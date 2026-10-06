@@ -65,6 +65,7 @@ from control_plane.executive_orchestration_principal import (
 from control_plane.executive_orchestration_result import RawRoleResultObservation
 from control_plane.visible_turn_projection import TurnKey
 from control_plane.operator_harness_contract import (
+    CHATGPT_GUI_RESOURCE_ID,
     ATTENTION_TURN_INSTRUCTION,
     AttentionTurnObservation,
     CandidateResult,
@@ -72,6 +73,7 @@ from control_plane.operator_harness_contract import (
     LaunchComparison,
     LaunchDecision,
     NormalizedEvent,
+    ObservedCapabilityIdentity,
     ObservedHarnessAttestation,
     OperationId,
     ProcessGenerationRef,
@@ -118,8 +120,10 @@ from control_plane.worker_execution_contract import (
     BinaryAttestation,
     CancelReceipt,
     CollectionReceipt,
+    OrchestrationLaunchSpec,
     ValidationReceipt,
     validate_subscription_canary_claim,
+    validate_orchestration_grant_digest,
     WorkerLaunchSpec,
     WorkerProcessRef,
     WorkerRecoveryBinding,
@@ -232,6 +236,10 @@ class BrokerProtocolError(WorkerBrokerError):
 
 class BrokerStateError(WorkerBrokerError):
     """A typed operation is invalid for the broker's current state."""
+
+
+class BrokerRunNotFound(BrokerStateError):
+    """The exact run has no record at this canonical broker owner."""
 
 
 class WorkerAdapterNotImplementedError(WorkerBrokerError):
@@ -467,7 +475,9 @@ class OperatorAttemptResource(Protocol):
 
     def stop(self) -> None: ...
 
-    def seal_after_uid_sweep(self, sweep: UIDSweepReceipt) -> BrowserReviewReceipt: ...
+    def seal_after_uid_sweep(
+        self, sweep: UIDSweepReceipt
+    ) -> BrowserReviewReceipt | None: ...
 
 
 OperatorAdapterFactory = Callable[
@@ -1034,6 +1044,7 @@ _LAUNCH_SPEC_FIELDS = frozenset(
         "secret_canary_verdict",
         "require_secret_canary",
         "subscription_canary_claim",
+        "effective_grant_digest",
     }
 )
 _PROVIDER_OWNED_LAUNCH_FIELDS = frozenset(
@@ -1061,6 +1072,8 @@ def _launch_spec_from_wire(value: Any, policy: BrokerPolicy) -> WorkerLaunchSpec
     if unknown:
         raise BrokerProtocolError(f"launch_spec has unknown fields: {sorted(unknown)}")
     try:
+        if "effective_grant_digest" in value:
+            validate_orchestration_grant_digest(value["effective_grant_digest"])
         validate_subscription_canary_claim(value.get("subscription_canary_claim", {}))
     except WorkerRecoveryContractError as exc:
         raise BrokerProtocolError(str(exc)) from exc
@@ -1257,6 +1270,13 @@ def _launch_spec_from_wire(value: Any, policy: BrokerPolicy) -> WorkerLaunchSpec
     keyword["subscription_canary_claim"] = validate_subscription_canary_claim(
         value.get("subscription_canary_claim", {}),
     )
+    # The authenticated control owns the sealed grant and its semantic binding.
+    # Retain that provenance in recovery material without widening legacy specs
+    # or letting the worker preempt the supervisor-owned launch attestation.
+    if "effective_grant_digest" in value:
+        return OrchestrationLaunchSpec(
+            **keyword, effective_grant_digest=value["effective_grant_digest"]
+        )
     return WorkerLaunchSpec(**keyword)
 
 
@@ -1544,7 +1564,7 @@ class ExecutiveWorkerBroker:
         try:
             return self._runs[run_id]
         except KeyError as exc:
-            raise BrokerStateError(f"run {run_id!r} is unknown to this broker") from exc
+            raise BrokerRunNotFound(f"run {run_id!r} is unknown to this broker") from exc
 
     def _authorize_peer(self, peer: PeerCredentials) -> None:
         if int(peer.uid) != int(self.policy.control_uid):
@@ -2901,28 +2921,70 @@ class ExecutiveWorkerBroker:
                     state.resource.seal_after_uid_sweep,
                     sweep,
                 )
-                if not isinstance(artifact_receipt, BrowserReviewReceipt):
-                    raise BrokerStateError(
-                        "browser resource returned an untyped artifact receipt"
+                if artifact_receipt is None:
+                    # Only the explicitly requested and materialized GUI contract
+                    # is artifact-free. A missing browser receipt is not success.
+                    capability = getattr(state.resource, "observed_capability", None)
+                    required_resources = tuple(
+                        item for item in state.requested.capabilities.required
+                        if item.kind == "resource"
                     )
-                try:
-                    artifact_receipt = browser_review_receipt(
-                        artifact_receipt.to_wire()
-                    )
-                except BrowserReviewError as exc:
-                    raise BrokerStateError(
-                        "browser resource returned an invalid closed artifact receipt"
-                    ) from exc
-                if (
-                    artifact_receipt.attempt_id != state.epoch.attempt_id
-                    or artifact_receipt.session_epoch_id
-                    != state.epoch.session_epoch_id
-                    or artifact_receipt.process_generation_id
-                    != state.generation.process_generation_id
-                ):
-                    raise BrokerStateError(
-                        "browser receipt generation identity drifted"
-                    )
+                    receipt = state.materialization_receipt
+                    observed_resources = ()
+                    if receipt is not None:
+                        try:
+                            attestation = wire_observed_harness_attestation(
+                                receipt.observed_attestation
+                            )
+                        except OperatorHarnessWireError as exc:
+                            raise BrokerStateError(
+                                "operator resource lacks validated artifact-free admission"
+                            ) from exc
+                        observed_resources = tuple(
+                            item for item in attestation.capabilities
+                            if item.kind == "resource"
+                        )
+                    if (
+                        not isinstance(capability, ObservedCapabilityIdentity)
+                        or capability.kind != "resource"
+                        or capability.name != CHATGPT_GUI_RESOURCE_ID
+                        or not isinstance(capability.resource_contract_digest, str)
+                        or re.fullmatch(r"[0-9a-f]{64}", capability.resource_contract_digest) is None
+                        or len(required_resources) != 1
+                        or required_resources[0].name != capability.name
+                        or required_resources[0].resource_contract_digest
+                        != capability.resource_contract_digest
+                        or observed_resources != (capability,)
+                        or receipt is None
+                        or receipt.requested_profile_digest
+                        != requested_profile_digest(operator_to_wire(state.requested))
+                    ):
+                        raise BrokerStateError(
+                            "operator resource lacks validated artifact-free admission"
+                        )
+                else:
+                    if not isinstance(artifact_receipt, BrowserReviewReceipt):
+                        raise BrokerStateError(
+                            "operator resource returned an untyped artifact receipt"
+                        )
+                    try:
+                        artifact_receipt = browser_review_receipt(
+                            artifact_receipt.to_wire()
+                        )
+                    except BrowserReviewError as exc:
+                        raise BrokerStateError(
+                            "browser resource returned an invalid closed artifact receipt"
+                        ) from exc
+                    if (
+                        artifact_receipt.attempt_id != state.epoch.attempt_id
+                        or artifact_receipt.session_epoch_id
+                        != state.epoch.session_epoch_id
+                        or artifact_receipt.process_generation_id
+                        != state.generation.process_generation_id
+                    ):
+                        raise BrokerStateError(
+                            "browser receipt generation identity drifted"
+                        )
             await self._remember_operator_terminal(
                 state, observation, artifact_receipt
             )
@@ -4161,6 +4223,8 @@ class RemoteCodexWorkerAdapter:
             "status",
             {"run_id": ref.run_id},
         )
+        if result.get("adapter_id") != self.adapter_id:
+            raise BrokerProtocolError("remote recovery adapter identity does not match facade")
         run = _mapping(result.get("run"), field="run status")
         observed = _process_ref_from_json(run.get("process_ref"))
         if observed != ref:
@@ -4202,7 +4266,7 @@ class RemoteCodexWorkerAdapter:
             )
             terminal_sweep = _uid_sweep_from_json(cancelled.get("uid_sweep"))
         except RemoteBrokerError as exc:
-            if exc.code != "BrokerStateError":
+            if exc.code != "BrokerRunNotFound":
                 raise
         status = await self.client.request("status", {"fresh_uid_sweep": True})
         sweep = _uid_sweep_from_json(status.get("status_sweep"))
@@ -4224,6 +4288,8 @@ class RemoteCodexWorkerAdapter:
         if self._refs.get(ref.run_id) != ref:
             raise BrokerStateError("unknown or altered remote ProcessRef")
         result = await self.client.request("status", {"run_id": ref.run_id})
+        if result.get("adapter_id") != self.adapter_id:
+            raise BrokerProtocolError("remote status adapter identity does not match facade")
         run = _mapping(result.get("run"), field="run status")
         value = run.get("status")
         aliases = {
@@ -4248,6 +4314,14 @@ class RemoteCodexWorkerAdapter:
             + max(60.0, float(spec.cancel_grace_seconds) + 30.0),
         )
         receipt = _collection_from_json(result.get("collection"))
+        # A correctly bound transport/process envelope cannot relabel its result.
+        # Validate attribution before accepting data or updating sweep evidence.
+        if (
+            receipt.result.job_id != spec.job_id
+            or receipt.result.run_id != spec.run_id
+            or receipt.result.worker_id != spec.worker_id
+        ):
+            raise BrokerProtocolError("remote collection result identity differs from bound LaunchSpec")
         collected_ref = receipt.process_ref
         immutable_ref = dataclasses.replace(
             collected_ref,
@@ -4306,8 +4380,15 @@ class RemoteClaudeWorkerAdapter(RemoteCodexWorkerAdapter):
 class RemoteWorkerProcessController:
     """Synchronous restart-reconciliation facade over broker status/cancel."""
 
-    def __init__(self, client: WorkerBrokerClient) -> None:
+    def __init__(
+        self, client: WorkerBrokerClient, *, expected_worker_uid: int | None = None
+    ) -> None:
+        if expected_worker_uid is not None and (
+            type(expected_worker_uid) is not int or expected_worker_uid <= 0
+        ):
+            raise ValueError("expected worker UID must be a positive integer")
         self.client = client
+        self.expected_worker_uid = expected_worker_uid
         self._uid_sweeps: dict[str, Mapping[str, Any]] = {}
 
     def uid_sweep_receipt(self, attempt_or_run_id: Any) -> Mapping[str, Any]:
@@ -4321,15 +4402,32 @@ class RemoteWorkerProcessController:
     def cleanup_unbound_run(self, run_id: str) -> Mapping[str, Any]:
         """Synchronous counterpart used by restart/control recovery seams."""
 
+        # The supervisor grants this path only to a wholly unbound claim.
+        # An exact missing record needs no cancellation; generic errors do not
+        # grant absence. A retained run still receives one canonical cancel.
+        missing = False
         try:
-            result = self.client.request_sync(
-                "cancel",
-                {"run_id": run_id, "reason": "ambiguous control-side start response"},
-            )
-            self._uid_sweeps[run_id] = _uid_sweep_from_json(result.get("uid_sweep"))
+            status = self.client.request_sync("status", {"run_id": run_id})
         except RemoteBrokerError as exc:
-            if exc.code != "BrokerStateError":
+            if exc.code != "BrokerRunNotFound":
                 raise
+            missing = True
+        if not missing:
+            if (
+                not isinstance(status, Mapping)
+                or not isinstance(status.get("run"), Mapping)
+                or status["run"].get("run_id") != run_id
+            ):
+                raise BrokerProtocolError("unbound cleanup exact run status is malformed")
+            try:
+                result = self.client.request_sync(
+                    "cancel",
+                    {"run_id": run_id, "reason": "ambiguous control-side start response"},
+                )
+                self._uid_sweeps[run_id] = _uid_sweep_from_json(result.get("uid_sweep"))
+            except RemoteBrokerError as exc:
+                if exc.code != "BrokerRunNotFound":
+                    raise
         if not self._fresh_overall_absence(run_id):
             raise BrokerStateError("ambiguous start cleanup did not prove broker absence")
         return self._uid_sweeps[run_id]
@@ -4366,42 +4464,85 @@ class RemoteWorkerProcessController:
             and attestation.get("launch_nonce") == process.launch_nonce
         )
 
-    def _fresh_overall_absence(self, run_id: str) -> bool:
+    def _fresh_overall_absence(
+        self, attempt_or_run_id: Any, *, require_current_broker_startup: bool = False
+    ) -> bool:
+        run_id = getattr(attempt_or_run_id, "attempt_id", attempt_or_run_id)
+        if require_current_broker_startup and self.expected_worker_uid is None:
+            return False
         try:
             status = self.client.request_sync(
                 "status", {"fresh_uid_sweep": True}
             )
-        except (WorkerBrokerError, OSError):
-            return False
-        try:
+            if not isinstance(status, Mapping):
+                return False
             sweep = _uid_sweep_from_json(status.get("status_sweep"))
-        except BrokerProtocolError:
+        except (WorkerBrokerError, OSError):
             return False
         absent = (
             status.get("active_run_id") is None
+            and status.get("active_operator_attempt_id") is None
+            and status.get("active_operator_generation_id") is None
             and status.get("starting") is False
             and status.get("validation_busy") is False
             and status.get("status_sweep_busy") is False
             and status.get("quarantined_reason") is None
         )
-        if absent:
-            # Restart reconciliation needs both facts: the terminal sweep that
-            # killed residual same-UID descendants and the subsequent fresh
-            # idle sweep that closes the race before fence rotation. Preserve
-            # the former inside the latter across repeated absence checks.
-            previous = self._uid_sweeps.get(run_id)
-            preceding = None
-            if isinstance(previous, Mapping):
-                candidate = previous.get("preceding_terminal_sweep")
-                if isinstance(candidate, Mapping):
-                    preceding = dict(candidate)
-                elif previous.get("reason") != "status_absence":
-                    preceding = dict(previous)
-            combined = dict(sweep)
-            if preceding is not None:
-                combined["preceding_terminal_sweep"] = preceding
-            self._uid_sweeps[run_id] = combined
-        return absent
+        if not absent:
+            return False
+        if self.expected_worker_uid is not None:
+            if not {
+                "adapter_id", "broker_pid", "worker_uid", "active_run_id",
+                "active_operator_attempt_id", "active_operator_generation_id",
+                "starting", "validation_busy", "status_sweep_busy",
+                "quarantined_reason", "status_sweep",
+            }.issubset(status):
+                return False
+            broker_pid = status.get("broker_pid")
+            if (
+                status.get("adapter_id") != "codex-cli"
+                or not _positive_pid(broker_pid)
+                or type(status.get("worker_uid")) is not int
+                or status["worker_uid"] != self.expected_worker_uid
+                or sweep.get("reason") != "status_absence"
+                or sweep.get("worker_uid") != self.expected_worker_uid
+                or sweep.get("broker_pid") != broker_pid
+            ):
+                return False
+        startup = None
+        if require_current_broker_startup:
+            try:
+                startup = _uid_sweep_from_json(status.get("startup_sweep"))
+                started = dt.datetime.fromisoformat(attempt_or_run_id.started_at)
+                startup_at = dt.datetime.fromisoformat(startup["observed_at"])
+                observed = dt.datetime.fromisoformat(sweep["observed_at"])
+                if (
+                    any(value.utcoffset() is None for value in (started, startup_at, observed))
+                    or not started < startup_at <= observed
+                    or startup.get("reason") != "broker_startup"
+                    or startup.get("worker_uid") != self.expected_worker_uid
+                    or startup.get("broker_pid") != broker_pid
+                ):
+                    return False
+            except (WorkerBrokerError, AttributeError, KeyError, TypeError, ValueError):
+                return False
+        # Keep the proof from this same overall status. A terminal run sweep
+        # and a replacement broker's startup sweep have distinct meanings.
+        previous = self._uid_sweeps.get(run_id)
+        preceding = None
+        if isinstance(previous, Mapping):
+            candidate = previous.get("preceding_terminal_sweep")
+            if isinstance(candidate, Mapping):
+                preceding = dict(candidate)
+            elif previous.get("reason") != "status_absence":
+                preceding = dict(previous)
+        combined = dict(sweep)
+        if preceding is not None:
+            combined["preceding_terminal_sweep"] = preceding
+        if startup is not None:
+            combined["preceding_broker_startup_sweep"] = startup
+        self._uid_sweeps[run_id] = combined
+        return True
 
     def presence(self, attempt: Any):
         from control_plane.executive_supervisor import ProcessPresence
@@ -4409,12 +4550,14 @@ class RemoteWorkerProcessController:
         try:
             status = self.client.request_sync("status", {"run_id": attempt.attempt_id})
         except RemoteBrokerError as exc:
-            if exc.code == "BrokerStateError" and self._fresh_overall_absence(
-                attempt.attempt_id
+            if exc.code == "BrokerRunNotFound" and self._fresh_overall_absence(
+                attempt, require_current_broker_startup=True
             ):
-                return ProcessPresence.ABSENT
+                return ProcessPresence.MISSING
             return ProcessPresence.UNKNOWN
         except (WorkerBrokerError, OSError):
+            return ProcessPresence.UNKNOWN
+        if not isinstance(status, Mapping):
             return ProcessPresence.UNKNOWN
         run = status.get("run")
         if not isinstance(run, dict):
@@ -4437,20 +4580,20 @@ class RemoteWorkerProcessController:
             # operation and replay task. This is neither a live Attempt process
             # nor ambiguous identity, and it may not pass a global UID sweep yet.
             return ProcessPresence.TERMINAL_OWNED
-        if self._fresh_overall_absence(attempt.attempt_id):
+        if self._fresh_overall_absence(attempt):
             return ProcessPresence.ABSENT
         return ProcessPresence.UNKNOWN
 
     def absence_verified(self, attempt: Any) -> bool:
         from control_plane.executive_supervisor import ProcessPresence
 
-        return self.presence(attempt) is ProcessPresence.ABSENT
+        return self.presence(attempt) in {ProcessPresence.ABSENT, ProcessPresence.MISSING}
 
     def terminate(self, attempt: Any) -> None:
         from control_plane.executive_supervisor import ProcessPresence
 
         presence = self.presence(attempt)
-        if presence is ProcessPresence.ABSENT:
+        if presence in {ProcessPresence.ABSENT, ProcessPresence.MISSING}:
             return
         if presence is not ProcessPresence.LIVE:
             raise BrokerStateError("remote process identity is ambiguous; refusing cancellation")
@@ -4473,8 +4616,15 @@ class RemoteWorkerBrokerEndpoint:
     worker_uid: int
     worker_gid: int
     secret_canary_verdict: Mapping[str, Any] = dataclasses.field(default_factory=dict)
+    # Fixed by trusted endpoint construction, never a broker request selector.
+    # Keep the legacy default without making native Claude use the Codex facade.
+    adapter_id: str = "codex-cli"
 
     def __post_init__(self) -> None:
+        if type(self.adapter_id) is not str or self.adapter_id not in (
+            "codex-cli", "claude-code"
+        ):
+            raise WorkerBrokerError("remote worker endpoint has unsupported adapter_id")
         worker_id = str(self.worker_id or "").strip()
         worker_user = str(self.worker_user or "").strip()
         if not _ID_RE.fullmatch(worker_id):
@@ -4631,10 +4781,17 @@ class RemoteWorkerBrokerFleet:
             raise WorkerBrokerError("remote worker broker fleet has duplicate worker_id")
         validation_resolver = validation_commands_for_spec or (lambda _spec: ())
         if adapter_factory is None:
-            adapter_factory = lambda row: RemoteCodexWorkerAdapter(
-                row.client,
-                validation_commands_for_spec=validation_resolver,
-            )
+            def adapter_factory(row: RemoteWorkerBrokerEndpoint) -> RemoteCodexWorkerAdapter:
+                if row.adapter_id == "codex-cli":
+                    facade = RemoteCodexWorkerAdapter
+                elif row.adapter_id == "claude-code":
+                    facade = RemoteClaudeWorkerAdapter
+                else:
+                    raise WorkerBrokerError("remote worker endpoint has unsupported adapter_id")
+                return facade(
+                    row.client,
+                    validation_commands_for_spec=validation_resolver,
+                )
         if controller_factory is None:
             controller_factory = lambda row: RemoteWorkerProcessController(row.client)
         self._endpoints = {row.worker_id: row for row in rows}
@@ -4853,6 +5010,7 @@ __all__ = [
     "BrokerPreSubmitError",
     "BrokerProtocolError",
     "BrokerStateError",
+    "BrokerRunNotFound",
     "DedicatedUIDError",
     "DedicatedUIDSweeper",
     "ExecutiveWorkerBroker",

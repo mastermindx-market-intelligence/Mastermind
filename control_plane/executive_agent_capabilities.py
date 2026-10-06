@@ -70,8 +70,29 @@ _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 CLAUDE_OPERATOR_PROVIDER = "claude"
 CLAUDE_OPERATOR_HARNESS_KIND = "claude-agent-sdk"
 CLAUDE_OPERATOR_EXECUTION_SURFACE = "claude-agent-sdk"
-_EXECUTION_SURFACES = frozenset({"codex-exec", "codex-app-server", CLAUDE_OPERATOR_EXECUTION_SURFACE})
+_EXECUTION_SURFACES = frozenset({
+    "codex-exec", "codex-app-server", "claude-code", CLAUDE_OPERATOR_EXECUTION_SURFACE,
+})
 _AUTH_REALMS = frozenset({"dedicated-worker-account"})
+_ADAPTER_EXECUTION_SURFACES = {
+    "codex-cli": frozenset({"codex-exec", "codex-app-server"}),
+    "claude-code": frozenset({"claude-code"}),
+}
+_SEALED_WORKER_EXECUTION_SURFACES = frozenset({"codex-exec", "claude-code"})
+
+
+def adapter_supports_execution_surface(adapter_id: str, execution_surface: str) -> bool:
+    """Return whether one reviewed adapter owns the declared execution surface."""
+
+    adapter = str(adapter_id or "").strip().lower()
+    surface = str(execution_surface or "").strip().lower()
+    return surface in _ADAPTER_EXECUTION_SURFACES.get(adapter, frozenset())
+
+
+def is_sealed_worker_execution_surface(execution_surface: str) -> bool:
+    """Return whether the surface is a foreground sealed worker process."""
+
+    return str(execution_surface or "").strip().lower() in _SEALED_WORKER_EXECUTION_SURFACES
 _SANDBOX_POLICIES = frozenset({"read-only", "workspace-write"})
 _APPROVAL_POLICIES = frozenset({"never"})
 _NETWORK_POLICIES = frozenset({"disabled", "loopback-browser-only"})
@@ -195,6 +216,10 @@ except (KeyError,OSError,TypeError,UnicodeError,ValueError):
  raise SystemExit("runtime container bootstrap refused")
 '''
 WORKER_BROWSER_MCP_ARGS = ("-I", "-S", "-c", WORKER_BROWSER_MCP_BOOTSTRAP)
+COMPANY_MCP_COMMAND = "/usr/bin/python3"
+COMPANY_MCP_BOOTSTRAP = 'import hashlib,json,os,pathlib,re,stat,subprocess\nR=pathlib.Path("/Library/Application Support/MastermindExecutive")\nC=R/"config/company-consultation-edge.json"\nE={"PATH":"/usr/bin:/bin","LANG":"en_US.UTF-8"}\ndef sealed(p,d=False):\n for n in (p,*p.parents):\n  i=n.lstat(); D=d or n!=p\n  if i.st_uid!=0 or ((n==p or n==R or R in n.parents) and i.st_gid!=0) or i.st_mode&0o022 or stat.S_ISLNK(i.st_mode) or not (stat.S_ISDIR(i.st_mode) if D else stat.S_ISREG(i.st_mode)) or (not D and i.st_nlink!=1): raise ValueError()\n  if b"+" in subprocess.check_output(["/usr/bin/stat","-f","%Sp",str(n)],env=E): raise ValueError()\ntry:\n sealed(C)\n if stat.S_IMODE(C.stat().st_mode)!=0o444: raise ValueError()\n v=json.loads(C.read_bytes()); S=v["release_sha"]\n if set(v)!={"schema","release_sha","control_uid","worker_uid","entry_sha256","receipt_sha256"} or v["schema"]!="mastermind.company_mcp_edge/v1" or type(S)!=str or re.fullmatch("[0-9a-f]{40}",S) is None or type(v["worker_uid"])!=int or v["worker_uid"]<=0 or os.geteuid()!=v["worker_uid"]: raise ValueError()\n P=R/"releases"/S/"ops/executive_os/company_mcp_edge.py"; sealed(P)\n if hashlib.sha256(P.read_bytes()).hexdigest()!=v["entry_sha256"]: raise ValueError()\n B=pathlib.Path("/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12"); sealed(B)\n os.execve(B,[str(B),"-I","-S","-B",str(P),"stdio"],E)\nexcept (KeyError,OSError,TypeError,ValueError):\n raise SystemExit("Company edge bootstrap refused")\n'
+COMPANY_MCP_ARGS = ("-I", "-S", "-B", "-c", COMPANY_MCP_BOOTSTRAP)
+COMPANY_EXECUTION_PROFILE = "operator.appserver.interactive.company-mcp.v1"
 _RESOURCE_KEYS = frozenset(
     {
         "artifact_root",
@@ -229,6 +254,7 @@ _COMPANY_CONSULTATION_FORBIDDEN_AUTHORITY = (
     "deploy",
     "admin",
 )
+COMPANY_MCP_CONFIG_NAME = "company-consultation-v1"
 COMPANY_CONSULTATION_SCHEMA = "mastermind.company_consultation_mcp.v1"
 COMPANY_CONSULTATION_SERVER_IDENTITY = "mastermind-company-consultation-mcp"
 COMPANY_CONSULTATION_SERVER_VERSION = "1.0.0"
@@ -412,6 +438,14 @@ _BASE_APP_SERVER_OVERRIDES = (
     "features.mcp_2026_07_28=false",
     "features.multi_agent=false",
     "features.multi_agent_v2=false",
+    "features.browser_use_external=false",
+    "features.browser_use_full_cdp_access=false",
+    "features.daemon_auto_start=false",
+    "features.shell_snapshot=false",
+    "features.shell_snapshot_v2=false",
+    "features.skill_mcp_dependency_install=false",
+    "features.skill_search=false",
+    "features.workspace_dependencies=false",
 )
 
 
@@ -1170,16 +1204,17 @@ class ExecutionCapabilityRegistry:
                 )
             else:
                 command_value = str(value.get("command") or "").strip()
-                if (
-                    capability_id != "playwright-worker-browser-b1"
-                    or command_value != WORKER_BROWSER_MCP_COMMAND
-                ):
+                reviewed = {
+                    "playwright-worker-browser-b1": (WORKER_BROWSER_MCP_COMMAND, WORKER_BROWSER_MCP_ARGS),
+                    "company-consultation-mcp-v1": (COMPANY_MCP_COMMAND, COMPANY_MCP_ARGS),
+                }.get(capability_id)
+                if reviewed is None or command_value != reviewed[0]:
                     raise CapabilityPolicyError(
                         f"MCP grant {capability_id!r} stdio command is not reviewed"
                     )
                 raw_args = value.get("args")
                 if (
-                    raw_args != list(WORKER_BROWSER_MCP_ARGS)
+                    raw_args != list(reviewed[1])
                     or len(
                         json.dumps(
                             raw_args,
@@ -1230,6 +1265,16 @@ class ExecutionCapabilityRegistry:
                 value.get("tool_schema_digest"),
                 field=f"mcp_servers.{capability_id}.tool_schema_digest",
             )
+            if capability_id == "company-consultation-mcp-v1" and (
+                config_name != "company-consultation-v1" or transport != "stdio"
+                or auth_status != "unsupported"
+                or server_identity != COMPANY_CONSULTATION_SERVER_IDENTITY
+                or server_version != COMPANY_CONSULTATION_SERVER_VERSION
+                or enabled_tools != tuple(sorted(COMPANY_CONSULTATION_ENABLED_TOOLS))
+                or approval_mode != "approve"
+                or tool_schema_digest != COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST
+            ):
+                raise CapabilityPolicyError("Company MCP grant differs from its reviewed binding")
             normalized_grant = {
                 "capability_id": capability_id,
                 "config_name": config_name,
@@ -1576,12 +1621,12 @@ class ExecutionCapabilityRegistry:
                 raise CapabilityPolicyError(
                     f"profile {profile_id!r} both requires and forbids: {', '.join(collision)}"
                 )
-            if execution_surface == "codex-exec" and (
+            if is_sealed_worker_execution_surface(execution_surface) and (
                 mcp_server_ids or resource_ids or plugins
             ):
                 raise CapabilityPolicyError(
                     f"profile {profile_id!r} cannot grant MCP/plugins or resources "
-                    "to sealed codex-exec"
+                    f"to sealed worker execution surface {execution_surface!r}"
                 )
             is_browser_profile = profile_id == "operator.browser.local-review.v1"
             if is_browser_profile:
@@ -1620,10 +1665,10 @@ class ExecutionCapabilityRegistry:
                         "skill_capabilities; exact V4 company-Skill profiles "
                         "require skills=[]"
                     )
-                if execution_surface == "codex-exec":
+                if is_sealed_worker_execution_surface(execution_surface):
                     raise CapabilityPolicyError(
                         f"profile {profile_id!r} cannot grant skill_capabilities "
-                        "to sealed codex-exec"
+                        f"to sealed worker execution surface {execution_surface!r}"
                     )
                 if write_capable:
                     raise CapabilityPolicyError(

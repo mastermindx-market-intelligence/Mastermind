@@ -805,6 +805,29 @@ class WorkspaceReadService:
         bounded_canonical(response, limit=MAX_RESPONSE_BYTES - 1)
         return response
 
+    def read_mission_for_work_ref(self, work_ref):
+        """Host-internal COO consumer of the SAME Mission v3 acquisition.
+
+        The configured App-peer provider must authorize its sealed mission first.
+        This method performs no authentication, refresh, root creation or grant.
+        Root selection remains the current Control Room responsibility projection.
+        """
+        from common.executive_workspace_contract import _check_work_ref
+        if not _check_work_ref(work_ref):
+            raise ValueError("invalid_input")
+        snapshot = self.cache.snapshot()
+        autonomy = snapshot.document.get("autonomy")
+        rows = autonomy.get("responsibilities") if type(autonomy) is dict else None
+        matches = [row for row in rows if type(row) is dict
+                   and row.get("responsibility_ref") == work_ref] if type(rows) is list else []
+        if len(matches) != 1:
+            raise LookupError("selection_not_found")
+        selection = {"work_ref": work_ref, "root_job_id": matches[0].get("root_job_id")}
+        _join(snapshot.document, selection)
+        if not _qualified(snapshot, selection):
+            raise ValueError("source_unavailable")
+        return self._read_mission_v3({"selection": selection})["result"]
+
     async def handle_frame(self, frame):
         # v2 frames take the closed v2 validation path; v1 frames keep their
         # existing envelope.  The two are mutually exclusive — never both.

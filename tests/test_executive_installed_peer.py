@@ -1170,6 +1170,113 @@ def test_strict_json_preserves_finite_numbers_and_integers():
     }
 
 
+def _installed_config_read(monkeypatch, document):
+    raw = json.dumps(document, sort_keys=True, separators=(',', ':')).encode()
+    identity = SimpleNamespace(
+        st_dev=1, st_ino=2, st_mode=stat.S_IFREG | 0o644,
+        st_uid=0, st_gid=0, st_nlink=1, st_size=len(raw),
+        st_mtime_ns=3, st_ctime_ns=4,
+    )
+    monkeypatch.setattr(m, '_observe_ancestors', lambda *a: ())
+    monkeypatch.setattr(m, '_read_trusted_bytes', lambda *a, **k: (raw, identity))
+
+
+def _gateway_install_document(release, profile='release_control_v1'):
+    return {
+        'schema': 'mastermind.executive_mcp_install.v1',
+        'release_sha': release,
+        'service_uid': 458,
+        'ceo_ingress_socket_path': '/var/run/mastermind-executive/ceo-ingress.sock',
+        'port': 8443,
+        'policies': {},
+        'audit_root': '/var/log/mastermind-executive/mcp-auth',
+        'executive_mcp_profile': profile,
+    }
+
+
+def test_gateway_role_config_accepts_exact_release_control_profile(monkeypatch):
+    from ops.executive_os.executive_mcp_entry import CONFIG_SCHEMA
+
+    release = 'a' * 40
+    _installed_config_read(monkeypatch, _gateway_install_document(release))
+    observed = m._verify_role_config(m._role_topology('gateway'), release, m._Budget(25))
+
+    assert m._GATEWAY_CONFIG_SCHEMA == CONFIG_SCHEMA
+    profile_source = (
+        Path(__file__).parents[1] / 'integrations/executive_mcp/release_control.py'
+    ).read_text()
+    assert 'RELEASE_CONTROL_PROFILE = "release_control_v1"' in profile_source
+    assert m._GATEWAY_MCP_PROFILE == 'release_control_v1'
+    assert observed.release == release
+
+
+def test_gateway_role_config_accepts_exact_combined_release_profile(monkeypatch):
+    from integrations.executive_mcp.web_ceo_release import WEB_CEO_RELEASE_PROFILE
+
+    release = 'a' * 40
+    document = _gateway_install_document(release, WEB_CEO_RELEASE_PROFILE)
+    _installed_config_read(monkeypatch, document)
+    observed = m._verify_role_config(m._role_topology('gateway'), release, m._Budget(25))
+    assert m._GATEWAY_MCP_PROFILES == ('release_control_v1', WEB_CEO_RELEASE_PROFILE)
+    assert observed.release == release
+    assert observed.digest == m.hashlib.sha256(json.dumps(document, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+
+
+@pytest.mark.parametrize('profile', [
+    'web_ceo_release_v2', 'web_ceo_release_v1 ', 'WEB_CEO_RELEASE_V1',
+    'web_ceo_v3', 'personal_read', '',
+])
+def test_gateway_role_config_refuses_combined_profile_aliases(monkeypatch, profile):
+    release = 'a' * 40
+    _installed_config_read(monkeypatch, _gateway_install_document(release, profile))
+    with pytest.raises(peer.PeerIdentityError):
+        m._verify_role_config(m._role_topology('gateway'), release, m._Budget(25))
+
+
+@pytest.mark.parametrize('profile,code', [
+    ('web_ceo_v2', 'SERVICE_CONFIG_PROFILE_DRIFT'),
+    ('legacy', 'SERVICE_CONFIG_PROFILE_DRIFT'),
+    ('release_control_v2', 'SERVICE_CONFIG_PROFILE_DRIFT'),
+    (None, 'SERVICE_CONFIG_SCHEMA_DRIFT'),
+    (458, 'SERVICE_CONFIG_SCHEMA_DRIFT'),
+])
+def test_gateway_role_config_refuses_other_profiles(monkeypatch, profile, code):
+    release = 'a' * 40
+    _installed_config_read(monkeypatch, _gateway_install_document(release, profile))
+    with pytest.raises(peer.PeerIdentityError, match=code):
+        m._verify_role_config(m._role_topology('gateway'), release, m._Budget(25))
+
+
+def test_gateway_role_config_requires_profile_field(monkeypatch):
+    release = 'a' * 40
+    document = _gateway_install_document(release)
+    del document['executive_mcp_profile']
+    _installed_config_read(monkeypatch, document)
+    with pytest.raises(peer.PeerIdentityError, match='SERVICE_CONFIG_SCHEMA_DRIFT'):
+        m._verify_role_config(m._role_topology('gateway'), release, m._Budget(25))
+
+
+def test_gateway_role_config_requires_current_schema_field(monkeypatch):
+    release = 'a' * 40
+    document = _gateway_install_document(release)
+    document['schema_version'] = document.pop('schema')
+    _installed_config_read(monkeypatch, document)
+    with pytest.raises(peer.PeerIdentityError, match='SERVICE_CONFIG_SCHEMA_DRIFT'):
+        m._verify_role_config(m._role_topology('gateway'), release, m._Budget(25))
+
+
+def test_control_role_config_is_unchanged(monkeypatch):
+    release = 'a' * 40
+    _installed_config_read(monkeypatch, {
+        'proof_base_sha': release,
+        'control_uid': 450,
+        'python_runtime_provenance_digest': 'b' * 64,
+    })
+    observed = m._verify_role_config(m._role_topology('control'), release, m._Budget(25))
+    assert observed.release == release
+    assert observed.provenance_digest == ''
+
+
 @pytest.mark.parametrize('changed_field', [None, 'st_ino', 'st_mtime_ns', 'st_ctime_ns'])
 def test_release_recheck_retains_manifest_descriptor_identity(monkeypatch, changed_field):
     """An unchanged content digest must not hide replacement or metadata drift."""
@@ -1354,3 +1461,561 @@ def test_extra_subprocess_interface_refuses_unqualified_combinations(monkeypatch
     with pytest.raises(peer.PeerIdentityError, match='COMMAND_NOT_ALLOWED'):
         m._run_bounded_readonly(argv, budget=m._Budget(25), max_bytes=4096,
                                allow_empty=allow_empty, merge_stderr=merge_stderr)
+
+
+class _FakeProcPidInfo:
+    """Mock the libproc ABI, never query a real process."""
+
+    def __init__(self):
+        self.argtypes = None
+        self.restype = None
+        self.calls = []
+        self.size = 56
+        self.unique_id = 113769795
+        self.parent_unique_id = 113769700
+        self.parent_pidversion = 235172800
+        self.pidversion = 235172879
+        self.error = None
+
+    def __call__(self, pid, flavor, argument, output, size):
+        self.calls.append((pid, flavor, argument, size, ctypes.get_errno()))
+        if self.error is not None:
+            raise self.error
+        result = ctypes.cast(output, ctypes.POINTER(installed._ProcUniqueIdentifierInfo)).contents
+        result.p_uniqueid = self.unique_id
+        result.p_puniqueid = self.parent_unique_id
+        result.p_orig_ppidversion = self.parent_pidversion
+        result.p_idversion = self.pidversion
+        return self.size
+
+
+@pytest.fixture
+def process_instance_api(monkeypatch):
+    query = _FakeProcPidInfo()
+    loads = []
+
+    class Library:
+        proc_pidinfo = query
+
+    def load(path, **kwargs):
+        loads.append((path, kwargs))
+        return Library()
+
+    monkeypatch.setattr(installed.sys, "platform", "darwin")
+    monkeypatch.setattr(installed.ctypes, "CDLL", load)
+    return query, loads
+
+
+def test_process_instance_abi_is_exact_56_byte_native_layout():
+    layout = installed._ProcUniqueIdentifierInfo
+    assert ctypes.sizeof(layout) == 56
+    assert [(name, getattr(layout, name).offset) for name, _ in layout._fields_] == [
+        ("p_uuid", 0), ("p_uniqueid", 16), ("p_puniqueid", 24),
+        ("p_idversion", 32), ("p_orig_ppidversion", 36),
+        ("p_reserve2", 40), ("p_reserve3", 48),
+    ]
+
+
+@pytest.mark.parametrize("pid", [1, 17778, (1 << 31) - 1])
+def test_process_instance_binds_exact_native_signature_and_clears_errno(process_instance_api, pid):
+    query, loads = process_instance_api
+    ctypes.set_errno(123)
+    value = installed._observe_process_instance(pid)
+    assert query.calls == [(pid, 17, 0, 56, 0)]
+    assert loads == [("/usr/lib/libproc.dylib", {"use_errno": True})]
+    assert query.argtypes == [ctypes.c_int, ctypes.c_int, ctypes.c_uint64,
+                              ctypes.c_void_p, ctypes.c_int]
+    assert query.restype is ctypes.c_int
+    assert (value.unique_id, value.pidversion) == (query.unique_id, query.pidversion)
+    assert value.parent_unique_id == query.parent_unique_id
+    assert value.parent_pidversion == query.parent_pidversion
+    assert list(value.__dataclass_fields__) == [
+        "unique_id", "pidversion", "parent_unique_id", "parent_pidversion"
+    ]
+    with pytest.raises(AttributeError):
+        value.unique_id = 1
+    assert "_observe_process_instance" not in installed.__all__
+
+
+def test_process_instance_reads_fresh_identity_and_distinguishes_exec(process_instance_api):
+    query, _ = process_instance_api
+    first = installed._observe_process_instance(123)
+    assert installed._observe_process_instance(123) == first
+    query.pidversion += 1
+    second = installed._observe_process_instance(123)
+    assert second.unique_id == first.unique_id
+    assert second != first
+    query.unique_id += 1
+    assert installed._observe_process_instance(123) != second
+    assert len(query.calls) == 4
+
+
+@pytest.mark.parametrize("pid", [True, False, None, "123", 1.0, b"1", [], {}, 0, -1, 1 << 31, 1 << 70])
+def test_process_instance_invalid_pid_never_loads_native_api(process_instance_api, pid):
+    query, loads = process_instance_api
+    with pytest.raises(peer.PeerIdentityError, match="^SERVICE_PROCESS_PID_INVALID$"):
+        installed._observe_process_instance(pid)
+    assert query.calls == []
+    assert loads == []
+
+
+def test_process_instance_refuses_int_subclass_before_native_api(process_instance_api):
+    class Pid(int):
+        pass
+    query, loads = process_instance_api
+    with pytest.raises(peer.PeerIdentityError, match="^SERVICE_PROCESS_PID_INVALID$"):
+        installed._observe_process_instance(Pid(123))
+    assert query.calls == loads == []
+
+
+def test_process_instance_non_darwin_never_loads_api(monkeypatch, process_instance_api):
+    query, loads = process_instance_api
+    monkeypatch.setattr(installed.sys, "platform", "linux")
+    with pytest.raises(peer.PeerIdentityError, match="^PEER_PLATFORM_UNSUPPORTED$"):
+        installed._observe_process_instance(123)
+    assert query.calls == loads == []
+
+
+def test_process_instance_wrong_layout_never_loads_api(monkeypatch, process_instance_api):
+    query, loads = process_instance_api
+    real_sizeof = ctypes.sizeof
+    monkeypatch.setattr(installed.ctypes, "sizeof", lambda kind:
+                        55 if kind is installed._ProcUniqueIdentifierInfo else real_sizeof(kind))
+    with pytest.raises(peer.PeerIdentityError, match="^SERVICE_PROCESS_ABI_UNSUPPORTED$"):
+        installed._observe_process_instance(123)
+    assert query.calls == loads == []
+
+
+@pytest.mark.parametrize("failure", ["library", "symbol", "call"])
+def test_process_instance_api_failure_is_short_and_nonsecret(monkeypatch, process_instance_api, failure):
+    query, _ = process_instance_api
+    if failure == "library":
+        def unavailable(*args, **kwargs):
+            raise OSError("private path /secret and PID 123")
+        monkeypatch.setattr(installed.ctypes, "CDLL", unavailable)
+    elif failure == "symbol":
+        monkeypatch.setattr(installed.ctypes, "CDLL", lambda *args, **kwargs: object())
+    else:
+        query.error = OSError("private path /secret and PID 123")
+    with pytest.raises(peer.PeerIdentityError) as caught:
+        installed._observe_process_instance(123)
+    assert str(caught.value) == "SERVICE_PROCESS_OBSERVATION_UNAVAILABLE"
+    assert caught.value.__suppress_context__ is True
+
+
+@pytest.mark.parametrize("size", [-1, 0, 1, 55, 57, 112, True, 56.0, None])
+def test_process_instance_nonexact_return_never_yields_identity(process_instance_api, size):
+    query, _ = process_instance_api
+    query.size = size
+    with pytest.raises(peer.PeerIdentityError, match="^SERVICE_PROCESS_OBSERVATION_SIZE_INVALID$"):
+        installed._observe_process_instance(123)
+
+
+@pytest.mark.parametrize("unique_id,pidversion", [(0, 1), (1, 0), (1, -1), (1, -(1 << 31)), (0, 0)])
+def test_process_instance_nonpositive_identity_refuses(process_instance_api, unique_id, pidversion):
+    query, _ = process_instance_api
+    query.unique_id, query.pidversion = unique_id, pidversion
+    with pytest.raises(peer.PeerIdentityError, match="^SERVICE_PROCESS_IDENTITY_INVALID$"):
+        installed._observe_process_instance(123)
+
+
+# Private request deadline support. No host qualification is performed.
+import inspect
+
+class IntSubclass(int):
+    pass
+
+
+def clock(monkeypatch, start=1_000_000_000):
+    now = [start]
+    sleeps = []
+    def sleep(seconds):
+        sleeps.append(seconds)
+        now[0] += round(seconds * 1_000_000_000)
+    monkeypatch.setattr(m, "time", SimpleNamespace(
+        monotonic=lambda: now[0] / 1_000_000_000,
+        monotonic_ns=lambda: now[0], sleep=sleep))
+    return now, sleeps
+
+
+@pytest.mark.parametrize("endpoint", [True, False, 0, -1, 1.5, "2", [], {}, IntSubclass(2)])
+def test_invalid_endpoint_has_no_clock_or_observation(monkeypatch, endpoint):
+    def forbidden(*args, **kwargs):
+        pytest.fail("invalid endpoint reached clock or observation")
+    monkeypatch.setattr(m, "time", SimpleNamespace(monotonic=forbidden, monotonic_ns=forbidden))
+    monkeypatch.setattr(m._peer_identity, "_current_capture", forbidden)
+    with pytest.raises((ValueError, m.PeerIdentityError)):
+        m._Budget(25, deadline_monotonic_ns=endpoint)
+    with pytest.raises((ValueError, m.PeerIdentityError)):
+        m._qualify_installed_peer_with_deadline(object(), role="control", deadline_monotonic_ns=endpoint)
+
+
+def test_public_signature_unchanged():
+    assert str(inspect.signature(m.qualify_installed_peer)) == "(peer, *, role)"
+
+
+@pytest.mark.parametrize("explicit_none", [False, True])
+def test_legacy_budget_never_reads_nanosecond_clock(monkeypatch, explicit_none):
+    now = [0.0]
+    monkeypatch.setattr(m, "time", SimpleNamespace(
+        monotonic=lambda: now[0],
+        monotonic_ns=lambda: pytest.fail("legacy budget read new clock")))
+    budget = m._Budget(25, **({"deadline_monotonic_ns": None} if explicit_none else {}))
+    assert budget.check() == 25
+    now[0] = 24.5
+    assert budget.check() == .5
+    now[0] = 25
+    with pytest.raises(m.PeerIdentityError):
+        budget.check()
+
+
+@pytest.mark.parametrize("endpoint,expected", [(3_000_000_000, 2), (100_000_000_000, 25), (10**1000, 25)])
+def test_parent_and_local_cap_min_compose(monkeypatch, endpoint, expected):
+    now, _ = clock(monkeypatch)
+    budget = m._Budget(25, deadline_monotonic_ns=endpoint)
+    assert budget.check() == expected
+    now[0] += 1_000_000_000
+    assert budget.check() == expected - 1
+
+
+def test_one_endpoint_is_never_replenished(monkeypatch):
+    now, _ = clock(monkeypatch)
+    budget = m._Budget(25, deadline_monotonic_ns=4_000_000_000)
+    for remaining in [3, 2, 1]:
+        assert budget.check() == remaining
+        now[0] += 1_000_000_000
+    with pytest.raises(m.PeerIdentityError):
+        budget.check()
+
+
+@pytest.mark.parametrize("offset", [0, -1])
+def test_expired_private_qualification_has_zero_capture(monkeypatch, offset):
+    now, _ = clock(monkeypatch)
+    monkeypatch.setattr(m._peer_identity, "_current_capture", lambda *a: pytest.fail("expired capture"))
+    with pytest.raises(m.PeerIdentityError):
+        m._qualify_installed_peer_with_deadline(object(), role="control", deadline_monotonic_ns=now[0] + offset)
+
+
+def qualification_seams(monkeypatch):
+    import os
+    capture = m._peer_identity._CaptureState(lambda: None, None, object(), os.getpid())
+    monkeypatch.setattr(m._peer_identity, "_current_capture", lambda peer: capture)
+    return object.__new__(m._peer_identity.InstalledServicePeerBinding)
+
+
+def test_late_qualification_never_calls_binding(monkeypatch):
+    now, _ = clock(monkeypatch)
+    qualification_seams(monkeypatch)
+    def qualify(*args):
+        now[0] = 2_000_000_000
+        return object()
+    monkeypatch.setattr(m, "_qualify", qualify)
+    monkeypatch.setattr(m, "_owner_binding", lambda *a: pytest.fail("late binding"))
+    with pytest.raises(m.PeerIdentityError):
+        m._qualify_installed_peer_with_deadline(object(), role="control", deadline_monotonic_ns=2_000_000_000)
+
+
+def test_original_qualification_refusal_survives_expiry(monkeypatch):
+    now, _ = clock(monkeypatch)
+    qualification_seams(monkeypatch)
+    original = m.PeerIdentityError("SERVICE_PEER_IDENTITY_MISMATCH")
+    def qualify(*args):
+        now[0] = 2_000_000_000
+        raise original
+    monkeypatch.setattr(m, "_qualify", qualify)
+    with pytest.raises(m.PeerIdentityError) as failure:
+        m._qualify_installed_peer_with_deadline(object(), role="control", deadline_monotonic_ns=2_000_000_000)
+    assert failure.value is original
+
+
+def test_binding_returning_at_deadline_is_not_exposed(monkeypatch):
+    now, _ = clock(monkeypatch)
+    binding = qualification_seams(monkeypatch)
+    monkeypatch.setattr(m, "_qualify", lambda *a: object())
+    def bind(*args):
+        now[0] = 2_000_000_000
+        return binding
+    monkeypatch.setattr(m, "_owner_binding", bind)
+    with pytest.raises(m.PeerIdentityError):
+        m._qualify_installed_peer_with_deadline(object(), role="control", deadline_monotonic_ns=2_000_000_000)
+
+
+def child_harness(monkeypatch, *, late_stage=None, failure_stage=None, cleanup_ok=True):
+    now, sleeps = clock(monkeypatch)
+    endpoint = 2_000_000_000
+    calls = []
+    blocks = iter([b"ok\n", b""])
+    def step(name):
+        calls.append(name)
+        if name == late_stage or name == failure_stage:
+            now[0] = endpoint
+        if name == failure_stage:
+            raise OSError("private test diagnostic")
+    class Stream:
+        def fileno(self):
+            step("fileno")
+            return 123
+        def close(self):
+            step("close")
+    class Child:
+        stdout = Stream()
+        def poll(self):
+            step("poll")
+            return 0
+        def kill(self):
+            step("kill")
+        def wait(self, *, timeout):
+            step("wait")
+            return 0
+    child = Child()
+    def launch(*args, **kwargs):
+        step("spawn")
+        return child
+    def discard(process):
+        assert process is child
+        step("cleanup")
+        return cleanup_ok
+    class Selector:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            step("selector_close")
+        def register(self, *args):
+            step("register")
+        def select(self, timeout):
+            assert 0 < timeout <= (endpoint - now[0]) / 1_000_000_000
+            step("select")
+            return [object()]
+    def read(*args):
+        step("read")
+        return next(blocks)
+    monkeypatch.setattr(m, "sys", SimpleNamespace(platform="darwin"))
+    monkeypatch.setattr(m, "subprocess", SimpleNamespace(Popen=launch, DEVNULL=-3, PIPE=-1))
+    monkeypatch.setattr(m, "selectors", SimpleNamespace(DefaultSelector=Selector, EVENT_READ=1))
+    monkeypatch.setattr(m, "os", SimpleNamespace(set_blocking=lambda *a: step("nonblock"), read=read))
+    monkeypatch.setattr(m, "_discard_bounded_child", discard)
+    return now, calls, endpoint
+
+
+@pytest.mark.parametrize("stage", ["spawn", "fileno", "nonblock", "register", "select", "read", "selector_close", "poll", "cleanup"])
+def test_late_child_phase_refuses_with_one_cleanup(monkeypatch, stage):
+    now, calls, endpoint = child_harness(monkeypatch, late_stage=stage)
+    budget = m._Budget(25, deadline_monotonic_ns=endpoint)
+    with pytest.raises(m.PeerIdentityError):
+        m._run_bounded(m._SYSCTL_BOOT_ID_ARGV, max_bytes=128, budget=budget)
+    assert calls.count("spawn") == 1
+    assert calls.count("cleanup") == 1
+    if stage == "select":
+        assert "read" not in calls
+
+
+def test_expired_child_budget_does_not_spawn(monkeypatch):
+    now, calls, endpoint = child_harness(monkeypatch)
+    budget = m._Budget(25, deadline_monotonic_ns=endpoint)
+    now[0] = endpoint
+    with pytest.raises(m.PeerIdentityError):
+        m._run_bounded(m._SYSCTL_BOOT_ID_ARGV, max_bytes=128, budget=budget)
+    assert calls == []
+
+
+def test_child_success_retains_closed_command_and_single_cleanup(monkeypatch):
+    now, calls, endpoint = child_harness(monkeypatch)
+    budget = m._Budget(25, deadline_monotonic_ns=endpoint)
+    assert m._run_bounded(m._SYSCTL_BOOT_ID_ARGV, max_bytes=128, budget=budget) == b"ok\n"
+    assert calls.count("spawn") == calls.count("cleanup") == 1
+
+
+@pytest.mark.parametrize("cleanup_ok,code", [(True, "SERVICE_LAUNCHCTL_COMMAND_FAILED"), (False, "SERVICE_LAUNCHCTL_CLEANUP_UNPROVEN")])
+def test_child_original_failure_and_cleanup_precedence(monkeypatch, cleanup_ok, code):
+    now, calls, endpoint = child_harness(monkeypatch, failure_stage="read", cleanup_ok=cleanup_ok)
+    budget = m._Budget(25, deadline_monotonic_ns=endpoint)
+    with pytest.raises(m.PeerIdentityError) as failure:
+        m._run_bounded(m._SYSCTL_BOOT_ID_ARGV, max_bytes=128, budget=budget)
+    assert failure.value.code == code
+    assert calls.count("cleanup") == 1
+
+
+@pytest.mark.parametrize("step_ns,expires", [(1_000_000_000, False), (2_000_000_000, True)])
+def test_repeated_identity_probes_share_one_cumulative_budget(monkeypatch, composition, step_ns, expires):
+    value = composition("control")
+    now, _ = clock(monkeypatch)
+    calls = []
+    old_boot = m._observe_real_boot_id
+    old_launch = m._observe_launchd_service
+    def boot(*, budget):
+        calls.append(("boot", budget))
+        now[0] += step_ns
+        return old_boot()
+    def launch(role, *, budget):
+        calls.append(("launch", budget))
+        now[0] += step_ns
+        return old_launch(role)
+    monkeypatch.setattr(m, "_observe_real_boot_id", boot)
+    monkeypatch.setattr(m, "_observe_launchd_service", launch)
+    if expires:
+        with pytest.raises(m.PeerIdentityError):
+            m._qualify_installed_peer_with_deadline(value.peer, role="control", deadline_monotonic_ns=10_000_000_000)
+        assert [x[0] for x in calls] == ["boot", "launch", "boot", "launch", "boot"]
+    else:
+        binding = m._qualify_installed_peer_with_deadline(value.peer, role="control", deadline_monotonic_ns=10_000_000_000)
+        context = m._peer_identity.require_installed_service_peer(value.peer, binding)
+        assert context.connection_instance is value.peer.connection_instance
+        assert context.service_label == value.launch.service_label
+        assert [x[0] for x in calls] == ["boot", "launch"] * 3
+    assert all(item[1] is calls[0][1] for item in calls)
+
+
+@pytest.mark.parametrize("which", ["capture", "dynamic"])
+def test_slow_synchronous_identity_observation_never_qualifies(monkeypatch, composition, which):
+    value = composition("control")
+    now, _ = clock(monkeypatch)
+    old_boot = m._observe_real_boot_id
+    old_launch = m._observe_launchd_service
+    monkeypatch.setattr(m, "_observe_real_boot_id", lambda *, budget: old_boot())
+    monkeypatch.setattr(m, "_observe_launchd_service", lambda role, *, budget: old_launch(role))
+    owner = m._peer_identity if which == "capture" else m
+    name = "_current_capture" if which == "capture" else "_observe_dynamic_code"
+    old = getattr(owner, name)
+    def slow(*args):
+        result = old(*args)
+        now[0] = 2_000_000_000
+        return result
+    monkeypatch.setattr(owner, name, slow)
+    monkeypatch.setattr(m, "_owner_binding", lambda *a: pytest.fail("late observation reached binding"))
+    with pytest.raises(m.PeerIdentityError):
+        m._qualify_installed_peer_with_deadline(value.peer, role="control", deadline_monotonic_ns=2_000_000_000)
+
+
+@pytest.mark.parametrize("stage", ["spawn", "select", "read", "poll", "cleanup"])
+def test_codesign_child_uses_same_endpoint_and_cleanup(monkeypatch, stage):
+    now, calls, endpoint = child_harness(monkeypatch, late_stage=stage)
+    budget = m._Budget(25, deadline_monotonic_ns=endpoint)
+    with pytest.raises(m.PeerIdentityError):
+        m._run_bounded_readonly(m._CODESIGN_VERIFY_ARGV, budget=budget,
+            max_bytes=128, allow_empty=True, merge_stderr=False)
+    assert calls.count("spawn") == calls.count("cleanup") == 1
+    if stage == "select":
+        assert "read" not in calls
+
+
+@pytest.mark.parametrize("which", ["pid", "program", "argv", "working_directory"])
+def test_private_deadline_preserves_closed_identity_joins(monkeypatch, composition, which):
+    value = composition("control")
+    clock(monkeypatch)
+    old_boot = m._observe_real_boot_id
+    changes = {"pid": value.peer.pid + 1, "program": "/unqualified/python",
+               "argv": value.launch.argv + ("--unqualified",), "working_directory": "/unqualified"}
+    bad = dataclasses.replace(value.launch, **{which: changes[which]})
+    monkeypatch.setattr(m, "_observe_real_boot_id", lambda *, budget: old_boot())
+    monkeypatch.setattr(m, "_observe_launchd_service", lambda role, *, budget: bad)
+    monkeypatch.setattr(m, "_owner_binding", lambda *a: pytest.fail("identity mismatch reached binding"))
+    with pytest.raises(m.PeerIdentityError) as failure:
+        m._qualify_installed_peer_with_deadline(value.peer, role="control", deadline_monotonic_ns=10_000_000_000)
+    assert "MISMATCH" in failure.value.code
+
+
+@pytest.mark.parametrize("change", ["pid", "pidversion"])
+def test_private_deadline_does_not_hide_reused_or_execed_peer(monkeypatch, composition, change):
+    value = composition("control")
+    clock(monkeypatch)
+    kernel = m._peer_identity._observe_socket(value.connection)
+    changed = dataclasses.replace(kernel, **{change: getattr(kernel, change) + 1})
+    monkeypatch.setattr(m._peer_identity, "_observe_socket", lambda connection: changed)
+    monkeypatch.setattr(m, "_qualify", lambda *a: pytest.fail("stale capture reached qualification"))
+    with pytest.raises(m.PeerIdentityError):
+        m._qualify_installed_peer_with_deadline(value.peer, role="control", deadline_monotonic_ns=10_000_000_000)
+
+
+@pytest.mark.parametrize("helper", ["read", "inventory"])
+def test_private_file_refusal_survives_deadline_during_cleanup(monkeypatch, helper):
+    now, _ = clock(monkeypatch)
+    budget = m._Budget(25, deadline_monotonic_ns=2_000_000_000)
+    info = SimpleNamespace(st_mode=stat.S_IFIFO, st_nlink=1, st_size=0)
+    monkeypatch.setattr(m, "_open_trusted", lambda *a, **k: (123, info, info))
+    closed = []
+    def close(fd):
+        closed.append(fd)
+        now[0] = 2_000_000_000
+    monkeypatch.setattr(m, "_close", close)
+    if helper == "read":
+        expected = "SERVICE_OBJECT_TYPE_UNSUPPORTED"
+        call = lambda: m._read_trusted_bytes("/fixed", budget=budget, maximum=100)
+    else:
+        expected = "SERVICE_RUNTIME_BASE_UNQUALIFIED"
+        monkeypatch.setattr(m, "_PYTHON_LINK_INDEX", {})
+        call = lambda: m._inventory_python_base(budget)
+    with pytest.raises(m.PeerIdentityError) as failure:
+        call()
+    assert failure.value.code == expected
+    assert closed == [123]
+
+
+def test_private_reap_sleep_is_clamped_and_late_exit_refuses(monkeypatch):
+    now, sleeps = clock(monkeypatch)
+    budget = m._Budget(25, deadline_monotonic_ns=1_001_000_000)
+    class Child:
+        def poll(self):
+            return None
+    assert m._reap_bounded_exit_code(Child(), 4.0, budget=budget) is None
+    assert sleeps == [.001]
+    class LateExit:
+        def poll(self):
+            now[0] = 2_000_000_000
+            return 0
+    now[0] = 1_000_000_000
+    budget = m._Budget(25, deadline_monotonic_ns=2_000_000_000)
+    assert m._reap_bounded_exit_code(LateExit(), 4.0, budget=budget) is None
+
+
+@pytest.mark.parametrize("observer", ["boot", "launchd"])
+def test_private_observer_refuses_late_parsed_result(monkeypatch, observer):
+    now, _ = clock(monkeypatch)
+    budget = m._Budget(25, deadline_monotonic_ns=2_000_000_000)
+    def run(argv, *, max_bytes, budget):
+        assert budget.caller_deadline == 2_000_000_000
+        if argv == m._SYSCTL_OSRELEASE_ARGV:
+            return b"25.5.0\n"
+        return _launchd_fixture() if observer == "launchd" else b"01234567-89ab-cdef-0123-456789abcdef\n"
+    monkeypatch.setattr(m, "_run_bounded", run)
+    if observer == "launchd":
+        old = m._parse_launchctl_service
+        def parse(*args, **kwargs):
+            result = old(*args, **kwargs)
+            now[0] = 2_000_000_000
+            return result
+        monkeypatch.setattr(m, "_parse_launchctl_service", parse)
+        call = lambda: m._observe_launchd_service("control", budget=budget)
+    else:
+        old = m._bounded_single_line
+        def parse(*args, **kwargs):
+            result = old(*args, **kwargs)
+            now[0] = 2_000_000_000
+            return result
+        monkeypatch.setattr(m, "_bounded_single_line", parse)
+        call = lambda: m._observe_real_boot_id(budget=budget)
+    with pytest.raises(m.PeerIdentityError):
+        call()
+
+
+def test_private_entry_requires_endpoint_even_though_budget_none_is_legacy(monkeypatch):
+    def forbidden():
+        pytest.fail("missing private endpoint read clock")
+    monkeypatch.setattr(m, "time", SimpleNamespace(monotonic=forbidden, monotonic_ns=forbidden))
+    with pytest.raises(m.PeerIdentityError, match="DEADLINE_INVALID"):
+        m._qualify_installed_peer_with_deadline(object(), role="control", deadline_monotonic_ns=None)
+
+
+@pytest.mark.parametrize("uid,expected", [(501, "SERVICE_OBJECT_NOT_ROOT_OWNED"), (0, "SERVICE_QUALIFICATION_BUDGET_EXCEEDED")])
+def test_private_late_metadata_refusal_is_preserved_without_next_open(monkeypatch, uid, expected):
+    now, _ = clock(monkeypatch)
+    budget = m._Budget(25, deadline_monotonic_ns=2_000_000_000)
+    def lstat(path):
+        now[0] = 2_000_000_000
+        return SimpleNamespace(st_uid=uid, st_gid=0, st_mode=stat.S_IFREG | 0o600)
+    monkeypatch.setattr(m, "_lstat", lstat)
+    fake_os = SimpleNamespace(**vars(os))
+    fake_os.open = lambda *a: pytest.fail("late metadata initiated another open")
+    monkeypatch.setattr(m, "os", fake_os)
+    with pytest.raises(m.PeerIdentityError) as failure:
+        m._open_trusted("/fixed", budget=budget)
+    assert failure.value.code == expected

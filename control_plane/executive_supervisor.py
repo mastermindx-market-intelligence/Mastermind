@@ -20,6 +20,7 @@ import dataclasses
 import hashlib
 import json
 import os
+import re
 import pwd
 import signal
 import stat
@@ -33,6 +34,7 @@ from uuid import uuid4
 from control_plane.worker_execution_contract import (
     LAUNCH_ATTESTATION_SCHEMA_VERSION,
     CollectionReceipt,
+    OrchestrationLaunchSpec,
     ProcessInspector,
     ValidationReceipt,
     WorkerLaunchSpec,
@@ -45,6 +47,8 @@ from control_plane.worker_adapter import WorkerExecutionAdapter
 from control_plane.executive_agent_capabilities import (
     CapabilityPolicyError,
     ExecutionCapabilityRegistry,
+    adapter_supports_execution_surface,
+    is_sealed_worker_execution_surface,
 )
 from control_plane.executive_authority import (
     AuthorityDecision,
@@ -204,6 +208,7 @@ class ProcessPresence(str, Enum):
 
     LIVE = "LIVE"
     ABSENT = "ABSENT"
+    MISSING = "MISSING"
     TERMINAL_OWNED = "TERMINAL_OWNED"
     UNKNOWN = "UNKNOWN"
 
@@ -388,13 +393,6 @@ class ActiveRun:
     recovered_presence: ProcessPresence | None = dataclasses.field(
         default=None, repr=False
     )
-
-
-@dataclasses.dataclass(frozen=True)
-class OrchestrationLaunchSpec(WorkerLaunchSpec):
-    """LaunchSpec carrying the immutable v4 grant without widening legacy bytes."""
-
-    effective_grant_digest: str = ""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -682,6 +680,105 @@ def _validate_output_scope(job: Job, output: Mapping[str, Any]) -> None:
         )
     if str(output.get("status")) == "COMPLETED" and output.get("errors"):
         raise SupervisorError("completed worker result contains errors")
+
+
+PLANNER_ROUTING_OPTIONS_SCHEMA = "mastermind.planner_routing_options/v1"
+_PLANNER_ROUTING_MODEL_LIMIT = 16
+
+
+def _planner_routing_options(runtime: Runtime, job: Job) -> dict[str, Any] | None:
+    """Project model-safe routing choices for one orchestration planner.
+
+    The projection is observational only.  It exposes no Worker ids, account
+    labels, host/session identity, credentials or provider homes, and it grants
+    no placement authority.  Plan admission and Capacity re-check every
+    selected pool/model immediately before materialization/claim.
+    """
+
+    if job.orchestration_role != "plan":
+        return None
+    root_id = str(job.root_job_id or "")
+    root = runtime.jobs.get_job(root_id)
+    if root is None:
+        raise SupervisorError("planner routing options lost their root Job")
+    raw_union = root.constraints.get("work_placement_union")
+    if not isinstance(raw_union, list) or not raw_union:
+        return {
+            "schema_version": PLANNER_ROUTING_OPTIONS_SCHEMA,
+            "default_mode": "AUTO",
+            "default_route": {
+                "provider_realm": root.constraints.get("provider"),
+                "eligible_quota_classes": list(
+                    root.constraints.get("eligible_quota_classes") or []
+                ),
+                "model": root.constraints.get("model"),
+            },
+            "manual_override_plan_schema": "mastermind.execution_plan/v4",
+            "pools": [],
+            "degraded": ["work_placement_union_unavailable"],
+        }
+
+    workers = runtime.workers.list_workers()
+    pools: list[dict[str, Any]] = []
+    for member in raw_union:
+        if not isinstance(member, Mapping):
+            continue
+        provider = str(member.get("provider_realm") or "").strip().lower()
+        quota_class = str(member.get("quota_class") or "").strip().lower()
+        if not provider or not quota_class:
+            continue
+        models: dict[str, dict[str, int]] = {}
+        registered_count = 0
+        available_count = 0
+        for worker in workers:
+            quota = runtime.workers.get_quota_class(worker.worker_id, quota_class)
+            if quota is None or quota.provider != provider:
+                continue
+            registered_count += 1
+            if quota.status.value == "AVAILABLE":
+                available_count += 1
+            if not quota.model:
+                continue
+            model = str(quota.model).strip().lower()
+            counts = models.setdefault(
+                model,
+                {"registered_capacity_count": 0, "available_capacity_count": 0},
+            )
+            counts["registered_capacity_count"] += 1
+            if quota.status.value == "AVAILABLE":
+                counts["available_capacity_count"] += 1
+        model_rows = [
+            {"model": model, **models[model]}
+            for model in sorted(models)[:_PLANNER_ROUTING_MODEL_LIMIT]
+        ]
+        pools.append(
+            {
+                "provider_realm": provider,
+                "quota_class": quota_class,
+                "registered_capacity_count": registered_count,
+                "available_capacity_count": available_count,
+                "models": model_rows,
+                "models_truncated": len(models) > _PLANNER_ROUTING_MODEL_LIMIT,
+            }
+        )
+
+    return {
+        "schema_version": PLANNER_ROUTING_OPTIONS_SCHEMA,
+        "default_mode": "AUTO",
+        "default_route": {
+            "provider_realm": root.constraints.get("provider"),
+            "eligible_quota_classes": list(
+                root.constraints.get("eligible_quota_classes") or []
+            ),
+            "model": root.constraints.get("model"),
+        },
+        "manual_override_plan_schema": "mastermind.execution_plan/v4",
+        "pools": sorted(
+            pools,
+            key=lambda item: (item["provider_realm"], item["quota_class"]),
+        ),
+        "degraded": [],
+    }
 
 
 class ExecutiveSupervisor:
@@ -1016,6 +1113,9 @@ class ExecutiveSupervisor:
             "assigned_quota_class": attempt.quota_class,
             "checkpoint": job.checkpoint,
         }
+        routing_options = _planner_routing_options(self.runtime, job)
+        if routing_options is not None:
+            packet["routing_options"] = routing_options
         if effective_grant is not None:
             packet["effective_grant_digest"] = attempt.effective_grant_digest
             packet["orchestration"] = {
@@ -1198,7 +1298,14 @@ class ExecutiveSupervisor:
         )
         if quota is None:
             raise SupervisorError("claimed worker quota class disappeared")
+        worker = self.runtime.workers.get_worker(lease.attempt.worker_id)
+        if worker is None:
+            raise SupervisorError("claimed worker identity disappeared")
+        adapter_id = str(worker.worker_type or "").strip().lower()
         metadata = quota.metadata
+        metadata_adapter_id = str(metadata.get("adapter_id") or "").strip().lower()
+        if metadata_adapter_id and metadata_adapter_id != adapter_id:
+            raise SupervisorError("claimed capacity adapter identity drifted")
         keys = (
             "execution_profile_id",
             "execution_profile_digest",
@@ -1226,7 +1333,10 @@ class ExecutiveSupervisor:
         ):
             raise SupervisorError("installed execution capability policy drifted")
         if (
-            profile.execution_surface != "codex-exec"
+            not is_sealed_worker_execution_surface(profile.execution_surface)
+            or not adapter_supports_execution_surface(
+                adapter_id, profile.execution_surface
+            )
             or profile.auth_realm != "dedicated-worker-account"
             or profile.approval_policy != "never"
             or profile.network_policy != "disabled"
@@ -1236,7 +1346,7 @@ class ExecutiveSupervisor:
             or profile.plugins
         ):
             raise SupervisorError(
-                "sealed worker refuses an execution profile with an unimplemented surface"
+                "sealed worker refuses an incompatible execution profile or unimplemented surface"
             )
         authorities = (
             effective_grant["authorities"]
@@ -1246,6 +1356,20 @@ class ExecutiveSupervisor:
         if "WRITE_BRANCH" in authorities and not profile.write_capable:
             raise SupervisorError(
                 "read-only execution profile refuses a write-capable Job grant"
+            )
+
+    @staticmethod
+    def _require_attested_isolation(
+        spec: WorkerLaunchSpec, attestation: Mapping[str, Any]
+    ) -> None:
+        digest = spec.isolation_manifest_sha256
+        if (
+            not isinstance(digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+            or attestation.get("isolation_manifest_sha256") != digest
+        ):
+            raise SupervisorError(
+                "worker launch attestation does not bind the admitted isolation manifest"
             )
 
     def _launch_metadata(
@@ -1288,6 +1412,12 @@ class ExecutiveSupervisor:
             or attestation.get("schema_version") != LAUNCH_ATTESTATION_SCHEMA_VERSION
         ):
             raise SupervisorError("worker adapter did not provide a complete launch attestation")
+        if (
+            self.require_complete_launch_attestation
+            or effective_grant is not None
+            or spec.isolation_manifest_sha256 is not None
+        ):
+            self._require_attested_isolation(spec, attestation)
         if effective_grant is not None:
             if "effective_grant_digest" in attestation:
                 raise SupervisorError("worker launch attestation preempted supervisor grant binding")
@@ -2405,6 +2535,12 @@ class ExecutiveSupervisor:
             raise SupervisorError(
                 "worker recovery binding differs from launch attestation"
             )
+        if (
+            self.require_complete_launch_attestation
+            or effective_grant is not None
+            or spec.isolation_manifest_sha256 is not None
+        ):
+            self._require_attested_isolation(spec, attestation)
         return binding, spec, effective_grant
 
     def _normalise_recovered_lease(
@@ -2782,8 +2918,13 @@ class ExecutiveSupervisor:
                 # retained terminal run still cannot match missing control
                 # metadata, so repeating presence() would recreate the wedge.
                 presence = ProcessPresence.ABSENT
-            elif presence is ProcessPresence.ABSENT:
-                if not self.process_controller.absence_verified(attempt):
+            elif presence in {ProcessPresence.ABSENT, ProcessPresence.MISSING}:
+                verified = (
+                    self.process_controller.presence(attempt) is ProcessPresence.MISSING
+                    if presence is ProcessPresence.MISSING
+                    else self.process_controller.absence_verified(attempt)
+                )
+                if not verified:
                     presence = ProcessPresence.UNKNOWN
                 else:
                     # This must be fresh for an initially absent process too;

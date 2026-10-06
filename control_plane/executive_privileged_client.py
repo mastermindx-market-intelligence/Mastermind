@@ -15,6 +15,7 @@ import hashlib
 import json
 import re
 import socket
+import time
 from pathlib import Path
 from typing import Mapping
 
@@ -39,12 +40,65 @@ DEFAULT_SOCKET = Path("/var/run/mastermind-executive/privileged.sock")
 DEFAULT_CLIENT_TIMEOUT_SECONDS = 11 * 60
 _MAX_RESPONSE_BYTES = 128 * 1024
 _SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
+_DEADLINE_EXPIRED = "privileged broker client deadline expired"
 
 
-def _read_response(connection: socket.socket) -> dict[str, object]:
+def _validated_deadline(deadline_monotonic_ns: int) -> int:
+    """Return the one absolute endpoint, refusing a non-exact or non-positive int.
+
+    ``bool``, ``int`` subclasses, floats and strings are all refused, so no
+    caller can smuggle a relative or truthy value into the deadline path.
+    """
+    if type(deadline_monotonic_ns) is not int:
+        raise TypeError("deadline_monotonic_ns must be an exact int")
+    if deadline_monotonic_ns <= 0:
+        raise ValueError("deadline_monotonic_ns must be positive")
+    return deadline_monotonic_ns
+
+
+def _require_within_deadline(deadline_monotonic_ns: int) -> None:
+    """Acceptance fence: a phase returning at or after the endpoint is not success.
+
+    Syscalls, JSON parsing and close cannot be preempted mid-flight, so this
+    only refuses to accept work that finished past the endpoint. Expiry is not
+    evidence that the broker did not apply an effect.
+    """
+    if deadline_monotonic_ns - time.monotonic_ns() <= 0:
+        raise TimeoutError(_DEADLINE_EXPIRED)
+
+
+def _clamped_timeout_seconds(existing_timeout_seconds, deadline_monotonic_ns: int) -> float:
+    """Return min(existing timeout, remaining endpoint); refuse an expired wait."""
+    remaining_ns = deadline_monotonic_ns - time.monotonic_ns()
+    if remaining_ns <= 0:
+        raise TimeoutError(_DEADLINE_EXPIRED)
+    if existing_timeout_seconds is not None:
+        # Preserve nonblocking zero and let settimeout reject a negative local
+        # limit, exactly as it does without an aggregate deadline. Compare in
+        # nanoseconds before division so a large integer endpoint cannot overflow
+        # when the ordinary finite socket limit is already the tighter bound.
+        if remaining_ns >= existing_timeout_seconds * 1_000_000_000:
+            return existing_timeout_seconds
+    return remaining_ns / 1_000_000_000
+
+
+def _read_response(
+    connection: socket.socket,
+    *,
+    deadline_monotonic_ns: int | None = None,
+) -> dict[str, object]:
+    deadline = None if deadline_monotonic_ns is None else _validated_deadline(deadline_monotonic_ns)
+    if deadline is not None:
+        _require_within_deadline(deadline)
     buffer = bytearray()
     while True:
+        if deadline is not None:
+            # The live socket timeout is already at most the original bound, so
+            # clamping against it keeps every recv at min(existing, remaining).
+            connection.settimeout(_clamped_timeout_seconds(connection.gettimeout(), deadline))
         chunk = connection.recv(min(4096, _MAX_RESPONSE_BYTES + 1 - len(buffer)))
+        if deadline is not None:
+            _require_within_deadline(deadline)
         if not chunk:
             raise RuntimeError("privileged broker closed before a response")
         buffer.extend(chunk)
@@ -55,9 +109,15 @@ def _read_response(connection: socket.socket) -> dict[str, object]:
             if newline != len(buffer) - 1:
                 raise RuntimeError("privileged broker returned multiple frames")
             break
+    if deadline is not None:
+        _require_within_deadline(deadline)
     value = json.loads(bytes(buffer[:-1]).decode("utf-8", errors="strict"))
+    if deadline is not None:
+        _require_within_deadline(deadline)
     if not isinstance(value, dict) or not isinstance(value.get("ok"), bool):
         raise RuntimeError("privileged broker returned an invalid response")
+    if deadline is not None:
+        _require_within_deadline(deadline)
     return value
 
 
@@ -66,16 +126,54 @@ def _send_one_frame(
     *,
     socket_path: Path,
     timeout_seconds: int,
+    require_root_peer: bool = False,
+    deadline_monotonic_ns: int | None = None,
 ) -> dict[str, object]:
+    deadline = None
+    if deadline_monotonic_ns is not None:
+        deadline = _validated_deadline(deadline_monotonic_ns)
+        _require_within_deadline(deadline)
     encoded = (json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n").encode("ascii")
+    if deadline is None:
+        connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            connection.settimeout(timeout_seconds)
+            connection.connect(str(socket_path))
+            if require_root_peer:
+                # P4's Control caller verifies the root end before sending any
+                # principal/approval bytes. There is no UID fallback on platforms
+                # without the Darwin connected-peer primitive.
+                if not hasattr(connection, "getpeereid") or connection.getpeereid()[0] != 0:
+                    raise RuntimeError("release broker root peer unavailable")
+            connection.sendall(encoded)
+            return _read_response(connection)
+        finally:
+            connection.close()
+    _require_within_deadline(deadline)
     connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
-        connection.settimeout(timeout_seconds)
+        _require_within_deadline(deadline)
+        connection.settimeout(_clamped_timeout_seconds(timeout_seconds, deadline))
         connection.connect(str(socket_path))
+        _require_within_deadline(deadline)
+        if require_root_peer:
+            if not hasattr(connection, "getpeereid") or connection.getpeereid()[0] != 0:
+                raise RuntimeError("release broker root peer unavailable")
+            _require_within_deadline(deadline)
+        connection.settimeout(_clamped_timeout_seconds(timeout_seconds, deadline))
         connection.sendall(encoded)
-        return _read_response(connection)
-    finally:
-        connection.close()
+        _require_within_deadline(deadline)
+        response = _read_response(connection, deadline_monotonic_ns=deadline)
+    except BaseException:
+        try:
+            connection.close()
+        except BaseException:
+            # Cleanup is attempted once without replacing the active failure.
+            pass
+        raise
+    connection.close()
+    _require_within_deadline(deadline)
+    return response
 
 
 def send_effect(
@@ -94,9 +192,13 @@ def send_status(
     *,
     socket_path: Path = DEFAULT_SOCKET,
     timeout_seconds: int = DEFAULT_CLIENT_TIMEOUT_SECONDS,
+    require_root_peer: bool = False,
 ) -> dict[str, object]:
     """Send one validated status request over one bounded connection; no retry."""
     validated = validate_status_request(request)
+    if require_root_peer:
+        return _send_one_frame(validated.to_dict(), socket_path=socket_path,
+                               timeout_seconds=timeout_seconds, require_root_peer=True)
     return _send_one_frame(validated.to_dict(), socket_path=socket_path, timeout_seconds=timeout_seconds)
 
 

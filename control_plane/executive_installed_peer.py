@@ -19,6 +19,13 @@ import sys
 import time
 
 from control_plane.executive_peer_identity import PeerIdentityError
+# Compatibility aliases for the existing release-observation owner. The ABI
+# lives in a neutral module shared with OHF child-lineage qualification.
+from control_plane.executive_process_identity import (
+    _ProcUniqueIdentifierInfo,
+    _ProcessInstanceObservation,
+    _observe_process_instance,
+)
 
 __all__ = ["qualify_installed_peer"]
 
@@ -743,19 +750,45 @@ def _parse_launchctl_service(raw: bytes, *, role: str) -> _LaunchdObservation:
     )
 
 
-def _reap_bounded_exit_code(process, deadline: float):
-    """Return a finished child's exit status, or None once the deadline passed."""
+def _reap_bounded_exit_code(process, deadline: float, *, budget=None):
+    """Return a finished child's exit status, or None once the deadline passed.
+
+    ``budget`` is the private caller-deadline form. Only a budget that actually
+    carries a caller endpoint changes the ordinary path: the endpoint is
+    honoured before any positive exit status is accepted, so a poll completing
+    at or after it never qualifies, and the wait between polls is clamped to
+    the shorter of the existing poll interval and the remaining budget.
+    """
+    caller_deadline = None if budget is None else budget.caller_deadline
     while True:
+        if caller_deadline is not None and (budget.remaining() <= 0 or time.monotonic() >= deadline):
+            return None
         try:
             code = process.poll()
         except Exception:
             raise _launchd_refusal("SERVICE_LAUNCHCTL_COMMAND_FAILED") from None
-        if type(code) is int:
-            return code
-        if time.monotonic() >= deadline:
-            return None
+        if caller_deadline is None:
+            if type(code) is int:
+                return code
+            if time.monotonic() >= deadline:
+                return None
+            wait = _LAUNCHD_POLL_SECONDS
+        else:
+            parent = budget.remaining()
+            if parent <= 0 or time.monotonic() >= deadline:
+                return None
+            if type(code) is int:
+                return code
+            wait = _LAUNCHD_POLL_SECONDS
+            local = deadline - time.monotonic()
+            if parent < wait:
+                wait = parent
+            if local < wait:
+                wait = local
+            if wait <= 0:
+                return None
         try:
-            time.sleep(_LAUNCHD_POLL_SECONDS)
+            time.sleep(wait)
         except Exception:
             raise _launchd_refusal("SERVICE_LAUNCHCTL_COMMAND_FAILED") from None
 
@@ -782,12 +815,27 @@ def _discard_bounded_child(process) -> bool:
     return closed
 
 
-def _run_bounded(argv: object, *, max_bytes: object) -> bytes:
+def _command_deadline_fence(budget, deadline: float) -> None:
+    if budget is not None and budget.caller_deadline is not None:
+        budget.check()
+        if time.monotonic() >= deadline:
+            raise _launchd_refusal("SERVICE_LAUNCHCTL_TIMEOUT")
+
+
+def _run_bounded(argv: object, *, max_bytes: object, budget=None) -> bytes:
     """Run one fixed internal argv with bounded reads and a monotonic deadline.
 
     Only the closed absolute-path command tuples below are ever executable: no
     caller path, no shell, no inherited environment, no unbounded capture. The
     child is killed, reaped, and its descriptors closed on every outcome.
+
+    ``budget`` is the private caller-deadline form: one already-composed parent
+    budget min-composes with the existing local limit and is never renewed or
+    retried. An expired parent refuses before ``Popen``, expiry is checked
+    after a successful ``Popen``, read, poll, parse and cleanup, and the owned
+    child is still killed, reaped and closed on every one of those paths. A
+    primary refusal is never replaced by a later deadline, and omitted calls
+    keep the original deadline arithmetic, call shape, and clock reads.
     """
     if type(argv) is not tuple or argv not in _BOUNDED_COMMANDS:
         raise _launchd_refusal("SERVICE_LAUNCHCTL_COMMAND_NOT_ALLOWED")
@@ -799,7 +847,11 @@ def _run_bounded(argv: object, *, max_bytes: object) -> bytes:
         raise _launchd_refusal("SERVICE_LAUNCHCTL_COMMAND_NOT_ALLOWED")
     if sys.platform != "darwin":
         raise _launchd_refusal("PEER_PLATFORM_UNSUPPORTED")
-    deadline = time.monotonic() + _LAUNCHD_TIMEOUT_SECONDS
+    if budget is None:
+        deadline = time.monotonic() + _LAUNCHD_TIMEOUT_SECONDS
+    else:
+        budget.check()
+        deadline = time.monotonic() + min(budget.remaining(), _LAUNCHD_TIMEOUT_SECONDS)
     try:
         process = subprocess.Popen(
             list(argv),
@@ -818,32 +870,44 @@ def _run_bounded(argv: object, *, max_bytes: object) -> bytes:
     refusal = ""
     try:
         try:
+            if budget is not None:
+                budget.check()
+            _command_deadline_fence(budget, deadline)
             stream = process.stdout
             if stream is None:
                 raise _launchd_refusal("SERVICE_LAUNCHCTL_COMMAND_FAILED")
             descriptor = stream.fileno()
+            _command_deadline_fence(budget, deadline)
             os.set_blocking(descriptor, False)
+            _command_deadline_fence(budget, deadline)
             with selectors.DefaultSelector() as selector:
                 selector.register(descriptor, selectors.EVENT_READ)
+                _command_deadline_fence(budget, deadline)
                 while True:
                     remaining = deadline - time.monotonic()
+                    if budget is not None:
+                        parent = budget.remaining()
+                        if parent < remaining:
+                            remaining = parent
                     if remaining <= 0:
                         refusal = "SERVICE_LAUNCHCTL_TIMEOUT"
                         break
-                    budget = max_bytes + 1 - consumed
-                    if budget <= 0:
+                    read_cap = max_bytes + 1 - consumed
+                    if read_cap <= 0:
                         refusal = "SERVICE_LAUNCHCTL_OUTPUT_TOO_LARGE"
                         break
                     if not selector.select(
                         remaining if remaining < _LAUNCHD_POLL_SECONDS else _LAUNCHD_POLL_SECONDS
                     ):
                         continue
+                    _command_deadline_fence(budget, deadline)
                     try:
                         chunk = os.read(
-                            descriptor, min(_LAUNCHD_READ_CHUNK_BYTES, budget)
+                            descriptor, min(_LAUNCHD_READ_CHUNK_BYTES, read_cap)
                         )
                     except BlockingIOError:
                         continue
+                    _command_deadline_fence(budget, deadline)
                     if not chunk:
                         break
                     consumed += len(chunk)
@@ -851,8 +915,13 @@ def _run_bounded(argv: object, *, max_bytes: object) -> bytes:
                     if consumed > max_bytes:
                         refusal = "SERVICE_LAUNCHCTL_OUTPUT_TOO_LARGE"
                         break
+                    if budget is not None:
+                        budget.check()
             if not refusal:
-                code = _reap_bounded_exit_code(process, deadline)
+                if budget is None:
+                    code = _reap_bounded_exit_code(process, deadline)
+                else:
+                    code = _reap_bounded_exit_code(process, deadline, budget=budget)
                 if code is None:
                     refusal = "SERVICE_LAUNCHCTL_TIMEOUT"
                 elif code != 0:
@@ -871,6 +940,9 @@ def _run_bounded(argv: object, *, max_bytes: object) -> bytes:
             refusal = "SERVICE_LAUNCHCTL_CLEANUP_UNPROVEN"
     if refusal:
         raise _launchd_refusal(refusal)
+    if budget is not None:
+        budget.check()
+    _command_deadline_fence(budget, deadline)
     return payload
 
 
@@ -893,34 +965,69 @@ def _bounded_single_line(raw: object, *, maximum: int, code: str) -> str:
     return text
 
 
-def _require_qualified_kernel_profile() -> None:
-    """Accept only the observed Darwin 25.5 kernel family. No guessed futures."""
+def _require_qualified_kernel_profile(*, budget=None) -> None:
+    """Accept only the observed Darwin 25.5 kernel family. No guessed futures.
+
+    ``budget`` is the private caller-deadline form. Omitted, the child call
+    shape and clock reads stay exactly as they were.
+    """
+    _deadline_fence(budget)
+    if budget is None:
+        raw = _run_bounded(_SYSCTL_OSRELEASE_ARGV,
+                           max_bytes=_LAUNCHD_MAX_KERNEL_BYTES)
+    else:
+        raw = _run_bounded(_SYSCTL_OSRELEASE_ARGV,
+                           max_bytes=_LAUNCHD_MAX_KERNEL_BYTES, budget=budget)
     release = _bounded_single_line(
-        _run_bounded(_SYSCTL_OSRELEASE_ARGV, max_bytes=_LAUNCHD_MAX_KERNEL_BYTES),
+        raw,
         maximum=_LAUNCHD_MAX_KERNEL_BYTES,
         code="SERVICE_LAUNCHCTL_PROFILE_UNQUALIFIED",
     )
     if not _LAUNCHD_KERNEL_PATTERN.fullmatch(release):
         raise _launchd_refusal("SERVICE_LAUNCHCTL_PROFILE_UNQUALIFIED")
+    _deadline_fence(budget)
 
 
-def _observe_launchd_service(role: str) -> _LaunchdObservation:
+def _observe_launchd_service(role: str, *, budget=None) -> _LaunchdObservation:
     """Read one closed system service through launchd's own account of itself.
 
     Live observations are never cached: every call re-runs both fixed commands.
     Argument, working-directory, and on-disk pin checks belong to the forthcoming
     file-closure factory and are deliberately not claimed here.
+
+    The private ``budget`` is one already-composed parent budget shared with the
+    kernel-profile probe that precedes it; omitted, both call shapes stay exact.
     """
+    _deadline_fence(budget)
     spec = _launchd_role_spec(role)
-    _require_qualified_kernel_profile()
-    raw = _run_bounded(spec.launchctl_argv, max_bytes=_LAUNCHD_MAX_BYTES)
-    return _parse_launchctl_service(raw, role=role)
+    if budget is None:
+        _require_qualified_kernel_profile()
+        raw = _run_bounded(spec.launchctl_argv, max_bytes=_LAUNCHD_MAX_BYTES)
+    else:
+        _require_qualified_kernel_profile(budget=budget)
+        raw = _run_bounded(spec.launchctl_argv, max_bytes=_LAUNCHD_MAX_BYTES,
+                           budget=budget)
+    observation = _parse_launchctl_service(raw, role=role)
+    _deadline_fence(budget)
+    return observation
 
 
-def _observe_real_boot_id() -> str:
-    """Return the kernel boot-session UUID, lowercased. Never a derived guess."""
+def _observe_real_boot_id(*, budget=None) -> str:
+    """Return the kernel boot-session UUID, lowercased. Never a derived guess.
+
+    The private ``budget`` is the caller-deadline form of the same parent
+    budget; omitted, the child call shape and clock reads stay exactly as they
+    were.
+    """
+    _deadline_fence(budget)
+    if budget is None:
+        raw = _run_bounded(_SYSCTL_BOOT_ID_ARGV,
+                           max_bytes=_LAUNCHD_MAX_BOOT_ID_BYTES)
+    else:
+        raw = _run_bounded(_SYSCTL_BOOT_ID_ARGV,
+                           max_bytes=_LAUNCHD_MAX_BOOT_ID_BYTES, budget=budget)
     value = _bounded_single_line(
-        _run_bounded(_SYSCTL_BOOT_ID_ARGV, max_bytes=_LAUNCHD_MAX_BOOT_ID_BYTES),
+        raw,
         maximum=_LAUNCHD_MAX_BOOT_ID_BYTES,
         code="SERVICE_BOOT_UUID_MALFORMED",
     ).lower()
@@ -928,6 +1035,7 @@ def _observe_real_boot_id() -> str:
         raise _launchd_refusal("SERVICE_BOOT_UUID_MALFORMED")
     if not any(char != "0" for char in value.replace("-", "")):
         raise _launchd_refusal("SERVICE_BOOT_UUID_NIL")
+    _deadline_fence(budget)
     return value
 
 
@@ -1035,7 +1143,8 @@ _NETWORK_CLOSURE_TOTAL_BYTES = 46298728
 _NETWORK_MANIFEST_NAME = ".executive-release-manifest.json"
 _RELEASE_MANIFEST_SCHEMA = "mastermind.executive_release_manifest/v1"
 _GATEWAY_CONFIG_SCHEMA = "mastermind.executive_mcp_install.v1"
-_GATEWAY_MCP_PROFILE = "web_ceo_v2"
+_GATEWAY_MCP_PROFILE = "release_control_v1"
+_GATEWAY_MCP_PROFILES = (_GATEWAY_MCP_PROFILE, "web_ceo_release_v1")
 _RELEASE_SHA_PATTERN = re.compile(r"[0-9a-f]{40}")
 _DIGEST_PATTERN = re.compile(r"[0-9a-f]{64}")
 _RELEASE_PLACEHOLDER = "{release}"
@@ -1237,22 +1346,76 @@ def _role_topology(role: object) -> _RoleTopology:
     return topology
 
 
+_NANOSECONDS_PER_SECOND = 1_000_000_000
+_DEADLINE_INVALID_CODE = "SERVICE_QUALIFICATION_DEADLINE_INVALID"
+
+
 class _Budget:
-    """One monotonic qualification budget; every read/walk/child obeys it."""
+    """One monotonic qualification budget; every read/walk/child obeys it.
 
-    __slots__ = ("_deadline",)
+    ``deadline_monotonic_ns`` is the private caller-deadline form: one absolute
+    caller ``time.monotonic_ns()`` endpoint, retained verbatim and min-composed
+    with the original local budget in exact integer nanoseconds so a huge
+    endpoint is never converted to a float. It is never regenerated, so every
+    nested probe sees the same endpoint. None or omitted keeps the original
+    ``time.monotonic()`` behaviour and never reads ``monotonic_ns``.
+    """
 
-    def __init__(self, seconds: float):
-        self._deadline = time.monotonic() + seconds
+    __slots__ = ("_deadline", "_endpoint_ns", "_local_ns")
+
+    def __init__(self, seconds: float, *, deadline_monotonic_ns: object = None):
+        if deadline_monotonic_ns is not None and (
+            type(deadline_monotonic_ns) is not int
+            or deadline_monotonic_ns <= 0
+        ):
+            raise _refuse(_DEADLINE_INVALID_CODE)
+        self._endpoint_ns = deadline_monotonic_ns
+        if deadline_monotonic_ns is None:
+            self._deadline = time.monotonic() + seconds
+            self._local_ns = None
+        else:
+            self._deadline = None
+            self._local_ns = time.monotonic_ns() + int(seconds * _NANOSECONDS_PER_SECOND)
+
+    @property
+    def caller_deadline(self):
+        """The retained caller endpoint, or None in local-budget-only mode."""
+        return self._endpoint_ns
 
     def remaining(self) -> float:
-        return self._deadline - time.monotonic()
+        if self._endpoint_ns is None:
+            return self._deadline - time.monotonic()
+        endpoint_ns = (
+            self._endpoint_ns
+            if self._endpoint_ns < self._local_ns
+            else self._local_ns
+        )
+        return (endpoint_ns - time.monotonic_ns()) / _NANOSECONDS_PER_SECOND
 
     def check(self, code: str = "SERVICE_QUALIFICATION_BUDGET_EXCEEDED") -> float:
         remaining = self.remaining()
         if remaining <= 0:
             raise _refuse(code)
         return remaining
+
+
+def _deadline_fence(budget: _Budget) -> None:
+    """Guard one potentially blocking observation, caller-deadline mode only.
+
+    An expired parent refuses with the existing budget code, and never from a
+    ``finally`` or ``except`` arm, so a primary refusal stays in front.
+    """
+    if budget is not None and budget.caller_deadline is not None:
+        budget.check()
+
+
+def _deadline_probe_kwargs(budget: _Budget) -> dict:
+    """Share the one parent budget with the probes able to accept it.
+
+    Local-budget-only qualification passes no keyword at all, so every existing
+    observer call shape stays exact.
+    """
+    return {} if budget.caller_deadline is None else {"budget": budget}
 
 
 def _object_identity(info: os.stat_result) -> tuple:
@@ -1347,17 +1510,20 @@ def _open_trusted(
         flags = os.O_RDONLY | getattr(os, "O_SYMLINK", 0) | getattr(
             os, "O_CLOEXEC", 0
         )
+    _deadline_fence(budget)
     try:
         descriptor = os.open(path, flags)
     except OSError:
         raise _refuse("SERVICE_OBJECT_UNAVAILABLE") from None
     try:
+        _deadline_fence(budget)
         try:
             observed = os.fstat(descriptor)
         except OSError:
             raise _refuse("SERVICE_OBJECT_UNAVAILABLE") from None
         if _object_identity(observed) != _object_identity(before):
             raise _refuse("SERVICE_OBJECT_IDENTITY_CHANGED")
+        _deadline_fence(budget)
         observed_acl = _require_no_acl(
             path,
             before,
@@ -1371,6 +1537,7 @@ def _open_trusted(
                 if ancestor
                 else "SERVICE_ACL_PRESENT"
             )
+        _deadline_fence(budget)
         if _object_identity(os.fstat(descriptor)) != _object_identity(before) or _object_identity(_lstat(path)) != _object_identity(before):
             raise _refuse("SERVICE_OBJECT_IDENTITY_CHANGED")
         budget.check()
@@ -1416,6 +1583,7 @@ def _read_trusted_bytes(
         while True:
             budget.check()
             block = os.read(descriptor, min(65536, maximum + 1 - consumed))
+            _deadline_fence(budget)
             if not block:
                 break
             consumed += len(block)
@@ -1434,10 +1602,14 @@ def _read_trusted_bytes(
         if _object_identity(_lstat(path)) != _object_identity(observed):
             raise _refuse("SERVICE_OBJECT_CHANGED_DURING_READ")
         budget.check()
-        return data, observed
+        if budget.caller_deadline is None:
+            return data, observed
     finally:
         _close(descriptor)
-        budget.check()
+        if budget.caller_deadline is None:
+            budget.check()
+    _deadline_fence(budget)
+    return data, observed
 
 
 def _strict_json_object(pairs: list) -> dict:
@@ -1751,11 +1923,11 @@ def _verify_role_config(
         if _require_document_int(document, "control_uid", code="SERVICE_CONFIG_SCHEMA_DRIFT") != 450:
             raise _refuse("SERVICE_CONFIG_UID_DRIFT")
     else:
-        if _require_document_text(document, "schema_version", code="SERVICE_CONFIG_SCHEMA_DRIFT") != _GATEWAY_CONFIG_SCHEMA:
+        if _require_document_text(document, "schema", code="SERVICE_CONFIG_SCHEMA_DRIFT") != _GATEWAY_CONFIG_SCHEMA:
             raise _refuse("SERVICE_CONFIG_SCHEMA_DRIFT")
         if _require_document_int(document, "service_uid", code="SERVICE_CONFIG_SCHEMA_DRIFT") != 458:
             raise _refuse("SERVICE_CONFIG_UID_DRIFT")
-        if _require_document_text(document, "executive_mcp_profile", code="SERVICE_CONFIG_SCHEMA_DRIFT") != _GATEWAY_MCP_PROFILE:
+        if _require_document_text(document, "executive_mcp_profile", code="SERVICE_CONFIG_SCHEMA_DRIFT") not in _GATEWAY_MCP_PROFILES:
             raise _refuse("SERVICE_CONFIG_PROFILE_DRIFT")
         if _require_release(document, "release_sha", code="SERVICE_CONFIG_SCHEMA_DRIFT") != release:
             raise _refuse("SERVICE_CONFIG_RELEASE_MISMATCH")
@@ -2066,12 +2238,16 @@ def _run_bounded_readonly(argv: tuple, *, budget: _Budget, max_bytes: int,
     payload = b""
     try:
         try:
+            _command_deadline_fence(budget, deadline)
             if process.stdout is None:
                 raise _refuse("SERVICE_RUNTIME_PROVENANCE_UNAVAILABLE")
             descriptor = process.stdout.fileno()
+            _command_deadline_fence(budget, deadline)
             os.set_blocking(descriptor, False)
+            _command_deadline_fence(budget, deadline)
             with selectors.DefaultSelector() as selector:
                 selector.register(descriptor, selectors.EVENT_READ)
+                _command_deadline_fence(budget, deadline)
                 while True:
                     budget.check()
                     remaining = deadline - time.monotonic()
@@ -2082,17 +2258,22 @@ def _run_bounded_readonly(argv: tuple, *, budget: _Budget, max_bytes: int,
                         raise _refuse("SERVICE_LAUNCHCTL_OUTPUT_TOO_LARGE")
                     if not selector.select(min(remaining, _LAUNCHD_POLL_SECONDS)):
                         continue
+                    _command_deadline_fence(budget, deadline)
                     try:
                         block = os.read(descriptor, min(_LAUNCHD_READ_CHUNK_BYTES, cap))
                     except BlockingIOError:
                         continue
+                    _command_deadline_fence(budget, deadline)
                     if not block:
                         break
                     consumed += len(block)
                     if consumed > max_bytes:
                         raise _refuse("SERVICE_LAUNCHCTL_OUTPUT_TOO_LARGE")
                     chunks.append(block)
-            code = _reap_bounded_exit_code(process, deadline)
+            if budget.caller_deadline is None:
+                code = _reap_bounded_exit_code(process, deadline)
+            else:
+                code = _reap_bounded_exit_code(process, deadline, budget=budget)
             if code is None:
                 raise _refuse("SERVICE_QUALIFICATION_BUDGET_EXCEEDED")
             if code != 0:
@@ -2110,6 +2291,7 @@ def _run_bounded_readonly(argv: tuple, *, budget: _Budget, max_bytes: int,
     if refusal:
         raise _refuse(refusal)
     budget.check()
+    _command_deadline_fence(budget, deadline)
     return payload
 
 
@@ -2156,7 +2338,9 @@ def _inventory_python_base(budget: _Budget) -> tuple:
             identities.append((relative, _object_identity(info)))
         finally:
             _close(handle)
-            budget.check()
+            if budget.caller_deadline is None:
+                budget.check()
+        _deadline_fence(budget)
     if {name for name, _, _ in links} != set(_PYTHON_LINK_INDEX):
         raise _refuse("SERVICE_RUNTIME_LINK_SET_DRIFT")
     return tuple(sorted(identities)), tuple(sorted(links))
@@ -2370,8 +2554,10 @@ def _qualify(topology: _RoleTopology, peer, role: str, budget: _Budget):
     if peer.pid < 1 or peer.pidversion < 1:
         raise _refuse("SERVICE_PEER_IDENTITY_INCOMPLETE")
 
-    boot = _observe_real_boot_id()
-    launchd = _observe_launchd_service(role)
+    boot = _observe_real_boot_id(**_deadline_probe_kwargs(budget))
+    _deadline_fence(budget)
+    launchd = _observe_launchd_service(role, **_deadline_probe_kwargs(budget))
+    _deadline_fence(budget)
     if launchd.pid != peer.pid:
         raise _refuse("SERVICE_LAUNCHD_PID_MISMATCH")
     if launchd.username != topology.username or launchd.group != topology.group:
@@ -2380,25 +2566,33 @@ def _qualify(topology: _RoleTopology, peer, role: str, budget: _Budget):
         raise _refuse("SERVICE_LAUNCHD_PROGRAM_MISMATCH")
 
     plist = _verify_role_plist(topology, budget)
+    _deadline_fence(budget)
     release_path = _release_directory(plist.release)
+    _deadline_fence(budget)
     if launchd.argv != plist.argv:
         raise _refuse("SERVICE_LAUNCHD_ARGV_MISMATCH")
     if launchd.working_directory != release_path:
         raise _refuse("SERVICE_PLIST_WORKING_DIRECTORY_MISMATCH")
 
     config = _verify_role_config(topology, plist.release, budget)
+    _deadline_fence(budget)
     budget.check()
     projection = _verify_control_projection(budget)
+    _deadline_fence(budget)
     budget.check()
     if topology.role == "control" and projection.release != plist.release:
         raise _refuse("SERVICE_CONFIG_RELEASE_MISMATCH")
     release = _verify_release(topology, plist.release, budget)
+    _deadline_fence(budget)
     budget.check()
     runtime = _verify_python_runtime(budget)
+    _deadline_fence(budget)
     budget.check()
     closure = _verify_network_closure(budget) if topology.network_closure else None
+    _deadline_fence(budget)
     budget.check()
     dynamic = _observe_dynamic_code(peer.audit_token, _PYTHON_MAIN_EXECUTABLE)
+    _deadline_fence(budget)
     budget.check()
     if (
         dynamic.dynamic_code_status != 0
@@ -2408,38 +2602,54 @@ def _qualify(topology: _RoleTopology, peer, role: str, budget: _Budget):
 
     # Race joins: every identity used above must still hold right now, with no
     # positive cache anywhere in this factory.
-    _joined(_observe_real_boot_id(), boot, "SERVICE_BOOT_ID_CHANGED")
-    _joined(_observe_launchd_service(role), launchd, "SERVICE_LAUNCHD_CHANGED")
+    _joined(_observe_real_boot_id(**_deadline_probe_kwargs(budget)), boot, "SERVICE_BOOT_ID_CHANGED")
+    _deadline_fence(budget)
+    _joined(_observe_launchd_service(role, **_deadline_probe_kwargs(budget)), launchd, "SERVICE_LAUNCHD_CHANGED")
+    _deadline_fence(budget)
     _joined(
         _observe_dynamic_code(peer.audit_token, _PYTHON_MAIN_EXECUTABLE),
         dynamic,
         "SERVICE_DYNAMIC_CODE_CHANGED",
     )
+    _deadline_fence(budget)
     _joined(
         _verify_role_plist(topology, budget, expected_release=plist.release),
         plist,
         "SERVICE_PLIST_CHANGED",
     )
+    _deadline_fence(budget)
     _joined(
         _verify_role_config(topology, plist.release, budget),
         config,
         "SERVICE_CONFIG_CHANGED",
     )
+    _deadline_fence(budget)
     _joined(_verify_control_projection(budget), projection, "SERVICE_CONFIG_CHANGED")
+    _deadline_fence(budget)
     budget.check()
     _recheck_release(release, budget)
+    _deadline_fence(budget)
     _recheck_python_runtime(runtime, budget)
+    _deadline_fence(budget)
     if closure is not None:
         _recheck_network_closure(closure, budget)
+        _deadline_fence(budget)
 
     _joined(_verify_role_plist(topology, budget, expected_release=plist.release), plist, "SERVICE_PLIST_CHANGED")
+    _deadline_fence(budget)
     _joined(_verify_role_config(topology, plist.release, budget), config, "SERVICE_CONFIG_CHANGED")
+    _deadline_fence(budget)
     _joined(_verify_control_projection(budget), projection, "SERVICE_CONFIG_CHANGED")
-    _joined(_observe_real_boot_id(), boot, "SERVICE_BOOT_ID_CHANGED")
-    _joined(_observe_launchd_service(role), launchd, "SERVICE_LAUNCHD_CHANGED")
+    _deadline_fence(budget)
+    _joined(_observe_real_boot_id(**_deadline_probe_kwargs(budget)), boot, "SERVICE_BOOT_ID_CHANGED")
+    _deadline_fence(budget)
+    _joined(_observe_launchd_service(role, **_deadline_probe_kwargs(budget)), launchd, "SERVICE_LAUNCHD_CHANGED")
+    _deadline_fence(budget)
     _joined(_observe_dynamic_code(peer.audit_token, _PYTHON_MAIN_EXECUTABLE), dynamic, "SERVICE_DYNAMIC_CODE_CHANGED")
+    _deadline_fence(budget)
     budget.check()
     state = _peer_identity._current_capture(peer)
+    _deadline_fence(budget)
     if state.original.audit_token != peer.audit_token or state.receiver_pid != os.getpid():
         raise _refuse("SERVICE_PEER_IDENTITY_MISMATCH")
 
@@ -2477,10 +2687,25 @@ def qualify_installed_peer(peer, *, role):
     closure, and dynamic code identity all agree before and after. Any refusal
     carries one short nonsecret code and never a path, config, or exception text.
     """
+    return _qualify_installed_peer_core(peer, role=role)
+
+
+def _qualify_installed_peer_with_deadline(peer, *, role, deadline_monotonic_ns):
+    """Private request tightening only; never a wire or authority input."""
+    if type(deadline_monotonic_ns) is not int or deadline_monotonic_ns <= 0:
+        raise _refuse(_DEADLINE_INVALID_CODE)
+    return _qualify_installed_peer_core(
+        peer, role=role, deadline_monotonic_ns=deadline_monotonic_ns)
+
+
+def _qualify_installed_peer_core(peer, *, role, deadline_monotonic_ns=None):
     try:
         topology = _role_topology(role)
-        budget = _Budget(_SERVICE_BUDGET_SECONDS)
+        budget = (_Budget(_SERVICE_BUDGET_SECONDS) if deadline_monotonic_ns is None
+                  else _Budget(_SERVICE_BUDGET_SECONDS, deadline_monotonic_ns=deadline_monotonic_ns))
+        _deadline_fence(budget)
         capture = _peer_identity._current_capture(peer)
+        _deadline_fence(budget)
         if type(capture) is not _peer_identity._CaptureState:
             raise _refuse("PEER_CAPTURE_PROVENANCE_REQUIRED")
         observation = _qualify(topology, peer, role, budget)

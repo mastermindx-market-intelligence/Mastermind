@@ -46,6 +46,15 @@ test('paper tools expose discovery, bounded prepare, reads and one explicit cont
   assert.equal(PAPER_DESIGN_TOOLS[4].annotations.idempotentHint, false);
   assert.equal(PAPER_DESIGN_TOOLS[4].annotations.destructiveHint, true);
   assert.equal(PAPER_DESIGN_TOOLS[4].annotations.openWorldHint, true);
+  assert.match(PAPER_DESIGN_TOOLS[0].description, /DOCUMENT_UNAVAILABLE/);
+  assert.match(PAPER_DESIGN_TOOLS[0].description, /does not prove Paper Desktop or a known exact file is unavailable/);
+  assert.match(PAPER_DESIGN_TOOLS[2].description, /exact target even if default active-file inspection is unavailable/);
+  for (const tool of PAPER_DESIGN_TOOLS) assert.doesNotMatch(tool.description, /list_files/);
+  assert.match(PAPER_DESIGN_TOOLS[3].description, /same file\/page across hosts/);
+  assert.match(PAPER_DESIGN_TOOLS[4].description, /board\/artboard\/node/);
+  assert.match(PAPER_DESIGN_TOOLS[4].description, /target-scoped, not a file-wide lease/);
+  assert.doesNotMatch(PAPER_DESIGN_TOOLS[3].description, /Only one modifying session/);
+  assert.doesNotMatch(PAPER_DESIGN_TOOLS[4].description, /Only one modifying session/);
 });
 
 test('paper config is closed, absolute and digest pinned', () => {
@@ -76,6 +85,10 @@ test('inspect dispatches exact bridge status without shell or caller path', asyn
   assert.equal(result.value.gateway_surface.client_surface_recovery, 'REVIEW_AND_REFRESH_APPROVED_APP_ACTION_SNAPSHOT');
   assert.equal(result.value.gateway_surface.reconnect_alone_proves_refresh, false);
   assert.equal(result.value.gateway_surface.generic_process_fallback_allowed, false);
+  assert.equal(result.value.gateway_surface.concurrency_rule, 'MULTI_WRITER_PER_FILE_TARGET_SCOPED');
+  assert.equal(result.value.gateway_surface.same_file_multi_writer_allowed, true);
+  assert.equal(result.value.gateway_surface.same_page_multi_writer_allowed, true);
+  assert.equal(result.value.gateway_surface.coordination_scope, 'BOARD_ARTBOARD_NODE');
   assert.deepEqual(calls[0][0], '/opt/paper/python');
   assert.deepEqual(calls[0][1], ['/opt/paper/bridge.py', 'status']);
   assert.equal(calls[0][2].shell, undefined);
@@ -166,7 +179,10 @@ test('prepare opens only the host-pinned app and returns read-only when write sc
   assert.equal(result.value.write_qualified, false);
   assert.equal(result.value.already_active, false);
   assert.equal(result.value.app_open_attempted, true);
-  assert.equal(result.value.concurrency_rule, 'ONE_WRITER_PER_FILE_ACROSS_HOSTS');
+  assert.equal(result.value.concurrency_rule, 'MULTI_WRITER_PER_FILE_TARGET_SCOPED');
+  assert.equal(result.value.same_file_multi_writer_allowed, true);
+  assert.equal(result.value.same_page_multi_writer_allowed, true);
+  assert.equal(result.value.coordination_scope, 'BOARD_ARTBOARD_NODE');
   assert.deepEqual(opens, [['/Applications/Paper.app', fileId]]);
 });
 

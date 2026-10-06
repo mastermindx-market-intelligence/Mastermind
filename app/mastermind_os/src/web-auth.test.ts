@@ -17,6 +17,7 @@ import {
   READ_TIMEOUT_MS,
   TOKEN_TIMEOUT_MS,
 } from "./public-config";
+import workUnavailable from "./fixtures/work-service-unavailable.json";
 const response = (data: unknown) =>
   new Response(JSON.stringify(data), {
     headers: { "content-type": "application/json" },
@@ -34,6 +35,7 @@ function setup(
     blocked?: boolean;
     digest?: Promise<ArrayBuffer>;
     configured?: boolean;
+    executiveResource?: string;
   } = {},
 ) {
   vi.useFakeTimers();
@@ -51,11 +53,13 @@ function setup(
       token_type: "Bearer",
       access_token: "private-token",
       expires_in: 3600,
+      scope: new URL(popup.location).searchParams.get("scope"),
     }),
   );
   const open = vi.fn(() => (options.blocked ? null : popup));
   const client = createWebAuth({
     config: {
+      executiveResource: options.executiveResource ?? null,
       webClientId:
         options.configured === false ? null : "fixture-public-client",
     },
@@ -99,6 +103,7 @@ function setup(
     callback();
     await flush();
     callback();
+    if (options.executiveResource) { await flush(); callback(); }
     await pending;
   };
   return { client, popup, messages, fetcher, open, callback, login };
@@ -309,6 +314,7 @@ describe("fixed browser reads", () => {
     e.fetcher.mockImplementation(async () => response({ ok: true }));
     const signal = new AbortController().signal;
     await e.client.readPrograms({ signal });
+    await e.client.readWork({ signal });
     await e.client.readMission({
       work_ref: "WS:ONE",
       root_job_id: "JOB-1",
@@ -318,12 +324,26 @@ describe("fixed browser reads", () => {
     const urls = e.fetcher.mock.calls.slice(2).map((c) => String(c[0]));
     expect(urls).toEqual([
       `${ORIGIN}/workspace/programs/current`,
+      `${ORIGIN}/workspace/work/current`,
       `${ORIGIN}/workspace/mission/current?work_ref=WS%3AONE&root_job_id=JOB-1`,
       `${ORIGIN}/workspace/window/current`,
     ]);
     await expect(
       e.client.readMission({ work_ref: "bad", root_job_id: "JOB-1", signal }),
     ).rejects.toThrow("SELECTION_INVALID");
+  });
+  it("preserves the fixed Work typed-503 document for the closed decoder", async () => {
+    const e = setup();
+    await e.login();
+    e.fetcher.mockResolvedValueOnce(
+      new Response(JSON.stringify(workUnavailable), {
+        status: 503,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    await expect(
+      e.client.readWork({ signal: new AbortController().signal }),
+    ).resolves.toEqual(workUnavailable);
   });
   it("permits >64KiB public JSON while enforcing the 2M byte cap", async () => {
     const e = setup();
@@ -511,5 +531,94 @@ describe("fixed structured-result browser transport", () => {
       }),
     ).rejects.toThrow("SELECTION_INVALID");
     expect(e.fetcher).not.toHaveBeenCalled();
+  });
+});
+
+describe("optional Executive authentication in the existing web owner", () => {
+  const resource = "https://fixture-resource.mastermind-x.com/executive";
+  const scopes = "mastermind.executive.read mastermind.executive.intent.submit";
+  it("uses a distinct third PKCE transaction with the same client and callback", async () => {
+    const e = setup({ executiveResource: resource }), pending = e.client.signIn();
+    await flush(); const first = new URL(e.popup.location);
+    e.callback(); await flush(); const second = new URL(e.popup.location);
+    e.callback(); await flush(); const third = new URL(e.popup.location);
+    expect(third.searchParams.get("audience")).toBe(resource);
+    expect(third.searchParams.get("scope")).toBe(scopes);
+    expect(third.searchParams.get("client_id")).toBe(first.searchParams.get("client_id"));
+    expect(third.searchParams.get("redirect_uri")).toBe(first.searchParams.get("redirect_uri"));
+    expect(new Set([first, second, third].map((u) => u.searchParams.get("state"))).size).toBe(3);
+    e.callback(); await pending;
+    expect(e.client.executive!.available()).toBe(true);
+    expect(e.client.getState()).toEqual({ status: "signed_in", reason: null, acquisition: true, content: true });
+    expect(JSON.stringify(e.client)).not.toContain("private-token");
+  });
+  it("keeps workspace access usable when optional Executive authorization is refused", async () => {
+    const e = setup({ executiveResource: resource }), pending = e.client.signIn();
+    await flush(); e.callback(); await flush(); e.callback(); await flush();
+    e.callback({ code: undefined, error: "access_denied" }); await pending;
+    expect(e.client.getState()).toMatchObject({ status: "signed_in", acquisition: true, content: true });
+    expect(e.client.executive!.available()).toBe(false);
+  });
+  it.each([scopes.split(" ").reverse().join(" "), scopes + " admin", scopes + " mastermind.executive.read"])(
+    "accepts only the exact scope set from an Executive token response", async (returnedScope) => {
+      const e = setup({ executiveResource: resource });
+      e.fetcher.mockImplementation(async () => response({ token_type: "Bearer", access_token: "private-token", expires_in: 3600,
+        scope: new URL(e.popup.location).searchParams.get("audience") === resource
+          ? returnedScope : new URL(e.popup.location).searchParams.get("scope") }));
+      await e.login();
+      expect(e.client.executive!.available()).toBe(returnedScope === scopes.split(" ").reverse().join(" "));
+    });
+  it("exposes only three fixed authenticated POST routes with exact bodies", async () => {
+    const e = setup({ executiveResource: resource }); await e.login();
+    e.fetcher.mockClear(); e.fetcher.mockResolvedValue(response({ ok: true }));
+    const signal = new AbortController().signal;
+    await e.client.executive!.context(signal);
+    e.fetcher.mockResolvedValue(response({ ok: false }));
+    await e.client.executive!.submit({ operation_key: "original" }, signal);
+    e.fetcher.mockResolvedValue(response({ ok: false }));
+    await e.client.executive!.status({ intent_id: "original-intent" }, signal);
+    expect(e.fetcher.mock.calls.map(([url]) => url)).toEqual(["context", "submit", "status"].map((path) => ORIGIN + "/os/executive/" + path));
+    expect(e.fetcher.mock.calls.map(([, init]) => JSON.parse(String(init?.body)))).toEqual([
+      {}, { arguments: { operation_key: "original" } }, { arguments: { intent_id: "original-intent" } },
+    ]);
+    for (const [, init] of e.fetcher.mock.calls) expect(init).toMatchObject({
+      method: "POST", redirect: "error", credentials: "omit", cache: "no-store",
+      headers: { Authorization: "Bearer private-token", "Content-Type": "application/json" },
+    });
+  });
+  it("bounds request and actual response bytes without submitting twice", async () => {
+    const e = setup({ executiveResource: resource }); await e.login(); e.fetcher.mockClear();
+    await expect(e.client.executive!.submit({ extra: "x".repeat(65_536) }, new AbortController().signal)).rejects.toThrow("EXECUTIVE_INPUT_TOO_LARGE");
+    expect(e.fetcher).not.toHaveBeenCalled();
+    e.fetcher.mockResolvedValue(response({ data: "x".repeat(262_144) }));
+    await expect(e.client.executive!.context(new AbortController().signal)).rejects.toThrow();
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+  });
+  it.each(["submit", "status"] as const)("invalidates a stalled %s reply immediately on sign-out", async (route) => {
+    const e = setup({ executiveResource: resource }); await e.login();
+    const late = deferred<Response>(); e.fetcher.mockReturnValue(late.promise);
+    const generation = e.client.executive!.authGeneration();
+    const result = route === "submit"
+      ? e.client.executive!.submit({ operation_key: "original" }, new AbortController().signal)
+      : e.client.executive!.status({ intent_id: "original" }, new AbortController().signal);
+    const rejected = expect(result).rejects.toThrow("EXECUTIVE_REQUEST_CANCELLED");
+    await e.client.signOut(); await rejected;
+    expect(e.client.executive!.authGeneration()).toBeGreaterThan(generation);
+    expect(e.client.executive!.available()).toBe(false);
+    late.resolve(response({ ok: true, status: "accepted" })); await flush();
+    expect(e.fetcher.mock.calls.filter(([url]) => String(url).endsWith("/" + route))).toHaveLength(1);
+  });
+  it("expires Executive capability even while the display's workspace access remains valid", async () => {
+    const e = setup({ executiveResource: resource });
+    e.fetcher.mockImplementation(async () => response({ token_type: "Bearer", access_token: "private-token",
+      scope: new URL(e.popup.location).searchParams.get("scope"),
+      expires_in: new URL(e.popup.location).searchParams.get("audience") === resource ? 1 : 3600 }));
+    await e.login(); const generation = e.client.executive!.authGeneration(), listener = vi.fn();
+    e.client.executive!.subscribe(listener);
+    await vi.advanceTimersByTimeAsync(1001);
+    expect(e.client.executive!.available()).toBe(false);
+    expect(e.client.executive!.authGeneration()).toBeGreaterThan(generation);
+    expect(listener).toHaveBeenCalled();
+    expect(e.client.getState().status).toBe("signed_in");
   });
 });

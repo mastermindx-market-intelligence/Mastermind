@@ -72,6 +72,7 @@ Usage
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import re
@@ -95,11 +96,13 @@ INTENT_SCHEMA_V2 = "mastermind.ceo_intent.v2"
 #: no CEO reader may classify a bounded service audit as CEO provenance
 #: (``executive_inbox.py:118`` keeps its CEO-only pin unchanged).
 INTENT_SCHEMA_SERVICE = "mastermind.executive_service_intent.v1"
+INTENT_SCHEMA_PRINCIPAL = "mastermind.executive_principal_intent.v1"
 
 #: Schema of the receipt this module returns.
 RECEIPT_SCHEMA = "mastermind.ceo_intent_receipt.v1"
 RECEIPT_SCHEMA_V2 = "mastermind.ceo_intent_receipt.v2"
 RECEIPT_SCHEMA_SERVICE = "mastermind.executive_service_intent_receipt.v1"
+RECEIPT_SCHEMA_PRINCIPAL = "mastermind.executive_principal_intent_receipt.v1"
 _DIALOGUE_SOURCE_UNSET = object()
 
 #: Namespace for the durable event ``command_id``.  The prefix keeps CEO intent
@@ -142,6 +145,11 @@ _REQUIRED_KEYS = frozenset(
 _OPTIONAL_KEYS = frozenset({"workstream"})
 _V2_REQUIRED_KEYS = _REQUIRED_KEYS | frozenset({"intent_kind", "business_impact"})
 _V2_OPTIONAL_KEYS = _OPTIONAL_KEYS
+_PRINCIPAL_IDENTITY_KEYS = frozenset({
+    "seat", "principal_binding_digest", "mission_authority_ref",
+    "authority_generation_digest", "workstream",
+})
+_PRINCIPAL_REQUIRED_KEYS = _REQUIRED_KEYS | _PRINCIPAL_IDENTITY_KEYS
 _V2_INTENT_KIND = "executive_coo_cycle"
 _V2_BUSINESS_IMPACTS = frozenset({"routine", "material", "critical"})
 
@@ -618,6 +626,81 @@ def _require_service_ceiling(contract: Mapping[str, Any]) -> None:
         )
 
 
+def _principal_identity(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate immutable context shape, never authenticate its author."""
+    from control_plane.coo_principal_envelope import PrincipalAdmissionContext
+    if value.get("actor") != "coo-principal" or value.get("seat") != "coo":
+        raise CeoIntentError("principal actor and seat must be role-correct")
+    try:
+        context = PrincipalAdmissionContext(
+            work_ref=value["workstream"],
+            principal_binding_digest=value["principal_binding_digest"],
+            mission_authority_ref=value["mission_authority_ref"],
+            authority_generation_digest=value["authority_generation_digest"],
+        )
+    except (KeyError, TypeError, ValueError):
+        raise CeoIntentError("principal immutable identity is invalid") from None
+    return {"seat": "coo", "work_ref": context.work_ref,
+            "principal_binding_digest": context.principal_binding_digest,
+            "mission_authority_ref": context.mission_authority_ref,
+            "authority_generation_digest": context.authority_generation_digest}
+
+
+def _require_principal_contract(intent: Mapping[str, Any]) -> None:
+    """Keep the principal episode inside the existing two worker profiles."""
+    from control_plane import ceo_request
+    from control_plane.coo_principal_request import INTENT_ID_RE as PRINCIPAL_ID_RE
+    contract = intent["execution_contract"]
+    required = {"requested_authorities", "authority_level", "branch", "worktree", "attempt_limit"}
+    allowed = required | {"allowed_write_paths", "validation_commands"}
+    authorities = contract["requested_authorities"]
+    research = ceo_request.derive_authorities("research_only")
+    code = ceo_request.derive_authorities("bounded_code_change")
+    if (not required <= set(contract) or not set(contract) <= allowed
+            or PRINCIPAL_ID_RE.fullmatch(intent["intent_id"]) is None
+            or contract["authority_level"] != ceo_request.AUTHORITY_LEVEL
+            or type(contract["attempt_limit"]) is not int
+            or not 1 <= contract["attempt_limit"] <= 2
+            or contract["branch"] != ceo_request.derive_branch(intent["intent_id"])
+            or authorities not in (research, code)):
+        raise CeoIntentError("principal worker contract is invalid")
+    paths, commands = contract.get("allowed_write_paths"), contract.get("validation_commands")
+    if ((authorities == research and (paths or commands))
+            or (authorities == code and (not paths or not commands))):
+        raise CeoIntentError("principal worker profile requirements differ")
+
+
+def _require_principal_request_ref(value: Any, intent_id: str) -> str:
+    from control_plane.coo_principal_request import principal_intent_id
+    try:
+        if principal_intent_id(value) != intent_id:
+            raise ValueError()
+    except (TypeError, ValueError):
+        raise CeoIntentError("principal request identity does not bind intent") from None
+    return value
+
+
+def _require_principal_context(intent, context, request_ref, guard) -> None:
+    from control_plane.coo_principal_envelope import PrincipalAdmissionContext
+    if type(context) is not PrincipalAdmissionContext or not callable(guard):
+        raise CeoIntentError("trusted principal admission is unavailable")
+    identity = _principal_identity(intent)
+    if any(identity[key] != getattr(context, key) for key in identity if key != "seat"):
+        raise CeoIntentError("principal admission context does not bind envelope")
+    _require_principal_request_ref(request_ref, intent["intent_id"])
+
+
+def _run_principal_guard(intent, guard) -> None:
+    # The future App-only ingress must supply a canonical host recheck, not a
+    # model-authored Boolean. A callback alone is NOT OAuth/peer authentication.
+    # Replays resolve first. Guard failures or non-None results have no Job effect.
+    try:
+        if guard(copy.deepcopy(intent)) is not None:
+            raise ValueError()
+    except Exception:
+        raise CeoIntentError("trusted principal admission refused") from None
+
+
 def validate_intent(payload: Any) -> dict[str, Any]:
     """Return the canonical form of one closed CEO intent envelope.
 
@@ -638,6 +721,8 @@ def validate_intent(payload: Any) -> dict[str, Any]:
         _exact_keys(raw, "intent", _V2_REQUIRED_KEYS, _V2_OPTIONAL_KEYS)
     elif schema == INTENT_SCHEMA_SERVICE:
         _exact_keys(raw, "intent", _SERVICE_REQUIRED_KEYS, _SERVICE_OPTIONAL_KEYS)
+    elif schema == INTENT_SCHEMA_PRINCIPAL:
+        _exact_keys(raw, "intent", _PRINCIPAL_REQUIRED_KEYS, frozenset())
     else:
         raise CeoIntentError(
             f"intent.schema must be {INTENT_SCHEMA!r}, {INTENT_SCHEMA_V2!r}, or "
@@ -729,6 +814,10 @@ def validate_intent(payload: Any) -> dict[str, Any]:
         _require_service_ceiling(intent["execution_contract"])
         intent["principal_id"] = principal_id
         intent["task_kind"] = task_kind
+    if schema == INTENT_SCHEMA_PRINCIPAL:
+        _principal_identity(raw)
+        intent.update({key: raw[key] for key in _PRINCIPAL_IDENTITY_KEYS})
+        _require_principal_contract(intent)
     if "workstream" in raw:
         # A pointer into the Agent OS knowledge plane, recorded for provenance.
         # Nothing in this path opens, resolves, or writes that store.
@@ -797,8 +886,11 @@ def _receipt(
     duplicate: bool,
     created_at_ms: int,
     receipt_schema: str = RECEIPT_SCHEMA,
+    principal: dict[str, Any] | None = None,
+    request_ref: str | None = None,
+    work_ref: str | None = None,
 ) -> dict[str, Any]:
-    return {
+    value = {
         "schema": receipt_schema,
         "intent_id": intent_id,
         "fingerprint": fingerprint,
@@ -819,6 +911,16 @@ def _receipt(
         "grounding": dict(grounding),
         "created_at_ms": int(created_at_ms),
     }
+    if receipt_schema == RECEIPT_SCHEMA_PRINCIPAL:
+        if principal is None:
+            raise CeoIntentError("principal receipt identity is unavailable")
+        value["principal"] = dict(principal)
+        value["request_ref"] = _require_principal_request_ref(request_ref, intent_id)
+    if receipt_schema == RECEIPT_SCHEMA_V2 and work_ref is not None:
+        value["work_ref"] = _text(
+            work_ref, "intent.workstream", pattern=_WORKSTREAM_RE, max_chars=72
+        )
+    return value
 
 
 def build_receipt(
@@ -828,6 +930,7 @@ def build_receipt(
     fingerprint: str,
     duplicate: bool,
     created_at_ms: int,
+    principal_request_ref: str | None = None,
 ) -> dict[str, Any]:
     """Assemble the receipt envelope matching the intent schema."""
 
@@ -839,6 +942,9 @@ def build_receipt(
         duplicate=duplicate,
         created_at_ms=created_at_ms,
         receipt_schema=_receipt_schema_for(intent.get("schema")),
+        principal=_principal_identity(intent) if intent.get("schema") == INTENT_SCHEMA_PRINCIPAL else None,
+        request_ref=principal_request_ref,
+        work_ref=intent.get("workstream") if intent.get("schema") == INTENT_SCHEMA_V2 else None,
     )
 
 
@@ -850,6 +956,8 @@ def _receipt_schema_for(intent_schema: Any) -> str:
     mistake a bounded service audit for a CEO submission.
     """
 
+    if intent_schema == INTENT_SCHEMA_PRINCIPAL:
+        return RECEIPT_SCHEMA_PRINCIPAL
     if intent_schema == INTENT_SCHEMA_V2:
         return RECEIPT_SCHEMA_V2
     if intent_schema == INTENT_SCHEMA_SERVICE:
@@ -857,7 +965,7 @@ def _receipt_schema_for(intent_schema: Any) -> str:
     return RECEIPT_SCHEMA
 
 
-def _provenance(intent: Mapping[str, Any], fingerprint: str) -> dict[str, Any]:
+def _provenance(intent: Mapping[str, Any], fingerprint: str, *, principal_request_ref: str | None = None) -> dict[str, Any]:
     """The durable record of WHO asked, for WHAT, grounded on WHICH revisions."""
 
     value = {
@@ -879,6 +987,9 @@ def _provenance(intent: Mapping[str, Any], fingerprint: str) -> dict[str, Any]:
         value["requested_authorities"] = requested
         value["effective_authorities"] = list(requested)
         value["write_authorities"] = []
+    if intent["schema"] == INTENT_SCHEMA_PRINCIPAL:
+        value.update({key: intent[key] for key in _PRINCIPAL_IDENTITY_KEYS})
+        value["request_ref"] = _require_principal_request_ref(principal_request_ref, intent["intent_id"])
     return value
 
 
@@ -910,6 +1021,7 @@ def _receipt_from_event(
         INTENT_SCHEMA,
         INTENT_SCHEMA_V2,
         INTENT_SCHEMA_SERVICE,
+        INTENT_SCHEMA_PRINCIPAL,
     }:
         raise CeoIntentError(
             f"intent {intent_id!r} resolves to a record whose provenance schema is "
@@ -926,6 +1038,8 @@ def _receipt_from_event(
             f"intent {intent_id!r} has no well-formed fingerprint in its durable record"
         )
     if fingerprint is not None and recorded != fingerprint:
+        if provenance_schema == INTENT_SCHEMA_PRINCIPAL:
+            raise CeoIntentConflict("principal operation conflicts; reconcile the original request")
         raise CeoIntentConflict(
             f"intent_id {intent_id!r} was already accepted with a different envelope: "
             f"recorded fingerprint {recorded} != submitted fingerprint {fingerprint}. "
@@ -1029,6 +1143,26 @@ def _receipt_from_event(
         raise CeoIntentError(
             f"v1 intent {intent_id!r} resolved to a cycle-eligible Job"
         )
+    principal = None
+    request_ref = None
+    if provenance_schema == INTENT_SCHEMA_PRINCIPAL:
+        principal = _principal_identity(provenance)
+        request_ref = _require_principal_request_ref(provenance.get("request_ref"), intent_id)
+        expected_keys = {"schema", "intent_id", "actor", "fingerprint", "grounding", "request_ref"} | _PRINCIPAL_IDENTITY_KEYS
+        if (set(provenance) != expected_keys or job.owner_seat != "coo"
+                or job.escalation_target != "coo" or job.parent_job_id is not None
+                or not 1 <= job.attempt_limit <= 2):
+            raise CeoIntentError("principal durable identity or Job binding differs")
+    work_ref = None
+    if provenance_schema == INTENT_SCHEMA_V2 and "workstream" in provenance:
+        # Revalidate the immutable source pointer before exposing it on replay.
+        # Older v2 events without this optional field remain readable as-is.
+        work_ref = _text(
+            provenance["workstream"],
+            "intent.workstream",
+            pattern=_WORKSTREAM_RE,
+            max_chars=72,
+        )
     grounding = provenance.get("grounding")
     return _receipt(
         job,
@@ -1038,6 +1172,9 @@ def _receipt_from_event(
         duplicate=True,
         created_at_ms=int(event.get("created_at_ms") or 0),
         receipt_schema=_receipt_schema_for(provenance_schema),
+        principal=principal,
+        request_ref=request_ref,
+        work_ref=work_ref,
     )
 
 
@@ -1087,6 +1224,9 @@ def submit_intent(
     execution_binding: "dict[str, Any] | None" = None,
     dialogue_source: Any = _DIALOGUE_SOURCE_UNSET,
     require_dialogue_source: bool = False,
+    principal_context: Any = None,
+    principal_request_ref: str | None = None,
+    principal_admission_guard: Any = None,
 ) -> dict[str, Any]:
     """Validate one intent and turn it into exactly one durable QUEUED Job.
 
@@ -1116,7 +1256,19 @@ def submit_intent(
     that source remains an exact identity conflict.
     """
 
+    # Principal admission is dormant for every incumbent caller: all three
+    # trusted keyword-only inputs are required. The future installed App must
+    # authenticate and derive context outside model control; its App-only peer
+    # path must provide the canonical fresh mission/binding/effect guard.
+    # This sink adds no auth service, deployment, dispatch, or worker lifecycle.
     intent = validate_intent(payload)
+    if intent["schema"] == INTENT_SCHEMA_PRINCIPAL:
+        _require_principal_context(intent, principal_context, principal_request_ref, principal_admission_guard)
+        from control_plane.ceo_request import derive_worktree
+        if not workspace_root or intent["execution_contract"]["worktree"] != derive_worktree(str(workspace_root), intent["intent_id"]):
+            raise CeoIntentError("principal worktree differs from trusted derivation")
+    elif any(value is not None for value in (principal_context, principal_request_ref, principal_admission_guard)):
+        raise CeoIntentError("principal admission context cannot authorize another schema")
     _require_workspace(intent, Path(workspace_root) if workspace_root else None)
     fingerprint = intent_fingerprint(intent)
     intent_id = intent["intent_id"]
@@ -1153,14 +1305,17 @@ def submit_intent(
                 raise StateConflict("v1 CEO intent cannot carry a host execution binding")
             if effective_dialogue_source is not None:
                 raise StateConflict("v1 CEO intent cannot carry a host dialogue source")
-            if intent["schema"] == INTENT_SCHEMA_SERVICE:
-                # Belt: the ceiling was enforced at validation, and is re-checked
-                # here so no future caller can reach create_job with a service
-                # envelope that skipped the discriminator.  The seat is EXPLICIT:
+            if intent["schema"] in {INTENT_SCHEMA_SERVICE, INTENT_SCHEMA_PRINCIPAL}:
+                # Each schema keeps its own ceiling and admission preconditions.
+                # The narrow service tier remains unchanged. The seat is EXPLICIT:
                 # ``coo`` is the one seat that skips the typed-executive-
                 # provenance gate, and a service intent must never be seated
                 # above it.  No role, no host binding, no dialogue source.
-                _require_service_ceiling(contract)
+                if intent["schema"] == INTENT_SCHEMA_SERVICE:
+                    _require_service_ceiling(contract)
+                else:
+                    _require_principal_contract(intent)
+                    _run_principal_guard(intent, principal_admission_guard)
                 job = runtime.jobs.create_job(
                     intent["objective"],
                     department=intent["department"],
@@ -1176,7 +1331,7 @@ def submit_intent(
                     allowed_write_paths=contract.get("allowed_write_paths"),
                     validation_commands=contract.get("validation_commands"),
                     command_id=command_id,
-                    provenance=_provenance(intent, fingerprint),
+                    provenance=_provenance(intent, fingerprint, principal_request_ref=principal_request_ref),
                     owner_seat="coo",
                     escalation_target="coo",
                 )
@@ -1222,6 +1377,7 @@ def submit_intent(
         fingerprint=fingerprint,
         duplicate=False,
         created_at_ms=int((created or {}).get("created_at_ms") or 0),
+        principal_request_ref=principal_request_ref,
     )
 
 
@@ -1255,10 +1411,12 @@ __all__ = [
     "INTENT_ID_RE",
     "INTENT_SCHEMA",
     "INTENT_SCHEMA_SERVICE",
+    "INTENT_SCHEMA_PRINCIPAL",
     "INTENT_SCHEMA_V2",
     "MAX_ENVELOPE_BYTES",
     "RECEIPT_SCHEMA",
     "RECEIPT_SCHEMA_SERVICE",
+    "RECEIPT_SCHEMA_PRINCIPAL",
     "RECEIPT_SCHEMA_V2",
     "SHA_RE",
     "build_receipt",

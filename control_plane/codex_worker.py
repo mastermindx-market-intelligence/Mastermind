@@ -130,6 +130,19 @@ _DISABLED_FEATURES = (
     "image_generation",
     "memories",
     "multi_agent",
+    "auth_elicitation",
+    "browser_use_external",
+    "browser_use_full_cdp_access",
+    "daemon_auto_start",
+    "enable_mcp_apps",
+    "mcp_2026_07_28",
+    "multi_agent_v2",
+    "shell_snapshot",
+    "shell_snapshot_v2",
+    "skill_mcp_dependency_install",
+    "skill_search",
+    "tool_call_mcp_elicitation",
+    "workspace_dependencies",
     "remote_plugin",
 )
 _JSONL_EVENT_TYPES = frozenset({
@@ -256,6 +269,7 @@ class ProcessIdentity:
     effective_gid: int
     real_uid: int
     real_gid: int
+    parent_pid: int | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1129,6 +1143,7 @@ class ProcessInspector:
                 effective_gid=int(info.pbi_gid),
                 real_uid=int(info.pbi_ruid),
                 real_gid=int(info.pbi_rgid),
+                parent_pid=int(info.pbi_ppid),
             )
 
         try:
@@ -3761,6 +3776,7 @@ class CodexWorkerAdapter:
                 binary=self.binary,
                 rendered_argv=_redact_argv(argv),
                 environment_keys=tuple(sorted(environment)),
+                isolation_manifest_sha256=spec.isolation_manifest_sha256,
                 permission_profile_sha256=_canonical_sha256(permission_profile),
                 prompt_sha256=hashlib.sha256(spec.prompt.encode("utf-8")).hexdigest(),
                 expected_base_sha=spec.expected_base_sha,

@@ -11,6 +11,7 @@ from control_plane.executive_agent_capabilities import (
     CAPABILITY_POLICY_SCHEMA_V4,
     CapabilityPolicyError,
     ExecutionCapabilityRegistry,
+    adapter_supports_execution_surface,
     app_server_security_config_digest,
     app_server_security_config_projection,
     observed_mcp_tool_schema_digest,
@@ -135,7 +136,7 @@ def test_default_policy_is_secret_free_unarmed_and_resolves_closed_profiles():
     registry = ExecutionCapabilityRegistry.load()
     assert registry.lifecycle_authority == "executive_os"
     assert registry.production_armed is False
-    assert registry.policy_version == "2026-09-18.browser-b1-runtime-r2"
+    assert registry.policy_version == "2026-10-03.company-consultation-edge-p0"
     assert len(registry.policy_digest) == 64
 
     sealed = registry.resolve("sealed.worker.write.no-extensions.v1")
@@ -143,6 +144,23 @@ def test_default_policy_is_secret_free_unarmed_and_resolves_closed_profiles():
     assert sealed.write_capable is True
     assert sealed.native_helper_policy is NativeHelperPolicy.DISABLED
     assert sealed.required_capability_names == ()
+
+    claude_read = registry.resolve("sealed.worker.claude.readonly.no-extensions.v1")
+    assert claude_read.execution_surface == "claude-code"
+    assert claude_read.write_capable is False
+    assert claude_read.required_capability_names == ()
+
+    claude_write = registry.resolve("sealed.worker.claude.write.no-extensions.v1")
+    assert claude_write.execution_surface == "claude-code"
+    assert claude_write.write_capable is True
+    assert claude_write.native_helper_policy is NativeHelperPolicy.DISABLED
+    assert claude_write.required_capability_names == ()
+
+    assert adapter_supports_execution_surface("codex-cli", "codex-exec")
+    assert adapter_supports_execution_surface("codex-cli", "codex-app-server")
+    assert not adapter_supports_execution_surface("codex-cli", "claude-code")
+    assert adapter_supports_execution_surface("claude-code", "claude-code")
+    assert not adapter_supports_execution_surface("claude-code", "codex-exec")
 
     operator = registry.resolve("operator.appserver.readonly.v1")
     assert operator.execution_surface == "codex-app-server"
@@ -167,6 +185,18 @@ def test_default_policy_is_secret_free_unarmed_and_resolves_closed_profiles():
     assert helper.native_helper.hide_spawn_agent_metadata is True
     assert helper.mcp_servers == ("openai-developer-docs-v1",)
 
+
+
+def test_native_claude_sealed_surface_refuses_extension_capabilities(tmp_path):
+    raw = _raw_policy()
+    profile = raw["profiles"]["sealed.worker.claude.readonly.no-extensions.v1"]
+    profile["mcp_servers"] = ["openai-developer-docs-v1"]
+
+    with pytest.raises(
+        CapabilityPolicyError,
+        match="sealed worker execution surface",
+    ):
+        ExecutionCapabilityRegistry.load(_write(tmp_path, raw))
 
 def test_profile_compiles_exact_mcp_manifest_and_secret_free_config():
     profile = ExecutionCapabilityRegistry.load().resolve(
@@ -653,12 +683,12 @@ def test_browser_grants_refuse_transport_identity_or_profile_widening(tmp_path, 
 
 
 def test_v3_ratified_generation_and_schema_constants_remain_exact(tmp_path):
-    """Freeze the explicitly ratified V3 Browser B1 runtime generation.
+    """Freeze the V3 policy after the disabled Company edge addition.
 
     CAP-S1 remains opt-in for V4 and the default schema remains V3.  The
-    Browser B1 runtime receipt is target-generation-bound, so its deliberate
-    ratification rotates the V3 policy identity instead of silently reusing
-    the prior generation.
+    Company stdio grant rotates the global policy identity; the incumbent
+    Browser B1 and docs profile digests remain unchanged. Company stays
+    disabled until its installed native admission owner is qualified.
     """
 
     assert CAPABILITY_POLICY_SCHEMA == CAPABILITY_POLICY_SCHEMA_V3
@@ -677,7 +707,7 @@ def test_v3_ratified_generation_and_schema_constants_remain_exact(tmp_path):
     assert registry.policy_digest != previous.policy_digest
     registry = previous
     assert registry.policy_digest == (
-        "f29fd9038a4b0d96dba1d50b24570f8f7fb383f046b48ec5ae4aae44363a38b0"
+        "0568a41fe7b16b20f3945e79ce87d736fa75bc90c1e747a2b7f1c0c8ffc495d5"
     )
     assert registry.resolve(
         "operator.appserver.readonly.docs-mcp.native-helper.v1"
