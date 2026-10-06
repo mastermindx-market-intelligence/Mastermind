@@ -521,6 +521,165 @@ def test_host_factory_composes_gateway_fence_and_read_only_reconciliation(tmp_pa
     ) == 1
 
 
+def test_host_completes_reciprocal_continue_result_stop_cycle_without_duplicate_effect(
+    tmp_path,
+) -> None:
+    runtime, root, child, attempt = runtime_child(tmp_path)
+    resolver = Resolver(binding(root, child, attempt))
+
+    class Service:
+        def __init__(self) -> None:
+            self.messages: list[dict] = []
+            self.send_calls = 0
+
+        async def __call__(self, path: Path, request: dict, **kwargs):
+            assert path == Path("/private/tmp/mastermind-agent-dialogue.sock")
+            operation = request["operation"]
+            if operation == "read_thread":
+                assert kwargs == {}
+                return {
+                    "ok": True,
+                    "result": {
+                        "thread_ts": request["args"]["thread_ts"],
+                        "historical_messages": [],
+                        "messages": [
+                            {"message": message}
+                            for message in self.messages
+                        ],
+                        "mutated_count": 0,
+                    },
+                }
+            assert operation == "send_message"
+            before_write = kwargs.get("before_write")
+            assert callable(before_write)
+            self.send_calls += 1
+            outcome = before_write()
+            if asyncio.iscoroutine(outcome):
+                await outcome
+            message = request["args"]["message"]
+            self.messages.append(message)
+            return {
+                "ok": True,
+                "result": {
+                    "action": "CREATED",
+                    "message_key": message["message_key"],
+                    "fingerprint": message["fingerprint"],
+                },
+            }
+
+    service = Service()
+    host = build_principal_company_dialogue_host(
+        runtime=runtime,
+        binding_resolver=resolver,
+        socket_path=Path("/private/tmp/mastermind-agent-dialogue.sock"),
+        service_call=service,
+        utc_now=lambda: "2026-10-05T06:00:00Z",
+    )
+
+    continued = run(
+        host.gateway.call(
+            "continue",
+            {
+                "instruction": "Complete the bounded evidence phase.",
+                "stop_condition": "Return one canonical result.",
+            },
+        )
+    )
+    assert continued["ok"] is True
+    assert service.send_calls == 1
+    assert len(service.messages) == 1
+    continue_message = service.messages[0]
+    assert continue_message["message_type"] == "CONTINUE"
+    assert continue_message["reply_to_message_key"] == REPLY_KEY
+
+    worker_result = build_message_v2(
+        {
+            "schema": "mastermind.agent_dialogue.v2",
+            "message_key": "asd-result-reciprocal0001",
+            "message_type": "RESULT",
+            "work_ref": WORK_REF,
+            "commission_ref": commission(),
+            "session_ref": SESSION_REF,
+            "actor_ref": {
+                "kind": "worker_attempt",
+                "job_id": child.job_id,
+                "attempt_id": attempt.attempt_id,
+                "worker_id": attempt.worker_id,
+            },
+            "reply_to_message_key": continue_message["message_key"],
+            "applies_to": {
+                "kind": "executive_attempt",
+                "job_id": child.job_id,
+                "attempt_id": attempt.attempt_id,
+                "worker_id": attempt.worker_id,
+            },
+            "summary": "Bounded child result returned.",
+            "body": {
+                "status": "PASS",
+                "result": "The requested evidence phase completed successfully.",
+            },
+            "evidence_refs": [],
+            "requires_response": False,
+            "created_at": "2026-10-05T06:01:00Z",
+        }
+    )
+    service.messages.append(worker_result)
+    resolver.value = binding(
+        root,
+        child,
+        attempt,
+        reply_to_message_key=worker_result["message_key"],
+    )
+
+    stopped = run(
+        host.gateway.call(
+            "stop",
+            {
+                "reason": "The current commission result is accepted.",
+                "next_authority": "sol",
+            },
+        )
+    )
+    assert stopped["ok"] is True
+    assert service.send_calls == 2
+    assert len(service.messages) == 3
+    stop_message = service.messages[-1]
+    assert stop_message["message_type"] == "STOP"
+    assert stop_message["reply_to_message_key"] == worker_result["message_key"]
+    assert stop_message["message_key"] != continue_message["message_key"]
+
+    principal_messages = [
+        message
+        for message in service.messages
+        if message["actor_ref"]["kind"] == "executive_principal"
+    ]
+    assert [message["message_type"] for message in principal_messages] == [
+        "CONTINUE",
+        "STOP",
+    ]
+    assert len({message["message_key"] for message in principal_messages}) == 2
+
+    for message in principal_messages:
+        events = runtime.events.list_events(
+            aggregate_type=PRINCIPAL_RUNTIME_AGGREGATE_TYPE,
+            aggregate_id=message["message_key"],
+        )
+        assert len(events) == 1
+        assert events[0].event_type == PRINCIPAL_RUNTIME_EVENT_TYPE
+        observed = run(host.reconcile(message["message_key"]))
+        assert observed.state is PrincipalCommitObservationState.APPLIED
+
+    assert sum(
+        len(
+            runtime.events.list_events(
+                aggregate_type=PRINCIPAL_RUNTIME_AGGREGATE_TYPE,
+                aggregate_id=message["message_key"],
+            )
+        )
+        for message in principal_messages
+    ) == 2
+
+
 def test_runtime_fence_test_is_in_existing_ci_gate() -> None:
     from scripts.ci_pytest import resolve_gate
 
