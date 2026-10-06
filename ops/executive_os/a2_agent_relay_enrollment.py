@@ -4,8 +4,8 @@ The ceremony either qualifies one stdin-only Slack bot token or, for the
 reviewed shared-Executive-Relay migration, reuses the already-enrolled C1 token
 entirely inside the native host. It then installs the exact release-bound
 A2 token/config/launchd files and stops. It never provisions an app or principal
-and never loads, enables, or starts the service. The Relay runs only as the
-host-prepared dedicated ``_mastermind_agent_relay`` owner; ``_mastermind_exec``
+and never loads, enables, or starts the service. The Relay keeps the existing
+host-prepared dedicated service-owner boundary, and the existing Executive peer
 remains the single filesystem-reachable, peer-credential-checked client. Slack
 prose conveys no host authority.
 """

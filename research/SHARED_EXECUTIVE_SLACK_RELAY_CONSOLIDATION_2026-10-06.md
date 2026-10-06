@@ -66,7 +66,7 @@ token. The new native `enroll-shared` A2 operation consumes the already-enrolled
 C1 credential from its attested native secret file, verifies the same bot
 identity + exact shared scopes + `#agent-dispatch` history access, then creates
 the normal A2 service-private credential/config/plist under the existing
-`_mastermind_agent_relay` ownership boundary.
+A2 service-owner boundary.
 
 The secret never passes through ChatGPT, Slack, GitHub, argv, logs, receipts or
 model-visible state. C1 and A2 keep separate local service-private copies so
