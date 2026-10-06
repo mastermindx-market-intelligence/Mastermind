@@ -1520,6 +1520,61 @@ def build_web_ceo_v3_mcp_app(
     return _build_profile_mcp_app(settings, **configuration)
 
 
+def build_web_ceo_v3_with_coo_mcp_app(
+    settings: Any,
+    *,
+    coo_settings: Any,
+    audit_sink: Any,
+    mdm_reader: Any,
+    session_target_projector: Any,
+    session_reply_handler: Any,
+    session_summon_handler: Any,
+    session_reply_read_tool=None,
+    workspace_app=None,
+    content_app=None,
+    os_app=None,
+    enable_os_executive_transport: bool = False,
+    os_executive_resource: str | None = None,
+    os_commission_preparer: Any | None = None,
+) -> Any:
+    """Opt-in COO route over the existing Web-CEO v3 listener and authority."""
+    from integrations.mastermind_executive_app.coo import CooAppSettings
+    from integrations.mastermind_executive_app.app import _metadata_policy_and_path
+    from integrations.mastermind_executive_app.gateway import make_shared_jwks_cache
+
+    if type(coo_settings) is not CooAppSettings or coo_settings.executive != settings:
+        raise ValueError("COO and CEO must use the exact same installed Executive settings")
+    cache = settings.jwks_cache or make_shared_jwks_cache(settings.policies)
+    if cache is None:
+        raise ValueError("a shared Executive JWKS authority is required")
+    configured = dataclasses.replace(settings, jwks_cache=cache)
+    coo_configured = dataclasses.replace(coo_settings, executive=configured)
+    _, metadata_path = _metadata_policy_and_path(configured.policies)
+    if metadata_path.startswith("/mcp/coo"):
+        raise ValueError("metadata route collides with the static COO transport")
+    metadata = protected_resource_metadata(configured.policies.submit)
+    metadata["scopes_supported"] = sorted(
+        set(metadata["scopes_supported"]) | set(coo_configured.policy.required_scopes)
+    )
+    ceo = build_web_ceo_v3_mcp_app(
+        configured,
+        audit_sink=audit_sink,
+        mdm_reader=mdm_reader,
+        session_target_projector=session_target_projector,
+        session_reply_handler=session_reply_handler,
+        session_summon_handler=session_summon_handler,
+        session_reply_read_tool=session_reply_read_tool,
+        workspace_app=workspace_app,
+        content_app=content_app,
+        os_app=os_app,
+        enable_os_executive_transport=enable_os_executive_transport,
+        os_executive_resource=os_executive_resource,
+        os_commission_preparer=os_commission_preparer,
+    )
+    coo = build_coo_mcp_app(coo_configured, audit_sink=audit_sink)
+    return _ExecutiveWithCoo(ceo, coo, metadata_path, metadata)
+
+
 def build_web_ceo_sessions_mcp_app(
     settings: Any,
     *,
