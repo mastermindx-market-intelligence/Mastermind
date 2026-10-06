@@ -886,8 +886,18 @@ def _canonical_fabric_root_detail(root_job_id="JOB-003"):
         result=None,
         checkpoint=None,
     )
-    root, _ = fabric_job_view._job_card(
-        root_job, (), {}, contract_version=2
+    armed = {key: None for key in fabric_job_view.ARM_KEYS}
+    armed["source"] = "absent"
+    document = fabric_job_view.compose_fabric_view_v2(
+        root_job_id=root_job_id,
+        root_job=root_job,
+        jobs=[root_job],
+        attempts_by_job={root_job_id: []},
+        joined_job_ids={root_job_id},
+        runtime_identity={"root": None, "db_present": True, "identity": None},
+        armed=armed,
+        degraded=[],
+        generated_at="2026-10-06T09:00:00Z",
     )
     snapshot = SimpleNamespace(
         snapshot_digest="a" * 64,
@@ -908,24 +918,8 @@ def _canonical_fabric_root_detail(root_job_id="JOB-003"):
         "before": 2,
         "after": 2,
     }
-    return {
-        "schema": fabric_job_view.SCHEMA_V2,
-        "generated_at": "2026-10-06T09:00:00Z",
-        "runtime": {
-            "root": None,
-            "db_present": True,
-            "identity": None,
-            "acquisition": acquisition,
-        },
-        "armed": {},
-        "root": root,
-        "children": [],
-        "unjoined_job_count": 0,
-        "unjoined_job_ids": [],
-        "degraded": [],
-        "missingness": [],
-        "capability": {},
-    }
+    document["runtime"]["acquisition"] = acquisition
+    return document
 
 
 def test_v2_fabric_root_detail_closes_runtime_acquisition_and_job_cards():
@@ -974,6 +968,36 @@ def test_v2_fabric_root_detail_closes_runtime_acquisition_and_job_cards():
     )
     assert WebCeoV2CeoIngressReadGateway._valid_fabric_data(
         attempt_private, arguments=arguments
+    ) is False
+
+    result_private = copy.deepcopy(canonical)
+    result_private["root"]["result"]["state"] = "EXECUTION_READY"
+    assert WebCeoV2CeoIngressReadGateway._valid_fabric_data(
+        result_private, arguments=arguments
+    ) is False
+
+    armed_private = copy.deepcopy(canonical)
+    armed_private["armed"]["execution_ready"] = True
+    assert WebCeoV2CeoIngressReadGateway._valid_fabric_data(
+        armed_private, arguments=arguments
+    ) is False
+
+    missingness_private = copy.deepcopy(canonical)
+    missingness_private["missingness"][0]["private_detail"] = SECRET
+    assert WebCeoV2CeoIngressReadGateway._valid_fabric_data(
+        missingness_private, arguments=arguments
+    ) is False
+
+    capability_private = copy.deepcopy(canonical)
+    capability_private["capability"]["private_detail"] = SECRET
+    assert WebCeoV2CeoIngressReadGateway._valid_fabric_data(
+        capability_private, arguments=arguments
+    ) is False
+
+    wrong_unjoined = copy.deepcopy(canonical)
+    wrong_unjoined["unjoined_job_count"] = 1
+    assert WebCeoV2CeoIngressReadGateway._valid_fabric_data(
+        wrong_unjoined, arguments=arguments
     ) is False
 
 

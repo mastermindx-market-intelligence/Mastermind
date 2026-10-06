@@ -1303,7 +1303,7 @@ class CeoIngressReadGateway:
         requested_root: str,
         root_card: bool,
     ) -> bool:
-        from control_plane import fabric_job_view
+        from control_plane import fabric_job_view, mission_workspace
         from control_plane.executive_runtime import JobStatus
 
         if type(value) is not dict or set(value) != fabric_job_view.JOB_CARD_KEYS_V2:
@@ -1364,13 +1364,9 @@ class CeoIngressReadGateway:
                 repair["supersedes_job_id"] is None
                 or type(repair["supersedes_job_id"]) is str
             )
-            and type(result) is dict
-            and set(result) == {
-                "state", "summary", "artifacts", "errors", "next_actions"
-            }
-            and type(acceptance) is dict
-            and set(acceptance) == fabric_job_view.ACCEPTANCE_KEYS
-            and acceptance == fabric_job_view._acceptance_v2()[0]
+            and mission_workspace._valid_result_v2(result)[1] is True
+            and mission_workspace._valid_fabric_v2_acceptance(acceptance)
+            and mission_workspace._valid_fabric_v2_review(review)
         ):
             return False
         if root_card:
@@ -1448,6 +1444,122 @@ class CeoIngressReadGateway:
             and fabric_job_view._qualified_generation(value.get("generation"))
             is not None
         )
+
+    @staticmethod
+    def _valid_fabric_root_detail_envelope(
+        value: object,
+        *,
+        acquisition: Mapping[str, Any],
+        root_present: bool,
+    ) -> bool:
+        from control_plane import fabric_job_view
+
+        if type(value) is not dict:
+            return False
+        if not CeoIngressReadGateway._valid_generated_at(value.get("generated_at")):
+            return False
+
+        armed = value.get("armed")
+        if not (
+            type(armed) is dict
+            and set(armed) == {*fabric_job_view.ARM_KEYS, "source"}
+            and all(
+                armed[key] is None or type(armed[key]) is bool
+                for key in fabric_job_view.ARM_KEYS
+            )
+            and armed["source"] in {"absent", "control.json"}
+        ):
+            return False
+
+        provenance = acquisition.get("provenance")
+        if type(provenance) is not dict:
+            return False
+        acquisition_unjoined = provenance.get("unjoined_job_ids")
+        count = value.get("unjoined_job_count")
+        public_ids = value.get("unjoined_job_ids")
+        if not (
+            type(acquisition_unjoined) is list
+            and type(count) is int
+            and count >= 0
+            and count == len(acquisition_unjoined)
+            and type(public_ids) is list
+            and public_ids
+            == sorted(acquisition_unjoined)[: fabric_job_view.UNJOINED_JOB_ID_LIMIT]
+        ):
+            return False
+
+        degraded = value.get("degraded")
+        if not (
+            type(degraded) is list
+            and all(type(item) is str for item in degraded)
+            and degraded == sorted(set(degraded))
+        ):
+            return False
+
+        missingness = value.get("missingness")
+        if type(missingness) is not list:
+            return False
+        seen_missingness = set()
+        missingness_order = []
+        for fact in missingness:
+            if not (
+                type(fact) is dict
+                and set(fact)
+                == {
+                    "missingness_class",
+                    "target_field",
+                    "producer_owner",
+                    "reason",
+                }
+                and fact["missingness_class"] in fabric_job_view.MISSINGNESS_CLASSES
+                and type(fact["target_field"]) is str
+                and bool(fact["target_field"])
+                and (
+                    fact["producer_owner"] is None
+                    or (
+                        type(fact["producer_owner"]) is str
+                        and bool(fact["producer_owner"])
+                    )
+                )
+                and type(fact["reason"]) is str
+                and bool(fact["reason"])
+            ):
+                return False
+            key = (
+                fact["missingness_class"],
+                fact["target_field"],
+                fact["producer_owner"] or "",
+                fact["reason"],
+            )
+            if key in seen_missingness:
+                return False
+            seen_missingness.add(key)
+            missingness_order.append(key)
+        if missingness_order != sorted(missingness_order):
+            return False
+
+        capability = value.get("capability")
+        if not (
+            type(capability) is dict
+            and set(capability) == {"state", "installed", "version", "detail"}
+            and capability["state"] in fabric_job_view.CAPABILITY_STATES
+            and capability["installed"] is True
+            and capability["version"] is None
+            and type(capability["detail"]) is str
+            and bool(capability["detail"])
+        ):
+            return False
+        if root_present and capability["state"] not in {
+            fabric_job_view.PROVEN,
+            fabric_job_view.PARTIAL,
+        }:
+            return False
+        if not root_present and capability["state"] not in {
+            fabric_job_view.PARTIAL,
+            fabric_job_view.UNSUPPORTED,
+        }:
+            return False
+        return True
 
     @staticmethod
     def _valid_fabric_result_v2(
@@ -1723,6 +1835,19 @@ class CeoIngressReadGateway:
                     acquisition, requested_root=requested
                 )
             ):
+                return False
+            if not cls._valid_fabric_root_detail_envelope(
+                value,
+                acquisition=acquisition,
+                root_present=root is not None,
+            ):
+                return False
+            from control_plane import mission_workspace
+            try:
+                mission_workspace.validate_mission_workspace_v2_input(
+                    fabric_view=value
+                )
+            except (TypeError, ValueError):
                 return False
             if root is not None and not cls._valid_fabric_job_card_v2(
                 root, requested_root=requested, root_card=True
