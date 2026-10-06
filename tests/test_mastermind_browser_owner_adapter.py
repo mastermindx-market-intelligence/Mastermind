@@ -359,3 +359,64 @@ def test_reconcile_survives_current_catalog_and_backend_schema_upgrade():
                 },
             )
         )
+
+
+def test_workbench_projector_maps_only_the_safe_high_level_subset():
+    from integrations.mastermind_browser_plugin.owner_adapter import WorkbenchManagedProjector
+
+    projector = WorkbenchManagedProjector()
+
+    assert projector.project_read(tab_value(), "snapshot", {}) == OwnerToolCall(
+        tool_name="browser_snapshot",
+        arguments={},
+    )
+    assert projector.project_read(tab_value(), "screenshot", {}) == OwnerToolCall(
+        tool_name="browser_take_screenshot",
+        arguments={"scale": "css"},
+    )
+    assert projector.project_action(
+        tab_value(), "click", {"element_ref": "1_2"}
+    ) == OwnerToolCall(
+        tool_name="browser_click",
+        arguments={"target": "1_2"},
+    )
+    assert projector.project_action(
+        tab_value(), "type", {"element_ref": "1_4", "text": "Mastermind"}
+    ) == OwnerToolCall(
+        tool_name="browser_type",
+        arguments={
+            "target": "1_4",
+            "text": "Mastermind",
+            "slowly": False,
+            "submit": False,
+        },
+    )
+    assert projector.project_action(
+        tab_value(), "navigate", {"url": "https://example.test/next"}
+    ) == OwnerToolCall(
+        tool_name="browser_navigate",
+        arguments={"url": "https://example.test/next"},
+    )
+
+
+def test_workbench_projector_rejects_scroll_and_argument_smuggling():
+    from integrations.mastermind_browser_plugin.owner_adapter import WorkbenchManagedProjector
+
+    projector = WorkbenchManagedProjector()
+    with pytest.raises(OwnerRefused, match="ACTION_BACKEND_UNSUPPORTED"):
+        projector.project_action(
+            tab_value(allowed_actions=("scroll",)),
+            "scroll",
+            {"delta_x": 0, "delta_y": 1},
+        )
+
+    for action, args in [
+        ("click", {"element_ref": "1_2", "button": "right"}),
+        ("type", {"element_ref": "1_4", "text": "x", "submit": True}),
+        ("navigate", {"url": "file:///etc/passwd"}),
+    ]:
+        with pytest.raises(OwnerRefused):
+            projector.project_action(tab_value(), action, args)
+
+    with pytest.raises(OwnerRefused):
+        projector.project_read(tab_value(), "snapshot", {"filename": "leak.md"})

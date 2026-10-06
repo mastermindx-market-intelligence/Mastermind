@@ -14,6 +14,7 @@ import inspect
 import json
 import re
 from typing import Any, Protocol
+from urllib.parse import urlsplit
 
 from .facade import OwnerRefused
 from .tab_ref import (
@@ -95,6 +96,104 @@ class ManagedToolProjector(Protocol):
     def project_action(
         self, tab: BrowserTabRef, action: str, arguments: Mapping[str, Any]
     ) -> OwnerToolCall: ...
+
+
+class WorkbenchManagedProjector:
+    """Project the seven-tool Browser contract into #1071's safe tool subset.
+
+    This object owns no browser state or effect. It deliberately omits scroll,
+    tab mutation, selectors, filenames, full-page screenshots, modifier keys,
+    slow typing and implicit submission.
+    """
+
+    @staticmethod
+    def _arguments(value: object, expected: frozenset[str]) -> dict[str, Any]:
+        if type(value) is not dict or set(value) != expected:
+            raise OwnerRefused("BACKEND_PROJECTION_INVALID")
+        return dict(value)
+
+    @staticmethod
+    def _element_ref(value: object) -> str:
+        if type(value) is not str or _TOKEN.fullmatch(value) is None:
+            raise OwnerRefused("BACKEND_PROJECTION_INVALID")
+        return value
+
+    @staticmethod
+    def _text(value: object) -> str:
+        if (
+            type(value) is not str
+            or "\x00" in value
+            or len(value.encode("utf-8")) > 16_384
+        ):
+            raise OwnerRefused("BACKEND_PROJECTION_INVALID")
+        return value
+
+    @staticmethod
+    def _url(value: object) -> str:
+        if (
+            type(value) is not str
+            or not value
+            or len(value) > 2048
+            or any(ord(ch) <= 32 for ch in value)
+        ):
+            raise OwnerRefused("BACKEND_PROJECTION_INVALID")
+        try:
+            parsed = urlsplit(value)
+            _ = parsed.port
+        except (TypeError, ValueError):
+            raise OwnerRefused("BACKEND_PROJECTION_INVALID") from None
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+        ):
+            raise OwnerRefused("BACKEND_PROJECTION_INVALID")
+        return value
+
+    def project_read(
+        self, tab: BrowserTabRef, action: str, arguments: Mapping[str, Any]
+    ) -> OwnerToolCall:
+        if type(tab) is not BrowserTabRef:
+            raise OwnerRefused("BACKEND_PROJECTION_INVALID")
+        args = self._arguments(arguments, frozenset())
+        if args:
+            raise OwnerRefused("BACKEND_PROJECTION_INVALID")
+        if action == "snapshot":
+            return OwnerToolCall("browser_snapshot", {})
+        if action == "screenshot":
+            return OwnerToolCall("browser_take_screenshot", {"scale": "css"})
+        raise OwnerRefused("ACTION_BACKEND_UNSUPPORTED")
+
+    def project_action(
+        self, tab: BrowserTabRef, action: str, arguments: Mapping[str, Any]
+    ) -> OwnerToolCall:
+        if type(tab) is not BrowserTabRef:
+            raise OwnerRefused("BACKEND_PROJECTION_INVALID")
+        if action == "click":
+            args = self._arguments(arguments, frozenset({"element_ref"}))
+            return OwnerToolCall(
+                "browser_click",
+                {"target": self._element_ref(args["element_ref"])},
+            )
+        if action == "type":
+            args = self._arguments(arguments, frozenset({"element_ref", "text"}))
+            return OwnerToolCall(
+                "browser_type",
+                {
+                    "target": self._element_ref(args["element_ref"]),
+                    "text": self._text(args["text"]),
+                    "slowly": False,
+                    "submit": False,
+                },
+            )
+        if action == "navigate":
+            args = self._arguments(arguments, frozenset({"url"}))
+            return OwnerToolCall(
+                "browser_navigate",
+                {"url": self._url(args["url"])},
+            )
+        raise OwnerRefused("ACTION_BACKEND_UNSUPPORTED")
 
 
 async def _maybe(value: Any) -> Any:
@@ -352,4 +451,5 @@ __all__ = [
     "ManagedBrowserOwnerAdapter",
     "ManagedToolProjector",
     "OwnerToolCall",
+    "WorkbenchManagedProjector",
 ]
