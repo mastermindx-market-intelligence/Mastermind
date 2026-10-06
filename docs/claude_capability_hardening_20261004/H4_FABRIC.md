@@ -192,10 +192,41 @@ H4-B0 satisfies the authority-side requirements:
 6. no Runtime/root constructor, CEO ingress, CooCycle, MCP tool catalog or production config is
    changed by this slice.
 
-Still open for **H4-B1/B2**: a separately discriminated principal-orchestration ingress frame and
-the accepted root-source discriminator inside the existing Runtime root constructor. Those shared
-paths remain held while #1147/#1041 own overlapping source. The new action grant is necessary
-authorization evidence, not sufficient authority to create a root.
+### H4-B1a current source slice — one closed Runtime root-source discriminator
+
+The obsolete #1041 hierarchy carrier is now closed unmerged under its explicit Fable
+`should_close_unmerged` disposition; protected V1 remains the H4 graph. With that stale Runtime
+collision cleared, the branch factors the generic V1 orchestration lifecycle through one Runtime
+root-source discriminator.
+
+Today the closed root creator set remains exactly `{"ceo_intent"}`, so this refactor **does not admit
+a principal root**. It removes duplicated CEO-literal checks from the generic lifecycle paths that a
+future reviewed root source must share:
+
+- persisted aggregation-root decode;
+- exact-worker target root binding;
+- child-lineage creation;
+- planner and interactive-child creation;
+- plan admission;
+- dispatch and requeue;
+- aggregation handoff.
+
+The pre-persistence source discriminator is role-sensitive: aggregation may use only a member of the
+closed root-creator set, while child roles remain exactly `coo_cycle`. This prevents adding a future
+principal root creator from silently authorizing principal-authored child provenance.
+
+CEO-specific consumers remain explicitly CEO-only and are **not** widened by the generic helper:
+finite-drive admission/binding/arm, the current `create_v2_orchestration_root` constructor, C2's
+CEO-source authority projection, and the legacy CEO command-correlated bounded reader.
+
+A source-law regression asserts the generic Runtime functions call the central discriminator and
+that literal `ceo_intent` remains only in that reviewed CEO-specific allowlist. Existing V1
+root/planner/plan/dispatch/requeue/aggregation/finite regressions remain the behavioral oracle.
+
+Still open for **H4-B1b/B2**: create one separately discriminated principal-root constructor/source
+contract inside Runtime, then compose the principal ingress after #1147's overlapping
+`executive_ceo_ingress.py` / `ceo_intent.py` carrier is accepted or released. The B0 action grant
+and B1a discriminator are necessary foundations, not sufficient authority to create a root.
 
 **H4-C** later exposes only that accepted operation/status through the COO MCP/package after H1
 native profile/schema qualification. No raw CooCycle method, worker selector or provider/account

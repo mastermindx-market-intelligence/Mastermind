@@ -255,6 +255,15 @@ _EXECUTIVE_DIALOGUE_SOURCE_KEYS = frozenset(
     }
 )
 _ORCHESTRATION_ROLES = frozenset({"plan", "work", "review", "repair", "aggregation"})
+_ORCHESTRATION_PROVENANCE_SCHEMA = "mastermind.executive_orchestration_provenance/v1"
+_ORCHESTRATION_PROVENANCE_SOURCE_SCHEMA = (
+    "mastermind.executive_orchestration_provenance_source/v1"
+)
+# Closed current root-source vocabulary. H4 principal-root work may add one
+# separately reviewed creator here only after its source/command/replay contract
+# exists. Sealed child provenance remains coo_cycle and finite-drive paths below
+# retain their explicit CEO-intent requirement.
+_ORCHESTRATION_ROOT_CREATORS = frozenset({"ceo_intent"})
 COO_CYCLE_BLOCK_REASONS = frozenset(
     {
         "invalid_root",
@@ -1696,7 +1705,7 @@ def _validate_exact_worker_target_selection(
         raise StateConflict("exact worker target root is unavailable")
     root = _job_from_row(root_row)
     if (root.orchestration_role != "aggregation" or root.parent_job_id is not None
-        or root.orchestration_provenance.get("creator") != "ceo_intent"
+        or not _accepted_orchestration_root_provenance(root.orchestration_provenance)
         or root.orchestration_provenance.get("source_id") != d["operation_key"]):
         raise StateConflict("exact worker target operation is not its admitted root")
     for field, expected in (("worker_id", "worker_id"), ("quota_class", "quota_class"),
@@ -4592,6 +4601,58 @@ def _quota_specifications(
     return result
 
 
+def _orchestration_source_creator(
+    provenance: Mapping[str, Any] | None,
+    *,
+    role: str,
+) -> str | None:
+    """Return the accepted creator for one pre-persistence provenance source."""
+
+    if not isinstance(provenance, Mapping):
+        return None
+    if provenance.get("schema_version") != _ORCHESTRATION_PROVENANCE_SOURCE_SCHEMA:
+        return None
+    creator = provenance.get("creator")
+    if type(creator) is not str:
+        return None
+    if role == "aggregation":
+        return creator if creator in _ORCHESTRATION_ROOT_CREATORS else None
+    return creator if creator == "coo_cycle" else None
+
+
+def _orchestration_root_creator(
+    provenance: Mapping[str, Any] | None,
+) -> str | None:
+    """Return one accepted root creator from the closed Runtime vocabulary.
+
+    This is a source discriminator only. It grants no root-creation capability,
+    provider placement, mission authority, or finite-drive eligibility.
+    """
+
+    if not isinstance(provenance, Mapping):
+        return None
+    if provenance.get("schema_version") != _ORCHESTRATION_PROVENANCE_SCHEMA:
+        return None
+    creator = provenance.get("creator")
+    if type(creator) is not str or creator not in _ORCHESTRATION_ROOT_CREATORS:
+        return None
+    return creator
+
+
+def _accepted_orchestration_root_provenance(
+    provenance: Mapping[str, Any] | None,
+) -> bool:
+    return _orchestration_root_creator(provenance) is not None
+
+
+def _ceo_intent_root_provenance(
+    provenance: Mapping[str, Any] | None,
+) -> bool:
+    """CEO-specific root check for finite/legacy consumers that are not H4-generic."""
+
+    return _orchestration_root_creator(provenance) == "ceo_intent"
+
+
 def _decode_orchestration_job_fields(
     row: sqlite3.Row,
 ) -> tuple[str | None, dict[str, Any] | None, str | None]:
@@ -4631,8 +4692,7 @@ def _decode_orchestration_job_fields(
     if not isinstance(provenance, dict) or set(provenance) != expected_keys:
         raise PersistenceError("orchestration provenance is not the closed wire")
     if (
-        provenance["schema_version"]
-        != "mastermind.executive_orchestration_provenance/v1"
+        provenance["schema_version"] != _ORCHESTRATION_PROVENANCE_SCHEMA
         or provenance["job_id"] != row["job_id"]
         or provenance["parent_job_id"] != row["parent_job_id"]
         or provenance["root_job_id"] != row["root_job_id"]
@@ -4642,7 +4702,7 @@ def _decode_orchestration_job_fields(
         raise PersistenceError("orchestration provenance identity mismatch")
     if role == "aggregation":
         if (
-            provenance["creator"] != "ceo_intent"
+            not _accepted_orchestration_root_provenance(provenance)
             or row["parent_job_id"] is not None
             or row["root_job_id"] != row["job_id"]
         ):
@@ -10174,7 +10234,7 @@ def _assert_orchestration_lineage_for_create(
     if (
         parent_role != "aggregation"
         or parent_provenance is None
-        or parent_provenance.get("creator") != "ceo_intent"
+        or not _accepted_orchestration_root_provenance(parent_provenance)
         or parent_row["root_job_id"] != parent_row["job_id"]
     ):
         raise StateConflict("orchestration child requires a strict v2 aggregation root")
@@ -10487,7 +10547,7 @@ def _assert_orchestration_dispatch_eligible(
     if (
         root_role != "aggregation"
         or root_provenance is None
-        or root_provenance.get("creator") != "ceo_intent"
+        or not _accepted_orchestration_root_provenance(root_provenance)
         or root["parent_job_id"] is not None
         or root["root_job_id"] != root["job_id"]
     ):
@@ -10566,7 +10626,7 @@ def _assert_orchestration_requeue_eligible(
     if (
         root_role != "aggregation"
         or root_provenance is None
-        or root_provenance.get("creator") != "ceo_intent"
+        or not _accepted_orchestration_root_provenance(root_provenance)
         or root["parent_job_id"] is not None
         or root["root_job_id"] != root["job_id"]
     ):
@@ -12246,7 +12306,7 @@ class JobRegistry:
             or root.parent_job_id is not None
             or root.root_job_id != root.job_id
             or not isinstance(root.orchestration_provenance, dict)
-            or root.orchestration_provenance.get("creator") != "ceo_intent"
+            or not _accepted_orchestration_root_provenance(root.orchestration_provenance)
         ):
             raise StateConflict(
                 "planner creation requires a strict v2 aggregation root"
@@ -12366,7 +12426,7 @@ class JobRegistry:
             or root.parent_job_id is not None
             or root.root_job_id != root.job_id
             or not isinstance(root.orchestration_provenance, dict)
-            or root.orchestration_provenance.get("creator") != "ceo_intent"
+            or not _accepted_orchestration_root_provenance(root.orchestration_provenance)
         ):
             raise StateConflict(
                 "interactive creation requires a strict v2 aggregation root"
@@ -12437,7 +12497,7 @@ class JobRegistry:
             if (
                 role != "aggregation"
                 or provenance is None
-                or provenance.get("creator") != "ceo_intent"
+                or not _accepted_orchestration_root_provenance(provenance)
                 or root["root_job_id"] != root["job_id"]
             ):
                 raise StateConflict("plan admission requires a strict-v2 root")
@@ -13383,7 +13443,7 @@ class JobRegistry:
             if (
                 role != "aggregation"
                 or provenance is None
-                or provenance.get("creator") != "ceo_intent"
+                or not _accepted_orchestration_root_provenance(provenance)
                 or root["parent_job_id"] is not None
                 or root["root_job_id"] != root["job_id"]
             ):
@@ -14242,15 +14302,15 @@ class JobRegistry:
                     "orchestration provenance source is not the closed wire"
                 )
             if orchestration_provenance.get("schema_version") != (
-                "mastermind.executive_orchestration_provenance_source/v1"
+                _ORCHESTRATION_PROVENANCE_SOURCE_SCHEMA
             ):
                 raise StateConflict(
                     "unsupported orchestration provenance source schema"
                 )
-            if orchestration_provenance.get("creator") not in {
-                "ceo_intent",
-                "coo_cycle",
-            }:
+            if _orchestration_source_creator(
+                orchestration_provenance,
+                role=orchestration_role,
+            ) is None:
                 raise StateConflict("orchestration provenance creator is invalid")
             source_id = str(orchestration_provenance.get("source_id") or "")
             source_digest = str(orchestration_provenance.get("source_digest") or "")
