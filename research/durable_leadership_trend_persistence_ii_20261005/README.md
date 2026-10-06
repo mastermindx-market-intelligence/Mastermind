@@ -3,10 +3,10 @@
 **Status:** research-only package. No DL-1 instrument, efficacy read, ranker, lifecycle state, portfolio rule, procurement, or production change is authorized.
 
 **Current source pins**
-- Mastermind protected `master`: `d8c302b8a8a65ab13e2afba98cc73481606ed4d0`
-- Macro `main`: `91f274d860e77f245bde31232a617f81d9a5b331`
+- Mastermind protected `master`: `a6d40ff648671b03bd4d829d84dd066b58ea8c3f`
+- Macro `main`: `e95e32d4418f12c9670a6a4321498d2c641158fd`
 
-The protected Skillpack at `d8c302...` retains schema `mastermind.sol_skillpack.v1`, version `1.0.1`, and the same `INDEX.md` blob as the prior `877b1e7...` pin; the intervening Mastermind movement is unrelated OS work and does not change this research ruling.
+The protected Skillpack at `a6d40ff...` retains schema `mastermind.sol_skillpack.v1`, version `1.0.1`. The current Mastermind movement is unrelated Executive/harness work. A bounded current-Macro recheck found no collision in the relevant Leader Radar, Top Anatomy, PSS-CR1, Conditional Fusion, or D03/source-rights owner surfaces; no broad census was reopened.
 
 **Scientific ruling:** **CONTINUE — NARROWED**  
 **Operational DL-0 ruling:** **WAIT_FOR_DATA / SOURCE_GATE**  
@@ -57,10 +57,19 @@ A dependence/evaluation block is now exactly **60 market trading sessions**, not
 - Confirmation B4–B9: 360 market sessions = 72 formations.
 - Last confirmatory formation: market-session offset 535.
 - Last primary occupancy maturity: offset 555.
-- Conservative one-reveal maturity after every 60-session structural-secondary window: offset 595.
-- Anchor-to-reveal geometry: 596 trading sessions, approximately 2.37 trading years.
+- Last t+60 structural-secondary maturity: offset 595.
+- Five-session occupancy-resolution grace for the last t+60 occupancy endpoint expires: offset 600.
+- Anchor-to-reveal geometry: 601 trading sessions, approximately 2.38 trading years.
 
 The source gate must clear before an anchor can exist; there is no valid calendar completion date yet.
+
+## Final endpoint-attrition law
+
+A formation-valid focal row never disappears from the denominator because it later leaves the S&P 1500, is acquired, delists, loses a listing, or lacks a price. The freeze-authoritative status table is in §4A of file 07. Known terminal-security events code occupancy = 0 and first-exit at the effective terminal session; ordinary index departure with continued trading remains labelable; proven same-security ticker/exchange continuity is followed; unresolved identity/price/threshold states remain explicit pending rows and block the sole efficacy read rather than being dropped.
+
+## Final power law
+
+Section 23 of file 07 now calibrates and estimates power by literal synthetic **prequential refitting** of the frozen ridge-logistic S and A models under the same training/embargo/transformation/block mechanics as the real study. Oracle synthetic probabilities generate labels only and are never used as A predictions or in the §17 test statistic.
 
 ## Package
 
