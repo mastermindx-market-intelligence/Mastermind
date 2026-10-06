@@ -1,5 +1,8 @@
 # 01 — Executive Decision, Forensic Census, and Evidence Synthesis
 
+> **FREEZE AUTHORITY NOTICE — FINAL HARDENING**  
+> This document is historical design context only and is **not freeze-authoritative**. Any language below that makes continuous survival/hazard the DL-1 primary endpoint, prefers an ex-U.S. confirmation route, requires a DL-1 interaction model or `I − A` contrast, calls `PROSPECTIVE_US_POST_FREEZE` operationally selected before its taxonomy-source gate clears, or otherwise conflicts with the final source/experiment specification is **SUPERSEDED**. `07_DL1_PREREG_DRAFT_FREEZE_READY.md` is the sole experiment authority. `06_DL0_QUALIFICATION_AND_OWNER_RECONCILIATION.md` is the sole owner/source-route authority. Historical text in this file may not be used to loosen, recover, or reinterpret a superseded design choice.
+
 ## Executive decision
 
 **Final recommendation: CONTINUE — NARROWED.**
