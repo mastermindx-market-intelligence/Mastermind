@@ -52,6 +52,7 @@ from control_plane.executive_runtime import (
     Job,
     JobStatus,
     OrchestrationDispatchOutcome,
+    PRINCIPAL_ORCHESTRATION_ROOT_CREATOR,
     PersistenceError,
     Runtime,
     RuntimeProofError,
@@ -61,6 +62,7 @@ from control_plane.executive_runtime import (
     V3_HOST_EXECUTION_BINDING_KEYS,
     _normalise_constraints,
     _normalise_work_placement_union,
+    _orchestration_root_creator,
     _validated_plan_admission,
     _project_work_placement,
     HOST_EXECUTION_BINDING_VERSION_KEY,
@@ -5881,6 +5883,15 @@ class ExecutiveControlService:
         raw = self._require_current_coo_binding()
         normalized = _normalise_constraints(raw)
         normalized["work_placement_union"] = _normalise_work_placement_union(raw["work_placement_union"])
+        creator = self._coo_root_creator(root)
+        if creator is None:
+            return dict(raw)
+        if creator == PRINCIPAL_ORCHESTRATION_ROOT_CREATOR:
+            # Principal roots are admitted with the current reviewed host binding.
+            # They never inherit the CEO acceptance-maintenance predecessor-base
+            # exception or its one-way harness promotion.
+            return dict(raw)
+
         # CEO-only intake freezes the closed harness into this root. A later
         # host arm supplies capacity; it does not promote that admitted root
         # into a native operator. Preserve only this one-way, same-base change
@@ -5901,25 +5912,30 @@ class ExecutiveControlService:
                     operator_harness_armed=effective["operator_harness_armed"])
 
     @staticmethod
-    def _has_strict_coo_root_identity(root: Job) -> bool:
+    def _coo_root_creator(root: Job) -> str | None:
         provenance = root.orchestration_provenance
-        return bool(
+        if not (
             root.parent_job_id is None
             and root.root_job_id == root.job_id
             and root.depth == 0
             and root.orchestration_role == "aggregation"
             and isinstance(provenance, dict)
-            and provenance.get("schema_version")
-            == "mastermind.executive_orchestration_provenance/v1"
-            and provenance.get("creator") == "ceo_intent"
             and provenance.get("job_id") == root.job_id
             and provenance.get("root_job_id") == root.job_id
             and provenance.get("parent_job_id") is None
             and root.worktree is not None
             and root.branch is not None
-        )
+        ):
+            return None
+        return _orchestration_root_creator(provenance)
+
+    @staticmethod
+    def _has_strict_coo_root_identity(root: Job) -> bool:
+        return ExecutiveControlService._coo_root_creator(root) is not None
 
     def _is_bound_coo_root(self, root: Job) -> bool:
+        if not self._has_strict_coo_root_identity(root):
+            return False
         raw_binding = self._coo_binding_for_root(root)
         binding = _normalise_constraints(raw_binding)
         binding["work_placement_union"] = _normalise_work_placement_union(raw_binding["work_placement_union"])

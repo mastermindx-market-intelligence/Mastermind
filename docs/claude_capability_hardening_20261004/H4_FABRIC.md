@@ -291,20 +291,41 @@ profile/provider/model/workspace binding through the existing child-constraint o
 **BUILT_NOT_PROVEN / source-only**: the constructor has no production caller, no provider launch is
 performed, and no capability/MCP tool is armed by this slice.
 
-### H4-B2-B still required — installed service/ingress, dispatch and reconciliation
+### H4-B2-B1 current source candidate — existing service recognizes only current-bound principal roots
 
-The existing Executive service's strict bound-root/dispatch path is still CEO-root-specific and the
-principal constructor has no production ingress caller. B2-B must:
+The existing Executive service now consumes the same closed root-source discriminator when deciding
+whether a root/child belongs to its reviewed COO dispatch graph.
 
-1. derive/pass the current host execution/profile/source/proof/placement binding from existing
-   installed owners into B2-A, never from model request fields;
-2. extend only the service's generic bound-root/dispatch validation to the reviewed root-source
-   discriminator without widening CEO-only finite/release paths;
-3. add a separately discriminated principal-orchestration ingress frame after the overlapping #1147
+For `coo_principal` roots, service qualification is deliberately stricter than the historical CEO
+path:
+
+- the root must be a strict depth-0 aggregation root with branch/worktree and accepted principal
+  provenance;
+- every current execution/profile/provider/model/capability/placement binding field must still equal
+  the root's admitted constraints;
+- a principal root **cannot** use the CEO acceptance-maintenance predecessor-base exception;
+- a principal root **cannot** use the CEO one-way harness-arm promotion; host binding drift simply
+  makes it unbound;
+- a planner created beneath a valid principal root is accepted by the existing
+  `_require_bound_coo_job` child check and keeps the current reviewed operator binding; and
+- finite control, CEO replay, source-capacity maintenance and release-specific CEO checks remain
+  unchanged and CEO-only.
+
+The source proof runs the new principal service cases beside the existing CEO maintenance and v3
+placement-drift cases. No listener, worker, provider, Runtime root or production configuration is
+created by these tests.
+
+### H4-B2-B2 still required — installed ingress and request reconciliation
+
+The principal constructor still has no production ingress caller. B2-B2 must:
+
+1. derive/pass the current host execution/profile/source/proof/placement binding and current Dialogue
+   source from the installed service owner into B2-A, never from model request fields;
+2. add a separately discriminated principal-orchestration ingress frame after the overlapping #1147
    ingress carrier is accepted/released;
-4. preserve the existing principal `request_ref / intent_id` status and same-command reconciliation
+3. preserve the existing principal `request_ref / intent_id` status and same-command reconciliation
    semantics after response loss; and
-5. prove an actual planner/child dispatch only after those exact source gates and H1/H3 native
+4. prove an actual planner/child dispatch only after those exact source gates and H1/H3 native
    admission are accepted.
 
 Finite-drive admission/arm, CEO intent replay and C2 CEO-source maintenance remain CEO-only unless
