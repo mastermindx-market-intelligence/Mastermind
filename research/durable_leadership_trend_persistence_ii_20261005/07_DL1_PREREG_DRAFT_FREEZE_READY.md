@@ -3,7 +3,8 @@
 **SOLE FREEZE-AUTHORITATIVE EXPERIMENT SPECIFICATION. NO EFFICACY OUTCOME ACCESS AUTHORIZED.**
 
 **Scientific ruling:** `CONTINUE — NARROWED`  
-**Operational state:** `WAIT_FOR_DATA / SOURCE_GATE`
+**Operational state:** `WAIT_FOR_DATA / SOURCE_GATE`  
+**Current protected reconciliation:** Mastermind `d8c302b8a8a65ab13e2afba98cc73481606ed4d0`; Macro `0beebb3bd1f246a13396c3bd8f996103a26c3b77`
 
 This document closes the experimental degrees of freedom. It does **not** authorize capture or implementation while DL-0's taxonomy source gate is unresolved.
 
