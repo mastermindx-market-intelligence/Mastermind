@@ -62,6 +62,49 @@ def test_semantic_config_accepts_distinct_valid_additional_resource():
     assert preflight._semantic_config(value, SHA) == value
 
 
+def test_semantic_config_refuses_submit_primary_resource_in_additional_resources():
+    submit_primary = (
+        "https://tunnel-service.gateway.unified-0.internal.api.openai.org/"
+        "v1/mcp/tunnel_" + "3" * 32
+    )
+    value = _config()
+    value["policies"]["submit"]["resource"] = submit_primary
+    value["executive_additional_resources"] = [submit_primary]
+
+    with pytest.raises(preflight.GatewayRefreshPreflightError):
+        preflight._semantic_config(value, SHA)
+
+
+@pytest.mark.parametrize("primary_policy", ["read", "submit"])
+def test_semantic_config_refuses_os_resource_collision_with_primary(primary_policy):
+    value = _config()
+    value.update(
+        os_executive_transport=True,
+        os_executive_resource="https://mcp.mastermind-x.com/os/executive",
+        os_commission_port=45025,
+    )
+    value["policies"][primary_policy]["resource"] = value["os_executive_resource"]
+
+    with pytest.raises(preflight.GatewayRefreshPreflightError):
+        preflight._semantic_config(value, SHA)
+
+
+def test_semantic_config_accepts_distinct_additional_and_os_resources():
+    additional = (
+        "https://tunnel-service.gateway.unified-0.internal.api.openai.org/"
+        "v1/mcp/tunnel_" + "4" * 32
+    )
+    value = _config()
+    value.update(
+        os_executive_transport=True,
+        os_executive_resource="https://mcp.mastermind-x.com/os/executive",
+        os_commission_port=45025,
+        executive_additional_resources=[additional],
+    )
+
+    assert preflight._semantic_config(value, SHA) == value
+
+
 @pytest.mark.parametrize(
     "mutate",
     [

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import copy
-import dataclasses
 import hashlib
 import json
 import os
@@ -23,9 +22,8 @@ if os.fspath(_ROOT) not in sys.path:
 
 from control_plane import executive_installed_peer as installed
 from integrations.mastermind_executive_app.gateway import load_app_policies
-from integrations.business_mcp_auth.contracts import validate_resource_policy
 from ops.executive_os.executive_mcp_entry import (
-    validate_additional_resources,
+    build_additional_policies,
     validate_document,
 )
 
@@ -47,16 +45,10 @@ def _semantic_config(document: object, expected_sha: str) -> dict:
         if value.get("release_sha") != expected_sha:
             _refuse()
         policies = load_app_policies(value["policies"])
-        resources = validate_additional_resources(value)
-        if policies.read.resource in resources:
-            _refuse()
-        for resource in resources:
-            validate_resource_policy(
-                dataclasses.replace(policies.read, resource=resource)
-            )
-            validate_resource_policy(
-                dataclasses.replace(policies.submit, resource=resource)
-            )
+        # Reuse the launcher's single canonical resource owner. It validates
+        # connector tunnels, the optional OS Executive resource, collisions
+        # with both primary resources, and every derived policy variant.
+        build_additional_policies(value, policies)
     except GatewayRefreshPreflightError:
         raise
     except Exception:
