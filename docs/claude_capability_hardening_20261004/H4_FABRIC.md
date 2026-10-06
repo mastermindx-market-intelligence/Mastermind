@@ -159,28 +159,43 @@ The installed COO application already has the correct final-guard shape:
 - it obtains current Mission Workspace facts and applies the existing `NewEffectGate`;
 - only after those checks does it build/send a modifying ingress frame.
 
-The remaining authorization gap is explicit: current `AuthorityFact` carries mission, proof,
-capability/source/economic digests and source/lease conflict state, but **does not carry a semantic
-principal-action ceiling**. The general `NewEffectGate.OPEN` means "a new effect is currently
-permitted"; it does not mean every future COO action kind is authorized.
+### H4-B0 current source slice — versioned principal-action authority ceiling
 
-H4-B must therefore extend the **existing authority generation/provider contract** with a versioned,
-closed principal-action grant that can distinguish today's bounded intent from
-`governed_orchestration`. Do not infer permission from an opaque capability/source digest, from
-the presence of a tool, or from `NewEffectGate.OPEN`. Old authority generations must continue to
-authorize only their existing action set and fail closed for orchestration.
+The branch now implements the first non-colliding H4-B unit in the existing installed authority
+owner. It does **not** open the orchestration sink.
 
-The exact field/schema spelling is reserved to the incumbent authority owner, but acceptance requires:
+Current V1 mission rows remain byte/semantic compatible and implicitly authorize only
+`bounded_intent`. A V2 row is identified by the exact additional fields
+`authority_version=2` and sorted unique `principal_actions`. The closed action vocabulary is:
 
-1. the action set participates in the authority generation identity/digest;
-2. `governed_orchestration` is absent by default from old/current bounded-only generations;
-3. the installed COO app re-reads the same current authority generation at the modifying boundary;
-4. changed action grants under the same logical request cannot reuse an old authorization receipt;
-5. status/reconciliation of an already-created root does not require permission to create a new root;
-6. the new action grant does not encode provider/account/host/tree/worker selectors.
+- `bounded_intent`;
+- `governed_orchestration`.
 
-This keeps the permission decision in the same canonical authority source and avoids a second H4
-policy plane.
+The existing `generation(row)` continues to hash every immutable mission-row field except dynamic
+`enabled`. Therefore adding/removing/changing the V2 action set changes the same canonical
+`authority_generation_digest`; no second action-policy digest or store is introduced. Old V1
+generations cannot silently gain orchestration.
+
+`AuthorityFact` now carries the normalized action tuple and the read-only mandate projects it under
+`capability.principal_actions`. The current installed bounded-intent host guard and COO app both
+require `bounded_intent` before today's submit path can approach Executive ingress. An
+orchestration-only generation therefore refuses the current bounded tool pre-effect, while status
+and mandate reads remain readable.
+
+H4-B0 satisfies the authority-side requirements:
+
+1. the action set participates in the existing authority generation identity/digest;
+2. `governed_orchestration` is absent by default from V1 bounded-only generations;
+3. the installed COO app re-reads the same current authority generation at its modifying boundary;
+4. action-grant changes necessarily move the generation digest;
+5. no action grant encodes provider/account/host/tree/worker selectors; and
+6. no Runtime/root constructor, CEO ingress, CooCycle, MCP tool catalog or production config is
+   changed by this slice.
+
+Still open for **H4-B1/B2**: a separately discriminated principal-orchestration ingress frame and
+the accepted root-source discriminator inside the existing Runtime root constructor. Those shared
+paths remain held while #1147/#1041 own overlapping source. The new action grant is necessary
+authorization evidence, not sufficient authority to create a root.
 
 **H4-C** later exposes only that accepted operation/status through the COO MCP/package after H1
 native profile/schema qualification. No raw CooCycle method, worker selector or provider/account
