@@ -151,11 +151,19 @@ launch, Company/Wake applicability or model/provider selection. Tests use a real
 Runtime and prove single-event replay refusal, current child/lease fencing, semantic conflict,
 sticky effect-unknown and exact applied reconciliation.
 
-**H6-B2-B** must compose this owner into the accepted host/application path, bind the exact principal
-server/tool-schema generation into H1 admission and current Company/Wake applicability, and expose a
-read-only reconciliation operation on that already-admitted principal surface. B2-B must not create
-another effect ledger, dialogue store or wake system. Only after that composition and independent
-review may a real native principal use the modifying tools.
+**H6-B2-B host composition is now source-built** through
+`integrations/mastermind_company_principal_host.py`. The factory accepts only an exact existing
+Executive `Runtime`, an already-current principal binding resolver and the existing Agent Dialogue
+socket/service carrier. It constructs the B1 gateway and B2-A Runtime COMMIT owner together and
+exposes read-only same-message-key reconciliation. It does not choose a principal, child, profile,
+provider, account, session, route or transport and creates no listener, Job, Attempt, store, retry
+owner or capability grant.
+
+The remaining B2-B admission/install work is narrower: bind the exact principal server/tool-schema
+generation into H1 capability admission and current Company/Wake applicability, then compose the
+installed stdio/host entrypoint with this factory. Source existence does not admit a native principal.
+Only after exact admission, installation and independent review may a real principal use the
+modifying tools.
 
 ## Message operation and effect reconciliation
 

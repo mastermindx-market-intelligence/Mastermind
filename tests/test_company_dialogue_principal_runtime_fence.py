@@ -12,6 +12,9 @@ from integrations.mastermind_company_mcp.adapter import DialogueBinding
 from integrations.mastermind_company_mcp.principal_adapter import (
     PrincipalCommitIntent,
 )
+from integrations.mastermind_company_principal_host import (
+    build_principal_company_dialogue_host,
+)
 from integrations.mastermind_company_principal_runtime_fence import (
     PRINCIPAL_RUNTIME_AGGREGATE_TYPE,
     PRINCIPAL_RUNTIME_EVENT_TYPE,
@@ -418,6 +421,104 @@ def test_runtime_fence_owner_adds_no_table_listener_or_retry_plane() -> None:
         "claim_job(",
     ):
         assert forbidden not in source
+
+
+def test_host_factory_composes_gateway_fence_and_read_only_reconciliation(tmp_path) -> None:
+    runtime, root, child, attempt = runtime_child(tmp_path)
+    bound = binding(root, child, attempt)
+
+    class Service:
+        def __init__(self) -> None:
+            self.messages: list[dict] = []
+            self.send_calls = 0
+
+        async def __call__(self, path: Path, request: dict, **kwargs):
+            assert path == Path("/private/tmp/mastermind-agent-dialogue.sock")
+            operation = request["operation"]
+            if operation == "read_thread":
+                assert kwargs == {}
+                return {
+                    "ok": True,
+                    "result": {
+                        "thread_ts": request["args"]["thread_ts"],
+                        "historical_messages": [],
+                        "messages": [
+                            {"message": message}
+                            for message in self.messages
+                        ],
+                        "mutated_count": 0,
+                    },
+                }
+            assert operation == "send_message"
+            before_write = kwargs.get("before_write")
+            assert callable(before_write)
+            self.send_calls += 1
+            outcome = before_write()
+            if asyncio.iscoroutine(outcome):
+                await outcome
+            message = request["args"]["message"]
+            self.messages.append(message)
+            return {
+                "ok": True,
+                "result": {
+                    "action": "CREATED",
+                    "message_key": message["message_key"],
+                    "fingerprint": message["fingerprint"],
+                },
+            }
+
+    service = Service()
+    host = build_principal_company_dialogue_host(
+        runtime=runtime,
+        binding_resolver=Resolver(bound),
+        socket_path=Path("/private/tmp/mastermind-agent-dialogue.sock"),
+        service_call=service,
+        utc_now=lambda: "2026-10-05T06:00:00Z",
+    )
+
+    result = run(
+        host.gateway.call(
+            "continue",
+            {
+                "instruction": "Continue the next bounded phase.",
+                "stop_condition": "Return one canonical result.",
+            },
+        )
+    )
+    assert result["ok"] is True
+    assert service.send_calls == 1
+    assert len(service.messages) == 1
+
+    key = service.messages[0]["message_key"]
+    events = runtime.events.list_events(
+        aggregate_type=PRINCIPAL_RUNTIME_AGGREGATE_TYPE,
+        aggregate_id=key,
+    )
+    assert len(events) == 1
+    assert events[0].event_type == PRINCIPAL_RUNTIME_EVENT_TYPE
+
+    observed = run(host.reconcile(key))
+    assert observed.state is PrincipalCommitObservationState.APPLIED
+
+    replay = run(
+        host.gateway.call(
+            "continue",
+            {
+                "instruction": "Continue the next bounded phase.",
+                "stop_condition": "Return one canonical result.",
+            },
+        )
+    )
+    assert replay["ok"] is False
+    assert replay["error"]["code"] == "EFFECT_FENCE_UNAVAILABLE"
+    assert service.send_calls == 2
+    assert len(service.messages) == 1
+    assert len(
+        runtime.events.list_events(
+            aggregate_type=PRINCIPAL_RUNTIME_AGGREGATE_TYPE,
+            aggregate_id=key,
+        )
+    ) == 1
 
 
 def test_runtime_fence_test_is_in_existing_ci_gate() -> None:
