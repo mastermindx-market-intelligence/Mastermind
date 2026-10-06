@@ -135,8 +135,11 @@ def installed(tmp_path, monkeypatch, inputs):
     root_broker = _broker(tmp_path)
     root_broker._release_owner = root_owner
     transport_calls = []
-    def transport(payload, *, socket_path, timeout_seconds, require_root_peer=False):
+    def transport(payload, *, socket_path, timeout_seconds, require_root_peer=False,
+                  deadline_monotonic_ns=None):
         assert socket_path == client.DEFAULT_SOCKET and require_root_peer is True
+        assert type(deadline_monotonic_ns) is int
+        assert 0 < deadline_monotonic_ns - consumer.time.monotonic_ns() <= 15_000_000_000
         transport_calls.append(copy.deepcopy(payload))
         serving, requesting = socket.socketpair()
         def serve():
@@ -148,7 +151,8 @@ def installed(tmp_path, monkeypatch, inputs):
             with requesting:
                 requesting.settimeout(2)
                 requesting.sendall(json.dumps(payload).encode() + b"\n")
-                result = client._read_response(requesting)
+                result = client._read_response(
+                    requesting, deadline_monotonic_ns=deadline_monotonic_ns)
         finally:
             thread.join(3)
             assert not thread.is_alive()
@@ -557,3 +561,105 @@ def test_commit_operation_key_is_correlation_only_while_disarmed(installed, monk
     assert result["error"]["code"] == "RELEASE_COMMIT_DISARMED"
     assert counts(installed["runtime"]) == before
     assert installed["root_broker"]._executor.calls == []
+
+
+@pytest.mark.parametrize("operation", [
+    "exchange", "reserve_release_prestart", "start_reserved_release", "read_release_closure",
+])
+def test_release_transport_call_sites_create_fresh_private_fifteen_second_endpoint(
+        installed, monkeypatch, operation):
+    """Check transport wiring; existing suites separately exercise real capabilities."""
+    from types import SimpleNamespace
+    args = approve_arguments(installed)
+    approved = installed["call"]("approve_release_transition", args)
+    approval = installed["control"]._read(args["operation_key"])
+    prepared = installed["call"]("prepare_release_transition", {
+        "operation_key": args["operation_key"],
+        "approved_transition_ref": approved["approved_transition_ref"],
+    })
+    commit_frame = ingress.validate_frame(ingress.project_frame(
+        "commit_prepared_release_transition",
+        {"operation_key": args["operation_key"], "prepared_token": prepared["prepared_token"]},
+        principal=installed["principal"]))
+    approve_frame = ingress.validate_frame(ingress.project_frame(
+        "approve_release_transition", args, principal=installed["principal"]))
+    now = [consumer.time.monotonic_ns()]
+    wall_clock = consumer.time.time_ns
+    monkeypatch.setattr(consumer, "time", SimpleNamespace(
+        monotonic_ns=lambda: now[0], time_ns=wall_clock))
+    calls = []
+
+    class StopAtTransport(Exception):
+        pass
+
+    def capture(payload, **kwargs):
+        assert kwargs == {
+            "socket_path": client.DEFAULT_SOCKET, "timeout_seconds": 15,
+            "require_root_peer": True, "deadline_monotonic_ns": now[0] + 15_000_000_000,
+        }
+        assert "deadline_monotonic_ns" not in json.dumps(payload)
+        calls.append(kwargs["deadline_monotonic_ns"])
+        raise StopAtTransport
+
+    monkeypatch.setattr(client, "_send_one_frame", capture)
+
+    # These synthetic consumed values isolate the transport call, not admission
+    # authority. No fake capability is sent to a real broker or Runtime.
+    class FreshFixture:
+        def _consume(self):
+            return commit_frame, approval, SimpleNamespace(to_dict=lambda: {}), {}
+
+    class ClosureFixture:
+        def _consume(self):
+            return {"approval": approval.to_dict()}
+
+    if operation == "start_reserved_release":
+        monkeypatch.setattr(consumer, "_FreshReleaseAdmission", FreshFixture)
+    if operation == "read_release_closure":
+        monkeypatch.setattr(consumer, "_CanonicalUnresolvedReleaseEvidence", ClosureFixture)
+    broker = consumer.ReleaseBrokerClient()
+    for _ in range(2):
+        with pytest.raises(StopAtTransport):
+            if operation == "exchange":
+                broker.exchange(approve_frame)
+            elif operation == "reserve_release_prestart":
+                broker.reserve_release_prestart(frame=commit_frame, approval=approval)
+            elif operation == "start_reserved_release":
+                broker.start_reserved_release(fresh_admission=FreshFixture())
+            else:
+                broker.read_release_closure(canonical_evidence=ClosureFixture())
+        now[0] += 1_000_000
+    assert calls[1] - calls[0] == 1_000_000
+
+
+@pytest.mark.parametrize('state',['STARTED','PUBLICATION_INTENT','PUBLISHED','BROKER_RESTART_PENDING','RECOVERING','SUCCEEDED','ROLLED_BACK'])
+def test_publication_protocol_history_has_one_read_and_zero_resend(installed,monkeypatch,state):
+    from tests.test_executive_release_contract import with_publication_protocol
+    args,approval,old,reads=install_history_read_fixture(installed,monkeypatch,'SUCCEEDED')
+    status=with_publication_protocol(old,state)
+    contract.validate_release_terminal_status(status,expected_approval=approval)
+    installed['history_projection'][0]=lambda _:copy.deepcopy(status)
+    before=counts(installed['runtime']);frames=len(installed['transport_calls'])
+    monkeypatch.setattr(client,'send_status',lambda *a,**k:pytest.fail('legacy resend'))
+    result=installed['call']('reconcile_release_transition',{'operation_key':args['operation_key']})
+    assert len(installed['transport_calls'])==frames+1
+    assert installed['transport_calls'][-1]['operation']=='reconcile_release_transition'
+    assert len(reads)==1 and counts(installed['runtime'])==before
+    assert installed['root_broker']._executor.calls==[]
+    if state in ('SUCCEEDED','ROLLED_BACK'):
+        assert result['ok'] and result['broker_status']==status
+    else:
+        assert not result['ok'] and result['effect']=='EFFECT_UNKNOWN'
+        assert result['error']['code']=='RELEASE_EFFECT_IN_PROGRESS'
+
+
+def test_unqualified_v2_epoch_never_attests_success_or_resends(installed,monkeypatch):
+    from tests.test_executive_release_contract import with_publication_protocol
+    args,approval,old,reads=install_history_read_fixture(installed,monkeypatch,'SUCCEEDED')
+    status=with_publication_protocol(old,'SUCCEEDED');status['terminal_receipt']['after_actuator_generation']+=1
+    installed['history_projection'][0]=lambda _:status
+    before=counts(installed['runtime']);frames=len(installed['transport_calls'])
+    result=installed['call']('reconcile_release_transition',{'operation_key':args['operation_key']})
+    assert not result['ok'] and result['effect']=='EFFECT_UNKNOWN'
+    assert len(installed['transport_calls'])==frames+1 and counts(installed['runtime'])==before
+    assert not reads and installed['root_broker']._executor.calls==[]

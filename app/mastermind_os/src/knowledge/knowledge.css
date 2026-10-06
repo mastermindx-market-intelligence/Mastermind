@@ -1,0 +1,43 @@
+.atelier-knowledge { color: #f3f3f3; background: #080808; padding: 40px 48px 56px; font-family: Inter, sans-serif; line-height: 1.55; overflow-wrap: anywhere; }
+.atelier-knowledge * { box-sizing: border-box; min-width: 0; }
+.atelier-knowledge h1, .atelier-knowledge h2, .atelier-knowledge h3 { font-family: Manrope, sans-serif; font-weight: 500; margin: 0; }
+.atelier-knowledge p { margin: 0 0 12px; }
+.knowledge-heading { position: relative; padding-right: 300px; margin-bottom: 32px; }
+.knowledge-heading h1 { font-size: 44px; line-height: 1.18; letter-spacing: -.04em; margin: 12px 0 20px; }
+.knowledge-heading > p:last-of-type { color: #b8b8b8; font-size: 18px; }
+.knowledge-eyebrow { color: #c9b99b; text-transform: uppercase; letter-spacing: .12em; font-size: 11px; }
+.knowledge-search { position: absolute; right: 0; bottom: 0; width: 270px; }
+.knowledge-search label { display: block; color: #b8b8b8; font-size: 13px; margin-bottom: 8px; }
+.atelier-knowledge input, .atelier-knowledge button { font: inherit; color: inherit; background: #0c0c0c; border: 1px solid #2d2d2d; border-radius: 12px; min-height: 44px; padding: 10px 16px; }
+.atelier-knowledge input { width: 100%; }
+.atelier-knowledge button { cursor: pointer; }
+.atelier-knowledge button:hover:not(:disabled) { background: #222; }
+.atelier-knowledge button:disabled { cursor: default; color: #949494; }
+.atelier-knowledge :focus-visible { outline: 2px solid #c9b99b; outline-offset: 4px; }
+.knowledge-source { display: flex; gap: 16px; align-items: baseline; color: #b8b8b8; font-size: 13px; margin-bottom: 24px; }
+.knowledge-source > span { font-size: 11px; letter-spacing: .08em; }
+.knowledge-collections { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; margin-bottom: 20px; }
+.knowledge-collections section, .knowledge-companion { background: #121212; border: 1px solid #252525; border-radius: 20px; padding: 28px; }
+.knowledge-collections h2 { font-size: 25px; line-height: 1.3; margin: 12px 0 24px; }
+.knowledge-collections section > p:last-child, .knowledge-muted { color: #949494; font-size: 13px; }
+.knowledge-layout { display: grid; grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr); gap: 36px; align-items: start; margin-top: 32px; }
+.knowledge-section-title { display: flex; gap: 16px; align-items: baseline; justify-content: space-between; margin-bottom: 24px; }
+.knowledge-section-title h2 { font-size: 22px; }
+.knowledge-section-title > p { font-size: 13px; color: #b8b8b8; }
+.knowledge-list ul { list-style: none; padding: 0; margin: 0; }
+.knowledge-list li { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 24px 0; border-bottom: 1px solid #252525; }
+.knowledge-list h3 { font-size: 22px; margin-bottom: 10px; }
+.knowledge-ref { color: #949494; font-size: 13px; }
+.knowledge-row-action { display: flex; flex-direction: column; align-items: end; gap: 12px; flex-shrink: 0; font-size: 12px; }
+.knowledge-companion h2 { font-size: 28px; line-height: 1.2; margin: 14px 0 20px; }
+.knowledge-companion p { color: #b8b8b8; }
+.knowledge-companion dl { border-block: 1px solid #292929; padding-block: 20px; }
+.knowledge-companion dt { color: #949494; font-size: 12px; }
+.knowledge-companion dd { margin: 4px 0 16px; font-size: 13px; }
+.knowledge-companion .knowledge-boundary { border-top: 1px solid #292929; margin: 24px 0 0; padding-top: 24px; font-size: 13px; }
+.knowledge-empty { padding: 28px 0; color: #b8b8b8; }
+.knowledge-empty h3 { margin-bottom: 16px; }
+.knowledge-history, .atelier-knowledge [data-state="STALE"] { color: #c9b99b; }
+.atelier-knowledge [data-state="CURRENT"] { color: #a8c2ad; }
+@media (max-width: 1100px) { .knowledge-heading { padding-right: 0; } .knowledge-search { position: static; width: min(100%, 420px); margin-top: 24px; } .knowledge-layout { grid-template-columns: 1fr; } }
+@media (max-width: 760px) { .atelier-knowledge { padding: 24px; } .knowledge-heading h1 { font-size: 30px; line-height: 1.2; } .knowledge-heading > p:last-of-type { font-size: 16px; } .knowledge-collections { grid-template-columns: 1fr; gap: 12px; } .knowledge-collections section { padding: 20px; } .knowledge-collections h2 { font-size: 22px; margin-bottom: 12px; } .knowledge-list li { align-items: start; flex-direction: column; gap: 12px; } .knowledge-row-action { flex-direction: row; align-items: center; justify-content: space-between; width: 100%; } .knowledge-companion { padding: 20px; } .knowledge-section-title, .knowledge-source { flex-wrap: wrap; } }

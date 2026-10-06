@@ -12,9 +12,9 @@ WORKER_GID="451"
 CODEX_ATTESTATION_OWNER_GID="$WORKER_GID"
 PROVIDER_HOME="/var/db/mastermind-executive/workers/codex-01/provider-home"
 CODEX_BINARY="/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
-CODEX_VERSION="0.147.0"
+CODEX_VERSION="0.159.2"
 CODEX_TEAM_ID="2DC432GLL2"
-CODEX_SHA256="19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37"
+CODEX_SHA256="16593cc2f422d5f398a8e40f550ebbaf1245392528957be342c295920a300704"
 SYSTEM_ROOT="/Library/Application Support/MastermindExecutive"
 SYSTEM_BIN="$SYSTEM_ROOT/bin"
 SYSTEM_CONFIG="$SYSTEM_ROOT/config"
@@ -30,6 +30,8 @@ RECOVER_READINESS_TRANSACTION="false"
 EXPECTED_CREDENTIAL_KIND=""
 WORKSPACE_BINDING_CLASS=""
 CREDENTIAL_EXPIRES_AT=""
+REQUALIFY_TERMINAL_ADVERSE_SHA256=""
+RENEW_DEVICE_REVALIDATION_SHA256=""
 READINESS_RECEIPT="/Library/Application Support/MastermindExecutive/config/provider-readiness-v2.json"
 READINESS_TRANSACTION_LOCK="$SYSTEM_CONFIG/provider-readiness.transaction.lock"
 READINESS_LOCK_HELD="false"
@@ -87,7 +89,7 @@ trap 'preserve_readiness_lock_on_signal 131' QUIT
 trap 'preserve_readiness_lock_on_signal 143' TERM
 
 usage() {
-  /bin/echo "usage: sudo /bin/bash $0 MODE [--slot-id codex-pro-01|codex-pro-02|codex-pro-03] [--replace-existing] [--expected-credential-kind KIND] [--workspace-binding-class CLASS] [--credential-expires-at UTC] [options]" >&2
+  /bin/echo "usage: sudo /bin/bash $0 MODE [--slot-id codex-pro-01|codex-pro-02|codex-pro-03] [--replace-existing] [--expected-credential-kind KIND] [--workspace-binding-class CLASS] [--credential-expires-at UTC] [--requalify-terminal-adverse-sha256 SHA256 | --renew-device-revalidation-sha256 SHA256] [options]" >&2
   /bin/echo "modes: --verify-only | --verify-ready | --enroll-service-account | --enroll-personal-access-token | --reauthorize-device | --recover-readiness-transaction" >&2
   exit 64
 }
@@ -105,6 +107,8 @@ while [ "$#" -gt 0 ]; do
     --expected-credential-kind) EXPECTED_CREDENTIAL_KIND="${2:-}"; POLICY_OVERRIDE="true"; shift 2 ;;
     --workspace-binding-class) WORKSPACE_BINDING_CLASS="${2:-}"; POLICY_OVERRIDE="true"; shift 2 ;;
     --credential-expires-at) CREDENTIAL_EXPIRES_AT="${2:-}"; shift 2 ;;
+    --requalify-terminal-adverse-sha256) REQUALIFY_TERMINAL_ADVERSE_SHA256="${2:-}"; shift 2 ;;
+    --renew-device-revalidation-sha256) RENEW_DEVICE_REVALIDATION_SHA256="${2:-}"; shift 2 ;;
     --codex-binary) CODEX_BINARY="${2:-}"; shift 2 ;;
     --codex-version) CODEX_VERSION="${2:-}"; shift 2 ;;
     --worker-uid) WORKER_UID="${2:-}"; WORKER_GID="${2:-}"; LOW_LEVEL_SLOT_OVERRIDE="true"; shift 2 ;;
@@ -149,6 +153,19 @@ resolve_selected_slot() {
 }
 
 resolve_selected_slot
+
+if [ -n "$REQUALIFY_TERMINAL_ADVERSE_SHA256" ] && [ -n "$RENEW_DEVICE_REVALIDATION_SHA256" ]; then
+  usage
+fi
+EXPLICIT_PREDECESSOR_SHA256="${REQUALIFY_TERMINAL_ADVERSE_SHA256:-$RENEW_DEVICE_REVALIDATION_SHA256}"
+if [ -n "$EXPLICIT_PREDECESSOR_SHA256" ]; then
+  [ "$VERIFY_READY" = "true" ] && [ "$SLOT_SELECTED" = "false" ] \
+    && [ "$LOW_LEVEL_SLOT_OVERRIDE" = "false" ] \
+    && [ "$EXPECTED_CREDENTIAL_KIND" = "device-auth" ] \
+    && [ "$WORKSPACE_BINDING_CLASS" = "company-workspace-admin-attested" ] \
+    && [ "${#EXPLICIT_PREDECESSOR_SHA256}" -eq 64 ] || usage
+  case "$EXPLICIT_PREDECESSOR_SHA256" in *[!0-9a-f]*) usage ;; esac
+fi
 
 if [ "$SLOT_SELECTED" = "true" ]; then
   case "$SLOT_ID" in
@@ -442,7 +459,7 @@ else
   }
   OBSERVED_SHA256="$(/usr/bin/shasum -a 256 "$PINNED_CODEX_BINARY" | /usr/bin/awk '{print $1}')"
   [ "$OBSERVED_SHA256" = "$CODEX_SHA256" ] || {
-    /bin/echo "Codex binary bytes do not match the exact reviewed 0.147.0 allowlist" >&2
+    /bin/echo "Codex binary bytes do not match the exact reviewed 0.159.2 allowlist" >&2
     exit 65
   }
   OBSERVED_TEAM="$(/usr/bin/codesign -dv --verbose=4 "$PINNED_CODEX_BINARY" 2>&1 | /usr/bin/awk -F= '$1 == "TeamIdentifier" {print $2}')"
@@ -691,22 +708,41 @@ fi
 if [ "$VERIFY_READY" = "true" ]; then
   verify_complete_auth
   verify_installed_binary_available
+  requalification_args=()
+  if [ -n "$REQUALIFY_TERMINAL_ADVERSE_SHA256" ]; then
+    requalification_args=(--requalify-terminal-adverse-sha256 "$REQUALIFY_TERMINAL_ADVERSE_SHA256")
+  elif [ -n "$RENEW_DEVICE_REVALIDATION_SHA256" ]; then
+    requalification_args=(--renew-device-revalidation-sha256 "$RENEW_DEVICE_REVALIDATION_SHA256")
+  fi
   if "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/provider_readiness.py" reuse \
       --receipt "$READINESS_RECEIPT" --auth "$AUTH_PATH" \
       --binary "$INSTALLED_CODEX_BINARY" \
       --worker-uid "$WORKER_UID" --worker-gid "$WORKER_GID" \
       --expected-kind "$EXPECTED_CREDENTIAL_KIND" \
       --workspace-binding-class "$WORKSPACE_BINDING_CLASS" \
-      --credential-expires-at "$CREDENTIAL_EXPIRES_AT" >/dev/null 2>&1; then
+      --credential-expires-at "$CREDENTIAL_EXPIRES_AT" \
+      ${requalification_args[@]+"${requalification_args[@]}"} >/dev/null 2>&1; then
     /bin/echo "dedicated worker auth is READY; current passing receipt reused; no canary spent"
     exit 0
   else
     reuse_status=$?
   fi
-  [ "$reuse_status" -eq 3 ] || [ "$reuse_status" -eq 4 ] || {
-    /bin/echo "existing provider readiness receipt is stale or invalid; fail closed" >&2
-    exit 65
-  }
+  if [ -n "$RENEW_DEVICE_REVALIDATION_SHA256" ]; then
+    [ "$reuse_status" -eq 6 ] || {
+      /bin/echo "explicit device-auth revalidation is not due or eligible; no canary spent" >&2
+      exit 65
+    }
+  elif [ -n "$REQUALIFY_TERMINAL_ADVERSE_SHA256" ]; then
+    [ "$reuse_status" -eq 5 ] || {
+      /bin/echo "explicit terminal-adverse requalification is not eligible; no canary spent" >&2
+      exit 65
+    }
+  else
+    [ "$reuse_status" -eq 3 ] || [ "$reuse_status" -eq 4 ] || {
+      /bin/echo "existing provider readiness receipt is stale or invalid; fail closed" >&2
+      exit 65
+    }
+  fi
 
   IDENTITY_RESULT="$(/usr/bin/mktemp /private/tmp/mastermind-provider-identity.XXXXXX)"
   if ! "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/provider_identity_probe.py" \
@@ -731,7 +767,8 @@ if [ "$VERIFY_READY" = "true" ]; then
       --expected-kind "$EXPECTED_CREDENTIAL_KIND" \
       --workspace-binding-class "$WORKSPACE_BINDING_CLASS" \
       --credential-expires-at "$CREDENTIAL_EXPIRES_AT" \
-      ${refresh_args[@]+"${refresh_args[@]}"} >/dev/null 2>&1; then
+      ${refresh_args[@]+"${refresh_args[@]}"} \
+      ${requalification_args[@]+"${requalification_args[@]}"} >/dev/null 2>&1; then
     /bin/echo "provider canary reservation failed; no canary spent" >&2
     exit 65
   fi

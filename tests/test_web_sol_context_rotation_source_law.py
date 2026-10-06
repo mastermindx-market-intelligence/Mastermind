@@ -315,3 +315,281 @@ def test_implementation_plan_preserves_open_carriers_and_one_capability_per_pr()
     )
     for phrase in required:
         assert phrase in plan, f"implementation plan omits required boundary: {phrase}"
+
+
+# SR-F0 session-reliability and adaptive-mode source contracts.
+def test_session_reliability_skill_is_enrolled_and_compatible() -> None:
+    path = ROOT / "docs/sol_skills/SESSION_RELIABILITY.md"
+    assert path.exists()
+    skill = _read("docs/sol_skills/SESSION_RELIABILITY.md")
+    index = _normalized(_read("docs/sol_skills/INDEX.md"))
+    for phrase in (
+        "schema: mastermind.sol_skillpack.v1",
+        "skillpack_version: 1.0.1",
+        "minimum_bootstrap_major: 1",
+        "skill: session_reliability",
+    ):
+        assert phrase in skill
+    assert "### `SESSION_RELIABILITY.md`" in index
+    assert "distinguishes bounded mode recovery from context rotation" in index
+
+
+def test_session_reliability_preserves_budgets_and_emergency_frontier() -> None:
+    skill = _normalized(_read("docs/sol_skills/SESSION_RELIABILITY.md"))
+    for phrase in (
+        "8 KiB or 150 lines",
+        "16 KiB",
+        "100 matches",
+        "32 KiB",
+        "six material tool calls",
+        "15 seconds",
+        "30 seconds",
+        "12 KiB / 1500 words",
+        "NOT_CANONICALLY_PERSISTED",
+        "last durable ref",
+        "A successor must reconcile and persist",
+    ):
+        assert phrase in skill
+
+
+def test_isolated_failure_allows_only_bounded_mode_recovery() -> None:
+    law = _normalized(_read(LAW_PATH))
+    skill = _normalized(_read("docs/sol_skills/SESSION_RELIABILITY.md"))
+    for phrase in (
+        "Thinking failed != context exhausted",
+        "low context pressure",
+        "at most one bounded recovery",
+        "different user-visible reasoning mode such as Extra High",
+        "not proof of cause, carrier failover, or context rotation",
+        "never bypasses a safety/permission denial",
+    ):
+        assert phrase in law
+    assert "a relevant mode change may be part of that recovery" in skill
+    assert "already heavy/unstable enough that continuing is unsafe" in skill
+
+
+def test_compact_project_kernel_carries_adaptive_mode_and_rotation_boundary() -> None:
+    kernel = _normalized(_read("docs/sol_skills/BOOTSTRAP_KERNEL.md"))
+    for phrase in (
+        "Sol owns mode recommendations",
+        "Pro may support writes, lack specific tools/actions, or lose access mid-session",
+        "Extra High is a recovery candidate, not guaranteed access",
+        "Text cannot self-switch",
+        "No unchanged retry/reconnect loops",
+        "Tool failure is not chat corruption",
+        "HARD_ROTATION after repeated thinking/session failure",
+        "NOT_CANONICALLY_PERSISTED",
+        "MODE_SWITCH/FRESH_CHAT are human-gate reasons, not lifecycle states",
+    ):
+        assert phrase in kernel
+
+
+def test_session_reliability_budgets_are_pressure_indicators_not_productivity_ceilings() -> None:
+    skill = _normalized(_read("docs/sol_skills/SESSION_RELIABILITY.md"))
+    for phrase in (
+        "pressure indicators and checkpoint prompts",
+        "never hard productivity ceilings",
+        "healthy long turn",
+        "same bounded phase",
+        "Depth is allowed; breadth is fenced",
+    ):
+        assert phrase in skill
+
+
+def test_session_reliability_distinguishes_stream_turn_session_and_workspace_failures() -> None:
+    skill = _normalized(_read("docs/sol_skills/SESSION_RELIABILITY.md"))
+    for phrase in (
+        "STREAM_ATTACHMENT_UNCERTAIN",
+        "TURN_EXECUTION_ENDED",
+        "SESSION_UNSTABLE",
+        "WORKSPACE_OR_EFFECT_UNCERTAIN",
+        "do not duplicate Continue or effects",
+        "same conversation",
+        "fresh same-mode chat",
+    ):
+        assert phrase in skill
+
+
+def test_session_reliability_preserves_long_mode_specific_work() -> None:
+    skill = _normalized(_read("docs/sol_skills/SESSION_RELIABILITY.md"))
+    for phrase in (
+        "Astra Pro",
+        "10–20+ minute",
+        "30–50m+",
+        "mode stickiness",
+        "not a timer law",
+        "Do not bounce",
+    ):
+        assert phrase in skill
+
+
+def test_compact_kernel_projects_phase_fence_and_mode_stickiness() -> None:
+    kernel = _normalized(_read("docs/sol_skills/BOOTSTRAP_KERNEL.md"))
+    for phrase in (
+        "mode stickiness",
+        "active semantic phase",
+        "Depth allowed; breadth fenced",
+        "same healthy chat",
+        "mission is incomplete",
+        "fresh same-mode chat",
+    ):
+        assert phrase in kernel
+
+
+def test_stream_attachment_uncertainty_does_not_imply_context_rotation() -> None:
+    law = _normalized(_read(LAW_PATH))
+    for phrase in (
+        "client stream detachment is not session death",
+        "STREAM_ATTACHMENT_UNCERTAIN",
+        "does not establish `ROTATION_REQUIRED`",
+        "reacquire the exact conversation/request state",
+        "Do not duplicate `Continue` or any modifying effect",
+    ):
+        assert phrase in law
+
+
+def _section_text(text: str, heading: str, next_heading: str) -> str:
+    start = text.index(heading)
+    end = text.index(next_heading, start + len(heading))
+    return " ".join(text[start:end].split())
+
+
+def _sr_f0_semantic_guard_errors(*, law: str, skill: str, active: str) -> list[str]:
+    errors: list[str] = []
+    norm_law = " ".join(law.split())
+    norm_skill = " ".join(skill.split())
+    norm_active = " ".join(active.split())
+    suspected = _section_text(skill, "### `ROTATION_SUSPECTED`", "### `ROTATION_REQUIRED`")
+    phase = _section_text(
+        active,
+        "The reliability invariant is the **recovery gap**, not runtime:",
+        "## Step 8 — Final-response gate",
+    )
+    law_threshold = "two consecutive terminal generation failures in the exact conversation with no successful intervening turn"
+    skill_threshold = "two consecutive terminal generation failures with no successful intervening turn"
+    if law_threshold not in norm_law or skill_threshold not in norm_skill:
+        errors.append("two-failure-threshold")
+    if "cumulative raw output approaching the turn budget;" in suspected:
+        errors.append("budget-alone-rotation")
+    if "output pressure alone does not require a turn boundary" not in phase:
+        errors.append("pressure-only-turn-boundary")
+    if "surface remains healthy, **start that next phase in the same turn**" not in phase:
+        errors.append("healthy-phase-continuation")
+    if "a specific chunk boundary alone is no longer sufficient" not in norm_active:
+        errors.append("chunk-boundary-not-stop")
+    return errors
+
+
+def test_output_pressure_alone_does_not_force_recovery_or_rotation() -> None:
+    skill = _read("docs/sol_skills/SESSION_RELIABILITY.md")
+    active = _read("docs/sol_skills/ACTIVE_EXECUTION.md")
+    active_normalized = " ".join(active.split())
+    suspected = _section_text(skill, "### `ROTATION_SUSPECTED`", "### `ROTATION_REQUIRED`")
+    assert "cumulative raw output approaching the turn budget;" not in suspected
+    assert "output pressure plus a stale durable frontier or inability to keep further output bounded" in suspected
+    assert "Output pressure alone does not change `SESSION_HEALTHY`" in skill
+    assert "output pressure alone does not require a turn boundary" in active_normalized
+
+
+def test_persistence_failure_maps_to_existing_truthful_dispositions() -> None:
+    skill = " ".join(_read("docs/sol_skills/SESSION_RELIABILITY.md").split())
+    kernel = " ".join(_read("docs/sol_skills/BOOTSTRAP_KERNEL.md").split())
+    for phrase in (
+        "`EFFECT_UNKNOWN` only for an ambiguous checkpoint write",
+        "`EXACT_HUMAN_GATE` only for a real human/admin ceremony",
+        "proven pre-dispatch persistence/platform outage",
+        "`ALL_SCOPED_LANES_BLOCKED`",
+        "safe independent work remains",
+        "`MORE_WORK_EXISTS`",
+    ):
+        assert phrase in skill
+    assert "Classify by observed cause; never invent HUMAN_GATE/EFFECT_UNKNOWN" in kernel
+
+
+def test_semantic_mutation_guard_rejects_threshold_and_healthy_phase_reversal() -> None:
+    law = _read(LAW_PATH)
+    skill = _read("docs/sol_skills/SESSION_RELIABILITY.md")
+    active = _read("docs/sol_skills/ACTIVE_EXECUTION.md")
+    assert _sr_f0_semantic_guard_errors(law=law, skill=skill, active=active) == []
+
+    bad_law = law.replace(
+        "two consecutive terminal generation failures in the\nexact conversation with no successful intervening turn",
+        "twenty consecutive terminal generation failures in the\nexact conversation with no successful intervening turn",
+    )
+    bad_skill = skill.replace(
+        "two consecutive terminal generation failures with no successful intervening turn",
+        "twenty consecutive terminal generation failures with no successful intervening turn",
+    )
+    assert "two-failure-threshold" in _sr_f0_semantic_guard_errors(
+        law=bad_law, skill=bad_skill, active=active
+    )
+
+    bad_active = active.replace(
+        "surface remains healthy, **start that next phase in the same turn**",
+        "surface remains healthy, **stop the current turn immediately**",
+    )
+    assert "healthy-phase-continuation" in _sr_f0_semantic_guard_errors(
+        law=law, skill=skill, active=bad_active
+    )
+
+    bad_chunk_gate = active.replace(
+        "a specific chunk boundary alone is no longer sufficient",
+        "a specific chunk boundary alone is sufficient",
+    )
+    assert "chunk-boundary-not-stop" in _sr_f0_semantic_guard_errors(
+        law=law, skill=skill, active=bad_chunk_gate
+    )
+
+
+def test_rotation_law_persistence_frontier_uses_cause_based_disposition_mapping() -> None:
+    law = " ".join(_read(LAW_PATH).split())
+    assert "under the genuine human/effect gate" not in law
+    for phrase in (
+        "ACTIVE_EXECUTION Step 8",
+        "`EFFECT_UNKNOWN` only for an ambiguous checkpoint write",
+        "`EXACT_HUMAN_GATE` only for a real human/admin ceremony",
+        "confirmed pre-dispatch persistence/platform outage",
+        "`ALL_SCOPED_LANES_BLOCKED`",
+        "safe independent work remains",
+        "`MORE_WORK_EXISTS`",
+        "`NOT_CANONICALLY_PERSISTED`",
+    ):
+        assert phrase in law
+
+
+def test_cross_phase_continuation_is_projected_into_session_reliability_and_kernel() -> None:
+    skill = " ".join(_read("docs/sol_skills/SESSION_RELIABILITY.md").split())
+    kernel_raw = _read("docs/sol_skills/BOOTSTRAP_KERNEL.md")
+    kernel = " ".join(kernel_raw.split())
+    for phrase in (
+        "Completing a checkpoint, task, or semantic phase does not itself end the turn",
+        "start the next bounded safe critical-path phase in the same healthy turn",
+        "A clean phase boundary is not continuity pressure",
+        "start it rather than yielding merely because the previous phase ended",
+    ):
+        assert phrase in skill
+    for phrase in (
+        "After any task/phase completes, verify/save it, reassess the mission",
+        "WAITING_EXTERNAL/review/CI/messages are lane-local",
+        "`DURABLE_EXECUTION_RUNNING` requires proven STARTED/RUNNING + lawful return",
+        "Other Step-8 stops still apply",
+        "A clean phase boundary is not a stop",
+        "MORE_WORK_EXISTS means the mission is incomplete: do not finalize while healthy useful work remains",
+        "task/phase/checkpoint completion alone never qualifies",
+    ):
+        assert phrase in kernel
+    project_block = kernel_raw.split("```text\n", 1)[1].split("```", 1)[0]
+    assert len(project_block) < 8000
+
+
+def test_cross_phase_mutation_guard_rejects_phase_boundary_as_stop() -> None:
+    law = _read(LAW_PATH)
+    skill = _read("docs/sol_skills/SESSION_RELIABILITY.md")
+    active = _read("docs/sol_skills/ACTIVE_EXECUTION.md")
+    bad_active = active.replace(
+        "surface remains healthy, **start that next phase in the same turn**",
+        "surface remains healthy, **stop at this phase boundary**",
+    )
+    assert "healthy-phase-continuation" in _sr_f0_semantic_guard_errors(
+        law=law, skill=skill, active=bad_active
+    )

@@ -75,6 +75,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import express from 'express';
+import { createCommissionService } from './commission-service.mjs';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -99,6 +100,7 @@ import {
   resolveGitPublishConfig,
   toolResult as gitToolResult,
 } from './git-publish.mjs';
+import { STUDIO_WORKSPACE_TOOLS, STUDIO_REPOSITORY_GIT_TOOLS, createRepositoryWorkspaceAccess, resolveRepositoryWorkspaceConfig } from './workspace-access.mjs';
 import {
   PAPER_DESIGN_TOOLS,
   PAPER_DESIGN_TOOL_NAMES,
@@ -368,6 +370,19 @@ export function resolveConfig(partial = {}) {
   }
 
   cfg.gitPublish = resolveGitPublishConfig(cfg.gitPublish);
+  cfg.repositoryWorkspaces = resolveRepositoryWorkspaceConfig(cfg.repositoryWorkspaces);
+  if (cfg.repositoryWorkspaces && !cfg.gitPublish) throw new TypeError('repositoryWorkspaces requires configured typed Git');
+  if (cfg.commissionPublication !== undefined && cfg.commissionPublication !== false) {
+    const value = cfg.commissionPublication;
+    if (!value || typeof value !== 'object' || Array.isArray(value) ||
+        Object.keys(value).sort().join(',') !== 'configurationDigest,enabled' || value.enabled !== true ||
+        typeof value.configurationDigest !== 'string' || !/^[0-9a-f]{64}$/.test(value.configurationDigest) ||
+        !cfg.repositoryWorkspaces?.allowedRepositories.includes('mastermind') ||
+        cfg.host !== '127.0.0.1' || cfg.publicUrl || cfg.testMode || cfg.port < 1024 || cfg.port === 8443 || cfg.port === 45017) {
+      throw new TypeError('commission publication requires exact opted-in private owner configuration');
+    }
+    cfg.commissionPublication = Object.freeze({...value});
+  }
   cfg.paperDesign = resolvePaperDesignConfig(cfg.paperDesign);
   cfg.fleetStatus = resolveFleetStatusConfig(cfg.fleetStatus);
 
@@ -889,7 +904,8 @@ class GatewaySession {
 
     this.transport = null;
     this.server = null;
-    this.gitPublisher = cfg.gitPublish ? createGitPublisher(cfg.gitPublish) : null;
+    this.workspaceAccess = cfg.repositoryWorkspaces ? createRepositoryWorkspaceAccess(cfg.repositoryWorkspaces, cfg.gitPublish) : null;
+    this.gitPublisher = this.workspaceAccess ?? (cfg.gitPublish ? createGitPublisher(cfg.gitPublish) : null);
     this.paperDesigner = cfg.paperDesign ? createPaperDesigner(cfg.paperDesign) : null;
     this.fleetStatus = cfg.fleetStatus
       ? createFleetStatus({ enabled: true, ...cfg.fleetStatus })
@@ -1018,7 +1034,10 @@ class GatewaySession {
           localTools.push({ ...STUDIO_FLEET_STATUS_TOOL });
         }
         if (session.gitPublisher) {
-          localTools.push(...STUDIO_GIT_PUBLISH_TOOLS.map((tool) => ({ ...tool })));
+          localTools.push(...(session.workspaceAccess ? STUDIO_REPOSITORY_GIT_TOOLS : STUDIO_GIT_PUBLISH_TOOLS).map((tool) => ({ ...tool })));
+        }
+        if (session.workspaceAccess) {
+          localTools.push(...STUDIO_WORKSPACE_TOOLS.map((tool) => ({ ...tool })));
         }
         if (session.paperDesigner) {
           localTools.push(...PAPER_DESIGN_TOOLS.map((tool) => ({ ...tool })));
@@ -1129,6 +1148,20 @@ class GatewaySession {
         });
         return paperToolResult(result.value, result.isError);
       }, { kind: 'tools/call', tool: name, started });
+    }
+
+    if (this.workspaceAccess && STUDIO_WORKSPACE_TOOLS.some((tool) => tool.name === name)) {
+      this.bumpTool(name);
+      try {
+        const args = request?.params?.arguments ?? {};
+        const data = name === 'studio_workspace_repositories'
+          ? await this.workspaceAccess.repositories(args) : await this.workspaceAccess.acquire(args);
+        const isError = data?.status === 'REFUSED' || data?.status === 'PARTIAL' || data?.effect_state === 'EFFECT_UNKNOWN';
+        if (data?.effect_state === 'EFFECT_UNKNOWN') this.taint('workspace acquisition effect unknown');
+        return gitToolResult(data, isError);
+      } catch {
+        return gitToolResult({ status: 'REFUSED', effect_state: 'NOT_APPLIED', code: 'WORKSPACE_ACTION_REFUSED' }, true);
+      }
     }
 
     if (this.gitPublisher &&
@@ -1522,6 +1555,17 @@ class GatewaySession {
  */
 export async function startGateway(partialConfig = {}, auth = {}) {
   const cfg = resolveConfig(partialConfig);
+  let commissionService = null;
+  if (cfg.commissionPublication) {
+    if (typeof auth.accountLabel !== 'string' || !auth.accountLabel ||
+        auth.principal !== 'tunnel:' + auth.accountLabel) throw new TypeError('private Studio commission owner required');
+    commissionService = await createCommissionService({
+      configurationDigest: cfg.commissionPublication.configurationDigest,
+      accountLabel: auth.accountLabel, port: cfg.port,
+      gitConfig: cfg.gitPublish, workspaceConfig: cfg.repositoryWorkspaces,
+    });
+  }
+
   const lists = buildAllowlists(cfg);
 
   /** Every live session, keyed by MCP session id. */
@@ -1675,6 +1719,8 @@ export async function startGateway(partialConfig = {}, auth = {}) {
     }
     return next();
   });
+
+  if (commissionService) app.use(commissionService.middleware);
 
   /* 2. Unauthenticated health endpoints. No paths, no principals, no tokens. */
   app.get('/healthz', (_req, res) => {
@@ -2067,6 +2113,7 @@ export async function startGateway(partialConfig = {}, auth = {}) {
       clearInterval(sweeper);
       listeningAddress = null;
       await admitTail;
+      if (commissionService) await commissionService.close();
 
       // Close all remaining owned backends. Broken predecessors were already
       // closed before replacement.

@@ -1,0 +1,1308 @@
+{
+  "architecture": "arm64",
+  "generated_at": "2026-10-02T03:32:03.038472+00:00",
+  "input_sha256": {
+    "../../../integrations/acp_worker/dsh_dispatch_preflight.mjs": "9d828fa84a4215c465edccb2fe06e9695350c4d2eda583055837e351613f20ad",
+    "dispatch-binding.test.mjs": "62f7d741f2a9072343e2bea0bd299429e8fdd3a9f515aaaa137f15c5728e2299",
+    "donor-manifest.json": "badec9f979d283f8c508c83b8072f6f6de308a394a57afcbc1bb17daa0047192",
+    "loaded-runtime-preflight.test.mjs": "f30fa03a9a9f715916a10fd9ec59ce2ad3ca2ef3e362150afd5f9ef46571fd77",
+    "package-lock.json": "56c3f8fabcb8ac055c772a36a7cad15bae6d4ebf90b40e2bcecc19f8fb73fd98",
+    "package.json": "3ba0a43261b30f31583a359c16aaa3a90e24e74d1229a5aa40679e6ca149e530",
+    "prepare.py": "3dca0cec77bb068d9d7b7a3d386e0193da89c726150347d95f9e127e5fb6f42d",
+    "qualify-loaded-runtime.mjs": "49634d9dba0f50c3c2a2e0752961eade2acf5d8d7fc3f8a532dedee9b83fa06a",
+    "strict-dispatch-binding.patch": "9852126790e5305ef0fe6b0b81336b85c3a0b888cb0969b1fd4a8a0a9de97aa9",
+    "tsconfig.json": "001f949bce3428d8071a11c99e90cb7451b7989265e140251df147b1cb6881ad",
+    "verify.py": "b8497b4ef014503711d9a6da8b6c3cb38102a1dba8aad398fda1356931189068",
+    "vitest.config.mjs": "ba36a3ec8059072999908f2e9989b079988d774924e95b59dd863c80ec025718"
+  },
+  "loaded_runtime_preflight": {
+    "cases": [
+      "actual patched and enabled runtime qualifies before any model call",
+      "published ignores requested option",
+      "pristine ignores requested option",
+      "patched default remains disabled",
+      "patched explicitly disabled",
+      "denying everything cannot fake qualification",
+      "unrelated tool definitions and callbacks survive the preflight",
+      "preflight can run twice without leaked guards or wrappers",
+      "throwing existing middleware refuses and leaves no probe tools",
+      "already-aborted owner signal prevents all probe registration",
+      "owner cancellation during middleware prevents qualification",
+      "missing deadline signal fails closed before touching runtime",
+      "partial patch without guard enforcement is refused",
+      "partial patch without definition enforcement is refused",
+      "partial patch without result enforcement is refused",
+      "cancellation does not abandon an unsettled tool pipeline",
+      "cleanup failure blocks qualification after draining all own disposers"
+    ],
+    "defect_source_sha256": {
+      "definition": "134933d11d4a79be3f4632fde2c449ae31d1350c6a076762609fda8926736d78",
+      "guard": "e98a08eb0b6f98f6ea58e77c91b709c24bd6bcc1732c58fe1ca3499ed78b6afd",
+      "result": "dc5673694865c2f258e4f220a8d075368d5977dd96b64e09d2a6d104f97cd901"
+    },
+    "exit_code": 0,
+    "log": "loaded-preflight.log",
+    "log_sha256": "0fc2e2afb0eaa46ab94fda304b9d7d687dab62963319367f3e2f8afae3ba5f34",
+    "passed": 17,
+    "scope": "Actual ToolRuntime instance, in-memory probes, not installed ACP qualification",
+    "stderr_empty": true,
+    "tests": 17
+  },
+  "mutants": {
+    "remove_definition_check": {
+      "exit_code": 1,
+      "failed_cases": [
+        "replace-before-body-name-only",
+        "strict binding rejects own-scope shadowing during the wrapper"
+      ],
+      "killed": true,
+      "log": "mutant-definition.log",
+      "log_sha256": "29ccfbfdc6ee4cf73f7b7471289f4b22a1f9b0a00aea0766e24d6f3556f3a71d",
+      "mutant_sha256": "134933d11d4a79be3f4632fde2c449ae31d1350c6a076762609fda8926736d78",
+      "observations": {
+        "guard-throws-late": {
+          "counts": {
+            "approved": 0,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "Error: guard unavailable",
+                "type": "text"
+              }
+            ],
+            "error": {
+              "message": "guard unavailable"
+            },
+            "isError": true
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "guard-allow"
+          ]
+        },
+        "queued-revocation": {
+          "counts": {
+            "approved": 0,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "Error: MASTERMIND_BINDING_REFUSED",
+                "type": "text"
+              }
+            ],
+            "error": {
+              "message": "MASTERMIND_BINDING_REFUSED"
+            },
+            "isError": true
+          },
+          "trace": [
+            "guard-allow",
+            "queued-grant-revoked",
+            "wrapper-enter",
+            "guard-deny"
+          ]
+        },
+        "remove-during-body-post-value": {
+          "counts": {
+            "approved": 1,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "approved:rewritten",
+                "type": "text"
+              }
+            ],
+            "isError": false,
+            "value": "rewritten"
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "guard-allow",
+            "approved-body",
+            "removed"
+          ]
+        },
+        "replace-before-body": {
+          "counts": {
+            "approved": 0,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "Error: MASTERMIND_BINDING_REFUSED",
+                "type": "text"
+              }
+            ],
+            "error": {
+              "message": "MASTERMIND_BINDING_REFUSED"
+            },
+            "isError": true
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "replaced",
+            "guard-deny"
+          ]
+        },
+        "replace-before-body-name-only": {
+          "counts": {
+            "approved": 0,
+            "replacement": 1
+          },
+          "result": {
+            "content": [
+              {
+                "text": "replacement:original",
+                "type": "text"
+              }
+            ],
+            "isError": false,
+            "value": "original"
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "replaced",
+            "guard-allow",
+            "replacement-body"
+          ]
+        },
+        "replace-during-body-post-value": {
+          "counts": {
+            "approved": 1,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "approved:rewritten",
+                "type": "text"
+              }
+            ],
+            "isError": false,
+            "value": "rewritten"
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "guard-allow",
+            "approved-body",
+            "replaced"
+          ]
+        },
+        "replace-during-body-wrapper-value": {
+          "counts": {
+            "approved": 1,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "approved:wrapped",
+                "type": "text"
+              }
+            ],
+            "isError": false,
+            "value": "wrapped"
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "guard-allow",
+            "approved-body",
+            "replaced"
+          ]
+        },
+        "revoke-before-body": {
+          "counts": {
+            "approved": 0,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "Error: MASTERMIND_BINDING_REFUSED",
+                "type": "text"
+              }
+            ],
+            "error": {
+              "message": "MASTERMIND_BINDING_REFUSED"
+            },
+            "isError": true
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "revoked",
+            "guard-deny"
+          ]
+        }
+      },
+      "passed": 17,
+      "stderr_empty": true,
+      "tests": 19
+    },
+    "remove_guard_recheck": {
+      "exit_code": 1,
+      "failed_cases": [
+        "guard-throws-late",
+        "queued-revocation",
+        "revoke-before-body"
+      ],
+      "killed": true,
+      "log": "mutant-guard.log",
+      "log_sha256": "6b164218fb8e553834a3558d21da2bd0719797bd8624c1285a12f34881370447",
+      "mutant_sha256": "e98a08eb0b6f98f6ea58e77c91b709c24bd6bcc1732c58fe1ca3499ed78b6afd",
+      "observations": {
+        "guard-throws-late": {
+          "counts": {
+            "approved": 1,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "approved:original",
+                "type": "text"
+              }
+            ],
+            "isError": false,
+            "value": "original"
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "approved-body"
+          ]
+        },
+        "queued-revocation": {
+          "counts": {
+            "approved": 1,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "approved:original",
+                "type": "text"
+              }
+            ],
+            "isError": false,
+            "value": "original"
+          },
+          "trace": [
+            "guard-allow",
+            "queued-grant-revoked",
+            "wrapper-enter",
+            "approved-body"
+          ]
+        },
+        "remove-during-body-post-value": {
+          "counts": {
+            "approved": 1,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "approved:rewritten",
+                "type": "text"
+              }
+            ],
+            "isError": false,
+            "value": "rewritten"
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "approved-body",
+            "removed"
+          ]
+        },
+        "replace-before-body": {
+          "counts": {
+            "approved": 0,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "Error: TOOL_DISPATCH_BINDING_CHANGED",
+                "type": "text"
+              }
+            ],
+            "error": {
+              "message": "TOOL_DISPATCH_BINDING_CHANGED"
+            },
+            "isError": true
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "replaced"
+          ]
+        },
+        "replace-before-body-name-only": {
+          "counts": {
+            "approved": 0,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "Error: TOOL_DISPATCH_BINDING_CHANGED",
+                "type": "text"
+              }
+            ],
+            "error": {
+              "message": "TOOL_DISPATCH_BINDING_CHANGED"
+            },
+            "isError": true
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "replaced"
+          ]
+        },
+        "replace-during-body-post-value": {
+          "counts": {
+            "approved": 1,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "approved:rewritten",
+                "type": "text"
+              }
+            ],
+            "isError": false,
+            "value": "rewritten"
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "approved-body",
+            "replaced"
+          ]
+        },
+        "replace-during-body-wrapper-value": {
+          "counts": {
+            "approved": 1,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "approved:wrapped",
+                "type": "text"
+              }
+            ],
+            "isError": false,
+            "value": "wrapped"
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "approved-body",
+            "replaced"
+          ]
+        },
+        "revoke-before-body": {
+          "counts": {
+            "approved": 1,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "approved:original",
+                "type": "text"
+              }
+            ],
+            "isError": false,
+            "value": "original"
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "revoked",
+            "approved-body"
+          ]
+        }
+      },
+      "passed": 16,
+      "stderr_empty": true,
+      "tests": 19
+    },
+    "remove_result_binding": {
+      "exit_code": 1,
+      "failed_cases": [
+        "remove-during-body-post-value",
+        "replace-during-body-post-value",
+        "replace-during-body-wrapper-value"
+      ],
+      "killed": true,
+      "log": "mutant-result.log",
+      "log_sha256": "4fc709bd8c71cac9d08bff79366df303f31f56e6b2ee6cdeb0e4664a661a097f",
+      "mutant_sha256": "dc5673694865c2f258e4f220a8d075368d5977dd96b64e09d2a6d104f97cd901",
+      "observations": {
+        "guard-throws-late": {
+          "counts": {
+            "approved": 0,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "Error: guard unavailable",
+                "type": "text"
+              }
+            ],
+            "error": {
+              "message": "guard unavailable"
+            },
+            "isError": true
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "guard-allow"
+          ]
+        },
+        "queued-revocation": {
+          "counts": {
+            "approved": 0,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "Error: MASTERMIND_BINDING_REFUSED",
+                "type": "text"
+              }
+            ],
+            "error": {
+              "message": "MASTERMIND_BINDING_REFUSED"
+            },
+            "isError": true
+          },
+          "trace": [
+            "guard-allow",
+            "queued-grant-revoked",
+            "wrapper-enter",
+            "guard-deny"
+          ]
+        },
+        "remove-during-body-post-value": {
+          "counts": {
+            "approved": 1,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "Error: unknown tool \"mcp__fixture__read\"",
+                "type": "text"
+              }
+            ],
+            "error": {
+              "info": {
+                "code": "UNKNOWN_TOOL",
+                "name": "ToolNotFoundError"
+              },
+              "message": "unknown tool \"mcp__fixture__read\""
+            },
+            "isError": true
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "guard-allow",
+            "approved-body",
+            "removed"
+          ]
+        },
+        "replace-before-body": {
+          "counts": {
+            "approved": 0,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "Error: MASTERMIND_BINDING_REFUSED",
+                "type": "text"
+              }
+            ],
+            "error": {
+              "message": "MASTERMIND_BINDING_REFUSED"
+            },
+            "isError": true
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "replaced",
+            "guard-deny"
+          ]
+        },
+        "replace-before-body-name-only": {
+          "counts": {
+            "approved": 0,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "Error: TOOL_DISPATCH_BINDING_CHANGED",
+                "type": "text"
+              }
+            ],
+            "error": {
+              "message": "TOOL_DISPATCH_BINDING_CHANGED"
+            },
+            "isError": true
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "replaced",
+            "guard-allow"
+          ]
+        },
+        "replace-during-body-post-value": {
+          "counts": {
+            "approved": 1,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "replacement:rewritten",
+                "type": "text"
+              }
+            ],
+            "isError": false,
+            "value": "rewritten"
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "guard-allow",
+            "approved-body",
+            "replaced"
+          ]
+        },
+        "replace-during-body-wrapper-value": {
+          "counts": {
+            "approved": 1,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "replacement:wrapped",
+                "type": "text"
+              }
+            ],
+            "isError": false,
+            "value": "wrapped"
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "guard-allow",
+            "approved-body",
+            "replaced"
+          ]
+        },
+        "revoke-before-body": {
+          "counts": {
+            "approved": 0,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "Error: MASTERMIND_BINDING_REFUSED",
+                "type": "text"
+              }
+            ],
+            "error": {
+              "message": "MASTERMIND_BINDING_REFUSED"
+            },
+            "isError": true
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "revoked",
+            "guard-deny"
+          ]
+        }
+      },
+      "passed": 16,
+      "stderr_empty": true,
+      "tests": 19
+    }
+  },
+  "node": "v26.5.0",
+  "node_sha256": "70851490e028b3d699a8d6d4e1de909af2a989359ae807974c92af9c6580a8e8",
+  "platform": "Darwin",
+  "provider_calls": 0,
+  "python": "3.14.7",
+  "schema": "mastermind.dsh_dispatch_verification.v1",
+  "success": true,
+  "supply": {
+    "commit": "4878cdabd87d4041bdaff61d04c966883b9fd07a",
+    "patched_sha256": "72bf073000032fa129dc3ee3521c8848e489449b42c07ddc8bbd7b93fc99ed08",
+    "runtime_started": false,
+    "source_files": 14
+  },
+  "targeted": {
+    "patched": {
+      "exit_code": 0,
+      "failed_cases": [],
+      "log": "patched-targeted.log",
+      "log_sha256": "788ea712d2b34e8a6dbbf2f6c84bb0fceb1d8414f936f562248d4142875ced80",
+      "observations": {
+        "guard-throws-late": {
+          "counts": {
+            "approved": 0,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "Error: guard unavailable",
+                "type": "text"
+              }
+            ],
+            "error": {
+              "message": "guard unavailable"
+            },
+            "isError": true
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "guard-allow"
+          ]
+        },
+        "queued-revocation": {
+          "counts": {
+            "approved": 0,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "Error: MASTERMIND_BINDING_REFUSED",
+                "type": "text"
+              }
+            ],
+            "error": {
+              "message": "MASTERMIND_BINDING_REFUSED"
+            },
+            "isError": true
+          },
+          "trace": [
+            "guard-allow",
+            "queued-grant-revoked",
+            "wrapper-enter",
+            "guard-deny"
+          ]
+        },
+        "remove-during-body-post-value": {
+          "counts": {
+            "approved": 1,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "approved:rewritten",
+                "type": "text"
+              }
+            ],
+            "isError": false,
+            "value": "rewritten"
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "guard-allow",
+            "approved-body",
+            "removed"
+          ]
+        },
+        "replace-before-body": {
+          "counts": {
+            "approved": 0,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "Error: MASTERMIND_BINDING_REFUSED",
+                "type": "text"
+              }
+            ],
+            "error": {
+              "message": "MASTERMIND_BINDING_REFUSED"
+            },
+            "isError": true
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "replaced",
+            "guard-deny"
+          ]
+        },
+        "replace-before-body-name-only": {
+          "counts": {
+            "approved": 0,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "Error: TOOL_DISPATCH_BINDING_CHANGED",
+                "type": "text"
+              }
+            ],
+            "error": {
+              "message": "TOOL_DISPATCH_BINDING_CHANGED"
+            },
+            "isError": true
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "replaced",
+            "guard-allow"
+          ]
+        },
+        "replace-during-body-post-value": {
+          "counts": {
+            "approved": 1,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "approved:rewritten",
+                "type": "text"
+              }
+            ],
+            "isError": false,
+            "value": "rewritten"
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "guard-allow",
+            "approved-body",
+            "replaced"
+          ]
+        },
+        "replace-during-body-wrapper-value": {
+          "counts": {
+            "approved": 1,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "approved:wrapped",
+                "type": "text"
+              }
+            ],
+            "isError": false,
+            "value": "wrapped"
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "guard-allow",
+            "approved-body",
+            "replaced"
+          ]
+        },
+        "revoke-before-body": {
+          "counts": {
+            "approved": 0,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "Error: MASTERMIND_BINDING_REFUSED",
+                "type": "text"
+              }
+            ],
+            "error": {
+              "message": "MASTERMIND_BINDING_REFUSED"
+            },
+            "isError": true
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "revoked",
+            "guard-deny"
+          ]
+        }
+      },
+      "passed": 19,
+      "stderr_empty": true,
+      "tests": 19
+    },
+    "published_baseline": {
+      "exit_code": 1,
+      "failed_cases": [
+        "guard-throws-late",
+        "queued-revocation",
+        "remove-during-body-post-value",
+        "replace-before-body",
+        "replace-before-body-name-only",
+        "replace-during-body-post-value",
+        "replace-during-body-wrapper-value",
+        "revoke-before-body",
+        "strict binding rejects own-scope shadowing during the wrapper"
+      ],
+      "log": "baseline-npm.log",
+      "log_sha256": "fe9a035b2d76cec082ac96c658038f46b84b9cb52929220d7b792fa075ce8c04",
+      "observations": {
+        "guard-throws-late": {
+          "counts": {
+            "approved": 1,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "approved:original",
+                "type": "text"
+              }
+            ],
+            "isError": false,
+            "value": "original"
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "approved-body"
+          ]
+        },
+        "queued-revocation": {
+          "counts": {
+            "approved": 1,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "approved:original",
+                "type": "text"
+              }
+            ],
+            "isError": false,
+            "value": "original"
+          },
+          "trace": [
+            "guard-allow",
+            "queued-grant-revoked",
+            "wrapper-enter",
+            "approved-body"
+          ]
+        },
+        "remove-during-body-post-value": {
+          "counts": {
+            "approved": 1,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "Error: unknown tool \"mcp__fixture__read\"",
+                "type": "text"
+              }
+            ],
+            "error": {
+              "info": {
+                "code": "UNKNOWN_TOOL",
+                "name": "ToolNotFoundError"
+              },
+              "message": "unknown tool \"mcp__fixture__read\""
+            },
+            "isError": true
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "approved-body",
+            "removed"
+          ]
+        },
+        "replace-before-body": {
+          "counts": {
+            "approved": 0,
+            "replacement": 1
+          },
+          "result": {
+            "content": [
+              {
+                "text": "replacement:original",
+                "type": "text"
+              }
+            ],
+            "isError": false,
+            "value": "original"
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "replaced",
+            "replacement-body"
+          ]
+        },
+        "replace-before-body-name-only": {
+          "counts": {
+            "approved": 0,
+            "replacement": 1
+          },
+          "result": {
+            "content": [
+              {
+                "text": "replacement:original",
+                "type": "text"
+              }
+            ],
+            "isError": false,
+            "value": "original"
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "replaced",
+            "replacement-body"
+          ]
+        },
+        "replace-during-body-post-value": {
+          "counts": {
+            "approved": 1,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "replacement:rewritten",
+                "type": "text"
+              }
+            ],
+            "isError": false,
+            "value": "rewritten"
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "approved-body",
+            "replaced"
+          ]
+        },
+        "replace-during-body-wrapper-value": {
+          "counts": {
+            "approved": 1,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "replacement:wrapped",
+                "type": "text"
+              }
+            ],
+            "isError": false,
+            "value": "wrapped"
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "approved-body",
+            "replaced"
+          ]
+        },
+        "revoke-before-body": {
+          "counts": {
+            "approved": 1,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "approved:original",
+                "type": "text"
+              }
+            ],
+            "isError": false,
+            "value": "original"
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "revoked",
+            "approved-body"
+          ]
+        }
+      },
+      "passed": 10,
+      "stderr_empty": true,
+      "tests": 19
+    },
+    "source_baseline": {
+      "exit_code": 1,
+      "failed_cases": [
+        "guard-throws-late",
+        "queued-revocation",
+        "remove-during-body-post-value",
+        "replace-before-body",
+        "replace-before-body-name-only",
+        "replace-during-body-post-value",
+        "replace-during-body-wrapper-value",
+        "revoke-before-body",
+        "strict binding rejects own-scope shadowing during the wrapper"
+      ],
+      "log": "baseline-source.log",
+      "log_sha256": "6f3d0e268e46e9f07b3ff258e4e7b5df4aa98f6f215cf253bf3ae38d2fb8f1b6",
+      "observations": {
+        "guard-throws-late": {
+          "counts": {
+            "approved": 1,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "approved:original",
+                "type": "text"
+              }
+            ],
+            "isError": false,
+            "value": "original"
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "approved-body"
+          ]
+        },
+        "queued-revocation": {
+          "counts": {
+            "approved": 1,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "approved:original",
+                "type": "text"
+              }
+            ],
+            "isError": false,
+            "value": "original"
+          },
+          "trace": [
+            "guard-allow",
+            "queued-grant-revoked",
+            "wrapper-enter",
+            "approved-body"
+          ]
+        },
+        "remove-during-body-post-value": {
+          "counts": {
+            "approved": 1,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "Error: unknown tool \"mcp__fixture__read\"",
+                "type": "text"
+              }
+            ],
+            "error": {
+              "info": {
+                "code": "UNKNOWN_TOOL",
+                "name": "ToolNotFoundError"
+              },
+              "message": "unknown tool \"mcp__fixture__read\""
+            },
+            "isError": true
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "approved-body",
+            "removed"
+          ]
+        },
+        "replace-before-body": {
+          "counts": {
+            "approved": 0,
+            "replacement": 1
+          },
+          "result": {
+            "content": [
+              {
+                "text": "replacement:original",
+                "type": "text"
+              }
+            ],
+            "isError": false,
+            "value": "original"
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "replaced",
+            "replacement-body"
+          ]
+        },
+        "replace-before-body-name-only": {
+          "counts": {
+            "approved": 0,
+            "replacement": 1
+          },
+          "result": {
+            "content": [
+              {
+                "text": "replacement:original",
+                "type": "text"
+              }
+            ],
+            "isError": false,
+            "value": "original"
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "replaced",
+            "replacement-body"
+          ]
+        },
+        "replace-during-body-post-value": {
+          "counts": {
+            "approved": 1,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "replacement:rewritten",
+                "type": "text"
+              }
+            ],
+            "isError": false,
+            "value": "rewritten"
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "approved-body",
+            "replaced"
+          ]
+        },
+        "replace-during-body-wrapper-value": {
+          "counts": {
+            "approved": 1,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "replacement:wrapped",
+                "type": "text"
+              }
+            ],
+            "isError": false,
+            "value": "wrapped"
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "approved-body",
+            "replaced"
+          ]
+        },
+        "revoke-before-body": {
+          "counts": {
+            "approved": 1,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "approved:original",
+                "type": "text"
+              }
+            ],
+            "isError": false,
+            "value": "original"
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "revoked",
+            "approved-body"
+          ]
+        }
+      },
+      "passed": 10,
+      "stderr_empty": true,
+      "tests": 19
+    }
+  },
+  "test_leaf_effects": "IN_MEMORY_ONLY",
+  "typecheck": {
+    "exit_code": 0,
+    "log": "typecheck.log",
+    "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_empty": true
+  },
+  "upstream": {
+    "patched": {
+      "exit_code": 0,
+      "failed": 0,
+      "log": "upstream-patched.log",
+      "log_sha256": "84e61293e93d7fd493cac1ee05255ebb1cef3074c05b03918439748f3c70f544",
+      "passed": 178,
+      "report_sha256": "ae5b0b0cbaab42e47ac4553fdcc1545efe9aabbf8c80698230c7f87eaccacf2d",
+      "stderr_empty": true,
+      "tests": 178
+    },
+    "pristine": {
+      "exit_code": 0,
+      "failed": 0,
+      "log": "upstream-pristine.log",
+      "log_sha256": "95e53459c5199ef7accdd11a97691f6a1155a00e10ee5b736683360344acbcd4",
+      "passed": 178,
+      "report_sha256": "f57639e370f09893910300a79da2047b5f9c18afeb901b05b80409b923a42f6d",
+      "stderr_empty": true,
+      "tests": 178
+    }
+  }
+}

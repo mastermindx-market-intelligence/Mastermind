@@ -2,7 +2,8 @@
 # Credential-free host preparation for the private A2 Agent Relay.
 #
 # This source-owned entry point creates or verifies only the fixed service
-# principal and non-secret prerequisite directories. It never enrolls a token,
+# principal, non-secret prerequisite directories and disabled launchd override.
+# It refuses a loaded Relay and never enrolls a token,
 # writes Relay configuration or a plist, or loads and starts a service.
 set -euo pipefail
 umask 077
@@ -14,6 +15,8 @@ RELAY_HOME="$RUNTIME_ROOT/home"
 TOKEN_PATH="$CONFIG_ROOT/agent-relay.token"
 CONFIG_PATH="$CONFIG_ROOT/agent-relay.json"
 PLIST_PATH="/Library/LaunchDaemons/com.mastermind.executive.agent-relay.plist"
+
+RELAY_LABEL="com.mastermind.executive.agent-relay"
 
 RELAY_USER="_mastermind_agent_relay"
 RELAY_GROUP="_mastermind_agent_relay"
@@ -195,17 +198,31 @@ preflight_directory() {
   fi
 }
 
+assert_relay_unloaded() {
+  local status=0
+  /bin/launchctl print "system/$RELAY_LABEL" >/dev/null 2>&1 || status=$?
+  [ "$status" -eq 113 ] || refuse "Agent Relay must be proven unloaded before enrollment"
+}
+
+
 assert_exec_identity
 for reserved in "$TOKEN_PATH" "$CONFIG_PATH" "$PLIST_PATH"; do
   [ ! -e "$reserved" ] && [ ! -L "$reserved" ] \
     || refuse "existing enrollment or service artifact must be reconciled first"
 done
+assert_relay_unloaded
 preflight_directory "$SYSTEM_ROOT" 0 0 755
 preflight_directory "$CONFIG_ROOT" 0 0 755
 preflight_directory "$RUNTIME_ROOT" 0 0 711
 preflight_directory "$RELAY_HOME" "$RELAY_UID" "$RELAY_GID" 700
 ensure_numeric_unused Groups PrimaryGroupID "$RELAY_GID" "$RELAY_GROUP"
 ensure_numeric_unused Users UniqueID "$RELAY_UID" "$RELAY_USER"
+
+# Installed reviewed control/worker configs must exist before host mutation.
+# The canonical global transaction records any uncertain disable; this script
+# never retries that effect. Reconcile its exact marker through the same owner.
+/bin/bash "$RELEASE_ROOT/ops/executive_os/autonomy-control.sh" \
+  a2-disable-prepare --expected-sha "$RELEASE_SHA"
 
 ensure_group
 ensure_user
@@ -219,4 +236,6 @@ ensure_directory "$CONFIG_ROOT" root wheel 0 0 755
 ensure_directory "$RUNTIME_ROOT" root wheel 0 0 711
 ensure_directory "$RELAY_HOME" "$RELAY_USER" "$RELAY_GROUP" "$RELAY_UID" "$RELAY_GID" 700
 
-/bin/echo "A2 Agent Relay host preparation complete: principal and non-secret directories only"
+assert_relay_unloaded
+
+/bin/echo "A2 Agent Relay host preparation complete: exact principal, directories and disabled unloaded Relay"

@@ -9,9 +9,9 @@ These candidate pins require exact-source independent review before merge.
 REVIEWED_PATH = 'control_plane/executive_release_factory.py'
 REVIEWED_LITERAL_COUNT = 3
 REVIEWED_ANCHORS = {'_Reader': {'node_type': 'ClassDef',
-             'ast_sha256': '59aa65b283ed49dec83ca29867fee3439b766c826031ca4951aa302012ac626f',
+             'ast_sha256': 'c231d737b4f5f9be13d48364a9762108ae9f0d8ad3a01313af534acbd00cedc4',
              'sites': ((('body',
-                         5,
+                         6,
                          'body',
                          5,
                          'body',
@@ -27,6 +27,12 @@ REVIEWED_ANCHORS = {'_Reader': {'node_type': 'ClassDef',
                         512,
                         '512'),)},
  '_resident': {'node_type': 'FunctionDef',
-               'ast_sha256': '429b84b69c05e23026d3f7c4b55b7d24e3bbf638254a73859d1e2b2eb30ccf08',
-               'sites': ((('body', 3, 'iter', 'elts', 3, 'elts', 4), 'int', 450, '450'),
-                         (('body', 23, 'test', 'values', 2, 'comparators', 0), 'int', 450, '450'))}}
+               'ast_sha256': '64c54eeb8ff5bcea770411652100afdc84e5d3bf31736f2d0e352af2734981c2',
+               'sites': ((('body', 3, 'iter', 'elts', 3, 'elts', 4),
+                          'int',
+                          450,
+                          '450'),
+                         (('body', 23, 'test', 'values', 2, 'comparators', 0),
+                          'int',
+                          450,
+                          '450'))}}

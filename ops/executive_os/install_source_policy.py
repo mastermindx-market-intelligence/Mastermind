@@ -37,9 +37,32 @@ def _require_sha(value: str, label: str) -> str:
 
 
 def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    repo = Path(repo)
+    try:
+        canonical = repo.resolve(strict=True)
+    except OSError as exc:
+        raise InstallSourcePolicyError("could not inspect source checkout") from exc
+    trust_value = str(canonical)
+    # Root must inspect the explicitly selected operator-owned checkout without
+    # requiring persistent/global Git trust. Keep the exception command-scoped
+    # and exact; wildcard or indirect aliases would widen that trust boundary.
+    if (
+        canonical != repo
+        or "*" in trust_value
+        or any(ord(char) < 32 for char in trust_value)
+    ):
+        raise InstallSourcePolicyError("source checkout path is unsafe for exact Git trust")
     try:
         completed = subprocess.run(
-            ["/usr/bin/git", "--no-optional-locks", "-C", str(repo), *args],
+            [
+                "/usr/bin/git",
+                "--no-optional-locks",
+                "-c",
+                f"safe.directory={trust_value}",
+                "-C",
+                trust_value,
+                *args,
+            ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -95,6 +118,22 @@ def _require_checkout(
         raise InstallSourcePolicyError(
             f"{label} origin/master differs from the attested protected master SHA"
         )
+
+
+def validate_acceptance_source(*, source_repo: Path, expected_sha: str) -> str:
+    """Return the tree of one clean exact protected source for host acceptance.
+
+    Acceptance shares the installer's command-scoped ownership exception; it
+    does not gain the separate frozen-ancestor install mode or persistent trust.
+    """
+    validate_install_source(
+        source_repo=source_repo,
+        expected_sha=expected_sha,
+        protected_master_sha=None,
+        allow_frozen_accepted_ancestor=False,
+    )
+    tree = _git(source_repo, "rev-parse", f"{expected_sha}^{{tree}}").stdout.strip()
+    return _require_sha(tree, "source tree SHA")
 
 
 def validate_install_source(

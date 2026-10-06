@@ -98,7 +98,7 @@ REVIEWED_ANCHORS = {'_LAUNCHD_ROLES': {'node_type': 'Assign',
                          'sites': ((('body', 3, 'body', 1, 'test', 'comparators', 0), 'int', 450, '450'),
                                    (('body', 3, 'orelse', 1, 'test', 'comparators', 0), 'int', 458, '458'))},
  '_inventory_python_base': {'node_type': 'FunctionDef',
-                            'ast_sha256': '596652feb54da86955aedf19d7d4e313205963daaf3d0f2f272c2e0a5269a1b1',
+                            'ast_sha256': 'fa4c9c3d13b53e71660a28e26ffd76824c2dd0574a98426cac4676d4a714f3d8',
                             'sites': ((('body',
                                         5,
                                         'body',
@@ -171,8 +171,15 @@ def reviewed_literal_spans(path: str, source: str):
     """
     if type(source) is not str:
         return ()
+    reviewed_container = None
     if path == REVIEWED_PATH:
         reviewed_anchors = REVIEWED_ANCHORS
+    elif path == "control_plane/executive_service.py":
+        from tests.executive_company_identity_review import (
+            REVIEWED_ANCHORS as company_anchors, REVIEWED_CONTAINER,
+        )
+        reviewed_anchors = company_anchors
+        reviewed_container = REVIEWED_CONTAINER
     elif path == "control_plane/executive_release_factory.py":
         from tests.executive_release_identity_review import REVIEWED_ANCHORS as release_anchors
         reviewed_anchors = release_anchors
@@ -181,6 +188,14 @@ def reviewed_literal_spans(path: str, source: str):
             REVIEWED_ANCHORS as release_owner_anchors,
         )
         reviewed_anchors = release_owner_anchors
+    elif path == "control_plane/executive_release_observation.py":
+        from tests.executive_release_observation_identity_review import (
+            REVIEWED_ANCHORS as release_observation_anchors,
+        )
+        reviewed_anchors = release_observation_anchors
+    elif path == "ops/executive_os/a2_agent_relay_enrollment.py":
+        from tests.executive_a2_identity_review import REVIEWED_ANCHORS as a2_anchors
+        reviewed_anchors = a2_anchors
     else:
         return ()
     # str.splitlines recognizes these separators, while Python source/AST
@@ -192,8 +207,14 @@ def reviewed_literal_spans(path: str, source: str):
     except (SyntaxError, ValueError, RecursionError):
         return ()
     lines = source.splitlines(keepends=True)
+    nodes = tree.body
+    if reviewed_container is not None:
+        containers = [node for node in nodes if _anchor_name(node) == reviewed_container]
+        if len(containers) != 1 or not isinstance(containers[0], ast.ClassDef):
+            return ()
+        nodes = containers[0].body
     anchors = {}
-    for node in tree.body:
+    for node in nodes:
         name = _anchor_name(node)
         if name is not None:
             anchors.setdefault(name, []).append(node)

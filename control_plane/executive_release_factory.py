@@ -7,7 +7,7 @@ The accepted input contract is R6, SHA-256
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import hashlib
 import hmac
 import json
@@ -19,6 +19,7 @@ import selectors
 import stat
 import subprocess
 import sys
+from sys import exc_info as _exc_info
 import time
 
 from control_plane import executive_release_contract as contract
@@ -41,9 +42,14 @@ _BROKER_CONFIG = _CONFIG / "privileged-broker.json"
 _STAGING = Path("/Library/Application Support/MastermindExecutive/release-staging")
 _DEPENDENCIES = (
     "control_plane/executive_release_factory.py",
+    "control_plane/executive_release_observation.py",
+    "control_plane/executive_installed_peer.py",
+    "control_plane/fs_security.py",
+    "ops/executive_os/release_owner_resident_inputs.py",
     "control_plane/executive_release_owner.py",
     "control_plane/executive_release_token.py",
     "control_plane/executive_release_contract.py",
+    "control_plane/executive_release_actuator.py",
     "control_plane/executive_authority.py",
     "control_plane/executive_release_consumer.py",
     "control_plane/executive_privileged_broker.py",
@@ -99,10 +105,22 @@ class _File:
                 "ancestors": [list(row[:5]) for row in self.ancestors]}
 
 
+def _bounded_endpoint(deadline_monotonic_ns, local_budget_ns):
+    now = time.monotonic_ns()
+    if deadline_monotonic_ns is not None and (
+            type(deadline_monotonic_ns) is not int
+            or not 0 < deadline_monotonic_ns <= (1 << 63) - 1):
+        _unavailable()
+    endpoint = min(now + local_budget_ns, deadline_monotonic_ns) if deadline_monotonic_ns is not None else now + local_budget_ns
+    if now >= endpoint:
+        _unavailable()
+    return endpoint, now
+
+
 class _Reader:
     """One bounded observation, with all parent descriptors held through read."""
 
-    def __init__(self, *, resident=False):
+    def __init__(self, *, resident=False, deadline_monotonic_ns=None):
         if sys.platform != "darwin":
             _unavailable()
         for name in ("O_NOFOLLOW", "O_CLOEXEC", "O_NONBLOCK", "O_DIRECTORY"):
@@ -110,35 +128,57 @@ class _Reader:
                 _unavailable()
         if os.open not in os.supports_dir_fd or os.stat not in os.supports_dir_fd:
             _unavailable()
-        self.deadline = time.monotonic() + 5
+        self.deadline_monotonic_ns, self.last_monotonic_ns = _bounded_endpoint(
+            deadline_monotonic_ns, 5_000_000_000)
+        self.deadline = self.deadline_monotonic_ns / 1_000_000_000
         self.maximum = (32 if resident else 544) * 1024 * 1024
-        self.max_leaves = 20 if resident else 32
+        # Four newly verified dependency files, with no unbounded traversal.
+        self.max_leaves = 24 if resident else 36
         self.bytes = 0
         self.leaves = 0
 
     def check(self):
-        if time.monotonic() >= self.deadline:
+        now = time.monotonic_ns()
+        if now < self.last_monotonic_ns or now >= self.deadline_monotonic_ns:
             _unavailable()
+        self.last_monotonic_ns = now
+
+    def _io(self, function, *args, **kwargs):
+        # Check before every new OS operation. Acquired handles are registered
+        # by the caller before the next check so expiry cannot leak them.
+        self.check()
+        return function(*args, **kwargs)
 
     def names(self, descriptor, expected):
         names = []
-        with os.scandir(descriptor) as entries:
-            for entry in entries:
-                self.check()
+        entries = self._io(os.scandir, descriptor)
+        try:
+            while True:
+                try:
+                    entry = self._io(next, entries)
+                except StopIteration:
+                    break
                 names.append(entry.name)
                 if len(names) > len(expected):
                     _unavailable()
+        finally:
+            primary = _exc_info()[0] is not None
+            try:
+                entries.close()
+            except BaseException:
+                if not primary:
+                    raise
+        self.check()
         return sorted(names)
 
-    @staticmethod
-    def _trusted(info, descriptor, *, directory=False, mode=None, gid=0):
+    def _trusted(self, info, descriptor, *, directory=False, mode=None, gid=0):
         expected = stat.S_ISDIR if directory else stat.S_ISREG
         if (not expected(info.st_mode) or info.st_uid != 0
                 or info.st_mode & 0o022
                 or ((not directory or mode is not None) and info.st_gid != gid)
                 or (mode is not None and stat.S_IMODE(info.st_mode) != mode)
                 or (not directory and info.st_nlink != 1)
-                or has_macos_acl("", expected_identity=info, descriptor=descriptor)):
+                or self._io(has_macos_acl, "", expected_identity=info, descriptor=descriptor)):
             _unavailable()
 
     def observe(self, path, *, maximum, mode=None, gid=0, retain=True,
@@ -152,18 +192,18 @@ class _Reader:
         walked = []
         try:
             flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_DIRECTORY
-            parent = os.open("/", flags)
+            parent = self._io(os.open, "/", flags)
             handles.append(parent)
-            root = os.fstat(parent)
+            root = self._io(os.fstat, parent)
             self._trusted(root, parent, directory=True)
             ancestors = [_metadata(root)]
             prefix = Path("/")
             for component in path.parts[1:-1]:
                 self.check()
-                before = os.stat(component, dir_fd=parent, follow_symlinks=False)
-                descriptor = os.open(component, flags, dir_fd=parent)
+                before = self._io(os.stat, component, dir_fd=parent, follow_symlinks=False)
+                descriptor = self._io(os.open, component, flags, dir_fd=parent)
                 handles.append(descriptor)
-                after = os.fstat(descriptor)
+                after = self._io(os.fstat, descriptor)
                 if _metadata(before) != _metadata(after):
                     _unavailable()
                 prefix /= component
@@ -174,15 +214,15 @@ class _Reader:
                 ancestors.append(_metadata(after))
                 parent = descriptor
             leaf = path.name
-            before = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
+            before = self._io(os.stat, leaf, dir_fd=parent, follow_symlinks=False)
             if not (stat.S_ISDIR if directory else stat.S_ISREG)(before.st_mode):
                 _unavailable()
             leaf_flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
             if directory:
                 leaf_flags |= os.O_DIRECTORY
-            descriptor = os.open(leaf, leaf_flags, dir_fd=parent)
+            descriptor = self._io(os.open, leaf, leaf_flags, dir_fd=parent)
             handles.append(descriptor)
-            opened = os.fstat(descriptor)
+            opened = self._io(os.fstat, descriptor)
             if _metadata(before) != _metadata(opened):
                 _unavailable()
             self._trusted(opened, descriptor, directory=directory, mode=mode, gid=gid)
@@ -204,7 +244,7 @@ class _Reader:
                 parts, count, hasher = [], 0, hashlib.sha256()
                 while True:
                     self.check()
-                    chunk = os.read(descriptor, min(1024 * 1024, maximum + 1 - count))
+                    chunk = self._io(os.read, descriptor, min(1024 * 1024, maximum + 1 - count))
                     if not chunk:
                         break
                     count += len(chunk)
@@ -219,70 +259,105 @@ class _Reader:
                 raw = b"".join(parts) if retain else None
                 digest = hasher.hexdigest()
             self.check()
-            if (_metadata(os.fstat(descriptor)) != identity
-                    or _metadata(os.stat(leaf, dir_fd=parent, follow_symlinks=False)) != identity):
+            if (_metadata(self._io(os.fstat, descriptor)) != identity
+                    or _metadata(self._io(os.stat, leaf, dir_fd=parent, follow_symlinks=False)) != identity):
                 _unavailable()
             if directory and self.names(descriptor, names) != first_names:
                 _unavailable()
             for previous, component, handle, original in reversed(walked):
-                if (_metadata(os.fstat(handle)) != original
-                        or _metadata(os.stat(component, dir_fd=previous,
+                if (_metadata(self._io(os.fstat, handle)) != original
+                        or _metadata(self._io(os.stat, component, dir_fd=previous,
                                              follow_symlinks=False)) != original):
                     _unavailable()
-            if _metadata(os.fstat(handles[0])) != ancestors[0]:
+            if _metadata(self._io(os.fstat, handles[0])) != ancestors[0]:
                 _unavailable()
             self.check()
-            return _File(raw, digest, identity, tuple(ancestors))
+            result = _File(raw, digest, identity, tuple(ancestors))
+        except ReleaseConsumerError:
+            raise
         except (OSError, ValueError, RuntimeError):
             _unavailable()
         finally:
+            primary = _exc_info()[0] is not None
+            cleanup_error = None
             for descriptor in reversed(handles):
-                os.close(descriptor)
+                try:
+                    os.close(descriptor)
+                except BaseException as error:
+                    if cleanup_error is None:
+                        cleanup_error = error
+            if cleanup_error is not None and not primary:
+                raise cleanup_error
+        self.check()
+        return result
 
 
-def _boot_id():
-    deadline = time.monotonic() + 2
+def _boot_id(*, deadline_monotonic_ns=None):
+    endpoint, last = _bounded_endpoint(deadline_monotonic_ns, 2_000_000_000)
+
+    def remaining():
+        nonlocal last
+        now = time.monotonic_ns()
+        if now < last or now >= endpoint:
+            _unavailable()
+        last = now
+        return (endpoint - now) / 1_000_000_000
+
+    remaining()
     process = subprocess.Popen(["/usr/sbin/sysctl", "-n", "kern.bootsessionuuid"],
         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
         cwd="/", env={"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LANG": "C", "LC_ALL": "C"})
     payload = bytearray()
+    selector = None
     try:
+        remaining()
         if process.stdout is None:
             _unavailable()
         descriptor = process.stdout.fileno()
+        remaining()
         os.set_blocking(descriptor, False)
-        with selectors.DefaultSelector() as selector:
-            selector.register(descriptor, selectors.EVENT_READ)
-            while True:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0 or len(payload) > 4096:
-                    _unavailable()
-                if not selector.select(remaining):
-                    _unavailable()
-                try:
-                    block = os.read(descriptor, 4097 - len(payload))
-                except BlockingIOError:
-                    continue
-                if not block:
-                    break
-                payload.extend(block)
-        remaining = deadline - time.monotonic()
-        if remaining <= 0 or process.wait(timeout=remaining) != 0 or not 0 < len(payload) <= 4096:
+        remaining()
+        selector = selectors.DefaultSelector()
+        remaining()
+        selector.register(descriptor, selectors.EVENT_READ)
+        while True:
+            wait = remaining()
+            if len(payload) > 4096 or not selector.select(wait):
+                _unavailable()
+            remaining()
+            try:
+                block = os.read(descriptor, 4097 - len(payload))
+            except BlockingIOError:
+                continue
+            remaining()
+            if not block:
+                break
+            payload.extend(block)
+        if process.wait(timeout=remaining()) != 0 or not 0 < len(payload) <= 4096:
             _unavailable()
+        remaining()
     finally:
-        if process.stdout is not None:
-            process.stdout.close()
-        if process.poll() is None:
-            process.kill()
-        try:
-            process.wait(timeout=0.25)
-        except subprocess.TimeoutExpired:
-            _unavailable()
+        primary = _exc_info()[0] is not None
+        cleanup_error = None
+        actions = [lambda: selector.close() if selector is not None else None,
+                   lambda: process.stdout.close() if process.stdout is not None else None,
+                   lambda: process.kill() if process.poll() is None else None,
+                   lambda: process.wait(timeout=0.25)]
+        for action in actions:
+            try:
+                action()
+            except BaseException as error:
+                if cleanup_error is None:
+                    cleanup_error = error
+        if cleanup_error is not None and not primary:
+            raise cleanup_error
+    remaining()
     from uuid import UUID
     value = payload.decode("ascii").strip().lower()
     parsed = UUID(value)
     if str(parsed) != value or not parsed.int:
         _unavailable()
+    remaining()
     return value
 
 
@@ -435,16 +510,33 @@ def _resident(config, reader, now, *, admission=False):
     provenance = _match(control.get("python_runtime_provenance_digest"), _HEX64)
     if provenance == "0" * 64:
         _unavailable()
-    evidence = _object(file_document(files["evidence"].raw),
-        "schema owner_installation_id target_ref registration_generation release_commit release_tree "
-        "control_config_digest broker_config_digest installed_configuration_digest "
-        "python_runtime_provenance_digest provider_binary_attestation_digest "
-        "provider_attestation_role provider_attestation_boot_id issuer_binding_digest "
-        "issuer_binding_owner_installation_id issuer_binding_role issuer_binding_release_commit "
-        "issuer_binding_boot_id issuer_binding_observed_at provider_attestation_observed_at "
-        "production_disarming", "mastermind.executive_release_owner_installed_evidence/v1")
+    # The release_control_armed flag is read only from the already
+    # resident-verified control.json bytes. Missing or exact boolean False
+    # leaves the factory disarmed for compatibility with the current
+    # template/default. Only exact boolean True attaches the fixed
+    # production ExecutiveReleaseActuatorJournal. Any non-boolean value
+    # refuses composition. The resident control bytes and installed
+    # evidence/configuration digest already bind this value to the
+    # installed source/config identity.
+    armed_value = control.get("release_control_armed", False)
+    if type(armed_value) is not bool:
+        _unavailable()
+    armed = armed_value
+    document = file_document(files["evidence"].raw)
+    if document.get("schema") == "mastermind.executive_release_owner_installed_evidence/v2":
+        from ops.executive_os.release_owner_resident_inputs import decode_installed_evidence_v2
+        evidence = decode_installed_evidence_v2(files["evidence"].raw)
+    else:
+        evidence = _object(document,
+            "schema owner_installation_id target_ref registration_generation release_commit release_tree "
+            "control_config_digest broker_config_digest installed_configuration_digest "
+            "python_runtime_provenance_digest provider_binary_attestation_digest "
+            "provider_attestation_role provider_attestation_boot_id issuer_binding_digest "
+            "issuer_binding_owner_installation_id issuer_binding_role issuer_binding_release_commit "
+            "issuer_binding_boot_id issuer_binding_observed_at provider_attestation_observed_at "
+            "production_disarming", "mastermind.executive_release_owner_installed_evidence/v1")
     reader.check()
-    boot = _boot_id()
+    boot = _boot_id(deadline_monotonic_ns=reader.deadline_monotonic_ns)
     reader.check()
     expected = {
         "owner_installation_id": reg["owner_installation_id"], "target_ref": reg["target_ref"],
@@ -478,7 +570,7 @@ def _resident(config, reader, now, *, admission=False):
                               trust_generation=reg["trust_generation"],
                               owner_installation_id=reg["owner_installation_id"])
     reader.check()
-    return reg, files, evidence, policy, boot, codec, identity
+    return reg, files, evidence, policy, boot, codec, identity, armed
 
 
 def _array(value, maximum, *, paths=False):
@@ -502,7 +594,7 @@ def _join(value, expected):
 
 
 def _stage(reader, transition, resident, now):
-    reg, files, evidence, policy, boot, codec, resident_identity = resident
+    reg, files, evidence, policy, boot, codec, resident_identity, _armed = resident
     _match(transition, _HEX64)
     registry_file = reader.observe(_REGISTRY, maximum=16384, mode=0o400)
     table = registry(file_document(registry_file.raw), reg["registration_generation"])
@@ -630,9 +722,65 @@ def _stage(reader, transition, resident, now):
     return ReleaseOwnerSnapshot(policy=policy, codec=codec,
         owner_installation_id=reg["owner_installation_id"], target_ref=reg["target_ref"],
         boot_id=boot, key_id=reg["key_id"], trust_generation=reg["trust_generation"],
-        app_generation=reg["app_generation"], schema_digest=_digest(_SCHEMA_MAP),
+        app_generation=reg["app_generation"], schema_digest=_digest({**_SCHEMA_MAP, "schemas": {**_SCHEMA_MAP["schemas"],
+            "installed_evidence": evidence["schema"]}}),
         admission_contract_digest=_digest(_ADMISSION_MAP), effect=effect,
         preconditions=preconditions, input_identity_digest=input_identity)
+
+
+def _physical_snapshot(state, resident, observation, reader):
+    """Join fresh fixed C1 observation to secured resident v2, without effects."""
+    from control_plane import executive_release_observation as native
+    reg, files, evidence, _policy, boot, _codec, _identity, _armed = resident
+    if type(observation) is not native._ReleaseObservation or observation.boot_id != boot:
+        _unavailable()
+    fresh = observation.freshness
+    if (type(fresh) is not native._Freshness
+            or any(type(v) is not int for v in (fresh.started_monotonic_ns,
+                fresh.completed_monotonic_ns, fresh.deadline_monotonic_ns))
+            or not 0 <= fresh.started_monotonic_ns <= fresh.completed_monotonic_ns < fresh.deadline_monotonic_ns
+            or fresh.deadline_monotonic_ns != reader.deadline_monotonic_ns
+            or fresh.completed_monotonic_ns > time.monotonic_ns()):
+        _unavailable()
+    roles = observation.roles
+    names = {"control", "worker", "relay", "gateway", "broker"}
+    if (type(roles) is not tuple or len(roles) != 5
+            or any(type(row) is not native._RoleObservation or type(row.role) is not str for row in roles)
+            or {row.role for row in roles} != names):
+        _unavailable()
+    native._validate_roles(roles)
+    manifest = _strict_json(files["manifest"].raw)
+    for row in roles:
+        if (type(row.content) is not native._InstalledContent
+                or row.content.role != row.role
+                or row.content.release_commit != manifest["commit_sha"]
+                or row.content.release_tree != manifest["tree_sha"]
+                or row.content.installed_manifest_digest != files["manifest"].sha256):
+            _unavailable()
+        expected_config = {"control": "config/control.json", "broker": "config/privileged-broker.json"}.get(row.role)
+        if expected_config is not None and row.content.configuration_digest != files[expected_config].sha256:
+            _unavailable()
+        _match(row.service_generation_digest, _HEX64)
+        if row.service_generation_digest == "0" * 64:
+            _unavailable()
+    broker = next(row for row in roles if row.role == "broker")
+    before = {
+        "release_commit": manifest["commit_sha"], "release_tree": manifest["tree_sha"],
+        "installed_manifest_digest": files["manifest"].sha256,
+        "configuration_digest": _configuration_digest(files),
+        "broker_source_commit": broker.content.release_commit,
+        "broker_source_tree": broker.content.release_tree,
+        "broker_binary_digest": broker.content.executable_closure_digest,
+        "service_generation_digests": {row.role: row.service_generation_digest for row in roles},
+    }
+    if contract.canonical_release_bytes(before) != contract.canonical_release_bytes(evidence["before"]):
+        _unavailable()
+    _match(observation.target_observation_digest, _HEX64)
+    if observation.target_observation_digest == "0" * 64:
+        _unavailable()
+    reader.check()
+    return replace(state, actuator_generation=evidence["actuator_generation"],
+        target_observation_digest=observation.target_observation_digest, before=before)
 
 
 def build_release_owner(config):
@@ -652,7 +800,7 @@ def build_release_owner(config):
         baseline = _resident(config, _Reader(resident=True), composed_at)
         if reg != baseline[0] or initial != baseline[1]["registration"]:
             _unavailable()
-        original_identity = baseline[-1]
+        original_identity = baseline[-2]
 
         def current(*, admission=False, reader=None):
             now = int(time.time())
@@ -660,28 +808,51 @@ def build_release_owner(config):
                 _unavailable()
             observation = _resident(config, reader or _Reader(resident=True), now,
                                     admission=admission)
-            if not hmac.compare_digest(observation[-1], original_identity):
+            # The tuple now carries an attached root journal at the end
+            # (or None); identity is at index -2.
+            if not hmac.compare_digest(observation[-2], original_identity):
                 _unavailable()
             return observation, now
 
-        def snapshot(transition):
+        def snapshot(transition, *, deadline_monotonic_ns=None):
             try:
-                reader = _Reader()
+                reader = _Reader(deadline_monotonic_ns=deadline_monotonic_ns)
                 observation, now = current(admission=True, reader=reader)
-                return _stage(reader, transition, observation, now)
+                state = _stage(reader, transition, observation, now)
+                if observation[2]["schema"] == "mastermind.executive_release_owner_installed_evidence/v2":
+                    # Only fixed installed source constructs this observation.
+                    from control_plane.executive_release_observation import _observe_release
+                    physical = _observe_release(deadline_monotonic_ns=reader.deadline_monotonic_ns)
+                    reader.check()
+                    repeated, _ = current(admission=True, reader=_Reader(
+                        resident=True, deadline_monotonic_ns=reader.deadline_monotonic_ns))
+                    if observation[1] != repeated[1] or observation[4] != repeated[4]:
+                        _unavailable()
+                    state = _physical_snapshot(state, observation, physical, reader)
+                reader.check()
+                return state
             except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
                 _unavailable()
 
         def history():
             try:
                 observation, _ = current()
-                reg, _files, _evidence, _policy, _boot, codec, identity = observation
+                reg, _files, _evidence, _policy, _boot, codec, identity, _armed = observation
                 return ReleaseHistoryTrust(codec=codec,
                     owner_installation_id=reg["owner_installation_id"], target_ref=reg["target_ref"],
                     input_identity_digest=identity)
             except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
                 _unavailable()
-        return ReleaseBrokerOwner(snapshot, history_trust=history)
+        root_journal = None
+        if baseline[-1]:
+            # Import only after the resident manifest/source closure has been
+            # verified. Construction stores the fixed path and performs no IO.
+            from control_plane.executive_release_actuator import (
+                ExecutiveReleaseActuatorJournal,
+            )
+            root_journal = ExecutiveReleaseActuatorJournal()
+        return ReleaseBrokerOwner(snapshot, history_trust=history,
+                                  root_journal=root_journal)
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
         _unavailable()
 
@@ -859,3 +1030,31 @@ def observed_at(value: str, now_seconds: int, *, admission: bool) -> int:
     if admission and now_seconds >= observed + _DAY_SECONDS:
         _fail("observed_at", "STALE")
     return observed
+
+
+def _decode_resident_evidence_v2(
+    raw: bytes,
+    expected_evidence_context: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Pure full-context join; callers still supply unauthenticated evidence.
+
+    This adapter is intentionally not connected to resident/owner construction.
+    The future secured consumer must independently derive every expected field.
+    """
+    from ops.executive_os.release_owner_resident_inputs import (
+        ReleaseOwnerInputError, canonical_file_bytes, decode_installed_evidence_v2,
+    )
+
+    if type(expected_evidence_context) is not dict:
+        _fail("expected_evidence_context", "TYPE")
+    try:
+        evidence = decode_installed_evidence_v2(raw)
+        expected_raw = canonical_file_bytes(expected_evidence_context)
+        decode_installed_evidence_v2(expected_raw)
+    except ReleaseOwnerInputError as error:
+        _fail("installed_evidence", error.code)
+    # Canonical bytes retain every nested JSON type, unlike Python equality
+    # where True == 1 and 1 == 1.0. Closed decoding forbids partial contexts.
+    if raw != expected_raw:
+        _fail("installed_evidence", "MISMATCH")
+    return evidence
