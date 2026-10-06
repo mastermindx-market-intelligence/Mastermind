@@ -1,0 +1,53 @@
+{
+  "schema_version": "mastermind.executive_agent_capabilities/v3",
+  "policy_version": "2026-10-06.claude-principal-h1",
+  "lifecycle_authority": "executive_os",
+  "production_armed": false,
+  "mcp_servers": {
+    "mastermind-executive-coo-v1": {
+      "config_name": "mastermindExecutiveCoo",
+      "transport": "streamable-http",
+      "url": "https://mcp.mastermind-x.com/mcp/coo",
+      "required": true,
+      "auth_status": "oAuth",
+      "server_identity": "mastermind-executive-coo",
+      "server_version": "1.0.0",
+      "enabled_tools": [
+        "executive_mandate",
+        "executive_state",
+        "executive_inbox",
+        "executive_fabric",
+        "submit_principal_intent",
+        "principal_intent_status"
+      ],
+      "default_tools_approval_mode": "approve",
+      "tool_schema_digest": "8d4ff58a30c02b717788b80fdfd1c5b8b35493dc11dd76cac351cde7b4509d72"
+    }
+  },
+  "resources": {},
+  "plugins": {},
+  "profiles": {
+    "principal.claude-code.executive-coo.v1": {
+      "enabled": true,
+      "execution_surface": "claude-code-principal",
+      "auth_realm": "oauth-principal-account",
+      "sandbox_policy": "read-only",
+      "approval_policy": "never",
+      "network_policy": "disabled",
+      "write_capable": false,
+      "native_helper_policy": "disabled",
+      "native_helper": null,
+      "skills": [],
+      "mcp_servers": [
+        "mastermind-executive-coo-v1"
+      ],
+      "resources": [],
+      "plugins": [],
+      "forbidden": [
+        "browser-control",
+        "filesystem-write",
+        "worker-launch"
+      ]
+    }
+  }
+}
