@@ -89,20 +89,59 @@ This slice adds **no sampler, GitHub client, timer, persistence, watcher registr
 delivery call, merge, rerun or deploy operation**. It closes the material-result → existing-Wake
 obligation seam only.
 
-## H5-B2-B remaining process-owner composition
+## H5-B2-B1 current source slice — process-local exact-candidate waiter
 
-B2-B still must bind H5-A+B1+B2-A to one accepted Class-E/Class-T sampling/process owner that can:
+The current branch now adds `control_plane/github_ci_candidate_waiter.py`. This is the bounded
+Class-E/Class-T process primitive missing from B1; it still does **not** own GitHub transport.
 
-- register-or-reuse one exact candidate observation;
-- obtain complete owner-native GitHub check snapshots;
-- reconcile ambiguous registration/return state by the exact candidate rather than duplicating it;
-- feed only material B1 decisions into B2-A;
-- route/deliver the resulting obligation through existing SessionTargetRegistry/Wake Fabric; and
-- retire only that candidate observation when terminal.
+One process-local `CandidateWaiterRegistry` registers the deterministic B1 observer identity before
+sampling. A duplicate registration for that exact candidate fails with zero displacement. Registration
+tokens are opaque, never reused for the process lifetime, and cleanup is compare-and-delete so an old
+`finally` cannot clear a newer registration. Restart intentionally loses the registration: it is hot
+process evidence, not durable watcher/lifecycle truth.
 
-No production-proven generic GitHub-CI sampler/registration API has been located in the bounded
-current source. That absence blocks unattended/native H5 claims; it does not justify creating a
-Claude plugin database or misusing a dialogue/capacity observer.
+`wait_for_candidate_material` accepts only:
+
+- a previously classified exact-candidate baseline;
+- an injected owner-native `sample()` callback;
+- an injected blocking/cadence `wait()` callback;
+- the process-local registry; and
+- a bounded sample count.
+
+A PENDING baseline may arm the waiter. A terminal or already-UNKNOWN/material baseline must be consumed
+before waiting. Each sample goes through H5-B1; PENDING progress and unchanged state stay inside the
+blocking call, while GREEN/FAILED/STALE or observer-health transitions return exactly once. Identity
+drift refuses and cleanup still unregisters the incumbent. Exhausting the bounded sample budget returns
+a typed quiescent result with no Wake or reasoning claim.
+
+This module imports no GitHub/network, timer, persistence, MCP, Wake, Runtime, subprocess or release
+owner. The injected wait function controls Class-E/Class-T cadence; the reasoning model never receives
+unchanged samples. Tests cover duplicate registration, stale compare-delete, token reuse, terminal and
+UNKNOWN returns, identity drift, cadence failure, bounded exhaustion and guaranteed cleanup.
+
+## H5-B2-B2 remaining host/source composition
+
+The remaining H5 process work is narrower. One accepted host composition must:
+
+- obtain complete owner-native GitHub PR/check snapshots for the frozen candidate;
+- provide the current required-check policy/source reference used by H5-A;
+- feed those snapshots into H5-A through the injected B2-B1 `sample()` seam;
+- supply the accepted Class-E/Class-T blocking/cadence primitive through `wait()`;
+- reconcile ambiguous host registration/delivery state by the exact observer identity rather than
+  starting a second process;
+- send only a B1 material/terminal decision through B2-A into existing SessionTargetRegistry/Wake
+  Fabric; and
+- retire the process-local waiter when the bounded call exits.
+
+The repository already has a hardened GitHub GET-only transport in Source Continuity, but it is a
+script-private adapter with Source-Continuity-specific budgets and conditional-revalidation semantics.
+H5 must not import that private script backwards into Executive code or clone a looser API client merely
+for convenience. Either factor an accepted shared read-only GitHub transport from its existing owner or
+compose H5 from another already-accepted owner-native GitHub read surface.
+
+No production-proven generic GitHub-CI sampler/host composition has yet been located in the bounded
+current source. That absence blocks unattended/native H5 claims; it does not justify a Claude plugin
+database, persistent watcher table or misuse of the Slack/capacity observers.
 
 ## Resolve the existing owner first
 
