@@ -177,6 +177,7 @@ def _run(
     spoof_argv0: str | None = None,
     shadow_cd: bool = False,
     shadow_builtin: bool = False,
+    shadow_test: bool = False,
     cwd: Path | None = None,
 ) -> tuple[int, str, str, list[str], str, Path, Path]:
     script, control_plist, worker_plist = _prepare_script(tmp_path)
@@ -211,6 +212,8 @@ def _run(
             prelude += "builtin() { return 0; }; "
         if shadow_cd:
             prelude += "cd() { return 0; }; "
+        if shadow_test:
+            prelude += "function [ { return 0; }; "
         command = [
             "/bin/bash",
             "-c",
@@ -432,7 +435,12 @@ def test_restart_gateway_cycles_only_fixed_mcp_and_confirms_running(
     tmp_path: Path,
 ) -> None:
     mcp_plist = tmp_path / "mcp.plist"
-    plan = _gateway_enabled_plan() + _stop_ok(MCP_LABEL) + _ensure_running_bootstrap(MCP_LABEL, mcp_plist)
+    plan = (
+        _gateway_enabled_plan()
+        + _stop_ok(MCP_LABEL)
+        + _ensure_running_bootstrap(MCP_LABEL, mcp_plist)
+        + _gateway_enabled_plan()
+    )
     code, out, err, log, remaining, *_ = _qualified_gateway_run(tmp_path, plan)
     assert code == 0, err
     assert remaining == ""
@@ -1234,7 +1242,8 @@ def _qualified_gateway_run(tmp_path, plan, *, changes=None, config_changes=None,
                            controller_from_release=True,
                            source_with_spoofed_argv0=False,
                            source_with_shadowed_cd=False,
-                           source_with_shadowed_builtin=False):
+                           source_with_shadowed_builtin=False,
+                           source_with_shadowed_test=False):
     config = {"schema": "mastermind.executive_mcp_install.v1",
               "release_sha": GATEWAY_SHA, "service_uid": 458}
     config.update(config_changes or {})
@@ -1349,6 +1358,7 @@ except (OSError,ValueError,KeyError,IndexError,AssertionError,plistlib.InvalidFi
         source_with_spoofed_argv0
         or source_with_shadowed_cd
         or source_with_shadowed_builtin
+        or source_with_shadowed_test
     ):
         spoof_argv0 = str(expected_controller_dir / "service-control.sh")
     return _run(
@@ -1360,9 +1370,14 @@ except (OSError,ValueError,KeyError,IndexError,AssertionError,plistlib.InvalidFi
         spoof_argv0=spoof_argv0,
         shadow_cd=source_with_shadowed_cd,
         shadow_builtin=source_with_shadowed_builtin,
+        shadow_test=source_with_shadowed_test,
         cwd=(
             expected_controller_dir
-            if source_with_shadowed_cd or source_with_shadowed_builtin
+            if (
+                source_with_shadowed_cd
+                or source_with_shadowed_builtin
+                or source_with_shadowed_test
+            )
             else None
         ),
     )
@@ -1382,7 +1397,8 @@ def _gateway_enabled_plan(value="false"):
 @pytest.mark.parametrize("enabled_value", [None, "false", "enabled"])
 def test_gateway_exact_release_qualified_before_any_cycle(tmp_path, enabled_value):
     plan = (_gateway_enabled_plan(enabled_value) + _stop_ok(MCP_LABEL)
-            + _ensure_running_bootstrap(MCP_LABEL, tmp_path / "mcp.plist"))
+            + _ensure_running_bootstrap(MCP_LABEL, tmp_path / "mcp.plist")
+            + _gateway_enabled_plan(enabled_value))
     code, out, err, calls, remaining, *_ = _qualified_gateway_run(tmp_path, plan)
     assert code == 0, err
     assert remaining == ""
@@ -1467,6 +1483,23 @@ def test_gateway_refuses_sourced_checkout_with_shadowed_builtin_and_cd(
         controller_from_release=False,
         source_with_shadowed_cd=True,
         source_with_shadowed_builtin=True,
+    )
+    assert code == 65
+    assert "gateway deep preflight failed" in err
+    assert calls == []
+    assert remaining == ""
+
+
+def test_gateway_refuses_sourced_checkout_with_shadowed_test_builtin_and_cd(
+    tmp_path,
+):
+    code, _, err, calls, remaining, *_ = _qualified_gateway_run(
+        tmp_path,
+        [],
+        controller_from_release=False,
+        source_with_shadowed_cd=True,
+        source_with_shadowed_builtin=True,
+        source_with_shadowed_test=True,
     )
     assert code == 65
     assert "gateway deep preflight failed" in err
@@ -1578,6 +1611,23 @@ def test_gateway_deep_postflight_failure_is_effect_unknown_without_retry(tmp_pat
     assert calls.count(f"bootstrap system {tmp_path / 'mcp.plist'}") == 1
 
 
+def test_gateway_rechecks_running_state_after_deep_postflight(tmp_path):
+    plan = (
+        _gateway_enabled_plan()
+        + _stop_ok(MCP_LABEL)
+        + _ensure_running_bootstrap(MCP_LABEL, tmp_path / "mcp.plist")
+        + [("print-disabled system", 0, _gateway_override_table((MCP_LABEL, "false")), "")]
+        + [(f"print system/{MCP_LABEL}", 0, "state = exited", "")]
+    )
+    code, _, err, calls, remaining, *_ = _qualified_gateway_run(tmp_path, plan)
+    assert code == 75
+    assert "stage=postflight" in err and "do not replay" in err
+    assert remaining == ""
+    assert calls == [entry[0] for entry in plan]
+    assert calls.count(f"disable system/{MCP_LABEL}") == 1
+    assert calls.count(f"bootstrap system {tmp_path / 'mcp.plist'}") == 1
+
+
 def test_gateway_post_start_config_disappearance_is_effect_unknown(tmp_path, monkeypatch):
     # Remove only the disposable config after the fake bootstrap succeeds.
     marker = 'exit "$plan_exit"'
@@ -1631,7 +1681,8 @@ def test_gateway_failed_modifying_verb_stops_without_another_effect(tmp_path, st
 @pytest.mark.skipif(sys.platform != "darwin", reason="requires native macOS plutil parser")
 def test_gateway_qualification_uses_real_native_plutil_with_disposable_files(tmp_path):
     plan = (_gateway_enabled_plan("enabled") + _stop_ok(MCP_LABEL)
-            + _ensure_running_bootstrap(MCP_LABEL, tmp_path / "mcp.plist"))
+            + _ensure_running_bootstrap(MCP_LABEL, tmp_path / "mcp.plist")
+            + _gateway_enabled_plan("enabled"))
     code, _, err, calls, remaining, *_ = _qualified_gateway_run(
         tmp_path, plan, native_plutil=True)
     assert code == 0, err

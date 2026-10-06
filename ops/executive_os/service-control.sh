@@ -450,11 +450,11 @@ qualify_gateway_refresh_preflight() {
   # generation being qualified. Bind the raw BASH_SOURCE path first: unlike
   # derived cd/pwd state, it cannot be changed by caller-defined shell
   # functions. Canonical lifecycle callers execute this exact absolute path.
-  [ "$SCRIPT_SOURCE" = "$controller" ] || return 1
-  [ "$SCRIPT_DIR" = "$expected_dir" ] || return 1
-  [ "$SCRIPT_PATH" = "$controller" ] || return 1
-  [ -f "$controller" ] && [ ! -L "$controller" ] || return 1
-  [ -f "$helper" ] && [ ! -L "$helper" ] || return 1
+  [[ "$SCRIPT_SOURCE" == "$controller" ]] || return 1
+  [[ "$SCRIPT_DIR" == "$expected_dir" ]] || return 1
+  [[ "$SCRIPT_PATH" == "$controller" ]] || return 1
+  [[ -f "$controller" && ! -L "$controller" ]] || return 1
+  [[ -f "$helper" && ! -L "$helper" ]] || return 1
   "$GATEWAY_PREFLIGHT_PYTHON" -I -S -B "$helper" \
     --expected-sha "$expected_sha" >/dev/null
 }
@@ -634,6 +634,13 @@ case "$1" in
     fi
     if ! qualify_gateway_release "$3" \
         || ! qualify_gateway_refresh_preflight "$3"; then
+      /bin/echo "gateway_refresh_effect_unknown stage=postflight; do not replay" >&2
+      exit 75
+    fi
+    # The replacement may exit while deep postflight qualification walks the
+    # sealed release/runtime closure. Rejoin enabled + running state only after
+    # postflight completes before reporting success.
+    if ! require_gateway_enabled || ! require_running "$MCP_LABEL"; then
       /bin/echo "gateway_refresh_effect_unknown stage=postflight; do not replay" >&2
       exit 75
     fi
