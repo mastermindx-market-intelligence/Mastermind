@@ -261,25 +261,50 @@ The source-only proof currently includes:
 The local host cannot collect the signed COO ASGI suite because `jwt` is absent; hosted CI remains
 the integration owner for those app tests.
 
-### H4-B2 still required — trusted host binding, dispatch, ingress and reconciliation
+### H4-B2-A current source candidate — trusted root execution and Dialogue binding
 
-B1b deliberately does **not** derive or install the reviewed host execution/placement binding that
-real planner/work dispatch requires. Its root currently contains only Runtime's ordinary default
-quota-class normalization, not an admitted provider/model/host/profile selection.
+The next source-only slice now supplies the trusted root facts B1b deliberately omitted, while still
+exposing no production ingress caller.
+
+`JobRegistry.create_principal_orchestration_root(...)` accepts host-only `workspace_root`,
+`execution_binding` and `dialogue_source` arguments after the H4 bundle and current principal
+admission guard have passed. None of these fields are present in the model-authored request or
+H4-A envelope.
+
+When any host binding is supplied, B2-A requires the complete reviewed workspace + execution-binding
+pair; a required Dialogue source may not be omitted. It:
+
+- rejects a relative workspace root instead of resolving it against process CWD;
+- deterministically derives the existing branch/worktree from the stable principal intent identity;
+- normalizes the same closed v2/v3 host execution-binding key sets already used by CEO-v2 roots,
+  including the admitted placement union;
+- requires the H4 grounding Mastermind SHA to equal the trusted host `base_sha`;
+- stores the reviewed execution/profile/provider/model/capability pins in the existing root
+  constraints rather than in a second H4 policy record;
+- binds the normalized existing Executive Dialogue source and its digest into immutable
+  `JOB_CREATED` provenance; and
+- preserves the H4 request/ref/intent/root-source identity when host placement changes, so host
+  composition cannot become a retry identity.
+
+The resulting root can create the existing CooCycle planner, which inherits the admitted operator
+profile/provider/model/workspace binding through the existing child-constraint owner. This remains
+**BUILT_NOT_PROVEN / source-only**: the constructor has no production caller, no provider launch is
+performed, and no capability/MCP tool is armed by this slice.
+
+### H4-B2-B still required — installed service/ingress, dispatch and reconciliation
 
 The existing Executive service's strict bound-root/dispatch path is still CEO-root-specific and the
-current principal constructor has no production ingress caller. Therefore B2 must:
+principal constructor has no production ingress caller. B2-B must:
 
-1. derive the current host execution/profile/source/proof/placement binding from existing owners,
-   not from the model request;
-2. carry the current Dialogue source through the existing trusted host composition;
-3. extend the service's generic bound-root/dispatch validation to the reviewed root-source
+1. derive/pass the current host execution/profile/source/proof/placement binding from existing
+   installed owners into B2-A, never from model request fields;
+2. extend only the service's generic bound-root/dispatch validation to the reviewed root-source
    discriminator without widening CEO-only finite/release paths;
-4. add a separately discriminated principal-orchestration ingress frame after the overlapping #1147
+3. add a separately discriminated principal-orchestration ingress frame after the overlapping #1147
    ingress carrier is accepted/released;
-5. preserve the existing principal `request_ref / intent_id` status and same-command reconciliation
+4. preserve the existing principal `request_ref / intent_id` status and same-command reconciliation
    semantics after response loss; and
-6. prove an actual planner/child dispatch only after those exact source gates and H1/H3 native
+5. prove an actual planner/child dispatch only after those exact source gates and H1/H3 native
    admission are accepted.
 
 Finite-drive admission/arm, CEO intent replay and C2 CEO-source maintenance remain CEO-only unless
