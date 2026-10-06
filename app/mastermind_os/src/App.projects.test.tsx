@@ -3,6 +3,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
+import { navigateCompanyOperation } from "./test-operational-navigation";
 import { decodeProgramsObservation } from "./programs-observation";
 import { controlRoomFixture, missionFixture } from "./test-fixtures";
 import programs from "./fixtures/programs-available-workspace-service.json";
@@ -24,7 +25,8 @@ describe("Projects in the actual App", () => {
     expect(new URLSearchParams(location.search).get("root_job_id")).toBe("JOB-B");
     await user.click(screen.getByRole("button", { name: "Projects" }));
     expect(await screen.findByRole("region", { name: "Selected project" })).toBeTruthy();
-    for (const route of ["Today", "Work", "Programs", "Fleet & Capacity", "Mission Workspace", "Conversation", "Activity", "Connections", "Evidence"])
+    await user.click(screen.getByRole("button", { name: "Today" }));
+    for (const route of ["Today", "Work", "Open Programs", "Fleet & Capacity", "Mission Workspace", "Conversation", "Activity", "Connections", "Evidence"])
       expect(screen.getByRole("button", { name: route })).toBeTruthy();
     expect(read).toHaveBeenCalledTimes(2); // one original collection plus the new exact selection
   });
@@ -34,7 +36,7 @@ describe("Projects in the actual App", () => {
     await user.click(screen.getByRole("button", { name: "Projects" }));
     expect(await screen.findByText("Project facts cannot be displayed from this source.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Open project Beta/ })).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Programs" }));
+    await navigateCompanyOperation(user, "Programs");
     expect(await screen.findByRole("button", { name: /Beta program/ })).toBeTruthy();
   });
 });

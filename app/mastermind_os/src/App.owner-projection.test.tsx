@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { flushSync } from "react-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
+import { navigateCompanyOperation } from "./test-operational-navigation";
 import { bindMissionHost, createNativeClient } from "./host";
 import { controlRoomFixture } from "./test-fixtures";
 import programsFixture from "./fixtures/programs-available-workspace-service.json";
@@ -75,7 +76,7 @@ describe("actual Today owner projection", () => {
     expect(e.invoke.mock.calls.filter(([command]) => command === "read_programs")).toHaveLength(1);
     await userEvent.setup().click(screen.getByRole("button", { name: "Review sources" }));
     expect(screen.getByRole("complementary", { name: "Source evidence" }).textContent).toContain("programs-owner-observation:v1:");
-    for (const route of ["Today", "Work", "Programs", "Fleet & Capacity", "Mission Workspace", "Conversation", "Activity", "Connections", "Evidence"])
+    for (const route of ["Today", "Work", "Open Programs", "Fleet & Capacity", "Mission Workspace", "Conversation", "Activity", "Connections", "Evidence"])
       expect(screen.getByRole("button", { name: route })).toBeTruthy();
     expect(screen.getAllByRole("main")).toHaveLength(1);
   });
@@ -106,7 +107,7 @@ describe("actual Today owner projection", () => {
     await waitFor(() => expect(screen.getByRole("region", { name: "Meta-CEO answer" }).textContent).toContain("Private owner project"));
     const user = userEvent.setup();
     await user.type(screen.getByRole("textbox", { name: "Direction to Meta-CEO" }), "Same project thought");
-    await user.click(screen.getByRole("button", { name: "Programs" }));
+    await navigateCompanyOperation(user, "Programs");
     await user.click(await screen.findByRole("button", { name: /Current project source/ }));
     await user.click(screen.getByRole("button", { name: "Today" }));
     await user.click(screen.getByRole("button", { name: "Review sources" }));

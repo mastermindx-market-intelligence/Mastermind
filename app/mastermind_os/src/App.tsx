@@ -82,10 +82,22 @@ const primaryNavigation: readonly View[] = [
   "Inbox",
   "Conversations",
   "Knowledge",
-  "Work",
-  "Programs",
-  "Fleet & Capacity",
 ];
+type OperationalView = "Work" | "Programs" | "Fleet & Capacity";
+function OperationalNavigation({ label, onNavigate }: {
+  label: string;
+  onNavigate: (view: OperationalView) => void;
+}) {
+  return (
+    <nav className="card" aria-label={label}>
+      <div className="segmented">
+        <button type="button" onClick={() => onNavigate("Work")}>Work</button>
+        <button type="button" onClick={() => onNavigate("Programs")}>Open Programs</button>
+        <button type="button" onClick={() => onNavigate("Fleet & Capacity")}>Fleet &amp; Capacity</button>
+      </div>
+    </nav>
+  );
+}
 const missionNavigation: readonly View[] = [
   "Mission Workspace",
   "Conversation",
@@ -1049,9 +1061,11 @@ function ProjectPlan({ d }: { d: MissionDocument }) {
 function ProjectMore({
   d,
   sessionPanel,
+  onNavigate,
 }: {
   d: MissionDocument;
   sessionPanel: React.ReactNode;
+  onNavigate: (view: OperationalView) => void;
 }) {
   return (
     <>
@@ -1068,6 +1082,7 @@ function ProjectMore({
         </div>
       </section>
       {sessionPanel}
+      <OperationalNavigation label="Project operations" onNavigate={onNavigate} />
       <Connections d={d} />
       <section className="card source-gap">
         <div className="section-title">
@@ -2438,6 +2453,10 @@ export function App() {
         disabled={!authState?.acquisition}
       />
     ) : null;
+  const navigateOperationalView = (view: OperationalView) => {
+    setProjectTab(null);
+    setActive(view);
+  };
   let content: React.ReactNode;
   if (active === "Today")
     content = (
@@ -2448,13 +2467,7 @@ export function App() {
           draft={office.draft}
           onDraftChange={office.changeDraft}
         />
-        <button
-          type="button"
-          className="primary"
-          onClick={() => setActive("Programs")}
-        >
-          Open Programs
-        </button>
+        <OperationalNavigation label="Company operations" onNavigate={navigateOperationalView} />
       </>
     );
   else if (active === "Inbox")
@@ -2550,7 +2563,7 @@ export function App() {
           ) : projectTab === "Evidence" ? (
             <Evidence d={d} />
           ) : (
-            <ProjectMore d={d} sessionPanel={sessionPanel} />
+            <ProjectMore d={d} sessionPanel={sessionPanel} onNavigate={navigateOperationalView} />
           )}
         </>
       ) : (

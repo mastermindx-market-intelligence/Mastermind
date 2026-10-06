@@ -10,6 +10,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
+import { navigateCompanyOperation } from "./test-operational-navigation";
 import { bindMissionHost, type AuthState } from "./host";
 import { createWebAuth } from "./web-auth";
 import type {
@@ -101,7 +102,7 @@ describe("React read lifecycle fences", () => {
       await screen.findByRole("button", { name: "Mission Workspace" }),
     );
     expect(await screen.findByText("JOB-A")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Programs" }));
+    await navigateCompanyOperation(user, "Programs");
     await user.click(
       await screen.findByRole("button", { name: /Beta program/ }),
     );
@@ -292,7 +293,7 @@ describe("React read lifecycle fences", () => {
     render(<App />);
     await user.click(screen.getByRole("button", { name: "Mission Workspace" }));
     expect(await screen.findByText("JOB-A")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Programs" }));
+    await navigateCompanyOperation(user, "Programs");
     await user.click(
       await screen.findByRole("button", { name: /Beta program/ }),
     );
@@ -345,7 +346,7 @@ describe("React read lifecycle fences", () => {
         "?work_ref=WS%3AALPHA&root_job_id=JOB-A",
       ),
     );
-    await user.click(screen.getByRole("button", { name: "Programs" }));
+    await navigateCompanyOperation(user, "Programs");
     await user.click(
       await screen.findByRole("button", { name: /Beta program/ }),
     );
@@ -398,7 +399,7 @@ describe("Executive OS convergence surfaces", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "Work" }));
+    await navigateCompanyOperation(user, "Work");
     expect(await screen.findByText("JOB-2")).toBeTruthy();
     expect(screen.getByText("CHECKPOINTED")).toBeTruthy();
     expect(screen.getByText("JOB-1")).toBeTruthy();
@@ -416,7 +417,7 @@ describe("Executive OS convergence surfaces", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "Work" }));
+    await navigateCompanyOperation(user, "Work");
     expect(await screen.findByText("projection_refused")).toBeTruthy();
     expect(screen.getAllByText("UNAVAILABLE").length).toBeGreaterThan(0);
     expect(screen.getByText(/not evidence of zero work/i)).toBeTruthy();
@@ -431,7 +432,7 @@ describe("Executive OS convergence surfaces", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "Fleet & Capacity" }));
+    await navigateCompanyOperation(user, "Fleet & Capacity");
     expect(
       screen.getByRole("heading", { name: "Fleet & Capacity", level: 1 }),
     ).toBeTruthy();
@@ -484,6 +485,19 @@ describe("Executive OS convergence surfaces", () => {
 });
 
 describe("native and interaction contracts", () => {
+  it("keeps exactly five Company destinations and contextual operational routes", async () => {
+    render(<App />);
+    const company = screen.getByRole("navigation", { name: "Company navigation" });
+    expect(within(company).getAllByRole("button").map(button => button.textContent?.trim().replace(/^[^A-Za-z]+/, ""))).toEqual([
+      "Today", "Projects", "Inbox", "Conversations", "Knowledge",
+    ]);
+    const operations = screen.getByRole("navigation", { name: "Company operations" });
+    expect(within(operations).getByRole("button", { name: "Work" })).toBeTruthy();
+    expect(within(operations).getByRole("button", { name: "Open Programs" })).toBeTruthy();
+    await userEvent.setup().click(within(operations).getByRole("button", { name: "Fleet & Capacity" }));
+    expect(screen.getByRole("heading", { name: "Fleet & Capacity", level: 1 })).toBeTruthy();
+    expect(screen.queryByRole("navigation", { name: "Company operations" })).toBeNull();
+  });
   it("skip to workspace retains Today and the original URL while focusing main", async () => {
     window.MastermindMissionHost = {
       selection: { workRef: "WS:ALPHA", rootJobId: "JOB-A" },
@@ -1144,9 +1158,9 @@ describe("installed authentication and permitted content", () => {
     };
     const user = userEvent.setup();
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Programs" }));
+    await navigateCompanyOperation(user, "Programs");
     await user.click(screen.getByRole("button", { name: "Conversation" }));
-    await user.click(screen.getByRole("button", { name: "Programs" }));
+    await navigateCompanyOperation(user, "Programs");
     const beta = await screen.findByRole("button", { name: /Beta program/ });
     await user.click(beta);
     await act(async () => {
@@ -1211,7 +1225,7 @@ describe("route focus handoff", () => {
   it("retains persistent navigation focus and exposes the current route", async () => {
     const user = userEvent.setup();
     render(<App />);
-    const programs = screen.getByRole("button", { name: "Programs" });
+    const programs = screen.getByRole("button", { name: "Projects" });
     programs.focus();
     await user.keyboard("{Enter}");
     expect(document.activeElement).toBe(programs);
@@ -1672,7 +1686,7 @@ function installCommandHost(
 }
 
 async function launchFromWork(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole("button", { name: "Work" }));
+  await navigateCompanyOperation(user, "Work");
   await user.type(
     screen.getByLabelText("Goal"),
     "Ship the orchestrator",
@@ -1687,7 +1701,7 @@ describe("App command composition", () => {
 
     installCommandHost(undefined);
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Work" }));
+    await navigateCompanyOperation(user, "Work");
     expect(screen.getByText(COMMAND_ROUTE_UNAVAILABLE)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Launch" })).toBeNull();
     cleanup();
@@ -1717,7 +1731,7 @@ describe("App command composition", () => {
       },
     };
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Work" }));
+    await navigateCompanyOperation(user, "Work");
     expect(screen.getByText(COMMAND_ROUTE_UNAVAILABLE)).toBeTruthy();
     expect(incomplete.prepare).not.toHaveBeenCalled();
     expect(incomplete.submit).not.toHaveBeenCalled();
@@ -1731,7 +1745,7 @@ describe("App command composition", () => {
       content: false,
     });
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Work" }));
+    await navigateCompanyOperation(user, "Work");
     expect(screen.getByText(COMMAND_ROUTE_UNAVAILABLE)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Launch" })).toBeNull();
     expect(signedOut.prepare).not.toHaveBeenCalled();
@@ -1768,7 +1782,7 @@ describe("App command composition", () => {
     installCommandHost(binding);
     const user = userEvent.setup();
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Work" }));
+    await navigateCompanyOperation(user, "Work");
     await user.type(screen.getByLabelText("Goal"), "Ship the orchestrator");
     const launch = screen.getByRole("button", { name: "Launch" });
     await user.click(launch);
@@ -1896,7 +1910,7 @@ describe("App command composition", () => {
     const user = userEvent.setup();
     render(<App />);
     await launchFromWork(user);
-    await user.click(screen.getByRole("button", { name: "Programs" }));
+    await navigateCompanyOperation(user, "Programs");
     await user.click(await screen.findByRole("button", { name: /Beta program/ }));
     await act(async () =>
       pending.resolve({
@@ -2175,15 +2189,15 @@ describe("host-composition repair regressions (R2)", () => {
     installCommandHost(made.binding);
     const user = userEvent.setup();
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Work" }));
+    await navigateCompanyOperation(user, "Work");
     await user.type(screen.getByLabelText("Goal"), "First launch");
     await user.click(screen.getByRole("button", { name: "Launch" }));
     await waitFor(() => expect(made.submit).toHaveBeenCalledTimes(1));
 
     // A second dispatch from a remounted leaf (mission switch and back).
-    await user.click(screen.getByRole("button", { name: "Programs" }));
+    await navigateCompanyOperation(user, "Programs");
     await user.click(await screen.findByRole("button", { name: /Beta program/ }));
-    await user.click(screen.getByRole("button", { name: "Work" }));
+    await navigateCompanyOperation(user, "Work");
     await user.type(screen.getByLabelText("Goal"), "Second launch");
     await user.click(screen.getByRole("button", { name: "Launch" }));
     expect(made.prepare).toHaveBeenCalledTimes(1);
@@ -2511,7 +2525,7 @@ describe("host-composition repair regressions (R4)", () => {
     // The seeded pointer lives only in the old store, so the live recover
     // is read-only and reaches no old-port call; the uncertainty survives.
     await user.click(screen.getByRole("button", { name: "Today" }));
-    await user.click(screen.getByRole("button", { name: "Work" }));
+    await navigateCompanyOperation(user, "Work");
     await user.click(screen.getByRole("button", { name: "Check status" }));
     await act(async () => {
       for (let i = 0; i < 8; i++) await Promise.resolve();

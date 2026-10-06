@@ -172,7 +172,7 @@ describe("owner-backed daily routes in App", () => {
       "Conversations",
       "Knowledge",
       "Work",
-      "Programs",
+      "Open Programs",
       "Fleet & Capacity",
       "Mission Workspace",
       "Conversation",
@@ -259,13 +259,15 @@ describe("owner-backed daily routes in App", () => {
 
     await user.click(within(tabs).getByRole("tab", { name: "More" }));
     expect(screen.getByRole("heading", { name: "Journal" })).toBeTruthy();
+    const operations = screen.getByRole("navigation", { name: "Project operations" });
+    expect(within(operations).getAllByRole("button").map(button => button.textContent)).toEqual(["Work", "Open Programs", "Fleet & Capacity"]);
     expect(
       screen.getByRole("heading", { name: "Resources & systems" }),
     ).toBeTruthy();
 
     for (const legacy of [
       "Work",
-      "Programs",
+      "Open Programs",
       "Fleet & Capacity",
       "Mission Workspace",
       "Conversation",
