@@ -18,6 +18,8 @@ WORKER_PLIST="/Library/LaunchDaemons/$WORKER_LABEL.plist"
 RELAY_PLIST="/Library/LaunchDaemons/$RELAY_LABEL.plist"
 AGENT_RELAY_PLIST="/Library/LaunchDaemons/$AGENT_RELAY_LABEL.plist"
 SCRIPT_DIR="$(cd -P "$(/usr/bin/dirname "$0")" && /bin/pwd)"
+GATEWAY_PREFLIGHT_PYTHON="/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12"
+GATEWAY_PREFLIGHT="$SCRIPT_DIR/gateway_refresh_preflight.py"
 
 usage() {
   /bin/echo "usage: $0 {start|stop|restart|restart-gateway|start-readside|stop-readside|start-agent-relay|stop-agent-relay|status-agent-relay|status}" >&2
@@ -438,6 +440,12 @@ qualify_gateway_release() {
   [ "$(gateway_field "$MCP_PLIST" ProgramArguments.5 string)" = "$MCP_CONFIG" ] || return 1
 }
 
+qualify_gateway_refresh_preflight() {
+  "$GATEWAY_PREFLIGHT_PYTHON" -I -S -B "$GATEWAY_PREFLIGHT" \
+    --expected-sha "$1" >/dev/null
+}
+
+
 require_gateway_enabled() {
   local output
   if ! output="$(/bin/launchctl print-disabled system 2>/dev/null)"; then
@@ -446,10 +454,20 @@ require_gateway_enabled() {
   fi
   if ! /bin/echo "$output" | /usr/bin/awk -v label="$MCP_LABEL" '
     NF == 0 {next}
-    $1 == "disabled" && $2 == "services" && $3 == "=" && $4 == "{" && NF == 4 {header++; next}
-    $1 == "}" && NF == 1 {footer++; next}
+    $1 == "disabled" && $2 == "services" && $3 == "=" && $4 == "{" && NF == 4 {
+      if (state != 0) invalid=1
+      state=1; header++; next
+    }
+    $1 == "}" && NF == 1 {
+      if (state != 1) invalid=1
+      state=2; footer++; next
+    }
     NF == 3 && $1 ~ /^"[A-Za-z0-9._-]+"$/ && $2 == "=>" \
         && ($3 == "enabled" || $3 == "disabled" || $3 == "true" || $3 == "false") {
+      if (state != 1 || labels[$1]++) {
+        invalid=1
+        next
+      }
       if ($1 == "\"" label "\"") {
         seen++;
         if ($3 == "disabled" || $3 == "true") disabled=1
@@ -458,9 +476,9 @@ require_gateway_enabled() {
     }
     {invalid=1}
     END {
-      # print-disabled is an override table, not an inventory.  A valid table
-      # with no row for this label means the service is default-enabled.
-      exit(header == 1 && footer == 1 && !invalid && seen <= 1 && !disabled ? 0 : 1)
+      # print-disabled is an override table, not an inventory. A structurally
+      # complete table with no row for this label means default-enabled.
+      exit(state == 2 && header == 1 && footer == 1 && !invalid && seen <= 1 && !disabled ? 0 : 1)
     }
   '; then
     /bin/echo "gateway must already be enabled: disabled or unknown" >&2
@@ -584,6 +602,10 @@ case "$1" in
       /bin/echo "gateway release qualification failed" >&2
       exit 65
     fi
+    if ! qualify_gateway_refresh_preflight "$3"; then
+      /bin/echo "gateway deep preflight failed" >&2
+      exit 65
+    fi
     require_gateway_enabled || exit 65
     require_running "$MCP_LABEL" || exit 65
     # Restart may re-enable only the service this invocation observed enabled
@@ -596,7 +618,8 @@ case "$1" in
       /bin/echo "gateway_refresh_effect_unknown stage=start; do not replay" >&2
       exit 75
     fi
-    if ! qualify_gateway_release "$3"; then
+    if ! qualify_gateway_release "$3" \
+        || ! qualify_gateway_refresh_preflight "$3"; then
       /bin/echo "gateway_refresh_effect_unknown stage=postflight; do not replay" >&2
       exit 75
     fi

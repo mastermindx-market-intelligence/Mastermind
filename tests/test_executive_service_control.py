@@ -61,6 +61,10 @@ fi
 exec /usr/bin/plutil "$@"
 '''
 
+GATEWAY_PREFLIGHT_PYTHON_SHIM = r'''#!/bin/bash
+exit "${FAKE_GATEWAY_PREFLIGHT_EXIT:-0}"
+'''
+
 LAUNCHCTL_SHIM = r'''#!/bin/bash
 key="$*"
 printf '%s\n' "$key" >> "$FAKE_LAUNCHCTL_LOG"
@@ -97,6 +101,8 @@ def _native_shims(tmp_path: Path) -> dict[str, Path]:
         "/usr/bin/plutil": _write_executable(root / "plutil", PLUTIL_SHIM),
         "/bin/launchctl": _write_executable(root / "launchctl", LAUNCHCTL_SHIM),
         "/bin/sleep": _write_executable(root / "sleep", '#!/bin/bash\n[ "$*" = "1" ]\n'),
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12":
+            _write_executable(root / "gateway-preflight-python", GATEWAY_PREFLIGHT_PYTHON_SHIM),
     }
 
 
@@ -1192,7 +1198,8 @@ GATEWAY_CONFIG_PATH = "/Library/Application Support/MastermindExecutive/config/e
 
 def _qualified_gateway_run(tmp_path, plan, *, changes=None, config_changes=None,
                            extra_args=("--expected-sha", GATEWAY_SHA),
-                           missing_config=False, symlink_config=False, native_plutil=False):
+                           missing_config=False, symlink_config=False, native_plutil=False,
+                           preflight_exit=0, preflight_exits=None):
     config = {"schema": "mastermind.executive_mcp_install.v1",
               "release_sha": GATEWAY_SHA, "service_uid": 458}
     config.update(config_changes or {})
@@ -1213,6 +1220,30 @@ def _qualified_gateway_run(tmp_path, plan, *, changes=None, config_changes=None,
     def prepare(script):
         text = script.read_text().replace(GATEWAY_CONFIG_PATH, str(config_path))
         script.write_text(text)
+        preflight = tmp_path / "native-shims" / "gateway-preflight-python"
+        if preflight_exits is None:
+            preflight.write_text(
+                "#!/bin/bash\n"
+                f"exit {int(preflight_exit)}\n",
+                encoding="utf-8",
+            )
+        else:
+            exit_plan = tmp_path / "gateway-preflight-exits"
+            exit_plan.write_text(
+                "\n".join(str(int(code)) for code in preflight_exits) + "\n",
+                encoding="utf-8",
+            )
+            preflight.write_text(
+                "#!/bin/bash\n"
+                f"plan={str(exit_plan)!r}\n"
+                'code="$(head -n 1 "$plan")"\n'
+                '[ -n "$code" ] || exit 98\n'
+                'tail -n +2 "$plan" > "$plan.next"\n'
+                'mv "$plan.next" "$plan"\n'
+                'exit "$code"\n',
+                encoding="utf-8",
+            )
+        preflight.chmod(0o755)
         (tmp_path / "mcp.plist").write_bytes(plistlib.dumps(document))
         if not missing_config:
             target = tmp_path / "actual-config.json" if symlink_config else config_path
@@ -1302,6 +1333,16 @@ def test_gateway_generation_mismatch_is_pre_effect_refusal(tmp_path, changes, co
     assert calls == []
 
 
+def test_gateway_deep_preflight_refusal_never_stops_service(tmp_path):
+    code, _, err, calls, remaining, *_ = _qualified_gateway_run(
+        tmp_path, [], preflight_exit=65
+    )
+    assert code == 65
+    assert "gateway deep preflight failed" in err
+    assert calls == []
+    assert remaining == ""
+
+
 @pytest.mark.parametrize("kind", ["missing", "symlink"])
 def test_gateway_missing_or_indirect_config_never_stops_service(tmp_path, kind):
     code, _, _, calls, _, *_ = _qualified_gateway_run(
@@ -1322,6 +1363,21 @@ def test_gateway_never_enables_previously_disabled_or_unknown_service(tmp_path, 
     plan = [("print-disabled system", code, output, "")]
     result, _, err, calls, remaining, *_ = _qualified_gateway_run(tmp_path, plan)
     assert result == 65
+    assert "gateway must already be enabled" in err
+    assert calls == ["print-disabled system"]
+    assert remaining == ""
+
+
+@pytest.mark.parametrize("output", [
+    f'    "{MCP_LABEL}" => false\ndisabled services = {{\n}}',
+    'disabled services = {\n    "other.service" => false\n'
+    '    "other.service" => enabled\n}',
+    'disabled services = {\n}\n    "other.service" => false',
+])
+def test_gateway_malformed_override_structure_is_pre_effect_refusal(tmp_path, output):
+    plan = [("print-disabled system", 0, output, "")]
+    code, _, err, calls, remaining, *_ = _qualified_gateway_run(tmp_path, plan)
+    assert code == 65
     assert "gateway must already be enabled" in err
     assert calls == ["print-disabled system"]
     assert remaining == ""
@@ -1352,6 +1408,20 @@ def test_gateway_rejects_each_argv_coordinate_before_lifecycle(tmp_path, index, 
         tmp_path, [], changes={"ProgramArguments": args})
     assert code == 65
     assert calls == []
+
+
+def test_gateway_deep_postflight_failure_is_effect_unknown_without_retry(tmp_path):
+    plan = (_gateway_enabled_plan() + _stop_ok(MCP_LABEL)
+            + _ensure_running_bootstrap(MCP_LABEL, tmp_path / "mcp.plist"))
+    code, _, err, calls, remaining, *_ = _qualified_gateway_run(
+        tmp_path, plan, preflight_exits=(0, 65)
+    )
+    assert code == 75
+    assert "stage=postflight" in err and "do not replay" in err
+    assert remaining == ""
+    assert calls == [entry[0] for entry in plan]
+    assert calls.count(f"disable system/{MCP_LABEL}") == 1
+    assert calls.count(f"bootstrap system {tmp_path / 'mcp.plist'}") == 1
 
 
 def test_gateway_post_start_config_disappearance_is_effect_unknown(tmp_path, monkeypatch):
