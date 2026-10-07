@@ -1224,3 +1224,22 @@ def test_replace_exact_file_atomic_refuses_a_missing_target(monkeypatch, tmp_pat
             mode=0o644,
         )
     assert not missing.exists()
+
+
+def test_shared_relay_runbook_orders_rebind_before_scope_migration_and_a2():
+    runbook = (
+        ROOT / "docs" / "runbooks" / "shared-executive-slack-relay.md"
+    ).read_text(encoding="utf-8")
+    sequencing = runbook.split("## Safe sequencing", 1)[1].split(
+        "## Migration compatibility", 1
+    )[0]
+
+    rebind = sequencing.index("rebind-release")
+    scope_migration = sequencing.index("add bot scope `channels:history`")
+    c1_verify = sequencing.index("post-migration Slack identity")
+    a2_shared = sequencing.index("enroll-shared")
+
+    assert rebind < scope_migration < c1_verify < a2_shared
+    assert "A mixed or uncertain outcome is a hard stop" in sequencing
+    assert "No Slack token is copied into chat" in sequencing
+    assert "Neither verification is permission to start the other service." in sequencing
