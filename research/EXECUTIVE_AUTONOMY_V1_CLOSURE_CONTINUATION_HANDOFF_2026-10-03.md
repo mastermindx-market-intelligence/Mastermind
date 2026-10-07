@@ -268,6 +268,7 @@ NEXT: single watcher watch13 adds #1227 head/comments/reviews. Quiet otherwise.
   - the Slack order (step not actionable yet);
   - the A2 conflict between 6032187810 and 6031259282 + DEC (shared route: `U0BT71H4FQE` `enroll-shared`, no TTY token; `U0BTF3QGABF` not enrolled; route choice with the Chairman; never both).
 - **Do not re-post** 6032388623 (amend in place only).
+- **Agent OS.** Macro **#8590** (merge-on-green) updates the WS `next_action`: the install target is the generation containing the #784 merge, and the 1fc040f install state is recorded. It also adds a `do_not_redo` entry for 6032388623. Validation: 0 errors.
 - **Critical path.**
   1. #784 flock successor.
   2. Merge.
