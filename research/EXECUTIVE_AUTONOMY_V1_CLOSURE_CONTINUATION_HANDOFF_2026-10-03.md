@@ -221,6 +221,65 @@ NEXT: single watcher watch13 adds #1227 head/comments/reviews. Quiet otherwise.
 - Non-blocking: guard evaluates `direct_tool_names + release_tool_names` before the tuple assertion; V3 → 1.5.0 / 11 tools means the pending human Business recreate must be scanned as the installed inventory at that time (C19 parent sequencing, not a PR defect).
 - Not done: no local suite run (hosted gate used), no install/arm/effect, no #1143 post (the packet asked for the return on the PR). Re-review = one bounded read on the next pushed head, only if asked or if the gate stays unowned at that read.
 
+## 4an Cycle 05:21Z–05:50Z (10-07) — Sol's six #1143 posts (04:51–05:07Z) agree with the amended order, the DEC and the census, so no C3 act is owed; #784's lock-repair successor is in flight with its incumbent writer
+- **Trigger.** watch54 (task bxpkvf0z4) EDGE `1143 comments=93 (was 87)` at 05:21:47Z.
+- **Endpoints re-read.**
+  - master ee120e80 is unchanged.
+  - #784 is open and draft at be0030ae; mergeable_state is clean.
+  - #811 is open and draft at 8b992746; mergeable_state is clean.
+  - None of the four checkpoint posts has been edited.
+- **Consumed.** All six posts are by MastermindX1 and pinned at ee120e80.
+  - **6031176006, pre-cutover M2 readiness.**
+    - Host checks pass: source policy `exact_protected_master`, Python 3.12.10 (signer BMM5U3QVKW), worker login verify, and `host_recovery_readiness` READY.
+    - The installed generation is still 5b244a2b.
+    - Source is held only on #784's P2 4202700988.
+  - **6031195368, Slack qualification.**
+    - The live root-owned C1 credential qualifies T0BRD2AQXQV / U0BT71H4FQE.
+    - Its scopes are exactly `chat:write + groups:history`, so the missing scope is exactly `channels:history`.
+    - The ceremony is placed "after source/install gates".
+  - **6031244219, catalog freeze.**
+    - 11 base tools plus the Session Bridge's `session_reply_read` make 12.
+    - Server 1.5.0, base schema 968205a2…, census d7c5395e….
+    - This equals C3's 4am readback.
+  - **6031259282, relay identity.**
+    - The canonical identity is U0BT71H4FQE, a member of both channels.
+    - The redundant `U0BTF3QGABF` @mastermind_relay is the dedicated-path bot recorded in 4aj. It is not accepted for A2 and stays inert pending an admin decision.
+  - **6031290184, OS public edge.** Truthfully NOT_INSTALLED: no OS tunnel or commission config/plist, and the installed MCP has no OS transport.
+  - **6031347591, cumulative checkpoint.** Its "exact next sequence":
+    1. #784 merge.
+    2. Re-pin and preflight.
+    3. Install.
+    4. C1 rebind (#784).
+    5. `channels:history`.
+    6. `enroll-shared`.
+    7. Worker readiness and the 12-tool census.
+    8. Business App refresh and a fresh-chat test.
+    9. Runtime root proof.
+    10. OS lane.
+- **C3 judgment.** Everything is consistent, so there is no post.
+  - In the checkpoint, step 4 (rebind) comes before step 5 (scope edit). That matches the amended note 6028181298, the DEC amendment (#8561) and the WS. It supersedes the looser "after source/install gates" wording.
+  - The catalog matches census d7c5395e.
+  - The redundant bot matches the DEC's one-route rule and "keep or remove is the Chairman's call".
+- **#784.**
+  - Codex P2 4202700988 at `c1_relay_enrollment.py:958` (be0030ae) is the attestation→rename race.
+  - Sol support ruling 6031089049 (04:43Z) specifies:
+    - one fixed host-local `flock` at `/Library/Application Support/MastermindExecutive/locks/c1-sol-state-relay-rebind.lock`;
+    - a lock capability required by replace, converge and rollback;
+    - five discriminators.
+  - CONTINUE 6031219428 (04:55Z) sends this to the incumbent writer mastermindx-2, on the same PR and branch. No replacement writer.
+- **C3 integration check banked for the merge readback (read-only, verified this cycle).**
+  - The `locks/` namespace is created only by `prepare-capacity-host.sh` L622 (`install -d -o root -g wheel -m 0700`). `install.sh` never creates it, and no source path removes it.
+  - This host's launchd override table lists codex-pro-01/02/03 as disabled. Only that preparer installs them (L801, after L622), so the namespace is expected to be present on M2.
+  - The control-host readiness profile does not check the namespace.
+  - The installer boots C1 out. A namespace refusal, which is pre-effect by design, would therefore appear only after SOL_STATE is already down.
+  - The merge readback will ask the release owner's pre-install preflight to prove the namespace: direct, root:wheel 0700, no ACL.
+- **Also observed.** The override table has `com.mastermind.executive.agent-relay => disabled` with no loaded job. This is consistent with A2 being disarmed.
+- **Next.**
+  1. #784 successor, then CI and exact-head review, then merge.
+  2. One joint-generation C3 readback on #1143 covering provenance, exact-head CI and review, catalog invariants, composition (including #811 if it lands) and the lock-namespace precondition.
+  3. The install receipt, then `c3_post_install_verify.sh <merge-sha>`.
+  - watch55 is armed. MISSION_COMPLETE false.
+
 ## 4am Cycle 03:49Z–04:05Z (10-07) — **#1220 MERGED as ee120e80**; C3 integration readback is clean (patch-identical squash, CI and independent review at the exact head, catalog invariants unchanged); #784 at be0030ae is the remaining source gate before the install
 - **Trigger.** watch53 (task bcmuu44x9) EDGE `states(1220|784|811)=MERGED:false|OPEN:true|OPEN:true` at 03:49:17Z. An earlier tick at 03:19Z recorded #784 → be0030ae.
 - **#1220.**
@@ -597,6 +656,7 @@ Watcher: watch3 (S/watch3.out; #1143 comments + #811 head/comments + master; 10-
 - Do not re-ACK; do not post a second Slack root for this operation.
 
 ## 8 Next action
+- 05:50Z (10-07): Sol's six #1143 posts (93) agree with the amended order, the DEC and census d7c5395e, so no C3 post. #784's flock successor is with mastermindx-2 (CONTINUE 6031219428). The merge readback will add the lock-namespace precondition (`locks/` comes only from prepare-capacity-host.sh; codex-pro-01/02/03 on this host imply it exists). watch55 is armed.
 - 04:05Z (10-07): **#1220 MERGED ee120e80** (squash, patch-identical to the adjudicated c9552576; CI and Codex exact-head review clean; catalog invariants unchanged, so census d7c5395e stays valid). The remaining source gate is #784 (be0030ae). The next edge is the #784 merge, then one joint-generation C3 readback on #1143, then the install receipt. watch54 is armed.
 - 02:55Z (10-07): watch52 EDGE (#811 comments 48→49) gave a Codex "no major issues" on #811 at 8b992746 (02:21Z).
   - #784 → **57cfd9d1** (repair "harden shared C1 release rebind" plus a protected merge, 02:39Z; CodeQL and analyzers success, `test` in progress).
