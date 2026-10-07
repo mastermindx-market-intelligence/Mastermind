@@ -454,6 +454,110 @@ def reconcile_legacy_pending_registration(
     return registration, observation_digest
 
 
+def reconcile_legacy_absent_registration(
+    policy: ExecutiveAuthPolicy,
+    *,
+    store: KeychainRegistrationStore,
+    observed_attempt_ref: str,
+    observed_redirect_uri: str,
+    observed_policy_digest: str,
+    marker_created_at_epoch: int,
+    audit_window_start_epoch: int,
+    audit_window_end_epoch: int,
+    observed_at_epoch: int,
+    current_inventory_complete: bool,
+    audit_window_complete: bool,
+    current_inventory_match_count: int,
+    historical_registration_match_count: int,
+    historical_deletion_match_count: int,
+    audit_total_events: int,
+    audit_page_count: int,
+    evidence_digest: str,
+) -> str:
+    """Resolve one legacy DCR effect as absent from complete tenant evidence.
+
+    The v1 marker was written immediately before a five-second DCR POST, but it
+    did not retain the deterministic client name added by v2.  This path never
+    calls Auth0 and never registers, deletes, renames, or substitutes a client.
+    It may clear only the exact legacy marker after a complete current
+    inventory plus a complete historical audit window prove zero matching
+    registration/deletion events across a window that covers the request.
+    """
+
+    state = store.load_state()
+    ints = (
+        marker_created_at_epoch,
+        audit_window_start_epoch,
+        audit_window_end_epoch,
+        observed_at_epoch,
+        current_inventory_match_count,
+        historical_registration_match_count,
+        historical_deletion_match_count,
+        audit_total_events,
+        audit_page_count,
+    )
+    if (
+        not isinstance(state, PendingRegistration)
+        or state.client_name is not None
+        or state.policy_digest != policy.policy_digest
+        or state.redirect_uri != CALLBACK_URL
+        or observed_attempt_ref != state.attempt_ref
+        or observed_redirect_uri != CALLBACK_URL
+        or observed_policy_digest != policy.policy_digest
+        or current_inventory_complete is not True
+        or audit_window_complete is not True
+        or any(isinstance(value, bool) or not isinstance(value, int) for value in ints)
+        or marker_created_at_epoch <= 0
+        or audit_window_start_epoch <= 0
+        or audit_window_end_epoch <= 0
+        or observed_at_epoch <= 0
+        or audit_window_start_epoch > marker_created_at_epoch
+        or audit_window_end_epoch < marker_created_at_epoch + 60
+        or observed_at_epoch < audit_window_end_epoch
+        or current_inventory_match_count != 0
+        or historical_registration_match_count != 0
+        or historical_deletion_match_count != 0
+        or audit_total_events <= 0
+        or audit_page_count <= 0
+        or not KeychainRegistrationStore._hex64(evidence_digest)
+    ):
+        raise EnrollmentError(
+            "legacy pending Executive public client registration absence cannot be reconciled"
+        )
+
+    observation = {
+        "schema": "mastermind.codex_fabric.legacy_dcr_absence_observation/v1",
+        "attempt_ref": state.attempt_ref,
+        "audit_page_count": audit_page_count,
+        "audit_total_events": audit_total_events,
+        "audit_window_complete": True,
+        "audit_window_end_epoch": audit_window_end_epoch,
+        "audit_window_start_epoch": audit_window_start_epoch,
+        "client_name": CLIENT_NAME,
+        "current_inventory_complete": True,
+        "current_inventory_match_count": current_inventory_match_count,
+        "evidence_digest": evidence_digest,
+        "historical_deletion_match_count": historical_deletion_match_count,
+        "historical_registration_match_count": historical_registration_match_count,
+        "marker_created_at_epoch": marker_created_at_epoch,
+        "observed_at_epoch": observed_at_epoch,
+        "policy_digest": observed_policy_digest,
+        "redirect_uri": observed_redirect_uri,
+    }
+    observation_digest = hashlib.sha256(
+        json.dumps(observation, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    try:
+        store.clear_pending(state.attempt_ref)
+    except EnrollmentEffectUnknown:
+        raise
+    except Exception:
+        raise EnrollmentEffectUnknown(
+            "legacy Executive public client registration absence reconciliation effect is unknown"
+        ) from None
+    return observation_digest
+
+
 def pending_registration_status(
     policy: ExecutiveAuthPolicy,
     *,
@@ -796,10 +900,26 @@ def main(
         action="store_true",
         help="reconcile the historical pre-fingerprint pending DCR effect from tenant evidence",
     )
+    parser.add_argument(
+        "--legacy-reconcile-absence",
+        action="store_true",
+        help="clear the historical pre-fingerprint pending DCR effect only from complete absence evidence",
+    )
     parser.add_argument("--reconcile-redirect-uri")
     parser.add_argument("--reconcile-policy-digest")
     parser.add_argument("--reconcile-match-count", type=int)
     parser.add_argument("--reconcile-observed-at-epoch", type=int)
+    parser.add_argument("--absence-marker-created-at-epoch", type=int)
+    parser.add_argument("--absence-audit-window-start-epoch", type=int)
+    parser.add_argument("--absence-audit-window-end-epoch", type=int)
+    parser.add_argument("--absence-current-inventory-complete", action="store_true")
+    parser.add_argument("--absence-audit-window-complete", action="store_true")
+    parser.add_argument("--absence-current-inventory-match-count", type=int)
+    parser.add_argument("--absence-historical-registration-match-count", type=int)
+    parser.add_argument("--absence-historical-deletion-match-count", type=int)
+    parser.add_argument("--absence-audit-total-events", type=int)
+    parser.add_argument("--absence-audit-page-count", type=int)
+    parser.add_argument("--absence-evidence-digest")
     parser.add_argument(
         "--pending-status",
         action="store_true",
@@ -818,24 +938,74 @@ def main(
             args.reconcile_match_count,
             args.reconcile_observed_at_epoch,
         )
+        absence_values = (
+            args.reconcile_attempt_ref,
+            args.reconcile_redirect_uri,
+            args.reconcile_policy_digest,
+            args.reconcile_observed_at_epoch,
+            args.absence_marker_created_at_epoch,
+            args.absence_audit_window_start_epoch,
+            args.absence_audit_window_end_epoch,
+            args.absence_current_inventory_match_count,
+            args.absence_historical_registration_match_count,
+            args.absence_historical_deletion_match_count,
+            args.absence_audit_total_events,
+            args.absence_audit_page_count,
+            args.absence_evidence_digest,
+        )
+        if args.legacy_reconcile and args.legacy_reconcile_absence:
+            raise EnrollmentError("legacy reconciliation modes are mutually exclusive")
         if args.pending_status and (
             args.legacy_reconcile
+            or args.legacy_reconcile_absence
             or any(value is not None for value in reconciliation_values + legacy_values)
+            or args.absence_current_inventory_complete
+            or args.absence_audit_window_complete
         ):
             raise EnrollmentError(
                 "pending status cannot be combined with reconciliation"
             )
-        if any(value is None for value in reconciliation_values) and any(
-            value is not None for value in reconciliation_values
-        ):
-            raise EnrollmentError(
-                "reconciliation requires client id, attempt ref, and client name together"
-            )
-        if args.legacy_reconcile:
-            if any(value is None for value in reconciliation_values + legacy_values):
-                raise EnrollmentError("legacy reconciliation evidence is incomplete")
-        elif any(value is not None for value in legacy_values):
-            raise EnrollmentError("legacy reconciliation evidence requires --legacy-reconcile")
+        if args.legacy_reconcile_absence:
+            if args.reconcile_client_id is not None or args.reconcile_client_name is not None:
+                raise EnrollmentError("legacy absence reconciliation does not accept a client id or name")
+            if args.reconcile_match_count is not None:
+                raise EnrollmentError("legacy absence reconciliation uses explicit zero-match evidence")
+            if (
+                any(value is None for value in absence_values)
+                or not args.absence_current_inventory_complete
+                or not args.absence_audit_window_complete
+            ):
+                raise EnrollmentError("legacy absence reconciliation evidence is incomplete")
+        else:
+            if any(value is None for value in reconciliation_values) and any(
+                value is not None for value in reconciliation_values
+            ):
+                raise EnrollmentError(
+                    "reconciliation requires client id, attempt ref, and client name together"
+                )
+            if args.legacy_reconcile:
+                if any(value is None for value in reconciliation_values + legacy_values):
+                    raise EnrollmentError("legacy reconciliation evidence is incomplete")
+            elif any(value is not None for value in legacy_values):
+                raise EnrollmentError("legacy reconciliation evidence requires --legacy-reconcile")
+            if (
+                any(value is not None for value in (
+                    args.absence_marker_created_at_epoch,
+                    args.absence_audit_window_start_epoch,
+                    args.absence_audit_window_end_epoch,
+                    args.absence_current_inventory_match_count,
+                    args.absence_historical_registration_match_count,
+                    args.absence_historical_deletion_match_count,
+                    args.absence_audit_total_events,
+                    args.absence_audit_page_count,
+                    args.absence_evidence_digest,
+                ))
+                or args.absence_current_inventory_complete
+                or args.absence_audit_window_complete
+            ):
+                raise EnrollmentError(
+                    "legacy absence evidence requires --legacy-reconcile-absence"
+                )
         if args.pending_status:
             registrations = (
                 KeychainRegistrationStore()
@@ -844,6 +1014,37 @@ def main(
             )
             policy = load_installed_policy(policy_path, expected_uid=expected_uid)
             payload = pending_registration_status(policy, store=registrations)
+        elif args.legacy_reconcile_absence:
+            registrations = (
+                KeychainRegistrationStore()
+                if registration_store is None
+                else registration_store
+            )
+            policy = load_installed_policy(policy_path, expected_uid=expected_uid)
+            observation_digest = reconcile_legacy_absent_registration(
+                policy,
+                store=registrations,
+                observed_attempt_ref=args.reconcile_attempt_ref,
+                observed_redirect_uri=args.reconcile_redirect_uri,
+                observed_policy_digest=args.reconcile_policy_digest,
+                marker_created_at_epoch=args.absence_marker_created_at_epoch,
+                audit_window_start_epoch=args.absence_audit_window_start_epoch,
+                audit_window_end_epoch=args.absence_audit_window_end_epoch,
+                observed_at_epoch=args.reconcile_observed_at_epoch,
+                current_inventory_complete=args.absence_current_inventory_complete,
+                audit_window_complete=args.absence_audit_window_complete,
+                current_inventory_match_count=args.absence_current_inventory_match_count,
+                historical_registration_match_count=args.absence_historical_registration_match_count,
+                historical_deletion_match_count=args.absence_historical_deletion_match_count,
+                audit_total_events=args.absence_audit_total_events,
+                audit_page_count=args.absence_audit_page_count,
+                evidence_digest=args.absence_evidence_digest,
+            )
+            payload = {
+                "observation_digest": observation_digest,
+                "policy_digest": policy.policy_digest,
+                "state": "reconciled_legacy_absent",
+            }
         elif args.reconcile_client_id is not None:
             registrations = (
                 KeychainRegistrationStore()
