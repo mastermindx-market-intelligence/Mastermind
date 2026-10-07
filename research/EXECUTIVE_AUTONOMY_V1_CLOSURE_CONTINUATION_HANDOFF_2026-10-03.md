@@ -221,6 +221,50 @@ NEXT: single watcher watch13 adds #1227 head/comments/reviews. Quiet otherwise.
 - Non-blocking: guard evaluates `direct_tool_names + release_tool_names` before the tuple assertion; V3 → 1.5.0 / 11 tools means the pending human Business recreate must be scanned as the installed inventory at that time (C19 parent sequencing, not a PR defect).
 - Not done: no local suite run (hosted gate used), no install/arm/effect, no #1143 post (the packet asked for the return on the PR). Re-review = one bounded read on the next pushed head, only if asked or if the gate stays unowned at that read.
 
+## 4al Cycle 02:15Z–02:30Z (10-07) — #1143 84–87 consumed; **the captain adopts the shared path and the install → rebind → scope-edit order**; #1220 and #784 have exact CI-red repair requests open; C3 composition is clean; C3 read-only installed-identity baseline taken
+- **Trigger.** watch51 (task bvzagbmhx) EDGE `1143 comments=87 (was 83)` at 02:15:57Z.
+- **Endpoints.** Master is unchanged at 9a24ef2c. #1220 → **c9552576** (protected-master merge, 0 behind master, mergeable_state blocked). #784 is at 9b7d8ce9 (1 behind master). Macro **#8561 MERGED** (14c93a68). No watched comment was edited.
+- **6029121134 + 6029138295 (mastermindx-3, packet 02).**
+  - Pinned at 9a24ef2c.
+  - The catalog-defining blobs are byte-identical, so census artifact d7c5395e… stays current. Do not regenerate it.
+  - The client is still 7 tools, with generic argument maps for `executive_fabric` and `executive_mdm`. Adoption needs an exact 12-name + schema match.
+  - Publication and Scan Tools are held until the installed 1.5.0 proof.
+  - Exact CI reds:
+    - #1220 de09c783, run 37555275737: `test_personal_read_mcp_uses_only_v1_ceo_ingress_and_has_no_write_route`.
+    - #784 9b7d8ce9, run 37554488942: Linux ACL `C1_ENROLLMENT_HOST_REFUSED`, the runbook-order assertion, and D8 literals 450/453.
+- **6029389158 (MastermindX1, captain delta).**
+  - #1220: the eight blockers have mutation-kill proof, and one stale Personal Read fixture is red. Fixture repair was requested at #1220 6029179767; the production validator stays strict.
+  - #784: three bounded failure classes; repair was requested at #784 6029310765.
+  - Do not install until both gates close with green CI and exact-head review.
+  - **Packet 03:** #1265 source qualified (249/249). `U0BT71H4FQE` is in both channels, and the installed C1 config binds the same bot. **Install/rebind before the Slack scope migration; one path only.** This matches the amended C3 note, so the order fork is closed on the carrier. The Chairman still chooses the route.
+  - Packet 06: the Auth0 and Workspace/Content identities are UNPROVEN; the first step after install is read-only owner reconciliation.
+  - Captain's path: #1220 + #784 → accepted release → M2 install/Gate B → C1 rebind → packet-03 Slack → packet-02 catalog → packet-04 round trip → packet-07.
+- **6029441634 (mastermindx-2).** The V2 live reader is healthy on 1.4.0 / 5b244a2b, mode readonly, degraded=[]. The read calls created zero records (Jobs 13, Attempts 15, Workers 1). JOB-003 and JOB-013 are QUEUED with attempt_count 0, unreplayed. Installed Macro is 88804ed7.
+- **C3 integration (read-only).**
+  - Pairwise `merge-tree`: master×c9552576 rc=0, master×9b7d8ce9 rc=0, c9552576×9b7d8ce9 rc=0.
+  - #1220 and #784 share no paths: #784 touches `c1_relay_enrollment.py`, its test and the runbook. The joint install generation therefore composes in either merge order.
+  - `scratchpad/c3_post_install_verify.sh` is staged. It uses only `launchctl print` and reports each governed daemon's release.
+  - Baseline at 02:2xZ:
+    - mcp running, PID 34488, @5b244a2b;
+    - control running, PID 924, @5b244a2b;
+    - sol-state-relay running, PID 3151, **@4c148709**;
+    - privileged not running, @5b244a2b;
+    - agent-relay, worker.codex, backup and remote-worker-gateway ABSENT.
+- **No C3 post this cycle.** The carrier already carries every fact, the captain consumed the order, and a new note would be NO_DELTA admin.
+- **Critical path.**
+  1. #1220 fixture repair → CI → exact-head review → merge.
+  2. #784 repair → CI → review → merge, in parallel with step 1.
+  3. One install.
+  4. C1 rebind.
+  5. Slack.
+  6. C1 verify and `enroll-shared`.
+  7. Census, which C3 verifies with `c3_post_install_verify.sh` plus the 12-tool artifact.
+  8. Catalog.
+  9. Worker route.
+  10. Pilot.
+  11. Packet 07.
+  MISSION_COMPLETE false.
+
 ## 4ak Cycle 01:09Z–01:25Z (10-07) — watch50 edge (release-owner in-place edit); **C1 rebind dependency (#784) refutes the 4aj "install alone" precondition** → C3 note amended in place, DEC amended (Macro #8561); #1220 → de09c783 (all eight blockers claimed repaired)
 - **Trigger.** watch50 (task b799uwe60) EDGE: #1143 6027192883 edited 00:52:12Z, seen at 01:09:51Z.
 - **Re-read of every endpoint.**
@@ -517,6 +561,7 @@ Watcher: watch3 (S/watch3.out; #1143 comments + #811 head/comments + master; 10-
 - Do not re-ACK; do not post a second Slack root for this operation.
 
 ## 8 Next action
+- 02:30Z (10-07): #1143 84–87 consumed. The captain adopts the shared path and the install → C1 rebind → scope-edit order (the fork is closed on the carrier; the route is still the Chairman's choice). #1220 c9552576 and #784 9b7d8ce9 have exact CI-red repair requests open; composition is clean pairwise. The C3 installed-identity baseline is taken (relay @4c148709) and the after-install check is staged. Next edges: #1220 / #784 merges → install receipt → run c3_post_install_verify.sh with the merge SHA. watch52 is armed.
 - 01:25Z (10-07): The release owner's edit (6027192883, 00:52Z) and the packet-01 checkpoint 6028474958 are consumed. The C1 relay runs its own 4c148709 generation (verified read-only), so the Slack scope edit waits for the install **and** the C1 rebind (#784). C3 note 6028181298 is amended in place, and Macro #8561 amends the DEC. The Chairman completed the A0BUDHZ137A cleanup, which is harmless. #1220 → de09c783 (eight blockers claimed repaired; review and CI owed). Master is 9a24ef2c (#955, off path). Next edges: #1220 and #784 merges → one install → C1 rebind → Slack edit → census (C3 verifies). watch51 is armed.
 - 00:45Z (10-07): #1143 79–81 consumed. Master 6a85e0d6 contains #1265: A2 moves to the shared Executive Relay path by Chairman intent, and its order is install first, scope edit second. C3 note 6028181298 surfaces this fork to the release, captain and packet-01 owners, who had each pinned 6e82f9af or earlier. Macro #8558 supersedes the DEC. The "don't wait for #1220" advice is retracted, and all owners hold the install for #1220 (eight blockers, 0e7f7a01). Next edges: #1220 merge → the re-pinned install receipt (C3 verifies read-only plus the 12-tool census) → the Slack path choice and receipt → packet 07. watch50 is armed.
 - 23:40Z (10-06): #1219 MERGED 760f51b5; master 2d590c51. Release/install owned by the Chairman-assigned takeover (6027192883), holding for #1220 (now 610ad65e, 6 open findings). C3 posted Slack receipt delta 6027309991; Macro #8556 opened. watch49 armed. Next edges: release owner's install receipt → verify read-only + 12-tool census; Slack ceremony receipt → DEC check; #1220 MERGED → record SHA; Sol/owner handoff naming C3 → adjudicate.
