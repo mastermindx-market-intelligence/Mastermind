@@ -687,3 +687,31 @@ test('selected publisher refuses a foreign or unversioned owner receipt before G
     }
   } finally { await f.cleanup(); }
 });
+
+test('read-only workspace status fences Git config and optional locks', async () => {
+  const f = await fixture();
+  try {
+    const observations = [];
+    const publisher = createGitPublisher(f.config, {
+      execFile: async (file, args, options) => {
+        if (file === GIT && gitCommand(args) === 'status') {
+          observations.push({
+            global: options?.env?.GIT_CONFIG_GLOBAL,
+            noSystem: options?.env?.GIT_CONFIG_NOSYSTEM,
+            optionalLocks: options?.env?.GIT_OPTIONAL_LOCKS,
+          });
+        }
+        return execFile(file, args, options);
+      },
+    });
+    const status = await publisher.status({ operation_id: f.operationId });
+    assert.equal(status.clean, true);
+    assert.deepEqual(observations, [{
+      global: '/dev/null',
+      noSystem: '1',
+      optionalLocks: '0',
+    }]);
+  } finally {
+    await f.cleanup();
+  }
+});
