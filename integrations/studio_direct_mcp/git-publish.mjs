@@ -327,6 +327,14 @@ export function createGitPublisher(config, dependencies = {}) {
     }
   }
 
+  async function syncRealIndex(cwd, revision) {
+    // read-tree intentionally aligns the real index to the new commit without
+    // touching the worktree. Refresh stat metadata immediately afterward so
+    // subsequent read-only cleanliness probes do not report stat-only dirt.
+    await git(cwd, ['read-tree', revision]);
+    await git(cwd, ['update-index', '--refresh']);
+  }
+
   async function verifyDestinationBinding(binding) {
     const {workspacePath, remoteUrl, gitArgs} = binding;
     for (const mode of [[], ['--push']]) {
@@ -578,7 +586,7 @@ export function createGitPublisher(config, dependencies = {}) {
           // The private index protects the caller from pre-commit staging side
           // effects. Once the fenced ref update is known applied, align the
           // real index with that exact commit without touching the worktree.
-          await git(before.workspacePath, ['read-tree', commitHead]);
+          await syncRealIndex(before.workspacePath, commitHead);
         } catch {
           indexSynced = false;
         }
@@ -761,7 +769,7 @@ export function createGitPublisher(config, dependencies = {}) {
 
       async function finishCommissionApplied(successCode) {
         let indexSynced = true;
-        try { await git(before.workspacePath, ['read-tree', commitHead]); } catch { indexSynced = false; }
+        try { await syncRealIndex(before.workspacePath, commitHead); } catch { indexSynced = false; }
         let observed = null;
         try { observed = await workspace(operationId, {observeRemote: false}); } catch { /* known applied */ }
         if (!observed) {
