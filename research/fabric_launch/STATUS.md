@@ -58,3 +58,22 @@ actual effective tool use on each selected native provider; do not infer univers
 from a package name or one successful route.
 
 Mission state: PARTIAL, not globally deployed. Unrelated improvements are deferred.
+## M2 local Claude installation
+
+A user-scoped native Claude installation now exists on M2 through the existing local
+`mastermind-private` marketplace. `mastermind-workforce@mastermind-private` is enabled at
+version `0.1.0-candidate.g61e97693f4bb.skills-only`; Claude reports both
+`mastermind-worker-bootstrap` and `mastermind-craft`, with no MCP server bundled by this
+package. The installed cache contains the same 23 source files as the validated marketplace
+copy with zero hash mismatches. The global Claude startup instructions now select Worker
+Bootstrap plus exactly one Craft role for bounded Mastermind work and explicitly state that
+the package grants no tool/runtime/child authority.
+
+Existing connected M2 MCPs include Figma and Paper. Linear and the existing Mastermind
+Executive MCP currently report authentication-required; `mmx-cimd-probe` is disconnected.
+The Claude CLI itself currently reports `loggedIn=false`. A no-tools skill invocation canary
+was attempted once and ended before inference with the exact authentication failure; no
+credential bypass, copying or alternate account was attempted. Therefore local package
+installation/discovery is proven, while actual fresh-model method consumption remains
+`BLOCKED_AUTH` until the normal human Claude login ceremony is completed. Local install
+receipt SHA-256: `c949c01e2f8f86354dfec1678aa0904bca94cd72e4cf23eaf7ae1b4adb02f41d`.

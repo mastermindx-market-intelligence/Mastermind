@@ -123,6 +123,36 @@
     "terminal_sha256": "3c5cabc178f3720d760909c40f497ecf9a29db3e1339b04997b98fcd4e254e10",
     "verdict": "REQUEST_CHANGES"
   },
+  "local_claude_m2_install": {
+    "candidate_source_commit": "61e97693f4bbf60fe1f7638247c378744caa598f",
+    "claude_cli_auth": "not_logged_in",
+    "claude_startup_bootstrap_installed": true,
+    "enabled": true,
+    "existing_mcp_statuses": {
+      "linear-server": "auth_required",
+      "mastermind-executive": "auth_required",
+      "mmx-cimd-probe": "failed",
+      "plugin:figma:figma": "connected",
+      "plugin:paper-desktop:paper": "connected"
+    },
+    "host": "m2studio",
+    "installed_cache_file_count": 23,
+    "installed_source_file_count": 23,
+    "installed_source_hashes_match": true,
+    "local_receipt_sha256": "c949c01e2f8f86354dfec1678aa0904bca94cd72e4cf23eaf7ae1b4adb02f41d",
+    "mcp_servers_added_by_workforce": 0,
+    "observed_at": "2026-10-07T05:23:00Z",
+    "plugin_id": "mastermind-workforce@mastermind-private",
+    "plugin_version": "0.1.0-candidate.g61e97693f4bb.skills-only",
+    "proof_boundary": "Native plugin install, enablement, component discovery, startup projection, and exact cache-source equality are proven on M2. Actual model consumption is not claimed until Claude first-party authentication is restored and a fresh-session canary succeeds.",
+    "protected_master_pin": "ee120e80f5d5e0344c453dd7cbf4108b9c429b38",
+    "scope": "user",
+    "skill_inference_canary": "BLOCKED_AUTH",
+    "skills": [
+      "mastermind-craft",
+      "mastermind-worker-bootstrap"
+    ]
+  },
   "mcp_reply_validation": {
     "full_log_sha256": "0ae2dd3c8ccfa8e725211f5e4d7df46bc2ca05ee0e5d8ab4e53a6ffb02b5b9a1",
     "full_suite_passed": 177,
@@ -237,7 +267,8 @@
     "Coordinate stopped-service publication of the new pool wrapper and all ten existing Studio consumer pins through their existing publisher; no raw pin edits.",
     "Select/admit exact native worker capability-package profiles, then prove their effective tools and source method loading.",
     "Complete native app OAuth/resource consent through existing owners; M2 Linear remains authentication-required, no Web-token inheritance.",
-    "Restore mini2 free disk space through the existing storage owner before a Sol native provider qualification; do not lower the 50GB admission floor."
+    "Restore mini2 free disk space through the existing storage owner before a Sol native provider qualification; do not lower the 50GB admission floor.",
+    "Restore M2 Claude CLI first-party authentication via the normal human login flow, then run one fresh-session read-only Workforce skill canary; do not reuse/copy another client credential."
   ],
   "plugin_variant_identity": {
     "full_suite_passed": 201,
