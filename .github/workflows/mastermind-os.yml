@@ -51,7 +51,6 @@ jobs:
         working-directory: app/mastermind_os
     env:
       RUSTUP_TOOLCHAIN: "1.99.0"
-      CARGO_TARGET_DIR: ${{ runner.temp }}/mastermind-os-target
       # The default checkout is this exact integration/push commit, not PR head.
       MM_SOURCE_REVISION: ${{ github.sha }}
       MM_BUILD_IDENTITY: ci-native-${{ github.run_id }}-${{ github.run_attempt }}
@@ -62,6 +61,8 @@ jobs:
           node-version: "22.14.0"
           cache: npm
           cache-dependency-path: app/mastermind_os/package-lock.json
+      - name: Place build products in runner-owned temporary storage
+        run: echo "CARGO_TARGET_DIR=$RUNNER_TEMP/mastermind-os-target" >> "$GITHUB_ENV"
       - name: Install pinned Rust toolchain
         run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
       - run: npm ci

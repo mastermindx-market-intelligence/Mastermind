@@ -60,10 +60,20 @@ def test_build_identity_matches_checkout_and_toolchain_is_exact():
     assert re.fullmatch(r"\d+\.\d+\.\d+", env["RUSTUP_TOOLCHAIN"])
     assert env["MM_SOURCE_REVISION"] == "${{ github.sha }}"
     assert env["MM_BUILD_IDENTITY"] == "ci-native-${{ github.run_id }}-${{ github.run_attempt }}"
-    assert env["CARGO_TARGET_DIR"] == "${{ runner.temp }}/mastermind-os-target"
+    assert "CARGO_TARGET_DIR" not in env
+    assert 'echo "CARGO_TARGET_DIR=$RUNNER_TEMP/mastermind-os-target" >> "$GITHUB_ENV"' in commands(job)
     checkout = next(step for step in job["steps"] if step.get("uses", "").startswith("actions/checkout@"))
     assert "ref" not in checkout.get("with", {})
     assert 'rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal' in commands(job)
+
+
+def test_job_environment_uses_only_admitted_expression_contexts():
+    # runner is available to steps, but not jobs.<job_id>.env. Generic YAML
+    # parsers accept that mistake while GitHub rejects the entire workflow.
+    allowed = {"github", "needs", "strategy", "matrix", "vars", "secrets", "inputs"}
+    for value in native_job()["env"].values():
+        for context in re.findall(r"\$\{\{\s*(\w+)\.", value):
+            assert context in allowed, f"{context} is unavailable in job-level env"
 
 
 def test_native_assets_precede_locked_rust_checks_and_tests():
