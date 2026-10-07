@@ -70,6 +70,7 @@ class ExtensionBrokerPlan:
     expected_tool_schema_digest: str
     requires_user_approval: bool = True
     one_broker_connection_per_profile: bool = True
+    requires_single_enrolled_profile_per_host: bool = True
 
     @property
     def is_admission(self) -> bool:
@@ -89,6 +90,7 @@ class ExtensionBrokerPlan:
             "expected_tool_schema_digest": self.expected_tool_schema_digest,
             "requires_user_approval": True,
             "one_broker_connection_per_profile": True,
+            "requires_single_enrolled_profile_per_host": True,
             "is_admission": False,
             "is_installation": False,
             "authority": {
@@ -129,9 +131,12 @@ def build_extension_broker_plan(
         raise ExtensionModeError("Playwright MCP version is not reviewed")
 
     # Initial shared-human enrollment deliberately uses Playwright's visible
-    # connection approval + tab picker. No profile token or model-selected
-    # profile enters this plan. One long-lived broker client then multiplexes
-    # separately authorized Mastermind callers above the selected tab group.
+    # connection approval + tab picker. Pinned 0.0.79 has no profile selector
+    # or extension-token binding, so the host owner may grant this mode only
+    # when exactly one Chrome profile on that host is extension-enrolled. One
+    # long-lived broker client then multiplexes separately authorized Mastermind
+    # callers above the selected tab group. Multiple enrolled profiles on one
+    # host require a later reviewed runtime with exact profile selection.
     argv = (
         cli,
         "--browser",

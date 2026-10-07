@@ -567,3 +567,45 @@ def test_relay_self_retires_when_workbench_parent_disappears(
     thread.join(timeout=3)
     assert not thread.is_alive()
     assert not socket_path.exists()
+
+
+def test_extension_child_argv_attaches_through_reviewed_extension_only():
+    from control_plane.browser_resource_contract import BrowserMode
+    from integrations.workbench_browser_mcp.relay import playwright_child_argv
+
+    argv = playwright_child_argv(
+        node_executable="/opt/homebrew/bin/node",
+        mcp_cli_path="/opt/mmx/node_modules/@playwright/mcp/cli.js",
+        chrome_executable="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        output_dir="/private/tmp/mmx-browser-output",
+        mode="".join(("exten", "sion")),
+        profile_dir=None,
+    )
+    assert argv == (
+        "/opt/homebrew/bin/node",
+        "/opt/mmx/node_modules/@playwright/mcp/cli.js",
+        "--browser",
+        "chrome",
+        "--output-dir",
+        "/private/tmp/mmx-browser-output",
+        "--extension",
+    )
+    for forbidden in (
+        "--headless",
+        "--isolated",
+        "--user-data-dir",
+        "--executable-path",
+        "--cdp-endpoint",
+        "--shared-browser-context",
+    ):
+        assert forbidden not in argv
+
+    with pytest.raises(BrowserRelayError):
+        playwright_child_argv(
+            node_executable="/opt/homebrew/bin/node",
+            mcp_cli_path="/opt/mmx/node_modules/@playwright/mcp/cli.js",
+            chrome_executable="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            output_dir="/private/tmp/mmx-browser-output",
+            mode=BrowserMode.EXTENSION.value,
+            profile_dir="/Users/private/Profile 2",
+        )

@@ -40,6 +40,7 @@ def test_extension_plan_reuses_exact_reviewed_playwright_schema():
     assert value.extension_id == EXTENSION_ID
     assert value.requires_user_approval is True
     assert value.one_broker_connection_per_profile is True
+    assert value.requires_single_enrolled_profile_per_host is True
     assert value.is_admission is False
     assert value.is_installation is False
 
