@@ -688,30 +688,82 @@ test('selected publisher refuses a foreign or unversioned owner receipt before G
   } finally { await f.cleanup(); }
 });
 
-test('read-only workspace status fences Git config and optional locks', async () => {
+test('read-only cleanliness probes preserve config semantics and confine optional locks', async () => {
   const f = await fixture();
   try {
-    const observations = [];
+    const calls = [];
     const publisher = createGitPublisher(f.config, {
       execFile: async (file, args, options) => {
-        if (file === GIT && gitCommand(args) === 'status') {
-          observations.push({
-            global: options?.env?.GIT_CONFIG_GLOBAL,
-            noSystem: options?.env?.GIT_CONFIG_NOSYSTEM,
-            optionalLocks: options?.env?.GIT_OPTIONAL_LOCKS,
-          });
-        }
+        calls.push({file, args, env: options?.env ?? {}});
         return execFile(file, args, options);
       },
     });
     const status = await publisher.status({ operation_id: f.operationId });
     assert.equal(status.clean, true);
-    assert.deepEqual(observations, [{
-      global: '/dev/null',
-      noSystem: '1',
-      optionalLocks: '0',
-    }]);
+    const cleanliness = new Set(['diff-files', 'diff-index', 'ls-files']);
+    const observed = calls.filter(({file, args}) => file === GIT && cleanliness.has(gitCommand(args)));
+    assert.deepEqual(observed.map(({args}) => gitCommand(args)).sort(), ['diff-files', 'diff-index', 'ls-files']);
+    for (const {env} of observed) {
+      assert.equal(env.GIT_OPTIONAL_LOCKS, '0');
+      assert.equal('GIT_CONFIG_GLOBAL' in env, false);
+      assert.equal('GIT_CONFIG_NOSYSTEM' in env, false);
+    }
+    for (const {file, args, env} of calls.filter(({file, args}) =>
+      file === GIT && !cleanliness.has(gitCommand(args)))) {
+      assert.equal('GIT_OPTIONAL_LOCKS' in env, false, `${gitCommand(args)} inherited observation fence`);
+      assert.equal('GIT_CONFIG_GLOBAL' in env, false);
+      assert.equal('GIT_CONFIG_NOSYSTEM' in env, false);
+    }
   } finally {
     await f.cleanup();
+  }
+});
+
+test('global exclude semantics cannot create false-clean push readiness', async () => {
+  const f = await fixture();
+  const previousHome = process.env.HOME;
+  try {
+    const home = path.join(f.root, 'home');
+    const ignoreDir = path.join(home, '.config', 'git');
+    await run('/bin/mkdir', ['-p', ignoreDir]);
+    await writeFile(path.join(home, '.gitconfig'), '[core]\n\texcludesFile = /dev/null\n');
+    await writeFile(path.join(ignoreDir, 'ignore'), 'pending.txt\n');
+    await writeFile(path.join(f.workspace, 'pending.txt'), 'must remain visible to publication admission\n');
+    process.env.HOME = home;
+
+    const publisher = createGitPublisher(f.config);
+    const status = await publisher.status({operation_id: f.operationId});
+    assert.equal(status.clean, false);
+    assert.equal(status.ready_to_push, false);
+
+    const out = await publisher.push({operation_id: f.operationId, expected_head_sha: f.head});
+    assert.equal(out.effect_state, 'NOT_APPLIED');
+    assert.equal(out.code, 'WORKSPACE_DIRTY');
+    const {stdout: remoteOut} = await git(
+      f.workspace, 'ls-remote', '--heads', 'origin', `refs/heads/${f.branch}`);
+    assert.equal(remoteOut.trim(), '');
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    await f.cleanup();
+  }
+});
+
+test('tracked and staged changes both refuse push under split cleanliness probes', async () => {
+  for (const staged of [false, true]) {
+    const f = await fixture();
+    try {
+      await writeFile(path.join(f.workspace, 'proof.txt'), staged ? 'staged\n' : 'unstaged\n');
+      if (staged) await git(f.workspace, 'add', 'proof.txt');
+      const publisher = createGitPublisher(f.config);
+      const out = await publisher.push({operation_id: f.operationId, expected_head_sha: f.head});
+      assert.equal(out.effect_state, 'NOT_APPLIED');
+      assert.equal(out.code, 'WORKSPACE_DIRTY');
+      const {stdout: remoteOut} = await git(
+        f.workspace, 'ls-remote', '--heads', 'origin', `refs/heads/${f.branch}`);
+      assert.equal(remoteOut.trim(), '');
+    } finally {
+      await f.cleanup();
+    }
   }
 });
