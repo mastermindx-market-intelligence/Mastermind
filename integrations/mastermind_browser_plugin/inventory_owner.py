@@ -31,7 +31,7 @@ from .tab_ref import (
 _TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _BROWSER_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._~:-]{15,16383}$")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
-_MAX_TITLE = 512
+_MAX_TITLE = 1 << 9
 _MAX_URL = 2048
 
 
