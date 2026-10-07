@@ -873,15 +873,14 @@ def _replace_exact_file_atomic(
     uid: int,
     gid: int,
     mode: int,
-) -> None:
-    """Atomically replace one attested private file in place.
+    expected_attestation: _PrivateFileAttestation,
+) -> _PrivateFileAttestation:
+    """Atomically replace one exact attested preimage in place.
 
-    Mirrors ``write_new_private_file``'s parent and attestation discipline while
-    keeping the inode-backed path identity launchd already holds.  It never
-    creates a missing final file, and it refuses an original that is a symlink,
-    has an extra hard link, or does not already carry the expected ownership,
-    mode and ACL state before the rename.  The replacement is staged under a
-    collision-safe temporary name and every failure path unlinks it.
+    The caller must supply the attestation it actually observed when it decided
+    to write. This helper re-proves that exact inode/content identity before
+    staging and again immediately before rename, so another modifier cannot be
+    silently overwritten merely because the path still has valid metadata.
     """
 
     path = Path(path)
@@ -900,11 +899,17 @@ def _replace_exact_file_atomic(
         raise
     except Exception:
         raise C1EnrollmentError("C1_ENROLLMENT_WRITE_REFUSED") from None
-    try:
-        before = path.lstat()
-    except OSError:
-        raise C1EnrollmentError("C1_ENROLLMENT_WRITE_REFUSED") from None
-    _exact_file(path, uid=uid, gid=gid, mode=mode)
+
+    before_bytes, before_attestation = _attest_private_bytes(
+        path,
+        uid=uid,
+        gid=gid,
+        mode=mode,
+        max_bytes=PLIST_MAX_BYTES,
+        code="C1_REBIND_EFFECT_UNCERTAIN",
+    )
+    if before_attestation != expected_attestation:
+        raise C1EnrollmentError("C1_REBIND_EFFECT_UNCERTAIN")
 
     descriptor = -1
     temporary: Path | None = None
@@ -935,19 +940,39 @@ def _replace_exact_file_atomic(
             raise OSError
         os.close(descriptor)
         descriptor = -1
-        current = path.lstat()
-        if (current.st_dev, current.st_ino, current.st_nlink) != (
-            before.st_dev,
-            before.st_ino,
-            before.st_nlink,
+
+        current_bytes, current_attestation = _attest_private_bytes(
+            path,
+            uid=uid,
+            gid=gid,
+            mode=mode,
+            max_bytes=PLIST_MAX_BYTES,
+            code="C1_REBIND_EFFECT_UNCERTAIN",
+        )
+        if (
+            current_attestation != expected_attestation
+            or current_bytes != before_bytes
         ):
-            raise OSError
+            raise C1EnrollmentError("C1_REBIND_EFFECT_UNCERTAIN")
+
         os.replace(temporary, path)
         temporary = None
         _fsync_parent(path)
-        after = path.lstat()
-        if after.st_dev != staged.st_dev or after.st_ino != staged.st_ino:
-            raise OSError
+        after_bytes, after_attestation = _attest_private_bytes(
+            path,
+            uid=uid,
+            gid=gid,
+            mode=mode,
+            max_bytes=PLIST_MAX_BYTES,
+            code="C1_REBIND_EFFECT_UNCERTAIN",
+        )
+        if (
+            after_bytes != payload
+            or after_attestation.device != staged.st_dev
+            or after_attestation.inode != staged.st_ino
+        ):
+            raise C1EnrollmentError("C1_REBIND_EFFECT_UNCERTAIN")
+        return after_attestation
     except C1EnrollmentError:
         raise
     except OSError:
@@ -963,7 +988,6 @@ def _replace_exact_file_atomic(
                 temporary.unlink()
             except OSError:
                 pass
-    _exact_file(path, uid=uid, gid=gid, mode=mode)
 
 
 @dataclass(frozen=True)
@@ -1050,52 +1074,101 @@ def _stage_rebind_target(*, bot_user_id: str, release_sha: str) -> _RebindTarget
     )
 
 
+def _read_rebind_state() -> tuple[
+    tuple[bytes, _PrivateFileAttestation] | None,
+    tuple[bytes, _PrivateFileAttestation] | None,
+]:
+    """Fresh attested state for both durable files; None means unreadable."""
+
+    rows: list[tuple[bytes, _PrivateFileAttestation] | None] = []
+    for path, uid, gid, mode, max_bytes in (
+        (
+            RELAY_PLIST,
+            RELAY_PLIST_UID,
+            RELAY_PLIST_GID,
+            PLIST_MODE,
+            PLIST_MAX_BYTES,
+        ),
+        (
+            c1_runtime.CONFIG_PATH,
+            RELAY_CONFIG_UID,
+            RELAY_CONFIG_GID,
+            CONFIG_MODE,
+            CONFIG_MAX_BYTES,
+        ),
+    ):
+        try:
+            rows.append(
+                _attest_private_bytes(
+                    path,
+                    uid=uid,
+                    gid=gid,
+                    mode=mode,
+                    max_bytes=max_bytes,
+                    code="C1_REBIND_EFFECT_UNCERTAIN",
+                )
+            )
+        except C1EnrollmentError:
+            rows.append(None)
+    return rows[0], rows[1]
+
+
 def _read_rebind_pair() -> tuple[bytes | None, bytes | None]:
     """Fresh attested read of both durable files; None means unreadable."""
 
+    state = _read_rebind_state()
     return (
-        _try_attest_private_bytes(
-            RELAY_PLIST,
-            uid=RELAY_PLIST_UID,
-            gid=RELAY_PLIST_GID,
-            mode=PLIST_MODE,
-            max_bytes=PLIST_MAX_BYTES,
-        ),
-        _try_attest_private_bytes(
-            c1_runtime.CONFIG_PATH,
-            uid=RELAY_CONFIG_UID,
-            gid=RELAY_CONFIG_GID,
-            mode=CONFIG_MODE,
-            max_bytes=CONFIG_MAX_BYTES,
-        ),
+        None if state[0] is None else state[0][0],
+        None if state[1] is None else state[1][0],
     )
 
 
-def _converge_rebind_pair(target: _RebindTarget) -> C1EnrollmentError | None:
-    """Drive both durable files to the exact staged target bytes.
+def _converge_rebind_pair(
+    target: _RebindTarget,
+    expected_attestations: Mapping[Path, _PrivateFileAttestation],
+) -> tuple[C1EnrollmentError | None, dict[Path, _PrivateFileAttestation]]:
+    """Drive both durable files forward without overwriting observed drift."""
 
-    Returns the first typed write failure, or None when the durable pair is the
-    staged target.  A write that raised may still have committed, so callers
-    always reconcile against a fresh durable read instead of trusting the raise.
-    """
+    owned = dict(expected_attestations)
+    writes = target.writes()
 
-    for path, payload, uid, gid, mode in target.writes():
-        if (
-            _try_attest_private_bytes(
+    for path, payload, uid, gid, mode in writes:
+        observed: dict[Path, tuple[bytes, _PrivateFileAttestation]] = {}
+
+        # Re-prove the whole pair before every operation-owned write. This
+        # catches drift on the sibling file both before the first rename and
+        # between the two renames.
+        for observed_path, _unused, observed_uid, observed_gid, observed_mode in writes:
+            try:
+                current = _attest_private_bytes(
+                    observed_path,
+                    uid=observed_uid,
+                    gid=observed_gid,
+                    mode=observed_mode,
+                    max_bytes=PLIST_MAX_BYTES,
+                    code="C1_REBIND_EFFECT_UNCERTAIN",
+                )
+            except C1EnrollmentError as exc:
+                return exc, owned
+            if current[1] != owned[observed_path]:
+                return C1EnrollmentError("C1_REBIND_EFFECT_UNCERTAIN"), owned
+            observed[observed_path] = current
+
+        current_bytes, current_attestation = observed[path]
+        if current_bytes == payload:
+            continue
+        try:
+            owned[path] = _replace_exact_file_atomic(
                 path,
+                payload,
                 uid=uid,
                 gid=gid,
                 mode=mode,
-                max_bytes=PLIST_MAX_BYTES,
+                expected_attestation=current_attestation,
             )
-            == payload
-        ):
-            continue
-        try:
-            _replace_exact_file_atomic(path, payload, uid=uid, gid=gid, mode=mode)
         except C1EnrollmentError as exc:
-            return exc
-    return None
+            return exc, owned
+    return None, owned
 
 
 def _restore_rebind_pair(
@@ -1104,57 +1177,133 @@ def _restore_rebind_pair(
     config_preimage: bytes,
     *,
     entry_coherent: bool,
+    expected_attestations: Mapping[Path, _PrivateFileAttestation],
     fallback: BaseException | None,
 ) -> None:
-    """Prove one coherent generation, or report effect-uncertain.
+    """Restore only state still owned by this operation; otherwise fail closed."""
 
-    A clean refusal is reported only after a fresh read proves BOTH durable
-    files are the exact entry preimages again.  A mixed entry generation has no
-    coherent preimage to restore, so it is never reported as a rollback.  A
-    durable pair that is provably half of each generation is reported as a
-    typed mixed generation; anything else is effect-uncertain.
-    """
+    state = _read_rebind_state()
+    if state[0] is None or state[1] is None:
+        raise C1EnrollmentError("C1_REBIND_EFFECT_UNCERTAIN") from fallback
+    plist_state, config_state = state
+    current = (plist_state[0], config_state[0])
+    current_attestations = {
+        RELAY_PLIST: plist_state[1],
+        c1_runtime.CONFIG_PATH: config_state[1],
+    }
+    expected = dict(expected_attestations)
 
-    if entry_coherent:
-        for path, payload, uid, gid, mode in (
-            (
-                RELAY_PLIST,
-                plist_preimage,
-                RELAY_PLIST_UID,
-                RELAY_PLIST_GID,
-                PLIST_MODE,
-            ),
-            (
-                c1_runtime.CONFIG_PATH,
-                config_preimage,
-                RELAY_CONFIG_UID,
-                RELAY_CONFIG_GID,
-                CONFIG_MODE,
-            ),
+    mixed = current in (
+        (target.plist_bytes, config_preimage),
+        (plist_preimage, target.config_bytes),
+    )
+
+    # Byte shape never overrides ownership evidence. If either inode changed
+    # outside the attested operation, the outcome is uncertain even when the
+    # bytes happen to resemble a known old/target generation.
+    if any(
+        current_attestations[path] != expected[path]
+        for path in current_attestations
+    ):
+        raise C1EnrollmentError("C1_REBIND_EFFECT_UNCERTAIN") from fallback
+
+    if current == (plist_preimage, config_preimage):
+        if entry_coherent:
+            raise C1EnrollmentError("C1_REBIND_WRITE_REFUSED") from fallback
+        raise C1EnrollmentError(
+            "C1_REBIND_MIXED_GENERATION" if mixed
+            else "C1_REBIND_EFFECT_UNCERTAIN"
+        ) from fallback
+
+    if not entry_coherent:
+        raise C1EnrollmentError(
+            "C1_REBIND_MIXED_GENERATION" if mixed
+            else "C1_REBIND_EFFECT_UNCERTAIN"
+        ) from fallback
+
+    rollback_writes = (
+        (
+            RELAY_PLIST,
+            plist_preimage,
+            RELAY_PLIST_UID,
+            RELAY_PLIST_GID,
+            PLIST_MODE,
+        ),
+        (
+            c1_runtime.CONFIG_PATH,
+            config_preimage,
+            RELAY_CONFIG_UID,
+            RELAY_CONFIG_GID,
+            CONFIG_MODE,
+        ),
+    )
+
+    # Re-prove the whole pair before every rollback rename. A concurrent change
+    # to the sibling file stops rollback before any later stale write.
+    for path, payload, uid, gid, mode in rollback_writes:
+        observed = _read_rebind_state()
+        if observed[0] is None or observed[1] is None:
+            raise C1EnrollmentError("C1_REBIND_EFFECT_UNCERTAIN") from fallback
+        observed_attestations = {
+            RELAY_PLIST: observed[0][1],
+            c1_runtime.CONFIG_PATH: observed[1][1],
+        }
+        if any(
+            observed_attestations[owned_path] != expected[owned_path]
+            for owned_path in observed_attestations
         ):
+            raise C1EnrollmentError("C1_REBIND_EFFECT_UNCERTAIN") from fallback
+
+        current_bytes = (
+            observed[0][0] if path == RELAY_PLIST else observed[1][0]
+        )
+        if current_bytes == payload:
+            continue
+        try:
+            expected[path] = _replace_exact_file_atomic(
+                path,
+                payload,
+                uid=uid,
+                gid=gid,
+                mode=mode,
+                expected_attestation=expected[path],
+            )
+        except C1EnrollmentError:
+            break
+    else:
+        final_state = _read_rebind_state()
+        if final_state[0] is not None and final_state[1] is not None:
+            final = (final_state[0][0], final_state[1][0])
+            final_attestations = {
+                RELAY_PLIST: final_state[0][1],
+                c1_runtime.CONFIG_PATH: final_state[1][1],
+            }
             if (
-                _try_attest_private_bytes(
-                    path,
-                    uid=uid,
-                    gid=gid,
-                    mode=mode,
-                    max_bytes=PLIST_MAX_BYTES,
+                final == (plist_preimage, config_preimage)
+                and all(
+                    final_attestations[path] == expected[path]
+                    for path in final_attestations
                 )
-                == payload
             ):
-                continue
-            try:
-                _replace_exact_file_atomic(path, payload, uid=uid, gid=gid, mode=mode)
-            except C1EnrollmentError:
-                break
-        else:
-            if _read_rebind_pair() == (plist_preimage, config_preimage):
                 raise C1EnrollmentError("C1_REBIND_WRITE_REFUSED") from fallback
-    current = _read_rebind_pair()
-    if (
-        current[0] in (plist_preimage, target.plist_bytes)
-        and current[1] in (config_preimage, target.config_bytes)
-        and None not in current
+
+    final_state = _read_rebind_state()
+    if final_state[0] is None or final_state[1] is None:
+        raise C1EnrollmentError("C1_REBIND_EFFECT_UNCERTAIN") from fallback
+    final_attestations = {
+        RELAY_PLIST: final_state[0][1],
+        c1_runtime.CONFIG_PATH: final_state[1][1],
+    }
+    if any(
+        final_attestations[path] != expected[path]
+        for path in final_attestations
+    ):
+        raise C1EnrollmentError("C1_REBIND_EFFECT_UNCERTAIN") from fallback
+
+    current = (final_state[0][0], final_state[1][0])
+    if current in (
+        (target.plist_bytes, config_preimage),
+        (plist_preimage, target.config_bytes),
     ):
         raise C1EnrollmentError("C1_REBIND_MIXED_GENERATION") from fallback
     raise C1EnrollmentError("C1_REBIND_EFFECT_UNCERTAIN") from fallback
@@ -1163,11 +1312,21 @@ def _restore_rebind_pair(
 def _validate_rebind_pair(
     target: _RebindTarget,
     token_attestation: _PrivateFileAttestation,
+    expected_attestations: Mapping[Path, _PrivateFileAttestation],
 ) -> None:
-    """Post-write proof that both durable files are the exact new generation."""
+    """Post-write proof of exact target bytes and operation-owned identities."""
 
-    plist_bytes, config_bytes = _read_rebind_pair()
-    if plist_bytes != target.plist_bytes or config_bytes != target.config_bytes:
+    state = _read_rebind_state()
+    if state[0] is None or state[1] is None:
+        raise C1EnrollmentError("C1_REBIND_EFFECT_UNCERTAIN")
+    plist_state, config_state = state
+    plist_bytes, config_bytes = plist_state[0], config_state[0]
+    if (
+        plist_bytes != target.plist_bytes
+        or config_bytes != target.config_bytes
+        or plist_state[1] != expected_attestations[RELAY_PLIST]
+        or config_state[1] != expected_attestations[c1_runtime.CONFIG_PATH]
+    ):
         raise C1EnrollmentError("C1_REBIND_EFFECT_UNCERTAIN")
     observed_root = _assert_relay_plist_document(
         _parse_relay_plist(plist_bytes, code="C1_REBIND_EFFECT_UNCERTAIN"),
@@ -1201,7 +1360,7 @@ async def _rebind(*, bot_user_id: str) -> dict[str, object]:
         raise C1EnrollmentError("C1_REBIND_PARTIAL_STATE")
 
     token_attestation = _attest_token()
-    plist_preimage, _plist_attestation = _attest_private_bytes(
+    plist_preimage, plist_attestation = _attest_private_bytes(
         RELAY_PLIST,
         uid=RELAY_PLIST_UID,
         gid=RELAY_PLIST_GID,
@@ -1209,7 +1368,7 @@ async def _rebind(*, bot_user_id: str) -> dict[str, object]:
         max_bytes=PLIST_MAX_BYTES,
         code="C1_REBIND_PLIST_REFUSED",
     )
-    config_preimage, _config_attestation = _attest_private_bytes(
+    config_preimage, config_attestation = _attest_private_bytes(
         c1_runtime.CONFIG_PATH,
         uid=RELAY_CONFIG_UID,
         gid=RELAY_CONFIG_GID,
@@ -1243,27 +1402,41 @@ async def _rebind(*, bot_user_id: str) -> dict[str, object]:
     target = _stage_rebind_target(bot_user_id=bot_user_id, release_sha=release_sha)
     _assert_services_stopped("C1_REBIND_SERVICE_RUNNING")
 
-    failure = _converge_rebind_pair(target)
+    expected_attestations = {
+        RELAY_PLIST: plist_attestation,
+        c1_runtime.CONFIG_PATH: config_attestation,
+    }
+    failure, expected_attestations = _converge_rebind_pair(
+        target,
+        expected_attestations,
+    )
     if failure is not None and _read_rebind_pair() != (
         target.plist_bytes,
         target.config_bytes,
     ):
-        # The failing write did not (or could not) commit the intended bytes.
+        # A failed write is reconciled only against identities still owned by
+        # this operation. Concurrent drift is never overwritten by rollback.
         _restore_rebind_pair(
             target,
             plist_preimage,
             config_preimage,
             entry_coherent=entry_coherent,
+            expected_attestations=expected_attestations,
             fallback=failure,
         )
     try:
-        _validate_rebind_pair(target, token_attestation)
+        _validate_rebind_pair(
+            target,
+            token_attestation,
+            expected_attestations,
+        )
     except C1EnrollmentError as exc:
         _restore_rebind_pair(
             target,
             plist_preimage,
             config_preimage,
             entry_coherent=entry_coherent,
+            expected_attestations=expected_attestations,
             fallback=exc,
         )
     _assert_services_stopped("C1_REBIND_SERVICE_RUNNING")

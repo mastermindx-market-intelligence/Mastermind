@@ -415,9 +415,16 @@ def _install_host(
     writes: list[Path] = []
     real_replace = enrollment._replace_exact_file_atomic  # noqa: SLF001
 
-    def replace(path, payload, *, uid, gid, mode):
+    def replace(path, payload, *, uid, gid, mode, expected_attestation):
         writes.append(Path(path))
-        real_replace(path, payload, uid=uid, gid=gid, mode=mode)
+        return real_replace(
+            path,
+            payload,
+            uid=uid,
+            gid=gid,
+            mode=mode,
+            expected_attestation=expected_attestation,
+        )
 
     monkeypatch.setattr(enrollment, "_replace_exact_file_atomic", replace)
     return _Host(
@@ -1006,6 +1013,113 @@ def test_rebind_reports_service_state_drift_after_the_commit(monkeypatch, tmp_pa
     )
 
 
+def _external_replace_config(host: _Host, payload: bytes) -> None:
+    replacement = host.root / ".external-config-replacement"
+    replacement.write_bytes(payload)
+    replacement.chmod(0o440)
+    os.chown(replacement, -1, host.enrollment.RELAY_CONFIG_GID)
+    os.replace(replacement, host.config_path)
+
+
+def test_rebind_refuses_valid_concurrent_config_generation_before_first_write(
+    monkeypatch, tmp_path
+):
+    host = _install_host(monkeypatch, tmp_path)
+    enrollment = host.enrollment
+    real_stage = enrollment._stage_rebind_target  # noqa: SLF001
+
+    def stage(*, bot_user_id, release_sha):
+        target = real_stage(bot_user_id=bot_user_id, release_sha=release_sha)
+        external = enrollment._canonical_config_bytes(  # noqa: SLF001
+            enrollment.build_config_document(
+                bot_user_id=BOT,
+                release_sha=THIRD_RELEASE,
+            )
+        )
+        _external_replace_config(host, external)
+        return target
+
+    monkeypatch.setattr(enrollment, "_stage_rebind_target", stage)
+
+    with pytest.raises(
+        enrollment.C1EnrollmentError, match="C1_REBIND_EFFECT_UNCERTAIN"
+    ):
+        asyncio.run(host.rebind())
+
+    # The whole pair is preflighted before the first operation-owned write.
+    # The external valid generation survives untouched and no stale rollback
+    # overwrites it.
+    assert host.writes == []
+    assert host.plist_release() == OLD_RELEASE
+    assert host.config_release() == THIRD_RELEASE
+
+
+def test_rebind_refuses_sibling_drift_between_forward_renames(
+    monkeypatch, tmp_path
+):
+    host = _install_host(monkeypatch, tmp_path)
+    enrollment = host.enrollment
+    external = enrollment._canonical_config_bytes(  # noqa: SLF001
+        enrollment.build_config_document(
+            bot_user_id=BOT,
+            release_sha=THIRD_RELEASE,
+        )
+    )
+
+    def replace(path, payload, *, uid, gid, mode, expected_attestation):
+        result = host.replace(
+            path,
+            payload,
+            uid=uid,
+            gid=gid,
+            mode=mode,
+            expected_attestation=expected_attestation,
+        )
+        if Path(path) == host.relay_plist:
+            _external_replace_config(host, external)
+        return result
+
+    monkeypatch.setattr(enrollment, "_replace_exact_file_atomic", replace)
+
+    with pytest.raises(
+        enrollment.C1EnrollmentError, match="C1_REBIND_EFFECT_UNCERTAIN"
+    ):
+        asyncio.run(host.rebind())
+
+    # The first owned rename may commit, but the sibling drift is detected
+    # before the second owned rename and the external config is never replaced.
+    assert host.plist_release() == NEW_RELEASE
+    assert host.config_release() == THIRD_RELEASE
+    assert host.writes == [host.relay_plist]
+
+
+def test_rebind_refuses_same_bytes_external_inode_without_calling_it_mixed(
+    monkeypatch, tmp_path
+):
+    host = _install_host(monkeypatch, tmp_path)
+    enrollment = host.enrollment
+    real_stage = enrollment._stage_rebind_target  # noqa: SLF001
+    preimage = host.config_path.read_bytes()
+
+    def stage(*, bot_user_id, release_sha):
+        target = real_stage(bot_user_id=bot_user_id, release_sha=release_sha)
+        _external_replace_config(host, preimage)
+        return target
+
+    monkeypatch.setattr(enrollment, "_stage_rebind_target", stage)
+
+    with pytest.raises(
+        enrollment.C1EnrollmentError, match="C1_REBIND_EFFECT_UNCERTAIN"
+    ):
+        asyncio.run(host.rebind())
+
+    # The bytes remain a coherent old/old generation, but inode ownership
+    # changed externally. That is uncertainty, never a mixed-generation claim.
+    assert host.writes == []
+    assert host.plist_release() == OLD_RELEASE
+    assert host.config_release() == OLD_RELEASE
+
+
 class _InjectedReplace:
     """Script one post-commit or pre-commit failure per replacement call."""
 
@@ -1014,13 +1128,29 @@ class _InjectedReplace:
         self.script = list(script)
         self.calls: list[Path] = []
 
-    def __call__(self, path, payload, *, uid, gid, mode):
+    def __call__(
+        self,
+        path,
+        payload,
+        *,
+        uid,
+        gid,
+        mode,
+        expected_attestation,
+    ):
         path = Path(path)
         self.calls.append(path)
         if self.script and self.script[0][0] == path:
             _target, behaviour = self.script.pop(0)
             if behaviour == "commit_then_raise":
-                self.host.replace(path, payload, uid=uid, gid=gid, mode=mode)
+                self.host.replace(
+                    path,
+                    payload,
+                    uid=uid,
+                    gid=gid,
+                    mode=mode,
+                    expected_attestation=expected_attestation,
+                )
                 raise self.host.enrollment.C1EnrollmentError(
                     "C1_ENROLLMENT_WRITE_REFUSED"
                 )
@@ -1029,16 +1159,32 @@ class _InjectedReplace:
                     "C1_ENROLLMENT_WRITE_REFUSED"
                 )
             if behaviour == "tamper_token_after":
-                self.host.replace(path, payload, uid=uid, gid=gid, mode=mode)
+                result = self.host.replace(
+                    path,
+                    payload,
+                    uid=uid,
+                    gid=gid,
+                    mode=mode,
+                    expected_attestation=expected_attestation,
+                )
                 replacement = self.host.root / ".token.rotation"
                 replacement.write_bytes(self.host.token_path.read_bytes())
                 replacement.chmod(0o400)
                 os.replace(replacement, self.host.token_path)
-                return
-        self.host.replace(path, payload, uid=uid, gid=gid, mode=mode)
+                return result
+        return self.host.replace(
+            path,
+            payload,
+            uid=uid,
+            gid=gid,
+            mode=mode,
+            expected_attestation=expected_attestation,
+        )
 
 
-def test_rebind_rolls_back_a_first_write_post_commit_failure(monkeypatch, tmp_path):
+def test_rebind_reports_uncertain_when_first_write_return_is_lost(
+    monkeypatch, tmp_path
+):
     host = _install_host(monkeypatch, tmp_path)
     injection = _InjectedReplace(host, [(host.relay_plist, "commit_then_raise")])
     monkeypatch.setattr(host.enrollment, "_replace_exact_file_atomic", injection)
@@ -1046,28 +1192,34 @@ def test_rebind_rolls_back_a_first_write_post_commit_failure(monkeypatch, tmp_pa
     config_preimage = host.config_path.read_bytes()
 
     with pytest.raises(
-        host.enrollment.C1EnrollmentError, match="C1_REBIND_WRITE_REFUSED"
+        host.enrollment.C1EnrollmentError, match="C1_REBIND_EFFECT_UNCERTAIN"
     ):
         asyncio.run(host.rebind())
 
-    # A clean refusal is only lawful with both durable files proven at the
-    # exact preimages, never with one file rewound and the other advanced.
-    assert host.relay_plist.read_bytes() == plist_preimage
+    # The first replacement committed, but its returned attestation never
+    # reached the caller. Cross-generation bytes alone cannot prove that this
+    # operation still owns the new inode, so stale rollback is forbidden.
+    assert host.relay_plist.read_bytes() != plist_preimage
     assert host.config_path.read_bytes() == config_preimage
-    assert host.plist_release() == OLD_RELEASE
+    assert host.plist_release() == NEW_RELEASE
     assert host.config_release() == OLD_RELEASE
 
 
-def test_rebind_completes_forward_after_a_second_write_post_commit_failure(
+def test_rebind_reports_effect_unknown_after_second_write_return_is_lost(
     monkeypatch, tmp_path
 ):
     host = _install_host(monkeypatch, tmp_path)
     injection = _InjectedReplace(host, [(host.config_path, "commit_then_raise")])
     monkeypatch.setattr(host.enrollment, "_replace_exact_file_atomic", injection)
 
-    receipt = asyncio.run(host.rebind())
+    with pytest.raises(
+        host.enrollment.C1EnrollmentError, match="C1_REBIND_EFFECT_UNCERTAIN"
+    ):
+        asyncio.run(host.rebind())
 
-    assert receipt["action"] == "rebound"
+    # Both bytes reached the coherent target, but the caller did not receive
+    # the second post-write attestation. Coherent bytes are not proof that this
+    # operation still owns the final inode, and must never be mislabeled MIXED.
     assert host.plist_release() == NEW_RELEASE
     assert host.config_release() == NEW_RELEASE
     assert host.plist_document() == _shell_relay_document(
@@ -1098,7 +1250,7 @@ def test_rebind_reports_a_proven_mixed_generation_instead_of_a_rollback(
     injection = _InjectedReplace(
         host,
         [
-            (host.relay_plist, "commit_then_raise"),
+            (host.config_path, "raise_without_write"),
             (host.relay_plist, "raise_without_write"),
         ],
     )
@@ -1109,8 +1261,31 @@ def test_rebind_reports_a_proven_mixed_generation_instead_of_a_rollback(
     ):
         asyncio.run(host.rebind())
 
-    # The remaining pair is provably half of each generation.  It is reported as
-    # a mixed generation, never as a completed rollback.
+    # The first forward write returned its exact post-write attestation. The
+    # second forward write then refused before commit, and the rollback refused
+    # before changing the first file. This is a proven operation-owned cross
+    # generation, so MIXED is precise rather than EFFECT_UNCERTAIN.
+    assert host.plist_release() == NEW_RELEASE
+    assert host.config_release() == OLD_RELEASE
+
+
+def test_rebind_preserves_crash_mixed_class_when_forward_repair_refuses(
+    monkeypatch, tmp_path
+):
+    host = _install_host(
+        monkeypatch,
+        tmp_path,
+        plist_release=NEW_RELEASE,
+        config_release=OLD_RELEASE,
+    )
+    injection = _InjectedReplace(host, [(host.config_path, "raise_without_write")])
+    monkeypatch.setattr(host.enrollment, "_replace_exact_file_atomic", injection)
+
+    with pytest.raises(
+        host.enrollment.C1EnrollmentError, match="C1_REBIND_MIXED_GENERATION"
+    ):
+        asyncio.run(host.rebind())
+
     assert host.plist_release() == NEW_RELEASE
     assert host.config_release() == OLD_RELEASE
 
@@ -1246,12 +1421,25 @@ def test_rebind_never_creates_a_missing_final_file(monkeypatch, tmp_path):
         asyncio.run(host.rebind())
 
 
-def test_replace_exact_file_atomic_refuses_a_missing_target(monkeypatch, tmp_path):
+def test_replace_exact_file_atomic_treats_a_missing_observed_target_as_uncertain(
+    monkeypatch, tmp_path
+):
     host = _install_host(monkeypatch, tmp_path)
     missing = host.root / "absent.plist"
+    expected = host.enrollment._PrivateFileAttestation(  # noqa: SLF001
+        device=0,
+        inode=0,
+        size=1,
+        mtime_ns=0,
+        uid=os.geteuid(),
+        gid=os.getegid(),
+        mode=0o644,
+        link_count=1,
+        sha256="0" * 64,
+    )
 
     with pytest.raises(
-        host.enrollment.C1EnrollmentError, match="C1_ENROLLMENT_WRITE_REFUSED"
+        host.enrollment.C1EnrollmentError, match="C1_REBIND_EFFECT_UNCERTAIN"
     ):
         host.enrollment._replace_exact_file_atomic(  # noqa: SLF001
             missing,
@@ -1259,6 +1447,7 @@ def test_replace_exact_file_atomic_refuses_a_missing_target(monkeypatch, tmp_pat
             uid=os.geteuid(),
             gid=os.getegid(),
             mode=0o644,
+            expected_attestation=expected,
         )
     assert not missing.exists()
 
