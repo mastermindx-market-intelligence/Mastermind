@@ -221,6 +221,60 @@ NEXT: single watcher watch13 adds #1227 head/comments/reviews. Quiet otherwise.
 - Non-blocking: guard evaluates `direct_tool_names + release_tool_names` before the tuple assertion; V3 → 1.5.0 / 11 tools means the pending human Business recreate must be scanned as the installed inventory at that time (C19 parent sequencing, not a PR defect).
 - Not done: no local suite run (hosted gate used), no install/arm/effect, no #1143 post (the packet asked for the return on the PR). Re-review = one bounded read on the next pushed head, only if asked or if the gate stays unowned at that read.
 
+## 4ak Cycle 01:09Z–01:25Z (10-07) — watch50 edge (release-owner in-place edit); **C1 rebind dependency (#784) refutes the 4aj "install alone" precondition** → C3 note amended in place, DEC amended (Macro #8561); #1220 → de09c783 (all eight blockers claimed repaired)
+- **Trigger.** watch50 (task b799uwe60) EDGE: #1143 6027192883 edited 00:52:12Z, seen at 01:09:51Z.
+- **Re-read of every endpoint.**
+  - #1143 = 83; the new comment is 6028474958 (mastermindx-2, 00:53:52Z).
+  - master → **9a24ef2c** (#955, Claude Code Executive MCP client edge; `integrations/claude_executive_mcp/`, not a mission path).
+  - #1220 → **de09c783** (01:03:58Z, "close installed read trust boundary"). MastermindX1 6028649565 says all eight blockers are repaired, and that exact-head independent review and hosted CI remain. The prior head 0e7f7a01 failed its hosted test (run 37548927371, same-UID browser-relay rejection test).
+  - Macro **#8558 MERGED** (e42e522d).
+- **6027192883 v2 (release owner, pinned at 6a85e0d6).**
+  - **The Chairman replied "done"** to the A0BUDHZ137A cleanup: the app-level token is revoked, Socket Mode is off, and there are two bot scopes. This is recorded USER_CONFIRMED_COMPLETE.
+  - The release owner still frames native stdin/TTY enrollment, which is the dedicated path; #1265 is not consumed there.
+  - ChatGPT app object `asdk_app_6ac0bb84…` is in DEVELOPMENT. Workspace publication and OAuth are unproven.
+  - The maintenance-carry read-only preflight passed.
+  - The next modifying phase waits on #1220.
+- **6028474958 (mastermindx-2, packet-01).** It consumed #1265 independently.
+  - `U0BT71H4FQE` is already in both channels, so no invite is needed.
+  - The only Slack uncertainty is whether the Executive Relay app already has the three-scope union.
+  - **New dependency: PR #784.** The C1 relay is pinned to its own `4c148709` generation, and `install.sh` never rebinds it. #784 adds the transactional `rebind-release` owner; it is draft, at 9b7d8ce9 (00:55Z), behind master, and its only review is a 2026-09-19 approval at 836bb89e.
+  - Revised path:
+    1. #784 CI and review.
+    2. #1220.
+    3. Install one generation containing both, with services stopped.
+    4. C1 rebind.
+    5. Slack scope edit, if still needed.
+    6. C1 verify.
+    7. Provider readiness.
+    8. A2 `enroll-shared` and verify, then the lifecycles resume.
+    9. Same-parent canary.
+- **Seat verification (read-only, m2studio).**
+  - `launchctl print system/com.mastermind.executive.sol-state-relay` gives program `releases/4c148709…/scripts/c1_sol_state_relay.py`, state running.
+  - `install.sh` only disables and boots out `RELAY_LABEL` (L1007–1043); it never rebinds C1.
+  - C1 at 4c148709 checks the exact two scopes (`c1_runtime.py:33`, `:331`), and its entrypoint runs `verify_slack_identity` on every start (`scripts/c1_sol_state_relay.py:49`).
+  - So a scope edit before the C1 rebind breaks the next C1 start. The 4aj claim "install first satisfies the precondition" and the "installed 5b244a2b C1" wording are **refuted**.
+- **Sweep (O.12, same cycle).**
+  - #1143 **6028181298 amended in place** (01:13:15Z, marked "Amended 01:13Z"): steps 1 and 3 and the order bullet now read install → C1 rebind (#784) → scope edit → C1 verify → enroll-shared. Read back verified.
+  - Macro **#8561** (`merge-on-green`, 3d22839a): the DEC answer, rationale, alternatives, evidence and operating law are amended in place with an `## Amendment (2026-10-07)` section, and the WS P5, next_action and landmines are updated. Validate gives 0 errors and 132 warnings.
+  - 4aj's order bullet and §6 line are superseded by this block.
+  - Memory is corrected.
+  - The user is told that the earlier "after the install" timing is withdrawn.
+- **Fork status.** Packet 01 (mastermindx-2) and C3 are on the shared path. The release owner and captain have not consumed #1265; the Chairman completed the dedicated-path cleanup, which is harmless. The path choice remains with the packet-03 owner and the Chairman. No further C3 post: 6028474958 already carries the right sequence on the carrier.
+- **Critical path.**
+  1. #1220 de09c783: exact-head review and CI → merge.
+  2. #784: CI, review and merge, in parallel with step 1.
+  3. ONE install of a generation containing both, at or after 6a85e0d6, with services stopped.
+  4. C1 rebind.
+  5. Human Slack scope edit.
+  6. C1 verify.
+  7. `enroll-shared`.
+  8. 12-tool census, which C3 verifies read-only.
+  9. Catalog and OAuth.
+  10. Worker route.
+  11. Packet-04 pilot → same-parent consumption.
+  12. Packet 07.
+  MISSION_COMPLETE false.
+
 ## 4aj Cycle 00:27Z–00:45Z (10-07) — #1143 79–81 consumed; master **6a85e0d6** (#1265, shared Executive Relay by Chairman intent); C3 Slack-path note **6028181298**; DEC superseded → Macro **#8558**; the "don't wait for #1220" advice to the user retracted
 - **Trigger.** watch49 (task byi605558) EDGE `1143 comments=81 (was 79)` at 00:27:53Z.
 - **Re-read of every endpoint.**
@@ -425,7 +479,7 @@ Watcher: watch3 (S/watch3.out; #1143 comments + #811 head/comments + master; 10-
 - Human gates: root/admin ceremony for install (host owner); ChatGPT app catalog rescan (Chairman/platform); Fable connector OAuth (Chairman).
 
 ## 6 Do-not-redo
-- Do not re-post the #1265 shared-relay note 6028181298, and do not open a second Agent OS supersession for the A2 receipt (Macro #8558). Never advise adding channels:history to the Executive Relay app before a #1265-containing install, and never advise enrolling A2 by both routes. Do not tell anyone #1220 is optional for the install: it is the read trust-boundary closure (retracted 4aj).
+- Do not re-post the #1265 shared-relay note 6028181298 (amended in place 01:13Z), and do not open another Agent OS supersession for the A2 receipt (Macro #8558 plus the in-place amendment in #8561). Never advise adding channels:history to the Executive Relay app before **C1 is rebound (#784) to a #1265-containing install**: the install alone is not enough (4ak). Never advise enrolling A2 by both routes. Do not tell anyone #1220 is optional for the install: it is the read trust-boundary closure (retracted 4aj).
 - `mastermindxryan` is shared by this seat and the Chairman-assigned release-takeover session (6027192883): never treat its comments as this seat's; mark every C3 post. Do not re-post the Slack receipt delta 6027309991; do not post a counter-recommendation on the install hold (the release owner's call) — give integration facts to the user.
 - Do not act on any of Sol's nine prepared handoffs (6025513145 v2: 00 RELEASE_CAPTAIN … 08) unless one is delivered to this seat; take no merge-queue action on #1219 (MastermindX1 queued it 22:15:14Z); do not re-post the #1220 census correction (amended in place 22:21:33Z).
 - Do not tell the user the `mastermind-web-ceo` plugin is ready to connect, and do not recreate it: a 2026-10-06 metadata read returned NOT_FOUND (#1143 6025513145); only a fresh owner read that shows it visible reopens that path.
@@ -463,6 +517,7 @@ Watcher: watch3 (S/watch3.out; #1143 comments + #811 head/comments + master; 10-
 - Do not re-ACK; do not post a second Slack root for this operation.
 
 ## 8 Next action
+- 01:25Z (10-07): The release owner's edit (6027192883, 00:52Z) and the packet-01 checkpoint 6028474958 are consumed. The C1 relay runs its own 4c148709 generation (verified read-only), so the Slack scope edit waits for the install **and** the C1 rebind (#784). C3 note 6028181298 is amended in place, and Macro #8561 amends the DEC. The Chairman completed the A0BUDHZ137A cleanup, which is harmless. #1220 → de09c783 (eight blockers claimed repaired; review and CI owed). Master is 9a24ef2c (#955, off path). Next edges: #1220 and #784 merges → one install → C1 rebind → Slack edit → census (C3 verifies). watch51 is armed.
 - 00:45Z (10-07): #1143 79–81 consumed. Master 6a85e0d6 contains #1265: A2 moves to the shared Executive Relay path by Chairman intent, and its order is install first, scope edit second. C3 note 6028181298 surfaces this fork to the release, captain and packet-01 owners, who had each pinned 6e82f9af or earlier. Macro #8558 supersedes the DEC. The "don't wait for #1220" advice is retracted, and all owners hold the install for #1220 (eight blockers, 0e7f7a01). Next edges: #1220 merge → the re-pinned install receipt (C3 verifies read-only plus the 12-tool census) → the Slack path choice and receipt → packet 07. watch50 is armed.
 - 23:40Z (10-06): #1219 MERGED 760f51b5; master 2d590c51. Release/install owned by the Chairman-assigned takeover (6027192883), holding for #1220 (now 610ad65e, 6 open findings). C3 posted Slack receipt delta 6027309991; Macro #8556 opened. watch49 armed. Next edges: release owner's install receipt → verify read-only + 12-tool census; Slack ceremony receipt → DEC check; #1220 MERGED → record SHA; Sol/owner handoff naming C3 → adjudicate.
 - 22:30Z (10-06): Sol v2 assessment consumed (handoffs prepared, none delivered; alpha path #1219 → install → census → catalog → relay → child → same-parent; #1220 off it). #1219 APPROVED 5435142290 + in merge queue 22:15:14Z. #1220 eeba7ba2: 4 new Codex P1s (Sol's); census 6015048614 amended in place (O.12). watch48 armed. Next edges: #1219 MERGED → record SHA + Agent OS WS update; #1219 removed from queue → read why; install receipt → verify read-only; ceremony receipt → DEC check; a delivered handoff naming this seat → adjudicate.
