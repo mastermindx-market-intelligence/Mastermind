@@ -221,6 +221,36 @@ NEXT: single watcher watch13 adds #1227 head/comments/reviews. Quiet otherwise.
 - Non-blocking: guard evaluates `direct_tool_names + release_tool_names` before the tuple assertion; V3 → 1.5.0 / 11 tools means the pending human Business recreate must be scanned as the installed inventory at that time (C19 parent sequencing, not a PR defect).
 - Not done: no local suite run (hosted gate used), no install/arm/effect, no #1143 post (the packet asked for the return on the PR). Re-review = one bounded read on the next pushed head, only if asked or if the gate stays unowned at that read.
 
+## 4am Cycle 03:49Z–04:05Z (10-07) — **#1220 MERGED as ee120e80**; C3 integration readback is clean (patch-identical squash, CI and independent review at the exact head, catalog invariants unchanged); #784 at be0030ae is the remaining source gate before the install
+- **Trigger.** watch53 (task bcmuu44x9) EDGE `states(1220|784|811)=MERGED:false|OPEN:true|OPEN:true` at 03:49:17Z. An earlier tick at 03:19Z recorded #784 → be0030ae.
+- **#1220.**
+  - Merged 03:43:32Z by mastermindx-2 as a squash: master **ee120e80** (parent 8d403b9d = #1258, docs-only `research/product_intelligence_local_delivery_20261005/*`, off path).
+  - Sol source-release adjudication **ACCEPTED** at c9552576 (#1220 6030120779): the prior threads are CLOSED_BY_CURRENT_HEAD; the last successor is a test-fixture alignment (bb84bf6a).
+  - Commits are by `chriswong6031-creator`, so the adjudicator and reviewer are independent of the writer.
+- **C3 integration readback (read-only, verified this cycle).**
+  1. **Provenance.** The stable patch-id of `9a24ef2c..c9552576` equals that of `8d403b9d..ee120e80` (e9861ced…; 5 files, +4255/−12). The squash is exactly the adjudicated content.
+  2. **Exact-head evidence.** CI run 37561118735 at c9552576 completed with success, and all 6 check-runs succeeded. The Codex exact-head review 6029489910 at `c95525761f` found "no major issues".
+  3. **Catalog invariants on ee120e80.**
+     - `web_ceo_v3.py` be01ee44, `web_ceo_sessions.py` e066e86f, `return_tools.py` 8512c612 (byte-identical to packet-02's accepted blobs);
+     - `WEB_CEO_V3_SERVER_VERSION = "1.5.0"`;
+     - schema snapshot 968205a2….
+     The packet-02 census artifact d7c5395e… therefore stays valid for this generation.
+  4. **Composition on ee120e80.** master×#784 be0030ae rc=0, master×#811 8b992746 rc=0, #784×#811 rc=0. Each is 2 behind master (#1258 + #1220); mergeable_state is clean.
+- **No C3 post yet.** The captain's rule (6029389158) holds the install until #784 also closes. One joint-generation C3 readback will be posted when #784 merges, so the release owner selects one exact generation.
+- **Critical path.**
+  1. #784 be0030ae: CI, exact-head review, merge.
+  2. Exact accepted release containing ee120e80 and #784 (and #811 if its owner lands it).
+  3. M2 install with services stopped, Gate B.
+  4. C1 rebind.
+  5. Slack, which is the Chairman's route choice.
+  6. C1 verify and `enroll-shared`.
+  7. Census: C3 runs `c3_post_install_verify.sh <merge-sha>` against the 12-tool artifact.
+  8. Catalog.
+  9. Worker route.
+  10. Pilot.
+  11. Packet 07.
+  MISSION_COMPLETE false.
+
 ## 4al Cycle 02:15Z–02:30Z (10-07) — #1143 84–87 consumed; **the captain adopts the shared path and the install → rebind → scope-edit order**; #1220 and #784 have exact CI-red repair requests open; C3 composition is clean; C3 read-only installed-identity baseline taken
 - **Trigger.** watch51 (task bvzagbmhx) EDGE `1143 comments=87 (was 83)` at 02:15:57Z.
 - **Endpoints.** Master is unchanged at 9a24ef2c. #1220 → **c9552576** (protected-master merge, 0 behind master, mergeable_state blocked). #784 is at 9b7d8ce9 (1 behind master). Macro **#8561 MERGED** (14c93a68). No watched comment was edited.
@@ -567,6 +597,7 @@ Watcher: watch3 (S/watch3.out; #1143 comments + #811 head/comments + master; 10-
 - Do not re-ACK; do not post a second Slack root for this operation.
 
 ## 8 Next action
+- 04:05Z (10-07): **#1220 MERGED ee120e80** (squash, patch-identical to the adjudicated c9552576; CI and Codex exact-head review clean; catalog invariants unchanged, so census d7c5395e stays valid). The remaining source gate is #784 (be0030ae). The next edge is the #784 merge, then one joint-generation C3 readback on #1143, then the install receipt. watch54 is armed.
 - 02:55Z (10-07): watch52 EDGE (#811 comments 48→49) gave a Codex "no major issues" on #811 at 8b992746 (02:21Z).
   - #784 → **57cfd9d1** (repair "harden shared C1 release rebind" plus a protected merge, 02:39Z; CodeQL and analyzers success, `test` in progress).
   - #1220 is unchanged at c9552576. #1143 is 87; master is 9a24ef2c.
