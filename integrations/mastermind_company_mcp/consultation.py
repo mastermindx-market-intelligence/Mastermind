@@ -12,6 +12,10 @@ from collections.abc import Awaitable, Callable, Mapping
 from types import MappingProxyType
 from typing import Any
 
+from common.company_consultation_host_contract import (
+    COMPANY_CONSULTATION_RESULT_SCHEMA,
+    MAX_RESPONSE_BYTES as COMPANY_CONSULTATION_MAX_RESPONSE_BYTES,
+)
 from common.agent_dialogue_consultation_contract import (
     CONSULTATION_SCHEMA,
     GROK_CONSULTATION_SCHEMA,
@@ -27,9 +31,7 @@ COMPANY_CONSULTATION_CAPABILITY = COMPANY_CONSULTATION_SCHEMA
 COMPANY_CONSULTATION_SERVER_NAME = "mastermind-company-consultation"
 COMPANY_CONSULTATION_SERVER_IDENTITY = "mastermind-company-consultation-mcp"
 COMPANY_CONSULTATION_SERVER_VERSION = "1.0.0"
-COMPANY_CONSULTATION_RESULT_SCHEMA = "mastermind.company_consultation_mcp_result.v1"
 COMPANY_CONSULTATION_MAX_REQUEST_BYTES = 32768
-COMPANY_CONSULTATION_MAX_RESPONSE_BYTES = 65536
 COMPANY_CONSULTATION_ERROR_CODES = frozenset(
     {
         "INVALID_REQUEST",

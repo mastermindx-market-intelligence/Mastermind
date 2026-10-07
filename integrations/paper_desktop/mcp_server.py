@@ -29,6 +29,9 @@ def build_server(allow_write=False, allow_prepare=False, *, execution_binding=No
         "A snapshot is a drift guard, not permission, a document revision, or a collaboration lock. "
         "Multiple admitted designers may modify the same file/page across hosts; coordinate by "
         "board/artboard/node target and re-read/re-plan known overlap. "
+        "Default active-file context and exact-file serviceability are separate facts. If paper_inspect "
+        "returns DOCUMENT_UNAVAILABLE but an exact fileId is known, do not declare Paper blocked: call "
+        "paper_read(get_basic_info, {fileId}) once to bootstrap that target snapshot. "
         "Each logical mutation remains on one carrier until reconciled. Never retry EFFECT_UNKNOWN; "
         "reconcile the original operation with the same carrier."
     ))
@@ -50,6 +53,18 @@ def build_server(allow_write=False, allow_prepare=False, *, execution_binding=No
                              coordination_scope="BOARD_ARTBOARD_NODE")
         except Refusal as exc:
             value = {"state": exc.code, "detail": exc.detail, "retry_allowed": False}
+            if action == "status" and exc.code == "DOCUMENT_UNAVAILABLE":
+                # Default active-file lookup failure is narrower than exact-file
+                # serviceability. Keep the refusal typed/error-visible while
+                # making the lawful one-shot bootstrap machine-readable even
+                # when a ChatGPT app is still using an older frozen tool description.
+                value.update({
+                    "context_scope": "DEFAULT_ACTIVE_FILE",
+                    "whole_paper_outage_proven": False,
+                    "exact_target_status": "UNKNOWN",
+                    "next_action_if_file_id_known": "paper_read:get_basic_info(fileId)",
+                    "retry_paper_inspect": False,
+                })
         if execution_binding is not None:
             value = dict(value, execution_binding=dict(execution_binding))
         bad = value.get("state") not in {None, "CONNECTED", "OBSERVED", "APPLIED_RESPONSE_OBSERVED", "PAPER_READY", "PAPER_READY_READ_ONLY"}
@@ -91,7 +106,7 @@ def build_server(allow_write=False, allow_prepare=False, *, execution_binding=No
 
     @server.tool(annotations=read_annotations)
     async def paper_inspect() -> CallToolResult:
-        """Inspect Paper availability and the active file; obtain a fresh snapshot guard."""
+        """Inspect Paper availability and default active-file context.\n\n        DOCUMENT_UNAVAILABLE means the default active context could not be resolved; it does\n        not prove Paper or an exact target file is unavailable. If the intended fileId is\n        already known, call paper_read with tool="get_basic_info" and that fileId once. A\n        successful explicit read returns the target guard needed for prepare/edit.\n        """
         return await asyncio.to_thread(run, "status")
 
     @server.tool(annotations=read_annotations)

@@ -110,6 +110,24 @@ may make an **independently authorized** RDC carrier eligible under the separate
 law; absence itself never supplies permission. After edit dispatch, timeout/lost response
 remains `EFFECT_UNKNOWN` on the original carrier and forbids cross-carrier replay.
 
+### Paper 0.5.14 catalog qualification — 2026-10-01
+
+Paper Desktop 0.5.14 later changed its full canonical catalog from accepted
+`8cd27488a3adfc19c6c36d4349b75feebc71c159253c47f8a0f8d50c27043deb` to
+`ac18857df0aa6323646333368e5798e7c28de7b4d5f5dc3cb320276e3535daa9`. Qualification used
+the complete live 36-tool dictionary plus durable accepted `ca90...`/`8cd...` receipts. Rebuilding
+the 34-tool predecessor by removing `rename_pages`, `list_resources`, `rename_resource` and restoring
+the exact historical `list_files` descriptor reproduces `ca90...` exactly; adding the current
+`rename_pages` descriptor reproduces accepted `8cd...` exactly. The current full map independently
+reproduces `ac18857...`. Thus the accepted-to-current delta is exactly: remove `list_files`, add
+blocked `list_resources`, add blocked `rename_resource`; no surviving descriptor changed.
+
+Bridge 0.1.4 keeps the same 12 edit tools, reduces the read allowlist from 17 to 16 by removing
+`list_files`, and does not expose either new resource tool. Immutable runtime generation v10 owns
+bridge SHA-256 `7d810c458a53e00e21014fd7375ac338dc9c1421b30f823feb4d34184f9d08fc`; v9 remains unchanged.
+Exact target, snapshot, token-delete, desktop mutex, and EFFECT_UNKNOWN/no-replay guards are preserved.
+Evidence: `docs/evidence/paper_desktop/20261001_0514_catalog_compatibility.json`.
+
 ### Paper release-version compatibility ruling — 2026-09-30
 
 Paper Desktop's reported release version is now **observational metadata, not a write-admission
@@ -242,7 +260,9 @@ If the transition cannot be proven, it returns
 `PAPER_DOCUMENT_TRANSITION_UNCONFIRMED`, performs no automatic replay, and exposes no
 content edit capability. When the file is already active, prepare skips the desktop
 launch entirely and returns the current snapshot plus write-schema qualification.
-Use `paper_read` with `tool=list_files` first when the file ID is unknown.
+The reviewed 0.5.14 catalog no longer exposes `list_files`, and resource discovery remains blocked.
+When the file ID is unknown, obtain the exact identity from accepted task context or stop at a typed
+binding gap; do not guess a file or substitute `list_resources`.
 
 No paid plan is needed for initial smoke proof. Paper 0.5.11 returns a compact
 structured file header plus a richer JSON text block from `get_basic_info`; the
@@ -333,9 +353,10 @@ code output is a starting point, not automatic tested production implementation.
 3. Approved scratch edit, screenshot, JSX extraction; no wrong-document changes.
 4. Fresh ChatGPT Web session runs `paper_inspect` and confirms its
    `gateway_surface` names the five exact Paper actions. When another file is needed, the
-   **client surface itself** must expose `paper_prepare`; `paper_read` with
-   `tool=list_files` -> direct `paper_prepare(file_id)` -> re-inspect -> read/edit/
-   screenshot/JSX. Generic host-command emulation does not satisfy this acceptance.
+   **client surface itself** must expose `paper_prepare`; resolve a known exact `fileId` from accepted
+   task context -> direct `paper_prepare(file_id)` -> exact-file read/edit/screenshot/JSX. If no exact
+   file identity is known, stop rather than guessing or invoking blocked resource discovery. Generic
+   host-command emulation does not satisfy this acceptance.
    Tunnel health alone is not the design-journey proof.
 5. Existing capability registry attests a bounded worker; no second control plane.
 6. One real product design-to-code/browser journey before Figma retirement.

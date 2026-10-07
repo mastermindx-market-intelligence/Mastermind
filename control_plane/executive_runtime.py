@@ -59,6 +59,7 @@ from control_plane.executive_coo_policy import (
     EXPECTED_POLICY_SHA256,
 )
 from control_plane.executive_orchestration_principal import (
+    base_process_identity,
     OperatorPrincipalObservation,
     OrchestrationPrincipalError,
     build_execution_principal_snapshot,
@@ -76,6 +77,8 @@ from control_plane.executive_retry_safety import (
 from control_plane.operator_harness_contract import (
     AttemptExecutionMode,
     CandidateResult,
+    CapabilityIdentity,
+    ObservedCapabilityIdentity,
     CheckpointObservation,
     EventCursor,
     LaunchDecision,
@@ -5912,6 +5915,203 @@ class WorkerRegistry:
             ]
         return [worker for item in worker_ids if (worker := self.get_worker(item))]
 
+
+    @staticmethod
+    def _proof_recovery_command(job_id: str, lost_attempt_id: str) -> str:
+        return f"proof-capacity-recover:{job_id}:{lost_attempt_id}"
+
+    @staticmethod
+    def _validate_proof_recovery_receipt(
+        receipt: Any, *, job_id: str, lost_attempt_id: str, worker_id: str, quota_class: str,
+    ) -> dict[str, Any]:
+        """Validate durable replay with the same closed receipt law as a fresh write."""
+        from control_plane.executive_worker_broker import uid_sweep_receipt_is_passing
+        keys = {"schema_version", "job_id", "lost_attempt_id", "worker_id", "quota_class",
+                "status", "previous_snapshot", "uid_sweep",
+                "observation_started_at", "observation_finished_at"}
+        numeric = {"job_version", "attempt_version", "worker_version", "quota_version",
+                   "quota_updated_at_ms", "fence_generation", "attempt_started_at_ms",
+                   "lost_event_id", "requeue_event_id"}
+        target = {"job_id": job_id, "lost_attempt_id": lost_attempt_id,
+                  "worker_id": worker_id, "quota_class": quota_class}
+        try:
+            snapshot = receipt["previous_snapshot"]
+            sweep = receipt["uid_sweep"]
+            startup = sweep["preceding_broker_startup_sweep"]
+            observed = datetime.fromisoformat(sweep["observed_at"])
+            booted = datetime.fromisoformat(startup["observed_at"])
+            began = datetime.fromisoformat(receipt["observation_started_at"])
+            ended = datetime.fromisoformat(receipt["observation_finished_at"])
+            valid = (
+                isinstance(receipt, dict) and set(receipt) == keys
+                and receipt["schema_version"] == "mastermind.executive_proof_capacity_recovery/v1"
+                and receipt["status"] == "AVAILABLE"
+                and all(receipt[k] == v for k, v in target.items())
+                and isinstance(snapshot, dict) and set(snapshot) == set(target) | numeric
+                and all(snapshot[k] == v for k, v in target.items())
+                and all(type(snapshot[k]) is int and snapshot[k] > 0 for k in numeric)
+                and snapshot["lost_event_id"] < snapshot["requeue_event_id"]
+                and uid_sweep_receipt_is_passing(sweep)
+                and uid_sweep_receipt_is_passing(startup)
+                and sweep.get("reason") == "status_absence"
+                and startup.get("reason") == "broker_startup"
+                and type(sweep.get("worker_uid")) is int and sweep["worker_uid"] > 0
+                and sweep["worker_uid"] == startup.get("worker_uid")
+                and type(sweep.get("broker_pid")) is int and sweep["broker_pid"] > 1
+                and sweep["broker_pid"] == startup.get("broker_pid")
+                and all(t.utcoffset() is not None for t in (observed, booted, began, ended))
+                and snapshot["attempt_started_at_ms"] < booted.timestamp() * 1000
+                and booted <= observed and began <= observed <= ended
+            )
+        except (KeyError, TypeError, ValueError, AttributeError):
+            valid = False
+        if not valid:
+            raise StateConflict("proof recovery receipt is malformed or belongs to another target")
+        return receipt
+
+    def proof_capacity_recovery_result(
+        self, job_id: str, lost_attempt_id: str, *, worker_id: str, quota_class: str,
+        connection: sqlite3.Connection | None = None,
+    ) -> dict[str, Any] | None:
+        """Reconcile the one immutable recovery event before observing or writing."""
+        def read(conn):
+            row = conn.execute("SELECT * FROM events WHERE command_id=?", (
+                self._proof_recovery_command(job_id, lost_attempt_id),
+            )).fetchone()
+            if row is None:
+                return None
+            if (row["event_type"] != "PROOF_CAPACITY_RECOVERED"
+                    or row["aggregate_type"] != "quota_class"
+                    or row["aggregate_id"] != f"{worker_id}:{quota_class}"
+                    or row["job_id"] != job_id or row["attempt_id"] != lost_attempt_id
+                    or row["worker_id"] != worker_id or row["quota_class"] != quota_class):
+                raise StateConflict("proof recovery command belongs to another target")
+            return self._validate_proof_recovery_receipt(
+                _json_loads(row["payload_json"], fallback={}), job_id=job_id,
+                lost_attempt_id=lost_attempt_id, worker_id=worker_id, quota_class=quota_class)
+        if connection is not None:
+            return read(connection)
+        with self.store.read() as conn:
+            return read(conn)
+
+    def proof_capacity_recovery_snapshot(
+        self, job_id: str, lost_attempt_id: str, *, worker_id: str, quota_class: str,
+        connection: sqlite3.Connection | None = None,
+    ) -> dict[str, Any]:
+        """Bind the explicit requeue and unheld error quota before broker I/O."""
+        def read(conn):
+            job = conn.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+            attempt = conn.execute("SELECT * FROM attempts WHERE attempt_id=?",
+                                   (lost_attempt_id,)).fetchone()
+            quota = conn.execute(
+                "SELECT * FROM worker_quota_classes WHERE worker_id=? AND quota_class=?",
+                (worker_id, quota_class)).fetchone()
+            worker = conn.execute("SELECT * FROM workers WHERE worker_id=?",
+                                  (worker_id,)).fetchone()
+            error = {"reason": "process identity absent during supervisor restart",
+                     "verified_process_absent": True}
+            if (job is None or attempt is None or quota is None or worker is None
+                    or job["status"] != "QUEUED" or job["current_attempt_id"] is not None
+                    or job["assigned_worker_id"] is not None
+                    or job["assigned_quota_class"] is not None
+                    or job["orchestration_role"] is not None
+                    or attempt["job_id"] != job_id or attempt["worker_id"] != worker_id
+                    or attempt["quota_class"] != quota_class or attempt["status"] != "LOST"
+                    or attempt["execution_mode"] != "SEALED_WORKER"
+                    or attempt["lease_token"] is not None
+                    or _json_loads(attempt["error_json"], fallback={}) != error
+                    or quota["status"] != "ERROR" or quota["held_attempt_id"] is not None
+                    or quota["fence_counter"] != attempt["fence_generation"]
+                    or worker["identity_status"] != "ONLINE"):
+                raise StateConflict("proof recovery requires the exact requeued missing-owner quota")
+            lost = conn.execute(
+                "SELECT * FROM events WHERE event_type='ATTEMPT_LOST' AND attempt_id=?",
+                (lost_attempt_id,)).fetchall()
+            requeue = conn.execute(
+                "SELECT * FROM events WHERE event_type='JOB_REQUEUED' AND job_id=? "
+                "ORDER BY event_id DESC LIMIT 1", (job_id,)).fetchone()
+            latest = conn.execute(
+                "SELECT attempt_id FROM attempts WHERE job_id=? ORDER BY attempt_number DESC LIMIT 1",
+                (job_id,)).fetchone()
+            if (len(lost) != 1 or lost[0]["job_id"] != job_id
+                    or lost[0]["worker_id"] != worker_id or lost[0]["quota_class"] != quota_class
+                    or lost[0]["actor"] != "supervisor"
+                    or _json_loads(lost[0]["payload_json"], fallback={}) != error
+                    or requeue is None or requeue["attempt_id"] != lost_attempt_id
+                    or _json_loads(requeue["payload_json"], fallback={}) != {"previous_status": "LOST"}
+                    or requeue["event_id"] <= lost[0]["event_id"]
+                    or latest is None or latest["attempt_id"] != lost_attempt_id
+                    or conn.execute(
+                        "SELECT 1 FROM worker_quota_classes WHERE worker_id=? AND held_attempt_id IS NOT NULL",
+                        (worker_id,)).fetchone() is not None):
+                raise StateConflict("proof recovery has no exact missing-owner requeue evidence")
+            return {
+                "job_id": job_id, "lost_attempt_id": lost_attempt_id,
+                "worker_id": worker_id, "quota_class": quota_class,
+                "job_version": job["version"], "attempt_version": attempt["version"],
+                "worker_version": worker["version"], "quota_version": quota["version"],
+                "quota_updated_at_ms": quota["updated_at_ms"],
+                "fence_generation": quota["fence_counter"],
+                "attempt_started_at_ms": attempt["started_at_ms"],
+                "lost_event_id": lost[0]["event_id"], "requeue_event_id": requeue["event_id"],
+            }
+        if connection is not None:
+            return read(connection)
+        with self.store.read() as conn:
+            return read(conn)
+
+    def recover_proof_capacity(
+        self, job_id: str, lost_attempt_id: str, *, worker_id: str, quota_class: str,
+        expected_snapshot: Mapping[str, Any], uid_sweep: Mapping[str, Any],
+        expected_worker_uid: int, observation_started_at: datetime,
+        observation_finished_at: datetime,
+    ) -> dict[str, Any]:
+        """Explicit resource requalification; never changes LOST or requeue history."""
+        with self.store.transaction() as conn:
+            prior = self.proof_capacity_recovery_result(
+                job_id, lost_attempt_id, worker_id=worker_id, quota_class=quota_class,
+                connection=conn)
+            if prior is not None:
+                return prior
+            snapshot = self.proof_capacity_recovery_snapshot(
+                job_id, lost_attempt_id, worker_id=worker_id, quota_class=quota_class,
+                connection=conn)
+            if snapshot != dict(expected_snapshot):
+                raise StateConflict("proof recovery state changed during broker observation")
+            receipt = {
+                "schema_version": "mastermind.executive_proof_capacity_recovery/v1",
+                "job_id": job_id, "lost_attempt_id": lost_attempt_id,
+                "worker_id": worker_id, "quota_class": quota_class, "status": "AVAILABLE",
+                "previous_snapshot": snapshot, "uid_sweep": dict(uid_sweep),
+                "observation_started_at": observation_started_at.isoformat(),
+                "observation_finished_at": observation_finished_at.isoformat(),
+            }
+            self._validate_proof_recovery_receipt(
+                receipt, job_id=job_id, lost_attempt_id=lost_attempt_id,
+                worker_id=worker_id, quota_class=quota_class)
+            if (type(expected_worker_uid) is not int
+                    or uid_sweep["worker_uid"] != expected_worker_uid):
+                raise StateConflict("proof recovery receipt names a foreign worker UID")
+            timestamp = self.store.now_ms()
+            changed = conn.execute(
+                """UPDATE worker_quota_classes
+                   SET status='AVAILABLE',last_seen_at_ms=?,updated_at_ms=?,version=version+1
+                   WHERE worker_id=? AND quota_class=? AND status='ERROR'
+                     AND held_attempt_id IS NULL AND fence_counter=? AND version=?
+                     AND updated_at_ms=?""",
+                (timestamp, timestamp, worker_id, quota_class, snapshot["fence_generation"],
+                 snapshot["quota_version"], snapshot["quota_updated_at_ms"])).rowcount
+            if changed != 1:
+                raise StateConflict("proof recovery quota compare-and-set failed")
+            self.store.append_event(
+                conn, aggregate_type="quota_class", aggregate_id=f"{worker_id}:{quota_class}",
+                event_type="PROOF_CAPACITY_RECOVERED", actor="executive-control-service",
+                job_id=job_id, attempt_id=lost_attempt_id, worker_id=worker_id,
+                quota_class=quota_class, payload=receipt,
+                command_id=self._proof_recovery_command(job_id, lost_attempt_id),
+                timestamp_ms=timestamp)
+            return receipt
+
     def set_worker_status(
         self,
         worker_id: str,
@@ -7399,7 +7599,12 @@ def _validated_sealed_worker_launch_material(
     binary = attestation.get("binary") if isinstance(attestation, dict) else None
     if (
         not isinstance(attestation, dict)
-        or set(attestation) != attestation_keys
+        # Historical terminal v1 receipts remain readable. New principal sealing
+        # requires the explicit isolation digest; no persisted receipt is backfilled.
+        or set(attestation) not in (
+            attestation_keys, attestation_keys | {"isolation_manifest_sha256"}
+        )
+        or (allow_unsealed_principal and "isolation_manifest_sha256" not in attestation)
         or attestation.get("schema_version")
         != "mastermind.executive_launch_attestation/v1"
         or metadata.get("schema_version") != "mastermind.executive_process_launch/v1"
@@ -7435,7 +7640,13 @@ def _validated_sealed_worker_launch_material(
         )
         or any(
             re.fullmatch(r"[0-9a-f]{64}", str(attestation.get(name))) is None
-            for name in {"permission_profile_sha256", "prompt_sha256"}
+            for name in (
+                {"permission_profile_sha256", "prompt_sha256"}
+                | (
+                    {"isolation_manifest_sha256"}
+                    if "isolation_manifest_sha256" in attestation else set()
+                )
+            )
         )
         or not isinstance(attestation.get("secret_canary_verdict"), dict)
         or attestation["secret_canary_verdict"].get("passed") is not True
@@ -15750,6 +15961,99 @@ class AttemptRegistry:
             if payload["exact_worker_target"] != target.evidence():
                 raise StateConflict("exact worker target first-issuance observation differs")
 
+    def terminal_cycle_dispatch_outcome(
+        self, job_id: str, *, command_id: str
+    ) -> OrchestrationDispatchOutcome:
+        return self._terminal_cycle_dispatch_outcome(job_id, command_id=command_id, reconciled=False)
+
+    def reconciled_terminal_cycle_dispatch_outcome(
+        self, job_id: str, *, command_id: str
+    ) -> OrchestrationDispatchOutcome:
+        """Observe already reconciled terminal history; never make it dispatchable."""
+        return self._terminal_cycle_dispatch_outcome(job_id, command_id=command_id, reconciled=True)
+
+    def _terminal_cycle_dispatch_outcome(
+        self, job_id: str, *, command_id: str, reconciled: bool
+    ) -> OrchestrationDispatchOutcome:
+        """Read an exact terminal lost-return outcome without reacquiring a lease.
+
+        A restarted service has a new lease owner. Historical terminal evidence
+        must not impersonate the old owner or pass through fresh claim routing.
+        The existing COO ambiguity owner still commits reconciliation.
+        """
+        with self.store.read() as connection:
+            job = connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?", (job_id,)
+            ).fetchone()
+            marker = connection.execute(
+                "SELECT * FROM events WHERE command_id=?",
+                (f"{command_id}:effect-unknown",),
+            ).fetchone()
+            resolution = connection.execute(
+                "SELECT * FROM events WHERE command_id=?", (f"{command_id}:reconciled",),
+            ).fetchone()
+            if (
+                job is None or marker is None
+                or (resolution is not None) != reconciled
+                or JobStatus(job["status"]) not in _TERMINAL_JOB_STATUSES
+                or job["orchestration_role"] is None
+            ):
+                raise StateConflict("terminal dispatch requires an exact lost-return marker")
+            pending = _validated_coo_dispatch_effect_event(
+                connection, marker, expected_root_id=job["root_job_id"]
+            )
+            if resolution is not None:
+                resolved = _validated_coo_dispatch_effect_event(
+                    connection, resolution, expected_root_id=job["root_job_id"],
+                )
+                if any(resolved[key] != pending[key] for key in
+                       ("selected_job_id", "attempt_id", "dispatch_command_id")):
+                    raise StateConflict("terminal dispatch reconciliation differs from original claim")
+            attempt = connection.execute(
+                "SELECT * FROM attempts WHERE attempt_id=?",
+                (pending["attempt_id"],),
+            ).fetchone()
+            claim = connection.execute(
+                "SELECT * FROM events WHERE command_id=?", (command_id,)
+            ).fetchone()
+            if attempt is None or claim is None:
+                raise StateConflict("terminal dispatch lost its historical claim")
+            payload = _strict_canonical_json_loads(
+                claim["payload_json"], name="terminal dispatch claim"
+            )
+            expected_command = (
+                f"coo-cycle:{job['root_job_id']}:dispatch:{job_id}:attempt:"
+                f"{attempt['attempt_number']}"
+            )
+            if (
+                pending["selected_job_id"] != job_id
+                or pending["dispatch_command_id"] != command_id
+                or command_id != expected_command
+                or claim["aggregate_type"] != "job"
+                or claim["aggregate_id"] != job_id
+                or claim["worker_id"] != attempt["worker_id"]
+                or claim["quota_class"] != attempt["quota_class"]
+                or not isinstance(payload, dict)
+                or payload.get("cycle_command_id") != command_id
+                or payload.get("dispatch_job_id") != job_id
+                or attempt["job_id"] != job_id
+                or job["current_attempt_id"] != attempt["attempt_id"]
+                or AttemptStatus(attempt["status"]) not in _TERMINAL_ATTEMPT_STATUSES
+                or attempt["status"] != job["status"]
+                or attempt["lease_token"] is not None
+                or connection.execute(
+                    "SELECT 1 FROM worker_quota_classes WHERE held_attempt_id=?",
+                    (attempt["attempt_id"],),
+                ).fetchone() is not None
+            ):
+                raise StateConflict("terminal dispatch historical identity drifted")
+            return OrchestrationDispatchOutcome(
+                command_id=command_id,
+                job_id=job_id,
+                attempt=_attempt_from_row(attempt),
+                outcome="TERMINAL",
+            )
+
     def dispatch_cycle_job(
         self,
         job_id: str,
@@ -16421,6 +16725,7 @@ class AttemptRegistry:
                     "rendered_argv",
                     "environment_keys",
                     "permission_profile_sha256",
+                    "isolation_manifest_sha256",
                     "prompt_sha256",
                     "expected_base_sha",
                     "observed_base_sha",
@@ -16460,7 +16765,10 @@ class AttemptRegistry:
                     raise StateConflict(
                         "launch attestation environment allow-list is invalid"
                     )
-                for digest_field in ("permission_profile_sha256", "prompt_sha256"):
+                for digest_field in (
+                    "permission_profile_sha256", "prompt_sha256",
+                    "isolation_manifest_sha256",
+                ):
                     digest = attestation.get(digest_field)
                     if (
                         not isinstance(digest, str)
@@ -18052,7 +18360,7 @@ class OperatorHarnessRegistry:
                     != generation.process_generation_id
                     or observed_principal.provider_session_id
                     != found["provider_session_id"]
-                    or observed_principal.process_identity != expected_process
+                    or base_process_identity(observed_principal.process_identity) != expected_process
                     or placement.get("worker_id") != row["worker_id"]
                     or placement.get("quota_class") != row["quota_class"]
                     or not isinstance(grant, dict)
@@ -18265,7 +18573,7 @@ class OperatorHarnessRegistry:
                 "decision": LaunchDecision.ALLOW.value,
                 "attestation_digest": current["observed_attestation_digest"],
             }
-            or observation["process_identity"]
+            or base_process_identity(observation["process_identity"])
             != {
                 "pid": current["pid"],
                 "pgid": current["pgid"],
@@ -22724,6 +23032,52 @@ class ActiveOperatorBindingFacts:
     provider: str
     account_label: str
     owner_seat: str
+    job_id: str
+    worker_id: str
+    process_generation_id: str
+    pid: int
+    pgid: int
+    process_start_identity: str
+    boot_id: str
+    admitted_unique_id: int | None = None
+    admitted_pidversion: int | None = None
+
+
+
+def _expected_mcp_capability(
+    *, config_name: str, server_identity: str, server_version: str,
+    tool_schema_digest: str, auth_status: str,
+) -> dict[str, Any]:
+    expected = {
+        "kind": "mcp_server",
+        "name": config_name,
+        "tool_schema_digest": tool_schema_digest,
+        "mcp_server_identity": server_identity,
+        "mcp_server_version": server_version,
+        "mcp_auth_status": auth_status,
+        "skill_content_digest": None,
+        "resource_contract_digest": None,
+    }
+    if (
+        any(type(value) is not str or not value for value in (
+            config_name, server_identity, server_version, auth_status,
+        ))
+        or type(tool_schema_digest) is not str
+        or re.fullmatch(r"[0-9a-f]{64}", tool_schema_digest) is None
+    ):
+        raise StateConflict("MCP binding requires a complete host capability identity")
+    return expected
+
+
+@dataclasses.dataclass(frozen=True)
+class ActiveMcpCapabilityBindingFacts:
+    """Same-snapshot current writer and its required, attested MCP capability."""
+
+    binding: ActiveOperatorBindingFacts
+    requested_capability: CapabilityIdentity
+    observed_capability: ObservedCapabilityIdentity
+    requested_profile_digest: str
+    observed_attestation_digest: str
 
 
 def _discover_job_roots_bounded(acquisition: BoundedRuntimeAcquisition) -> BoundedRuntimeRootDiscovery:
@@ -24020,6 +24374,187 @@ class Runtime:
                 attempt_token=attempt_token,
             )
 
+    def current_harness_binding_for_parent_pid(
+        self,
+        parent_pid: int,
+        *,
+        connection: sqlite3.Connection | None = None,
+    ) -> ActiveOperatorBindingFacts:
+        """Select one current OHF writer by an internally observed PID hint.
+
+        This read-only projection does not authenticate an MCP peer. The host
+        must additionally prove the connected child's kernel parent identity
+        equals this exact process instance before each effect.
+        """
+        if type(parent_pid) is not int or not 0 < parent_pid <= (1 << 31) - 1:
+            raise StateConflict("runtime parent lookup requires an exact positive PID")
+        if connection is None:
+            with self.store.read() as owned_connection:
+                return self.current_harness_binding_for_parent_pid(
+                    parent_pid, connection=owned_connection
+                )
+        self.store._assert_owned_snapshot_connection(connection)
+        rows = connection.execute(
+            """
+            SELECT a.attempt_id,g.process_generation_id,g.session_epoch_id,
+                   g.pid,g.pgid,g.process_start_identity,g.boot_id
+            FROM main.process_generations g
+            JOIN main.harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id
+            JOIN main.attempts a ON a.attempt_id=e.attempt_id
+            WHERE g.pid=? AND g.executive_writer_held=1
+              AND g.ended_at_ms IS NULL AND e.state='CURRENT'
+            LIMIT 2
+            """,
+            (parent_pid,),
+        ).fetchall()
+        if len(rows) != 1:
+            raise StateConflict("runtime parent lookup requires exactly one current writer")
+        row = rows[0]
+        facts = self.current_harness_binding_source(
+            str(row["attempt_id"]), connection=connection
+        )
+        if any(
+            getattr(facts, key) != row[key]
+            for key in (
+                "attempt_id", "session_epoch_id", "process_generation_id",
+                "pid", "pgid", "process_start_identity", "boot_id",
+            )
+        ):
+            raise StateConflict("runtime parent lookup process identity drifted")
+        return facts
+
+    def current_harness_mcp_binding_for_parent_pid(
+        self,
+        parent_pid: int,
+        *,
+        config_name: str,
+        server_identity: str,
+        server_version: str,
+        tool_schema_digest: str,
+        auth_status: str,
+        connection: sqlite3.Connection | None = None,
+    ) -> ActiveMcpCapabilityBindingFacts:
+        """Read exact current-writer and required MCP capability facts together.
+
+        The host supplies its sealed expected capability, never tool arguments.
+        This is a read projection, not socket authentication or a launch grant.
+        """
+        expected = _expected_mcp_capability(
+            config_name=config_name, server_identity=server_identity,
+            server_version=server_version, tool_schema_digest=tool_schema_digest,
+            auth_status=auth_status,
+        )
+        if connection is None:
+            with self.store.read() as owned_connection:
+                return self.current_harness_mcp_binding_for_parent_pid(
+                    parent_pid, config_name=config_name,
+                    server_identity=server_identity, server_version=server_version,
+                    tool_schema_digest=tool_schema_digest, auth_status=auth_status,
+                    connection=owned_connection,
+                )
+        self.store._assert_owned_snapshot_connection(connection)
+        binding = self.current_harness_binding_for_parent_pid(
+            parent_pid, connection=connection
+        )
+        return self._current_harness_mcp_capability(binding, expected, connection)
+
+    def current_harness_mcp_binding_for_attempt(
+        self, attempt_id: str, *, config_name: str, server_identity: str,
+        server_version: str, tool_schema_digest: str, auth_status: str,
+        connection: sqlite3.Connection | None = None,
+    ) -> ActiveMcpCapabilityBindingFacts:
+        """Qualify one exact recipient through the same current-writer owner.
+
+        No peer identity or dispatch authority is established by this read.
+        The caller must revalidate this exact binding before admission.
+        """
+        expected = _expected_mcp_capability(
+            config_name=config_name, server_identity=server_identity,
+            server_version=server_version, tool_schema_digest=tool_schema_digest,
+            auth_status=auth_status,
+        )
+        if connection is None:
+            with self.store.read() as owned_connection:
+                return self.current_harness_mcp_binding_for_attempt(
+                    attempt_id, config_name=config_name, server_identity=server_identity,
+                    server_version=server_version, tool_schema_digest=tool_schema_digest,
+                    auth_status=auth_status, connection=owned_connection,
+                )
+        self.store._assert_owned_snapshot_connection(connection)
+        binding = self.current_harness_binding_source(attempt_id, connection=connection)
+        return self._current_harness_mcp_capability(binding, expected, connection)
+
+    def _current_harness_mcp_capability(
+        self, binding: ActiveOperatorBindingFacts, expected: Mapping[str, Any],
+        connection: sqlite3.Connection,
+    ) -> ActiveMcpCapabilityBindingFacts:
+        self.store._assert_owned_snapshot_connection(connection)
+        config_name = expected["name"]
+        rows = connection.execute(
+            """SELECT a.requested_execution_profile_json,
+                      a.requested_execution_profile_digest,
+                      g.observed_attestation_json,g.observed_attestation_digest
+               FROM main.attempts a
+               JOIN main.harness_session_epochs e ON e.attempt_id=a.attempt_id
+               JOIN main.process_generations g ON g.session_epoch_id=e.session_epoch_id
+               WHERE a.attempt_id=? AND g.process_generation_id=?
+                 AND e.session_epoch_id=? AND e.state='CURRENT'
+                 AND g.executive_writer_held=1 AND g.ended_at_ms IS NULL
+               LIMIT 2""",
+            (binding.attempt_id, binding.process_generation_id, binding.session_epoch_id),
+        ).fetchall()
+        if len(rows) != 1:
+            raise StateConflict("MCP binding requires one exact admitted generation")
+        row = rows[0]
+        from control_plane.operator_harness_wire import (
+            OperatorHarnessWireError,
+            observed_harness_attestation,
+            requested_execution_profile,
+        )
+        try:
+            requested = requested_execution_profile(_load_canonical_digest_pair(
+                row["requested_execution_profile_json"],
+                row["requested_execution_profile_digest"],
+                name="MCP requested profile",
+            ))
+            observed = observed_harness_attestation(_load_canonical_digest_pair(
+                row["observed_attestation_json"], row["observed_attestation_digest"],
+                name="MCP observed attestation",
+            ))
+            comparison = compare_launch(requested, observed)
+        except (PersistenceError, OperatorHarnessWireError, TypeError, ValueError) as exc:
+            raise StateConflict("MCP binding sealed evidence is invalid") from exc
+        required = [
+            value for value in requested.capabilities.required
+            if value.name == config_name
+        ]
+        attested = [
+            value for value in observed.capabilities if value.name == config_name
+        ]
+        if (
+            comparison.decision is not LaunchDecision.ALLOW
+            or len(required) != 1 or len(attested) != 1
+            or any(value.name == config_name for value in requested.capabilities.allowed_ambient)
+            or observed.effective_mcp.count(config_name) != 1
+            or config_name in observed.effective_skills
+            or config_name in observed.effective_plugins_or_apps
+        ):
+            raise StateConflict("MCP binding requires an exact required and attested capability")
+        if (
+            any(getattr(required[0], key) != value for key, value in expected.items())
+            or any(getattr(attested[0], key) != value for key, value in expected.items())
+            or required[0].harness_binary_digest != requested.harness_binary_digest
+            or observed.harness_binary_digest != requested.harness_binary_digest
+        ):
+            raise StateConflict("MCP binding capability identity drifted")
+        return ActiveMcpCapabilityBindingFacts(
+            binding=binding,
+            requested_capability=required[0],
+            observed_capability=attested[0],
+            requested_profile_digest=str(row["requested_execution_profile_digest"]),
+            observed_attestation_digest=str(row["observed_attestation_digest"]),
+        )
+
     def current_harness_binding_source(
         self,
         attempt_id: str,
@@ -24502,7 +25037,7 @@ class Runtime:
             }
             or observation["process_generation_id"] != row["process_generation_id"]
             or observation["provider_session_id"] != row["epoch_provider_session"]
-            or observation["process_identity"]
+            or base_process_identity(observation["process_identity"])
             != {
                 "pid": row["generation_pid"],
                 "pgid": row["generation_pgid"],
@@ -24519,6 +25054,15 @@ class Runtime:
             provider=str(placement["provider"]),
             account_label=str(placement["account_label"]),
             owner_seat=str(row["owner_seat"]),
+            job_id=str(row["job_id"]),
+            worker_id=str(row["worker_id"]),
+            process_generation_id=str(row["process_generation_id"]),
+            pid=int(row["generation_pid"]),
+            pgid=int(row["generation_pgid"]),
+            process_start_identity=str(row["generation_process_start_identity"]),
+            boot_id=str(row["generation_boot_id"]),
+            admitted_unique_id=observation["process_identity"].get("unique_id"),
+            admitted_pidversion=observation["process_identity"].get("pidversion"),
         )
 
 
@@ -26518,6 +27062,7 @@ class ReleaseMaintenanceRegistry:
 
 __all__ = [
     "ActiveOperatorBindingFacts",
+    "ActiveMcpCapabilityBindingFacts",
     "Attempt",
     "AttemptLease",
     "AttemptRegistry",

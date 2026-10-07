@@ -242,6 +242,15 @@ class DialogueWakeResult:
 
 
 @dataclasses.dataclass(frozen=True)
+class DialogueWakeTargetIdentity:
+    """Current native identity without an operator effect capability."""
+    registry: Any
+    runtime_binding: Any
+    target_attempt_id: str
+    process_generation_id: str
+
+
+@dataclasses.dataclass(frozen=True)
 class DialogueWakeTarget:
     """Executive-owned Stage-B1 resolution of one proposed Wake target."""
 
@@ -375,6 +384,168 @@ def _dialogue_target_bindings_for_root(
     return result
 
 
+def derive_dialogue_wake_canary_current_facts(
+    runtime: Runtime, request: DialogueWakeRequest, resolved: DialogueWakeTarget,
+    base_route: Any, *, installed_release_sha: str, now_provider: Callable[[], int],
+) -> Any:
+    """One shared current Runtime snapshot for publisher and effect-time guard."""
+    from control_plane.dialogue_wake_canary_activation import DialogueWakeCanaryCurrentFacts
+    from control_plane.runtime_binding_projection import project_runtime_binding
+
+    with runtime.store.read() as connection:
+        reader = object.__new__(ExecutiveControlService)
+        source_facts = reader._runtime_dialogue_observation_facts(
+            runtime,
+            request.parent,
+            connection=connection,
+        )
+        source_response = reduce_dialogue_observation(
+            parent=request.parent,
+            thread_ts=request.thread_ts,
+            facts=source_facts,
+        )
+        if _dialogue_candidate_from_response(source_response) != request.candidate:
+            raise StateConflict("current canary source candidate disagrees")
+        source = runtime.current_harness_binding_source(
+            resolved.target_attempt_id,
+            connection=connection,
+        )
+        target = resolved.registry.get(resolved.runtime_binding.session_alias)
+        binding = project_runtime_binding(
+            runtime,
+            resolved.target_attempt_id,
+            target,
+            connection=connection,
+        )
+        rows = connection.execute(
+            """
+            SELECT g.process_generation_id
+            FROM process_generations AS g
+            JOIN harness_session_epochs AS e
+              ON e.session_epoch_id=g.session_epoch_id
+            WHERE e.attempt_id=? AND e.state='CURRENT'
+              AND g.executive_writer_held=1
+              AND g.ended_at_ms IS NULL
+              AND g.generation_number=?
+            """,
+            (resolved.target_attempt_id, binding.binding_generation),
+        ).fetchall()
+        if (
+            len(rows) != 1
+            or source.owner_seat != request.obligation.declared_target_seat
+            or binding != resolved.runtime_binding
+            or str(rows[0]["process_generation_id"])
+            != resolved.process_generation_id
+        ):
+            raise StateConflict("current canary writer identity disagrees")
+        facts = DialogueWakeCanaryCurrentFacts(
+            installed_release_sha=installed_release_sha,
+            operation_key=request.parent["operation_key"],
+            source_root_job_id=request.candidate.root_job_id,
+            source_job_id=request.candidate.job_id,
+            source_attempt_id=request.candidate.attempt_id,
+            source_worker_id=request.candidate.worker_id,
+            source_semantic_digest=request.candidate.evidence_digest,
+            obligation_id=request.obligation.obligation_id,
+            target_seat=source.owner_seat,
+            target_session_alias=binding.session_alias,
+            target_attempt_id=resolved.target_attempt_id,
+            binding_id=binding.binding_id,
+            binding_generation=binding.binding_generation,
+            process_generation_id=str(rows[0]["process_generation_id"]),
+            policy_digest=base_route.policy_digest,
+        )
+        # The Executive clock is deliberately the final observation made
+        # while this fresh read snapshot is still owned by the worker thread.
+        now = now_provider()
+    return facts, now
+
+
+def resolve_current_dialogue_wake_target(
+    runtime: Runtime, request: DialogueWakeRequest,
+) -> DialogueWakeTargetIdentity | None:
+    """Resolve current identity only; no operator capability or provider effect."""
+    from control_plane.runtime_binding_projection import project_runtime_binding
+    from control_plane.session_targets import load_session_targets
+
+    root_job_id = request.candidate.root_job_id
+    seat = request.obligation.declared_target_seat
+    resolved: list[DialogueWakeTargetIdentity] = []
+    with runtime.store.read() as connection:
+        registry = load_session_targets()
+        rows = connection.execute(
+            """
+            SELECT current_attempt_id
+            FROM jobs
+            WHERE root_job_id=?
+              AND current_attempt_id IS NOT NULL
+              AND status IN ('RUNNING','CHECKPOINTED','CANCEL_REQUESTED')
+            ORDER BY job_id
+            """,
+            (root_job_id,),
+        ).fetchall()
+        for row in rows:
+            attempt_id = str(row["current_attempt_id"] or "")
+            try:
+                source = runtime.current_harness_binding_source(
+                    attempt_id,
+                    connection=connection,
+                )
+                if source.owner_seat != seat:
+                    continue
+                seat_map = registry.root_job_bindings.get(root_job_id, {})
+                alias = seat_map.get(seat)
+                target = (
+                    registry.get(alias)
+                    if alias is not None
+                    else registry.resolve(seat)
+                )
+                if alias is None:
+                    root_bindings = {
+                        key: dict(value)
+                        for key, value in registry.root_job_bindings.items()
+                    }
+                    root_bindings[root_job_id] = {
+                        **root_bindings.get(root_job_id, {}),
+                        seat: target.session_alias,
+                    }
+                    registry = registry.with_root_job_bindings(root_bindings)
+                binding = project_runtime_binding(
+                    runtime,
+                    attempt_id,
+                    target,
+                    connection=connection,
+                )
+                generation_rows = connection.execute(
+                    """
+                    SELECT g.process_generation_id
+                    FROM process_generations AS g
+                    JOIN harness_session_epochs AS e
+                      ON e.session_epoch_id=g.session_epoch_id
+                    WHERE e.attempt_id=?
+                      AND e.state='CURRENT'
+                      AND g.executive_writer_held=1
+                      AND g.generation_number=?
+                    """,
+                    (attempt_id, binding.binding_generation),
+                ).fetchall()
+                if len(generation_rows) != 1:
+                    continue
+                resolved.append(
+                    DialogueWakeTargetIdentity(
+                        registry=registry,
+                        runtime_binding=binding,
+                        target_attempt_id=attempt_id,
+                        process_generation_id=str(
+                            generation_rows[0]["process_generation_id"]
+                        ),
+                    )
+                )
+            except Exception:
+                continue
+    return resolved[0] if len(resolved) == 1 else None
+
+
 class ExecutiveDialogueWakeBridge:
     """Re-resolve a Relay proposal into existing Executive Wake owners."""
 
@@ -411,10 +582,10 @@ class ExecutiveDialogueWakeBridge:
         if canary_profile is not None and not callable(canary_current_facts_for) and (
             not isinstance(installed_release_sha, str)
             or not installed_release_sha
-            or not isinstance(operation_key, str)
-            or not operation_key
+            or (operation_key is not None
+                and (not isinstance(operation_key, str) or not operation_key))
         ):
-            raise TypeError("canary composition requires attested release and operation")
+            raise TypeError("canary composition requires an attested release and optional exact operation")
         if canary_profile is not None and not callable(canary_now_epoch_seconds):
             raise TypeError("canary_now_epoch_seconds is required for current submission")
         if historical_target_for is not None and not callable(historical_target_for):
@@ -429,6 +600,98 @@ class ExecutiveDialogueWakeBridge:
         self._historical_target_for = historical_target_for
         self._installed_release_sha = installed_release_sha
         self._operation_key = operation_key
+
+    async def dispatch_requester_answer(self, runtime, projection, *, before_effect=None) -> str | None:
+        """Reconcile one exact requester source through the existing Wake carrier.
+
+        Return only a stored native-read delivery command, never a synthesized
+        receipt. Production route and retry arming remain mandatory.
+        """
+        from control_plane.consultation_runtime import (
+            ConsultationRuntime, RequesterAnswerAttentionProjection,
+        )
+        from control_plane.session_targets import load_session_targets, route_obligation
+        from control_plane.wake_ledger import LedgerPhase, assert_causal
+        from control_plane.wake_persist import WakeLedgerRepository
+
+        if (not isinstance(runtime, Runtime)
+                or not isinstance(projection, RequesterAnswerAttentionProjection)
+                or self._canary_profile is not None):
+            raise StateConflict("requester answer Wake composition is unavailable")
+        owner = ConsultationRuntime(runtime, repository_root=runtime.store.root)
+        def current_source():
+            if before_effect is not None:
+                before_effect()
+            with runtime.store.read() as connection:
+                recovered = owner.recover_requester_answer_attention(
+                    projection.obligation, connection=connection,
+                )
+                if recovered != projection:
+                    raise StateConflict("requester answer projection is stale")
+                source = runtime.current_harness_binding_source(
+                    projection.identity.requester_attempt_id, connection=connection,
+                )
+            return source
+        source = current_source()
+        target, binding = projection.target, projection.binding
+        registry = load_session_targets()
+        # This fixed alias is owned by consultation_requester_binding, not a
+        # caller-selected seat or a search for any current writer.
+        registry = dataclasses.replace(
+            registry, targets={**registry.targets, target.session_alias: target},
+        )
+        registry = registry.with_root_job_bindings({
+            **registry.root_job_bindings,
+            projection.identity.root_job_id: {
+                **registry.root_job_bindings.get(projection.identity.root_job_id, {}),
+                target.target_seat: target.session_alias,
+            },
+        })
+        route = route_obligation(projection.obligation, registry, binding=binding)
+        if not route.delivery_allowed or not self._retry_policy.armed:
+            raise StateConflict("requester answer Wake route is unarmed")
+        epoch, generation = runtime.operator_harness.generation_refs(source.process_generation_id)
+        if (
+            epoch.attempt_id != projection.identity.requester_attempt_id
+            or runtime.operator_harness.current_writer_generation(epoch) != generation
+        ):
+            raise StateConflict("requester answer writer is stale")
+        resolved = DialogueWakeTarget(
+            registry=registry, runtime_binding=binding,
+            target_attempt_id=projection.identity.requester_attempt_id,
+            process_generation_id=source.process_generation_id,
+            operator_adapter=self._operator_adapter,
+        )
+        carrier = self._carrier_factory(
+            runtime=runtime, resolved=resolved, target=target, current_binding=binding,
+            retry_policy=self._retry_policy, generation=generation,
+            source_guard=current_source,
+        )
+        state = await carrier.reconcile(projection.obligation, route)
+        if state.value == "EFFECT_UNKNOWN":
+            from control_plane.wake_dispatcher import WakeEffectUnknownError
+            raise WakeEffectUnknownError("requester answer Wake needs same-attempt reconciliation")
+        if state.value == "MISSING":
+            current_source()
+            await carrier.submit(projection.obligation, route)
+        stored = WakeLedgerRepository(runtime).list_records(projection.obligation.obligation_id)
+        assert_causal(tuple(item.record for item in stored))
+        delivered = [item for item in stored if item.record.phase is LedgerPhase.DELIVERED]
+        if len(delivered) > 1:
+            raise StateConflict("requester answer has ambiguous delivered evidence")
+        if not delivered or delivered[0].record.native_company_read is None:
+            return None
+        record = delivered[0].record
+        if (
+            record.binding_id != binding.binding_id
+            or record.binding_generation != binding.binding_generation
+            or record.destination_digest != route.destination_digest
+            or record.session_alias != target.session_alias
+            or record.reasoning_surface != binding.reasoning_surface
+            or record.native_company_read.target_attempt_id != projection.identity.requester_attempt_id
+        ):
+            raise StateConflict("requester answer delivered identity drifted")
+        return delivered[0].event.command_id
 
     @property
     def canary_profile(self) -> Any:
@@ -944,8 +1207,8 @@ class ExecutiveDialogueWakeBridge:
         if grant is None:
             raise StateConflict("current canary grant is unavailable")
         if (
-            request.parent.get("operation_key") != self._operation_key
-            or self._operation_key != grant.operation_key
+            request.parent.get("operation_key") != grant.operation_key
+            or (self._operation_key is not None and self._operation_key != grant.operation_key)
             or request.candidate.root_job_id != grant.source_root_job_id
             or request.candidate.job_id != grant.source_job_id
             or request.candidate.attempt_id != grant.source_attempt_id
@@ -955,73 +1218,11 @@ class ExecutiveDialogueWakeBridge:
             raise StateConflict("current canary source grant disagrees")
         now_provider = self._canary_now_epoch_seconds
         assert callable(now_provider)
-        with runtime.store.read() as connection:
-            reader = object.__new__(ExecutiveControlService)
-            source_facts = reader._runtime_dialogue_observation_facts(
-                runtime,
-                request.parent,
-                connection=connection,
-            )
-            source_response = reduce_dialogue_observation(
-                parent=request.parent,
-                thread_ts=request.thread_ts,
-                facts=source_facts,
-            )
-            if _dialogue_candidate_from_response(source_response) != request.candidate:
-                raise StateConflict("current canary source candidate disagrees")
-            source = runtime.current_harness_binding_source(
-                resolved.target_attempt_id,
-                connection=connection,
-            )
-            target = resolved.registry.get(resolved.runtime_binding.session_alias)
-            binding = project_runtime_binding(
-                runtime,
-                resolved.target_attempt_id,
-                target,
-                connection=connection,
-            )
-            rows = connection.execute(
-                """
-                SELECT g.process_generation_id
-                FROM process_generations AS g
-                JOIN harness_session_epochs AS e
-                  ON e.session_epoch_id=g.session_epoch_id
-                WHERE e.attempt_id=? AND e.state='CURRENT'
-                  AND g.executive_writer_held=1
-                  AND g.ended_at_ms IS NULL
-                  AND g.generation_number=?
-                """,
-                (resolved.target_attempt_id, binding.binding_generation),
-            ).fetchall()
-            if (
-                len(rows) != 1
-                or source.owner_seat != grant.target_seat
-                or binding != resolved.runtime_binding
-                or str(rows[0]["process_generation_id"])
-                != resolved.process_generation_id
-            ):
-                raise StateConflict("current canary writer identity disagrees")
-            facts = DialogueWakeCanaryCurrentFacts(
-                installed_release_sha=str(self._installed_release_sha),
-                operation_key=str(self._operation_key),
-                source_root_job_id=request.candidate.root_job_id,
-                source_job_id=request.candidate.job_id,
-                source_attempt_id=request.candidate.attempt_id,
-                source_worker_id=request.candidate.worker_id,
-                source_semantic_digest=request.candidate.evidence_digest,
-                obligation_id=request.obligation.obligation_id,
-                target_seat=source.owner_seat,
-                target_session_alias=binding.session_alias,
-                target_attempt_id=resolved.target_attempt_id,
-                binding_id=binding.binding_id,
-                binding_generation=binding.binding_generation,
-                process_generation_id=str(rows[0]["process_generation_id"]),
-                policy_digest=base_route.policy_digest,
-            )
-            # The Executive clock is deliberately the final observation made
-            # while this fresh read snapshot is still owned by the worker thread.
-            now = now_provider()
-        return facts, now
+        return derive_dialogue_wake_canary_current_facts(
+            runtime, request, resolved, base_route,
+            installed_release_sha=str(self._installed_release_sha),
+            now_provider=now_provider,
+        )
 
     async def historical_only(
         self,
@@ -1080,93 +1281,19 @@ class ExecutiveDialogueWakeBridge:
         return DialogueWakeResult(state.value, reasons[state.value])
 
     def _resolve_current_target(
-        self,
-        runtime: Runtime,
-        request: DialogueWakeRequest,
+        self, runtime: Runtime, request: DialogueWakeRequest,
     ) -> DialogueWakeTarget | None:
-        from control_plane.runtime_binding_projection import project_runtime_binding
-        from control_plane.session_targets import load_session_targets
-
-        operator_adapter = self._operator_adapter
-        if not callable(getattr(operator_adapter, "deliver_attention", None)):
+        if not callable(getattr(self._operator_adapter, "deliver_attention", None)):
             return None
-        root_job_id = request.candidate.root_job_id
-        seat = request.obligation.declared_target_seat
-        resolved: list[DialogueWakeTarget] = []
-        with runtime.store.read() as connection:
-            registry = load_session_targets()
-            rows = connection.execute(
-                """
-                SELECT current_attempt_id
-                FROM jobs
-                WHERE root_job_id=?
-                  AND current_attempt_id IS NOT NULL
-                  AND status IN ('RUNNING','CHECKPOINTED','CANCEL_REQUESTED')
-                ORDER BY job_id
-                """,
-                (root_job_id,),
-            ).fetchall()
-            for row in rows:
-                attempt_id = str(row["current_attempt_id"] or "")
-                try:
-                    source = runtime.current_harness_binding_source(
-                        attempt_id,
-                        connection=connection,
-                    )
-                    if source.owner_seat != seat:
-                        continue
-                    seat_map = registry.root_job_bindings.get(root_job_id, {})
-                    alias = seat_map.get(seat)
-                    target = (
-                        registry.get(alias)
-                        if alias is not None
-                        else registry.resolve(seat)
-                    )
-                    if alias is None:
-                        root_bindings = {
-                            key: dict(value)
-                            for key, value in registry.root_job_bindings.items()
-                        }
-                        root_bindings[root_job_id] = {
-                            **root_bindings.get(root_job_id, {}),
-                            seat: target.session_alias,
-                        }
-                        registry = registry.with_root_job_bindings(root_bindings)
-                    binding = project_runtime_binding(
-                        runtime,
-                        attempt_id,
-                        target,
-                        connection=connection,
-                    )
-                    generation_rows = connection.execute(
-                        """
-                        SELECT g.process_generation_id
-                        FROM process_generations AS g
-                        JOIN harness_session_epochs AS e
-                          ON e.session_epoch_id=g.session_epoch_id
-                        WHERE e.attempt_id=?
-                          AND e.state='CURRENT'
-                          AND g.executive_writer_held=1
-                          AND g.generation_number=?
-                        """,
-                        (attempt_id, binding.binding_generation),
-                    ).fetchall()
-                    if len(generation_rows) != 1:
-                        continue
-                    resolved.append(
-                        DialogueWakeTarget(
-                            registry=registry,
-                            runtime_binding=binding,
-                            target_attempt_id=attempt_id,
-                            process_generation_id=str(
-                                generation_rows[0]["process_generation_id"]
-                            ),
-                            operator_adapter=operator_adapter,
-                        )
-                    )
-                except Exception:
-                    continue
-        return resolved[0] if len(resolved) == 1 else None
+        identity = resolve_current_dialogue_wake_target(runtime, request)
+        if identity is None:
+            return None
+        return DialogueWakeTarget(
+            registry=identity.registry, runtime_binding=identity.runtime_binding,
+            target_attempt_id=identity.target_attempt_id,
+            process_generation_id=identity.process_generation_id,
+            operator_adapter=self._operator_adapter,
+        )
 
     async def __call__(
         self,
@@ -1840,6 +1967,7 @@ class CeoIngressAppBinding:
     content_provider_factory: Callable[[Runtime], Any] | None = None
     steward_provider_factory: Callable[[Runtime], Any] | None = None
     workspace_read_provider_factory: Callable[[Runtime], Any] | None = None
+    session_bridge_provider_factory: Callable[[Runtime], Any] | None = None
     read_schema: str = CEO_APP_READ_SCHEMA
     # Separate principal capability; the incumbent CEO armed bit grants none.
     # Existing launchers omit these fields, so this route is dormant by default.
@@ -1856,6 +1984,11 @@ class CeoIngressAppBinding:
             raise ValueError("App binding requires a grounding provider")
         if self.read_schema not in CEO_APP_READ_TOOLS_BY_SCHEMA:
             raise ValueError("App binding read schema is not an admitted profile")
+        if (
+            self.session_bridge_provider_factory is not None
+            and not callable(self.session_bridge_provider_factory)
+        ):
+            raise ValueError("Session Bridge requires a host provider")
         if self.principal_facts_factory is not None and not callable(self.principal_facts_factory):
             raise ValueError("principal facts require a host provider")
         if type(self.principal_admission_armed) is not bool:
@@ -1864,6 +1997,46 @@ class CeoIngressAppBinding:
             raise ValueError("principal admission requires a host guard")
         if self.principal_admission_armed and self.principal_admission_guard is None:
             raise ValueError("armed principal admission requires a host guard")
+
+
+class CompanyConsultationHostProtocol(Protocol):
+    async def handle_connection(
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None: ...
+
+
+@dataclasses.dataclass(frozen=True)
+class CompanyConsultationBinding:
+    """Trusted optional transport composition; grants remain Runtime-owned."""
+    socket_path: Path
+    worker_uid: int
+    group_gid: int
+    host_factory: Callable[[Runtime], CompanyConsultationHostProtocol]
+    activated_socket: socket.socket | None = None
+
+    def __post_init__(self) -> None:
+        path = Path(self.socket_path)
+        if (not path.is_absolute() or "\0" in os.fspath(path)
+                or os.path.normpath(os.fspath(path)) != os.fspath(path)
+                or len(os.fsencode(path)) > 103
+                or type(self.worker_uid) is not int or self.worker_uid <= 0
+                or type(self.group_gid) is not int or self.group_gid <= 0
+                or not callable(self.host_factory)):
+            raise ValueError("Company consultation binding is invalid")
+        object.__setattr__(self, "socket_path", path)
+        activated = self.activated_socket
+        if activated is not None:
+            if activated.family != socket.AF_UNIX:
+                raise ValueError("Company consultation socket must use AF_UNIX")
+            bound = activated.getsockname()
+            if isinstance(bound, bytes):
+                bound = os.fsdecode(bound)
+            if (not isinstance(bound, str) or not bound
+                    or not Path(bound).is_absolute()
+                    or os.path.normpath(bound) != bound
+                    or bound not in {os.fspath(path), os.fspath(path.resolve(strict=False))}):
+                raise ValueError("Company consultation activated path mismatch")
+            _require_listening_if_queryable(activated)
 
 
 class ExecutiveControlService:
@@ -1879,6 +2052,8 @@ class ExecutiveControlService:
             Callable[[Runtime, SupervisorProtocol], OperatorSupervisorProtocol]
             | None
         ) = None,
+        proof_capacity_recovery_observer: Callable[[Any], Mapping[str, Any]] | None = None,
+        proof_capacity_recovery_worker_uid: int | None = None,
         operator_identity_verifier: Callable[[], Awaitable[None]] | None = None,
         autonomy_guard: Callable[[], None] | None = None,
         backup_backend: BackupBackendProtocol | None = None,
@@ -1900,6 +2075,7 @@ class ExecutiveControlService:
             TerminalReturnProjectorFactory | None
         ) = None,
         terminal_return_binding_resolver: Any | None = None,
+        company_consultation_binding: CompanyConsultationBinding | None = None,
         dialogue_observation_socket_path: Path | str | None = None,
         dialogue_observation_peer_uid: int | None = None,
         dialogue_observation_group_gid: int | None = None,
@@ -1920,6 +2096,15 @@ class ExecutiveControlService:
         self._workspace_control_room = workspace_control_room
         self._supervisor_factory = supervisor_factory
         self._operator_supervisor_factory = operator_supervisor_factory
+        if (proof_capacity_recovery_observer is not None
+                and (not callable(proof_capacity_recovery_observer)
+                     or type(proof_capacity_recovery_worker_uid) is not int
+                     or proof_capacity_recovery_worker_uid <= 0)):
+            raise ValueError("proof recovery requires a fixed observer and worker UID")
+        if proof_capacity_recovery_observer is None and proof_capacity_recovery_worker_uid is not None:
+            raise ValueError("proof recovery UID requires its observer")
+        self._proof_capacity_recovery_observer = proof_capacity_recovery_observer
+        self._proof_capacity_recovery_worker_uid = proof_capacity_recovery_worker_uid
         self._operator_identity_verifier = operator_identity_verifier
         self._autonomy_guard = autonomy_guard
         if self.config.coo_autonomy_armed and not callable(self._autonomy_guard):
@@ -2017,6 +2202,7 @@ class ExecutiveControlService:
         self._listener_drains: set[asyncio.Task[Any]] = set()
         self._read_provider_drain: asyncio.Task[Any] | None = None
         self._startup_reconciliation: list[Any] = []
+        self._company_answer_reconciliation: list[dict[str, str]] = []
         self._started_at: str | None = None
         if service_state not in {"READY", "AWAITING_CANARY"}:
             raise ValueError("service_state must be READY or AWAITING_CANARY")
@@ -2259,6 +2445,27 @@ class ExecutiveControlService:
             self._dialogue_observation_ready = False
             self._dialogue_observation_tasks: set[asyncio.Task[Any]] = set()
             self._dialogue_observation_inode: tuple[int, int] | None = None
+
+        binding = company_consultation_binding
+        if binding is not None:
+            if type(binding) is not CompanyConsultationBinding:
+                raise ValueError("Company consultation requires its trusted binding")
+            if binding.socket_path.resolve(strict=False) in {
+                path.resolve(strict=False) for path in (
+                    config.socket_path, config.terminal_return_socket_path,
+                    self._ceo_ingress_socket_path, self._dialogue_observation_socket_path,
+                ) if path is not None
+            }:
+                raise ValueError("Company consultation socket must be distinct")
+        self._company_consultation_binding = binding
+        self._company_consultation_host: CompanyConsultationHostProtocol | None = None
+        self._company_consultation_server: asyncio.AbstractServer | None = None
+        self._company_consultation_ready = False
+        self._company_consultation_tasks: set[asyncio.Task[Any]] = set()
+        self._company_consultation_writers: set[asyncio.StreamWriter] = set()
+        self._company_consultation_inode: tuple[int, int] | None = None
+        self._company_consultation_activated_socket = (
+            binding.activated_socket if binding is not None else None)
 
     def _load_coo_execution_binding(self) -> dict[str, Any]:
         """Resolve one reviewed sealed-COO alias into host-owned Job identity."""
@@ -2977,6 +3184,162 @@ class ExecutiveControlService:
         assert self._server is not None
         await self._server.start_serving()
 
+    async def _bind_company_consultation_server(self, *, start_serving: bool) -> None:
+        from common.company_consultation_host_contract import MAX_REQUEST_BYTES
+        binding = self._company_consultation_binding
+        assert binding is not None
+        path, gid = binding.socket_path, binding.group_gid
+        activated = self._company_consultation_activated_socket
+        options: dict[str, Any] = {}
+        if sys.version_info >= (3, 13):
+            options["cleanup_socket"] = False
+        if activated is None:
+            parent = path.parent
+            existed = parent.exists()
+            parent.mkdir(mode=0o710, parents=True, exist_ok=True)
+            info = parent.lstat()
+            if (not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode)
+                    or info.st_uid != os.geteuid()):
+                raise ServiceError("Company consultation parent custody is unavailable")
+            if not existed:
+                os.chown(parent, os.geteuid(), gid, follow_symlinks=False)
+                parent.chmod(0o710)
+                info = parent.lstat()
+            if info.st_gid != gid or stat.S_IMODE(info.st_mode) != 0o710:
+                raise ServiceError("Company consultation parent permissions differ")
+            try:
+                path.lstat()
+            except FileNotFoundError:
+                pass
+            else:
+                raise ServiceError("Company consultation pre-existing socket is ambiguous")
+            self._company_consultation_server = await asyncio.start_unix_server(
+                self._handle_company_consultation_connection, path=str(path),
+                limit=MAX_REQUEST_BYTES + 1, start_serving=start_serving, **options)
+            info = path.lstat()
+            if not stat.S_ISSOCK(info.st_mode) or info.st_uid != os.geteuid():
+                raise ServiceError("Company consultation socket custody is unavailable")
+            self._company_consultation_inode = (info.st_dev, info.st_ino)
+            os.chown(path, os.geteuid(), gid, follow_symlinks=False)
+            path.chmod(0o660)
+        else:
+            self._company_consultation_activated_socket = None
+            self._company_consultation_server = await asyncio.start_unix_server(
+                self._handle_company_consultation_connection, sock=activated,
+                limit=MAX_REQUEST_BYTES + 1, start_serving=start_serving, **options)
+        info = path.lstat()
+        if (not stat.S_ISSOCK(info.st_mode) or stat.S_ISLNK(info.st_mode)
+                or info.st_uid != os.geteuid() or info.st_gid != gid
+                or stat.S_IMODE(info.st_mode) != 0o660
+                or (activated is None and (info.st_dev, info.st_ino)
+                    != self._company_consultation_inode)):
+            raise ServiceError("Company consultation socket permissions or identity differ")
+
+    async def _start_company_consultation_serving(self) -> None:
+        assert self._company_consultation_server is not None
+        await self._company_consultation_server.start_serving()
+
+    async def _handle_company_consultation_connection(self, reader, writer) -> None:
+        task = asyncio.current_task()
+        self._company_consultation_tasks.add(task)
+        self._company_consultation_writers.add(writer)
+        try:
+            binding = self._company_consultation_binding
+            host = self._company_consultation_host
+            if (binding is None or host is None or self._closing
+                    or not self._company_consultation_ready or self._service_state != "READY"):
+                return
+            connection = writer.get_extra_info("socket")
+            if connection is None or _peer_uid(connection) != binding.worker_uid:
+                return
+            # The concrete host captures and holds this exact peer again, then
+            # revalidates the current parent/grant adjacent to every effect.
+            await host.handle_connection(reader, writer)
+        except _CLIENT_GONE:
+            pass
+        finally:
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except _CLIENT_GONE:
+                pass
+            finally:
+                self._company_consultation_tasks.discard(task)
+                self._company_consultation_writers.discard(writer)
+
+    def _require_company_answer_attention(self) -> None:
+        if (
+            self._closing or self._service_state != "READY"
+            or self._company_consultation_binding is None
+            or not self._company_consultation_ready
+            or not self.config.coo_operator_harness_armed
+        ):
+            raise StateConflict("Company answer attention service is unarmed")
+        self._require_current_autonomy()
+
+    async def _reconcile_company_answer_wakes(self) -> None:
+        """One bounded pass at existing startup/operator reconciliation edges."""
+        from control_plane.consultation_runtime import ConsultationRuntime
+        from control_plane.wake_events import SourceKind, WakeKind
+        from control_plane.wake_ledger import (
+            LedgerPhase, WAKE_AGGREGATE_TYPE, wake_record_from_event,
+        )
+        from control_plane.wake_persist import WakeLedgerRepository
+
+        host = self._company_consultation_host
+        if (host is None or self._service_state != "READY"
+                or not self.config.coo_operator_harness_armed):
+            return
+        dispatch = getattr(host, "dispatch_requester_answer", None)
+        consume = getattr(host, "consume_stored_native_read", None)
+        if not callable(dispatch) or not callable(consume):
+            return
+        runtime = self._require_runtime()
+        owner = ConsultationRuntime(runtime, repository_root=runtime.store.root)
+        repository = WakeLedgerRepository(runtime)
+        outcomes = []
+        for event in runtime.events.list_events(aggregate_type=WAKE_AGGREGATE_TYPE):
+            if event.event_type != LedgerPhase.WAKE_REQUESTED.value:
+                continue
+            try:
+                requested = wake_record_from_event(event)
+                obligation = requested.obligation
+                if (obligation is None
+                        or obligation.wake_kind is not WakeKind.CONSULTATION_ANSWER_AVAILABLE
+                        or obligation.source_kind is not SourceKind.CONSULTATION_ANSWER_ATTENTION):
+                    continue
+                self._require_company_answer_attention()
+                stored = repository.list_records(obligation.obligation_id)
+                if any(row.record.phase in {
+                    LedgerPhase.TARGET_ACKNOWLEDGED, LedgerPhase.SOURCE_RESOLVED,
+                } for row in stored):
+                    continue
+                delivered = [row for row in stored if row.record.phase is LedgerPhase.DELIVERED]
+                if len(delivered) > 1:
+                    raise StateConflict("Company answer has ambiguous delivery")
+                if delivered:
+                    if delivered[0].record.native_company_read is not None:
+                        await consume(delivered[0].event.command_id)
+                        state = "CONSUMED"
+                    else:
+                        state = "DELIVERED_WITHOUT_NATIVE_READ"
+                else:
+                    with runtime.store.read() as connection:
+                        projection = owner.recover_requester_answer_attention(
+                            obligation, connection=connection,
+                        )
+                    await dispatch(projection)
+                    state = "RECONCILED"
+                outcomes.append({"obligation_id": obligation.obligation_id, "state": state})
+            except Exception as exc:
+                # Holds are observational and remain on their existing stream;
+                # an unrelated malformed source does not invent a new queue.
+                outcomes.append({
+                    "obligation_id": event.aggregate_id, "state": "HELD",
+                    "reason": type(exc).__name__,
+                })
+        self._company_answer_reconciliation = outcomes
+
     async def start(self) -> None:
         if self._server is not None:
             raise ServiceError("Executive control service is already started")
@@ -3046,11 +3409,17 @@ class ExecutiveControlService:
                 if self._service_state != "QUARANTINED":
                     await self._finalize_release_admission_on_startup()
                 await self._replay_terminal_returns_on_startup()
+            if self._company_consultation_binding is not None:
+                self._namespace_custody.bound_runtime(self.runtime)
+                self._company_consultation_host = self._company_consultation_binding.host_factory(self.runtime)
+                if not callable(getattr(self._company_consultation_host, "handle_connection", None)):
+                    raise ServiceError("Company consultation host composition is unavailable")
             if self._workspace_control_room is not None:
                 await self._workspace_control_room.start()
             if (
                 self._ceo_ingress_socket_path is not None
                 or self._dialogue_observation_socket_path is not None
+                or self._company_consultation_binding is not None
             ):
                 # Every configured listener binds with no-accept only after
                 # Runtime reconciliation and the terminal phase audit.  Once
@@ -3062,16 +3431,22 @@ class ExecutiveControlService:
                     await self._bind_dialogue_observation_server(
                         start_serving=False
                     )
+                if self._company_consultation_binding is not None:
+                    await self._bind_company_consultation_server(start_serving=False)
                 await self._bind_operator_server(start_serving=False)
                 if self._ceo_ingress_socket_path is not None:
                     await self._start_ceo_ingress_serving()
                 if self._dialogue_observation_socket_path is not None:
                     await self._start_dialogue_observation_serving()
+                if self._company_consultation_binding is not None:
+                    await self._start_company_consultation_serving()
                 await self._start_operator_serving()
                 if self._ceo_ingress_socket_path is not None:
                     self._ceo_ingress_ready = True
                 if self._dialogue_observation_socket_path is not None:
                     self._dialogue_observation_ready = True
+                if self._company_consultation_binding is not None:
+                    self._company_consultation_ready = True
             else:
                 # Byte-compatible-unchanged: identical to the previous
                 # unconditional call (start_serving defaults to True).
@@ -3081,6 +3456,9 @@ class ExecutiveControlService:
             # (Operator starts second, so this line already runs after both),
             # unchanged single-listener timing otherwise.
             self._started_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            # Native Wake can call Company MCP. Recover only after every
+            # listener is serving, under the same existing service owner.
+            await self._reconcile_company_answer_wakes()
             if (
                 self.config.coo_autonomy_armed
                 and self._service_state == "READY"
@@ -3099,6 +3477,7 @@ class ExecutiveControlService:
         # anything else so a mid-startup failure or a fresh restart never
         # observes a stale true value.
         self._ceo_ingress_ready = False
+        self._company_consultation_ready = False
         if hasattr(self, "_dialogue_observation_ready"):
             self._dialogue_observation_ready = False
         self._closing = True
@@ -3119,6 +3498,12 @@ class ExecutiveControlService:
         if hasattr(self, "_dialogue_observation_server"):
             self._dialogue_observation_server = None
         ceo_ingress_server, self._ceo_ingress_server = self._ceo_ingress_server, None
+        company_server, self._company_consultation_server = self._company_consultation_server, None
+        if company_server is not None:
+            company_server.close()
+        if self._company_consultation_activated_socket is not None:
+            self._company_consultation_activated_socket.close()
+            self._company_consultation_activated_socket = None
         if server is not None:
             server.close()
         if observation_server is not None:
@@ -3127,10 +3512,12 @@ class ExecutiveControlService:
             ceo_ingress_server.close()
         # Python 3.12 Server.wait_closed also waits for accepted transports.
         # Close/drain those transports before awaiting listener completion.
-        for listener in (server, observation_server, ceo_ingress_server):
+        for listener in (server, observation_server, ceo_ingress_server, company_server):
             if listener is not None:
                 self._listener_drains.add(asyncio.create_task(listener.wait_closed()))
 
+        for writer in tuple(self._company_consultation_writers):
+            writer.close()
         for writer in tuple(self._operator_writers):
             writer.close()
         await self._drain_service_tasks(self._operator_handlers)
@@ -3250,6 +3637,9 @@ class ExecutiveControlService:
         if observation_task_set is not None:
             observation_task_set.clear()
 
+        await self._drain_service_tasks(self._company_consultation_tasks)
+        self._company_consultation_tasks.clear()
+        self._company_consultation_host = None
         await self._drain_service_tasks(self._physical_workers)
         await self._drain_service_tasks(self._listener_drains)
         for listener_drain in self._listener_drains:
@@ -3295,6 +3685,21 @@ class ExecutiveControlService:
                     self._dialogue_observation_socket_path.unlink()
         if hasattr(self, "_dialogue_observation_inode"):
             self._dialogue_observation_inode = None
+        binding = self._company_consultation_binding
+        if (binding is not None and binding.activated_socket is None
+                and self._company_consultation_inode is not None):
+            try:
+                info = binding.socket_path.lstat()
+            except FileNotFoundError:
+                pass
+            else:
+                if (stat.S_ISSOCK(info.st_mode) and not stat.S_ISLNK(info.st_mode)
+                        and (info.st_dev, info.st_ino) == self._company_consultation_inode
+                        and info.st_uid == os.geteuid()
+                        and info.st_gid == binding.group_gid
+                        and stat.S_IMODE(info.st_mode) == 0o660):
+                    binding.socket_path.unlink()
+        self._company_consultation_inode = None
         self._release_service_lock()
         if deferred_terminal_cancel is not None:
             raise deferred_terminal_cancel
@@ -4404,6 +4809,83 @@ class ExecutiveControlService:
                 await self._send_ceo_ingress_response(writer, result, response_ceiling=(
                     MAX_PAGE_BYTES if parsed["schema"] == PAGE_SCHEMA else ceo_ingress.MAX_RESPONSE_BYTES))
                 return
+            from common.session_bridge_private_contract import (
+                PRIVATE_SCHEMA as SESSION_BRIDGE_PRIVATE_SCHEMA,
+                SessionBridgeIngressOwner, BridgeError, MODIFYING_TOOLS,
+                private_result as session_bridge_result,
+            )
+            if isinstance(parsed, Mapping) and parsed.get("schema") == SESSION_BRIDGE_PRIVATE_SCHEMA:
+                if not app_peer:
+                    await self._send_ceo_ingress_error(
+                        writer, "peer_denied", "Session Bridge requires the installed App peer"
+                    )
+                    return
+                factory = app_binding.session_bridge_provider_factory
+                if (
+                    not app_binding.armed
+                    or factory is None
+                    or self._closing
+                    or self._service_state not in {"READY", "AWAITING_CANARY"}
+                ):
+                    await self._send_ceo_ingress_error(
+                        writer, "ingress_unavailable", "installed Session Bridge owner is unavailable"
+                    )
+                    return
+                try:
+                    provider = factory(self._require_runtime())
+                    if type(provider) is not SessionBridgeIngressOwner:
+                        raise ValueError("invalid Session Bridge provider")
+                except Exception:
+                    await self._send_ceo_ingress_error(
+                        writer, "ingress_unavailable", "installed Session Bridge owner is unavailable"
+                    )
+                    return
+                # The integration owns semantic validation. Finish it before
+                # calling the effect handler; later failure may be committed.
+                try:
+                    tool = provider.validate_frame(parsed)
+                except BridgeError as exc:
+                    await self._send_ceo_ingress_error(writer, exc.code, exc.message)
+                    return
+                except Exception:
+                    await self._send_ceo_ingress_error(
+                        writer, "ingress_unavailable", "installed Session Bridge owner is unavailable"
+                    )
+                    return
+                if (self._closing
+                        or self._service_state not in {"READY", "AWAITING_CANARY"}
+                        or self._ceo_ingress_app_binding is not app_binding
+                        or not app_binding.armed):
+                    await self._send_ceo_ingress_error(
+                        writer, "ingress_unavailable", "installed Session Bridge owner is unavailable"
+                    )
+                    return
+                modifying = tool in MODIFYING_TOOLS
+                try:
+                    result = await provider.handle_frame(parsed)
+                    if (
+                        self._closing
+                        or self._service_state not in {"READY", "AWAITING_CANARY"}
+                        or self._ceo_ingress_app_binding is not app_binding
+                        or not app_binding.armed
+                    ):
+                        raise ValueError("Session Bridge binding changed")
+                except Exception:
+                    result = session_bridge_result(
+                        tool,
+                        code="effect_unknown" if modifying else "backend_unavailable",
+                        message=(
+                            "operation outcome is unknown; reconcile the original operation"
+                            if modifying else "installed Session Bridge owner is unavailable"
+                        ),
+                    )
+                # A response-write failure cannot turn an entered owner into an
+                # invalid-input/no-effect receipt, nor trigger a second send.
+                await self._send_ceo_ingress_response(
+                    writer, {"ok": True, "result": result},
+                    response_ceiling=ceo_ingress.MAX_RESPONSE_BYTES,
+                )
+                return
             if app_peer and isinstance(parsed, Mapping) and parsed.get("schema") in {
                 app_binding.read_schema, ceo_ingress.APP_GROUNDING_SCHEMA,
             }:
@@ -5263,6 +5745,60 @@ class ExecutiveControlService:
             result["workspace_rotation"] = rotation
             return result
 
+
+    def _is_maintenance_recovery_job(self, job: Job, lost_attempt_id: str) -> bool:
+        # An exact predecessor permit only recovers capacity. Ordinary dispatch
+        # and requeue retain the unchanged current-base proof predicate.
+        from ops.executive_os.acceptance_maintenance import (
+            MaintenanceError, recovery_permitted,
+        )
+        if (self.config.ceo_submit_armed or self.config.coo_autonomy_armed
+                or self.config.coo_operator_harness_armed):
+            return False
+        try:
+            permitted = recovery_permitted(
+                job, lost_attempt_id, self.config.proof_base_sha,
+                self.config.worker_id, self.config.quota_class,
+            )
+        except (MaintenanceError, OSError, ValueError):
+            return False
+        projected = dataclasses.replace(
+            job, constraints=dict(job.constraints, base_sha=self.config.proof_base_sha))
+        return permitted and self._is_fixed_proof_job(projected)
+
+    async def _recover_proof_capacity(self, job_id: str, lost_attempt_id: str) -> dict[str, Any]:
+        runtime = self._require_runtime()
+        target = {"worker_id": self.config.worker_id, "quota_class": self.config.quota_class}
+        async with self._dispatch_lock:
+            async with self._workspace_lock:
+                prior = runtime.workers.proof_capacity_recovery_result(
+                    job_id, lost_attempt_id, **target)
+                if prior is not None:
+                    return prior
+                if any(not task.done() for task in self._dispatch_tasks.values()):
+                    raise StateConflict("proof capacity recovery requires no active dispatch")
+                job = runtime.jobs.get_job(job_id)
+                if job is None or not (
+                    self._is_fixed_proof_job(job)
+                    or self._is_maintenance_recovery_job(job, lost_attempt_id)
+                ):
+                    raise StateConflict("proof capacity recovery accepts only its fixed harmless proof job")
+                observer = self._proof_capacity_recovery_observer
+                if observer is None:
+                    raise StateConflict("proof capacity recovery has no fixed broker observer")
+                snapshot = runtime.workers.proof_capacity_recovery_snapshot(
+                    job_id, lost_attempt_id, **target)
+                attempt = runtime.attempts.get_attempt(lost_attempt_id)
+                started = datetime.now(timezone.utc)
+                sweep = await self._run_physical(observer, attempt)
+                finished = datetime.now(timezone.utc)
+                if self._closing or self._service_state != "READY":
+                    raise StateConflict("proof recovery lost READY service custody")
+                return runtime.workers.recover_proof_capacity(
+                    job_id, lost_attempt_id, **target, expected_snapshot=snapshot,
+                    uid_sweep=sweep, expected_worker_uid=self._proof_capacity_recovery_worker_uid,
+                    observation_started_at=started, observation_finished_at=finished)
+
     def _submit_service_intent(self, payload: Any) -> dict[str, Any]:
         """Submit through the existing sink with v2 host composition attached."""
 
@@ -5340,10 +5876,32 @@ class ExecutiveControlService:
                 )
         return receipt
 
-    def _is_bound_coo_root(self, root: Job) -> bool:
-        raw_binding = self._require_current_coo_binding()
-        binding = _normalise_constraints(raw_binding)
-        binding["work_placement_union"] = _normalise_work_placement_union(raw_binding["work_placement_union"])
+    def _coo_binding_for_root(self, root: Job) -> dict[str, Any]:
+        from ops.executive_os.acceptance_maintenance import MaintenanceError, frozen_binding
+        raw = self._require_current_coo_binding()
+        normalized = _normalise_constraints(raw)
+        normalized["work_placement_union"] = _normalise_work_placement_union(raw["work_placement_union"])
+        # CEO-only intake freezes the closed harness into this root. A later
+        # host arm supplies capacity; it does not promote that admitted root
+        # into a native operator. Preserve only this one-way, same-base change
+        # after checking the complete remaining binding and strict root identity.
+        sealed = dict(normalized, operator_harness_armed=False)
+        if (
+            self._has_strict_coo_root_identity(root)
+            and normalized["operator_harness_armed"] is True
+            and root.constraints.get("operator_harness_armed") is False
+            and all(root.constraints.get(key) == value for key, value in sealed.items())
+        ):
+            return dict(raw, operator_harness_armed=False)
+        try:
+            effective = frozen_binding(root, normalized, self._require_runtime().store)
+        except (MaintenanceError, OSError, ValueError) as exc:
+            raise StateConflict("queued-root maintenance qualification failed") from exc
+        return dict(raw, base_sha=effective["base_sha"],
+                    operator_harness_armed=effective["operator_harness_armed"])
+
+    @staticmethod
+    def _has_strict_coo_root_identity(root: Job) -> bool:
         provenance = root.orchestration_provenance
         return bool(
             root.parent_job_id is None
@@ -5359,7 +5917,14 @@ class ExecutiveControlService:
             and provenance.get("parent_job_id") is None
             and root.worktree is not None
             and root.branch is not None
-            and all(root.constraints.get(key) == value for key, value in binding.items())
+        )
+
+    def _is_bound_coo_root(self, root: Job) -> bool:
+        raw_binding = self._coo_binding_for_root(root)
+        binding = _normalise_constraints(raw_binding)
+        binding["work_placement_union"] = _normalise_work_placement_union(raw_binding["work_placement_union"])
+        return self._has_strict_coo_root_identity(root) and all(
+            root.constraints.get(key) == value for key, value in binding.items()
         )
 
     def _require_bound_coo_job(self, job: Job) -> Job:
@@ -5374,7 +5939,7 @@ class ExecutiveControlService:
             or job.orchestration_role not in {"plan", "work", "review", "repair"}
         ):
             raise StateConflict("COO dispatch target is outside the direct strict-v2 subtree")
-        binding = self._require_current_coo_binding()
+        binding = self._coo_binding_for_root(root)
         if (
             job.orchestration_role == "plan"
             and binding["operator_harness_armed"] is True
@@ -5467,7 +6032,7 @@ class ExecutiveControlService:
             job.orchestration_role == "plan"
             and job.attempt_count == 0
             and (
-                observation["head"] != self.config.proof_base_sha
+                observation["head"] != self._coo_binding_for_root(root)["base_sha"]
                 or observation["launch_clean"] is not True
             )
         ):
@@ -5477,11 +6042,56 @@ class ExecutiveControlService:
         self._require_shared_git_handoff(workspace)
         return observation
 
+    def _maintenance_workspace_pending(self, root: Job) -> bool:
+        """Only the exact PASS-qualified untouched root may materialize its path."""
+        from ops.executive_os.acceptance_maintenance import descriptor_for
+        if root.worktree is None or self._path_exists(Path(root.worktree)):
+            return False
+        descriptor = descriptor_for(self.config.proof_base_sha)
+        if descriptor is None or descriptor["root_job_id"] != root.job_id:
+            return False
+        self._require_bound_coo_job(root)
+        path = Path(root.worktree)
+        if (path.parent != self.config.proof_workspace_root
+                or not re.fullmatch(r"auto-[0-9a-f]{32}", path.name)
+                or root.branch != "codex/" + path.name
+                or root.status is not JobStatus.QUEUED
+                or root.attempt_count != 0 or root.current_attempt_id is not None):
+            raise StateConflict("preserved root workspace admission drifted")
+        runtime = self._require_runtime()
+        with runtime.store.read() as connection:
+            if (connection.execute("SELECT 1 FROM jobs WHERE parent_job_id=? LIMIT 1", (root.job_id,)).fetchone()
+                    or connection.execute("SELECT 1 FROM attempts WHERE job_id=? LIMIT 1", (root.job_id,)).fetchone()):
+                raise StateConflict("preserved root already has execution history")
+        return True
+
+    async def _prepare_maintenance_root_workspace(self, root: Job) -> None:
+        # The normal serialized COO owner calls the existing credentialless
+        # workspace allocator; no intake, lease, or dispatch is duplicated.
+        async with self._workspace_lock:
+            if not self._maintenance_workspace_pending(root):
+                return
+            if any(not task.done() for task in self._dispatch_tasks.values()):
+                raise StateConflict("another dispatch owns workspace preparation")
+            binding = self._coo_binding_for_root(root)
+            workspace = Path(root.worktree)
+            receipt = await self._run_physical(
+                prepare_credentialless_clone,
+                self.config.proof_source_repository, self.config.proof_workspace_root,
+                job_id=workspace.name, base_sha=binding["base_sha"], branch=root.branch,
+                shared_gid=self.config.proof_shared_gid,
+                shared_write_paths=tuple(root.allowed_write_paths),
+            )
+            if (receipt.workspace_path != str(workspace) or receipt.branch != root.branch
+                    or receipt.base_sha != binding["base_sha"] or receipt.remote_count != 0):
+                raise StateConflict("preserved root workspace receipt drifted")
+            self._require_initial_coo_workspace(root)
+
     def _require_initial_coo_workspace(self, root: Job) -> dict[str, Any]:
         """Reuse one read-only initial-workspace rule at selection and execution."""
         observation = self._require_coo_workspace(root)
         if (
-            observation["head"] != self.config.proof_base_sha
+            observation["head"] != self._coo_binding_for_root(root)["base_sha"]
             or observation["launch_clean"] is not True
         ):
             raise ServiceError(
@@ -5615,7 +6225,7 @@ class ExecutiveControlService:
                 job = runtime.jobs.get_job(job_id)
                 if job is None:
                     raise StateConflict(f"job {job_id!r} does not exist")
-                self._require_bound_coo_job(job)
+                root = self._require_bound_coo_job(job)
                 if live and live != {job_id}:
                     live_jobs = [runtime.jobs.get_job(value) for value in live]
                     if (
@@ -5645,9 +6255,16 @@ class ExecutiveControlService:
                     JobStatus.RUNNING,
                     JobStatus.CHECKPOINTED,
                 }:
-                    raise StateConflict(
-                        f"job {job_id} cannot cycle-dispatch from {job.status.value}"
+                    # Resolve only an already-terminal command-bound ambiguity.
+                    # No supervisor, placement selection, lease replay or provider
+                    # start is involved, including after a service restart.
+                    terminal = runtime.attempts.terminal_cycle_dispatch_outcome(
+                        job_id, command_id=command_id
                     )
+                    await self._project_terminal_return(
+                        job_id, expected_attempt_id=terminal.attempt.attempt_id
+                    )
+                    return terminal
                 if job.status is JobStatus.QUEUED:
                     self._require_coo_workspace(job)
                 if (
@@ -5662,7 +6279,7 @@ class ExecutiveControlService:
                     self._require_operator_supervisor()
                     if (
                         job.orchestration_role == "plan"
-                        and self.config.coo_operator_harness_armed
+                        and self._coo_binding_for_root(root)["operator_harness_armed"]
                     )
                     else self._require_supervisor()
                 )
@@ -5728,6 +6345,7 @@ class ExecutiveControlService:
                 if job.parent_job_id == root_id
             ]
             if not children:
+                await self._prepare_maintenance_root_workspace(root)
                 self._require_initial_coo_workspace(root)
             live = {
                 value
@@ -5796,13 +6414,13 @@ class ExecutiveControlService:
             raise ServiceError("bounded COO root scan limit was exceeded")
         for row in rows:
             root = runtime.jobs.get_job(str(row["job_id"]))
-            if root is None or not self._is_bound_coo_root(root):
+            if root is None:
                 continue
-            blocked = any(
-                event.event_type == "COO_CYCLE_BLOCKED"
-                for event in runtime.events.list_events(job_id=root.job_id)
-            )
-            if blocked:
+            # Terminal history survives source/profile rotation. Validate its
+            # canonical block before asking whether it could dispatch now.
+            if runtime.jobs.validated_cycle_block(root.job_id) is not None:
+                continue
+            if not self._is_bound_coo_root(root):
                 continue
             if (
                 root.status is JobStatus.QUEUED
@@ -5820,7 +6438,8 @@ class ExecutiveControlService:
                     ).fetchone()
                 if child is None and attempt is None:
                     try:
-                        self._require_initial_coo_workspace(root)
+                        if not self._maintenance_workspace_pending(root):
+                            self._require_initial_coo_workspace(root)
                     except (OSError, ServiceError, StateConflict) as exc:
                         if prestart_refusals is not None:
                             prestart_refusals[root.job_id] = exc
@@ -6855,6 +7474,8 @@ class ExecutiveControlService:
                 "active_dispatches": active,
                 "dispatch_errors": dict(sorted(self._dispatch_errors.items())),
                 "startup_reconciliation": _jsonable(self._startup_reconciliation),
+                **({"company_answer_reconciliation": self._company_answer_reconciliation}
+                   if self._company_consultation_binding is not None else {}),
                 "coo_autonomy": {
                     "armed": self.config.coo_autonomy_armed,
                     "tick_interval_seconds": self.config.coo_tick_interval_seconds,
@@ -6969,12 +7590,16 @@ class ExecutiveControlService:
             self._exact_args(args, set())
             if any(not task.done() for task in self._dispatch_tasks.values()):
                 raise StateConflict("cannot reconcile while this service owns an active dispatch")
-            return _jsonable(
-                await self._run_physical(
-                    self._require_supervisor().reconcile_restart,
-                    requeue_lost=False,
-                )
+            result = await self._run_physical(
+                self._require_supervisor().reconcile_restart, requeue_lost=False,
             )
+            await self._reconcile_company_answer_wakes()
+            return _jsonable(result)
+        if command == "recover-proof-capacity":
+            self._exact_args(args, {"job_id", "lost_attempt_id"})
+            return await self._recover_proof_capacity(
+                self._id(args["job_id"], "job_id"),
+                self._id(args["lost_attempt_id"], "lost_attempt_id"))
         if command == "requeue":
             self._exact_args(args, {"job_id"})
             job_id = self._id(args["job_id"], "job_id")
@@ -7086,6 +7711,7 @@ async def send_control_request(
 
 
 __all__ = [
+    "CompanyConsultationBinding",
     "BackupBackendProtocol",
     "CONTROL_PROTOCOL_VERSION",
     "DEFAULT_MAX_REQUEST_BYTES",

@@ -1,3 +1,5 @@
+import { createNativeExecutiveTransport } from "./native-executive-transport";
+import type { OsExecutiveTransport } from "./orchestration/os-executive-host";
 import {
   decodeMission,
   decodeMissionv3,
@@ -19,6 +21,14 @@ import {
   type ResultEnvelopeDigestShape,
   type ResultSelection,
 } from "./result";
+import { decodeWorkDocument, type WorkDocument } from "./work";
+import { decodeProgramsObservation, type ProgramsObservation } from "./programs-observation";
+import {
+  completeOrchestratorCommandBinding,
+  type OrchestratorCommandBinding,
+} from "./orchestration/host-command-bindings";
+
+export type { OrchestratorCommandBinding };
 
 export interface AuthState {
   status: "unconfigured" | "signed_out" | "signing_in" | "signed_in" | "error";
@@ -27,11 +37,15 @@ export interface AuthState {
   content: boolean;
 }
 export interface RawClient {
+  readonly executive?: OsExecutiveTransport;
   getState(): AuthState;
+  /** Existing source epoch, when exposed by the fixed client; never a principal or grant. */
+  invalidationGeneration?(): number;
   subscribe(listener: (state: AuthState) => void): () => void;
   signIn(): Promise<unknown>;
   signOut(): Promise<unknown>;
   readPrograms(request: { signal: AbortSignal }): Promise<unknown>;
+  readWork(request: { signal: AbortSignal }): Promise<unknown>;
   readMission(request: {
     work_ref: string;
     root_job_id: string;
@@ -54,12 +68,11 @@ export interface RawClient {
 }
 /**
  * One internally consistent typed read API: every fixed read returns its
- * fully decoded frozen DTO, or throws. The typed allowed 503 body is not a
- * separate wrapper kind — it is the validated
- * `mastermind.workspace_role_result.v1` envelope with availability
- * "UNAVAILABLE", preserved whole (reason_codes included) for the consumer
- * render path. The exact five selector fields stay separate from the
- * AbortSignal, which is an option, never part of the selector.
+ * fully decoded frozen DTO, or throws. Work and Result each preserve their
+ * schema-specific typed allowed 503 document with availability "UNAVAILABLE";
+ * neither becomes a generic error wrapper or empty success. The exact Result
+ * five-selector tuple stays separate from AbortSignal, which is an option,
+ * never part of the selector.
  */
 export interface MissionResultRead {
   (request: ResultSelection & { signal: AbortSignal }): Promise<unknown>;
@@ -72,6 +85,9 @@ export interface MissionHost {
     request: MissionSelection & { signal: AbortSignal },
   ) => Promise<unknown>;
   readPrograms?: ProgramRead;
+  /** Same fixed Programs acquisition, retaining its collection owner receipt. */
+  readProgramsObservation?: (request: { signal: AbortSignal }) => Promise<ProgramsObservation>;
+  readWork?: (request: { signal: AbortSignal }) => Promise<WorkDocument>;
   readResult?: MissionResultRead;
   readCurrentWindow?: (request: {
     signal: AbortSignal;
@@ -79,20 +95,30 @@ export interface MissionHost {
   invalidationGeneration?: () => number;
   selection?: unknown;
   auth?: Pick<RawClient, "getState" | "subscribe" | "signIn" | "signOut">;
+  commandBinding?: OrchestratorCommandBinding;
 }
-export function bindMissionHost(client: RawClient): MissionHost {
+export function bindMissionHost(
+  client: RawClient,
+  commandBinding?: unknown,
+): MissionHost {
   let epoch = 0;
   let previous = JSON.stringify(client.getState());
+  let previousClientGeneration = client.invalidationGeneration?.();
   client.subscribe((state) => {
     const next = JSON.stringify(state);
-    if (next !== previous) {
+    const generation = client.invalidationGeneration?.();
+    // Native identity boundaries may retain the same public display state.
+    // Legacy/web clients without an epoch still deduplicate identical updates.
+    if (next !== previous || generation !== previousClientGeneration) {
       epoch++;
       previous = next;
+      previousClientGeneration = generation;
     }
   });
   const check = (signal: AbortSignal, started: number) => {
     if (signal.aborted || started !== epoch) throw new Error("READ_CANCELLED");
   };
+  const command = completeOrchestratorCommandBinding(commandBinding);
   return {
     invalidationGeneration: () => epoch,
     auth: {
@@ -113,6 +139,22 @@ export function bindMissionHost(client: RawClient): MissionHost {
       const raw = await client.readPrograms({ signal });
       check(signal, started);
       return decodeProgramsEnvelope(raw);
+    },
+    async readProgramsObservation({ signal }) {
+      const started = epoch;
+      check(signal, started);
+      const raw = await client.readPrograms({ signal });
+      check(signal, started);
+      return decodeProgramsObservation(raw);
+    },
+    async readWork({ signal }) {
+      const started = epoch;
+      check(signal, started);
+      const raw = await client.readWork({ signal });
+      check(signal, started);
+      const result = decodeWorkDocument(raw);
+      if (!result) throw new Error("WORK_RESPONSE_INVALID");
+      return result;
     },
     async readMission({ workRef, rootJobId, signal }) {
       const selection = normalizeSelection({ workRef, rootJobId });
@@ -196,6 +238,7 @@ export function bindMissionHost(client: RawClient): MissionHost {
       if (!result) throw new Error("WINDOW_RESPONSE_INVALID");
       return result;
     },
+    ...(command ? { commandBinding: command } : {}),
   };
 }
 
@@ -236,6 +279,7 @@ export async function createNativeClient(
   invoke: Invoke,
   listen: Listen,
 ): Promise<RawClient> {
+  const executive = await createNativeExecutiveTransport(invoke, listen);
   let current: AuthState = {
     status: "unconfigured",
     reason: "NATIVE_HOST_UNAVAILABLE",
@@ -244,10 +288,17 @@ export async function createNativeClient(
   };
   const listeners = new Set<(state: AuthState) => void>();
   let epoch = 0;
+  let readGeneration = new AbortController();
+  const invalidateReads = () => {
+    epoch++;
+    const previous = readGeneration;
+    readGeneration = new AbortController();
+    previous.abort();
+  };
   let control = 0;
   const update = (raw: unknown) => {
     current = authState(raw);
-    epoch++;
+    invalidateReads();
     for (const listener of listeners) listener({ ...current });
   };
   await listen("mastermind-auth-state", (event) => {
@@ -263,6 +314,7 @@ export async function createNativeClient(
   async function read(
     command:
       | "read_programs"
+      | "read_work"
       | "read_mission"
       | "read_mission_v3"
       | "read_result"
@@ -271,13 +323,46 @@ export async function createNativeClient(
     args?: Record<string, unknown>,
   ) {
     const started = epoch;
-    if (signal.aborted) throw new Error("READ_CANCELLED");
-    const raw = await invoke(command, args);
-    if (signal.aborted || started !== epoch) throw new Error("READ_CANCELLED");
-    return raw;
+    const generation = readGeneration.signal;
+    if (signal.aborted || generation.aborted) throw new Error("READ_CANCELLED");
+    // Tauri invoke has no AbortSignal parameter. Settle this read locally on
+    // cancellation without claiming the native request stopped or issuing any
+    // second native command. Both late outcomes remain observed below.
+    return new Promise<unknown>((resolve, reject) => {
+      let settled = false;
+      const finish = (failed: boolean, value: unknown) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener("abort", onAbort);
+        generation.removeEventListener("abort", onAbort);
+        if (failed) reject(value);
+        else resolve(value);
+      };
+      const onAbort = () => finish(true, new Error("READ_CANCELLED"));
+      const onFailure = (error: unknown) => {
+        if (signal.aborted || started !== epoch) onAbort();
+        else finish(true, error);
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      generation.addEventListener("abort", onAbort, { once: true });
+      if (signal.aborted || generation.aborted) {
+        onAbort();
+        return;
+      }
+      try {
+        Promise.resolve(invoke(command, args)).then((raw) => {
+          if (signal.aborted || started !== epoch) onAbort();
+          else finish(false, raw);
+        }, onFailure);
+      } catch (error) {
+        onFailure(error);
+      }
+    });
   }
   return {
+    executive: executive.transport,
     getState: () => ({ ...current }),
+    invalidationGeneration: () => epoch,
     subscribe(listener) {
       listeners.add(listener);
       return () => {
@@ -285,12 +370,15 @@ export async function createNativeClient(
       };
     },
     async signIn() {
-      epoch++;
+      executive.invalidate();
+      invalidateReads();
       const ticket = ++control;
+      const started = epoch;
       const result = await invoke("sign_in");
-      if (ticket === control) update(result);
+      if (ticket === control && started === epoch) update(result);
     },
     async signOut() {
+      executive.invalidate();
       const ticket = ++control;
       update({
         status: "signed_out",
@@ -298,10 +386,12 @@ export async function createNativeClient(
         acquisition: false,
         content: false,
       });
+      const started = epoch;
       const result = await invoke("sign_out");
-      if (ticket === control) update(result);
+      if (ticket === control && started === epoch) update(result);
     },
     readPrograms: ({ signal }) => read("read_programs", signal),
+    readWork: ({ signal }) => read("read_work", signal),
     readMission: ({ work_ref, root_job_id, signal }) => {
       if (!normalizeSelection({ workRef: work_ref, rootJobId: root_job_id }))
         return Promise.reject(new Error("SELECTION_INVALID"));

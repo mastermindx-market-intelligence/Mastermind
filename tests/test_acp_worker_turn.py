@@ -239,6 +239,189 @@ class AcpTurnTests(unittest.IsolatedAsyncioTestCase):
             if handlers:
                 await asyncio.wait_for(asyncio.gather(*tuple(handlers), return_exceptions=True), 1)
 
+
+    async def test_provider_scoped_model_option_preserves_worker_model_identity(self):
+        from acp.schema import (
+            AgentMessageChunk, InitializeResponse, Implementation,
+            NewSessionResponse, PromptResponse, SessionConfigOptionSelect,
+            SessionConfigSelectOption, TextContentBlock,
+        )
+        encoded='["fixture","model-a"]'
+        other='["other","model-a"]'
+        stopped=asyncio.Event()
+        handlers=set()
+        seen={"set": None, "prompts": 0}
+
+        class Peer:
+            def on_connect(self, client):
+                self.client=client
+            async def initialize(self, **kwargs):
+                return InitializeResponse(protocol_version=acp.PROTOCOL_VERSION,
+                    agent_info=Implementation(name="deepseek-harness-acp", version="0.0.1"))
+            async def new_session(self, **kwargs):
+                return NewSessionResponse(session_id="session-dsh", config_options=[
+                    SessionConfigOptionSelect(id="model", name="Model", category="model",
+                        type="select", current_value=other, options=[
+                            {"group":"fixture","name":"Fixture","options":[
+                                SessionConfigSelectOption(value=encoded,name="Model A")]},
+                            {"group":"other","name":"Other","options":[
+                                SessionConfigSelectOption(value=other,name="Other A")]},
+                        ])])
+            async def set_config_option(self, config_id, session_id, value, **kwargs):
+                seen["set"]=(config_id,session_id,value)
+                await self.client.session_update(session_id=session_id,
+                    update={"sessionUpdate":"config_option_update","configOptions":[{
+                        "id":"model","name":"Model","category":"model","type":"select",
+                        "currentValue":encoded,"options":[{
+                            "group":"fixture","name":"Fixture","options":[
+                                {"value":encoded,"name":"Model A"}]}]}]})
+                return {"configOptions":[{
+                    "id":"model","name":"Model","category":"model","type":"select",
+                    "currentValue":encoded,"options":[{
+                        "group":"fixture","name":"Fixture","options":[
+                            {"value":encoded,"name":"Model A"}]}]}]}
+            async def prompt(self, session_id, prompt, **kwargs):
+                seen["prompts"]+=1
+                await self.client.session_update(session_id=session_id,
+                    update=AgentMessageChunk(session_update="agent_message_chunk",
+                        content=TextContentBlock(type="text",text='{"answer":42}')))
+                return PromptResponse(stop_reason="end_turn")
+            async def cancel(self, **kwargs):
+                stopped.set()
+
+        async def handle(reader,writer):
+            task=asyncio.current_task(); handlers.add(task)
+            try:
+                await acp.run_agent(Peer(),writer,reader)
+            finally:
+                writer.close()
+                try: await writer.wait_closed()
+                except ConnectionResetError: pass
+                handlers.discard(task)
+
+        server=await asyncio.start_server(handle,"127.0.0.1",0,limit=65536)
+        reader,writer=await asyncio.open_connection("127.0.0.1",server.sockets[0].getsockname()[1],limit=65536)
+        spec=WorkerLaunchSpec(run_id="run-dsh",job_id="JOB-DSH",worker_id="worker-dsh",
+            workspace_path=Path("/fixture"),run_dir=Path("/fixture-run"),
+            prompt="Return an answer.",result_schema_path=Path("/fixture-schema"),
+            authorities=("READ","RESEARCH"),model="model-a",timeout_seconds=2,cancel_grace_seconds=1)
+        driver=AcpReadOnlyTurn(AcpProfile(agent_name="deepseek-harness-acp",
+            agent_version="0.0.1",model_option_provider="fixture"))
+        try:
+            result=await asyncio.wait_for(driver.run(spec,writer,reader,cancelled=asyncio.Event(),
+                validate_output=lambda value: None),4)
+            self.assertIsNone(result.error)
+            self.assertEqual(result.observed_model,"model-a")
+            self.assertEqual(seen["set"],("model","session-dsh",encoded))
+            self.assertEqual(seen["prompts"],1)
+        finally:
+            stopped.set(); writer.close()
+            try: await writer.wait_closed()
+            except ConnectionResetError: pass
+            server.close(); await server.wait_closed()
+            if handlers:
+                await asyncio.wait_for(asyncio.gather(*tuple(handlers),return_exceptions=True),1)
+
+    async def test_provider_scoped_model_option_refuses_wrong_provider(self):
+        from acp.schema import (
+            InitializeResponse, Implementation, NewSessionResponse, PromptResponse,
+            SessionConfigOptionSelect, SessionConfigSelectOption,
+        )
+        other='["other","model-a"]'
+        seen={"prompts":0}
+        handlers=set()
+
+        class Peer:
+            async def initialize(self, **kwargs):
+                return InitializeResponse(protocol_version=acp.PROTOCOL_VERSION,
+                    agent_info=Implementation(name="deepseek-harness-acp",version="0.0.1"))
+            async def new_session(self, **kwargs):
+                return NewSessionResponse(session_id="session-dsh",config_options=[
+                    SessionConfigOptionSelect(id="model",name="Model",category="model",
+                        type="select",current_value=other,options=[
+                            SessionConfigSelectOption(value=other,name="Other")])])
+            async def prompt(self, **kwargs):
+                seen["prompts"]+=1
+                return PromptResponse(stop_reason="end_turn")
+            async def cancel(self, **kwargs): pass
+
+        async def handle(reader,writer):
+            task=asyncio.current_task(); handlers.add(task)
+            try:
+                await acp.run_agent(Peer(),writer,reader)
+            finally:
+                writer.close()
+                try: await writer.wait_closed()
+                except ConnectionResetError: pass
+                handlers.discard(task)
+
+        server=await asyncio.start_server(handle,"127.0.0.1",0,limit=65536)
+        reader,writer=await asyncio.open_connection("127.0.0.1",server.sockets[0].getsockname()[1],limit=65536)
+        spec=WorkerLaunchSpec(run_id="run-dsh",job_id="JOB-DSH",worker_id="worker-dsh",
+            workspace_path=Path("/fixture"),run_dir=Path("/fixture-run"),prompt="Return.",
+            result_schema_path=Path("/fixture-schema"),authorities=("READ",),model="model-a",
+            timeout_seconds=2,cancel_grace_seconds=1)
+        driver=AcpReadOnlyTurn(AcpProfile(agent_name="deepseek-harness-acp",
+            agent_version="0.0.1",model_option_provider="fixture"))
+        try:
+            result=await asyncio.wait_for(driver.run(spec,writer,reader,cancelled=asyncio.Event(),
+                validate_output=lambda value: None),4)
+            self.assertEqual(result.error,"ACP_MODEL_UNAVAILABLE")
+            self.assertEqual(seen["prompts"],0)
+        finally:
+            writer.close()
+            try: await writer.wait_closed()
+            except ConnectionResetError: pass
+            server.close(); await server.wait_closed()
+            if handlers:
+                await asyncio.wait_for(asyncio.gather(*tuple(handlers),return_exceptions=True),1)
+
+    def test_provider_scoped_model_option_rejects_unbounded_route_identifier(self):
+        with self.assertRaisesRegex(ValueError,"invalid ACP profile identifier"):
+            AcpProfile(agent_name="deepseek-harness-acp",agent_version="0.0.1",
+                model_option_provider='fixture\nother')
+
+
+    async def test_frame_guard_keeps_valid_update_valid_after_cancel_requested(self):
+        from acp.schema import AgentMessageChunk, TextContentBlock
+
+        turn = AcpReadOnlyTurn(AcpProfile(agent_name="fixture", agent_version="1"))
+        guard = _TurnFrameGuard(turn)
+        guard.bind_session("session-1")
+        guard.begin_prompt()
+        turn._phase = "prompt"
+        turn._refuse("ACP_CANCEL_REQUESTED")
+
+        await guard.session_update(
+            session_id="session-1",
+            update=AgentMessageChunk(
+                session_update="agent_message_chunk",
+                content=TextContentBlock(type="text", text="already-in-flight"),
+            ),
+        )
+
+        self.assertEqual(turn._error, "ACP_CANCEL_REQUESTED")
+        self.assertIsNone(guard.violation)
+
+    async def test_frame_guard_still_rejects_invalid_update_after_cancel_requested(self):
+        from acp.schema import ToolCallUpdate
+
+        turn = AcpReadOnlyTurn(AcpProfile(agent_name="fixture", agent_version="1"))
+        guard = _TurnFrameGuard(turn)
+        guard.bind_session("session-1")
+        guard.begin_prompt()
+        turn._phase = "prompt"
+        turn._refuse("ACP_CANCEL_REQUESTED")
+
+        await guard.session_update(
+            session_id="session-1",
+            update=ToolCallUpdate(
+                tool_call_id="tool-1", kind="read", status="pending",
+            ),
+        )
+
+        self.assertEqual(guard.violation, "UPDATE_NOT_ADMITTED")
+
     async def test_guarded_reader_streams_split_agent_message_json_object(self):
         from acp.schema import (
             AgentMessageChunk, InitializeResponse, Implementation,

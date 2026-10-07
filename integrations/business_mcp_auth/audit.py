@@ -48,11 +48,37 @@ _CHANNEL_TOOLS = frozenset(
         "run_project_command",
         "read_action_result",
         "reconcile_action",
+        "prepare_browser_resource",
+        "start_browser_resource",
+        "reconcile_browser_resource",
+        "browser_console_messages",
+        "browser_network_requests",
+        "browser_snapshot",
+        "browser_take_screenshot",
+        "browser_wait_for",
+        "prepare_browser_click",
+        "prepare_browser_close",
+        "prepare_browser_fill_form",
+        "prepare_browser_hover",
+        "prepare_browser_navigate",
+        "prepare_browser_press_key",
+        "prepare_browser_select_option",
+        "prepare_browser_tabs",
+        "prepare_browser_type",
+        "run_browser_action",
+        "reconcile_browser_action",
     }
 )
 # Modifying tools are the only admissions that can precede an effect
-# dispatch.  Read/reconcile admissions never claim or publish anything.
-_CHANNEL_MODIFYING_TOOLS = frozenset({"commit_text_patch", "run_project_command"})
+# dispatch. Read/prepare/reconcile admissions never claim or publish anything.
+_CHANNEL_MODIFYING_TOOLS = frozenset(
+    {
+        "commit_text_patch",
+        "run_project_command",
+        "start_browser_resource",
+        "run_browser_action",
+    }
+)
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 _CHANNEL_LINE_KEYS = frozenset(
     {"accepted", "action_digest", "channel_ref", "code", "policy_id", "schema", "tool"}
