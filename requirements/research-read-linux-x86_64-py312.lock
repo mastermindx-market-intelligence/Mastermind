@@ -6,10 +6,9 @@
 #              26.1.2; pip-compile accepted that API, so pip was not downgraded.
 # Source:      requirements/research-read-linux-x86_64-py312.in
 #
-# Validated for linux by this exact download (rc=0, 41 files):
-#   /private/tmp/claude-501/-Users-chriswong-Documents-Cluade-macro-main/0e657eec-8307-4654-afae-0f4463a1243c/scratchpad/f12_l1/venv/bin/pip download --platform manylinux2014_x86_64 --platform manylinux_2_17_x86_64 --platform manylinux_2_28_x86_64 --python-version 3.12 --implementation cp --abi cp312 --only-binary=:all: --require-hashes -r requirements/research-read-linux-x86_64-py312.lock -d /private/tmp/claude-501/-Users-chriswong-Documents-Cluade-macro-main/0e657eec-8307-4654-afae-0f4463a1243c/scratchpad/f12_l1/wheels-linux
-# and by the marker-closure check
-#   /private/tmp/claude-501/-Users-chriswong-Documents-Cluade-macro-main/0e657eec-8307-4654-afae-0f4463a1243c/scratchpad/f12_l1/marker_closure.py
+# Validated for linux by this download (rc=0, 41 files; -d is any scratch dir):
+#   pip download --platform manylinux2014_x86_64 --platform manylinux_2_17_x86_64 --platform manylinux_2_28_x86_64 --python-version 3.12 --implementation cp --abi cp312 --only-binary=:all: --require-hashes -r requirements/research-read-linux-x86_64-py312.lock -d <scratch>/wheels-linux
+# and by a marker-closure check over the downloaded wheels:
 #   rc=0, MARKER_CLOSURE: PASS (41 lock pins, each with a downloaded wheel;
 #   every linux-applicable Requires-Dist name is pinned).
 #
