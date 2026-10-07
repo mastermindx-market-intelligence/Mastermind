@@ -221,6 +221,67 @@ NEXT: single watcher watch13 adds #1227 head/comments/reviews. Quiet otherwise.
 - Non-blocking: guard evaluates `direct_tool_names + release_tool_names` before the tuple assertion; V3 → 1.5.0 / 11 tools means the pending human Business recreate must be scanned as the installed inventory at that time (C19 parent sequencing, not a PR defect).
 - Not done: no local suite run (hosted gate used), no install/arm/effect, no #1143 post (the packet asked for the return on the PR). Re-review = one bounded read on the next pushed head, only if asked or if the gate stays unowned at that read.
 
+## 4ao Cycle 06:28Z–06:40Z (10-07) — **#811 MERGED as 1fc040f**; a Sol session installed **control 1fc040f** on M2 ahead of #784; C1 is still on 4c148709 and the MCP on 5b244a2b; C3 note **6032388623**
+- **Trigger.** watch55 (task bjzycl7b7) EDGE `1143 comments=97 (was 93)` at 06:28:03Z.
+- **Endpoints re-read.**
+  - master → **1fc040f7343d**, the #811 squash onto ee120e80. Owner mastermindx-2 queued it at 05:32:25Z, and it merged at 06:03:57Z.
+  - #784 is unchanged: draft, be0030ae, clean.
+  - None of the five checkpoint posts has been edited.
+- **Consumed.** All four posts are by MastermindX1.
+  - **6032019575, captain delta 003 (06:02Z, pin ee120e80).**
+    - #1220 is SOURCE_ACCEPTED / MERGED / NOT_INSTALLED.
+    - #784's flock closure is accepted as the shape. No duplicate writer.
+    - Install only once #784 is merged.
+    - Sequence: install → rebind with control and C1 stopped → "chosen shared-or-dedicated A2 path only — never both" → (shared) scope after rebind → verify → `enroll-shared` → 1.5.0 / 12-tool census → Packet 02 → Packet 04 → Packet 07.
+  - **6032160245, Packet 07 preflight (06:14Z, pin 1fc040f).**
+    - Status is PREPARED / NOT_EXECUTED.
+    - The Runtime before-state was read at 06:13:02Z through the installed read owner: release 5b244a2b, server 1.4.0, Jobs 13 (C9 F1 Q3), Attempts 15 (C9 F1 LOST5), 1 worker AVAILABLE.
+    - The arms are unchanged.
+    - JOB-002, JOB-003 and JOB-013 are preserved and are never canaries.
+    - #811's acceptance additions apply.
+    - The Packet 07 reviewer must be independent of the integrator.
+  - **6032187810, live rollout (06:16Z).** M2 has Executive release **1fc040f**.
+    - The first installer run failed on config generation and was reconciled, and the old read-side was restored (`sol-recover-readside-5b244a2b-…T0108Z`).
+    - A corrected staged control document changed only `proof_base_sha` and `proof_source_repository`.
+    - The second run passed. `executive.services.start_readside` then succeeded (`sol-start-readside-1fc040f7-…T0114Z`; the request-id times read as local UTC−5).
+    - The network MCP is a separate release owner and is still 1.4.0.
+    - A2 is unenrolled. The post presents "@mastermind_relay now in #agent-dispatch" and "prepare A2 native-TTY enrollment" as next steps.
+  - **6032311148, SOURCE START (06:26Z).**
+    - New operation `executive-release-control-terminal-composition-20261007-sol-001`, source-only, on a fresh PR.
+    - It composes `release_control_armed` and `ReleaseControlConsumer` into production Control.
+    - Expected surface: `control_plane/executive_release_consumer.py`, `scripts/executive_os_phase1c.py` and tests. It is disjoint from #784.
+- **C3 verification (read-only, this cycle).**
+  1. `c3_post_install_verify.sh 1fc040f7`:
+     - control running, PID 34907, @1fc040f;
+     - C1 sol-state-relay running, PID 34889, **@4c148709** (not rebound);
+     - mcp running, PID 34488 (unchanged), @5b244a2b;
+     - privileged loaded and idle, @1fc040f;
+     - worker.codex, agent-relay, backup and remote-worker-gateway absent.
+  2. #811's squash patch-id equals that of its accepted head 8b992746 (083f810e…).
+  3. Catalog files are unchanged at 1fc040f (be01ee44, e066e86f, `session_bridge/return_tools.py` 8512c612, server 1.5.0), so census d7c5395e stays valid.
+  4. #784 be0030ae composes clean with 1fc040f; it is 3 behind.
+  5. #784's runbook (steps 1–2 at be0030ae) runs `rebind-release` from the **installed** release tree it binds to, never from a source checkout. 1fc040f lacks #784, so **one more install at or after the #784 merge is required**, and control and C1 stay unloaded from that install until the rebind completes (no `start_readside` in between).
+- **C3 act.** #1143 **6032388623** (06:32:41Z), with an identical readback. It covers:
+  - the verified service table;
+  - #811 provenance;
+  - the second-install consequence;
+  - the Slack order (step not actionable yet);
+  - the A2 conflict between 6032187810 and 6031259282 + DEC (shared route: `U0BT71H4FQE` `enroll-shared`, no TTY token; `U0BTF3QGABF` not enrolled; route choice with the Chairman; never both).
+- **Do not re-post** 6032388623 (amend in place only).
+- **Critical path.**
+  1. #784 flock successor.
+  2. Merge.
+  3. Exact-source install of the #784 generation (services stay stopped).
+  4. C1 `rebind-release` from that release.
+  5. `channels:history`.
+  6. C1 verify.
+  7. `enroll-shared`.
+  8. Network MCP publication through its owner (V3 1.5).
+  9. 12-tool census and fresh chat.
+  10. Packet 04.
+  11. Packet 07.
+  - watch56 is armed. MISSION_COMPLETE false.
+
 ## 4an Cycle 05:21Z–05:50Z (10-07) — Sol's six #1143 posts (04:51–05:07Z) agree with the amended order, the DEC and the census, so no C3 act is owed; #784's lock-repair successor is in flight with its incumbent writer
 - **Trigger.** watch54 (task bxpkvf0z4) EDGE `1143 comments=93 (was 87)` at 05:21:47Z.
 - **Endpoints re-read.**
@@ -661,6 +722,7 @@ Watcher: watch3 (S/watch3.out; #1143 comments + #811 head/comments + master; 10-
 - Do not re-ACK; do not post a second Slack root for this operation.
 
 ## 8 Next action
+- 06:40Z (10-07): **#811 merged as 1fc040f**, and a Sol session installed **control 1fc040f** on M2 ahead of #784. Read-only check: C1 is still on 4c148709 (not rebound) and the MCP is still on 5b244a2b. #784's runbook runs the rebind from the installed release, so **one more install after the #784 merge** is needed, with services stopped until the rebind. C3 note **6032388623** also flags the A2 native-TTY / @mastermind_relay framing in 6032187810 as conflicting with 6031259282 and the DEC. watch56 is armed.
 - 05:50Z (10-07): Sol's six #1143 posts (93) agree with the amended order, the DEC and census d7c5395e, so no C3 post. #784's flock successor is with mastermindx-2 (CONTINUE 6031219428). The merge readback will add the lock-namespace precondition (`locks/` comes only from prepare-capacity-host.sh; codex-pro-01/02/03 on this host imply it exists). #811 is ready (owner-accepted 6031565594), and master+#811+#784 composes clean. watch55 is armed.
 - 04:05Z (10-07): **#1220 MERGED ee120e80** (squash, patch-identical to the adjudicated c9552576; CI and Codex exact-head review clean; catalog invariants unchanged, so census d7c5395e stays valid). The remaining source gate is #784 (be0030ae). The next edge is the #784 merge, then one joint-generation C3 readback on #1143, then the install receipt. watch54 is armed.
 - 02:55Z (10-07): watch52 EDGE (#811 comments 48→49) gave a Codex "no major issues" on #811 at 8b992746 (02:21Z).
