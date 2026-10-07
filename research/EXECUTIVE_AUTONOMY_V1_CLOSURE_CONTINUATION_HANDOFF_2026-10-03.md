@@ -567,6 +567,12 @@ Watcher: watch3 (S/watch3.out; #1143 comments + #811 head/comments + master; 10-
 - Do not re-ACK; do not post a second Slack root for this operation.
 
 ## 8 Next action
+- 02:55Z (10-07): watch52 EDGE (#811 comments 48→49) gave a Codex "no major issues" on #811 at 8b992746 (02:21Z).
+  - #784 → **57cfd9d1** (repair "harden shared C1 release rebind" plus a protected merge, 02:39Z; CodeQL and analyzers success, `test` in progress).
+  - #1220 is unchanged at c9552576. #1143 is 87; master is 9a24ef2c.
+  - Composition: 57cfd9d1 against master, #1220 and #811 gives rc=0 each.
+  - No C3 action.
+  - watch53 (task bcmuu44x9) is quieter by design (L.4: two admin-only wakes in a row): #811 now wakes only on a state change.
 - 02:30Z (10-07): #1143 84–87 consumed. The captain adopts the shared path and the install → C1 rebind → scope-edit order (the fork is closed on the carrier; the route is still the Chairman's choice). #1220 c9552576 and #784 9b7d8ce9 have exact CI-red repair requests open; composition is clean pairwise. The C3 installed-identity baseline is taken (relay @4c148709) and the after-install check is staged. Next edges: #1220 / #784 merges → install receipt → run c3_post_install_verify.sh with the merge SHA. watch52 is armed.
 - 01:25Z (10-07): The release owner's edit (6027192883, 00:52Z) and the packet-01 checkpoint 6028474958 are consumed. The C1 relay runs its own 4c148709 generation (verified read-only), so the Slack scope edit waits for the install **and** the C1 rebind (#784). C3 note 6028181298 is amended in place, and Macro #8561 amends the DEC. The Chairman completed the A0BUDHZ137A cleanup, which is harmless. #1220 → de09c783 (eight blockers claimed repaired; review and CI owed). Master is 9a24ef2c (#955, off path). Next edges: #1220 and #784 merges → one install → C1 rebind → Slack edit → census (C3 verifies). watch51 is armed.
 - 00:45Z (10-07): #1143 79–81 consumed. Master 6a85e0d6 contains #1265: A2 moves to the shared Executive Relay path by Chairman intent, and its order is install first, scope edit second. C3 note 6028181298 surfaces this fork to the release, captain and packet-01 owners, who had each pinned 6e82f9af or earlier. Macro #8558 supersedes the DEC. The "don't wait for #1220" advice is retracted, and all owners hold the install for #1220 (eight blockers, 0e7f7a01). Next edges: #1220 merge → the re-pinned install receipt (C3 verifies read-only plus the 12-tool census) → the Slack path choice and receipt → packet 07. watch50 is armed.
