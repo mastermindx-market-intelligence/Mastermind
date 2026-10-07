@@ -5,6 +5,7 @@ Import-inert: no SDK, authenticator, store, filesystem, or network.
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import re
 from typing import Any
@@ -71,7 +72,7 @@ FORBIDDEN_FIELD_NAMES = frozenset({
 })
 REPORT_ID_PATTERN = "^[a-z0-9][a-z0-9-]{0,120}$"
 DATE_PATTERN = "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
-# F10 read_port.py:30-49 @ 00efb3621a6e. Pasted values; this module does not import Macro.
+# F10 engine/research_vault/read_port.py:31-49 and :75-83, fulltext.py:20, read_service.py:33-37 @ Macro bd6f27c8163 (#8610). Pasted values; this module does not import Macro.
 SOURCE_STATES = (
     "SOURCE_FRESH",
     "PRODUCER_STALE",
@@ -80,7 +81,7 @@ SOURCE_STATES = (
     "LATEST_REPORT_INVALID",
     "FUTURE_REPORT_CLOCK",
 )
-TEXT_LAYER_STATES = (
+COVERAGE_STATES = (
     "FULL_TEXT",
     "PREFIX_ONLY_LEGACY",
     "NO_TEXT_LAYER",
@@ -88,6 +89,12 @@ TEXT_LAYER_STATES = (
     "SEGMENT_INDEX_PENDING",
     "PARTIAL_CORPUS",
     "SOURCE_REVISION_CHANGED",
+)
+TEXT_LAYER_STATES = (
+    "full",
+    "thin",
+    "none",
+    "unavailable",
 )
 RIO_STATES = (
     "CURRENT",
@@ -102,11 +109,23 @@ EVIDENCE_OUTCOMES = (
     "UNAVAILABLE",
     "PARTIAL",
 )
+DEGRADATION_CODES = (
+    "PRODUCER_STALE",
+    "PARTIAL_CORPUS",
+    "FULL_TEXT_PARTIAL",
+    "RIO_PARTIAL",
+    "METADATA_PARTIAL",
+    "SCAN_NO_TEXT",
+    "INDEX_REBUILD_PENDING",
+)
+SEGMENT_MAX_BYTES = 4000
+FETCH_MAX_SEGMENTS = 4
+FETCH_DEFAULT_SEGMENTS = 2
+FETCH_MAX_TEXT_BYTES = 24000
 
 _NO_CONTROL_PATTERN = r"^[^\u0000-\u001f\u007f-\u009f]*$"
 _SHA256_PATTERN = "^[0-9a-f]{64}$"
 _COMMIT_PATTERN = "^[0-9a-f]{40}$"
-_TICKER_PATTERN = "^[A-Za-z0-9][A-Za-z0-9._-]{0,23}$"
 _TOOL_DESCRIPTIONS = {
     "research_status": (
         "Report the research vault's freshness, coverage and catalog state. "
@@ -117,11 +136,12 @@ _TOOL_DESCRIPTIONS = {
         "institution and date filters. Returns report metadata only, never body text."
     ),
     "research_fetch": (
-        "Read one window of a report's extracted text by report_id; use next_cursor to continue."
+        "Read up to max_segments consecutive segments of a report's extracted text, "
+        "starting at segment_start; use next_segment_start to continue."
     ),
     "research_find_evidence": (
         "Find literal passages in research reports that bear on a claim. "
-        "Each passage is an exact substring of the extracted text with offsets and a hash."
+        "Each passage is an exact substring of the extracted text with UTF-8 byte offsets and hashes."
     ),
 }
 
@@ -168,10 +188,23 @@ def _bounded_text(min_length: int, max_length: int) -> dict[str, Any]:
     }
 
 
-_DATE_VALUE = {"type": ["string", "null"], "pattern": DATE_PATTERN}
 _COUNT = {"type": "integer", "minimum": 0}
 _REPORT_ID = {"type": "string", "pattern": REPORT_ID_PATTERN}
 _SHA256 = {"type": "string", "pattern": _SHA256_PATTERN}
+_SIDE = {
+    "type": "string",
+    "minLength": 0,
+    "maxLength": 40,
+    "pattern": _NO_CONTROL_PATTERN,
+}
+_PUBLISHED_AT = {
+    "type": "string",
+    "minLength": 0,
+    "maxLength": 64,
+    "pattern": _NO_CONTROL_PATTERN,
+}
+_RATIO = {"type": "number", "minimum": 0, "maximum": 1}
+_PAGE = {"type": ["integer", "null"], "minimum": 1}
 
 
 def _input_schemas() -> dict[str, dict[str, Any]]:
@@ -190,8 +223,8 @@ def _input_schemas() -> dict[str, dict[str, Any]]:
         "research_fetch": _object(
             {
                 "report_id": _REPORT_ID,
-                "cursor": {"type": "integer", "minimum": 0, "maximum": 2000000},
-                "max_chars": {"type": "integer", "minimum": 500, "maximum": 12000},
+                "segment_start": {"type": "integer", "minimum": 0},
+                "max_segments": {"type": "integer", "minimum": 1, "maximum": FETCH_MAX_SEGMENTS},
             },
             required=["report_id"],
         ),
@@ -217,15 +250,8 @@ def _candidate_schema() -> dict[str, Any]:
         "report_id": _REPORT_ID,
         "title": {"type": "string", "minLength": 0, "maxLength": 300},
         "institution": {"type": "string", "minLength": 0, "maxLength": 80},
-        "published_date": _DATE_VALUE,
-        "tickers": {
-            "type": "array",
-            "maxItems": 12,
-            "uniqueItems": True,
-            "items": {"type": "string", "pattern": _TICKER_PATTERN},
-        },
-        "text_layer": {"type": "string", "enum": list(TEXT_LAYER_STATES)},
-        "rio_state": {"type": "string", "enum": list(RIO_STATES)},
+        "side": _SIDE,
+        "published_at": _PUBLISHED_AT,
         "rank": {"type": "integer", "minimum": 1, "maximum": 20},
     })
 
@@ -235,7 +261,19 @@ def _report_schema() -> dict[str, Any]:
         "report_id": _REPORT_ID,
         "title": {"type": "string", "minLength": 0, "maxLength": 300},
         "institution": {"type": "string", "minLength": 0, "maxLength": 80},
-        "published_date": _DATE_VALUE,
+        "side": _SIDE,
+        "published_at": _PUBLISHED_AT,
+    })
+
+
+def _segment_schema() -> dict[str, Any]:
+    return _object({
+        "segment_index": _COUNT,
+        "page_start": _PAGE,
+        "page_end": _PAGE,
+        "byte_start": _COUNT,
+        "byte_end": {"type": "integer", "minimum": 1},
+        "text": {"type": "string", "minLength": 1, "maxLength": SEGMENT_MAX_BYTES},
     })
 
 
@@ -244,9 +282,11 @@ def _passage_schema() -> dict[str, Any]:
         {
             "report_id": _REPORT_ID,
             "passage_text": {"type": "string", "minLength": 1, "maxLength": 1200},
-            "char_start": {"type": "integer", "minimum": 0},
-            "char_end": {"type": "integer", "minimum": 1},
+            "byte_start": _COUNT,
+            "byte_end": {"type": "integer", "minimum": 1},
             "text_sha256": _SHA256,
+            "canonical_text_sha256": _SHA256,
+            "segment_index": _COUNT,
         },
         title="research.evidence_passage.v1",
     )
@@ -267,19 +307,20 @@ def _output_schemas() -> dict[str, dict[str, Any]]:
             }),
             "catalog": _object({
                 "report_count": _COUNT,
-                "institution_count": _COUNT,
-                "newest_report_date": _DATE_VALUE,
-                "oldest_report_date": _DATE_VALUE,
             }),
             "coverage": _object({
-                "text_layer_ok": _COUNT,
-                "text_layer_missing": _COUNT,
-                "rio_available": _COUNT,
+                "full_text_ratio": _RATIO,
+                "rio_ratio": _RATIO,
             }),
+            "degradation": {
+                "type": "array",
+                "uniqueItems": True,
+                "maxItems": len(DEGRADATION_CODES),
+                "items": {"type": "string", "enum": list(DEGRADATION_CODES)},
+            },
             "generation": _object({
                 "server_contract": {"const": CONTRACT},
                 "read_port_contract": {"type": "string", "minLength": 1, "maxLength": 120},
-                "macro_commit": {"type": "string", "pattern": _COMMIT_PATTERN},
                 "mastermind_commit": {"type": "string", "pattern": _COMMIT_PATTERN},
             }),
         }),
@@ -301,15 +342,18 @@ def _output_schemas() -> dict[str, dict[str, Any]]:
                 "source_class": {"const": "mastermind_private_institutional"},
                 "license_class": {"const": "internal_licensed"},
             }),
-            "text": {"type": "string", "maxLength": 12000},
-            "window": _object({
-                "start": {"type": "integer", "minimum": 0},
-                "end": {"type": "integer", "minimum": 0},
-                "total_chars": {"type": "integer", "minimum": 0},
-                "truncated": {"type": "boolean"},
-                "next_cursor": {"type": ["integer", "null"], "minimum": 0, "maximum": 2000000},
-            }),
-            "text_sha256": _SHA256,
+            "text_layer_state": {
+                "type": ["string", "null"],
+                "enum": [*TEXT_LAYER_STATES, None],
+            },
+            "coverage_state": {"type": "string", "enum": list(COVERAGE_STATES)},
+            "segment_count_total": _COUNT,
+            "segments": {
+                "type": "array",
+                "maxItems": FETCH_MAX_SEGMENTS,
+                "items": _segment_schema(),
+            },
+            "next_segment_start": {"type": ["integer", "null"], "minimum": 0},
             "rio_state": rio_state,
         }),
         "research_find_evidence": _object(
@@ -367,8 +411,8 @@ def validate_arguments(tool_name: object, arguments: object) -> dict[str, Any]:
     if tool_name == "research_search":
         normalized.setdefault("limit", 8)
     elif tool_name == "research_fetch":
-        normalized.setdefault("cursor", 0)
-        normalized.setdefault("max_chars", 6000)
+        normalized.setdefault("segment_start", 0)
+        normalized.setdefault("max_segments", FETCH_DEFAULT_SEGMENTS)
     elif tool_name == "research_find_evidence":
         normalized.setdefault("limit", 5)
     return normalized
@@ -385,16 +429,25 @@ def _fail_output() -> None:
 
 
 def _check_output_invariants(tool_name: str, result: dict[str, Any], quote_limit_chars: object) -> None:
+    """Check invariants JSON Schema cannot express.
+
+    Passage length identity is checked here. The canonical-bytes identity
+    passage_text.encode("utf-8") == canonical_utf8[byte_start:byte_end]
+    cannot be checked here, because this module never holds the canonical text.
+    That identity is the producer's (F10/L4) obligation.
+    """
     if tool_name == "research_find_evidence":
         passages = result["passages"]
         for passage in passages:
-            start = passage["char_start"]
-            end = passage["char_end"]
-            text = passage["passage_text"]
-            if end <= start or end - start != len(text):
+            raw = passage["passage_text"].encode("utf-8")
+            start = passage["byte_start"]
+            end = passage["byte_end"]
+            if end <= start or end - start != len(raw):
+                _fail_output()
+            if passage["text_sha256"] != hashlib.sha256(raw).hexdigest():
                 _fail_output()
             if isinstance(quote_limit_chars, int) and not isinstance(quote_limit_chars, bool):
-                if len(text) > min(1200, quote_limit_chars):
+                if len(passage["passage_text"]) > min(1200, quote_limit_chars):
                     _fail_output()
         outcome = result["outcome"]
         if outcome in ("FOUND", "PARTIAL") and len(passages) < 1:
@@ -402,21 +455,52 @@ def _check_output_invariants(tool_name: str, result: dict[str, Any], quote_limit
         if outcome in ("NOT_FOUND", "UNAVAILABLE") and len(passages) != 0:
             _fail_output()
     elif tool_name == "research_fetch":
-        window = result["window"]
-        start = window["start"]
-        end = window["end"]
-        total = window["total_chars"]
-        truncated = window["truncated"]
-        next_cursor = window["next_cursor"]
-        if not 0 <= start <= end <= total:
+        segments = result["segments"]
+        total = result["segment_count_total"]
+        nxt = result["next_segment_start"]
+        segment_max_bytes = SEGMENT_MAX_BYTES
+        fetch_max_text_bytes = FETCH_MAX_TEXT_BYTES
+        if result["coverage_state"] != "FULL_TEXT":
+            if segments or total != 0:
+                _fail_output()
+        encoded_lengths: list[int] = []
+        for segment in segments:
+            raw = segment["text"].encode("utf-8")
+            start = segment["byte_start"]
+            end = segment["byte_end"]
+            if end <= start or end - start != len(raw):
+                _fail_output()
+            if len(raw) > segment_max_bytes:
+                _fail_output()
+            if segment["segment_index"] >= total:
+                _fail_output()
+            page_start = segment["page_start"]
+            page_end = segment["page_end"]
+            both_null = page_start is None and page_end is None
+            both_int = (
+                isinstance(page_start, int)
+                and not isinstance(page_start, bool)
+                and isinstance(page_end, int)
+                and not isinstance(page_end, bool)
+            )
+            if not both_null and not (both_int and 1 <= page_start <= page_end):
+                _fail_output()
+            encoded_lengths.append(len(raw))
+        for prev, following in zip(segments, segments[1:]):
+            if following["segment_index"] != prev["segment_index"] + 1:
+                _fail_output()
+            if following["byte_start"] != prev["byte_end"]:
+                _fail_output()
+        if sum(encoded_lengths) > fetch_max_text_bytes:
             _fail_output()
-        if end - start != len(result["text"]):
-            _fail_output()
-        if truncated != (end < total):
-            _fail_output()
-        expected_next = end if truncated else None
-        if next_cursor != expected_next:
-            _fail_output()
+        if not segments:
+            if nxt is not None:
+                _fail_output()
+        else:
+            following_index = segments[-1]["segment_index"] + 1
+            expected = following_index if following_index < total else None
+            if nxt != expected:
+                _fail_output()
     elif tool_name == "research_search":
         seen: set[str] = set()
         for index, candidate in enumerate(result["candidates"]):
@@ -490,7 +574,13 @@ __all__ = [
     "REPORT_ID_PATTERN",
     "DATE_PATTERN",
     "SOURCE_STATES",
+    "COVERAGE_STATES",
     "TEXT_LAYER_STATES",
     "RIO_STATES",
     "EVIDENCE_OUTCOMES",
+    "DEGRADATION_CODES",
+    "SEGMENT_MAX_BYTES",
+    "FETCH_MAX_SEGMENTS",
+    "FETCH_DEFAULT_SEGMENTS",
+    "FETCH_MAX_TEXT_BYTES",
 ]
