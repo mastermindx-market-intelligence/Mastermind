@@ -464,6 +464,7 @@ def reconcile_legacy_absent_registration(
     marker_created_at_epoch: int,
     audit_window_start_epoch: int,
     audit_window_end_epoch: int,
+    current_inventory_observed_at_epoch: int,
     observed_at_epoch: int,
     current_inventory_complete: bool,
     audit_window_complete: bool,
@@ -489,6 +490,7 @@ def reconcile_legacy_absent_registration(
         marker_created_at_epoch,
         audit_window_start_epoch,
         audit_window_end_epoch,
+        current_inventory_observed_at_epoch,
         observed_at_epoch,
         current_inventory_match_count,
         historical_registration_match_count,
@@ -512,7 +514,8 @@ def reconcile_legacy_absent_registration(
         or audit_window_end_epoch <= 0
         or observed_at_epoch <= 0
         or audit_window_start_epoch > marker_created_at_epoch
-        or audit_window_end_epoch < marker_created_at_epoch + 60
+        or current_inventory_observed_at_epoch < marker_created_at_epoch
+        or audit_window_end_epoch < current_inventory_observed_at_epoch
         or observed_at_epoch < audit_window_end_epoch
         or current_inventory_match_count != 0
         or historical_registration_match_count != 0
@@ -536,6 +539,7 @@ def reconcile_legacy_absent_registration(
         "client_name": CLIENT_NAME,
         "current_inventory_complete": True,
         "current_inventory_match_count": current_inventory_match_count,
+        "current_inventory_observed_at_epoch": current_inventory_observed_at_epoch,
         "evidence_digest": evidence_digest,
         "historical_deletion_match_count": historical_deletion_match_count,
         "historical_registration_match_count": historical_registration_match_count,
@@ -912,6 +916,7 @@ def main(
     parser.add_argument("--absence-marker-created-at-epoch", type=int)
     parser.add_argument("--absence-audit-window-start-epoch", type=int)
     parser.add_argument("--absence-audit-window-end-epoch", type=int)
+    parser.add_argument("--absence-current-inventory-observed-at-epoch", type=int)
     parser.add_argument("--absence-current-inventory-complete", action="store_true")
     parser.add_argument("--absence-audit-window-complete", action="store_true")
     parser.add_argument("--absence-current-inventory-match-count", type=int)
@@ -946,6 +951,7 @@ def main(
             args.absence_marker_created_at_epoch,
             args.absence_audit_window_start_epoch,
             args.absence_audit_window_end_epoch,
+            args.absence_current_inventory_observed_at_epoch,
             args.absence_current_inventory_match_count,
             args.absence_historical_registration_match_count,
             args.absence_historical_deletion_match_count,
@@ -993,6 +999,7 @@ def main(
                     args.absence_marker_created_at_epoch,
                     args.absence_audit_window_start_epoch,
                     args.absence_audit_window_end_epoch,
+                    args.absence_current_inventory_observed_at_epoch,
                     args.absence_current_inventory_match_count,
                     args.absence_historical_registration_match_count,
                     args.absence_historical_deletion_match_count,
@@ -1030,6 +1037,7 @@ def main(
                 marker_created_at_epoch=args.absence_marker_created_at_epoch,
                 audit_window_start_epoch=args.absence_audit_window_start_epoch,
                 audit_window_end_epoch=args.absence_audit_window_end_epoch,
+                current_inventory_observed_at_epoch=args.absence_current_inventory_observed_at_epoch,
                 observed_at_epoch=args.reconcile_observed_at_epoch,
                 current_inventory_complete=args.absence_current_inventory_complete,
                 audit_window_complete=args.absence_audit_window_complete,

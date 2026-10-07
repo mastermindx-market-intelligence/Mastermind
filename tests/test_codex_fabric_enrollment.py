@@ -548,6 +548,7 @@ def _legacy_absence_kwargs(policy):
         "marker_created_at_epoch": 1_790_000_000,
         "audit_window_start_epoch": 1_789_999_000,
         "audit_window_end_epoch": 1_790_001_000,
+        "current_inventory_observed_at_epoch": 1_790_000_500,
         "observed_at_epoch": 1_790_002_000,
         "current_inventory_complete": True,
         "audit_window_complete": True,
@@ -603,6 +604,18 @@ def test_legacy_absence_reconciliation_refuses_incomplete_or_positive_evidence(
     assert store.load_state() == before
 
 
+def test_legacy_absence_reconciliation_refuses_audit_gap_before_current_inventory(tmp_path: Path):
+    import ops.codex_fabric.enroll_executive_mcp as enroll
+
+    policy, _api, store = _legacy_pending_store(tmp_path)
+    before = store.load_state()
+    kwargs = _legacy_absence_kwargs(policy)
+    kwargs["current_inventory_observed_at_epoch"] = kwargs["audit_window_end_epoch"] + 1
+    with pytest.raises(EnrollmentError):
+        enroll.reconcile_legacy_absent_registration(policy, store=store, **kwargs)
+    assert store.load_state() == before
+
+
 def test_legacy_absence_reconciliation_cleanup_ambiguity_stays_effect_unknown(tmp_path: Path):
     import ops.codex_fabric.enroll_executive_mcp as enroll
 
@@ -634,6 +647,7 @@ def test_cli_legacy_absence_reconciliation_emits_digest_only_receipt(tmp_path: P
             "--absence-marker-created-at-epoch", "1790000000",
             "--absence-audit-window-start-epoch", "1789999000",
             "--absence-audit-window-end-epoch", "1790001000",
+            "--absence-current-inventory-observed-at-epoch", "1790000500",
             "--reconcile-observed-at-epoch", "1790002000",
             "--absence-current-inventory-complete",
             "--absence-audit-window-complete",
