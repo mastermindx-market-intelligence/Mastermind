@@ -9,7 +9,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW_PATH = ".github/workflows/mastermind-os.yml"
-TEST_PATH = "tests/test_mastermind_os_native_ci.py"
+TEST_PATH = "tests/test_native_macos_ci.py"
 
 
 def workflow():
@@ -40,6 +40,18 @@ def test_existing_frontend_gate_is_preserved():
     job = workflow()["jobs"]["frontend"]
     assert job["runs-on"] == "ubuntu-latest"
     assert commands(job) == ["npm ci", "npm run typecheck", "npm test", "npm run build"]
+
+
+def test_node_pin_supports_the_locked_dependency_engines():
+    for job in workflow()["jobs"].values():
+        setup = next(step for step in job["steps"] if step.get("uses", "").startswith("actions/setup-node@"))
+        assert setup["with"]["node-version"] == "22.23.3"
+
+
+def test_trigger_paths_do_not_resemble_reserved_account_literals():
+    for event in ("pull_request", "push"):
+        for path in workflow()["on"][event]["paths"]:
+            assert "_mastermind_" not in path
 
 
 def test_workflow_and_test_changes_trigger_the_gate_without_write_permissions():

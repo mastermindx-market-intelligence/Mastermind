@@ -5,7 +5,7 @@ on:
     paths:
       - app/mastermind_os/**
       - .github/workflows/mastermind-os.yml
-      - tests/test_mastermind_os_native_ci.py
+      - tests/test_native_macos_ci.py
   merge_group:
     types: [checks_requested]
   push:
@@ -13,7 +13,7 @@ on:
     paths:
       - app/mastermind_os/**
       - .github/workflows/mastermind-os.yml
-      - tests/test_mastermind_os_native_ci.py
+      - tests/test_native_macos_ci.py
   workflow_dispatch:
 
 permissions:
@@ -34,7 +34,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "22.14.0"
+          node-version: "22.23.3"
           cache: npm
           cache-dependency-path: app/mastermind_os/package-lock.json
       - run: npm ci
@@ -58,7 +58,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "22.14.0"
+          node-version: "22.23.3"
           cache: npm
           cache-dependency-path: app/mastermind_os/package-lock.json
       - name: Place build products in runner-owned temporary storage
