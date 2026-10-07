@@ -425,3 +425,101 @@ def test_brokered_action_ref_tampering_is_refused():
             resource="browser-resource",
             tab_ref=tab_token,
         )
+
+
+def test_browser_session_ref_is_caller_bound_and_type_separated():
+    from integrations.mastermind_browser_plugin.tab_ref import (
+        BROWSER_SESSION_SCHEMA,
+        BrowserSessionRef,
+    )
+
+    session = BrowserSessionRef(
+        schema=BROWSER_SESSION_SCHEMA,
+        backend=TabBackend.MANAGED.value,
+        browser_ref="browser-resource-" + "a" * 64,
+        subject_digest="b" * 64,
+        client_ref="client-a",
+        resource="browser-resource",
+        host_ref="host-" + "c" * 64,
+        boot_ref="boot-a",
+        profile_ref="profile-a",
+        browser_instance_ref="browser-a",
+        connection_generation="generation-a",
+        consent_ref=None,
+        allowed_actions=("click", "snapshot"),
+        catalog_schema_digest="d" * 64,
+        backend_schema_digest="e" * 64,
+        issued_at_ms=NOW,
+        expires_at_ms=NOW + 60_000,
+    )
+    encoded = codec().encode_session(session)
+    decoded = codec().decode_session(
+        encoded,
+        now_ms=NOW + 1,
+        subject_digest="b" * 64,
+        client_ref="client-a",
+        resource="browser-resource",
+    )
+    assert decoded == session
+    with pytest.raises(BrowserTabRefError, match="CALLER_BINDING_CHANGED"):
+        codec().decode_session(
+            encoded,
+            now_ms=NOW + 1,
+            subject_digest="b" * 64,
+            client_ref="client-b",
+            resource="browser-resource",
+        )
+    with pytest.raises(BrowserTabRefError):
+        codec().decode(encoded, now_ms=NOW + 1)
+
+
+def test_browser_session_ref_expiry_and_consent_backend_rules():
+    from integrations.mastermind_browser_plugin.tab_ref import (
+        BROWSER_SESSION_SCHEMA,
+        BrowserSessionRef,
+    )
+
+    base = dict(
+        schema=BROWSER_SESSION_SCHEMA,
+        backend=TabBackend.MANAGED.value,
+        browser_ref="browser-resource-" + "a" * 64,
+        subject_digest="b" * 64,
+        client_ref="client-a",
+        resource="browser-resource",
+        host_ref="host-" + "c" * 64,
+        boot_ref="boot-a",
+        profile_ref="profile-a",
+        browser_instance_ref="browser-a",
+        connection_generation="generation-a",
+        consent_ref=None,
+        allowed_actions=("snapshot",),
+        catalog_schema_digest="d" * 64,
+        backend_schema_digest="e" * 64,
+        issued_at_ms=NOW,
+        expires_at_ms=NOW + 60_000,
+    )
+    token = codec().encode_session(BrowserSessionRef(**base))
+    with pytest.raises(BrowserTabRefError, match="SESSION_REF_EXPIRED"):
+        codec().decode_session(
+            token,
+            now_ms=NOW + 60_000,
+            subject_digest="b" * 64,
+            client_ref="client-a",
+            resource="browser-resource",
+        )
+    with pytest.raises(BrowserTabRefError, match="CONSENT_REQUIRED"):
+        BrowserSessionRef(**{**base, "backend": TabBackend.SHARED_HUMAN.value})
+    shared = BrowserSessionRef(
+        **{
+            **base,
+            "backend": TabBackend.SHARED_HUMAN.value,
+            "consent_ref": "consent-a",
+        }
+    )
+    assert codec().decode_session(
+        codec().encode_session(shared),
+        now_ms=NOW,
+        subject_digest="b" * 64,
+        client_ref="client-a",
+        resource="browser-resource",
+    ).consent_ref == "consent-a"
