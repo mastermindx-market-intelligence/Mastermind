@@ -55,7 +55,6 @@ CONTRACT = {
     "RELAY_GROUP": "_mastermind_sol_relay",
     "RELAY_LABEL": "com.mastermind.executive.sol-state-relay",
     "CONTROL_LABEL": "com.mastermind.executive.control",
-    "OPS_GID": 453,
     "DIALOGUE_RELAY_GID": 457,
     "PYTHON_BINARY": (
         "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12"
@@ -185,6 +184,8 @@ def _install_host(
     with_config: bool = True,
 ) -> _Host:
     enrollment = _module()
+    from ops.executive_os import acceptance as acceptance_owner
+
     root = tmp_path / "host"
     releases_root = root / "releases"
     old_root = releases_root / OLD_RELEASE
@@ -219,6 +220,9 @@ def _install_host(
     monkeypatch.setattr(enrollment, "RELAY_PLIST", relay_plist)
     monkeypatch.setattr(c1_runtime, "TOKEN_PATH", token_path)
     monkeypatch.setattr(c1_runtime, "CONFIG_PATH", config_path)
+    # This disposable fixture owns its regular files and models the accepted
+    # no-ACL result explicitly so Linux CI never calls the macOS ACL observer.
+    monkeypatch.setattr(c1_runtime, "_path_has_acl", lambda *_args, **_kwargs: False)
 
     euid, egid = os.geteuid(), os.getegid()
     for name in (
@@ -233,7 +237,6 @@ def _install_host(
         "RELAY_GID",
         "RELAY_PLIST_GID",
         "RELAY_CONFIG_GID",
-        "CONTROL_CONFIG_GID",
         "CONTROL_PLIST_GID",
     ):
         monkeypatch.setattr(enrollment, name, egid, raising=False)
@@ -247,8 +250,27 @@ def _install_host(
     relay_group = SimpleNamespace(gr_gid=egid, gr_mem=[])
     monkeypatch.setattr(enrollment.os, "geteuid", lambda: 0)
     monkeypatch.setattr(enrollment.sys, "platform", "darwin")
-    monkeypatch.setattr(enrollment.pwd, "getpwnam", lambda _name: relay_home)
-    monkeypatch.setattr(enrollment.grp, "getgrnam", lambda _name: relay_group)
+
+    def fake_user(name):
+        if name == enrollment.RELAY_USER:
+            return relay_home
+        if name == acceptance_owner.CONTROL_USER:
+            info = control_config.stat()
+            return SimpleNamespace(pw_uid=info.st_uid, pw_gid=info.st_gid)
+        raise KeyError(name)
+
+    def fake_group(name):
+        if name == enrollment.RELAY_GROUP:
+            return relay_group
+        if name in {
+            acceptance_owner.CONTROL_GROUP,
+            acceptance_owner.OPS_GROUP,
+        }:
+            return SimpleNamespace(gr_gid=control_config.stat().st_gid, gr_mem=[])
+        raise KeyError(name)
+
+    monkeypatch.setattr(enrollment.pwd, "getpwnam", fake_user)
+    monkeypatch.setattr(enrollment.grp, "getgrnam", fake_group)
     monkeypatch.setattr(
         enrollment.os, "getgrouplist", lambda _name, _gid: [egid]
     )
@@ -291,12 +313,12 @@ def _install_host(
             {
                 "Sockets": {
                     "Operator": {
-                        "SockPathOwner": 450,
-                        "SockPathGroup": CONTRACT["OPS_GID"],
+                        "SockPathOwner": control_config.stat().st_uid,
+                        "SockPathGroup": control_config.stat().st_gid,
                         "SockPathMode": 0o660,
                     },
                     "CeoIngress": {
-                        "SockPathOwner": 450,
+                        "SockPathOwner": control_config.stat().st_uid,
                         "SockPathGroup": enrollment.RELAY_GID,
                         "SockPathMode": 0o660,
                     },
@@ -304,7 +326,7 @@ def _install_host(
                         "SockPathName": os.fspath(
                             CONTRACT["DIALOGUE_OBSERVATION_SOCKET"]
                         ),
-                        "SockPathOwner": 450,
+                        "SockPathOwner": control_config.stat().st_uid,
                         "SockPathGroup": CONTRACT["DIALOGUE_RELAY_GID"],
                         "SockPathMode": 0o660,
                     },
@@ -317,6 +339,7 @@ def _install_host(
     if with_token:
         token_path.write_bytes(TOKEN_BYTES)
         token_path.chmod(0o400)
+        os.chown(token_path, -1, enrollment.RELAY_GID)
     if with_config:
         config_path.write_bytes(
             enrollment._canonical_config_bytes(  # noqa: SLF001
@@ -326,6 +349,7 @@ def _install_host(
             )
         )
         config_path.chmod(0o440)
+        os.chown(config_path, -1, enrollment.RELAY_CONFIG_GID)
     relay_plist.write_bytes(
         plistlib.dumps(
             _shell_relay_document(releases_root / plist_release, config_path),
@@ -333,6 +357,7 @@ def _install_host(
         )
     )
     relay_plist.chmod(0o644)
+    os.chown(relay_plist, -1, enrollment.RELAY_PLIST_GID)
 
     manifest_verify: list[tuple[str, str, str]] = []
 
@@ -381,7 +406,8 @@ def _install_host(
 
     def exact_file(path, *, uid, gid, mode):
         if Path(path) in root_owned_paths:
-            uid, gid = euid, egid
+            info = Path(path).lstat()
+            uid, gid = info.st_uid, info.st_gid
         real_exact_file(path, uid=uid, gid=gid, mode=mode)
 
     monkeypatch.setattr(enrollment, "_exact_file", exact_file)
@@ -797,12 +823,23 @@ def test_rebind_refuses_wrong_pinned_ownership(monkeypatch, tmp_path, target, at
             pw_dir=CONTRACT["RELAY_HOME"],
             pw_shell="/usr/bin/false",
         )
-        monkeypatch.setattr(enrollment.pwd, "getpwnam", lambda _name: drifted)
-        monkeypatch.setattr(
-            enrollment.grp,
-            "getgrnam",
-            lambda _name: SimpleNamespace(gr_gid=enrollment.RELAY_GID, gr_mem=[]),
-        )
+        prior_user_lookup = enrollment.pwd.getpwnam
+        prior_group_lookup = enrollment.grp.getgrnam
+
+        def drifted_user(name):
+            if name == enrollment.RELAY_USER:
+                return drifted
+            return prior_user_lookup(name)
+
+        def drifted_group(name):
+            if name == enrollment.RELAY_GROUP:
+                return SimpleNamespace(
+                    gr_gid=enrollment.RELAY_GID, gr_mem=[]
+                )
+            return prior_group_lookup(name)
+
+        monkeypatch.setattr(enrollment.pwd, "getpwnam", drifted_user)
+        monkeypatch.setattr(enrollment.grp, "getgrnam", drifted_group)
         monkeypatch.setattr(
             enrollment.os,
             "getgrouplist",

@@ -69,10 +69,8 @@ SYSTEM_RELEASE_ROOT = Path(
 # Pinned host identities. They are named so a fixture host can mirror them onto
 # one unprivileged test account; production values are unchanged.
 CONTROL_CONFIG_UID = 0
-CONTROL_CONFIG_GID = 450
 CONTROL_PLIST_UID = 0
 CONTROL_PLIST_GID = 0
-OPS_GID = 453
 RELAY_PLIST_UID = 0
 RELAY_PLIST_GID = 0
 RELAY_CONFIG_UID = 0
@@ -534,12 +532,19 @@ def _relay_substrate() -> str:
     rebind must instead validate the *previous* enrollment it is replacing.
     """
 
+    # Lazy by design: acceptance imports the A2 enrollment owner, and A2
+    # imports this C1 module. Loading acceptance at module import would cycle.
+    from ops.executive_os import acceptance
+
     if os.geteuid() != 0 or sys.platform != "darwin":
         raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED")
     release_sha = _release_identity()
     try:
         account = pwd.getpwnam(RELAY_USER)
         group = grp.getgrnam(RELAY_GROUP)
+        control_account = pwd.getpwnam(acceptance.CONTROL_USER)
+        control_group = grp.getgrnam(acceptance.CONTROL_GROUP)
+        ops_group = grp.getgrnam(acceptance.OPS_GROUP)
     except KeyError:
         raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED") from None
     if (
@@ -549,8 +554,12 @@ def _relay_substrate() -> str:
         or group.gr_mem
         or account.pw_dir != RELAY_HOME
         or account.pw_shell != "/usr/bin/false"
+        or control_account.pw_gid != control_group.gr_gid
     ):
         raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED")
+    control_uid = control_account.pw_uid
+    control_gid = control_group.gr_gid
+    ops_gid = ops_group.gr_gid
     # This runs before any token is read. A prepared host with admin/wheel or
     # any other unreviewed supplementary group is not eligible for enrollment.
     validate_host_relay_groups()
@@ -558,7 +567,7 @@ def _relay_substrate() -> str:
     _exact_file(
         CONTROL_CONFIG,
         uid=CONTROL_CONFIG_UID,
-        gid=CONTROL_CONFIG_GID,
+        gid=control_gid,
         mode=0o440,
     )
     _exact_file(CONTROL_PLIST, uid=CONTROL_PLIST_UID, gid=CONTROL_PLIST_GID, mode=PLIST_MODE)
@@ -594,15 +603,15 @@ def _relay_substrate() -> str:
         if set(sockets) != {"Operator", "CeoIngress", "DialogueObservation"}:
             raise ValueError
         if (
-            sockets["Operator"].get("SockPathOwner") != 450
-            or sockets["Operator"].get("SockPathGroup") != OPS_GID
+            sockets["Operator"].get("SockPathOwner") != control_uid
+            or sockets["Operator"].get("SockPathGroup") != ops_gid
             or sockets["Operator"].get("SockPathMode") != 0o660
-            or sockets["CeoIngress"].get("SockPathOwner") != 450
+            or sockets["CeoIngress"].get("SockPathOwner") != control_uid
             or sockets["CeoIngress"].get("SockPathGroup") != RELAY_GID
             or sockets["CeoIngress"].get("SockPathMode") != 0o660
             or sockets["DialogueObservation"].get("SockPathName")
             != os.fspath(DIALOGUE_OBSERVATION_SOCKET)
-            or sockets["DialogueObservation"].get("SockPathOwner") != 450
+            or sockets["DialogueObservation"].get("SockPathOwner") != control_uid
             or sockets["DialogueObservation"].get("SockPathGroup")
             != DIALOGUE_RELAY_GID
             or sockets["DialogueObservation"].get("SockPathMode") != 0o660

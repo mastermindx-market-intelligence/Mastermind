@@ -63,8 +63,10 @@ cd "$RELEASE_ROOT"
 `rebind-release` validates the old plist/config as one coherent enrolled
 generation, stages the exact installed-release plist/config pair, preserves and
 attests the existing credential without outputting or rewriting it, and
-converges the two files transactionally. A mixed or uncertain outcome is a hard
-stop: reconcile the same carrier and do not start either relay.
+converges the two files transactionally.
+
+A mixed or uncertain outcome is a hard stop. Reconcile the same carrier and do
+not start either relay.
 
 3. Slack admin edits the **existing Mastermind Executive Relay app** only:
    add bot scope `channels:history`, preserve `chat:write` and
@@ -108,8 +110,9 @@ Slack, GitHub, logs, or a model-visible surface.
 
 7. Run the normal A2 `verify --enable-w3c`. Resume the existing reviewed C1
    read-side/control lifecycle and the separate `start-agent-relay` lifecycle
-   only after each owner's normal release/admission gates. Neither verification
-   is permission to start the other service.
+   only after each owner's normal release/admission gates.
+
+Neither verification is permission to start the other service.
 
 ## Migration compatibility
 
