@@ -317,6 +317,57 @@ def test_valid_canonical_read_success_is_preserved(profile):
     assert observed == expected
 
 
+def _bounded_replacement(field, text, preview_chars=12):
+    preview = text[:preview_chars]
+    receipt = {
+        "bounded": True,
+        "original_bytes": len(text.encode("utf-8")),
+        "returned_bytes": len(preview.encode("utf-8")),
+        "field": field,
+    }
+    return {**receipt, "preview": preview}, receipt
+
+
+def test_state_requires_exact_consumption_of_bounding_receipts():
+    profile = WebCeoV2CeoIngressReadGateway
+    gateway = profile("/unused", object())
+    wire = canonical_result(profile)
+    text = "Review the current Executive attention and continue the durable mission."
+    replacement, receipt = _bounded_replacement("next_recommended_act", text)
+    wire["data"]["next_recommended_act"] = replacement
+    wire["bounded"] = [receipt]
+    assert gateway._is_canonical_read_result(
+        wire, tool="executive_state", arguments={}
+    ) is True
+
+    orphan = canonical_result(profile)
+    orphan["bounded"] = [receipt]
+    assert gateway._is_canonical_read_result(
+        orphan, tool="executive_state", arguments={}
+    ) is False
+
+
+def test_state_accepts_receipt_bound_strategic_objective_only_at_exact_path():
+    profile = WebCeoV2CeoIngressReadGateway
+    gateway = profile("/unused", object())
+    wire = canonical_result(profile)
+    text = "Establish durable CEO to COO to worker execution with verified return."
+    replacement, receipt = _bounded_replacement(
+        "strategic_state.p0[0].objective", text
+    )
+    wire["data"]["strategic_state"]["p0"][0]["objective"] = replacement
+    wire["bounded"] = [receipt]
+    assert gateway._is_canonical_read_result(
+        wire, tool="executive_state", arguments={}
+    ) is True
+
+    wrong = copy.deepcopy(wire)
+    wrong["bounded"][0]["field"] = "strategic_state.p0[1].objective"
+    assert gateway._is_canonical_read_result(
+        wrong, tool="executive_state", arguments={}
+    ) is False
+
+
 @pytest.mark.parametrize("profile", PROFILES)
 @pytest.mark.parametrize(
     ("upstream_code", "code", "category"),
@@ -805,21 +856,86 @@ def _canonical_executive_job_data(job_id="JOB-003", *, with_attempt=False):
     import dataclasses
     from control_plane.executive_runtime import Attempt, Job
 
+    attempt_id = "ATT-" + "1" * 32
+    policy_sha = "a" * 64
     job = {field.name: None for field in dataclasses.fields(Job)}
     job.update(
         job_id=job_id,
-        status="QUEUED",
+        objective="Perform one bounded Executive proof.",
+        department="executive-infrastructure",
+        priority=0,
+        status="RUNNING" if with_attempt else "QUEUED",
+        authority_level="A0",
+        checkpoint=None,
+        result=None,
+        created_at="2026-10-06T08:00:00+00:00",
+        updated_at="2026-10-06T08:00:00+00:00",
+        constraints={"eligible_quota_classes": ["default"]},
+        current_attempt_id=attempt_id if with_attempt else None,
         attempt_count=1 if with_attempt else 0,
         attempt_limit=1,
+        requested_authorities=[],
+        authority_policy_hash=policy_sha,
+        allowed_write_paths=[],
+        validation_commands=[],
+        parent_job_id=None,
+        root_job_id=job_id,
+        depth=0,
+        owner_seat="coo",
+        escalation_target="coo",
+        business_impact="routine",
+        review_required=False,
+        reviews_job_id=None,
+        orchestration_role=None,
+        orchestration_provenance=None,
+        orchestration_provenance_digest=None,
+        plan_attempt_id=None,
+        plan_digest=None,
+        plan_step_id=None,
+        repair_round=None,
+        supersedes_job_id=None,
     )
     attempts = []
     if with_attempt:
         attempt = {field.name: None for field in dataclasses.fields(Attempt)}
         attempt.update(
-            attempt_id="ATT-" + "1" * 32,
+            attempt_id=attempt_id,
             job_id=job_id,
             attempt_number=1,
+            worker_id="worker-01",
+            quota_class="default",
             status="CLAIMED",
+            fence_generation=1,
+            lease_owner="supervisor-test",
+            lease_expires_at="2026-10-06T08:01:00+00:00",
+            heartbeat_at="2026-10-06T08:00:00+00:00",
+            checkpoint_sequence=0,
+            checkpoint=None,
+            result=None,
+            error=None,
+            started_at="2026-10-06T08:00:00+00:00",
+            finished_at="",
+            version=1,
+            authority_policy_hash=policy_sha,
+            pid=None,
+            pgid=None,
+            process_start_identity=None,
+            boot_id=None,
+            provider_session_id=None,
+            stdout_path=None,
+            stderr_path=None,
+            result_path=None,
+            exit_code=None,
+            launch_metadata={},
+            execution_mode=None,
+            requested_execution_profile=None,
+            requested_execution_profile_digest=None,
+            effective_grant=None,
+            effective_grant_digest=None,
+            placement_snapshot=None,
+            placement_snapshot_digest=None,
+            execution_principal_snapshot=None,
+            execution_principal_snapshot_digest=None,
         )
         attempts.append(attempt)
     return {
@@ -861,6 +977,75 @@ def test_executive_job_closes_job_and_attempt_rows_and_relationships():
     wrong_latest["latest_attempt"]["attempt_id"] = "ATT-" + "2" * 32
     assert WebCeoV2CeoIngressReadGateway._valid_job_data(
         wrong_latest, arguments=arguments
+    ) is False
+
+
+def test_executive_job_rejects_private_nested_payloads_and_constraints():
+    requested = "JOB-003"
+    arguments = {"job_id": requested}
+    canonical = _canonical_executive_job_data(requested, with_attempt=True)
+
+    job_result = copy.deepcopy(canonical)
+    job_result["job"]["result"] = {
+        "summary": "done",
+        "completed_steps": [],
+        "current_state": "complete",
+        "artifacts": [],
+        "next_actions": [],
+        "errors": [],
+        "execution_ready": True,
+        "private_detail": SECRET,
+    }
+    assert WebCeoV2CeoIngressReadGateway._valid_job_data(
+        job_result, arguments=arguments
+    ) is False
+
+    constraints = copy.deepcopy(canonical)
+    constraints["job"]["constraints"]["private_detail"] = SECRET
+    assert WebCeoV2CeoIngressReadGateway._valid_job_data(
+        constraints, arguments=arguments
+    ) is False
+
+    attempt_error = copy.deepcopy(canonical)
+    attempt_error["attempts"][0]["error"] = {
+        "summary": "failed",
+        "completed_steps": [],
+        "current_state": "failed",
+        "artifacts": [],
+        "next_actions": [],
+        "errors": [],
+        "private_detail": SECRET,
+    }
+    assert WebCeoV2CeoIngressReadGateway._valid_job_data(
+        attempt_error, arguments=arguments
+    ) is False
+
+    launch = copy.deepcopy(canonical)
+    launch["attempts"][0]["launch_metadata"] = {
+        "execution_ready": True,
+        "private_detail": SECRET,
+    }
+    assert WebCeoV2CeoIngressReadGateway._valid_job_data(
+        launch, arguments=arguments
+    ) is False
+
+
+def test_executive_job_consumes_exact_aggregate_bounding_receipts():
+    requested = "JOB-003"
+    arguments = {"job_id": requested}
+    canonical = _canonical_executive_job_data(requested, with_attempt=True)
+    encoded = '{"launch_attestation":{"summary":"' + ("x" * 900) + '"}}'
+    replacement, receipt = _bounded_replacement(
+        "attempts[0].launch_metadata", encoded, preview_chars=512
+    )
+    canonical["attempts"][0]["launch_metadata"] = replacement
+    assert WebCeoV2CeoIngressReadGateway._valid_job_data(
+        canonical, arguments=arguments, bounded=[receipt]
+    ) is True
+
+    orphan = _canonical_executive_job_data(requested, with_attempt=True)
+    assert WebCeoV2CeoIngressReadGateway._valid_job_data(
+        orphan, arguments=arguments, bounded=[receipt]
     ) is False
 
 
@@ -1001,6 +1186,136 @@ def test_v2_fabric_root_detail_closes_runtime_acquisition_and_job_cards():
     ) is False
 
 
+def test_v2_fabric_root_detail_consumes_only_authenticated_bounded_narratives():
+    arguments = {"view": "root", "root_job_id": "JOB-003"}
+
+    summary = _canonical_fabric_root_detail()
+    replacement, receipt = _bounded_replacement(
+        "root.result.summary", "s" * 900, preview_chars=512
+    )
+    summary["root"]["result"]["summary"] = replacement
+    assert WebCeoV2CeoIngressReadGateway._valid_fabric_data(
+        summary, arguments=arguments, bounded=[receipt]
+    ) is True
+
+    artifact = _canonical_fabric_root_detail()
+    replacement, receipt = _bounded_replacement(
+        "root.result.artifacts[0]", "artifact://" + ("a" * 900), preview_chars=512
+    )
+    artifact["root"]["result"]["artifacts"] = [replacement]
+    assert WebCeoV2CeoIngressReadGateway._valid_fabric_data(
+        artifact, arguments=arguments, bounded=[receipt]
+    ) is True
+
+    private_list = _canonical_fabric_root_detail()
+    private_list["root"]["result"]["artifacts"] = [
+        {"execution_ready": True, "private_detail": SECRET}
+    ]
+    assert WebCeoV2CeoIngressReadGateway._valid_fabric_data(
+        private_list, arguments=arguments, bounded=[]
+    ) is False
+
+    orphan = _canonical_fabric_root_detail()
+    assert WebCeoV2CeoIngressReadGateway._valid_fabric_data(
+        orphan, arguments=arguments, bounded=[receipt]
+    ) is False
+
+    wire = canonical_result(WebCeoV2CeoIngressReadGateway)
+    wire["tool"] = "executive_fabric"
+    wire["grounding"] = {
+        "runtime": "readonly:installed-executive-runtime",
+        "source": "control_plane.fabric_job_view v2 (bounded Runtime observation)",
+    }
+    wire["data"] = summary
+    wire["bounded"] = [_bounded_replacement(
+        "root.result.summary", "s" * 900, preview_chars=512
+    )[1]]
+    gateway = WebCeoV2CeoIngressReadGateway("/unused", object())
+    assert gateway._is_canonical_read_result(
+        wire, tool="executive_fabric", arguments=arguments
+    ) is True
+
+
+def test_v2_fabric_absent_arm_source_requires_all_flags_null():
+    arguments = {"view": "root", "root_job_id": "JOB-003"}
+    canonical = _canonical_fabric_root_detail()
+    assert canonical["armed"]["source"] == "absent"
+    assert all(canonical["armed"][key] is None for key in (
+        "ceo_submit_armed", "coo_autonomy_armed", "ceo_ingress_app_armed",
+        "dialogue_bridge_armed", "terminal_return_armed",
+    ))
+
+    forged = copy.deepcopy(canonical)
+    forged["armed"]["ceo_submit_armed"] = True
+    assert WebCeoV2CeoIngressReadGateway._valid_fabric_data(
+        forged, arguments=arguments, bounded=[]
+    ) is False
+
+
+def test_v2_fabric_lifecycle_derives_not_started_for_queued_zero_attempt_root():
+    arguments = {"view": "root", "root_job_id": "JOB-003"}
+    canonical = _canonical_fabric_root_detail()
+    assert canonical["root"]["status"] == "QUEUED"
+    assert canonical["root"]["attempt_count"] == 0
+    assert canonical["root"]["current_attempt_id"] is None
+    assert canonical["root"]["attempts"] == []
+    assert canonical["root"]["result"]["state"] == "NOT_STARTED"
+    assert WebCeoV2CeoIngressReadGateway._valid_fabric_data(
+        canonical, arguments=arguments, bounded=[]
+    ) is True
+
+    forged = copy.deepcopy(canonical)
+    forged["root"]["result"]["state"] = "COMPLETED"
+    assert WebCeoV2CeoIngressReadGateway._valid_fabric_data(
+        forged, arguments=arguments, bounded=[]
+    ) is False
+
+
+def test_v2_fabric_partial_acquisition_requires_partial_capability_and_missingness():
+    arguments = {"view": "root", "root_job_id": "JOB-003"}
+    canonical = _canonical_fabric_root_detail()
+    acquisition = canonical["runtime"]["acquisition"]
+    acquisition["provenance"] = {
+        "state": "PARTIAL", "unjoined_job_ids": ["JOB-003"]
+    }
+    canonical["unjoined_job_count"] = 1
+    canonical["unjoined_job_ids"] = ["JOB-003"]
+    canonical["capability"] = {
+        "state": "PARTIAL",
+        "installed": True,
+        "version": None,
+        "detail": "bounded snapshot has omitted rows or unavailable provenance",
+    }
+    canonical["degraded"] = ["provenance not projected: JOB-003: workstream unavailable"]
+    canonical["missingness"].append({
+        "missingness_class": "MISSING_PRODUCER",
+        "target_field": "runtime.acquisition.provenance",
+        "producer_owner": "executive_runtime",
+        "reason": "durable CEO-intent workstream join unavailable for included Jobs",
+    })
+    canonical["missingness"] = sorted(
+        canonical["missingness"],
+        key=lambda fact: (
+            fact["missingness_class"], fact["target_field"],
+            fact["producer_owner"] or "", fact["reason"],
+        ),
+    )
+    assert WebCeoV2CeoIngressReadGateway._valid_fabric_data(
+        canonical, arguments=arguments, bounded=[]
+    ) is True
+
+    promoted = copy.deepcopy(canonical)
+    promoted["capability"]["state"] = "PROVEN"
+    promoted["capability"]["detail"] = (
+        "the executive runtime database was read; the requested root job was found"
+    )
+    promoted["degraded"] = []
+    promoted["missingness"] = []
+    assert WebCeoV2CeoIngressReadGateway._valid_fabric_data(
+        promoted, arguments=arguments, bounded=[]
+    ) is False
+
+
 def _canonical_fabric_result(root_job_id="JOB-003"):
     from control_plane import (
         executive_orchestration_result as result_owner,
@@ -1108,6 +1423,22 @@ def test_v2_fabric_result_closes_projection_and_content_contracts():
     forged_omission["omitted"].append("private_detail")
     assert WebCeoV2CeoIngressReadGateway._valid_fabric_data(
         forged_omission, arguments=arguments
+    ) is False
+
+
+def test_v2_fabric_result_view_rejects_any_outer_bounding_receipt():
+    canonical, arguments = _canonical_fabric_result()
+    assert WebCeoV2CeoIngressReadGateway._valid_fabric_data(
+        canonical, arguments=arguments, bounded=[]
+    ) is True
+    forged_receipt = {
+        "bounded": True,
+        "original_bytes": 900,
+        "returned_bytes": 512,
+        "field": "content.summary",
+    }
+    assert WebCeoV2CeoIngressReadGateway._valid_fabric_data(
+        canonical, arguments=arguments, bounded=[forged_receipt]
     ) is False
 
 
