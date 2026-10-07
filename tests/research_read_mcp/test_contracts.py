@@ -150,7 +150,7 @@ def _search_result() -> dict:
         "contract": CONTRACT,
         "source_state": "PRODUCER_STALE",
         "candidates": [_candidate(1), _candidate(2, report_id="report-2")],
-        "coverage_note": "catalog is stale",
+        "coverage_state": "PARTIAL_CORPUS",
     }
 
 
@@ -946,6 +946,7 @@ _BANNED_V1_KEYS = {
     "macro_commit",
     "window",
     "published_date",
+    "coverage_note",
 }
 
 
@@ -1378,5 +1379,65 @@ def test_v1_1_schemas_carry_no_v1_field_names() -> None:
         _schema_keys(schema, found)
     assert found.isdisjoint(_BANNED_V1_KEYS)
     source = Path(c.__file__).read_text(encoding="utf-8")
-    for name in ("char_start", "char_end", "cursor", "max_chars", "tickers", "text_layer_ok"):
+    for name in (
+        "char_start",
+        "char_end",
+        "cursor",
+        "max_chars",
+        "tickers",
+        "text_layer_ok",
+        "coverage_note",
+    ):
         assert name not in source
+
+
+def test_r2_c5_search_coverage_state_is_exactly_the_coverage_states_or_null() -> None:
+    coverage = c.OUTPUT_SCHEMAS["research_search"]["properties"]["coverage_state"]
+    assert set(coverage["enum"]) == set(c.COVERAGE_STATES) | {None}
+    for state in (*c.COVERAGE_STATES, None):
+        result = _search_result()
+        result["coverage_state"] = state
+        c.validate_output("research_search", result)
+    for bad in ("UNKNOWN_STATE", "", "full_text", 0, False, ["FULL_TEXT"], {}):
+        refused = _search_result()
+        refused["coverage_state"] = bad
+        _internal("research_search", refused)
+    missing = _search_result()
+    del missing["coverage_state"]
+    _internal("research_search", missing)
+
+
+def test_r2_c5_search_refuses_coverage_note() -> None:
+    extra = _search_result()
+    extra["coverage_note"] = "x"
+    _internal("research_search", extra)
+    replaced = _search_result()
+    del replaced["coverage_state"]
+    replaced["coverage_note"] = "x"
+    _internal("research_search", replaced)
+
+
+def test_r2_c3_candidate_side_and_published_at_accept_null_and_string() -> None:
+    normal = {"side": "long", "published_at": "2026-10-07T00:00:00Z"}
+    for field in ("side", "published_at"):
+        for value in (None, "", normal[field]):
+            result = _search_result()
+            result["candidates"][0][field] = value
+            c.validate_output("research_search", result)
+        for bad in (0, False, [], {}):
+            refused = _search_result()
+            refused["candidates"][0][field] = bad
+            _internal("research_search", refused)
+    both = _search_result()
+    both["candidates"][0]["side"] = None
+    both["candidates"][0]["published_at"] = None
+    c.validate_output("research_search", both)
+
+
+def test_r2_c3_fetch_report_side_and_published_at_stay_string_only() -> None:
+    side_null = _fetch_result()
+    side_null["report"]["side"] = None
+    _internal("research_fetch", side_null)
+    published_null = _fetch_result()
+    published_null["report"]["published_at"] = None
+    _internal("research_fetch", published_null)

@@ -203,6 +203,18 @@ _PUBLISHED_AT = {
     "maxLength": 64,
     "pattern": _NO_CONTROL_PATTERN,
 }
+_SIDE_OR_NULL = {
+    "type": ["string", "null"],
+    "minLength": 0,
+    "maxLength": 40,
+    "pattern": _NO_CONTROL_PATTERN,
+}
+_PUBLISHED_AT_OR_NULL = {
+    "type": ["string", "null"],
+    "minLength": 0,
+    "maxLength": 64,
+    "pattern": _NO_CONTROL_PATTERN,
+}
 _RATIO = {"type": "number", "minimum": 0, "maximum": 1}
 _PAGE = {"type": ["integer", "null"], "minimum": 1}
 
@@ -250,8 +262,8 @@ def _candidate_schema() -> dict[str, Any]:
         "report_id": _REPORT_ID,
         "title": {"type": "string", "minLength": 0, "maxLength": 300},
         "institution": {"type": "string", "minLength": 0, "maxLength": 80},
-        "side": _SIDE,
-        "published_at": _PUBLISHED_AT,
+        "side": _SIDE_OR_NULL,
+        "published_at": _PUBLISHED_AT_OR_NULL,
         "rank": {"type": "integer", "minimum": 1, "maximum": 20},
     })
 
@@ -332,7 +344,7 @@ def _output_schemas() -> dict[str, dict[str, Any]]:
                 "maxItems": 20,
                 "items": _candidate_schema(),
             },
-            "coverage_note": {"type": "string", "maxLength": 300},
+            "coverage_state": {"type": ["string", "null"], "enum": [*COVERAGE_STATES, None]},
         }),
         "research_fetch": _object({
             "contract": contract,
