@@ -523,6 +523,33 @@ class CeoIngressReadGateway:
 
     _READ_TOOL_NAMES = READ_TOOL_NAMES
     _READ_SCHEMA = ceo_ingress.APP_READ_SCHEMA
+    _RESULT_FIELDS = frozenset(
+        {
+            "schema",
+            "tool",
+            "ok",
+            "server_version",
+            "mode",
+            "generated_at",
+            "grounding",
+            "data",
+            "degraded",
+            "bounded",
+            "error",
+        }
+    )
+    _UNAVAILABLE_UPSTREAM_CODES = frozenset(
+        {
+            "peer_credentials_unavailable",
+            "peer_denied",
+            "ingress_unavailable",
+            "unsupported_ingress_schema",
+            "backend_unavailable",
+            "grounding_unavailable",
+            "internal_error",
+            "timeout",
+        }
+    )
 
     def __init__(self, socket_path: Path | str, client: CeoIngressClient) -> None:
         self._socket_path = socket_path
@@ -537,10 +564,2416 @@ class CeoIngressReadGateway:
         # Each request owns and closes its socket. No local state to drain.
         return None
 
+    def _result_server_version(self) -> str:
+        from integrations.executive_mcp.schemas import SERVER_VERSION
+
+        return SERVER_VERSION
+
+    @staticmethod
+    def _valid_generated_at(value: object) -> bool:
+        from datetime import datetime, timezone
+
+        if type(value) is not str or not value or len(value) > 64:
+            return False
+        try:
+            parsed = datetime.fromisoformat(value[:-1] + "+00:00" if value.endswith("Z") else value)
+        except ValueError:
+            return False
+        return parsed.tzinfo is not None and parsed.utcoffset() == timezone.utc.utcoffset(parsed)
+
+    @staticmethod
+    def _valid_bounding_receipts(value: object) -> bool:
+        if not isinstance(value, list):
+            return False
+        fields: set[str] = set()
+        for receipt in value:
+            if (
+                type(receipt) is not dict
+                or set(receipt) != {"bounded", "original_bytes", "returned_bytes", "field"}
+                or receipt["bounded"] is not True
+                or type(receipt["original_bytes"]) is not int
+                or type(receipt["returned_bytes"]) is not int
+                or receipt["original_bytes"] <= 0
+                or receipt["returned_bytes"] < 0
+                or receipt["returned_bytes"] > receipt["original_bytes"]
+                or type(receipt["field"]) is not str
+                or not receipt["field"]
+                or len(receipt["field"]) > 512
+                or receipt["field"] in fields
+            ):
+                return False
+            fields.add(receipt["field"])
+        return True
+
+    @staticmethod
+    def _valid_bounded_text(
+        value: object,
+        *,
+        field: str,
+        receipts: Mapping[str, Mapping[str, Any]],
+        consumed: set[str],
+        allow_empty: bool = True,
+    ) -> bool:
+        from integrations.executive_mcp.schemas import BOUND_PREVIEW_CHARS
+
+        if type(value) is str:
+            return allow_empty or bool(value)
+        if (
+            type(value) is not dict
+            or set(value) != {
+                "bounded", "original_bytes", "returned_bytes", "field", "preview"
+            }
+            or value.get("bounded") is not True
+            or value.get("field") != field
+            or type(value.get("original_bytes")) is not int
+            or type(value.get("returned_bytes")) is not int
+            or value["original_bytes"] <= 0
+            or value["returned_bytes"] < 0
+            or value["returned_bytes"] > value["original_bytes"]
+            or type(value.get("preview")) is not str
+            or len(value["preview"]) > BOUND_PREVIEW_CHARS
+            or (not allow_empty and not value["preview"])
+            or len(value["preview"].encode("utf-8")) != value["returned_bytes"]
+        ):
+            return False
+        receipt = receipts.get(field)
+        if (
+            type(receipt) is not dict
+            or receipt != {
+                "bounded": True,
+                "original_bytes": value["original_bytes"],
+                "returned_bytes": value["returned_bytes"],
+                "field": field,
+            }
+        ):
+            return False
+        consumed.add(field)
+        return True
+
+    @staticmethod
+    def _valid_bounded_string_list(
+        value: object,
+        *,
+        field: str,
+        receipts: Mapping[str, Mapping[str, Any]],
+        consumed: set[str],
+    ) -> bool:
+        if type(value) is not list:
+            return False
+        return all(
+            CeoIngressReadGateway._valid_bounded_text(
+                item,
+                field=f"{field}[{index}]",
+                receipts=receipts,
+                consumed=consumed,
+            )
+            for index, item in enumerate(value)
+        )
+
+    @staticmethod
+    def _valid_exact_narrative(
+        value: object,
+        expected: str,
+        *,
+        field: str,
+        receipts: Mapping[str, Mapping[str, Any]],
+        consumed: set[str],
+    ) -> bool:
+        if type(value) is str:
+            return value == expected
+        if not CeoIngressReadGateway._valid_bounded_text(
+            value,
+            field=field,
+            receipts=receipts,
+            consumed=consumed,
+        ):
+            return False
+        # Every fixed owner narrative used here is shorter than the canonical
+        # preview ceiling, so a genuine bound_document replacement preserves
+        # the complete expected text in its preview.
+        return value.get("preview") == expected
+
+    @staticmethod
+    def _fabric_preview_projection(value: object) -> object:
+        """Replace only already-validated bounded leaves for owner validators."""
+        if type(value) is dict:
+            if set(value) == {
+                "bounded", "original_bytes", "returned_bytes", "field", "preview"
+            } and value.get("bounded") is True and type(value.get("preview")) is str:
+                return value["preview"]
+            return {
+                key: CeoIngressReadGateway._fabric_preview_projection(item)
+                for key, item in value.items()
+            }
+        if type(value) is list:
+            return [
+                CeoIngressReadGateway._fabric_preview_projection(item)
+                for item in value
+            ]
+        return value
+
+    @staticmethod
+    def _valid_grounding(value: object, *, tool: str) -> bool:
+        if type(value) is not dict:
+            return False
+        if tool in {"executive_state", "executive_inbox"}:
+            if set(value) != {
+                "boot_packet_schema", "macro", "mastermind", "runtime", "runtime_db"
+            }:
+                return False
+            mastermind = value["mastermind"]
+            macro = value["macro"]
+            runtime_db = value["runtime_db"]
+            return (
+                type(mastermind) is dict
+                and set(mastermind) == {"branch", "root", "sha"}
+                and type(mastermind["branch"]) is str
+                and type(mastermind["root"]) is str
+                and type(mastermind["sha"]) is str
+                and len(mastermind["sha"]) == 40
+                and type(macro) is dict
+                and set(macro) == {"root", "sha"}
+                and (macro["root"] is None or type(macro["root"]) is str)
+                and (macro["sha"] is None or (type(macro["sha"]) is str and len(macro["sha"]) == 40))
+                and (value["boot_packet_schema"] is None or type(value["boot_packet_schema"]) is str)
+                and value["runtime"] == "readonly:installed-executive-runtime"
+                and type(runtime_db) is dict
+                and set(runtime_db) == {"path", "present"}
+                and type(runtime_db["path"]) is str
+                and type(runtime_db["present"]) is bool
+            )
+        return (
+            set(value) == {"runtime", "source"}
+            and value["runtime"] == "readonly:installed-executive-runtime"
+            and type(value["source"]) is str
+            and bool(value["source"])
+            and len(value["source"]) <= 256
+        )
+
+    @staticmethod
+    def _valid_strategic_summary(
+        value: object,
+        *,
+        receipts: Mapping[str, Mapping[str, Any]] | None = None,
+        consumed: set[str] | None = None,
+    ) -> bool:
+        import re
+        from control_plane import strategic_state
+
+        if value is None:
+            return True
+        if type(value) is not dict or set(value) != {
+            "schema", "company_phase", "north_star", "p0", "constraints"
+        }:
+            return False
+        receipts = receipts or {}
+        consumed = consumed if consumed is not None else set()
+        if (
+            value["schema"] != strategic_state.SCHEMA
+            or type(value["company_phase"]) is not str
+            or not value["company_phase"].strip()
+            or type(value["north_star"]) is not list
+            or not value["north_star"]
+            or not all(
+                CeoIngressReadGateway._valid_bounded_text(
+                    item,
+                    field=f"strategic_state.north_star[{index}]",
+                    receipts=receipts,
+                    consumed=consumed,
+                    allow_empty=False,
+                )
+                for index, item in enumerate(value["north_star"])
+            )
+            or type(value["p0"]) is not list
+            or not value["p0"]
+            or type(value["constraints"]) is not dict
+        ):
+            return False
+        seen: set[str] = set()
+        for index, row in enumerate(value["p0"]):
+            if type(row) is not dict or set(row) != {
+                "id", "department", "objective", "status"
+            }:
+                return False
+            if not (
+                type(row["id"]) is str
+                and row["id"].strip()
+                and type(row["department"]) is str
+                and row["department"].strip()
+                and type(row["status"]) is str
+                and row["status"].strip()
+                and CeoIngressReadGateway._valid_bounded_text(
+                    row["objective"],
+                    field=f"strategic_state.p0[{index}].objective",
+                    receipts=receipts,
+                    consumed=consumed,
+                    allow_empty=False,
+                )
+            ):
+                return False
+            if re.fullmatch(r"[A-Z][A-Z0-9_]*", row["id"]) is None or row["id"] in seen:
+                return False
+            seen.add(row["id"])
+        current_constraint_keys = set(strategic_state.REQUIRED_CONSTRAINTS) | {
+            "unbounded_autonomous_strategic_modification"
+        }
+        return (
+            set(value["constraints"]) == current_constraint_keys
+            and all(
+                type(name) is str
+                and name
+                and type(level) is str
+                and level
+                for name, level in value["constraints"].items()
+            )
+        )
+
+    @staticmethod
+    def _valid_runtime_counts(value: object) -> bool:
+        from control_plane.executive_runtime import (
+            AttemptStatus, JobStatus, WorkerStatus,
+        )
+
+        if value is None:
+            return True
+        if type(value) is not dict or set(value) != {"jobs", "attempts", "workers"}:
+            return False
+        for name, enum_type in (
+            ("jobs", JobStatus),
+            ("attempts", AttemptStatus),
+            ("workers", WorkerStatus),
+        ):
+            section = value[name]
+            if section is None:
+                continue
+            if type(section) is not dict or set(section) != {"total", "by_status"}:
+                return False
+            by_status = section["by_status"]
+            expected = {member.value for member in enum_type}
+            if (
+                type(section["total"]) is not int
+                or section["total"] < 0
+                or type(by_status) is not dict
+                or set(by_status) != expected
+                or any(type(count) is not int or count < 0 for count in by_status.values())
+                or section["total"] != sum(by_status.values())
+            ):
+                return False
+        return True
+
+    @staticmethod
+    def _valid_attention_counts(value: object) -> bool:
+        from control_plane import executive_inbox
+
+        expected = set(executive_inbox.TARGETS) | {"total"}
+        return (
+            type(value) is dict
+            and set(value) == expected
+            and all(type(count) is int and count >= 0 for count in value.values())
+            and value["total"] == sum(
+                value[target] for target in executive_inbox.TARGETS
+            )
+        )
+
+    @staticmethod
+    def _valid_handoffs(value: object) -> bool:
+        from control_plane import ceo_boot_packet
+
+        if type(value) is not list or len(value) > ceo_boot_packet.HANDOFF_LIMIT:
+            return False
+        for row in value:
+            if (
+                type(row) is not dict
+                or set(row) != {"name", "path"}
+                or type(row["name"]) is not str
+                or not row["name"]
+                or len(row["name"]) > 255
+                or type(row["path"]) is not str
+                or not row["path"].startswith("agentos/handoffs/")
+                or not row["path"].endswith(".md")
+                or row["path"].startswith("/")
+                or ".." in Path(row["path"]).parts
+            ):
+                return False
+        return True
+
+    @staticmethod
+    def _valid_state_data(value: object, *, bounded: object) -> bool:
+        import re
+        from control_plane import ceo_boot_packet, executive_inbox
+
+        keys = {
+            "mastermind", "macro", "boot_packet_schema", "inbox_schema",
+            "strategic_state", "next_recommended_act", "runtime_db",
+            "runtime_counts", "attention_counts", "handoffs",
+        }
+        if (
+            type(value) is not dict
+            or set(value) != keys
+            or not CeoIngressReadGateway._valid_bounding_receipts(bounded)
+        ):
+            return False
+        receipts = {item["field"]: item for item in bounded}
+        consumed: set[str] = set()
+        mastermind = value["mastermind"]
+        macro = value["macro"]
+        runtime_db = value["runtime_db"]
+        valid = (
+            type(mastermind) is dict
+            and set(mastermind) == {"branch", "root", "sha"}
+            and type(mastermind["branch"]) is str
+            and type(mastermind["root"]) is str
+            and type(mastermind["sha"]) is str
+            and re.fullmatch(r"[0-9a-f]{40}", mastermind["sha"]) is not None
+            and type(macro) is dict
+            and set(macro) == {"root", "sha", "resolved_via"}
+            and (macro["root"] is None or type(macro["root"]) is str)
+            and (
+                macro["sha"] is None
+                or (
+                    type(macro["sha"]) is str
+                    and re.fullmatch(r"[0-9a-f]{40}", macro["sha"]) is not None
+                )
+            )
+            and (macro["resolved_via"] is None or type(macro["resolved_via"]) is str)
+            and value["boot_packet_schema"] == ceo_boot_packet.SCHEMA
+            and value["inbox_schema"] == executive_inbox.SCHEMA
+            and CeoIngressReadGateway._valid_strategic_summary(
+                value["strategic_state"],
+                receipts=receipts,
+                consumed=consumed,
+            )
+            and (
+                value["next_recommended_act"] is None
+                or CeoIngressReadGateway._valid_bounded_text(
+                    value["next_recommended_act"],
+                    field="next_recommended_act",
+                    receipts=receipts,
+                    consumed=consumed,
+                    allow_empty=False,
+                )
+            )
+            and type(runtime_db) is dict
+            and set(runtime_db) == {"path", "present"}
+            and type(runtime_db["path"]) is str
+            and type(runtime_db["present"]) is bool
+            and CeoIngressReadGateway._valid_runtime_counts(value["runtime_counts"])
+            and CeoIngressReadGateway._valid_attention_counts(value["attention_counts"])
+            and CeoIngressReadGateway._valid_handoffs(value["handoffs"])
+        )
+        return valid and consumed == set(receipts)
+
+    @staticmethod
+    def _valid_inbox_grounding(
+        value: object,
+        *,
+        receipts: Mapping[str, Mapping[str, Any]],
+        consumed: set[str],
+    ) -> bool:
+        import re
+        from control_plane import ceo_boot_packet
+
+        if type(value) is not dict or set(value) != {
+            "mastermind", "macro", "boot_packet_schema", "runtime_db"
+        }:
+            return False
+        mastermind = value["mastermind"]
+        macro = value["macro"]
+        runtime_db = value["runtime_db"]
+        return (
+            type(mastermind) is dict
+            and set(mastermind) == {"branch", "root", "sha"}
+            and type(mastermind["branch"]) is str
+            and type(mastermind["root"]) is str
+            and type(mastermind["sha"]) is str
+            and re.fullmatch(r"[0-9a-f]{40}", mastermind["sha"]) is not None
+            and type(macro) is dict
+            and set(macro) == {"root", "sha"}
+            and (macro["root"] is None or type(macro["root"]) is str)
+            and (
+                macro["sha"] is None
+                or (
+                    type(macro["sha"]) is str
+                    and re.fullmatch(r"[0-9a-f]{40}", macro["sha"]) is not None
+                )
+            )
+            and (
+                value["boot_packet_schema"] is None
+                or value["boot_packet_schema"] == ceo_boot_packet.SCHEMA
+            )
+            and type(runtime_db) is dict
+            and set(runtime_db) == {"path", "present"}
+            and type(runtime_db["path"]) is str
+            and type(runtime_db["present"]) is bool
+        )
+
+    @staticmethod
+    def _valid_inbox_attention_item(
+        value: object,
+        *,
+        index: int,
+        receipts: Mapping[str, Mapping[str, Any]],
+        consumed: set[str],
+    ) -> bool:
+        import re
+        from control_plane import executive_inbox
+        from control_plane.executive_runtime import JobStatus
+
+        base_keys = {
+            "attention_id", "target", "kind", "source", "job_id", "workstream",
+            "status", "reason", "evidence", "existing_next_actions",
+        }
+        runtime_keys = {
+            "parent_job_id", "root_job_id", "depth", "owner_seat",
+            "escalation_target", "business_impact", "review_required",
+            "reviews_job_id",
+        }
+        if type(value) is not dict:
+            return False
+        source = value.get("source")
+        expected_keys = (
+            base_keys | runtime_keys if source == "runtime"
+            else base_keys if source == "agent_os"
+            else None
+        )
+        if expected_keys is None or set(value) != expected_keys:
+            return False
+        evidence = value["evidence"]
+        next_actions = value["existing_next_actions"]
+        if not (
+            type(value["attention_id"]) is str
+            and re.fullmatch(r"eia-[0-9a-f]{12}", value["attention_id"]) is not None
+            and value["target"] in executive_inbox.TARGETS
+            and type(value["kind"]) is str
+            and bool(value["kind"])
+            and (value["job_id"] is None or type(value["job_id"]) is str)
+            and (value["workstream"] is None or type(value["workstream"]) is str)
+            and (value["status"] is None or type(value["status"]) is str)
+            and CeoIngressReadGateway._valid_bounded_text(
+                value["reason"],
+                field=f"attention[{index}].reason",
+                receipts=receipts,
+                consumed=consumed,
+                allow_empty=False,
+            )
+            and type(evidence) is list
+            and all(
+                type(item) is dict
+                and set(item) == {"ref", "field", "value"}
+                and type(item["ref"]) is str
+                and type(item["field"]) is str
+                and CeoIngressReadGateway._valid_bounded_text(
+                    item["value"],
+                    field=f"attention[{index}].evidence[{evidence_index}].value",
+                    receipts=receipts,
+                    consumed=consumed,
+                )
+                for evidence_index, item in enumerate(evidence)
+            )
+            and type(next_actions) is list
+            and all(
+                CeoIngressReadGateway._valid_bounded_text(
+                    item,
+                    field=f"attention[{index}].existing_next_actions[{action_index}]",
+                    receipts=receipts,
+                    consumed=consumed,
+                )
+                for action_index, item in enumerate(next_actions)
+            )
+        ):
+            return False
+        if source == "agent_os":
+            return (
+                value["target"] == "ceo"
+                and value["kind"] == "ceo_decision_pending"
+                and value["job_id"] is None
+                and value["status"] is None
+                and value["existing_next_actions"] == []
+            )
+        statuses = {member.value for member in JobStatus}
+        return (
+            type(value["job_id"]) is str
+            and bool(value["job_id"])
+            and value["status"] in statuses
+            and (value["parent_job_id"] is None or type(value["parent_job_id"]) is str)
+            and type(value["root_job_id"]) is str
+            and bool(value["root_job_id"])
+            and type(value["depth"]) is int
+            and value["depth"] >= 0
+            and type(value["owner_seat"]) is str
+            and bool(value["owner_seat"])
+            and type(value["escalation_target"]) is str
+            and bool(value["escalation_target"])
+            and type(value["business_impact"]) is str
+            and bool(value["business_impact"])
+            and type(value["review_required"]) is bool
+            and (value["reviews_job_id"] is None or type(value["reviews_job_id"]) is str)
+        )
+
+    @staticmethod
+    def _valid_inbox_suppressed(value: object) -> bool:
+        from control_plane import executive_inbox
+
+        if value is None:
+            return True
+        expected = set(executive_inbox._SUPPRESSION_KEYS)
+        return (
+            type(value) is dict
+            and set(value) == expected
+            and all(type(count) is int and count >= 0 for count in value.values())
+        )
+
+    @staticmethod
+    def _valid_inbox_data(value: object, *, bounded: object) -> bool:
+        from control_plane import executive_inbox
+
+        keys = {
+            "schema", "generated_at", "grounding", "attention",
+            "runtime_counts", "suppressed", "degraded",
+        }
+        if (
+            type(value) is not dict
+            or set(value) != keys
+            or value["schema"] != executive_inbox.SCHEMA
+            or not CeoIngressReadGateway._valid_generated_at(value["generated_at"])
+            or not CeoIngressReadGateway._valid_bounding_receipts(bounded)
+        ):
+            return False
+        receipts = {receipt["field"]: receipt for receipt in bounded}
+        consumed: set[str] = set()
+        if not (
+            CeoIngressReadGateway._valid_inbox_grounding(
+                value["grounding"], receipts=receipts, consumed=consumed
+            )
+            and type(value["attention"]) is list
+            and all(
+                CeoIngressReadGateway._valid_inbox_attention_item(
+                    item,
+                    index=index,
+                    receipts=receipts,
+                    consumed=consumed,
+                )
+                for index, item in enumerate(value["attention"])
+            )
+            and CeoIngressReadGateway._valid_runtime_counts(value["runtime_counts"])
+            and CeoIngressReadGateway._valid_inbox_suppressed(value["suppressed"])
+            and type(value["degraded"]) is list
+            and all(
+                CeoIngressReadGateway._valid_bounded_text(
+                    item,
+                    field=f"degraded[{index}]",
+                    receipts=receipts,
+                    consumed=consumed,
+                )
+                for index, item in enumerate(value["degraded"])
+            )
+        ):
+            return False
+        # Every outer bounding receipt for an inbox must bind one accepted
+        # replacement object at exactly the same data path; no orphan receipt
+        # may make an otherwise foreign replacement look canonical.
+        return consumed == set(receipts)
+
+    @staticmethod
+    def _valid_job_payload(value: object) -> bool:
+        from control_plane.executive_runtime import JobPayload, StateConflict
+
+        if value is None:
+            return True
+        if type(value) is not dict:
+            return False
+        try:
+            return JobPayload.from_value(value).to_dict() == value
+        except (StateConflict, TypeError, ValueError):
+            return False
+
+    @staticmethod
+    def _valid_sha256(value: object) -> bool:
+        import re
+        return type(value) is str and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+
+    @staticmethod
+    def _valid_job_constraints(value: object, *, orchestration_role: object) -> bool:
+        from control_plane.executive_runtime import StateConflict, _normalise_constraints
+
+        if type(value) is not dict:
+            return False
+        try:
+            normalized = _normalise_constraints(
+                value,
+                host_admitted_placement_union=orchestration_role == "aggregation",
+            )
+        except (StateConflict, TypeError, ValueError):
+            return False
+        return normalized == value
+
+    @staticmethod
+    def _valid_job_orchestration_provenance(
+        value: object,
+        digest: object,
+        *,
+        job: Mapping[str, Any],
+    ) -> bool:
+        from control_plane.executive_orchestration_principal import digest as owner_digest
+
+        role = job.get("orchestration_role")
+        if role is None:
+            return value is None and digest is None
+        keys = {
+            "schema_version", "creator", "source_id", "source_digest",
+            "command_id", "job_id", "parent_job_id", "root_job_id", "role",
+        }
+        if not (
+            type(value) is dict
+            and set(value) == keys
+            and value["schema_version"]
+            == "mastermind.executive_orchestration_provenance/v1"
+            and value["job_id"] == job.get("job_id")
+            and value["parent_job_id"] == job.get("parent_job_id")
+            and value["root_job_id"] == job.get("root_job_id")
+            and value["role"] == role
+            and CeoIngressReadGateway._valid_sha256(value["source_digest"])
+            and CeoIngressReadGateway._valid_sha256(digest)
+            and owner_digest(value) == digest
+            and type(value["source_id"]) is str
+            and bool(value["source_id"])
+            and type(value["command_id"]) is str
+            and bool(value["command_id"])
+        ):
+            return False
+        if role == "aggregation":
+            return (
+                value["creator"] == "ceo_intent"
+                and job.get("parent_job_id") is None
+                and job.get("root_job_id") == job.get("job_id")
+            )
+        return value["creator"] == "coo_cycle" and job.get("parent_job_id") is not None
+
+    @staticmethod
+    def _valid_bounded_aggregate(
+        value: object,
+        *,
+        field: str,
+        receipts: Mapping[str, Mapping[str, Any]],
+        consumed: set[str],
+    ) -> bool:
+        return (
+            type(value) is dict
+            and value.get("bounded") is True
+            and CeoIngressReadGateway._valid_bounded_text(
+                value,
+                field=field,
+                receipts=receipts,
+                consumed=consumed,
+            )
+        )
+
+    @staticmethod
+    def _valid_payload_or_bound(
+        value: object,
+        *,
+        field: str,
+        receipts: Mapping[str, Mapping[str, Any]],
+        consumed: set[str],
+    ) -> bool:
+        if CeoIngressReadGateway._valid_bounded_aggregate(
+            value, field=field, receipts=receipts, consumed=consumed
+        ):
+            return True
+        return CeoIngressReadGateway._valid_job_payload(value)
+
+    @staticmethod
+    def _valid_requested_profile(value: object, digest: object) -> bool:
+        from control_plane import operator_harness_wire
+        from control_plane.operator_materialization_receipt import (
+            OperatorMaterializationReceiptError,
+            requested_profile_digest,
+        )
+
+        if value is None or digest is None:
+            return value is None and digest is None
+        if type(value) is not dict or not CeoIngressReadGateway._valid_sha256(digest):
+            return False
+        try:
+            parsed = operator_harness_wire.requested_execution_profile(value)
+            return (
+                operator_harness_wire.to_wire(parsed) == value
+                and requested_profile_digest(value) == digest
+            )
+        except (
+            operator_harness_wire.OperatorHarnessWireError,
+            OperatorMaterializationReceiptError,
+            TypeError,
+            ValueError,
+        ):
+            return False
+
+    @staticmethod
+    def _valid_placement_snapshot(value: object, digest: object) -> bool:
+        from control_plane import executive_orchestration_principal as principal
+
+        if value is None or digest is None:
+            return value is None and digest is None
+        if type(value) is not dict or not CeoIngressReadGateway._valid_sha256(digest):
+            return False
+        try:
+            return (
+                principal.validate_placement_snapshot(value) == value
+                and principal.digest(value) == digest
+            )
+        except (principal.OrchestrationPrincipalError, TypeError, ValueError):
+            return False
+
+    @staticmethod
+    def _valid_execution_principal_snapshot(
+        value: object,
+        digest: object,
+        *,
+        attempt: Mapping[str, Any],
+    ) -> bool:
+        from control_plane import executive_orchestration_principal as principal
+
+        if value is None or digest is None:
+            return value is None and digest is None
+        keys = {
+            "schema_version", "attempt_id", "worker_id", "quota_class",
+            "provider", "account_label", "placement_snapshot_digest",
+            "os_principal_name", "os_principal_uid", "provider_home_identity",
+        }
+        if not (
+            type(value) is dict
+            and set(value) == keys
+            and value["schema_version"] == principal.PRINCIPAL_SNAPSHOT_SCHEMA
+            and value["attempt_id"] == attempt.get("attempt_id")
+            and value["worker_id"] == attempt.get("worker_id")
+            and CeoIngressReadGateway._valid_sha256(
+                value["placement_snapshot_digest"]
+            )
+            and value["placement_snapshot_digest"]
+            == attempt.get("placement_snapshot_digest")
+            and type(value["quota_class"]) is str
+            and value["quota_class"] == attempt.get("quota_class")
+            and type(value["provider"]) is str
+            and bool(value["provider"])
+            and type(value["account_label"]) is str
+            and bool(value["account_label"])
+            and type(value["os_principal_name"]) is str
+            and bool(value["os_principal_name"])
+            and type(value["os_principal_uid"]) is int
+            and CeoIngressReadGateway._valid_sha256(digest)
+        ):
+            return False
+        try:
+            if principal.validate_provider_home_identity(
+                value["provider_home_identity"]
+            ) != value["provider_home_identity"]:
+                return False
+            return principal.digest(value) == digest
+        except (principal.OrchestrationPrincipalError, TypeError, ValueError):
+            return False
+
+    @staticmethod
+    def _valid_effective_grant(
+        value: object,
+        digest: object,
+        *,
+        job: Mapping[str, Any],
+        attempt: Mapping[str, Any],
+    ) -> bool:
+        from control_plane.executive_orchestration_principal import digest as owner_digest
+
+        role = job.get("orchestration_role")
+        if role is None:
+            return value is None and digest is None
+        keys = {
+            "schema_version", "authorities", "write_paths", "validation_argv",
+            "policy_sha", "job_id", "role",
+        }
+        if not (
+            type(value) is dict
+            and set(value) == keys
+            and value["schema_version"]
+            == "mastermind.executive_effective_grant/v1"
+            and value["job_id"] == job.get("job_id")
+            and value["role"] == role
+            and value["policy_sha"] == attempt.get("authority_policy_hash")
+            and value["policy_sha"] == job.get("authority_policy_hash")
+            and type(value["authorities"]) is list
+            and all(type(item) is str for item in value["authorities"])
+            and set(value["authorities"]) <= set(job.get("requested_authorities") or [])
+            and type(value["write_paths"]) is list
+            and all(type(item) is str for item in value["write_paths"])
+            and set(value["write_paths"]) <= set(job.get("allowed_write_paths") or [])
+            and type(value["validation_argv"]) is list
+            and all(
+                type(argv) is list and all(type(item) is str for item in argv)
+                for argv in value["validation_argv"]
+            )
+            and all(
+                argv in (job.get("validation_commands") or [])
+                for argv in value["validation_argv"]
+            )
+            and CeoIngressReadGateway._valid_sha256(digest)
+            and owner_digest(value) == digest
+        ):
+            return False
+        return True
+
+    @staticmethod
+    def _valid_attempt_row(
+        attempt: object,
+        *,
+        prefix: str,
+        job: Mapping[str, Any],
+        attempt_keys: set[str],
+        expected_number: int,
+        receipts: Mapping[str, Mapping[str, Any]],
+        consumed: set[str],
+    ) -> bool:
+        from control_plane.executive_runtime import AttemptStatus
+        from control_plane.operator_harness_contract import AttemptExecutionMode
+
+        if not (
+            type(attempt) is dict
+            and set(attempt) == attempt_keys
+            and attempt.get("job_id") == job.get("job_id")
+            and type(attempt.get("attempt_id")) is str
+            and bool(attempt["attempt_id"])
+            and type(attempt.get("attempt_number")) is int
+            and attempt["attempt_number"] == expected_number
+            and attempt.get("status") in {member.value for member in AttemptStatus}
+            and type(attempt.get("worker_id")) is str
+            and bool(attempt["worker_id"])
+            and type(attempt.get("quota_class")) is str
+            and bool(attempt["quota_class"])
+            and type(attempt.get("fence_generation")) is int
+            and attempt["fence_generation"] >= 0
+            and type(attempt.get("lease_owner")) is str
+            and bool(attempt["lease_owner"])
+            and type(attempt.get("lease_expires_at")) is str
+            and type(attempt.get("heartbeat_at")) is str
+            and type(attempt.get("checkpoint_sequence")) is int
+            and attempt["checkpoint_sequence"] >= 0
+            and type(attempt.get("started_at")) is str
+            and type(attempt.get("finished_at")) is str
+            and type(attempt.get("version")) is int
+            and attempt["version"] >= 0
+            and CeoIngressReadGateway._valid_sha256(
+                attempt.get("authority_policy_hash")
+            )
+            and (
+                attempt.get("pid") is None
+                or (type(attempt["pid"]) is int and attempt["pid"] > 0)
+            )
+            and (
+                attempt.get("pgid") is None
+                or (type(attempt["pgid"]) is int and attempt["pgid"] > 0)
+            )
+            and (
+                attempt.get("process_start_identity") is None
+                or type(attempt["process_start_identity"]) is str
+            )
+            and (
+                attempt.get("boot_id") is None
+                or type(attempt["boot_id"]) is str
+            )
+            and (
+                attempt.get("provider_session_id") is None
+                or type(attempt["provider_session_id"]) is str
+            )
+            and all(
+                attempt.get(key) is None or type(attempt[key]) is str
+                for key in ("stdout_path", "stderr_path", "result_path")
+            )
+            and (
+                attempt.get("exit_code") is None
+                or type(attempt["exit_code"]) is int
+            )
+            and (
+                attempt.get("execution_mode") is None
+                or attempt["execution_mode"]
+                in {member.value for member in AttemptExecutionMode}
+            )
+        ):
+            return False
+
+        for field in ("checkpoint", "result", "error"):
+            if not CeoIngressReadGateway._valid_payload_or_bound(
+                attempt.get(field),
+                field=f"{prefix}.{field}",
+                receipts=receipts,
+                consumed=consumed,
+            ):
+                return False
+
+        launch_metadata = attempt.get("launch_metadata")
+        if not (
+            launch_metadata == {}
+            or CeoIngressReadGateway._valid_bounded_aggregate(
+                launch_metadata,
+                field=f"{prefix}.launch_metadata",
+                receipts=receipts,
+                consumed=consumed,
+            )
+        ):
+            return False
+
+        if not CeoIngressReadGateway._valid_requested_profile(
+            attempt.get("requested_execution_profile"),
+            attempt.get("requested_execution_profile_digest"),
+        ):
+            return False
+        if not CeoIngressReadGateway._valid_placement_snapshot(
+            attempt.get("placement_snapshot"),
+            attempt.get("placement_snapshot_digest"),
+        ):
+            return False
+        placement = attempt.get("placement_snapshot")
+        if placement is not None and (
+            placement.get("worker_id") != attempt.get("worker_id")
+            or placement.get("quota_class") != attempt.get("quota_class")
+        ):
+            return False
+        if not CeoIngressReadGateway._valid_execution_principal_snapshot(
+            attempt.get("execution_principal_snapshot"),
+            attempt.get("execution_principal_snapshot_digest"),
+            attempt=attempt,
+        ):
+            return False
+        if not CeoIngressReadGateway._valid_effective_grant(
+            attempt.get("effective_grant"),
+            attempt.get("effective_grant_digest"),
+            job=job,
+            attempt=attempt,
+        ):
+            return False
+        return True
+
+    @staticmethod
+    def _valid_job_data(
+        value: object,
+        *,
+        arguments: Mapping[str, Any],
+        bounded: object = (),
+    ) -> bool:
+        import dataclasses
+        import re
+        from control_plane.executive_runtime import (
+            Attempt, Job, JobStatus,
+        )
+
+        if (
+            type(value) is not dict
+            or set(value) != {
+                "job", "attempts", "attempt_count", "attempt_limit", "latest_attempt"
+            }
+            or not (
+                bounded == ()
+                or CeoIngressReadGateway._valid_bounding_receipts(bounded)
+            )
+        ):
+            return False
+        receipts = {item["field"]: item for item in bounded}
+        consumed: set[str] = set()
+        job = value["job"]
+        attempts = value["attempts"]
+        job_keys = {field.name for field in dataclasses.fields(Job)}
+        attempt_keys = {field.name for field in dataclasses.fields(Attempt)}
+        requested = arguments.get("job_id")
+        if not (
+            type(job) is dict
+            and set(job) == job_keys
+            and job.get("job_id") == requested
+            and type(job.get("objective")) in {str, dict}
+            and CeoIngressReadGateway._valid_bounded_text(
+                job["objective"],
+                field="job.objective",
+                receipts=receipts,
+                consumed=consumed,
+                allow_empty=False,
+            )
+            and type(job.get("department")) is str
+            and bool(job["department"])
+            and type(job.get("priority")) is int
+            and job.get("status") in {member.value for member in JobStatus}
+            and (
+                job.get("assigned_worker_id") is None
+                or type(job["assigned_worker_id"]) is str
+            )
+            and (
+                job.get("assigned_quota_class") is None
+                or type(job["assigned_quota_class"]) is str
+            )
+            and type(job.get("authority_level")) is str
+            and re.fullmatch(r"A[0-7]", job["authority_level"]) is not None
+            and (job.get("branch") is None or type(job["branch"]) is str)
+            and (job.get("worktree") is None or type(job["worktree"]) is str)
+            and type(job.get("created_at")) is str
+            and type(job.get("updated_at")) is str
+            and type(job.get("attempt_count")) is int
+            and job["attempt_count"] >= 0
+            and type(job.get("attempt_limit")) is int
+            and job["attempt_limit"] >= 1
+            and type(job.get("requested_authorities")) is list
+            and all(type(item) is str for item in job["requested_authorities"])
+            and CeoIngressReadGateway._valid_sha256(
+                job.get("authority_policy_hash")
+            )
+            and type(job.get("allowed_write_paths")) is list
+            and all(type(item) is str for item in job["allowed_write_paths"])
+            and type(job.get("validation_commands")) is list
+            and all(
+                type(argv) is list and all(type(item) is str for item in argv)
+                for argv in job["validation_commands"]
+            )
+            and (job.get("parent_job_id") is None or type(job["parent_job_id"]) is str)
+            and type(job.get("root_job_id")) is str
+            and bool(job["root_job_id"])
+            and type(job.get("depth")) is int
+            and job["depth"] >= 0
+            and type(job.get("owner_seat")) is str
+            and bool(job["owner_seat"])
+            and type(job.get("escalation_target")) is str
+            and bool(job["escalation_target"])
+            and type(job.get("business_impact")) is str
+            and bool(job["business_impact"])
+            and type(job.get("review_required")) is bool
+            and (
+                job.get("reviews_job_id") is None
+                or type(job["reviews_job_id"]) is str
+            )
+            and (
+                job.get("orchestration_role") is None
+                or job["orchestration_role"]
+                in {"aggregation", "plan", "work", "review", "repair"}
+            )
+            and (
+                job.get("plan_attempt_id") is None
+                or type(job["plan_attempt_id"]) is str
+            )
+            and (
+                job.get("plan_digest") is None
+                or CeoIngressReadGateway._valid_sha256(job["plan_digest"])
+            )
+            and (
+                job.get("plan_step_id") is None
+                or type(job["plan_step_id"]) is str
+            )
+            and (
+                job.get("repair_round") is None
+                or (type(job["repair_round"]) is int and job["repair_round"] >= 0)
+            )
+            and (
+                job.get("supersedes_job_id") is None
+                or type(job["supersedes_job_id"]) is str
+            )
+            and type(attempts) is list
+            and type(value["attempt_count"]) is int
+            and value["attempt_count"] == len(attempts) == job["attempt_count"]
+            and type(value["attempt_limit"]) is int
+            and value["attempt_limit"] == job["attempt_limit"]
+        ):
+            return False
+
+        for field in ("checkpoint", "result"):
+            if not CeoIngressReadGateway._valid_payload_or_bound(
+                job.get(field),
+                field=f"job.{field}",
+                receipts=receipts,
+                consumed=consumed,
+            ):
+                return False
+        if not CeoIngressReadGateway._valid_job_constraints(
+            job.get("constraints"),
+            orchestration_role=job.get("orchestration_role"),
+        ):
+            return False
+        if not CeoIngressReadGateway._valid_job_orchestration_provenance(
+            job.get("orchestration_provenance"),
+            job.get("orchestration_provenance_digest"),
+            job=job,
+        ):
+            return False
+
+        seen_attempt_ids: set[str] = set()
+        for index, attempt in enumerate(attempts, start=1):
+            if not CeoIngressReadGateway._valid_attempt_row(
+                attempt,
+                prefix=f"attempts[{index - 1}]",
+                job=job,
+                attempt_keys=attempt_keys,
+                expected_number=index,
+                receipts=receipts,
+                consumed=consumed,
+            ):
+                return False
+            if attempt["attempt_id"] in seen_attempt_ids:
+                return False
+            seen_attempt_ids.add(attempt["attempt_id"])
+
+        latest = value["latest_attempt"]
+        if not attempts:
+            if latest is not None or job.get("current_attempt_id") is not None:
+                return False
+            return consumed == set(receipts)
+
+        if not (
+            type(latest) is dict
+            and set(latest) == attempt_keys
+            and latest.get("attempt_id") == attempts[-1].get("attempt_id")
+            and latest.get("job_id") == requested
+            and latest.get("attempt_number") == attempts[-1].get("attempt_number")
+            and job.get("current_attempt_id") == attempts[-1].get("attempt_id")
+            and CeoIngressReadGateway._valid_attempt_row(
+                latest,
+                prefix="latest_attempt",
+                job=job,
+                attempt_keys=attempt_keys,
+                expected_number=attempts[-1]["attempt_number"],
+                receipts=receipts,
+                consumed=consumed,
+            )
+        ):
+            return False
+        return consumed == set(receipts)
+
+    @classmethod
+    def _fabric_schema_family(cls) -> str:
+        return "none"
+
+    @staticmethod
+    def _valid_fabric_root_row(value: object) -> bool:
+        from control_plane import fabric_job_view
+        from control_plane.executive_runtime import JobStatus
+
+        return (
+            type(value) is dict
+            and set(value) == fabric_job_view.ROOT_ROW_KEYS
+            and type(value["job_id"]) is str
+            and bool(value["job_id"])
+            and value["status"] in {member.value for member in JobStatus}
+            and type(value["depth"]) is int
+            and value["depth"] == 0
+            and value["parent_job_id"] is None
+            and (
+                value["orchestration_role"] is None
+                or (
+                    type(value["orchestration_role"]) is str
+                    and bool(value["orchestration_role"])
+                )
+            )
+        )
+
+    @staticmethod
+    def _valid_fabric_root_list_v2(
+        value: object, *, arguments: Mapping[str, Any]
+    ) -> bool:
+        import re
+        from control_plane import fabric_job_view
+
+        if (
+            type(value) is not dict
+            or value.get("schema") != fabric_job_view.ROOT_LIST_SCHEMA_V2
+            or set(value) != fabric_job_view.ROOT_LIST_KEYS
+            or not CeoIngressReadGateway._valid_generated_at(value.get("generated_at"))
+        ):
+            return False
+        runtime = value.get("runtime")
+        roots = value.get("roots")
+        count = value.get("count")
+        total = value.get("total")
+        truncated = value.get("truncated")
+        degraded = value.get("degraded")
+        limit = arguments.get("limit")
+        if not (
+            type(runtime) is dict
+            and set(runtime) == {"root", "db_present", "identity", "acquisition"}
+            # Production V2/V3 binds this exact public runtime identity in
+            # scripts/executive_os_phase1c.py.  Do not accept a foreign/private
+            # readiness object in the otherwise schema-valid root list.
+            and runtime["root"] is None
+            and runtime["db_present"] is True
+            and runtime["identity"] is None
+            and type(roots) is list
+            and all(CeoIngressReadGateway._valid_fabric_root_row(row) for row in roots)
+            and len({row["job_id"] for row in roots}) == len(roots)
+            and type(count) is int
+            and count >= 0
+            and count == len(roots)
+            and (total is None or (type(total) is int and total >= count))
+            and type(truncated) is bool
+            and type(degraded) is list
+            and all(type(item) is str for item in degraded)
+            and type(limit) is int
+            and limit > 0
+            and count <= limit
+        ):
+            return False
+
+        acquisition = runtime["acquisition"]
+        template = fabric_job_view._acquisition_receipt(kind="root_discovery")
+        if type(acquisition) is not dict or set(acquisition) != set(template):
+            return False
+        query = acquisition.get("query")
+        budgets = acquisition.get("budgets")
+        truncation = acquisition.get("truncation")
+        provenance = acquisition.get("provenance")
+        generation = acquisition.get("generation")
+        snapshot_digest = acquisition.get("snapshot_digest")
+        if not (
+            acquisition.get("schema") == template["schema"]
+            and query == {"kind": "root_discovery", "root_job_id": None}
+            and acquisition.get("owner") == "executive_runtime"
+            and budgets == template["budgets"]
+            and (
+                snapshot_digest is None
+                or (
+                    type(snapshot_digest) is str
+                    and re.fullmatch(r"[0-9a-f]{64}", snapshot_digest) is not None
+                )
+            )
+            and type(truncation) is dict
+            and set(truncation) == {"jobs", "attempt_job_ids", "roots", "projection"}
+            and truncation["jobs"] is False
+            and truncation["attempt_job_ids"] == []
+            and type(truncation["roots"]) is bool
+            and type(truncation["projection"]) is bool
+            and type(provenance) is dict
+            and set(provenance) == {"state", "unjoined_job_ids"}
+            and provenance["state"] in {"COMPLETE", "PARTIAL"}
+            and type(provenance["unjoined_job_ids"]) is list
+            and all(type(item) is str and item for item in provenance["unjoined_job_ids"])
+            and provenance["unjoined_job_ids"]
+            == sorted(set(provenance["unjoined_job_ids"]))
+            and fabric_job_view._qualified_generation(generation) is not None
+        ):
+            return False
+
+        projected_ids = {row["job_id"] for row in roots}
+        unjoined_ids = set(provenance["unjoined_job_ids"])
+        if provenance["state"] == "COMPLETE":
+            if unjoined_ids:
+                return False
+        elif not projected_ids <= unjoined_ids:
+            return False
+
+        expected_truncated = bool(truncation["roots"] or truncation["projection"])
+        if truncated is not expected_truncated:
+            return False
+        if snapshot_digest is None:
+            return (
+                count == 0
+                and total is None
+                and not truncation["roots"]
+                and not truncation["projection"]
+            )
+        if truncation["roots"]:
+            if total is not None:
+                return False
+        elif total is None:
+            return False
+        if truncation["projection"]:
+            if count != limit or (total is not None and total <= count):
+                return False
+        elif not truncation["roots"] and total != count:
+            return False
+        return True
+
+    @staticmethod
+    def _valid_fabric_attempt_card(
+        value: object,
+        *,
+        prefix: str,
+        receipts: Mapping[str, Mapping[str, Any]],
+        consumed: set[str],
+    ) -> bool:
+        from control_plane import fabric_job_view
+        from control_plane.executive_runtime import AttemptStatus
+
+        if not (
+            type(value) is dict
+            and set(value) == fabric_job_view.ATTEMPT_CARD_KEYS
+            and type(value["attempt_id"]) is str
+            and bool(value["attempt_id"])
+            and type(value["attempt_number"]) is int
+            and value["attempt_number"] >= 1
+            and value["status"] in {member.value for member in AttemptStatus}
+            and (value["started_at"] is None or type(value["started_at"]) is str)
+            and (value["finished_at"] is None or type(value["finished_at"]) is str)
+            and (value["exit_code"] is None or type(value["exit_code"]) is int)
+            and type(value["has_result"]) is bool
+        ):
+            return False
+        error = value["error"]
+        if error is None:
+            return True
+        if type(error) is str:
+            return (
+                len(error) <= fabric_job_view._MAX_DETAIL_CHARS
+                and "\n" not in error
+                and "\r" not in error
+            )
+        if not CeoIngressReadGateway._valid_bounded_text(
+            error,
+            field=f"{prefix}.error",
+            receipts=receipts,
+            consumed=consumed,
+        ):
+            return False
+        preview = error.get("preview")
+        return (
+            type(preview) is str
+            and len(preview) <= fabric_job_view._MAX_DETAIL_CHARS
+            and "\n" not in preview
+            and "\r" not in preview
+        )
+
+    @staticmethod
+    def _valid_fabric_job_card_v2(
+        value: object,
+        *,
+        requested_root: str,
+        root_card: bool,
+        prefix: str,
+        receipts: Mapping[str, Mapping[str, Any]],
+        consumed: set[str],
+        attempts_truncated: bool,
+    ) -> bool:
+        from control_plane import fabric_job_view, mission_workspace
+        from control_plane.executive_runtime import JobStatus
+
+        if type(value) is not dict or set(value) != fabric_job_view.JOB_CARD_KEYS_V2:
+            return False
+        attempts = value["attempts"]
+        latest = value["latest_attempt"]
+        review = value["review"]
+        repair = value["repair"]
+        result = value["result"]
+        acceptance = value["acceptance"]
+        if not (
+            type(value["job_id"]) is str
+            and bool(value["job_id"])
+            and value["status"] in {member.value for member in JobStatus}
+            and value["root_job_id"] == requested_root
+            and type(value["depth"]) is int
+            and value["depth"] >= 0
+            and (
+                value["orchestration_role"] is None
+                or type(value["orchestration_role"]) is str
+            )
+            and (value["plan_step_id"] is None or type(value["plan_step_id"]) is str)
+            and type(value["attempt_count"]) is int
+            and value["attempt_count"] >= 0
+            and type(value["attempt_limit"]) is int
+            and value["attempt_limit"] >= 1
+            and (
+                value["current_attempt_id"] is None
+                or type(value["current_attempt_id"]) is str
+            )
+            and type(attempts) is list
+            and (
+                value["attempt_count"] >= len(attempts)
+                if attempts_truncated
+                else value["attempt_count"] == len(attempts)
+            )
+            and all(
+                CeoIngressReadGateway._valid_fabric_attempt_card(
+                    item,
+                    prefix=f"{prefix}.attempts[{index}]",
+                    receipts=receipts,
+                    consumed=consumed,
+                )
+                for index, item in enumerate(attempts)
+            )
+            and (
+                latest is None
+                or CeoIngressReadGateway._valid_fabric_attempt_card(
+                    latest,
+                    prefix=f"{prefix}.latest_attempt",
+                    receipts=receipts,
+                    consumed=consumed,
+                )
+            )
+            and type(review) is dict
+            and set(review) == {"required", "reviews_job_id", "verdict"}
+            and type(review["required"]) is bool
+            and (
+                review["reviews_job_id"] is None
+                or type(review["reviews_job_id"]) is str
+            )
+            and review["verdict"] in {"approve", "reject", "NOT_YET"}
+            and type(repair) is dict
+            and set(repair) == {"repair_round", "supersedes_job_id"}
+            and (
+                repair["repair_round"] is None
+                or (
+                    type(repair["repair_round"]) is int
+                    and repair["repair_round"] >= 0
+                )
+            )
+            and (
+                repair["supersedes_job_id"] is None
+                or type(repair["supersedes_job_id"]) is str
+            )
+            and mission_workspace._valid_fabric_v2_acceptance(acceptance)
+            and mission_workspace._valid_fabric_v2_review(review)
+        ):
+            return False
+        if root_card:
+            if not (
+                value["job_id"] == requested_root
+                and value["parent_job_id"] is None
+                and value["depth"] == 0
+            ):
+                return False
+        elif not (
+            value["job_id"] != requested_root
+            and type(value["parent_job_id"]) is str
+            and value["depth"] >= 1
+        ):
+            return False
+
+        if type(result) is not dict or set(result) != mission_workspace.RESULT_INPUT_KEYS:
+            return False
+        status = value["status"]
+        if status in fabric_job_view._TERMINAL_EXECUTION_STATES_V2:
+            expected_state = fabric_job_view._TERMINAL_EXECUTION_STATES_V2[status]
+        elif (
+            not attempts
+            and value["current_attempt_id"] is None
+            and value["attempt_count"] == 0
+        ):
+            expected_state = "NOT_STARTED"
+        else:
+            expected_state = "IN_PROGRESS"
+        if result.get("state") != expected_state:
+            return False
+        summary = result.get("summary")
+        if summary is not None and not CeoIngressReadGateway._valid_bounded_text(
+            summary,
+            field=f"{prefix}.result.summary",
+            receipts=receipts,
+            consumed=consumed,
+        ):
+            return False
+        for field in ("artifacts", "errors", "next_actions"):
+            if not CeoIngressReadGateway._valid_bounded_string_list(
+                result.get(field),
+                field=f"{prefix}.result.{field}",
+                receipts=receipts,
+                consumed=consumed,
+            ):
+                return False
+
+        if not attempts:
+            return latest is None
+        return (
+            type(latest) is dict
+            and latest.get("attempt_id") == attempts[-1].get("attempt_id")
+            and latest.get("attempt_number") == attempts[-1].get("attempt_number")
+        )
+
+    @staticmethod
+    def _valid_fabric_root_detail_acquisition(
+        value: object, *, requested_root: str
+    ) -> bool:
+        import re
+        from control_plane import fabric_job_view
+
+        template = fabric_job_view._acquisition_receipt(
+            kind="root_detail", root_job_id=requested_root
+        )
+        if type(value) is not dict or set(value) != set(template):
+            return False
+        truncation = value.get("truncation")
+        provenance = value.get("provenance")
+        snapshot_digest = value.get("snapshot_digest")
+        return (
+            value.get("schema") == template["schema"]
+            and value.get("query")
+            == {"kind": "root_detail", "root_job_id": requested_root}
+            and value.get("owner") == "executive_runtime"
+            and value.get("budgets") == template["budgets"]
+            and (
+                snapshot_digest is None
+                or (
+                    type(snapshot_digest) is str
+                    and re.fullmatch(r"[0-9a-f]{64}", snapshot_digest) is not None
+                )
+            )
+            and type(truncation) is dict
+            and set(truncation)
+            == {"jobs", "attempt_job_ids", "roots", "projection"}
+            and type(truncation["jobs"]) is bool
+            and type(truncation["attempt_job_ids"]) is list
+            and all(
+                type(item) is str and bool(item)
+                for item in truncation["attempt_job_ids"]
+            )
+            and truncation["attempt_job_ids"]
+            == sorted(set(truncation["attempt_job_ids"]))
+            and truncation["roots"] is False
+            and truncation["projection"] is False
+            and type(provenance) is dict
+            and set(provenance) == {"state", "unjoined_job_ids"}
+            and provenance["state"] in {"COMPLETE", "PARTIAL"}
+            and type(provenance["unjoined_job_ids"]) is list
+            and all(
+                type(item) is str and bool(item)
+                for item in provenance["unjoined_job_ids"]
+            )
+            and provenance["unjoined_job_ids"]
+            == sorted(set(provenance["unjoined_job_ids"]))
+            and fabric_job_view._qualified_generation(value.get("generation"))
+            is not None
+        )
+
+    @staticmethod
+    def _valid_fabric_root_detail_envelope(
+        value: object,
+        *,
+        acquisition: Mapping[str, Any],
+        root_present: bool,
+        receipts: Mapping[str, Mapping[str, Any]],
+        consumed: set[str],
+    ) -> bool:
+        from control_plane import fabric_job_view
+
+        if type(value) is not dict:
+            return False
+        if not CeoIngressReadGateway._valid_generated_at(value.get("generated_at")):
+            return False
+
+        armed = value.get("armed")
+        if not (
+            type(armed) is dict
+            and set(armed) == {*fabric_job_view.ARM_KEYS, "source"}
+            and all(
+                armed[key] is None or type(armed[key]) is bool
+                for key in fabric_job_view.ARM_KEYS
+            )
+            and armed["source"] in {"absent", "control.json"}
+        ):
+            return False
+        if armed["source"] == "absent" and any(
+            armed[key] is not None for key in fabric_job_view.ARM_KEYS
+        ):
+            return False
+
+        provenance = acquisition.get("provenance")
+        truncation = acquisition.get("truncation")
+        if type(provenance) is not dict or type(truncation) is not dict:
+            return False
+        acquisition_unjoined = provenance.get("unjoined_job_ids")
+        count = value.get("unjoined_job_count")
+        public_ids = value.get("unjoined_job_ids")
+        if not (
+            type(acquisition_unjoined) is list
+            and type(count) is int
+            and count >= 0
+            and count == len(acquisition_unjoined)
+            and type(public_ids) is list
+            and public_ids
+            == sorted(acquisition_unjoined)[: fabric_job_view.UNJOINED_JOB_ID_LIMIT]
+        ):
+            return False
+        expected_provenance_state = (
+            "PARTIAL"
+            if acquisition.get("snapshot_digest") is None or acquisition_unjoined
+            else "COMPLETE"
+        )
+        if provenance.get("state") != expected_provenance_state:
+            return False
+
+        degraded = value.get("degraded")
+        if type(degraded) is not list:
+            return False
+        degraded_text: list[str] = []
+        for index, item in enumerate(degraded):
+            if not CeoIngressReadGateway._valid_bounded_text(
+                item,
+                field=f"degraded[{index}]",
+                receipts=receipts,
+                consumed=consumed,
+            ):
+                return False
+            degraded_text.append(item if type(item) is str else item["preview"])
+        if degraded_text != sorted(set(degraded_text)):
+            return False
+
+        missingness = value.get("missingness")
+        if type(missingness) is not list:
+            return False
+        seen_missingness = set()
+        missingness_order = []
+        for index, fact in enumerate(missingness):
+            if not (
+                type(fact) is dict
+                and set(fact)
+                == {
+                    "missingness_class",
+                    "target_field",
+                    "producer_owner",
+                    "reason",
+                }
+                and fact["missingness_class"] in fabric_job_view.MISSINGNESS_CLASSES
+                and type(fact["target_field"]) is str
+                and bool(fact["target_field"])
+                and (
+                    fact["producer_owner"] is None
+                    or (
+                        type(fact["producer_owner"]) is str
+                        and bool(fact["producer_owner"])
+                    )
+                )
+                and CeoIngressReadGateway._valid_bounded_text(
+                    fact["reason"],
+                    field=f"missingness[{index}].reason",
+                    receipts=receipts,
+                    consumed=consumed,
+                    allow_empty=False,
+                )
+            ):
+                return False
+            reason = (
+                fact["reason"]
+                if type(fact["reason"]) is str
+                else fact["reason"]["preview"]
+            )
+            key = (
+                fact["missingness_class"],
+                fact["target_field"],
+                fact["producer_owner"] or "",
+                reason,
+            )
+            if key in seen_missingness:
+                return False
+            seen_missingness.add(key)
+            missingness_order.append(key)
+        if missingness_order != sorted(missingness_order):
+            return False
+
+        partial_acquisition = bool(
+            acquisition_unjoined
+            or truncation.get("jobs")
+            or truncation.get("attempt_job_ids")
+        )
+        if root_present:
+            expected_state = (
+                fabric_job_view.PARTIAL
+                if partial_acquisition
+                else fabric_job_view.PROVEN
+            )
+            expected_detail = (
+                "bounded snapshot has omitted rows or unavailable provenance"
+                if partial_acquisition
+                else "the executive runtime database was read; the requested root job was found"
+            )
+        elif acquisition.get("snapshot_digest") is None:
+            expected_state = fabric_job_view.UNSUPPORTED
+            expected_detail = (
+                "the executive runtime database is present but unreadable by this view"
+            )
+        else:
+            expected_state = fabric_job_view.PARTIAL
+            expected_detail = (
+                "the executive runtime database was read; the requested root job is not in it"
+            )
+
+        capability = value.get("capability")
+        if not (
+            type(capability) is dict
+            and set(capability) == {"state", "installed", "version", "detail"}
+            and capability["state"] == expected_state
+            and capability["installed"] is True
+            and capability["version"] is None
+            and CeoIngressReadGateway._valid_exact_narrative(
+                capability["detail"],
+                expected_detail,
+                field="capability.detail",
+                receipts=receipts,
+                consumed=consumed,
+            )
+        ):
+            return False
+
+        def has_fact(
+            missingness_class: str,
+            target_field: str,
+            producer_owner: str | None,
+            reason: str,
+        ) -> bool:
+            for index, fact in enumerate(missingness):
+                if (
+                    fact.get("missingness_class") == missingness_class
+                    and fact.get("target_field") == target_field
+                    and fact.get("producer_owner") == producer_owner
+                    and CeoIngressReadGateway._valid_exact_narrative(
+                        fact.get("reason"),
+                        reason,
+                        field=f"missingness[{index}].reason",
+                        receipts=receipts,
+                        consumed=consumed,
+                    )
+                ):
+                    return True
+            return False
+
+        required = [
+            (
+                "EXCLUDED", "return_path", "wake",
+                "return path disarmed; production_armed=false",
+            ),
+            (
+                "NULL_BY_DESIGN", "runtime.identity", "executive_os",
+                "no in-tree runtime identity artifact is readable by this view",
+            ),
+        ]
+        if root_present:
+            required.append(
+                (
+                    "MISSING_PRODUCER", "acceptance.state", None,
+                    "product acceptance has no producer in this projection",
+                )
+            )
+        if acquisition_unjoined:
+            required.append(
+                (
+                    "MISSING_PRODUCER",
+                    "runtime.acquisition.provenance",
+                    "executive_runtime",
+                    "durable CEO-intent workstream join unavailable for included Jobs",
+                )
+            )
+        if truncation.get("jobs") or truncation.get("attempt_job_ids"):
+            required.append(
+                (
+                    "OMITTED",
+                    "runtime.acquisition.truncation",
+                    "executive_runtime",
+                    "owner acquisition budget omits Jobs or Attempts",
+                )
+            )
+        if not root_present and acquisition.get("snapshot_digest") is None:
+            required.append(
+                (
+                    "MISSING_PRODUCER",
+                    "runtime.jobs",
+                    "executive_runtime",
+                    "runtime unreadable; no job truth is available",
+                )
+            )
+        if not all(has_fact(*fact) for fact in required):
+            return False
+        if partial_acquisition and not degraded:
+            return False
+        return True
+
+    @staticmethod
+    def _valid_fabric_result_v2(
+        value: object, *, arguments: Mapping[str, Any]
+    ) -> bool:
+        import re
+        from control_plane import (
+            executive_orchestration_result as result_owner,
+            fabric_result_projection,
+        )
+        from control_plane.executive_runtime import RUNTIME_READ_OBSERVATION_SCHEMA
+
+        keys = {
+            "schema", "selection", "role", "execution_status", "acceptance",
+            "role_result_digest", "generation", "availability",
+            "content_complete", "review", "counts", "content", "omitted",
+        }
+        if (
+            type(value) is not dict
+            or set(value) != keys
+            or value.get("schema")
+            != fabric_result_projection.FABRIC_ROLE_RESULT_VIEW_SCHEMA
+        ):
+            return False
+
+        digest_re = re.compile(r"[0-9a-f]{64}")
+        source_re = re.compile(r"[0-9a-f]{32}")
+        selection = value.get("selection")
+        if not (
+            type(selection) is dict
+            and set(selection)
+            == {"root_job_id", "job_id", "attempt_id", "result_envelope_digest"}
+            and all(
+                type(selection.get(key)) is str and bool(selection.get(key))
+                for key in ("root_job_id", "job_id", "attempt_id")
+            )
+            and digest_re.fullmatch(selection.get("result_envelope_digest", ""))
+            is not None
+            and all(
+                selection.get(key) == arguments.get(key)
+                for key in (
+                    "root_job_id", "job_id", "attempt_id",
+                    "result_envelope_digest",
+                )
+            )
+        ):
+            return False
+
+        role = value.get("role")
+        if (
+            role not in result_owner.ROLES
+            or value.get("execution_status") != "COMPLETED"
+            or value.get("acceptance") != "NOT_PROJECTED"
+            or type(value.get("role_result_digest")) is not str
+            or digest_re.fullmatch(value["role_result_digest"]) is None
+        ):
+            return False
+
+        generation = value.get("generation")
+        if not (
+            type(generation) is dict
+            and set(generation) == fabric_result_projection._GENERATION_KEYS
+            and generation.get("schema") == RUNTIME_READ_OBSERVATION_SCHEMA
+            and generation.get("state") == "SAME"
+            and type(generation.get("source_identity")) is str
+            and source_re.fullmatch(generation["source_identity"]) is not None
+            and type(generation.get("before")) is int
+            and generation["before"] >= 0
+            and type(generation.get("after")) is int
+            and generation["after"] == generation["before"]
+        ):
+            return False
+
+        availability = value.get("availability")
+        content = value.get("content")
+        omitted = value.get("omitted")
+        if availability == "AVAILABLE":
+            if not (
+                value.get("content_complete") is True
+                and omitted == []
+                and type(content) is dict
+                and set(content) == {"role_result", "summary", "next_actions"}
+                and type(content["role_result"]) is dict
+                and type(content["summary"]) is str
+                and type(content["next_actions"]) is list
+                and all(type(item) is str for item in content["next_actions"])
+            ):
+                return False
+            role_result = content["role_result"]
+            try:
+                if role == "plan":
+                    validated_role_result = result_owner._validate_plan(
+                        role_result,
+                        outer={
+                            "expected_root_job_id": selection["root_job_id"],
+                            "run_id": selection["attempt_id"],
+                        },
+                    )
+                elif role == "work":
+                    validated_role_result = result_owner._validate_work(
+                        role_result, repair=False
+                    )
+                elif role == "repair":
+                    validated_role_result = result_owner._validate_work(
+                        role_result, repair=True
+                    )
+                elif role == "review":
+                    validated_role_result = result_owner._validate_review(
+                        role_result, outer_errors=[]
+                    )
+                else:
+                    validated_role_result = result_owner._validate_aggregation(
+                        role_result, outer_job_id=selection["job_id"]
+                    )
+            except (KeyError, TypeError, ValueError, result_owner.OrchestrationResultError):
+                return False
+            if (
+                validated_role_result != role_result
+                or result_owner.canonical_digest(role_result)
+                != value["role_result_digest"]
+            ):
+                return False
+        elif availability == "CONTENT_OVER_BUDGET":
+            if not (
+                value.get("content_complete") is False
+                and content is None
+                and omitted == ["role_result", "summary", "next_actions"]
+            ):
+                return False
+            role_result = None
+        else:
+            return False
+
+        review = value.get("review")
+        if role == "review":
+            if not (
+                type(review) is dict
+                and set(review)
+                == {
+                    "verdict", "reviewed_job_id", "reviewed_attempt_id",
+                    "reviewed_result_digest", "latest_revision_currentness",
+                }
+                and review["verdict"] in {"approve", "reject"}
+                and type(review["reviewed_job_id"]) is str
+                and bool(review["reviewed_job_id"])
+                and type(review["reviewed_attempt_id"]) is str
+                and bool(review["reviewed_attempt_id"])
+                and type(review["reviewed_result_digest"]) is str
+                and digest_re.fullmatch(review["reviewed_result_digest"]) is not None
+                and review["latest_revision_currentness"] == "UNPROVEN"
+            ):
+                return False
+            if role_result is not None and (
+                review["verdict"] != role_result.get("verdict")
+                or review["reviewed_job_id"] != role_result.get("reviewed_job_id")
+                or review["reviewed_attempt_id"]
+                != role_result.get("reviewed_attempt_id")
+                or review["reviewed_result_digest"]
+                != role_result.get("reviewed_result_digest")
+            ):
+                return False
+        elif review is not None:
+            return False
+
+        counts = value.get("counts")
+        if not (
+            type(counts) is dict
+            and set(counts) == {"findings", "next_actions"}
+            and type(counts["next_actions"]) is int
+            and counts["next_actions"] >= 0
+        ):
+            return False
+        if role_result is not None and (
+            counts["next_actions"] != len(content["next_actions"])
+        ):
+            return False
+
+        findings = counts["findings"]
+        if role == "review":
+            if not (
+                type(findings) is dict
+                and set(findings) == {"total", "blocking", "warning", "info"}
+                and all(
+                    type(findings[key]) is int and findings[key] >= 0
+                    for key in ("total", "blocking", "warning", "info")
+                )
+                and findings["total"]
+                == findings["blocking"] + findings["warning"] + findings["info"]
+            ):
+                return False
+            if role_result is not None:
+                expected = {"total": 0, "blocking": 0, "warning": 0, "info": 0}
+                for finding in role_result["findings"]:
+                    expected["total"] += 1
+                    expected[finding["severity"]] += 1
+                if findings != expected:
+                    return False
+        elif findings is not None:
+            return False
+        return True
+
+    @classmethod
+    def _valid_fabric_data(
+        cls,
+        value: object,
+        *,
+        arguments: Mapping[str, Any],
+        bounded: object = (),
+    ) -> bool:
+        from control_plane import fabric_job_view
+
+        if type(value) is not dict:
+            return False
+        view = arguments.get("view")
+        family = cls._fabric_schema_family()
+
+        # V2/V3 is the acquisition-bound contract that owns the new bounding
+        # semantics.  Direct helper callers historically omit the argument, so
+        # the empty tuple remains an internal synonym for no outer receipts.
+        if family == "v2":
+            receipt_list = [] if bounded == () else bounded
+            if not cls._valid_bounding_receipts(receipt_list):
+                return False
+            receipts = {item["field"]: item for item in receipt_list}
+            consumed: set[str] = set()
+        else:
+            receipt_list = bounded
+            receipts = {}
+            consumed = set()
+
+        if view == "roots":
+            if family == "v2":
+                # The current bounded root-list owner has no authenticated leaf
+                # replacement contract in this gateway.  Reject any orphan
+                # receipt instead of pretending it was consumed.
+                return (
+                    receipt_list == []
+                    and cls._valid_fabric_root_list_v2(
+                        value, arguments=arguments
+                    )
+                )
+            if family != "v1":
+                return False
+            # Preserve the frozen historical V1 reader exactly; acquisition-
+            # bound row validation is a V2/V3 contract only.
+            return (
+                value.get("schema") == fabric_job_view.ROOT_LIST_SCHEMA
+                and set(value) == fabric_job_view.ROOT_LIST_KEYS
+                and type(value.get("roots")) is list
+                and type(value.get("count")) is int
+                and value["count"] == len(value["roots"])
+                and type(value.get("truncated")) is bool
+            )
+        if view == "root":
+            schema = value.get("schema")
+            expected_schema = (
+                fabric_job_view.SCHEMA
+                if family == "v1"
+                else fabric_job_view.SCHEMA_V2
+                if family == "v2"
+                else None
+            )
+            if (
+                expected_schema is None
+                or schema != expected_schema
+                or set(value) != fabric_job_view.OUTPUT_KEYS
+                or type(value.get("children")) is not list
+                or type(value.get("unjoined_job_ids")) is not list
+            ):
+                return False
+            requested = arguments.get("root_job_id")
+            root = value.get("root")
+            if family == "v1":
+                if root is not None and (
+                    type(root) is not dict
+                    or root.get("job_id") != requested
+                    or root.get("root_job_id") != requested
+                ):
+                    return False
+                return not any(
+                    type(child) is not dict
+                    or child.get("root_job_id") != requested
+                    for child in value["children"]
+                )
+
+            runtime = value.get("runtime")
+            acquisition = (
+                runtime.get("acquisition") if type(runtime) is dict else None
+            )
+            if not (
+                type(runtime) is dict
+                and set(runtime)
+                == {"root", "db_present", "identity", "acquisition"}
+                and runtime["root"] is None
+                and runtime["db_present"] is True
+                and runtime["identity"] is None
+                and cls._valid_fabric_root_detail_acquisition(
+                    acquisition, requested_root=requested
+                )
+            ):
+                return False
+            if not cls._valid_fabric_root_detail_envelope(
+                value,
+                acquisition=acquisition,
+                root_present=root is not None,
+                receipts=receipts,
+                consumed=consumed,
+            ):
+                return False
+
+            truncated_ids = set(
+                acquisition["truncation"]["attempt_job_ids"]
+            )
+            if root is not None and not cls._valid_fabric_job_card_v2(
+                root,
+                requested_root=requested,
+                root_card=True,
+                prefix="root",
+                receipts=receipts,
+                consumed=consumed,
+                attempts_truncated=root.get("job_id") in truncated_ids,
+            ):
+                return False
+            for index, child in enumerate(value["children"]):
+                if not cls._valid_fabric_job_card_v2(
+                    child,
+                    requested_root=requested,
+                    root_card=False,
+                    prefix=f"children[{index}]",
+                    receipts=receipts,
+                    consumed=consumed,
+                    attempts_truncated=(
+                        type(child) is dict
+                        and child.get("job_id") in truncated_ids
+                    ),
+                ):
+                    return False
+
+            # The canonical Mission validator is retained as the owning closed
+            # shape check.  Only narrative leaves already authenticated above
+            # are projected to their canonical preview strings for that type
+            # validator; identity/reference fields never reach this conversion
+            # because the gateway rejects them first.
+            from control_plane import mission_workspace
+            try:
+                mission_workspace.validate_mission_workspace_v2_input(
+                    fabric_view=cls._fabric_preview_projection(value)
+                )
+            except (TypeError, ValueError):
+                return False
+            return consumed == set(receipts)
+
+        if view == "result":
+            # The owner-specific result read deliberately bypasses generic
+            # bound_document and therefore always returns bounded: [].
+            return (
+                family == "v2"
+                and receipt_list == []
+                and cls._valid_fabric_result_v2(value, arguments=arguments)
+            )
+        return False
+
+    @staticmethod
+    def _valid_intent_receipt(
+        value: object, *, arguments: Mapping[str, Any]
+    ) -> bool:
+        import re
+        from control_plane import ceo_intent
+        from control_plane.executive_runtime import JobStatus
+
+        if type(value) is not dict:
+            return False
+        schema = value.get("schema")
+        base_keys = {
+            "schema", "intent_id", "fingerprint", "job_id", "status",
+            "accepted", "duplicate", "dispatched", "authority",
+            "grounding", "created_at_ms",
+        }
+        keys = set(value)
+        if schema in {ceo_intent.RECEIPT_SCHEMA, ceo_intent.RECEIPT_SCHEMA_SERVICE}:
+            if keys != base_keys:
+                return False
+        elif schema == ceo_intent.RECEIPT_SCHEMA_V2:
+            if keys not in (base_keys, base_keys | {"work_ref"}):
+                return False
+        elif schema == ceo_intent.RECEIPT_SCHEMA_PRINCIPAL:
+            if keys != base_keys | {"principal", "request_ref"}:
+                return False
+        else:
+            return False
+        authority = value.get("authority")
+        grounding = value.get("grounding")
+        if not (
+            type(value.get("intent_id")) is str
+            and value["intent_id"] == arguments.get("intent_id")
+            and ceo_intent.INTENT_ID_RE.fullmatch(value["intent_id"]) is not None
+            and type(value.get("fingerprint")) is str
+            and re.fullmatch(r"[0-9a-f]{64}", value["fingerprint"]) is not None
+            and type(value.get("job_id")) is str
+            and re.fullmatch(r"JOB-[0-9]{1,9}", value["job_id"]) is not None
+            and value.get("status") in {member.value for member in JobStatus}
+            and value.get("accepted") is True
+            and type(value.get("duplicate")) is bool
+            and value.get("dispatched") is False
+            and type(value.get("created_at_ms")) is int
+            and value["created_at_ms"] >= 0
+            and type(authority) is dict
+            and set(authority) == {"requested", "policy_sha256", "authority_level"}
+            and type(authority["requested"]) is list
+            and all(type(item) is str for item in authority["requested"])
+            and type(authority["policy_sha256"]) is str
+            and re.fullmatch(r"[0-9a-f]{64}", authority["policy_sha256"]) is not None
+            and type(authority["authority_level"]) is str
+            and re.fullmatch(r"A[0-7]", authority["authority_level"]) is not None
+            and type(grounding) is dict
+            and set(grounding) <= {"mastermind_sha", "macro_sha", "boot_packet_schema"}
+            and {"mastermind_sha", "macro_sha"} <= set(grounding)
+            and all(
+                type(grounding[key]) is str
+                and ceo_intent.SHA_RE.fullmatch(grounding[key]) is not None
+                for key in ("mastermind_sha", "macro_sha")
+            )
+            and (
+                "boot_packet_schema" not in grounding
+                or (
+                    type(grounding["boot_packet_schema"]) is str
+                    and bool(grounding["boot_packet_schema"])
+                    and len(grounding["boot_packet_schema"]) <= 128
+                )
+            )
+        ):
+            return False
+        if schema == ceo_intent.RECEIPT_SCHEMA_V2:
+            work_ref = value.get("work_ref")
+            return (
+                work_ref is None
+                or (
+                    type(work_ref) is str
+                    and re.fullmatch(r"WS:[A-Z0-9][A-Za-z0-9._-]{1,63}", work_ref)
+                    is not None
+                )
+            )
+        if schema == ceo_intent.RECEIPT_SCHEMA_PRINCIPAL:
+            from control_plane.coo_principal_envelope import PrincipalAdmissionContext
+            from control_plane.coo_principal_request import principal_intent_id
+
+            principal = value["principal"]
+            request_ref = value["request_ref"]
+            if type(principal) is not dict or set(principal) != {
+                "seat", "work_ref", "principal_binding_digest",
+                "mission_authority_ref", "authority_generation_digest",
+            }:
+                return False
+            if principal.get("seat") != "coo":
+                return False
+            try:
+                PrincipalAdmissionContext(
+                    work_ref=principal["work_ref"],
+                    principal_binding_digest=principal["principal_binding_digest"],
+                    mission_authority_ref=principal["mission_authority_ref"],
+                    authority_generation_digest=principal["authority_generation_digest"],
+                )
+                return principal_intent_id(request_ref) == value["intent_id"]
+            except (KeyError, TypeError, ValueError):
+                return False
+        return True
+
+    @classmethod
+    def _valid_success_data(
+        cls,
+        value: object,
+        *,
+        tool: str,
+        arguments: Mapping[str, Any],
+        bounded: object,
+    ) -> bool:
+        if tool == "executive_state":
+            return cls._valid_state_data(value, bounded=bounded)
+        if tool == "executive_inbox":
+            return cls._valid_inbox_data(value, bounded=bounded)
+        if tool == "executive_job":
+            return cls._valid_job_data(
+                value, arguments=arguments, bounded=bounded
+            )
+        if tool == "executive_fabric":
+            return cls._valid_fabric_data(
+                value, arguments=arguments, bounded=bounded
+            )
+        if tool == "ceo_intent_status":
+            return cls._valid_intent_receipt(value, arguments=arguments)
+        return False
+
+    def _is_canonical_read_result(
+        self, result: object, *, tool: str, arguments: Mapping[str, Any]
+    ) -> bool:
+        from integrations.executive_mcp.schemas import (
+            ERROR_CODES,
+            RESULT_SCHEMA,
+            ServerMode,
+            canonical_json,
+        )
+
+        if not isinstance(result, dict) or set(result) != self._RESULT_FIELDS:
+            return False
+        try:
+            canonical_json(result)
+        except (TypeError, ValueError):
+            return False
+        if (
+            result["schema"] != RESULT_SCHEMA
+            or result["tool"] != tool
+            or type(result["ok"]) is not bool
+            or result["server_version"] != self._result_server_version()
+            or result["mode"] != ServerMode.READONLY.value
+            or not self._valid_generated_at(result["generated_at"])
+            or (
+                result["ok"]
+                and not self._valid_grounding(result["grounding"], tool=tool)
+            )
+            or (
+                not result["ok"]
+                and result["grounding"] != {}
+            )
+            or not isinstance(result["degraded"], list)
+            or not all(isinstance(item, str) for item in result["degraded"])
+            or not self._valid_bounding_receipts(result["bounded"])
+        ):
+            return False
+        if result["ok"]:
+            return (
+                result["error"] is None
+                and self._valid_success_data(
+                    result["data"],
+                    tool=tool,
+                    arguments=arguments,
+                    bounded=result["bounded"],
+                )
+            )
+        error = result["error"]
+        return (
+            result["data"] is None
+            and isinstance(error, dict)
+            and set(error).issubset({"code", "message", "intent_id"})
+            and {"code", "message"}.issubset(error)
+            and isinstance(error["code"], str)
+            and error["code"] in ERROR_CODES
+            and isinstance(error["message"], str)
+            and (
+                "intent_id" not in error
+                or isinstance(error["intent_id"], str)
+            )
+        )
+
+    @classmethod
+    def _classified_upstream_failure(
+        cls, upstream_code: str
+    ) -> tuple[str, str]:
+        code = "backend_unavailable"
+        if upstream_code in cls._UNAVAILABLE_UPSTREAM_CODES:
+            message = "Executive reader is unavailable in the installed backend."
+        else:
+            code = "backend_refused"
+            if upstream_code == "authority_refused":
+                message = (
+                    "Executive reader permission was refused by the installed backend."
+                )
+            else:
+                message = "Executive reader request was refused by the installed backend."
+        return code, (
+            message + " Read-only describes this read operation; submission and "
+            "execution readiness were not observed."
+        )
+
+    @staticmethod
+    def _read_failure(response: CeoIngressResponse) -> tuple[str, str]:
+        """Classify one read boundary without exposing backend text or arm state."""
+        code = "backend_unavailable"
+        message = "Executive reader returned an invalid response."
+        unanswered = (
+            response.ok is None and response.result is None and response.error is None
+        )
+        if response.transport == TRANSPORT_NOT_SENT and unanswered:
+            message = "Executive reader request was not sent."
+        elif response.transport == TRANSPORT_SENT_UNKNOWN and unanswered:
+            message = (
+                "A trustworthy Executive reader response was unavailable "
+                "after the read request was attempted."
+            )
+        elif (
+            response.transport == TRANSPORT_SENT_OK and response.ok is False
+            and response.result is None and isinstance(response.error, dict)
+            and isinstance(response.error.get("code"), str)
+            and response.error["code"] in ceo_ingress.ERROR_CODES
+        ):
+            return CeoIngressReadGateway._classified_upstream_failure(
+                response.error["code"]
+            )
+        return code, (
+            message + " Read-only describes this read operation; submission and "
+            "execution readiness were not observed."
+        )
+
     async def call(self, name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
         from datetime import datetime, timezone
         from integrations.executive_mcp.schemas import (
-            GatewayError, RESULT_SCHEMA, ServerMode, error_envelope,
+            GatewayError, ServerMode, error_envelope,
         )
         try:
             if name not in self._READ_TOOL_NAMES:
@@ -551,11 +2984,19 @@ class CeoIngressReadGateway:
                 "tool": name, "arguments": validated,
             })
             result = response.result
-            if (response.transport == TRANSPORT_SENT_OK and response.ok is True
-                    and isinstance(result, dict) and result.get("schema") == RESULT_SCHEMA
-                    and result.get("tool") == name and type(result.get("ok")) is bool):
-                return result
-            raise GatewayError("backend_unavailable", "installed Executive reader is unavailable")
+            if (
+                response.transport == TRANSPORT_SENT_OK
+                and response.ok is True
+                and self._is_canonical_read_result(
+                    result, tool=name, arguments=validated
+                )
+            ):
+                if result["ok"]:
+                    return result
+                raise GatewayError(
+                    *self._classified_upstream_failure(result["error"]["code"])
+                )
+            raise GatewayError(*self._read_failure(response))
         except GatewayError as exc:
             return error_envelope(
                 name, mode=ServerMode.READONLY,
@@ -566,6 +3007,15 @@ class CeoIngressReadGateway:
 
 class WebCeoCeoIngressReadGateway(CeoIngressReadGateway):
     """Versioned Web-CEO installed reader; legacy v1 remains unchanged."""
+
+    @classmethod
+    def _fabric_schema_family(cls) -> str:
+        return "v1"
+
+    def _result_server_version(self) -> str:
+        from integrations.executive_mcp.web_ceo import WEB_CEO_SERVER_VERSION
+
+        return WEB_CEO_SERVER_VERSION
 
     _READ_TOOL_NAMES = (
         "executive_state",
@@ -587,7 +3037,16 @@ class WebCeoCeoIngressReadGateway(CeoIngressReadGateway):
 class WebCeoV2CeoIngressReadGateway(WebCeoCeoIngressReadGateway):
     """Static Web-CEO v2 installed reader (App-read v3); earlier readers frozen."""
 
+    @classmethod
+    def _fabric_schema_family(cls) -> str:
+        return "v2"
+
     _READ_SCHEMA = ceo_ingress.APP_READ_SCHEMA_V3
+
+    def _result_server_version(self) -> str:
+        from integrations.executive_mcp.web_ceo import WEB_CEO_V2_SERVER_VERSION
+
+        return WEB_CEO_V2_SERVER_VERSION
 
     def _validate_arguments(self, name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
         from integrations.executive_mcp.web_ceo import (
