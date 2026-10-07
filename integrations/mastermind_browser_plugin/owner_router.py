@@ -189,8 +189,89 @@ class BrowserOwnerRouter:
         )
 
 
+class HostRoutedBrowserOwnerRouter(BrowserOwnerRouter):
+    """Resolve the already-owned backend from each caller-bound signed tab.
+
+    The resolver is an injected owner seam. This class stores no host table,
+    endpoint map, placement preference, lease, browser registry, or retry state.
+    """
+
+    def __init__(
+        self,
+        *,
+        codec: BrowserTabRefCodec,
+        clock_ms,
+        caller_binding,
+        inventory_owner: BrowserInventoryPort,
+        owner_resolver,
+    ) -> None:
+        if type(codec) is not BrowserTabRefCodec:
+            raise TypeError("signed tab codec is required")
+        if (
+            not callable(clock_ms)
+            or not callable(caller_binding)
+            or not callable(owner_resolver)
+        ):
+            raise TypeError("router callbacks are required")
+        if any(
+            not callable(getattr(inventory_owner, method, None))
+            for method in ("browser_fleet", "browser_tabs")
+        ):
+            raise TypeError("existing Browser inventory port is required")
+        self._codec = codec
+        self._clock_ms = clock_ms
+        self._caller_binding = caller_binding
+        self._inventory = inventory_owner
+        self._owner_resolver = owner_resolver
+
+    @staticmethod
+    def _validate_backend_owner(owner: Any) -> BrowserTabBackendPort:
+        methods = (
+            "browser_snapshot",
+            "browser_screenshot",
+            "prepare_browser_action",
+            "run_browser_action",
+            "reconcile_browser_action",
+        )
+        if any(not callable(getattr(owner, method, None)) for method in methods):
+            raise OwnerRefused("BACKEND_ROUTE_UNAVAILABLE")
+        return owner
+
+    async def _tab_owner(
+        self,
+        caller: Any,
+        tab_ref: object,
+        *,
+        require_fresh: bool,
+    ) -> BrowserTabBackendPort:
+        binding = await self._caller(caller)
+        try:
+            tab = self._codec.decode(
+                tab_ref,
+                now_ms=self._now(),
+                require_fresh=require_fresh,
+            )
+        except BrowserTabRefError as exc:
+            raise OwnerRefused(str(exc)) from exc
+        if (
+            tab.subject_digest != binding.subject_digest
+            or tab.client_ref != binding.client_ref
+            or tab.resource != binding.resource
+        ):
+            raise OwnerRefused("CALLER_BINDING_CHANGED")
+        try:
+            owner = self._owner_resolver(caller, tab)
+            owner = await _maybe(owner)
+        except OwnerRefused:
+            raise
+        except Exception as exc:
+            raise OwnerRefused("BACKEND_ROUTE_UNAVAILABLE") from exc
+        return self._validate_backend_owner(owner)
+
+
 __all__ = [
     "BrowserInventoryPort",
     "BrowserOwnerRouter",
     "BrowserTabBackendPort",
+    "HostRoutedBrowserOwnerRouter",
 ]
