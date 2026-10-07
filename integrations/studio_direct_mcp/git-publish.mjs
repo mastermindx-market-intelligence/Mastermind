@@ -406,7 +406,16 @@ export function createGitPublisher(config, dependencies = {}) {
       git(workspacePath, ['rev-parse', '--show-toplevel']),
       git(workspacePath, ['symbolic-ref', '--quiet', '--short', 'HEAD']),
       git(workspacePath, ['rev-parse', 'HEAD']),
-      git(workspacePath, ['status', '--porcelain=v1', '--untracked-files=all']),
+      // Match the managed-workspace owner's read-only observation envelope.
+      // Status does not need credential helpers or system/global Git policy, and
+      // optional locks must not rewrite the shared worktree index.
+      git(workspacePath, ['status', '--porcelain=v1', '--untracked-files=all'], {
+        envExtra: {
+          GIT_CONFIG_GLOBAL: '/dev/null',
+          GIT_CONFIG_NOSYSTEM: '1',
+          GIT_OPTIONAL_LOCKS: '0',
+        },
+      }),
       remoteBinding ? Promise.resolve({stdout: remoteBinding.remoteUrl}) : git(workspacePath, ['remote', 'get-url', 'origin']),
     ]);
     const top = await realpath(oneLine(topOut, 'workspace top level'));
