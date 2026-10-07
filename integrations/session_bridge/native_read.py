@@ -133,12 +133,20 @@ class NativeReplyReader:
 
     async def __call__(self, principal, arguments: Mapping[str, Any]) -> dict[str, Any]:
         try:
-            if (not isinstance(arguments, Mapping) or set(arguments) != {"read_ref"}
-                    or not isinstance(arguments["read_ref"], str)
-                    or _ID.fullmatch(arguments["read_ref"]) is None):
+            if not isinstance(arguments, Mapping) or set(arguments) not in (
+                    {"read_ref"}, {"operation_key"}):
+                raise ValueError
+            field = next(iter(arguments))
+            if not isinstance(arguments[field], str) or _ID.fullmatch(arguments[field]) is None:
                 raise ValueError
             current = self._current_principal(principal)
-            binding, context, snapshot = await self._resolve(current, arguments["read_ref"])
+            read_ref = arguments.get("read_ref")
+            if field == "operation_key":
+                # Runtime owns this join. Do not derive a public reference, bind
+                # a request, revive a target or invoke any continuation owner.
+                read_ref = await _await(self._resolver.resolve_operation_read_ref(
+                    principal=current, operation_key=arguments[field]))
+            binding, context, snapshot = await self._resolve(current, read_ref)
             response = await self._service_call(self._socket_path, {
                 "version": CONTROL_VERSION_V2, "operation": "read_thread",
                 "args": {"context": context, "thread_ts": binding.thread_ts}})
@@ -171,7 +179,12 @@ class NativeReplyReader:
                         ("actor_ref", "applies_to", "work_ref", "commission_ref", "session_ref"))):
                 raise ValueError
             refreshed = self._current_principal(principal)
-            _, _, after = await self._resolve(refreshed, arguments["read_ref"])
+            _, _, after = await self._resolve(refreshed, read_ref)
+            if field == "operation_key":
+                recovered = await _await(self._resolver.resolve_operation_read_ref(
+                    principal=refreshed, operation_key=arguments[field]))
+                if recovered != read_ref:
+                    raise ValueError
             self._current_principal(principal)
             if after != snapshot:
                 raise ValueError
@@ -180,6 +193,8 @@ class NativeReplyReader:
                 "message_key": message["message_key"], "fingerprint": message["fingerprint"],
                 "text": message["body"]["completed"], "next_step": message["body"]["next"],
                 "primary_ts": primary_ts, "reply_committed": True, "parent_consumed": False}
+            if field == "operation_key":
+                result["operation_key"] = arguments[field]
             if len(_canonical(result).encode("ascii")) > 16384:
                 raise ValueError
             return result

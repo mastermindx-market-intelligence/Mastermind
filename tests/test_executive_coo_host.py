@@ -415,3 +415,25 @@ def test_guard_rereads_delegation_after_workspace_acquisition(tmp_path, monkeypa
         return mandate.mission_doc()
     monkeypatch.setattr(host.workspace, "read_mission_for_work_ref", moved)
     with pytest.raises(ValueError): host.guard(envelope)
+
+
+def test_control_coo_arming_accepts_web_ceo_v3_without_widening_other_profiles():
+    from ops.executive_os.coo_principal_host import validate_control_coo
+    from integrations.executive_mcp.web_ceo import WEB_CEO_V2_PROFILE
+    from integrations.executive_mcp.web_ceo_v3 import WEB_CEO_V3_PROFILE
+
+    required = {
+        "workspace_acquisition": {},
+        "workspace_resource_policy": {},
+        "workspace_control_room": {},
+        "ceo_ingress_app_peer_uid": 458,
+        "coo_principal_armed": True,
+    }
+    for profile in (WEB_CEO_V2_PROFILE, WEB_CEO_V3_PROFILE):
+        raw = dict(required, executive_mcp_profile=profile)
+        assert validate_control_coo(raw) is True
+
+    for profile in ("legacy", "web_ceo_v1", "personal_read"):
+        raw = dict(required, executive_mcp_profile=profile)
+        with pytest.raises(ValueError):
+            validate_control_coo(raw)

@@ -2,6 +2,7 @@
 from dataclasses import replace
 from types import SimpleNamespace
 import inspect
+import signal
 
 import pytest
 
@@ -123,3 +124,240 @@ def test_worker_account_must_match_canonical_slot_uid(monkeypatch):
         pw_uid=450 if name == control.CONTROL_USER else 999))
     refused(host, 'service_uid_process_unknown')
     assert calls == []
+
+
+def test_control_uid_quiesce_service_precondition_is_observe_only(monkeypatch):
+    monkeypatch.setattr(
+        control.ProductionArmHost,
+        "_loaded_observe_only",
+        lambda _self, label: label == control.CONTROL_LABEL,
+    )
+    monkeypatch.setattr(
+        control.ProductionArmHost,
+        "_stop_services_for_admission",
+        lambda _self: pytest.fail("quiesce precondition must not stop services"),
+    )
+    monkeypatch.setattr(
+        control.os, "kill", lambda *_args: pytest.fail("quiesce precondition must not signal")
+    )
+    with pytest.raises(control.ArmAdmissionError) as error:
+        control.ProductionArmHost().require_services_already_stopped()
+    assert error.value.code == "services_not_stopped"
+
+
+@pytest.mark.parametrize("returncode", [1, 5, 64, 77])
+def test_control_uid_quiesce_service_precondition_refuses_launchd_read_error(
+    monkeypatch, returncode
+):
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(tuple(argv))
+        return SimpleNamespace(returncode=returncode)
+
+    monkeypatch.setattr(control.subprocess, "run", run)
+    monkeypatch.setattr(
+        control.ProductionArmHost,
+        "_stop_services_for_admission",
+        lambda _self: pytest.fail("quiesce precondition must not stop services"),
+    )
+    monkeypatch.setattr(
+        control.os, "kill", lambda *_args: pytest.fail("quiesce precondition must not signal")
+    )
+
+    with pytest.raises(control.ArmAdmissionError) as error:
+        control.ProductionArmHost().require_services_already_stopped()
+
+    assert error.value.code == "services_gate_failed"
+    assert calls == [("/bin/launchctl", "print", f"system/{control.CONTROL_LABEL}")]
+
+
+def test_control_uid_quiesce_service_precondition_accepts_only_proven_absence(monkeypatch):
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(tuple(argv))
+        return SimpleNamespace(returncode=113)
+
+    monkeypatch.setattr(control.subprocess, "run", run)
+    control.ProductionArmHost().require_services_already_stopped()
+
+    assert calls == [
+        ("/bin/launchctl", "print", f"system/{control.CONTROL_LABEL}"),
+        ("/bin/launchctl", "print", f"system/{control.WORKER_LABEL}"),
+    ]
+
+
+class _QuiesceCliHost:
+    def __init__(self):
+        self.calls = []
+
+    def effective_uid(self):
+        self.calls.append("effective_uid")
+        return 0
+
+    def require_exact_install(self, expected_sha):
+        self.calls.append("require_exact_install")
+        return expected_sha
+
+    def validate_acceptance(self, _expected_sha):
+        self.calls.append("validate_acceptance")
+        return "accepted"
+
+    def load_unarmed_configs(self, _expected_sha):
+        self.calls.append("load_unarmed_configs")
+        return object()
+
+    def require_runtime_quiescent(self, _configs):
+        self.calls.append("require_runtime_quiescent")
+
+    def require_services_already_stopped(self):
+        self.calls.append("require_services_already_stopped")
+        raise control.ArmAdmissionError("services_not_stopped")
+
+    def require_transaction_absent(self):
+        pytest.fail("transaction gate must not follow failed service precondition")
+
+    def quiesce_control_uid_for_arm(self):
+        pytest.fail("quiesce must not run when a fixed service is loaded")
+
+    def require_service_uids_quiescent(self):
+        pytest.fail("post-quiescence proof must not run after refusal")
+
+
+def test_control_uid_quiesce_cli_refuses_loaded_service_before_any_quiesce(capsys):
+    host = _QuiesceCliHost()
+    code = control.main(
+        ["arm-quiesce-control-uid", "--expected-sha", "a" * 40],
+        host=host,
+    )
+    assert code == 2
+    assert "services_not_stopped" in capsys.readouterr().out
+    assert host.calls == [
+        "effective_uid",
+        "require_exact_install",
+        "validate_acceptance",
+        "load_unarmed_configs",
+        "require_runtime_quiescent",
+        "require_services_already_stopped",
+    ]
+
+
+def test_control_uid_quiesce_signals_only_fixed_control_principal(monkeypatch):
+    state = {450: [101, 102], 451: [123]}
+    calls = []
+    monkeypatch.setattr(
+        control.pwd, "getpwnam",
+        lambda name: SimpleNamespace(pw_uid=450 if name == control.CONTROL_USER else 451),
+    )
+
+    def processes(uid):
+        calls.append(("processes", uid))
+        return tuple(state[uid])
+
+    def kill(pid, signum):
+        calls.append(("kill", pid, signum))
+        assert pid in state[450]
+        assert pid not in state[451]
+        state[450].remove(pid)
+
+    monkeypatch.setattr(broker, "_ps_pids_for_uid", processes)
+    monkeypatch.setattr(control.os, "kill", kill)
+    monkeypatch.setattr(control.time, "sleep", lambda _seconds: None)
+
+    signalled = control.ProductionArmHost().quiesce_control_uid_for_arm()
+
+    assert signalled == (101, 102)
+    assert state == {450: [], 451: [123]}
+    assert not any(call[:2] == ("processes", 451) for call in calls)
+    assert [(call[1], call[2]) for call in calls if call[0] == "kill"] == [
+        (101, signal.SIGTERM),
+        (102, signal.SIGTERM),
+    ]
+
+
+def test_control_uid_quiesce_is_read_only_replay_when_already_empty(monkeypatch):
+    killed = []
+    monkeypatch.setattr(
+        control.pwd, "getpwnam", lambda _name: SimpleNamespace(pw_uid=450)
+    )
+    monkeypatch.setattr(broker, "_ps_pids_for_uid", lambda uid: ())
+    monkeypatch.setattr(control.os, "kill", lambda pid, signum: killed.append((pid, signum)))
+
+    assert control.ProductionArmHost().quiesce_control_uid_for_arm() == ()
+    assert killed == []
+
+
+def test_control_uid_quiesce_escalates_to_sigkill_and_proves_absence(monkeypatch):
+    live = [321]
+    signals = []
+    monkeypatch.setattr(
+        control.pwd, "getpwnam", lambda _name: SimpleNamespace(pw_uid=450)
+    )
+    monkeypatch.setattr(broker, "_ps_pids_for_uid", lambda uid: tuple(live))
+
+    def kill(pid, signum):
+        signals.append(signum)
+        if signum == signal.SIGKILL:
+            live.clear()
+
+    monkeypatch.setattr(control.os, "kill", kill)
+    monkeypatch.setattr(control.time, "sleep", lambda _seconds: None)
+
+    signalled = control.ProductionArmHost().quiesce_control_uid_for_arm()
+
+    assert signalled == (321,)
+    assert signal.SIGTERM in signals
+    assert signal.SIGKILL in signals
+    assert live == []
+
+
+def test_control_uid_quiesce_refuses_if_process_survives_both_signals(monkeypatch):
+    monkeypatch.setattr(
+        control.pwd, "getpwnam", lambda _name: SimpleNamespace(pw_uid=450)
+    )
+    monkeypatch.setattr(broker, "_ps_pids_for_uid", lambda uid: (456,))
+    monkeypatch.setattr(control.os, "kill", lambda _pid, _signum: None)
+    monkeypatch.setattr(control.time, "sleep", lambda _seconds: None)
+
+    with pytest.raises(control.ArmAdmissionError) as error:
+        control.ProductionArmHost().quiesce_control_uid_for_arm()
+
+    assert error.value.code == "service_uid_process_live"
+
+
+def test_control_uid_quiesce_refuses_invalid_process_identity(monkeypatch):
+    monkeypatch.setattr(
+        control.pwd, "getpwnam", lambda _name: SimpleNamespace(pw_uid=450)
+    )
+    monkeypatch.setattr(broker, "_ps_pids_for_uid", lambda uid: (0,))
+
+    with pytest.raises(control.ArmAdmissionError) as error:
+        control.ProductionArmHost().quiesce_control_uid_for_arm()
+
+    assert error.value.code == "service_uid_process_unknown"
+
+
+def test_control_uid_quiesce_cli_has_no_selectable_target_or_signal():
+    parser = control._parser()
+    sha = "a" * 40
+    with pytest.raises(SystemExit):
+        parser.parse_args(
+            [
+                "arm-quiesce-control-uid",
+                "--expected-sha",
+                sha,
+                "--uid",
+                "450",
+            ]
+        )
+    with pytest.raises(SystemExit):
+        parser.parse_args(
+            [
+                "arm-quiesce-control-uid",
+                "--expected-sha",
+                sha,
+                "--signal",
+                "KILL",
+            ]
+        )

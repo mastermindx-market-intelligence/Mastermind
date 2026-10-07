@@ -1,0 +1,3140 @@
+{
+  "architecture": "arm64",
+  "capability_grants": {
+    "mutations": {
+      "discovery": {
+        "exit_code": 1,
+        "failed_cases": [
+          "matches exact source grant and filters ungranted tools",
+          "projection mutation cannot widen already compiled permission",
+          "truthy and asynchronous host decisions cannot authorize anything"
+        ],
+        "killed": true,
+        "log_sha256": "461f11deec0947a17a96f8d6ac8081a5d8ac62a8f4b02c78b63f55f988d7fada",
+        "mutant_sha256": "346de9a8134d784246b054c43f808b5902129a8b234594365d943448d3d7d187",
+        "passed": 15,
+        "tests": 18
+      },
+      "dispatch": {
+        "exit_code": 1,
+        "failed_cases": [
+          "host revocation and both cancellation signals refuse dispatch",
+          "matches exact source grant and filters ungranted tools"
+        ],
+        "killed": true,
+        "log_sha256": "28c9d22d399c4c31f25d33c88a8354f53720bb185969f92c15a379d7993e7c08",
+        "mutant_sha256": "cd6ef10a3c66050c4e4fc9e659b35a28e297bd1178208e668d6334c5ce35a1c1",
+        "passed": 16,
+        "tests": 18
+      },
+      "schema": {
+        "exit_code": 1,
+        "failed_cases": [
+          "refuses changed annotations",
+          "refuses changed execution policy",
+          "refuses changed input schema",
+          "refuses changed missing required tool",
+          "refuses changed output schema"
+        ],
+        "killed": true,
+        "log_sha256": "5d8758bb2d7a994e17a4439a7be53cef65eed5cd79b0d9ffe134666987146ccb",
+        "mutant_sha256": "146d6a83658cbdd8cff4fa5875ac96a3db0001442c78c1870e4cf8f5149ace8d",
+        "passed": 13,
+        "tests": 18
+      },
+      "target": {
+        "exit_code": 1,
+        "failed_cases": [
+          "HTTPS target is compared exactly, not just by hostname",
+          "exact target must match before startup"
+        ],
+        "killed": true,
+        "log_sha256": "f272aa43bb0c68a894273a2fddd54b690ed68a12315c0c6c9335e162e3b94513",
+        "mutant_sha256": "0e4d586dc1eb73a5b9553a0d3ddac6ec2a351e8e6b3d5b059eefd7c275ad4a39",
+        "passed": 16,
+        "tests": 18
+      }
+    },
+    "native_artifact_scenarios": {
+      "missing-tool": {
+        "artifact_sha256": "c77814901495ebb3131d28b4968bd3f1cce3f39233e1c0cb580de5a7b9f9106c",
+        "discovery_pids": [
+          60856,
+          60942
+        ],
+        "exit_code": 0,
+        "fixture_children_absent": true,
+        "fixture_pids": [
+          60856,
+          60942,
+          61067,
+          61126
+        ],
+        "inputs_unchanged": true,
+        "log_sha256": "d4ea9487f9fce1f6d328257d4313ce61ea24f58e7b193f6b22c5a808983d7d10",
+        "model_requests": 0,
+        "phases": [
+          "startup",
+          "startup"
+        ],
+        "preflightObserved": false,
+        "projection_sha256": "d16683385fe2e9f1103437b70060a903ea15035baebe908edb97d6ee641a0d83",
+        "read_calls": 0,
+        "refusal": {
+          "code": null,
+          "message": "mcp-client(granted): initial connection or tool synchronization failed",
+          "name": "Error"
+        },
+        "scenario": "missing-tool",
+        "scope": "Synthetic existing Python grant types/digest -> compiled DSH profile -> actual MCP process; no production admission",
+        "search_calls": 0,
+        "sourceBinding": {
+          "serverInfo": {
+            "name": "mmx-stdio-fixture",
+            "version": "1"
+          },
+          "source": {
+            "auth_realm": "dedicated-worker-account",
+            "auth_status": "unsupported",
+            "capability_id": "fixture.dsh.read",
+            "execution_surface": "codex-app-server",
+            "grant_digest": "78ffa6d0b06c8b0a28e3c3fabd03ca66c6d091b01e82d157470672e8a3e47b03",
+            "profile_digest": "a8f850ac31b7eef3d4b15296ae8ddcd2c5424eefe8ef04d27b504e2a52e751ac",
+            "profile_id": "fixture.dsh.projection",
+            "tool_schema_digest": "3a9d4094bf73718975c3599bfd27909e9ecc4ce50418ed4509d6ab04c13ff02c"
+          },
+          "target": {
+            "args": [
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/stdio-fixture-server.mjs",
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/native-grant-AJ1VB4",
+              "normal"
+            ],
+            "command": "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+            "serverName": "granted",
+            "transport": "stdio"
+          }
+        },
+        "success": true
+      },
+      "normal": {
+        "artifact_sha256": "c77814901495ebb3131d28b4968bd3f1cce3f39233e1c0cb580de5a7b9f9106c",
+        "discovery_pids": [
+          59204,
+          59263
+        ],
+        "exit_code": 0,
+        "fixture_children_absent": true,
+        "fixture_pids": [
+          59204,
+          59263,
+          59419,
+          59478
+        ],
+        "inputs_unchanged": true,
+        "log_sha256": "3a3acf5ee2d67e74c8188d348b5a15c4fb979def1f2bd58dce3add5d3776a954",
+        "model_requests": 0,
+        "phases": [
+          "startup",
+          "startup",
+          "discovery",
+          "dispatch",
+          "dispatch"
+        ],
+        "preflightObserved": false,
+        "projection_sha256": "4ae08203a9c386376e847d5997e5ae68dbcad7737dba41a84d9e113171325b42",
+        "read_calls": 1,
+        "scenario": "normal",
+        "scope": "Synthetic existing Python grant types/digest -> compiled DSH profile -> actual MCP process; no production admission",
+        "search_calls": 1,
+        "sourceBinding": {
+          "serverInfo": {
+            "name": "mmx-stdio-fixture",
+            "version": "1"
+          },
+          "source": {
+            "auth_realm": "dedicated-worker-account",
+            "auth_status": "unsupported",
+            "capability_id": "fixture.dsh.read",
+            "execution_surface": "codex-app-server",
+            "grant_digest": "78ffa6d0b06c8b0a28e3c3fabd03ca66c6d091b01e82d157470672e8a3e47b03",
+            "profile_digest": "a8f850ac31b7eef3d4b15296ae8ddcd2c5424eefe8ef04d27b504e2a52e751ac",
+            "profile_id": "fixture.dsh.projection",
+            "tool_schema_digest": "3a9d4094bf73718975c3599bfd27909e9ecc4ce50418ed4509d6ab04c13ff02c"
+          },
+          "target": {
+            "args": [
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/stdio-fixture-server.mjs",
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/native-grant-yZJd83",
+              "normal"
+            ],
+            "command": "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+            "serverName": "granted",
+            "transport": "stdio"
+          }
+        },
+        "success": true,
+        "workload": {
+          "read": {
+            "file": "memo.txt",
+            "nonce": "c2f09054-5ee1-46ec-9ef7-e011d1f9ff12",
+            "pid": 59478,
+            "sha256": "5d7fc0a36029f22ab78506e33e12b853b724a195738c08769ed3d2b56f5a9786",
+            "text": "grant\nneedle c2f09054-5ee1-46ec-9ef7-e011d1f9ff12\n"
+          },
+          "search": {
+            "matches": [
+              {
+                "file": "memo.txt",
+                "line": 2,
+                "text": "needle c2f09054-5ee1-46ec-9ef7-e011d1f9ff12"
+              },
+              {
+                "file": "signals.txt",
+                "line": 1,
+                "text": "needle c2f09054-5ee1-46ec-9ef7-e011d1f9ff12"
+              }
+            ],
+            "nonce": "c2f09054-5ee1-46ec-9ef7-e011d1f9ff12",
+            "pid": 59478
+          }
+        }
+      },
+      "revoked": {
+        "artifact_sha256": "c77814901495ebb3131d28b4968bd3f1cce3f39233e1c0cb580de5a7b9f9106c",
+        "discovery_pids": [
+          59642,
+          59704
+        ],
+        "exit_code": 0,
+        "fixture_children_absent": true,
+        "fixture_pids": [
+          59642,
+          59704,
+          59801,
+          59859
+        ],
+        "inputs_unchanged": true,
+        "log_sha256": "cf298af693abff6c043df296eff2e02a999fb566f0942120da03105da5d25a1a",
+        "model_requests": 0,
+        "phases": [
+          "startup",
+          "startup",
+          "discovery",
+          "dispatch",
+          "dispatch"
+        ],
+        "preflightObserved": false,
+        "projection_sha256": "8c2abbb050e03e16664c283ffd205f32d2356ec4d5e9d90235b6e4ae5f6c820e",
+        "read_calls": 1,
+        "scenario": "revoked",
+        "scope": "Synthetic existing Python grant types/digest -> compiled DSH profile -> actual MCP process; no production admission",
+        "search_calls": 0,
+        "sourceBinding": {
+          "serverInfo": {
+            "name": "mmx-stdio-fixture",
+            "version": "1"
+          },
+          "source": {
+            "auth_realm": "dedicated-worker-account",
+            "auth_status": "unsupported",
+            "capability_id": "fixture.dsh.read",
+            "execution_surface": "codex-app-server",
+            "grant_digest": "78ffa6d0b06c8b0a28e3c3fabd03ca66c6d091b01e82d157470672e8a3e47b03",
+            "profile_digest": "a8f850ac31b7eef3d4b15296ae8ddcd2c5424eefe8ef04d27b504e2a52e751ac",
+            "profile_id": "fixture.dsh.projection",
+            "tool_schema_digest": "3a9d4094bf73718975c3599bfd27909e9ecc4ce50418ed4509d6ab04c13ff02c"
+          },
+          "target": {
+            "args": [
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/stdio-fixture-server.mjs",
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/native-grant-FR7yTg",
+              "normal"
+            ],
+            "command": "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+            "serverName": "granted",
+            "transport": "stdio"
+          }
+        },
+        "success": true,
+        "workload": {
+          "read": {
+            "file": "memo.txt",
+            "nonce": "53a93352-e9ca-499f-80d4-e4568aade5e2",
+            "pid": 59859,
+            "sha256": "7acefc6654518b545aa2bcb259bda96bf1043af10c5dd2c7bd276c2480d1c22f",
+            "text": "grant\nneedle 53a93352-e9ca-499f-80d4-e4568aade5e2\n"
+          }
+        }
+      },
+      "schema-drift": {
+        "artifact_sha256": "c77814901495ebb3131d28b4968bd3f1cce3f39233e1c0cb580de5a7b9f9106c",
+        "discovery_pids": [
+          60031,
+          60091
+        ],
+        "exit_code": 0,
+        "fixture_children_absent": true,
+        "fixture_pids": [
+          60031,
+          60091,
+          60209,
+          60260
+        ],
+        "inputs_unchanged": true,
+        "log_sha256": "f645fe119630fa84e677ef05611103c70157914412844ed8cace4165e0970f4e",
+        "model_requests": 0,
+        "phases": [
+          "startup",
+          "startup"
+        ],
+        "preflightObserved": false,
+        "projection_sha256": "1ac85237ea4b1e696c19ee9983795dc0cda0aec974045e982385d4b932050075",
+        "read_calls": 0,
+        "refusal": {
+          "code": null,
+          "message": "mcp-client(granted): initial connection or tool synchronization failed",
+          "name": "Error"
+        },
+        "scenario": "schema-drift",
+        "scope": "Synthetic existing Python grant types/digest -> compiled DSH profile -> actual MCP process; no production admission",
+        "search_calls": 0,
+        "sourceBinding": {
+          "serverInfo": {
+            "name": "mmx-stdio-fixture",
+            "version": "1"
+          },
+          "source": {
+            "auth_realm": "dedicated-worker-account",
+            "auth_status": "unsupported",
+            "capability_id": "fixture.dsh.read",
+            "execution_surface": "codex-app-server",
+            "grant_digest": "78ffa6d0b06c8b0a28e3c3fabd03ca66c6d091b01e82d157470672e8a3e47b03",
+            "profile_digest": "a8f850ac31b7eef3d4b15296ae8ddcd2c5424eefe8ef04d27b504e2a52e751ac",
+            "profile_id": "fixture.dsh.projection",
+            "tool_schema_digest": "3a9d4094bf73718975c3599bfd27909e9ecc4ce50418ed4509d6ab04c13ff02c"
+          },
+          "target": {
+            "args": [
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/stdio-fixture-server.mjs",
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/native-grant-kYe2GE",
+              "normal"
+            ],
+            "command": "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+            "serverName": "granted",
+            "transport": "stdio"
+          }
+        },
+        "success": true
+      },
+      "source-mismatch": {
+        "artifact_sha256": "c77814901495ebb3131d28b4968bd3f1cce3f39233e1c0cb580de5a7b9f9106c",
+        "discovery_pids": [
+          60664,
+          60715
+        ],
+        "exit_code": 0,
+        "fixture_children_absent": true,
+        "fixture_pids": [
+          60664,
+          60715
+        ],
+        "inputs_unchanged": true,
+        "log_sha256": "7234db156ed989964b42bfd6b5aeb2f062bc14f56e730ee531519c23b94b8879",
+        "model_requests": 0,
+        "phases": [
+          "startup"
+        ],
+        "preflightObserved": false,
+        "projection_sha256": "da6dd0f38e660671f341fe9aa2b8b394a622bdee5ff874819cfbf2bcae779bf2",
+        "read_calls": 0,
+        "refusal": {
+          "code": "DSH_MCP_GRANT_REFUSED",
+          "message": "DSH MCP grant binding refused",
+          "name": "Error"
+        },
+        "scenario": "source-mismatch",
+        "scope": "Synthetic existing Python grant types/digest -> compiled DSH profile -> actual MCP process; no production admission",
+        "search_calls": 0,
+        "sourceBinding": {
+          "serverInfo": {
+            "name": "mmx-stdio-fixture",
+            "version": "1"
+          },
+          "source": {
+            "auth_realm": "dedicated-worker-account",
+            "auth_status": "unsupported",
+            "capability_id": "fixture.dsh.read",
+            "execution_surface": "codex-app-server",
+            "grant_digest": "78ffa6d0b06c8b0a28e3c3fabd03ca66c6d091b01e82d157470672e8a3e47b03",
+            "profile_digest": "a8f850ac31b7eef3d4b15296ae8ddcd2c5424eefe8ef04d27b504e2a52e751ac",
+            "profile_id": "fixture.dsh.projection",
+            "tool_schema_digest": "3a9d4094bf73718975c3599bfd27909e9ecc4ce50418ed4509d6ab04c13ff02c"
+          },
+          "target": {
+            "args": [
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/stdio-fixture-server.mjs",
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/native-grant-vx25P7",
+              "normal"
+            ],
+            "command": "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+            "serverName": "granted",
+            "transport": "stdio"
+          }
+        },
+        "success": true
+      },
+      "startup-revoked": {
+        "artifact_sha256": "c77814901495ebb3131d28b4968bd3f1cce3f39233e1c0cb580de5a7b9f9106c",
+        "discovery_pids": [
+          61710,
+          61790
+        ],
+        "exit_code": 0,
+        "fixture_children_absent": true,
+        "fixture_pids": [
+          61710,
+          61790
+        ],
+        "inputs_unchanged": true,
+        "log_sha256": "f1d4ecdebff1057fe6ca01d3bc566ab9790a1da297b3a56f38f1263ae1df57ce",
+        "model_requests": 0,
+        "phases": [
+          "startup",
+          "startup"
+        ],
+        "preflightObserved": true,
+        "projection_sha256": "264b56ba93edd2d10ebb535ba63fb2511286ee313a99df0d8b3606d6fd18d62a",
+        "read_calls": 0,
+        "refusal": {
+          "code": "DSH_MCP_GRANT_REFUSED",
+          "message": "DSH MCP grant binding refused",
+          "name": "Error"
+        },
+        "scenario": "startup-revoked",
+        "scope": "Synthetic existing Python grant types/digest -> compiled DSH profile -> actual MCP process; no production admission",
+        "search_calls": 0,
+        "sourceBinding": {
+          "serverInfo": {
+            "name": "mmx-stdio-fixture",
+            "version": "1"
+          },
+          "source": {
+            "auth_realm": "dedicated-worker-account",
+            "auth_status": "unsupported",
+            "capability_id": "fixture.dsh.read",
+            "execution_surface": "codex-app-server",
+            "grant_digest": "78ffa6d0b06c8b0a28e3c3fabd03ca66c6d091b01e82d157470672e8a3e47b03",
+            "profile_digest": "a8f850ac31b7eef3d4b15296ae8ddcd2c5424eefe8ef04d27b504e2a52e751ac",
+            "profile_id": "fixture.dsh.projection",
+            "tool_schema_digest": "3a9d4094bf73718975c3599bfd27909e9ecc4ce50418ed4509d6ab04c13ff02c"
+          },
+          "target": {
+            "args": [
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/stdio-fixture-server.mjs",
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/native-grant-Bt5B38",
+              "normal"
+            ],
+            "command": "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+            "serverName": "granted",
+            "transport": "stdio"
+          }
+        },
+        "success": true
+      },
+      "target-mismatch": {
+        "artifact_sha256": "c77814901495ebb3131d28b4968bd3f1cce3f39233e1c0cb580de5a7b9f9106c",
+        "discovery_pids": [
+          60379,
+          60444
+        ],
+        "exit_code": 0,
+        "fixture_children_absent": true,
+        "fixture_pids": [
+          60379,
+          60444
+        ],
+        "inputs_unchanged": true,
+        "log_sha256": "a247b43b89c151a3223bbe241a3f9e570bf0f7b52d5faa6f6db28688ebb76b45",
+        "model_requests": 0,
+        "phases": [],
+        "preflightObserved": false,
+        "projection_sha256": "f25736554e76065797bd2dae46de8990491f4275dd1a96db94e5b9edc0687d38",
+        "read_calls": 0,
+        "refusal": {
+          "code": "DSH_MCP_GRANT_REFUSED",
+          "message": "DSH MCP grant binding refused",
+          "name": "Error"
+        },
+        "scenario": "target-mismatch",
+        "scope": "Synthetic existing Python grant types/digest -> compiled DSH profile -> actual MCP process; no production admission",
+        "search_calls": 0,
+        "sourceBinding": {
+          "serverInfo": {
+            "name": "mmx-stdio-fixture",
+            "version": "1"
+          },
+          "source": {
+            "auth_realm": "dedicated-worker-account",
+            "auth_status": "unsupported",
+            "capability_id": "fixture.dsh.read",
+            "execution_surface": "codex-app-server",
+            "grant_digest": "78ffa6d0b06c8b0a28e3c3fabd03ca66c6d091b01e82d157470672e8a3e47b03",
+            "profile_digest": "a8f850ac31b7eef3d4b15296ae8ddcd2c5424eefe8ef04d27b504e2a52e751ac",
+            "profile_id": "fixture.dsh.projection",
+            "tool_schema_digest": "3a9d4094bf73718975c3599bfd27909e9ecc4ce50418ed4509d6ab04c13ff02c"
+          },
+          "target": {
+            "args": [
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/stdio-fixture-server.mjs",
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/native-grant-5SRt4L",
+              "normal"
+            ],
+            "command": "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+            "serverName": "granted",
+            "transport": "stdio"
+          }
+        },
+        "success": true
+      },
+      "wrong-version": {
+        "artifact_sha256": "c77814901495ebb3131d28b4968bd3f1cce3f39233e1c0cb580de5a7b9f9106c",
+        "discovery_pids": [
+          61251,
+          61346
+        ],
+        "exit_code": 0,
+        "fixture_children_absent": true,
+        "fixture_pids": [
+          61251,
+          61346,
+          61503,
+          61566
+        ],
+        "inputs_unchanged": true,
+        "log_sha256": "d3eec1a932d17a8afa12d227bc99300c8a3ca5e62c9bd03b36152eede29eab74",
+        "model_requests": 0,
+        "phases": [
+          "startup",
+          "startup"
+        ],
+        "preflightObserved": false,
+        "projection_sha256": "7bf6082217c6dea4e7b38ce75abdf49a762ee59334957e180a7f0bd03b0b7d16",
+        "read_calls": 0,
+        "refusal": {
+          "code": null,
+          "message": "mcp-client(granted): initial connection or tool synchronization failed",
+          "name": "Error"
+        },
+        "scenario": "wrong-version",
+        "scope": "Synthetic existing Python grant types/digest -> compiled DSH profile -> actual MCP process; no production admission",
+        "search_calls": 0,
+        "sourceBinding": {
+          "serverInfo": {
+            "name": "mmx-stdio-fixture",
+            "version": "1"
+          },
+          "source": {
+            "auth_realm": "dedicated-worker-account",
+            "auth_status": "unsupported",
+            "capability_id": "fixture.dsh.read",
+            "execution_surface": "codex-app-server",
+            "grant_digest": "78ffa6d0b06c8b0a28e3c3fabd03ca66c6d091b01e82d157470672e8a3e47b03",
+            "profile_digest": "a8f850ac31b7eef3d4b15296ae8ddcd2c5424eefe8ef04d27b504e2a52e751ac",
+            "profile_id": "fixture.dsh.projection",
+            "tool_schema_digest": "3a9d4094bf73718975c3599bfd27909e9ecc4ce50418ed4509d6ab04c13ff02c"
+          },
+          "target": {
+            "args": [
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/stdio-fixture-server.mjs",
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/native-grant-JjIr8y",
+              "normal"
+            ],
+            "command": "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+            "serverName": "granted",
+            "transport": "stdio"
+          }
+        },
+        "success": true
+      }
+    },
+    "python_projection": {
+      "exit_code": 0,
+      "log_sha256": "9ff733b70e67bc7323bb631dcb4ffe4d9c7024021b47771f7a41754617455db7",
+      "passed": 11,
+      "tests": 11
+    },
+    "runtime_projection": {
+      "exit_code": 0,
+      "failed_cases": [],
+      "log_sha256": "230bc527474c7c758e93fc41583f1a5ee10992ec27bd25e0e0f2587282dfa41d",
+      "passed": 18,
+      "tests": 18
+    },
+    "scope": "Existing Python grant/digest projection through built DSH profile; synthetic host witness, no production or ACP admission"
+  },
+  "core_supply": {
+    "commit": "4878cdabd87d4041bdaff61d04c966883b9fd07a",
+    "patched_sha256": "72bf073000032fa129dc3ee3521c8848e489449b42c07ddc8bbd7b93fc99ed08",
+    "runtime_started": false,
+    "source_files": 14
+  },
+  "generated_at": "2026-10-03T10:23:51.843516+00:00",
+  "independent_review": "NOT_PERFORMED",
+  "input_sha256": {
+    "../../../control_plane/dsh_mcp_client_projection.py": "1ec4d4343dbcaa44ecb2b0191587269e99dd217260d035108081fd601447e1fa",
+    "../../../control_plane/executive_agent_capabilities.py": "fae14caeeb02b97b63cff35f190e68d4b63ea2b183b8f836a288d9cc71fe428b",
+    "../../../integrations/acp_worker/dsh_dispatch_preflight.mjs": "9d828fa84a4215c465edccb2fe06e9695350c4d2eda583055837e351613f20ad",
+    "../../../integrations/acp_worker/dsh_mcp_grant.mjs": "34f9a6f17cbf4fdea2c551c4fdd85b10748e9f84b1af5d35ba577b566ba4a40b",
+    "../../../integrations/acp_worker/dsh_tool_profile.mjs": "3fb96c8cde4e3b85dbca888b7d986480f535f3707821d19ec0885a08ef79e59c",
+    "../../../tests/fixtures/dsh_mcp_grant_projection.py": "3db4cf8fef2db97dd7fc77a8092e3b54fa14476abd7eb79eed4c3dffc8397fa8",
+    "../../../tests/test_dsh_mcp_client_projection.py": "ebf34b7f5254eb4e57161e3eb614edd4f700c43072b50993c1cdbb84956476a0",
+    "agent-loop-manifest.json": "27421db09a4edb15ce357ffd7795888bb485a98a88a202e76a5f2d27015f86d2",
+    "build-profile.mjs": "bc1236523d458a7ea553f53a8d156852e79674f5944ee2600f82ea6a327e9a57",
+    "donor-manifest.json": "badec9f979d283f8c508c83b8072f6f6de308a394a57afcbc1bb17daa0047192",
+    "grant-admission.test.mjs": "476dc8dd7e33eed0822a904b7723b2eb0559bd61fce081f93447d7e92fded66e",
+    "mcp-admission.test.mjs": "b2a507738f38a833f237b2cf1b718882f2515962644208425e049e2e8c0407ce",
+    "mcp-context-boundary.test.mjs": "db2fd87b4c3271260486b8e10933719073ec6edfda9e5675036aefc473ade9fe",
+    "mcp-generation-admission.patch": "68f1bb4a93efde1d2b8a7967ec431f6d00aa9c8ebfa5149b8ffb1a3eadbf23d9",
+    "mcp-manifest.json": "9ee81858dbb77fe0698751007d99ea822b8e6a72700fca35d30d1b1c794be594",
+    "mcp-preparation.test.py": "6cac00c59fd4a719cc2aba5222fb3468bb8fa3e33e35268e7320d191ff0047f4",
+    "mcp-stdio.test.mjs": "cd213490be050c6f4af4cf36bfb537873f73a17beee1c6b89ac7d22a448c2270",
+    "native-grant-canary.mjs": "064ced18f5327345a88bdb0734aeb47c35cd32aa772d575cc24ea6f6b7a1a4f4",
+    "native-profile-canary.mjs": "f33dbb82d24d65f801d17bdad7bab9b735572322d6adbbcd6803501db53ffaad",
+    "package-lock.json": "56c3f8fabcb8ac055c772a36a7cad15bae6d4ebf90b40e2bcecc19f8fb73fd98",
+    "package.json": "3ba0a43261b30f31583a359c16aaa3a90e24e74d1229a5aa40679e6ca149e530",
+    "prepare_mcp.py": "4e6c5b5a4a7f0a2e9eb5002efb16624c84467f36955ac2ccc26133b95d183184",
+    "profile-startup.test.mjs": "d33d96c65fbe480438319f994fc9cebb2337cdb0070c9c28b80e2ccdf96f0679",
+    "shared-tools-closure.test.mjs": "1e20f1abcd68e035d75f36c484d020a5c73ba48819861cbee9b35a6b0bca00b5",
+    "stdio-fixture-server.mjs": "7e947f424918be0764aee1e3f7e449849b9ccb9bba0fa540447c7e6c0b9e0d58",
+    "strict-dispatch-binding.patch": "9852126790e5305ef0fe6b0b81336b85c3a0b888cb0969b1fd4a8a0a9de97aa9",
+    "tsconfig.mcp.json": "a12bb6b96171409d82854d1e6f4d10fb9ec1640941032ffa7f68a641b2b52f6c",
+    "verify_mcp.py": "d91bfab5007027ab77b4fa8ca4c6b8f4657840d32b09da747346bb8e4e073439",
+    "vitest.mcp.config.mjs": "cbf0a84fb2c98186648d0f8ffa45b15e70e711c5535f2e7a57f4224885c4c0a9"
+  },
+  "installed": false,
+  "mcp_supply": {
+    "commit": "4878cdabd87d4041bdaff61d04c966883b9fd07a",
+    "patch_sha256": "68f1bb4a93efde1d2b8a7967ec431f6d00aa9c8ebfa5149b8ffb1a3eadbf23d9",
+    "patched_source_sha256": {
+      "connection.ts": "a030f9d245e5c5fb3a1f606b21eb5e707e096a62cdd8d9d1e5fbed550822618c",
+      "index.ts": "26f90f0c34660d24058e19e8683d3f191e3752ce3a90129f7e7cf8d1b0790638",
+      "tools.ts": "82556c9d36cb3b6b92f593e6d476db92dd33983176954cf48cea5d0d164e7e82",
+      "transport.ts": "70e9d99f1fb99e734407b9884c618f676cbcd5809db37b49326cbb8e8a285e8f"
+    },
+    "runtime_started": false,
+    "source_files": 11
+  },
+  "model_requests": 0,
+  "mutations": {
+    "connection": {
+      "cases": [
+        "exposes only admitted tools and returns a real server nonce",
+        "passes immutable complete schemas and actual server identity to admission",
+        "refuses revoked permission after an asynchronous wrapper",
+        "refuses a disconnected connection generation before sending",
+        "retires the old generation when re-admission refuses schema drift",
+        "retires the old generation before a failing list request",
+        "retires the previous generation while refreshed discovery is pending",
+        "retained old definition cannot send after a successful replacement sync",
+        "refuses unlisted tool without exposure or execution",
+        "refuses duplicate selection without exposure or execution",
+        "refuses nonfunction guard without exposure or execution",
+        "refuses async admission without exposure or execution",
+        "requires live connection binding when admission is enabled",
+        "requires a literal true from the final execution guard",
+        "keeps a completed old-generation call attributable without resending it",
+        "preserves the unconfigured legacy bridge behavior",
+        "threads admission through the actual connection startup owner",
+        "rejects a server-identity mismatch before exposing tools",
+        "rejects public display names supplied as raw grant identities",
+        "captures the selected guard instead of a mutable grant-property lookup",
+        "rejects a generation that disconnects while discovery is suspended",
+        "checks currentness again after the admission callback",
+        "lets the owner reject changed output schemas from real tools/list",
+        "allows an explicitly empty selection without inventing a required capability",
+        "uses the same admission hook on actual SDK tool-list notifications",
+        "tool admission does not publish server instructions",
+        "tool admission does not authorize resources/list",
+        "tool admission does not authorize resources/templates/list",
+        "tool admission does not authorize resources/read",
+        "tool-only context restriction preserves a permitted real tool call",
+        "empty admitted tool set does not expose other context channels",
+        "legacy context publication and resource requests stay unchanged"
+      ],
+      "exit_code": 1,
+      "failed_cases": [
+        "empty admitted tool set does not expose other context channels",
+        "threads admission through the actual connection startup owner",
+        "uses the same admission hook on actual SDK tool-list notifications"
+      ],
+      "killed": true,
+      "log_sha256": "2571499f4a902945ae391396552bebf56fbbd50dd2e8fed214908bb063a7f539",
+      "mutant_sha256": "b30dcd38fa6c2d4adb75f4d4a11512fd62ae628e62295da6ddb805ddb09aadf3",
+      "passed": 29,
+      "report_sha256": "d34f2ec2c3ccf13e89226ecd9e81b375ab61119c50606ed75be5d740afc8d44f",
+      "seconds": 2.534,
+      "stderr_empty": true,
+      "tests": 32
+    },
+    "context": {
+      "cases": [
+        "exposes only admitted tools and returns a real server nonce",
+        "passes immutable complete schemas and actual server identity to admission",
+        "refuses revoked permission after an asynchronous wrapper",
+        "refuses a disconnected connection generation before sending",
+        "retires the old generation when re-admission refuses schema drift",
+        "retires the old generation before a failing list request",
+        "retires the previous generation while refreshed discovery is pending",
+        "retained old definition cannot send after a successful replacement sync",
+        "refuses unlisted tool without exposure or execution",
+        "refuses duplicate selection without exposure or execution",
+        "refuses nonfunction guard without exposure or execution",
+        "refuses async admission without exposure or execution",
+        "requires live connection binding when admission is enabled",
+        "requires a literal true from the final execution guard",
+        "keeps a completed old-generation call attributable without resending it",
+        "preserves the unconfigured legacy bridge behavior",
+        "threads admission through the actual connection startup owner",
+        "rejects a server-identity mismatch before exposing tools",
+        "rejects public display names supplied as raw grant identities",
+        "captures the selected guard instead of a mutable grant-property lookup",
+        "rejects a generation that disconnects while discovery is suspended",
+        "checks currentness again after the admission callback",
+        "lets the owner reject changed output schemas from real tools/list",
+        "allows an explicitly empty selection without inventing a required capability",
+        "uses the same admission hook on actual SDK tool-list notifications",
+        "tool admission does not publish server instructions",
+        "tool admission does not authorize resources/list",
+        "tool admission does not authorize resources/templates/list",
+        "tool admission does not authorize resources/read",
+        "tool-only context restriction preserves a permitted real tool call",
+        "empty admitted tool set does not expose other context channels",
+        "legacy context publication and resource requests stay unchanged"
+      ],
+      "exit_code": 1,
+      "failed_cases": [
+        "empty admitted tool set does not expose other context channels",
+        "tool admission does not authorize resources/list",
+        "tool admission does not authorize resources/read",
+        "tool admission does not authorize resources/templates/list",
+        "tool admission does not publish server instructions"
+      ],
+      "killed": true,
+      "log_sha256": "c5752cd538de9a583100ad6b55da5bfe2361b925557c4c1e6508cabf4155e19b",
+      "mutant_sha256": "a291bc888d54e022e6adeee051b6519f12715ff3dda8969f1c4c9d7b31d1f7b2",
+      "passed": 27,
+      "report_sha256": "0a8feadda6e631b4e85ece1d3424bb3fe0adcf146b1c068b2970a90339cfe116",
+      "seconds": 25.438,
+      "stderr_empty": true,
+      "tests": 32
+    },
+    "dispatch": {
+      "cases": [
+        "exposes only admitted tools and returns a real server nonce",
+        "passes immutable complete schemas and actual server identity to admission",
+        "refuses revoked permission after an asynchronous wrapper",
+        "refuses a disconnected connection generation before sending",
+        "retires the old generation when re-admission refuses schema drift",
+        "retires the old generation before a failing list request",
+        "retires the previous generation while refreshed discovery is pending",
+        "retained old definition cannot send after a successful replacement sync",
+        "refuses unlisted tool without exposure or execution",
+        "refuses duplicate selection without exposure or execution",
+        "refuses nonfunction guard without exposure or execution",
+        "refuses async admission without exposure or execution",
+        "requires live connection binding when admission is enabled",
+        "requires a literal true from the final execution guard",
+        "keeps a completed old-generation call attributable without resending it",
+        "preserves the unconfigured legacy bridge behavior",
+        "threads admission through the actual connection startup owner",
+        "rejects a server-identity mismatch before exposing tools",
+        "rejects public display names supplied as raw grant identities",
+        "captures the selected guard instead of a mutable grant-property lookup",
+        "rejects a generation that disconnects while discovery is suspended",
+        "checks currentness again after the admission callback",
+        "lets the owner reject changed output schemas from real tools/list",
+        "allows an explicitly empty selection without inventing a required capability",
+        "uses the same admission hook on actual SDK tool-list notifications",
+        "tool admission does not publish server instructions",
+        "tool admission does not authorize resources/list",
+        "tool admission does not authorize resources/templates/list",
+        "tool admission does not authorize resources/read",
+        "tool-only context restriction preserves a permitted real tool call",
+        "empty admitted tool set does not expose other context channels",
+        "legacy context publication and resource requests stay unchanged"
+      ],
+      "exit_code": 1,
+      "failed_cases": [
+        "captures the selected guard instead of a mutable grant-property lookup",
+        "refuses a disconnected connection generation before sending",
+        "refuses revoked permission after an asynchronous wrapper",
+        "requires a literal true from the final execution guard",
+        "retained old definition cannot send after a successful replacement sync"
+      ],
+      "killed": true,
+      "log_sha256": "e5b3dea08b2e69d112ace974d0bfcc968dbad056c6ffd1d43b97473a8c4add88",
+      "mutant_sha256": "1d3e3006ee9637a924a085e2cbf6851cec98cbeeecc0fc194a957109f246f32b",
+      "passed": 27,
+      "report_sha256": "4b51de8dee53fdc6f0f5bcce28ff43cffc53188f0f77aac524d56784d6c51d77",
+      "seconds": 2.499,
+      "stderr_empty": true,
+      "tests": 32
+    },
+    "filter": {
+      "cases": [
+        "exposes only admitted tools and returns a real server nonce",
+        "passes immutable complete schemas and actual server identity to admission",
+        "refuses revoked permission after an asynchronous wrapper",
+        "refuses a disconnected connection generation before sending",
+        "retires the old generation when re-admission refuses schema drift",
+        "retires the old generation before a failing list request",
+        "retires the previous generation while refreshed discovery is pending",
+        "retained old definition cannot send after a successful replacement sync",
+        "refuses unlisted tool without exposure or execution",
+        "refuses duplicate selection without exposure or execution",
+        "refuses nonfunction guard without exposure or execution",
+        "refuses async admission without exposure or execution",
+        "requires live connection binding when admission is enabled",
+        "requires a literal true from the final execution guard",
+        "keeps a completed old-generation call attributable without resending it",
+        "preserves the unconfigured legacy bridge behavior",
+        "threads admission through the actual connection startup owner",
+        "rejects a server-identity mismatch before exposing tools",
+        "rejects public display names supplied as raw grant identities",
+        "captures the selected guard instead of a mutable grant-property lookup",
+        "rejects a generation that disconnects while discovery is suspended",
+        "checks currentness again after the admission callback",
+        "lets the owner reject changed output schemas from real tools/list",
+        "allows an explicitly empty selection without inventing a required capability",
+        "uses the same admission hook on actual SDK tool-list notifications",
+        "tool admission does not publish server instructions",
+        "tool admission does not authorize resources/list",
+        "tool admission does not authorize resources/templates/list",
+        "tool admission does not authorize resources/read",
+        "tool-only context restriction preserves a permitted real tool call",
+        "empty admitted tool set does not expose other context channels",
+        "legacy context publication and resource requests stay unchanged"
+      ],
+      "exit_code": 1,
+      "failed_cases": [
+        "allows an explicitly empty selection without inventing a required capability",
+        "empty admitted tool set does not expose other context channels",
+        "exposes only admitted tools and returns a real server nonce",
+        "keeps a completed old-generation call attributable without resending it",
+        "threads admission through the actual connection startup owner",
+        "uses the same admission hook on actual SDK tool-list notifications"
+      ],
+      "killed": true,
+      "log_sha256": "fd19eb186471bd36c2fb986591822192cc17b54d2948c01b307c2d1a442cfe16",
+      "mutant_sha256": "e3ab861c002909128d7bcd143eec8ce351c2da0179ed448bfc265c245a76841e",
+      "passed": 26,
+      "report_sha256": "ace104c56198c513361e346db8faebe533b28a93fb922f3e47e6c4e12caaf467",
+      "seconds": 6.217,
+      "stderr_empty": true,
+      "tests": 32
+    }
+  },
+  "native_artifact": {
+    "build": {
+      "agent_loop": {
+        "integrity": "sha512-01JWFfTcne/44tqfGLAOH0KkMicq6VVFBV1YjQbO9vj6Q0SmcHsPObm11fP0opEZIqEmdUN5wwS6LAzCjViDlg==",
+        "manifest_sha256": "27421db09a4edb15ce357ffd7795888bb485a98a88a202e76a5f2d27015f86d2",
+        "package": "@deepseek-ai/dsh-agent-loop",
+        "version": "0.2.0-rc.1"
+      },
+      "artifact": "profile-build-nqJpHV/index.mjs",
+      "artifact_sha256": "c77814901495ebb3131d28b4968bd3f1cce3f39233e1c0cb580de5a7b9f9106c",
+      "compiler": "8.3.1",
+      "files": {
+        "index.mjs": "c77814901495ebb3131d28b4968bd3f1cce3f39233e1c0cb580de5a7b9f9106c"
+      },
+      "input_sha256": {
+        "../../../integrations/acp_worker/dsh_dispatch_preflight.mjs": "9d828fa84a4215c465edccb2fe06e9695350c4d2eda583055837e351613f20ad",
+        "../../../integrations/acp_worker/dsh_mcp_grant.mjs": "34f9a6f17cbf4fdea2c551c4fdd85b10748e9f84b1af5d35ba577b566ba4a40b",
+        "../../../integrations/acp_worker/dsh_tool_profile.mjs": "3fb96c8cde4e3b85dbca888b7d986480f535f3707821d19ec0885a08ef79e59c",
+        ".cache/donor/index.ts": "72bf073000032fa129dc3ee3521c8848e489449b42c07ddc8bbd7b93fc99ed08",
+        ".cache/donor/invariant.ts": "919744eaa6c1e6489a68a4ea3be9831e1e6c576a4a2fce96801d0a3a33ac2a79",
+        ".cache/donor/json-schema.ts": "13deffdfd34539e23706b0fde235991da45b2f07c5c18dbbf3ca734c1da0c788",
+        ".cache/donor/presentation.ts": "2e729538403ef924430187df13ec5e140de95e0ea41a8225093dba644c1f2b6a",
+        ".cache/donor/ptc.ts": "a0569c4600191c4395e669ceb20f6bd279cc898d3ba506bd8e6a188e80ed8dfb",
+        ".cache/donor/py-types.ts": "aa912e3f9e5ea1024600f0598f29de46c9308fd2774886576ba1f07ce81488ec",
+        ".cache/donor/schema.ts": "d54459d0ad535ff3375138d40f3b37b39c6994703f1ea6a331df9a97c7e3cd23",
+        ".cache/donor/testing.ts": "8b7bf72750d885c1acb52e99ccac9e42542cc5efcb581098ad3507e83ca0a651",
+        ".cache/donor/ts-types.ts": "473562e67f2282579b2abb451acee759e2d2af681a051690c4980af4459016e1",
+        ".cache/donor/types.ts": "2b2bfa5da56f7ebb67236a33329fff47064bcc8d2658ce24a4cdedc7668e6fe9",
+        ".cache/mcp-donor/connection.ts": "a030f9d245e5c5fb3a1f606b21eb5e707e096a62cdd8d9d1e5fbed550822618c",
+        ".cache/mcp-donor/index.ts": "26f90f0c34660d24058e19e8683d3f191e3752ce3a90129f7e7cf8d1b0790638",
+        ".cache/mcp-donor/server-context.ts": "02ca9fe759891788572385a00f0cc7b6e92d6e98e103c1d00dd99ccec0d6319a",
+        ".cache/mcp-donor/tools.ts": "82556c9d36cb3b6b92f593e6d476db92dd33983176954cf48cea5d0d164e7e82",
+        ".cache/mcp-donor/transport.ts": "70e9d99f1fb99e734407b9884c618f676cbcd5809db37b49326cbb8e8a285e8f",
+        "agent-loop-manifest.json": "27421db09a4edb15ce357ffd7795888bb485a98a88a202e76a5f2d27015f86d2",
+        "build-profile.mjs": "bc1236523d458a7ea553f53a8d156852e79674f5944ee2600f82ea6a327e9a57",
+        "node_modules/@deepseek-ai/dsh-agent-loop/lib/index.js": "00c4814d63f3d1e2754eb09144832d19b30499d6ea444730473f740b587948c2",
+        "node_modules/@deepseek-ai/dsh-agent-loop/lib/types/index.d.ts": "906f202b859b11f7b0a399d8c4921c47384dd6177c990d59b8a93026a9875e8e",
+        "node_modules/@deepseek-ai/dsh-agent-loop/package.json": "e7ecfbef09d7dfd50be40d70a32ca87b1ee43ac3cefdfeb050468c7f0e31b0ea",
+        "package-lock.json": "56c3f8fabcb8ac055c772a36a7cad15bae6d4ebf90b40e2bcecc19f8fb73fd98"
+      },
+      "installed": false,
+      "kind": "TEST_LOCAL_PROFILE_BUILD",
+      "lock_sha256": "56c3f8fabcb8ac055c772a36a7cad15bae6d4ebf90b40e2bcecc19f8fb73fd98",
+      "mcp_patch_sha256": "68f1bb4a93efde1d2b8a7967ec431f6d00aa9c8ebfa5149b8ffb1a3eadbf23d9",
+      "model_requests": 0
+    },
+    "build_run": {
+      "exit_code": 0,
+      "log_sha256": "eaa5a5457653dd81aa31d4b0afdbf97a4b517b40a435777f06a5ffee6918faa0",
+      "stderr_empty": true
+    },
+    "rebuild_run": {
+      "exit_code": 0,
+      "log_sha256": "bf34298c9a2cbac5d1fdd3e5725382135ce753317263b9c188e1dc1585f11cbd",
+      "stderr_empty": true
+    },
+    "repeat_build_identical": true,
+    "scenarios": {
+      "disabled-core": {
+        "exit_code": 0,
+        "log_sha256": "ed31ad4cff481c99c0430bb214b044f967524e1588b387411e779b6e81cfe74d",
+        "observation": {
+          "artifact_sha256": "c77814901495ebb3131d28b4968bd3f1cce3f39233e1c0cb580de5a7b9f9106c",
+          "fixture_children_absent": true,
+          "fixture_pids": [],
+          "inputs_unchanged": true,
+          "model_requests": 0,
+          "node": "v26.5.0",
+          "nonce": "e6ba7076-c95b-421b-b758-2de313f2d2c2",
+          "parent_pid": 57925,
+          "read_calls": 0,
+          "refusal": {
+            "code": "DSH_DISPATCH_PREFLIGHT_REFUSED",
+            "message": "Loaded DSH dispatch policy failed: revocation",
+            "name": "Error"
+          },
+          "scenario": "disabled-core",
+          "scope": "Built artifact in plain Node; synthetic MCP workload, not Executive/ACP admission",
+          "search_calls": 0,
+          "success": true
+        },
+        "receipt_sha256": "c9398518f8037e99ab41a8fa2992124c50d166b7f4facf92194370028e6408e1",
+        "stderr_empty": true
+      },
+      "normal": {
+        "exit_code": 0,
+        "log_sha256": "ace3ab44bdc7a0c41de285b37e915d5f47799de06f31741610ac1f0f566acdea",
+        "observation": {
+          "artifact_sha256": "c77814901495ebb3131d28b4968bd3f1cce3f39233e1c0cb580de5a7b9f9106c",
+          "fixture_children_absent": true,
+          "fixture_pids": [
+            57778,
+            57838
+          ],
+          "inputs_unchanged": true,
+          "model_requests": 0,
+          "node": "v26.5.0",
+          "nonce": "6f766f77-e22c-44ab-82ca-bfdb53079af9",
+          "parent_pid": 57678,
+          "read_calls": 1,
+          "scenario": "normal",
+          "scope": "Built artifact in plain Node; synthetic MCP workload, not Executive/ACP admission",
+          "search_calls": 1,
+          "success": true,
+          "workload": {
+            "read": {
+              "file": "memo.txt",
+              "nonce": "6f766f77-e22c-44ab-82ca-bfdb53079af9",
+              "pid": 57838,
+              "sha256": "700e7f785159891f8e8224e3cc61ad4f9f4effe75e44a9d673c704c66837f503",
+              "text": "artifact\nneedle 6f766f77-e22c-44ab-82ca-bfdb53079af9\n"
+            },
+            "search": {
+              "matches": [
+                {
+                  "file": "memo.txt",
+                  "line": 2,
+                  "text": "needle 6f766f77-e22c-44ab-82ca-bfdb53079af9"
+                },
+                {
+                  "file": "signals.txt",
+                  "line": 1,
+                  "text": "needle 6f766f77-e22c-44ab-82ca-bfdb53079af9"
+                }
+              ],
+              "nonce": "6f766f77-e22c-44ab-82ca-bfdb53079af9",
+              "pid": 57838
+            }
+          }
+        },
+        "receipt_sha256": "dcef9055832bbf966e23df0344e249d688ae2b0633d5a5be73493087e453c011",
+        "stderr_empty": true
+      },
+      "pre-aborted": {
+        "exit_code": 0,
+        "log_sha256": "df4e36dace3c2dd6c2fdc24dd0777933519a3b6168634bf4660edc2eb4297bbf",
+        "observation": {
+          "artifact_sha256": "c77814901495ebb3131d28b4968bd3f1cce3f39233e1c0cb580de5a7b9f9106c",
+          "fixture_children_absent": true,
+          "fixture_pids": [],
+          "inputs_unchanged": true,
+          "model_requests": 0,
+          "node": "v26.5.0",
+          "nonce": "a6055b5b-5c9d-441e-988a-7256cead75b0",
+          "parent_pid": 58243,
+          "read_calls": 0,
+          "refusal": {
+            "code": 20,
+            "message": "This operation was aborted",
+            "name": "AbortError"
+          },
+          "scenario": "pre-aborted",
+          "scope": "Built artifact in plain Node; synthetic MCP workload, not Executive/ACP admission",
+          "search_calls": 0,
+          "success": true
+        },
+        "receipt_sha256": "321017d79fd6087c436dba1dd3dc46bb21a88e5e18fb62c9b80568bb38244ebf",
+        "stderr_empty": true
+      },
+      "startup-refused": {
+        "exit_code": 0,
+        "log_sha256": "821bde191c92185e3b21db5d93cdd6d7bb13960cece44c7c7c072402148a276f",
+        "observation": {
+          "artifact_sha256": "c77814901495ebb3131d28b4968bd3f1cce3f39233e1c0cb580de5a7b9f9106c",
+          "fixture_children_absent": true,
+          "fixture_pids": [
+            58086,
+            58147
+          ],
+          "inputs_unchanged": true,
+          "model_requests": 0,
+          "node": "v26.5.0",
+          "nonce": "a0f3f9b0-c9d4-4426-bf4b-8e01d76d56c1",
+          "parent_pid": 58016,
+          "read_calls": 0,
+          "refusal": {
+            "code": null,
+            "message": "mcp-client(artifact): initial connection or tool synchronization failed",
+            "name": "Error"
+          },
+          "scenario": "startup-refused",
+          "scope": "Built artifact in plain Node; synthetic MCP workload, not Executive/ACP admission",
+          "search_calls": 0,
+          "success": true
+        },
+        "receipt_sha256": "78366f82adbdc6778ce9b10ad6537cb5a4f4f1bf20981f081211d39f200a2627",
+        "stderr_empty": true
+      }
+    },
+    "scope": "Actual built module imports patched ToolRuntime and selected AgentLoop from one bundle; plain Node, no Vitest alias/loader; test-local external dependencies, not installed ACP",
+    "shared_scheduler": {
+      "exit_code": 0,
+      "log_sha256": "48c31f94c2339309b55916b8d625ae7475a5cfab3a746f26f3c3cb92e119dd51",
+      "stderr_empty": true
+    }
+  },
+  "network_transport": "OFFICIAL_IN_MEMORY_MCP_AND_REAL_LOCAL_STDIO",
+  "node": "v26.5.0",
+  "node_sha256": "70851490e028b3d699a8d6d4e1de909af2a989359ae807974c92af9c6580a8e8",
+  "observations": [
+    {
+      "calls": {
+        "read": 1,
+        "write": 0
+      },
+      "exposed": [
+        "mcp__fixture__read_memo_717e74314675"
+      ],
+      "journey": "permitted-real-mcp-call",
+      "publicName": "mcp__fixture__read_memo_717e74314675",
+      "rawName": "read.memo",
+      "result": {
+        "content": [
+          {
+            "text": "fc7a094d-3837-44b9-88b0-76908d62be35",
+            "type": "text"
+          }
+        ]
+      },
+      "sourceNonce": "fc7a094d-3837-44b9-88b0-76908d62be35"
+    },
+    {
+      "calls": 1,
+      "exposedAfterRevocation": [],
+      "generationsObserved": 2,
+      "journey": "connection-notification-readmission"
+    }
+  ],
+  "platform": "Darwin",
+  "preparation": {
+    "exit_code": 0,
+    "log_sha256": "c90e1a854b98ad84a43f1a7883d0324eb2df770d9b49cad1aa5b5acdd1445fb0",
+    "passed": 6,
+    "tests": 6
+  },
+  "schema": "mastermind.dsh_mcp_admission_verification.v1",
+  "scope": "Real MCP SDK protocol and donor bridge; no model/installed-worker/Executive-parent proof",
+  "stdio": {
+    "environment_mutant": {
+      "all_observed_children_settled": true,
+      "cases": [
+        "real stdio subprocess reads and searches two synthetic files through admitted tools",
+        "host-admitted stdio excludes unapproved ambient configuration",
+        "host-admitted stdio excludes ambient Node startup options",
+        "explicit private home and cwd reach the actual child",
+        "legacy transport retains its existing scrubbed ambient behavior",
+        "revoked live grant prevents an actual child request",
+        "instruction and resource channels remain closed over real stdio",
+        "startup discovery rejection settles the real child",
+        "lost response never resends the already-read request",
+        "in-flight cancellation reaches the real server and settles without a second call",
+        "the synthetic fixture never reads a caller-selected outside path",
+        "SDK negotiation probe is reaped before the useful session is ready"
+      ],
+      "exit_code": 1,
+      "failed_cases": [
+        "host-admitted stdio excludes ambient Node startup options",
+        "host-admitted stdio excludes unapproved ambient configuration"
+      ],
+      "killed": true,
+      "log_sha256": "d160a48e802cf8715a9688bc8a86f5c54f20c62a5f0b59ea0a1ea3663004e602",
+      "mutant_sha256": "83520c0cb0e6dde5f96072feb9b729308485300b2a47b2e75470288f4bfb67e9",
+      "observations": [
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-tp5p2p",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-tp5p2p/home",
+              "nodeOptions": null,
+              "nonce": "5f03ad5c-12fc-4e0a-ab75-934d9a9cae68",
+              "pid": 88027
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-tp5p2p",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-tp5p2p/home",
+              "nodeOptions": null,
+              "nonce": "5f03ad5c-12fc-4e0a-ab75-934d9a9cae68",
+              "pid": 88097
+            },
+            {
+              "event": "read",
+              "file": "memo.txt",
+              "nonce": "5f03ad5c-12fc-4e0a-ab75-934d9a9cae68",
+              "pid": 88097
+            },
+            {
+              "event": "search",
+              "nonce": "5f03ad5c-12fc-4e0a-ab75-934d9a9cae68",
+              "pid": 88097,
+              "query": "5f03ad5c-12fc-4e0a-ab75-934d9a9cae68"
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "5f03ad5c-12fc-4e0a-ab75-934d9a9cae68",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-tp5p2p",
+          "strict": true,
+          "workloadEvidence": {
+            "read": {
+              "file": "memo.txt",
+              "nonce": "5f03ad5c-12fc-4e0a-ab75-934d9a9cae68",
+              "pid": 88097,
+              "sha256": "d7db56c226d8486c3aeb6896c864e00c6e91771fcedc22eb03d36018682925d4",
+              "text": "Research fixture\nneedle 5f03ad5c-12fc-4e0a-ab75-934d9a9cae68\n"
+            },
+            "search": {
+              "matches": [
+                {
+                  "file": "memo.txt",
+                  "line": 2,
+                  "text": "needle 5f03ad5c-12fc-4e0a-ab75-934d9a9cae68"
+                },
+                {
+                  "file": "signals.txt",
+                  "line": 3,
+                  "text": "needle 5f03ad5c-12fc-4e0a-ab75-934d9a9cae68"
+                }
+              ],
+              "nonce": "5f03ad5c-12fc-4e0a-ab75-934d9a9cae68",
+              "pid": 88097
+            }
+          }
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": "fixture-ambient",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-aFxzGd",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-aFxzGd/home",
+              "nodeOptions": null,
+              "nonce": "47aeeb11-5487-4a65-bfed-abf407f4e189",
+              "pid": 88190
+            },
+            {
+              "ambient": "fixture-ambient",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-aFxzGd",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-aFxzGd/home",
+              "nodeOptions": null,
+              "nonce": "47aeeb11-5487-4a65-bfed-abf407f4e189",
+              "pid": 88257
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "47aeeb11-5487-4a65-bfed-abf407f4e189",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-aFxzGd",
+          "strict": true,
+          "workloadEvidence": {}
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-pn07ZR",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-pn07ZR/home",
+              "nodeOptions": "--no-warnings",
+              "nonce": "63b1cfc4-a46c-4d89-a0db-1723bbf87ccc",
+              "pid": 88358
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-pn07ZR",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-pn07ZR/home",
+              "nodeOptions": "--no-warnings",
+              "nonce": "63b1cfc4-a46c-4d89-a0db-1723bbf87ccc",
+              "pid": 88383
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "63b1cfc4-a46c-4d89-a0db-1723bbf87ccc",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-pn07ZR",
+          "strict": true,
+          "workloadEvidence": {}
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-C6ipAf",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-C6ipAf/home",
+              "nodeOptions": null,
+              "nonce": "d77a1d08-6d2b-47a6-b90c-fc0817bf3407",
+              "pid": 88390
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-C6ipAf",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-C6ipAf/home",
+              "nodeOptions": null,
+              "nonce": "d77a1d08-6d2b-47a6-b90c-fc0817bf3407",
+              "pid": 88394
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "d77a1d08-6d2b-47a6-b90c-fc0817bf3407",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-C6ipAf",
+          "strict": true,
+          "workloadEvidence": {}
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": "fixture-ambient",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-Rjf2WN",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-Rjf2WN/home",
+              "nodeOptions": null,
+              "nonce": "f327dd5c-827b-47d9-9337-e3b3288e794f",
+              "pid": 88452
+            },
+            {
+              "ambient": "fixture-ambient",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-Rjf2WN",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-Rjf2WN/home",
+              "nodeOptions": null,
+              "nonce": "f327dd5c-827b-47d9-9337-e3b3288e794f",
+              "pid": 88524
+            },
+            {
+              "event": "read",
+              "file": "memo.txt",
+              "nonce": "f327dd5c-827b-47d9-9337-e3b3288e794f",
+              "pid": 88524
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "f327dd5c-827b-47d9-9337-e3b3288e794f",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-Rjf2WN",
+          "strict": false,
+          "workloadEvidence": {}
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-jT6BCh",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-jT6BCh/home",
+              "nodeOptions": null,
+              "nonce": "56014001-c5b7-4633-a9e8-61aa68f16ed4",
+              "pid": 88618
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-jT6BCh",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-jT6BCh/home",
+              "nodeOptions": null,
+              "nonce": "56014001-c5b7-4633-a9e8-61aa68f16ed4",
+              "pid": 88674
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "56014001-c5b7-4633-a9e8-61aa68f16ed4",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-jT6BCh",
+          "strict": true,
+          "workloadEvidence": {}
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-6tTTZ5",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-6tTTZ5/home",
+              "nodeOptions": null,
+              "nonce": "6b81833e-dd93-4c3b-995d-f1dd31c7114a",
+              "pid": 88736
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-6tTTZ5",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-6tTTZ5/home",
+              "nodeOptions": null,
+              "nonce": "6b81833e-dd93-4c3b-995d-f1dd31c7114a",
+              "pid": 88790
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "6b81833e-dd93-4c3b-995d-f1dd31c7114a",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-6tTTZ5",
+          "strict": true,
+          "workloadEvidence": {}
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-qulrAt",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-qulrAt/home",
+              "nodeOptions": null,
+              "nonce": "72651610-7144-4b5c-8ee5-7354944e906e",
+              "pid": 88865
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-qulrAt",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-qulrAt/home",
+              "nodeOptions": null,
+              "nonce": "72651610-7144-4b5c-8ee5-7354944e906e",
+              "pid": 88933
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "reject-list",
+          "nonce": "72651610-7144-4b5c-8ee5-7354944e906e",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-qulrAt",
+          "strict": true,
+          "workloadEvidence": {}
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-eRxvz0",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-eRxvz0/home",
+              "nodeOptions": null,
+              "nonce": "da4b477d-a96b-4bbf-90b3-26c7ff87ff0f",
+              "pid": 88999
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-eRxvz0",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-eRxvz0/home",
+              "nodeOptions": null,
+              "nonce": "da4b477d-a96b-4bbf-90b3-26c7ff87ff0f",
+              "pid": 89062
+            },
+            {
+              "event": "read",
+              "file": "memo.txt",
+              "nonce": "da4b477d-a96b-4bbf-90b3-26c7ff87ff0f",
+              "pid": 89062
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "lost-reply",
+          "nonce": "da4b477d-a96b-4bbf-90b3-26c7ff87ff0f",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-eRxvz0",
+          "strict": true,
+          "workloadEvidence": {}
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-az5SoD",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-az5SoD/home",
+              "nodeOptions": null,
+              "nonce": "6dce3bff-800f-46f2-8574-d6f75952dea3",
+              "pid": 89151
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-az5SoD",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-az5SoD/home",
+              "nodeOptions": null,
+              "nonce": "6dce3bff-800f-46f2-8574-d6f75952dea3",
+              "pid": 89222
+            },
+            {
+              "event": "read",
+              "file": "memo.txt",
+              "nonce": "6dce3bff-800f-46f2-8574-d6f75952dea3",
+              "pid": 89222
+            },
+            {
+              "event": "cancelled",
+              "nonce": "6dce3bff-800f-46f2-8574-d6f75952dea3",
+              "pid": 89222
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "wait-cancel",
+          "nonce": "6dce3bff-800f-46f2-8574-d6f75952dea3",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-az5SoD",
+          "strict": true,
+          "workloadEvidence": {}
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-sEdMGE",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-sEdMGE/home",
+              "nodeOptions": null,
+              "nonce": "e1b0afa6-8f0c-48d4-a255-174049690157",
+              "pid": 89320
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-sEdMGE",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-sEdMGE/home",
+              "nodeOptions": null,
+              "nonce": "e1b0afa6-8f0c-48d4-a255-174049690157",
+              "pid": 89379
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "e1b0afa6-8f0c-48d4-a255-174049690157",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-sEdMGE",
+          "strict": true,
+          "workloadEvidence": {}
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-VoS4up",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-VoS4up/home",
+              "nodeOptions": null,
+              "nonce": "86a98dbb-244e-46b7-a171-113e4a9f8024",
+              "pid": 89441
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-VoS4up",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-VoS4up/home",
+              "nodeOptions": null,
+              "nonce": "86a98dbb-244e-46b7-a171-113e4a9f8024",
+              "pid": 89492
+            },
+            {
+              "event": "read",
+              "file": "memo.txt",
+              "nonce": "86a98dbb-244e-46b7-a171-113e4a9f8024",
+              "pid": 89492
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "86a98dbb-244e-46b7-a171-113e4a9f8024",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-VoS4up",
+          "strict": true,
+          "workloadEvidence": {}
+        }
+      ],
+      "observations_sha256": "aae8e12ac4d9f7219164fdef0627c90c293def5b538838cbdc10b626f10f939f",
+      "passed": 10,
+      "report_sha256": "0bd1829f0d47cf401823a90f437896d4b17c94c93a4ff4cb4217946930faf1b7",
+      "seconds": 4.631,
+      "stderr_empty": true,
+      "tests": 12
+    },
+    "patched": {
+      "all_observed_children_settled": true,
+      "cases": [
+        "real stdio subprocess reads and searches two synthetic files through admitted tools",
+        "host-admitted stdio excludes unapproved ambient configuration",
+        "host-admitted stdio excludes ambient Node startup options",
+        "explicit private home and cwd reach the actual child",
+        "legacy transport retains its existing scrubbed ambient behavior",
+        "revoked live grant prevents an actual child request",
+        "instruction and resource channels remain closed over real stdio",
+        "startup discovery rejection settles the real child",
+        "lost response never resends the already-read request",
+        "in-flight cancellation reaches the real server and settles without a second call",
+        "the synthetic fixture never reads a caller-selected outside path",
+        "SDK negotiation probe is reaped before the useful session is ready"
+      ],
+      "exit_code": 0,
+      "failed_cases": [],
+      "log_sha256": "331f129c70ddecedf94a0061c250d85440fdbc3f4b797468bd9088ddbc86b563",
+      "observations": [
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-gKoPBN",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-gKoPBN/home",
+              "nodeOptions": null,
+              "nonce": "4f535bf7-d702-4127-ad42-b5c34fc4f3de",
+              "pid": 85658
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-gKoPBN",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-gKoPBN/home",
+              "nodeOptions": null,
+              "nonce": "4f535bf7-d702-4127-ad42-b5c34fc4f3de",
+              "pid": 85722
+            },
+            {
+              "event": "read",
+              "file": "memo.txt",
+              "nonce": "4f535bf7-d702-4127-ad42-b5c34fc4f3de",
+              "pid": 85722
+            },
+            {
+              "event": "search",
+              "nonce": "4f535bf7-d702-4127-ad42-b5c34fc4f3de",
+              "pid": 85722,
+              "query": "4f535bf7-d702-4127-ad42-b5c34fc4f3de"
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "4f535bf7-d702-4127-ad42-b5c34fc4f3de",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-gKoPBN",
+          "strict": true,
+          "workloadEvidence": {
+            "read": {
+              "file": "memo.txt",
+              "nonce": "4f535bf7-d702-4127-ad42-b5c34fc4f3de",
+              "pid": 85722,
+              "sha256": "40cfb571087af5316ff4b01f7408e0c2b3afc920d3ce482085efa4eeb1b7916d",
+              "text": "Research fixture\nneedle 4f535bf7-d702-4127-ad42-b5c34fc4f3de\n"
+            },
+            "search": {
+              "matches": [
+                {
+                  "file": "memo.txt",
+                  "line": 2,
+                  "text": "needle 4f535bf7-d702-4127-ad42-b5c34fc4f3de"
+                },
+                {
+                  "file": "signals.txt",
+                  "line": 3,
+                  "text": "needle 4f535bf7-d702-4127-ad42-b5c34fc4f3de"
+                }
+              ],
+              "nonce": "4f535bf7-d702-4127-ad42-b5c34fc4f3de",
+              "pid": 85722
+            }
+          }
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-OQo4jk",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-OQo4jk/home",
+              "nodeOptions": null,
+              "nonce": "925203c8-42be-47c6-a7fe-e5c650095a15",
+              "pid": 85818
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-OQo4jk",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-OQo4jk/home",
+              "nodeOptions": null,
+              "nonce": "925203c8-42be-47c6-a7fe-e5c650095a15",
+              "pid": 85858
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "925203c8-42be-47c6-a7fe-e5c650095a15",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-OQo4jk",
+          "strict": true,
+          "workloadEvidence": {}
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-O8ga9R",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-O8ga9R/home",
+              "nodeOptions": null,
+              "nonce": "44f3be5d-2c9f-40e4-9a85-0eb219dc3b25",
+              "pid": 85908
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-O8ga9R",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-O8ga9R/home",
+              "nodeOptions": null,
+              "nonce": "44f3be5d-2c9f-40e4-9a85-0eb219dc3b25",
+              "pid": 85961
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "44f3be5d-2c9f-40e4-9a85-0eb219dc3b25",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-O8ga9R",
+          "strict": true,
+          "workloadEvidence": {}
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-JHcaj7",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-JHcaj7/home",
+              "nodeOptions": null,
+              "nonce": "06cccd2d-1774-45c8-b5d4-8e3664eea6cb",
+              "pid": 86020
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-JHcaj7",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-JHcaj7/home",
+              "nodeOptions": null,
+              "nonce": "06cccd2d-1774-45c8-b5d4-8e3664eea6cb",
+              "pid": 86088
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "06cccd2d-1774-45c8-b5d4-8e3664eea6cb",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-JHcaj7",
+          "strict": true,
+          "workloadEvidence": {}
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": "fixture-ambient",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-5ucMfq",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-5ucMfq/home",
+              "nodeOptions": null,
+              "nonce": "e7707804-7591-4a52-92dd-0eb4763a112a",
+              "pid": 86159
+            },
+            {
+              "ambient": "fixture-ambient",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-5ucMfq",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-5ucMfq/home",
+              "nodeOptions": null,
+              "nonce": "e7707804-7591-4a52-92dd-0eb4763a112a",
+              "pid": 86211
+            },
+            {
+              "event": "read",
+              "file": "memo.txt",
+              "nonce": "e7707804-7591-4a52-92dd-0eb4763a112a",
+              "pid": 86211
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "e7707804-7591-4a52-92dd-0eb4763a112a",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-5ucMfq",
+          "strict": false,
+          "workloadEvidence": {}
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-P8PVSV",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-P8PVSV/home",
+              "nodeOptions": null,
+              "nonce": "a63a6198-1bb3-4714-8179-a18971315b19",
+              "pid": 86282
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-P8PVSV",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-P8PVSV/home",
+              "nodeOptions": null,
+              "nonce": "a63a6198-1bb3-4714-8179-a18971315b19",
+              "pid": 86336
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "a63a6198-1bb3-4714-8179-a18971315b19",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-P8PVSV",
+          "strict": true,
+          "workloadEvidence": {}
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-cdbqXS",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-cdbqXS/home",
+              "nodeOptions": null,
+              "nonce": "9af36df2-d51a-4617-8d9b-7551dd1db445",
+              "pid": 86394
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-cdbqXS",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-cdbqXS/home",
+              "nodeOptions": null,
+              "nonce": "9af36df2-d51a-4617-8d9b-7551dd1db445",
+              "pid": 86452
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "9af36df2-d51a-4617-8d9b-7551dd1db445",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-cdbqXS",
+          "strict": true,
+          "workloadEvidence": {}
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-3iQrG7",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-3iQrG7/home",
+              "nodeOptions": null,
+              "nonce": "f56ea83f-55e1-4ea8-a0c8-eea8bad65be3",
+              "pid": 86516
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-3iQrG7",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-3iQrG7/home",
+              "nodeOptions": null,
+              "nonce": "f56ea83f-55e1-4ea8-a0c8-eea8bad65be3",
+              "pid": 86575
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "reject-list",
+          "nonce": "f56ea83f-55e1-4ea8-a0c8-eea8bad65be3",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-3iQrG7",
+          "strict": true,
+          "workloadEvidence": {}
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-mSiLSF",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-mSiLSF/home",
+              "nodeOptions": null,
+              "nonce": "621e513a-86f8-49b2-ab13-0acadde12f59",
+              "pid": 86640
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-mSiLSF",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-mSiLSF/home",
+              "nodeOptions": null,
+              "nonce": "621e513a-86f8-49b2-ab13-0acadde12f59",
+              "pid": 86698
+            },
+            {
+              "event": "read",
+              "file": "memo.txt",
+              "nonce": "621e513a-86f8-49b2-ab13-0acadde12f59",
+              "pid": 86698
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "lost-reply",
+          "nonce": "621e513a-86f8-49b2-ab13-0acadde12f59",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-mSiLSF",
+          "strict": true,
+          "workloadEvidence": {}
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-LzVCYm",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-LzVCYm/home",
+              "nodeOptions": null,
+              "nonce": "b55e4ef0-33e9-425b-8f95-cbec5fece685",
+              "pid": 86778
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-LzVCYm",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-LzVCYm/home",
+              "nodeOptions": null,
+              "nonce": "b55e4ef0-33e9-425b-8f95-cbec5fece685",
+              "pid": 86832
+            },
+            {
+              "event": "read",
+              "file": "memo.txt",
+              "nonce": "b55e4ef0-33e9-425b-8f95-cbec5fece685",
+              "pid": 86832
+            },
+            {
+              "event": "cancelled",
+              "nonce": "b55e4ef0-33e9-425b-8f95-cbec5fece685",
+              "pid": 86832
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "wait-cancel",
+          "nonce": "b55e4ef0-33e9-425b-8f95-cbec5fece685",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-LzVCYm",
+          "strict": true,
+          "workloadEvidence": {}
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-CnhfJ0",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-CnhfJ0/home",
+              "nodeOptions": null,
+              "nonce": "4a5142d0-9e43-4e2b-a1c6-7c995f133833",
+              "pid": 86908
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-CnhfJ0",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-CnhfJ0/home",
+              "nodeOptions": null,
+              "nonce": "4a5142d0-9e43-4e2b-a1c6-7c995f133833",
+              "pid": 86961
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "4a5142d0-9e43-4e2b-a1c6-7c995f133833",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-CnhfJ0",
+          "strict": true,
+          "workloadEvidence": {}
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-KcOv3U",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-KcOv3U/home",
+              "nodeOptions": null,
+              "nonce": "4266e972-c1d5-4713-9ff0-d7e1e88d24db",
+              "pid": 87027
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-KcOv3U",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-KcOv3U/home",
+              "nodeOptions": null,
+              "nonce": "4266e972-c1d5-4713-9ff0-d7e1e88d24db",
+              "pid": 87084
+            },
+            {
+              "event": "read",
+              "file": "memo.txt",
+              "nonce": "4266e972-c1d5-4713-9ff0-d7e1e88d24db",
+              "pid": 87084
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "4266e972-c1d5-4713-9ff0-d7e1e88d24db",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-KcOv3U",
+          "strict": true,
+          "workloadEvidence": {}
+        }
+      ],
+      "observations_sha256": "a85092efeee7bb0cb649b65e768b303dfdda446e858192781cc31ee4f44d7bd5",
+      "passed": 12,
+      "report_sha256": "11fc0cc4bebb4236ac668fe3d7ef5cf6488daeeb54b5dea372bfb82481cb9fce",
+      "seconds": 5.55,
+      "stderr_empty": true,
+      "tests": 12
+    },
+    "scope": "Synthetic disk inputs, SDK probe plus session; no model, ACP parent or OS confinement",
+    "sdk_executable_sha256": {
+      "index.mjs": "af3ec9fcf3a70fb4681e9b3c11aa18a7ce9aca36fed9f138a6e704043695d414",
+      "stdio.mjs": "f1917f032946bb4855130aaea2f4eb0b549eabc15ccc5c094f16545fb58fc138"
+    }
+  },
+  "success": true,
+  "targeted": {
+    "patched": {
+      "cases": [
+        "exposes only admitted tools and returns a real server nonce",
+        "passes immutable complete schemas and actual server identity to admission",
+        "refuses revoked permission after an asynchronous wrapper",
+        "refuses a disconnected connection generation before sending",
+        "retires the old generation when re-admission refuses schema drift",
+        "retires the old generation before a failing list request",
+        "retires the previous generation while refreshed discovery is pending",
+        "retained old definition cannot send after a successful replacement sync",
+        "refuses unlisted tool without exposure or execution",
+        "refuses duplicate selection without exposure or execution",
+        "refuses nonfunction guard without exposure or execution",
+        "refuses async admission without exposure or execution",
+        "requires live connection binding when admission is enabled",
+        "requires a literal true from the final execution guard",
+        "keeps a completed old-generation call attributable without resending it",
+        "preserves the unconfigured legacy bridge behavior",
+        "threads admission through the actual connection startup owner",
+        "rejects a server-identity mismatch before exposing tools",
+        "rejects public display names supplied as raw grant identities",
+        "captures the selected guard instead of a mutable grant-property lookup",
+        "rejects a generation that disconnects while discovery is suspended",
+        "checks currentness again after the admission callback",
+        "lets the owner reject changed output schemas from real tools/list",
+        "allows an explicitly empty selection without inventing a required capability",
+        "uses the same admission hook on actual SDK tool-list notifications",
+        "tool admission does not publish server instructions",
+        "tool admission does not authorize resources/list",
+        "tool admission does not authorize resources/templates/list",
+        "tool admission does not authorize resources/read",
+        "tool-only context restriction preserves a permitted real tool call",
+        "empty admitted tool set does not expose other context channels",
+        "legacy context publication and resource requests stay unchanged"
+      ],
+      "exit_code": 0,
+      "failed_cases": [],
+      "log_sha256": "9f393e69c33f1e9a1b50c6d8c412df7f2d41a26a3df2f20d7503c23a3671fa5c",
+      "passed": 32,
+      "report_sha256": "cf685921cf859ee944739ba495335c0cb389a3c1ed705048de2c125e20573128",
+      "seconds": 1.242,
+      "stderr_empty": true,
+      "tests": 32
+    },
+    "pristine": {
+      "cases": [
+        "exposes only admitted tools and returns a real server nonce",
+        "passes immutable complete schemas and actual server identity to admission",
+        "refuses revoked permission after an asynchronous wrapper",
+        "refuses a disconnected connection generation before sending",
+        "retires the old generation when re-admission refuses schema drift",
+        "retires the old generation before a failing list request",
+        "retires the previous generation while refreshed discovery is pending",
+        "retained old definition cannot send after a successful replacement sync",
+        "refuses unlisted tool without exposure or execution",
+        "refuses duplicate selection without exposure or execution",
+        "refuses nonfunction guard without exposure or execution",
+        "refuses async admission without exposure or execution",
+        "requires live connection binding when admission is enabled",
+        "requires a literal true from the final execution guard",
+        "keeps a completed old-generation call attributable without resending it",
+        "preserves the unconfigured legacy bridge behavior",
+        "threads admission through the actual connection startup owner",
+        "rejects a server-identity mismatch before exposing tools",
+        "rejects public display names supplied as raw grant identities",
+        "captures the selected guard instead of a mutable grant-property lookup",
+        "rejects a generation that disconnects while discovery is suspended",
+        "checks currentness again after the admission callback",
+        "lets the owner reject changed output schemas from real tools/list",
+        "allows an explicitly empty selection without inventing a required capability",
+        "uses the same admission hook on actual SDK tool-list notifications",
+        "tool admission does not publish server instructions",
+        "tool admission does not authorize resources/list",
+        "tool admission does not authorize resources/templates/list",
+        "tool admission does not authorize resources/read",
+        "tool-only context restriction preserves a permitted real tool call",
+        "empty admitted tool set does not expose other context channels",
+        "legacy context publication and resource requests stay unchanged"
+      ],
+      "exit_code": 1,
+      "failed_cases": [
+        "allows an explicitly empty selection without inventing a required capability",
+        "captures the selected guard instead of a mutable grant-property lookup",
+        "checks currentness again after the admission callback",
+        "empty admitted tool set does not expose other context channels",
+        "exposes only admitted tools and returns a real server nonce",
+        "keeps a completed old-generation call attributable without resending it",
+        "lets the owner reject changed output schemas from real tools/list",
+        "passes immutable complete schemas and actual server identity to admission",
+        "refuses a disconnected connection generation before sending",
+        "refuses async admission without exposure or execution",
+        "refuses duplicate selection without exposure or execution",
+        "refuses nonfunction guard without exposure or execution",
+        "refuses revoked permission after an asynchronous wrapper",
+        "refuses unlisted tool without exposure or execution",
+        "rejects a generation that disconnects while discovery is suspended",
+        "rejects a server-identity mismatch before exposing tools",
+        "rejects public display names supplied as raw grant identities",
+        "requires a literal true from the final execution guard",
+        "requires live connection binding when admission is enabled",
+        "retained old definition cannot send after a successful replacement sync",
+        "retires the old generation before a failing list request",
+        "retires the old generation when re-admission refuses schema drift",
+        "retires the previous generation while refreshed discovery is pending",
+        "threads admission through the actual connection startup owner",
+        "tool admission does not authorize resources/list",
+        "tool admission does not authorize resources/read",
+        "tool admission does not authorize resources/templates/list",
+        "tool admission does not publish server instructions",
+        "uses the same admission hook on actual SDK tool-list notifications"
+      ],
+      "log_sha256": "5862bd1eb21b809b078688edcef8ad1d3f62c13777ad031df7b1037c7fc8ea2c",
+      "passed": 3,
+      "report_sha256": "adfeca96b1d895486e5cdaeb40537769eedab82b332f434e70c8559b57448331",
+      "seconds": 2.715,
+      "stderr_empty": true,
+      "tests": 32
+    }
+  },
+  "typecheck": {
+    "exit_code": 0,
+    "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "upstream": {
+    "donor": {
+      "cases": [
+        "exports name, inject, and Config",
+        "Config schema rejects a missing serverName",
+        "Config schema rejects an invalid serverName",
+        "Config schema accepts a valid serverName",
+        "Config schema materializes reconnect defaults and merges partial overrides",
+        "Config schema rejects an invalid reconnect block",
+        "connects without attributed prompt text when server instructions are absent or blank (undefined)",
+        "connects without attributed prompt text when server instructions are absent or blank (\"\")",
+        "connects without attributed prompt text when server instructions are absent or blank (\" \\n\\t\")",
+        "connects, syncs tools under the namespace, and registers a notification handler",
+        "keeps the Cordis plugin loading until initial discovery publishes its tools",
+        "rejects a duplicate serverName at load and leaves the first instance intact",
+        "closes the transport when its owner unloads during initial connection",
+        "allows one serverName in each independent registration scope",
+        "releases the serverName reservation on dispose",
+        "scopes serverName reservations per app root",
+        "logs error and registers no tools when connect fails; dispose closes the client",
+        "rejects activation and still closes the client when startup failure is configured as fatal",
+        "rejects strict startup when the initial tool generation cannot be registered",
+        "preserves strict startup registration when list_changed arrives before connect resolves",
+        "re-syncs tools on ToolListChanged notification",
+        "keeps the previous generation when a re-sync fails",
+        "effect disposer unregisters the CURRENT generation and closes client",
+        "effect disposer handles client.close failure gracefully",
+        "uses streamable-http config path",
+        "counts the complete attributed UTF-8 text before publishing tools",
+        "joins clean names verbatim",
+        "replaces invalid characters and appends an identity hash",
+        "truncates over-long names and appends an identity hash",
+        "is deterministic and collision-free for distinct identities",
+        "registers tools under server-qualified public names",
+        "lets two servers publish the same raw name side by side",
+        "coexists with a native tool of the same raw name",
+        "rejects a tool list where one raw name appears twice",
+        "keeps the previous generation when the fetch phase fails",
+        "rolls back the whole generation when a foreign tool squats on the namespace",
+        "unregisters previous tools before re-syncing",
+        "validates outputs with the complete SDK definition after paginated discovery",
+        "calls MCP callTool with the RAW name and returns text content",
+        "sends the raw name for normalized public names",
+        "joins multiple text blocks with newline",
+        "preserves canonical MCP JSON while admitting an ordered mixed image result",
+        "keeps a valid raw image result while explicitly refusing it without a durable route",
+        "rejects a malformed image batch before storing any member",
+        "rejects unsupported media and base64 aliases as one atomic batch",
+        "does not admit images for a route without declared image input",
+        "refuses images when the exact route is missing, unverifiable, or canceled",
+        "refuses images when attachment storage rejects the admitted batch",
+        "reports attachment policy rejection as image admission rather than storage failure",
+        "keeps admitted images when post-execute shortens only the text",
+        "keeps a dispatch value replacement instead of prepared images",
+        "keeps a dispatch renderer replacement instead of prepared images",
+        "lets post-execute replacement win over a prepared image projection",
+        "lets post-execute value replacement and blocking discard prepared projections",
+        "marks primitive blocks from canonical-value replacement unsupported",
+        "validates structuredContent when the advertised output schema is supported",
+        "falls back to JsonValue for unsupported advertised output schemas",
+        "maps isError to an error result via throw",
+        "rejects tools that require task-based execution",
+        "passes abort signal to callTool",
+        "reports unsupported audio without claiming the raw block was discarded",
+        "reports unsupported embedded resources without discarding the raw block",
+        "preserves resource-link name and URI in the model projection",
+        "diagnoses an incomplete resource link from canonical-value replacement",
+        "diagnoses unknown content types from canonical-value replacement",
+        "diagnoses an image without media type from canonical-value replacement",
+        "diagnoses audio without media type from canonical-value replacement",
+        "diagnoses missing text from canonical-value replacement",
+        "handles empty content array",
+        "handles isError with non-text content (fallback error message)",
+        "uses tool description when provided",
+        "uses empty description when tool has no description",
+        "creates StdioClientTransport for stdio config",
+        "creates StreamableHTTPClientTransport for http config without headers",
+        "creates StreamableHTTPClientTransport for http config with headers",
+        "scrubs sensitive env vars and forwards the rest",
+        "merges explicit env on top of scrubbed ambient env",
+        "coerces null args to empty object for callTool",
+        "coerces primitive string args to empty object for callTool",
+        "keeps a resource-only server connected without requesting tools",
+        "keeps shared resource tools for a configured server without resource capability",
+        "reads resources and preserves explicit list and template cursors through the SDK",
+        "updates tools through the SDK modern list-change subscription",
+        "delivers caller cancellation to an executing modern tool",
+        "keeps instructions withdrawn when disposal interrupts initial discovery",
+        "rejects resource reads while a replacement connection is still negotiating",
+        "reconnects after a transport close, re-syncs tools through the new generation, and serves calls",
+        "stops at the failure cap, unregisters the tools, and reports final failure",
+        "gives up behind an in-flight re-sync and removes the generation it publishes",
+        "does not start a replacement until a failed generation reports that it closed",
+        "stops reconnecting when a failed generation never reports that it closed",
+        "suppresses retry reporting when disposal owns a pending connect rejection",
+        "stops reconnecting when disposal overlaps failed-generation cleanup",
+        "bounds disposal during connect when the transport never reports closure",
+        "bounds disposal during discovery when the transport never reports closure",
+        "closes a transport that attaches after disposal starts",
+        "discards a queued tool refresh when disposal starts before it runs",
+        "dispose during the backoff wait cancels the pending reconnect",
+        "a transport close after dispose schedules nothing",
+        "reconnect disabled keeps the registered tools and reports manual recovery",
+        "reconnect disabled after a failed initial connect reports no registered tools",
+        "an uptime past the stability window resets the attempt budget",
+        "a crash loop with briefly successful connects still exhausts the cap",
+        "a connect rejection racing its own transport close schedules exactly one retry per attempt",
+        "a transport that closes during a resolving connect registers nothing from the dead generation",
+        "dispose during an in-flight initial sync quiesces without leaking tools",
+        "a re-sync failing because dispose closed the transport stays silent",
+        "a stale notification handler from a replaced generation is ignored",
+        "resolves omission to the defaults, frozen",
+        "keeps explicit values",
+        "rejects unknown keys",
+        "rejects out-of-range delays",
+        "rejects an initial delay above the ceiling",
+        "rejects non-positive-integer attempt caps",
+        "apply fails loud at load on a misconfigured reconnect",
+        "publishes literal instructions and withdraws the prompt and resource provider together",
+        "shows scoped server instructions only to the owning scope",
+        "preserves the exact execution, arguments and canonical structured results",
+        "rejects invalid external results before exposing content (null)",
+        "rejects invalid external results before exposing content ({\"content\":[42]})",
+        "rejects invalid external results before exposing content ({\"content\":[{\"type\":\"image\"}]})"
+      ],
+      "exit_code": 0,
+      "failed_cases": [],
+      "log_sha256": "3b36b7291c2d7ec995404baf7ba0f4e49cfddd0b4182cfe81c8817a555b7a02e",
+      "passed": 121,
+      "report_sha256": "c934b1e885a6904a904bd0e6dc56083a35743ed0b6146df191807ffc805c7808",
+      "seconds": 5.962,
+      "stderr_empty": true,
+      "tests": 121
+    },
+    "pristine": {
+      "cases": [
+        "exports name, inject, and Config",
+        "Config schema rejects a missing serverName",
+        "Config schema rejects an invalid serverName",
+        "Config schema accepts a valid serverName",
+        "Config schema materializes reconnect defaults and merges partial overrides",
+        "Config schema rejects an invalid reconnect block",
+        "connects without attributed prompt text when server instructions are absent or blank (undefined)",
+        "connects without attributed prompt text when server instructions are absent or blank (\"\")",
+        "connects without attributed prompt text when server instructions are absent or blank (\" \\n\\t\")",
+        "connects, syncs tools under the namespace, and registers a notification handler",
+        "keeps the Cordis plugin loading until initial discovery publishes its tools",
+        "rejects a duplicate serverName at load and leaves the first instance intact",
+        "closes the transport when its owner unloads during initial connection",
+        "allows one serverName in each independent registration scope",
+        "releases the serverName reservation on dispose",
+        "scopes serverName reservations per app root",
+        "logs error and registers no tools when connect fails; dispose closes the client",
+        "rejects activation and still closes the client when startup failure is configured as fatal",
+        "rejects strict startup when the initial tool generation cannot be registered",
+        "preserves strict startup registration when list_changed arrives before connect resolves",
+        "re-syncs tools on ToolListChanged notification",
+        "keeps the previous generation when a re-sync fails",
+        "effect disposer unregisters the CURRENT generation and closes client",
+        "effect disposer handles client.close failure gracefully",
+        "uses streamable-http config path",
+        "counts the complete attributed UTF-8 text before publishing tools",
+        "joins clean names verbatim",
+        "replaces invalid characters and appends an identity hash",
+        "truncates over-long names and appends an identity hash",
+        "is deterministic and collision-free for distinct identities",
+        "registers tools under server-qualified public names",
+        "lets two servers publish the same raw name side by side",
+        "coexists with a native tool of the same raw name",
+        "rejects a tool list where one raw name appears twice",
+        "keeps the previous generation when the fetch phase fails",
+        "rolls back the whole generation when a foreign tool squats on the namespace",
+        "unregisters previous tools before re-syncing",
+        "validates outputs with the complete SDK definition after paginated discovery",
+        "calls MCP callTool with the RAW name and returns text content",
+        "sends the raw name for normalized public names",
+        "joins multiple text blocks with newline",
+        "preserves canonical MCP JSON while admitting an ordered mixed image result",
+        "keeps a valid raw image result while explicitly refusing it without a durable route",
+        "rejects a malformed image batch before storing any member",
+        "rejects unsupported media and base64 aliases as one atomic batch",
+        "does not admit images for a route without declared image input",
+        "refuses images when the exact route is missing, unverifiable, or canceled",
+        "refuses images when attachment storage rejects the admitted batch",
+        "reports attachment policy rejection as image admission rather than storage failure",
+        "keeps admitted images when post-execute shortens only the text",
+        "keeps a dispatch value replacement instead of prepared images",
+        "keeps a dispatch renderer replacement instead of prepared images",
+        "lets post-execute replacement win over a prepared image projection",
+        "lets post-execute value replacement and blocking discard prepared projections",
+        "marks primitive blocks from canonical-value replacement unsupported",
+        "validates structuredContent when the advertised output schema is supported",
+        "falls back to JsonValue for unsupported advertised output schemas",
+        "maps isError to an error result via throw",
+        "rejects tools that require task-based execution",
+        "passes abort signal to callTool",
+        "reports unsupported audio without claiming the raw block was discarded",
+        "reports unsupported embedded resources without discarding the raw block",
+        "preserves resource-link name and URI in the model projection",
+        "diagnoses an incomplete resource link from canonical-value replacement",
+        "diagnoses unknown content types from canonical-value replacement",
+        "diagnoses an image without media type from canonical-value replacement",
+        "diagnoses audio without media type from canonical-value replacement",
+        "diagnoses missing text from canonical-value replacement",
+        "handles empty content array",
+        "handles isError with non-text content (fallback error message)",
+        "uses tool description when provided",
+        "uses empty description when tool has no description",
+        "creates StdioClientTransport for stdio config",
+        "creates StreamableHTTPClientTransport for http config without headers",
+        "creates StreamableHTTPClientTransport for http config with headers",
+        "scrubs sensitive env vars and forwards the rest",
+        "merges explicit env on top of scrubbed ambient env",
+        "coerces null args to empty object for callTool",
+        "coerces primitive string args to empty object for callTool",
+        "keeps a resource-only server connected without requesting tools",
+        "keeps shared resource tools for a configured server without resource capability",
+        "reads resources and preserves explicit list and template cursors through the SDK",
+        "updates tools through the SDK modern list-change subscription",
+        "delivers caller cancellation to an executing modern tool",
+        "keeps instructions withdrawn when disposal interrupts initial discovery",
+        "rejects resource reads while a replacement connection is still negotiating",
+        "reconnects after a transport close, re-syncs tools through the new generation, and serves calls",
+        "stops at the failure cap, unregisters the tools, and reports final failure",
+        "gives up behind an in-flight re-sync and removes the generation it publishes",
+        "does not start a replacement until a failed generation reports that it closed",
+        "stops reconnecting when a failed generation never reports that it closed",
+        "suppresses retry reporting when disposal owns a pending connect rejection",
+        "stops reconnecting when disposal overlaps failed-generation cleanup",
+        "bounds disposal during connect when the transport never reports closure",
+        "bounds disposal during discovery when the transport never reports closure",
+        "closes a transport that attaches after disposal starts",
+        "discards a queued tool refresh when disposal starts before it runs",
+        "dispose during the backoff wait cancels the pending reconnect",
+        "a transport close after dispose schedules nothing",
+        "reconnect disabled keeps the registered tools and reports manual recovery",
+        "reconnect disabled after a failed initial connect reports no registered tools",
+        "an uptime past the stability window resets the attempt budget",
+        "a crash loop with briefly successful connects still exhausts the cap",
+        "a connect rejection racing its own transport close schedules exactly one retry per attempt",
+        "a transport that closes during a resolving connect registers nothing from the dead generation",
+        "dispose during an in-flight initial sync quiesces without leaking tools",
+        "a re-sync failing because dispose closed the transport stays silent",
+        "a stale notification handler from a replaced generation is ignored",
+        "resolves omission to the defaults, frozen",
+        "keeps explicit values",
+        "rejects unknown keys",
+        "rejects out-of-range delays",
+        "rejects an initial delay above the ceiling",
+        "rejects non-positive-integer attempt caps",
+        "apply fails loud at load on a misconfigured reconnect",
+        "publishes literal instructions and withdraws the prompt and resource provider together",
+        "shows scoped server instructions only to the owning scope",
+        "preserves the exact execution, arguments and canonical structured results",
+        "rejects invalid external results before exposing content (null)",
+        "rejects invalid external results before exposing content ({\"content\":[42]})",
+        "rejects invalid external results before exposing content ({\"content\":[{\"type\":\"image\"}]})"
+      ],
+      "exit_code": 0,
+      "failed_cases": [],
+      "log_sha256": "a77d8b1109901a64c8e6d60e6372a6829d46cc5e2a34457f46858e596a9576e8",
+      "passed": 121,
+      "report_sha256": "b7549d01910e9ac63bcd8263c7f9c2ffb73d635fa7d48f6e6de330c513d84255",
+      "seconds": 4.352,
+      "stderr_empty": true,
+      "tests": 121
+    }
+  },
+  "worker_profile": {
+    "mutants": {
+      "admission_wiring": {
+        "all_recorded_children_absent": true,
+        "cases": [
+          "public admitted plugin activates the real read path with only selected tools",
+          "admitted plugin refuses permissive startup before process creation",
+          "admitted plugin refuses implicit reconnect before process creation",
+          "admitted plugin refuses enabled reconnect before process creation",
+          "public admitted factory rejects missing host permission or cancellation binding",
+          "pre-aborted admitted startup creates no process",
+          "public admitted startup failure rolls back tools and settles all child processes",
+          "public admitted plugin shares namespace ownership with the original plugin",
+          "plugin disposal releases the original namespace for another admitted instance",
+          "owner abort uses existing plugin teardown and removes admitted tools",
+          "Mastermind runtime profile performs preflight then activates the actual read process",
+          "Mastermind runtime profile rejects disabled dispatch enforcement before spawning",
+          "Mastermind runtime profile rejects deny-all false readiness before spawning",
+          "Mastermind runtime profile cancellation during preflight never starts a process",
+          "Mastermind runtime profile snapshots startup config before asynchronous preflight",
+          "legacy experiment import resolves the same runtime preflight implementation",
+          "owner abort during real discovery prevents activation and settles startup processes",
+          "owner abort during an actual profile tool call settles without replay",
+          "admission refusal rolls back namespace so a later explicit instance can activate"
+        ],
+        "exit_code": 1,
+        "failed_cases": [
+          "Mastermind runtime profile performs preflight then activates the actual read process",
+          "admission refusal rolls back namespace so a later explicit instance can activate",
+          "public admitted plugin activates the real read path with only selected tools"
+        ],
+        "fixture_pids": [
+          41433,
+          41509,
+          41603,
+          41653,
+          41703,
+          41753,
+          41815,
+          41870,
+          41939,
+          41994,
+          42087,
+          42165,
+          42279,
+          42340,
+          42485,
+          42540,
+          42625,
+          42674,
+          42770,
+          42825,
+          42881,
+          42936
+        ],
+        "inputs_unchanged": true,
+        "killed": true,
+        "log_sha256": "9b2b224866c866d67fe302fe66221cd0ce3eb2489549262d5f6010d69a419533",
+        "mutant_sha256": "1ea7b40144e05be69277f3d4110b709badadebec312ebc462fc4f3d734da2e6a",
+        "observations_sha256": "4e7dc92c4f9face0878b27139bfe38f8808a21c26dcf3eb197c7fbd1c57482e0",
+        "passed": 16,
+        "report_sha256": "783a7197c0ff8963102e0d075fd925292252d256af296b4bf472e4afd69b4998",
+        "seconds": 4.657,
+        "stderr_empty": true,
+        "tests": 19,
+        "useful_workload": {
+          "childrenAbsent": true,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-uwOl7z",
+              "event": "start",
+              "explicit": null,
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-uwOl7z/home",
+              "nodeOptions": null,
+              "nonce": "8b23da35-45af-4b15-90d8-473a8df425dc",
+              "pid": 42279
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-uwOl7z",
+              "event": "start",
+              "explicit": null,
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-uwOl7z/home",
+              "nodeOptions": null,
+              "nonce": "8b23da35-45af-4b15-90d8-473a8df425dc",
+              "pid": 42340
+            },
+            {
+              "event": "read",
+              "file": "memo.txt",
+              "nonce": "8b23da35-45af-4b15-90d8-473a8df425dc",
+              "pid": 42340
+            },
+            {
+              "event": "search",
+              "nonce": "8b23da35-45af-4b15-90d8-473a8df425dc",
+              "pid": 42340,
+              "query": "8b23da35-45af-4b15-90d8-473a8df425dc"
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "8b23da35-45af-4b15-90d8-473a8df425dc",
+          "pids": [
+            42279,
+            42340
+          ],
+          "workload": {
+            "read": {
+              "file": "memo.txt",
+              "nonce": "8b23da35-45af-4b15-90d8-473a8df425dc",
+              "pid": 42340,
+              "sha256": "8cb7aba77f462a44a48b0b6c767a6cb93f6c47daf8e124ff80e2be6c730799e6",
+              "text": "profile\nneedle 8b23da35-45af-4b15-90d8-473a8df425dc\n"
+            },
+            "search": {
+              "matches": [
+                {
+                  "file": "memo.txt",
+                  "line": 2,
+                  "text": "needle 8b23da35-45af-4b15-90d8-473a8df425dc"
+                },
+                {
+                  "file": "signals.txt",
+                  "line": 2,
+                  "text": "needle 8b23da35-45af-4b15-90d8-473a8df425dc"
+                }
+              ],
+              "nonce": "8b23da35-45af-4b15-90d8-473a8df425dc",
+              "pid": 42340
+            }
+          }
+        }
+      },
+      "required_preflight": {
+        "all_recorded_children_absent": true,
+        "cases": [
+          "public admitted plugin activates the real read path with only selected tools",
+          "admitted plugin refuses permissive startup before process creation",
+          "admitted plugin refuses implicit reconnect before process creation",
+          "admitted plugin refuses enabled reconnect before process creation",
+          "public admitted factory rejects missing host permission or cancellation binding",
+          "pre-aborted admitted startup creates no process",
+          "public admitted startup failure rolls back tools and settles all child processes",
+          "public admitted plugin shares namespace ownership with the original plugin",
+          "plugin disposal releases the original namespace for another admitted instance",
+          "owner abort uses existing plugin teardown and removes admitted tools",
+          "Mastermind runtime profile performs preflight then activates the actual read process",
+          "Mastermind runtime profile rejects disabled dispatch enforcement before spawning",
+          "Mastermind runtime profile rejects deny-all false readiness before spawning",
+          "Mastermind runtime profile cancellation during preflight never starts a process",
+          "Mastermind runtime profile snapshots startup config before asynchronous preflight",
+          "legacy experiment import resolves the same runtime preflight implementation",
+          "owner abort during real discovery prevents activation and settles startup processes",
+          "owner abort during an actual profile tool call settles without replay",
+          "admission refusal rolls back namespace so a later explicit instance can activate"
+        ],
+        "exit_code": 1,
+        "failed_cases": [
+          "Mastermind runtime profile cancellation during preflight never starts a process",
+          "Mastermind runtime profile rejects deny-all false readiness before spawning",
+          "Mastermind runtime profile rejects disabled dispatch enforcement before spawning",
+          "Mastermind runtime profile snapshots startup config before asynchronous preflight"
+        ],
+        "fixture_pids": [
+          43651,
+          43717,
+          43873,
+          43934,
+          43994,
+          44051,
+          44119,
+          44182,
+          44238,
+          44302,
+          44431,
+          44489,
+          44716,
+          44770,
+          44907,
+          44964,
+          45037,
+          45110,
+          45175,
+          45230,
+          45303,
+          45361,
+          45444,
+          45483,
+          45528,
+          45568,
+          45616,
+          45663,
+          45722,
+          45785
+        ],
+        "inputs_unchanged": true,
+        "killed": true,
+        "log_sha256": "70e0e9650d258716bc4780162c3196a8183367e225a9067e3ddeebf66870f98a",
+        "mutant_sha256": "47e5d7c1c32ffef85c6bf773f7cd28bfa5bc6ae3dde1c2c1b4838e66cd7c150e",
+        "observations_sha256": "a96ed8a0e1b53baa2ce8198199e0c73b92daeb3e72ad1d9549402a05326df7a6",
+        "passed": 15,
+        "report_sha256": "bae99b12eb46231ad5235d328c07ace98eec8508a61492d536daeac102744f42",
+        "seconds": 6.787,
+        "stderr_empty": true,
+        "tests": 19,
+        "useful_workload": {
+          "childrenAbsent": true,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-ngIQvx",
+              "event": "start",
+              "explicit": null,
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-ngIQvx/home",
+              "nodeOptions": null,
+              "nonce": "77abf849-6de7-4f97-a273-df22f22061af",
+              "pid": 44716
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-ngIQvx",
+              "event": "start",
+              "explicit": null,
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-ngIQvx/home",
+              "nodeOptions": null,
+              "nonce": "77abf849-6de7-4f97-a273-df22f22061af",
+              "pid": 44770
+            },
+            {
+              "event": "read",
+              "file": "memo.txt",
+              "nonce": "77abf849-6de7-4f97-a273-df22f22061af",
+              "pid": 44770
+            },
+            {
+              "event": "search",
+              "nonce": "77abf849-6de7-4f97-a273-df22f22061af",
+              "pid": 44770,
+              "query": "77abf849-6de7-4f97-a273-df22f22061af"
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "77abf849-6de7-4f97-a273-df22f22061af",
+          "pids": [
+            44716,
+            44770
+          ],
+          "workload": {
+            "read": {
+              "file": "memo.txt",
+              "nonce": "77abf849-6de7-4f97-a273-df22f22061af",
+              "pid": 44770,
+              "sha256": "ac22586b8664508923ec0cf030bf6e1ffc15960e7306b14e5c9bc891a1465461",
+              "text": "profile\nneedle 77abf849-6de7-4f97-a273-df22f22061af\n"
+            },
+            "search": {
+              "matches": [
+                {
+                  "file": "memo.txt",
+                  "line": 2,
+                  "text": "needle 77abf849-6de7-4f97-a273-df22f22061af"
+                },
+                {
+                  "file": "signals.txt",
+                  "line": 2,
+                  "text": "needle 77abf849-6de7-4f97-a273-df22f22061af"
+                }
+              ],
+              "nonce": "77abf849-6de7-4f97-a273-df22f22061af",
+              "pid": 44770
+            }
+          }
+        }
+      },
+      "startup_policy": {
+        "all_recorded_children_absent": true,
+        "cases": [
+          "public admitted plugin activates the real read path with only selected tools",
+          "admitted plugin refuses permissive startup before process creation",
+          "admitted plugin refuses implicit reconnect before process creation",
+          "admitted plugin refuses enabled reconnect before process creation",
+          "public admitted factory rejects missing host permission or cancellation binding",
+          "pre-aborted admitted startup creates no process",
+          "public admitted startup failure rolls back tools and settles all child processes",
+          "public admitted plugin shares namespace ownership with the original plugin",
+          "plugin disposal releases the original namespace for another admitted instance",
+          "owner abort uses existing plugin teardown and removes admitted tools",
+          "Mastermind runtime profile performs preflight then activates the actual read process",
+          "Mastermind runtime profile rejects disabled dispatch enforcement before spawning",
+          "Mastermind runtime profile rejects deny-all false readiness before spawning",
+          "Mastermind runtime profile cancellation during preflight never starts a process",
+          "Mastermind runtime profile snapshots startup config before asynchronous preflight",
+          "legacy experiment import resolves the same runtime preflight implementation",
+          "owner abort during real discovery prevents activation and settles startup processes",
+          "owner abort during an actual profile tool call settles without replay",
+          "admission refusal rolls back namespace so a later explicit instance can activate"
+        ],
+        "exit_code": 1,
+        "failed_cases": [
+          "admitted plugin refuses enabled reconnect before process creation",
+          "admitted plugin refuses implicit reconnect before process creation",
+          "admitted plugin refuses permissive startup before process creation"
+        ],
+        "fixture_pids": [
+          38555,
+          38663,
+          38756,
+          38785,
+          38866,
+          38936,
+          39028,
+          39115,
+          39216,
+          39308,
+          39399,
+          39475,
+          39575,
+          39656,
+          39741,
+          39799,
+          39865,
+          39924,
+          40021,
+          40075,
+          40206,
+          40265,
+          40352,
+          40409,
+          40473,
+          40517,
+          40582,
+          40636,
+          40703,
+          40760
+        ],
+        "inputs_unchanged": true,
+        "killed": true,
+        "log_sha256": "6f7e829db88b7d5a9a9e5711ccb64db8af67b66ac0a3384c547d01e345d40101",
+        "mutant_sha256": "f39a76eaea8c8e9dc90a0b1acac249dfcbe43515dc0a6b696b6a96d9cbbe2752",
+        "observations_sha256": "797e09e9c1452ed9f633063f424aef321f88aea06c3afa06b51409c9f0ebc80b",
+        "passed": 16,
+        "report_sha256": "974e97215b59025659a48b8c88b05641737c83a3cee30bf159a150923ff451c6",
+        "seconds": 5.226,
+        "stderr_empty": true,
+        "tests": 19,
+        "useful_workload": {
+          "childrenAbsent": true,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-Wri0MS",
+              "event": "start",
+              "explicit": null,
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-Wri0MS/home",
+              "nodeOptions": null,
+              "nonce": "3354d57f-b49e-43a0-bf03-e705700e808b",
+              "pid": 40021
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-Wri0MS",
+              "event": "start",
+              "explicit": null,
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-Wri0MS/home",
+              "nodeOptions": null,
+              "nonce": "3354d57f-b49e-43a0-bf03-e705700e808b",
+              "pid": 40075
+            },
+            {
+              "event": "read",
+              "file": "memo.txt",
+              "nonce": "3354d57f-b49e-43a0-bf03-e705700e808b",
+              "pid": 40075
+            },
+            {
+              "event": "search",
+              "nonce": "3354d57f-b49e-43a0-bf03-e705700e808b",
+              "pid": 40075,
+              "query": "3354d57f-b49e-43a0-bf03-e705700e808b"
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "3354d57f-b49e-43a0-bf03-e705700e808b",
+          "pids": [
+            40021,
+            40075
+          ],
+          "workload": {
+            "read": {
+              "file": "memo.txt",
+              "nonce": "3354d57f-b49e-43a0-bf03-e705700e808b",
+              "pid": 40075,
+              "sha256": "74572d6d66e891472ba5df950738f85954518272b474b03f3ea09466ceb53e63",
+              "text": "profile\nneedle 3354d57f-b49e-43a0-bf03-e705700e808b\n"
+            },
+            "search": {
+              "matches": [
+                {
+                  "file": "memo.txt",
+                  "line": 2,
+                  "text": "needle 3354d57f-b49e-43a0-bf03-e705700e808b"
+                },
+                {
+                  "file": "signals.txt",
+                  "line": 2,
+                  "text": "needle 3354d57f-b49e-43a0-bf03-e705700e808b"
+                }
+              ],
+              "nonce": "3354d57f-b49e-43a0-bf03-e705700e808b",
+              "pid": 40075
+            }
+          }
+        }
+      },
+      "startup_snapshot": {
+        "all_recorded_children_absent": true,
+        "cases": [
+          "public admitted plugin activates the real read path with only selected tools",
+          "admitted plugin refuses permissive startup before process creation",
+          "admitted plugin refuses implicit reconnect before process creation",
+          "admitted plugin refuses enabled reconnect before process creation",
+          "public admitted factory rejects missing host permission or cancellation binding",
+          "pre-aborted admitted startup creates no process",
+          "public admitted startup failure rolls back tools and settles all child processes",
+          "public admitted plugin shares namespace ownership with the original plugin",
+          "plugin disposal releases the original namespace for another admitted instance",
+          "owner abort uses existing plugin teardown and removes admitted tools",
+          "Mastermind runtime profile performs preflight then activates the actual read process",
+          "Mastermind runtime profile rejects disabled dispatch enforcement before spawning",
+          "Mastermind runtime profile rejects deny-all false readiness before spawning",
+          "Mastermind runtime profile cancellation during preflight never starts a process",
+          "Mastermind runtime profile snapshots startup config before asynchronous preflight",
+          "legacy experiment import resolves the same runtime preflight implementation",
+          "owner abort during real discovery prevents activation and settles startup processes",
+          "owner abort during an actual profile tool call settles without replay",
+          "admission refusal rolls back namespace so a later explicit instance can activate"
+        ],
+        "exit_code": 1,
+        "failed_cases": [
+          "Mastermind runtime profile snapshots startup config before asynchronous preflight"
+        ],
+        "fixture_pids": [
+          53560,
+          53883,
+          53995,
+          54054,
+          54132,
+          54189,
+          54258,
+          54308,
+          54368,
+          54421,
+          54503,
+          54565,
+          54760,
+          54848,
+          54988,
+          55043,
+          55390,
+          55468,
+          55561,
+          55629,
+          55717,
+          55774,
+          55831,
+          55885
+        ],
+        "inputs_unchanged": true,
+        "killed": true,
+        "log_sha256": "397ac039f9cad6794a8ebbaca63fe01d7c8169760a74b8ffb0703f750243bdfa",
+        "mutant_sha256": "883c203101f5a939f734a4bfe358d35b908cf00b25d7b4abcd193655cf1a20ea",
+        "observations_sha256": "492f7967ef4ef56267913c5f03585f122644f48a0e8c3644de6398275e6897b2",
+        "passed": 18,
+        "report_sha256": "837c0470e22135e52b9304f066b466ce276f0db4207d08bcf37e733b311127ad",
+        "seconds": 23.145,
+        "stderr_empty": true,
+        "tests": 19,
+        "useful_workload": {
+          "childrenAbsent": true,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-hbTLjT",
+              "event": "start",
+              "explicit": null,
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-hbTLjT/home",
+              "nodeOptions": null,
+              "nonce": "af560f0b-08c5-4a2a-9d53-6cb9527194ff",
+              "pid": 54760
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-hbTLjT",
+              "event": "start",
+              "explicit": null,
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-hbTLjT/home",
+              "nodeOptions": null,
+              "nonce": "af560f0b-08c5-4a2a-9d53-6cb9527194ff",
+              "pid": 54848
+            },
+            {
+              "event": "read",
+              "file": "memo.txt",
+              "nonce": "af560f0b-08c5-4a2a-9d53-6cb9527194ff",
+              "pid": 54848
+            },
+            {
+              "event": "search",
+              "nonce": "af560f0b-08c5-4a2a-9d53-6cb9527194ff",
+              "pid": 54848,
+              "query": "af560f0b-08c5-4a2a-9d53-6cb9527194ff"
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "af560f0b-08c5-4a2a-9d53-6cb9527194ff",
+          "pids": [
+            54760,
+            54848
+          ],
+          "workload": {
+            "read": {
+              "file": "memo.txt",
+              "nonce": "af560f0b-08c5-4a2a-9d53-6cb9527194ff",
+              "pid": 54848,
+              "sha256": "b6250d2d6853295afb7c0405e95eb279e485e92d63acd3c6372552a7afebcdc1",
+              "text": "profile\nneedle af560f0b-08c5-4a2a-9d53-6cb9527194ff\n"
+            },
+            "search": {
+              "matches": [
+                {
+                  "file": "memo.txt",
+                  "line": 2,
+                  "text": "needle af560f0b-08c5-4a2a-9d53-6cb9527194ff"
+                },
+                {
+                  "file": "signals.txt",
+                  "line": 2,
+                  "text": "needle af560f0b-08c5-4a2a-9d53-6cb9527194ff"
+                }
+              ],
+              "nonce": "af560f0b-08c5-4a2a-9d53-6cb9527194ff",
+              "pid": 54848
+            }
+          }
+        }
+      }
+    },
+    "positive": {
+      "all_recorded_children_absent": true,
+      "cases": [
+        "public admitted plugin activates the real read path with only selected tools",
+        "admitted plugin refuses permissive startup before process creation",
+        "admitted plugin refuses implicit reconnect before process creation",
+        "admitted plugin refuses enabled reconnect before process creation",
+        "public admitted factory rejects missing host permission or cancellation binding",
+        "pre-aborted admitted startup creates no process",
+        "public admitted startup failure rolls back tools and settles all child processes",
+        "public admitted plugin shares namespace ownership with the original plugin",
+        "plugin disposal releases the original namespace for another admitted instance",
+        "owner abort uses existing plugin teardown and removes admitted tools",
+        "Mastermind runtime profile performs preflight then activates the actual read process",
+        "Mastermind runtime profile rejects disabled dispatch enforcement before spawning",
+        "Mastermind runtime profile rejects deny-all false readiness before spawning",
+        "Mastermind runtime profile cancellation during preflight never starts a process",
+        "Mastermind runtime profile snapshots startup config before asynchronous preflight",
+        "legacy experiment import resolves the same runtime preflight implementation",
+        "owner abort during real discovery prevents activation and settles startup processes",
+        "owner abort during an actual profile tool call settles without replay",
+        "admission refusal rolls back namespace so a later explicit instance can activate"
+      ],
+      "exit_code": 0,
+      "failed_cases": [],
+      "fixture_pids": [
+        36165,
+        36238,
+        36365,
+        36435,
+        36493,
+        36551,
+        36632,
+        36695,
+        36745,
+        36815,
+        36895,
+        36957,
+        37062,
+        37145,
+        37259,
+        37317,
+        37422,
+        37474,
+        37540,
+        37591,
+        37674,
+        37727,
+        37814,
+        37881
+      ],
+      "inputs_unchanged": true,
+      "log_sha256": "d65ef89ab495de2c5137b0e95733ed1281c92d62466a748d1194c8a44f762d97",
+      "observations_sha256": "d99d67248d0d553983078cfd9130930b7042941efc1ad8be9e1e61a6a1d92649",
+      "passed": 19,
+      "report_sha256": "01486346dae98b98d650683a4f792614bd7384dbd51f0ea11b2c207275e5475c",
+      "seconds": 4.349,
+      "stderr_empty": true,
+      "tests": 19,
+      "useful_workload": {
+        "childrenAbsent": true,
+        "events": [
+          {
+            "ambient": null,
+            "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-EYQQSl",
+            "event": "start",
+            "explicit": null,
+            "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-EYQQSl/home",
+            "nodeOptions": null,
+            "nonce": "38c0d3eb-2509-4d5d-8555-884223566e7a",
+            "pid": 37062
+          },
+          {
+            "ambient": null,
+            "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-EYQQSl",
+            "event": "start",
+            "explicit": null,
+            "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-EYQQSl/home",
+            "nodeOptions": null,
+            "nonce": "38c0d3eb-2509-4d5d-8555-884223566e7a",
+            "pid": 37145
+          },
+          {
+            "event": "read",
+            "file": "memo.txt",
+            "nonce": "38c0d3eb-2509-4d5d-8555-884223566e7a",
+            "pid": 37145
+          },
+          {
+            "event": "search",
+            "nonce": "38c0d3eb-2509-4d5d-8555-884223566e7a",
+            "pid": 37145,
+            "query": "38c0d3eb-2509-4d5d-8555-884223566e7a"
+          }
+        ],
+        "inputsUnchanged": true,
+        "mode": "normal",
+        "nonce": "38c0d3eb-2509-4d5d-8555-884223566e7a",
+        "pids": [
+          37062,
+          37145
+        ],
+        "workload": {
+          "read": {
+            "file": "memo.txt",
+            "nonce": "38c0d3eb-2509-4d5d-8555-884223566e7a",
+            "pid": 37145,
+            "sha256": "8ad7a97e75f195a85b22f80b30c580cc7c78e0ea7e8679aa45c9c7fe909a8996",
+            "text": "profile\nneedle 38c0d3eb-2509-4d5d-8555-884223566e7a\n"
+          },
+          "search": {
+            "matches": [
+              {
+                "file": "memo.txt",
+                "line": 2,
+                "text": "needle 38c0d3eb-2509-4d5d-8555-884223566e7a"
+              },
+              {
+                "file": "signals.txt",
+                "line": 2,
+                "text": "needle 38c0d3eb-2509-4d5d-8555-884223566e7a"
+              }
+            ],
+            "nonce": "38c0d3eb-2509-4d5d-8555-884223566e7a",
+            "pid": 37145
+          }
+        }
+      }
+    },
+    "scope": "Real Cordis plugin and Mastermind source profile + synthetic MCP process; not installed ACP or Executive acceptance"
+  }
+}

@@ -34,11 +34,25 @@ from integrations.executive_mcp.web_ceo_v3 import WEB_CEO_V3_PROFILE
 from integrations.executive_mcp.personal_read import PERSONAL_READ_PROFILE
 
 
-@pytest.mark.parametrize("profile", ["legacy", WEB_CEO_V3_PROFILE, PERSONAL_READ_PROFILE])
+@pytest.mark.parametrize("profile", ["legacy", PERSONAL_READ_PROFILE])
 def test_mission_activation_cannot_replace_a_different_ceo_profile(tmp_path, profile):
     _, coo, _, _ = helpers.setup(tmp_path)
     raw = install.base_document(); raw.update(coo=coo, executive_mcp_profile=profile)
     with pytest.raises(ValueError): entry.validate_document(raw)
+
+
+@pytest.mark.parametrize("profile", [WEB_CEO_V2_PROFILE, WEB_CEO_V3_PROFILE])
+def test_mission_activation_accepts_supported_web_ceo_profiles(tmp_path, profile):
+    _, coo, _, _ = helpers.setup(tmp_path)
+    raw = install.base_document(); raw.update(coo=coo, executive_mcp_profile=profile)
+    assert entry.validate_document(raw) == raw
+    source = tmp_path / raw["release_sha"]
+    settings = AppSettings(policies=load_app_policies(raw["policies"]), mastermind_root=source,
+        macro_root_flag=None, environ={}, ceo_ingress_socket_path=raw["ceo_ingress_socket_path"],
+        read_from_ceo_ingress=True)
+    selected = entry.build_installed_coo_settings(raw, source, tmp_path / "mcp.json", settings)
+    assert isinstance(selected.authority_provider.__self__, CooFactsClient)
+    assert selected.executive is settings
 
 
 @pytest.mark.parametrize("source_available", [True, False])
@@ -98,6 +112,7 @@ def test_control_policy_and_grant_projection_are_stdlib_only(tmp_path):
         "from ops.executive_os.coo_principal_host import CooInstalledSource;"
         "from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry;"
         "raw=json.loads(sys.stdin.read());e.validate_document(raw);"
+        "assert 'integrations.mastermind_executive_app.os_commission_client' not in sys.modules;"
         "source=CooInstalledSource(lambda:raw['coo'],lambda:ExecutionCapabilityRegistry.load("
         + repr(str(registry)) + ",source_root=" + repr(root) + "));"
         "source.snapshot('WS:EXECUTIVE-CAPACITY-FABRIC');"

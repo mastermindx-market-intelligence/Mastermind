@@ -6,7 +6,7 @@
  ]);
 -// Closed web_ceo_v2 read/profile-error contract: server._is_e1_envelope.
 +// Closed, source-qualified V2/V3 E1 contracts; other versions remain unknown.
-+const E1_SERVER_VERSIONS = new Set(["1.2.0", "1.4.0"]);
++const E1_SERVER_VERSIONS = new Set(["1.2.0", "1.4.0", "1.5.0"]);
  const E1_ENVELOPE_KEYS = [
    "schema", "tool", "ok", "server_version", "mode", "generated_at",
    "grounding", "data", "degraded", "bounded", "error",

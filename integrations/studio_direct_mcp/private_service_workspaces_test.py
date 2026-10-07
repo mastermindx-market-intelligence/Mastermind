@@ -30,7 +30,7 @@ class RepositoryWorkspaceInstallTests(unittest.TestCase):
 
     def test_source_manifest_includes_consumer_and_preserves_legacy_generations(self):
         self.assertIn("workspace-access.mjs", service.STAGE_FILES)
-        prior = frozenset(service.STAGE_FILES) - {"workspace-access.mjs"}
+        prior = frozenset(service.LEGACY_STAGE_FILES_V6) - {"workspace-access.mjs"}
         self.assertIn(prior, service.KNOWN_MANIFEST_FILESETS)
         self.assertIn(prior - {"fleet-status.mjs"}, service.KNOWN_MANIFEST_FILESETS)
 
