@@ -273,6 +273,11 @@ NEXT: single watcher watch13 adds #1227 head/comments/reviews. Quiet otherwise.
   - The control-host readiness profile does not check the namespace.
   - The installer boots C1 out. A namespace refusal, which is pre-effect by design, would therefore appear only after SOL_STATE is already down.
   - The merge readback will ask the release owner's pre-install preflight to prove the namespace: direct, root:wheel 0700, no ACL.
+- **#811 left draft (seen when watch55 armed at 05:27:50Z).**
+  - mastermindx-2 posted 6031565594 (05:24:20Z), "SOL ACCEPTED BUILDER RESULT / BRANCH_WRITER_RELEASED" at exact head 8b992746: CI 37561100519 success, Codex 6029519102 clean, Source Continuity REMOTE_COMPLETE_VERIFIED.
+  - It marked #811 ready at 05:24:32Z. Its next edge is the owner's current-base checks, then an expected-head merge. That is the owner's lane, not a C3 act.
+  - C3 composition check (local only, nothing pushed): #784 owns 3 paths and #811 owns 6, with none shared. master+#811 composes clean, and (master+#811)+#784 at be0030ae composes clean.
+  - If #811 lands first, the joint-generation readback covers it as well.
 - **Also observed.** The override table has `com.mastermind.executive.agent-relay => disabled` with no loaded job. This is consistent with A2 being disarmed.
 - **Next.**
   1. #784 successor, then CI and exact-head review, then merge.
@@ -656,7 +661,7 @@ Watcher: watch3 (S/watch3.out; #1143 comments + #811 head/comments + master; 10-
 - Do not re-ACK; do not post a second Slack root for this operation.
 
 ## 8 Next action
-- 05:50Z (10-07): Sol's six #1143 posts (93) agree with the amended order, the DEC and census d7c5395e, so no C3 post. #784's flock successor is with mastermindx-2 (CONTINUE 6031219428). The merge readback will add the lock-namespace precondition (`locks/` comes only from prepare-capacity-host.sh; codex-pro-01/02/03 on this host imply it exists). watch55 is armed.
+- 05:50Z (10-07): Sol's six #1143 posts (93) agree with the amended order, the DEC and census d7c5395e, so no C3 post. #784's flock successor is with mastermindx-2 (CONTINUE 6031219428). The merge readback will add the lock-namespace precondition (`locks/` comes only from prepare-capacity-host.sh; codex-pro-01/02/03 on this host imply it exists). #811 is ready (owner-accepted 6031565594), and master+#811+#784 composes clean. watch55 is armed.
 - 04:05Z (10-07): **#1220 MERGED ee120e80** (squash, patch-identical to the adjudicated c9552576; CI and Codex exact-head review clean; catalog invariants unchanged, so census d7c5395e stays valid). The remaining source gate is #784 (be0030ae). The next edge is the #784 merge, then one joint-generation C3 readback on #1143, then the install receipt. watch54 is armed.
 - 02:55Z (10-07): watch52 EDGE (#811 comments 48→49) gave a Codex "no major issues" on #811 at 8b992746 (02:21Z).
   - #784 → **57cfd9d1** (repair "harden shared C1 release rebind" plus a protected merge, 02:39Z; CodeQL and analyzers success, `test` in progress).
