@@ -419,6 +419,7 @@ def china_company_evidence(ticker: str) -> dict:
         "may_change_entry": False,
         "may_change_exit": False,
         "may_trade": False,
+        "may_execute_source_text": False,
     }
 
     def _base(status: str, *, source: dict | None = None) -> dict:
