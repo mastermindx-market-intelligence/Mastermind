@@ -19,6 +19,8 @@ The workstream and Macro commit come from the current assignment/source owner, n
 
 This opt-in path emits the canonical `context_bundle.v1` JSON produced by Macro `scripts/agentos.py compile-context`. It does not run the global brief or mix unrelated global handoffs into the task. Omitting `--workstream` preserves the previous company-wide boot-packet behavior. `--json` is optional in workstream mode because that mode always returns canonical JSON.
 
+**Both `--macro-root` and `--expected-macro-sha` are mandatory in workstream mode.** An environment root, sibling checkout or vendor mirror cannot substitute for the assigned source. The legacy company-wide mode retains its original discovery behavior.
+
 `--expected-macro-sha` checks checkout HEAD before and after the read and matches the compiler's reported `repo_sha`. It is a drift guard, not a signature, immutable filesystem snapshot, native loading attestation, proof that the commit is protected/current, or runtime permission. The caller must establish the approved source. The canonical source-record digest identifies the compiler's actual record inputs; unrelated dirty-file/liveness questions remain with their existing owners.
 
 ## Startup order
@@ -56,15 +58,19 @@ An actual M2 read on 2026-10-06, against Macro `610889a4e3088bd9dacafedb43a8617f
 
 Consequently, the launcher must not infer that omitted handoffs do not exist. Read the exact current continuation separately, or use a justified larger budget while preserving all warnings. Durable source hygiene belongs to Agent OS: summarize historical settled work with exact evidence links and retain all still-applicable constraints. Such a repair needs semantic review; do not weaken compiler preservation rules to hide bloated records.
 
+A follow-up same-record-digest experiment on Macro `a80e6ff8ff771b0f994982b2dfb2de203197dc18` confirmed that even a 12,000-token request returned the same 18,423-token estimate with no handoff. A 24,000-token request included one handoff, 12 decisions and eight discoveries, but still estimated 25,626 tokens and omitted 15 items. The selected handoff was dated 2026-09-29, not this operation's 2026-10-06 continuation. Therefore a larger budget is not a substitute for the exact assigned continuation, and is not a global worker default. Preserve role-specific context/spend bounds.
+
 ## Failure guide
 
 | Observation | Correct action |
 |---|---|
+| Missing explicit source root or pin | Obtain them from the current assignment/source owner. Do not use the legacy environment/sibling/vendor ladder for scoped recovery. |
 | No usable Macro checkout | Resolve the installed repository binding. Do not clone an unapproved fallback or use an unrelated global brief. |
 | Expected source pin mismatch | Reconcile the assignment's source and the existing checkout. Do not remove the check merely to make startup pass. |
 | Canonical compiler exit 1 | Inspect the named workstream's existence/schema using the current Agent OS owner. Error output is intentionally not copied into the prompt by this adapter. |
 | Timeout / transport byte ceiling | Context was not emitted. Diagnose the bounded read; do not keep retrying unchanged or treat partial output as success. |
 | Reader settlement unknown | Preserve the original reader/carrier and reconcile through its process owner before another attempt. |
+| Malformed Git SHA or source-record digest | Reject the payload. The source digest must satisfy the existing `valid_source_records_digest` contract (`sha256:` plus 64 lowercase hex characters). |
 | Wrong schema / duplicate JSON keys / wrong target | Refuse the response as context; do not guess which field or workstream was intended. |
 | Degraded or no-answer payload | Preserve it as knowledge uncertainty, never as admission or permission. Retrieve only the needed missing canonical evidence. |
 | Required native tool absent | Report the exact missing tool/profile; continue unrelated safe work. Do not infer the whole Fabric is down. |

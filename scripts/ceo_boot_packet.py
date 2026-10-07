@@ -9,8 +9,9 @@ arms anything.
 The default company-wide mode ALWAYS exits 0 once the arguments parse. A missing
 or stale Macro checkout is an orientation gap, not a control-plane fault.
 
-With --workstream, this entrypoint instead reads the existing canonical Agent OS
-context_bundle.v1 JSON. Missing named context is a nonzero read failure, never a
+With --workstream, an explicit --macro-root and --expected-macro-sha are required.
+This entrypoint reads the existing canonical Agent OS context_bundle.v1 JSON.
+Missing named context is a nonzero read failure, never a
 fallback to a generic brief. This is evidence, not authority or native admission.
 No memory compiler, renderer, store or execution lifecycle is added.
 
@@ -42,6 +43,7 @@ from control_plane.ceo_boot_packet import (  # noqa: E402  (after sys.path boots
     render_packet,
     resolve_macro_root,
 )
+from control_plane.session_truth_contract import valid_source_records_digest  # noqa: E402
 
 # Transport ceiling, not the compiler's token budget. Never clip constraints.
 _CONTEXT_MAX_BYTES = 256 * 1024
@@ -73,7 +75,7 @@ def _workstream_context(args: argparse.Namespace) -> int:
     if root is None:
         return unavailable("no usable Macro checkout; supply --macro-root")
     root = root.resolve()
-    if args.expected_macro_sha is not None and git_sha(root) != args.expected_macro_sha:
+    if git_sha(root) != args.expected_macro_sha:
         return unavailable("Macro checkout does not match the expected source pin")
     argv = [sys.executable, "-B", os.fspath(root / "scripts" / "agentos.py"),
             "compile-context", "--workstream", args.workstream,
@@ -110,11 +112,15 @@ def _workstream_context(args: argparse.Namespace) -> int:
         for field in ("source_records_digest", "repo_sha", "generated_at"):
             if not isinstance(payload.get(field), str) or not payload[field]:
                 raise ValueError("missing context provenance")
+        if not re.fullmatch(r"[0-9a-f]{40}", payload["repo_sha"]):
+            raise ValueError("noncanonical Git source identity")
+        if not valid_source_records_digest(payload["source_records_digest"]):
+            raise ValueError("noncanonical source-record digest")
         if "no_answer_reason" not in payload:
             raise ValueError("missing context answer state")
     except (ValueError, TypeError, RecursionError):
         return unavailable("invalid or mismatched canonical context response")
-    if args.expected_macro_sha is not None and (
+    if (
         payload["repo_sha"] != args.expected_macro_sha
         or git_sha(root) != args.expected_macro_sha
     ):
@@ -163,7 +169,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--expected-macro-sha",
-        help="require this exact Macro HEAD before/after a workstream read and in its provenance",
+        help="required with --workstream: exact Macro HEAD before/after the read and in its provenance",
     )
     return parser
 
@@ -172,6 +178,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
     if args.workstream is not None:
+        # Scoped recovery must never inherit the global brief's discovery ladder.
+        if not args.macro_root or not args.macro_root.strip():
+            parser.error("--workstream requires an explicit --macro-root; no discovery fallback")
+        if args.expected_macro_sha is None:
+            parser.error("--workstream requires --expected-macro-sha from the source owner")
         args.workstream = args.workstream.removeprefix("WS:")
         if not re.fullmatch(r"[A-Z0-9][A-Za-z0-9._-]{1,63}", args.workstream):
             parser.error("--workstream must name one exact workstream key")
