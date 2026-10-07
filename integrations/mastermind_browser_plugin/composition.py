@@ -11,6 +11,7 @@ from typing import Any, Callable
 
 from .inventory_owner import BrowserInventoryOwner
 from .owner_adapter import (
+    BrokeredManagedBrowserOwnerAdapter,
     ExistingBrowserEffectPort,
     ManagedBrowserOwnerAdapter,
     SharedHumanBrowserOwnerAdapter,
@@ -48,6 +49,7 @@ def compose_browser_owner(
     expected_catalog_schema_digest: str,
     managed_backend_schema_digest: str,
     shared_backend_schema_digest: str,
+    managed_broker_caller: Any | None = None,
 ) -> BrowserOwnerComposition:
     """Join already-owned Browser seams without adding another control plane."""
 
@@ -66,7 +68,12 @@ def compose_browser_owner(
         expected_catalog_schema_digest=expected_catalog_schema_digest,
     )
     projector = WorkbenchManagedProjector()
-    managed = ManagedBrowserOwnerAdapter(
+    managed_type = (
+        ManagedBrowserOwnerAdapter
+        if managed_broker_caller is None
+        else BrokeredManagedBrowserOwnerAdapter
+    )
+    managed_kwargs = dict(
         codec=codec,
         clock_ms=clock_ms,
         caller_binding=caller_binding,
@@ -78,6 +85,13 @@ def compose_browser_owner(
         expected_catalog_schema_digest=expected_catalog_schema_digest,
         expected_backend_schema_digest=managed_backend_schema_digest,
     )
+    if managed_broker_caller is None:
+        managed = managed_type(**managed_kwargs)
+    else:
+        managed = managed_type(
+            broker_caller=managed_broker_caller,
+            **managed_kwargs,
+        )
     shared = SharedHumanBrowserOwnerAdapter(
         broker_caller=shared_broker_caller,
         codec=codec,

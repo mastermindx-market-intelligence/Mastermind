@@ -7,6 +7,7 @@ policy. It creates no lease, queue, lifecycle, permission or retry owner.
 from __future__ import annotations
 
 import inspect
+import threading
 from dataclasses import dataclass
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -14,11 +15,12 @@ from typing import Any
 
 from control_plane.codex_worker import ProcessInspector
 from integrations.business_mcp_auth.contracts import validate_resource_policy
+from integrations.workbench_action_mcp.contracts import ActionCaller
 from integrations.workbench_action_mcp.deployment import RuntimeServices
 
 from .app import create_authenticated_browser_server
-from .browser_port import BrowserActionPort
-from .contracts import BrowserRefCodec
+from .browser_port import BrowserActionPort, BrowserPortRefused
+from .contracts import BrowserRefCodec, BrowserResourceRef
 from .resource_port import (
     BrowserHostConfig,
     BrowserResourcePort,
@@ -40,6 +42,14 @@ class BrowserPorts:
 
 
 @dataclass(frozen=True)
+class ActiveBrowserProjection:
+    """Ephemeral read projection of one exact resource this deployment started."""
+
+    browser_ref: str
+    resource: BrowserResourceRef
+
+
+@dataclass(frozen=True)
 class BrowserDeployment:
     """Borrowed browser facade over one existing Workbench runtime generation."""
 
@@ -55,6 +65,8 @@ class BrowserDeployment:
     run_action: Callable[..., Any]
     reconcile_action: Callable[..., Any]
     cleanup_resource: Callable[..., Any]
+    observe_active_resources: Callable[..., Any]
+    observe_tab_group: Callable[..., Any]
 
 
 async def _run_existing(services: RuntimeServices, operation: Callable[[], object]) -> object:
@@ -178,6 +190,32 @@ def create_browser_deployment(
     action_port = ports.action_port
     selected_host = validate_host_config(host_config)
 
+    # Runtime-scoped projection only. The signed browser_ref and Workbench owner
+    # remain authoritative; this set is neither durable nor independently
+    # recoverable and disappears with the deployment process.
+    projection_gate = threading.RLock()
+    active_projection: dict[
+        str, tuple[tuple[str, str, str], BrowserResourceRef]
+    ] = {}
+
+    def caller_key(caller: ActionCaller) -> tuple[str, str, str]:
+        if type(caller) is not ActionCaller:
+            raise TypeError("browser projection caller must be ActionCaller")
+        return (caller.subject_digest, caller.client_ref, caller.resource)
+
+    def remember(
+        caller: ActionCaller, browser_ref: str, resource: BrowserResourceRef
+    ) -> None:
+        key = caller_key(caller)
+        with projection_gate:
+            active_projection[browser_ref] = (key, resource)
+
+    def forget(browser_ref: object) -> None:
+        if type(browser_ref) is not str:
+            return
+        with projection_gate:
+            active_projection.pop(browser_ref, None)
+
     async def prepare_resource(caller, project_ref, mode, profile_ref):
         return await _run_existing(
             services,
@@ -190,13 +228,69 @@ def create_browser_deployment(
         )
 
     async def start_resource(caller, start_ref):
-        return await _run_existing(
+        receipt = await _run_existing(
             services, lambda: resource_port.start_resource(caller, start_ref)
         )
+        if (
+            isinstance(receipt, Mapping)
+            and receipt.get("effect_state") == "APPLIED"
+            and type(receipt.get("browser_ref")) is str
+        ):
+            browser_ref = receipt["browser_ref"]
+            try:
+                observed = await _run_existing(
+                    services,
+                    lambda: action_port.observe_resource(caller, browser_ref),
+                )
+            except BrowserPortRefused:
+                # The start receipt remains authoritative. A transient inability
+                # to observe it must not be rewritten as NOT_APPLIED.
+                pass
+            else:
+                if type(observed) is BrowserResourceRef:
+                    remember(caller, browser_ref, observed)
+        return receipt
 
     async def reconcile_resource(caller, start_ref):
         return await _run_existing(
             services, lambda: resource_port.reconcile_resource(caller, start_ref)
+        )
+
+    async def observe_active_resources(
+        caller: ActionCaller,
+    ) -> tuple[ActiveBrowserProjection, ...]:
+        key = caller_key(caller)
+
+        def project() -> tuple[ActiveBrowserProjection, ...]:
+            with projection_gate:
+                snapshot = tuple(active_projection.items())
+            result: list[ActiveBrowserProjection] = []
+            stale: list[str] = []
+            for browser_ref, (owner_key, _cached) in snapshot:
+                if owner_key != key:
+                    continue
+                try:
+                    live = action_port.observe_resource(caller, browser_ref)
+                except BrowserPortRefused:
+                    stale.append(browser_ref)
+                    continue
+                result.append(
+                    ActiveBrowserProjection(browser_ref=browser_ref, resource=live)
+                )
+            if stale:
+                with projection_gate:
+                    for browser_ref in stale:
+                        current = active_projection.get(browser_ref)
+                        if current is not None and current[0] == key:
+                            active_projection.pop(browser_ref, None)
+            return tuple(result)
+
+        return await _run_existing(services, project)
+
+    async def observe_tab_group(caller: ActionCaller, browser_ref: str):
+        return await _run_existing(
+            services,
+            lambda: action_port.observe_tab_group(caller, browser_ref),
         )
 
     async def read_tool(caller, browser_ref, tool, arguments):
@@ -240,7 +334,7 @@ def create_browser_deployment(
         tool_call_inflight: bool = False,
     ):
         # Host/lease-owner method only; deliberately not exported as an MCP tool.
-        return await _run_existing(
+        receipt = await _run_existing(
             services,
             lambda: resource_port.cleanup_resource(
                 browser_ref,
@@ -249,6 +343,9 @@ def create_browser_deployment(
                 tool_call_inflight=tool_call_inflight,
             ),
         )
+        if isinstance(receipt, Mapping) and receipt.get("released") is True:
+            forget(browser_ref)
+        return receipt
 
     server = create_authenticated_browser_server(
         authenticator=services.authenticator,
@@ -282,7 +379,15 @@ def create_browser_deployment(
         run_action=run_action,
         reconcile_action=reconcile_action,
         cleanup_resource=cleanup_resource,
+        observe_active_resources=observe_active_resources,
+        observe_tab_group=observe_tab_group,
     )
 
 
-__all__ = ["BrowserDeployment", "BrowserPorts", "create_browser_deployment", "create_browser_ports"]
+__all__ = [
+    "ActiveBrowserProjection",
+    "BrowserDeployment",
+    "BrowserPorts",
+    "create_browser_deployment",
+    "create_browser_ports",
+]

@@ -588,8 +588,20 @@ class SharedHumanBrowserOwnerAdapter(ManagedBrowserOwnerAdapter):
         return self._receipt(value)
 
 
+class BrokeredManagedBrowserOwnerAdapter(SharedHumanBrowserOwnerAdapter):
+    """Managed pooled browser with the same caller-bound action-ref envelope.
+
+    The Workbench resource is owned by one internal broker caller while each
+    external Browser caller receives its own signed tab/action capabilities.
+    """
+
+    def _required_backend(self) -> str:
+        return TabBackend.MANAGED.value
+
+
 __all__ = [
     "BrowserCallerBinding",
+    "BrokeredManagedBrowserOwnerAdapter",
     "ExistingBrowserEffectPort",
     "ManagedBrowserOwnerAdapter",
     "ManagedToolProjector",
