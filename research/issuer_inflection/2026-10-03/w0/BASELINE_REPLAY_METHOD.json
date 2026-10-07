@@ -1,0 +1,67 @@
+{
+  "kind": "development_owner_baseline_replay_method",
+  "source_commit": "37122b69fffa98cb160022c4831df0338ef3e7e3",
+  "script": "baseline_replay.py",
+  "scope": "Two existing direct FIF metrics crossed with two exact reporting periods. No new owner, schema registration, source write, publication or outcome trial.",
+  "metric_ids": [
+    "revenue",
+    "total_assets"
+  ],
+  "periods": [
+    {
+      "kind": "duration",
+      "start": "2024-09-29",
+      "end": "2025-09-27",
+      "label": "FY2025"
+    },
+    {
+      "kind": "instant",
+      "start": null,
+      "end": "2025-09-27",
+      "label": "2025-09-27"
+    }
+  ],
+  "snapshots": {
+    "before_a1_admission": {
+      "source_snapshot_at": "2026-08-01T00:00:00Z",
+      "recorded_at": "2026-08-23T00:32:30Z"
+    },
+    "after_a1_before_a2_admission": {
+      "source_snapshot_at": "2026-08-01T00:00:00Z",
+      "recorded_at": "2026-08-23T07:02:12Z"
+    },
+    "after_a2_admission": {
+      "source_snapshot_at": "2026-08-01T00:00:00Z",
+      "recorded_at": "2026-08-23T12:00:00Z"
+    },
+    "before_a2_source": {
+      "source_snapshot_at": "2026-07-31T10:01:01Z",
+      "recorded_at": "2026-08-23T12:00:00Z"
+    }
+  },
+  "comparisons": [
+    {
+      "name": "first_admission",
+      "before": "before_a1_admission",
+      "after": "after_a1_before_a2_admission"
+    },
+    {
+      "name": "later_admission_refusal",
+      "before": "after_a1_before_a2_admission",
+      "after": "after_a2_admission"
+    },
+    {
+      "name": "source_cutoff_refusal",
+      "before": "before_a2_source",
+      "after": "after_a2_admission"
+    },
+    {
+      "name": "identical_cutoff",
+      "before": "after_a2_admission",
+      "after": "after_a2_admission"
+    }
+  ],
+  "development_exposed": true,
+  "trial_registered": false,
+  "production_emission": false
+}

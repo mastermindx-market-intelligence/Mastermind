@@ -1,0 +1,40 @@
+{
+  "kind": "development_owner_input_replay",
+  "source_commit": "37122b69fffa98cb160022c4831df0338ef3e7e3",
+  "source_paths": [
+    "engine",
+    "app",
+    "collectors",
+    "config",
+    "lib",
+    "tests/test_fundamental_forensics_ixbrl_raw_ledger.py",
+    "tests/fixtures/fundamental_forensics/aapl_10k_2025",
+    "tests/fixtures/fundamental_forensics/aapl_10q_2026q3",
+    "data/reference/security_master.parquet",
+    "data/reference/issuer_master.parquet"
+  ],
+  "driver_sha256": "ea7eb744ec43d5bc6adab029ae9f86562dc8eca6ede41c518e94ae9096aa1ee7",
+  "frozen_query_method_sha256": "b183fa79087c1f2bc4f53f6eba345553cfbb1eed55d6751c1ce3af525dbf7c08",
+  "python": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)]",
+  "recorded_before_execution_at": "2026-10-03T20:04:12.263235+00:00",
+  "test_command": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "-m",
+    "pytest",
+    "-c",
+    "/dev/null",
+    "--noconftest",
+    "-p",
+    "no:cacheprovider",
+    "-q",
+    "tests/test_fundamental_forensics_ixbrl_raw_ledger.py::test_required_governed_aapl_values",
+    "tests/test_fundamental_forensics_ixbrl_raw_ledger.py::test_unlinked_vintages_are_not_evaluable",
+    "tests/test_fundamental_forensics_ixbrl_raw_ledger.py::test_pit_cutoffs_hide_future_knowledge",
+    "tests/test_fundamental_forensics_ixbrl_raw_ledger.py::test_statement_query_reconciliation_for_direct_metrics"
+  ],
+  "development_exposed": true,
+  "heldout": false,
+  "trial_registered": false,
+  "production_proof": false,
+  "i3_acceptance": false
+}

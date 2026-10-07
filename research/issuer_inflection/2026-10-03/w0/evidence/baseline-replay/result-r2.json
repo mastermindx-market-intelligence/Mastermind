@@ -1,0 +1,51 @@
+{
+  "kind": "development_baseline_replay_verified",
+  "method_sha256": "62764ed676ce5f63102185c4e7658dad428e6972325aacb2a0b6d7c6544d6dd3",
+  "comparisons": [
+    {
+      "name": "first_admission",
+      "artifact_sha256": "ee7faddbd0bf053a0ec674344fa6a7d5c95fd9fecdab822188606f81c27809cd",
+      "counts": {
+        "became_available_not_economic_change": 2,
+        "unchanged_refusal": 2
+      },
+      "exact_prior_semantic_parity": true,
+      "requested_variable_count": 4
+    },
+    {
+      "name": "later_admission_refusal",
+      "artifact_sha256": "52cb04350d7cee2769b106827a0b39a592fd85d7a723a1c64c8cc8e5db7ad82b",
+      "counts": {
+        "became_not_evaluable": 1,
+        "unchanged_refusal": 2,
+        "unchanged_value": 1
+      },
+      "exact_prior_semantic_parity": true,
+      "requested_variable_count": 4
+    },
+    {
+      "name": "source_cutoff_refusal",
+      "artifact_sha256": "007542c487242ff0e2536b0b03ff6412ffd47e54ab349f3554ceaa1e6a855eca",
+      "counts": {
+        "became_not_evaluable": 1,
+        "unchanged_refusal": 2,
+        "unchanged_value": 1
+      },
+      "exact_prior_semantic_parity": true,
+      "requested_variable_count": 4
+    },
+    {
+      "name": "identical_cutoff",
+      "artifact_sha256": "efeb04d0ef1f53b8eeed2d14c9474492e95e0ab186cb67e3305ba7448bcaba41",
+      "counts": {
+        "unchanged_refusal": 3,
+        "unchanged_value": 1
+      },
+      "exact_prior_semantic_parity": true,
+      "requested_variable_count": 4
+    }
+  ],
+  "completed_at": "2026-10-04T00:13:13.438625+00:00",
+  "full_w1_accepted": false,
+  "production_proof": false
+}

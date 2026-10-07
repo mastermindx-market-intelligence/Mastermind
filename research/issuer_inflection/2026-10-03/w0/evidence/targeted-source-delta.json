@@ -1,0 +1,79 @@
+{
+  "kind": "targeted_owner_dependency_byte_comparison",
+  "audit_pin": "7ce8e6dfaaa8b8effed2430e069e1efe73e47fa6",
+  "current_pin": "37122b69fffa98cb160022c4831df0338ef3e7e3",
+  "observed_at": "2026-10-03T19:51:29.982368+00:00",
+  "scope": "Only ten named W0/W1 owner dependencies; no global tree, workstream or workspace census.",
+  "files": [
+    {
+      "path": "engine/company_intelligence/financial_dossier.py",
+      "audit_sha256": "87471b024532c13bc52679423edc8b43a1eff2d112062a5e3ff8588733232123",
+      "current_sha256": "87471b024532c13bc52679423edc8b43a1eff2d112062a5e3ff8588733232123",
+      "unchanged_from_audit": true,
+      "snapshot_matches_current": true
+    },
+    {
+      "path": "engine/company_intelligence/event_workspace.py",
+      "audit_sha256": "77ce38c31272ed27365cdb7ad28e89ea077f8c306e2900b50300d1bc25cb86ee",
+      "current_sha256": "ff90af02298ed82797b0071f947be34a035064e1347f91f1cfef9f33822bfd47",
+      "unchanged_from_audit": false,
+      "snapshot_matches_current": true
+    },
+    {
+      "path": "engine/earnings_narrative/economic_interpretation.py",
+      "audit_sha256": "675d8332310dd5152c5dede1aa98eebc968e8b5e75f54b6741bdff235e4159a7",
+      "current_sha256": "675d8332310dd5152c5dede1aa98eebc968e8b5e75f54b6741bdff235e4159a7",
+      "unchanged_from_audit": true,
+      "snapshot_matches_current": true
+    },
+    {
+      "path": "engine/fundamental_forensics/query_service.py",
+      "audit_sha256": "7fc5b10ea5b7b0e26c82e3316ed429f84734ec81f4bab593adf6843dbe2ed7eb",
+      "current_sha256": "7fc5b10ea5b7b0e26c82e3316ed429f84734ec81f4bab593adf6843dbe2ed7eb",
+      "unchanged_from_audit": true,
+      "snapshot_matches_current": true
+    },
+    {
+      "path": "engine/fundamental_forensics/ixbrl_raw_ledger.py",
+      "audit_sha256": "d3f0c2c83396396ce7be8495978b29be5320484023851b0161fc33c2230bec10",
+      "current_sha256": "d3f0c2c83396396ce7be8495978b29be5320484023851b0161fc33c2230bec10",
+      "unchanged_from_audit": true,
+      "snapshot_matches_current": true
+    },
+    {
+      "path": "engine/fundamental_forensics/statement_service.py",
+      "audit_sha256": "245a33053dfd845f6390635142f5e9f27dd0102ca626f1e02512593eb15b2f6e",
+      "current_sha256": "245a33053dfd845f6390635142f5e9f27dd0102ca626f1e02512593eb15b2f6e",
+      "unchanged_from_audit": true,
+      "snapshot_matches_current": true
+    },
+    {
+      "path": "tests/test_fundamental_forensics_ixbrl_raw_ledger.py",
+      "audit_sha256": "6a4f78ceba0aef7e475c8ec2f65b4f2daeba9b1603e87dfd040697abba1481d4",
+      "current_sha256": "6a4f78ceba0aef7e475c8ec2f65b4f2daeba9b1603e87dfd040697abba1481d4",
+      "unchanged_from_audit": true,
+      "snapshot_matches_current": true
+    },
+    {
+      "path": "config/fundamental_forensics/metrics/v1/metric_catalog.yaml",
+      "audit_sha256": "195f8df1a278e79e63051718c2e491a64bbac2b9425db5fcfe687a3b558b45a0",
+      "current_sha256": "195f8df1a278e79e63051718c2e491a64bbac2b9425db5fcfe687a3b558b45a0",
+      "unchanged_from_audit": true,
+      "snapshot_matches_current": true
+    },
+    {
+      "path": "config/fundamental_forensics/metrics/v1/mappings/core.yaml",
+      "audit_sha256": "ccfceb0f0181877a14992691a410e28ebf53fb6abf24765d0bd820fcbc9d9bc0",
+      "current_sha256": "ccfceb0f0181877a14992691a410e28ebf53fb6abf24765d0bd820fcbc9d9bc0",
+      "unchanged_from_audit": true,
+      "snapshot_matches_current": true
+    },
+    {
+      "path": "config/fundamental_forensics/metrics/v1/formulas/core.yaml",
+      "audit_sha256": "3bff86c3545d2c34b225d2211a81367f71d5e0393bf33a067651e6686b324689",
+      "current_sha256": "3bff86c3545d2c34b225d2211a81367f71d5e0393bf33a067651e6686b324689",
+      "unchanged_from_audit": true,
+      "snapshot_matches_current": true
+    }
+  ]
+}

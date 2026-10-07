@@ -1,0 +1,62 @@
+[
+  {
+    "name": "after_a1_before_a2_admission",
+    "response_sha256": "71ef0548d64c2c0c98eb7acdcaf6e45ff5dbb7786069ba9095456e0e32d00631",
+    "bytes": 80994,
+    "actual_started_at": "2026-10-04T00:06:41.552517+00:00",
+    "actual_completed_at": "2026-10-04T00:06:43.216453+00:00",
+    "owner_coverage": {
+      "requested_cells": 4,
+      "value_cells": 2,
+      "missing_cells": 0,
+      "not_evaluable_cells": 2
+    },
+    "query_hash": "2cfcc2c1022e492671bbfb583de0311fc7bbdbcc7927bd993bb2cdadcf02c1b6",
+    "production_issuer_service": false
+  },
+  {
+    "name": "after_a2_admission",
+    "response_sha256": "548f16b80ee5bd7cb8610e3a5b72c3e099ac2584f1b6a61564c3e5f70a5929b3",
+    "bytes": 79109,
+    "actual_started_at": "2026-10-04T00:06:43.216493+00:00",
+    "actual_completed_at": "2026-10-04T00:06:43.303350+00:00",
+    "owner_coverage": {
+      "requested_cells": 4,
+      "value_cells": 1,
+      "missing_cells": 0,
+      "not_evaluable_cells": 3
+    },
+    "query_hash": "54e6370e7bd8dbaff68ee1af848a29afb9bce6029f906e195c5e346e131f5ce7",
+    "production_issuer_service": false
+  },
+  {
+    "name": "before_a1_admission",
+    "response_sha256": "622c88a9d544f0062d4b8244c637a1f5d6ba9ff4953b3e477553b9acdd4f340e",
+    "bytes": 76327,
+    "actual_started_at": "2026-10-04T00:06:43.303375+00:00",
+    "actual_completed_at": "2026-10-04T00:06:43.387893+00:00",
+    "owner_coverage": {
+      "requested_cells": 4,
+      "value_cells": 0,
+      "missing_cells": 2,
+      "not_evaluable_cells": 2
+    },
+    "query_hash": "d497ea3bbd379c27efb30eb5d7739a7b221e5bbfadb5b749a7fd730e2312c2be",
+    "production_issuer_service": false
+  },
+  {
+    "name": "before_a2_source",
+    "response_sha256": "2c5ca8f3c87c3ae6554b75d777442c48c8fd05c401248abcfb009a1d5608b543",
+    "bytes": 80994,
+    "actual_started_at": "2026-10-04T00:06:43.387916+00:00",
+    "actual_completed_at": "2026-10-04T00:06:43.471770+00:00",
+    "owner_coverage": {
+      "requested_cells": 4,
+      "value_cells": 2,
+      "missing_cells": 0,
+      "not_evaluable_cells": 2
+    },
+    "query_hash": "84295a51bff22782cee57902ed4199d3659719184e036a5a6689655ee4d96e8b",
+    "production_issuer_service": false
+  }
+]

@@ -1,0 +1,30 @@
+{
+  "source_head": "b95a7ddcb24f74a81b9486620c219217518d6f20",
+  "scope": "new fixture consumer source-binding regression",
+  "recorded_before_execution_at": "2026-10-04T02:17:09.927460+00:00",
+  "test_sha256": "f64930184a8dfb35855c1bae1b50c843a66b974933c016df486bbc217113655f",
+  "module_sha256": "4f3516830dba112649b46b965c90e481c7c25ca1f81225658ef3b8ae36e8f472",
+  "exit_code": 1,
+  "output_sha256": "da393825ccc1b8f1c8ae82a5f53693929eaffd32a34d16a087c3205edbe40162",
+  "tests_run": 15,
+  "failures": 14,
+  "failing_tests": [
+    "test_bad_unit_shape_has_typed_refusal",
+    "test_context_issuer_must_match_source_issuer",
+    "test_instant_cannot_back_duration",
+    "test_provenance_unit_must_match_cell_unit",
+    "test_ratio_unit_cannot_back_absolute_usd",
+    "test_selected_clock_must_match_provenance",
+    "test_selected_concept_must_match_provenance",
+    "test_selected_unit_must_match_owner_unit",
+    "test_source_readiness_must_not_exceed_cutoff",
+    "test_source_readiness_must_not_precede_fact",
+    "test_system_readiness_cannot_ignore_later_governance",
+    "test_system_readiness_cannot_precede_admission",
+    "test_wrong_duration_end_cannot_back_same_period",
+    "test_wrong_duration_start_cannot_back_same_period"
+  ],
+  "original_log_bytes": 13688,
+  "i3_acceptance": false,
+  "production_proof": false
+}
