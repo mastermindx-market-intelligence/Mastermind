@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ast
 import copy
+import hashlib
 import inspect
 import json
 import re
@@ -40,29 +41,38 @@ DESCRIPTIONS = {
         "institution and date filters. Returns report metadata only, never body text."
     ),
     "research_fetch": (
-        "Read one window of a report's extracted text by report_id; use next_cursor to continue."
+        "Read up to max_segments consecutive segments of a report's extracted text, "
+        "starting at segment_start; use next_segment_start to continue."
     ),
     "research_find_evidence": (
         "Find literal passages in research reports that bear on a claim. "
-        "Each passage is an exact substring of the extracted text with offsets and a hash."
+        "Each passage is an exact substring of the extracted text with UTF-8 byte offsets and hashes."
     ),
 }
 OPTIONAL_INPUTS = {
     "research_status": set(),
     "research_search": {"institution", "from", "to", "limit"},
-    "research_fetch": {"cursor", "max_chars"},
+    "research_fetch": {"segment_start", "max_segments"},
     "research_find_evidence": {"report_ids", "limit"},
 }
-SHA = "ab" * 32
-MACRO_COMMIT = "a" * 40
 MASTERMIND_COMMIT = "b" * 40
-CANONICAL = "Institutional demand remains concentrated in the front end of the curve."
+CANONICAL = "Institutional demand remains concentrated in the front end of the curve. 研报"
 
 
 def _invalid(tool: str, arguments: object) -> None:
     with pytest.raises(c.ContractViolation) as caught:
         c.validate_arguments(tool, arguments)
     assert caught.value.code == "INVALID_REQUEST"
+
+
+def _internal(tool: str, result: object, **kwargs: object) -> None:
+    with pytest.raises(c.ContractViolation) as caught:
+        c.validate_output(tool, result, **kwargs)
+    assert caught.value.code == "INTERNAL_ERROR"
+
+
+def _sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
 
 
 def _walk(schema: object):
@@ -104,10 +114,8 @@ def _candidate(index: int, *, report_id: str | None = None, rank: int | None = N
         "report_id": report_id or f"report-{index}",
         "title": "Rates outlook",
         "institution": "Example",
-        "published_date": "2026-10-07",
-        "tickers": ["AAPL", "BRK.B"],
-        "text_layer": "FULL_TEXT",
-        "rio_state": "CURRENT",
+        "side": "long",
+        "published_at": "2026-10-07T00:00:00Z",
         "rank": index if rank is None else rank,
     }
 
@@ -123,19 +131,15 @@ def _status_result() -> dict:
         },
         "catalog": {
             "report_count": 2,
-            "institution_count": 1,
-            "newest_report_date": "2026-10-07",
-            "oldest_report_date": None,
         },
         "coverage": {
-            "text_layer_ok": 2,
-            "text_layer_missing": 0,
-            "rio_available": 1,
+            "full_text_ratio": 1.0,
+            "rio_ratio": 0.5,
         },
+        "degradation": [],
         "generation": {
             "server_contract": CONTRACT,
-            "read_port_contract": "research.vault.read_port.v1",
-            "macro_commit": MACRO_COMMIT,
+            "read_port_contract": "research_vault.read_status.v1",
             "mastermind_commit": MASTERMIND_COMMIT,
         },
     }
@@ -146,14 +150,47 @@ def _search_result() -> dict:
         "contract": CONTRACT,
         "source_state": "PRODUCER_STALE",
         "candidates": [_candidate(1), _candidate(2, report_id="report-2")],
-        "coverage_note": "catalog is stale",
+        "coverage_state": "PARTIAL_CORPUS",
     }
 
 
-def _fetch_result(*, truncated: bool, text: str = "hello", total: int | None = None) -> dict:
-    start = 0
-    end = len(text)
-    total_chars = end + (5 if truncated else 0) if total is None else total
+def _segment(
+    index: int,
+    text: str,
+    byte_start: int,
+    *,
+    page_start: int | None = 1,
+    page_end: int | None = 1,
+) -> dict:
+    raw = text.encode("utf-8")
+    return {
+        "segment_index": index,
+        "page_start": page_start,
+        "page_end": page_end,
+        "byte_start": byte_start,
+        "byte_end": byte_start + len(raw),
+        "text": text,
+    }
+
+
+def _fetch_result(
+    *,
+    segments: list[dict] | None = None,
+    total: int | None = None,
+    coverage_state: str = "FULL_TEXT",
+    text: str | None = None,
+    text_layer_state: str | None = "full",
+) -> dict:
+    if segments is None:
+        body = "hello" if text is None else text
+        segments = [_segment(0, body, 0)]
+    if total is None:
+        total = len(segments) if coverage_state == "FULL_TEXT" else 0
+    if segments:
+        following = segments[-1]["segment_index"] + 1
+        nxt = following if following < total else None
+    else:
+        nxt = None
     return {
         "contract": CONTRACT,
         "source_state": "SOURCE_FRESH",
@@ -161,32 +198,38 @@ def _fetch_result(*, truncated: bool, text: str = "hello", total: int | None = N
             "report_id": "abc-1",
             "title": "Rates outlook",
             "institution": "Example",
-            "published_date": "2026-10-07",
+            "side": "long",
+            "published_at": "2026-10-07T00:00:00Z",
         },
         "provenance": {
             "source_class": "mastermind_private_institutional",
             "license_class": "internal_licensed",
         },
-        "text": text,
-        "window": {
-            "start": start,
-            "end": end,
-            "total_chars": total_chars,
-            "truncated": truncated,
-            "next_cursor": end if truncated else None,
-        },
-        "text_sha256": SHA,
+        "text_layer_state": text_layer_state,
+        "coverage_state": coverage_state,
+        "segment_count_total": total,
+        "segments": segments,
+        "next_segment_start": nxt,
         "rio_state": "CURRENT",
     }
 
 
-def _passage(text: str, start: int, report_id: str = "abc-1") -> dict:
+def _passage(
+    text: str,
+    byte_start: int,
+    report_id: str = "abc-1",
+    *,
+    segment_index: int = 0,
+) -> dict:
+    raw_text = text.encode("utf-8")
     return {
         "report_id": report_id,
         "passage_text": text,
-        "char_start": start,
-        "char_end": start + len(text),
-        "text_sha256": SHA,
+        "byte_start": byte_start,
+        "byte_end": byte_start + len(raw_text),
+        "text_sha256": _sha256(raw_text),
+        "canonical_text_sha256": _sha256(CANONICAL.encode("utf-8")),
+        "segment_index": segment_index,
     }
 
 
@@ -201,11 +244,23 @@ def _evidence_result(outcome: str, passages: list[dict]) -> dict:
 
 
 def _found_passages() -> list[dict]:
-    first = CANONICAL[0:13]
-    second = CANONICAL[14:20]
-    assert first == CANONICAL[0:13]
-    assert second == CANONICAL[14:20]
-    return [_passage(first, 0), _passage(second, 14, report_id="abc-2")]
+    raw = CANONICAL.encode("utf-8")
+    first = "Institutional"
+    suffix = "研报"
+    assert CANONICAL.startswith(first)
+    assert suffix in CANONICAL
+    assert len(suffix.encode("utf-8")) != len(suffix)
+    char_at = CANONICAL.index(suffix)
+    spans = (
+        (0, len(first.encode("utf-8")), "abc-1"),
+        (len(CANONICAL[:char_at].encode("utf-8")), len(CANONICAL[:char_at].encode("utf-8")) + len(suffix.encode("utf-8")), "abc-2"),
+    )
+    passages = []
+    for byte_start, byte_end, report_id in spans:
+        passage_text = raw[byte_start:byte_end].decode("utf-8")
+        assert raw[byte_start:byte_end] == passage_text.encode("utf-8")
+        passages.append(_passage(passage_text, byte_start, report_id=report_id))
+    return passages
 
 
 def _output_cases() -> list[tuple[str, str, object, dict]]:
@@ -220,32 +275,32 @@ def _output_cases() -> list[tuple[str, str, object, dict]]:
     many = copy.deepcopy(search)
     many["candidates"] = [_candidate(i) for i in range(1, 22)]
     length_mismatch = _evidence_result("FOUND", [_passage("ab", 0)])
-    length_mismatch["passages"][0]["char_end"] = 1
+    length_mismatch["passages"][0]["byte_end"] = 1
     same_offset = _evidence_result("FOUND", [_passage("ab", 4)])
-    same_offset["passages"][0]["char_end"] = same_offset["passages"][0]["char_start"]
+    same_offset["passages"][0]["byte_end"] = same_offset["passages"][0]["byte_start"]
     long_passage = _evidence_result("FOUND", [_passage("p" * 1201, 0)])
     quote_passage = _evidence_result("FOUND", [_passage("q" * 101, 0)])
-    fetch = _fetch_result(truncated=True)
+    fetch = _fetch_result(text="hello", total=4)
     bad_length = copy.deepcopy(fetch)
-    bad_length["text"] = "hell"
-    bad_truncated = copy.deepcopy(fetch)
-    bad_truncated["window"]["truncated"] = False
-    bad_truncated["window"]["next_cursor"] = None
-    bad_cursor = copy.deepcopy(fetch)
-    bad_cursor["window"]["next_cursor"] = 0
-    bad_total = copy.deepcopy(fetch)
-    bad_total["window"]["total_chars"] = 1
-    bad_total["window"]["truncated"] = False
-    bad_total["window"]["next_cursor"] = None
-    huge_text = _fetch_result(truncated=False, text="x" * 12001, total=12001)
+    bad_length["segments"][0]["text"] = "hell"
+    bad_next_missing = copy.deepcopy(fetch)
+    bad_next_missing["next_segment_start"] = None
+    bad_next_wrong = copy.deepcopy(fetch)
+    bad_next_wrong["next_segment_start"] = 0
+    done = _fetch_result(text="hello")
+    bad_next_when_done = copy.deepcopy(done)
+    bad_next_when_done["next_segment_start"] = 1
+    bad_index = copy.deepcopy(done)
+    bad_index["segments"][0]["segment_index"] = 1
+    huge_text = _fetch_result(text="x" * 12001)
     status = _status_result()
     bad_server = copy.deepcopy(status)
     bad_server["generation"]["server_contract"] = "other"
-    bad_macro = copy.deepcopy(status)
-    bad_macro["generation"]["macro_commit"] = "a" * 39
+    bad_commit = copy.deepcopy(status)
+    bad_commit["generation"]["mastermind_commit"] = "b" * 39
     bad_mastermind = copy.deepcopy(status)
     bad_mastermind["generation"]["mastermind_commit"] = ("b" * 40) + "\n"
-    bad_license = _fetch_result(truncated=False)
+    bad_license = _fetch_result(text="hello")
     bad_license["provenance"]["license_class"] = "public"
     wrong_contract = _search_result()
     wrong_contract["contract"] = "other"
@@ -270,13 +325,14 @@ def _output_cases() -> list[tuple[str, str, object, dict]]:
         ("not_found_with_passage", "research_find_evidence", _evidence_result("NOT_FOUND", [_passage("ab", 0)]), {}),
         ("passage_text_1201", "research_find_evidence", long_passage, {}),
         ("quote_limit_exceeded", "research_find_evidence", quote_passage, {"quote_limit_chars": 100}),
-        ("fetch_window_length_mismatch", "research_fetch", bad_length, {}),
-        ("fetch_truncated_inconsistent", "research_fetch", bad_truncated, {}),
-        ("fetch_next_cursor_inconsistent", "research_fetch", bad_cursor, {}),
-        ("fetch_end_past_total", "research_fetch", bad_total, {}),
-        ("fetch_text_12001", "research_fetch", huge_text, {}),
+        ("fetch_segment_byte_length_mismatch", "research_fetch", bad_length, {}),
+        ("fetch_next_segment_start_missing", "research_fetch", bad_next_missing, {}),
+        ("fetch_next_segment_start_wrong", "research_fetch", bad_next_wrong, {}),
+        ("fetch_next_segment_start_when_done", "research_fetch", bad_next_when_done, {}),
+        ("fetch_segment_index_past_total", "research_fetch", bad_index, {}),
+        ("fetch_text_over_segment_cap", "research_fetch", huge_text, {}),
         ("status_server_contract_wrong", "research_status", bad_server, {}),
-        ("status_macro_commit_39_hex", "research_status", bad_macro, {}),
+        ("status_mastermind_commit_39_hex", "research_status", bad_commit, {}),
         ("status_mastermind_commit_trailing_newline", "research_status", bad_mastermind, {}),
         ("provenance_license_class_changed", "research_fetch", bad_license, {}),
         ("unknown_tool_name", "research_delete", _status_result(), {}),
@@ -422,42 +478,20 @@ def test_fetch_report_id_accepts_pattern_and_121_chars(report_id: str) -> None:
     assert len("a" + ("b" * 120)) == 121
     accepted = c.validate_arguments("research_fetch", {"report_id": report_id})
     assert accepted["report_id"] == report_id
-    assert accepted["cursor"] == 0
-    assert accepted["max_chars"] == 6000
+    assert accepted["segment_start"] == 0
+    assert accepted["max_segments"] == 2
 
 
 def test_fetch_defaults_do_not_mutate_the_caller() -> None:
     original = {"report_id": "abc-1"}
     snapshot = copy.deepcopy(original)
     accepted = c.validate_arguments("research_fetch", original)
-    assert accepted["cursor"] == 0
-    assert accepted["max_chars"] == 6000
+    assert accepted["segment_start"] == 0
+    assert accepted["max_segments"] == 2
     assert original == snapshot
-    explicit = {"report_id": "abc-1", "cursor": 4, "max_chars": 500}
+    explicit = {"report_id": "abc-1", "segment_start": 4, "max_segments": 1}
     assert c.validate_arguments("research_fetch", explicit) == explicit
-    assert explicit == {"report_id": "abc-1", "cursor": 4, "max_chars": 500}
-
-
-@pytest.mark.parametrize("cursor", [-1, 2000001])
-def test_fetch_cursor_rejects_outside_closed_range(cursor: int) -> None:
-    _invalid("research_fetch", {"report_id": "abc-1", "cursor": cursor})
-
-
-@pytest.mark.parametrize("cursor", [0, 2000000])
-def test_fetch_cursor_accepts_closed_range(cursor: int) -> None:
-    assert c.validate_arguments("research_fetch", {"report_id": "abc-1", "cursor": cursor})["cursor"] == cursor
-
-
-@pytest.mark.parametrize("max_chars", [499, 12001])
-def test_fetch_max_chars_rejects_outside_closed_range(max_chars: int) -> None:
-    _invalid("research_fetch", {"report_id": "abc-1", "max_chars": max_chars})
-
-
-@pytest.mark.parametrize("max_chars", [500, 12000])
-def test_fetch_max_chars_accepts_closed_range(max_chars: int) -> None:
-    assert c.validate_arguments(
-        "research_fetch", {"report_id": "abc-1", "max_chars": max_chars}
-    )["max_chars"] == max_chars
+    assert explicit == {"report_id": "abc-1", "segment_start": 4, "max_segments": 1}
 
 
 @pytest.mark.parametrize("claim", ["a" * 301, "a\nb"])
@@ -551,20 +585,23 @@ def test_invalid_request_does_not_echo_input_or_chain_a_cause() -> None:
         c.ContractViolation("BOGUS")
 
 
-def test_valid_outputs_pass_including_windows_ranks_and_literal_passages() -> None:
+def test_valid_outputs_pass_including_segments_ranks_and_literal_passages() -> None:
     c.validate_output("research_status", _status_result())
     search = _search_result()
     c.validate_output("research_search", search)
     assert [item["rank"] for item in search["candidates"]] == [1, 2]
-    truncated = _fetch_result(truncated=True)
-    whole = _fetch_result(truncated=False)
-    c.validate_output("research_fetch", truncated)
+    continued = _fetch_result(total=3)
+    whole = _fetch_result()
+    c.validate_output("research_fetch", continued)
     c.validate_output("research_fetch", whole)
-    assert truncated["window"]["next_cursor"] == len(truncated["text"])
-    assert whole["window"]["next_cursor"] is None
+    assert continued["next_segment_start"] == 1
+    assert whole["next_segment_start"] is None
     passages = _found_passages()
-    assert passages[0]["passage_text"] == CANONICAL[passages[0]["char_start"]:passages[0]["char_end"]]
-    assert passages[1]["passage_text"] == CANONICAL[passages[1]["char_start"]:passages[1]["char_end"]]
+    raw = CANONICAL.encode("utf-8")
+    for passage in passages:
+        byte_start = passage["byte_start"]
+        byte_end = passage["byte_end"]
+        assert raw[byte_start:byte_end] == passage["passage_text"].encode("utf-8")
     c.validate_output("research_find_evidence", _evidence_result("FOUND", passages))
     c.validate_output("research_find_evidence", _evidence_result("PARTIAL", passages[:1]))
     c.validate_output("research_find_evidence", _evidence_result("NOT_FOUND", []))
@@ -586,9 +623,19 @@ def test_output_invariant_or_schema_failure_is_internal_error(
 
 
 def test_maximal_cjk_results_fit_under_the_result_cap() -> None:
-    fetch = _fetch_result(truncated=False, text="文" * 12000, total=12000)
+    unit = "文" * 1333
+    raw_len = len(unit.encode("utf-8"))
+    assert raw_len == 3999
+    segments = []
+    byte_at = 0
+    for index in range(c.FETCH_MAX_SEGMENTS):
+        segments.append(_segment(index, unit, byte_at, page_start=index + 1, page_end=index + 1))
+        byte_at += raw_len
+    fetch = _fetch_result(segments=segments, total=c.FETCH_MAX_SEGMENTS)
+    passage_text = "文" * 1200
+    passage_bytes = len(passage_text.encode("utf-8"))
     passages = [
-        _passage("证" * 1200, index * 1200, report_id=f"report-{index}")
+        _passage(passage_text, index * passage_bytes, report_id=f"report-{index}", segment_index=index)
         for index in range(10)
     ]
     evidence = _evidence_result("FOUND", passages)
@@ -658,7 +705,7 @@ def test_enums_contract_id_and_evidence_titles_match_the_frozen_contract() -> No
         "LATEST_REPORT_INVALID",
         "FUTURE_REPORT_CLOCK",
     )
-    assert c.TEXT_LAYER_STATES == (
+    assert c.COVERAGE_STATES == (
         "FULL_TEXT",
         "PREFIX_ONLY_LEGACY",
         "NO_TEXT_LAYER",
@@ -667,11 +714,28 @@ def test_enums_contract_id_and_evidence_titles_match_the_frozen_contract() -> No
         "PARTIAL_CORPUS",
         "SOURCE_REVISION_CHANGED",
     )
+    assert c.TEXT_LAYER_STATES == ("full", "thin", "none", "unavailable")
+    assert c.DEGRADATION_CODES == (
+        "PRODUCER_STALE",
+        "PARTIAL_CORPUS",
+        "FULL_TEXT_PARTIAL",
+        "RIO_PARTIAL",
+        "METADATA_PARTIAL",
+        "SCAN_NO_TEXT",
+        "INDEX_REBUILD_PENDING",
+    )
     assert c.RIO_STATES == ("CURRENT", "MISSING", "STALE", "INVALID", "NOT_REQUESTED")
     assert c.EVIDENCE_OUTCOMES == ("FOUND", "NOT_FOUND", "UNAVAILABLE", "PARTIAL")
+    assert c.SEGMENT_MAX_BYTES == 4000
+    assert c.FETCH_MAX_SEGMENTS == 4
+    assert c.FETCH_DEFAULT_SEGMENTS == 2
+    assert c.FETCH_MAX_TEXT_BYTES == 24000
     source = Path(c.__file__).read_text(encoding="utf-8")
-    assert "read_port.py:30-49 @ 00efb3621a6e" in source
-    assert CONTRACT == "mastermind.research_read_mcp.v1"
+    assert (
+        "F10 engine/research_vault/read_port.py:31-49 and :75-83, fulltext.py:20, "
+        "read_service.py:33-37 @ Macro bd6f27c8163 (#8610)."
+    ) in source
+    assert CONTRACT == "mastermind.research_read_mcp.v1.1"
     for schema in c.OUTPUT_SCHEMAS.values():
         assert schema["properties"]["contract"] == {"const": CONTRACT}
         assert schema["properties"]["source_state"]["enum"] == list(c.SOURCE_STATES)
@@ -684,10 +748,11 @@ def test_enums_contract_id_and_evidence_titles_match_the_frozen_contract() -> No
     assert c.OUTPUT_SCHEMAS["research_status"]["properties"]["generation"]["properties"]["server_contract"] == {
         "const": CONTRACT
     }
-    candidate = c.OUTPUT_SCHEMAS["research_search"]["properties"]["candidates"]["items"]
-    assert candidate["properties"]["text_layer"]["enum"] == list(c.TEXT_LAYER_STATES)
-    assert candidate["properties"]["rio_state"]["enum"] == list(c.RIO_STATES)
-    assert c.OUTPUT_SCHEMAS["research_fetch"]["properties"]["rio_state"]["enum"] == list(c.RIO_STATES)
+    fetch = c.OUTPUT_SCHEMAS["research_fetch"]["properties"]
+    assert fetch["coverage_state"]["enum"] == list(c.COVERAGE_STATES)
+    assert fetch["text_layer_state"]["enum"] == [*c.TEXT_LAYER_STATES, None]
+    assert fetch["text_layer_state"]["type"] == ["string", "null"]
+    assert fetch["rio_state"]["enum"] == list(c.RIO_STATES)
     assert evidence["properties"]["rio_state"]["enum"] == list(c.RIO_STATES)
     assert evidence["properties"]["outcome"]["enum"] == list(c.EVIDENCE_OUTCOMES)
 
@@ -696,6 +761,7 @@ def test_contract_modules_import_only_the_allowlisted_modules() -> None:
     allowed = {
         "__future__",
         "copy",
+        "hashlib",
         "json",
         "re",
         "typing",
@@ -830,3 +896,548 @@ def test_lock_if_present_is_hashed_and_pins_the_same_direct_versions() -> None:
         name, version = line.split("==", 1)
         name = name.split("[", 1)[0]
         assert locked[_canonicalize(name)] == version
+
+
+_FETCH_RESULT_KEYS = [
+    "contract",
+    "source_state",
+    "report",
+    "provenance",
+    "text_layer_state",
+    "coverage_state",
+    "segment_count_total",
+    "segments",
+    "next_segment_start",
+    "rio_state",
+]
+_SEGMENT_KEYS = ["segment_index", "page_start", "page_end", "byte_start", "byte_end", "text"]
+_CANDIDATE_KEYS = ["report_id", "title", "institution", "side", "published_at", "rank"]
+_PASSAGE_KEYS = [
+    "report_id",
+    "passage_text",
+    "byte_start",
+    "byte_end",
+    "text_sha256",
+    "canonical_text_sha256",
+    "segment_index",
+]
+_STATUS_KEYS = [
+    "contract",
+    "source_state",
+    "producer",
+    "catalog",
+    "coverage",
+    "degradation",
+    "generation",
+]
+_BANNED_V1_KEYS = {
+    "char_start",
+    "char_end",
+    "cursor",
+    "max_chars",
+    "tickers",
+    "text_layer",
+    "text_layer_ok",
+    "text_layer_missing",
+    "rio_available",
+    "institution_count",
+    "newest_report_date",
+    "oldest_report_date",
+    "macro_commit",
+    "window",
+    "published_date",
+    "coverage_note",
+}
+
+
+def _require_v11_fetch_schema() -> None:
+    props = c.OUTPUT_SCHEMAS["research_fetch"]["properties"]
+    assert list(props) == _FETCH_RESULT_KEYS
+    assert "window" not in props
+
+
+def _require_v11_passage_schema() -> None:
+    props = c.OUTPUT_SCHEMAS["research_find_evidence"]["properties"]["passages"]["items"]["properties"]
+    assert list(props) == _PASSAGE_KEYS
+    assert "char_start" not in props
+
+
+def _legacy_fetch() -> dict:
+    text = "hello"
+    return {
+        "contract": CONTRACT,
+        "source_state": "SOURCE_FRESH",
+        "report": {
+            "report_id": "abc-1",
+            "title": "Rates outlook",
+            "institution": "Example",
+            "published_date": "2026-10-07",
+        },
+        "provenance": {
+            "source_class": "mastermind_private_institutional",
+            "license_class": "internal_licensed",
+        },
+        "text": text,
+        "window": {
+            "start": 0,
+            "end": len(text),
+            "total_chars": len(text),
+            "truncated": False,
+            "next_cursor": None,
+        },
+        "text_sha256": "ab" * 32,
+        "rio_state": "CURRENT",
+    }
+
+
+def _legacy_search() -> dict:
+    return {
+        "contract": CONTRACT,
+        "source_state": "SOURCE_FRESH",
+        "candidates": [{
+            "report_id": "report-1",
+            "title": "Rates outlook",
+            "institution": "Example",
+            "published_date": "2026-10-07",
+            "tickers": ["AAPL"],
+            "text_layer": "FULL_TEXT",
+            "rio_state": "CURRENT",
+            "rank": 1,
+        }],
+        "coverage_note": "",
+    }
+
+
+def _legacy_passage() -> dict:
+    text = "Institutional"
+    return {
+        "report_id": "abc-1",
+        "passage_text": text,
+        "char_start": 0,
+        "char_end": len(text),
+        "text_sha256": "ab" * 32,
+    }
+
+
+def _legacy_status() -> dict:
+    return {
+        "contract": CONTRACT,
+        "source_state": "SOURCE_FRESH",
+        "producer": {
+            "last_success_at": "2026-10-07T00:00:00Z",
+            "age_seconds": 1.5,
+            "stale": False,
+        },
+        "catalog": {
+            "report_count": 2,
+            "institution_count": 1,
+            "newest_report_date": "2026-10-07",
+            "oldest_report_date": None,
+        },
+        "coverage": {
+            "text_layer_ok": 2,
+            "text_layer_missing": 0,
+            "rio_available": 1,
+        },
+        "generation": {
+            "server_contract": CONTRACT,
+            "read_port_contract": "research_vault.read_status.v1",
+            "macro_commit": "a" * 40,
+            "mastermind_commit": MASTERMIND_COMMIT,
+        },
+    }
+
+
+def _schema_keys(schema: object, found: set[str]) -> None:
+    if isinstance(schema, dict):
+        properties = schema.get("properties")
+        if isinstance(properties, dict):
+            found.update(properties)
+            for child in properties.values():
+                _schema_keys(child, found)
+        required = schema.get("required")
+        if isinstance(required, list):
+            found.update(item for item in required if isinstance(item, str))
+        for key in ("items", "additionalProperties", "contains"):
+            child = schema.get(key)
+            if isinstance(child, (dict, list)):
+                _schema_keys(child, found)
+        for key in ("anyOf", "oneOf", "allOf", "prefixItems"):
+            group = schema.get(key)
+            if isinstance(group, list):
+                for child in group:
+                    _schema_keys(child, found)
+    elif isinstance(schema, list):
+        for child in schema:
+            _schema_keys(child, found)
+
+
+def test_row1_search_omits_cursor_and_limits_1_to_20_default_8() -> None:
+    props = c.INPUT_SCHEMAS["research_search"]["properties"]
+    assert "cursor" not in props
+    assert props["limit"]["minimum"] == 1
+    assert props["limit"]["maximum"] == 20
+    original = {"query": "a"}
+    snapshot = copy.deepcopy(original)
+    assert c.validate_arguments("research_search", original)["limit"] == 8
+    assert original == snapshot
+    _invalid("research_search", {"query": "a", "limit": 0})
+    _invalid("research_search", {"query": "a", "limit": 21})
+    _invalid("research_search", {"query": "a", "cursor": 0})
+
+
+def test_row2_fetch_inputs_are_segment_selectors() -> None:
+    schema = c.INPUT_SCHEMAS["research_fetch"]
+    assert list(schema["properties"]) == ["report_id", "segment_start", "max_segments"]
+    assert schema["required"] == ["report_id"]
+    assert schema["properties"]["segment_start"] == {"type": "integer", "minimum": 0}
+    assert "maximum" not in schema["properties"]["segment_start"]
+    assert schema["properties"]["max_segments"]["minimum"] == 1
+    assert schema["properties"]["max_segments"]["maximum"] == 4
+    original = {"report_id": "abc-1"}
+    snapshot = copy.deepcopy(original)
+    accepted = c.validate_arguments("research_fetch", original)
+    assert accepted["segment_start"] == 0
+    assert accepted["max_segments"] == 2
+    assert original == snapshot
+    large = c.validate_arguments("research_fetch", {"report_id": "abc-1", "segment_start": 10**6})
+    assert large["segment_start"] == 10**6
+    assert large["max_segments"] == 2
+    assert c.validate_arguments(
+        "research_fetch", {"report_id": "abc-1", "max_segments": 4}
+    )["max_segments"] == 4
+    for arguments in (
+        {"report_id": "abc-1", "segment_start": -1},
+        {"report_id": "abc-1", "max_segments": 0},
+        {"report_id": "abc-1", "max_segments": 5},
+        {"report_id": "abc-1", "segment_start": True},
+        {"report_id": "abc-1", "segment_start": False},
+        {"report_id": "abc-1", "max_segments": True},
+        {"report_id": "abc-1", "max_segments": False},
+    ):
+        _invalid("research_fetch", arguments)
+
+
+def test_row2_fetch_rejects_cursor_and_max_chars() -> None:
+    _invalid("research_fetch", {"report_id": "abc-1", "cursor": 0})
+    _invalid("research_fetch", {"report_id": "abc-1", "max_chars": 6000})
+
+
+def test_row2_fetch_result_matches_segment_schema() -> None:
+    _require_v11_fetch_schema()
+    result = _fetch_result(total=3)
+    c.validate_output("research_fetch", result)
+    assert list(result) == _FETCH_RESULT_KEYS
+    segment_schema = c.OUTPUT_SCHEMAS["research_fetch"]["properties"]["segments"]["items"]
+    assert list(segment_schema["properties"]) == _SEGMENT_KEYS
+    assert list(result["segments"][0]) == _SEGMENT_KEYS
+    both_null = _fetch_result()
+    both_null["segments"][0]["page_start"] = None
+    both_null["segments"][0]["page_end"] = None
+    c.validate_output("research_fetch", both_null)
+    nullable_layer = _fetch_result()
+    nullable_layer["text_layer_state"] = None
+    c.validate_output("research_fetch", nullable_layer)
+    extra = _fetch_result()
+    extra["segments"][0]["extra"] = 1
+    _internal("research_fetch", extra)
+    missing = _fetch_result()
+    del missing["segments"][0]["text"]
+    _internal("research_fetch", missing)
+
+
+def test_row2_legacy_window_fetch_is_refused() -> None:
+    legacy = _legacy_fetch()
+    assert "text" in legacy and "window" in legacy and "text_sha256" in legacy
+    _internal("research_fetch", legacy)
+
+
+def test_row2_non_full_text_empty_segments_pass() -> None:
+    assert "coverage_state" in c.OUTPUT_SCHEMAS["research_fetch"]["properties"]
+    result = _fetch_result(segments=[], total=0, coverage_state="NO_TEXT_LAYER", text_layer_state=None)
+    assert result["segments"] == []
+    assert result["segment_count_total"] == 0
+    assert result["next_segment_start"] is None
+    c.validate_output("research_fetch", result)
+
+
+def test_row3_candidate_is_six_fields() -> None:
+    props = c.OUTPUT_SCHEMAS["research_search"]["properties"]["candidates"]["items"]["properties"]
+    assert list(props) == _CANDIDATE_KEYS
+    result = _search_result()
+    result["candidates"][0]["published_at"] = ""
+    result["candidates"][0]["side"] = ""
+    c.validate_output("research_search", result)
+    for field, value in (
+        ("tickers", ["AAPL"]),
+        ("text_layer", "full"),
+        ("rio_state", "CURRENT"),
+        ("published_date", "2026-10-07"),
+    ):
+        broken = _search_result()
+        broken["candidates"][0][field] = value
+        _internal("research_search", broken)
+
+
+def test_row3_legacy_candidate_fields_are_refused() -> None:
+    _internal("research_search", _legacy_search())
+
+
+def test_row4_non_ascii_byte_passage_passes_and_char_span_is_refused() -> None:
+    _require_v11_passage_schema()
+    non_ascii = _found_passages()[1]
+    assert len(non_ascii["passage_text"].encode("utf-8")) != len(non_ascii["passage_text"])
+    c.validate_output("research_find_evidence", _evidence_result("FOUND", [non_ascii]))
+    char_sized = copy.deepcopy(non_ascii)
+    char_sized["byte_end"] = char_sized["byte_start"] + len(char_sized["passage_text"])
+    _internal("research_find_evidence", _evidence_result("FOUND", [char_sized]))
+    with_char_keys = copy.deepcopy(non_ascii)
+    with_char_keys["char_start"] = 0
+    with_char_keys["char_end"] = 2
+    _internal("research_find_evidence", _evidence_result("FOUND", [with_char_keys]))
+
+
+def test_row4_legacy_char_offsets_are_refused() -> None:
+    passage = _legacy_passage()
+    assert passage["char_end"] - passage["char_start"] == len(passage["passage_text"])
+    _internal("research_find_evidence", _evidence_result("FOUND", [passage]))
+
+
+def test_row4_missing_fields_and_wrong_passage_hash_are_refused() -> None:
+    _require_v11_passage_schema()
+    missing_canonical = _found_passages()[1]
+    del missing_canonical["canonical_text_sha256"]
+    _internal("research_find_evidence", _evidence_result("FOUND", [missing_canonical]))
+    missing_segment = _found_passages()[1]
+    del missing_segment["segment_index"]
+    _internal("research_find_evidence", _evidence_result("FOUND", [missing_segment]))
+    wrong_hash = _found_passages()[1]
+    wrong_hash["text_sha256"] = "ab" * 32
+    assert wrong_hash["text_sha256"] != _sha256(wrong_hash["passage_text"].encode("utf-8"))
+    _internal("research_find_evidence", _evidence_result("FOUND", [wrong_hash]))
+
+
+def test_row5_status_shape_ratios_and_degradation() -> None:
+    status = c.OUTPUT_SCHEMAS["research_status"]["properties"]
+    assert list(status) == _STATUS_KEYS
+    assert list(status["catalog"]["properties"]) == ["report_count"]
+    assert list(status["coverage"]["properties"]) == ["full_text_ratio", "rio_ratio"]
+    assert list(status["generation"]["properties"]) == [
+        "server_contract",
+        "read_port_contract",
+        "mastermind_commit",
+    ]
+    read_port = status["generation"]["properties"]["read_port_contract"]
+    assert read_port == {"type": "string", "minLength": 1, "maxLength": 120}
+    assert "const" not in read_port
+    c.validate_output("research_status", _status_result())
+    empty = _status_result()
+    assert empty["degradation"] == []
+    c.validate_output("research_status", empty)
+    every_code = _status_result()
+    every_code["degradation"] = list(c.DEGRADATION_CODES)
+    c.validate_output("research_status", every_code)
+    for value in ("x", "y" * 120, "research_vault.read_status.v1"):
+        projected = _status_result()
+        projected["generation"]["read_port_contract"] = value
+        c.validate_output("research_status", projected)
+    removed = (
+        ("catalog", "institution_count", 1),
+        ("catalog", "newest_report_date", "2026-10-07"),
+        ("catalog", "oldest_report_date", None),
+        ("coverage", "text_layer_ok", 1),
+        ("coverage", "text_layer_missing", 0),
+        ("coverage", "rio_available", 1),
+        ("generation", "macro_commit", "a" * 40),
+    )
+    for parent, field, value in removed:
+        broken = _status_result()
+        broken[parent][field] = value
+        _internal("research_status", broken)
+    unknown = _status_result()
+    unknown["degradation"] = ["NOT_A_CODE"]
+    _internal("research_status", unknown)
+    duplicate = _status_result()
+    duplicate["degradation"] = ["PRODUCER_STALE", "PRODUCER_STALE"]
+    _internal("research_status", duplicate)
+    ratio = _status_result()
+    ratio["coverage"]["full_text_ratio"] = 1.01
+    _internal("research_status", ratio)
+    rio_ratio = _status_result()
+    rio_ratio["coverage"]["rio_ratio"] = 1.01
+    _internal("research_status", rio_ratio)
+
+
+def test_row5_legacy_status_counts_are_refused() -> None:
+    _internal("research_status", _legacy_status())
+
+
+def test_row6_evidence_outcomes_are_the_closed_four() -> None:
+    assert c.EVIDENCE_OUTCOMES == ("FOUND", "NOT_FOUND", "UNAVAILABLE", "PARTIAL")
+    outcome = c.OUTPUT_SCHEMAS["research_find_evidence"]["properties"]["outcome"]
+    assert outcome["enum"] == list(c.EVIDENCE_OUTCOMES)
+    _internal("research_find_evidence", _evidence_result("MAYBE", []))
+
+
+def test_row7_passage_byte_span_must_match_utf8_length() -> None:
+    _require_v11_passage_schema()
+    passage = _passage("ab", 0)
+    passage["byte_end"] = passage["byte_start"] + len(passage["passage_text"].encode("utf-8")) + 1
+    _internal("research_find_evidence", _evidence_result("FOUND", [passage]))
+
+
+def test_row7_quote_limit_refuses_without_trimming_or_mutating() -> None:
+    _require_v11_passage_schema()
+    passage = _passage("q" * 10, 0)
+    evidence = _evidence_result("FOUND", [passage])
+    snapshot = copy.deepcopy(evidence)
+    c.validate_output("research_find_evidence", evidence, quote_limit_chars=10)
+    assert evidence == snapshot
+    _internal("research_find_evidence", evidence, quote_limit_chars=9)
+    assert evidence == snapshot
+    assert passage["passage_text"] == "q" * 10
+
+
+def test_row7_segment_index_must_be_consecutive() -> None:
+    _require_v11_fetch_schema()
+    segments = [_segment(0, "ab", 0), _segment(2, "cd", 2)]
+    _internal("research_fetch", _fetch_result(segments=segments, total=3))
+
+
+def test_row7_adjacent_segments_must_be_byte_contiguous() -> None:
+    _require_v11_fetch_schema()
+    gap = [_segment(0, "ab", 0), _segment(1, "cd", 4)]
+    _internal("research_fetch", _fetch_result(segments=gap, total=2))
+    overlap = [_segment(0, "ab", 0), _segment(1, "cd", 1)]
+    _internal("research_fetch", _fetch_result(segments=overlap, total=2))
+
+
+def test_row7_next_segment_start_must_follow_when_more_remain() -> None:
+    _require_v11_fetch_schema()
+    result = _fetch_result(text="ab", total=3)
+    assert result["next_segment_start"] == 1
+    result["next_segment_start"] = 0
+    _internal("research_fetch", result)
+
+
+def test_row7_next_segment_start_must_be_null_when_done() -> None:
+    _require_v11_fetch_schema()
+    result = _fetch_result(text="ab")
+    assert result["next_segment_start"] is None
+    result["next_segment_start"] = 1
+    _internal("research_fetch", result)
+
+
+def test_row7_non_full_text_cannot_carry_segments() -> None:
+    _require_v11_fetch_schema()
+    _internal("research_fetch", _fetch_result(text="ab", coverage_state="PREFIX_ONLY_LEGACY"))
+
+
+def test_row7_segment_index_must_be_below_total() -> None:
+    _require_v11_fetch_schema()
+    result = _fetch_result(text="ab")
+    result["segments"][0]["segment_index"] = 1
+    result["segment_count_total"] = 1
+    result["next_segment_start"] = None
+    _internal("research_fetch", result)
+
+
+def test_row7_page_start_must_not_exceed_page_end() -> None:
+    _require_v11_fetch_schema()
+    result = _fetch_result()
+    result["segments"][0]["page_start"] = 3
+    result["segments"][0]["page_end"] = 2
+    _internal("research_fetch", result)
+
+
+def test_row7_page_bounds_must_be_both_null_or_both_int() -> None:
+    _require_v11_fetch_schema()
+    start_only = _fetch_result()
+    start_only["segments"][0]["page_end"] = None
+    _internal("research_fetch", start_only)
+    end_only = _fetch_result()
+    end_only["segments"][0]["page_start"] = None
+    _internal("research_fetch", end_only)
+
+
+def test_row7_segment_over_segment_max_bytes_is_internal_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    _require_v11_fetch_schema()
+    monkeypatch.setattr(c, "SEGMENT_MAX_BYTES", 4)
+    _internal("research_fetch", _fetch_result(text="hello"))
+
+
+def test_row7_total_over_fetch_max_text_bytes_is_internal_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    _require_v11_fetch_schema()
+    monkeypatch.setattr(c, "FETCH_MAX_TEXT_BYTES", 5)
+    segments = [_segment(0, "abc", 0), _segment(1, "def", 3)]
+    _internal("research_fetch", _fetch_result(segments=segments, total=2))
+
+
+def test_v1_1_schemas_carry_no_v1_field_names() -> None:
+    found: set[str] = set()
+    for schema in [*c.INPUT_SCHEMAS.values(), *c.OUTPUT_SCHEMAS.values()]:
+        _schema_keys(schema, found)
+    assert found.isdisjoint(_BANNED_V1_KEYS)
+    source = Path(c.__file__).read_text(encoding="utf-8")
+    for name in (
+        "char_start",
+        "char_end",
+        "cursor",
+        "max_chars",
+        "tickers",
+        "text_layer_ok",
+        "coverage_note",
+    ):
+        assert name not in source
+
+
+def test_r2_c5_search_coverage_state_is_exactly_the_coverage_states_or_null() -> None:
+    coverage = c.OUTPUT_SCHEMAS["research_search"]["properties"]["coverage_state"]
+    assert set(coverage["enum"]) == set(c.COVERAGE_STATES) | {None}
+    for state in (*c.COVERAGE_STATES, None):
+        result = _search_result()
+        result["coverage_state"] = state
+        c.validate_output("research_search", result)
+    for bad in ("UNKNOWN_STATE", "", "full_text", 0, False, ["FULL_TEXT"], {}):
+        refused = _search_result()
+        refused["coverage_state"] = bad
+        _internal("research_search", refused)
+    missing = _search_result()
+    del missing["coverage_state"]
+    _internal("research_search", missing)
+
+
+def test_r2_c5_search_refuses_coverage_note() -> None:
+    extra = _search_result()
+    extra["coverage_note"] = "x"
+    _internal("research_search", extra)
+    replaced = _search_result()
+    del replaced["coverage_state"]
+    replaced["coverage_note"] = "x"
+    _internal("research_search", replaced)
+
+
+def test_r2_c3_candidate_side_and_published_at_accept_null_and_string() -> None:
+    normal = {"side": "long", "published_at": "2026-10-07T00:00:00Z"}
+    for field in ("side", "published_at"):
+        for value in (None, "", normal[field]):
+            result = _search_result()
+            result["candidates"][0][field] = value
+            c.validate_output("research_search", result)
+        for bad in (0, False, [], {}):
+            refused = _search_result()
+            refused["candidates"][0][field] = bad
+            _internal("research_search", refused)
+    both = _search_result()
+    both["candidates"][0]["side"] = None
+    both["candidates"][0]["published_at"] = None
+    c.validate_output("research_search", both)
+
+
+def test_r2_c3_fetch_report_side_and_published_at_stay_string_only() -> None:
+    side_null = _fetch_result()
+    side_null["report"]["side"] = None
+    _internal("research_fetch", side_null)
+    published_null = _fetch_result()
+    published_null["report"]["published_at"] = None
+    _internal("research_fetch", published_null)
