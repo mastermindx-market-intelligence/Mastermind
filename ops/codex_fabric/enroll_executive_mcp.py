@@ -42,12 +42,21 @@ CLIENT_NAME = "Mastermind Codex Astra"
 REGISTRATION_SCHEMA = "mastermind.codex_fabric.executive_mcp_registration.v1"
 PENDING_REGISTRATION_SCHEMA_V1 = "mastermind.codex_fabric.executive_mcp_registration_attempt.v1"
 PENDING_REGISTRATION_SCHEMA = "mastermind.codex_fabric.executive_mcp_registration_attempt.v2"
+ABSENCE_RECONCILED_SCHEMA = "mastermind.codex_fabric.executive_mcp_registration_attempt.v3"
+DEFINITIVE_REFUSAL_SCHEMA = "mastermind.codex_fabric.executive_mcp_registration_attempt.v4"
 REGISTRATION_ACCOUNT = b"astra-executive-registration"
 _REGISTRATION_KEYS = frozenset({"schema", "client_id", "redirect_uri", "policy_digest"})
 _PENDING_REGISTRATION_V1_KEYS = frozenset({"schema", "attempt_ref", "redirect_uri", "policy_digest"})
 _PENDING_REGISTRATION_KEYS = frozenset(
     {"schema", "attempt_ref", "client_name", "redirect_uri", "policy_digest"}
 )
+_ABSENCE_RECONCILED_KEYS = frozenset(
+    {
+        "schema", "attempt_ref", "client_name", "redirect_uri",
+        "policy_digest", "absence_digest",
+    }
+)
+_DEFINITIVE_REFUSAL_KEYS = _ABSENCE_RECONCILED_KEYS
 
 
 class EnrollmentError(RuntimeError):
@@ -84,6 +93,24 @@ class PendingRegistration:
     client_name: str | None = None
 
 
+@dataclasses.dataclass(frozen=True)
+class AbsenceReconciledRegistration:
+    attempt_ref: str
+    redirect_uri: str
+    policy_digest: str
+    client_name: str
+    absence_digest: str
+
+
+@dataclasses.dataclass(frozen=True)
+class DefinitivelyRefusedRegistration:
+    attempt_ref: str
+    redirect_uri: str
+    policy_digest: str
+    client_name: str
+    absence_digest: str
+
+
 class KeychainRegistrationStore:
     """One fixed DCR state item: absent, pending-effect, or completed client."""
 
@@ -97,7 +124,15 @@ class KeychainRegistrationStore:
             and all(ch in "0123456789abcdef" for ch in value)
         )
 
-    def load_state(self) -> ClientRegistration | PendingRegistration | None:
+    def load_state(
+        self,
+    ) -> (
+        ClientRegistration
+        | PendingRegistration
+        | AbsenceReconciledRegistration
+        | DefinitivelyRefusedRegistration
+        | None
+    ):
         raw = self._api.read(KEYCHAIN_SERVICE, REGISTRATION_ACCOUNT)
         if raw is None:
             return None
@@ -133,6 +168,40 @@ class KeychainRegistrationStore:
             ):
                 raise EnrollmentError("stored Executive client registration is invalid")
             return PendingRegistration(attempt_ref, redirect_uri, policy_digest, client_name)
+        if schema == ABSENCE_RECONCILED_SCHEMA and set(value) == _ABSENCE_RECONCILED_KEYS:
+            attempt_ref = value.get("attempt_ref")
+            client_name = value.get("client_name")
+            redirect_uri = value.get("redirect_uri")
+            policy_digest = value.get("policy_digest")
+            absence_digest = value.get("absence_digest")
+            if (
+                not self._hex64(attempt_ref)
+                or client_name != f"{CLIENT_NAME} {attempt_ref[:16]}"
+                or redirect_uri != CALLBACK_URL
+                or not self._hex64(policy_digest)
+                or not self._hex64(absence_digest)
+            ):
+                raise EnrollmentError("stored Executive client registration is invalid")
+            return AbsenceReconciledRegistration(
+                attempt_ref, redirect_uri, policy_digest, client_name, absence_digest
+            )
+        if schema == DEFINITIVE_REFUSAL_SCHEMA and set(value) == _DEFINITIVE_REFUSAL_KEYS:
+            attempt_ref = value.get("attempt_ref")
+            client_name = value.get("client_name")
+            redirect_uri = value.get("redirect_uri")
+            policy_digest = value.get("policy_digest")
+            absence_digest = value.get("absence_digest")
+            if (
+                not self._hex64(attempt_ref)
+                or client_name != f"{CLIENT_NAME} {attempt_ref[:16]}"
+                or redirect_uri != CALLBACK_URL
+                or not self._hex64(policy_digest)
+                or not self._hex64(absence_digest)
+            ):
+                raise EnrollmentError("stored Executive client registration is invalid")
+            return DefinitivelyRefusedRegistration(
+                attempt_ref, redirect_uri, policy_digest, client_name, absence_digest
+            )
         if (
             schema == PENDING_REGISTRATION_SCHEMA_V1
             and set(value) == _PENDING_REGISTRATION_V1_KEYS
@@ -153,6 +222,14 @@ class KeychainRegistrationStore:
         state = self.load_state()
         if isinstance(state, PendingRegistration):
             raise EnrollmentEffectUnknown("Executive public client registration effect is unknown")
+        if isinstance(state, AbsenceReconciledRegistration):
+            raise EnrollmentError(
+                "Executive public client registration requires explicit same-operation resume"
+            )
+        if isinstance(state, DefinitivelyRefusedRegistration):
+            raise EnrollmentError(
+                "Executive public client registration was definitively refused"
+            )
         return state
 
     def save_pending(self, pending: PendingRegistration) -> None:
@@ -171,6 +248,57 @@ class KeychainRegistrationStore:
                 "client_name": pending.client_name,
                 "redirect_uri": pending.redirect_uri,
                 "policy_digest": pending.policy_digest,
+            },
+            sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")
+        self._api.upsert(KEYCHAIN_SERVICE, REGISTRATION_ACCOUNT, raw)
+
+    def save_absence_reconciled(
+        self, reconciled: AbsenceReconciledRegistration
+    ) -> None:
+        if (
+            not isinstance(reconciled, AbsenceReconciledRegistration)
+            or not self._hex64(reconciled.attempt_ref)
+            or reconciled.client_name
+            != f"{CLIENT_NAME} {reconciled.attempt_ref[:16]}"
+            or reconciled.redirect_uri != CALLBACK_URL
+            or not self._hex64(reconciled.policy_digest)
+            or not self._hex64(reconciled.absence_digest)
+        ):
+            raise EnrollmentError("Executive client registration absence receipt is invalid")
+        raw = json.dumps(
+            {
+                "schema": ABSENCE_RECONCILED_SCHEMA,
+                "attempt_ref": reconciled.attempt_ref,
+                "client_name": reconciled.client_name,
+                "redirect_uri": reconciled.redirect_uri,
+                "policy_digest": reconciled.policy_digest,
+                "absence_digest": reconciled.absence_digest,
+            },
+            sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")
+        self._api.upsert(KEYCHAIN_SERVICE, REGISTRATION_ACCOUNT, raw)
+
+    def save_definitive_refusal(
+        self, refused: DefinitivelyRefusedRegistration
+    ) -> None:
+        if (
+            not isinstance(refused, DefinitivelyRefusedRegistration)
+            or not self._hex64(refused.attempt_ref)
+            or refused.client_name != f"{CLIENT_NAME} {refused.attempt_ref[:16]}"
+            or refused.redirect_uri != CALLBACK_URL
+            or not self._hex64(refused.policy_digest)
+            or not self._hex64(refused.absence_digest)
+        ):
+            raise EnrollmentError("Executive client registration refusal receipt is invalid")
+        raw = json.dumps(
+            {
+                "schema": DEFINITIVE_REFUSAL_SCHEMA,
+                "attempt_ref": refused.attempt_ref,
+                "client_name": refused.client_name,
+                "redirect_uri": refused.redirect_uri,
+                "policy_digest": refused.policy_digest,
+                "absence_digest": refused.absence_digest,
             },
             sort_keys=True, separators=(",", ":"),
         ).encode("utf-8")
@@ -289,6 +417,14 @@ def ensure_client_registration(
     existing = store.load_state()
     if isinstance(existing, PendingRegistration):
         raise EnrollmentEffectUnknown("Executive public client registration effect is unknown")
+    if isinstance(existing, AbsenceReconciledRegistration):
+        raise EnrollmentError(
+            "Executive public client registration requires explicit same-operation resume"
+        )
+    if isinstance(existing, DefinitivelyRefusedRegistration):
+        raise EnrollmentError(
+            "Executive public client registration was definitively refused"
+        )
     if existing is not None:
         if existing.policy_digest != policy.policy_digest or existing.redirect_uri != CALLBACK_URL:
             raise EnrollmentError("stored Executive client registration does not match installed policy")
@@ -454,6 +590,242 @@ def reconcile_legacy_pending_registration(
     return registration, observation_digest
 
 
+def reconcile_legacy_pending_absence(
+    policy: ExecutiveAuthPolicy,
+    *,
+    store: KeychainRegistrationStore,
+    observed_attempt_ref: str,
+    observed_redirect_uri: str,
+    observed_policy_digest: str,
+    marker_created_at_epoch: int,
+    attempt_local_outcome_by_epoch: int,
+    audit_window_start_epoch: int,
+    audit_window_end_epoch: int,
+    audit_events_total: int,
+    audit_pages_total: int,
+    audit_pagination_complete: bool,
+    audit_retention_covers_window: bool,
+    marker_metadata_digest: str,
+    audit_receipt_digest: str,
+    inventory_receipt_digest: str,
+    local_outcome_evidence_digest: str,
+    current_client_match_count: int,
+    create_client_match_count: int,
+    dynamic_registration_match_count: int,
+    deleted_tpc_client_match_count: int,
+    observed_at_epoch: int,
+) -> tuple[AbsenceReconciledRegistration, str]:
+    """Reconcile the legacy DCR effect as absent from authoritative tenant evidence.
+
+    This performs no Auth0 request. It preserves the original attempt_ref and
+    upgrades only the existing Keychain item so a later explicit resume can use
+    the same logical operation with a fingerprinted client name.
+    """
+
+    state = store.load_state()
+    if not isinstance(state, PendingRegistration) or state.client_name is not None:
+        raise EnrollmentError("legacy Executive public client registration is not pending")
+
+    integer_fields = (
+        marker_created_at_epoch,
+        attempt_local_outcome_by_epoch,
+        audit_window_start_epoch,
+        audit_window_end_epoch,
+        audit_events_total,
+        audit_pages_total,
+        current_client_match_count,
+        create_client_match_count,
+        dynamic_registration_match_count,
+        deleted_tpc_client_match_count,
+        observed_at_epoch,
+    )
+    if any(isinstance(value, bool) or not isinstance(value, int) for value in integer_fields):
+        raise EnrollmentError("legacy DCR absence evidence is invalid")
+    evidence_digests = (
+        marker_metadata_digest,
+        audit_receipt_digest,
+        inventory_receipt_digest,
+        local_outcome_evidence_digest,
+    )
+    if not all(store._hex64(value) for value in evidence_digests):
+        raise EnrollmentError("legacy DCR absence evidence digest is invalid")
+    if (
+        state.policy_digest != policy.policy_digest
+        or state.redirect_uri != CALLBACK_URL
+        or observed_attempt_ref != state.attempt_ref
+        or observed_redirect_uri != CALLBACK_URL
+        or observed_policy_digest != policy.policy_digest
+        or marker_created_at_epoch <= 0
+        or attempt_local_outcome_by_epoch < marker_created_at_epoch
+        or audit_window_start_epoch <= 0
+        or audit_window_start_epoch > marker_created_at_epoch
+        or audit_window_end_epoch < attempt_local_outcome_by_epoch
+        or audit_events_total <= 0
+        or audit_pages_total <= 0
+        or audit_pagination_complete is not True
+        or audit_retention_covers_window is not True
+        or current_client_match_count != 0
+        or create_client_match_count != 0
+        or dynamic_registration_match_count != 0
+        or deleted_tpc_client_match_count != 0
+        or observed_at_epoch < audit_window_end_epoch
+    ):
+        raise EnrollmentError("legacy DCR absence evidence is insufficient")
+
+    observation = {
+        "schema": "mastermind.codex_fabric.legacy_dcr_absence_observation.v1",
+        "attempt_ref": state.attempt_ref,
+        "redirect_uri": observed_redirect_uri,
+        "policy_digest": observed_policy_digest,
+        "marker_created_at_epoch": marker_created_at_epoch,
+        "attempt_local_outcome_by_epoch": attempt_local_outcome_by_epoch,
+        "audit_window_start_epoch": audit_window_start_epoch,
+        "audit_window_end_epoch": audit_window_end_epoch,
+        "audit_events_total": audit_events_total,
+        "audit_pages_total": audit_pages_total,
+        "audit_pagination_complete": True,
+        "audit_retention_covers_window": True,
+        "marker_metadata_digest": marker_metadata_digest,
+        "audit_receipt_digest": audit_receipt_digest,
+        "inventory_receipt_digest": inventory_receipt_digest,
+        "local_outcome_evidence_digest": local_outcome_evidence_digest,
+        "current_client_match_count": 0,
+        "create_client_match_count": 0,
+        "dynamic_registration_match_count": 0,
+        "deleted_tpc_client_match_count": 0,
+        "observed_at_epoch": observed_at_epoch,
+    }
+    absence_digest = hashlib.sha256(
+        json.dumps(observation, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    reconciled = AbsenceReconciledRegistration(
+        attempt_ref=state.attempt_ref,
+        redirect_uri=CALLBACK_URL,
+        policy_digest=policy.policy_digest,
+        client_name=f"{CLIENT_NAME} {state.attempt_ref[:16]}",
+        absence_digest=absence_digest,
+    )
+    try:
+        store.save_absence_reconciled(reconciled)
+        readback = store.load_state()
+    except Exception:
+        raise EnrollmentEffectUnknown(
+            "legacy Executive DCR absence reconciliation effect is unknown"
+        ) from None
+    if readback != reconciled:
+        raise EnrollmentEffectUnknown(
+            "legacy Executive DCR absence reconciliation effect is unknown"
+        )
+    return reconciled, absence_digest
+
+
+def resume_legacy_registration_after_absence(
+    policy: ExecutiveAuthPolicy,
+    metadata: OidcMetadata,
+    *,
+    store: KeychainRegistrationStore,
+    post_json: Callable[[str, dict[str, Any]], Mapping[str, Any]],
+) -> ClientRegistration:
+    """Perform one same-attempt DCR request after legacy absence was reconciled."""
+
+    state = store.load_state()
+    if not isinstance(state, AbsenceReconciledRegistration):
+        raise EnrollmentError("legacy Executive DCR operation is not absence-reconciled")
+    if (
+        state.policy_digest != policy.policy_digest
+        or state.redirect_uri != CALLBACK_URL
+        or state.client_name != f"{CLIENT_NAME} {state.attempt_ref[:16]}"
+    ):
+        raise EnrollmentError("legacy Executive DCR absence receipt is stale")
+
+    pending = PendingRegistration(
+        state.attempt_ref,
+        CALLBACK_URL,
+        policy.policy_digest,
+        state.client_name,
+    )
+    try:
+        # Move back to effect-unknown BEFORE the network call. If the reply is
+        # lost, a second invocation cannot post again.
+        store.save_pending(pending)
+        if store.load_state() != pending:
+            raise EnrollmentEffectUnknown(
+                "legacy Executive DCR same-operation resume fence is unknown"
+            )
+    except EnrollmentEffectUnknown:
+        raise
+    except Exception:
+        raise EnrollmentEffectUnknown(
+            "legacy Executive DCR same-operation resume fence is unknown"
+        ) from None
+
+    request = {
+        "client_name": state.client_name,
+        "redirect_uris": [CALLBACK_URL],
+        "token_endpoint_auth_method": "none",
+        "grant_types": ["authorization_code", "refresh_token"],
+        "response_types": ["code"],
+    }
+    try:
+        response = post_json(metadata.registration_endpoint, request)
+    except EnrollmentDefinitiveRefusal:
+        refused = DefinitivelyRefusedRegistration(
+            attempt_ref=state.attempt_ref,
+            redirect_uri=state.redirect_uri,
+            policy_digest=state.policy_digest,
+            client_name=state.client_name,
+            absence_digest=state.absence_digest,
+        )
+        try:
+            store.save_definitive_refusal(refused)
+            if store.load_state() != refused:
+                raise EnrollmentEffectUnknown(
+                    "legacy Executive DCR refusal settlement is unknown"
+                )
+        except EnrollmentEffectUnknown:
+            raise
+        except Exception:
+            raise EnrollmentEffectUnknown(
+                "legacy Executive DCR refusal settlement is unknown"
+            ) from None
+        raise EnrollmentError("Executive public client registration was refused") from None
+    except Exception:
+        raise EnrollmentEffectUnknown(
+            "Executive public client registration effect is unknown"
+        ) from None
+
+    if not isinstance(response, Mapping):
+        raise EnrollmentEffectUnknown("Executive public client registration effect is unknown")
+    client_id = response.get("client_id")
+    redirects = response.get("redirect_uris")
+    grants = response.get("grant_types")
+    auth_method = response.get("token_endpoint_auth_method")
+    if (
+        not isinstance(client_id, str)
+        or not client_id.startswith("tpc_")
+        or response.get("client_secret") is not None
+        or redirects != [CALLBACK_URL]
+        or not isinstance(grants, list)
+        or not {"authorization_code", "refresh_token"}.issubset(set(grants))
+        or auth_method != "none"
+    ):
+        raise EnrollmentEffectUnknown("Executive public client registration effect is unknown")
+
+    registration = ClientRegistration(client_id, CALLBACK_URL, policy.policy_digest)
+    try:
+        store.save(registration)
+        readback = store.load_state()
+    except Exception:
+        raise EnrollmentEffectUnknown(
+            "Executive public client registration effect is unknown"
+        ) from None
+    if readback != registration:
+        raise EnrollmentEffectUnknown(
+            "Executive public client registration effect is unknown"
+        )
+    return registration
+
+
 def pending_registration_status(
     policy: ExecutiveAuthPolicy,
     *,
@@ -462,7 +834,14 @@ def pending_registration_status(
     """Return only non-secret metadata needed to reconcile one pending DCR effect."""
 
     state = store.load_state()
-    if not isinstance(state, PendingRegistration):
+    if not isinstance(
+        state,
+        (
+            PendingRegistration,
+            AbsenceReconciledRegistration,
+            DefinitivelyRefusedRegistration,
+        ),
+    ):
         raise EnrollmentError("Executive public client registration is not pending")
     if (
         state.policy_digest != policy.policy_digest
@@ -471,6 +850,26 @@ def pending_registration_status(
         raise EnrollmentError(
             "pending Executive public client registration does not match installed policy"
         )
+    if isinstance(state, AbsenceReconciledRegistration):
+        return {
+            "absence_digest": state.absence_digest,
+            "attempt_ref": state.attempt_ref,
+            "client_name": state.client_name,
+            "policy_digest": state.policy_digest,
+            "reconcilable": True,
+            "redirect_uri": state.redirect_uri,
+            "state": "absence_reconciled",
+        }
+    if isinstance(state, DefinitivelyRefusedRegistration):
+        return {
+            "absence_digest": state.absence_digest,
+            "attempt_ref": state.attempt_ref,
+            "client_name": state.client_name,
+            "policy_digest": state.policy_digest,
+            "reconcilable": False,
+            "redirect_uri": state.redirect_uri,
+            "state": "definitive_refusal",
+        }
     return {
         "attempt_ref": state.attempt_ref,
         "client_name": state.client_name,
@@ -796,10 +1195,36 @@ def main(
         action="store_true",
         help="reconcile the historical pre-fingerprint pending DCR effect from tenant evidence",
     )
+    parser.add_argument(
+        "--legacy-absence-reconcile",
+        action="store_true",
+        help="reconcile authoritative absence for the historical pending DCR operation",
+    )
+    parser.add_argument(
+        "--resume-legacy-after-absence",
+        action="store_true",
+        help="perform one same-attempt DCR request after stored legacy absence reconciliation",
+    )
     parser.add_argument("--reconcile-redirect-uri")
     parser.add_argument("--reconcile-policy-digest")
     parser.add_argument("--reconcile-match-count", type=int)
     parser.add_argument("--reconcile-observed-at-epoch", type=int)
+    parser.add_argument("--absence-marker-created-at-epoch", type=int)
+    parser.add_argument("--absence-attempt-outcome-by-epoch", type=int)
+    parser.add_argument("--absence-audit-start-epoch", type=int)
+    parser.add_argument("--absence-audit-end-epoch", type=int)
+    parser.add_argument("--absence-audit-events-total", type=int)
+    parser.add_argument("--absence-audit-pages-total", type=int)
+    parser.add_argument("--absence-audit-pagination-complete", action="store_true")
+    parser.add_argument("--absence-audit-retention-complete", action="store_true")
+    parser.add_argument("--absence-marker-metadata-digest")
+    parser.add_argument("--absence-audit-receipt-digest")
+    parser.add_argument("--absence-inventory-receipt-digest")
+    parser.add_argument("--absence-local-outcome-evidence-digest")
+    parser.add_argument("--absence-current-client-match-count", type=int)
+    parser.add_argument("--absence-create-client-match-count", type=int)
+    parser.add_argument("--absence-dcr-match-count", type=int)
+    parser.add_argument("--absence-deleted-tpc-match-count", type=int)
     parser.add_argument(
         "--pending-status",
         action="store_true",
@@ -818,78 +1243,193 @@ def main(
             args.reconcile_match_count,
             args.reconcile_observed_at_epoch,
         )
-        if args.pending_status and (
-            args.legacy_reconcile
-            or any(value is not None for value in reconciliation_values + legacy_values)
-        ):
-            raise EnrollmentError(
-                "pending status cannot be combined with reconciliation"
+        absence_values = (
+            args.absence_marker_created_at_epoch,
+            args.absence_attempt_outcome_by_epoch,
+            args.absence_audit_start_epoch,
+            args.absence_audit_end_epoch,
+            args.absence_audit_events_total,
+            args.absence_audit_pages_total,
+            args.absence_marker_metadata_digest,
+            args.absence_audit_receipt_digest,
+            args.absence_inventory_receipt_digest,
+            args.absence_local_outcome_evidence_digest,
+            args.absence_current_client_match_count,
+            args.absence_create_client_match_count,
+            args.absence_dcr_match_count,
+            args.absence_deleted_tpc_match_count,
+        )
+        special_actions = sum(
+            bool(value)
+            for value in (
+                args.pending_status,
+                args.legacy_reconcile,
+                args.legacy_absence_reconcile,
+                args.resume_legacy_after_absence,
             )
-        if any(value is None for value in reconciliation_values) and any(
-            value is not None for value in reconciliation_values
-        ):
-            raise EnrollmentError(
-                "reconciliation requires client id, attempt ref, and client name together"
-            )
-        if args.legacy_reconcile:
-            if any(value is None for value in reconciliation_values + legacy_values):
-                raise EnrollmentError("legacy reconciliation evidence is incomplete")
-        elif any(value is not None for value in legacy_values):
-            raise EnrollmentError("legacy reconciliation evidence requires --legacy-reconcile")
-        if args.pending_status:
+        )
+        if special_actions > 1:
+            raise EnrollmentError("Executive MCP enrollment action is ambiguous")
+
+        if args.resume_legacy_after_absence:
+            if any(
+                value is not None
+                for value in reconciliation_values + legacy_values + absence_values
+            ) or args.absence_audit_pagination_complete or args.absence_audit_retention_complete:
+                raise EnrollmentError("same-operation resume does not accept reconciliation evidence")
             registrations = (
                 KeychainRegistrationStore()
                 if registration_store is None
                 else registration_store
             )
             policy = load_installed_policy(policy_path, expected_uid=expected_uid)
-            payload = pending_registration_status(policy, store=registrations)
-        elif args.reconcile_client_id is not None:
-            registrations = (
-                KeychainRegistrationStore()
-                if registration_store is None
-                else registration_store
+            metadata = discover_metadata(policy, get_json=_get_json)
+            registration = resume_legacy_registration_after_absence(
+                policy, metadata, store=registrations, post_json=_post_json
             )
-            policy = load_installed_policy(policy_path, expected_uid=expected_uid)
-            if args.legacy_reconcile:
-                registration, observation_digest = reconcile_legacy_pending_registration(
-                    policy,
-                    store=registrations,
-                    observed_client_id=args.reconcile_client_id,
-                    observed_attempt_ref=args.reconcile_attempt_ref,
-                    observed_client_name=args.reconcile_client_name,
-                    observed_redirect_uri=args.reconcile_redirect_uri,
-                    observed_policy_digest=args.reconcile_policy_digest,
-                    observed_match_count=args.reconcile_match_count,
-                    observed_at_epoch=args.reconcile_observed_at_epoch,
-                )
-                state = "reconciled_legacy"
-            else:
-                registration = reconcile_pending_registration(
-                    policy,
-                    store=registrations,
-                    observed_client_id=args.reconcile_client_id,
-                    observed_attempt_ref=args.reconcile_attempt_ref,
-                    observed_client_name=args.reconcile_client_name,
-                )
-                observation_digest = None
-                state = "reconciled"
             payload = {
                 "client_id_digest": hashlib.sha256(
                     registration.client_id.encode("utf-8")
                 ).hexdigest(),
                 "policy_digest": registration.policy_digest,
-                "state": state,
+                "state": "legacy_same_operation_resumed",
             }
-            if observation_digest is not None:
-                payload["observation_digest"] = observation_digest
-        else:
-            receipt = enroll_once(
-                policy_path=policy_path,
-                expected_uid=expected_uid,
-                registration_store=registration_store,
+        elif args.legacy_absence_reconcile:
+            if (
+                args.reconcile_client_id is not None
+                or args.reconcile_client_name is not None
+                or args.reconcile_match_count is not None
+                or any(
+                    value is None
+                    for value in (
+                        args.reconcile_attempt_ref,
+                        args.reconcile_redirect_uri,
+                        args.reconcile_policy_digest,
+                        args.reconcile_observed_at_epoch,
+                    ) + absence_values
+                )
+                or not args.absence_audit_pagination_complete
+                or not args.absence_audit_retention_complete
+            ):
+                raise EnrollmentError("legacy absence reconciliation evidence is incomplete")
+            registrations = (
+                KeychainRegistrationStore()
+                if registration_store is None
+                else registration_store
             )
-            payload = dataclasses.asdict(receipt)
+            policy = load_installed_policy(policy_path, expected_uid=expected_uid)
+            reconciled, absence_digest = reconcile_legacy_pending_absence(
+                policy,
+                store=registrations,
+                observed_attempt_ref=args.reconcile_attempt_ref,
+                observed_redirect_uri=args.reconcile_redirect_uri,
+                observed_policy_digest=args.reconcile_policy_digest,
+                marker_created_at_epoch=args.absence_marker_created_at_epoch,
+                attempt_local_outcome_by_epoch=args.absence_attempt_outcome_by_epoch,
+                audit_window_start_epoch=args.absence_audit_start_epoch,
+                audit_window_end_epoch=args.absence_audit_end_epoch,
+                audit_events_total=args.absence_audit_events_total,
+                audit_pages_total=args.absence_audit_pages_total,
+                audit_pagination_complete=args.absence_audit_pagination_complete,
+                audit_retention_covers_window=args.absence_audit_retention_complete,
+                marker_metadata_digest=args.absence_marker_metadata_digest,
+                audit_receipt_digest=args.absence_audit_receipt_digest,
+                inventory_receipt_digest=args.absence_inventory_receipt_digest,
+                local_outcome_evidence_digest=args.absence_local_outcome_evidence_digest,
+                current_client_match_count=args.absence_current_client_match_count,
+                create_client_match_count=args.absence_create_client_match_count,
+                dynamic_registration_match_count=args.absence_dcr_match_count,
+                deleted_tpc_client_match_count=args.absence_deleted_tpc_match_count,
+                observed_at_epoch=args.reconcile_observed_at_epoch,
+            )
+            payload = {
+                "absence_digest": absence_digest,
+                "attempt_ref_digest": hashlib.sha256(
+                    reconciled.attempt_ref.encode("utf-8")
+                ).hexdigest(),
+                "policy_digest": reconciled.policy_digest,
+                "state": "legacy_absence_reconciled",
+            }
+        else:
+            if any(value is not None for value in absence_values) or (
+                args.absence_audit_pagination_complete
+                or args.absence_audit_retention_complete
+            ):
+                raise EnrollmentError(
+                    "absence evidence requires --legacy-absence-reconcile"
+                )
+            if args.pending_status and any(
+                value is not None for value in reconciliation_values + legacy_values
+            ):
+                raise EnrollmentError(
+                    "pending status cannot be combined with reconciliation"
+                )
+            if any(value is None for value in reconciliation_values) and any(
+                value is not None for value in reconciliation_values
+            ):
+                raise EnrollmentError(
+                    "reconciliation requires client id, attempt ref, and client name together"
+                )
+            if args.legacy_reconcile:
+                if any(value is None for value in reconciliation_values + legacy_values):
+                    raise EnrollmentError("legacy reconciliation evidence is incomplete")
+            elif any(value is not None for value in legacy_values):
+                raise EnrollmentError("legacy reconciliation evidence requires --legacy-reconcile")
+
+            if args.pending_status:
+                registrations = (
+                    KeychainRegistrationStore()
+                    if registration_store is None
+                    else registration_store
+                )
+                policy = load_installed_policy(policy_path, expected_uid=expected_uid)
+                payload = pending_registration_status(policy, store=registrations)
+            elif args.reconcile_client_id is not None:
+                registrations = (
+                    KeychainRegistrationStore()
+                    if registration_store is None
+                    else registration_store
+                )
+                policy = load_installed_policy(policy_path, expected_uid=expected_uid)
+                if args.legacy_reconcile:
+                    registration, observation_digest = reconcile_legacy_pending_registration(
+                        policy,
+                        store=registrations,
+                        observed_client_id=args.reconcile_client_id,
+                        observed_attempt_ref=args.reconcile_attempt_ref,
+                        observed_client_name=args.reconcile_client_name,
+                        observed_redirect_uri=args.reconcile_redirect_uri,
+                        observed_policy_digest=args.reconcile_policy_digest,
+                        observed_match_count=args.reconcile_match_count,
+                        observed_at_epoch=args.reconcile_observed_at_epoch,
+                    )
+                    state = "reconciled_legacy"
+                else:
+                    registration = reconcile_pending_registration(
+                        policy,
+                        store=registrations,
+                        observed_client_id=args.reconcile_client_id,
+                        observed_attempt_ref=args.reconcile_attempt_ref,
+                        observed_client_name=args.reconcile_client_name,
+                    )
+                    observation_digest = None
+                    state = "reconciled"
+                payload = {
+                    "client_id_digest": hashlib.sha256(
+                        registration.client_id.encode("utf-8")
+                    ).hexdigest(),
+                    "policy_digest": registration.policy_digest,
+                    "state": state,
+                }
+                if observation_digest is not None:
+                    payload["observation_digest"] = observation_digest
+            else:
+                receipt = enroll_once(
+                    policy_path=policy_path,
+                    expected_uid=expected_uid,
+                    registration_store=registration_store,
+                )
+                payload = dataclasses.asdict(receipt)
     except Exception:
         print("REFUSED: Executive MCP enrollment unavailable.", file=sys.stderr)
         return 2

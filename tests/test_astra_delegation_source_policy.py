@@ -166,3 +166,21 @@ def test_attended_astra_profile_does_not_claim_executive_parent_cutover():
         "served-model canary",
     ):
         assert phrase in runbook
+
+
+def test_runbook_documents_legacy_dcr_absence_reconciliation_and_same_operation_resume():
+    text = RUNBOOK.read_text(encoding="utf-8")
+    required = (
+        "--legacy-absence-reconcile",
+        "state=absence_reconciled",
+        "same `attempt_ref`",
+        "--resume-legacy-after-absence",
+        "before the retry POST",
+        "one same-operation DCR request",
+        "authoritative tenant audit",
+        "immutable SHA-256 evidence digests",
+        "state=definitive_refusal",
+        "consumes the resume opportunity",
+    )
+    for phrase in required:
+        assert phrase in text
