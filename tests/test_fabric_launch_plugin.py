@@ -54,3 +54,14 @@ def test_different_source_versions_do_not_reuse_native_plugin_version():
     second=json.loads(p.assemble(inputs(),'b'*40)['.codex-plugin/plugin.json'])
     assert first['version']!=second['version']
     assert 'aaaaaaaaaaaa' in first['version']
+
+
+def test_skills_only_and_docs_variants_do_not_collide_in_native_cache():
+    core=p.assemble(inputs(),'a'*40,docs=False)
+    docs=p.assemble(inputs(),'a'*40,docs=True)
+    cm=json.loads(core['.codex-plugin/plugin.json'])
+    dm=json.loads(docs['.codex-plugin/plugin.json'])
+    assert cm['name']==dm['name']=='mastermind-workforce'
+    assert cm['version']!=dm['version']
+    assert json.loads(core['BUILD.json'])['variant']=='skills-only'
+    assert json.loads(docs['BUILD.json'])['variant']=='public-docs'

@@ -37,7 +37,8 @@ def assemble(files, source_commit, *, docs=False):
     for name in ('mastermind-craft','mastermind-worker-bootstrap'):
         if 'skills/'+name+'/SKILL.md' not in result:
             raise ValueError('PLUGIN_SKILL_MISSING')
-    manifest={'name':'mastermind-workforce','version':'0.1.0-candidate.g'+source_commit[:12],
+    variant='public-docs' if docs else 'skills-only'
+    manifest={'name':'mastermind-workforce','version':'0.1.0-candidate.g'+source_commit[:12]+'.'+variant,
               'description':'Scoped worker boot, eight Craft methods and exact context/tool/return contracts.',
               'skills':'./skills/'}
     if docs:
@@ -48,7 +49,7 @@ def assemble(files, source_commit, *, docs=False):
     claude={**manifest,'author':{'name':'Mastermind'}}
     result['.claude-plugin/plugin.json']=(json.dumps(claude,sort_keys=True)+'\n').encode()
     result['BUILD.json']=(json.dumps({
-        'schema':'mastermind.workforce_plugin_artifact.v1','source_commit':source_commit,
+        'schema':'mastermind.workforce_plugin_artifact.v1','source_commit':source_commit,'variant':variant,
         'source_state':'SOURCE_CANDIDATE','native_skill_attested':False,
         'execution_authority':False,'canonical_source_files':source_map,
         'mcp_servers':['openaiDeveloperDocs'] if docs else [],

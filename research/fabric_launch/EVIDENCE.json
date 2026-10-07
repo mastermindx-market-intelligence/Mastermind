@@ -1,5 +1,15 @@
 {
-  "active_review": null,
+  "active_review": {
+    "carrier_log": "install-delta-carrier.log",
+    "role": "independent installer delta review",
+    "run_id": "rs_20261007T000948Z_15930",
+    "scope": [
+      "ops/fabric_launch/install.py",
+      "ops/fabric_launch/cli.py"
+    ],
+    "source_commit": "db099ad6f5c92217bcc88a474422b2ff7c3d0782",
+    "status": "STARTED_AWAITING_RETURN"
+  },
   "active_review_obligations": [],
   "affected_source_hashes": {
     "docs/superpowers/plans/2026-10-06-subagent-operating-environment.md": "063ca1ec982899e61c59d004f86469743169e46739eff7df16100380071bfe69",
@@ -97,6 +107,43 @@
     "subtests_passed": 59
   },
   "mission": "Fresh workers receive a bounded task, one role method, attributed context, usable tools and an exact return path.",
+  "native_plugin_parser_proof": {
+    "credential_environment_forwarded": false,
+    "native_cached_build_count": 1,
+    "native_cached_source_files_verified": 19,
+    "native_model_inference": false,
+    "production_admission": false,
+    "prompt_sha256": "086cad3e61421da41e44569a7c62587f78a1de556fa2ca9febd2c010adeda372",
+    "proof_boundary": "Installation and skill-metadata exposure in an isolated credential-free Codex profile; no model invocation or production admission.",
+    "real_account_config_changed": false,
+    "receipt_sha256": "816b3d05b3478da33d993c6466a8aa5d77cabb5b6480933bafec44714c682d6f",
+    "schema": "mastermind.workforce_native_parser_probe.v1",
+    "skill_metadata_found": {
+      "mastermind-craft": true,
+      "mastermind-worker-bootstrap": true
+    },
+    "source_commit": "db099ad6f5c92217bcc88a474422b2ff7c3d0782",
+    "steps": [
+      {
+        "returncode": 0,
+        "stderr_bytes": 0,
+        "stdout_bytes": 198,
+        "step": "marketplace"
+      },
+      {
+        "returncode": 0,
+        "stderr_bytes": 0,
+        "stdout_bytes": 456,
+        "step": "install"
+      },
+      {
+        "returncode": 0,
+        "stderr_bytes": 0,
+        "stdout_bytes": 13950,
+        "step": "prompt"
+      }
+    ]
+  },
   "parent_verification": {
     "log_sha256": "b8ef89a377574ef978743c6d5b8ef04cf23d31d70f07ab687da15689d46050db",
     "passed": 3,
@@ -110,6 +157,13 @@
     "Release retained Craft dependencies through their source owners before protected native CapabilityPackage admission.",
     "Enroll native app credentials through each app owner; Linear auth is unresolved."
   ],
+  "plugin_variant_identity": {
+    "full_suite_passed": 201,
+    "log_sha256": "189133bbf54486f70dc814bf4608b925229bbee9f335300eb78f186bf118b826",
+    "regression_failed_before_fix": true,
+    "skills_only_and_public_docs_versions_distinct": true,
+    "subtests_passed": 59
+  },
   "private_bootstrap_plugin": {
     "creation_and_metadata_verified": true,
     "discoverability": "PRIVATE",
