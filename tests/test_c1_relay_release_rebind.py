@@ -1243,3 +1243,6 @@ def test_shared_relay_runbook_orders_rebind_before_scope_migration_and_a2():
     assert "A mixed or uncertain outcome is a hard stop" in sequencing
     assert "No Slack token is copied into chat" in sequencing
     assert "Neither verification is permission to start the other service." in sequencing
+    assert "never run the ceremony from an operator" in sequencing
+    assert sequencing.count('cd "$RELEASE_ROOT"') == 3
+    assert sequencing.count("python3.12 -I -S -B") == 3
