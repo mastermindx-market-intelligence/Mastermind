@@ -21,12 +21,38 @@ RESULT_BODY_SCHEMA = "mastermind.workspace_role_result.v1"
 PROJECTION_SCHEMA = "mastermind.fabric_role_result_view.v1"
 FABRIC_VIEW_SCHEMA_V2 = "mastermind.fabric_job_view.v2"
 FABRIC_VIEW_SCHEMA_V3 = "mastermind.fabric_job_view.v3"
+WORK_SCHEMA = "mastermind.workspace_work_queue.v1"
+#: Closed set of work-queue refusal reason codes the read service may emit
+#: on a typed UNAVAILABLE body.  Anything outside this set is a contract
+#: violation — the closed-key-set guard in the read service refuses it.
+WORK_REFUSAL_REASON_CODES = frozenset({
+    "source_unavailable",
+    "runtime_observation_not_same",
+    "projection_refused",
+    "source_integrity_unverified",
+})
 MAX_REQUEST_BYTES = 8192
 MAX_RESPONSE_BYTES = 2_000_000
 #: Result response ceiling — the entire canonical UTF-8 socket
 #: ``{ok:true,result:BODY}`` serialization including the trailing LF must fit
 #: in this many bytes, and the public BODY serialization must also fit alone.
 MAX_RESULT_RESPONSE_BYTES = 16_384
+#: Closed vocabulary for ``effect_exception.reason`` in
+#: ``mastermind.workspace_work_queue.v1``.  The composer emits the first
+#: four (its own vocabulary for the control room / autonomy input it was
+#: handed); the read service emits the fifth (its own vocabulary for
+#: ``source_unavailable`` / ``projection_refused`` / etc. — see
+#: :data:`WORK_REFUSAL_REASON_CODES`).  Anything outside this set on
+#: ``effect_exception.reason`` is a contract violation.  Both producer
+#: sites assert membership; the workspace-app contract facade re-exports
+#: the constant so the facade-parity test exercises it.
+QUEUE_EFFECT_EXCEPTION_REASONS = frozenset({
+    "control_room_missing",
+    "autonomy_missing",
+    "no_exception_observed",
+    "exception_observed",
+    "read_refused",
+})
 _WORK_REF = re.compile(r"WS:[A-Z0-9][A-Za-z0-9._-]{1,63}")
 #: Frozen v2 C public shape JOB-[0-9]{1,9} with the existing max16-character
 #: guard.  Differs from the legacy ``wake_events.JOB_ID_RE`` (3+ digits) only
@@ -143,14 +169,14 @@ def response_ceiling_for(operation):
 
 def validate_frame(frame):
     if (type(frame) is not dict or set(frame) != {"schema", "operation", "selection", "principal"}
-            or frame["schema"] != FRAME_SCHEMA or frame["operation"] not in ("programs", "mission")
+            or frame["schema"] != FRAME_SCHEMA or frame["operation"] not in ("programs", "work", "mission")
             or type(frame["principal"]) is not dict or set(frame["principal"]) != PRINCIPAL_KEYS
             or frame["principal"]["resource"] != RESOURCE or frame["principal"]["scopes"] != [SCOPE]
             or any(type(frame["principal"][key]) is not str or not 1 <= len(frame["principal"][key]) <= 256
                    for key in PRINCIPAL_KEYS - {"scopes"})
             or len(canonical(frame)) + 1 > MAX_REQUEST_BYTES):
         raise ValueError("invalid_input")
-    if frame["operation"] == "programs":
+    if frame["operation"] in ("programs", "work"):
         if frame["selection"] is not None:
             raise ValueError("invalid_input")
     else:

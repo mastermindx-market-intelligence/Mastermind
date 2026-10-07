@@ -181,11 +181,14 @@ def test_shared_index_stays_group_readable_after_control_cleanliness(
     real_run_bytes = executive_workspace._run_bytes
 
     def observed_run_bytes(argv, *, cwd, env):
-        recorded_envs.append(dict(env))
-        recorded_argv.append(tuple(argv))
-        index = Path(cwd) / ".git" / "index"
-        if index.exists() and not index_mode_before_status:
-            index_mode_before_status.append(stat.S_IMODE(index.stat().st_mode))
+        # Construction now reads the pinned profile from the source. This
+        # regression guards the distinct post-sharing workspace observations.
+        if Path(cwd) != source:
+            recorded_envs.append(dict(env))
+            recorded_argv.append(tuple(argv))
+            index = Path(cwd) / ".git" / "index"
+            if index.exists() and not index_mode_before_status:
+                index_mode_before_status.append(stat.S_IMODE(index.stat().st_mode))
         return real_run_bytes(argv, cwd=cwd, env=env)
 
     monkeypatch.setattr(executive_workspace, "_run_bytes", observed_run_bytes)
@@ -510,6 +513,20 @@ def test_symlink_permission_repair_fails_closed_when_mode_does_not_change(
 
 
 def test_launch_cleanliness_definition_includes_ignored_untracked_material():
+    # Tracked-status observation must not recursively enumerate untracked files:
+    # the second observation already enumerates every untracked/ignored path.
+    assert executive_workspace.LAUNCH_CLEAN_STATUS_ARGS == (
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--untracked-files=no",
+    )
+    assert executive_workspace.LAUNCH_CLEAN_UNTRACKED_ARGS == (
+        "ls-files",
+        "--others",
+        "-z",
+    )
+
     calls: list[tuple[str, ...]] = []
 
     def observe(arguments):
@@ -1359,4 +1376,121 @@ def test_linked_workspace_refuses_invalid_declared_publication_branch(tmp_path: 
             receipt.workspace_path,
             expected_operation_id="repair-existing-pr-invalid",
             published_branch=value,
+        )
+
+
+def test_linked_workspace_release_accepts_deleted_source_branch_via_exact_pull_ref(tmp_path: Path):
+    source, base_sha = _repository(tmp_path)
+    remote = tmp_path / "remote.git"
+    subprocess.run(
+        ["git", "init", "--bare", "-q", str(remote)],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    _git(source, "remote", "add", "origin", str(remote))
+    _git(source, "push", "-u", "origin", "master")
+
+    root = tmp_path / "agent-workspaces"
+    operation = "postmerge-pr-ref-001"
+    receipt = executive_workspace.prepare_linked_worktree(
+        source,
+        root,
+        operation_id=operation,
+        lane="web",
+        base_sha=base_sha,
+        branch=f"sol/web-{operation}",
+    )
+    workspace = Path(receipt.workspace_path)
+    (workspace / "README.md").write_text("candidate head\\n", encoding="utf-8")
+    _git(workspace, "add", "README.md")
+    _git(workspace, "commit", "-qm", "candidate")
+    head = _git(workspace, "rev-parse", "HEAD")
+    _git(workspace, "push", "origin", f"HEAD:refs/heads/sol/web-{operation}")
+    _git(remote, "update-ref", "refs/pull/818/head", head)
+    _git(workspace, "push", "origin", "--delete", f"sol/web-{operation}")
+
+    held = executive_workspace.inspect_linked_worktree(
+        source, root, workspace, expected_operation_id=operation
+    )
+    assert held.state == "PRESERVED_UNPUBLISHED"
+
+    observed = executive_workspace.inspect_linked_worktree(
+        source,
+        root,
+        workspace,
+        expected_operation_id=operation,
+        published_pull_request=818,
+    )
+    assert observed.state == "RELEASABLE"
+    assert observed.recoverability == "HEAD_PUBLISHED_TO_PULL_REQUEST_REF"
+
+    released = executive_workspace.release_linked_worktree(
+        source,
+        root,
+        workspace,
+        expected_operation_id=operation,
+        published_pull_request=818,
+    )
+    assert released.state == "REMOVED"
+    assert released.removed is True
+    assert not workspace.exists()
+    assert _git(remote, "rev-parse", "refs/pull/818/head") == head
+
+
+def test_linked_workspace_pull_ref_evidence_is_exact_and_unambiguous(tmp_path: Path):
+    source, base_sha = _repository(tmp_path)
+    remote = tmp_path / "remote.git"
+    subprocess.run(
+        ["git", "init", "--bare", "-q", str(remote)],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    _git(source, "remote", "add", "origin", str(remote))
+    _git(source, "push", "-u", "origin", "master")
+    root = tmp_path / "agent-workspaces"
+    operation = "postmerge-pr-ref-002"
+    receipt = executive_workspace.prepare_linked_worktree(
+        source,
+        root,
+        operation_id=operation,
+        lane="web",
+        base_sha=base_sha,
+        branch=f"sol/web-{operation}",
+    )
+    workspace = Path(receipt.workspace_path)
+    (workspace / "README.md").write_text("local only\\n", encoding="utf-8")
+    _git(workspace, "add", "README.md")
+    _git(workspace, "commit", "-qm", "local candidate")
+    _git(remote, "update-ref", "refs/pull/819/head", base_sha)
+
+    held = executive_workspace.inspect_linked_worktree(
+        source,
+        root,
+        workspace,
+        expected_operation_id=operation,
+        published_pull_request=819,
+    )
+    assert held.state == "PRESERVED_UNPUBLISHED"
+    assert workspace.exists()
+
+    for invalid in (0, -1, True, 2_147_483_648):
+        with pytest.raises(WorkspaceError, match="published pull request is invalid"):
+            executive_workspace.inspect_linked_worktree(
+                source,
+                root,
+                workspace,
+                expected_operation_id=operation,
+                published_pull_request=invalid,
+            )
+
+    with pytest.raises(WorkspaceError, match="mutually exclusive"):
+        executive_workspace.inspect_linked_worktree(
+            source,
+            root,
+            workspace,
+            expected_operation_id=operation,
+            published_branch="sol/other",
+            published_pull_request=819,
         )

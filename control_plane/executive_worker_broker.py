@@ -65,6 +65,7 @@ from control_plane.executive_orchestration_principal import (
 from control_plane.executive_orchestration_result import RawRoleResultObservation
 from control_plane.visible_turn_projection import TurnKey
 from control_plane.operator_harness_contract import (
+    CHATGPT_GUI_RESOURCE_ID,
     ATTENTION_TURN_INSTRUCTION,
     AttentionTurnObservation,
     CandidateResult,
@@ -72,6 +73,7 @@ from control_plane.operator_harness_contract import (
     LaunchComparison,
     LaunchDecision,
     NormalizedEvent,
+    ObservedCapabilityIdentity,
     ObservedHarnessAttestation,
     OperationId,
     ProcessGenerationRef,
@@ -118,7 +120,10 @@ from control_plane.worker_execution_contract import (
     BinaryAttestation,
     CancelReceipt,
     CollectionReceipt,
+    OrchestrationLaunchSpec,
     ValidationReceipt,
+    validate_subscription_canary_claim,
+    validate_orchestration_grant_digest,
     WorkerLaunchSpec,
     WorkerProcessRef,
     WorkerRecoveryBinding,
@@ -185,7 +190,8 @@ _OHF_OPERATIONS = frozenset(
     }
 )
 _ALLOWED_OPERATIONS = frozenset(
-    {"start", "status", "collect", "cancel", "validate", "autonomy-canary"}
+    {"start", "status", "collect", "cancel", "validate", "autonomy-canary",
+     "interactive-canary"}
 ) | _OHF_OPERATIONS
 _MAX_REQUEST_BYTES = 1024 * 1024
 _MAX_OPERATOR_PROMPT_BYTES = 512 * 1024
@@ -207,6 +213,13 @@ _SHELL_EXECUTABLES = frozenset(
         "/usr/bin/env",
     }
 )
+_SUBSCRIPTION_CANARY_OBSERVATION_FIELDS = frozenset({
+    "schema", "execution_mode", "run_id", "job_id", "worker_id", "quota_class",
+    "fence_generation", "capacity_generation", "capacity_state", "held_attempt_id",
+    "current_attempt_id", "binding_id", "profile_id", "adapter_id", "model",
+    "realm_config_sha256", "realm_generation", "catalog_digest", "issued_at_ms",
+    "expires_at_ms", "observation_digest",
+})
 
 
 class WorkerBrokerError(RuntimeError):
@@ -223,6 +236,10 @@ class BrokerProtocolError(WorkerBrokerError):
 
 class BrokerStateError(WorkerBrokerError):
     """A typed operation is invalid for the broker's current state."""
+
+
+class BrokerRunNotFound(BrokerStateError):
+    """The exact run has no record at this canonical broker owner."""
 
 
 class WorkerAdapterNotImplementedError(WorkerBrokerError):
@@ -458,7 +475,9 @@ class OperatorAttemptResource(Protocol):
 
     def stop(self) -> None: ...
 
-    def seal_after_uid_sweep(self, sweep: UIDSweepReceipt) -> BrowserReviewReceipt: ...
+    def seal_after_uid_sweep(
+        self, sweep: UIDSweepReceipt
+    ) -> BrowserReviewReceipt | None: ...
 
 
 OperatorAdapterFactory = Callable[
@@ -1024,6 +1043,8 @@ _LAUNCH_SPEC_FIELDS = frozenset(
         "shared_run_gid",
         "secret_canary_verdict",
         "require_secret_canary",
+        "subscription_canary_claim",
+        "effective_grant_digest",
     }
 )
 _PROVIDER_OWNED_LAUNCH_FIELDS = frozenset(
@@ -1050,6 +1071,12 @@ def _launch_spec_from_wire(value: Any, policy: BrokerPolicy) -> WorkerLaunchSpec
     unknown = set(value) - _LAUNCH_SPEC_FIELDS
     if unknown:
         raise BrokerProtocolError(f"launch_spec has unknown fields: {sorted(unknown)}")
+    try:
+        if "effective_grant_digest" in value:
+            validate_orchestration_grant_digest(value["effective_grant_digest"])
+        validate_subscription_canary_claim(value.get("subscription_canary_claim", {}))
+    except WorkerRecoveryContractError as exc:
+        raise BrokerProtocolError(str(exc)) from exc
     required = {
         "run_id",
         "job_id",
@@ -1240,7 +1267,36 @@ def _launch_spec_from_wire(value: Any, policy: BrokerPolicy) -> WorkerLaunchSpec
     ):
         if optional in value:
             keyword[optional] = value[optional]
+    keyword["subscription_canary_claim"] = validate_subscription_canary_claim(
+        value.get("subscription_canary_claim", {}),
+    )
+    # The authenticated control owns the sealed grant and its semantic binding.
+    # Retain that provenance in recovery material without widening legacy specs
+    # or letting the worker preempt the supervisor-owned launch attestation.
+    if "effective_grant_digest" in value:
+        return OrchestrationLaunchSpec(
+            **keyword, effective_grant_digest=value["effective_grant_digest"]
+        )
     return WorkerLaunchSpec(**keyword)
+
+
+def _subscription_canary_observation_from_wire(value: Any) -> dict[str, Any]:
+    """Parse only the closed claim schema into a dict ready for sealing.
+
+    The 21-field schema is owned by the broker-admission module; we mirror it
+    here so the wire cannot smuggle in unknown keys before the typed
+    admission refuses them.  The seal step still re-validates types, hashes,
+    freshness and exact launch-spec identity.
+    """
+
+    if not isinstance(value, dict) or set(value) != _SUBSCRIPTION_CANARY_OBSERVATION_FIELDS:
+        raise BrokerProtocolError(
+            "subscription canary observation is not the closed claim schema"
+        )
+    try:
+        return dict(validate_subscription_canary_claim(value))
+    except WorkerRecoveryContractError as exc:
+        raise BrokerProtocolError(str(exc)) from exc
 
 
 def get_peer_credentials(peer_socket: socket.socket) -> PeerCredentials:
@@ -1306,15 +1362,21 @@ def activate_launchd_socket(name: str) -> socket.socket:
 
 
 class ExecutiveWorkerBroker:
-    """One-worker, one-active-job typed adapter broker."""
+    """One-worker, one-active-job typed adapter broker.
+
+    An explicitly armed Operator Harness-only broker binds no flat adapter.
+    Its installed entrypoint supplies the attested binary and rich factory;
+    flat execution and validation remain unavailable on that broker.
+    """
 
     def __init__(
         self,
-        adapter: WorkerExecutionAdapter,
+        adapter: WorkerExecutionAdapter | None,
         policy: BrokerPolicy,
         sweeper: ResidualSweeper,
         *,
-        adapter_id: str = "codex-cli",
+        adapter_id: str | None = "codex-cli",
+        operator_binary_attestation: BinaryAttestation | None = None,
         validation_adapter: WorkerExecutionAdapter | None = None,
         validation_adapter_id: str | None = None,
         peer_resolver: Callable[[socket.socket], PeerCredentials] = get_peer_credentials,
@@ -1326,58 +1388,86 @@ class ExecutiveWorkerBroker:
             [Mapping[str, Any]], Mapping[str, Any]
         ]
         | None = None,
+        subscription_realm_owner: Any | None = None,
     ) -> None:
-        try:
-            descriptor = bind_reviewed_adapter(adapter, adapter_id)
-        except AdapterBindingError as exc:
-            raise WorkerBrokerError(str(exc)) from exc
-        except Exception as exc:
-            raise WorkerBrokerError(
-                f"worker adapter {adapter_id!r} failed to bind"
-            ) from exc
-        self.adapter = adapter
-        self.adapter_id = descriptor.adapter_id
-        if validation_adapter is None:
-            if validation_adapter_id not in (None, self.adapter_id):
+        self._operator_only = adapter is None
+        self._operator_binary_attestation = operator_binary_attestation
+        if self._operator_only:
+            if (adapter_id is not None or validation_adapter is not None
+                    or validation_adapter_id is not None):
                 raise WorkerBrokerError(
-                    "validation adapter identity was supplied without an adapter"
+                    "operator-only broker cannot bind a flat or validation adapter"
                 )
-            if self.adapter_id == "claude-code":
+            if (operator_harness_armed is not True
+                    or not callable(operator_adapter_factory)
+                    or not isinstance(operator_binary_attestation, BinaryAttestation)
+                    or not isinstance(operator_binary_attestation.sha256, str)
+                    or re.fullmatch(r"[0-9a-f]{64}", operator_binary_attestation.sha256) is None
+                    or not isinstance(operator_binary_attestation.version, str)
+                    or not operator_binary_attestation.version.strip()):
                 raise WorkerBrokerError(
-                    "Claude broker requires the reviewed common validation adapter"
+                    "operator-only broker requires armed factory and typed binary attestation"
                 )
-            validation_descriptor = descriptor
-            validation_adapter = adapter
+            self.adapter = None
+            self.adapter_id = None
+            self.validation_adapter = None
+            self.validation_adapter_id = None
         else:
-            if not isinstance(validation_adapter_id, str) or not validation_adapter_id:
+            if operator_binary_attestation is not None:
                 raise WorkerBrokerError(
-                    "validation adapter requires one exact reviewed identity"
+                    "flat broker binary identity must remain on its reviewed adapter"
                 )
             try:
-                validation_descriptor = bind_reviewed_adapter(
-                    validation_adapter, validation_adapter_id
-                )
+                descriptor = bind_reviewed_adapter(adapter, adapter_id)
             except AdapterBindingError as exc:
                 raise WorkerBrokerError(str(exc)) from exc
             except Exception as exc:
                 raise WorkerBrokerError(
-                    f"validation adapter {validation_adapter_id!r} failed to bind"
+                    f"worker adapter {adapter_id!r} failed to bind"
                 ) from exc
-            if self.adapter_id == "codex-cli" and (
-                validation_adapter is not adapter
-                or validation_descriptor.adapter_id != self.adapter_id
-            ):
-                raise WorkerBrokerError(
-                    "Codex broker validation must remain on its primary reviewed adapter"
-                )
-            if self.adapter_id == "claude-code" and (
-                validation_descriptor.adapter_id != "codex-cli"
-            ):
-                raise WorkerBrokerError(
-                    "Claude broker validation requires the reviewed common Codex sandbox"
-                )
-        self.validation_adapter = validation_adapter
-        self.validation_adapter_id = validation_descriptor.adapter_id
+            self.adapter = adapter
+            self.adapter_id = descriptor.adapter_id
+            if validation_adapter is None:
+                if validation_adapter_id not in (None, self.adapter_id):
+                    raise WorkerBrokerError(
+                        "validation adapter identity was supplied without an adapter"
+                    )
+                if self.adapter_id == "claude-code":
+                    raise WorkerBrokerError(
+                        "Claude broker requires the reviewed common validation adapter"
+                    )
+                validation_descriptor = descriptor
+                validation_adapter = adapter
+            else:
+                if not isinstance(validation_adapter_id, str) or not validation_adapter_id:
+                    raise WorkerBrokerError(
+                        "validation adapter requires one exact reviewed identity"
+                    )
+                try:
+                    validation_descriptor = bind_reviewed_adapter(
+                        validation_adapter, validation_adapter_id
+                    )
+                except AdapterBindingError as exc:
+                    raise WorkerBrokerError(str(exc)) from exc
+                except Exception as exc:
+                    raise WorkerBrokerError(
+                        f"validation adapter {validation_adapter_id!r} failed to bind"
+                    ) from exc
+                if self.adapter_id == "codex-cli" and (
+                    validation_adapter is not adapter
+                    or validation_descriptor.adapter_id != self.adapter_id
+                ):
+                    raise WorkerBrokerError(
+                        "Codex broker validation must remain on its primary reviewed adapter"
+                    )
+                if self.adapter_id == "claude-code" and (
+                    validation_descriptor.adapter_id != "codex-cli"
+                ):
+                    raise WorkerBrokerError(
+                        "Claude broker validation requires the reviewed common Codex sandbox"
+                    )
+            self.validation_adapter = validation_adapter
+            self.validation_adapter_id = validation_descriptor.adapter_id
         self.policy = policy
         self.sweeper = sweeper
         self.peer_resolver = peer_resolver
@@ -1386,6 +1476,14 @@ class ExecutiveWorkerBroker:
         self.operator_harness_armed = bool(operator_harness_armed)
         self.autonomy_guard = autonomy_guard
         self.autonomy_canary_factory = autonomy_canary_factory
+        if subscription_realm_owner is not None:
+            from control_plane.codex_provider_realm import SubscriptionRealmOwner
+
+            if not isinstance(subscription_realm_owner, SubscriptionRealmOwner):
+                raise WorkerBrokerError(
+                    "subscription_realm_owner must be a SubscriptionRealmOwner"
+                )
+        self.subscription_realm_owner = subscription_realm_owner
         if self.operator_harness_armed and self.operator_adapter_factory is None:
             raise WorkerBrokerError(
                 "armed Operator Harness requires a reviewed worker-local adapter factory"
@@ -1466,7 +1564,7 @@ class ExecutiveWorkerBroker:
         try:
             return self._runs[run_id]
         except KeyError as exc:
-            raise BrokerStateError(f"run {run_id!r} is unknown to this broker") from exc
+            raise BrokerRunNotFound(f"run {run_id!r} is unknown to this broker") from exc
 
     def _authorize_peer(self, peer: PeerCredentials) -> None:
         if int(peer.uid) != int(self.policy.control_uid):
@@ -1490,7 +1588,7 @@ class ExecutiveWorkerBroker:
         payload = request.get("payload")
         if not isinstance(payload, dict):
             raise BrokerProtocolError("payload must be an object")
-        result = await self._dispatch(str(operation), payload)
+        result = await self._dispatch(str(operation), payload, peer=peer)
         return {
             "schema_version": BROKER_RESPONSE_SCHEMA_VERSION,
             "request_id": request_id,
@@ -1499,7 +1597,17 @@ class ExecutiveWorkerBroker:
             "result": _jsonable(result),
         }
 
-    async def _dispatch(self, operation: str, payload: dict[str, Any]) -> Any:
+    def _require_flat_adapter(self) -> None:
+        if self._operator_only:
+            raise BrokerStateError("operator-only broker refuses flat worker operations")
+
+    async def _dispatch(
+        self,
+        operation: str,
+        payload: dict[str, Any],
+        *,
+        peer: PeerCredentials | None = None,
+    ) -> Any:
         if operation == "start":
             return await self._start(payload)
         if operation == "status":
@@ -1512,6 +1620,12 @@ class ExecutiveWorkerBroker:
             return await self._validate(payload)
         if operation == "autonomy-canary":
             return await self._autonomy_canary(payload)
+        if operation == "interactive-canary":
+            if peer is None:
+                raise PeerAuthorizationError(
+                    "interactive subscription canary requires an authenticated Unix peer"
+                )
+            return await self._interactive_canary(payload, peer=peer)
         if operation == "ohf-validate":
             return await self._ohf_validate(payload)
         if operation == "ohf-identity":
@@ -1595,6 +1709,140 @@ class ExecutiveWorkerBroker:
             async with self._state_lock:
                 self._validation_busy = False
 
+    async def _interactive_canary(
+        self, payload: dict[str, Any], *, peer: PeerCredentials,
+    ) -> dict[str, Any]:
+        """Launch one interactive subscription canary through the typed
+        broker seam.  The claim observation travels only over the kernel-
+        authenticated Control-UID Unix peer; this operation must not call
+        ``_require_current_autonomy`` and must not widen autonomous broker
+        execution.
+        """
+
+        if self.subscription_realm_owner is None:
+            raise BrokerStateError(
+                "interactive subscription canary is not configured for this worker"
+            )
+        self._require_flat_adapter()
+        descriptor = adapter_descriptor(self.adapter_id)
+        if not descriptor.implemented:
+            raise WorkerAdapterNotImplementedError(
+                f"worker adapter {descriptor.adapter_id!r} is not implemented "
+                "for interactive canary execution"
+            )
+        binding = getattr(self.adapter, "binding", None)
+        if binding is not None:
+            if getattr(binding, "implementation_state", None) == "SPEC_ONLY":
+                raise WorkerAdapterNotImplementedError(
+                    f"worker adapter {descriptor.adapter_id!r} catalog binding "
+                    "is SPEC_ONLY for interactive canary execution"
+                )
+            if getattr(binding, "autonomous_allowed", None) is not False:
+                raise WorkerAdapterNotImplementedError(
+                    f"worker adapter {descriptor.adapter_id!r} catalog binding "
+                    "does not allow interactive canary execution"
+                )
+        if set(payload) != {"launch_spec", "subscription_canary_observation"}:
+            raise BrokerProtocolError(
+                "interactive-canary payload fields are invalid"
+            )
+        spec = _launch_spec_from_wire(payload["launch_spec"], self.policy)
+        if spec.authorities != ("READ",) or spec.authority is not None:
+            raise BrokerProtocolError(
+                "interactive subscription canary requires READ-only job authority"
+            )
+        observation = _subscription_canary_observation_from_wire(
+            payload["subscription_canary_observation"]
+        )
+        if dict(spec.subscription_canary_claim) != observation:
+            raise BrokerProtocolError(
+                "subscription canary observation differs from the launch specification"
+            )
+        async with self._state_lock:
+            if self._quarantined_reason is not None:
+                raise BrokerStateError(
+                    f"worker broker is quarantined: {self._quarantined_reason}"
+                )
+            if (
+                self._active_run_id is not None
+                or self._operator_run is not None
+                or self._starting
+                or self._validation_busy
+                or self._status_sweep_busy
+            ):
+                raise BrokerStateError(
+                    "the worker broker already has active work"
+                )
+            if spec.run_id in self._runs:
+                raise BrokerStateError("run_id cannot be reused")
+            self._starting = True
+        try:
+            started = False
+            admission: Any = None
+            from control_plane.subscription_canary_admission import (
+                seal_broker_subscription_canary_admission,
+            )
+
+            admission = seal_broker_subscription_canary_admission(
+                observation,
+                realm_owner=self.subscription_realm_owner,
+                peer=peer,
+                spec=spec,
+            )
+            start_canary = getattr(self.adapter, "start_subscription_canary", None)
+            if not callable(start_canary):
+                raise BrokerStateError(
+                    "adapter does not implement interactive subscription canary launch"
+                )
+            process_ref = await start_canary(spec, admission)
+            attestation_reader = getattr(self.adapter, "launch_attestation", None)
+            attestation = (
+                attestation_reader(process_ref)
+                if callable(attestation_reader)
+                else None
+            )
+            started = True
+        except Exception:
+            await self._handle_canary_start_failure()
+            raise
+        finally:
+            async with self._state_lock:
+                if started:
+                    state = _BrokerRun(
+                        spec=spec,
+                        process_ref=process_ref,
+                        validation_commands=(),
+                        launch_attestation=attestation,
+                    )
+                    self._remember(spec.run_id, state)
+                    self._active_run_id = spec.run_id
+                self._starting = False
+        return {
+            "adapter_id": self.adapter_id,
+            "process_ref": process_ref,
+            "launch_attestation": attestation,
+            "subscription_canary_observation_digest": admission.observation_digest,
+            "subscription_canary_binding_id": admission.binding_id,
+            "subscription_canary_model": admission.model,
+            "startup_sweep": self.startup_sweep,
+        }
+
+    async def _handle_canary_start_failure(self) -> None:
+        """Sweep the dedicated worker UID on canary launch failure, mirroring
+        the production start-failure cleanup so an interactive canary cannot
+        leave residual processes behind.
+        """
+
+        try:
+            self.last_sweep = await asyncio.to_thread(
+                self.sweeper.sweep, "canary_start_failed",
+            )
+        except Exception as sweep_exc:
+            async with self._state_lock:
+                self._quarantined_reason = (
+                    f"canary start cleanup failed: {type(sweep_exc).__name__}"
+                )
+
     def _operator_factory(
         self, requested: RequestedExecutionProfile
     ) -> tuple[OperatorAdapter, dict[str, str], Path]:
@@ -1676,7 +1924,8 @@ class ExecutiveWorkerBroker:
     async def _ohf_identity(self, payload: dict[str, Any]) -> dict[str, Any]:
         if payload:
             raise BrokerProtocolError("ohf-identity payload must be empty")
-        binary = getattr(self.adapter, "binary", None)
+        binary = (self._operator_binary_attestation if self._operator_only
+                  else getattr(self.adapter, "binary", None))
         if binary is None:
             raise BrokerStateError("worker binary attestation is unavailable")
         return {
@@ -2672,28 +2921,70 @@ class ExecutiveWorkerBroker:
                     state.resource.seal_after_uid_sweep,
                     sweep,
                 )
-                if not isinstance(artifact_receipt, BrowserReviewReceipt):
-                    raise BrokerStateError(
-                        "browser resource returned an untyped artifact receipt"
+                if artifact_receipt is None:
+                    # Only the explicitly requested and materialized GUI contract
+                    # is artifact-free. A missing browser receipt is not success.
+                    capability = getattr(state.resource, "observed_capability", None)
+                    required_resources = tuple(
+                        item for item in state.requested.capabilities.required
+                        if item.kind == "resource"
                     )
-                try:
-                    artifact_receipt = browser_review_receipt(
-                        artifact_receipt.to_wire()
-                    )
-                except BrowserReviewError as exc:
-                    raise BrokerStateError(
-                        "browser resource returned an invalid closed artifact receipt"
-                    ) from exc
-                if (
-                    artifact_receipt.attempt_id != state.epoch.attempt_id
-                    or artifact_receipt.session_epoch_id
-                    != state.epoch.session_epoch_id
-                    or artifact_receipt.process_generation_id
-                    != state.generation.process_generation_id
-                ):
-                    raise BrokerStateError(
-                        "browser receipt generation identity drifted"
-                    )
+                    receipt = state.materialization_receipt
+                    observed_resources = ()
+                    if receipt is not None:
+                        try:
+                            attestation = wire_observed_harness_attestation(
+                                receipt.observed_attestation
+                            )
+                        except OperatorHarnessWireError as exc:
+                            raise BrokerStateError(
+                                "operator resource lacks validated artifact-free admission"
+                            ) from exc
+                        observed_resources = tuple(
+                            item for item in attestation.capabilities
+                            if item.kind == "resource"
+                        )
+                    if (
+                        not isinstance(capability, ObservedCapabilityIdentity)
+                        or capability.kind != "resource"
+                        or capability.name != CHATGPT_GUI_RESOURCE_ID
+                        or not isinstance(capability.resource_contract_digest, str)
+                        or re.fullmatch(r"[0-9a-f]{64}", capability.resource_contract_digest) is None
+                        or len(required_resources) != 1
+                        or required_resources[0].name != capability.name
+                        or required_resources[0].resource_contract_digest
+                        != capability.resource_contract_digest
+                        or observed_resources != (capability,)
+                        or receipt is None
+                        or receipt.requested_profile_digest
+                        != requested_profile_digest(operator_to_wire(state.requested))
+                    ):
+                        raise BrokerStateError(
+                            "operator resource lacks validated artifact-free admission"
+                        )
+                else:
+                    if not isinstance(artifact_receipt, BrowserReviewReceipt):
+                        raise BrokerStateError(
+                            "operator resource returned an untyped artifact receipt"
+                        )
+                    try:
+                        artifact_receipt = browser_review_receipt(
+                            artifact_receipt.to_wire()
+                        )
+                    except BrowserReviewError as exc:
+                        raise BrokerStateError(
+                            "browser resource returned an invalid closed artifact receipt"
+                        ) from exc
+                    if (
+                        artifact_receipt.attempt_id != state.epoch.attempt_id
+                        or artifact_receipt.session_epoch_id
+                        != state.epoch.session_epoch_id
+                        or artifact_receipt.process_generation_id
+                        != state.generation.process_generation_id
+                    ):
+                        raise BrokerStateError(
+                            "browser receipt generation identity drifted"
+                        )
             await self._remember_operator_terminal(
                 state, observation, artifact_receipt
             )
@@ -2906,6 +3197,7 @@ class ExecutiveWorkerBroker:
         }
 
     async def _start(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._require_flat_adapter()
         descriptor = adapter_descriptor(self.adapter_id)
         if not descriptor.implemented:
             raise WorkerAdapterNotImplementedError(
@@ -2928,6 +3220,15 @@ class ExecutiveWorkerBroker:
         if set(payload) != {"launch_spec", "validation_commands"}:
             raise BrokerProtocolError("start payload fields are invalid")
         spec = _launch_spec_from_wire(payload["launch_spec"], self.policy)
+        # Ordinary autonomous broker start must refuse any spec carrying a
+        # subscription canary claim; only the interactive-canary operation
+        # may carry one.  An empty mapping (default factory) is fine because
+        # it normalizes to a frozen empty mapping.
+        if spec.subscription_canary_claim:
+            raise BrokerProtocolError(
+                "ordinary broker start refuses a subscription canary claim; "
+                "only the interactive-canary operation may carry one"
+            )
         commands = _validation_commands(payload["validation_commands"])
         async with self._state_lock:
             if self._quarantined_reason is not None:
@@ -2977,6 +3278,7 @@ class ExecutiveWorkerBroker:
         }
 
     async def _status(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._require_flat_adapter()
         if set(payload) - {"run_id", "fresh_uid_sweep"}:
             raise BrokerProtocolError("status payload fields are invalid")
         run_id = payload.get("run_id")
@@ -3125,6 +3427,7 @@ class ExecutiveWorkerBroker:
         return receipt, sweep
 
     async def _collect(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._require_flat_adapter()
         if set(payload) != {"run_id"}:
             raise BrokerProtocolError("collect payload fields are invalid")
         async with self._state_lock:
@@ -3142,6 +3445,7 @@ class ExecutiveWorkerBroker:
         return {"collection": receipt, "uid_sweep": sweep}
 
     async def _cancel(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._require_flat_adapter()
         if set(payload) != {"run_id", "reason"}:
             raise BrokerProtocolError("cancel payload fields are invalid")
         reason = payload.get("reason")
@@ -3239,6 +3543,7 @@ class ExecutiveWorkerBroker:
                 self._validation_busy = False
 
     async def _validate(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._require_flat_adapter()
         if set(payload) != {"run_id", "argv", "timeout_seconds"}:
             raise BrokerProtocolError("validate payload fields are invalid")
         commands = _validation_commands([payload["argv"]])
@@ -3807,6 +4112,13 @@ def _launch_spec_to_json(spec: WorkerLaunchSpec) -> dict[str, Any]:
     serialized = _jsonable(spec)
     if not isinstance(serialized, dict):  # pragma: no cover - dataclass invariant
         raise BrokerProtocolError("worker launch spec did not serialize to an object")
+    # Mixed-version compatibility: ordinary Control hosts serialize a launch
+    # spec without a canary claim.  An empty mapping would re-introduce the
+    # field on every byte-stable wire payload, so strip it whenever the claim
+    # is empty.  A canary payload always carries the closed schema so the
+    # worker side keeps receiving it.
+    if not spec.subscription_canary_claim:
+        serialized.pop("subscription_canary_claim", None)
     return serialized
 
 
@@ -3833,20 +4145,46 @@ class RemoteCodexWorkerAdapter:
         self.inspector = _UnavailableRemoteInspector()
 
     async def start(self, spec: WorkerLaunchSpec) -> WorkerProcessRef:
-        commands = [list(command) for command in self.validation_commands_for_spec(spec)]
-        result = await self.client.request(
-            "start",
-            {
+        is_canary = bool(spec.subscription_canary_claim)
+        if is_canary:
+            try:
+                validate_subscription_canary_claim(spec.subscription_canary_claim)
+            except WorkerRecoveryContractError as exc:
+                raise BrokerProtocolError(str(exc)) from exc
+        if is_canary:
+            operation = "interactive-canary"
+            payload = {
+                    "launch_spec": _launch_spec_to_json(spec),
+                    "subscription_canary_observation": dict(spec.subscription_canary_claim),
+                }
+        else:
+            operation = "start"
+            payload = {
                 "launch_spec": _launch_spec_to_json(spec),
-                "validation_commands": commands,
-            },
-        )
+                "validation_commands": [
+                    list(command)
+                    for command in self.validation_commands_for_spec(spec)
+                ],
+            }
+        result = await self.client.request(operation, payload)
         if result.get("adapter_id") != self.adapter_id:
             raise BrokerProtocolError("remote broker adapter identity does not match facade")
         process_ref = _process_ref_from_json(result.get("process_ref"))
         if process_ref.run_id != spec.run_id:
             raise BrokerProtocolError("remote process run_id does not match LaunchSpec")
         attestation = _mapping(result.get("launch_attestation"), field="launch attestation")
+        if is_canary:
+            claim = spec.subscription_canary_claim
+            expected = {
+                "subscription_canary_observation_digest": claim["observation_digest"],
+                "subscription_canary_binding_id": claim["binding_id"],
+                "subscription_canary_model": claim["model"],
+            }
+            for field, value in expected.items():
+                if result.get(field) != value or attestation.get(field) != value:
+                    raise BrokerProtocolError(
+                        "remote subscription canary receipt does not match LaunchSpec"
+                    )
         startup_sweep = _uid_sweep_from_json(result.get("startup_sweep"))
         self._refs[spec.run_id] = process_ref
         self._attestations[spec.run_id] = attestation
@@ -3885,6 +4223,8 @@ class RemoteCodexWorkerAdapter:
             "status",
             {"run_id": ref.run_id},
         )
+        if result.get("adapter_id") != self.adapter_id:
+            raise BrokerProtocolError("remote recovery adapter identity does not match facade")
         run = _mapping(result.get("run"), field="run status")
         observed = _process_ref_from_json(run.get("process_ref"))
         if observed != ref:
@@ -3926,7 +4266,7 @@ class RemoteCodexWorkerAdapter:
             )
             terminal_sweep = _uid_sweep_from_json(cancelled.get("uid_sweep"))
         except RemoteBrokerError as exc:
-            if exc.code != "BrokerStateError":
+            if exc.code != "BrokerRunNotFound":
                 raise
         status = await self.client.request("status", {"fresh_uid_sweep": True})
         sweep = _uid_sweep_from_json(status.get("status_sweep"))
@@ -3948,6 +4288,8 @@ class RemoteCodexWorkerAdapter:
         if self._refs.get(ref.run_id) != ref:
             raise BrokerStateError("unknown or altered remote ProcessRef")
         result = await self.client.request("status", {"run_id": ref.run_id})
+        if result.get("adapter_id") != self.adapter_id:
+            raise BrokerProtocolError("remote status adapter identity does not match facade")
         run = _mapping(result.get("run"), field="run status")
         value = run.get("status")
         aliases = {
@@ -3972,6 +4314,14 @@ class RemoteCodexWorkerAdapter:
             + max(60.0, float(spec.cancel_grace_seconds) + 30.0),
         )
         receipt = _collection_from_json(result.get("collection"))
+        # A correctly bound transport/process envelope cannot relabel its result.
+        # Validate attribution before accepting data or updating sweep evidence.
+        if (
+            receipt.result.job_id != spec.job_id
+            or receipt.result.run_id != spec.run_id
+            or receipt.result.worker_id != spec.worker_id
+        ):
+            raise BrokerProtocolError("remote collection result identity differs from bound LaunchSpec")
         collected_ref = receipt.process_ref
         immutable_ref = dataclasses.replace(
             collected_ref,
@@ -4030,8 +4380,15 @@ class RemoteClaudeWorkerAdapter(RemoteCodexWorkerAdapter):
 class RemoteWorkerProcessController:
     """Synchronous restart-reconciliation facade over broker status/cancel."""
 
-    def __init__(self, client: WorkerBrokerClient) -> None:
+    def __init__(
+        self, client: WorkerBrokerClient, *, expected_worker_uid: int | None = None
+    ) -> None:
+        if expected_worker_uid is not None and (
+            type(expected_worker_uid) is not int or expected_worker_uid <= 0
+        ):
+            raise ValueError("expected worker UID must be a positive integer")
         self.client = client
+        self.expected_worker_uid = expected_worker_uid
         self._uid_sweeps: dict[str, Mapping[str, Any]] = {}
 
     def uid_sweep_receipt(self, attempt_or_run_id: Any) -> Mapping[str, Any]:
@@ -4045,15 +4402,32 @@ class RemoteWorkerProcessController:
     def cleanup_unbound_run(self, run_id: str) -> Mapping[str, Any]:
         """Synchronous counterpart used by restart/control recovery seams."""
 
+        # The supervisor grants this path only to a wholly unbound claim.
+        # An exact missing record needs no cancellation; generic errors do not
+        # grant absence. A retained run still receives one canonical cancel.
+        missing = False
         try:
-            result = self.client.request_sync(
-                "cancel",
-                {"run_id": run_id, "reason": "ambiguous control-side start response"},
-            )
-            self._uid_sweeps[run_id] = _uid_sweep_from_json(result.get("uid_sweep"))
+            status = self.client.request_sync("status", {"run_id": run_id})
         except RemoteBrokerError as exc:
-            if exc.code != "BrokerStateError":
+            if exc.code != "BrokerRunNotFound":
                 raise
+            missing = True
+        if not missing:
+            if (
+                not isinstance(status, Mapping)
+                or not isinstance(status.get("run"), Mapping)
+                or status["run"].get("run_id") != run_id
+            ):
+                raise BrokerProtocolError("unbound cleanup exact run status is malformed")
+            try:
+                result = self.client.request_sync(
+                    "cancel",
+                    {"run_id": run_id, "reason": "ambiguous control-side start response"},
+                )
+                self._uid_sweeps[run_id] = _uid_sweep_from_json(result.get("uid_sweep"))
+            except RemoteBrokerError as exc:
+                if exc.code != "BrokerRunNotFound":
+                    raise
         if not self._fresh_overall_absence(run_id):
             raise BrokerStateError("ambiguous start cleanup did not prove broker absence")
         return self._uid_sweeps[run_id]
@@ -4090,42 +4464,85 @@ class RemoteWorkerProcessController:
             and attestation.get("launch_nonce") == process.launch_nonce
         )
 
-    def _fresh_overall_absence(self, run_id: str) -> bool:
+    def _fresh_overall_absence(
+        self, attempt_or_run_id: Any, *, require_current_broker_startup: bool = False
+    ) -> bool:
+        run_id = getattr(attempt_or_run_id, "attempt_id", attempt_or_run_id)
+        if require_current_broker_startup and self.expected_worker_uid is None:
+            return False
         try:
             status = self.client.request_sync(
                 "status", {"fresh_uid_sweep": True}
             )
-        except (WorkerBrokerError, OSError):
-            return False
-        try:
+            if not isinstance(status, Mapping):
+                return False
             sweep = _uid_sweep_from_json(status.get("status_sweep"))
-        except BrokerProtocolError:
+        except (WorkerBrokerError, OSError):
             return False
         absent = (
             status.get("active_run_id") is None
+            and status.get("active_operator_attempt_id") is None
+            and status.get("active_operator_generation_id") is None
             and status.get("starting") is False
             and status.get("validation_busy") is False
             and status.get("status_sweep_busy") is False
             and status.get("quarantined_reason") is None
         )
-        if absent:
-            # Restart reconciliation needs both facts: the terminal sweep that
-            # killed residual same-UID descendants and the subsequent fresh
-            # idle sweep that closes the race before fence rotation. Preserve
-            # the former inside the latter across repeated absence checks.
-            previous = self._uid_sweeps.get(run_id)
-            preceding = None
-            if isinstance(previous, Mapping):
-                candidate = previous.get("preceding_terminal_sweep")
-                if isinstance(candidate, Mapping):
-                    preceding = dict(candidate)
-                elif previous.get("reason") != "status_absence":
-                    preceding = dict(previous)
-            combined = dict(sweep)
-            if preceding is not None:
-                combined["preceding_terminal_sweep"] = preceding
-            self._uid_sweeps[run_id] = combined
-        return absent
+        if not absent:
+            return False
+        if self.expected_worker_uid is not None:
+            if not {
+                "adapter_id", "broker_pid", "worker_uid", "active_run_id",
+                "active_operator_attempt_id", "active_operator_generation_id",
+                "starting", "validation_busy", "status_sweep_busy",
+                "quarantined_reason", "status_sweep",
+            }.issubset(status):
+                return False
+            broker_pid = status.get("broker_pid")
+            if (
+                status.get("adapter_id") != "codex-cli"
+                or not _positive_pid(broker_pid)
+                or type(status.get("worker_uid")) is not int
+                or status["worker_uid"] != self.expected_worker_uid
+                or sweep.get("reason") != "status_absence"
+                or sweep.get("worker_uid") != self.expected_worker_uid
+                or sweep.get("broker_pid") != broker_pid
+            ):
+                return False
+        startup = None
+        if require_current_broker_startup:
+            try:
+                startup = _uid_sweep_from_json(status.get("startup_sweep"))
+                started = dt.datetime.fromisoformat(attempt_or_run_id.started_at)
+                startup_at = dt.datetime.fromisoformat(startup["observed_at"])
+                observed = dt.datetime.fromisoformat(sweep["observed_at"])
+                if (
+                    any(value.utcoffset() is None for value in (started, startup_at, observed))
+                    or not started < startup_at <= observed
+                    or startup.get("reason") != "broker_startup"
+                    or startup.get("worker_uid") != self.expected_worker_uid
+                    or startup.get("broker_pid") != broker_pid
+                ):
+                    return False
+            except (WorkerBrokerError, AttributeError, KeyError, TypeError, ValueError):
+                return False
+        # Keep the proof from this same overall status. A terminal run sweep
+        # and a replacement broker's startup sweep have distinct meanings.
+        previous = self._uid_sweeps.get(run_id)
+        preceding = None
+        if isinstance(previous, Mapping):
+            candidate = previous.get("preceding_terminal_sweep")
+            if isinstance(candidate, Mapping):
+                preceding = dict(candidate)
+            elif previous.get("reason") != "status_absence":
+                preceding = dict(previous)
+        combined = dict(sweep)
+        if preceding is not None:
+            combined["preceding_terminal_sweep"] = preceding
+        if startup is not None:
+            combined["preceding_broker_startup_sweep"] = startup
+        self._uid_sweeps[run_id] = combined
+        return True
 
     def presence(self, attempt: Any):
         from control_plane.executive_supervisor import ProcessPresence
@@ -4133,12 +4550,14 @@ class RemoteWorkerProcessController:
         try:
             status = self.client.request_sync("status", {"run_id": attempt.attempt_id})
         except RemoteBrokerError as exc:
-            if exc.code == "BrokerStateError" and self._fresh_overall_absence(
-                attempt.attempt_id
+            if exc.code == "BrokerRunNotFound" and self._fresh_overall_absence(
+                attempt, require_current_broker_startup=True
             ):
-                return ProcessPresence.ABSENT
+                return ProcessPresence.MISSING
             return ProcessPresence.UNKNOWN
         except (WorkerBrokerError, OSError):
+            return ProcessPresence.UNKNOWN
+        if not isinstance(status, Mapping):
             return ProcessPresence.UNKNOWN
         run = status.get("run")
         if not isinstance(run, dict):
@@ -4161,20 +4580,20 @@ class RemoteWorkerProcessController:
             # operation and replay task. This is neither a live Attempt process
             # nor ambiguous identity, and it may not pass a global UID sweep yet.
             return ProcessPresence.TERMINAL_OWNED
-        if self._fresh_overall_absence(attempt.attempt_id):
+        if self._fresh_overall_absence(attempt):
             return ProcessPresence.ABSENT
         return ProcessPresence.UNKNOWN
 
     def absence_verified(self, attempt: Any) -> bool:
         from control_plane.executive_supervisor import ProcessPresence
 
-        return self.presence(attempt) is ProcessPresence.ABSENT
+        return self.presence(attempt) in {ProcessPresence.ABSENT, ProcessPresence.MISSING}
 
     def terminate(self, attempt: Any) -> None:
         from control_plane.executive_supervisor import ProcessPresence
 
         presence = self.presence(attempt)
-        if presence is ProcessPresence.ABSENT:
+        if presence in {ProcessPresence.ABSENT, ProcessPresence.MISSING}:
             return
         if presence is not ProcessPresence.LIVE:
             raise BrokerStateError("remote process identity is ambiguous; refusing cancellation")
@@ -4197,8 +4616,15 @@ class RemoteWorkerBrokerEndpoint:
     worker_uid: int
     worker_gid: int
     secret_canary_verdict: Mapping[str, Any] = dataclasses.field(default_factory=dict)
+    # Fixed by trusted endpoint construction, never a broker request selector.
+    # Keep the legacy default without making native Claude use the Codex facade.
+    adapter_id: str = "codex-cli"
 
     def __post_init__(self) -> None:
+        if type(self.adapter_id) is not str or self.adapter_id not in (
+            "codex-cli", "claude-code"
+        ):
+            raise WorkerBrokerError("remote worker endpoint has unsupported adapter_id")
         worker_id = str(self.worker_id or "").strip()
         worker_user = str(self.worker_user or "").strip()
         if not _ID_RE.fullmatch(worker_id):
@@ -4355,10 +4781,17 @@ class RemoteWorkerBrokerFleet:
             raise WorkerBrokerError("remote worker broker fleet has duplicate worker_id")
         validation_resolver = validation_commands_for_spec or (lambda _spec: ())
         if adapter_factory is None:
-            adapter_factory = lambda row: RemoteCodexWorkerAdapter(
-                row.client,
-                validation_commands_for_spec=validation_resolver,
-            )
+            def adapter_factory(row: RemoteWorkerBrokerEndpoint) -> RemoteCodexWorkerAdapter:
+                if row.adapter_id == "codex-cli":
+                    facade = RemoteCodexWorkerAdapter
+                elif row.adapter_id == "claude-code":
+                    facade = RemoteClaudeWorkerAdapter
+                else:
+                    raise WorkerBrokerError("remote worker endpoint has unsupported adapter_id")
+                return facade(
+                    row.client,
+                    validation_commands_for_spec=validation_resolver,
+                )
         if controller_factory is None:
             controller_factory = lambda row: RemoteWorkerProcessController(row.client)
         self._endpoints = {row.worker_id: row for row in rows}
@@ -4577,6 +5010,7 @@ __all__ = [
     "BrokerPreSubmitError",
     "BrokerProtocolError",
     "BrokerStateError",
+    "BrokerRunNotFound",
     "DedicatedUIDError",
     "DedicatedUIDSweeper",
     "ExecutiveWorkerBroker",

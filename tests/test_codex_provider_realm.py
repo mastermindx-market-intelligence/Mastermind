@@ -11,6 +11,7 @@ import pytest
 from control_plane import codex_provider_realm as cpr
 from control_plane import codex_worker as cw
 from control_plane import opencode_go_pooled_transport
+from ops.executive_os import provider_readiness
 from control_plane.codex_provider_realm import (
     ALIBABA_TOKEN_PLAN,
     CANDIDATE_CODEX_PROVIDER_REALMS_SPEC_ONLY,
@@ -26,7 +27,10 @@ from scripts.executive_os_phase1c_worker import (
 )
 
 EXECUTIVE_SYSTEM_ROOT = Path("/Library/Application Support/MastermindExecutive")
-EXECUTIVE_CODEX_BINARY = EXECUTIVE_SYSTEM_ROOT / "bin/codex-0.147.0"
+SOURCE_CODEX_BINARY = Path(
+    "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/"
+    "@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
+)
 
 
 def _binary(tmp_path: Path) -> tuple[Path, cw.BinaryAttestation]:
@@ -138,19 +142,23 @@ def test_provider_realm_refuses_unsafe_identity_endpoint_and_retry() -> None:
 def test_current_codex_native_config_rejects_chat_and_loads_responses(
     tmp_path: Path,
 ) -> None:
-    if not EXECUTIVE_SYSTEM_ROOT.exists():
-        pytest.skip("MastermindExecutive system root is unavailable (hosted CI)")
-    assert EXECUTIVE_SYSTEM_ROOT.is_dir()
-    assert EXECUTIVE_CODEX_BINARY.is_file()
+    if not SOURCE_CODEX_BINARY.exists():
+        pytest.skip("Codex package binary is unavailable (hosted CI)")
+    assert SOURCE_CODEX_BINARY.is_file()
+    assert hashlib.sha256(SOURCE_CODEX_BINARY.read_bytes()).hexdigest() == (
+        provider_readiness.CODEX_SHA256
+    )
 
     version_result = subprocess.run(
-        [str(EXECUTIVE_CODEX_BINARY), "--version"],
+        [str(SOURCE_CODEX_BINARY), "--version"],
         capture_output=True,
         text=True,
         timeout=10,
     )
     assert version_result.returncode == 0
-    assert version_result.stdout.strip() == "codex-cli 0.147.0"
+    assert version_result.stdout.strip() == (
+        f"codex-cli {provider_readiness.CODEX_VERSION}"
+    )
 
     def run(realm: CodexProviderRealm) -> subprocess.CompletedProcess[str]:
         home = tmp_path / f"codex-home-{realm.realm_id}"
@@ -159,7 +167,7 @@ def test_current_codex_native_config_rejects_chat_and_loads_responses(
         workspace.mkdir()
         process = subprocess.run(
             [
-                str(EXECUTIVE_CODEX_BINARY),
+                str(SOURCE_CODEX_BINARY),
                 "debug",
                 "models",
                 *(

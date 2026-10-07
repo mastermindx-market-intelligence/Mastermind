@@ -29,13 +29,14 @@ _COMPANY_SLOT = get_slot("codex-01")
 _COMPANY_BINDING = _COMPANY_SLOT.workspace_binding_class
 _COMPANY_CREDENTIAL_KINDS = frozenset(_COMPANY_SLOT.allowed_credential_kinds)
 
-SERVICE_ACTIONS = frozenset(
-    {
-        "executive.services.start",
-        "executive.services.stop",
-        "executive.services.restart",
-    }
-)
+SERVICE_ACTION_VERBS = {
+    "executive.services.start": "start",
+    "executive.services.stop": "stop",
+    "executive.services.restart": "restart",
+    "executive.services.start_readside": "start-readside",
+    "executive.services.stop_readside": "stop-readside",
+}
+SERVICE_ACTIONS = frozenset(SERVICE_ACTION_VERBS)
 WORKER_AUTH_ACTIONS = frozenset(
     {
         "executive.worker_auth.verify_only",
@@ -53,6 +54,8 @@ ACTION_EFFECT_CLASS = {
     "executive.services.start": "SERVICE_CONTROL",
     "executive.services.stop": "SERVICE_CONTROL",
     "executive.services.restart": "SERVICE_CONTROL",
+    "executive.services.start_readside": "SERVICE_CONTROL",
+    "executive.services.stop_readside": "SERVICE_CONTROL",
     "executive.worker_auth.verify_only": "CREDENTIAL_ADMIN_READINESS",
     "executive.worker_auth.verify_ready": "CREDENTIAL_ADMIN_READINESS",
     "executive.worker_auth.recover_transaction": "CREDENTIAL_ADMIN_RECOVERY",
@@ -166,7 +169,10 @@ def _validate_verify_ready_args(args: Mapping[str, Any]) -> tuple[tuple[str, str
                 }.items()
             )
         )
-    if keys != company_keys:
+    requalification_keys = (
+        "requalify_terminal_adverse_sha256", "renew_device_revalidation_sha256",
+    )
+    if keys not in (company_keys, *(company_keys | {key} for key in requalification_keys)):
         raise PrivilegedActionError(
             "verify_ready arguments must select a reviewed slot or the complete company policy"
         )
@@ -176,15 +182,18 @@ def _validate_verify_ready_args(args: Mapping[str, Any]) -> tuple[tuple[str, str
     binding = _require_string(args["workspace_binding_class"], "workspace_binding_class")
     if binding != _COMPANY_BINDING:
         raise PrivilegedActionError("workspace_binding_class is not the reviewed company binding")
-    return tuple(
-        sorted(
-            {
-                "expected_credential_kind": kind,
-                "workspace_binding_class": binding,
-                "credential_expires_at": _validate_expiry(args["credential_expires_at"]),
-            }.items()
-        )
-    )
+    values = {
+        "expected_credential_kind": kind,
+        "workspace_binding_class": binding,
+        "credential_expires_at": _validate_expiry(args["credential_expires_at"]),
+    }
+    for requalification_key in requalification_keys:
+        if requalification_key in keys:
+            digest = _require_string(args[requalification_key], requalification_key)
+            if kind != "device-auth" or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+                raise PrivilegedActionError("requalification requires device-auth and an exact receipt SHA256")
+            values[requalification_key] = digest
+    return tuple(sorted(values.items()))
 
 
 def validate_request(raw: Mapping[str, Any]) -> ValidatedPrivilegedAction:
@@ -242,7 +251,7 @@ def build_argv(request: ValidatedPrivilegedAction, release_root: str | Path) -> 
     root = Path(release_root)
     args = request.args_dict()
     if request.action in SERVICE_ACTIONS:
-        verb = request.action.rsplit(".", 1)[1]
+        verb = SERVICE_ACTION_VERBS[request.action]
         return (
             "/bin/bash",
             str(root / "ops/executive_os/service-control.sh"),
@@ -278,6 +287,10 @@ def build_argv(request: ValidatedPrivilegedAction, release_root: str | Path) -> 
         argv.extend(("--workspace-binding-class", args["workspace_binding_class"]))
     if "credential_expires_at" in args:
         argv.extend(("--credential-expires-at", args["credential_expires_at"]))
+    if "requalify_terminal_adverse_sha256" in args:
+        argv.extend(("--requalify-terminal-adverse-sha256", args["requalify_terminal_adverse_sha256"]))
+    if "renew_device_revalidation_sha256" in args:
+        argv.extend(("--renew-device-revalidation-sha256", args["renew_device_revalidation_sha256"]))
     return tuple(argv)
 
 

@@ -502,6 +502,382 @@ def _request(operation: str, payload: dict, *, suffix: str = "1") -> dict:
     }
 
 
+from control_plane.executive_worker_broker import (
+    _jsonable,
+    _launch_spec_from_wire,
+    _launch_spec_to_json,
+)
+
+
+def _owner_claim() -> dict:
+    now = 1_758_000_000_000
+    value = {
+        "schema": "mastermind.subscription_canary_claim/v1",
+        "execution_mode": "interactive_canary",
+        "run_id": "run-1",
+        "job_id": "job-1",
+        "worker_id": "codex-01",
+        "quota_class": "interactive",
+        "fence_generation": 7,
+        "capacity_generation": 7,
+        "capacity_state": "BUSY",
+        "held_attempt_id": "run-1",
+        "current_attempt_id": "run-1",
+        "binding_id": "reviewed-binding",
+        "profile_id": "reviewed-profile",
+        "adapter_id": "codex-cli",
+        "model": "reviewed-model",
+        "realm_config_sha256": "a" * 64,
+        "realm_generation": 2,
+        "catalog_digest": "b" * 64,
+        "issued_at_ms": now,
+        "expires_at_ms": now + 1_000,
+        "observation_digest": "c" * 64,
+    }
+    value["observation_digest"] = hashlib.sha256(json.dumps(
+        {key: item for key, item in value.items() if key != "observation_digest"},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+    return value
+
+
+def test_remote_facade_routes_only_validated_claims_to_interactive_canary(
+    tmp_path: Path,
+) -> None:
+    broker, adapter, _sweeper, peer, spec_value = _fixture(tmp_path)
+    base_spec = _launch_spec_from_wire(spec_value, broker.policy)
+    claim = _owner_claim()
+    canary_spec = dataclasses.replace(
+        base_spec,
+        authorities=("READ",),
+        model=claim["model"],
+        subscription_canary_claim=claim,
+    )
+    ordinary_calls: list[tuple[str, dict]] = []
+    canary_calls: list[tuple[str, dict]] = []
+
+    class Client:
+        async def request(self, operation, payload):
+            (canary_calls if operation == "interactive-canary" else ordinary_calls).append(
+                (operation, payload)
+            )
+            process_ref = ProcessRef(
+                run_id=base_spec.run_id,
+                pid=42420,
+                pgid=42420,
+                process_start_identity="start-42420",
+                boot_session_id="boot-fixture",
+                launch_nonce="nonce-fixture",
+                provider_session_id=None,
+                stdout_path=str(base_spec.run_dir / "logs" / "stdout.jsonl"),
+                stderr_path=str(base_spec.run_dir / "logs" / "stderr.log"),
+                result_path=str(base_spec.run_dir / "output" / "result.json"),
+                started_at="2026-09-18T00:00:00+00:00",
+                binary=BinaryAttestation(
+                    path="/fixture/codex",
+                    real_path="/fixture/codex",
+                    version="fixture-1",
+                    sha256="a" * 64,
+                    team_identifier="2DC432GLL2",
+                    size=1,
+                    device=1,
+                    inode=1,
+                    mode=0o555,
+                    uid=0,
+                    gid=0,
+                    mtime_ns=1,
+                ),
+                base_sha=base_spec.expected_base_sha,
+                session_id=42420,
+                effective_uid=base_spec.expected_worker_uid,
+                effective_gid=base_spec.expected_worker_gid,
+                real_uid=base_spec.expected_worker_uid,
+                real_gid=base_spec.expected_worker_gid,
+            )
+            return {
+                "adapter_id": "codex-cli",
+                "process_ref": _jsonable(process_ref),
+                "launch_attestation": {},
+                "startup_sweep": FakeSweeper().sweep("remote-test").to_dict(),
+            }
+
+    remote = RemoteCodexWorkerAdapter(Client())  # type: ignore[arg-type]
+    asyncio.run(remote.start(base_spec))
+    assert ordinary_calls == [("start", {
+        "launch_spec": _launch_spec_to_json(base_spec),
+        "validation_commands": [],
+    })]
+    assert canary_calls == []
+
+    payload_spec = _launch_spec_from_wire(
+        _launch_spec_to_json(canary_spec),
+        broker.policy,
+    )
+    assert payload_spec.subscription_canary_claim == claim
+
+    class CanaryClient:
+        async def request(self, operation, payload):
+            canary_calls.append((operation, payload))
+            process_ref = ProcessRef(
+                run_id=canary_spec.run_id,
+                pid=42421,
+                pgid=42421,
+                process_start_identity="start-42421",
+                boot_session_id="boot-fixture",
+                launch_nonce="nonce-fixture",
+                provider_session_id=None,
+                stdout_path=str(canary_spec.run_dir / "logs" / "stdout.jsonl"),
+                stderr_path=str(canary_spec.run_dir / "logs" / "stderr.log"),
+                result_path=str(canary_spec.run_dir / "output" / "result.json"),
+                started_at="2026-09-18T00:00:00+00:00",
+                binary=BinaryAttestation(
+                    path="/fixture/codex",
+                    real_path="/fixture/codex",
+                    version="fixture-1",
+                    sha256="a" * 64,
+                    team_identifier="2DC432GLL2",
+                    size=1,
+                    device=1,
+                    inode=1,
+                    mode=0o555,
+                    uid=0,
+                    gid=0,
+                    mtime_ns=1,
+                ),
+                base_sha=canary_spec.expected_base_sha,
+                session_id=42421,
+                effective_uid=canary_spec.expected_worker_uid,
+                effective_gid=canary_spec.expected_worker_gid,
+                real_uid=canary_spec.expected_worker_uid,
+                real_gid=canary_spec.expected_worker_gid,
+            )
+            return {
+                "adapter_id": "codex-cli",
+                "process_ref": _jsonable(process_ref),
+                "launch_attestation": {
+                    "subscription_canary_observation_digest": claim["observation_digest"],
+                    "subscription_canary_binding_id": claim["binding_id"],
+                    "subscription_canary_model": claim["model"],
+                },
+                "subscription_canary_observation_digest": claim[
+                    "observation_digest"
+                ],
+                "subscription_canary_binding_id": claim["binding_id"],
+                "subscription_canary_model": claim["model"],
+                "startup_sweep": FakeSweeper().sweep("remote-test").to_dict(),
+            }
+
+    remote = RemoteCodexWorkerAdapter(CanaryClient())  # type: ignore[arg-type]
+    asyncio.run(remote.start(canary_spec))
+    assert [operation for operation, _payload in canary_calls] == ["interactive-canary"]
+    assert canary_calls[-1][1]["subscription_canary_observation"] == claim
+    assert list(canary_calls[-1][1]) == ["launch_spec", "subscription_canary_observation"]
+
+
+def test_ordinary_broker_start_refuses_claim_bearing_spec(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    broker, _adapter, _sweeper, _peer, spec_value = _fixture(tmp_path)
+    spec_value["subscription_canary_claim"] = _owner_claim()
+    monkeypatch.setattr(broker, "_require_current_autonomy", lambda: None)
+
+    with pytest.raises(
+        BrokerProtocolError,
+        match="ordinary broker start refuses a subscription canary claim",
+    ):
+        asyncio.run(broker._start({
+            "launch_spec": spec_value,
+            "validation_commands": [],
+        }))
+
+
+def test_interactive_canary_seals_real_peer_and_enforces_one_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    broker, adapter, sweeper, peer, spec_value = _fixture(tmp_path)
+    from control_plane.codex_provider_realm import SubscriptionRealmOwner
+
+    class RealmOwner(SubscriptionRealmOwner):
+        def __new__(cls, *args, **kwargs):
+            return object.__new__(cls)
+
+        def __init__(self) -> None:
+            pass
+
+        def observe(self):
+            return {
+                "worker_id": "codex-01",
+                "binding_id": "reviewed-binding",
+                "profile_id": "reviewed-profile",
+                "adapter_id": "codex-cli",
+                "realm_config_sha256": "a" * 64,
+                "realm_generation": 2,
+                "catalog_digest": "b" * 64,
+                "control_uid": peer.uid,
+            }
+
+    claim = _owner_claim()
+    spec = dataclasses.replace(
+        _launch_spec_from_wire(spec_value, broker.policy),
+        authorities=("READ",),
+        model=claim["model"],
+        subscription_canary_claim=claim,
+    )
+    broker.subscription_realm_owner = RealmOwner()
+    seals: list[dict[str, object]] = []
+
+    class Admission:
+        observation_digest = claim["observation_digest"]
+        binding_id = claim["binding_id"]
+        model = claim["model"]
+
+    def seal(observation, *, realm_owner, peer, spec):
+        seals.append({
+            "observation": observation,
+            "realm_owner": realm_owner,
+            "peer": peer,
+            "spec": spec,
+        })
+        return Admission()
+
+    monkeypatch.setattr(
+        "control_plane.subscription_canary_admission.seal_broker_subscription_canary_admission",
+        seal,
+    )
+    payload = {
+        "launch_spec": _launch_spec_to_json(spec),
+        "subscription_canary_observation": claim,
+    }
+    mismatched_payload = {
+        **payload,
+        "subscription_canary_observation": {
+            **claim,
+            "quota_class": "different-quota",
+        },
+    }
+    with pytest.raises(BrokerProtocolError, match="differs from the launch specification"):
+        asyncio.run(broker.execute(
+            _request("interactive-canary", mismatched_payload), peer=peer,
+        ))
+    assert seals == []
+    with pytest.raises(BrokerStateError, match="does not implement interactive"):
+        asyncio.run(broker.execute(
+            _request("interactive-canary", payload), peer=peer,
+        ))
+    assert len(seals) == 1
+    assert seals[0]["peer"] is peer
+    assert seals[0]["spec"] == spec
+    assert broker._active_run_id is None
+    assert broker._starting is False
+    assert sweeper.calls == ["canary_start_failed"]
+
+    class CanaryAdapter(FakeAdapter):
+        async def start_subscription_canary(self, launch_spec, admission):
+            assert admission.observation_digest == claim["observation_digest"]
+            return await self.start(launch_spec)
+
+        def launch_attestation(self, ref):
+            return {
+                "subscription_canary_observation_digest": claim["observation_digest"],
+                "subscription_canary_binding_id": claim["binding_id"],
+                "subscription_canary_model": claim["model"],
+            }
+
+    broker.adapter = CanaryAdapter()
+    result = asyncio.run(broker.execute(
+        _request("interactive-canary", payload), peer=peer,
+    ))
+    assert len(seals) == 2
+    assert seals[-1]["peer"] is peer
+    assert broker._active_run_id == spec.run_id
+    assert broker._runs[spec.run_id].spec == spec
+    assert result["result"]["subscription_canary_observation_digest"] == claim["observation_digest"]
+    assert result["result"]["subscription_canary_binding_id"] == claim["binding_id"]
+    assert result["result"]["subscription_canary_model"] == claim["model"]
+    with pytest.raises(BrokerStateError, match="already has active work"):
+        asyncio.run(broker.execute(
+            _request("interactive-canary", payload), peer=peer,
+        ))
+    broker._active_run_id = None
+    broker._starting = False
+    broker._validation_busy = False
+    broker._status_sweep_busy = False
+    with pytest.raises(BrokerStateError, match="run_id cannot be reused"):
+        asyncio.run(broker.execute(
+            _request("interactive-canary", payload), peer=peer,
+        ))
+
+
+def test_service_subscription_realm_requires_exact_enrollment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import scripts.executive_os_phase1c_worker as worker
+    from control_plane.codex_provider_realm import SubscriptionRealmOwner
+
+    class RecordingOwner(SubscriptionRealmOwner):
+        def __new__(cls, *args, **kwargs):
+            return object.__new__(cls)
+
+        def __init__(self, *, observed=None) -> None:
+            self.observed = observed or {}
+
+        def observe(self):
+            return self.observed
+
+    def loader(**kwargs):
+        return RecordingOwner(observed=kwargs["observed"])
+    config_path = tmp_path / "worker.json"
+    config_path.write_text("{}", encoding="utf-8")
+    matching_loader = (
+        lambda path, *, expected_config_sha256: RecordingOwner(observed={})
+    )
+    config = {
+        "schema_version": worker.SUBSCRIPTION_CONFIG_SCHEMA_VERSION,
+    }
+    with pytest.raises(
+        worker.WorkerConfigError,
+        match="enrollment is required for subscription service",
+    ):
+        with pytest.MonkeyPatch.context() as patch_context:
+            patch_context.setattr(
+                "control_plane.codex_provider_realm.load_subscription_realm_owner",
+                matching_loader,
+            )
+            worker._build_subscription_realm_owner(config, config_path)
+    config["subscription_realm_enrollment"] = {
+        "binding_id": "other-binding",
+        "generation": 3,
+    }
+    with pytest.MonkeyPatch.context() as patch_context:
+        patch_context.setattr(
+            "control_plane.codex_provider_realm.SubscriptionRealmOwner",
+            RecordingOwner,
+        )
+        patch_context.setattr(
+            "control_plane.codex_provider_realm.load_subscription_realm_owner",
+            lambda path, *, expected_config_sha256: RecordingOwner(observed={
+                "binding_id": "reviewed-binding",
+                "realm_generation": 3,
+            }),
+        )
+        with pytest.raises(
+            worker.WorkerConfigError,
+            match="owner disagrees with enrollment",
+        ):
+            worker._build_subscription_realm_owner(config, config_path)
+        patch_context.setattr(
+            "control_plane.codex_provider_realm.load_subscription_realm_owner",
+            lambda path, *, expected_config_sha256: RecordingOwner(observed={
+                "binding_id": "other-binding",
+                "realm_generation": 3,
+            }),
+        )
+        assert worker._build_subscription_realm_owner(
+            config, config_path
+        ).observed["binding_id"] == "other-binding"
+
+
 
 def _protocol_stub(adapter_id: str):
     class _Stub:
@@ -1207,41 +1583,136 @@ def test_fresh_status_uid_sweep_proves_idle_absence(tmp_path: Path) -> None:
     asyncio.run(scenario())
 
 
-def test_remote_controller_absent_unknown_run_captures_fresh_status_sweep() -> None:
-    sweep = FakeSweeper().sweep("status_absence").to_dict()
+def _missing_owner_fixture():
+    from types import SimpleNamespace
+    from copy import deepcopy
+
+    startup = FakeSweeper().sweep("broker_startup").to_dict()
+    startup.update(worker_uid=451, broker_pid=42419,
+                   observed_at="2026-08-11T00:00:01+00:00")
+    fresh = FakeSweeper().sweep("status_absence").to_dict()
+    fresh.update(worker_uid=451, broker_pid=42419,
+                 observed_at="2026-08-11T00:00:02+00:00")
+    status = dict(adapter_id="codex-cli", worker_uid=451, broker_pid=42419,
+                  active_run_id=None, active_operator_attempt_id=None,
+                  active_operator_generation_id=None, starting=False,
+                  validation_busy=False, status_sweep_busy=False,
+                  quarantined_reason=None, startup_sweep=startup, status_sweep=fresh)
 
     class Client:
-        def __init__(self) -> None:
-            self.calls: list[tuple[str, dict]] = []
+        error_code = "BrokerRunNotFound"
+        def __init__(self):
+            self.calls = []
+            self.status = status
 
         def request_sync(self, operation, payload):
-            self.calls.append((operation, payload))
-            if payload.get("run_id"):
-                from control_plane.executive_worker_broker import RemoteBrokerError
-
-                raise RemoteBrokerError("BrokerStateError", "unknown run")
+            self.calls.append((operation, dict(payload)))
+            assert operation == "status"
+            if "run_id" in payload:
+                raise RemoteBrokerError(self.error_code, "run unavailable")
             assert payload == {"fresh_uid_sweep": True}
-            return {
-                "active_run_id": None,
-                "starting": False,
-                "validation_busy": False,
-                "status_sweep_busy": False,
-                "quarantined_reason": None,
-                "status_sweep": sweep,
-            }
+            return deepcopy(self.status)
 
-    attempt = type("Attempt", (), {"attempt_id": "run-absent"})()
+    attempt = SimpleNamespace(attempt_id="run-missing",
+                              started_at="2026-08-11T00:00:00+00:00")
     client = Client()
-    controller = RemoteWorkerProcessController(client)  # type: ignore[arg-type]
+    return client, attempt, RemoteWorkerProcessController(client, expected_worker_uid=451)
 
+
+def test_remote_controller_missing_owner_requires_fresh_startup_and_absence():
     from control_plane.executive_supervisor import ProcessPresence
 
-    assert controller.presence(attempt) is ProcessPresence.ABSENT
-    assert controller.uid_sweep_receipt(attempt)["reason"] == "status_absence"
+    client, attempt, controller = _missing_owner_fixture()
+    assert controller.presence(attempt) is ProcessPresence.MISSING
+    assert controller.absence_verified(attempt) is True
+    controller.terminate(attempt)  # no cancel or signal for proven owner loss
+    receipt = controller.uid_sweep_receipt(attempt)
+    assert receipt == {
+        **client.status["status_sweep"],
+        "preceding_broker_startup_sweep": client.status["startup_sweep"],
+    }
     assert client.calls == [
-        ("status", {"run_id": "run-absent"}),
+        ("status", {"run_id": "run-missing"}),
         ("status", {"fresh_uid_sweep": True}),
-    ]
+    ] * 3
+    # Repeat absence must read the new observation, not its passing cache.
+    client.status["status_sweep"]["passed"] = False
+    assert controller.absence_verified(attempt) is False
+
+
+@pytest.mark.parametrize("path,value", [
+    ("adapter_id", "claude-code"), ("worker_uid", 452), ("worker_uid", True),
+    ("broker_pid", 0), ("broker_pid", True),
+    ("active_run_id", "other"), ("active_operator_attempt_id", "other"),
+    ("active_operator_generation_id", "other"), ("starting", True),
+    ("validation_busy", True), ("status_sweep_busy", True),
+    ("quarantined_reason", "uncertain"),
+    ("status_sweep.worker_uid", 452), ("status_sweep.broker_pid", 42418),
+    ("status_sweep.reason", "run_terminal"), ("status_sweep.passed", False),
+    ("status_sweep.observed_at", "invalid"),
+    ("status_sweep.observed_at", "2026-08-11T00:00:00+00:00"),
+    ("status_sweep.observed_at", "2026-08-11T00:00:02"),
+    ("startup_sweep.worker_uid", 452), ("startup_sweep.broker_pid", 42418),
+    ("startup_sweep.reason", "status_absence"), ("startup_sweep.passed", False),
+    ("startup_sweep.observed_at", "invalid"),
+    ("startup_sweep.observed_at", "2026-08-11T00:00:00+00:00"),
+    ("startup_sweep.observed_at", "2026-08-11T00:00:03+00:00"),
+    ("startup_sweep.observed_at", "2026-08-11T00:00:01"),
+    ("startup_sweep", None), ("status_sweep", None),
+])
+def test_remote_controller_missing_owner_rejects_foreign_stale_or_busy_proof(path, value):
+    from control_plane.executive_supervisor import ProcessPresence
+
+    client, attempt, controller = _missing_owner_fixture()
+    target = client.status
+    keys = path.split(".")
+    for key in keys[:-1]:
+        target = target[key]
+    target[keys[-1]] = value
+    assert controller.presence(attempt) is ProcessPresence.UNKNOWN
+    with pytest.raises(BrokerStateError, match="no restart-cancellation"):
+        controller.uid_sweep_receipt(attempt)
+
+
+@pytest.mark.parametrize("code", ["BrokerStateError", "BrokerProtocolError",
+                                   "PeerAuthorizationError", "InternalBrokerError"])
+def test_remote_controller_generic_error_cannot_prove_missing(code):
+    from control_plane.executive_supervisor import ProcessPresence
+
+    client, attempt, controller = _missing_owner_fixture()
+    client.error_code = code
+    assert controller.presence(attempt) is ProcessPresence.UNKNOWN
+    assert client.calls == [("status", {"run_id": attempt.attempt_id})]
+
+
+def test_remote_controller_missing_owner_requires_uid_pin():
+    from control_plane.executive_supervisor import ProcessPresence
+
+    client, attempt, _controller = _missing_owner_fixture()
+    assert RemoteWorkerProcessController(client).presence(attempt) is ProcessPresence.UNKNOWN
+    assert client.calls == [("status", {"run_id": attempt.attempt_id})]
+
+
+def test_unknown_exact_run_has_distinct_broker_error(tmp_path):
+    from control_plane.executive_worker_broker import BrokerRunNotFound
+
+    async def scenario():
+        broker, _adapter, _sweeper, peer, _spec = _fixture(tmp_path)
+        broker.peer_resolver = lambda _socket: peer
+        with pytest.raises(BrokerRunNotFound):
+            await broker.execute(_request("status", {"run_id": "run-absent"}), peer=peer)
+        socket_path = _socket_path()
+        server = await asyncio.start_unix_server(broker.handle_connection,
+                                                path=str(socket_path))
+        try:
+            with pytest.raises(RemoteBrokerError) as caught:
+                await WorkerBrokerClient(socket_path).request("status", {"run_id": "run-absent"})
+            assert caught.value.code == "BrokerRunNotFound"
+        finally:
+            server.close()
+            await server.wait_closed()
+            socket_path.unlink(missing_ok=True)
+    asyncio.run(scenario())
 
 
 def test_remote_controller_retains_terminal_and_fresh_absence_sweeps(
@@ -1365,7 +1836,7 @@ class _GitFailedStartAdapter(FakeAdapter):
 
     async def start(self, spec):
         raise GitPreflightFailed(
-            operation="status --porcelain=v1 -z --untracked-files=all",
+            operation="status --porcelain=v1 -z --untracked-files=no",
             exit_code=128,
         )
 
@@ -1593,7 +2064,7 @@ def test_git_preflight_timeout_is_typed_and_broker_survives_cleanup(
             _GitFailedStartAdapter(),
             "git_preflight_failed",
             None,
-            "status --porcelain=v1 -z --untracked-files=all",
+            "status --porcelain=v1 -z --untracked-files=no",
             128,
         ),
     ),
@@ -1668,9 +2139,9 @@ def test_safe_launch_failures_are_typed_private_and_broker_survives(
                 "code": "git_preflight_failed",
                 "message": (
                     "Git preflight failed: status --porcelain=v1 -z "
-                    "--untracked-files=all (exit 128)"
+                    "--untracked-files=no (exit 128)"
                 ),
-                "operation": "status --porcelain=v1 -z --untracked-files=all",
+                "operation": "status --porcelain=v1 -z --untracked-files=no",
                 "exit_code": 128,
             },
         ),
@@ -2841,6 +3312,8 @@ def test_remote_adapter_reattaches_exact_broker_run_without_starting_again(
             assert operation == "status"
             assert payload == {"run_id": ref.run_id}
             return {
+                # Mirror the existing broker status wire, including its identity.
+                "adapter_id": "codex-cli",
                 "run": {
                     "status": "RUNNING",
                     "process_ref": _jsonable(ref),
@@ -3018,3 +3491,173 @@ def test_codex_validation_byte_semantics_preserved(tmp_path: Path) -> None:
             )
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("facade_name", ["codex", "claude"])
+@pytest.mark.parametrize("field", ["job_id", "run_id", "worker_id"])
+def test_remote_collection_refuses_foreign_result_identity(
+    tmp_path: Path, facade_name: str, field: str
+) -> None:
+    async def scenario() -> None:
+        broker, adapter, _sweeper, _peer, spec_value = _fixture(tmp_path)
+        from control_plane.executive_worker_broker import (
+            RemoteClaudeWorkerAdapter,
+            RemoteCodexWorkerAdapter,
+            _jsonable,
+            _launch_spec_from_wire,
+        )
+
+        spec = _launch_spec_from_wire(spec_value, broker.policy)
+        ref = await adapter.start(spec)
+        adapter.finished.set()
+        receipt = adapter._collection()
+        replacement = {
+            "job_id": "JOB-foreign",
+            "run_id": "ATT-foreign",
+            "worker_id": "worker-foreign",
+        }[field]
+        foreign_result = dataclasses.replace(
+            receipt.result, **{field: replacement}
+        )
+        foreign_receipt = dataclasses.replace(receipt, result=foreign_result)
+
+        class Client:
+            async def request(self, operation, payload, *, timeout_seconds=None):
+                assert operation == "collect"
+                assert payload == {"run_id": ref.run_id}
+                return {
+                    "collection": _jsonable(foreign_receipt),
+                    "uid_sweep": _jsonable(FakeSweeper().sweep("remote-test")),
+                }
+
+        facade_type = (
+            RemoteCodexWorkerAdapter
+            if facade_name == "codex"
+            else RemoteClaudeWorkerAdapter
+        )
+        remote = facade_type(Client())  # type: ignore[arg-type]
+        remote._refs[spec.run_id] = ref
+        remote._specs[spec.run_id] = spec
+
+        with pytest.raises(BrokerProtocolError, match="result identity"):
+            await remote.collect_result(ref)
+
+        # Refusal does not retarget, forget, or settle the original run.
+        assert remote._refs[spec.run_id] == ref
+        assert remote._specs[spec.run_id] == spec
+        assert spec.run_id not in remote._uid_sweeps
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("field", [
+    "adapter_id", "broker_pid", "worker_uid", "active_run_id",
+    "active_operator_attempt_id", "active_operator_generation_id",
+    "starting", "validation_busy", "status_sweep_busy", "quarantined_reason",
+])
+def test_missing_owner_requires_complete_status(field):
+    from control_plane.executive_supervisor import ProcessPresence
+
+    client, attempt, controller = _missing_owner_fixture()
+    del client.status[field]
+    assert controller.presence(attempt) is ProcessPresence.UNKNOWN
+
+
+@pytest.mark.parametrize("status", [None, {}, {"run": {}}, {"run": {"run_id": "other"}}])
+def test_unbound_cleanup_malformed_exact_status_never_cancels(status):
+    calls = []
+    class Client:
+        def request_sync(self, operation, payload):
+            calls.append((operation, dict(payload)))
+            return status
+    controller = RemoteWorkerProcessController(Client())
+    with pytest.raises(BrokerProtocolError, match="exact run status is malformed"):
+        controller.cleanup_unbound_run("run-unbound")
+    assert calls == [("status", {"run_id": "run-unbound"})]
+
+
+@pytest.mark.parametrize("orchestration", [False, True])
+def test_remote_start_preserves_shared_launch_contract(tmp_path, orchestration):
+    from control_plane.executive_supervisor import OrchestrationLaunchSpec
+    from control_plane.worker_execution_contract import worker_launch_spec_sha256
+
+    broker, adapter, sweeper, peer, value = _fixture(tmp_path)
+    base = _launch_spec_from_wire(value, broker.policy)
+    legacy_wire = _launch_spec_to_json(base)
+    legacy_hash = worker_launch_spec_sha256(base)
+    assert "effective_grant_digest" not in legacy_wire
+    assert "subscription_canary_claim" not in legacy_wire
+    spec = (
+        OrchestrationLaunchSpec(
+            **{field.name: getattr(base, field.name) for field in dataclasses.fields(base)},
+            effective_grant_digest="a" * 64,
+        )
+        if orchestration else base
+    )
+    wire = _launch_spec_to_json(spec)
+    restored = _launch_spec_from_wire(wire, broker.policy)
+    assert type(restored) is type(spec)
+    assert restored == spec
+    assert worker_launch_spec_sha256(restored) == worker_launch_spec_sha256(spec)
+    if orchestration:
+        assert worker_launch_spec_sha256(restored) != legacy_hash
+    else:
+        assert wire == legacy_wire
+
+    class Client:
+        async def request(self, operation, payload):
+            response = await broker.execute(_request(operation, payload), peer=peer)
+            return response["result"]
+
+    async def scenario():
+        broker.initialize()
+        remote = RemoteCodexWorkerAdapter(Client())
+        ref = await remote.start(spec)
+        assert adapter.spec == spec
+        assert type(adapter.spec) is type(spec)
+        assert "effective_grant_digest" not in remote.launch_attestation(ref)
+        assert sweeper.calls == ["broker_startup"]
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("digest", [None, "", True, 7, [], "A" * 64, "g" * 64, "a" * 63, "a" * 65])
+def test_broker_rejects_invalid_grant_digest_before_start(tmp_path, digest):
+    broker, adapter, _sweeper, peer, value = _fixture(tmp_path)
+    value["effective_grant_digest"] = digest
+    with pytest.raises(BrokerProtocolError, match="exact lowercase SHA-256"):
+        asyncio.run(broker.execute(
+            _request("start", {"launch_spec": value, "validation_commands": []}),
+            peer=peer,
+        ))
+    assert adapter.spec is None
+    assert broker._starting is False
+    assert broker._active_run_id is None
+    assert broker._runs == {}
+
+
+def test_orchestration_spec_still_rejects_unknown_fields_before_start(tmp_path):
+    broker, adapter, _sweeper, peer, value = _fixture(tmp_path)
+    value.update(effective_grant_digest="a" * 64, effective_grant={"authorities": ["SERVICE_CONTROL"]})
+    with pytest.raises(BrokerProtocolError, match="unknown fields"):
+        asyncio.run(broker.execute(
+            _request("start", {"launch_spec": value, "validation_commands": []}),
+            peer=peer,
+        ))
+    assert adapter.spec is None
+    assert broker._runs == {}
+
+
+@pytest.mark.parametrize("digest", ["", "A" * 64, "a" * 63, "a" * 65, None])
+def test_local_orchestration_launch_spec_rejects_invalid_digest(tmp_path, digest):
+    from control_plane.worker_execution_contract import (
+        OrchestrationLaunchSpec, WorkerRecoveryContractError,
+    )
+
+    broker, _adapter, _sweeper, _peer, value = _fixture(tmp_path)
+    base = _launch_spec_from_wire(value, broker.policy)
+    with pytest.raises(WorkerRecoveryContractError, match="exact lowercase SHA-256"):
+        OrchestrationLaunchSpec(
+            **{field.name: getattr(base, field.name) for field in dataclasses.fields(base)},
+            effective_grant_digest=digest,
+        )

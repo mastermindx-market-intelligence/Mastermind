@@ -27,6 +27,7 @@ from control_plane.executive_runtime import (
     AttemptStatus,
     FiniteControlContext,
     FiniteReservationDecision,
+    INTERACTIVE_TX5_EXECUTION_PROFILE,
     Job,
     JobStatus,
     OrchestrationDispatchOutcome,
@@ -876,7 +877,12 @@ class CooCycle:
                 return self._block(root_id, root_id, "unexpected_pre_admission_child")
             planner = children[0]
             planner_provenance = planner.orchestration_provenance
-            expected_create_command = f"coo-cycle:{root_id}:create-planner:0"
+            interactive_profile_id = planner.constraints.get("execution_profile_id")
+            expected_create_command = (
+                f"coo-cycle:{root_id}:create-interactive:0"
+                if interactive_profile_id == INTERACTIVE_TX5_EXECUTION_PROFILE
+                else f"coo-cycle:{root_id}:create-planner:0"
+            )
             if (
                 planner.orchestration_role != "plan"
                 or planner.parent_job_id != root_id
@@ -900,6 +906,14 @@ class CooCycle:
                 != root.orchestration_provenance_digest
             ):
                 return self._block(root_id, planner.job_id, "lineage_invalid")
+            if interactive_profile_id == INTERACTIVE_TX5_EXECUTION_PROFILE:
+                return self._outcome(
+                    root_id,
+                    "NO_ACTION",
+                    planner.job_id,
+                    None,
+                    {"reason": "interactive_profile_not_owned_by_one_shot_cycle"},
+                )
 
         # 2. One recoverable same-Job requeue precedes every create/dispatch.
         recoverable = sorted(
@@ -1125,12 +1139,12 @@ class CooCycle:
                     return self._block(root_id, selected.job_id, _classify_invalid(exc))
                 return self._outcome(root_id, "REPAIR_CREATED", receipt.job_id, command, receipt)
 
-        # 4. Materialize one lowest-ordinal missing dependency-ready V3 work Job.
+        # 4. Materialize one lowest-ordinal missing dependency-ready V3/V4 work Job.
         if (
             admission is not None
             and plan_body is not None
             and admission.get("schema_version") == "mastermind.coo_plan_admission/v2"
-            and plan_body.get("schema_version") == "mastermind.execution_plan/v3"
+            and plan_body.get("schema_version") in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4"}
         ):
             materialized_steps = {
                 str(job.plan_step_id)
@@ -1174,9 +1188,20 @@ class CooCycle:
 
         # 5. Create exactly the sole planner.
         if not children and not admission_events:
-            command = f"coo-cycle:{root_id}:create-planner:0"
-            planner = self.runtime.jobs.create_cycle_planner(root_id, command_id=command)
-            return self._outcome(root_id, "PLANNER_CREATED", planner.job_id, command, planner)
+            try:
+                planner = self.runtime.jobs.create_cycle_planner(
+                    root_id,
+                    command_id=f"coo-cycle:{root_id}:create-planner:0",
+                )
+            except StateConflict as exc:
+                return self._block(root_id, root_id, _classify_invalid(exc))
+            return self._outcome(
+                root_id,
+                "PLANNER_CREATED",
+                planner.job_id,
+                f"coo-cycle:{root_id}:create-planner:0",
+                planner,
+            )
 
         # 6. Service one bounded ready sibling only when every active child is
         # exact, lease-live, read-only work from the same sealed plan.  Any stale
@@ -1198,7 +1223,7 @@ class CooCycle:
             active
             and queued
             and plan_body is not None
-            and plan_body["schema_version"] == "mastermind.execution_plan/v3"
+            and plan_body["schema_version"] in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4"}
             and self._ready_frontier_open(active, queued, current_by_step)
         ):
             for candidate in queued:
@@ -1244,7 +1269,7 @@ class CooCycle:
                 unavailable.append(candidate.job_id)
                 if not (
                     plan_body is not None
-                    and plan_body["schema_version"] == "mastermind.execution_plan/v3"
+                    and plan_body["schema_version"] in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4"}
                     and all(self._is_read_only_frontier_work(job) for job in queued)
                 ):
                     break

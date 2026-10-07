@@ -16,6 +16,7 @@
   "dialogue_observation_launchd_socket_name": "DialogueObservation",
   "dialogue_observation_peer_uid": 457,
   "dialogue_observation_socket_path": "/var/run/mastermind-dialogue-observation/dialogue-observation.sock",
+  "dialogue_wake_canary_activation": null,
   "dialogue_wake_retry_policy": {
     "accepted_ttl_s": null,
     "armed": false,
@@ -29,6 +30,7 @@
   "control_uid": 450,
   "cost_class": "standard",
   "coo_autonomy_armed": false,
+  "coo_principal_armed": false,
   "ceo_submit_armed": false,
   "coo_operator_harness_armed": false,
   "coo_default_quota_class": "codex-coo-default",

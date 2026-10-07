@@ -663,7 +663,7 @@ proves from `config/read` with all layers included that no forced workspace or
 forced login policy was applied. Neither fallback is implicit. Personal,
 API-key, platform API-key, `CODEX_ACCESS_TOKEN` runtime injection, forced
 workspace IDs, operator credential copying, and manual `auth.json` edits are
-forbidden. Pinned Codex `0.147.0` has no reviewed workspace-selection flag; do
+forbidden. Pinned Codex `0.159.2` has no reviewed workspace-selection flag; do
 not invent one and never silently fall back to Personal.
 
 The live canary CLI does not accept `--probe-root`, `--operator-home`, or
@@ -674,7 +674,7 @@ drop. It is not group- or world-traversable. The root process removes that tree
 after the run. A local filesystem preflight failure is `isolation_violation`,
 not a provider `process_failed`.
 
-The inference canary uses the exact installed `codex-0.147.0` binary as
+The inference canary uses the exact installed `codex-0.159.2` binary as
 `_mastermind_worker`, the dedicated `CODEX_HOME`, production model
 `gpt-5.6-sol`, and an inert disposable workspace. It does not start services,
 open Executive SQLite, write production workspaces/runs, or print credentials.
@@ -919,8 +919,91 @@ sudo /bin/bash \
 ```
 
 Recovery removes only the stale transaction marker. It never removes a receipt,
-changes a credential, or authorizes another canary. A reserved or adverse
-receipt still requires a newly authorized credential-replacement attempt.
+changes a credential, or authorizes another canary. A reserved or uncertain
+receipt remains blocked; it is never treated as a terminal provider failure.
+
+For an unchanged **company device-auth** credential whose explicitly approved
+revalidation deadline has expired or has 30 minutes or less remaining, the same
+`executive.worker_auth.verify_ready` action accepts
+`--renew-device-revalidation-sha256 SHA256`. This is an explicit new operational
+revalidation under a current authorized acceptance assignment, never an automatic
+extension of a token expiry or a deadline-only edit. Supply the SHA256 of the
+exact prior **passing** receipt and a newly approved deadline more than 30 and
+no more than 60 minutes ahead. A still-live window with more than 30 minutes
+remaining must be reused; it cannot be renewed early.
+
+Renewal requires full equality of the current credential and binary identities
+with the prior passing receipt, including device numbers. It admits only the
+fixed company device-auth principal and workspace policy. Reservations,
+nonpassing/unknown receipts, changed credentials/binaries, personal slots,
+service-account tokens and personal access tokens refuse. It is mutually
+exclusive with terminal-adverse requalification and ordinary readiness refresh.
+
+This explicit renewal uses the existing readiness transaction lock, exact
+preimage digest/lstat comparison, immutable superseded-receipt archive and
+sticky canary reservation. A fresh identity probe must retain the same provider
+policy, exactly one new canary must pass, and the post-canary identity must still
+match before a new passing receipt can bind the new deadline. No logout,
+credential replacement, deletion or copying occurs. The old passing receipt
+remains evidence; it never becomes current readiness by changing its deadline.
+Retain one request ID and use the existing same-ID status/reconciliation path
+after transport loss. The predecessor digest is a concurrency fence, not a
+source of renewal authority.
+
+For the reviewed Codex **0.147.0 to 0.159.2** upgrade only, the existing
+`executive.worker_auth.verify_ready` broker action also accepts the explicit
+`--requalify-terminal-adverse-sha256 SHA256` option. This is a new bounded
+qualification, not a replay of the burned canary. Use it only under the current
+authorized acceptance assignment, after normal protected release installation
+and reconciliation of any earlier request. The digest is the full SHA256 of
+the exact root-owned live readiness receipt bytes; it is a concurrency fence,
+not authority. Keep a single explicit request ID and reconcile that same ID
+after transport loss; never manufacture another ID to evade an uncertain effect.
+
+This path is company device-auth only: no slot selector, service-account token,
+personal access token, credential replacement, logout or receipt invalidation.
+The administrator must attest the company binding and a Chairman-approved
+revalidation deadline more than 30 and no more than 60 minutes ahead. This is
+an operational device-auth horizon, not an assertion about token expiry.
+
+Admission requires a finalized v2 `provider_turn_failed` receipt with exact
+inference exit 1, no timeout, matching terminal event/refusal and a non-null
+sanitized canary. Credential lstat and identity policy must be unchanged,
+except for the tightly paired device-number comparison described below. The
+receipt, identity and canary must bind the exact reviewed predecessor binary,
+whose retained root-owned install attestation must still validate. The current
+binary must be the reviewed successor; the new identity probe must pass.
+Passing receipts, reservations, missing/ambiguous results, timeouts, signal
+exits, other failures, changed credentials and same-generation attempts refuse
+before a canary. Without this explicit option, existing refusal behavior stays
+unchanged.
+
+A specialized `paired_filesystem_device_renumbering` comparison is confined to
+this explicit new qualification and its NOT_APPLIED reconciliation. Historical
+auth and predecessor binary must have one matching positive integer device
+number; current auth, reattested predecessor and successor must share another.
+Every non-device lstat field and fixed binary path/version/SHA/team must match.
+A single-file device change, split current devices or any other drift refuses.
+This recognizes the observed paired renumbering pattern; **historical volume
+identity is unproven** because the old receipt contains no VolumeUUID. It never
+normalizes generic lstat identity, reuses old readiness, infers an account ID,
+or weakens exact current reservation/post-canary identity comparisons.
+
+The readiness transaction owner revalidates the exact preimage, saves its bytes
+under the existing digest-named `.superseded-*.json` sibling at root-only mode
+0400, fsyncs it, and atomically replaces the unchanged live receipt with one
+fresh reservation. A crash before replacement leaves the old final receipt;
+a crash after replacement leaves a sticky reservation. The existing one-canary,
+post-identity and finalization procedure then applies. Neither outcome permits
+a second canary on the successor binary. The broker request digest and preserved
+sibling provide provenance without changing the readiness receipt schema.
+
+The existing `NOT_APPLIED` reconciliation owner recognizes this request shape
+from its exact target digest. It may prove non-application only when the same
+old final bytes predate the request, the prior/current binary transition and
+credential identity still validate, and no readiness lock/process remains.
+Any changed receipt or reservation keeps the effect unknown. Reconciliation
+preserves the original marker and never replays the request.
 
 This install-before-readiness order is deliberate, not circular: `install.sh`
 requires strong structural auth metadata (exact worker UID/GID, mode `0600`,
@@ -1010,10 +1093,21 @@ Attempt IDs, UIDs, exit statuses, and exact SHA.
 ## Receipt-gated autonomy arm, proof, and credential interlock
 
 Formal acceptance still leaves both installed arm bits false. Do not edit either
-JSON config. From the exact installed release, first prove the closed unarmed
-state, then run the one root transaction that binds the reviewed Gate B receipt,
-formal acceptance, current provider readiness, both configs, exact release and
-Runtime quiescence:
+JSON config. Acceptance may also leave macOS per-user agents owned by the fixed
+Control service UID after the LaunchDaemons stop. The arm gate deliberately
+never signals a process, so converge that one fixed principal through the
+existing autonomy owner before the receipt-gated arm. This pre-arm action accepts
+only the expected release SHA: it cannot select a UID, PID, label, signal or
+timeout; it requires the accepted release, unarmed configs, a quiescent Runtime,
+stopped Control/worker services and no autonomy transaction; it never targets
+the worker UID, Runtime, configs, credentials or Gate B receipt. Success is
+current process-table evidence only, and the following arm independently
+rechecks service-UID quiescence.
+
+From the exact installed release, first prove the closed unarmed state, then
+quiesce the fixed Control UID and run the one root transaction that binds the
+reviewed Gate B receipt, formal acceptance, current provider readiness, both
+configs, exact release and Runtime quiescence:
 
 ```bash
 AUTONOMY_CONTROL="/Library/Application Support/MastermindExecutive/releases/$MERGE_SHA/ops/executive_os/autonomy-control.sh"
@@ -1023,6 +1117,8 @@ WORKSPACE_BINDING_CLASS='company-workspace-admin-attested'
 CREDENTIAL_EXPIRES_AT='YYYY-MM-DDTHH:MM:SSZ'
 
 sudo /bin/bash "$AUTONOMY_CONTROL" status --expected-sha "$MERGE_SHA"
+sudo /bin/bash "$AUTONOMY_CONTROL" arm-quiesce-control-uid \
+  --expected-sha "$MERGE_SHA"
 sudo /bin/bash "$AUTONOMY_CONTROL" arm \
   --expected-sha "$MERGE_SHA" \
   --gate-b-receipt "$GATE_B_RECEIPT" \
@@ -1031,6 +1127,8 @@ sudo /bin/bash "$AUTONOMY_CONTROL" arm \
   --credential-expires-at "$CREDENTIAL_EXPIRES_AT"
 sudo /bin/bash "$AUTONOMY_CONTROL" status --expected-sha "$MERGE_SHA"
 ```
+
+The arm admission process scan reuses the worker owner's saved, real and effective UID projection. The control UID must have no process. For the dedicated worker UID, only the exact Apple per-user `distnoted` job may remain after its existing launchd, executable and code-signature attestation, followed by a second unchanged process and attribution observation. A name or executable path alone does not qualify. All other processes and unknown observations refuse; the gate never signals or disables a platform service.
 
 The first status must be exactly `UNARMED`; the post-transaction status must be
 exactly `ARMED_READY`. Arm stops both services before committing either config,
@@ -1292,3 +1390,107 @@ census—not this preparer—emits `GROUNDED_CF1_GIT_RELEASE_PATH_ACCEPTED`. Eve
 then, CF2-I-A is the next separate carrier. OAuth/device ceremonies,
 credentials, provider calls, service start, runtime composition, routing,
 fan-out and failover remain held.
+
+
+## Job-bound worker login check (P2-1)
+
+The current-attempt controller adds the `REQUEST_WORKER_LOGIN_CHECK` policy
+capability with scope `current_attempt_assigned_worker_slot`. It can perform only
+`executive.worker_auth.verify_only` for the real Attempt's assigned reviewed
+worker slot. A successful terminal observation is login-status evidence; it is
+never a READY claim or permission to dispatch another Job.
+
+Source acceptance and installed acceptance are separate. Before this policy
+transition, reconcile the installed Runtime and prove **zero living Attempts**,
+or settle them explicitly using the existing lifecycle. Do not replace the
+policy under living Attempts that carry the previous policy digest. Preserve the
+single installed Control/Runtime owner and its existing receipt/custody protocol.
+
+After independent exact-head review and required CI, merge through protected
+master and prepare that exact immutable release for the existing administrator
+bootstrap. The existing `install.sh --arm-privileged-broker` ceremony is the sole
+arm: it derives `privileged_readiness_armed=true` and the canonical privileged
+socket in root-owned Control configuration. A caller-supplied configuration that
+conflicts with the ceremony refuses. Without that flag the arm is false and the
+socket field is null; a retained older wrapper grants no command authority.
+
+Only after the broker's registration, socket ownership and mode are verified does
+the installer publish root-owned mode0555 `mmx-control`. The wrapper fixes the
+release, canonical Control socket, and `check-current-worker-login` subcommand.
+It accepts exactly three positional arguments and rejects option-prefixed values:
+
+```bash
+"/Library/Application Support/MastermindExecutive/bin/mmx-control" \
+  JOB_ID ATTEMPT_ID FENCE_GENERATION
+```
+
+Use the installed Control's existing `register-worker`, `create-proof-job`, and
+`dispatch` commands as the non-root approved operator. When the installer-derived
+readiness arm is true, the fixed proof contract adds `REQUEST_WORKER_LOGIN_CHECK`
+to its existing four authorities; the existing Supervisor/Runtime claims that
+real Job for `codex-01`. No caller supplies authorities and no direct Runtime or
+database write substitutes for admission. Creation and dispatch alone perform no
+privileged broker action. Prove the returned current Job/Attempt/fence, policy
+digest and installed release, then explicitly invoke `mmx-control`. It requires
+the existing Control service to be READY. If the worker already finished, first
+admission refuses with zero effect: record that result, never hold the worker or
+automatically redispatch just to obtain a proof window.
+Verify the observed login status independently of the broker child's exit code,
+and retain the exact Runtime Event family plus broker request/receipt IDs,
+installed release, host boot identity and no-password-prompt evidence.
+
+Interrupt only the client and read the same logical family again. A terminal
+receipt replays without an effect; an uncertain effect performs at most one
+status read. `NOT_FOUND`, a broker marker, timeout, and malformed evidence remain
+`EFFECT_UNKNOWN`. None authorizes a resend. Prove exactly one effect, wrong Job
+and stale-fence refusals, and denial of a dedicated worker's direct broker
+socket access. Read back the existing broker peer policy: the operator UID
+retains its inherited direct `mmx-admin` grant; this wrapper does not contain that
+principal. No credentials, lease tokens or arbitrary child output belong in the
+acceptance record.
+
+P2-1 remains `BUILT_NOT_PROVEN` until that real installed path and fresh native
+orchestrator consumption are observed. Provider renewal, readiness canaries,
+service-control request authority and multi-host admission remain separately
+owned later slices; do not infer full autonomy from this login-check capability.
+# Optional private account-email comparison
+
+The existing `provider_identity_probe.py` has an opt-in `--compare-seat-stdin`
+diagnostic. Its entire output is one line: `MATCH`, `MISMATCH`, or `UNKNOWN`.
+Exit status is zero only for `MATCH`, and two otherwise. In this mode argument,
+input, policy, observation, and cleanup failures produce `UNKNOWN` without
+printing usage, identifiers, or raw error details. The default v1 identity JSON
+and the readiness receipt schema are unchanged.
+
+Supply the expected **account email** from an approved in-memory producer through
+private pipe stdin. The producer must close the pipe after the value; EOF is
+required, including when the value ends with a newline. The diagnostic reads at
+most 256 bytes and waits at most five seconds for this input. It rejects terminals,
+regular files, socket descriptors, extra lines, and oversized input. Never put a
+real expected identifier in command arguments, environment variables, shell
+history, temporary files, logs, receipts, or a persisted hash. Do not derive an
+email from a slot label or create a seat-to-account registry for this diagnostic.
+
+Comparison is exact and case-sensitive, with no alias stripping or normalization.
+Both values must be ASCII dot-atom emails: at most 254 bytes total, a local part
+of at most 64 bytes, and at least two nonempty domain labels of at most 63 bytes
+each. Display names, quoted local parts, Unicode, whitespace, controls, and other
+unsupported forms yield `UNKNOWN`. `MISMATCH` means two supported values differ;
+`UNKNOWN` includes absent email, an unmapped seat label, and any failed guard.
+
+The existing Darwin/root, approved worker principal and provider-home, credential
+kind, plan, workspace-binding-class, and host/auth-transaction requirements still
+apply. This mode uses the same pinned binary and existing
+`account/read(refreshToken:false)` observation. The existing forced-auth absence,
+login status, binary, and credential-metadata checks must all succeed, and the
+app-server must be closed, before `MATCH` or `MISMATCH` can leave the probe. The
+expected value is not sent to the app-server. Credential contents remain opaque.
+
+A match establishes only in-memory account-email equality under those checks.
+It establishes no workspace ID, independent quota domain, spend entitlement,
+readiness, routing eligibility, installation, or production acceptance. Source
+review, installation, and a later authorized diagnostic invocation are separate
+steps; this documentation authorizes none of those host effects. Do not use
+`provision-worker-auth.sh --verify-ready` as a comparison shortcut: that path may
+reserve and run inference. Existing canary reservations and adverse receipts
+remain unchanged and grant no retry.
