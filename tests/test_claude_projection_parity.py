@@ -56,7 +56,7 @@ def test_profile_inventory_requires_explicit_reclassification(manifest, change):
     if change == "remove":
         del manifest["profiles"][PROFILE]
     else:
-        manifest["profiles"]["principal.claude.coo.rich.v1"] = {}
+        manifest["profiles"]["principal.claude.coo.future.v2"] = {}
     with pytest.raises(checker.ParityError, match="inventory"):
         checker.validate_manifest(manifest, source_root=ROOT)
 

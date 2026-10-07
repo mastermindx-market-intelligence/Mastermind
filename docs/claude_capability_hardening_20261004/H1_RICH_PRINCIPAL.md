@@ -44,29 +44,34 @@ review even if a hand-constructed profile makes a fixture run.
 
 ## Current-base rich-generation contract
 
-The current protected implementation makes the H1 admission gap concrete:
+The current branch now makes the H1 admission gap concrete in two separate generations:
 
-- `ExecutionCapabilityProfile.claude_sdk_config_projection()` accepts only the first restricted
-  `claude-agent-sdk` generation: read-only sandbox, network disabled, native helpers disabled and
-  **zero skills / skill grants / MCP grants / plugins / resources**.
-- `ClaudeReadbackPolicyObserver` proves that same generation only. It requires native tools
-  `Read/Glob/Grep` (+ provider StructuredOutput readback), empty skill/plugin/MCP catalogs and the
-  exact restricted sandbox/permission provenance.
-- `ExecutiveOperatorSupervisor` currently admits only
-  `operator.claude.readonly.v1` for the Claude Agent SDK path, with empty MCP/resource/skill grants.
-- The checked-in capability registry currently has no rich Claude-principal profile. Its MCP registry
-  contains existing Company Consultation, OpenAI docs and Browser grants, but **no admitted Executive
-  COO MCP grant and no admitted principal Company Dialogue MCP grant**.
-- H3 now has a source package for the six-tool Executive COO backend. #955's prior
-  issuer-consistency defect is source-repaired at `e17a56b3454c2528239322a1d1b667d427a7a7f0`
-  and is back with its original reviewer; installed/native authentication remains unproven until
-  that repair is accepted and the real Claude/IdP ceremony passes.
-- H6 now has a distinct principal Company Dialogue tool generation plus Runtime COMMIT fencing and
-  source-only host composition; that generation is still deliberately absent from capability policy.
+- The original restricted `operator.claude.readonly.v1` path remains unchanged: read-only sandbox,
+  network disabled, native helpers disabled and **zero skills / skill grants / MCP grants / plugins /
+  resources**. `ClaudeReadbackPolicyObserver` continues to prove only that restricted generation.
+- H1-RG1 adds a separate checked-in **disabled** profile
+  `principal.claude.coo.rich.v1` plus the exact reviewed MCP grant records
+  `executive-coo-mcp-v1` and `company-dialogue-principal-mcp-v1`. The global policy stays
+  `production_armed=false`; the profile itself stays `enabled=false`.
+- The RG1 candidate projection carries exactly the six Executive COO tools plus four Principal Company
+  Dialogue tools, but its sandbox still has `deniedDomains=["*"]`,
+  `allowAllUnixSockets=false`, and `allowLocalBinding=false`. The candidate therefore describes
+  the transport generation without making either loopback HTTP or Unix stdio usable.
+- `ClaudeProjectedMcpReadbackObserver` can bind the projected server/tool-name inventory to
+  same-session native readback, but explicitly reports
+  `native_tool_schema_attested=false` and `resource_generation_attested=false`.
+- `ExecutiveOperatorSupervisor` still admits only the original
+  `operator.claude.readonly.v1` Claude Agent SDK lane. There is no runnable rich-principal
+  supervisor predicate yet.
+- #955's issuer-consistency repair is now merged in protected Mastermind source. That closes the
+  source defect only; installed Claude/IdP authentication and the real native canary remain unproven.
+- H6 now has the distinct principal Company Dialogue tool generation, Runtime COMMIT fence, host
+  factory, peer-authenticated Unix transport, shared immutable stdio edge and Executive-service
+  listener source. Installed config/socket activation and native capability admission remain open.
 
-Therefore H1 must add a **new generation**. It must not relax the predicates on
-`operator.claude.readonly.v1`, retrofit MCP onto sealed Claude worker profiles, or reinterpret the
-existing restricted readback as proof of rich capability.
+H1-RG1 therefore advances the programme to **DISABLED_REGISTRY_CANDIDATE / BUILT_NOT_PROVEN**. It
+does not relax `operator.claude.readonly.v1`, retrofit MCP onto sealed Claude workers, or treat
+configuration/readback as provider admission.
 
 ### Required grant generations before the profile can be enabled
 
@@ -79,50 +84,49 @@ The eventual rich profile needs independently accepted identities for at least t
    with host composition using the existing Runtime event fence. The ordinary worker Company Dialogue
    server and the existing Company Consultation server are different capabilities and cannot stand in.
 
-The current source now freezes the authority-bearing generations without prematurely inventing
-transport or production grant identities:
+The current source now freezes both authority-bearing server generations **and** their RG1 registry
+identities:
 
-- Executive COO server `mastermind-executive-coo` / `1.0.0`, six tools, exact
-  `COO_TOOL_SCHEMA_DIGEST=8d4ff58a30c02b717788b80fdfd1c5b8b35493dc11dd76cac351cde7b4509d72`.
-  The digest uses the same normalized tool name/input-schema/output-schema/annotations projection as
-  `observed_mcp_tool_schema_digest`; descriptions and output prose are not authority.
-- Principal Company Dialogue server `mastermind-company-dialogue-principal-mcp` / `0.1.0`,
-  four tools, exact
-  `PRINCIPAL_TOOL_SCHEMA_DIGEST=d45c0f8fe2451c726757c42be729e0e49fc5b2637c33efc97dee00168fab7abd`.
-- `RICH_PRINCIPAL_CAPABILITY_GENERATIONS.json` records those two source generations under candidate
-  profile label `principal.claude.coo.rich.v1` with `production_armed=false`. It intentionally
-  leaves `grant_capability_id`, config name, transport, URL/command/args, network policy and final
-  profile digest unresolved. The file is deliberately not a capability-policy schema and the
-  canonical registry loader must reject it.
+- Executive COO: capability `executive-coo-mcp-v1`, config
+  `mastermindExecutiveCoo`, streamable HTTP at the one reviewed loopback resource
+  `http://127.0.0.1:8444/mcp`, OAuth, server `mastermind-executive-coo/1.0.0`, six tools,
+  tool-schema digest
+  `8d4ff58a30c02b717788b80fdfd1c5b8b35493dc11dd76cac351cde7b4509d72`, grant digest
+  `6e279edd1c0b4236c9b8679c706831df44e7da1881af64863a71884dc65e74d1`.
+- Principal Company Dialogue: capability `company-dialogue-principal-mcp-v1`, config
+  `mastermindCompanyDialoguePrincipal`, stdio through the exact installed principal-edge
+  bootstrap, server `mastermind-company-dialogue-principal-mcp/0.1.0`, four tools,
+  tool-schema digest
+  `d45c0f8fe2451c726757c42be729e0e49fc5b2637c33efc97dee00168fab7abd`, grant digest
+  `508e734ae94f0cd89f1fb545b7ca2ade089a1fcca0a54cdc9b755b8b9f948a3a`.
+- Candidate profile `principal.claude.coo.rich.v1` has profile digest
+  `c7c104f39940a96f105be5e30954db2a14d9919e7366e2c38fbe36390d394930`; policy generation
+  `2026-10-06.claude-rich-principal-rg1` has digest
+  `b240b6eee9566f6590c60d3b4b410df8cd74220088b735b375ee10558d690dfd`.
+- `RICH_PRINCIPAL_CAPABILITY_GENERATIONS.json` v2 records those immutable IDs/digests without
+  embedding URL/command/args or credentials. It remains deliberately not loadable as a capability
+  policy and states `production_armed=false`.
 
-Focused validation across the candidate manifest, projected native readback, Claude MCP projection,
-H3 plugin and H6 principal schema is **143 passed**. This advances H1 from “schema identity unknown”
-to **exact source generations / transport-and-admission gated**; it does not clear #1196 custody or
-authorize a production registry edit.
+The parser change is capability-specific rather than a generic transport relaxation:
 
-### Exact registry changes still required
+- generic streamable-HTTP grants remain HTTPS-only; only
+  `executive-coo-mcp-v1` can name exactly `http://127.0.0.1:8444/mcp`;
+- stdio remains closed to reviewed command/argument tuples and now adds exactly the Principal
+  Company edge alongside Browser B1 and Company Consultation;
+- both principal-only grants are rejected from every profile except
+  `principal.claude.coo.rich.v1`;
+- that profile refuses any enable flip, write capability, helper, Skill, plugin, resource, forbidden
+  capability, browser network policy or missing/extra MCP grant.
 
-The current canonical registry cannot represent either candidate grant without an explicit reviewed
-owner change:
+Focused H1/H2 validation across registry, frozen generations, projection parity, Model Router and
+principal edge is **207 passed**. H2 parity now explicitly classifies 12 profiles:
+4 configuration-supported pairs, 26 deferred and 18 unsupported. Native admission and observed
+tool-schema attestation remain false.
 
-- streamable-HTTP grants pass through the registry's HTTPS-only URL validator. The accepted #955
-  Claude Executive edge is the exact loopback resource `http://127.0.0.1:8444/mcp`, so H1 must
-  either add a **capability-specific exact-loopback HTTP qualification** for the Executive COO grant
-  or replace that transport with another independently accepted carrier. Do not weaken the general
-  HTTPS rule or accept arbitrary localhost ports.
-- stdio grants are currently closed to reviewed command/argument tuples for Browser B1 and Company
-  Consultation only. H6 now has a separate source-built principal stdio edge at
-  `ops/executive_os/company_dialogue_principal_edge.py`, but the registry must add a new reviewed
-  capability ID/config name/command bootstrap for that edge rather than borrowing the ordinary
-  Company Consultation grant.
-- the principal edge deliberately reuses the existing immutable Company MCP Python runtime while
-  retaining a distinct root-owned config/source digest. This removes the need for a second Python
-  provisioner; it does **not** remove the need for a distinct MCP grant identity and installed
-  Executive-side listener.
-
-These are H1 admission changes in the existing registry owner. #1196 currently owns overlapping
-capability-registry paths, so this programme must not publish a competing production-policy edit
-until that source custody is reconciled.
+#1196 remains an open ACP draft touching the same registry file but only its ACP execution-surface
+constant block; no live #1196 workspace/process was observed during this RG1 wave. H1-RG1 changes
+different semantic regions and must still be reconciled against #1196/current protected source at
+review/release time. This is not authority to overwrite a future moved ACP head.
 
 Any separate context/source capability used for R0 must also have its own existing owner/grant.
 Counting two methods from one Executive server is still one owner.
@@ -131,16 +135,21 @@ Counting two methods from one Executive server is still one owner.
 
 Implement and review the rich generation in this order:
 
-1. add the exact MCP grant descriptors while leaving the new principal profile disabled;
-2. extend the Claude SDK projection with a profile-specific reviewed configuration branch rather than
-   widening the first-profile predicate;
-3. add a separate rich native readback observer that compares the full exact MCP server/schema catalog
-   and refuses extra ambient MCP/skills/plugins/hooks;
-4. add a separate supervisor admission predicate for the exact new profile/digests;
-5. prove profile/package/grant drift negatives while the profile remains disabled;
-6. only after source review install/observe the exact generation and run harmless native reads;
-7. add R1 modifying admission only after #955/H3 authentication + role policy are independently
-   accepted; add H6 modifying dialogue only after its installed host/profile generation is accepted.
+1. **RG1 source complete:** exact MCP grant descriptors are checked in and the new principal profile
+   remains disabled.
+2. **RG1 source complete:** the Claude SDK projection has a profile-specific exact candidate branch;
+   the original restricted-profile predicate remains unchanged.
+3. **PARTIAL:** `ClaudeProjectedMcpReadbackObserver` verifies exact server/tool-name readback and
+   launch provenance, but native tools/list schemas and installed resource generations are still
+   explicitly unattested.
+4. **NOT BUILT:** add a separate supervisor/adapter admission predicate for the exact new
+   profile/policy/grant digests; do not reuse the restricted `operator.claude.readonly.v1` predicate.
+5. **RG1 source complete:** profile/grant/transport/borrowing drift negatives pass while the profile
+   remains disabled.
+6. **NOT PROVEN:** after source review and accepted transport/network policy, install/observe the exact
+   generation and run harmless native reads.
+7. **NOT PROVEN:** R1 modifying admission requires real #955/H3 authentication + role policy;
+   H6 modifying dialogue requires its installed host/profile generation and native canary.
 
 ### Transport/network decision
 

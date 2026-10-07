@@ -158,6 +158,28 @@
         }
       }
     },
+    "operator.browser.isolated.v1": {
+      "package_generation_digests": {},
+      "profile_digest": "725fcb2372f72581e523a4c3db8ec3dd990da3323df913fb68c4d840dcf48779",
+      "surfaces": {
+        "agent-sdk": {
+          "reason": "Pending isolated browser profile remains disabled and lacks typed owner/resource admission on Claude.",
+          "status": "deferred"
+        },
+        "cli": {
+          "reason": "Pending isolated browser profile remains disabled and lacks typed owner/resource admission on Claude.",
+          "status": "deferred"
+        },
+        "desktop-local": {
+          "reason": "Pending isolated browser profile remains disabled and lacks typed owner/resource admission on Claude.",
+          "status": "deferred"
+        },
+        "inline-subagent": {
+          "reason": "Pending isolated browser profile remains disabled and lacks typed owner/resource admission on Claude.",
+          "status": "deferred"
+        }
+      }
+    },
     "operator.browser.local-review.v1": {
       "package_generation_digests": {},
       "profile_digest": "f0430198b3ba00e53b70583e547d12d3e471dd499b69ef4a495fc14ca2826199",
@@ -272,6 +294,28 @@
         },
         "inline-subagent": {
           "reason": "Not qualified by this static CLI/SDK slice; requires explicit owner review and exact surface/native-helper/resource admission.",
+          "status": "deferred"
+        }
+      }
+    },
+    "principal.claude.coo.rich.v1": {
+      "package_generation_digests": {},
+      "profile_digest": "c7c104f39940a96f105be5e30954db2a14d9919e7366e2c38fbe36390d394930",
+      "surfaces": {
+        "agent-sdk": {
+          "reason": "H1-RG1 freezes grants/profile only; native transport, network, tool-schema and supervisor admission remain unqualified.",
+          "status": "deferred"
+        },
+        "cli": {
+          "reason": "H1-RG1 freezes grants/profile only; native transport, network, tool-schema and supervisor admission remain unqualified.",
+          "status": "deferred"
+        },
+        "desktop-local": {
+          "reason": "H1-RG1 freezes grants/profile only; native transport, network, tool-schema and supervisor admission remain unqualified.",
+          "status": "deferred"
+        },
+        "inline-subagent": {
+          "reason": "H1-RG1 freezes grants/profile only; native transport, network, tool-schema and supervisor admission remain unqualified.",
           "status": "deferred"
         }
       }
