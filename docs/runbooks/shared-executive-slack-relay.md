@@ -42,12 +42,20 @@ or workspace-wide channel-management scope is introduced by this migration.
    installer deliberately leaves C1/control services stopped; it does not
    rewrite an already-enrolled C1 relay plist or config.
 
+   Let `RELEASE_ROOT` denote the installer-verified
+   `/Library/Application Support/MastermindExecutive/releases/<accepted-sha>`.
+   Every native command below must execute from that exact installed release
+   with the pinned Executive Python; never run the ceremony from an operator
+   source checkout.
+
 2. **Before changing Slack scopes or starting C1**, keep Executive control and
    the C1 relay unloaded and keep the relay explicitly disabled. Rebind the
    coherent existing C1 enrollment to the exact installed release:
 
 ```text
-python3 ops/executive_os/c1_relay_enrollment.py \
+cd "$RELEASE_ROOT"
+/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12 -I -S -B \
+  ops/executive_os/c1_relay_enrollment.py \
   rebind-release \
   --expected-bot-user-id U0BT71H4FQE
 ```
@@ -69,7 +77,9 @@ stop: reconcile the same carrier and do not start either relay.
    post-migration Slack identity:
 
 ```text
-python3 ops/executive_os/c1_relay_enrollment.py \
+cd "$RELEASE_ROOT"
+/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12 -I -S -B \
+  ops/executive_os/c1_relay_enrollment.py \
   verify \
   --expected-bot-user-id U0BT71H4FQE
 ```
@@ -82,7 +92,9 @@ runbook does not grant start authority.
 6. On the native Executive host, with A2 still disabled/unloaded, run:
 
 ```text
-python3 ops/executive_os/a2_agent_relay_enrollment.py \
+cd "$RELEASE_ROOT"
+/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12 -I -S -B \
+  ops/executive_os/a2_agent_relay_enrollment.py \
   enroll-shared \
   --expected-bot-user-id U0BT71H4FQE \
   --enable-w3c
