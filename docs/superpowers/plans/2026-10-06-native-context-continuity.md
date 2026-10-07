@@ -41,7 +41,7 @@ Do not edit `control_plane/ceo_boot_packet.py`, root AGENTS.md/CLAUDE.md, provid
 
 ### Task A — expose the canonical task context
 
-Interface: `python3 scripts/ceo_boot_packet.py --workstream WS:KEY --macro-root <approved Macro checkout> [--context-budget 4000] [--timeout 15] [--now ISO]`.
+Interface: `python3 scripts/ceo_boot_packet.py --workstream WS:KEY --macro-root <approved Macro checkout> --expected-macro-sha <approved commit> [--context-budget 4000] [--timeout 15] [--now ISO]`.
 
 The workstream mode emits the existing `context_bundle.v1` JSON, not a new boot-envelope schema. Without `--workstream`, all legacy behavior remains unchanged. The context route must not call the global brief or return unrelated global handoffs. `--since` is not meaningful for this mode and must be rejected rather than ignored. A context budget without a selected workstream is invalid.
 
@@ -142,3 +142,18 @@ Bounded GLM placement observation at `2026-10-06T22:49:10.069840Z`: existing `po
 Fresh #518 metadata: open, Draft, not mergeable at `d64784fff1807e2547c3ad37f3f8a34010d312e0`; its body retains a completed semantic-review receipt and says current integration/custody release and native adoption remain owed. Preserve the completed review rather than commission another first review. Its historical body sentence claiming non-Draft conflicts with current metadata; current metadata wins. No #518 branch, scope, review, custody or installation was modified here.
 
 **Capability state:** source slice BUILT_NOT_PROVEN for native adoption; parent mission incomplete. No provider-home, global Skill/MCP, app, runtime, service, credential or worker modification. Next phases: exact-source publication/review; canonical Agent OS continuation; send narrow integration findings to existing bootstrap/worker/Claude owners; then obtain role-qualified native loading and real continuation/parent-result proof. Do not redo the completed source census or test epochs unless their relevant inputs change.
+
+
+### Independent-review repair — 2026-10-07 UTC (October 6 New York)
+
+Codex's real GitHub review of `f52b845bf17f126ea06b55b2128d040321a1f29f` returned two P2 findings, comments `4201662543` and `4201662550`: the opt-in scoped read could use the legacy source-discovery ladder without an explicit root/pin, and nonempty-but-malformed provenance was accepted. New tests reproduced **12 failures / 43 passes** before source changes.
+
+The scoped mode now requires nonempty explicit `--macro-root` and `--expected-macro-sha` before discovery. The generic company brief is unchanged. Git provenance must be 40 lowercase hex characters, and record digests reuse `control_plane.session_truth_contract.valid_source_records_digest`; no parallel digest contract or compiler is added. The synthetic positive fixture was corrected to the real prefixed digest format. The owning/legacy campaign after repair: **85 passed**, zero failures, exit 0. Exact repaired-source hosted CI and independent re-review remain release requirements; original green checks do not transfer automatically.
+
+A separate read-only integration review of #1272 executed its `7accb1c...` Agent OS reader unchanged and verified the same blob `302ee7d...` at `db099ad6...`. Two tests reproduced import-bytecode writes and a descendant continuing after read timeout; the original #1273 path passed the same two cases. Review `5435946057` returns these repairs to the active #1272 source owner; no competing writer or worker was launched. The fixture uses an exception-only import shim and self-terminating subprocesses, not provider execution.
+
+Context-budget experiment: the previous Macro pin first refused with zero payload after its checkout moved. Fresh identity and path-diff checks established Macro `a80e6ff8ff771b0f994982b2dfb2de203197dc18`, with unchanged compiler/workstream bytes and no uncommitted changes on those paths. Both successful reads retain source-record digest `sha256:b11ce527e32220071b42918136c931d09b9edbd7d02a58c7541bbfb2f10a0350`. At 12,000 requested tokens, no handoff was included; at 24,000, one September 29 handoff appeared, not this operation's current continuation. Context growth alone cannot recover the correct mission.
+
+New proof files remain under the existing operation evidence directory. No Macro instruction-preflight or provider-home denial was retried; Agent OS persistence remains outstanding. Claude plugin #1269 and transport fix #1264 are now merged source, not native installation/admission proof. Source owner continues on #1273; all installation, authentication, Runtime, original-parent and incumbent-custody boundaries remain in force.
+
+Final R1 qualification: **182 passed**, zero failures/errors/skips, across task context, legacy boot, Session Truth contract/CLI/acquisition tests; exit 0. The repaired real M2 read returned exit 0 at Macro `a80e6ff8ff771b0f994982b2dfb2de203197dc18`. An environment-only scoped invocation returned exit 2 and zero payload bytes. One isolated transport loss during verification was reconciled on the same Studio carrier: expected output files were absent and no matching reader process remained; the single bounded technical retry produced those results. Source changes were unaffected.

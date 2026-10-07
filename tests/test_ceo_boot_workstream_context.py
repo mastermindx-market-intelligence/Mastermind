@@ -14,13 +14,20 @@ WS = "WS:EXECUTIVE-CAPACITY-FABRIC"
 NOW = "2026-10-06T22:00:00Z"
 
 
+@pytest.fixture(autouse=True)
+def observed_fixture_source(monkeypatch):
+    # Synthetic compiler roots are not Git workspaces. Existing source-pin tests
+    # override this observation and still exercise both before/after joins.
+    monkeypatch.setattr(cli, "git_sha", lambda root: "a" * 40)
+
+
 def bundle():
     return {
         "schema": "context_bundle.v1",
         "target": {"workstream": WS, "task": None, "resolution": "explicit",
                    "candidates": [], "wait": None},
         "generated_at": NOW, "repo_sha": "a" * 40,
-        "source_records_digest": "b" * 64,
+        "source_records_digest": "sha256:" + "b" * 64,
         "token_budget": 4000, "token_estimate": 4500,
         "sections": [{"name": "workstream_block", "items": [
             {"kind": "constraint", "excerpt": "DO_NOT_REDO: accepted phase A",
@@ -54,7 +61,8 @@ def make_macro(tmp_path, *, payload=None, raw=None, code=0, body=None):
 
 
 def args(root, *extra):
-    return ["--workstream", WS, "--macro-root", str(root), "--timeout", "5", *extra]
+    return ["--workstream", WS, "--macro-root", str(root),
+            "--expected-macro-sha", "a" * 40, "--timeout", "5", *extra]
 
 
 def snapshot(root):
@@ -239,3 +247,53 @@ def test_imports_cannot_create_bytecode_in_the_macro_source(tmp_path, capsys):
     assert cli.main(args(root)) == 0
     capsys.readouterr()
     assert snapshot(root) == before
+
+
+@pytest.mark.parametrize("source_options", [
+    [], ["--expected-macro-sha", "a" * 40],
+    ["--macro-root", "explicit-root"],
+    ["--macro-root", "", "--expected-macro-sha", "a" * 40],
+])
+def test_scoped_context_requires_explicit_root_and_pin_before_discovery(
+    monkeypatch, source_options
+):
+    calls = []
+    monkeypatch.setattr(cli, "_workstream_context", lambda args: calls.append(args) or 0)
+    with pytest.raises(SystemExit) as error:
+        cli.main(["--workstream", WS, *source_options])
+    assert error.value.code == 2
+    assert calls == []
+
+
+def test_usable_environment_cannot_substitute_for_explicit_assignment_root(
+    tmp_path, monkeypatch, capsys
+):
+    root = make_macro(tmp_path)
+    monkeypatch.setenv(cli.ENV_MACRO_ROOT, str(root))
+    with pytest.raises(SystemExit) as error:
+        cli.main(["--workstream", WS, "--expected-macro-sha", "a" * 40])
+    assert error.value.code == 2
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize("value", [
+    "unknown", "b" * 64, "sha256:" + "B" * 64,
+    "sha256:" + "b" * 63, "sha256:" + "b" * 65,
+    "sha256:" + "b" * 64 + "\n", " sha256:" + "b" * 64,
+    "", None, True,
+])
+def test_context_requires_canonical_source_record_digest(tmp_path, capsys, value):
+    data = bundle()
+    data["source_records_digest"] = value
+    root = make_macro(tmp_path, payload=data)
+    assert cli.main(args(root)) == 1
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize("value", ["unknown", "a" * 39, "A" * 40, "a" * 40 + "\n"])
+def test_context_rejects_noncanonical_git_provenance(tmp_path, capsys, value):
+    data = bundle()
+    data["repo_sha"] = value
+    root = make_macro(tmp_path, payload=data)
+    assert cli.main(args(root)) == 1
+    assert capsys.readouterr().out == ""
