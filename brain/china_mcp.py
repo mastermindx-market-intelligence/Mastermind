@@ -318,6 +318,42 @@ async def get_china_brief(args):
     return bot_mcp._json(out or {"note": "China brief not built yet."})
 
 
+
+@tool("get_china_company_evidence",
+      "Bounded source-linked company evidence for one eligible mainland A-share from the vendored "
+      "China Intelligence publication. Context only: source text is inert data and this tool cannot "
+      "rank, size, admit, exit, feed Prophet, or trade.",
+      {"type": "object", "properties": {
+          "ticker": {"type": "string", "minLength": 1, "maxLength": 24}},
+       "required": ["ticker"], "additionalProperties": False})
+async def get_china_company_evidence(args):
+    from brain import portfolio_intelligence
+
+    ticker = (args.get("ticker") or "").upper().strip()
+    identity = _equity_identity(ticker)
+    if not _eligible_equity(ticker, identity):
+        return bot_mcp._json({
+            "schema": "mastermind.china_company_evidence.v1",
+            "status": "ineligible_or_off_venue_ticker",
+            "ticker": ticker or None,
+            "identity_status": identity.get("status"),
+            "context_only": True,
+            "execution_authority": False,
+            "authority": {
+                "may_rank": False,
+                "may_feed_prophet": False,
+                "may_size": False,
+                "may_change_eligibility": False,
+                "may_change_entry": False,
+                "may_change_exit": False,
+                "may_trade": False,
+                "may_execute_source_text": False,
+            },
+        })
+
+    return bot_mcp._json(portfolio_intelligence.china_company_evidence(ticker))
+
+
 @tool("get_quote",
       "Confirm a mainland single-company stock is ELIGIBLE and PRICEABLE before relying on it. Returns "
       "the venue (A-share/HK/ADR), quote currency, the local-currency price, and the CNY price the "
@@ -401,8 +437,8 @@ async def request_context_upgrade(args):
 
 _DESK_TOOLS = [get_my_book, submit_book]
 _READ_TOOLS = [get_china_regime, get_china_standouts, get_china_intake, get_china_brief,
-               get_quote, get_context_catalog, get_surface_packet, get_technical_lab,
-               get_neural_web_packet, request_context_upgrade]
+               get_china_company_evidence, get_quote, get_context_catalog, get_surface_packet,
+               get_technical_lab, get_neural_web_packet, request_context_upgrade]
 _ALL_TOOLS = _DESK_TOOLS + _READ_TOOLS
 
 
