@@ -1,16 +1,7 @@
 {
-  "active_review": {
-    "carrier_log": "install-delta-carrier.log",
-    "role": "independent installer delta review",
-    "run_id": "rs_20261007T000948Z_15930",
-    "scope": [
-      "ops/fabric_launch/install.py",
-      "ops/fabric_launch/cli.py"
-    ],
-    "source_commit": "db099ad6f5c92217bcc88a474422b2ff7c3d0782",
-    "status": "STARTED_AWAITING_RETURN"
-  },
+  "active_review": null,
   "active_review_obligations": [],
+  "active_workers": 0,
   "affected_source_hashes": {
     "docs/superpowers/plans/2026-10-06-subagent-operating-environment.md": "063ca1ec982899e61c59d004f86469743169e46739eff7df16100380071bfe69",
     "ops/fabric_launch/agentos.py": "b146c008c939ca8276f91eadca4b60b781ec694e64ff02ddaa9908cc6c8f2dfe",
@@ -59,23 +50,62 @@
     "targeted_tests_passed": 84,
     "unicode_content_delivered_without_literal_escape_bloat": true
   },
+  "deliverable_archives": {
+    "public_docs": {
+      "bytes": 35411,
+      "sha256": "c117901e2b4d43aeadbeb2c171a8ffa0904023f984af8a7c3aa2371623ffd9d3",
+      "source_commit": "a865b48b9ac3cb10bc6766c459f47d981fc7f917",
+      "state": "PACKAGED_NATIVE_PARSER_VERIFIED_NOT_PRODUCTION_ADMITTED"
+    },
+    "skills_only": {
+      "bytes": 35143,
+      "sha256": "bd83f502a8181e0ae65a2cae4b8e337316b282c209a05b2f249fa3986b91f594",
+      "source_commit": "a865b48b9ac3cb10bc6766c459f47d981fc7f917",
+      "state": "PACKAGED_NATIVE_PARSER_VERIFIED_NOT_PRODUCTION_ADMITTED"
+    }
+  },
   "do_not_redo": [
     "Craft compiler and role-method design.",
     "Successful verifier implementation and original exact source closure proof.",
     "Historical timeout or successful worker dispatches."
   ],
+  "implementation_source": "a865b48b9ac3cb10bc6766c459f47d981fc7f917",
   "installation": {
     "executive_profiles_changed": false,
     "global_hook": "NOT_INSTALLED",
     "native_skill_attested": false,
     "pool_wrapper_changed": false,
     "pool_wrapper_sha256": "95dad5ac680d605200252f7152ecc80b77a767016874028288822a98b2b72c78",
-    "studio_pinned_consumers": 10
+    "studio_pinned_consumers": 10,
+    "wrapper_candidate": {
+      "authority_granted": false,
+      "candidate_sha256": "6b45a4d40830bb0bce42efa54ec05b8078f8a6277264f128f030dba36a48a19e",
+      "original_sha256": "95dad5ac680d605200252f7152ecc80b77a767016874028288822a98b2b72c78",
+      "pinned_consumer_count": 10,
+      "source_commit": "a865b48b9ac3cb10bc6766c459f47d981fc7f917",
+      "state": "WRAPPER_CANDIDATE_NOT_INSTALLED"
+    }
+  },
+  "installer_delta_acceptance": {
+    "cleanup_proven": true,
+    "independent_checks_sha256": "80fbab466d4f3fdc6d06132c83015d4e32127ba645806b5376f7631440c6417a",
+    "parent_consumed": true,
+    "parent_verification_sha256": "3668f81dc690850ad186a8d242f3f410b3c7099920e37b6bd78ef3731c8ba134",
+    "parent_verified_passed": 8,
+    "parent_verified_test_count": 8,
+    "production_release_authorized": false,
+    "residual_count": 0,
+    "review_sha256": "28aae31f855bac7c1cd590a217ba9f3d8727a8d4f61999023e484db9c83c140a",
+    "run_id": "rs_20261007T000948Z_15930",
+    "source_commit": "db099ad6f5c92217bcc88a474422b2ff7c3d0782",
+    "source_files_unchanged": 30,
+    "terminal_receipt_sha256": "6cdad9d823d3d0431ecbd49d3efb05edb5bce055cae86a7e272c08707c99ff2c",
+    "verdict": "APPROVE_DELTA"
   },
   "installer_review": {
     "cleanup_proven": true,
     "confirmed_finding": "Missing, incomplete or malformed Studio consumer evidence was treated as an empty conflict set.",
-    "independent_repair_recheck": "NOT_YET_PERFORMED",
+    "independent_repair_recheck": "APPROVE_DELTA",
     "new_negative_cases_failed_before_repair": 14,
     "parent_consumed": true,
     "parent_reproduction_log_sha256": "b1a0a00552441301408785fcb090d1cb123774af5454dfbefea8ef5cf99198a6",
@@ -107,6 +137,56 @@
     "subtests_passed": 59
   },
   "mission": "Fresh workers receive a bounded task, one role method, attributed context, usable tools and an exact return path.",
+  "mission_complete": false,
+  "native_docs_parser_proof": {
+    "credential_environment_forwarded": false,
+    "mcp_configured_servers": [
+      {
+        "auth_status": "unsupported",
+        "disabled_reason": null,
+        "enabled": true,
+        "name": "openaiDeveloperDocs",
+        "startup_timeout_sec": null,
+        "tool_timeout_sec": null,
+        "transport": {
+          "bearer_token_env_var": null,
+          "env_http_headers": null,
+          "http_headers": null,
+          "http_headers_helper": null,
+          "type": "streamable_http",
+          "url": "https://developers.openai.com/mcp"
+        }
+      }
+    ],
+    "model_inference": false,
+    "native_mcp_call_claimed": false,
+    "production_configuration_changed": false,
+    "receipt_sha256": "04d4eeb42392cbabb69220c52c49f73c527517c0694ae96451370db72a5397a6",
+    "schema": "mastermind.workforce_docs_native_parser_probe.v1",
+    "skills_visible": {
+      "mastermind-craft": true,
+      "mastermind-worker-bootstrap": true
+    },
+    "source_commit": "a865b48b9ac3cb10bc6766c459f47d981fc7f917",
+    "steps": [
+      {
+        "returncode": 0,
+        "step": "marketplace"
+      },
+      {
+        "returncode": 0,
+        "step": "install"
+      },
+      {
+        "returncode": 0,
+        "step": "mcp"
+      },
+      {
+        "returncode": 0,
+        "step": "prompt"
+      }
+    ]
+  },
   "native_plugin_parser_proof": {
     "credential_environment_forwarded": false,
     "native_cached_build_count": 1,
@@ -144,6 +224,7 @@
       }
     ]
   },
+  "next_action": "Existing source/release owners reconcile the Craft stack and consumer-pinned pool rollout using the prepared candidate; use read-only preflight until source custody and service quiescence are established.",
   "parent_verification": {
     "log_sha256": "b8ef89a377574ef978743c6d5b8ef04cf23d31d70f07ab687da15689d46050db",
     "passed": 3,
@@ -152,10 +233,11 @@
     "worker_test_sha256": "e026f837926ed98f9a75ee4e678224e3993690a7573987743002c309cd40cdaa"
   },
   "pending": [
-    "Publish hardening delta and exact-head CI.",
-    "Coordinate pool wrapper rollout through the existing Studio publication owner for all ten pinned consumers.",
-    "Release retained Craft dependencies through their source owners before protected native CapabilityPackage admission.",
-    "Enroll native app credentials through each app owner; Linear auth is unresolved."
+    "Release unchanged Craft dependencies #587/#588 and this candidate through existing source/review/protected-branch owners.",
+    "Coordinate stopped-service publication of the new pool wrapper and all ten existing Studio consumer pins through their existing publisher; no raw pin edits.",
+    "Select/admit exact native worker capability-package profiles, then prove their effective tools and source method loading.",
+    "Complete native app OAuth/resource consent through existing owners; M2 Linear remains authentication-required, no Web-token inheritance.",
+    "Restore mini2 free disk space through the existing storage owner before a Sol native provider qualification; do not lower the 50GB admission floor."
   ],
   "plugin_variant_identity": {
     "full_suite_passed": 201,
@@ -165,14 +247,22 @@
     "subtests_passed": 59
   },
   "private_bootstrap_plugin": {
-    "creation_and_metadata_verified": true,
+    "creation_update_and_source_readback_verified": true,
     "discoverability": "PRIVATE",
-    "installation_or_all_account_adoption_claimed": false,
+    "installed_all_accounts": false,
+    "native_worker_profile_admission": false,
     "plugin_id": "Plugin_e3508a53bed88191bb0d04ec2405d618",
-    "release_id": "pluginrel_6ac5892d41d8819191c611930ab74319",
+    "published_file_count": 22,
+    "release_id": "pluginrel_6ac593391c888191a1beeaf3f6da3f3d",
+    "role_method_count": 8,
     "scope": "WORKSPACE",
-    "source_commit": "40a7f3986942c915198071cd8def92c53416f682",
-    "version": "0.1.0-candidate.g40a7f3986942"
+    "skills": [
+      "mastermind-worker-bootstrap",
+      "mastermind-craft"
+    ],
+    "source_commit": "a865b48b9ac3cb10bc6766c459f47d981fc7f917",
+    "uploaded_archive_sha256": "6798c54f7ae7b2e2d038d1a9cac4f6eacbe4dde7d185f346d8c567b9ed6bd9ca",
+    "version": "0.2.0-candidate.ga865b48b9ac3"
   },
   "procedure_pin": "6e82f9af41bf175c87e70f6a852f73b71eca80c8",
   "schema": "mastermind.fabric_launch_evidence.v1",
@@ -184,8 +274,8 @@
   "source_predecessor": "e67027b1f35202703e5989a3980bb6e34f20d194",
   "source_tested_live": "2fcaaae3c19a313c5eef850854e217a74abcd9d2",
   "tests": {
-    "focused_passed": 159,
-    "log_sha256": "49e6700f4283feda838c6a79341908927fa01ffc631d31d3a818a36d82aa4dfd",
+    "focused_passed": 201,
+    "log_sha256": "189133bbf54486f70dc814bf4608b925229bbee9f335300eb78f186bf118b826",
     "predecessor_hosted_ci": {
       "conclusion": "success",
       "head": "e67027b1f35202703e5989a3980bb6e34f20d194",
