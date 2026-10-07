@@ -37,13 +37,49 @@ or workspace-wide channel-management scope is introduced by this migration.
 
 ## Safe sequencing
 
-1. Install a Mastermind release containing the shared-relay source.
-2. Slack admin edits the **existing Mastermind Executive Relay app** only:
+1. Install the exact accepted Mastermind release containing both the shared-relay
+   source and the reviewed C1 release-rebind owner. The standard Executive
+   installer deliberately leaves C1/control services stopped; it does not
+   rewrite an already-enrolled C1 relay plist or config.
+
+2. **Before changing Slack scopes or starting C1**, keep Executive control and
+   the C1 relay unloaded and keep the relay explicitly disabled. Rebind the
+   coherent existing C1 enrollment to the exact installed release:
+
+```text
+python3 ops/executive_os/c1_relay_enrollment.py \
+  rebind-release \
+  --expected-bot-user-id U0BT71H4FQE
+```
+
+`rebind-release` validates the old plist/config as one coherent enrolled
+generation, stages the exact installed-release plist/config pair, preserves and
+attests the existing credential without outputting or rewriting it, and
+converges the two files transactionally. A mixed or uncertain outcome is a hard
+stop: reconcile the same carrier and do not start either relay.
+
+3. Slack admin edits the **existing Mastermind Executive Relay app** only:
    add bot scope `channels:history`, preserve `chat:write` and
    `groups:history`, then reinstall/approve the app in the existing workspace.
    Do not create another app and do not remove a Dot app.
-3. Confirm the existing bot remains a member of both channels above.
-4. On the native Executive host, with A2 still disabled/unloaded, run:
+
+4. Confirm the existing bot remains a member of both channels above.
+
+5. While C1 remains disabled/unloaded, verify its rebound enrollment against the
+   post-migration Slack identity:
+
+```text
+python3 ops/executive_os/c1_relay_enrollment.py \
+  verify \
+  --expected-bot-user-id U0BT71H4FQE
+```
+
+This verification must prove the same workspace/bot, the exact shared
+three-scope set, and `#sol-runtime` history access before the C1 lifecycle is
+resumed. The existing C1 read-side/control lifecycle remains its own owner; this
+runbook does not grant start authority.
+
+6. On the native Executive host, with A2 still disabled/unloaded, run:
 
 ```text
 python3 ops/executive_os/a2_agent_relay_enrollment.py \
@@ -58,8 +94,10 @@ three-scope set, proves `#agent-dispatch` history access, and writes the normal
 A2 private token/config/plist files. No Slack token is copied into chat, argv,
 Slack, GitHub, logs, or a model-visible surface.
 
-5. Run the normal A2 `verify --enable-w3c`, then the existing reviewed
-   `start-agent-relay` lifecycle only after its normal release/admission gates.
+7. Run the normal A2 `verify --enable-w3c`. Resume the existing reviewed C1
+   read-side/control lifecycle and the separate `start-agent-relay` lifecycle
+   only after each owner's normal release/admission gates. Neither verification
+   is permission to start the other service.
 
 ## Migration compatibility
 
