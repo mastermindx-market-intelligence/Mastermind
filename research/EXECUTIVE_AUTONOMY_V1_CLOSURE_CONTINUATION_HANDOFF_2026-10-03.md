@@ -251,6 +251,12 @@ NEXT: single watcher watch13 adds #1227 head/comments/reviews. Quiet otherwise.
     - privileged not running, @5b244a2b;
     - agent-relay, worker.codex, backup and remote-worker-gateway ABSENT.
 - **No C3 post this cycle.** The carrier already carries every fact, the captain consumed the order, and a new note would be NO_DELTA admin.
+- **#811 revived (seen at watch52 arm, 02:18Z).**
+  - mastermindx-2 recomposed it on 9a24ef2c as **8b992746** (02:15Z) and requested `@codex review` (#811 6029485243).
+  - 6 files: `control_plane/executive_operator_supervisor.py`, `executive_supervisor.py`, `docs/EXECUTIVE_MCP.md` and tests (immutable-commission verification before worker launch and recovery).
+  - Composition with master, #1220 and #784: rc=0 each.
+  - This seat parked #811 on 10-04 at the convergence tripwire. Reviving it is the packet owner's call.
+  - C3 adds it to the composition and identity check only if it joins the install generation. No C3 action.
 - **Critical path.**
   1. #1220 fixture repair → CI → exact-head review → merge.
   2. #784 repair → CI → review → merge, in parallel with step 1.
