@@ -181,11 +181,14 @@ def test_shared_index_stays_group_readable_after_control_cleanliness(
     real_run_bytes = executive_workspace._run_bytes
 
     def observed_run_bytes(argv, *, cwd, env):
-        recorded_envs.append(dict(env))
-        recorded_argv.append(tuple(argv))
-        index = Path(cwd) / ".git" / "index"
-        if index.exists() and not index_mode_before_status:
-            index_mode_before_status.append(stat.S_IMODE(index.stat().st_mode))
+        # Construction now reads the pinned profile from the source. This
+        # regression guards the distinct post-sharing workspace observations.
+        if Path(cwd) != source:
+            recorded_envs.append(dict(env))
+            recorded_argv.append(tuple(argv))
+            index = Path(cwd) / ".git" / "index"
+            if index.exists() and not index_mode_before_status:
+                index_mode_before_status.append(stat.S_IMODE(index.stat().st_mode))
         return real_run_bytes(argv, cwd=cwd, env=env)
 
     monkeypatch.setattr(executive_workspace, "_run_bytes", observed_run_bytes)
@@ -510,6 +513,20 @@ def test_symlink_permission_repair_fails_closed_when_mode_does_not_change(
 
 
 def test_launch_cleanliness_definition_includes_ignored_untracked_material():
+    # Tracked-status observation must not recursively enumerate untracked files:
+    # the second observation already enumerates every untracked/ignored path.
+    assert executive_workspace.LAUNCH_CLEAN_STATUS_ARGS == (
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--untracked-files=no",
+    )
+    assert executive_workspace.LAUNCH_CLEAN_UNTRACKED_ARGS == (
+        "ls-files",
+        "--others",
+        "-z",
+    )
+
     calls: list[tuple[str, ...]] = []
 
     def observe(arguments):
@@ -923,6 +940,32 @@ def test_install_sh_prunes_unreachable_objects_after_repack_and_before_final_cho
     assert "prune unreachable" in comment_block
     assert "verify zero loose objects" in comment_block
     assert "not company state" in comment_block
+
+
+def test_install_sh_normalizes_safe_promisor_markers_after_prune_before_final_trust():
+    install_text = _INSTALL_SH.read_text(encoding="utf-8")
+
+    prune_marker = '/usr/bin/git -C "$ADMIN_CHECKOUT" prune --expire=now'
+    normalize_marker = '"$RELEASE_ROOT/ops/executive_os/admin_checkout.py" normalize'
+    final_chown = '/usr/sbin/chown -R "$CONTROL_USER:$CONTROL_GROUP" "$ADMIN_CHECKOUT"'
+    loose_assertion = "administrative checkout still holds loose objects after repack"
+
+    prune_index = install_text.index(prune_marker)
+    normalize_index = install_text.index(normalize_marker, prune_index)
+    chown_index = install_text.index(final_chown, normalize_index)
+    assertion_index = install_text.index(loose_assertion, chown_index)
+    assert prune_index < normalize_index < chown_index < assertion_index
+
+    invocation_start = install_text.rindex('/usr/bin/sudo -u "$CONTROL_USER"', prune_index, normalize_index)
+    invocation = install_text[invocation_start:normalize_index + len(normalize_marker) + 320]
+    assert 'GIT_NO_LAZY_FETCH=1' in invocation
+    assert 'GIT_NO_REPLACE_OBJECTS=1' in invocation
+    assert 'GIT_TERMINAL_PROMPT=0' in invocation
+    assert '--checkout "$ADMIN_CHECKOUT"' in invocation
+    assert '--expected-commit "$EXPECTED_SHA"' in invocation
+    refusal = install_text[normalize_index:chown_index]
+    assert "administrative checkout promisor normalization refused" in refusal
+    assert "exit 65" in refusal
 
 
 def test_prune_after_repack_reaches_zero_loose_objects_and_stays_clonable(tmp_path: Path):

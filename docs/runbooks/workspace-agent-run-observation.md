@@ -1,8 +1,10 @@
 # Workspace Agent run observation: one read, not an execution engine
 
-Status: source candidate / `BUILT_NOT_PROVEN`. No published agent, Workspace token,
-Executive registration, provider-trigger effect, unattended continuation or production
-acceptance is established by this code. Integration direction: Mastermind PR #603.
+Status: source candidate / `BUILT_NOT_PROVEN` / production-disarmed. No published
+agent, Workspace token, Executive registration, provider-trigger effect, unattended
+continuation or production acceptance is established by this code. The read observer
+is merged; the one-shot trigger primitive is source-only and deliberately has no CLI,
+scheduler, retry loop or production registration.
 
 ## Observable capability
 
@@ -13,10 +15,13 @@ result, independent review, Wake consumption, or company acceptance.
 
 Existing owners remain: Executive admission/lifecycle/results; RuntimeBinding and
 Wake; Capacity; current app authentication; Macro Agent OS; GitHub evidence.
-This module registers no transport, adds no Executive tool, opens no listener,
-persists no token or result, and has no loop, queue, retry or POST method.
+The observation module registers no transport, adds no Executive tool, opens no
+listener, persists no token or result, and has no loop, queue or retry. The separate
+`integrations/workspace_agent_trigger.py` source owns one exact POST primitive only;
+it is not exposed by the operator CLI and is not an authorization to invoke a live
+Workspace Agent.
 
-Contract checked 2026-09-13:
+Contract rechecked 2026-09-19:
 https://developers.openai.com/workspace-agents/trigger-runs
 https://developers.openai.com/workspace-agents/authentication
 
@@ -60,6 +65,26 @@ Unknown provider states, malformed JSON, identity mismatch and HTTP failure stay
 unavailable with null state/terminal fields. Error bodies and vendor prose are
 not emitted. Unknown additive JSON fields are ignored, not treated as authority.
 
+## Dark trigger source: not an operator command
+
+`build_trigger_plan` freezes the exact channel, bounded input, optional conversation
+key, payload digest and deterministic idempotency material before provider I/O.
+`trigger_once` accepts only that frozen plan and performs at most one POST to the
+fixed provider host. It does not redirect or retry. A transport failure after the
+effect boundary is `TRIGGER_EFFECT_UNKNOWN`; a received 202 remains provider
+acceptance even if the correlation body is malformed.
+
+The plan hides its request body from `repr`, the token remains external, and error
+bodies are never promoted into diagnostics. The primitive owns no replay ledger:
+before any live use, the existing Executive operation/event owner must durably bind
+the operation to the exact plan and reconcile an uncertain effect on this same
+carrier. Until the bounded candidate-return and current-target seams are accepted,
+do not call this primitive against a real channel.
+
+Provider completion still cannot be converted into `TARGET_ACKNOWLEDGED`. The
+canonical ACK path requires trusted current-writer/runtime evidence that the public
+Workspace run API does not establish.
+
 ## First real qualification and exact next integration
 
 1. The existing workspace owner enables the published API channel and provisions
@@ -74,7 +99,7 @@ not emitted. Unknown additive JSON fields are ignored, not treated as authority.
    or dialogue owner. The public status API does not retrieve the answer. Do not
    widen #599's five-tool contract or synthesize a trusted current-worker Wake ACK.
 5. Only after the current-target, return and budget seams are reviewed may an
-   admitted Executive caller use a separately implemented trigger transport.
+   admitted Executive owner bind and invoke the existing dark trigger primitive.
    Native fabric execution and Workbench proof continue through their incumbents.
 
 No cancellation endpoint, workspace-agent creation endpoint, exact-agent attestation,
@@ -85,11 +110,14 @@ provider-terminal state and accepted capability remain different facts.
 
 ```sh
 python3 -m unittest discover -s tests -p test_workspace_agent_api.py -v
+python3 -m unittest discover -s tests -p test_workspace_agent_trigger.py -v
 ```
 
-The test suite exercises the actual CLI, a single injected HTTP connection, exact
-GET path, bounded reads, no redirects/retries, error redaction and correlation.
-Its synthetic server response is not live Workspace Agent proof.
+The suites exercise the actual read-only CLI plus injected GET/POST connections,
+exact paths and headers, bounded bodies, deterministic trigger-plan identity,
+zero-I/O preflight refusals, no redirects/retries, effect uncertainty, error
+redaction and correlation. Their synthetic provider responses are not live
+Workspace Agent proof.
 
 Two prompt-only helpers were run through the existing Studio engineering broker.
 The Flash artifact was rejected (invalid JSON, swapped identifiers and foreign URLs);

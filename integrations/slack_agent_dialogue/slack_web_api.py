@@ -51,12 +51,78 @@ def _effect_unknown() -> SlackEffectUnknown:
     return SlackEffectUnknown(_EFFECT_UNKNOWN)
 
 
+def estimate_replies_append_bytes(*, text: str, thread_ts: str) -> int:
+    """Conservative encoded response cost of one appended thread reply."""
+
+    if not isinstance(text, str) or _TS_RE.fullmatch(thread_ts) is None:
+        raise ValueError("text and thread_ts must be valid")
+    worst_case_message = {
+        "type": "message",
+        "team": "T" + "Z" * 31,
+        "user": "U" + "Z" * 31,
+        "text": text,
+        "ts": "9" * 16 + ".999999",
+        "thread_ts": thread_ts,
+    }
+    envelope = {
+        "ok": True,
+        "messages": [worst_case_message],
+        "has_more": False,
+        "response_metadata": {"next_cursor": ""},
+    }
+    return len(
+        json.dumps(
+            envelope,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    )
+
+
 @dataclass(frozen=True)
 class SlackHttpResponse:
     status_code: int
     final_url: str
     headers: Mapping[str, str]
     body: bytes
+
+
+@dataclass(frozen=True, eq=False)
+class BoundedHistoryPage(HistoryPage):
+    """History plus exact raw response-page byte facts."""
+
+    response_page_bytes: tuple[int, ...]
+    response_byte_limit: int
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if any(
+            type(value) is not int or not 0 < value <= self.response_byte_limit
+            for value in self.response_page_bytes
+        ):
+            raise ValueError("response_page_bytes must be bounded positive integers")
+        if self.response_byte_limit != MAX_RESPONSE_BYTES:
+            raise ValueError("response_byte_limit must match MAX_RESPONSE_BYTES")
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, HistoryPage):
+            return NotImplemented
+        if (
+            self.messages != other.messages
+            or self.complete != other.complete
+            or self.mutation_evidence_complete != other.mutation_evidence_complete
+        ):
+            return False
+        if isinstance(other, BoundedHistoryPage):
+            return (
+                self.response_page_bytes == other.response_page_bytes
+                and self.response_byte_limit == other.response_byte_limit
+            )
+        return True
+
+    __hash__ = HistoryPage.__hash__
 
 
 @dataclass(frozen=True)
@@ -311,7 +377,9 @@ class SlackWebApiDialogueClient:
         if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
             raise _unavailable()
 
-    async def _get(self, *, path: str, query: Mapping[str, str]) -> dict[str, Any]:
+    async def _get(
+        self, *, path: str, query: Mapping[str, str]
+    ) -> tuple[dict[str, Any], int]:
         expected_url = _request_url(path, query)
         try:
             response = await self._transport.request(
@@ -326,7 +394,7 @@ class SlackWebApiDialogueClient:
             raise _unavailable() from None
         if payload.get("ok") is not True:
             raise _unavailable()
-        return payload
+        return payload, len(response.body)
 
     async def _post(self, *, json_body: Mapping[str, Any]) -> dict[str, Any]:
         path = "chat.postMessage"
@@ -511,12 +579,17 @@ class SlackWebApiDialogueClient:
 
     @staticmethod
     def _incomplete_history(
-        messages: list[SlackMessage], *, mutation_evidence_complete: bool
-    ) -> HistoryPage:
-        return HistoryPage(
+        messages: list[SlackMessage],
+        *,
+        mutation_evidence_complete: bool,
+        response_page_bytes: list[int],
+    ) -> BoundedHistoryPage:
+        return BoundedHistoryPage(
             messages=tuple(messages),
             complete=False,
             mutation_evidence_complete=mutation_evidence_complete,
+            response_page_bytes=tuple(response_page_bytes),
+            response_byte_limit=MAX_RESPONSE_BYTES,
         )
 
     async def _collect_history(
@@ -530,6 +603,7 @@ class SlackWebApiDialogueClient:
         messages: list[SlackMessage] = []
         seen_timestamps: set[str] = set()
         seen_cursors: set[str] = set()
+        response_page_bytes: list[int] = []
         mutation_complete = True
         cursor: str | None = None
 
@@ -539,15 +613,15 @@ class SlackWebApiDialogueClient:
                 return self._incomplete_history(
                     messages,
                     mutation_evidence_complete=mutation_complete,
+                    response_page_bytes=response_page_bytes,
                 )
             query = dict(base_query)
             query["limit"] = str(remaining)
             if cursor is not None:
                 query["cursor"] = cursor
-            parsed = self._history_page(
-                await self._get(path=path, query=query),
-                limit=remaining,
-            )
+            payload, page_bytes = await self._get(path=path, query=query)
+            response_page_bytes.append(page_bytes)
+            parsed = self._history_page(payload, limit=remaining)
             mutation_complete = (
                 mutation_complete and parsed.mutation_evidence_complete
             )
@@ -557,6 +631,7 @@ class SlackWebApiDialogueClient:
                 return self._incomplete_history(
                     messages + list(parsed.messages),
                     mutation_evidence_complete=mutation_complete,
+                    response_page_bytes=response_page_bytes,
                 )
             messages.extend(parsed.messages)
             seen_timestamps.update(message.ts for message in parsed.messages)
@@ -578,10 +653,12 @@ class SlackWebApiDialogueClient:
                         )
                     ):
                         raise _unavailable()
-                return HistoryPage(
+                return BoundedHistoryPage(
                     messages=tuple(messages),
                     complete=True,
                     mutation_evidence_complete=mutation_complete,
+                    response_page_bytes=tuple(response_page_bytes),
+                    response_byte_limit=MAX_RESPONSE_BYTES,
                 )
             if (
                 not continuation
@@ -591,6 +668,7 @@ class SlackWebApiDialogueClient:
                 return self._incomplete_history(
                     messages,
                     mutation_evidence_complete=mutation_complete,
+                    response_page_bytes=response_page_bytes,
                 )
             seen_cursors.add(parsed.next_cursor)
             cursor = parsed.next_cursor
@@ -598,6 +676,7 @@ class SlackWebApiDialogueClient:
         return self._incomplete_history(
             messages,
             mutation_evidence_complete=mutation_complete,
+            response_page_bytes=response_page_bytes,
         )
 
     async def fetch_channel_history(
@@ -678,6 +757,7 @@ class SlackWebApiDialogueClient:
 
 
 __all__ = [
+    "BoundedHistoryPage",
     "DEFAULT_TIMEOUT_SECONDS",
     "MAX_RESPONSE_BYTES",
     "SLACK_API_ROOT",
@@ -685,4 +765,5 @@ __all__ = [
     "SlackHttpTransport",
     "SlackWebApiDialogueClient",
     "UrllibSlackHttpTransport",
+    "estimate_replies_append_bytes",
 ]

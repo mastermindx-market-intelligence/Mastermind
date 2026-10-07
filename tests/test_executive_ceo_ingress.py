@@ -1526,13 +1526,17 @@ def test_close_holds_lock_even_when_server_wait_closed_is_a_no_op(
         loop = asyncio.get_running_loop()
         entered = asyncio.Event()
         release = asyncio.Event()
-        real_submit_intent = ceo_intent.submit_intent
-
         def paused_submit_intent(runtime, payload, *, workspace_root=None):
+            # This test proves the handler/physical-worker drain boundary, not
+            # durable CEO-intent commit latency.  The neighboring disconnect
+            # test owns the real submit/commit/restart path.  Keep this worker
+            # physically blocked until release, then return the minimum valid
+            # ingress receipt so hosted-runner load cannot consume the fixture's
+            # deliberately tiny 200 ms shutdown grace.
             loop.call_soon_threadsafe(entered.set)
             fut = asyncio.run_coroutine_threadsafe(release.wait(), loop)
             fut.result()
-            return real_submit_intent(runtime, payload, workspace_root=workspace_root)
+            return {"dispatched": False}
 
         monkeypatch.setattr(ceo_intent, "submit_intent", paused_submit_intent)
 

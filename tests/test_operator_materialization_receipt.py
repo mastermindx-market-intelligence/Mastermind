@@ -479,6 +479,7 @@ def test_persistence_refuses_directory_mode_drift(tmp_path: Path) -> None:
     receipt = _receipt()
     root = tmp_path / ".operator-materializations"
     root.mkdir(mode=0o755)
+    root.chmod(0o755)  # Ensure the negative fixture survives a restrictive umask.
     with pytest.raises(OperatorMaterializationReceiptError, match="mode"):
         persist_operator_materialization_receipt(
             tmp_path, receipt, expected_owner_uid=os.geteuid()
@@ -841,3 +842,41 @@ def test_failure_paths_balance_retained_descriptors(
             expected_owner_uid=os.geteuid(),
         )
     assert len(list(fd_root.iterdir())) == before
+
+
+@pytest.mark.parametrize("enriched", [False, True])
+def test_credential_exec_pair_roundtrips_without_widening_session_identity(enriched):
+    values = _inputs()
+    values.pop("expected_provider_session_id")
+    legacy = dict(values["process_identity"])
+    identity = dict(legacy, **({"unique_id": 8001, "pidversion": 4} if enriched else {}))
+    values["process_credentials"] = dict(values["process_credentials"], process_identity=identity)
+    receipt = build_operator_materialization_receipt(**values)
+    loaded = load_operator_materialization_receipt(canonical_json_bytes(receipt.to_dict()))
+    assert loaded.to_dict() == receipt.to_dict()
+    assert loaded.process_identity == legacy
+    assert loaded.process_credentials["process_identity"] == identity
+
+
+@pytest.mark.parametrize("changes", [
+    {"unique_id": 8001}, {"pidversion": 4},
+    {"unique_id": 0, "pidversion": 4}, {"unique_id": True, "pidversion": 4},
+    {"unique_id": 8001, "pidversion": False}, {"unique_id": 8001, "pidversion": -1},
+    {"unique_id": 8001, "pidversion": 4, "surplus": 1},
+    {"unique_id": 8001, "pidversion": 4, "pid": 7002},
+])
+def test_credential_exec_pair_must_be_complete_valid_and_bound(changes):
+    values = _inputs()
+    values.pop("expected_provider_session_id")
+    identity = dict(values["process_identity"], **changes)
+    values["process_credentials"] = dict(values["process_credentials"], process_identity=identity)
+    with pytest.raises(OperatorMaterializationReceiptError):
+        build_operator_materialization_receipt(**values)
+
+
+def test_materialization_top_level_remains_closed_four_fields():
+    values = _inputs()
+    values.pop("expected_provider_session_id")
+    values["process_identity"] = dict(values["process_identity"], unique_id=8001, pidversion=4)
+    with pytest.raises(OperatorMaterializationReceiptError):
+        build_operator_materialization_receipt(**values)

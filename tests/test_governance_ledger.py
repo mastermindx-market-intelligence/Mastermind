@@ -894,29 +894,56 @@ class TestIncidentReplays:
                  "portfolio.desk_ab","portfolio.marks","brain.student","brain.distill",
                  "brain.interim_marks","brain.outcomes","brain.outcome_ledger","brain.scorer",
                  "brain.ledger","brain.macro_risk","brain.calibration","data_layer.store"]
+        # Every installation below goes through monkeypatch so it is undone at
+        # teardown. Two of these used to be raw writes that leaked for the rest
+        # of the process:
+        #
+        #   * `setattr(parent, leaf, stub)` bound the stub as an attribute of
+        #     the real parent package. pytest's own
+        #     `monkeypatch.setattr("brain.outcomes.label_thesis", ...)` resolves
+        #     through `getattr(brain, "outcomes")`, so any later test in the
+        #     same process got this stub instead of the real module.
+        #   * `sys.modules[m] = stub` ran BEFORE `monkeypatch.setitem`, so
+        #     setitem recorded the stub as the "original" and restored the stub
+        #     rather than removing the key.
+        #
+        # The `if m not in sys.modules` guard hid both: in one serial pytest
+        # process these modules are already imported by the time this test
+        # runs, so nothing was stubbed. Group the suite differently -- which is
+        # exactly what `scripts/ci_pytest.py --jobs N` does -- and this test
+        # silently poisoned `brain.outcomes` for everything after it.
         for m in stubs:
             parts = m.split(".")
             for i in range(1, len(parts)):
-                p = ".".join(parts[:i])
-                if p not in sys.modules:
-                    sys.modules[p] = types.ModuleType(p)
+                package = ".".join(parts[:i])
+                if package not in sys.modules:
+                    monkeypatch.setitem(sys.modules, package, types.ModuleType(package))
             stub = types.ModuleType(m)
             if m not in sys.modules:
                 parent = ".".join(parts[:-1])
-                setattr(sys.modules[parent], parts[-1], stub)
-                sys.modules[m] = stub
+                monkeypatch.setattr(sys.modules[parent], parts[-1], stub, raising=False)
                 monkeypatch.setitem(sys.modules, m, stub)
+        # `sys.modules.get(m)` is the REAL module whenever the guard above
+        # skipped stubbing it, so these must be monkeypatched too -- a raw
+        # setattr here permanently grafted `record`/`run`/`connect`/... onto
+        # live modules for the rest of the process.
         for m in stubs:
-            s = sys.modules.get(m)
-            if s:
+            module = sys.modules.get(m)
+            if module:
                 for attr in ("record","run","train","realized_returns","resolve",
                              "track_record","all_theses","connect","save_track_record",
                              "persist","latest"):
-                    if not hasattr(s, attr):
-                        setattr(s, attr, lambda *a, **kw: {})
+                    if not hasattr(module, attr):
+                        monkeypatch.setattr(module, attr, lambda *a, **kw: {}, raising=False)
         cal = sys.modules.get("brain.calibration")
         assert cal is not None
-        cal.persist = lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("injected"))
+        # Was a raw assignment: it left the real brain.calibration.persist
+        # raising RuntimeError("injected") for every later test in the process.
+        monkeypatch.setattr(
+            cal, "persist",
+            lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("injected")),
+            raising=False,
+        )
         sched._loop_maintenance_job()
         p = re_mod._ledger_path(tmp_path)
         events = [json.loads(l) for l in p.read_text().splitlines() if l.strip()]
@@ -1113,3 +1140,42 @@ class TestIncidentReplays:
             obj = json.loads(line)
             assert "event_id" in obj
             assert "ts" in obj
+
+
+def test_r04_stub_installation_leaves_no_module_residue():
+    """R04's scheduler stubs must not outlive their own test.
+
+    R04 installs stubs for brain.outcomes and 14 sibling modules. They used to
+    be raw `sys.modules[...] = stub` / `setattr(parent, leaf, stub)` writes that
+    were never undone, which silently replaced those modules for every later
+    test sharing the process. It looked harmless only because a single serial
+    pytest run has already imported them all by the time R04 runs, so the
+    `if m not in sys.modules` guard skipped every one. Regroup the suite --
+    `scripts/ci_pytest.py --jobs N` does exactly that -- and R04 could poison
+    `brain.outcomes` for everything after it.
+
+    Runs R04 in a subprocess with a real importer and asserts the modules it
+    touched are still the genuine ones afterwards.
+    """
+    import subprocess
+    import sys as _sys
+
+    probe = (
+        "import sys, types, pytest\n"
+        # Force the guard's stubbing branch: pretend nothing is imported yet.
+        "code = pytest.main(['-q', '-p', 'no:cacheprovider',\n"
+        "  'tests/test_governance_ledger.py::TestIncidentReplays::test_r04_step_failed_event_written'])\n"
+        "import brain, brain.outcomes, brain.calibration\n"
+        "assert hasattr(brain.outcomes, 'label_thesis'), 'brain.outcomes was left stubbed'\n"
+        "assert getattr(brain, 'outcomes') is sys.modules['brain.outcomes'], "
+        "'brain package attribute still points at a stub'\n"
+        "assert not hasattr(brain.outcomes, 'connect'), "
+        "'a stub attribute was grafted onto the real module'\n"
+        "sys.exit(0 if code == 0 else 1)\n"
+    )
+    result = subprocess.run(
+        [_sys.executable, "-c", probe],
+        cwd=Path(__file__).resolve().parent.parent,
+        capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-2000:]
