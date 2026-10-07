@@ -119,22 +119,94 @@ def stage(repository, commit, destination):
     return manifest
 
 
-def pinned_consumers(wrapper, proposed_sha):
-    """Read the existing Studio owner's pins; never rewrite or weaken them."""
-    target=str(Path(wrapper).absolute())
-    conflicts=[]
-    paths=list(STUDIO_CONSUMER_ROOT.glob('*/config.json'))
-    if len(paths)>32:raise ValueError('CONSUMER_CENSUS_UNBOUNDED')
-    for path in paths:
-        if path.is_symlink() or path.stat().st_size>1024*1024:
+def _consumer_config(path):
+    """Bound one existing owner's config read without following a replacement link."""
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError('CONSUMER_CONFIG_UNREADABLE')
+            result[key] = value
+        return result
+    def nonfinite(_):
+        raise ValueError('CONSUMER_CONFIG_UNREADABLE')
+    def identity(info):
+        return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+    try:
+        before = path.lstat()
+        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or not 0 < before.st_size <= 1024*1024:
             raise ValueError('CONSUMER_CONFIG_UNSAFE')
-        try:value=json.loads(path.read_bytes())
-        except (ValueError,UnicodeError):raise ValueError('CONSUMER_CONFIG_UNREADABLE') from None
-        config=value.get('fleetStatus',{}) if isinstance(value,dict) else {}
-        if not isinstance(config,dict):raise ValueError('CONSUMER_CONFIG_UNREADABLE')
-        if config.get('enabled') is True and config.get('fabricLauncherPath')==target:
-            if config.get('fabricLauncherSha256')!=proposed_sha:
-                conflicts.append(path.parent.name)
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, 'rb') as stream:
+            opened = os.fstat(stream.fileno())
+            if identity(opened) != identity(before):
+                raise ValueError('CONSUMER_CONFIG_CHANGED')
+            data = stream.read(1024*1024 + 1)
+            after = os.fstat(stream.fileno())
+        if identity(after) != identity(before) or identity(path.lstat()) != identity(before) or len(data) != before.st_size:
+            raise ValueError('CONSUMER_CONFIG_CHANGED')
+        value = json.loads(data, object_pairs_hook=unique, parse_constant=nonfinite)
+    except (OSError, UnicodeError, json.JSONDecodeError, RecursionError):
+        raise ValueError('CONSUMER_CONFIG_UNREADABLE') from None
+    if type(value) is not dict:
+        raise ValueError('CONSUMER_CONFIG_UNREADABLE')
+    return value
+
+
+def pinned_consumers(wrapper, proposed_sha):
+    """Read a complete bounded consumer census; absence is not a successful read.
+
+    This is compatibility evidence, not a coordinated release transaction. The
+    existing Studio publication owner still owns service quiescence and pin changes.
+    """
+    target = str(Path(wrapper).resolve(strict=False))
+    root = STUDIO_CONSUMER_ROOT
+    conflicts = []
+    try:
+        before = root.lstat()
+        if not stat.S_ISDIR(before.st_mode):
+            raise ValueError('CONSUMER_CENSUS_UNAVAILABLE')
+        directories = []
+        with os.scandir(root) as entries:
+            for count, entry in enumerate(entries, 1):
+                if count > 64:
+                    raise ValueError('CONSUMER_CENSUS_UNBOUNDED')
+                info = entry.stat(follow_symlinks=False)
+                if stat.S_ISLNK(info.st_mode):
+                    raise ValueError('CONSUMER_CONFIG_UNSAFE')
+                if stat.S_ISDIR(info.st_mode):
+                    directories.append((Path(entry.path), info))
+                elif not stat.S_ISREG(info.st_mode):
+                    raise ValueError('CONSUMER_CENSUS_UNAVAILABLE')
+        if len(directories) > 32:
+            raise ValueError('CONSUMER_CENSUS_UNBOUNDED')
+        for directory, initial in sorted(directories, key=lambda row: str(row[0])):
+            value = _consumer_config(directory / 'config.json')
+            current = directory.lstat()
+            if (current.st_dev, current.st_ino, current.st_mtime_ns) != (initial.st_dev, initial.st_ino, initial.st_mtime_ns):
+                raise ValueError('CONSUMER_CONFIG_CHANGED')
+            if 'fleetStatus' not in value:
+                continue
+            config = value['fleetStatus']
+            if type(config) is not dict or type(config.get('enabled')) is not bool:
+                raise ValueError('CONSUMER_CONFIG_UNREADABLE')
+            if not config['enabled']:
+                continue
+            path = config.get('fabricLauncherPath')
+            expected = config.get('fabricLauncherSha256')
+            if path is None and expected is None:
+                continue
+            if (type(path) is not str or not path or len(path) > 4096
+                    or any(ord(c) < 32 for c in path) or not Path(path).is_absolute()
+                    or type(expected) is not str or re.fullmatch(r'[0-9a-f]{64}', expected) is None):
+                raise ValueError('CONSUMER_CONFIG_UNREADABLE')
+            if str(Path(path).resolve(strict=False)) == target and expected != proposed_sha:
+                conflicts.append(directory.name)
+        after = root.lstat()
+        if (after.st_dev, after.st_ino, after.st_mtime_ns) != (before.st_dev, before.st_ino, before.st_mtime_ns):
+            raise ValueError('CONSUMER_CENSUS_CHANGED')
+    except (OSError, RuntimeError):
+        raise ValueError('CONSUMER_CENSUS_UNAVAILABLE') from None
     return conflicts
 
 
@@ -144,6 +216,7 @@ def stage_wrapper_candidate(wrapper, release, expected_sha, output):
     original=wrapper.read_bytes()
     if sha(original)!=expected_sha:raise ValueError('WRAPPER_PREIMAGE_CHANGED')
     candidate=wrapper_content(original,release)
+    consumer_count=len(pinned_consumers(wrapper,sha(candidate)))
     with Path(output).open('xb') as stream:
         stream.write(candidate)
         stream.flush()
@@ -152,7 +225,7 @@ def stage_wrapper_candidate(wrapper, release, expected_sha, output):
     subprocess.run(['bash','-n',str(output)],check=True,timeout=10)
     if Path(output).read_bytes()!=candidate:raise ValueError('WRAPPER_CANDIDATE_READBACK_FAILED')
     return {'state':'WRAPPER_CANDIDATE_NOT_INSTALLED','original_sha256':expected_sha,
-            'candidate_sha256':sha(candidate),'pinned_consumer_count':len(pinned_consumers(wrapper,sha(candidate)))}
+            'candidate_sha256':sha(candidate),'pinned_consumer_count':consumer_count}
 
 
 def activate(wrapper, release, expected_sha):
@@ -180,6 +253,8 @@ def activate(wrapper, release, expected_sha):
         after=wrapper.lstat()
         if (before.st_dev,before.st_ino,before.st_mtime_ns)!=(after.st_dev,after.st_ino,after.st_mtime_ns) or wrapper.read_bytes()!=data:
             raise ValueError('WRAPPER_CHANGED_DURING_PREPARE')
+        if pinned_consumers(wrapper,sha(updated)):
+            raise ValueError('PINNED_CONSUMER_RELEASE_REQUIRED')
         os.replace(name,wrapper)
         if wrapper.read_bytes()!=updated:raise ValueError('WRAPPER_READBACK_FAILED')
         return {'state':'PROMPT_HOOK_INSTALLED','wrapper_sha256':sha(updated),'backup':str(backup)}

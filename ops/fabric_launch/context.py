@@ -206,6 +206,7 @@ def prepare(value: dict, *, now: dt.datetime | None = None) -> dict:
     if type(context["degraded"]) is not list or len(context["degraded"]) > 8:
         fail("CONTEXT_DEGRADATION_INVALID")
     retained, omitted, fact_keys, used = [], [], set(), 0
+    validated_facts = []
     for reason in context["degraded"]:
         degraded.append("context:" + text(reason, 512))
     for fact in context["facts"]:
@@ -219,17 +220,26 @@ def prepare(value: dict, *, now: dt.datetime | None = None) -> dict:
         text(fact["content"], MAX_FACT_BYTES)
         available = fresh(fact["observed_at"], now)
         size = len(canonical(fact))
+        validated_facts.append((fact, key, available, size))
+    selected_keys = set()
+    # Reserve the existing bounded budget for required facts before optional ones.
+    # Preserve the original order when rendering the retained source facts below.
+    for fact, key, available, size in sorted(validated_facts, key=lambda row: not row[0]["required"]):
         reason = "STALE" if not available else "OMITTED_BUDGET" if used + size > MAX_CONTEXT_BYTES else ""
         if reason:
             if fact["required"]:
                 fail("REQUIRED_CONTEXT_UNAVAILABLE:" + reason)
             omitted.append({"ref": fact["ref"], "revision": fact["revision"], "reason": reason})
         else:
-            retained.append(fact)
+            selected_keys.add(key)
             used += size
+    retained = [fact for fact, key, _available, _size in validated_facts if key in selected_keys]
     # Keep source facts in an explicitly labelled data section of the existing brief.
+    # UTF-8 text remains readable rather than becoming larger literal escape text.
+    # Canonical receipt hashing and its conservative budget above remain unchanged.
     for fact in retained:
-        request["inputs"].append("ADVISORY PROJECT FACT (not authority): " + canonical(fact).decode())
+        rendered = json.dumps(fact, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+        request["inputs"].append("ADVISORY PROJECT FACT (not authority): " + rendered)
     if required or optional:
         inventory = {"scope_ref": observations["scope_ref"], "required": required,
                      "optional": optional, "observed_states": {n: state(n) for n in required + optional},

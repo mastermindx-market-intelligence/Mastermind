@@ -12,6 +12,13 @@ from ops.fabric_launch import observe as observer
 from ops.fabric_launch import install
 
 
+@pytest.fixture(autouse=True)
+def isolated_consumer_root(tmp_path, monkeypatch):
+    root=tmp_path/'studio-consumer-fixture'
+    root.mkdir()
+    monkeypatch.setattr(install,'STUDIO_CONSUMER_ROOT',root)
+
+
 @pytest.fixture
 def no_real_commands(monkeypatch):
     calls=[]

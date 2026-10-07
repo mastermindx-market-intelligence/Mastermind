@@ -182,3 +182,39 @@ def test_omitted_context_no_answer_is_visible_not_invented(launch_input):
     result = c.prepare(launch_input, now=NOW)
     assert 'context:Agent OS query unresolved' in result['degraded'][1]
     assert result['retained_context_refs'] == []
+
+
+def test_optional_facts_cannot_crowd_out_required_project_context(launch_input):
+    base=launch_input['context']['facts'][0]
+    launch_input['context']['facts']=[
+        dict(base,ref='optional-first',content='o'*2900,required=False),
+        dict(base,ref='required-a',content='a'*1600),
+        dict(base,ref='required-b',content='b'*1600),
+    ]
+    result=c.prepare(launch_input,now=NOW)
+    assert result['retained_context_refs']==['required-a','required-b']
+    assert result['omitted_context']==[{'ref':'optional-first','revision':'commit:fixture','reason':'OMITTED_BUDGET'}]
+
+
+def test_retained_facts_keep_source_order_after_required_budget_reservation(launch_input):
+    base=launch_input['context']['facts'][0]
+    launch_input['context']['facts']=[dict(base,ref='optional-first',required=False),dict(base,ref='required-last')]
+    result=c.prepare(launch_input,now=NOW)
+    assert result['retained_context_refs']==['optional-first','required-last']
+
+
+def test_utf8_project_context_fits_compiler_input_without_escape_bloat(launch_input, monkeypatch):
+    launch_input['context']['facts'][0]['content']='\u4e2d'*850
+    compile_original=c.materialize_worker_commission
+    compiler_inputs=[]
+    def observed_compile(request, **kwargs):
+        compiler_inputs.append(copy.deepcopy(request))
+        return compile_original(request, **kwargs)
+    monkeypatch.setattr(c, 'materialize_worker_commission', observed_compile)
+    result=c.prepare(launch_input,now=NOW)
+    entry=next(v for v in compiler_inputs[-1]['inputs'] if v.startswith('ADVISORY PROJECT FACT'))
+    assert json.loads(entry.split(': ',1)[1])['content']=='\u4e2d'*850
+    assert '\u4e2d'*850 in entry
+    # The incumbent compiler owns its final Markdown/JSON rendering. Preserve it.
+    assert result['instructions_markdown'].count('u4e2d') >= 850
+    assert result['retained_context_refs']==['repo:fixture']

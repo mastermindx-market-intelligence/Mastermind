@@ -292,3 +292,26 @@ A current native Claude MCP census on M2 returned `linear-server` as authenticat
 This is a real actor/client enrollment gap; the presence of the ChatGPT Linear connector or
 a saved MCP server name is not evidence of a working native Linear tool. No credential or
 OAuth state was copied or reset during this task.
+
+
+## 13. Independent review and preparation corrections
+
+A real independent installer reviewer returned REQUEST_CHANGES against source 40a7f398.
+Its standard-library reproduction confirmed that a missing consumer directory or a
+non-object JSON document could be mistaken for no pinned consumers. The parent reproduced
+the findings on the frozen source, then repaired the bounded existing reader. Missing,
+unlistable, symlinked, partial, ambiguous or malformed consumer evidence now refuses; the
+original wrapper remains unchanged. The publisher rechecks conflicts immediately before
+its conditional swap. This compatibility observation is not a service-quiescence lock:
+the existing Studio owner must still coordinate the actual release.
+
+Project-fact selection now reserves space for required facts before optional ones and
+preserves their original source order in the output. Unicode facts are passed into the
+existing compiler without an extra layer of literal escape text. No compiler budget or
+required-source rule was weakened. Exact JSON-RPC replies are required for readiness:
+wrong request ids, protocol versions, duplicate/nonfinite JSON, primitive results and
+error/result ambiguity cannot produce a successful read observation.
+
+The real bounded verifier result remains accepted only for the source it tested; these
+new repairs have deterministic regression proof and require their own exact revision
+qualification. Native package selection and global rollout are not inferred from either.
