@@ -3414,13 +3414,6 @@ def test_manual_config_edit_alone_does_not_make_the_ceo_submit_sink_eligible():
         is False
     )
 
-    # The honest limit is written into the function docstring itself.
-    source = Path(control.__file__).read_text(encoding="utf-8")
-    docstring = source.split("def ceo_submit_sink_eligible(", 1)[1].split('"""', 2)[1]
-    assert "SOURCE-side gate" in docstring
-    assert "control_plane/executive_service.py" in docstring
-    assert "does not yet consult it" in docstring
-    assert "no runtime effect" in docstring
 
 
 def test_direct_install_with_armed_config_does_not_make_the_ceo_submit_sink_eligible():

@@ -2056,6 +2056,7 @@ class ExecutiveControlService:
         proof_capacity_recovery_worker_uid: int | None = None,
         operator_identity_verifier: Callable[[], Awaitable[None]] | None = None,
         autonomy_guard: Callable[[], None] | None = None,
+        ceo_submit_admission_guard: Callable[[], None] | None = None,
         backup_backend: BackupBackendProtocol | None = None,
         activated_socket: socket.socket | None = None,
         service_state: str = "READY",
@@ -2107,6 +2108,7 @@ class ExecutiveControlService:
         self._proof_capacity_recovery_worker_uid = proof_capacity_recovery_worker_uid
         self._operator_identity_verifier = operator_identity_verifier
         self._autonomy_guard = autonomy_guard
+        self._ceo_submit_admission_guard = ceo_submit_admission_guard
         if self.config.coo_autonomy_armed and not callable(self._autonomy_guard):
             raise ValueError("armed COO autonomy requires an autonomy guard")
         self._backup_backend = backup_backend or _ModuleBackupBackend()
@@ -5017,6 +5019,8 @@ class ExecutiveControlService:
                                        else self._ceo_ingress_armed),
                     principal_peer_authorized=app_peer and principal_frame,
                     principal_admission_guard=principal_guard if principal_frame else None,
+                    admission_guard=(lambda _envelope: self._require_ceo_submit_admission())
+                    if self.config.ceo_submit_armed or (app_peer and not principal_frame) else None,
                     # Strict-v2 selection is trusted host composition.  The
                     # source-free public frame cannot opt itself into (or out
                     # of) the terminal-return admission path.
@@ -5799,26 +5803,31 @@ class ExecutiveControlService:
                     uid_sweep=sweep, expected_worker_uid=self._proof_capacity_recovery_worker_uid,
                     observation_started_at=started, observation_finished_at=finished)
 
+    def _require_ceo_submit_admission(self) -> None:
+        guard = self._ceo_submit_admission_guard
+        if guard is None and not self._is_production_control_socket():
+            return
+        if not self.config.ceo_submit_armed or not callable(guard) or self._closing:
+            raise _CeoSubmitUnarmedError()
+        try:
+            if guard() is not None:
+                raise ValueError("admission guard returned a value")
+        except Exception as exc:
+            raise _CeoSubmitUnarmedError() from exc
+
     def _submit_service_intent(self, payload: Any) -> dict[str, Any]:
         """Submit through the existing sink with v2 host composition attached."""
 
         normalized = ceo_intent.validate_intent(payload)
+        command_id = ceo_intent.command_id_for(str(normalized["intent_id"]))
+        if self._require_runtime().store.find_event_by_command_id(command_id) is not None:
+            return ceo_intent.submit_intent(
+                self._require_runtime(), normalized,
+                workspace_root=self.config.proof_workspace_root,
+            )
         binding: dict[str, Any] | None = None
         dialogue_source: dict[str, Any] | None = None
         if normalized.get("schema") == ceo_intent.INTENT_SCHEMA_V2:
-            # Replay/status is entirely durable. A current source provider is
-            # admission evidence only and is never consulted for an existing
-            # command, including while that provider is unavailable or moved.
-            command_id = ceo_intent.command_id_for(str(normalized["intent_id"]))
-            existing = self._require_runtime().store.find_event_by_command_id(
-                command_id
-            )
-            if existing is not None:
-                return ceo_intent.submit_intent(
-                    self._require_runtime(),
-                    normalized,
-                    workspace_root=self.config.proof_workspace_root,
-                )
             if normalized["grounding"].get("mastermind_sha") != self.config.proof_base_sha:
                 raise ceo_intent.CeoIntentError(
                     "v2 intent grounding.mastermind_sha differs from the installed reviewed release"
@@ -5863,6 +5872,7 @@ class ExecutiveControlService:
             submit_kwargs["execution_binding"] = binding
             submit_kwargs["dialogue_source"] = dialogue_source
             submit_kwargs["require_dialogue_source"] = provider is not None
+        self._require_ceo_submit_admission()
         receipt = ceo_intent.submit_intent(
             self._require_runtime(),
             normalized,
