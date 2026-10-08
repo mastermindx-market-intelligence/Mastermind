@@ -9,13 +9,18 @@ files, and stops with the Relay disabled and unloaded.
 
 ``resume`` is limited to the one reviewed crash state where the token file was
 committed but config was not. ``verify`` is read-only with respect to enrollment
-files. No operation overwrites ambiguous existing state.
+files. ``rebind-release`` binds one already complete enrollment to the exact
+release tree this helper is executing from, preserving the credential and every
+non-version policy field; it never enrolls, enables or starts a service. No
+operation overwrites ambiguous existing state.
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
+import fcntl
 import grp
+import hashlib
 import json
 import os
 import plistlib
@@ -24,8 +29,11 @@ import re
 import stat
 import subprocess
 import sys
+import tempfile
 import termios
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO, TextIO
 
@@ -60,11 +68,38 @@ RELAY_PLIST = Path(
 SYSTEM_RELEASE_ROOT = Path(
     "/Library/Application Support/MastermindExecutive/releases"
 )
+C1_REBIND_LOCK_DIR = Path(
+    "/Library/Application Support/MastermindExecutive/locks"
+)
+C1_REBIND_LOCK_PATH = C1_REBIND_LOCK_DIR / "c1-sol-state-relay-rebind.lock"
+C1_REBIND_LOCK_UID = 0
+C1_REBIND_LOCK_GID = 0
+C1_REBIND_LOCK_DIR_MODE = 0o700
+C1_REBIND_LOCK_MODE = 0o600
+# Pinned host identities. They are named so a fixture host can mirror them onto
+# one unprivileged test account; production values are unchanged.
+CONTROL_CONFIG_UID = 0
+CONTROL_PLIST_UID = 0
+CONTROL_PLIST_GID = 0
+RELAY_PLIST_UID = 0
+RELAY_PLIST_GID = 0
+RELAY_CONFIG_UID = 0
+RELAY_CONFIG_GID = RELAY_GID
+PYTHON_BINARY = "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12"
+RELAY_HOME = "/var/db/mastermind-executive/sol-state-relay/home"
+RELAY_STDOUT_PATH = "/var/log/mastermind-executive/sol-state-relay/stdout.log"
+RELAY_STDERR_PATH = "/var/log/mastermind-executive/sol-state-relay/stderr.log"
+PLIST_MODE = 0o644
+CONFIG_MODE = 0o440
+TOKEN_MODE = 0o400
+PLIST_MAX_BYTES = 64 * 1024
+CONFIG_MAX_BYTES = 8192
 MAX_TOKEN_BYTES = 2048
 _TOKEN_SHAPED_RE = re.compile(
     r"(?i)(?:^|[^A-Za-z0-9])xox[abprs]-[A-Za-z0-9-]{10,}"
 )
 _RELEASE_RE = re.compile(r"^[0-9a-f]{40}$")
+_PLACEHOLDER_RE = re.compile(r"__[A-Z0-9_]+__")
 
 ERROR_CODES = frozenset(
     {
@@ -78,6 +113,17 @@ ERROR_CODES = frozenset(
         "C1_ENROLLMENT_INTERNAL",
         "C1_ENROLLMENT_SECRET_SURFACE_REFUSED",
         "C1_ENROLLMENT_WRITE_REFUSED",
+        "C1_REBIND_BUSY",
+        "C1_REBIND_EFFECT_UNCERTAIN",
+        "C1_REBIND_MIXED_GENERATION",
+        "C1_REBIND_PARTIAL_STATE",
+        "C1_REBIND_PLIST_REFUSED",
+        "C1_REBIND_SERVICE_RUNNING",
+        "C1_REBIND_STALE_CONFIG",
+        "C1_REBIND_TOKEN_DRIFT",
+        "C1_REBIND_TOKEN_REFUSED",
+        "C1_REBIND_VERSION_MISMATCH",
+        "C1_REBIND_WRITE_REFUSED",
     }
 )
 
@@ -98,7 +144,7 @@ class _OpaqueParser(argparse.ArgumentParser):
 def build_parser() -> argparse.ArgumentParser:
     parser = _OpaqueParser(description="Enroll the Mastermind C1 SOL_STATE Relay")
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("enroll", "resume", "verify"):
+    for name in ("enroll", "resume", "verify", "rebind-release"):
         child = commands.add_parser(name)
         child.add_argument("--expected-bot-user-id", required=True)
     return parser
@@ -188,6 +234,281 @@ def build_config_document(*, bot_user_id: str, release_sha: str) -> dict[str, ob
         "max_executive_age_seconds": c1_runtime.MAX_EXECUTIVE_AGE_SECONDS,
         "relay_version": release_sha,
     }
+
+
+@dataclass(frozen=True)
+class _PrivateFileAttestation:
+    device: int
+    inode: int
+    size: int
+    mtime_ns: int
+    uid: int
+    gid: int
+    mode: int
+    link_count: int
+    sha256: str
+
+
+_REBIND_LOCK_MINT = object()
+
+
+class _RebindLockCapability:
+    """Opaque live capability proving this process holds the fixed rebind flock."""
+
+    __slots__ = ("descriptor", "device", "inode", "path", "_live")
+
+    def __init__(
+        self,
+        marker: object,
+        *,
+        descriptor: int,
+        device: int,
+        inode: int,
+        path: Path,
+    ) -> None:
+        if marker is not _REBIND_LOCK_MINT:
+            raise TypeError("rebind lock capability is private")
+        self.descriptor = int(descriptor)
+        self.device = int(device)
+        self.inode = int(inode)
+        self.path = Path(path)
+        self._live = True
+
+
+def _validate_rebind_lock_path(*, descriptor: int | None = None) -> os.stat_result:
+    """Validate the fixed root-only lock namespace and one direct lock inode."""
+
+    if os.geteuid() != 0 or sys.platform != "darwin":
+        raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED")
+    try:
+        parent = C1_REBIND_LOCK_DIR.lstat()
+    except OSError:
+        raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED") from None
+    if (
+        stat.S_ISLNK(parent.st_mode)
+        or not stat.S_ISDIR(parent.st_mode)
+        or parent.st_uid != C1_REBIND_LOCK_UID
+        or parent.st_gid != C1_REBIND_LOCK_GID
+        or stat.S_IMODE(parent.st_mode) != C1_REBIND_LOCK_DIR_MODE
+    ):
+        raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED")
+    try:
+        if c1_runtime._path_has_acl(  # noqa: SLF001
+            C1_REBIND_LOCK_DIR, expected_info=parent
+        ):
+            raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED")
+    except C1EnrollmentError:
+        raise
+    except Exception:
+        raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED") from None
+
+    try:
+        info = C1_REBIND_LOCK_PATH.lstat()
+    except OSError:
+        raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED") from None
+    if (
+        stat.S_ISLNK(info.st_mode)
+        or not stat.S_ISREG(info.st_mode)
+        or info.st_nlink != 1
+        or info.st_uid != C1_REBIND_LOCK_UID
+        or info.st_gid != C1_REBIND_LOCK_GID
+        or stat.S_IMODE(info.st_mode) != C1_REBIND_LOCK_MODE
+    ):
+        raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED")
+    if descriptor is not None:
+        try:
+            opened = os.fstat(descriptor)
+        except OSError:
+            raise C1EnrollmentError("C1_REBIND_WRITE_REFUSED") from None
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or opened.st_nlink != 1
+            or (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino)
+            or opened.st_uid != C1_REBIND_LOCK_UID
+            or opened.st_gid != C1_REBIND_LOCK_GID
+            or stat.S_IMODE(opened.st_mode) != C1_REBIND_LOCK_MODE
+        ):
+            raise C1EnrollmentError("C1_REBIND_WRITE_REFUSED")
+    try:
+        if c1_runtime._path_has_acl(  # noqa: SLF001
+            C1_REBIND_LOCK_PATH, expected_info=info
+        ):
+            raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED")
+    except C1EnrollmentError:
+        raise
+    except Exception:
+        raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED") from None
+    return info
+
+
+def _assert_rebind_lock(lock: object) -> _RebindLockCapability:
+    """Require the one live capability and re-prove its descriptor/path identity."""
+
+    if (
+        not isinstance(lock, _RebindLockCapability)
+        or not lock._live  # noqa: SLF001
+        or lock.path != C1_REBIND_LOCK_PATH
+    ):
+        raise C1EnrollmentError("C1_REBIND_WRITE_REFUSED")
+    info = _validate_rebind_lock_path(descriptor=lock.descriptor)
+    if (info.st_dev, info.st_ino) != (lock.device, lock.inode):
+        raise C1EnrollmentError("C1_REBIND_WRITE_REFUSED")
+    return lock
+
+
+@contextmanager
+def _rebind_lock() -> Iterator[_RebindLockCapability]:
+    """Hold one nonblocking host flock for the complete supported rebind."""
+
+    if os.geteuid() != 0 or sys.platform != "darwin":
+        raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED")
+    try:
+        parent = C1_REBIND_LOCK_DIR.lstat()
+    except OSError:
+        raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED") from None
+    if (
+        stat.S_ISLNK(parent.st_mode)
+        or not stat.S_ISDIR(parent.st_mode)
+        or parent.st_uid != C1_REBIND_LOCK_UID
+        or parent.st_gid != C1_REBIND_LOCK_GID
+        or stat.S_IMODE(parent.st_mode) != C1_REBIND_LOCK_DIR_MODE
+    ):
+        raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED")
+    try:
+        if c1_runtime._path_has_acl(  # noqa: SLF001
+            C1_REBIND_LOCK_DIR, expected_info=parent
+        ):
+            raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED")
+    except C1EnrollmentError:
+        raise
+    except Exception:
+        raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED") from None
+
+    base_flags = os.O_RDWR | getattr(os, "O_CLOEXEC", 0)
+    if hasattr(os, "O_NOFOLLOW"):
+        base_flags |= os.O_NOFOLLOW
+    descriptor = -1
+    capability: _RebindLockCapability | None = None
+    try:
+        created = False
+        try:
+            descriptor = os.open(
+                C1_REBIND_LOCK_PATH,
+                base_flags | os.O_CREAT | os.O_EXCL,
+                C1_REBIND_LOCK_MODE,
+            )
+            created = True
+        except FileExistsError:
+            try:
+                descriptor = os.open(C1_REBIND_LOCK_PATH, base_flags)
+            except OSError:
+                raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED") from None
+        if created:
+            created_info = os.fstat(descriptor)
+            if (
+                created_info.st_uid != C1_REBIND_LOCK_UID
+                or created_info.st_gid != C1_REBIND_LOCK_GID
+            ):
+                os.fchown(descriptor, C1_REBIND_LOCK_UID, C1_REBIND_LOCK_GID)
+            if stat.S_IMODE(created_info.st_mode) != C1_REBIND_LOCK_MODE:
+                os.fchmod(descriptor, C1_REBIND_LOCK_MODE)
+            os.fsync(descriptor)
+        info = _validate_rebind_lock_path(descriptor=descriptor)
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise C1EnrollmentError("C1_REBIND_BUSY") from None
+        except OSError as exc:
+            if exc.errno in {11, 35}:
+                raise C1EnrollmentError("C1_REBIND_BUSY") from None
+            raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED") from None
+        info = _validate_rebind_lock_path(descriptor=descriptor)
+        capability = _RebindLockCapability(
+            _REBIND_LOCK_MINT,
+            descriptor=descriptor,
+            device=info.st_dev,
+            inode=info.st_ino,
+            path=C1_REBIND_LOCK_PATH,
+        )
+        yield capability
+    finally:
+        if capability is not None:
+            capability._live = False  # noqa: SLF001
+        if descriptor >= 0:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+            except OSError:
+                pass
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+
+
+def _attest_private_bytes(
+    path: Path,
+    *,
+    uid: int,
+    gid: int,
+    mode: int,
+    max_bytes: int,
+    code: str,
+) -> tuple[bytes, _PrivateFileAttestation]:
+    """Read one exact private file and attest its identity and content digest."""
+
+    try:
+        before = path.lstat()
+        raw = c1_runtime._read_exact_private_bytes(  # noqa: SLF001
+            path,
+            expected_uid=int(uid),
+            expected_gid=int(gid),
+            expected_mode=int(mode),
+            max_bytes=int(max_bytes),
+        )
+        after = path.lstat()
+    except Exception:
+        raise C1EnrollmentError(code) from None
+    if (
+        stat.S_ISLNK(before.st_mode)
+        or not stat.S_ISREG(before.st_mode)
+        or (before.st_dev, before.st_ino, before.st_nlink)
+        != (after.st_dev, after.st_ino, after.st_nlink)
+    ):
+        raise C1EnrollmentError(code)
+    return raw, _PrivateFileAttestation(
+        device=before.st_dev,
+        inode=before.st_ino,
+        size=before.st_size,
+        mtime_ns=before.st_mtime_ns,
+        uid=before.st_uid,
+        gid=before.st_gid,
+        mode=stat.S_IMODE(before.st_mode),
+        link_count=before.st_nlink,
+        sha256=hashlib.sha256(raw).hexdigest(),
+    )
+
+
+def _try_attest_private_bytes(
+    path: Path,
+    *,
+    uid: int,
+    gid: int,
+    mode: int,
+    max_bytes: int,
+) -> bytes | None:
+    """Best-effort durable read used only to reconcile observed state."""
+
+    try:
+        return _attest_private_bytes(
+            path,
+            uid=uid,
+            gid=gid,
+            mode=mode,
+            max_bytes=max_bytes,
+            code="C1_REBIND_EFFECT_UNCERTAIN",
+        )[0]
+    except C1EnrollmentError:
+        return None
 
 
 async def qualify_token(
@@ -403,13 +724,34 @@ def validate_host_relay_groups() -> None:
         raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED") from None
 
 
-def _assert_host_prepared() -> str:
+def _install_release_root() -> Path:
+    try:
+        return _ROOT.resolve(strict=True)
+    except OSError:
+        raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED") from None
+
+
+def _relay_substrate() -> str:
+    """Validate every release-agnostic C1 host precondition.
+
+    This deliberately does not bind the installed relay plist to a release:
+    enroll/resume/verify add that strict current-release check themselves, and
+    rebind must instead validate the *previous* enrollment it is replacing.
+    """
+
+    # Lazy by design: acceptance imports the A2 enrollment owner, and A2
+    # imports this C1 module. Loading acceptance at module import would cycle.
+    from ops.executive_os import acceptance
+
     if os.geteuid() != 0 or sys.platform != "darwin":
         raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED")
     release_sha = _release_identity()
     try:
         account = pwd.getpwnam(RELAY_USER)
         group = grp.getgrnam(RELAY_GROUP)
+        control_account = pwd.getpwnam(acceptance.CONTROL_USER)
+        control_group = grp.getgrnam(acceptance.CONTROL_GROUP)
+        ops_group = grp.getgrnam(acceptance.OPS_GROUP)
     except KeyError:
         raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED") from None
     if (
@@ -417,17 +759,25 @@ def _assert_host_prepared() -> str:
         or account.pw_gid != RELAY_GID
         or group.gr_gid != RELAY_GID
         or group.gr_mem
-        or account.pw_dir != "/var/db/mastermind-executive/sol-state-relay/home"
+        or account.pw_dir != RELAY_HOME
         or account.pw_shell != "/usr/bin/false"
+        or control_account.pw_gid != control_group.gr_gid
     ):
         raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED")
+    control_uid = control_account.pw_uid
+    control_gid = control_group.gr_gid
+    ops_gid = ops_group.gr_gid
     # This runs before any token is read. A prepared host with admin/wheel or
     # any other unreviewed supplementary group is not eligible for enrollment.
     validate_host_relay_groups()
 
-    _exact_file(CONTROL_CONFIG, uid=0, gid=450, mode=0o440)
-    _exact_file(CONTROL_PLIST, uid=0, gid=0, mode=0o644)
-    _exact_file(RELAY_PLIST, uid=0, gid=0, mode=0o644)
+    _exact_file(
+        CONTROL_CONFIG,
+        uid=CONTROL_CONFIG_UID,
+        gid=control_gid,
+        mode=0o440,
+    )
+    _exact_file(CONTROL_PLIST, uid=CONTROL_PLIST_UID, gid=CONTROL_PLIST_GID, mode=PLIST_MODE)
 
     try:
         control = json.loads(CONTROL_CONFIG.read_text(encoding="utf-8"))
@@ -460,54 +810,60 @@ def _assert_host_prepared() -> str:
         if set(sockets) != {"Operator", "CeoIngress", "DialogueObservation"}:
             raise ValueError
         if (
-            sockets["Operator"].get("SockPathOwner") != 450
-            or sockets["Operator"].get("SockPathGroup") != 453
+            sockets["Operator"].get("SockPathOwner") != control_uid
+            or sockets["Operator"].get("SockPathGroup") != ops_gid
             or sockets["Operator"].get("SockPathMode") != 0o660
-            or sockets["CeoIngress"].get("SockPathOwner") != 450
+            or sockets["CeoIngress"].get("SockPathOwner") != control_uid
             or sockets["CeoIngress"].get("SockPathGroup") != RELAY_GID
             or sockets["CeoIngress"].get("SockPathMode") != 0o660
             or sockets["DialogueObservation"].get("SockPathName")
             != os.fspath(DIALOGUE_OBSERVATION_SOCKET)
-            or sockets["DialogueObservation"].get("SockPathOwner") != 450
+            or sockets["DialogueObservation"].get("SockPathOwner") != control_uid
             or sockets["DialogueObservation"].get("SockPathGroup")
             != DIALOGUE_RELAY_GID
             or sockets["DialogueObservation"].get("SockPathMode") != 0o660
         ):
             raise ValueError
-
-        relay_plist = plistlib.loads(RELAY_PLIST.read_bytes())
-        if relay_plist.get("Label") != RELAY_LABEL:
-            raise ValueError
-        if (
-            relay_plist.get("UserName") != RELAY_USER
-            or relay_plist.get("GroupName") != RELAY_GROUP
-        ):
-            raise ValueError
-        expected_program = [
-            "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
-            "-I",
-            "-S",
-            "-B",
-            os.fspath(_ROOT / "scripts" / "c1_sol_state_relay.py"),
-            "--config",
-            os.fspath(c1_runtime.CONFIG_PATH),
-        ]
-        if relay_plist.get("ProgramArguments") != expected_program:
-            raise ValueError
-        environment = relay_plist.get("EnvironmentVariables")
-        if not isinstance(environment, dict) or any(
-            "TOKEN" in str(key).upper() for key in environment
-        ):
-            raise ValueError
     except Exception:
         raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED") from None
+    return release_sha
+
+
+def _assert_services_stopped(code: str) -> None:
+    """Require control and relay absent/stopped and the relay explicitly disabled."""
 
     if (
         _launchd_loaded(CONTROL_LABEL)
         or _launchd_loaded(RELAY_LABEL)
         or not _launchd_disabled(RELAY_LABEL)
     ):
+        raise C1EnrollmentError(code)
+
+
+def _assert_host_prepared() -> str:
+    """The strict current-release gate used by enroll, resume and verify.
+
+    The installed relay plist must already be the exact closed enrollment bound
+    to this release tree. Rebind must not use this gate: on the stale host it
+    exists to repair, the plist is still bound to the previous release.
+    """
+
+    release_sha = _relay_substrate()
+    raw, _attestation = _attest_private_bytes(
+        RELAY_PLIST,
+        uid=RELAY_PLIST_UID,
+        gid=RELAY_PLIST_GID,
+        mode=PLIST_MODE,
+        max_bytes=PLIST_MAX_BYTES,
+        code="C1_ENROLLMENT_HOST_REFUSED",
+    )
+    observed_root = _assert_relay_plist_document(
+        _parse_relay_plist(raw, code="C1_ENROLLMENT_HOST_REFUSED"),
+        code="C1_ENROLLMENT_HOST_REFUSED",
+    )
+    if observed_root != _install_release_root():
         raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED")
+    _assert_services_stopped("C1_ENROLLMENT_HOST_REFUSED")
     return release_sha
 
 
@@ -527,7 +883,7 @@ def _existing_token() -> str:
             c1_runtime.TOKEN_PATH,
             expected_uid=RELAY_UID,
             expected_gid=RELAY_GID,
-            expected_mode=0o400,
+            expected_mode=TOKEN_MODE,
             max_bytes=MAX_TOKEN_BYTES,
         )
     except Exception:
@@ -548,6 +904,778 @@ def _canonical_config_bytes(document: Mapping[str, object]) -> bytes:
     ).encode("utf-8")
 
 
+RELAY_PLIST_TEMPLATE_NAME = "com.mastermind.executive.sol-state-relay.plist.template"
+
+
+def _relay_environment() -> dict[str, str]:
+    return {
+        "HOME": RELAY_HOME,
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "NO_COLOR": "1",
+        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+        "PYTHONUNBUFFERED": "1",
+        "TZ": "UTC",
+    }
+
+
+def _relay_program_arguments(release_root: Path) -> list[str]:
+    """The exact relay argv, identical to the shell render owner's input."""
+
+    return [
+        PYTHON_BINARY,
+        "-I",
+        "-S",
+        "-B",
+        os.fspath(release_root / "scripts" / "c1_sol_state_relay.py"),
+        "--config",
+        os.fspath(c1_runtime.CONFIG_PATH),
+    ]
+
+
+def _expected_relay_plist_document(release_root: Path) -> dict[str, object]:
+    """The one closed relay LaunchDaemon contract for a release root."""
+
+    return {
+        "Label": RELAY_LABEL,
+        "ProgramArguments": _relay_program_arguments(release_root),
+        "WorkingDirectory": os.fspath(release_root),
+        "UserName": RELAY_USER,
+        "GroupName": RELAY_GROUP,
+        "RunAtLoad": True,
+        "KeepAlive": True,
+        "ThrottleInterval": 10,
+        "ExitTimeOut": 15,
+        "AbandonProcessGroup": False,
+        "ProcessType": "Background",
+        "Umask": 0o77,
+        "HardResourceLimits": {"Core": 0, "FileSize": 16 * 1024 * 1024},
+        "EnvironmentVariables": _relay_environment(),
+        "StandardOutPath": RELAY_STDOUT_PATH,
+        "StandardErrorPath": RELAY_STDERR_PATH,
+    }
+
+
+def _contains_placeholder(value: object) -> bool:
+    if isinstance(value, str):
+        return _PLACEHOLDER_RE.search(value) is not None
+    if isinstance(value, Mapping):
+        return any(
+            _contains_placeholder(key) or _contains_placeholder(item)
+            for key, item in value.items()
+        )
+    if isinstance(value, (list, tuple)):
+        return any(_contains_placeholder(item) for item in value)
+    return False
+
+
+def _parse_relay_plist(raw: bytes, *, code: str) -> dict[str, object]:
+    """Parse one relay plist without ever indexing before the type is checked."""
+
+    try:
+        document = plistlib.loads(raw)
+    except Exception:
+        raise C1EnrollmentError(code) from None
+    if not isinstance(document, dict):
+        raise C1EnrollmentError(code)
+    return document
+
+
+def _relay_plist_release_root(document: Mapping[str, object], *, code: str) -> Path:
+    """Derive the single installed release root one document is bound to."""
+
+    working_directory = document.get("WorkingDirectory")
+    if not isinstance(working_directory, str) or not working_directory:
+        raise C1EnrollmentError(code)
+    release_root = Path(working_directory)
+    if not release_root.is_absolute() or release_root != Path(
+        os.path.normpath(working_directory)
+    ):
+        raise C1EnrollmentError(code)
+    try:
+        relative = release_root.relative_to(SYSTEM_RELEASE_ROOT.resolve())
+    except ValueError:
+        raise C1EnrollmentError(code) from None
+    if len(relative.parts) != 1 or _RELEASE_RE.fullmatch(relative.parts[0]) is None:
+        raise C1EnrollmentError(code)
+    return release_root
+
+
+def _assert_relay_plist_document(
+    document: Mapping[str, object], *, code: str
+) -> Path:
+    """Validate one complete closed relay enrollment and return its release root.
+
+    The document must equal the single reviewed relay contract for its own
+    release root: exact 7-element ProgramArguments, exact Python/-I/-S/-B, the
+    exact ``scripts/c1_sol_state_relay.py`` entrypoint beneath one 40-hex
+    release root, the exact config path and WorkingDirectory, the exact
+    Label/UserName/GroupName and static contract, and one closed
+    EnvironmentVariables allowlist with no TOKEN key and no leftover template
+    placeholder.
+    """
+
+    release_root = _relay_plist_release_root(document, code=code)
+    if document != _expected_relay_plist_document(release_root) or _contains_placeholder(
+        document
+    ):
+        raise C1EnrollmentError(code)
+    return release_root
+
+
+def _render_relay_plist(release_root: Path) -> bytes:
+    """Render the new generation from the installed plist template owner.
+
+    ``prepare-c1-sol-state-relay.sh`` installs the template and then binds
+    ProgramArguments, WorkingDirectory, UserName, GroupName, HOME, stdout and
+    stderr to the release.  This mirrors that composition, and the composed
+    document must equal the closed contract exactly, so template drift fails
+    closed instead of writing a second unchecked plist semantics.
+    """
+
+    try:
+        document = plistlib.loads(
+            (
+                _install_release_root()
+                / "ops"
+                / "executive_os"
+                / RELAY_PLIST_TEMPLATE_NAME
+            ).read_text(encoding="utf-8").encode("utf-8")
+        )
+    except Exception:
+        raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED") from None
+    if not isinstance(document, dict):
+        raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED")
+    environment = document.get("EnvironmentVariables")
+    if not isinstance(environment, dict):
+        raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED")
+    document["ProgramArguments"] = _relay_program_arguments(release_root)
+    document["WorkingDirectory"] = os.fspath(release_root)
+    document["UserName"] = RELAY_USER
+    document["GroupName"] = RELAY_GROUP
+    environment["HOME"] = RELAY_HOME
+    document["EnvironmentVariables"] = environment
+    document["StandardOutPath"] = RELAY_STDOUT_PATH
+    document["StandardErrorPath"] = RELAY_STDERR_PATH
+    try:
+        if document != _expected_relay_plist_document(release_root):
+            raise ValueError
+        _assert_relay_plist_document(document, code="C1_ENROLLMENT_HOST_REFUSED")
+        rendered = plistlib.dumps(document, sort_keys=True)
+        if _contains_placeholder(_parse_relay_plist(
+            rendered, code="C1_ENROLLMENT_HOST_REFUSED"
+        )):
+            raise ValueError
+    except C1EnrollmentError:
+        raise
+    except Exception:
+        raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED") from None
+    return rendered
+
+
+def _replace_exact_file_atomic(
+    path: Path,
+    payload: bytes,
+    *,
+    uid: int,
+    gid: int,
+    mode: int,
+    expected_attestation: _PrivateFileAttestation,
+    lock: _RebindLockCapability,
+) -> _PrivateFileAttestation:
+    """Atomically replace one exact attested preimage in place.
+
+    The caller must supply the attestation it actually observed when it decided
+    to write. This helper re-proves that exact inode/content identity before
+    staging and again immediately before rename, so another modifier cannot be
+    silently overwritten merely because the path still has valid metadata.
+    """
+
+    _assert_rebind_lock(lock)
+    path = Path(path)
+    if not path.is_absolute() or not payload or len(payload) > PLIST_MAX_BYTES:
+        raise C1EnrollmentError("C1_ENROLLMENT_WRITE_REFUSED")
+    try:
+        parent = path.parent.lstat()
+    except OSError:
+        raise C1EnrollmentError("C1_ENROLLMENT_WRITE_REFUSED") from None
+    if stat.S_ISLNK(parent.st_mode) or not stat.S_ISDIR(parent.st_mode):
+        raise C1EnrollmentError("C1_ENROLLMENT_WRITE_REFUSED")
+    try:
+        if c1_runtime._path_has_acl(path.parent, expected_info=parent):  # noqa: SLF001
+            raise C1EnrollmentError("C1_ENROLLMENT_WRITE_REFUSED")
+    except C1EnrollmentError:
+        raise
+    except Exception:
+        raise C1EnrollmentError("C1_ENROLLMENT_WRITE_REFUSED") from None
+
+    before_bytes, before_attestation = _attest_private_bytes(
+        path,
+        uid=uid,
+        gid=gid,
+        mode=mode,
+        max_bytes=PLIST_MAX_BYTES,
+        code="C1_REBIND_EFFECT_UNCERTAIN",
+    )
+    if before_attestation != expected_attestation:
+        raise C1EnrollmentError("C1_REBIND_EFFECT_UNCERTAIN")
+
+    descriptor = -1
+    temporary: Path | None = None
+    try:
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{path.name}.", dir=path.parent
+        )
+        temporary = Path(temporary_name)
+        staged = os.fstat(descriptor)
+        if staged.st_uid != int(uid) or staged.st_gid != int(gid):
+            os.fchown(descriptor, int(uid), int(gid))
+        os.fchmod(descriptor, int(mode))
+        view = memoryview(payload)
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:
+                raise OSError
+            view = view[written:]
+        os.fsync(descriptor)
+        staged = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(staged.st_mode)
+            or staged.st_nlink != 1
+            or staged.st_uid != int(uid)
+            or staged.st_gid != int(gid)
+            or stat.S_IMODE(staged.st_mode) != int(mode)
+        ):
+            raise OSError
+        os.close(descriptor)
+        descriptor = -1
+
+        current_bytes, current_attestation = _attest_private_bytes(
+            path,
+            uid=uid,
+            gid=gid,
+            mode=mode,
+            max_bytes=PLIST_MAX_BYTES,
+            code="C1_REBIND_EFFECT_UNCERTAIN",
+        )
+        if (
+            current_attestation != expected_attestation
+            or current_bytes != before_bytes
+        ):
+            raise C1EnrollmentError("C1_REBIND_EFFECT_UNCERTAIN")
+
+        _assert_rebind_lock(lock)
+        os.replace(temporary, path)
+        temporary = None
+        _fsync_parent(path)
+        after_bytes, after_attestation = _attest_private_bytes(
+            path,
+            uid=uid,
+            gid=gid,
+            mode=mode,
+            max_bytes=PLIST_MAX_BYTES,
+            code="C1_REBIND_EFFECT_UNCERTAIN",
+        )
+        if (
+            after_bytes != payload
+            or after_attestation.device != staged.st_dev
+            or after_attestation.inode != staged.st_ino
+        ):
+            raise C1EnrollmentError("C1_REBIND_EFFECT_UNCERTAIN")
+        return after_attestation
+    except C1EnrollmentError:
+        raise
+    except OSError:
+        raise C1EnrollmentError("C1_ENROLLMENT_WRITE_REFUSED") from None
+    finally:
+        if descriptor >= 0:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        if temporary is not None:
+            try:
+                temporary.unlink()
+            except OSError:
+                pass
+
+
+@dataclass(frozen=True)
+class _RebindTarget:
+    bot_user_id: str
+    release_sha: str
+    plist_bytes: bytes
+    config_bytes: bytes
+
+    def writes(self) -> tuple[tuple[Path, bytes, int, int, int], ...]:
+        return (
+            (
+                RELAY_PLIST,
+                self.plist_bytes,
+                RELAY_PLIST_UID,
+                RELAY_PLIST_GID,
+                PLIST_MODE,
+            ),
+            (
+                c1_runtime.CONFIG_PATH,
+                self.config_bytes,
+                RELAY_CONFIG_UID,
+                RELAY_CONFIG_GID,
+                CONFIG_MODE,
+            ),
+        )
+
+
+def _load_rebind_config(*, code: str) -> c1_runtime.C1RuntimeConfig:
+    """Reuse the existing closed config owner; never surface INTERNAL."""
+
+    try:
+        return c1_runtime.load_config(
+            c1_runtime.CONFIG_PATH,
+            expected_path=c1_runtime.CONFIG_PATH,
+            expected_owner_uid=RELAY_CONFIG_UID,
+            expected_group_gid=RELAY_GID,
+        )
+    except Exception:
+        raise C1EnrollmentError(code) from None
+
+
+def _attest_token() -> _PrivateFileAttestation:
+    """Attest the credential identity without ever exposing its bytes."""
+
+    _raw, attestation = _attest_private_bytes(
+        c1_runtime.TOKEN_PATH,
+        uid=RELAY_UID,
+        gid=RELAY_GID,
+        mode=TOKEN_MODE,
+        max_bytes=MAX_TOKEN_BYTES,
+        code="C1_REBIND_TOKEN_REFUSED",
+    )
+    return attestation
+
+
+def _stage_rebind_target(*, bot_user_id: str, release_sha: str) -> _RebindTarget:
+    """Stage and validate both target documents before the first mutation."""
+
+    plist_bytes = _render_relay_plist(_install_release_root())
+    _assert_relay_plist_document(
+        _parse_relay_plist(plist_bytes, code="C1_REBIND_PLIST_REFUSED"),
+        code="C1_REBIND_PLIST_REFUSED",
+    )
+    config_document = build_config_document(
+        bot_user_id=bot_user_id,
+        release_sha=release_sha,
+    )
+    config_bytes = _canonical_config_bytes(config_document)
+    try:
+        staged_document = json.loads(config_bytes.decode("utf-8"))
+    except Exception:
+        raise C1EnrollmentError("C1_REBIND_STALE_CONFIG") from None
+    if (
+        not isinstance(staged_document, dict)
+        or _canonical_config_bytes(staged_document) != config_bytes
+    ):
+        raise C1EnrollmentError("C1_REBIND_STALE_CONFIG")
+    return _RebindTarget(
+        bot_user_id=bot_user_id,
+        release_sha=release_sha,
+        plist_bytes=plist_bytes,
+        config_bytes=config_bytes,
+    )
+
+
+def _read_rebind_state() -> tuple[
+    tuple[bytes, _PrivateFileAttestation] | None,
+    tuple[bytes, _PrivateFileAttestation] | None,
+]:
+    """Fresh attested state for both durable files; None means unreadable."""
+
+    rows: list[tuple[bytes, _PrivateFileAttestation] | None] = []
+    for path, uid, gid, mode, max_bytes in (
+        (
+            RELAY_PLIST,
+            RELAY_PLIST_UID,
+            RELAY_PLIST_GID,
+            PLIST_MODE,
+            PLIST_MAX_BYTES,
+        ),
+        (
+            c1_runtime.CONFIG_PATH,
+            RELAY_CONFIG_UID,
+            RELAY_CONFIG_GID,
+            CONFIG_MODE,
+            CONFIG_MAX_BYTES,
+        ),
+    ):
+        try:
+            rows.append(
+                _attest_private_bytes(
+                    path,
+                    uid=uid,
+                    gid=gid,
+                    mode=mode,
+                    max_bytes=max_bytes,
+                    code="C1_REBIND_EFFECT_UNCERTAIN",
+                )
+            )
+        except C1EnrollmentError:
+            rows.append(None)
+    return rows[0], rows[1]
+
+
+def _read_rebind_pair() -> tuple[bytes | None, bytes | None]:
+    """Fresh attested read of both durable files; None means unreadable."""
+
+    state = _read_rebind_state()
+    return (
+        None if state[0] is None else state[0][0],
+        None if state[1] is None else state[1][0],
+    )
+
+
+def _converge_rebind_pair(
+    target: _RebindTarget,
+    expected_attestations: Mapping[Path, _PrivateFileAttestation],
+    *,
+    lock: _RebindLockCapability,
+) -> tuple[C1EnrollmentError | None, dict[Path, _PrivateFileAttestation]]:
+    """Drive both durable files forward without overwriting observed drift."""
+
+    _assert_rebind_lock(lock)
+    owned = dict(expected_attestations)
+    writes = target.writes()
+
+    for path, payload, uid, gid, mode in writes:
+        observed: dict[Path, tuple[bytes, _PrivateFileAttestation]] = {}
+
+        # Re-prove the whole pair before every operation-owned write. This
+        # catches drift on the sibling file both before the first rename and
+        # between the two renames.
+        for observed_path, _unused, observed_uid, observed_gid, observed_mode in writes:
+            try:
+                current = _attest_private_bytes(
+                    observed_path,
+                    uid=observed_uid,
+                    gid=observed_gid,
+                    mode=observed_mode,
+                    max_bytes=PLIST_MAX_BYTES,
+                    code="C1_REBIND_EFFECT_UNCERTAIN",
+                )
+            except C1EnrollmentError as exc:
+                return exc, owned
+            if current[1] != owned[observed_path]:
+                return C1EnrollmentError("C1_REBIND_EFFECT_UNCERTAIN"), owned
+            observed[observed_path] = current
+
+        current_bytes, current_attestation = observed[path]
+        if current_bytes == payload:
+            continue
+        try:
+            owned[path] = _replace_exact_file_atomic(
+                path,
+                payload,
+                uid=uid,
+                gid=gid,
+                mode=mode,
+                expected_attestation=current_attestation,
+                lock=lock,
+            )
+        except C1EnrollmentError as exc:
+            return exc, owned
+    return None, owned
+
+
+def _restore_rebind_pair(
+    target: _RebindTarget,
+    plist_preimage: bytes,
+    config_preimage: bytes,
+    *,
+    entry_coherent: bool,
+    expected_attestations: Mapping[Path, _PrivateFileAttestation],
+    fallback: BaseException | None,
+    lock: _RebindLockCapability,
+) -> None:
+    """Restore only state still owned by this operation; otherwise fail closed."""
+
+    state = _read_rebind_state()
+    if state[0] is None or state[1] is None:
+        raise C1EnrollmentError("C1_REBIND_EFFECT_UNCERTAIN") from fallback
+    plist_state, config_state = state
+    current = (plist_state[0], config_state[0])
+    current_attestations = {
+        RELAY_PLIST: plist_state[1],
+        c1_runtime.CONFIG_PATH: config_state[1],
+    }
+    expected = dict(expected_attestations)
+
+    mixed = current in (
+        (target.plist_bytes, config_preimage),
+        (plist_preimage, target.config_bytes),
+    )
+
+    # Byte shape never overrides ownership evidence. If either inode changed
+    # outside the attested operation, the outcome is uncertain even when the
+    # bytes happen to resemble a known old/target generation.
+    if any(
+        current_attestations[path] != expected[path]
+        for path in current_attestations
+    ):
+        raise C1EnrollmentError("C1_REBIND_EFFECT_UNCERTAIN") from fallback
+
+    if current == (plist_preimage, config_preimage):
+        if entry_coherent:
+            raise C1EnrollmentError("C1_REBIND_WRITE_REFUSED") from fallback
+        raise C1EnrollmentError(
+            "C1_REBIND_MIXED_GENERATION" if mixed
+            else "C1_REBIND_EFFECT_UNCERTAIN"
+        ) from fallback
+
+    if not entry_coherent:
+        raise C1EnrollmentError(
+            "C1_REBIND_MIXED_GENERATION" if mixed
+            else "C1_REBIND_EFFECT_UNCERTAIN"
+        ) from fallback
+
+    rollback_writes = (
+        (
+            RELAY_PLIST,
+            plist_preimage,
+            RELAY_PLIST_UID,
+            RELAY_PLIST_GID,
+            PLIST_MODE,
+        ),
+        (
+            c1_runtime.CONFIG_PATH,
+            config_preimage,
+            RELAY_CONFIG_UID,
+            RELAY_CONFIG_GID,
+            CONFIG_MODE,
+        ),
+    )
+
+    # Re-prove the whole pair before every rollback rename. A concurrent change
+    # to the sibling file stops rollback before any later stale write.
+    for path, payload, uid, gid, mode in rollback_writes:
+        observed = _read_rebind_state()
+        if observed[0] is None or observed[1] is None:
+            raise C1EnrollmentError("C1_REBIND_EFFECT_UNCERTAIN") from fallback
+        observed_attestations = {
+            RELAY_PLIST: observed[0][1],
+            c1_runtime.CONFIG_PATH: observed[1][1],
+        }
+        if any(
+            observed_attestations[owned_path] != expected[owned_path]
+            for owned_path in observed_attestations
+        ):
+            raise C1EnrollmentError("C1_REBIND_EFFECT_UNCERTAIN") from fallback
+
+        current_bytes = (
+            observed[0][0] if path == RELAY_PLIST else observed[1][0]
+        )
+        if current_bytes == payload:
+            continue
+        try:
+            expected[path] = _replace_exact_file_atomic(
+                path,
+                payload,
+                uid=uid,
+                gid=gid,
+                mode=mode,
+                expected_attestation=expected[path],
+                lock=lock,
+            )
+        except C1EnrollmentError:
+            break
+    else:
+        final_state = _read_rebind_state()
+        if final_state[0] is not None and final_state[1] is not None:
+            final = (final_state[0][0], final_state[1][0])
+            final_attestations = {
+                RELAY_PLIST: final_state[0][1],
+                c1_runtime.CONFIG_PATH: final_state[1][1],
+            }
+            if (
+                final == (plist_preimage, config_preimage)
+                and all(
+                    final_attestations[path] == expected[path]
+                    for path in final_attestations
+                )
+            ):
+                raise C1EnrollmentError("C1_REBIND_WRITE_REFUSED") from fallback
+
+    final_state = _read_rebind_state()
+    if final_state[0] is None or final_state[1] is None:
+        raise C1EnrollmentError("C1_REBIND_EFFECT_UNCERTAIN") from fallback
+    final_attestations = {
+        RELAY_PLIST: final_state[0][1],
+        c1_runtime.CONFIG_PATH: final_state[1][1],
+    }
+    if any(
+        final_attestations[path] != expected[path]
+        for path in final_attestations
+    ):
+        raise C1EnrollmentError("C1_REBIND_EFFECT_UNCERTAIN") from fallback
+
+    current = (final_state[0][0], final_state[1][0])
+    if current in (
+        (target.plist_bytes, config_preimage),
+        (plist_preimage, target.config_bytes),
+    ):
+        raise C1EnrollmentError("C1_REBIND_MIXED_GENERATION") from fallback
+    raise C1EnrollmentError("C1_REBIND_EFFECT_UNCERTAIN") from fallback
+
+
+def _validate_rebind_pair(
+    target: _RebindTarget,
+    token_attestation: _PrivateFileAttestation,
+    expected_attestations: Mapping[Path, _PrivateFileAttestation],
+) -> None:
+    """Post-write proof of exact target bytes and operation-owned identities."""
+
+    state = _read_rebind_state()
+    if state[0] is None or state[1] is None:
+        raise C1EnrollmentError("C1_REBIND_EFFECT_UNCERTAIN")
+    plist_state, config_state = state
+    plist_bytes, config_bytes = plist_state[0], config_state[0]
+    if (
+        plist_bytes != target.plist_bytes
+        or config_bytes != target.config_bytes
+        or plist_state[1] != expected_attestations[RELAY_PLIST]
+        or config_state[1] != expected_attestations[c1_runtime.CONFIG_PATH]
+    ):
+        raise C1EnrollmentError("C1_REBIND_EFFECT_UNCERTAIN")
+    observed_root = _assert_relay_plist_document(
+        _parse_relay_plist(plist_bytes, code="C1_REBIND_EFFECT_UNCERTAIN"),
+        code="C1_REBIND_EFFECT_UNCERTAIN",
+    )
+    if os.fspath(observed_root) != os.fspath(_install_release_root()):
+        raise C1EnrollmentError("C1_REBIND_EFFECT_UNCERTAIN")
+    config = _load_rebind_config(code="C1_REBIND_EFFECT_UNCERTAIN")
+    if (
+        config.relay_version != target.release_sha
+        or config.slack_bot_user_id != target.bot_user_id
+    ):
+        raise C1EnrollmentError("C1_REBIND_EFFECT_UNCERTAIN")
+    if _attest_token() != token_attestation:
+        raise C1EnrollmentError("C1_REBIND_TOKEN_DRIFT")
+
+
+async def _rebind(*, bot_user_id: str) -> dict[str, object]:
+    """Serialize one supported overwrite transaction before its first host read."""
+
+    with _rebind_lock() as lock:
+        return await _rebind_locked(bot_user_id=bot_user_id, lock=lock)
+
+
+async def _rebind_locked(
+    *, bot_user_id: str, lock: _RebindLockCapability
+) -> dict[str, object]:
+    """Rebind one complete existing enrollment to the installed release.
+
+    This is not enrollment.  It never qualifies, reads out or rewrites the
+    credential, never calls a provider, and never enables, bootstraps,
+    kickstarts or starts a service.
+    """
+
+    _assert_rebind_lock(lock)
+    release_sha = _relay_substrate()
+    _assert_services_stopped("C1_REBIND_SERVICE_RUNNING")
+    if not _path_present(c1_runtime.TOKEN_PATH) or not _path_present(
+        c1_runtime.CONFIG_PATH
+    ):
+        raise C1EnrollmentError("C1_REBIND_PARTIAL_STATE")
+
+    token_attestation = _attest_token()
+    plist_preimage, plist_attestation = _attest_private_bytes(
+        RELAY_PLIST,
+        uid=RELAY_PLIST_UID,
+        gid=RELAY_PLIST_GID,
+        mode=PLIST_MODE,
+        max_bytes=PLIST_MAX_BYTES,
+        code="C1_REBIND_PLIST_REFUSED",
+    )
+    config_preimage, config_attestation = _attest_private_bytes(
+        c1_runtime.CONFIG_PATH,
+        uid=RELAY_CONFIG_UID,
+        gid=RELAY_CONFIG_GID,
+        mode=CONFIG_MODE,
+        max_bytes=CONFIG_MAX_BYTES,
+        code="C1_REBIND_STALE_CONFIG",
+    )
+    old_release_root = _assert_relay_plist_document(
+        _parse_relay_plist(plist_preimage, code="C1_REBIND_PLIST_REFUSED"),
+        code="C1_REBIND_PLIST_REFUSED",
+    )
+    old_release = old_release_root.name
+    old_config = _load_rebind_config(code="C1_REBIND_STALE_CONFIG")
+    if old_config.slack_bot_user_id != bot_user_id:
+        raise C1EnrollmentError("C1_REBIND_STALE_CONFIG")
+    config_release = old_config.relay_version
+    if old_release == config_release:
+        if old_release == release_sha:
+            return {
+                "action": "already-current",
+                "bot_user_id": bot_user_id,
+                "release_sha": release_sha,
+            }
+        entry_coherent = True
+    elif release_sha in (old_release, config_release):
+        # A crash between the two renames: one durable file is already forward.
+        entry_coherent = False
+    else:
+        raise C1EnrollmentError("C1_REBIND_VERSION_MISMATCH")
+
+    target = _stage_rebind_target(bot_user_id=bot_user_id, release_sha=release_sha)
+    _assert_services_stopped("C1_REBIND_SERVICE_RUNNING")
+
+    expected_attestations = {
+        RELAY_PLIST: plist_attestation,
+        c1_runtime.CONFIG_PATH: config_attestation,
+    }
+    failure, expected_attestations = _converge_rebind_pair(
+        target,
+        expected_attestations,
+        lock=lock,
+    )
+    if failure is not None and _read_rebind_pair() != (
+        target.plist_bytes,
+        target.config_bytes,
+    ):
+        # A failed write is reconciled only against identities still owned by
+        # this operation. Concurrent drift is never overwritten by rollback.
+        _restore_rebind_pair(
+            target,
+            plist_preimage,
+            config_preimage,
+            entry_coherent=entry_coherent,
+            expected_attestations=expected_attestations,
+            fallback=failure,
+            lock=lock,
+        )
+    try:
+        _validate_rebind_pair(
+            target,
+            token_attestation,
+            expected_attestations,
+        )
+    except C1EnrollmentError as exc:
+        _restore_rebind_pair(
+            target,
+            plist_preimage,
+            config_preimage,
+            entry_coherent=entry_coherent,
+            expected_attestations=expected_attestations,
+            fallback=exc,
+            lock=lock,
+        )
+    _assert_services_stopped("C1_REBIND_SERVICE_RUNNING")
+    return {
+        "action": "rebound",
+        "bot_user_id": bot_user_id,
+        "release_sha": release_sha,
+    }
+
+
 async def _enroll(*, bot_user_id: str, stdin: BinaryIO) -> dict[str, object]:
     release_sha = _assert_host_prepared()
     if _path_present(c1_runtime.TOKEN_PATH) or _path_present(c1_runtime.CONFIG_PATH):
@@ -559,17 +1687,22 @@ async def _enroll(*, bot_user_id: str, stdin: BinaryIO) -> dict[str, object]:
         (token + "\n").encode("ascii"),
         uid=RELAY_UID,
         gid=RELAY_GID,
-        mode=0o400,
+        mode=TOKEN_MODE,
     )
     config = build_config_document(bot_user_id=bot_user_id, release_sha=release_sha)
     write_new_private_file(
         c1_runtime.CONFIG_PATH,
         _canonical_config_bytes(config),
-        uid=0,
-        gid=RELAY_GID,
-        mode=0o440,
+        uid=RELAY_CONFIG_UID,
+        gid=RELAY_CONFIG_GID,
+        mode=CONFIG_MODE,
     )
-    c1_runtime.load_config(c1_runtime.CONFIG_PATH, expected_group_gid=RELAY_GID)
+    c1_runtime.load_config(
+        c1_runtime.CONFIG_PATH,
+        expected_path=c1_runtime.CONFIG_PATH,
+        expected_owner_uid=RELAY_CONFIG_UID,
+        expected_group_gid=RELAY_GID,
+    )
     return {**qualification, "action": "enrolled", "release_sha": release_sha}
 
 
@@ -583,11 +1716,16 @@ async def _resume(*, bot_user_id: str) -> dict[str, object]:
     write_new_private_file(
         c1_runtime.CONFIG_PATH,
         _canonical_config_bytes(config),
-        uid=0,
-        gid=RELAY_GID,
-        mode=0o440,
+        uid=RELAY_CONFIG_UID,
+        gid=RELAY_CONFIG_GID,
+        mode=CONFIG_MODE,
     )
-    c1_runtime.load_config(c1_runtime.CONFIG_PATH, expected_group_gid=RELAY_GID)
+    c1_runtime.load_config(
+        c1_runtime.CONFIG_PATH,
+        expected_path=c1_runtime.CONFIG_PATH,
+        expected_owner_uid=RELAY_CONFIG_UID,
+        expected_group_gid=RELAY_GID,
+    )
     return {**qualification, "action": "resumed", "release_sha": release_sha}
 
 
@@ -599,6 +1737,8 @@ async def _verify(*, bot_user_id: str) -> dict[str, object]:
         raise C1EnrollmentError("C1_ENROLLMENT_EXISTING_REFUSED")
     config = c1_runtime.load_config(
         c1_runtime.CONFIG_PATH,
+        expected_path=c1_runtime.CONFIG_PATH,
+        expected_owner_uid=RELAY_CONFIG_UID,
         expected_group_gid=RELAY_GID,
     )
     if config.slack_bot_user_id != bot_user_id or config.relay_version != release_sha:
@@ -634,6 +1774,8 @@ def run(
             receipt = asyncio.run(_resume(bot_user_id=args.expected_bot_user_id))
         elif args.command == "verify":
             receipt = asyncio.run(_verify(bot_user_id=args.expected_bot_user_id))
+        elif args.command == "rebind-release":
+            receipt = asyncio.run(_rebind(bot_user_id=args.expected_bot_user_id))
         else:  # pragma: no cover
             raise C1EnrollmentError("C1_ENROLLMENT_ARGUMENTS_REFUSED")
         stdout.write(
