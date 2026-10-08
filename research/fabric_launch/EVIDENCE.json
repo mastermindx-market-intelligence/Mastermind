@@ -124,6 +124,36 @@
     "verdict": "REQUEST_CHANGES"
   },
   "local_claude_m2_install": {
+    "account_scope_verification": {
+      "conclusion": "The user-scope ~/.claude Workforce installation is visible from each of the four isolated desktop-account embedded Claude Code runtimes. Per-profile credential/config stores remain separate; no credential copying or profile merging was performed.",
+      "desktop_accounts": [
+        "Claude 3",
+        "Claude 5",
+        "Claude 6",
+        "Claude 8"
+      ],
+      "distinct_account_uuid_count": 4,
+      "per_account_embedded_cli_discovery": {
+        "Claude 3": {
+          "embedded_cli_version": "2.1.286",
+          "workforce_plugin_visible": true
+        },
+        "Claude 5": {
+          "embedded_cli_version": "2.1.293",
+          "workforce_plugin_visible": true
+        },
+        "Claude 6": {
+          "embedded_cli_version": "2.1.284",
+          "workforce_plugin_visible": true
+        },
+        "Claude 8": {
+          "embedded_cli_version": "2.1.293",
+          "workforce_plugin_visible": true
+        }
+      },
+      "separate_claude_config_dir_observed": false,
+      "shared_home": "/Users/chriswong"
+    },
     "candidate_source_commit": "61e97693f4bbf60fe1f7638247c378744caa598f",
     "claude_cli_auth": "not_logged_in",
     "claude_startup_bootstrap_installed": true,
@@ -139,6 +169,7 @@
     "installed_cache_file_count": 23,
     "installed_source_file_count": 23,
     "installed_source_hashes_match": true,
+    "latest_procedure_pin": "c7e47c859eb2925c5626931fd511800773ba09ac",
     "local_receipt_sha256": "c949c01e2f8f86354dfec1678aa0904bca94cd72e4cf23eaf7ae1b4adb02f41d",
     "mcp_servers_added_by_workforce": 0,
     "observed_at": "2026-10-07T05:23:00Z",
@@ -151,7 +182,8 @@
     "skills": [
       "mastermind-craft",
       "mastermind-worker-bootstrap"
-    ]
+    ],
+    "standalone_cli_auth_note": "The earlier loggedIn=false observation applies to the standalone shell Claude CLI, not to the four Claude Desktop account identities. It is not an account-wide installation blocker."
   },
   "mcp_reply_validation": {
     "full_log_sha256": "0ae2dd3c8ccfa8e725211f5e4d7df46bc2ca05ee0e5d8ab4e53a6ffb02b5b9a1",

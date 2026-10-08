@@ -77,3 +77,17 @@ credential bypass, copying or alternate account was attempted. Therefore local p
 installation/discovery is proven, while actual fresh-model method consumption remains
 `BLOCKED_AUTH` until the normal human Claude login ceremony is completed. Local install
 receipt SHA-256: `c949c01e2f8f86354dfec1678aa0904bca94cd72e4cf23eaf7ae1b4adb02f41d`.
+
+### Four-account M2 scope verification
+
+The M2 desktop fleet currently uses four distinct Claude account profiles: Claude 3, 5, 6,
+and 8. Their account UUIDs are distinct, but their embedded Claude Code runtimes share
+`HOME=/Users/chriswong` and do not set a separate `CLAUDE_CONFIG_DIR`. The supported
+user-scope plugin home is therefore shared while each desktop application's OAuth/account
+profile remains isolated. Running each account's own embedded Claude binary showed
+`mastermind-workforce@mastermind-private` version
+`0.1.0-candidate.g61e97693f4bb.skills-only` with both Workforce skills. Embedded CLI
+versions observed were 2.1.286 (Claude 3), 2.1.293 (Claude 5), 2.1.284 (Claude 6), and
+2.1.293 (Claude 8). No per-profile credential files were copied and no account settings
+were merged. The prior `claude auth status` logged-out result was for the standalone shell
+CLI and is not evidence that these four desktop identities are logged out.
