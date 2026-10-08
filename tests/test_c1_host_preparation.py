@@ -76,6 +76,16 @@ def test_c1_host_preparation_is_fixed_credential_free_and_non_arming():
     assert "/usr/bin/false" in text
     assert "pwpolicy" in text
 
+    # The C1 preparation owner guarantees only the fixed root-only namespace.
+    assert 'C1_REBIND_LOCK_ROOT="$SYSTEM_ROOT/locks"' in text
+    assert '/usr/bin/install -d -o root -g wheel -m 0700 "$C1_REBIND_LOCK_ROOT"' in text
+    assert '[ -d "$C1_REBIND_LOCK_ROOT" ] && [ ! -L "$C1_REBIND_LOCK_ROOT" ]' in text
+    assert '"$(/usr/bin/stat -f \'%u:%g\' "$C1_REBIND_LOCK_ROOT")" = "0:0"' in text
+    assert '"$(/usr/bin/stat -f \'%Lp\' "$C1_REBIND_LOCK_ROOT")" = "700"' in text
+    assert "C1 rebind lock namespace has a filesystem ACL" in text
+    assert "c1-sol-state-relay-rebind.lock" not in text
+    assert "flock" not in text
+
     # This preparation wave owns no credential ceremony and may not arm a daemon.
     forbidden = (
         "auth.test",
@@ -163,3 +173,32 @@ def test_c1_relay_launchd_template_has_config_only_program_and_no_socket_or_secr
     serialized = PLIST.read_text(encoding="utf-8").lower()
     assert "token" not in serialized
     assert "slack" not in serialized
+
+
+def test_c1_lock_namespace_refuses_existing_drift_before_install_normalization():
+    text = PREP.read_text(encoding="utf-8")
+    body = text.split("ensure_rebind_lock_root() {", 1)[1].split("\n}\n", 1)[0]
+
+    existing_gate = body.index(
+        'if [ -e "$C1_REBIND_LOCK_ROOT" ] || [ -L "$C1_REBIND_LOCK_ROOT" ]'
+    )
+    direct_directory_gate = body.index(
+        '[ -d "$C1_REBIND_LOCK_ROOT" ] && [ ! -L "$C1_REBIND_LOCK_ROOT" ]'
+    )
+    create_missing = body.index(
+        '/usr/bin/install -d -o root -g wheel -m 0700 "$C1_REBIND_LOCK_ROOT"'
+    )
+    owner_gate = body.index(
+        '$(/usr/bin/stat -f \'%u:%g\' "$C1_REBIND_LOCK_ROOT")'
+    )
+    mode_gate = body.index(
+        '$(/usr/bin/stat -f \'%Lp\' "$C1_REBIND_LOCK_ROOT")'
+    )
+    acl_gate = body.index(
+        '$(/usr/bin/stat -f \'%Sp\' "$C1_REBIND_LOCK_ROOT")'
+    )
+
+    assert existing_gate < direct_directory_gate < create_missing
+    assert create_missing < owner_gate < mode_gate < acl_gate
+    assert "/bin/chmod" not in body
+    assert "/usr/sbin/chown" not in body
