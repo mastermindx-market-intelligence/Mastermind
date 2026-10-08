@@ -212,8 +212,14 @@ def _install_host(
     relay_plist = root / PLIST_NAME
     token_path = root / "sol-state-relay.token"
     config_path = root / "sol-state-relay.json"
+    lock_dir = root / "locks"
+    lock_dir.mkdir()
+    lock_dir.chmod(0o700)
+    lock_path = lock_dir / "c1-sol-state-relay-rebind.lock"
 
     monkeypatch.setattr(enrollment, "_ROOT", new_root)
+    monkeypatch.setattr(enrollment, "C1_REBIND_LOCK_DIR", lock_dir)
+    monkeypatch.setattr(enrollment, "C1_REBIND_LOCK_PATH", lock_path)
     monkeypatch.setattr(enrollment, "SYSTEM_RELEASE_ROOT", releases_root)
     monkeypatch.setattr(enrollment, "CONTROL_CONFIG", control_config)
     monkeypatch.setattr(enrollment, "CONTROL_PLIST", control_plist)
@@ -240,6 +246,9 @@ def _install_host(
         "CONTROL_PLIST_GID",
     ):
         monkeypatch.setattr(enrollment, name, egid, raising=False)
+    lock_dir_info = lock_dir.stat()
+    monkeypatch.setattr(enrollment, "C1_REBIND_LOCK_UID", lock_dir_info.st_uid)
+    monkeypatch.setattr(enrollment, "C1_REBIND_LOCK_GID", lock_dir_info.st_gid)
 
     relay_home = SimpleNamespace(
         pw_uid=euid,
@@ -415,7 +424,7 @@ def _install_host(
     writes: list[Path] = []
     real_replace = enrollment._replace_exact_file_atomic  # noqa: SLF001
 
-    def replace(path, payload, *, uid, gid, mode, expected_attestation):
+    def replace(path, payload, *, uid, gid, mode, expected_attestation, lock):
         writes.append(Path(path))
         return real_replace(
             path,
@@ -424,6 +433,7 @@ def _install_host(
             gid=gid,
             mode=mode,
             expected_attestation=expected_attestation,
+            lock=lock,
         )
 
     monkeypatch.setattr(enrollment, "_replace_exact_file_atomic", replace)
@@ -1066,7 +1076,7 @@ def test_rebind_refuses_sibling_drift_between_forward_renames(
         )
     )
 
-    def replace(path, payload, *, uid, gid, mode, expected_attestation):
+    def replace(path, payload, *, uid, gid, mode, expected_attestation, lock):
         result = host.replace(
             path,
             payload,
@@ -1074,6 +1084,7 @@ def test_rebind_refuses_sibling_drift_between_forward_renames(
             gid=gid,
             mode=mode,
             expected_attestation=expected_attestation,
+            lock=lock,
         )
         if Path(path) == host.relay_plist:
             _external_replace_config(host, external)
@@ -1137,6 +1148,7 @@ class _InjectedReplace:
         gid,
         mode,
         expected_attestation,
+        lock,
     ):
         path = Path(path)
         self.calls.append(path)
@@ -1150,6 +1162,7 @@ class _InjectedReplace:
                     gid=gid,
                     mode=mode,
                     expected_attestation=expected_attestation,
+                    lock=lock,
                 )
                 raise self.host.enrollment.C1EnrollmentError(
                     "C1_ENROLLMENT_WRITE_REFUSED"
@@ -1166,6 +1179,7 @@ class _InjectedReplace:
                     gid=gid,
                     mode=mode,
                     expected_attestation=expected_attestation,
+                    lock=lock,
                 )
                 replacement = self.host.root / ".token.rotation"
                 replacement.write_bytes(self.host.token_path.read_bytes())
@@ -1179,6 +1193,7 @@ class _InjectedReplace:
             gid=gid,
             mode=mode,
             expected_attestation=expected_attestation,
+            lock=lock,
         )
 
 
@@ -1438,18 +1453,134 @@ def test_replace_exact_file_atomic_treats_a_missing_observed_target_as_uncertain
         sha256="0" * 64,
     )
 
+    with host.enrollment._rebind_lock() as lock:  # noqa: SLF001
+        with pytest.raises(
+            host.enrollment.C1EnrollmentError, match="C1_REBIND_EFFECT_UNCERTAIN"
+        ):
+            host.enrollment._replace_exact_file_atomic(  # noqa: SLF001
+                missing,
+                b"payload\n",
+                uid=os.geteuid(),
+                gid=os.getegid(),
+                mode=0o644,
+                expected_attestation=expected,
+                lock=lock,
+            )
+    assert not missing.exists()
+
+
+def test_rebind_refuses_second_supported_transaction_while_lock_is_held(
+    monkeypatch, tmp_path
+):
+    host = _install_host(monkeypatch, tmp_path)
+    with host.enrollment._rebind_lock():  # noqa: SLF001
+        with pytest.raises(host.enrollment.C1EnrollmentError, match="C1_REBIND_BUSY"):
+            asyncio.run(host.rebind())
+    assert host.writes == []
+
+
+def test_replace_exact_file_atomic_requires_live_lock_capability(monkeypatch, tmp_path):
+    host = _install_host(monkeypatch, tmp_path)
+    raw, expected = host.enrollment._attest_private_bytes(  # noqa: SLF001
+        host.relay_plist,
+        uid=host.enrollment.RELAY_PLIST_UID,
+        gid=host.enrollment.RELAY_PLIST_GID,
+        mode=host.enrollment.PLIST_MODE,
+        max_bytes=host.enrollment.PLIST_MAX_BYTES,
+        code="C1_REBIND_PLIST_REFUSED",
+    )
     with pytest.raises(
-        host.enrollment.C1EnrollmentError, match="C1_REBIND_EFFECT_UNCERTAIN"
+        host.enrollment.C1EnrollmentError, match="C1_REBIND_WRITE_REFUSED"
     ):
         host.enrollment._replace_exact_file_atomic(  # noqa: SLF001
-            missing,
-            b"payload\n",
-            uid=os.geteuid(),
-            gid=os.getegid(),
-            mode=0o644,
+            host.relay_plist,
+            raw,
+            uid=host.enrollment.RELAY_PLIST_UID,
+            gid=host.enrollment.RELAY_PLIST_GID,
+            mode=host.enrollment.PLIST_MODE,
             expected_attestation=expected,
+            lock=None,
         )
-    assert not missing.exists()
+
+
+@pytest.mark.parametrize("case", ["mode", "symlink", "hardlink", "acl"])
+def test_rebind_refuses_hostile_lock_file(monkeypatch, tmp_path, case):
+    host = _install_host(monkeypatch, tmp_path)
+    lock_path = host.enrollment.C1_REBIND_LOCK_PATH
+    if case == "symlink":
+        target = host.root / "lock-target"
+        target.write_text("", encoding="utf-8")
+        target.chmod(0o600)
+        lock_path.symlink_to(target)
+    else:
+        lock_path.write_text("", encoding="utf-8")
+        lock_path.chmod(0o600)
+        if case == "mode":
+            lock_path.chmod(0o644)
+        elif case == "hardlink":
+            os.link(lock_path, host.root / "lock-hardlink")
+        elif case == "acl":
+            original = host.enrollment.c1_runtime._path_has_acl  # noqa: SLF001
+
+            def has_acl(path, *args, **kwargs):
+                if Path(path) == lock_path:
+                    return True
+                return original(path, *args, **kwargs)
+
+            monkeypatch.setattr(
+                host.enrollment.c1_runtime, "_path_has_acl", has_acl
+            )
+
+    with pytest.raises(
+        host.enrollment.C1EnrollmentError, match="C1_ENROLLMENT_HOST_REFUSED"
+    ):
+        asyncio.run(host.rebind())
+    assert host.writes == []
+
+
+def test_stale_unlocked_rebind_lock_file_is_not_authority(monkeypatch, tmp_path):
+    host = _install_host(monkeypatch, tmp_path)
+    lock_path = host.enrollment.C1_REBIND_LOCK_PATH
+    lock_path.write_text("", encoding="utf-8")
+    lock_path.chmod(0o600)
+
+    result = asyncio.run(host.rebind())
+    assert result["action"] == "rebound"
+    replay = asyncio.run(host.rebind())
+    assert replay["action"] == "already-current"
+
+
+def test_forward_and_rollback_share_one_live_lock_capability(monkeypatch, tmp_path):
+    host = _install_host(monkeypatch, tmp_path)
+    enrollment = host.enrollment
+    real_replace = host.replace
+    seen: list[object] = []
+
+    def replace(path, payload, *, uid, gid, mode, expected_attestation, lock):
+        enrollment._assert_rebind_lock(lock)  # noqa: SLF001
+        seen.append(lock)
+        result = real_replace(
+            path,
+            payload,
+            uid=uid,
+            gid=gid,
+            mode=mode,
+            expected_attestation=expected_attestation,
+            lock=lock,
+        )
+        if Path(path) == host.config_path and len(seen) == 2:
+            replacement = host.root / ".token-rotation-lock-test"
+            replacement.write_bytes(host.token_path.read_bytes())
+            replacement.chmod(0o400)
+            os.replace(replacement, host.token_path)
+        return result
+
+    monkeypatch.setattr(enrollment, "_replace_exact_file_atomic", replace)
+    with pytest.raises(enrollment.C1EnrollmentError, match="C1_REBIND_WRITE_REFUSED"):
+        asyncio.run(host.rebind())
+
+    assert len(seen) >= 4
+    assert len({id(item) for item in seen}) == 1
 
 
 def test_shared_relay_runbook_orders_rebind_before_scope_migration_and_a2():

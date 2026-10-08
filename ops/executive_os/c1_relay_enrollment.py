@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import fcntl
 import grp
 import hashlib
 import json
@@ -30,7 +31,8 @@ import subprocess
 import sys
 import tempfile
 import termios
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO, TextIO
@@ -66,6 +68,14 @@ RELAY_PLIST = Path(
 SYSTEM_RELEASE_ROOT = Path(
     "/Library/Application Support/MastermindExecutive/releases"
 )
+C1_REBIND_LOCK_DIR = Path(
+    "/Library/Application Support/MastermindExecutive/locks"
+)
+C1_REBIND_LOCK_PATH = C1_REBIND_LOCK_DIR / "c1-sol-state-relay-rebind.lock"
+C1_REBIND_LOCK_UID = 0
+C1_REBIND_LOCK_GID = 0
+C1_REBIND_LOCK_DIR_MODE = 0o700
+C1_REBIND_LOCK_MODE = 0o600
 # Pinned host identities. They are named so a fixture host can mirror them onto
 # one unprivileged test account; production values are unchanged.
 CONTROL_CONFIG_UID = 0
@@ -103,6 +113,7 @@ ERROR_CODES = frozenset(
         "C1_ENROLLMENT_INTERNAL",
         "C1_ENROLLMENT_SECRET_SURFACE_REFUSED",
         "C1_ENROLLMENT_WRITE_REFUSED",
+        "C1_REBIND_BUSY",
         "C1_REBIND_EFFECT_UNCERTAIN",
         "C1_REBIND_MIXED_GENERATION",
         "C1_REBIND_PARTIAL_STATE",
@@ -236,6 +247,202 @@ class _PrivateFileAttestation:
     mode: int
     link_count: int
     sha256: str
+
+
+_REBIND_LOCK_MINT = object()
+
+
+class _RebindLockCapability:
+    """Opaque live capability proving this process holds the fixed rebind flock."""
+
+    __slots__ = ("descriptor", "device", "inode", "path", "_live")
+
+    def __init__(
+        self,
+        marker: object,
+        *,
+        descriptor: int,
+        device: int,
+        inode: int,
+        path: Path,
+    ) -> None:
+        if marker is not _REBIND_LOCK_MINT:
+            raise TypeError("rebind lock capability is private")
+        self.descriptor = int(descriptor)
+        self.device = int(device)
+        self.inode = int(inode)
+        self.path = Path(path)
+        self._live = True
+
+
+def _validate_rebind_lock_path(*, descriptor: int | None = None) -> os.stat_result:
+    """Validate the fixed root-only lock namespace and one direct lock inode."""
+
+    if os.geteuid() != 0 or sys.platform != "darwin":
+        raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED")
+    try:
+        parent = C1_REBIND_LOCK_DIR.lstat()
+    except OSError:
+        raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED") from None
+    if (
+        stat.S_ISLNK(parent.st_mode)
+        or not stat.S_ISDIR(parent.st_mode)
+        or parent.st_uid != C1_REBIND_LOCK_UID
+        or parent.st_gid != C1_REBIND_LOCK_GID
+        or stat.S_IMODE(parent.st_mode) != C1_REBIND_LOCK_DIR_MODE
+    ):
+        raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED")
+    try:
+        if c1_runtime._path_has_acl(  # noqa: SLF001
+            C1_REBIND_LOCK_DIR, expected_info=parent
+        ):
+            raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED")
+    except C1EnrollmentError:
+        raise
+    except Exception:
+        raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED") from None
+
+    try:
+        info = C1_REBIND_LOCK_PATH.lstat()
+    except OSError:
+        raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED") from None
+    if (
+        stat.S_ISLNK(info.st_mode)
+        or not stat.S_ISREG(info.st_mode)
+        or info.st_nlink != 1
+        or info.st_uid != C1_REBIND_LOCK_UID
+        or info.st_gid != C1_REBIND_LOCK_GID
+        or stat.S_IMODE(info.st_mode) != C1_REBIND_LOCK_MODE
+    ):
+        raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED")
+    if descriptor is not None:
+        try:
+            opened = os.fstat(descriptor)
+        except OSError:
+            raise C1EnrollmentError("C1_REBIND_WRITE_REFUSED") from None
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or opened.st_nlink != 1
+            or (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino)
+            or opened.st_uid != C1_REBIND_LOCK_UID
+            or opened.st_gid != C1_REBIND_LOCK_GID
+            or stat.S_IMODE(opened.st_mode) != C1_REBIND_LOCK_MODE
+        ):
+            raise C1EnrollmentError("C1_REBIND_WRITE_REFUSED")
+    try:
+        if c1_runtime._path_has_acl(  # noqa: SLF001
+            C1_REBIND_LOCK_PATH, expected_info=info
+        ):
+            raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED")
+    except C1EnrollmentError:
+        raise
+    except Exception:
+        raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED") from None
+    return info
+
+
+def _assert_rebind_lock(lock: object) -> _RebindLockCapability:
+    """Require the one live capability and re-prove its descriptor/path identity."""
+
+    if (
+        not isinstance(lock, _RebindLockCapability)
+        or not lock._live  # noqa: SLF001
+        or lock.path != C1_REBIND_LOCK_PATH
+    ):
+        raise C1EnrollmentError("C1_REBIND_WRITE_REFUSED")
+    info = _validate_rebind_lock_path(descriptor=lock.descriptor)
+    if (info.st_dev, info.st_ino) != (lock.device, lock.inode):
+        raise C1EnrollmentError("C1_REBIND_WRITE_REFUSED")
+    return lock
+
+
+@contextmanager
+def _rebind_lock() -> Iterator[_RebindLockCapability]:
+    """Hold one nonblocking host flock for the complete supported rebind."""
+
+    if os.geteuid() != 0 or sys.platform != "darwin":
+        raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED")
+    try:
+        parent = C1_REBIND_LOCK_DIR.lstat()
+    except OSError:
+        raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED") from None
+    if (
+        stat.S_ISLNK(parent.st_mode)
+        or not stat.S_ISDIR(parent.st_mode)
+        or parent.st_uid != C1_REBIND_LOCK_UID
+        or parent.st_gid != C1_REBIND_LOCK_GID
+        or stat.S_IMODE(parent.st_mode) != C1_REBIND_LOCK_DIR_MODE
+    ):
+        raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED")
+    try:
+        if c1_runtime._path_has_acl(  # noqa: SLF001
+            C1_REBIND_LOCK_DIR, expected_info=parent
+        ):
+            raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED")
+    except C1EnrollmentError:
+        raise
+    except Exception:
+        raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED") from None
+
+    base_flags = os.O_RDWR | getattr(os, "O_CLOEXEC", 0)
+    if hasattr(os, "O_NOFOLLOW"):
+        base_flags |= os.O_NOFOLLOW
+    descriptor = -1
+    capability: _RebindLockCapability | None = None
+    try:
+        created = False
+        try:
+            descriptor = os.open(
+                C1_REBIND_LOCK_PATH,
+                base_flags | os.O_CREAT | os.O_EXCL,
+                C1_REBIND_LOCK_MODE,
+            )
+            created = True
+        except FileExistsError:
+            try:
+                descriptor = os.open(C1_REBIND_LOCK_PATH, base_flags)
+            except OSError:
+                raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED") from None
+        if created:
+            created_info = os.fstat(descriptor)
+            if (
+                created_info.st_uid != C1_REBIND_LOCK_UID
+                or created_info.st_gid != C1_REBIND_LOCK_GID
+            ):
+                os.fchown(descriptor, C1_REBIND_LOCK_UID, C1_REBIND_LOCK_GID)
+            if stat.S_IMODE(created_info.st_mode) != C1_REBIND_LOCK_MODE:
+                os.fchmod(descriptor, C1_REBIND_LOCK_MODE)
+            os.fsync(descriptor)
+        info = _validate_rebind_lock_path(descriptor=descriptor)
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise C1EnrollmentError("C1_REBIND_BUSY") from None
+        except OSError as exc:
+            if exc.errno in {11, 35}:
+                raise C1EnrollmentError("C1_REBIND_BUSY") from None
+            raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED") from None
+        info = _validate_rebind_lock_path(descriptor=descriptor)
+        capability = _RebindLockCapability(
+            _REBIND_LOCK_MINT,
+            descriptor=descriptor,
+            device=info.st_dev,
+            inode=info.st_ino,
+            path=C1_REBIND_LOCK_PATH,
+        )
+        yield capability
+    finally:
+        if capability is not None:
+            capability._live = False  # noqa: SLF001
+        if descriptor >= 0:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+            except OSError:
+                pass
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
 
 
 def _attest_private_bytes(
@@ -874,6 +1081,7 @@ def _replace_exact_file_atomic(
     gid: int,
     mode: int,
     expected_attestation: _PrivateFileAttestation,
+    lock: _RebindLockCapability,
 ) -> _PrivateFileAttestation:
     """Atomically replace one exact attested preimage in place.
 
@@ -883,6 +1091,7 @@ def _replace_exact_file_atomic(
     silently overwritten merely because the path still has valid metadata.
     """
 
+    _assert_rebind_lock(lock)
     path = Path(path)
     if not path.is_absolute() or not payload or len(payload) > PLIST_MAX_BYTES:
         raise C1EnrollmentError("C1_ENROLLMENT_WRITE_REFUSED")
@@ -955,6 +1164,7 @@ def _replace_exact_file_atomic(
         ):
             raise C1EnrollmentError("C1_REBIND_EFFECT_UNCERTAIN")
 
+        _assert_rebind_lock(lock)
         os.replace(temporary, path)
         temporary = None
         _fsync_parent(path)
@@ -1126,9 +1336,12 @@ def _read_rebind_pair() -> tuple[bytes | None, bytes | None]:
 def _converge_rebind_pair(
     target: _RebindTarget,
     expected_attestations: Mapping[Path, _PrivateFileAttestation],
+    *,
+    lock: _RebindLockCapability,
 ) -> tuple[C1EnrollmentError | None, dict[Path, _PrivateFileAttestation]]:
     """Drive both durable files forward without overwriting observed drift."""
 
+    _assert_rebind_lock(lock)
     owned = dict(expected_attestations)
     writes = target.writes()
 
@@ -1165,6 +1378,7 @@ def _converge_rebind_pair(
                 gid=gid,
                 mode=mode,
                 expected_attestation=current_attestation,
+                lock=lock,
             )
         except C1EnrollmentError as exc:
             return exc, owned
@@ -1179,6 +1393,7 @@ def _restore_rebind_pair(
     entry_coherent: bool,
     expected_attestations: Mapping[Path, _PrivateFileAttestation],
     fallback: BaseException | None,
+    lock: _RebindLockCapability,
 ) -> None:
     """Restore only state still owned by this operation; otherwise fail closed."""
 
@@ -1267,6 +1482,7 @@ def _restore_rebind_pair(
                 gid=gid,
                 mode=mode,
                 expected_attestation=expected[path],
+                lock=lock,
             )
         except C1EnrollmentError:
             break
@@ -1345,6 +1561,15 @@ def _validate_rebind_pair(
 
 
 async def _rebind(*, bot_user_id: str) -> dict[str, object]:
+    """Serialize one supported overwrite transaction before its first host read."""
+
+    with _rebind_lock() as lock:
+        return await _rebind_locked(bot_user_id=bot_user_id, lock=lock)
+
+
+async def _rebind_locked(
+    *, bot_user_id: str, lock: _RebindLockCapability
+) -> dict[str, object]:
     """Rebind one complete existing enrollment to the installed release.
 
     This is not enrollment.  It never qualifies, reads out or rewrites the
@@ -1352,6 +1577,7 @@ async def _rebind(*, bot_user_id: str) -> dict[str, object]:
     kickstarts or starts a service.
     """
 
+    _assert_rebind_lock(lock)
     release_sha = _relay_substrate()
     _assert_services_stopped("C1_REBIND_SERVICE_RUNNING")
     if not _path_present(c1_runtime.TOKEN_PATH) or not _path_present(
@@ -1409,6 +1635,7 @@ async def _rebind(*, bot_user_id: str) -> dict[str, object]:
     failure, expected_attestations = _converge_rebind_pair(
         target,
         expected_attestations,
+        lock=lock,
     )
     if failure is not None and _read_rebind_pair() != (
         target.plist_bytes,
@@ -1423,6 +1650,7 @@ async def _rebind(*, bot_user_id: str) -> dict[str, object]:
             entry_coherent=entry_coherent,
             expected_attestations=expected_attestations,
             fallback=failure,
+            lock=lock,
         )
     try:
         _validate_rebind_pair(
@@ -1438,6 +1666,7 @@ async def _rebind(*, bot_user_id: str) -> dict[str, object]:
             entry_coherent=entry_coherent,
             expected_attestations=expected_attestations,
             fallback=exc,
+            lock=lock,
         )
     _assert_services_stopped("C1_REBIND_SERVICE_RUNNING")
     return {
