@@ -860,7 +860,7 @@ test('private-index preparation refuses concurrent real-index mutation before re
 });
 
 
-test('post-ref concurrent index lock stays untouched; source ref is known APPLIED', async () => {
+test('foreign index lock is preserved after the fenced ref update', async () => {
   const f = await fixture();
   try {
     await writeFile(path.join(f.workspace, 'proof.txt'), 'v2\n');
@@ -870,7 +870,7 @@ test('post-ref concurrent index lock stays untouched; source ref is known APPLIE
     const publisher = createGitPublisher(f.config, {
       execFile: async (file, args, options) => {
         const out = await execFile(file, args, options);
-        if (!injected && file === GIT && args[0] === 'update-ref') {
+        if (!injected && file === GIT && args[0] === 'commit-tree') {
           // Disposable synthetic workspace only. Git index lock belongs to
           // another writer and must never be deleted by the publisher.
           await writeFile(lockPath, 'foreign index lock\n', {flag:'wx'});
