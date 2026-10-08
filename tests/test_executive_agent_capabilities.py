@@ -136,7 +136,7 @@ def test_default_policy_is_secret_free_unarmed_and_resolves_closed_profiles():
     registry = ExecutionCapabilityRegistry.load()
     assert registry.lifecycle_authority == "executive_os"
     assert registry.production_armed is False
-    assert registry.policy_version == "2026-10-03.company-consultation-edge-p0"
+    assert registry.policy_version == "2026-10-06.claude-rich-principal-rg1"
     assert len(registry.policy_digest) == 64
 
     sealed = registry.resolve("sealed.worker.write.no-extensions.v1")
@@ -299,11 +299,16 @@ def test_company_dialogue_fixture_compiles_through_existing_capability_authority
     assert widened.expected_config_digest != expected_digest
 
 
-def test_production_policy_has_no_company_dialogue_placeholder_endpoint_or_profile():
+def test_production_policy_has_no_legacy_company_dialogue_placeholder():
     raw = _raw_policy()
     rendered = json.dumps(raw, sort_keys=True)
-    assert "mastermind-company-dialogue" not in rendered
-    assert "mastermindCompanyDialogue" not in rendered
+    # The old test-only HTTPS placeholder remains forbidden. H1-RG1 now has a
+    # distinct reviewed principal Company Dialogue grant, covered separately.
+    assert "mastermind-company-dialogue-v1" not in raw["mcp_servers"]
+    assert (
+        "operator.appserver.readonly.company-dialogue.fixture.v1"
+        not in raw["profiles"]
+    )
     assert "company-dialogue.test.invalid" not in rendered
 
 
@@ -683,39 +688,47 @@ def test_browser_grants_refuse_transport_identity_or_profile_widening(tmp_path, 
 
 
 def test_v3_ratified_generation_and_schema_constants_remain_exact(tmp_path):
-    """Freeze the V3 policy after the disabled Company edge addition.
+    """Freeze both predecessor V3 generations while adding inert H1-RG1.
 
-    CAP-S1 remains opt-in for V4 and the default schema remains V3.  The
-    Company stdio grant rotates the global policy identity; the incumbent
-    Browser B1 and docs profile digests remain unchanged. Company stays
-    disabled until its installed native admission owner is qualified.
+    CAP-S1 remains opt-in for V4 and the default schema remains V3.  The two
+    rich-principal MCP grants and disabled profile rotate only the new policy
+    identity; the immediately previous protected-master generation and the
+    older pre-isolated-browser generation remain reproducible byte-for-byte.
     """
 
     assert CAPABILITY_POLICY_SCHEMA == CAPABILITY_POLICY_SCHEMA_V3
     assert CAPABILITY_POLICY_SCHEMA_V3 == "mastermind.executive_agent_capabilities/v3"
     assert CAPABILITY_POLICY_SCHEMA_V4 == "mastermind.executive_agent_capabilities/v4"
 
-    registry = ExecutionCapabilityRegistry.load()
-    assert registry.schema_version == CAPABILITY_POLICY_SCHEMA_V3
-    assert registry.capability_packages == {}
-    # Preserve the previous ratified generation's identity independently of
-    # the new inert declaration, which necessarily rotates the policy digest.
+    current = ExecutionCapabilityRegistry.load()
+    assert current.schema_version == CAPABILITY_POLICY_SCHEMA_V3
+    assert current.capability_packages == {}
+
     raw = _raw_policy()
-    del raw["profiles"]["operator.browser.isolated.v1"]
-    del raw["resources"]["worker-browser-isolated"]
+    del raw["profiles"]["principal.claude.coo.rich.v1"]
+    del raw["mcp_servers"]["executive-coo-mcp-v1"]
+    del raw["mcp_servers"]["company-dialogue-principal-mcp-v1"]
+    raw["policy_version"] = "2026-10-03.company-consultation-edge-p0"
     previous = ExecutionCapabilityRegistry.load(_write(tmp_path, raw))
-    assert registry.policy_digest != previous.policy_digest
-    registry = previous
-    assert registry.policy_digest == (
+    assert current.policy_digest != previous.policy_digest
+    assert previous.policy_digest == (
+        "506c1e2aa4bb730bf0325383bfdbbcf73adba7f248378af4dfc7d89ff23c6dd5"
+    )
+
+    older_raw = json.loads(json.dumps(raw))
+    del older_raw["profiles"]["operator.browser.isolated.v1"]
+    del older_raw["resources"]["worker-browser-isolated"]
+    older = ExecutionCapabilityRegistry.load(_write(tmp_path, older_raw))
+    assert older.policy_digest == (
         "0568a41fe7b16b20f3945e79ce87d736fa75bc90c1e747a2b7f1c0c8ffc495d5"
     )
-    assert registry.resolve(
+    assert older.resolve(
         "operator.appserver.readonly.docs-mcp.native-helper.v1"
     ).profile_digest == (
         "028fce73ff8c4cb8f8ada7b514e89b74fba64b92f29db3780004a360e0995d39"
     )
 
-    for profile in registry.profiles.values():
+    for profile in older.profiles.values():
         assert profile.skill_grants == ()
         assert profile.app_server_config_projection()["skills"] == {"config": None}
 

@@ -9,10 +9,14 @@ from types import MappingProxyType
 
 import pytest
 
+from control_plane.coo_principal_envelope import PrincipalAdmissionContext
+from control_plane.coo_principal_mandate import NewEffectGate
 from control_plane.executive_delegation_identity import ExecutiveDelegationIdentity
 from control_plane.executive_runtime import AttemptStatus, WorkerStatus
 from control_plane.session_targets import RuntimeBinding
+from integrations.mastermind_company_mcp.adapter import CompanyDialogueGateway
 from integrations.mastermind_company_mcp.schemas import (
+    GatewayError,
     SERVER_IDENTITY,
     SERVER_VERSION,
     TOOL_SCHEMA_DIGEST,
@@ -28,10 +32,13 @@ from integrations.slack_agent_dialogue.company_dialogue_runtime_binding import (
     BindingReason,
     BindingState,
     CompanyDialogueBindingError,
+    CooPrincipalDialogueCaller,
     CurrentWorkerDialogueSnapshot,
     WorkerDialogueCaller,
     require_company_dialogue_binding,
+    require_company_dialogue_principal_binding,
     resolve_company_dialogue_binding,
+    resolve_company_dialogue_principal_binding,
 )
 
 
@@ -43,6 +50,10 @@ POLICY_DIGEST = "b" * 64
 PARENT_CREATED = "2026-08-31T22:00:00Z"
 ATTEMPT_ID = "ATT-0123456789abcdef0123456789abcdef"
 ROLLED_ATTEMPT_ID = "ATT-fedcba9876543210fedcba9876543210"
+PRINCIPAL_BINDING_DIGEST = "e" * 64
+AUTHORITY_GENERATION_DIGEST = "f" * 64
+CAPABILITY_PROFILE_DIGEST = "9" * 64
+REPLY_MESSAGE_KEY = "asd-result-12345678"
 
 
 def identity() -> ExecutiveDelegationIdentity:
@@ -152,6 +163,52 @@ def resolve(*, current: CurrentWorkerDialogueSnapshot | None = None, actor: Work
     )
 
 
+def principal_caller(
+    *,
+    work_ref: str = "WS:CHAIRMAN-CONTROL-ROOM",
+    root_job_id: str = "JOB-100",
+    principal_binding_digest: str = PRINCIPAL_BINDING_DIGEST,
+    authority_generation_digest: str = AUTHORITY_GENERATION_DIGEST,
+    reasoning_surface: str = "claude-agent-sdk",
+    capability_profile_digest: str = CAPABILITY_PROFILE_DIGEST,
+    new_effect_gate: NewEffectGate = NewEffectGate.OPEN,
+    accountable_seat: str = "coo",
+    owed_seat: str = "coo",
+) -> CooPrincipalDialogueCaller:
+    return CooPrincipalDialogueCaller(
+        admission_context=PrincipalAdmissionContext(
+            work_ref=work_ref,
+            principal_binding_digest=principal_binding_digest,
+            mission_authority_ref="mission-authority-current",
+            authority_generation_digest=authority_generation_digest,
+        ),
+        root_job_id=root_job_id,
+        reasoning_surface=reasoning_surface,
+        capability_profile_digest=capability_profile_digest,
+        new_effect_gate=new_effect_gate,
+        accountable_seat=accountable_seat,
+        owed_seat=owed_seat,
+    )
+
+
+def resolve_principal(
+    *,
+    current: CurrentWorkerDialogueSnapshot | None = None,
+    actor: CooPrincipalDialogueCaller | None = None,
+    dialogue_parent: dict | None = None,
+    thread_ts: str = THREAD_TS,
+    reply_to_message_key: str = REPLY_MESSAGE_KEY,
+):
+    return resolve_company_dialogue_principal_binding(
+        delegation_identity=identity(),
+        dialogue_parent=dialogue_parent or parent(),
+        thread_ts=thread_ts,
+        current=current if current is not None else snapshot(),
+        actor=actor if actor is not None else principal_caller(),
+        reply_to_message_key=reply_to_message_key,
+    )
+
+
 def test_exact_current_worker_receives_same_parent_context_and_current_attempt_actor() -> None:
     result = resolve()
 
@@ -186,6 +243,245 @@ def test_exact_current_worker_receives_same_parent_context_and_current_attempt_a
     )
     assert result.binding.reply_to_message_key is None
     assert len(result.evidence_digest) == 64
+
+
+def test_exact_current_coo_principal_resolves_only_to_live_child_carrier() -> None:
+    result = resolve_principal()
+
+    assert result.schema == BINDING_SCHEMA
+    assert result.state is BindingState.RESOLVED
+    assert result.reason is BindingReason.EXACT_CURRENT_COO_PRINCIPAL
+    assert result.binding is not None
+    assert result.binding.work_ref == "WS:CHAIRMAN-CONTROL-ROOM"
+    assert result.binding.session_ref == identity().session_ref
+    assert result.binding.operation_key == identity().operation_key
+    assert result.binding.thread_ts == THREAD_TS
+    assert result.binding.reply_to_message_key == REPLY_MESSAGE_KEY
+    assert result.binding.allowed_message_types == ("RULING", "CONTINUE", "STOP")
+    assert result.binding.actor_ref == {
+        "kind": "executive_principal",
+        "seat": "coo",
+        "reasoning_surface": "claude-agent-sdk",
+        "principal_binding_digest": PRINCIPAL_BINDING_DIGEST,
+        "mission_authority_ref": "mission-authority-current",
+        "authority_generation_digest": AUTHORITY_GENERATION_DIGEST,
+        "capability_profile_digest": CAPABILITY_PROFILE_DIGEST,
+        "root_job_id": "JOB-100",
+    }
+    assert result.binding.applies_to == {
+        "kind": "executive_attempt",
+        "job_id": "JOB-200",
+        "attempt_id": ATTEMPT_ID,
+        "worker_id": "codex-worker-01",
+    }
+    assert len(result.evidence_digest) == 64
+
+
+def test_principal_binding_is_still_inert_to_current_worker_mcp_gateway() -> None:
+    result = resolve_principal()
+    assert result.binding is not None
+    with pytest.raises(GatewayError) as caught:
+        CompanyDialogueGateway._binding_context(result.binding)
+    assert caught.value.code == "BINDING_UNAVAILABLE"
+
+
+@pytest.mark.parametrize(
+    ("actor", "reason"),
+    [
+        (
+            principal_caller(work_ref="WS:OTHER-MISSION"),
+            BindingReason.PRINCIPAL_MISSION_MISMATCH,
+        ),
+        (
+            principal_caller(root_job_id="JOB-999"),
+            BindingReason.PRINCIPAL_MISSION_MISMATCH,
+        ),
+        (
+            principal_caller(
+                new_effect_gate=NewEffectGate.FENCED_EFFECT_UNKNOWN,
+            ),
+            BindingReason.PRINCIPAL_EFFECT_FENCED,
+        ),
+        (
+            principal_caller(accountable_seat="ceo"),
+            BindingReason.PRINCIPAL_TURN_RESERVED,
+        ),
+        (
+            principal_caller(owed_seat="worker"),
+            BindingReason.PRINCIPAL_TURN_RESERVED,
+        ),
+    ],
+)
+def test_principal_mission_effect_and_turn_fences_refuse(
+    actor: CooPrincipalDialogueCaller,
+    reason: BindingReason,
+) -> None:
+    result = resolve_principal(actor=actor)
+    assert result.state is BindingState.REFUSED
+    assert result.reason is reason
+    assert result.binding is None
+
+
+@pytest.mark.parametrize(
+    ("current", "dialogue_parent", "reason"),
+    [
+        (
+            snapshot(attempt_status=AttemptStatus.COMPLETED),
+            parent(),
+            BindingReason.CURRENT_ATTEMPT_INACTIVE,
+        ),
+        (
+            snapshot(worker_status=WorkerStatus.AVAILABLE),
+            parent(),
+            BindingReason.CURRENT_WORKER_INACTIVE,
+        ),
+        (
+            snapshot(attested=False),
+            parent(),
+            BindingReason.CAPABILITY_NOT_ATTESTED,
+        ),
+        (
+            snapshot(parent_fingerprint="f" * 64),
+            parent(),
+            BindingReason.DIALOGUE_PARENT_STALE,
+        ),
+        (
+            snapshot(),
+            parent(operation_key="exec-job-201"),
+            BindingReason.DIALOGUE_IDENTITY_MISMATCH,
+        ),
+    ],
+)
+def test_principal_binding_reuses_current_child_and_parent_fences(
+    current: CurrentWorkerDialogueSnapshot,
+    dialogue_parent: dict,
+    reason: BindingReason,
+) -> None:
+    result = resolve_principal(current=current, dialogue_parent=dialogue_parent)
+    assert result.state is BindingState.REFUSED
+    assert result.reason is reason
+    assert result.binding is None
+
+
+def test_principal_binding_reports_current_runtime_unknown_without_fallback() -> None:
+    result = resolve_company_dialogue_principal_binding(
+        delegation_identity=identity(),
+        dialogue_parent=parent(),
+        thread_ts=THREAD_TS,
+        current=None,
+        actor=principal_caller(),
+        reply_to_message_key=REPLY_MESSAGE_KEY,
+    )
+    assert result.state is BindingState.UNKNOWN
+    assert result.reason is BindingReason.CURRENT_RUNTIME_UNAVAILABLE
+    assert result.binding is None
+
+
+def test_principal_binding_tracks_current_attempt_rollover_without_reusing_stale_child() -> None:
+    current = snapshot(attempt_id=ROLLED_ATTEMPT_ID, worker_id="codex-worker-02")
+    result = resolve_principal(current=current)
+    assert result.state is BindingState.RESOLVED
+    assert result.binding is not None
+    assert result.binding.applies_to == {
+        "kind": "executive_attempt",
+        "job_id": "JOB-200",
+        "attempt_id": ROLLED_ATTEMPT_ID,
+        "worker_id": "codex-worker-02",
+    }
+    assert result.binding.reply_to_message_key == REPLY_MESSAGE_KEY
+    assert result.evidence_digest != resolve_principal().evidence_digest
+
+
+def test_principal_binding_refuses_malformed_current_principal_profile_digest() -> None:
+    malformed = principal_caller(capability_profile_digest="not-a-digest")
+    result = resolve_principal(actor=malformed)
+    assert result.state is BindingState.REFUSED
+    assert result.reason is BindingReason.ACTOR_PROFILE_MISMATCH
+    assert result.binding is None
+
+
+@pytest.mark.parametrize(
+    "reply_to_message_key",
+    ["", "asd-short", "result-12345678", "asd-RESULT-12345678"],
+)
+def test_principal_reply_target_is_closed_and_server_bound(
+    reply_to_message_key: str,
+) -> None:
+    result = resolve_principal(reply_to_message_key=reply_to_message_key)
+    assert result.state is BindingState.REFUSED
+    assert result.reason is BindingReason.REPLY_TARGET_INVALID
+    assert result.binding is None
+
+
+def test_principal_cannot_bind_root_as_its_own_subordinate() -> None:
+    current = dataclasses.replace(
+        snapshot(),
+        job_id="JOB-100",
+        root_job_id="JOB-100",
+    )
+    root_identity = dataclasses.replace(identity(), job_id="JOB-100")
+    result = resolve_company_dialogue_principal_binding(
+        delegation_identity=root_identity,
+        dialogue_parent=parent(),
+        thread_ts=THREAD_TS,
+        current=current,
+        actor=principal_caller(),
+        reply_to_message_key=REPLY_MESSAGE_KEY,
+    )
+    assert result.state is BindingState.REFUSED
+    assert result.reason is BindingReason.CURRENT_JOB_MISMATCH
+    assert result.binding is None
+
+
+def test_principal_binding_digest_moves_on_authority_profile_or_reply_generation() -> None:
+    baseline = resolve_principal()
+    moved_authority = resolve_principal(
+        actor=principal_caller(authority_generation_digest="1" * 64)
+    )
+    moved_profile = resolve_principal(
+        actor=principal_caller(capability_profile_digest="2" * 64)
+    )
+    moved_reply = resolve_principal(reply_to_message_key="asd-result-87654321")
+    moved_runtime_binding = runtime_binding(generation=4)
+    moved_runtime = resolve_principal(
+        current=snapshot(runtime=moved_runtime_binding),
+    )
+    assert len(
+        {
+            baseline.evidence_digest,
+            moved_authority.evidence_digest,
+            moved_profile.evidence_digest,
+            moved_reply.evidence_digest,
+            moved_runtime.evidence_digest,
+        }
+    ) == 5
+
+
+def test_require_principal_binding_re_resolves_and_refuses_fenced_effect() -> None:
+    with pytest.raises(CompanyDialogueBindingError) as caught:
+        require_company_dialogue_principal_binding(
+            delegation_identity=identity(),
+            dialogue_parent=parent(),
+            thread_ts=THREAD_TS,
+            current=snapshot(),
+            actor=principal_caller(
+                new_effect_gate=NewEffectGate.FENCED_RECONCILIATION_REQUIRED
+            ),
+            reply_to_message_key=REPLY_MESSAGE_KEY,
+        )
+    assert caught.value.resolution.reason is BindingReason.PRINCIPAL_EFFECT_FENCED
+
+
+def test_principal_caller_has_no_provider_account_thread_or_target_selector() -> None:
+    assert set(CooPrincipalDialogueCaller.__dataclass_fields__) == {
+        "admission_context",
+        "root_job_id",
+        "reasoning_surface",
+        "capability_profile_digest",
+        "new_effect_gate",
+        "accountable_seat",
+        "owed_seat",
+    }
 
 
 def test_actual_runtime_minted_job_and_attempt_ids_resolve_public_binding() -> None:

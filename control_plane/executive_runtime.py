@@ -255,6 +255,19 @@ _EXECUTIVE_DIALOGUE_SOURCE_KEYS = frozenset(
     }
 )
 _ORCHESTRATION_ROLES = frozenset({"plan", "work", "review", "repair", "aggregation"})
+_ORCHESTRATION_PROVENANCE_SCHEMA = "mastermind.executive_orchestration_provenance/v1"
+_ORCHESTRATION_PROVENANCE_SOURCE_SCHEMA = (
+    "mastermind.executive_orchestration_provenance_source/v1"
+)
+# Closed root-source vocabulary. The COO-principal creator is source-only until
+# its separately reviewed ingress is composed; sealed child provenance remains
+# coo_cycle and finite-drive paths below retain their explicit CEO-intent
+# requirement.
+CEO_ORCHESTRATION_ROOT_CREATOR = "ceo_intent"
+PRINCIPAL_ORCHESTRATION_ROOT_CREATOR = "coo_principal"
+_ORCHESTRATION_ROOT_CREATORS = frozenset(
+    {CEO_ORCHESTRATION_ROOT_CREATOR, PRINCIPAL_ORCHESTRATION_ROOT_CREATOR}
+)
 COO_CYCLE_BLOCK_REASONS = frozenset(
     {
         "invalid_root",
@@ -1440,6 +1453,94 @@ def normalize_executive_dialogue_source(
     )
 
 
+def _constraints_with_host_execution_binding(
+    constraints: Mapping[str, Any] | None,
+    execution_binding: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Apply one reviewed host execution binding to root constraints.
+
+    The binding is trusted host composition, never public intent/request data.
+    CEO-v2 and COO-principal roots share this single normalization law.
+    """
+
+    raw_caller = dict(constraints or {})
+    normalized_caller = _normalise_constraints(raw_caller)
+    if execution_binding is None:
+        return normalized_caller
+    if not isinstance(execution_binding, Mapping):
+        raise StateConflict("host execution binding fields are incomplete or drifted")
+    version = execution_binding.get(
+        HOST_EXECUTION_BINDING_VERSION_KEY,
+        HOST_EXECUTION_BINDING_V2,
+    )
+    if version not in {HOST_EXECUTION_BINDING_V2, HOST_EXECUTION_BINDING_V3}:
+        raise StateConflict("host execution binding version is unknown")
+    carried = dict(execution_binding)
+    carried.pop(HOST_EXECUTION_BINDING_VERSION_KEY, None)
+    admitted_union = None
+    if version == HOST_EXECUTION_BINDING_V3:
+        if set(carried) != set(V3_HOST_EXECUTION_BINDING_KEYS):
+            raise StateConflict(
+                "v2 host execution binding fields are incomplete or drifted"
+            )
+        if "work_placement_union" in raw_caller:
+            raise StateConflict(
+                "caller constraint work_placement_union conflicts "
+                "with reviewed host composition"
+            )
+        admitted_union = _normalise_work_placement_union(
+            carried.pop("work_placement_union")
+        )
+    if set(carried) != set(V2_HOST_EXECUTION_BINDING_KEYS):
+        raise StateConflict(
+            "v2 host execution binding fields are incomplete or drifted"
+        )
+    bound = _normalise_constraints(carried)
+    if set(bound) != set(V2_HOST_EXECUTION_BINDING_KEYS):
+        raise StateConflict("v2 host execution binding did not normalize exactly")
+    for key in set(raw_caller) & set(bound):
+        if normalized_caller.get(key) != bound[key]:
+            raise StateConflict(
+                f"caller constraint {key} conflicts with reviewed host composition"
+            )
+    normalized_caller.update(bound)
+    if admitted_union is not None:
+        normalized_caller["work_placement_union"] = admitted_union
+        return _normalise_constraints(
+            normalized_caller,
+            host_admitted_placement_union=True,
+        )
+    return _normalise_constraints(normalized_caller)
+
+
+def _provenance_with_dialogue_source(
+    provenance: Mapping[str, Any],
+    dialogue_source: Mapping[str, Any] | None,
+    *,
+    work_ref: str,
+) -> dict[str, Any]:
+    """Attach one immutable host-owned dialogue source to root provenance."""
+
+    result = dict(provenance)
+    if dialogue_source is None:
+        return result
+    normalized_source = normalize_executive_dialogue_source(
+        dialogue_source,
+        work_ref=work_ref,
+    ).to_dict()
+    result["dialogue_source"] = normalized_source
+    result["dialogue_source_digest"] = hashlib.sha256(
+        json.dumps(
+            normalized_source,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    return result
+
+
 def _dialogue_source_from_root_creation(
     connection: sqlite3.Connection,
     *,
@@ -1696,7 +1797,7 @@ def _validate_exact_worker_target_selection(
         raise StateConflict("exact worker target root is unavailable")
     root = _job_from_row(root_row)
     if (root.orchestration_role != "aggregation" or root.parent_job_id is not None
-        or root.orchestration_provenance.get("creator") != "ceo_intent"
+        or not _accepted_orchestration_root_provenance(root.orchestration_provenance)
         or root.orchestration_provenance.get("source_id") != d["operation_key"]):
         raise StateConflict("exact worker target operation is not its admitted root")
     for field, expected in (("worker_id", "worker_id"), ("quota_class", "quota_class"),
@@ -4592,6 +4693,58 @@ def _quota_specifications(
     return result
 
 
+def _orchestration_source_creator(
+    provenance: Mapping[str, Any] | None,
+    *,
+    role: str,
+) -> str | None:
+    """Return the accepted creator for one pre-persistence provenance source."""
+
+    if not isinstance(provenance, Mapping):
+        return None
+    if provenance.get("schema_version") != _ORCHESTRATION_PROVENANCE_SOURCE_SCHEMA:
+        return None
+    creator = provenance.get("creator")
+    if type(creator) is not str:
+        return None
+    if role == "aggregation":
+        return creator if creator in _ORCHESTRATION_ROOT_CREATORS else None
+    return creator if creator == "coo_cycle" else None
+
+
+def _orchestration_root_creator(
+    provenance: Mapping[str, Any] | None,
+) -> str | None:
+    """Return one accepted root creator from the closed Runtime vocabulary.
+
+    This is a source discriminator only. It grants no root-creation capability,
+    provider placement, mission authority, or finite-drive eligibility.
+    """
+
+    if not isinstance(provenance, Mapping):
+        return None
+    if provenance.get("schema_version") != _ORCHESTRATION_PROVENANCE_SCHEMA:
+        return None
+    creator = provenance.get("creator")
+    if type(creator) is not str or creator not in _ORCHESTRATION_ROOT_CREATORS:
+        return None
+    return creator
+
+
+def _accepted_orchestration_root_provenance(
+    provenance: Mapping[str, Any] | None,
+) -> bool:
+    return _orchestration_root_creator(provenance) is not None
+
+
+def _ceo_intent_root_provenance(
+    provenance: Mapping[str, Any] | None,
+) -> bool:
+    """CEO-specific root check for finite/legacy consumers that are not H4-generic."""
+
+    return _orchestration_root_creator(provenance) == "ceo_intent"
+
+
 def _decode_orchestration_job_fields(
     row: sqlite3.Row,
 ) -> tuple[str | None, dict[str, Any] | None, str | None]:
@@ -4631,8 +4784,7 @@ def _decode_orchestration_job_fields(
     if not isinstance(provenance, dict) or set(provenance) != expected_keys:
         raise PersistenceError("orchestration provenance is not the closed wire")
     if (
-        provenance["schema_version"]
-        != "mastermind.executive_orchestration_provenance/v1"
+        provenance["schema_version"] != _ORCHESTRATION_PROVENANCE_SCHEMA
         or provenance["job_id"] != row["job_id"]
         or provenance["parent_job_id"] != row["parent_job_id"]
         or provenance["root_job_id"] != row["root_job_id"]
@@ -4642,7 +4794,7 @@ def _decode_orchestration_job_fields(
         raise PersistenceError("orchestration provenance identity mismatch")
     if role == "aggregation":
         if (
-            provenance["creator"] != "ceo_intent"
+            not _accepted_orchestration_root_provenance(provenance)
             or row["parent_job_id"] is not None
             or row["root_job_id"] != row["job_id"]
         ):
@@ -10174,7 +10326,7 @@ def _assert_orchestration_lineage_for_create(
     if (
         parent_role != "aggregation"
         or parent_provenance is None
-        or parent_provenance.get("creator") != "ceo_intent"
+        or not _accepted_orchestration_root_provenance(parent_provenance)
         or parent_row["root_job_id"] != parent_row["job_id"]
     ):
         raise StateConflict("orchestration child requires a strict v2 aggregation root")
@@ -10487,7 +10639,7 @@ def _assert_orchestration_dispatch_eligible(
     if (
         root_role != "aggregation"
         or root_provenance is None
-        or root_provenance.get("creator") != "ceo_intent"
+        or not _accepted_orchestration_root_provenance(root_provenance)
         or root["parent_job_id"] is not None
         or root["root_job_id"] != root["job_id"]
     ):
@@ -10566,7 +10718,7 @@ def _assert_orchestration_requeue_eligible(
     if (
         root_role != "aggregation"
         or root_provenance is None
-        or root_provenance.get("creator") != "ceo_intent"
+        or not _accepted_orchestration_root_provenance(root_provenance)
         or root["parent_job_id"] is not None
         or root["root_job_id"] != root["job_id"]
     ):
@@ -12099,58 +12251,10 @@ class JobRegistry:
         if command_id != command_id_for(str(normalized["intent_id"])):
             raise StateConflict("v2 COO root command_id is not intent-derived")
         contract = normalized["execution_contract"]
-        constraints = dict(contract.get("constraints") or {})
-        if execution_binding is not None:
-            version = execution_binding.get(
-                HOST_EXECUTION_BINDING_VERSION_KEY,
-                HOST_EXECUTION_BINDING_V2,
-            )
-            if version not in {HOST_EXECUTION_BINDING_V2, HOST_EXECUTION_BINDING_V3}:
-                raise StateConflict("host execution binding version is unknown")
-            carried = dict(execution_binding)
-            carried.pop(HOST_EXECUTION_BINDING_VERSION_KEY, None)
-            admitted_union = None
-            if version == HOST_EXECUTION_BINDING_V3:
-                if not isinstance(execution_binding, dict) or set(carried) != set(
-                    V3_HOST_EXECUTION_BINDING_KEYS
-                ):
-                    raise StateConflict(
-                        "v2 host execution binding fields are incomplete or drifted"
-                    )
-                if "work_placement_union" in constraints:
-                    raise StateConflict(
-                        "caller constraint work_placement_union conflicts "
-                        "with reviewed host composition"
-                    )
-                admitted_union = _normalise_work_placement_union(
-                    carried.pop("work_placement_union")
-                )
-            if not isinstance(execution_binding, dict) or set(carried) != set(
-                V2_HOST_EXECUTION_BINDING_KEYS
-            ):
-                raise StateConflict(
-                    "v2 host execution binding fields are incomplete or drifted"
-                )
-            bound = _normalise_constraints(carried)
-            if set(bound) != set(V2_HOST_EXECUTION_BINDING_KEYS):
-                raise StateConflict(
-                    "v2 host execution binding did not normalize exactly"
-                )
-            normalized_caller = _normalise_constraints(constraints)
-            for key in set(constraints) & set(bound):
-                if normalized_caller.get(key) != bound[key]:
-                    raise StateConflict(
-                        f"caller constraint {key} conflicts with reviewed host composition"
-                    )
-            normalized_caller.update(bound)
-            if admitted_union is not None:
-                normalized_caller["work_placement_union"] = admitted_union
-                constraints = _normalise_constraints(
-                    normalized_caller,
-                    host_admitted_placement_union=True,
-                )
-            else:
-                constraints = _normalise_constraints(normalized_caller)
+        constraints = _constraints_with_host_execution_binding(
+            contract.get("constraints"),
+            execution_binding,
+        )
         worktree = contract.get("worktree")
         if worktree is not None:
             if workspace_root is None:
@@ -12178,20 +12282,11 @@ class JobRegistry:
                 raise StateConflict(
                     "v2 dialogue source requires the intent's exact workstream"
                 )
-            normalized_source = normalize_executive_dialogue_source(
+            provenance = _provenance_with_dialogue_source(
+                provenance,
                 dialogue_source,
                 work_ref=work_ref,
-            ).to_dict()
-            provenance["dialogue_source"] = normalized_source
-            provenance["dialogue_source_digest"] = hashlib.sha256(
-                json.dumps(
-                    normalized_source,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                    ensure_ascii=False,
-                    allow_nan=False,
-                ).encode("utf-8")
-            ).hexdigest()
+            )
         return self.create_job(
             normalized["objective"],
             department=normalized["department"],
@@ -12215,6 +12310,154 @@ class JobRegistry:
                 "creator": "ceo_intent",
                 "source_id": normalized["intent_id"],
                 "source_digest": fingerprint,
+            },
+            _v2_root_capability=_V2_ROOT_CREATION_CAPABILITY,
+        )
+
+    def create_principal_orchestration_root(
+        self,
+        bundle: Mapping[str, Any],
+        *,
+        principal_admission_guard: Callable[[object], None],
+        workspace_root: str | Path | None = None,
+        execution_binding: Mapping[str, Any] | None = None,
+        dialogue_source: Mapping[str, Any] | None = None,
+        require_dialogue_source: bool = False,
+    ) -> Job:
+        """Create one source-only COO-principal aggregation root.
+
+        No current MCP/ingress path calls this method. The existing host guard
+        must re-prove the exact principal/mission authority generation before
+        the Runtime effect. Stable command identity is shared with bounded COO
+        work so cross-kind reuse is a reconciliation conflict, never a second
+        root.
+        """
+
+        from control_plane.ceo_intent import command_id_for
+        from control_plane.coo_principal_envelope import (
+            CooPrincipalEnvelopeError,
+            principal_orchestration_bundle_digest,
+            validate_principal_orchestration_bundle,
+        )
+
+        if not callable(principal_admission_guard):
+            raise StateConflict(
+                "principal orchestration requires a current admission guard"
+            )
+        try:
+            normalized = validate_principal_orchestration_bundle(bundle)
+            bundle_digest = principal_orchestration_bundle_digest(normalized)
+        except CooPrincipalEnvelopeError as exc:
+            raise StateConflict(
+                f"principal orchestration bundle is invalid: {exc}"
+            ) from exc
+
+        intent_id = str(normalized["intent_id"])
+        command_id = command_id_for(intent_id)
+        existing = self.store.find_event_by_command_id(command_id)
+        if existing is not None:
+            raise StateConflict(
+                "principal orchestration operation already has durable state; "
+                "reconcile the original request"
+            )
+        try:
+            principal_admission_guard(normalized)
+        except Exception as exc:
+            raise StateConflict(
+                "principal orchestration admission is not current"
+            ) from exc
+
+        request = normalized["normalized_request"]
+        envelope = normalized["envelope"]
+        try:
+            attempt_limit = CooCyclePolicy.load().max_attempts_per_orchestration_job
+        except CooCyclePolicyError as exc:
+            raise StateConflict(f"COO cycle policy is invalid: {exc}") from exc
+
+        if type(require_dialogue_source) is not bool:
+            raise StateConflict("principal orchestration dialogue-source gate is invalid")
+        host_bound = any(
+            value is not None
+            for value in (workspace_root, execution_binding, dialogue_source)
+        ) or require_dialogue_source
+        constraints: dict[str, Any] = {}
+        branch: str | None = None
+        worktree: str | None = None
+        if host_bound:
+            if workspace_root is None or execution_binding is None:
+                raise StateConflict(
+                    "principal orchestration host binding requires workspace and execution binding"
+                )
+            if require_dialogue_source and dialogue_source is None:
+                raise StateConflict(
+                    "principal orchestration trusted dialogue source is unavailable"
+                )
+            from control_plane.ceo_request import derive_branch, derive_worktree
+
+            requested_root = Path(workspace_root).expanduser()
+            if not requested_root.is_absolute():
+                raise StateConflict(
+                    "principal orchestration workspace root must be absolute"
+                )
+            root_path = requested_root.resolve(strict=False)
+            branch = derive_branch(intent_id)
+            worktree = derive_worktree(str(root_path), intent_id)
+            resolved_worktree = Path(worktree).expanduser().resolve(strict=False)
+            if root_path not in resolved_worktree.parents:
+                raise StateConflict(
+                    "principal orchestration worktree is outside the reviewed workspace root"
+                )
+            constraints = _constraints_with_host_execution_binding(
+                {},
+                execution_binding,
+            )
+            base_sha = constraints.get("base_sha")
+            if envelope["grounding"].get("mastermind_sha") != base_sha:
+                raise StateConflict(
+                    "principal orchestration grounding differs from reviewed host base"
+                )
+
+        provenance = {
+            "schema": envelope["schema"],
+            "intent_id": intent_id,
+            "request_ref": normalized["request_ref"],
+            "action_kind": normalized["action_kind"],
+            "request_fingerprint": normalized["request_fingerprint"],
+            "bundle_digest": bundle_digest,
+            "actor": envelope["actor"],
+            "seat": envelope["seat"],
+            "principal_binding_digest": envelope["principal_binding_digest"],
+            "mission_authority_ref": envelope["mission_authority_ref"],
+            "authority_generation_digest": envelope["authority_generation_digest"],
+            "grounding": dict(envelope["grounding"]),
+            "workstream": envelope["workstream"],
+        }
+        provenance = _provenance_with_dialogue_source(
+            provenance,
+            dialogue_source,
+            work_ref=str(envelope["workstream"]),
+        )
+        return self.create_job(
+            str(request["objective"]),
+            department=str(request["department"]),
+            priority=int(request["priority"]),
+            authority_level="A0",
+            branch=branch,
+            worktree=worktree,
+            constraints=constraints,
+            attempt_limit=int(attempt_limit),
+            requested_authorities=["READ"],
+            allowed_write_paths=[],
+            validation_commands=[],
+            command_id=command_id,
+            provenance=provenance,
+            business_impact=str(request["business_impact"]),
+            orchestration_role="aggregation",
+            orchestration_provenance={
+                "schema_version": _ORCHESTRATION_PROVENANCE_SOURCE_SCHEMA,
+                "creator": PRINCIPAL_ORCHESTRATION_ROOT_CREATOR,
+                "source_id": intent_id,
+                "source_digest": bundle_digest,
             },
             _v2_root_capability=_V2_ROOT_CREATION_CAPABILITY,
         )
@@ -12246,7 +12489,7 @@ class JobRegistry:
             or root.parent_job_id is not None
             or root.root_job_id != root.job_id
             or not isinstance(root.orchestration_provenance, dict)
-            or root.orchestration_provenance.get("creator") != "ceo_intent"
+            or not _accepted_orchestration_root_provenance(root.orchestration_provenance)
         ):
             raise StateConflict(
                 "planner creation requires a strict v2 aggregation root"
@@ -12366,7 +12609,7 @@ class JobRegistry:
             or root.parent_job_id is not None
             or root.root_job_id != root.job_id
             or not isinstance(root.orchestration_provenance, dict)
-            or root.orchestration_provenance.get("creator") != "ceo_intent"
+            or not _accepted_orchestration_root_provenance(root.orchestration_provenance)
         ):
             raise StateConflict(
                 "interactive creation requires a strict v2 aggregation root"
@@ -12437,7 +12680,7 @@ class JobRegistry:
             if (
                 role != "aggregation"
                 or provenance is None
-                or provenance.get("creator") != "ceo_intent"
+                or not _accepted_orchestration_root_provenance(provenance)
                 or root["root_job_id"] != root["job_id"]
             ):
                 raise StateConflict("plan admission requires a strict-v2 root")
@@ -13383,7 +13626,7 @@ class JobRegistry:
             if (
                 role != "aggregation"
                 or provenance is None
-                or provenance.get("creator") != "ceo_intent"
+                or not _accepted_orchestration_root_provenance(provenance)
                 or root["parent_job_id"] is not None
                 or root["root_job_id"] != root["job_id"]
             ):
@@ -14242,15 +14485,15 @@ class JobRegistry:
                     "orchestration provenance source is not the closed wire"
                 )
             if orchestration_provenance.get("schema_version") != (
-                "mastermind.executive_orchestration_provenance_source/v1"
+                _ORCHESTRATION_PROVENANCE_SOURCE_SCHEMA
             ):
                 raise StateConflict(
                     "unsupported orchestration provenance source schema"
                 )
-            if orchestration_provenance.get("creator") not in {
-                "ceo_intent",
-                "coo_cycle",
-            }:
+            if _orchestration_source_creator(
+                orchestration_provenance,
+                role=orchestration_role,
+            ) is None:
                 raise StateConflict("orchestration provenance creator is invalid")
             source_id = str(orchestration_provenance.get("source_id") or "")
             source_digest = str(orchestration_provenance.get("source_digest") or "")
@@ -23533,7 +23776,7 @@ class BoundedRuntimeReadObservation:
         self._after: int | None = None
         self._identity: str | None = None
         self._receipt: RuntimeReadObservationReceipt | None = None
-        self._commands: dict[str, tuple[str, str, str]] = {}
+        self._commands: dict[str, tuple[str, str, str, str]] = {}
         self._events: dict[str, Event | None] = {}
         # Fixed VM budget handed to the fresh private connection this
         # observation's owner opens; it is never a caller-facing callback.
@@ -23572,8 +23815,7 @@ class BoundedRuntimeReadObservation:
             if not (isinstance(cycle, Mapping) and set(cycle) == keys
                     and isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest)
                     and digest == orchestration_digest(cycle)
-                    and cycle.get("schema_version") == "mastermind.executive_orchestration_provenance/v1"
-                    and cycle.get("creator") == "ceo_intent"
+                    and _accepted_orchestration_root_provenance(cycle)
                     and isinstance(cycle.get("source_id"), str)
                     and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{2,63}", cycle["source_id"])
                     and isinstance(cycle.get("source_digest"), str)
@@ -23584,7 +23826,12 @@ class BoundedRuntimeReadObservation:
                     and cycle.get("root_job_id") == job.job_id == job.root_job_id
                     and cycle.get("role") == job.orchestration_role == "aggregation"):
                 continue
-            self._commands[cycle["command_id"]] = (job.job_id, digest, cycle["source_digest"])
+            self._commands[cycle["command_id"]] = (
+                job.job_id,
+                digest,
+                cycle["source_digest"],
+                str(cycle["creator"]),
+            )
 
     def read_job_root_bounded(self, root_job_id: str) -> BoundedRuntimeRootSnapshot:
         self._select()
@@ -23654,20 +23901,49 @@ class BoundedRuntimeReadObservation:
                 return self._events[command_id]
             if len(self._events) >= 17:
                 raise StateConflict("bounded observation point budget exceeded")
-            job_id, digest, source_digest = self._commands[command_id]
+            job_id, digest, source_digest, creator = self._commands[command_id]
             event = self._store.get_event_by_command_id(command_id, connection=self._connection)
             if event is not None:
                 payload = event.payload
                 provenance = payload.get("provenance") if isinstance(payload, Mapping) else None
-                if not (event.event_type == "JOB_CREATED" and event.command_id == command_id
-                        and event.job_id == event.aggregate_id == job_id and event.aggregate_type == "job"
-                        and isinstance(provenance, Mapping)
-                        and provenance.get("schema") == "mastermind.ceo_intent.v2"
-                        and "ceo-intent:" + str(provenance.get("intent_id")) == command_id
+                common = (
+                    event.event_type == "JOB_CREATED"
+                    and event.command_id == command_id
+                    and event.job_id == event.aggregate_id == job_id
+                    and event.aggregate_type == "job"
+                    and isinstance(payload, Mapping)
+                    and isinstance(provenance, Mapping)
+                    and payload.get("orchestration_role") == "aggregation"
+                    and payload.get("orchestration_provenance_digest") == digest
+                )
+                if not common:
+                    raise RuntimeReadUnavailable(
+                        "creation Event identity disagrees with included Job"
+                    )
+                if creator == CEO_ORCHESTRATION_ROOT_CREATOR:
+                    valid_creator = (
+                        provenance.get("schema") == "mastermind.ceo_intent.v2"
+                        and "ceo-intent:" + str(provenance.get("intent_id"))
+                        == command_id
                         and provenance.get("fingerprint") == source_digest
-                        and payload.get("orchestration_role") == "aggregation"
-                        and payload.get("orchestration_provenance_digest") == digest):
-                    raise RuntimeReadUnavailable("creation Event identity disagrees with included Job")
+                    )
+                elif creator == PRINCIPAL_ORCHESTRATION_ROOT_CREATOR:
+                    valid_creator = (
+                        provenance.get("schema")
+                        == "mastermind.executive_principal_orchestration.v1"
+                        and "ceo-intent:" + str(provenance.get("intent_id"))
+                        == command_id
+                        and provenance.get("action_kind") == "governed_orchestration"
+                        and provenance.get("actor") == "coo-principal"
+                        and provenance.get("seat") == "coo"
+                        and provenance.get("bundle_digest") == source_digest
+                    )
+                else:
+                    valid_creator = False
+                if not valid_creator:
+                    raise RuntimeReadUnavailable(
+                        "creation Event source disagrees with included Job"
+                    )
             self._events[command_id] = event
             return event
         except BaseException:

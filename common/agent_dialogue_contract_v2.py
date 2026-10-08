@@ -76,7 +76,20 @@ MESSAGE_KEYS_V2 = frozenset(
     }
 )
 _EXECUTIVE_ACTOR_KEYS = frozenset({"kind", "seat", "reasoning_surface"})
+_PRINCIPAL_ACTOR_KEYS = frozenset(
+    {
+        "kind",
+        "seat",
+        "reasoning_surface",
+        "principal_binding_digest",
+        "mission_authority_ref",
+        "authority_generation_digest",
+        "capability_profile_digest",
+        "root_job_id",
+    }
+)
 _WORKER_ACTOR_KEYS = frozenset({"kind", "job_id", "attempt_id", "worker_id"})
+COO_PRINCIPAL_MESSAGE_TYPES = frozenset({"RULING", "CONTINUE", "STOP"})
 _REPOSITORY_APPLICABILITY_KEYS = frozenset(
     {"kind", "repository", "head_sha", "pr"}
 )
@@ -329,6 +342,36 @@ def validate_actor_ref(value: Any) -> dict[str, Any]:
             ),
         }
 
+    if kind == "executive_principal":
+        if set(value) != _PRINCIPAL_ACTOR_KEYS or value.get("seat") != "coo":
+            raise DialogueContractError("MESSAGE_INVALID")
+        digests = (
+            value["principal_binding_digest"],
+            value["authority_generation_digest"],
+            value["capability_profile_digest"],
+        )
+        if any(
+            not isinstance(item, str) or _SHA64_RE.fullmatch(item) is None
+            for item in digests
+        ):
+            raise DialogueContractError("MESSAGE_INVALID")
+        return {
+            "kind": "executive_principal",
+            "seat": "coo",
+            "reasoning_surface": _require_identity_string(
+                value["reasoning_surface"], max_chars=100
+            ),
+            "principal_binding_digest": value["principal_binding_digest"],
+            "mission_authority_ref": _require_identity_string(
+                value["mission_authority_ref"], max_chars=255
+            ),
+            "authority_generation_digest": value["authority_generation_digest"],
+            "capability_profile_digest": value["capability_profile_digest"],
+            "root_job_id": _require_identity_string(
+                value["root_job_id"], max_chars=64
+            ),
+        }
+
     if kind == "worker_attempt":
         if set(value) != _WORKER_ACTOR_KEYS:
             raise DialogueContractError("MESSAGE_INVALID")
@@ -378,6 +421,8 @@ def validate_applies_to_v2(value: Any) -> dict[str, Any]:
 def _allowed_message_types(actor_ref: Mapping[str, Any]) -> frozenset[str]:
     if actor_ref["kind"] == "worker_attempt":
         return FABLE_MESSAGE_TYPES
+    if actor_ref["kind"] == "executive_principal":
+        return COO_PRINCIPAL_MESSAGE_TYPES
     seat = actor_ref["seat"]
     if seat == "coo":
         return FABLE_MESSAGE_TYPES
@@ -392,6 +437,13 @@ def _validate_worker_attempt_join(
     actor_ref: Mapping[str, Any],
     applies_to: Mapping[str, Any],
 ) -> None:
+    if actor_ref["kind"] == "executive_principal":
+        if (
+            applies_to["kind"] != "executive_attempt"
+            or actor_ref["root_job_id"] == applies_to["job_id"]
+        ):
+            raise DialogueContractError("MESSAGE_INVALID")
+        return
     if actor_ref["kind"] != "worker_attempt":
         return
     if applies_to["kind"] != "executive_attempt":
@@ -455,6 +507,14 @@ def validate_message_v2(value: Any) -> dict[str, Any]:
     if not isinstance(fingerprint, str) or _SHA64_RE.fullmatch(fingerprint) is None:
         raise DialogueContractError("MESSAGE_INVALID")
 
+    body = validate_body(message_type, value["body"])
+    if (
+        actor_ref["kind"] == "executive_principal"
+        and message_type == "RULING"
+        and body["authority_class"] != "WITHIN_COMMISSION"
+    ):
+        raise DialogueContractError("MESSAGE_INVALID")
+
     normalized = {
         "schema": MESSAGE_SCHEMA_V2,
         "message_key": message_key,
@@ -469,7 +529,7 @@ def validate_message_v2(value: Any) -> dict[str, Any]:
             value["summary"],
             max_chars=MAX_SUMMARY_CHARS,
         ),
-        "body": validate_body(message_type, value["body"]),
+        "body": body,
         "evidence_refs": _validate_evidence_refs(value["evidence_refs"]),
         "requires_response": requires_response,
         "created_at": _require_utc(
