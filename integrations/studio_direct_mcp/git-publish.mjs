@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { execFile as execFileCallback } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
-import { mkdtemp, readFile, realpath as realpathDefault, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, open, readFile, realpath as realpathDefault, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 
 const execFileDefault = promisify(execFileCallback);
@@ -327,12 +327,41 @@ export function createGitPublisher(config, dependencies = {}) {
     }
   }
 
-  async function syncRealIndex(cwd, revision) {
-    // read-tree intentionally aligns the real index to the new commit without
-    // touching the worktree. Refresh stat metadata immediately afterward so
-    // subsequent read-only cleanliness probes do not report stat-only dirt.
-    await git(cwd, ['read-tree', revision]);
-    await git(cwd, ['update-index', '--refresh']);
+  async function seedPrivateIndex(workspacePath, indexPath) {
+    const {stdout} = await git(workspacePath, ['rev-parse', '--git-path', 'index']);
+    const realIndexPath = path.resolve(workspacePath, oneLine(stdout, 'real index path'));
+    const originalIndex = await readFile(realIndexPath);
+    await writeFile(indexPath, originalIndex);
+    return {realIndexPath, originalIndex};
+  }
+
+  async function syncRealIndex(realIndexPath, originalIndex, stagedIndexPath) {
+    // read-tree after a successful commit also destroys sparse skip-worktree
+    // metadata. The private staged index already encodes the exact committed
+    // tree; install those bytes with Git's normal exclusive index.lock protocol.
+    // Never clobber a concurrent index writer. A sync failure after update-ref
+    // is APPLIED/PARTIAL, never a denial or replay of the committed ref.
+    const lockPath = realIndexPath + '.lock';
+    let handle = null;
+    let ownsLock = false;
+    try {
+      handle = await open(lockPath, 'wx', 0o600);
+      ownsLock = true;
+      if (!(await readFile(realIndexPath)).equals(originalIndex)) {
+        throw new Error('real index changed before post-commit synchronization');
+      }
+      const stagedIndex = await readFile(stagedIndexPath);
+      await handle.writeFile(stagedIndex);
+      await handle.sync();
+      await handle.close();
+      handle = null;
+      await rename(lockPath, realIndexPath);
+      ownsLock = false;
+    } finally {
+      if (handle !== null) await handle.close().catch(() => {});
+      // A failed exclusive open never grants ownership of someone else's lock.
+      if (ownsLock) await rm(lockPath, {force: true}).catch(() => {});
+    }
   }
 
   async function verifyDestinationBinding(binding) {
@@ -556,10 +585,7 @@ export function createGitPublisher(config, dependencies = {}) {
       // phantom deletions and makes git add -A exceed its bounded timeout.
       // Snapshot the actual index into the private staging index instead.
       // Neither the real index nor the source ref is modified at this step.
-      const { stdout: realIndexOut } = await git(before.workspacePath, ['rev-parse', '--git-path', 'index']);
-      const realIndexPath = path.resolve(before.workspacePath, oneLine(realIndexOut, 'real index path'));
-      const originalIndex = await readFile(realIndexPath);
-      await writeFile(indexPath, originalIndex);
+      const {realIndexPath, originalIndex} = await seedPrivateIndex(before.workspacePath, indexPath);
       await gitWithIndex(before.workspacePath, ['add', '-A', '--', '.'], indexPath);
       const { stdout: treeOut } = await gitWithIndex(before.workspacePath, ['write-tree'], indexPath);
       const tree = oneLine(treeOut, 'candidate tree');
@@ -607,7 +633,7 @@ export function createGitPublisher(config, dependencies = {}) {
           // The private index protects the caller from pre-commit staging side
           // effects. Once the fenced ref update is known applied, align the
           // real index with that exact commit without touching the worktree.
-          await syncRealIndex(before.workspacePath, commitHead);
+          await syncRealIndex(realIndexPath, originalIndex, indexPath);
         } catch {
           indexSynced = false;
         }
@@ -730,7 +756,7 @@ export function createGitPublisher(config, dependencies = {}) {
     let commitHead = null;
     let ref = null;
     try {
-      await gitWithIndex(before.workspacePath, ['read-tree', expectedHead], indexPath);
+      const {realIndexPath, originalIndex} = await seedPrivateIndex(before.workspacePath, indexPath);
       await gitWithIndex(before.workspacePath, ['add', '--', COMMISSION_PATH], indexPath);
       const {stdout: treeOut} = await gitWithIndex(before.workspacePath, ['write-tree'], indexPath);
       const tree = oneLine(treeOut, 'commission candidate tree');
@@ -765,6 +791,14 @@ export function createGitPublisher(config, dependencies = {}) {
         };
       }
 
+      if (!(await readFile(realIndexPath)).equals(originalIndex)) {
+        return {
+          schema: 'mastermind.studio_git_commit_result.v1',
+          status: 'REFUSED', effect_state: 'NOT_APPLIED',
+          code: 'REAL_INDEX_CHANGED_DURING_PREPARATION',
+          operation_id: operationId, branch: before.branch, local_head_sha: expectedHead,
+        };
+      }
       const {stdout: commitOut} = await gitWithIndex(before.workspacePath,
         ['commit-tree', tree, '-p', expectedHead, '-m', message], indexPath);
       commitHead = oneLine(commitOut, 'commission commit HEAD');
@@ -790,7 +824,7 @@ export function createGitPublisher(config, dependencies = {}) {
 
       async function finishCommissionApplied(successCode) {
         let indexSynced = true;
-        try { await syncRealIndex(before.workspacePath, commitHead); } catch { indexSynced = false; }
+        try { await syncRealIndex(realIndexPath, originalIndex, indexPath); } catch { indexSynced = false; }
         let observed = null;
         try { observed = await workspace(operationId, {observeRemote: false}); } catch { /* known applied */ }
         if (!observed) {

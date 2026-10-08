@@ -858,3 +858,38 @@ test('private-index preparation refuses concurrent real-index mutation before re
     assert.equal(remoteOut.trim(), '');
   } finally { await f.cleanup(); }
 });
+
+
+test('post-ref concurrent index lock stays untouched; source ref is known APPLIED', async () => {
+  const f = await fixture();
+  try {
+    await writeFile(path.join(f.workspace, 'proof.txt'), 'v2\n');
+    const {stdout: indexOut} = await git(f.workspace, 'rev-parse', '--git-path', 'index');
+    const lockPath = path.resolve(f.workspace, indexOut.trim()) + '.lock';
+    let injected = false;
+    const publisher = createGitPublisher(f.config, {
+      execFile: async (file, args, options) => {
+        const out = await execFile(file, args, options);
+        if (!injected && file === GIT && args[0] === 'update-ref') {
+          // Disposable synthetic workspace only. Git index lock belongs to
+          // another writer and must never be deleted by the publisher.
+          await writeFile(lockPath, 'foreign index lock\n', {flag:'wx'});
+          injected = true;
+        }
+        return out;
+      },
+    });
+    const result = await publisher.commit({
+      operation_id:f.operationId, expected_head_sha:f.head,
+      message:'test: preserve foreign index lock',
+    });
+    assert.equal(injected, true);
+    assert.equal(result.effect_state, 'APPLIED');
+    assert.equal(result.index_synced, false);
+    assert.equal(result.status, 'PARTIAL');
+    assert.equal(result.code, 'APPLIED_INDEX_SYNC_FAILED');
+    assert.equal(await readFile(lockPath, 'utf8'), 'foreign index lock\n');
+    const {stdout: headOut} = await git(f.workspace, 'rev-parse', 'HEAD');
+    assert.equal(headOut.trim(), result.commit_head_sha);
+  } finally {await f.cleanup();}
+});
