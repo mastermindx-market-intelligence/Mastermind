@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { execFile as execFileCallback } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
-import { mkdtemp, realpath as realpathDefault, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath as realpathDefault, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 
 const execFileDefault = promisify(execFileCallback);
@@ -551,11 +551,32 @@ export function createGitPublisher(config, dependencies = {}) {
     const indexPath = path.join(scratch, 'index');
     let refUpdateAttempted = false;
     try {
-      await gitWithIndex(before.workspacePath, ['read-tree', expectedHead], indexPath);
+      // read-tree into a fresh GIT_INDEX_FILE loses linked-worktree sparse
+      // skip-worktree metadata. On a large sparse checkout that produces
+      // phantom deletions and makes git add -A exceed its bounded timeout.
+      // Snapshot the actual index into the private staging index instead.
+      // Neither the real index nor the source ref is modified at this step.
+      const { stdout: realIndexOut } = await git(before.workspacePath, ['rev-parse', '--git-path', 'index']);
+      const realIndexPath = path.resolve(before.workspacePath, oneLine(realIndexOut, 'real index path'));
+      const originalIndex = await readFile(realIndexPath);
+      await writeFile(indexPath, originalIndex);
       await gitWithIndex(before.workspacePath, ['add', '-A', '--', '.'], indexPath);
       const { stdout: treeOut } = await gitWithIndex(before.workspacePath, ['write-tree'], indexPath);
       const tree = oneLine(treeOut, 'candidate tree');
       if (!SHA_RE.test(tree)) throw new Error('candidate tree is invalid');
+      // A competing index writer must not be silently overwritten. The
+      // original source ref is still untouched, so this refusal is NOT_APPLIED.
+      if (!(await readFile(realIndexPath)).equals(originalIndex)) {
+        return {
+          schema: 'mastermind.studio_git_commit_result.v1',
+          status: 'REFUSED',
+          effect_state: 'NOT_APPLIED',
+          code: 'REAL_INDEX_CHANGED_DURING_PREPARATION',
+          operation_id: operationId,
+          branch: before.branch,
+          local_head_sha: expectedHead,
+        };
+      }
       const { stdout: baseTreeOut } = await git(before.workspacePath, ['rev-parse', `${expectedHead}^{tree}`]);
       const baseTree = oneLine(baseTreeOut, 'base tree');
       const ref = commitActionRef(operationId, before.branch, expectedHead, tree, message);

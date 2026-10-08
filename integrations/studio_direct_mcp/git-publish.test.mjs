@@ -767,3 +767,94 @@ test('tracked and staged changes both refuse push under split cleanliness probes
     }
   }
 });
+
+
+test('sparse typed commit seeds its private index from the linked worktree index', async () => {
+  const f = await fixture();
+  try {
+    await run('/bin/mkdir', ['-p', path.join(f.workspace, 'visible'), path.join(f.workspace, 'hidden')]);
+    await writeFile(path.join(f.workspace, 'visible', 'shown.txt'), 'original\n');
+    await writeFile(path.join(f.workspace, 'hidden', 'preserve.txt'), 'hidden tracked\n');
+    await git(f.workspace, 'add', '-A');
+    await git(f.workspace, 'commit', '-m', 'test: complete source before sparse checkout');
+    const { stdout: baseOut } = await git(f.workspace, 'rev-parse', 'HEAD');
+    const base = baseOut.trim();
+    const receipt = {
+      schema_version: 'mastermind.workspace_cli/v1', action: 'status', effect: 'NOT_APPLIED',
+      receipt: { source_repository: f.sourceRepo, workspace_path: f.workspace, branch: f.branch,
+        dirty: false, head_sha: base, state: 'RELEASABLE' },
+    };
+    const shell = '#!/bin/sh\n' + 'printf "%s\\n" ' + "'" + JSON.stringify(receipt) + "'" + '\n';
+    await writeFile(f.cli, shell);
+    await chmod(f.cli, 0o700);
+    await git(f.workspace, 'sparse-checkout', 'init', '--cone');
+    await git(f.workspace, 'sparse-checkout', 'set', 'visible');
+    await assert.rejects(readFile(path.join(f.workspace, 'hidden', 'preserve.txt')), /ENOENT/);
+    await writeFile(path.join(f.workspace, 'visible', 'shown.txt'), 'changed\n');
+    await writeFile(path.join(f.workspace, 'visible', 'new.txt'), 'new file\n');
+
+    const { stdout: indexOut } = await git(f.workspace, 'rev-parse', '--git-path', 'index');
+    const realIndexPath = path.resolve(f.workspace, indexOut.trim());
+    const realIndex = await readFile(realIndexPath);
+    let privateIndexVerified = false;
+    const publisher = createGitPublisher(f.config, {
+      execFile: async (file, args, options) => {
+        if (file === GIT && args[0] === 'add' && options?.env?.GIT_INDEX_FILE) {
+          assert.deepEqual(await readFile(options.env.GIT_INDEX_FILE), realIndex,
+            'private staging index must retain sparse skip-worktree flags');
+          privateIndexVerified = true;
+        }
+        return execFile(file, args, options);
+      },
+    });
+    const result = await publisher.commit({
+      operation_id: f.operationId, expected_head_sha: base,
+      message: 'test: sparse typed commit',
+    });
+    assert.equal(privateIndexVerified, true);
+    assert.equal(result.effect_state, 'APPLIED');
+    assert.equal(result.status, 'OK');
+    assert.equal(result.index_synced, true);
+    const { stdout: hiddenOut } = await git(f.workspace, 'show', 'HEAD:hidden/preserve.txt');
+    assert.equal(hiddenOut, 'hidden tracked\n');
+    const { stdout: shownOut } = await git(f.workspace, 'show', 'HEAD:visible/shown.txt');
+    assert.equal(shownOut, 'changed\n');
+    const { stdout: newOut } = await git(f.workspace, 'show', 'HEAD:visible/new.txt');
+    assert.equal(newOut, 'new file\n');
+    const { stdout: statusOut } = await git(f.workspace, 'status', '--porcelain=v1', '--untracked-files=all');
+    assert.equal(statusOut, '');
+    assert.equal((await publisher.status({operation_id:f.operationId})).clean, true);
+  } finally { await f.cleanup(); }
+});
+
+test('private-index preparation refuses concurrent real-index mutation before ref update', async () => {
+  const f = await fixture();
+  try {
+    await writeFile(path.join(f.workspace, 'proof.txt'), 'changed\n');
+    let injected = false;
+    const publisher = createGitPublisher(f.config, {
+      execFile: async (file, args, options) => {
+        const out = await execFile(file, args, options);
+        if (!injected && file === GIT && args[0] === 'write-tree' && options?.env?.GIT_INDEX_FILE) {
+          await writeFile(path.join(f.workspace, 'competitor.txt'), 'concurrent\n');
+          await git(f.workspace, 'add', 'competitor.txt');
+          injected = true;
+        }
+        return out;
+      },
+    });
+    const result = await publisher.commit({
+      operation_id: f.operationId, expected_head_sha: f.head,
+      message: 'test: concurrent index refusal',
+    });
+    assert.equal(injected, true);
+    assert.equal(result.status, 'REFUSED');
+    assert.equal(result.effect_state, 'NOT_APPLIED');
+    assert.equal(result.code, 'REAL_INDEX_CHANGED_DURING_PREPARATION');
+    const { stdout: headOut } = await git(f.workspace, 'rev-parse', 'HEAD');
+    assert.equal(headOut.trim(), f.head);
+    const { stdout: remoteOut } = await git(
+      f.workspace, 'ls-remote', '--heads', 'origin', 'refs/heads/' + f.branch);
+    assert.equal(remoteOut.trim(), '');
+  } finally { await f.cleanup(); }
+});
