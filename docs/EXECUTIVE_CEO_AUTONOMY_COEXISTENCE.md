@@ -19,7 +19,7 @@ same target configuration and unchanged worker hash.
 Known failures restore the exact prior control and receipt bytes, prove the
 restored Control process, and restore its launchd override before releasing the
 marker. Unknown effects keep that exact marker. The existing
-`ceo-submit-recover` owner reconciles the same transaction; it does not replay
+`ceo-submit-reconcile` owner reconciles the same transaction; it does not replay
 arm/disarm. Recovery refuses modified archives or any live config/receipt that
 matches neither the sealed prior generation nor its recorded target.
 
