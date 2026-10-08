@@ -1,0 +1,76 @@
+{
+  "task": "Bounded Mastermind auction presentation refinement",
+  "recorded_at": "2026-10-08T23:41:49.069433+00:00",
+  "status": "candidate_frozen_local_checks_passed_browser_rerun_pending_root",
+  "scope": "Only new auction renderer/CSS, renderer unit assertions, and existing loopback browser verification assertions. No remote writes, API/model/auth/authority changes, provider jobs or publication actions.",
+  "changed_files": [
+    {
+      "path": "mastermind_patch/app/static/market_view.html",
+      "preimage_sha256": "b8d84a7313bdd7c9f4bbcc3ddfeadaaeddd85b9976ca143a64acaf5146c8a043",
+      "sha256": "c42e251ff86b1ee53cea017dc358b7e403fe8c82b46e6f3d8e0d06423754c911"
+    },
+    {
+      "path": "mastermind_patch/tests/test_sovereign_auction_renderer.cjs",
+      "preimage_sha256": "d2ef60d56f7b5301db79c667f529e38fd7fcfd7bad69d2213b3b14099635b97d",
+      "sha256": "864008961197abac4eb7b1d37e14b86db8f9bda52913052e63e8542374fc82cf"
+    },
+    {
+      "path": "ui_verification/verify_mastermind_ui.cjs",
+      "preimage_sha256": "d250148f1e5cb609b5af2ab8ca3d2443c47f3c662e5849d18ebfee0b4a2b7e7d",
+      "sha256": "d162597a3f6780b4f30e1fd8595a9db9da5f184e5f9c90be9bedf5d182514a7a"
+    }
+  ],
+  "unchanged_clock_and_harness_files": [
+    {
+      "path": "mastermind_patch/brain/sovereign_auction_context.py",
+      "sha256": "7e9930bc77c1aafed2d8a3406e57af3558822c29cdb60c49d327c5685c6aac8e"
+    },
+    {
+      "path": "mastermind_patch/tests/test_sovereign_auction_context.py",
+      "sha256": "8feccdf4875d27804a94fb7d078610de6c2c767d2cc000bbb14e9a02a4b23d58"
+    },
+    {
+      "path": "ui_verification/mastermind_loopback_harness.py",
+      "sha256": "ac06f0f9b62c0639a140164cf0e441ef2a086a92635e0d9891c50a2f853d1f89"
+    }
+  ],
+  "presentation": [
+    "Lexical integer grouping of exact decimal USD source values; fractional digits and trailing zeros preserved without Number conversion.",
+    "Readable English and Chinese instrument names, physical lifecycle status, auction date, issue date, competitive UTC deadline and scheduled ET time.",
+    "Unknown amount/deadline/result evidence remains explicit; issue calendar wording does not imply actual settlement.",
+    "Native closed Source details retains raw event ID, source label/class, exact raw amount/deadline, known-at and first-observed clocks, all source/physical/issue enums, result keys/values, null-reason codes and official link.",
+    "Top source observed/cutoff clocks remain visible; source health clocks/failure reasons remain accessible under Source observations with visible degraded notice.",
+    "Accepted panel min-width:0 and group-expander full-grid-span repairs preserved unchanged."
+  ],
+  "verification": [
+    {
+      "command": "node tests/test_sovereign_auction_renderer.cjs",
+      "cwd": "mastermind_patch",
+      "exit_code": 0,
+      "result": "Actual page script: exact large/fractional/trailing-zero decimal grouping, readable EN/ZH labels, raw audit evidence, 43 past plus 3 scheduled future-first grouping, explicit unknowns, hostile text/link escaping, unavailable."
+    },
+    {
+      "command": "node --check ui_verification/verify_mastermind_ui.cjs",
+      "cwd": ".",
+      "exit_code": 0,
+      "result": "Syntax passed."
+    }
+  ],
+  "browser_assertion_delta": [
+    "Same 48-case matrix; same real native-route fixture harness, original source and fixed cutoff.",
+    "Explicit closed-by-default Source details audit per representative lifecycle class and every known scheduled auction; opens each, verifies exact raw evidence and links, runs unchanged geometry assertions, records sourceDetailChecks and screenshot.",
+    "Default card summaries must exclude raw ID, row known clock, source/physical enums and null-reason codes.",
+    "Source-failure evidence is checked after opening Source observations; human degraded status remains required before opening.",
+    "Group expanders have a distinct class so source disclosures are never misidentified as group expansion.",
+    "No horizontal-overflow, clipping, container bounds or expanded card-width checks weakened."
+  ],
+  "browser_evidence": {
+    "run02": "Root reports actual FastAPI/Chromium run02 all 48 passed and screenshots inspected for HTML preimage b8d84a7313bdd7c9f4bbcc3ddfeadaaeddd85b9976ca143a64acaf5146c8a043. Run02 is preserved and is historical evidence only for the prior renderer.",
+    "current_candidate": "No HTTP/browser run performed by this subagent for the new presentation bytes. Root must install all three changed files and execute the same 48-case matrix into a new output directory."
+  },
+  "install": "Root solely installs changed HTML, renderer test and browser runner; Python harness remains identical. Use existing native Python/uvicorn and Terminal Playwright/Chromium. No extra dependency or off-loopback network is required.",
+  "patch": {
+    "path": "ui_verification/mastermind_presentation_final/PRESENTATION.patch",
+    "sha256": "bea11887599f6f8656e2d6dd40e9d0870cf30567b67ecadbadf281ea4b16fc1c"
+  }
+}

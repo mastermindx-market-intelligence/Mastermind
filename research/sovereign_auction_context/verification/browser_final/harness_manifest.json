@@ -1,0 +1,167 @@
+{
+  "schema_version": "mastermind_auction_ui_harness_v1",
+  "status": "ACTUAL_HANDLER_PREFLIGHT_PASSED",
+  "fixed_reader_clock": "2026-10-08T23:00:00+00:00",
+  "harness": "Fresh read-only FastAPI routes; actual page/theme/API endpoint functions; temporary fixture files; no production app, lifespan, authentication or publication claim.",
+  "source_files": [
+    {
+      "path": "/Volumes/Mastermind/agent-workspaces/macro/web/sovereign-auction-pressure-20261008-sol-001/engine/treasury_auction_lifecycle.py",
+      "sha256": "9f8aee017dfd1f545a6e3b1a9bc96bb2ab6a60300d6d2ac1043f890606c0e91a"
+    },
+    {
+      "path": "/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/brain/sovereign_auction_context.py",
+      "sha256": "7e9930bc77c1aafed2d8a3406e57af3558822c29cdb60c49d327c5685c6aac8e"
+    },
+    {
+      "path": "/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/app/web.py",
+      "sha256": "7b3dd9c8a8b0c5bd8974ab4d726c935dc611cd4591f083bf9ec0b0137dbbac1c"
+    },
+    {
+      "path": "/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/app/static/market_view.html",
+      "sha256": "c42e251ff86b1ee53cea017dc358b7e403fe8c82b46e6f3d8e0d06423754c911"
+    },
+    {
+      "path": "/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/tests/test_sovereign_auction_api.py",
+      "sha256": "82bd75567f58863c61af64eb97d22ea77b2610f652e46120f50dbdd80d0d0275"
+    },
+    {
+      "path": "/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/tests/fixtures/sovereign_auction_context/event_calendar.json",
+      "sha256": "c3019af2c6439d954886744a4261b8ec84b98f33ebb32ee8aecfa6dcfa98c268"
+    },
+    {
+      "path": "/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/app/static/theme.css",
+      "sha256": "2afb70595a193b82387a5b720b5f08d6a0ad50468413d9401724dd422b9659f4"
+    }
+  ],
+  "input_receipts": [
+    {
+      "path": "/Volumes/Mastermind/agent-workspaces/macro/web/sovereign-auction-pressure-20261008-sol-001/research/sovereign_auction_pressure/source_audit/forward_capture_primary/treasury_auctions/observations/20261008T225320956449Z-1ff0778ec045ff5445c303f27a52ebc75813b51f31f9ac28cedb3bbf240682e4.json",
+      "sha256": "1ff0778ec045ff5445c303f27a52ebc75813b51f31f9ac28cedb3bbf240682e4"
+    },
+    {
+      "path": "/Volumes/Mastermind/agent-workspaces/macro/web/sovereign-auction-pressure-20261008-sol-001/research/sovereign_auction_pressure/source_audit/forward_capture_primary/treasury_auctions/observations/20261008T225325572222Z-a74cfb26c437e0d9d2b3242df6ccdc5c997dad696f7074931cff71c9507b0916.json",
+      "sha256": "a74cfb26c437e0d9d2b3242df6ccdc5c997dad696f7074931cff71c9507b0916"
+    },
+    {
+      "path": "/Volumes/Mastermind/agent-workspaces/macro/web/sovereign-auction-pressure-20261008-sol-001/research/sovereign_auction_pressure/source_audit/forward_capture_primary/treasury_auctions/observations/20261008T225329204683Z-c00d73268eaab3bf3619040eb39f21be1a37d7abc7c74fbca524539459454aea.json",
+      "sha256": "c00d73268eaab3bf3619040eb39f21be1a37d7abc7c74fbca524539459454aea"
+    },
+    {
+      "path": "/Volumes/Mastermind/agent-workspaces/macro/web/sovereign-auction-pressure-20261008-sol-001/research/sovereign_auction_pressure/source_audit/forward_capture_primary/treasury_auctions/observations/20261008T225333744010Z-141d39b47bbd030b4cfbbdd32209f7e95477042ba753d0253175d28849ebeabf.json",
+      "sha256": "141d39b47bbd030b4cfbbdd32209f7e95477042ba753d0253175d28849ebeabf"
+    }
+  ],
+  "base_view_sha256": "0f7b8f35a00d41b3d7aea8e756eed02962b0339ac482eb237d2968ce02734c7b",
+  "cases": {
+    "observed": {
+      "provenance": "Actual four-source captured observations, processed by the exact local W1 producer.",
+      "available": true,
+      "note": null,
+      "status": "available",
+      "source_observed_at": "2026-10-08T22:53:33.744010+00:00",
+      "decision_cutoff_utc": "2026-10-08T23:00:00+00:00",
+      "group_counts": {
+        "RESULT_OBSERVED": 43,
+        "ANNOUNCED": 3,
+        "TENTATIVE": 28
+      },
+      "scheduled_rows": [
+        {
+          "episode_id": "auction:912797UE5:2026-10-13",
+          "label": "26-Week Bill auction",
+          "offering_amount_usd": "82000000000",
+          "competitive_deadline_utc": "2026-10-13T15:30:00+00:00",
+          "known_at": "2026-10-08T22:53:25.572222+00:00"
+        },
+        {
+          "episode_id": "auction:912797VT1:2026-10-13",
+          "label": "13-Week Bill auction",
+          "offering_amount_usd": "95000000000",
+          "competitive_deadline_utc": "2026-10-13T15:30:00+00:00",
+          "known_at": "2026-10-08T22:53:25.572222+00:00"
+        },
+        {
+          "episode_id": "auction:912797SU2:2026-10-13",
+          "label": "6-Week Bill auction",
+          "offering_amount_usd": "95000000000",
+          "competitive_deadline_utc": "2026-10-13T17:00:00+00:00",
+          "known_at": "2026-10-08T22:53:25.572222+00:00"
+        }
+      ],
+      "wrapper_sha256": "8a45bb22108f534e909a66abcce4d1b79a2d1286f2110a250e9f6b6abd6676a7",
+      "actual_api_response_sha256": "3bf2649f4ed3e29427326b705c1eb8df8e6a303896cd1a09258021645bd552e2"
+    },
+    "unavailable": {
+      "provenance": "Synthetic missing-publication control: no nested auction context.",
+      "available": false,
+      "note": "sovereign_auction_context_not_published",
+      "status": null,
+      "source_observed_at": null,
+      "decision_cutoff_utc": null,
+      "group_counts": {},
+      "scheduled_rows": [],
+      "wrapper_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "actual_api_response_sha256": "3b90a81ee15beaad159528af3cec9b16cba7c860f28509b299f4734ea7a42b4b"
+    },
+    "source_failure": {
+      "provenance": "Synthetic later failure layered onto real observations; clocks and rows retain their valid evidence.",
+      "available": true,
+      "note": null,
+      "status": "degraded",
+      "source_observed_at": "2026-10-08T22:53:33.744010+00:00",
+      "decision_cutoff_utc": "2026-10-08T23:00:00+00:00",
+      "group_counts": {
+        "RESULT_OBSERVED": 43,
+        "ANNOUNCED": 3,
+        "TENTATIVE": 28
+      },
+      "scheduled_rows": [
+        {
+          "episode_id": "auction:912797UE5:2026-10-13",
+          "label": "26-Week Bill auction",
+          "offering_amount_usd": "82000000000",
+          "competitive_deadline_utc": "2026-10-13T15:30:00+00:00",
+          "known_at": "2026-10-08T22:53:25.572222+00:00"
+        },
+        {
+          "episode_id": "auction:912797VT1:2026-10-13",
+          "label": "13-Week Bill auction",
+          "offering_amount_usd": "95000000000",
+          "competitive_deadline_utc": "2026-10-13T15:30:00+00:00",
+          "known_at": "2026-10-08T22:53:25.572222+00:00"
+        },
+        {
+          "episode_id": "auction:912797SU2:2026-10-13",
+          "label": "6-Week Bill auction",
+          "offering_amount_usd": "95000000000",
+          "competitive_deadline_utc": "2026-10-13T17:00:00+00:00",
+          "known_at": "2026-10-08T22:53:25.572222+00:00"
+        }
+      ],
+      "wrapper_sha256": "f1fe30a4a9559603f3683b9c871f4a357b1dd38bffc6480ffa8834f3db5e760d",
+      "actual_api_response_sha256": "417499e15ca7f950c85de73ec6cfd0c92737b2a8f56cff03f99bfd026ad06642"
+    },
+    "awaiting_unknown": {
+      "provenance": "Synthetic missing-result/deadline/amount control, clearly labeled UI HARNESS.",
+      "available": true,
+      "note": null,
+      "status": "available",
+      "source_observed_at": "2026-10-08T22:53:33.744010+00:00",
+      "decision_cutoff_utc": "2026-10-08T23:00:00+00:00",
+      "group_counts": {
+        "AWAITING_RESULT": 1
+      },
+      "scheduled_rows": [],
+      "wrapper_sha256": "9a6de41071f4710f90f339abe71cd671ca3273db82c1f7a9430c01edb68a0891",
+      "actual_api_response_sha256": "23b718468ae646b2f57e948fc5d5f6f78feab73f5e79b60a54c7b8875b481bf1"
+    }
+  },
+  "origin": "http://127.0.0.1:63391",
+  "served_routes": [
+    "/api/market_view",
+    "/market_view",
+    "/theme.css"
+  ],
+  "app_lifespan": "off",
+  "external_python_connections": "denied"
+}

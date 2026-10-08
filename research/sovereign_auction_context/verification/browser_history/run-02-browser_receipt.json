@@ -1,0 +1,3729 @@
+{
+  "schema_version": "mastermind_auction_browser_receipt_v1",
+  "started_at": "2026-10-08T23:35:09.267Z",
+  "status": "passed",
+  "source_files": [
+    {
+      "path": "/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs",
+      "sha256": "d250148f1e5cb609b5af2ab8ca3d2443c47f3c662e5849d18ebfee0b4a2b7e7d"
+    },
+    {
+      "path": "/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/mastermind_loopback_harness.py",
+      "sha256": "ac06f0f9b62c0639a140164cf0e441ef2a086a92635e0d9891c50a2f853d1f89"
+    }
+  ],
+  "proof_scope": "Actual Chromium page, exact existing FastAPI endpoint functions, source-bound real auction observations plus declared synthetic negative cases; no production/auth/lifespan/provider acceptance.",
+  "results": [
+    {
+      "width": 1440,
+      "height": 900,
+      "lang": "en",
+      "theme": "light",
+      "case": "observed",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/1440x900-en-light-observed-page.png",
+          "sha256": "aa0c8d54759aad0c94bad5c9c81a1a3984d732c6ce15dc5a47c8da5f31efb520",
+          "bytes": 201018
+        },
+        {
+          "path": "screenshots/1440x900-en-light-observed-auction.png",
+          "sha256": "bfbf63e3069dcd896ee4e8b1acaa3fdfa19236ac95719b7bb9b21c139359a31d",
+          "bytes": 205108
+        },
+        {
+          "path": "screenshots/1440x900-en-light-observed-expanded-1.png",
+          "sha256": "b28269ea8996458ff12aee521ad9e2b28545228d9658bbe639bb678d65cfc4da",
+          "bytes": 234915
+        },
+        {
+          "path": "screenshots/1440x900-en-light-observed-expanded-2.png",
+          "sha256": "41b18fe99ea71764c3c96ccbffb453362553f43df7fc935bebbc2b0d35905c44",
+          "bytes": 234260
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "panel": {
+          "left": 80,
+          "right": 1360,
+          "width": 1280,
+          "height": 3044.328125
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 518.5,
+        "theme": "light",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      },
+      "expandedGroups": [
+        {
+          "heading": "Tentative calendar (28)",
+          "geometry": {
+            "viewportWidth": 1440,
+            "documentWidth": 1440,
+            "bodyWidth": 1440,
+            "panel": {
+              "left": 80,
+              "right": 1360,
+              "width": 1280,
+              "height": 6806.515625
+            },
+            "clipping": [],
+            "visibleCardCount": 36,
+            "minVisibleCardWidth": 518.5,
+            "theme": "light",
+            "lang": "en",
+            "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+            "bodyBackground": "rgb(245, 247, 250)",
+            "fontStatus": "loaded",
+            "fonts": []
+          },
+          "initialCardWidths": [
+            518.5,
+            518.5,
+            518.5,
+            518.5,
+            518.5
+          ],
+          "expandedCardWidths": [
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5
+          ]
+        },
+        {
+          "heading": "Observed results (43)",
+          "geometry": {
+            "viewportWidth": 1440,
+            "documentWidth": 1440,
+            "bodyWidth": 1440,
+            "panel": {
+              "left": 80,
+              "right": 1360,
+              "width": 1280,
+              "height": 9301.765625
+            },
+            "clipping": [],
+            "visibleCardCount": 51,
+            "minVisibleCardWidth": 518.5,
+            "theme": "light",
+            "lang": "en",
+            "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+            "bodyBackground": "rgb(245, 247, 250)",
+            "fontStatus": "loaded",
+            "fonts": []
+          },
+          "initialCardWidths": [
+            518.5,
+            518.5,
+            518.5,
+            518.5,
+            518.5
+          ],
+          "expandedCardWidths": [
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5
+          ]
+        }
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "lang": "en",
+      "theme": "light",
+      "case": "unavailable",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/1440x900-en-light-unavailable-auction.png",
+          "sha256": "541d3879009de73b0320eac9b5a67cbb18857b488f96993a104dd4de5d9a6cfd",
+          "bytes": 140251
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "panel": {
+          "left": 80,
+          "right": 1360,
+          "width": 1280,
+          "height": 255.53125
+        },
+        "clipping": [],
+        "visibleCardCount": 0,
+        "minVisibleCardWidth": null,
+        "theme": "light",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "lang": "en",
+      "theme": "light",
+      "case": "source_failure",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/1440x900-en-light-source_failure-auction.png",
+          "sha256": "bfbf63e3069dcd896ee4e8b1acaa3fdfa19236ac95719b7bb9b21c139359a31d",
+          "bytes": 205108
+        },
+        {
+          "path": "screenshots/1440x900-en-light-source_failure-failure.png",
+          "sha256": "7747fe9bab92fffafe4c8a0529b0a00250dc0dfc31315e90f52f45cd0e972fa5",
+          "bytes": 178550
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "panel": {
+          "left": 80,
+          "right": 1360,
+          "width": 1280,
+          "height": 3044.328125
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 518.5,
+        "theme": "light",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "lang": "en",
+      "theme": "light",
+      "case": "awaiting_unknown",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/1440x900-en-light-awaiting_unknown-auction.png",
+          "sha256": "24bfa3d74b66ae47fd661a8be03de9226b0cf9fe1cd5e93ef8029018a6715ff1",
+          "bytes": 182625
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "panel": {
+          "left": 80,
+          "right": 1360,
+          "width": 1280,
+          "height": 656.453125
+        },
+        "clipping": [],
+        "visibleCardCount": 1,
+        "minVisibleCardWidth": 518.5,
+        "theme": "light",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "lang": "en",
+      "theme": "dark",
+      "case": "observed",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/1440x900-en-dark-observed-page.png",
+          "sha256": "088447b6612a5bccdca3cd3ebfde51891fd310e696d0aa58b8eb88f05b436b65",
+          "bytes": 202452
+        },
+        {
+          "path": "screenshots/1440x900-en-dark-observed-auction.png",
+          "sha256": "885a9002d062bd241c1757e544440b807484ce90291b779a0a86caa7d08a5a56",
+          "bytes": 201919
+        },
+        {
+          "path": "screenshots/1440x900-en-dark-observed-expanded-1.png",
+          "sha256": "87f261cf0452d1dba345bb6bf9ea5134cb6d92330e2dfe3dca5578d690f25a07",
+          "bytes": 229125
+        },
+        {
+          "path": "screenshots/1440x900-en-dark-observed-expanded-2.png",
+          "sha256": "6d4e45ccb54bb7770552f4fd2612ffd8bec223da0605640c9a51da9940f1fe56",
+          "bytes": 228168
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "panel": {
+          "left": 80,
+          "right": 1360,
+          "width": 1280,
+          "height": 3044.328125
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 518.5,
+        "theme": "dark",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      },
+      "expandedGroups": [
+        {
+          "heading": "Tentative calendar (28)",
+          "geometry": {
+            "viewportWidth": 1440,
+            "documentWidth": 1440,
+            "bodyWidth": 1440,
+            "panel": {
+              "left": 80,
+              "right": 1360,
+              "width": 1280,
+              "height": 6806.515625
+            },
+            "clipping": [],
+            "visibleCardCount": 36,
+            "minVisibleCardWidth": 518.5,
+            "theme": "dark",
+            "lang": "en",
+            "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+            "bodyBackground": "rgb(10, 12, 17)",
+            "fontStatus": "loaded",
+            "fonts": []
+          },
+          "initialCardWidths": [
+            518.5,
+            518.5,
+            518.5,
+            518.5,
+            518.5
+          ],
+          "expandedCardWidths": [
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5
+          ]
+        },
+        {
+          "heading": "Observed results (43)",
+          "geometry": {
+            "viewportWidth": 1440,
+            "documentWidth": 1440,
+            "bodyWidth": 1440,
+            "panel": {
+              "left": 80,
+              "right": 1360,
+              "width": 1280,
+              "height": 9301.765625
+            },
+            "clipping": [],
+            "visibleCardCount": 51,
+            "minVisibleCardWidth": 518.5,
+            "theme": "dark",
+            "lang": "en",
+            "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+            "bodyBackground": "rgb(10, 12, 17)",
+            "fontStatus": "loaded",
+            "fonts": []
+          },
+          "initialCardWidths": [
+            518.5,
+            518.5,
+            518.5,
+            518.5,
+            518.5
+          ],
+          "expandedCardWidths": [
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5
+          ]
+        }
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "lang": "en",
+      "theme": "dark",
+      "case": "unavailable",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/1440x900-en-dark-unavailable-auction.png",
+          "sha256": "da999df9135f114468ad4e03b52341d46714ab3bb52762ddce4e43e0e0ebbd6c",
+          "bytes": 138780
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "panel": {
+          "left": 80,
+          "right": 1360,
+          "width": 1280,
+          "height": 255.53125
+        },
+        "clipping": [],
+        "visibleCardCount": 0,
+        "minVisibleCardWidth": null,
+        "theme": "dark",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "lang": "en",
+      "theme": "dark",
+      "case": "source_failure",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/1440x900-en-dark-source_failure-auction.png",
+          "sha256": "885a9002d062bd241c1757e544440b807484ce90291b779a0a86caa7d08a5a56",
+          "bytes": 201919
+        },
+        {
+          "path": "screenshots/1440x900-en-dark-source_failure-failure.png",
+          "sha256": "7cb0469f63c1b28c703f2747f07deba5bff1abd2e1ace655f98e37ad9143aea4",
+          "bytes": 177830
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "panel": {
+          "left": 80,
+          "right": 1360,
+          "width": 1280,
+          "height": 3044.328125
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 518.5,
+        "theme": "dark",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "lang": "en",
+      "theme": "dark",
+      "case": "awaiting_unknown",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/1440x900-en-dark-awaiting_unknown-auction.png",
+          "sha256": "a8ea14d5d0f2641cd477bbeae5fc4247e2fce7e4241a164f127137657fa47262",
+          "bytes": 183391
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "panel": {
+          "left": 80,
+          "right": 1360,
+          "width": 1280,
+          "height": 656.453125
+        },
+        "clipping": [],
+        "visibleCardCount": 1,
+        "minVisibleCardWidth": 518.5,
+        "theme": "dark",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "lang": "zh",
+      "theme": "light",
+      "case": "observed",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/1440x900-zh-light-observed-page.png",
+          "sha256": "420d76d332baa7b3ded406b8547b462c7c8bbb49bdd727a6225dd03ba134e73c",
+          "bytes": 201331
+        },
+        {
+          "path": "screenshots/1440x900-zh-light-observed-auction.png",
+          "sha256": "73916979df2d0e07fe70d29e2c289a446b63cb005e50930c4a931a70e20dabf8",
+          "bytes": 206022
+        },
+        {
+          "path": "screenshots/1440x900-zh-light-observed-expanded-1.png",
+          "sha256": "6c16e9ab10f2781432005ba42261f8bdc5ad4034b695bcebc7a58f0e5ca24a92",
+          "bytes": 248399
+        },
+        {
+          "path": "screenshots/1440x900-zh-light-observed-expanded-2.png",
+          "sha256": "7898d3e096f7e67f10639493235da9f6e0b7351d53e70406d289e264e9760ec2",
+          "bytes": 245784
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "panel": {
+          "left": 80,
+          "right": 1360,
+          "width": 1280,
+          "height": 2976.140625
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 518.5,
+        "theme": "light",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      },
+      "expandedGroups": [
+        {
+          "heading": "暂定日历 (28)",
+          "geometry": {
+            "viewportWidth": 1440,
+            "documentWidth": 1440,
+            "bodyWidth": 1440,
+            "panel": {
+              "left": 80,
+              "right": 1360,
+              "width": 1280,
+              "height": 6738.328125
+            },
+            "clipping": [],
+            "visibleCardCount": 36,
+            "minVisibleCardWidth": 518.5,
+            "theme": "light",
+            "lang": "zh",
+            "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+            "bodyBackground": "rgb(245, 247, 250)",
+            "fontStatus": "loaded",
+            "fonts": []
+          },
+          "initialCardWidths": [
+            518.5,
+            518.5,
+            518.5,
+            518.5,
+            518.5
+          ],
+          "expandedCardWidths": [
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5
+          ]
+        },
+        {
+          "heading": "已观察结果 (43)",
+          "geometry": {
+            "viewportWidth": 1440,
+            "documentWidth": 1440,
+            "bodyWidth": 1440,
+            "panel": {
+              "left": 80,
+              "right": 1360,
+              "width": 1280,
+              "height": 9233.578125
+            },
+            "clipping": [],
+            "visibleCardCount": 51,
+            "minVisibleCardWidth": 518.5,
+            "theme": "light",
+            "lang": "zh",
+            "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+            "bodyBackground": "rgb(245, 247, 250)",
+            "fontStatus": "loaded",
+            "fonts": []
+          },
+          "initialCardWidths": [
+            518.5,
+            518.5,
+            518.5,
+            518.5,
+            518.5
+          ],
+          "expandedCardWidths": [
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5
+          ]
+        }
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "lang": "zh",
+      "theme": "light",
+      "case": "unavailable",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/1440x900-zh-light-unavailable-auction.png",
+          "sha256": "202c7c5f94a0ac7432df97bac2a3d62b5cea12b1ef8158424f9d54007bef7dcd",
+          "bytes": 141233
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "panel": {
+          "left": 80,
+          "right": 1360,
+          "width": 1280,
+          "height": 255.53125
+        },
+        "clipping": [],
+        "visibleCardCount": 0,
+        "minVisibleCardWidth": null,
+        "theme": "light",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "lang": "zh",
+      "theme": "light",
+      "case": "source_failure",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/1440x900-zh-light-source_failure-auction.png",
+          "sha256": "73916979df2d0e07fe70d29e2c289a446b63cb005e50930c4a931a70e20dabf8",
+          "bytes": 206022
+        },
+        {
+          "path": "screenshots/1440x900-zh-light-source_failure-failure.png",
+          "sha256": "7367ae9ac78fd7bae0e6cbf8ab537925f553b151bb69e566dbdffe76b941a61c",
+          "bytes": 184204
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "panel": {
+          "left": 80,
+          "right": 1360,
+          "width": 1280,
+          "height": 2993.1875
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 518.5,
+        "theme": "light",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "lang": "zh",
+      "theme": "light",
+      "case": "awaiting_unknown",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/1440x900-zh-light-awaiting_unknown-auction.png",
+          "sha256": "fc0fc4b5a2a1f375bbd3dbdbffc2d350cf7e37ef681aefa4c30ef2839e19d43b",
+          "bytes": 177089
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "panel": {
+          "left": 80,
+          "right": 1360,
+          "width": 1280,
+          "height": 588.265625
+        },
+        "clipping": [],
+        "visibleCardCount": 1,
+        "minVisibleCardWidth": 518.5,
+        "theme": "light",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "lang": "zh",
+      "theme": "dark",
+      "case": "observed",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/1440x900-zh-dark-observed-page.png",
+          "sha256": "381df12a967e005b1f060d033a54e60edd43bd41bbcfd2e36ed0659cf877545c",
+          "bytes": 202286
+        },
+        {
+          "path": "screenshots/1440x900-zh-dark-observed-auction.png",
+          "sha256": "e6adc2233890c1ac6c872477ff2b5e9844389bb9e05fa592d9db2665d58becd7",
+          "bytes": 201336
+        },
+        {
+          "path": "screenshots/1440x900-zh-dark-observed-expanded-1.png",
+          "sha256": "b3c343383085c84370b069483b3e86b23a570d93b71ff7ff50718939dbbd715d",
+          "bytes": 240878
+        },
+        {
+          "path": "screenshots/1440x900-zh-dark-observed-expanded-2.png",
+          "sha256": "ca75c72735e0d5b666697aa7d9f3ad8258edc90b9e6fae38a73be214616abd7d",
+          "bytes": 238562
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "panel": {
+          "left": 80,
+          "right": 1360,
+          "width": 1280,
+          "height": 2976.140625
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 518.5,
+        "theme": "dark",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      },
+      "expandedGroups": [
+        {
+          "heading": "暂定日历 (28)",
+          "geometry": {
+            "viewportWidth": 1440,
+            "documentWidth": 1440,
+            "bodyWidth": 1440,
+            "panel": {
+              "left": 80,
+              "right": 1360,
+              "width": 1280,
+              "height": 6738.328125
+            },
+            "clipping": [],
+            "visibleCardCount": 36,
+            "minVisibleCardWidth": 518.5,
+            "theme": "dark",
+            "lang": "zh",
+            "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+            "bodyBackground": "rgb(10, 12, 17)",
+            "fontStatus": "loaded",
+            "fonts": []
+          },
+          "initialCardWidths": [
+            518.5,
+            518.5,
+            518.5,
+            518.5,
+            518.5
+          ],
+          "expandedCardWidths": [
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5
+          ]
+        },
+        {
+          "heading": "已观察结果 (43)",
+          "geometry": {
+            "viewportWidth": 1440,
+            "documentWidth": 1440,
+            "bodyWidth": 1440,
+            "panel": {
+              "left": 80,
+              "right": 1360,
+              "width": 1280,
+              "height": 9233.578125
+            },
+            "clipping": [],
+            "visibleCardCount": 51,
+            "minVisibleCardWidth": 518.5,
+            "theme": "dark",
+            "lang": "zh",
+            "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+            "bodyBackground": "rgb(10, 12, 17)",
+            "fontStatus": "loaded",
+            "fonts": []
+          },
+          "initialCardWidths": [
+            518.5,
+            518.5,
+            518.5,
+            518.5,
+            518.5
+          ],
+          "expandedCardWidths": [
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5,
+            612.5
+          ]
+        }
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "lang": "zh",
+      "theme": "dark",
+      "case": "unavailable",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/1440x900-zh-dark-unavailable-auction.png",
+          "sha256": "5550c72189fde95ea63bc95084aee9c341214748f478d6fa53df1638da577a32",
+          "bytes": 139862
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "panel": {
+          "left": 80,
+          "right": 1360,
+          "width": 1280,
+          "height": 255.53125
+        },
+        "clipping": [],
+        "visibleCardCount": 0,
+        "minVisibleCardWidth": null,
+        "theme": "dark",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "lang": "zh",
+      "theme": "dark",
+      "case": "source_failure",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/1440x900-zh-dark-source_failure-auction.png",
+          "sha256": "e6adc2233890c1ac6c872477ff2b5e9844389bb9e05fa592d9db2665d58becd7",
+          "bytes": 201336
+        },
+        {
+          "path": "screenshots/1440x900-zh-dark-source_failure-failure.png",
+          "sha256": "1032380d8c3784c591a53b07eb475dc0b99afd7ea5171db77c3c046bf3b6f629",
+          "bytes": 183389
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "panel": {
+          "left": 80,
+          "right": 1360,
+          "width": 1280,
+          "height": 2993.1875
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 518.5,
+        "theme": "dark",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "lang": "zh",
+      "theme": "dark",
+      "case": "awaiting_unknown",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/1440x900-zh-dark-awaiting_unknown-auction.png",
+          "sha256": "71b484e4913ba2cfcd279f49f951b72792c2397536194a3299852d4a19575e40",
+          "bytes": 176016
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "panel": {
+          "left": 80,
+          "right": 1360,
+          "width": 1280,
+          "height": 588.265625
+        },
+        "clipping": [],
+        "visibleCardCount": 1,
+        "minVisibleCardWidth": 518.5,
+        "theme": "dark",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 820,
+      "height": 1180,
+      "lang": "en",
+      "theme": "light",
+      "case": "observed",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/820x1180-en-light-observed-page.png",
+          "sha256": "89ff0d37954aba18e544328f235d248d63500bb5e9c8b753f5ebcf6e1b316557",
+          "bytes": 185570
+        },
+        {
+          "path": "screenshots/820x1180-en-light-observed-auction.png",
+          "sha256": "90d5b963dca1f1c437b725d0b16bc8879533b9582e29f183a21f694a017aafe0",
+          "bytes": 220490
+        },
+        {
+          "path": "screenshots/820x1180-en-light-observed-expanded-1.png",
+          "sha256": "7ae990cae3eb2a515425dab57ee44527d71a8205b8703aa9bd7bda784c3118e1",
+          "bytes": 255064
+        },
+        {
+          "path": "screenshots/820x1180-en-light-observed-expanded-2.png",
+          "sha256": "18e98359c51ccac95569a4f0bd0baebae8de2db7f837f4542256e7771c9df651",
+          "bytes": 239156
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 820,
+        "documentWidth": 820,
+        "bodyWidth": 820,
+        "panel": {
+          "left": 12,
+          "right": 808,
+          "width": 796,
+          "height": 3415.0625
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 378.5,
+        "theme": "light",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      },
+      "expandedGroups": [
+        {
+          "heading": "Tentative calendar (28)",
+          "geometry": {
+            "viewportWidth": 820,
+            "documentWidth": 820,
+            "bodyWidth": 820,
+            "panel": {
+              "left": 12,
+              "right": 808,
+              "width": 796,
+              "height": 7623.5
+            },
+            "clipping": [],
+            "visibleCardCount": 36,
+            "minVisibleCardWidth": 378.5,
+            "theme": "light",
+            "lang": "en",
+            "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+            "bodyBackground": "rgb(245, 247, 250)",
+            "fontStatus": "loaded",
+            "fonts": []
+          },
+          "initialCardWidths": [
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5
+          ],
+          "expandedCardWidths": [
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5
+          ]
+        },
+        {
+          "heading": "Observed results (43)",
+          "geometry": {
+            "viewportWidth": 820,
+            "documentWidth": 820,
+            "bodyWidth": 820,
+            "panel": {
+              "left": 12,
+              "right": 808,
+              "width": 796,
+              "height": 10732.34375
+            },
+            "clipping": [],
+            "visibleCardCount": 51,
+            "minVisibleCardWidth": 378.5,
+            "theme": "light",
+            "lang": "en",
+            "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+            "bodyBackground": "rgb(245, 247, 250)",
+            "fontStatus": "loaded",
+            "fonts": []
+          },
+          "initialCardWidths": [
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5
+          ],
+          "expandedCardWidths": [
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5
+          ]
+        }
+      ]
+    },
+    {
+      "width": 820,
+      "height": 1180,
+      "lang": "en",
+      "theme": "light",
+      "case": "unavailable",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/820x1180-en-light-unavailable-auction.png",
+          "sha256": "dbe065fb2fa59ac1782c017b1631ccb180427c1df37f6c81547c35ea651b6078",
+          "bytes": 127469
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 820,
+        "documentWidth": 820,
+        "bodyWidth": 820,
+        "panel": {
+          "left": 12,
+          "right": 808,
+          "width": 796,
+          "height": 249.53125
+        },
+        "clipping": [],
+        "visibleCardCount": 0,
+        "minVisibleCardWidth": null,
+        "theme": "light",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 820,
+      "height": 1180,
+      "lang": "en",
+      "theme": "light",
+      "case": "source_failure",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/820x1180-en-light-source_failure-auction.png",
+          "sha256": "90d5b963dca1f1c437b725d0b16bc8879533b9582e29f183a21f694a017aafe0",
+          "bytes": 220490
+        },
+        {
+          "path": "screenshots/820x1180-en-light-source_failure-failure.png",
+          "sha256": "c354cb7656153b7de289fc8d0c053c515edf2192c307dc8e56404e02941b499a",
+          "bytes": 181362
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 820,
+        "documentWidth": 820,
+        "bodyWidth": 820,
+        "panel": {
+          "left": 12,
+          "right": 808,
+          "width": 796,
+          "height": 3432.109375
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 378.5,
+        "theme": "light",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 820,
+      "height": 1180,
+      "lang": "en",
+      "theme": "light",
+      "case": "awaiting_unknown",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/820x1180-en-light-awaiting_unknown-auction.png",
+          "sha256": "f349518ef0a7bf73b5f1ea90c2e01c401ae3ac2cf44537cc8edc5e8f552ad6bd",
+          "bytes": 186307
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 820,
+        "documentWidth": 820,
+        "bodyWidth": 820,
+        "panel": {
+          "left": 12,
+          "right": 808,
+          "width": 796,
+          "height": 735.78125
+        },
+        "clipping": [],
+        "visibleCardCount": 1,
+        "minVisibleCardWidth": 378.5,
+        "theme": "light",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 820,
+      "height": 1180,
+      "lang": "en",
+      "theme": "dark",
+      "case": "observed",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/820x1180-en-dark-observed-page.png",
+          "sha256": "ec6a70c3b6e29fbf92a6add81526d5f6accbef5de0d298f94d83bb06c0a613ce",
+          "bytes": 184728
+        },
+        {
+          "path": "screenshots/820x1180-en-dark-observed-auction.png",
+          "sha256": "1fb71b0ecd5b8a6c849ef0e5300ac25af0f344d2a3142d3f7268106ea1c4d986",
+          "bytes": 220733
+        },
+        {
+          "path": "screenshots/820x1180-en-dark-observed-expanded-1.png",
+          "sha256": "6f6f77790e9de680d6515284cddd9b8e3380c87bce4e2b85e678dff592d76993",
+          "bytes": 253860
+        },
+        {
+          "path": "screenshots/820x1180-en-dark-observed-expanded-2.png",
+          "sha256": "4e09f39c976ff0a398173413df4c8801e5915e2b96dc27707d593b5066b90d4c",
+          "bytes": 237457
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 820,
+        "documentWidth": 820,
+        "bodyWidth": 820,
+        "panel": {
+          "left": 12,
+          "right": 808,
+          "width": 796,
+          "height": 3415.0625
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 378.5,
+        "theme": "dark",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      },
+      "expandedGroups": [
+        {
+          "heading": "Tentative calendar (28)",
+          "geometry": {
+            "viewportWidth": 820,
+            "documentWidth": 820,
+            "bodyWidth": 820,
+            "panel": {
+              "left": 12,
+              "right": 808,
+              "width": 796,
+              "height": 7623.5
+            },
+            "clipping": [],
+            "visibleCardCount": 36,
+            "minVisibleCardWidth": 378.5,
+            "theme": "dark",
+            "lang": "en",
+            "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+            "bodyBackground": "rgb(10, 12, 17)",
+            "fontStatus": "loaded",
+            "fonts": []
+          },
+          "initialCardWidths": [
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5
+          ],
+          "expandedCardWidths": [
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5
+          ]
+        },
+        {
+          "heading": "Observed results (43)",
+          "geometry": {
+            "viewportWidth": 820,
+            "documentWidth": 820,
+            "bodyWidth": 820,
+            "panel": {
+              "left": 12,
+              "right": 808,
+              "width": 796,
+              "height": 10732.34375
+            },
+            "clipping": [],
+            "visibleCardCount": 51,
+            "minVisibleCardWidth": 378.5,
+            "theme": "dark",
+            "lang": "en",
+            "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+            "bodyBackground": "rgb(10, 12, 17)",
+            "fontStatus": "loaded",
+            "fonts": []
+          },
+          "initialCardWidths": [
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5
+          ],
+          "expandedCardWidths": [
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5
+          ]
+        }
+      ]
+    },
+    {
+      "width": 820,
+      "height": 1180,
+      "lang": "en",
+      "theme": "dark",
+      "case": "unavailable",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/820x1180-en-dark-unavailable-auction.png",
+          "sha256": "696fff5bb28ee9ebc76da3e95b5075508e866a8ca7fb2c3e78fe067a6d679233",
+          "bytes": 127298
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 820,
+        "documentWidth": 820,
+        "bodyWidth": 820,
+        "panel": {
+          "left": 12,
+          "right": 808,
+          "width": 796,
+          "height": 249.53125
+        },
+        "clipping": [],
+        "visibleCardCount": 0,
+        "minVisibleCardWidth": null,
+        "theme": "dark",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 820,
+      "height": 1180,
+      "lang": "en",
+      "theme": "dark",
+      "case": "source_failure",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/820x1180-en-dark-source_failure-auction.png",
+          "sha256": "1fb71b0ecd5b8a6c849ef0e5300ac25af0f344d2a3142d3f7268106ea1c4d986",
+          "bytes": 220733
+        },
+        {
+          "path": "screenshots/820x1180-en-dark-source_failure-failure.png",
+          "sha256": "13aac1e1ab3ee4207d845e1a4b5f1a4df2b3e44a37b7222927719ee8b40dd9ce",
+          "bytes": 181979
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 820,
+        "documentWidth": 820,
+        "bodyWidth": 820,
+        "panel": {
+          "left": 12,
+          "right": 808,
+          "width": 796,
+          "height": 3432.109375
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 378.5,
+        "theme": "dark",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 820,
+      "height": 1180,
+      "lang": "en",
+      "theme": "dark",
+      "case": "awaiting_unknown",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/820x1180-en-dark-awaiting_unknown-auction.png",
+          "sha256": "65cf60ff83c7ca836d6590443346c2c41287d32114114213f0419fe09b7d08d7",
+          "bytes": 188989
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 820,
+        "documentWidth": 820,
+        "bodyWidth": 820,
+        "panel": {
+          "left": 12,
+          "right": 808,
+          "width": 796,
+          "height": 735.78125
+        },
+        "clipping": [],
+        "visibleCardCount": 1,
+        "minVisibleCardWidth": 378.5,
+        "theme": "dark",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 820,
+      "height": 1180,
+      "lang": "zh",
+      "theme": "light",
+      "case": "observed",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/820x1180-zh-light-observed-page.png",
+          "sha256": "6baf06efeae570c4a1057532f69ecaccc6b6fc2abdc6620205a87144685c9bc2",
+          "bytes": 185138
+        },
+        {
+          "path": "screenshots/820x1180-zh-light-observed-auction.png",
+          "sha256": "80c17dd3eeef31a50cdb08c903d9dc4c81b9d257d9f379de8db8ef96e81fb25f",
+          "bytes": 230149
+        },
+        {
+          "path": "screenshots/820x1180-zh-light-observed-expanded-1.png",
+          "sha256": "adf46bcb11a3ce2a61ef6f86408cbd61db4b6707a9eaa42aa21bdebf6a86e3a2",
+          "bytes": 267282
+        },
+        {
+          "path": "screenshots/820x1180-zh-light-observed-expanded-2.png",
+          "sha256": "e32167aa537b0b1febb84ef2ca7f322ec8b9b7351444a851f441aa0f4ec01176",
+          "bytes": 265223
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 820,
+        "documentWidth": 820,
+        "bodyWidth": 820,
+        "panel": {
+          "left": 12,
+          "right": 808,
+          "width": 796,
+          "height": 3266.3125
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 378.5,
+        "theme": "light",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      },
+      "expandedGroups": [
+        {
+          "heading": "暂定日历 (28)",
+          "geometry": {
+            "viewportWidth": 820,
+            "documentWidth": 820,
+            "bodyWidth": 820,
+            "panel": {
+              "left": 12,
+              "right": 808,
+              "width": 796,
+              "height": 7474.75
+            },
+            "clipping": [],
+            "visibleCardCount": 36,
+            "minVisibleCardWidth": 378.5,
+            "theme": "light",
+            "lang": "zh",
+            "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+            "bodyBackground": "rgb(245, 247, 250)",
+            "fontStatus": "loaded",
+            "fonts": []
+          },
+          "initialCardWidths": [
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5
+          ],
+          "expandedCardWidths": [
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5
+          ]
+        },
+        {
+          "heading": "已观察结果 (43)",
+          "geometry": {
+            "viewportWidth": 820,
+            "documentWidth": 820,
+            "bodyWidth": 820,
+            "panel": {
+              "left": 12,
+              "right": 808,
+              "width": 796,
+              "height": 9877.03125
+            },
+            "clipping": [],
+            "visibleCardCount": 51,
+            "minVisibleCardWidth": 378.5,
+            "theme": "light",
+            "lang": "zh",
+            "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+            "bodyBackground": "rgb(245, 247, 250)",
+            "fontStatus": "loaded",
+            "fonts": []
+          },
+          "initialCardWidths": [
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5
+          ],
+          "expandedCardWidths": [
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5
+          ]
+        }
+      ]
+    },
+    {
+      "width": 820,
+      "height": 1180,
+      "lang": "zh",
+      "theme": "light",
+      "case": "unavailable",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/820x1180-zh-light-unavailable-auction.png",
+          "sha256": "89adeda1f06f25359cab587618ac0bc36212d4391487a39f2cd09ed1744468d3",
+          "bytes": 128193
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 820,
+        "documentWidth": 820,
+        "bodyWidth": 820,
+        "panel": {
+          "left": 12,
+          "right": 808,
+          "width": 796,
+          "height": 249.53125
+        },
+        "clipping": [],
+        "visibleCardCount": 0,
+        "minVisibleCardWidth": null,
+        "theme": "light",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 820,
+      "height": 1180,
+      "lang": "zh",
+      "theme": "light",
+      "case": "source_failure",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/820x1180-zh-light-source_failure-auction.png",
+          "sha256": "80c17dd3eeef31a50cdb08c903d9dc4c81b9d257d9f379de8db8ef96e81fb25f",
+          "bytes": 230149
+        },
+        {
+          "path": "screenshots/820x1180-zh-light-source_failure-failure.png",
+          "sha256": "f372efa4bc0d2e38d9ebecaa42682c79dccd8568ab5ce1916c901fad2bc75751",
+          "bytes": 191998
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 820,
+        "documentWidth": 820,
+        "bodyWidth": 820,
+        "panel": {
+          "left": 12,
+          "right": 808,
+          "width": 796,
+          "height": 3283.359375
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 378.5,
+        "theme": "light",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 820,
+      "height": 1180,
+      "lang": "zh",
+      "theme": "light",
+      "case": "awaiting_unknown",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/820x1180-zh-light-awaiting_unknown-auction.png",
+          "sha256": "27180b4638ad1678828c82ab11a1ef58eb8fd664a55d1ace5232fe2dd9de4da0",
+          "bytes": 193381
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 820,
+        "documentWidth": 820,
+        "bodyWidth": 820,
+        "panel": {
+          "left": 12,
+          "right": 808,
+          "width": 796,
+          "height": 717.1875
+        },
+        "clipping": [],
+        "visibleCardCount": 1,
+        "minVisibleCardWidth": 378.5,
+        "theme": "light",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 820,
+      "height": 1180,
+      "lang": "zh",
+      "theme": "dark",
+      "case": "observed",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/820x1180-zh-dark-observed-page.png",
+          "sha256": "3122ca95567b47a9ea7dc4bc900a677770a1f1930d0cd70cbcc2bd933815b5f9",
+          "bytes": 183673
+        },
+        {
+          "path": "screenshots/820x1180-zh-dark-observed-auction.png",
+          "sha256": "a4a812dfddfc5b2da3191a9d810176b357fb243d1a769272f3a58d199c06ecfa",
+          "bytes": 228939
+        },
+        {
+          "path": "screenshots/820x1180-zh-dark-observed-expanded-1.png",
+          "sha256": "86e371e0df103845853cf2842b97b29b8cc4bf16142d40b6f4171e1b42d2081b",
+          "bytes": 264117
+        },
+        {
+          "path": "screenshots/820x1180-zh-dark-observed-expanded-2.png",
+          "sha256": "c1dc129dd75295cefce426a1629c00284cd24cad768cd774cf5aaf045f823a41",
+          "bytes": 262500
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 820,
+        "documentWidth": 820,
+        "bodyWidth": 820,
+        "panel": {
+          "left": 12,
+          "right": 808,
+          "width": 796,
+          "height": 3266.3125
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 378.5,
+        "theme": "dark",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      },
+      "expandedGroups": [
+        {
+          "heading": "暂定日历 (28)",
+          "geometry": {
+            "viewportWidth": 820,
+            "documentWidth": 820,
+            "bodyWidth": 820,
+            "panel": {
+              "left": 12,
+              "right": 808,
+              "width": 796,
+              "height": 7474.75
+            },
+            "clipping": [],
+            "visibleCardCount": 36,
+            "minVisibleCardWidth": 378.5,
+            "theme": "dark",
+            "lang": "zh",
+            "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+            "bodyBackground": "rgb(10, 12, 17)",
+            "fontStatus": "loaded",
+            "fonts": []
+          },
+          "initialCardWidths": [
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5
+          ],
+          "expandedCardWidths": [
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5
+          ]
+        },
+        {
+          "heading": "已观察结果 (43)",
+          "geometry": {
+            "viewportWidth": 820,
+            "documentWidth": 820,
+            "bodyWidth": 820,
+            "panel": {
+              "left": 12,
+              "right": 808,
+              "width": 796,
+              "height": 9877.03125
+            },
+            "clipping": [],
+            "visibleCardCount": 51,
+            "minVisibleCardWidth": 378.5,
+            "theme": "dark",
+            "lang": "zh",
+            "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+            "bodyBackground": "rgb(10, 12, 17)",
+            "fontStatus": "loaded",
+            "fonts": []
+          },
+          "initialCardWidths": [
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5
+          ],
+          "expandedCardWidths": [
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5,
+            378.5
+          ]
+        }
+      ]
+    },
+    {
+      "width": 820,
+      "height": 1180,
+      "lang": "zh",
+      "theme": "dark",
+      "case": "unavailable",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/820x1180-zh-dark-unavailable-auction.png",
+          "sha256": "4170f734b208888864523c77a44720e18636fd4367e63dfc95793c8167090d71",
+          "bytes": 127925
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 820,
+        "documentWidth": 820,
+        "bodyWidth": 820,
+        "panel": {
+          "left": 12,
+          "right": 808,
+          "width": 796,
+          "height": 249.53125
+        },
+        "clipping": [],
+        "visibleCardCount": 0,
+        "minVisibleCardWidth": null,
+        "theme": "dark",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 820,
+      "height": 1180,
+      "lang": "zh",
+      "theme": "dark",
+      "case": "source_failure",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/820x1180-zh-dark-source_failure-auction.png",
+          "sha256": "a4a812dfddfc5b2da3191a9d810176b357fb243d1a769272f3a58d199c06ecfa",
+          "bytes": 228939
+        },
+        {
+          "path": "screenshots/820x1180-zh-dark-source_failure-failure.png",
+          "sha256": "42df7bc5fd145c4eb8234c1f2fee63bde9d5d680a98ef75a197db00ff5a4657b",
+          "bytes": 191844
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 820,
+        "documentWidth": 820,
+        "bodyWidth": 820,
+        "panel": {
+          "left": 12,
+          "right": 808,
+          "width": 796,
+          "height": 3283.359375
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 378.5,
+        "theme": "dark",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 820,
+      "height": 1180,
+      "lang": "zh",
+      "theme": "dark",
+      "case": "awaiting_unknown",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/820x1180-zh-dark-awaiting_unknown-auction.png",
+          "sha256": "e6983b44e352a961f405c4c76e0ea3d0b6331cb1b3f4d889f0b2a63448d316f1",
+          "bytes": 194583
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 820,
+        "documentWidth": 820,
+        "bodyWidth": 820,
+        "panel": {
+          "left": 12,
+          "right": 808,
+          "width": 796,
+          "height": 717.1875
+        },
+        "clipping": [],
+        "visibleCardCount": 1,
+        "minVisibleCardWidth": 378.5,
+        "theme": "dark",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "lang": "en",
+      "theme": "light",
+      "case": "observed",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/390x844-en-light-observed-page.png",
+          "sha256": "7ba466ff4ef6c54b41de80b3f1d3ac6b09334265811cef88c4e0ee2038e6c6a0",
+          "bytes": 122356
+        },
+        {
+          "path": "screenshots/390x844-en-light-observed-auction.png",
+          "sha256": "de2416cde8349bb4dce96316fd6d8f210da0288a75e59e050a0c8663b9225da6",
+          "bytes": 103042
+        },
+        {
+          "path": "screenshots/390x844-en-light-observed-expanded-1.png",
+          "sha256": "f7c4a25e11409e96e314f4f0927790a7f50bde5b3c65a140eb41760c9be63151",
+          "bytes": 96776
+        },
+        {
+          "path": "screenshots/390x844-en-light-observed-expanded-2.png",
+          "sha256": "3c2840745c95d8d7f5019b9dabe0b8539602d775f7577af374ace2c87143aded",
+          "bytes": 96886
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 390,
+        "documentWidth": 390,
+        "bodyWidth": 390,
+        "panel": {
+          "left": 12,
+          "right": 378,
+          "width": 366,
+          "height": 5911.65625
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 336,
+        "theme": "light",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      },
+      "expandedGroups": [
+        {
+          "heading": "Tentative calendar (28)",
+          "geometry": {
+            "viewportWidth": 390,
+            "documentWidth": 390,
+            "bodyWidth": 390,
+            "panel": {
+              "left": 12,
+              "right": 378,
+              "width": 366,
+              "height": 15269.046875
+            },
+            "clipping": [],
+            "visibleCardCount": 36,
+            "minVisibleCardWidth": 336,
+            "theme": "light",
+            "lang": "en",
+            "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+            "bodyBackground": "rgb(245, 247, 250)",
+            "fontStatus": "loaded",
+            "fonts": []
+          },
+          "initialCardWidths": [
+            336,
+            336,
+            336,
+            336,
+            336
+          ],
+          "expandedCardWidths": [
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336
+          ]
+        },
+        {
+          "heading": "Observed results (43)",
+          "geometry": {
+            "viewportWidth": 390,
+            "documentWidth": 390,
+            "bodyWidth": 390,
+            "panel": {
+              "left": 12,
+              "right": 378,
+              "width": 366,
+              "height": 20722.5625
+            },
+            "clipping": [],
+            "visibleCardCount": 51,
+            "minVisibleCardWidth": 336,
+            "theme": "light",
+            "lang": "en",
+            "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+            "bodyBackground": "rgb(245, 247, 250)",
+            "fontStatus": "loaded",
+            "fonts": []
+          },
+          "initialCardWidths": [
+            336,
+            336,
+            336,
+            336,
+            336
+          ],
+          "expandedCardWidths": [
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336
+          ]
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "lang": "en",
+      "theme": "light",
+      "case": "unavailable",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/390x844-en-light-unavailable-auction.png",
+          "sha256": "a34caeb310cb5bdf0cf46f3fe0365d696c9c2bc98ddad8d8d0267228ee0d3ba4",
+          "bytes": 83315
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 390,
+        "documentWidth": 390,
+        "bodyWidth": 390,
+        "panel": {
+          "left": 12,
+          "right": 378,
+          "width": 366,
+          "height": 266.578125
+        },
+        "clipping": [],
+        "visibleCardCount": 0,
+        "minVisibleCardWidth": null,
+        "theme": "light",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "lang": "en",
+      "theme": "light",
+      "case": "source_failure",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/390x844-en-light-source_failure-auction.png",
+          "sha256": "de2416cde8349bb4dce96316fd6d8f210da0288a75e59e050a0c8663b9225da6",
+          "bytes": 103042
+        },
+        {
+          "path": "screenshots/390x844-en-light-source_failure-failure.png",
+          "sha256": "cecdd68341f1328d62d6d7b4163296de7c1b3bbc3422092aee4a9ad59e0e6c30",
+          "bytes": 103472
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 390,
+        "documentWidth": 390,
+        "bodyWidth": 390,
+        "panel": {
+          "left": 12,
+          "right": 378,
+          "width": 366,
+          "height": 5945.75
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 336,
+        "theme": "light",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "lang": "en",
+      "theme": "light",
+      "case": "awaiting_unknown",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/390x844-en-light-awaiting_unknown-auction.png",
+          "sha256": "fc8474bfc63a1d6df47ac0a3d9e0695cfffe086db2e37632449ced0ff31d53c5",
+          "bytes": 112202
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 390,
+        "documentWidth": 390,
+        "bodyWidth": 390,
+        "panel": {
+          "left": 12,
+          "right": 378,
+          "width": 366,
+          "height": 1037.953125
+        },
+        "clipping": [],
+        "visibleCardCount": 1,
+        "minVisibleCardWidth": 336,
+        "theme": "light",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "lang": "en",
+      "theme": "dark",
+      "case": "observed",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/390x844-en-dark-observed-page.png",
+          "sha256": "6e5fc50d97b733f029cac9393cfd6dce96b0f066ae4d6cd2b9c2521568f4496f",
+          "bytes": 124535
+        },
+        {
+          "path": "screenshots/390x844-en-dark-observed-auction.png",
+          "sha256": "7a3f3773d26d6d37f02a1b5168e6ec735092a10ad69605aa8d03ec982d484b14",
+          "bytes": 104582
+        },
+        {
+          "path": "screenshots/390x844-en-dark-observed-expanded-1.png",
+          "sha256": "709dd6f608240df481e0052701f3563dafc6b8aa38b0ba9531538d57f3d1cb84",
+          "bytes": 96796
+        },
+        {
+          "path": "screenshots/390x844-en-dark-observed-expanded-2.png",
+          "sha256": "34240a6ec6598993348880e25652db9d28f1af9ac1ce19b2efc3d8a72781f288",
+          "bytes": 96997
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 390,
+        "documentWidth": 390,
+        "bodyWidth": 390,
+        "panel": {
+          "left": 12,
+          "right": 378,
+          "width": 366,
+          "height": 5911.65625
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 336,
+        "theme": "dark",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      },
+      "expandedGroups": [
+        {
+          "heading": "Tentative calendar (28)",
+          "geometry": {
+            "viewportWidth": 390,
+            "documentWidth": 390,
+            "bodyWidth": 390,
+            "panel": {
+              "left": 12,
+              "right": 378,
+              "width": 366,
+              "height": 15269.046875
+            },
+            "clipping": [],
+            "visibleCardCount": 36,
+            "minVisibleCardWidth": 336,
+            "theme": "dark",
+            "lang": "en",
+            "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+            "bodyBackground": "rgb(10, 12, 17)",
+            "fontStatus": "loaded",
+            "fonts": []
+          },
+          "initialCardWidths": [
+            336,
+            336,
+            336,
+            336,
+            336
+          ],
+          "expandedCardWidths": [
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336
+          ]
+        },
+        {
+          "heading": "Observed results (43)",
+          "geometry": {
+            "viewportWidth": 390,
+            "documentWidth": 390,
+            "bodyWidth": 390,
+            "panel": {
+              "left": 12,
+              "right": 378,
+              "width": 366,
+              "height": 20722.5625
+            },
+            "clipping": [],
+            "visibleCardCount": 51,
+            "minVisibleCardWidth": 336,
+            "theme": "dark",
+            "lang": "en",
+            "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+            "bodyBackground": "rgb(10, 12, 17)",
+            "fontStatus": "loaded",
+            "fonts": []
+          },
+          "initialCardWidths": [
+            336,
+            336,
+            336,
+            336,
+            336
+          ],
+          "expandedCardWidths": [
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336
+          ]
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "lang": "en",
+      "theme": "dark",
+      "case": "unavailable",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/390x844-en-dark-unavailable-auction.png",
+          "sha256": "fd3d5ca07365683681b9258c4bbdfe5ab08870a63d1ef6f0b0fbff0f73f120f7",
+          "bytes": 82099
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 390,
+        "documentWidth": 390,
+        "bodyWidth": 390,
+        "panel": {
+          "left": 12,
+          "right": 378,
+          "width": 366,
+          "height": 266.578125
+        },
+        "clipping": [],
+        "visibleCardCount": 0,
+        "minVisibleCardWidth": null,
+        "theme": "dark",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "lang": "en",
+      "theme": "dark",
+      "case": "source_failure",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/390x844-en-dark-source_failure-auction.png",
+          "sha256": "7a3f3773d26d6d37f02a1b5168e6ec735092a10ad69605aa8d03ec982d484b14",
+          "bytes": 104582
+        },
+        {
+          "path": "screenshots/390x844-en-dark-source_failure-failure.png",
+          "sha256": "d974c6f1425aabee4f8093c978ded6512100aad894c9f2fe3f4dca310d5354aa",
+          "bytes": 103983
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 390,
+        "documentWidth": 390,
+        "bodyWidth": 390,
+        "panel": {
+          "left": 12,
+          "right": 378,
+          "width": 366,
+          "height": 5945.75
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 336,
+        "theme": "dark",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "lang": "en",
+      "theme": "dark",
+      "case": "awaiting_unknown",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/390x844-en-dark-awaiting_unknown-auction.png",
+          "sha256": "a237843e700c00ce5c91a14cfebe185ed751b199ff6d29d6650e8dee656a957f",
+          "bytes": 113946
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 390,
+        "documentWidth": 390,
+        "bodyWidth": 390,
+        "panel": {
+          "left": 12,
+          "right": 378,
+          "width": 366,
+          "height": 1037.953125
+        },
+        "clipping": [],
+        "visibleCardCount": 1,
+        "minVisibleCardWidth": 336,
+        "theme": "dark",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "lang": "zh",
+      "theme": "light",
+      "case": "observed",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/390x844-zh-light-observed-page.png",
+          "sha256": "377933cedd97f0e89dd7d6993a43efc48add180378ae246bbcae7789f88efbfa",
+          "bytes": 122549
+        },
+        {
+          "path": "screenshots/390x844-zh-light-observed-auction.png",
+          "sha256": "e63b3c0df0ed47ac3e866623879bda5f0f57707ceb75b41c606e2649cff8e278",
+          "bytes": 106173
+        },
+        {
+          "path": "screenshots/390x844-zh-light-observed-expanded-1.png",
+          "sha256": "d0f361569ee6128b4f16671e76edacec9cb814ca5e1fbb2ba22bff8666981535",
+          "bytes": 102420
+        },
+        {
+          "path": "screenshots/390x844-zh-light-observed-expanded-2.png",
+          "sha256": "ebfcee44e747c9527ef0860ac8b792ead80df3c83c076315720395b284b87a01",
+          "bytes": 101624
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 390,
+        "documentWidth": 390,
+        "bodyWidth": 390,
+        "panel": {
+          "left": 12,
+          "right": 378,
+          "width": 366,
+          "height": 5342.984375
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 336,
+        "theme": "light",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      },
+      "expandedGroups": [
+        {
+          "heading": "暂定日历 (28)",
+          "geometry": {
+            "viewportWidth": 390,
+            "documentWidth": 390,
+            "bodyWidth": 390,
+            "panel": {
+              "left": 12,
+              "right": 378,
+              "width": 366,
+              "height": 13417.40625
+            },
+            "clipping": [],
+            "visibleCardCount": 36,
+            "minVisibleCardWidth": 336,
+            "theme": "light",
+            "lang": "zh",
+            "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+            "bodyBackground": "rgb(245, 247, 250)",
+            "fontStatus": "loaded",
+            "fonts": []
+          },
+          "initialCardWidths": [
+            336,
+            336,
+            336,
+            336,
+            336
+          ],
+          "expandedCardWidths": [
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336
+          ]
+        },
+        {
+          "heading": "已观察结果 (43)",
+          "geometry": {
+            "viewportWidth": 390,
+            "documentWidth": 390,
+            "bodyWidth": 390,
+            "panel": {
+              "left": 12,
+              "right": 378,
+              "width": 366,
+              "height": 19279.984375
+            },
+            "clipping": [],
+            "visibleCardCount": 51,
+            "minVisibleCardWidth": 336,
+            "theme": "light",
+            "lang": "zh",
+            "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+            "bodyBackground": "rgb(245, 247, 250)",
+            "fontStatus": "loaded",
+            "fonts": []
+          },
+          "initialCardWidths": [
+            336,
+            336,
+            336,
+            336,
+            336
+          ],
+          "expandedCardWidths": [
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336
+          ]
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "lang": "zh",
+      "theme": "light",
+      "case": "unavailable",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/390x844-zh-light-unavailable-auction.png",
+          "sha256": "7f102735c0efb3b0f95d09934d1eb1c24d97db929ce1ff0e68a610bae6941818",
+          "bytes": 85330
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 390,
+        "documentWidth": 390,
+        "bodyWidth": 390,
+        "panel": {
+          "left": 12,
+          "right": 378,
+          "width": 366,
+          "height": 249.53125
+        },
+        "clipping": [],
+        "visibleCardCount": 0,
+        "minVisibleCardWidth": null,
+        "theme": "light",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "lang": "zh",
+      "theme": "light",
+      "case": "source_failure",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/390x844-zh-light-source_failure-auction.png",
+          "sha256": "e63b3c0df0ed47ac3e866623879bda5f0f57707ceb75b41c606e2649cff8e278",
+          "bytes": 106173
+        },
+        {
+          "path": "screenshots/390x844-zh-light-source_failure-failure.png",
+          "sha256": "1f9bf382a46563415b3c4a318a3ace12aa50fbd02dcfa64381da40e501a3eeb7",
+          "bytes": 110356
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 390,
+        "documentWidth": 390,
+        "bodyWidth": 390,
+        "panel": {
+          "left": 12,
+          "right": 378,
+          "width": 366,
+          "height": 5360.03125
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 336,
+        "theme": "light",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "lang": "zh",
+      "theme": "light",
+      "case": "awaiting_unknown",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/390x844-zh-light-awaiting_unknown-auction.png",
+          "sha256": "f99f08a58894d11e25a6c89a941fb4c018b8fb325a95ac0ddaf093d9514d4238",
+          "bytes": 129104
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 390,
+        "documentWidth": 390,
+        "bodyWidth": 390,
+        "panel": {
+          "left": 12,
+          "right": 378,
+          "width": 366,
+          "height": 893.84375
+        },
+        "clipping": [],
+        "visibleCardCount": 1,
+        "minVisibleCardWidth": 336,
+        "theme": "light",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "lang": "zh",
+      "theme": "dark",
+      "case": "observed",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/390x844-zh-dark-observed-page.png",
+          "sha256": "a71c0e27c71bc53e0e253f4c164718fe0a11e2c125ab900c2717d0fd101ef86f",
+          "bytes": 124161
+        },
+        {
+          "path": "screenshots/390x844-zh-dark-observed-auction.png",
+          "sha256": "31d3de3beb01ef38ceca4d8456f9d2b4d4a581c19306a5a89fe457e34e119e9e",
+          "bytes": 106943
+        },
+        {
+          "path": "screenshots/390x844-zh-dark-observed-expanded-1.png",
+          "sha256": "355b0e2b7660dcd4c4cf207743882a1f07460c83bd021bef9705344a914deacd",
+          "bytes": 102402
+        },
+        {
+          "path": "screenshots/390x844-zh-dark-observed-expanded-2.png",
+          "sha256": "0d16fe419d66f5ca91d04e9c5fd20e7e531d89343448b1cca6513bd2f67a3d7c",
+          "bytes": 101568
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 390,
+        "documentWidth": 390,
+        "bodyWidth": 390,
+        "panel": {
+          "left": 12,
+          "right": 378,
+          "width": 366,
+          "height": 5342.984375
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 336,
+        "theme": "dark",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      },
+      "expandedGroups": [
+        {
+          "heading": "暂定日历 (28)",
+          "geometry": {
+            "viewportWidth": 390,
+            "documentWidth": 390,
+            "bodyWidth": 390,
+            "panel": {
+              "left": 12,
+              "right": 378,
+              "width": 366,
+              "height": 13417.40625
+            },
+            "clipping": [],
+            "visibleCardCount": 36,
+            "minVisibleCardWidth": 336,
+            "theme": "dark",
+            "lang": "zh",
+            "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+            "bodyBackground": "rgb(10, 12, 17)",
+            "fontStatus": "loaded",
+            "fonts": []
+          },
+          "initialCardWidths": [
+            336,
+            336,
+            336,
+            336,
+            336
+          ],
+          "expandedCardWidths": [
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336
+          ]
+        },
+        {
+          "heading": "已观察结果 (43)",
+          "geometry": {
+            "viewportWidth": 390,
+            "documentWidth": 390,
+            "bodyWidth": 390,
+            "panel": {
+              "left": 12,
+              "right": 378,
+              "width": 366,
+              "height": 19279.984375
+            },
+            "clipping": [],
+            "visibleCardCount": 51,
+            "minVisibleCardWidth": 336,
+            "theme": "dark",
+            "lang": "zh",
+            "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+            "bodyBackground": "rgb(10, 12, 17)",
+            "fontStatus": "loaded",
+            "fonts": []
+          },
+          "initialCardWidths": [
+            336,
+            336,
+            336,
+            336,
+            336
+          ],
+          "expandedCardWidths": [
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336,
+            336
+          ]
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "lang": "zh",
+      "theme": "dark",
+      "case": "unavailable",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/390x844-zh-dark-unavailable-auction.png",
+          "sha256": "2a0ade4eef1738fbac8dd4da538245ab9477027c27fea2ceb3a2f5638d3daf3b",
+          "bytes": 84649
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 390,
+        "documentWidth": 390,
+        "bodyWidth": 390,
+        "panel": {
+          "left": 12,
+          "right": 378,
+          "width": 366,
+          "height": 249.53125
+        },
+        "clipping": [],
+        "visibleCardCount": 0,
+        "minVisibleCardWidth": null,
+        "theme": "dark",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "lang": "zh",
+      "theme": "dark",
+      "case": "source_failure",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/390x844-zh-dark-source_failure-auction.png",
+          "sha256": "31d3de3beb01ef38ceca4d8456f9d2b4d4a581c19306a5a89fe457e34e119e9e",
+          "bytes": 106943
+        },
+        {
+          "path": "screenshots/390x844-zh-dark-source_failure-failure.png",
+          "sha256": "0c7a7b09d9d989514f29fe6499af0cdfcbebd38648ce5bdf2f9debe6b697fdbc",
+          "bytes": 111353
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 390,
+        "documentWidth": 390,
+        "bodyWidth": 390,
+        "panel": {
+          "left": 12,
+          "right": 378,
+          "width": 366,
+          "height": 5360.03125
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 336,
+        "theme": "dark",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "lang": "zh",
+      "theme": "dark",
+      "case": "awaiting_unknown",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/390x844-zh-dark-awaiting_unknown-auction.png",
+          "sha256": "4007b69757c58659ca8b2b22c97619ef77e4be9f5d848e1ad8994d8c2f63f093",
+          "bytes": 131308
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 390,
+        "documentWidth": 390,
+        "bodyWidth": 390,
+        "panel": {
+          "left": 12,
+          "right": 378,
+          "width": 366,
+          "height": 893.84375
+        },
+        "clipping": [],
+        "visibleCardCount": 1,
+        "minVisibleCardWidth": 336,
+        "theme": "dark",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    }
+  ],
+  "harnessProcess": {
+    "pid": 5089,
+    "python": "/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/.venv/bin/python",
+    "args": [
+      "/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/mastermind_loopback_harness.py",
+      "--mastermind-root",
+      "/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001",
+      "--macro-root",
+      "/Volumes/Mastermind/agent-workspaces/macro/web/sovereign-auction-pressure-20261008-sol-001",
+      "--capture-data-root",
+      "/Volumes/Mastermind/agent-workspaces/macro/web/sovereign-auction-pressure-20261008-sol-001/research/sovereign_auction_pressure/source_audit/forward_capture_primary",
+      "--out-dir",
+      "/tmp/sovereign-auction-mastermind-ui-proof-02",
+      "--cutoff",
+      "2026-10-08T23:00:00Z"
+    ]
+  },
+  "harness_manifest": {
+    "path": "harness_manifest.json",
+    "sha256": "a6a4ede25094ec486b70724dfec99242f0fd0777167ca80cd334d5d0de69d7fc"
+  },
+  "browser_version": "149.0.7827.55",
+  "playwright_module": "/Volumes/Mastermind/agent-workspaces/terminal/web/sovereign-auction-context-20261008-sol-terminal-001/terminal/node_modules/@playwright/test/index.js",
+  "counts": {
+    "passed": 48
+  },
+  "completed_at": "2026-10-08T23:35:26.470Z"
+}

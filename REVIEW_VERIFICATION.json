@@ -1,0 +1,72 @@
+{
+  "source_base_commit": "c7e47c859eb2925c5626931fd511800773ba09ac",
+  "producer_module_sha256": "3faead6ed3aa7cb5c2cc6b86a3657ad578b71723feb858599fe8280cd70f23fb",
+  "candidate_module_sha256": "1fbedd8e8639c728777755228f693d70b5a3ab523c27c9a395084be4b962583e",
+  "shared_fixture_sha256": "b3e7eb3b5ca32e0ebe3d23011d9fa917841f38e9fb436c73c8ca62b53b01d0cb",
+  "checks": [
+    {
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-p",
+        "test_sovereign_auction*.py",
+        "-v"
+      ],
+      "cwd": "Mastermind source root",
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": "setUpClass (test_sovereign_auction_api.SovereignAuctionAPITests) ... skipped \"Full application import blocked: No module named 'fastapi'\"\ntest_bounds_horizon_counts_and_fresh_projection (test_sovereign_auction_context.SovereignAuctionContextTests.test_bounds_horizon_counts_and_fresh_projection) ... ok\ntest_clock_requires_exact_aware_iso (test_sovereign_auction_context.SovereignAuctionContextTests.test_clock_requires_exact_aware_iso) ... ok\ntest_explicit_class_facts_cannot_contradict_each_other (test_sovereign_auction_context.SovereignAuctionContextTests.test_explicit_class_facts_cannot_contradict_each_other) ... ok\ntest_first_observation_cannot_follow_selected_vintage (test_sovereign_auction_context.SovereignAuctionContextTests.test_first_observation_cannot_follow_selected_vintage) ... ok\ntest_fresh_request_read_and_explicit_off_unavailable (test_sovereign_auction_context.SovereignAuctionContextTests.test_fresh_request_read_and_explicit_off_unavailable) ... ok\ntest_future_evidence_is_rejected_without_rejecting_future_calendar (test_sovereign_auction_context.SovereignAuctionContextTests.test_future_evidence_is_rejected_without_rejecting_future_calendar) ... ok\ntest_future_scheduled_row_cannot_claim_results_already_observed (test_sovereign_auction_context.SovereignAuctionContextTests.test_future_scheduled_row_cannot_claim_results_already_observed) ... ok\ntest_lifecycle_labels_must_match_the_producer_cutoff (test_sovereign_auction_context.SovereignAuctionContextTests.test_lifecycle_labels_must_match_the_producer_cutoff) ... ok\ntest_null_deadline_result_and_unknown_reasons_stay_null (test_sovereign_auction_context.SovereignAuctionContextTests.test_null_deadline_result_and_unknown_reasons_stay_null) ... ok\ntest_numbers_reject_boolean_nonfinite_negative_amounts (test_sovereign_auction_context.SovereignAuctionContextTests.test_numbers_reject_boolean_nonfinite_negative_amounts) ... ok\ntest_official_https_source_links_only (test_sovereign_auction_context.SovereignAuctionContextTests.test_official_https_source_links_only) ... ok\ntest_real_single_bill_future_deadline_is_allowed (test_sovereign_auction_context.SovereignAuctionContextTests.test_real_single_bill_future_deadline_is_allowed) ... ok\ntest_real_w1_shared_fixture_and_decimal_units (test_sovereign_auction_context.SovereignAuctionContextTests.test_real_w1_shared_fixture_and_decimal_units) ... ok\ntest_result_requires_observed_evidence_and_finite_numbers (test_sovereign_auction_context.SovereignAuctionContextTests.test_result_requires_observed_evidence_and_finite_numbers) ... ok\ntest_row_authority_is_exact (test_sovereign_auction_context.SovereignAuctionContextTests.test_row_authority_is_exact) ... ok\ntest_source_failure_retains_observation_and_failure_separately (test_sovereign_auction_context.SovereignAuctionContextTests.test_source_failure_retains_observation_and_failure_separately) ... ok\ntest_source_health_clock_order_and_cutoff_age_are_consistent (test_sovereign_auction_context.SovereignAuctionContextTests.test_source_health_clock_order_and_cutoff_age_are_consistent) ... ok\ntest_unknown_risk_fields_are_not_served_at_any_depth (test_sovereign_auction_context.SovereignAuctionContextTests.test_unknown_risk_fields_are_not_served_at_any_depth) ... ok\ntest_wrong_schema_and_exact_authority_fail_closed (test_sovereign_auction_context.SovereignAuctionContextTests.test_wrong_schema_and_exact_authority_fail_closed) ... ok\n\n----------------------------------------------------------------------\nRan 19 tests in 0.036s\n\nOK (skipped=1)\n"
+    },
+    {
+      "command": [
+        "node",
+        "tests/test_sovereign_auction_renderer.cjs"
+      ],
+      "cwd": "Mastermind source root",
+      "exit_code": 0,
+      "stdout": "Actual renderer unit assertions passed: real clocks/amounts, EN/ZH, 43 past + 3 scheduled grouping/count/expand, awaiting/null, escaped upstream text and source href, unavailable.\n",
+      "stderr": ""
+    }
+  ],
+  "live_capture_positive_control": {
+    "cutoff": "2026-10-08T23:00:00Z",
+    "producer_status": "available",
+    "consumer_available": true,
+    "event_count": 74,
+    "source_count": 4,
+    "classes": {
+      "Bill": 56,
+      "Note": 10,
+      "Bond": 4,
+      "TIPS": 2,
+      "FRN": 2
+    },
+    "receipt_files": [
+      {
+        "path": "research_source/forward_capture_primary/treasury_auctions/observations/20261008T225320956449Z-1ff0778ec045ff5445c303f27a52ebc75813b51f31f9ac28cedb3bbf240682e4.json",
+        "sha256": "1ff0778ec045ff5445c303f27a52ebc75813b51f31f9ac28cedb3bbf240682e4"
+      },
+      {
+        "path": "research_source/forward_capture_primary/treasury_auctions/observations/20261008T225325572222Z-a74cfb26c437e0d9d2b3242df6ccdc5c997dad696f7074931cff71c9507b0916.json",
+        "sha256": "a74cfb26c437e0d9d2b3242df6ccdc5c997dad696f7074931cff71c9507b0916"
+      },
+      {
+        "path": "research_source/forward_capture_primary/treasury_auctions/observations/20261008T225329204683Z-c00d73268eaab3bf3619040eb39f21be1a37d7abc7c74fbca524539459454aea.json",
+        "sha256": "c00d73268eaab3bf3619040eb39f21be1a37d7abc7c74fbca524539459454aea"
+      },
+      {
+        "path": "research_source/forward_capture_primary/treasury_auctions/observations/20261008T225333744010Z-141d39b47bbd030b4cfbbdd32209f7e95477042ba753d0253175d28849ebeabf.json",
+        "sha256": "141d39b47bbd030b4cfbbdd32209f7e95477042ba753d0253175d28849ebeabf"
+      }
+    ]
+  },
+  "limitations": [
+    "API class skipped because FastAPI is missing in scratch; four native API tests remain unrun here.",
+    "Renderer function assertions do not prove real browser layout or HTTP route behavior.",
+    "No production publication, deployment, merge, external repository mutation, or provider job performed."
+  ]
+}
