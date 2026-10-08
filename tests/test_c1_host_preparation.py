@@ -195,10 +195,50 @@ def test_c1_lock_namespace_refuses_existing_drift_before_install_normalization()
         '$(/usr/bin/stat -f \'%Lp\' "$C1_REBIND_LOCK_ROOT")'
     )
     acl_gate = body.index(
-        '$(/usr/bin/stat -f \'%Sp\' "$C1_REBIND_LOCK_ROOT")'
+        'LOCK_NAMESPACE_LONG="$("/bin/ls" -lde "$C1_REBIND_LOCK_ROOT")"'
     )
 
     assert existing_gate < direct_directory_gate < create_missing
     assert create_missing < owner_gate < mode_gate < acl_gate
     assert "/bin/chmod" not in body
     assert "/usr/sbin/chown" not in body
+
+
+@pytest.mark.parametrize(
+    ("listing", "expected"),
+    [
+        ("drwx------  2 root  wheel  64 Oct  8 12:00 locks", 1),
+        (
+            "drwx------+ 2 root  wheel  64 Oct  8 12:00 locks\n"
+            " 0: user:someone allow add_file",
+            0,
+        ),
+        (
+            "drwx------  2 root  wheel  64 Oct  8 12:00 locks\n"
+            " 0: group:staff deny delete\n"
+            " 1: user:someone allow add_file",
+            0,
+        ),
+    ],
+)
+def test_c1_lock_namespace_acl_parser_uses_ls_e_entry_lines(listing, expected):
+    text = PREP.read_text(encoding="utf-8")
+    function = "lock_namespace_has_acl() {" + text.split(
+        "lock_namespace_has_acl() {", 1
+    )[1].split("\n}\n", 1)[0] + "\n}\n"
+    completed = subprocess.run(
+        ["/bin/bash", "-c", function + '\nlock_namespace_has_acl "$1"', "acl-test", listing],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == expected
+
+
+def test_c1_lock_namespace_acl_observation_is_acl_aware():
+    text = PREP.read_text(encoding="utf-8")
+    body = text.split("ensure_rebind_lock_root() {", 1)[1].split("\n}\n", 1)[0]
+
+    assert '"/bin/ls" -lde "$C1_REBIND_LOCK_ROOT"' in body
+    assert "lock_namespace_has_acl" in body
+    assert "%Sp" not in body

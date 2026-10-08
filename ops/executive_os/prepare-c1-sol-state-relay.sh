@@ -282,6 +282,13 @@ ensure_user() {
   fi
 }
 
+lock_namespace_has_acl() {
+  case "${1:-}" in
+    *$'\n'*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 ensure_rebind_lock_root() {
   if [ -e "$C1_REBIND_LOCK_ROOT" ] || [ -L "$C1_REBIND_LOCK_ROOT" ]; then
     [ -d "$C1_REBIND_LOCK_ROOT" ] && [ ! -L "$C1_REBIND_LOCK_ROOT" ] || {
@@ -299,9 +306,14 @@ ensure_rebind_lock_root() {
     /bin/echo "C1 rebind lock namespace is not mode 0700" >&2
     exit 65
   }
-  case "$(/usr/bin/stat -f '%Sp' "$C1_REBIND_LOCK_ROOT")" in
-    *+) /bin/echo "C1 rebind lock namespace has a filesystem ACL" >&2; exit 65 ;;
-  esac
+  LOCK_NAMESPACE_LONG="$("/bin/ls" -lde "$C1_REBIND_LOCK_ROOT")" || {
+    /bin/echo "C1 rebind lock namespace ACL observation failed" >&2
+    exit 65
+  }
+  if lock_namespace_has_acl "$LOCK_NAMESPACE_LONG"; then
+    /bin/echo "C1 rebind lock namespace has a filesystem ACL" >&2
+    exit 65
+  fi
 }
 
 ensure_group
