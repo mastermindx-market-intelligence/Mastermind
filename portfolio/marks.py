@@ -10,7 +10,8 @@ Three accessors → three answers for the same symbol on the same day = drift, a
 (P7). This module is the SINGLE source of a mark. Every NAV writer routes through it.
 
 Contract — one *logged* source precedence, evaluated per symbol, most-authoritative first:
-  1. ``polygon-eod``    — the Polygon EOD/snapshot close (regular-session, EOD-grade).
+  1. ``polygon-eod``    — the Polygon close for the requested as-of date; the live snapshot is used
+                          only for the current date, never to backfill an older as-of date.
   2. ``yahoo-parquet``  — the vendored dividend-adjusted daily-close parquet (``lib.store``),
                           last row ≤ asof (deterministic, offline, survivorship-clean).
   3. ``last-good-carry`` — the last mark we successfully logged for this symbol, carried forward
@@ -96,8 +97,13 @@ def _save_carry(carry: dict) -> None:
 
 
 def _days_between(a: str, b: str) -> Optional[int]:
+    """Directional age in calendar days: requested as-of minus observed/carry date.
+
+    Negative means the candidate mark is from the future and therefore cannot be consumed by a
+    point-in-time mark. ``None`` means the date identity is not trustworthy enough to bound.
+    """
     try:
-        return abs((date.fromisoformat(str(a)[:10]) - date.fromisoformat(str(b)[:10])).days)
+        return (date.fromisoformat(str(a)[:10]) - date.fromisoformat(str(b)[:10])).days
     except Exception:  # noqa: BLE001
         return None
 
@@ -105,13 +111,25 @@ def _days_between(a: str, b: str) -> Optional[int]:
 # ─────────────────────────────────────────────────────────────────────────────
 # the two live sources (both optional / offline-safe / injectable in tests)
 # ─────────────────────────────────────────────────────────────────────────────
-def _polygon_eod(symbol: str) -> Optional[float]:
-    """Regular-session EOD close from Polygon (snapshot: lastTrade → min → day → prevDay). USD."""
+def _polygon_eod(symbol: str, asof: str) -> Optional[float]:
+    """Polygon close for ``asof``. The live snapshot is same-day only.
+
+    Historical/replay marks first request the exact daily aggregate for ``asof``; if there is no
+    bar (weekend/holiday/missing feed), the caller falls through to Yahoo/carry. A current Polygon
+    snapshot is never relabelled as an older historical close.
+    """
     try:
         from data_layer import polygon
-        px = polygon.snapshot_price(symbol)
+        day = str(asof)[:10]
+        today = date.today().isoformat()
+        closes = polygon.daily_closes(symbol, day, day, cache=(day < today))
+        px = (closes or {}).get(day)
         if px and float(px) > 0:
             return float(px)
+        if day == today:
+            px = polygon.snapshot_price(symbol)
+            if px and float(px) > 0:
+                return float(px)
     except Exception:  # noqa: BLE001
         pass
     return None
@@ -158,10 +176,10 @@ def mark_symbols(symbols: Iterable[str], asof: str, *,
     to avg_cost). Successful marks refresh the carry store so tomorrow's missing feed can carry.
 
     ``polygon_fn`` / ``yahoo_fn`` inject the two live sources for offline tests (default: the real
-    Polygon snapshot + the yahoo parquet). Best-effort; never raises."""
+    Polygon as-of close + the yahoo parquet). Best-effort; never raises."""
     asof = str(asof)[:10]
     seed = {(k or "").upper(): v for k, v in (seed or {}).items() if v and v > 0}
-    pfn = polygon_fn if polygon_fn is not None else _polygon_eod
+    pfn = polygon_fn
     yfn = yahoo_fn if yahoo_fn is not None else _yahoo_parquet
     carry = dict(_load_carry() if carry is None else carry)
 
@@ -182,7 +200,7 @@ def mark_symbols(symbols: Iterable[str], asof: str, *,
             px, src = float(seed[sym]), "seed"
         if px is None:
             try:
-                v = pfn(sym)
+                v = pfn(sym) if pfn is not None else _polygon_eod(sym, asof)
             except Exception:  # noqa: BLE001 — a dead feed degrades to the next source (P2)
                 v = None
             if v and v > 0:
@@ -197,9 +215,9 @@ def mark_symbols(symbols: Iterable[str], asof: str, *,
         if px is None:                                   # carry the last good mark forward (P2)
             c = carry.get(sym)
             if c and c.get("price") and c["price"] > 0:
-                d = _days_between(asof, c.get("asof") or asof)
-                if d is None or d <= _stale_max_days():
-                    px, src, stale = float(c["price"]), SOURCE_CARRY, (d if d is not None else 0)
+                d = _days_between(asof, c.get("asof"))
+                if d is not None and 0 <= d <= _stale_max_days():
+                    px, src, stale = float(c["price"]), SOURCE_CARRY, d
 
         if px is None or px <= 0:                        # genuinely unpriceable — leave UNPRICED
             counts["unpriced"] += 1
