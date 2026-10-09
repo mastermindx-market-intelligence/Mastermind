@@ -1,0 +1,388 @@
+{
+  "schema": "commission14.research_source_evidence.v1",
+  "purpose": "Research evidence only. No new production schema, control plane or authority.",
+  "research_date_utc": "2026-10-04",
+  "input": {
+    "filename": "deep-research-report (11).md",
+    "sha256": "5f8d92a7279667f30998a52aae7a4bfafe1ff881e04c4572f65a7481d349c45c",
+    "words": 8574,
+    "lines": 1219,
+    "handling": "Read supplied draft; completed a new hardened commission without modifying the original."
+  },
+  "current_protected_revisions_at_final_recheck": {
+    "Mastermind": "521720b09be2921e996d9396b522b1c4ca62041c",
+    "macro": "59a0789c0e5ffcce15e682b6f3880f3eacc6f6fc",
+    "terminal": "1c708450187755160e1a5889b69598a2fcb1f0d1"
+  },
+  "source_snapshot_revisions": {
+    "Mastermind": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+    "macro": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+    "terminal": "1c708450187755160e1a5889b69598a2fcb1f0d1"
+  },
+  "mastermind_source_evidence": [
+    {
+      "reference_id": "M01",
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "source_snapshot_pin": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+      "path": "docs/sol_skills/INDEX.md",
+      "git_blob_sha": "38a18571229e487f525b1c9780f7993220a5da93",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/docs/sol_skills/INDEX.md",
+      "key_findings": [
+        {
+          "line_ranges": "1-60",
+          "finding": "Bootstrap/source law used; compatible skillpack."
+        }
+      ]
+    },
+    {
+      "reference_id": "M02",
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "source_snapshot_pin": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+      "path": ".gitmodules",
+      "git_blob_sha": "3ba5eadd76f83e06060cae8f9a68df6ce1a6f8c1",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/.gitmodules",
+      "key_findings": [
+        {
+          "line_ranges": "1-15",
+          "finding": "Resolves Macro repository wiring; source linkage, not proof deployed runtime version."
+        }
+      ]
+    },
+    {
+      "reference_id": "M03",
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "source_snapshot_pin": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+      "path": "portfolio/held_risk.py",
+      "git_blob_sha": "4ec5eb6047848d46b0d780dfdf9f3967fd0d1796",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/portfolio/held_risk.py",
+      "key_findings": [
+        {
+          "line_ranges": "737-790",
+          "finding": "SUE/revision earnings lane exists; fields alone do not prove mature historical revisions."
+        },
+        {
+          "line_ranges": "953-977",
+          "finding": "CFO/(0.05 * long-term debt) proxy can set held-risk severity; not guarded by missing leverage ratios."
+        }
+      ]
+    },
+    {
+      "reference_id": "M04",
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "source_snapshot_pin": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+      "path": "portfolio/lenses.py",
+      "git_blob_sha": "2b8f593991d963de3d5d5d97c5970c36115cc411",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/portfolio/lenses.py",
+      "key_findings": [
+        {
+          "line_ranges": "1015-1054",
+          "finding": "Directional non-bloc rows enter confluence synthesis."
+        }
+      ]
+    },
+    {
+      "reference_id": "M05",
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "source_snapshot_pin": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+      "path": "docs/superpowers/specs/2026-09-15-mastermind-portfolio-v3-risk-first-autonomous-manager-design.md",
+      "git_blob_sha": "d700d50d62c9ee585aafb9737e3a35e7734e42e4",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/docs/superpowers/specs/2026-09-15-mastermind-portfolio-v3-risk-first-autonomous-manager-design.md",
+      "key_findings": [
+        {
+          "line_ranges": "275-289",
+          "finding": "SPEC_ONLY/NOT_BUILT declarations are not operational proof."
+        },
+        {
+          "line_ranges": "1065-1076",
+          "finding": "Existing balance_sheet_credit evidence family."
+        }
+      ]
+    },
+    {
+      "reference_id": "M06",
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "source_snapshot_pin": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+      "path": "data/census/CENSUS.md",
+      "git_blob_sha": "dcf51d160ba9b470c91309b2dc19cf2d0048b458",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/data/census/CENSUS.md",
+      "key_findings": [
+        {
+          "line_ranges": "1-6",
+          "finding": "Generated census dated 2026-07-16; not hand-edited in this commission."
+        }
+      ]
+    },
+    {
+      "reference_id": "M07",
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "source_snapshot_pin": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+      "path": "loop/fundamentals.py",
+      "git_blob_sha": "b8ede9c1dc3d5c9adca9100a47a07db2c382267b",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/loop/fundamentals.py",
+      "key_findings": [
+        {
+          "line_ranges": "1-447",
+          "finding": "Existing PIT date filtering and accounting loader; history/selection limitations remain."
+        }
+      ]
+    },
+    {
+      "reference_id": "M08",
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "source_snapshot_pin": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+      "path": "loop/single_name_panel.py",
+      "git_blob_sha": "9967191353f96dd8feebf6f16941e47f2a69ed15",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/loop/single_name_panel.py",
+      "key_findings": [
+        {
+          "line_ranges": "1-200",
+          "finding": "Existing PIT single-name panel including deep/delisted universe."
+        }
+      ]
+    },
+    {
+      "reference_id": "M09",
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "source_snapshot_pin": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+      "path": "brain/research_desk.py",
+      "git_blob_sha": "702e398f107831e862efafd6e5df35ca703361a4",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/brain/research_desk.py",
+      "key_findings": [
+        {
+          "line_ranges": "1-264",
+          "finding": "Existing research-desk owner seam."
+        }
+      ]
+    },
+    {
+      "reference_id": "M10",
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "source_snapshot_pin": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+      "path": "brain/bottleneck.py",
+      "git_blob_sha": "f0ab5274df108cc7d56674c2c238eb2698ef7fdd",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/brain/bottleneck.py",
+      "key_findings": [
+        {
+          "line_ranges": "1-53",
+          "finding": "Existing bottleneck lens owner."
+        }
+      ]
+    },
+    {
+      "reference_id": "M11",
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "source_snapshot_pin": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+      "path": "research/TREND_PERSISTENCE_PROTOCOL.md",
+      "git_blob_sha": "740ac5ea117831e127c2258fe58d7fe369618c99",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/research/TREND_PERSISTENCE_PROTOCOL.md",
+      "key_findings": [
+        {
+          "line_ranges": "86-92,137-139",
+          "finding": "Documented historical-revisions/flow/subtheme limitations; bounded not universal absence proof."
+        }
+      ]
+    },
+    {
+      "reference_id": "M12",
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "source_snapshot_pin": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+      "path": "docs/source_thematic_rotation_framework.md",
+      "git_blob_sha": "fc20d514ac22b5587fc9f1bd191a4b8e648a8ea9",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/docs/source_thematic_rotation_framework.md",
+      "key_findings": [
+        {
+          "line_ranges": "1-199",
+          "finding": "Existing thematic context and framework, no new parallel engine recommended."
+        }
+      ]
+    }
+  ],
+  "terminal_source_evidence": {
+    "repository": "mastermindx-market-intelligence/mastermind-terminal",
+    "commit_pin": "1c708450187755160e1a5889b69598a2fcb1f0d1",
+    "path": "terminal/components/fin/OverviewPage.tsx",
+    "git_blob_sha": "4da49c637db7fd2bf694882914303fe1fd7f53a6",
+    "permanent_url": "https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/1c708450187755160e1a5889b69598a2fcb1f0d1/terminal/components/fin/OverviewPage.tsx",
+    "key_findings": [
+      {
+        "line_ranges": "428-438",
+        "finding": "CapitalStructure debt/cash/EV context exists."
+      },
+      {
+        "line_ranges": "737-742",
+        "finding": "Existing sector-sensitive FCF display; not a new issuer-credit feed."
+      }
+    ]
+  },
+  "macro_source_evidence_file": "MACRO_SOURCE_EVIDENCE.json",
+  "primary_reference_register_file": "REFERENCE_REGISTER.json",
+  "final_protected_drift_checks": [
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "base": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+      "head": "521720b09be2921e996d9396b522b1c4ca62041c",
+      "status": "ahead",
+      "ahead_by": 1,
+      "behind_by": 0,
+      "total_commits": 1,
+      "too_large": null,
+      "changed_files": [
+        {
+          "filename": "research/TREND_PERSISTENCE_PREREG_C1.md",
+          "status": "added",
+          "additions": 646,
+          "deletions": 0,
+          "changes": 646,
+          "previous_filename": null
+        }
+      ],
+      "compare_url": "https://github.com/mastermindx-market-intelligence/Mastermind/compare/a2646f458f9ff41ddcedd89b338be4a4349e6cd6...521720b09be2921e996d9396b522b1c4ca62041c",
+      "qualification": "Complete compare file list; none of the inspected credit/identity/financing/portfolio source paths changed. Adjacent changes separately assessed in the report."
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "base": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "head": "59a0789c0e5ffcce15e682b6f3880f3eacc6f6fc",
+      "status": "ahead",
+      "ahead_by": 2,
+      "behind_by": 0,
+      "total_commits": 2,
+      "too_large": null,
+      "changed_files": [
+        {
+          "filename": ".github/ci/legacy-jobs.yml",
+          "status": "modified",
+          "additions": 25,
+          "deletions": 1,
+          "changes": 26,
+          "previous_filename": null
+        },
+        {
+          "filename": "agentos/handoffs/TREND-PERSISTENCE-2026-10-04.md",
+          "status": "modified",
+          "additions": 26,
+          "deletions": 1,
+          "changes": 27,
+          "previous_filename": null
+        },
+        {
+          "filename": "agentos/workstreams/WS-TREND-PERSISTENCE.md",
+          "status": "modified",
+          "additions": 7,
+          "deletions": 2,
+          "changes": 9,
+          "previous_filename": null
+        },
+        {
+          "filename": "collectors/china_ths_concepts.py",
+          "status": "modified",
+          "additions": 271,
+          "deletions": 46,
+          "changes": 317,
+          "previous_filename": null
+        },
+        {
+          "filename": "tests/test_ci_pack.py",
+          "status": "modified",
+          "additions": 1,
+          "deletions": 0,
+          "changes": 1,
+          "previous_filename": null
+        },
+        {
+          "filename": "tests/test_ths_collection_receipts.py",
+          "status": "added",
+          "additions": 373,
+          "deletions": 0,
+          "changes": 373,
+          "previous_filename": null
+        }
+      ],
+      "compare_url": "https://github.com/mastermindx-market-intelligence/macro/compare/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3...59a0789c0e5ffcce15e682b6f3880f3eacc6f6fc",
+      "qualification": "Complete compare file list; none of the inspected credit/identity/financing/portfolio source paths changed. Adjacent changes separately assessed in the report."
+    }
+  ],
+  "final_adjacent_pr_recheck": [
+    {
+      "number": 8308,
+      "url": "https://github.com/mastermindx-market-intelligence/macro/pull/8308",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head_sha": "446ffd0f1062dd064c0716b576ceba7ce90acf2b",
+      "merge_commit_sha": "74e11aaf7ef644aeab8155d5dfe3fab5504e0567",
+      "updated_at": "2026-10-03T09:01:14Z"
+    },
+    {
+      "number": 8397,
+      "url": "https://github.com/mastermindx-market-intelligence/macro/pull/8397",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head_sha": "f6443f34f66c434e2ebfffb37cb3ba568de9f2b6",
+      "merge_commit_sha": "404c03089dc5bc39a68ead7e360e05c71b13c112",
+      "updated_at": "2026-10-04T06:20:39Z"
+    },
+    {
+      "number": 7119,
+      "url": "https://github.com/mastermindx-market-intelligence/macro/pull/7119",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head_sha": "c68d8bd4296df18e35d98b16a7e06f3588c22288",
+      "merge_commit_sha": null,
+      "updated_at": "2026-09-13T19:03:19Z"
+    },
+    {
+      "number": 8051,
+      "url": "https://github.com/mastermindx-market-intelligence/macro/pull/8051",
+      "state": "closed",
+      "draft": false,
+      "merged": true,
+      "head_sha": "5b753fa8494f5ffb56c2b275b072999292e0d3da",
+      "merge_commit_sha": "5e0ebcb161b460d63252208f040067c6b922e805",
+      "updated_at": "2026-09-27T06:46:22Z"
+    }
+  ],
+  "completed_research_tests": [
+    {
+      "name": "future_filing_selection_falsifier",
+      "record_in": "MACRO_SOURCE_EVIDENCE.json#/completed_synthetic_pit_falsifier",
+      "tested_function": "extract_maturity_ladder",
+      "source_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "source_blob": "cb5688451aa025156aed89566f9076729526d27e",
+      "cutoff": "2025-06-01",
+      "observed": {
+        "selected_filed": "2026-02-01",
+        "selected_accn": "future",
+        "y1": 999,
+        "status": "reported"
+      },
+      "interpretation": "Pure extractor is not sufficient for as-of historical selection; downstream capital_need guard does not recover older discarded input.",
+      "live_leakage_proved": false
+    }
+  ],
+  "independent_review": {
+    "economics_temporal_empirical": "Full A-L review completed; no blocker, substantive refinements incorporated.",
+    "source_vendor_rights": "Full report review completed; no blocker, applicable CDS/SEC scope/TRACE semantics/citation refinements incorporated.",
+    "owner_compatibility": "PASS; opt-in P0A remains within existing owner; later F09/CCW integration and wave gates held.",
+    "not_an_approval": "Research review does not authorize implementation or decision authority."
+  },
+  "scope_limitations": [
+    "No live production or external consumer execution/health was proved.",
+    "No paid dataset, licensed sample, negotiated quote or entitlement was obtained.",
+    "No historical predictive backtest or forward alpha result was produced.",
+    "Only the cited Hameed et al. abstract was verified; full text not inspected.",
+    "No production code, pipeline, portfolio behavior, deployment or authority was changed.",
+    "Current committed artifacts and provider documentation are not operational or original-vintage proof."
+  ],
+  "final_macro_delta_evidence_file": "MACRO_FINAL_HEAD_DELTA.json",
+  "mastermind_final_delta_source": {
+    "path": "research/TREND_PERSISTENCE_PREREG_C1.md",
+    "git_blob_sha": "8f280bd41430dc0b49551783a1066b42b068ce8d",
+    "commit_pin": "521720b09be2921e996d9396b522b1c4ca62041c",
+    "permanent_url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/521720b09be2921e996d9396b522b1c4ca62041c/research/TREND_PERSISTENCE_PREREG_C1.md",
+    "inspected_lines": "1-125",
+    "finding": "Adjacent frozen sector research records current sector labels with era_correct false and informative missingness; not a new era-correct issuer-credit identity source. No credit/portfolio/source-law code changed."
+  }
+}
