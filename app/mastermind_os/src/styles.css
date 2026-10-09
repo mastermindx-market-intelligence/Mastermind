@@ -742,6 +742,11 @@ a:focus-visible {
   dl {
     grid-template-columns: minmax(80px, 100px) minmax(0, 1fr);
   }
+  main .grid > .card > dl .state {
+    display: inline-block;
+    max-width: 100%;
+    white-space: normal;
+  }
 }
 @media (max-width: 420px) {
   main {
