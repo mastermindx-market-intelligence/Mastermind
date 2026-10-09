@@ -1054,11 +1054,17 @@ if [ ! -d "$RELEASE_ROOT" ]; then
   # mktemp creates the staging root as 0700. Both non-root service UIDs need
   # read/traverse access to the immutable release, while only root may mutate.
   /bin/chmod 0755 "$STAGING"
-  /bin/mv "$STAGING" "$RELEASE_ROOT"
+  # Seal and verify while the directory is still operation-owned staging. A
+  # settled interruption must never expose a canonical release without a seal.
+  "$PYTHON_BINARY" -I -S -B "$STAGING/ops/executive_os/release_manifest.py" create \
+    --root "$STAGING" --commit-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA"
+  /usr/sbin/chown root:wheel "$STAGING/.executive-release-manifest.json"
+  "$PYTHON_BINARY" -I -S -B "$STAGING/ops/executive_os/release_manifest.py" verify \
+    --root "$STAGING" --commit-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA"
+  # Reuse the existing exclusive namespace move: plain mv can nest staging
+  # inside a directory created by another writer after the initial check.
+  rename_codex_path_exclusive "$STAGING" "$RELEASE_ROOT" || exit 65
   STAGING=""
-  "$PYTHON_BINARY" -I -S -B "$RELEASE_ROOT/ops/executive_os/release_manifest.py" create \
-    --root "$RELEASE_ROOT" --commit-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA"
-  /usr/sbin/chown root:wheel "$RELEASE_ROOT/.executive-release-manifest.json"
 else
   "$PYTHON_BINARY" -I -S -B "$RELEASE_ROOT/ops/executive_os/release_manifest.py" verify \
     --root "$RELEASE_ROOT" --commit-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA"
