@@ -445,6 +445,59 @@ class ProModeReceipt:
         return value
 
 
+_TASK_COMPLEXITIES = frozenset({"C0", "C1", "C2", "C3"})
+_TASK_TOPOLOGIES = frozenset({"principal", "coordinator", "worker", "subagent", "reviewer"})
+_BUSINESS_IMPACTS = frozenset({"routine", "material", "critical"})
+_FRONTIER_WITNESS_KINDS = frozenset({
+    "unresolved_architecture", "conflicting_evidence", "cross_system_tradeoff",
+    "hard_debugging", "long_horizon_reasoning",
+})
+
+
+@dataclasses.dataclass(frozen=True)
+class TaskFit:
+    """Calibrated task evidence, not an execution, spend or hierarchy grant.
+
+    C0 is mechanical; C1 is routine bounded work; C2 is complex work within a
+    fixed architecture; C3 requires frontier judgment. A parent's role and a
+    product's importance never determine a child's complexity. The witness
+    validator establishes shape, not truth: review still owns semantic quality.
+    """
+
+    complexity: str
+    business_impact: str = "routine"
+    topology: str = "worker"
+    frontier_witness_kind: str | None = None
+    frontier_witness: str | None = None
+
+    def __post_init__(self) -> None:
+        for field, allowed in (
+            ("complexity", _TASK_COMPLEXITIES),
+            ("business_impact", _BUSINESS_IMPACTS),
+            ("topology", _TASK_TOPOLOGIES),
+        ):
+            value = getattr(self, field)
+            if not isinstance(value, str) or value not in allowed:
+                raise RoutingPolicyError(f"unsupported task fit {field}")
+        if self.complexity == "C3":
+            if (
+                not isinstance(self.frontier_witness_kind, str)
+                or self.frontier_witness_kind not in _FRONTIER_WITNESS_KINDS
+            ):
+                raise RoutingPolicyError("C3 requires a supported frontier witness kind")
+            object.__setattr__(self, "frontier_witness", _bounded_text(
+                self.frontier_witness, field="frontier_witness"))
+        elif self.frontier_witness_kind is not None or self.frontier_witness is not None:
+            raise RoutingPolicyError("only C3 may carry a frontier witness")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": "mastermind.task_fit/v1",
+            **dataclasses.asdict(self),
+            "classification_is_authority": False,
+        }
+
+
 @dataclasses.dataclass(frozen=True)
 class WorkRequest:
     task_kind: str
@@ -452,6 +505,7 @@ class WorkRequest:
     ambiguity: str = "low"
     required_capabilities: tuple[str, ...] = ()
     excluded_worker_ids: tuple[str, ...] = ()
+    task_fit: TaskFit | None = None
 
     def __post_init__(self) -> None:
         task_kind = str(self.task_kind).strip().lower()
@@ -463,6 +517,16 @@ class WorkRequest:
             raise RoutingPolicyError(f"unsupported risk {risk!r}")
         if ambiguity not in _AMBIGUITIES:
             raise RoutingPolicyError(f"unsupported ambiguity {ambiguity!r}")
+        if self.task_fit is not None:
+            if type(self.task_fit) is not TaskFit:
+                raise RoutingPolicyError("task_fit must be a validated TaskFit")
+            if self.task_fit.complexity != "C3":
+                if ambiguity == "high":
+                    raise RoutingPolicyError("bounded C0-C2 fit cannot carry high ambiguity")
+                if task_kind in _LEAD_TASKS:
+                    raise RoutingPolicyError(
+                        "calibrated lead tasks require C3; decompose bounded work into worker task kinds"
+                    )
         capabilities = tuple(
             sorted(
                 {
@@ -513,6 +577,16 @@ class RoutingDecision(_RoutingDecisionCompatibility):
     chat_reasoning_mode: ChatReasoningMode | None = None
     metered_cognition_receipt: MeteredCognitionReceipt | None = None
     pro_mode_receipt: ProModeReceipt | None = None
+    task_fit: TaskFit | None = None
+
+    @property
+    def requires_independent_review(self) -> bool:
+        """Feed the existing review gate; do not recursively review review jobs."""
+        return (
+            self.worker_eligible and self.task_kind != "review"
+            and self.task_fit is not None
+            and self.task_fit.business_impact != "routine"
+        )
 
     @property
     def worker_eligible(self) -> bool:
@@ -529,6 +603,11 @@ class RoutingDecision(_RoutingDecisionCompatibility):
     def to_dict(self) -> dict[str, Any]:
         value = dataclasses.asdict(self)
         value["mode"] = self.mode.value
+        if self.task_fit is None:
+            value.pop("task_fit", None)  # Preserve the legacy wire exactly.
+        else:
+            value["task_fit"] = self.task_fit.to_dict()
+            value["independent_review_required"] = self.requires_independent_review
         value["worker_eligible"] = self.worker_eligible
         value["suitability_tiers"] = [
             tier.to_dict() for tier in self.suitability_tiers
@@ -792,6 +871,16 @@ class ModelRouter:
     ) -> RoutingDecision:
         reasons: list[str] = []
         lead_required = False
+        if request.task_fit is not None:
+            fit = request.task_fit
+            reasons.extend((
+                f"task_complexity_{fit.complexity.lower()}",
+                f"business_impact_{fit.business_impact}",
+                f"task_topology_{fit.topology}",
+            ))
+            if fit.complexity == "C3":
+                lead_required = True
+                reasons.append(f"frontier_witness_{fit.frontier_witness_kind}")
         if request.task_kind in _LEAD_TASKS:
             lead_required = True
             reasons.append(f"task_kind_{request.task_kind}")
@@ -889,6 +978,7 @@ class ModelRouter:
                 chat_reasoning_mode=resolved_chat_reasoning_mode,
                 metered_cognition_receipt=metered_cognition_receipt,
                 pro_mode_receipt=pro_mode_receipt,
+                task_fit=request.task_fit,
             )
 
         if pro_mode_receipt is not None:
@@ -914,7 +1004,13 @@ class ModelRouter:
             )
 
         route = self.routes[request.task_kind]
-        suitability_tiers = tuple(route[request.risk])
+        suitability_band = request.risk
+        if request.task_fit is not None and request.task_fit.complexity == "C2":
+            # Reuse the already-reviewed stronger worker set. This does not
+            # relabel execution risk, alter a tier, or arm another provider.
+            suitability_band = "elevated"
+            reasons.append("complexity_c2_stronger_suitability")
+        suitability_tiers = tuple(route[suitability_band])
         first_profile = self.model_aliases[
             suitability_tiers[0].model_aliases[0]
         ]
@@ -954,6 +1050,7 @@ class ModelRouter:
             required_capabilities=capabilities,
             excluded_worker_ids=request.excluded_worker_ids,
             reason_codes=tuple(reasons),
+            task_fit=request.task_fit,
         )
 
 

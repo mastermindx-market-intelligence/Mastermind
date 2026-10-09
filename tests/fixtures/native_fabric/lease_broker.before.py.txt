@@ -1,0 +1,1365 @@
+#!/usr/bin/env python3
+"""Cluster-wide agent-slot lease broker (R11–R16).
+
+Single writer: SQLite at ext/broker/leases.sqlite behind a file lock.
+No inbound listeners. Secret-free stdout (names only, never key values).
+
+CLI:
+  acquire --orchestrator-id ID --pool P [--account A] [--task-class C]
+          [--host H] [--pid N] [--ttl S] [--wait S] [--poll S]
+  heartbeat <lease-id>
+  release <lease-id>
+  plan --class C --need N [--orchestrator-id ID]
+  status
+  gc
+"""
+from __future__ import annotations
+
+import argparse
+import fcntl
+import json
+import os
+import socket
+import sqlite3
+import sys
+import time
+from dataclasses import dataclass
+import uuid
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+KIT = os.path.abspath(os.path.join(HERE, ".."))
+DEFAULT_DB = os.path.join(HERE, "broker", "leases.sqlite")
+DEFAULT_LOCK = os.path.join(HERE, "broker", "leases.lock")
+DEFAULT_ACCOUNTS = os.path.join(KIT, "orch", "fabric", "accounts.yaml")
+STATUS_JSON = os.path.join(KIT, "orch", "fabric", "status.json")
+GROK_EXHAUSTED = os.path.join(HERE, "GROK_EXHAUSTED")
+
+POOL_ALIASES = {"qwen": "bailian"}
+HELD_STATES = ("held", "rented")
+DEFAULT_TTL = 180
+RENT_TTL = 90
+WAITER_STALE_S = 90  # demand grace; live acquirers refresh last_heartbeat
+CLASS_PRIORITY = {
+    "heal": 0,
+    "heals": 0,
+    "fix_build": 1,
+    "build": 1,
+    "builds": 1,
+    "fix": 1,
+    "review": 2,
+    "reviews": 2,
+    "census": 3,
+    "audit": 3,
+    "mechanical": 3,
+    "unknown": 4,
+}
+
+
+def _this_host() -> str:
+    return (os.environ.get("POOL_BROKER_HOST") or socket.gethostname() or "studio").split()[0]
+
+
+def _now_iso(ts: Optional[float] = None) -> str:
+    return datetime.fromtimestamp(ts or time.time(), tz=timezone.utc).isoformat()
+
+
+def _parse_iso(s: Optional[str]) -> Optional[float]:
+    if not s:
+        return None
+    raw = str(s).strip()
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(raw).timestamp()
+    except ValueError:
+        return None
+
+
+def _load_yaml(path: str) -> Dict[str, Any]:
+    with open(path, encoding="utf-8") as fh:
+        try:
+            import yaml  # type: ignore
+        except ImportError:
+            raise RuntimeError("PyYAML required to read accounts.yaml")
+        data = yaml.safe_load(fh) or {}
+    if not isinstance(data, dict):
+        raise RuntimeError("accounts.yaml must be a mapping")
+    return data
+
+
+def _pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def _class_priority(task_class: str) -> int:
+    return CLASS_PRIORITY.get((task_class or "unknown").lower(), 4)
+
+
+@dataclass
+class AcquireResult:
+    ok: bool
+    lease_id: str = ""
+    account: str = ""
+    state: str = ""
+    reason: str = ""
+    orchestrator_id: str = ""
+    pool: str = ""
+
+    def line(self) -> str:
+        if self.ok:
+            return f"LEASE={self.lease_id} ACCOUNT={self.account}"
+        return f"WAIT reason={self.reason or 'unavailable'}"
+
+
+@dataclass(frozen=True)
+class HeartbeatResult:
+    ok: bool
+    reason: str
+    ttl: float | None = None
+
+    def __bool__(self) -> bool:
+        return self.ok
+
+
+class Broker:
+    """Single-writer lease broker. All mutating methods take the file lock."""
+
+    def __init__(
+        self,
+        db_path: str = DEFAULT_DB,
+        lock_path: str = DEFAULT_LOCK,
+        accounts_path: str = DEFAULT_ACCOUNTS,
+        now_fn: Optional[Callable[[], float]] = None,
+        check_pid: bool = True,
+        external_gates: bool = True,
+        grok_marker: Optional[str] = None,
+        this_host: Optional[str] = None,
+        status_json: Optional[str] = None,
+    ) -> None:
+        self.db_path = db_path
+        self.lock_path = lock_path
+        self.accounts_path = accounts_path
+        self.now_fn = now_fn or time.time
+        self.check_pid = check_pid
+        self.external_gates = external_gates
+        self.grok_marker = grok_marker or GROK_EXHAUSTED
+        self.this_host = this_host or _this_host()
+        self.status_json = status_json or STATUS_JSON
+        os.makedirs(os.path.dirname(self.db_path) or ".", exist_ok=True)
+        os.makedirs(os.path.dirname(self.lock_path) or ".", exist_ok=True)
+        self._accounts_cache: Optional[Dict[str, Any]] = None
+        self._accounts_mtime: Optional[float] = None
+        self._init_db()
+
+    def _init_db(self) -> None:
+        conn = sqlite3.connect(self.db_path, timeout=30)
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS leases (
+                    id TEXT PRIMARY KEY,
+                    orchestrator_id TEXT NOT NULL,
+                    pool TEXT NOT NULL,
+                    account TEXT NOT NULL,
+                    task_class TEXT NOT NULL,
+                    model TEXT NOT NULL DEFAULT '',
+                    host TEXT NOT NULL,
+                    pid INTEGER NOT NULL,
+                    granted_at REAL NOT NULL,
+                    ttl INTEGER NOT NULL,
+                    last_heartbeat REAL NOT NULL,
+                    state TEXT NOT NULL,
+                    renewable INTEGER NOT NULL DEFAULT 1
+                )"""
+            )
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS waiters (
+                    id TEXT PRIMARY KEY,
+                    orchestrator_id TEXT NOT NULL,
+                    pool TEXT NOT NULL,
+                    account TEXT,
+                    task_class TEXT NOT NULL,
+                    host TEXT,
+                    enqueued_at REAL NOT NULL,
+                    priority INTEGER NOT NULL,
+                    need INTEGER NOT NULL DEFAULT 1,
+                    last_heartbeat REAL
+                )"""
+            )
+            self._ensure_schema(conn)
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _lock(self):
+        fh = open(self.lock_path, "a+")
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        return fh
+
+    def _conn(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.db_path, timeout=30)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def now(self) -> float:
+        return float(self.now_fn())
+
+    def normalize_pool(self, pool: str) -> str:
+        p = (pool or "").strip().lower()
+        return POOL_ALIASES.get(p, p)
+
+    def _ensure_schema(self, conn: sqlite3.Connection) -> None:
+        lcols = {r[1] for r in conn.execute("PRAGMA table_info(leases)")}
+        if "renewable" not in lcols:
+            conn.execute(
+                "ALTER TABLE leases ADD COLUMN renewable INTEGER NOT NULL DEFAULT 1"
+            )
+        if "model" not in lcols:
+            conn.execute(
+                "ALTER TABLE leases ADD COLUMN model TEXT NOT NULL DEFAULT ''"
+            )
+        wcols = {r[1] for r in conn.execute("PRAGMA table_info(waiters)")}
+        if "last_heartbeat" not in wcols:
+            conn.execute("ALTER TABLE waiters ADD COLUMN last_heartbeat REAL")
+            conn.execute(
+                "UPDATE waiters SET last_heartbeat = enqueued_at "
+                "WHERE last_heartbeat IS NULL"
+            )
+
+    def load_accounts_doc(self) -> Dict[str, Any]:
+        try:
+            mtime = os.path.getmtime(self.accounts_path)
+        except OSError:
+            if self._accounts_cache is not None:
+                return self._accounts_cache
+            raise
+        if self._accounts_mtime == mtime and self._accounts_cache is not None:
+            return self._accounts_cache
+        try:
+            doc = _load_yaml(self.accounts_path)
+        except Exception:
+            if self._accounts_cache is not None:
+                return self._accounts_cache
+            raise
+        self._accounts_cache = doc
+        self._accounts_mtime = mtime
+        return doc
+
+    def provider(self, pool: str) -> Dict[str, Any]:
+        pool = self.normalize_pool(pool)
+        doc = self.load_accounts_doc()
+        providers = doc.get("providers") or {}
+        # alias lookup
+        if pool in providers:
+            return dict(providers[pool] or {}, _name=pool)
+        for name, spec in providers.items():
+            aliases = [str(a).lower() for a in (spec or {}).get("pool_aliases") or []]
+            if pool in aliases:
+                return dict(spec or {}, _name=name)
+        return {"_name": pool, "enabled": False, "accounts": []}
+
+    def provider_name(self, pool: str) -> str:
+        return str(self.provider(pool).get("_name") or self.normalize_pool(pool))
+
+    # ── gates ────────────────────────────────────────────────────────────────
+
+    def _parked(self, acct: Dict[str, Any], now: float) -> bool:
+        until = _parse_iso(acct.get("parked_until"))
+        return until is not None and until > now
+
+    def _grok_exhausted(self) -> bool:
+        return os.path.exists(self.grok_marker)
+
+    def _bailian_effective_cap(self, name: str, base: int) -> Optional[int]:
+        """None = not grantable (non-429 cooldown). Else effective cap."""
+        if not self.external_gates:
+            return base
+        try:
+            if HERE not in sys.path:
+                sys.path.insert(0, HERE)
+            import bailian_keys
+
+            cd = bailian_keys.cooldown_info(name)
+            if cd is None:
+                return min(base, int(bailian_keys.current_per_key_cap()))
+            reason = cd[1] if len(cd) > 1 else ""
+            if reason != "http_429":
+                return None
+            return min(base, int(bailian_keys._effective_cap_for_key(name)))
+        except Exception:
+            return base
+
+    def account_cap(self, pool: str, acct: Dict[str, Any]) -> Optional[int]:
+        """Effective cap, or None if the account must not be granted."""
+        now = self.now()
+        if self._parked(acct, now):
+            return None
+        base = acct.get("per_account_cap")
+        if base is None:
+            return None
+        base = int(base)
+        name = str(acct.get("name") or "")
+        pname = self.provider_name(pool)
+        if pname == "grok" and self._grok_exhausted():
+            return None
+        if pname == "bailian":
+            return self._bailian_effective_cap(name, base)
+        return base
+
+    def account_model_cap(
+        self, pool: str, acct: Dict[str, Any], model: str
+    ) -> Optional[int]:
+        """Per-model account cap when the provider declares one."""
+        if self.provider_name(pool) != "glm":
+            return None
+        model_name = str(model or "").strip().lower()
+        if not model_name:
+            return None
+        raw = acct.get("per_model_caps") or {}
+        if not isinstance(raw, dict):
+            return None
+        value = raw.get(model_name)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        cap = int(value)
+        return cap if cap >= 0 else None
+
+    def _account_model_held(
+        self, conn: sqlite3.Connection, pool: str, account: str, model: str
+    ) -> int:
+        """Held leases for one concrete model.
+
+        During the migration, untagged legacy GLM leases count against full
+        GLM conservatively; Flash keeps exact-model accounting because its
+        declared model cap is no tighter than the generic account cap.
+        """
+        pool = self.provider_name(pool)
+        model_name = str(model or "").strip().lower()
+        if not model_name:
+            return 0
+        if pool == "glm" and model_name == "glm-5.3":
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM leases "
+                "WHERE state IN ('held','rented') AND pool=? AND account=? "
+                "AND (LOWER(model)=? OR model='')",
+                (pool, account, model_name),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM leases "
+                "WHERE state IN ('held','rented') AND pool=? AND account=? "
+                "AND LOWER(model)=?",
+                (pool, account, model_name),
+            ).fetchone()
+        return int(row["n"] if row else 0)
+
+    def grantable_accounts(self, pool: str) -> List[Dict[str, Any]]:
+        spec = self.provider(pool)
+        if spec.get("enabled") is False:
+            return []
+        out = []
+        for acct in spec.get("accounts") or []:
+            cap = self.account_cap(pool, acct)
+            if cap is None or cap <= 0:
+                continue
+            row = dict(acct)
+            row["_eff_cap"] = cap
+            out.append(row)
+        return out
+
+    def pool_cap(self, pool: str) -> int:
+        return sum(int(a["_eff_cap"]) for a in self.grantable_accounts(pool))
+
+    # ── sql helpers ──────────────────────────────────────────────────────────
+
+    def _active_leases(self, conn: sqlite3.Connection, pool: Optional[str] = None) -> List[sqlite3.Row]:
+        if pool:
+            pool = self.provider_name(pool)
+            cur = conn.execute(
+                "SELECT * FROM leases WHERE state IN ('held','rented') AND pool=?",
+                (pool,),
+            )
+        else:
+            cur = conn.execute("SELECT * FROM leases WHERE state IN ('held','rented')")
+        return list(cur.fetchall())
+
+    def _held_by(self, conn: sqlite3.Connection, orch: str, pool: str) -> List[sqlite3.Row]:
+        pool = self.provider_name(pool)
+        return list(
+            conn.execute(
+                "SELECT * FROM leases WHERE state IN ('held','rented') "
+                "AND orchestrator_id=? AND pool=?",
+                (orch, pool),
+            ).fetchall()
+        )
+
+    def _account_held(self, conn: sqlite3.Connection, pool: str, account: str) -> int:
+        pool = self.provider_name(pool)
+        row = conn.execute(
+            "SELECT COUNT(*) AS n FROM leases WHERE state IN ('held','rented') "
+            "AND pool=? AND account=?",
+            (pool, account),
+        ).fetchone()
+        return int(row["n"] if row else 0)
+
+    def _waiters(self, conn: sqlite3.Connection, pool: str) -> List[sqlite3.Row]:
+        pool = self.provider_name(pool)
+        return list(
+            conn.execute(
+                "SELECT * FROM waiters WHERE pool=? AND id NOT LIKE 'plan-%' "
+                "ORDER BY priority ASC, enqueued_at ASC",
+                (pool,),
+            ).fetchall()
+        )
+
+    def _active_orchestrators(self, conn: sqlite3.Connection, pool: str) -> List[str]:
+        pool = self.provider_name(pool)
+        ids = set()
+        for r in conn.execute(
+            "SELECT DISTINCT orchestrator_id FROM leases "
+            "WHERE state IN ('held','rented') AND pool=?",
+            (pool,),
+        ):
+            ids.add(r["orchestrator_id"])
+        for r in conn.execute(
+            "SELECT DISTINCT orchestrator_id FROM waiters "
+            "WHERE pool=? AND id NOT LIKE 'plan-%'",
+            (pool,),
+        ):
+            ids.add(r["orchestrator_id"])
+        return sorted(ids)
+
+    def fair_share(self, conn: sqlite3.Connection, pool: str, extra: Optional[str] = None) -> int:
+        cap = self.pool_cap(pool)
+        orchs = set(self._active_orchestrators(conn, pool))
+        if extra:
+            orchs.add(extra)
+        n = max(1, len(orchs))
+        if cap <= 0:
+            return 1
+        return max(1, cap // n)
+
+    def _below_share_waiters(
+        self, conn: sqlite3.Connection, pool: str, except_orch: str, share: int
+    ) -> List[sqlite3.Row]:
+        out = []
+        for w in self._waiters(conn, pool):
+            if w["orchestrator_id"] == except_orch:
+                continue
+            held = len(self._held_by(conn, w["orchestrator_id"], pool))
+            if held < share:
+                out.append(w)
+        return out
+
+    def _mark_surplus_nonrenewable(
+        self, conn: sqlite3.Connection, pool: str, share: int
+    ) -> None:
+        """When a below-share waiter exists, surplus leases drain at step boundaries."""
+        # TTL stays the granted liveness window. Non-renewability is renewable=0
+        # (blocks *new* acquires for this surplus); a heartbeat within TTL keeps
+        # the current step alive. Never deletes a live lease.
+        counts: Dict[str, List[sqlite3.Row]] = {}
+        for row in self._active_leases(conn, pool):
+            counts.setdefault(row["orchestrator_id"], []).append(row)
+        for _orch, rows in counts.items():
+            if len(rows) <= share:
+                continue
+            # keep the oldest `share` as held; mark the rest rented + non-renewable
+            rows_sorted = sorted(rows, key=lambda r: r["granted_at"])
+            for extra in rows_sorted[share:]:
+                conn.execute(
+                    "UPDATE leases SET state='rented', renewable=0 WHERE id=?",
+                    (extra["id"],),
+                )
+
+    # ── gc ───────────────────────────────────────────────────────────────────
+
+    def gc(self) -> int:
+        lock = self._lock()
+        try:
+            return self._gc_locked()
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+            lock.close()
+
+    def _gc_locked(self) -> int:
+        conn = self._conn()
+        expired = 0
+        try:
+            now = self.now()
+            for row in self._active_leases(conn):
+                dead = False
+                try:
+                    renewable = int(row["renewable"])
+                except (KeyError, IndexError, TypeError, ValueError):
+                    renewable = 1
+                if now - float(row["last_heartbeat"]) > float(row["ttl"]):
+                    dead = True
+                elif renewable == 0 and (now - float(row["granted_at"])) > float(row["ttl"]):
+                    # surplus past its granted TTL is non-renewable: expire it
+                    dead = True
+                elif (
+                    self.check_pid
+                    and row["host"] == self.this_host
+                    and not _pid_alive(int(row["pid"]))
+                ):
+                    dead = True
+                if dead:
+                    conn.execute(
+                        "UPDATE leases SET state='expired' WHERE id=?", (row["id"],)
+                    )
+                    expired += 1
+            # drop waiters whose demand heartbeat went stale (not absolute age)
+            conn.execute(
+                "DELETE FROM waiters WHERE COALESCE(last_heartbeat, enqueued_at) < ?",
+                (now - WAITER_STALE_S,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return expired
+
+    # ── acquire / release / heartbeat ────────────────────────────────────────
+
+    def acquire(
+        self,
+        orchestrator_id: str,
+        pool: str,
+        account: Optional[str] = None,
+        task_class: str = "unknown",
+        host: Optional[str] = None,
+        pid: int = 0,
+        ttl: Optional[int] = None,
+        wait: float = 0,
+        poll: float = 1.0,
+        model: str = "",
+    ) -> AcquireResult:
+        pool = self.provider_name(pool)
+        model = str(model or "").strip()
+        host = host or self.this_host
+        pid = int(pid or os.getpid())
+        orchestrator_id = str(orchestrator_id or "").strip()
+        if not orchestrator_id:
+            return AcquireResult(ok=False, reason="missing_orchestrator_id", pool=pool)
+        waiter_id: Optional[str] = None
+        deadline = self.now() + max(0.0, float(wait))
+        last_reason = "unavailable"
+        # Failed/blocked acquire demand stays in waiters for WAITER_STALE_S so
+        # lending and the starvation guard can fire (B5). plan() is read-only
+        # for fair share (N1) and does not register competing demand.
+        # Successful acquire deletes the waiter row inside _try_acquire.
+        while True:
+            lock = self._lock()
+            try:
+                self._gc_locked()
+                result, waiter_id, last_reason = self._try_acquire(
+                    orchestrator_id,
+                    pool,
+                    account,
+                    task_class,
+                    host,
+                    pid,
+                    ttl,
+                    waiter_id,
+                    model,
+                )
+                if result.ok:
+                    return result
+            finally:
+                fcntl.flock(lock, fcntl.LOCK_UN)
+                lock.close()
+            if self.now() >= deadline:
+                break
+            time.sleep(max(0.05, float(poll)))
+        return AcquireResult(
+            ok=False,
+            reason=last_reason,
+            orchestrator_id=orchestrator_id,
+            pool=pool,
+        )
+
+    def _drop_waiter(self, waiter_id: str) -> None:
+        lock = self._lock()
+        try:
+            conn = self._conn()
+            try:
+                conn.execute("DELETE FROM waiters WHERE id=?", (waiter_id,))
+                conn.commit()
+            finally:
+                conn.close()
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+            lock.close()
+
+    def _enqueue_waiter(
+        self,
+        conn: sqlite3.Connection,
+        waiter_id: Optional[str],
+        orch: str,
+        pool: str,
+        account: Optional[str],
+        task_class: str,
+        host: str,
+        need: int = 1,
+    ) -> str:
+        now = self.now()
+        existing = conn.execute(
+            "SELECT id FROM waiters WHERE orchestrator_id=? AND pool=?",
+            (orch, pool),
+        ).fetchone()
+        if existing:
+            wid = existing["id"]
+            conn.execute(
+                "UPDATE waiters SET last_heartbeat=?, task_class=?, priority=?, "
+                "account=?, host=?, need=? WHERE id=?",
+                (
+                    now,
+                    task_class,
+                    _class_priority(task_class),
+                    account,
+                    host,
+                    int(need),
+                    wid,
+                ),
+            )
+            conn.commit()
+            return wid
+        wid = waiter_id or uuid.uuid4().hex[:12]
+        conn.execute(
+            "INSERT OR REPLACE INTO waiters "
+            "(id, orchestrator_id, pool, account, task_class, host, "
+            "enqueued_at, priority, need, last_heartbeat) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (
+                wid,
+                orch,
+                pool,
+                account,
+                task_class,
+                host,
+                now,
+                _class_priority(task_class),
+                int(need),
+                now,
+            ),
+        )
+        conn.commit()
+        return wid
+
+    def _register_demand(
+        self,
+        conn: sqlite3.Connection,
+        waiter_id: Optional[str],
+        orch: str,
+        pool: str,
+        account: Optional[str],
+        task_class: str,
+        host: str,
+        need: int = 1,
+    ) -> str:
+        """Blocked/failed acquire: persist demand and drain surplus (B5 / N1)."""
+        wid = self._enqueue_waiter(
+            conn, waiter_id, orch, pool, account, task_class, host, need
+        )
+        share_now = self.fair_share(conn, pool)
+        if self._below_share_waiters(conn, pool, "", share_now):
+            self._mark_surplus_nonrenewable(conn, pool, share_now)
+            conn.commit()
+        return wid
+
+    def _front_of_queue(
+        self, conn: sqlite3.Connection, pool: str, orch: str, task_class: str
+    ) -> bool:
+        """True if this orch may take the next slot (priority + oldest-first)."""
+        waiters = self._waiters(conn, pool)
+        if not waiters:
+            return True
+        my_p = _class_priority(task_class)
+        # higher-priority (lower number) waiter from someone else blocks us
+        for w in waiters:
+            if w["orchestrator_id"] == orch:
+                return True
+            if int(w["priority"]) < my_p:
+                return False
+            if int(w["priority"]) == my_p:
+                # oldest at this class: if it's us, ok; if someone else, wait
+                return w["orchestrator_id"] == orch
+        return True
+
+    def _pick_account(
+        self,
+        conn: sqlite3.Connection,
+        pool: str,
+        preferred: Optional[str],
+        model: str = "",
+    ) -> Optional[str]:
+        grantable = self.grantable_accounts(pool)
+        if not grantable:
+            return None
+
+        def has_model_room(acct: Dict[str, Any], name: str) -> bool:
+            model_cap = self.account_model_cap(pool, acct, model)
+            if model_cap is None:
+                return True
+            return self._account_model_held(conn, pool, name, model) < model_cap
+
+        if preferred:
+            for a in grantable:
+                if a.get("name") == preferred:
+                    if (
+                        self._account_held(conn, pool, preferred) < int(a["_eff_cap"])
+                        and has_model_room(a, preferred)
+                    ):
+                        return preferred
+                    return None
+            return None  # stickiness: requested account not grantable
+        scored: List[Tuple[int, int, str]] = []
+        for a in grantable:
+            name = str(a["name"])
+            held = self._account_held(conn, pool, name)
+            cap = int(a["_eff_cap"])
+            if held >= cap or not has_model_room(a, name):
+                continue
+            scored.append((held, cap, name))
+        if not scored:
+            return None
+        scored.sort(key=lambda t: (t[0], -t[1], t[2]))
+        return scored[0][2]
+
+    def _try_acquire(
+        self,
+        orch: str,
+        pool: str,
+        account: Optional[str],
+        task_class: str,
+        host: str,
+        pid: int,
+        ttl: Optional[int],
+        waiter_id: Optional[str],
+        model: str = "",
+    ) -> Tuple[AcquireResult, Optional[str], str]:
+        spec = self.provider(pool)
+        if spec.get("enabled") is False:
+            return (
+                AcquireResult(ok=False, reason="provider_disabled", pool=pool, orchestrator_id=orch),
+                waiter_id,
+                "provider_disabled",
+            )
+        if pool == "grok" and self._grok_exhausted():
+            return (
+                AcquireResult(ok=False, reason="grok_exhausted", pool=pool, orchestrator_id=orch),
+                waiter_id,
+                "grok_exhausted",
+            )
+        cap = self.pool_cap(pool)
+        conn = self._conn()
+        try:
+            if cap <= 0:
+                waiter_id = self._register_demand(
+                    conn, waiter_id, orch, pool, account, task_class, host
+                )
+                return (
+                    AcquireResult(ok=False, reason="no_grantable_account", pool=pool, orchestrator_id=orch),
+                    waiter_id,
+                    "no_grantable_account",
+                )
+            active = self._active_leases(conn, pool)
+            share = self.fair_share(conn, pool, extra=orch)
+            held_rows = self._held_by(conn, orch, pool)
+            held_n = len(held_rows)
+            below_any = self._below_share_waiters(conn, pool, "", share)
+            below = self._below_share_waiters(conn, pool, orch, share)
+            if below_any:
+                self._mark_surplus_nonrenewable(conn, pool, share)
+                conn.commit()
+            else:
+                conn.execute(
+                    "UPDATE leases SET state='held', renewable=1 "
+                    "WHERE state IN ('held','rented') AND pool=?",
+                    (pool,),
+                )
+                conn.commit()
+
+            want_surplus = held_n >= share
+            if want_surplus and below:
+                waiter_id = self._register_demand(
+                    conn, waiter_id, orch, pool, account, task_class, host
+                )
+                return (
+                    AcquireResult(ok=False, reason="lending_blocked", pool=pool, orchestrator_id=orch),
+                    waiter_id,
+                    "lending_blocked",
+                )
+            if len(active) >= cap:
+                waiter_id = self._register_demand(
+                    conn, waiter_id, orch, pool, account, task_class, host
+                )
+                return (
+                    AcquireResult(ok=False, reason="cap_full", pool=pool, orchestrator_id=orch),
+                    waiter_id,
+                    "cap_full",
+                )
+            if not self._front_of_queue(conn, pool, orch, task_class):
+                waiter_id = self._register_demand(
+                    conn, waiter_id, orch, pool, account, task_class, host
+                )
+                return (
+                    AcquireResult(ok=False, reason="priority_wait", pool=pool, orchestrator_id=orch),
+                    waiter_id,
+                    "priority_wait",
+                )
+
+            picked = self._pick_account(conn, pool, account, model=model)
+            if not picked:
+                reason = "account_unavailable" if account else "accounts_at_cap"
+                if account and any(self._parked(a, self.now()) for a in (spec.get("accounts") or []) if a.get("name") == account):
+                    reason = "account_parked"
+                grantable_names = {a.get("name") for a in self.grantable_accounts(pool)}
+                persist = reason not in ("account_parked",) and (
+                    not account or account in grantable_names or reason == "accounts_at_cap"
+                )
+                if persist:
+                    waiter_id = self._register_demand(
+                        conn, waiter_id, orch, pool, account, task_class, host
+                    )
+                return (
+                    AcquireResult(ok=False, reason=reason, pool=pool, orchestrator_id=orch),
+                    waiter_id,
+                    reason,
+                )
+
+            state = "rented" if want_surplus else "held"
+            use_ttl = int(ttl if ttl is not None else (RENT_TTL if state == "rented" else DEFAULT_TTL))
+            lid = uuid.uuid4().hex[:12]
+            now = self.now()
+            conn.execute(
+                "INSERT INTO leases "
+                "(id, orchestrator_id, pool, account, task_class, model, host, pid, "
+                "granted_at, ttl, last_heartbeat, state, renewable) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (lid, orch, pool, picked, task_class, model, host, pid, now, use_ttl, now, state, 1),
+            )
+            conn.execute(
+                "DELETE FROM waiters WHERE orchestrator_id=? AND pool=?",
+                (orch, pool),
+            )
+            waiter_id = None
+            conn.commit()
+            return (
+                AcquireResult(
+                    ok=True,
+                    lease_id=lid,
+                    account=picked,
+                    state=state,
+                    orchestrator_id=orch,
+                    pool=pool,
+                ),
+                None,
+                "",
+            )
+        finally:
+            conn.close()
+
+    def heartbeat(self, lease_id: str) -> HeartbeatResult:
+        lock = self._lock()
+        try:
+            # Preserve the typed surplus-drain reason before gc marks it expired.
+            pre = self._conn()
+            try:
+                row = pre.execute("SELECT * FROM leases WHERE id=?", (lease_id,)).fetchone()
+                if row and row["state"] in HELD_STATES:
+                    now = self.now()
+                    if int(row["renewable"]) == 0 and (now - float(row["granted_at"])) > float(row["ttl"]):
+                        return HeartbeatResult(False, "nonrenewable", float(row["ttl"]))
+            finally:
+                pre.close()
+            self._gc_locked()
+            conn = self._conn()
+            try:
+                row = conn.execute(
+                    "SELECT * FROM leases WHERE id=?", (lease_id,)
+                ).fetchone()
+                if not row or row["state"] not in HELD_STATES:
+                    return HeartbeatResult(False, "not_held")
+                now = self.now()
+                try:
+                    renewable = int(row["renewable"])
+                except (KeyError, IndexError, TypeError, ValueError):
+                    renewable = 1
+                # renewable=0 past the granted TTL is non-renewable: refuse
+                # heartbeat so gc expires the surplus step (W3-F).
+                if renewable == 0 and (now - float(row["granted_at"])) > float(row["ttl"]):
+                    return HeartbeatResult(False, "nonrenewable", float(row["ttl"]))
+                conn.execute(
+                    "UPDATE leases SET last_heartbeat=? WHERE id=?",
+                    (now, lease_id),
+                )
+                # Heartbeat within the granted TTL keeps a live lease (B1).
+                conn.commit()
+                return HeartbeatResult(True, "held", float(row["ttl"]))
+            finally:
+                conn.close()
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+            lock.close()
+
+    def release(self, lease_id: str, orchestrator_id: Optional[str] = None) -> bool:
+        oid = (orchestrator_id or "").strip()
+        if not oid:
+            return False
+        lock = self._lock()
+        try:
+            conn = self._conn()
+            try:
+                row = conn.execute(
+                    "SELECT * FROM leases WHERE id=?", (lease_id,)
+                ).fetchone()
+                if not row:
+                    return False
+                if row["state"] not in HELD_STATES:
+                    return False
+                if row["orchestrator_id"] != oid:
+                    return False
+                conn.execute(
+                    "UPDATE leases SET state='released' WHERE id=?", (lease_id,)
+                )
+                conn.commit()
+                return True
+            finally:
+                conn.close()
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+            lock.close()
+
+    # ── plan / status ────────────────────────────────────────────────────────
+
+    def plan(
+        self,
+        task_class: str,
+        need: int,
+        orchestrator_id: str,
+    ) -> List[Dict[str, Any]]:
+        lock = self._lock()
+        try:
+            self._gc_locked()
+            conn = self._conn()
+            try:
+                # N1: plan is visibility only for fair share. Drop leftover
+                # plan-* waiters so they cannot inflate the denominator or
+                # zero surplus_ok. Only a blocked/failed acquire competes.
+                conn.execute("DELETE FROM waiters WHERE id LIKE 'plan-%'")
+                conn.commit()
+                out = []
+                doc = self.load_accounts_doc()
+                for name in (doc.get("providers") or {}):
+                    out.append(self._plan_pool(conn, name, task_class, need, orchestrator_id))
+                return out
+            finally:
+                conn.close()
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+            lock.close()
+
+    def _window_remaining(self, pool: str) -> str:
+        try:
+            if HERE not in sys.path:
+                sys.path.insert(0, HERE)
+            import pool_status
+
+            return pool_status._window_remaining("bailian" if pool == "qwen" else pool)
+        except Exception:
+            pass
+        spec = self.provider(pool)
+        if spec.get("_name") == "grok" and self._grok_exhausted():
+            return "EXHAUSTED"
+        if spec.get("enabled") is False:
+            return "disabled"
+        wins = []
+        for acct in spec.get("accounts") or []:
+            for w in acct.get("windows") or []:
+                if w.get("reset_anchor"):
+                    wins.append(str(w["reset_anchor"]))
+                elif w.get("reset_approx"):
+                    wins.append(str(w["reset_approx"]))
+                elif w.get("kind"):
+                    wins.append(str(w["kind"]))
+        return wins[0] if wins else "—"
+
+    def _plan_pool(
+        self,
+        conn: sqlite3.Connection,
+        pool: str,
+        task_class: str,
+        need: int,
+        orch: str,
+    ) -> Dict[str, Any]:
+        pool = self.provider_name(pool)
+        cap = self.pool_cap(pool)
+        active = len(self._active_leases(conn, pool))
+        held_by_me = len(self._held_by(conn, orch, pool)) if orch else 0
+        # N1: plan is read-only for fair share — do not count the caller as
+        # an extra orchestrator just because they asked for a plan.
+        share = self.fair_share(conn, pool)
+        below = self._below_share_waiters(conn, pool, orch or "", share)
+        free = max(0, cap - active)
+        entitled = max(0, share - held_by_me)
+        surplus_ok = free - entitled if not below else 0
+        grant_now = min(int(need), free, entitled + max(0, surplus_ok))
+        if cap <= 0:
+            grant_now = 0
+        still = max(0, int(need) - grant_now)
+        wait_est: Any = 0
+        if still:
+            if cap <= 0:
+                wait_est = "unknown"
+            else:
+                active_rows = list(self._active_leases(conn, pool))
+                surplus = []
+                for r in active_rows:
+                    try:
+                        renew = int(r["renewable"])
+                    except (KeyError, IndexError, TypeError, ValueError):
+                        renew = 1
+                    if r["state"] == "rented" or renew == 0:
+                        surplus.append(r)
+                cand = surplus if surplus else active_rows
+                now = self.now()
+                remain = []
+                for r in cand:
+                    rem = float(r["ttl"]) - (now - float(r["last_heartbeat"]))
+                    remain.append(max(0.0, rem))
+                wait_est = int(min(remain)) if remain else "unknown"
+        # N1: do not enqueue plan-* demand and do not mark surplus from plan.
+        # Recording competing demand is acquire's job.
+        return {
+            "pool": pool,
+            "grant_now": grant_now,
+            "wait_est": wait_est,
+            "fair_share": share,
+            "held_by_me": held_by_me,
+            "cluster_active": active,
+            "cap": cap,
+            "window_remaining": self._window_remaining(pool),
+            "task_class": task_class,
+            "need": int(need),
+        }
+
+    def snapshot(self) -> Dict[str, Any]:
+        lock = self._lock()
+        try:
+            self._gc_locked()
+            conn = self._conn()
+            try:
+                return self._snapshot_locked(conn)
+            finally:
+                conn.close()
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+            lock.close()
+
+    def _snapshot_locked(self, conn: sqlite3.Connection) -> Dict[str, Any]:
+        doc = self.load_accounts_doc()
+        pools: Dict[str, Any] = {}
+        leases_out: List[Dict[str, Any]] = []
+        waiters_out: List[Dict[str, Any]] = []
+        now = self.now()
+        for name, spec in (doc.get("providers") or {}).items():
+            cap = self.pool_cap(name)
+            active_rows = self._active_leases(conn, name)
+            accounts_out = []
+            for acct in spec.get("accounts") or []:
+                aname = str(acct.get("name") or "")
+                eff = self.account_cap(name, acct)
+                accounts_out.append(
+                    {
+                        "name": aname,
+                        "cap": int(acct.get("per_account_cap") or 0)
+                        if acct.get("per_account_cap") is not None
+                        else None,
+                        "effective_cap": eff,
+                        "held": self._account_held(conn, name, aname),
+                        "parked": self._parked(acct, now),
+                        "parked_until": acct.get("parked_until"),
+                        "usage": acct.get("usage") or {},
+                    }
+                )
+            orchs = self._active_orchestrators(conn, name)
+            pools[name] = {
+                "cap": cap,
+                "cluster_active": len(active_rows),
+                "remaining": max(0, cap - len(active_rows)),
+                "fair_share": self.fair_share(conn, name),
+                "window_remaining": self._window_remaining(name),
+                "enabled": spec.get("enabled", True),
+                "concurrency_cap": spec.get("concurrency_cap", cap if spec.get("enabled", True) else None),
+                "exhausted": bool(name == "grok" and self._grok_exhausted()),
+                "accounts": accounts_out,
+                "orchestrators_active": len(orchs),
+            }
+        for row in self._active_leases(conn):
+            leases_out.append(
+                {
+                    "id": row["id"],
+                    "orchestrator_id": row["orchestrator_id"],
+                    "pool": row["pool"],
+                    "account": row["account"],
+                    "task_class": row["task_class"],
+                    "model": row["model"] if "model" in row.keys() else "",
+                    "host": row["host"],
+                    "pid": row["pid"],
+                    "granted_at": row["granted_at"],
+                    "ttl": row["ttl"],
+                    "last_heartbeat": row["last_heartbeat"],
+                    "state": row["state"],
+                    "renewable": int(row["renewable"]) if "renewable" in row.keys() else 1,
+                    "age_s": int(now - float(row["granted_at"])),
+                }
+            )
+        for row in conn.execute("SELECT * FROM waiters ORDER BY priority ASC, enqueued_at ASC"):
+            waiters_out.append(
+                {
+                    "id": row["id"],
+                    "orchestrator_id": row["orchestrator_id"],
+                    "pool": row["pool"],
+                    "task_class": row["task_class"],
+                    "priority": row["priority"],
+                    "enqueued_at": row["enqueued_at"],
+                    "wait_s": int(now - float(row["enqueued_at"])),
+                }
+            )
+        extra: Dict[str, Any] = {}
+        try:
+            if HERE not in sys.path:
+                sys.path.insert(0, HERE)
+            import pool_status
+
+            extra = pool_status.build_status()
+        except Exception:
+            extra = {}
+        # Merge local observations (offpeak, last 402, bailian key cooldown)
+        # under pools without overwriting broker cap/active.
+        for pname, local in (extra.get("pools") or {}).items():
+            if pname not in pools:
+                continue
+            for k in ("last_402_429", "offpeak", "offpeak_window", "per_key_cap", "keys"):
+                if k in local:
+                    pools[pname][k] = local[k]
+        return {
+            "schema": "mastermind.provider_capacity.v1",
+            "generated_at": int(now),
+            "generated_at_human": _now_iso(now),
+            "this_host": self.this_host,
+            "orchestrators_active": len({r["orchestrator_id"] for r in leases_out}),
+            "pools": pools,
+            "leases": leases_out,
+            "waiters": waiters_out,
+            "offpeak": extra.get("offpeak"),
+        }
+
+    def write_status_json(self, snap: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        snap = snap if snap is not None else self.snapshot()
+        os.makedirs(os.path.dirname(self.status_json), exist_ok=True)
+        tmp = self.status_json + ".new"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(snap, fh, indent=2)
+        os.replace(tmp, self.status_json)
+        return snap
+
+    def print_status(self, snap: Optional[Dict[str, Any]] = None) -> None:
+        snap = snap if snap is not None else self.snapshot()
+        cols = 88
+        print()
+        print("═" * cols)
+        print("  AGENT POOL STATUS  (cluster lease broker)".center(cols))
+        print("═" * cols)
+        print(f"  schema={snap.get('schema')}  host={snap.get('this_host')}  orchs={snap.get('orchestrators_active')}")
+        print(f"  generated={snap.get('generated_at_human')}  offpeak={snap.get('offpeak')}")
+        print("─" * cols)
+        print(
+            f"  {'POOL':<10} {'CAP':>4} {'ACTIVE':>6} {'REM':>4} {'SHARE':>5} "
+            f"{'ORCHS':>5} {'WAIT':>4} {'WINDOW':<22}"
+        )
+        for name, p in (snap.get("pools") or {}).items():
+            wait_n = sum(1 for w in snap.get("waiters") or [] if w.get("pool") == name)
+            win = str(p.get("window_remaining") or "—")[:22]
+            if p.get("exhausted"):
+                win = "EXHAUSTED"
+            cap_s = "—" if p.get("concurrency_cap") is None and not p.get("enabled") else str(p.get("cap", 0))
+            print(
+                f"  {name:<10} {cap_s:>4} {p.get('cluster_active', 0):>6} "
+                f"{p.get('remaining', 0):>4} {p.get('fair_share', 0):>5} "
+                f"{p.get('orchestrators_active', 0):>5} {wait_n:>4} {win:<22}"
+            )
+        print("─" * cols)
+        print("  ACCOUNTS")
+        print(f"  {'POOL':<10} {'NAME':<12} {'CAP':>4} {'HELD':>4} {'PARKED':>8} {'UNTIL':<22}")
+        for name, p in (snap.get("pools") or {}).items():
+            for a in p.get("accounts") or []:
+                parked = "YES" if a.get("parked") else "no"
+                until = str(a.get("parked_until") or "—")[:22]
+                cap = a.get("effective_cap")
+                cap_s = "—" if cap is None else str(cap)
+                print(
+                    f"  {name:<10} {a.get('name','?'):<12} {cap_s:>4} "
+                    f"{a.get('held', 0):>4} {parked:>8} {until:<22}"
+                )
+        print("─" * cols)
+        print("  LEASES")
+        print(
+            f"  {'ID':<12} {'ORCH':<16} {'POOL':<8} {'ACCT':<10} {'HOST':<14} "
+            f"{'PID':>6} {'AGE':>5} {'STATE':<8}"
+        )
+        for r in snap.get("leases") or []:
+            print(
+                f"  {str(r.get('id','')):<12} {str(r.get('orchestrator_id',''))[:16]:<16} "
+                f"{str(r.get('pool','')):<8} {str(r.get('account','')):<10} "
+                f"{str(r.get('host',''))[:14]:<14} {int(r.get('pid') or 0):>6} "
+                f"{int(r.get('age_s') or 0):>5} {str(r.get('state','')):<8}"
+            )
+        if not snap.get("leases"):
+            print("  (none)")
+        print("─" * cols)
+        print("  WAITERS")
+        if snap.get("waiters"):
+            for w in snap["waiters"]:
+                print(
+                    f"  id={w.get('id')} orch={w.get('orchestrator_id')} "
+                    f"pool={w.get('pool')} class={w.get('task_class')} "
+                    f"pri={w.get('priority')} wait_s={w.get('wait_s')}"
+                )
+        else:
+            print("  (none)")
+        print("═" * cols)
+        print()
+
+
+def default_broker() -> Broker:
+    return Broker(
+        db_path=os.environ.get("POOL_BROKER_DB") or DEFAULT_DB,
+        lock_path=os.environ.get("POOL_BROKER_LOCK") or DEFAULT_LOCK,
+        accounts_path=os.environ.get("POOL_ACCOUNTS_YAML") or DEFAULT_ACCOUNTS,
+        grok_marker=os.environ.get("POOL_GROK_MARKER") or GROK_EXHAUSTED,
+        this_host=os.environ.get("POOL_BROKER_HOST") or _this_host(),
+        status_json=os.environ.get("POOL_STATUS_JSON") or STATUS_JSON,
+    )
+
+
+def resolve_orchestrator_id(explicit: Optional[str] = None) -> str:
+    if explicit:
+        return explicit.strip()
+    for key in ("POOL_ORCHESTRATOR_ID", "CLAUDE_SESSION_ID"):
+        val = (os.environ.get(key) or "").strip()
+        if val:
+            return val
+    host = _this_host()
+    return f"ppid-{host}-{os.getppid()}"
+
+
+def _print_plan(rows: List[Dict[str, Any]]) -> None:
+    for r in rows:
+        we = r["wait_est"]
+        we_s = f"{we}s" if isinstance(we, (int, float)) else str(we)
+        print(
+            f"POOL={r['pool']} grant_now={r['grant_now']} wait_est={we_s} "
+            f"fair_share={r['fair_share']} held_by_me={r['held_by_me']} "
+            f"cluster_active={r['cluster_active']}/{r['cap']} "
+            f"window_remaining={r['window_remaining']}"
+        )
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    p = argparse.ArgumentParser(description="cluster-wide agent-slot lease broker")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    pa = sub.add_parser("acquire")
+    pa.add_argument("--orchestrator-id", default=None)
+    pa.add_argument("--pool", required=True)
+    pa.add_argument("--account", default=None)
+    pa.add_argument("--task-class", default="unknown")
+    pa.add_argument("--model", default="")
+    pa.add_argument("--host", default=None)
+    pa.add_argument("--pid", type=int, default=0)
+    pa.add_argument("--ttl", type=int, default=None)
+    pa.add_argument("--wait", type=float, default=0)
+    pa.add_argument("--poll", type=float, default=1.0)
+
+    ph = sub.add_parser("heartbeat")
+    ph.add_argument("lease_id")
+
+    pr = sub.add_parser("release")
+    pr.add_argument("lease_id")
+    pr.add_argument("--orchestrator-id", default=None)
+
+    pp = sub.add_parser("plan")
+    pp.add_argument("--class", dest="task_class", default=None)
+    pp.add_argument("--task-class", dest="task_class_alt", default=None)
+    pp.add_argument("--need", type=int, required=True)
+    pp.add_argument("--orchestrator-id", default=None)
+
+    sub.add_parser("status")
+    sub.add_parser("gc")
+
+    args = p.parse_args(argv)
+    br = default_broker()
+
+    if args.cmd == "acquire":
+        oid = resolve_orchestrator_id(args.orchestrator_id)
+        res = br.acquire(
+            orchestrator_id=oid,
+            pool=args.pool,
+            account=args.account,
+            task_class=args.task_class,
+            model=args.model,
+            host=args.host,
+            pid=args.pid or os.getpid(),
+            ttl=args.ttl,
+            wait=args.wait,
+            poll=args.poll,
+        )
+        print(res.line())
+        return 0 if res.ok else 75
+
+    if args.cmd == "heartbeat":
+        answer = br.heartbeat(args.lease_id)
+        ttl = f" ttl={answer.ttl:g}" if answer.ttl is not None else ""
+        print(f"HEARTBEAT lease={args.lease_id} ok={'yes' if answer else 'no'} reason={answer.reason}{ttl}")
+        return 0 if answer else 1
+
+    if args.cmd == "release":
+        oid = resolve_orchestrator_id(args.orchestrator_id)
+        ok = br.release(args.lease_id, orchestrator_id=oid)
+        print(f"RELEASE lease={args.lease_id} ok={'yes' if ok else 'no'}")
+        return 0 if ok else 1
+
+    if args.cmd == "plan":
+        tc = args.task_class or args.task_class_alt or "unknown"
+        oid = resolve_orchestrator_id(args.orchestrator_id)
+        rows = br.plan(tc, args.need, oid)
+        _print_plan(rows)
+        return 0
+
+    if args.cmd == "status":
+        snap = br.write_status_json()
+        br.print_status(snap)
+        return 0
+
+    if args.cmd == "gc":
+        n = br.gc()
+        print(f"GC expired={n}")
+        return 0
+
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

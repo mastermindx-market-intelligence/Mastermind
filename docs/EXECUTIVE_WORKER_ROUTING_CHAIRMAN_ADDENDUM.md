@@ -488,3 +488,113 @@ Executive admission/claim records when those are applicable.
 > implementation or research quality. Escalate worker capability when evidence requires it. Use a
 > metered reasoning surface only under its separate complete bounded exception receipt. Fable, Pro
 > mode, and metered cognition are not defaults.**
+
+## 12. Capacity-aware native orchestration
+
+This section implements the Chairman's 2026-10-05 fabric-upgrade direction upon
+normal protected-source acceptance. A source candidate, model name, installed
+wrapper or favorable capacity preview grants no runtime or spending authority.
+
+### 12.1 Principal capacity should multiply reviewed worker output
+
+A currently commissioned native Codex or Claude principal may use its already
+admitted native avenue. Do not force that mission back through a Chat-only
+front end merely because Chat is the default for unbound Sol cognition. This is
+not approval for a new always-on metered Meta-CEO stack. Existing provider terms,
+spend envelopes, native enrollment and exact-parent admission remain required;
+Chat-specific reasoning-mode receipts are not native runtime receipts.
+
+Use Astra/Fable for unresolved principal-level judgment and continuity, and
+qualified Sol/Opus/full-GLM/Grok avenues for bounded coordination or specialist
+judgment when their measured fit justifies them. These names are organizational
+preferences, not invented model IDs or equal-capability declarations. A routine
+coordinator need not become C3 merely because it has children. Reserve scarce
+reasoning for decomposition, architecture, contradictory returns, exception
+handling and acceptance; send well-specified implementation, extraction and test
+work to the least-scarce qualified worker. GLM Flash, MiniMax and Qwen are desired
+worker families only where the exact product, model, harness and task class are
+qualified. Capacity ranks within the first lawful suitability tier; it cannot
+buy apparent throughput by lowering that tier.
+
+### 12.2 Reclassify every bounded child
+
+Record execution complexity separately from business impact, execution risk,
+architectural ambiguity and topology. Use C0 mechanical, C1 routine bounded,
+C2 complex within a fixed architecture, and C3 frontier judgment. C3 requires a
+specific bounded witness, not "important", "subagent", a large repository or a
+principal's model choice. A witness is evidence to review, not an authority token.
+Do not copy the parent's complexity into all descendants.
+
+`control_plane.model_router.TaskFit` and the existing Phase 1B `route`/`create-job`
+commands carry this calibration. Consequential C0/C1 work remains worker work
+with the existing independent-review gate. Real critical execution risk still
+requires adjudication; calling the business impact routine cannot weaken it.
+C2 may use the already-reviewed stronger worker band without relabeling execution
+risk. Unclassified legacy callers remain legacy, not silently certified as C1.
+Native/COO consumers must be qualified to supply and retain these facts before
+claiming company-wide adoption. Review jobs do not recursively mint review jobs.
+
+### 12.3 One hierarchy, one conserved budget, one set of resource owners
+
+Compose the existing Executive/COO hierarchy rather than adding a recursive
+supervisor, private worker queue or parallel lifecycle. Enforce the admitted root's
+versioned depth, child/attempt/cost/deadline ceilings across every descendant,
+review, repair and retry. A child inherits attenuated permission and a share of
+remaining root budget, never a fresh full budget. Source-only hierarchy candidates
+do not increase the installed depth or fanout limit.
+
+Count active and reserved work across all roots that share a real provider or
+billing resource. A parent using a subscription also consumes its applicable
+capacity. Avoid a parent/child deadlock on the last shared slot: existing runtime
+owners must provide a qualified wait/resume or admission strategy, not drop a
+lease while its provider process still runs. Bound the ready frontier by available
+review/merge capacity as well as execution capacity. Waiting is not a reason for
+frontier busy-polling or another background daemon.
+
+### 12.4 Capacity is an intersection, not an advertised agent count
+
+For each eligible account/model, intersect the available account-agent slots,
+model slots, shared-billing limits, request/token-rate constraints, host resource
+slots, root descendant budget and required reviewer capacity. Subtract active
+use and disjoint unsettled reservations exactly once. Do not add model maxima
+when their account or billing bucket is shared. Distinct host names, model aliases,
+API keys or account labels do not prove independent entitlement.
+
+The native pool broker remains its existing single lease owner. Model-specific
+planning must use the same per-account/model accounting as admission. Pool-only
+planning is not evidence of a concrete model's free capacity. A lease TTL is a
+reconciliation boundary, not a promised job completion time or quota refill.
+
+Shared AI Provider Control remains the owner of quota observations, multi-window
+forecasting, measured task cost and reserves. Consume its current accepted preview
+rather than recreate those algorithms in a harness or principal. Respect every
+applicable short, weekly, monthly or product-specific window actually observed;
+do not infer the subscribed product from a provider name. Keep unknown distinct
+from zero and from unlimited. A time-based reset forecast, promotional allowance
+or renewal is not new spendable balance until the existing owner accepts the
+provider observation. Account concurrency and model throughput are separate units.
+
+Every planning result must distinguish advisory headroom from an atomic claim,
+carry the applicable source/time/identity evidence and require claim-time
+revalidation. After START or an uncertain effect, preserve the original carrier
+and reconcile before any retry or account/model change. A capacity denial is not
+permission to alter provider identity, weaken limits or move the same effect to
+another tool. Ordinary pre-effect selection may use a different eligible resource
+only through the existing placement owner and its current policy.
+
+### 12.5 Optimize completed, accepted work
+
+Compare whole-closure cost per accepted result, including principal reasoning,
+failed work, reviewer and repair cost, not token price or the first successful
+worker response alone. Observe accepted throughput, p50/p95 completion time,
+quality/repair/escalation rate, scarce-model share, review backlog and time blocked
+by each real constraint. Use measured task cohorts; missing evidence is not a
+cheap fallback. Increase native frontier orchestration when it improves this
+outcome, not to maximize an arbitrary number of busy agents.
+
+Qualification must separately prove publication, installation, selected client
+configuration, authenticated admission, START, reviewed return, exact-parent
+consumption and cleanup. A two-provider, multi-level canary must test shared-cap
+contention, unavailable/stale quota, cancelled children, uncertain effects,
+review backlog and root-budget exhaustion. No all-account readiness claim follows
+from a fixture, app card, one native account or a successful source merge.
