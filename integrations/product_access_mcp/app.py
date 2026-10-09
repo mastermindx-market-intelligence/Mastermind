@@ -9,6 +9,7 @@ from collections.abc import Callable
 from jsonschema import Draft202012Validator, FormatChecker
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.settings import AuthSettings
+from mcp.server.auth.routes import build_resource_metadata_url
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import CallToolResult, TextContent, Tool
@@ -54,6 +55,8 @@ def create_product_server(*, authenticator: JwtAuthenticator, policy: ResourcePo
     # the literal issuer/audience enforced by the existing cryptographic owner.
     if str(settings.issuer_url) != selected.issuer or str(settings.resource_server_url) != selected.resource:
         raise ValueError("SDK URL normalization differs from the admitted resource policy")
+    if str(build_resource_metadata_url(settings.resource_server_url)) != selected.resource_metadata_url:
+        raise ValueError("SDK metadata URL differs from the admitted resource policy")
     verifier = MastermindTokenVerifier(authenticator=authenticator, policy=selected, now=now, audit_sink=audit_sink)
     specs = copy.deepcopy(TOOL_SPECS)
     by_name = {row["name"]: row for row in specs}
@@ -115,3 +118,19 @@ def create_product_server(*, authenticator: JwtAuthenticator, policy: ResourcePo
             return _error("OUTPUT_REFUSED")
 
     return server
+
+
+def product_http_app(server: FastMCP):
+    """Compose the existing SDK lifecycle with the existing pre-auth body guard.
+
+    This is the qualified HTTP entrypoint. Direct SDK apps omit the shared raw
+    request byte/deadline boundary and must not be used as the installed profile.
+    No new listener, auth middleware, request queue or lifecycle is introduced.
+    """
+    from integrations.executive_mcp.e1_http import PreAuthMcpBodyApp
+
+    if not isinstance(server, FastMCP):
+        raise TypeError("the Product MCP server is required")
+    application = server.streamable_http_app()
+    application.add_middleware(PreAuthMcpBodyApp)
+    return application

@@ -1,0 +1,75 @@
+{
+  "catalog_bytes": 12851,
+  "catalog_digest": "fbf9ae8b688264d0772a3c64ca4327ad4afe4adf2f4be948e5a72f6efc6b8123",
+  "domain_contract_sources": {
+    "macro": "3d90aad6d83152dfeeaf8345bc995826ac9d3139",
+    "terminal": "4d6a9ac81d01ac9f14c22fd3180f5d00f0239000"
+  },
+  "effect_state": "No uncertain modifications; source publication and owner review remain separate from deployment.",
+  "environment": {
+    "PyJWT": "2.13.0",
+    "httpx": "0.28.1",
+    "jsonschema": "4.26.0",
+    "mcp": "1.28.1",
+    "pytest": "9.1.0",
+    "python": "3.12.4"
+  },
+  "files": {
+    "integrations/product_access_mcp/__init__.py": "03e1298f3815b1e7223d816483707c8961793e0a9f24f8ee31a2c15f6ff9bd04",
+    "integrations/product_access_mcp/app.py": "25738d9aa14010362d6537fa1f4308551f75b4fb1380fb26f42abf88eccd7fbc",
+    "integrations/product_access_mcp/contracts.py": "921e3be1b18c86bd0e22e0faf8abb83667be5012f2b02472ec83c858cade5034",
+    "integrations/product_access_mcp/reader.py": "613daa131a1f0390f76b43e84a7ee32ed7c994eef508e4e1ed156f68e5df9b76",
+    "integrations/product_access_mcp/schemas.py": "aa2d6282d50660f316aaa8decfcd528b7dcbd201b81daeb4ce53b07a0547ee68",
+    "integrations/product_access_mcp/transport.py": "d0a79401651aa10a562d39ff961b0e4cfd4428383ffa29bc4424143b1d7a4ccd",
+    "tests/product_access_mcp/__init__.py": "e54563eb87738cea84d35af6c47d260b5cca3b0d4796bcc766de3a9fd87ae5a7",
+    "tests/product_access_mcp/test_app.py": "0b803939dcd3279326bca30d55ef62da2ede1b67920081cefd8d1b6649bc00de",
+    "tests/product_access_mcp/test_browser_return_boundary.py": "75de2754e9ba9a951a8895a79a6ec2ae90e73027e20c4ce20530581290a57f33",
+    "tests/product_access_mcp/test_observations.py": "1069bd093fe17d427a43d950f1b468e4a7b3e40553a295887102ebca25b39ae4",
+    "tests/product_access_mcp/test_transport.py": "c987eadbe4628658b1deafa0f500a86c8fc304f402b1ed211bbfd16fd4cda781"
+  },
+  "fleet_evidence": "HOST_PREFLIGHT.md; read-only Ubuntu system/package metadata, no browser admission or launch",
+  "full_repository_collection": {
+    "collected": 34192,
+    "errors": 2,
+    "full_suite_executed": false,
+    "unavailable_vendored_modules": [
+      "engine.signal_archive",
+      "lib.store"
+    ]
+  },
+  "mission_complete": false,
+  "observed_at": "2026-10-09T21:47:42.556351+00:00",
+  "operation_id": "product-access-browser-20261009-astra-001",
+  "parent_capability_state": "PARTIAL",
+  "production_proof": {
+    "actual_preview_defect_fix": false,
+    "application_mutation": false,
+    "browser_launch": false,
+    "genuine_screenshot": false,
+    "installed_product_plugin": false,
+    "multi_account_adoption": false,
+    "product_http_requests": false,
+    "real_product_identity": false
+  },
+  "protected_source": "326c8469a21d7f50fc9ecb1848196bf1c6e66685",
+  "public_adapter_state": "BUILT_NOT_PROVEN",
+  "pull_request": 1301,
+  "qualification": {
+    "command": "python -m pytest tests/product_access_mcp tests/test_business_mcp_auth_*.py tests/workbench_read_mcp/test_app.py tests/test_workbench_browser_app.py tests/test_workbench_browser_contracts.py tests/test_workbench_browser_runtime_recovery.py tests/test_browser_resource_contract.py tests/test_worker_browser_admission.py tests/workbench_action_mcp/test_browser_action_artifacts.py -o addopts='' -q --tb=short -rx",
+    "compileall": "passed",
+    "diff_check": "passed",
+    "duration_seconds": 27.07,
+    "exit_code": 0,
+    "expected_failures": 1,
+    "log_sha256": "ceac2738f38cd76259224fd8d7767af21855960f1bc849132a7528537d3dea57",
+    "passed": 582,
+    "subtests_passed": 51
+  },
+  "schema": "mastermind.product_access_source_qualification.v1",
+  "source_and_test_digest": "4ef94c6ebf15c8e2f275db2b1aaa934f068833fde1f24017eb4f4adb4cf35903",
+  "unresolved_expected_failure": {
+    "owner": "existing Browser MCP principal",
+    "reason": "Corrupt PNG-labeled bytes are forwarded by the existing native return. The test ran and failed as expected; this is NOT a passed negative case.",
+    "test": "tests/product_access_mcp/test_browser_return_boundary.py::BrowserNativeReturnTests::test_corrupt_png_is_refused_before_native_image_release"
+  }
+}

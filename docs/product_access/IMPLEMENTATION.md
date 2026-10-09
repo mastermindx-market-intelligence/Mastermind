@@ -14,29 +14,29 @@ Review focus: unknown/malformed/future timestamps; partial and omitted data; red
 Files: create `contracts.py`, `transport.py`, `reader.py` in `integrations/product_access_mcp/`; tests `test_observations.py` and `test_transport.py`.
 Interfaces: `PublicTransport.read(endpoint, symbols=()) -> HttpObservation`; `ProductReader.diagnostics()` and `.market_pulse(symbols)` return immutable-by-copy JSON observations; caller supplies neither transport URL nor credentials. `HttpObservation` holds status, bounded raw bytes, content type and an opaque error code.
 
-- [ ] Add failing projection tests for process/checkout drift, missing data, zero counts, explicit source age, unknown/future timestamps, partial coverage, quote revisions, unexpected secrets and malformed owner output.
-- [ ] Add failing actual local HTTP fixture tests for fixed destination/request, no cookies or auth, redirect refusal, deadlines, size/content-type/JSON errors and no retries.
-- [ ] Implement reviewed fixed endpoints and field projections. Disallow NaN/Infinity and duplicate JSON object keys. Preserve raw-body digest without returning raw failure content.
-- [ ] Run both suites; require correct RED→GREEN evidence. No production HTTP.
+- [x] Add failing projection tests for process/checkout drift, missing data, zero counts, explicit source age, unknown/future timestamps, partial coverage, quote revisions, unexpected secrets and malformed owner output.
+- [x] Add failing actual local HTTP fixture tests for fixed destination/request, no cookies or auth, redirect refusal, deadlines, size/content-type/JSON errors and no retries.
+- [x] Implement reviewed fixed endpoints and field projections. Disallow NaN/Infinity and duplicate JSON object keys. Preserve raw-body digest without returning raw failure content.
+- [x] Run both suites; require correct RED→GREEN evidence. No production HTTP.
 
 ## Task 2 — authenticated MCP boundary
 
 Files: create `app.py`, `__init__.py`; test `test_app.py`.
 Interface: `create_product_server(authenticator, policy, now, audit_sink, reader, allowed_hosts, allowed_origins=()) -> FastMCP`. Reuse the existing verifier; require dedicated `product.observe` policy. Expose only two closed-schema read tools. Never send access tokens to reader. Reverify the same credential after awaited read.
 
-- [ ] Add failing real SDK/ASGI tests using ephemeral RSA fixture keys and signed JWTs, actual MCP initialize/list/call requests, actual projection code and a fixture upstream transport.
-- [ ] Prove missing/wrong/expired/revoked identities, cross-user isolation from private state, invalid arguments, unknown tools, host/origin refusal, secret-safe errors and auth drift after read.
-- [ ] Implement inert factory, catalog/input validation, bounded structured return and existing auth audit integration.
-- [ ] Run new and adjacent auth/Workbench suites with exact pinned SDK. Record full-suite limitations independently.
+- [x] Add failing real SDK/ASGI tests using ephemeral RSA fixture keys and signed JWTs, actual MCP initialize/list/call requests, actual projection code and a fixture upstream transport.
+- [x] Prove missing/wrong/expired/revoked identities, absence of any private-user selector in this public-only profile (private tenant isolation remains a later gate), invalid arguments, unknown tools, host/origin refusal, secret-safe errors and auth drift after read.
+- [x] Implement inert factory, catalog/input validation, bounded structured return and existing auth audit integration.
+- [x] Run new and adjacent auth/Workbench suites with exact pinned SDK. Record full-suite limitations independently.
 
 ## Task 3 — qualification and recovery
 
 Files: update `ACCEPTANCE.md`, `CHECKPOINT.md`; no automatic install/registration.
 
-- [ ] Adversarially inspect changed files and add regression tests for concrete findings.
+- [x] Adversarially inspect changed files and add regression tests for concrete findings. The incumbent Browser image-integrity expected failure remains explicitly unresolved.
 - [ ] Run `git diff --check`, compile, targeted integration, adjacent Browser/auth tests, and repository pytest command. Preserve any unrelated failure by name; do not claim a full pass from targeted tests.
 - [ ] Commit and publish the exact own branch; open draft PR; inspect exact head/checks and request independent review when supported. Required CI/review remain release gates.
-- [ ] Document existing-owner deployment composition and exact negative/live acceptance checklist. No generic proxy or new auth service.
+- [x] Document existing-owner deployment composition and exact negative/live acceptance checklist. No generic proxy or new auth service.
 - [ ] Reassess remaining commission. Continue independent safe work; retain private OAuth, Browser permission/install, artifact return, live preview, release and real-account acceptance as distinct unresolved requirements.
 
 ## Initial evidence

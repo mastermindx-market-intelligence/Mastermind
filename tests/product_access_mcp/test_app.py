@@ -84,7 +84,8 @@ class ProductAppTests(unittest.IsolatedAsyncioTestCase):
         self.server = self.module.create_product_server(authenticator=self.auth, policy=self.policy,
             now=lambda: self.clock, audit_sink=self.audit, reader=self.reader,
             allowed_hosts=("127.0.0.1", "127.0.0.1:*"))
-        self.app = self.server.streamable_http_app()
+        self.assertTrue(callable(getattr(self.module, "product_http_app", None)), "bounded HTTP composition is absent")
+        self.app = self.module.product_http_app(self.server)
         self.ready, self.stop = asyncio.Event(), asyncio.Event()
         async def lifespan():
             async with self.app.router.lifespan_context(self.app):
@@ -235,11 +236,53 @@ class ProductAppTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["isError"])
         self.assertNotIn("PRIVATE_COOKIE", json.dumps(result))
 
+    async def test_raw_body_bound_runs_before_auth_and_sdk_json_parsing(self):
+        for raw in (b"x" * 65537, b"{\"PRIVATE_BODY\":\"" + b"x" * 65536):
+            response = await self.client.post("/mcp", content=raw, headers={"Content-Type": "application/json"})
+            self.assertEqual(response.status_code, 413)
+            self.assertNotIn("PRIVATE_BODY", response.text)
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.audit.events, [])
+
+    async def test_streamed_body_limit_does_not_trust_declared_length(self):
+        async def body():
+            yield b"x" * 32768
+            yield b"x" * 32769
+        response = await self.client.post("/mcp", content=body(), headers={"Content-Length": "1"})
+        self.assertEqual(response.status_code, 413)
+        self.assertEqual(self.calls, [])
+
+    async def test_disconnected_request_and_receive_deadline_are_bounded(self):
+        from unittest.mock import patch
+        from integrations.executive_mcp import e1_http
+        scope = {"type": "http", "method": "POST", "path": "/mcp", "headers": []}
+        for mode in ("disconnect", "stall"):
+            with self.subTest(mode=mode):
+                sent = []
+                async def receive():
+                    if mode == "stall":
+                        await asyncio.sleep(5)
+                    return {"type": "http.disconnect"}
+                async def send(value):
+                    sent.append(value)
+                with patch.object(e1_http, "PREAUTH_RECEIVE_DEADLINE_SECONDS", 0.01):
+                    await asyncio.wait_for(self.app(scope, receive, send), timeout=1)
+                self.assertEqual(sent[0]["status"], 400)
+        self.assertEqual(self.calls, [])
+
     async def test_factory_refuses_sdk_normalization_of_verified_issuer(self):
         issuer = ISSUER.rstrip("/")
         policy = dataclasses.replace(self.policy, issuer=issuer, authorization_servers=(issuer,))
         auth = JwtAuthenticator(policy=policy, jwks_cache=Keys({}))
         with self.assertRaisesRegex(ValueError, "SDK URL"):
+            self.module.create_product_server(authenticator=auth, policy=policy, now=lambda: self.clock,
+                audit_sink=self.audit, reader=self.reader, allowed_hosts=("127.0.0.1",))
+
+    async def test_factory_refuses_policy_metadata_the_sdk_would_not_advertise(self):
+        policy = dataclasses.replace(self.policy,
+            resource_metadata_url="https://product.example/.well-known/oauth-protected-resource/wrong")
+        auth = JwtAuthenticator(policy=policy, jwks_cache=Keys({}))
+        with self.assertRaisesRegex(ValueError, "SDK metadata"):
             self.module.create_product_server(authenticator=auth, policy=policy, now=lambda: self.clock,
                 audit_sink=self.audit, reader=self.reader, allowed_hosts=("127.0.0.1",))
 

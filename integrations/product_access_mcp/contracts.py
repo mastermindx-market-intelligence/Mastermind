@@ -55,14 +55,26 @@ def revision(value: object, minimum: int = 7, maximum: int = 40) -> str | None:
     return value if type(value) is str and re.fullmatch(r"[0-9a-f]{%d,%d}" % (minimum, maximum), value) else None
 
 
+# Match the advertised JSON Schema date-time wire format before parsing.
+# datetime.fromisoformat also accepts ISO week/basic dates, arbitrary separators,
+# and overflowed offset minutes that would fail the advertised schema.
+RFC3339_PATTERN = (
+    r"[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}"
+    r"(?:\.[0-9]+)?(?:[Zz]|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])"
+)
+
+
 def time_observation(value: object, now: datetime) -> dict[str, Any]:
     output = {"value": None, "status": "unknown", "age_seconds": None}
     if value is None:
         return output
     try:
-        if type(value) is not str or len(value) > 64:
+        if (type(value) is not str or len(value) > 64
+                or re.fullmatch(RFC3339_PATTERN, value) is None):
             raise ValueError
-        stamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        # Lowercase t/z are permitted; preserve the original wire spelling.
+        parsed_value = value[:-1] + "+00:00" if value.endswith(("Z", "z")) else value
+        stamp = datetime.fromisoformat(parsed_value)
         if stamp.utcoffset() is None:
             raise ValueError
         age = (now - stamp).total_seconds()
