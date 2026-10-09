@@ -721,30 +721,38 @@ def playwright_child_argv(
     output_dir = _absolute_cli_path(output_dir, "output_dir")
     if not mcp_cli_path.endswith("/node_modules/@playwright/mcp/cli.js"):
         raise BrowserRelayError("unexpected Playwright MCP entrypoint")
-    if mode not in {BrowserMode.ISOLATED.value, BrowserMode.PERSISTENT.value}:
+    if mode not in {
+        BrowserMode.ISOLATED.value,
+        BrowserMode.PERSISTENT.value,
+        BrowserMode.EXTENSION.value,
+    }:
         raise BrowserRelayError("browser mode is invalid")
     argv = [
         node_executable,
         mcp_cli_path,
         "--browser",
         "chrome",
-        "--executable-path",
-        chrome_executable,
-        "--output-dir",
-        output_dir,
-        "--headless",
     ]
-    if mode == BrowserMode.ISOLATED.value:
+    if mode != BrowserMode.EXTENSION.value:
+        argv.extend(("--executable-path", chrome_executable))
+    argv.extend(("--output-dir", output_dir))
+    if mode == BrowserMode.EXTENSION.value:
         if profile_dir is not None:
-            raise BrowserRelayError("isolated relay cannot bind a profile directory")
-        argv.append("--isolated")
+            raise BrowserRelayError("extension relay cannot bind a profile directory")
+        argv.append("--extension")
     else:
-        if profile_dir is None:
-            raise BrowserRelayError("persistent relay requires a profile directory")
-        argv.extend(("--user-data-dir", _absolute_cli_path(profile_dir, "profile_dir")))
-    forbidden = {"--shared-browser-context", "--cdp-endpoint", "--extension"}
+        argv.append("--headless")
+        if mode == BrowserMode.ISOLATED.value:
+            if profile_dir is not None:
+                raise BrowserRelayError("isolated relay cannot bind a profile directory")
+            argv.append("--isolated")
+        else:
+            if profile_dir is None:
+                raise BrowserRelayError("persistent relay requires a profile directory")
+            argv.extend(("--user-data-dir", _absolute_cli_path(profile_dir, "profile_dir")))
+    forbidden = {"--shared-browser-context", "--cdp-endpoint"}
     if forbidden.intersection(argv):
-        raise BrowserRelayError("unsafe shared or attached browser requested")
+        raise BrowserRelayError("unsafe shared browser requested")
     return tuple(argv)
 
 
@@ -756,7 +764,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--mcp-cli-path", required=True)
     parser.add_argument("--chrome-executable", required=True)
     parser.add_argument("--output-dir", required=True)
-    parser.add_argument("--mode", choices=[BrowserMode.ISOLATED.value, BrowserMode.PERSISTENT.value], required=True)
+    parser.add_argument(
+        "--mode",
+        choices=[
+            BrowserMode.ISOLATED.value,
+            BrowserMode.PERSISTENT.value,
+            BrowserMode.EXTENSION.value,
+        ],
+        required=True,
+    )
     parser.add_argument("--profile-dir")
     parser.add_argument("--home-dir", required=True)
     parser.add_argument("--tmp-dir", required=True)

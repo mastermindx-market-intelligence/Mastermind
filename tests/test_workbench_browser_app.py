@@ -380,3 +380,13 @@ class WorkbenchBrowserAppTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_prepare_resource_schema_explicitly_exposes_extension_mode():
+    from integrations.workbench_browser_mcp.app import _RESOURCE_PREPARE_SCHEMA
+
+    assert _RESOURCE_PREPARE_SCHEMA["properties"]["mode"]["enum"] == [
+        "isolated",
+        "persistent",
+        "extension",
+    ]

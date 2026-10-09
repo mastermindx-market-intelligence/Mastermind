@@ -60,7 +60,10 @@ class BrowserResourceRefused(RuntimeError):
 
 
 ResolveBinding = Callable[[ActionCaller, str], ProjectActionBinding | None]
-ProfileResolver = Callable[[str], "PersistentBrowserProfileGrant | None"]
+ProfileResolver = Callable[
+    [str],
+    "PersistentBrowserProfileGrant | SharedHumanBrowserProfileGrant | None",
+]
 RelayRequester = Callable[..., dict[str, Any]]
 RelayCommandBuilder = Callable[..., Sequence[str]]
 
@@ -78,6 +81,24 @@ class PersistentBrowserProfileGrant:
 
     profile_ref: str
     profile_dir: Path
+    owner_ref: str
+    operation_ref: str
+    generation: str
+    host_id: str
+    exclusive: bool
+
+
+@dataclasses.dataclass(frozen=True)
+class SharedHumanBrowserProfileGrant:
+    """Owner proof for the sole extension-enrolled profile and its broker.
+
+    With the pinned Playwright MCP 0.0.79 generation, extension mode cannot
+    select a Chrome profile by directory name. The profile owner must issue
+    this grant only when this is the sole extension-enabled eligible Chrome
+    profile on the host, and exclusive=True fences one broker for it.
+    """
+
+    profile_ref: str
     owner_ref: str
     operation_ref: str
     generation: str
@@ -280,7 +301,12 @@ class BrowserResourcePort:
         if start.profile_ref is None:
             raise BrowserResourceRefused("PROFILE_REF_INVALID")
         value = self._profile_resolver(start.profile_ref)
-        if not isinstance(value, PersistentBrowserProfileGrant):
+        expected_type = (
+            PersistentBrowserProfileGrant
+            if start.mode == BrowserMode.PERSISTENT.value
+            else SharedHumanBrowserProfileGrant
+        )
+        if type(value) is not expected_type:
             raise BrowserResourceRefused("PROFILE_GRANT_INVALID")
         if (
             value.profile_ref != start.profile_ref
@@ -291,6 +317,9 @@ class BrowserResourcePort:
             or value.exclusive is not True
         ):
             raise BrowserResourceRefused("PROFILE_GRANT_MISMATCH")
+        if start.mode == BrowserMode.EXTENSION.value:
+            return None
+        assert isinstance(value, PersistentBrowserProfileGrant)
         if not isinstance(value.profile_dir, Path) or not value.profile_dir.is_absolute():
             raise BrowserResourceRefused("PROFILE_GRANT_INVALID")
         _private_directory(value.profile_dir, "profile")
@@ -309,11 +338,15 @@ class BrowserResourcePort:
         resource_expires_at_ms = binding.scope.expires_at_ms
         if resource_expires_at_ms <= now_ms:
             raise BrowserResourceRefused("BROWSER_LEASE_EXPIRED")
-        if mode not in {BrowserMode.ISOLATED.value, BrowserMode.PERSISTENT.value}:
+        if mode not in {
+            BrowserMode.ISOLATED.value,
+            BrowserMode.PERSISTENT.value,
+            BrowserMode.EXTENSION.value,
+        }:
             raise BrowserResourceRefused("BROWSER_MODE_INVALID")
         if mode == BrowserMode.ISOLATED.value and profile_ref is not None:
             raise BrowserResourceRefused("PROFILE_REF_INVALID")
-        if mode == BrowserMode.PERSISTENT.value:
+        if mode in {BrowserMode.PERSISTENT.value, BrowserMode.EXTENSION.value}:
             if type(profile_ref) is not str or not profile_ref:
                 raise BrowserResourceRefused("PROFILE_REF_INVALID")
             # The existing profile owner, not this port, resolves admissibility.
@@ -975,6 +1008,7 @@ class BrowserResourcePort:
 __all__ = [
     "BrowserHostConfig",
     "PersistentBrowserProfileGrant",
+    "SharedHumanBrowserProfileGrant",
     "BrowserResourcePort",
     "BrowserResourceRefused",
     "default_relay_command",

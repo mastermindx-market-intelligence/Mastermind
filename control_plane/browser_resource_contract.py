@@ -57,6 +57,7 @@ class BrowserResourceError(ValueError):
 class BrowserMode(str, Enum):
     ISOLATED = "isolated"
     PERSISTENT = "persistent"
+    EXTENSION = "extension"
 
 
 class BrowserCleanupAction(str, Enum):
@@ -122,10 +123,11 @@ def build_browser_resource_plan(
 ) -> BrowserResourcePlan:
     """Project one owner-issued browser lease into one Playwright MCP process.
 
-    The caller must already own the host/process reservation and, for a persistent
-    profile, the exclusive profile reservation. This function accepts no port,
-    CDP endpoint, browser-extension attachment, shared browser context, credential,
-    proxy, or arbitrary Playwright-code input.
+    The caller must already own the host/process reservation and, for any
+    profile-bound mode, the exclusive profile reservation. Extension mode is an
+    explicit reviewed attachment mechanism; the caller still cannot supply a
+    port, CDP endpoint, shared browser context, credential, proxy, extension
+    token, or arbitrary Playwright-code input.
     """
     if not isinstance(mode, BrowserMode):
         raise BrowserResourceError("mode must be a BrowserMode")
@@ -148,39 +150,49 @@ def build_browser_resource_plan(
 
     if mode is BrowserMode.ISOLATED:
         if profile_ref is not None or profile_dir is not None:
-            raise BrowserResourceError("isolated resources cannot bind a persistent profile")
+            raise BrowserResourceError("isolated resources cannot bind a profile")
         requires_exclusive_profile = False
-    else:
+    elif mode is BrowserMode.PERSISTENT:
         if profile_ref is None or profile_dir is None:
             raise BrowserResourceError("persistent resources require an owner-selected profile")
         profile_ref = _safe_ref(profile_ref, "profile_ref")
         profile_dir = _absolute_path(profile_dir, "profile_dir")
+        requires_exclusive_profile = True
+    else:
+        if profile_ref is None or profile_dir is not None:
+            raise BrowserResourceError(
+                "extension resources require an owner-selected profile without a profile path"
+            )
+        if not headed:
+            raise BrowserResourceError("extension resources require interactive Chrome")
+        profile_ref = _safe_ref(profile_ref, "profile_ref")
         requires_exclusive_profile = True
 
     argv = [
         mcp_cli_path,
         "--browser",
         "chrome",
-        "--executable-path",
-        chrome_executable,
-        "--output-dir",
-        output_dir,
     ]
-    if not headed:
-        argv.append("--headless")
-    if mode is BrowserMode.ISOLATED:
-        argv.append("--isolated")
+    if mode is not BrowserMode.EXTENSION:
+        argv.extend(("--executable-path", chrome_executable))
+    argv.extend(("--output-dir", output_dir))
+    if mode is BrowserMode.EXTENSION:
+        argv.append("--extension")
     else:
-        argv.extend(("--user-data-dir", profile_dir))
+        if not headed:
+            argv.append("--headless")
+        if mode is BrowserMode.ISOLATED:
+            argv.append("--isolated")
+        else:
+            argv.extend(("--user-data-dir", profile_dir))
 
     forbidden = {
         "--shared-browser-context",
         "--cdp-endpoint",
-        "--extension",
         "--allow-unrestricted-file-access",
     }
     if forbidden.intersection(argv):
-        raise BrowserResourceError("unsafe browser sharing or attachment requested")
+        raise BrowserResourceError("unsafe browser sharing requested")
 
     return BrowserResourcePlan(
         lease_ref=lease_ref,
