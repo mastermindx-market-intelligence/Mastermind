@@ -125,18 +125,36 @@ def _fwd_drawdown_events(close, fwd: int, dd_bps: int):
 
 
 def _auc(y, p) -> Optional[float]:
-    """Rank-based ROC-AUC (Mann-Whitney U), no sklearn. None if a class is empty (mirrors
-    brain.distill._auc)."""
+    """ROC-AUC with average ranks for ties and the existing four-place rounding.
+
+    A tied positive/negative pair contributes one half, independent of row order.
+    Undefined classes or invalid, non-finite, non-binary populations return None;
+    invalid observations are not silently dropped or coerced into another class.
+    This metric repair does not requalify any archived historical verdict.
+    """
     try:
         import numpy as np
-        y = np.asarray(y).astype(int)
-        p = np.asarray(p, dtype=float)
+        y = np.asarray(y)
+        p = np.asarray(p)
+        if y.ndim != 1 or p.ndim != 1 or len(y) != len(p):
+            return None
+        if np.iscomplexobj(y) or np.iscomplexobj(p):
+            return None
+        y = y.astype(float)
+        p = p.astype(float)
+        if not np.isfinite(y).all() or not np.isfinite(p).all():
+            return None
+        if not ((y == 0) | (y == 1)).all():
+            return None
         n_pos, n_neg = int((y == 1).sum()), int((y == 0).sum())
         if n_pos == 0 or n_neg == 0:
             return None
         order = np.argsort(p, kind="mergesort")
+        sorted_scores = p[order]
+        starts = np.concatenate(([0], np.flatnonzero(sorted_scores[1:] != sorted_scores[:-1]) + 1))
+        ends = np.concatenate((starts[1:], [len(p)]))
         ranks = np.empty(len(p), dtype=float)
-        ranks[order] = np.arange(1, len(p) + 1)
+        ranks[order] = np.repeat((starts + 1 + ends) / 2.0, ends - starts)
         return round(float((ranks[y == 1].sum() - n_pos * (n_pos + 1) / 2.0) / (n_pos * n_neg)), 4)
     except Exception:  # noqa: BLE001
         return None
