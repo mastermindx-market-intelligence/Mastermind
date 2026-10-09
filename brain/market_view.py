@@ -1056,6 +1056,10 @@ def _adapt_neural_web(nw_out: Any) -> dict[str, Any]:
                 "verdict": verdict,
                 "regime": regime,
                 "contradiction_count": contr_count,
+                # Native descriptive context stays inside this existing advisory
+                # record; it supplies no direction, confidence or extra vote.
+                **{key: nw_out[key] for key in ("risk_envelope", "risk_envelope_status")
+                   if key in nw_out},
                 "advisory": True,
             },
         )
