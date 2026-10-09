@@ -157,3 +157,35 @@ def test_revocation_after_accepted_boot_still_blocks_first_worker_start(
     assert recorder.starts == 0
     assert sweeper.calls == ["broker_startup"]
     assert broker._quarantined_reason == "native_realm_refused"
+
+
+def test_revoked_native_realm_retains_cancel_of_previously_started_run(
+    tmp_path, monkeypatch
+):
+    from test_executive_worker_broker import FakeAdapter
+
+    ready = [True]
+
+    def recheck():
+        if not ready[0]:
+            raise RuntimeError("realm revoked")
+
+    broker, _recorder, payload, sweeper = _native_fixture(
+        tmp_path, monkeypatch, recheck
+    )
+    adapter = FakeAdapter()  # local fixture; never starts a provider process
+    broker.adapter = adapter
+
+    async def scenario():
+        started = await broker._start(payload)
+        assert started["process_ref"].run_id == "run-1"
+        ready[0] = False
+        with pytest.raises(BrokerStateError, match="native realm"):
+            broker._require_current_native_realm()
+        result = await broker._cancel({"run_id": "run-1", "reason": "clean stop"})
+        assert result["cancellation"].run_id == "run-1"
+
+    asyncio.run(scenario())
+    assert broker._quarantined_reason == "native_realm_refused"
+    assert adapter.cancel_calls == 1
+    assert "run_terminal" in sweeper.calls
