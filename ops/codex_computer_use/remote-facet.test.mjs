@@ -114,3 +114,26 @@ test("unconfirmed tool error is effect-unknown even when recorder fails",async()
   },context),/EFFECT_UNKNOWN/);
   assert.equal(invoked,1);
 });
+
+test("pixel, alternate-button, and multiple click escalation need native owner grants",async()=>{
+  const calls=[];
+  let current={...grant(true)};
+  const facet=createComputerUseFacet({
+    authorize:async()=>current,
+    dispatch:async(req)=>{calls.push(req);return {content:[]}},
+    recordUncertainEffect:async()=>{},
+  });
+  const args={app:"com.apple.calculator",x:100,y:100};
+  await assert.rejects(()=>facet.callTool({name:"cuse_click",arguments:args},context),/coordinate click not owner-authorized/);
+  await assert.rejects(()=>facet.callTool({name:"cuse_click",arguments:{
+    app:"com.apple.calculator",element_index:"9",mouse_button:"right"
+  }},context),/alternate button not owner-authorized/);
+  await assert.rejects(()=>facet.callTool({name:"cuse_click",arguments:{
+    app:"com.apple.calculator",element_index:"9",click_count:2
+  }},context),/multiple clicks not owner-authorized/);
+  assert.equal(calls.length,0);
+  current={...grant(true),allowCoordinateClick:true};
+  await facet.callTool({name:"cuse_click",arguments:args},context);
+  assert.equal(calls.length,1);
+  assert.deepEqual(calls[0].arguments,args);
+});
