@@ -825,8 +825,8 @@ def derive_work_producers_v1(control_room: Any) -> dict[str, Any]:
     WQ-PROD-1 round 2 — closed eligibility + falsifiable freshness:
 
     - ``observed_at`` is the OLDEST
-      ``validity.card.sources[*].observed_at`` (lexicographic minimum,
-      which is chronological minimum for RFC3339 UTC).  It is NEVER
+      ``validity.card.sources[*].observed_at`` by parsed UTC instant,
+      preserving the original timestamp text.  It is NEVER
       ``qualified_at`` — the autonomy projection pins
       ``qualified_at == autonomy.generated_at`` for every card
       (see :mod:`control_plane.autonomy_control_room_projection`
@@ -1104,8 +1104,9 @@ def _evaluate_card(
         return None, ("effect_unknown_without_source" if is_effect_unknown
                       else "no_source_observations")
 
-    # OLDEST parseable source observed_at — RFC3339 UTC sorts
-    # lexicographically the same as chronologically.
+    # Optional fractional precision breaks lexicographic time ordering.
+    # Compare parsed instants; preserve original text and the existing
+    # lexicographic tie-break for differently formatted equal instants.
     parsed_observed: list[str] = []
     for source in sources:
         if not isinstance(source, Mapping):
@@ -1121,7 +1122,7 @@ def _evaluate_card(
     if not parsed_observed:
         return None, ("effect_unknown_without_source" if is_effect_unknown
                       else "no_source_observations")
-    oldest_observed = min(parsed_observed)
+    oldest_observed = min(parsed_observed, key=lambda obs: (_parse_observed_at(obs), obs))
     evidence_ref = proof_ref if isinstance(proof_ref, str) and proof_ref else responsibility_ref
 
     # Owed turn → accountability.  WQ-PROD-1 round 3 + round 4: when an
