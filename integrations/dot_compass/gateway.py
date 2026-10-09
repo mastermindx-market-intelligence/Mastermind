@@ -25,7 +25,7 @@ from .contracts import (
 
 _SECRETS = (re.compile(p, re.I) for p in (
     r"github_pat_", r"\bgh[pousr]_[A-Za-z0-9]", r"\bxox[baprs]-",
-    r"\bsk-[A-Za-z0-9]", r"\bBearer\s+\S+", r"-----BEGIN .*PRIVATE KEY-----",
+    r"\bsk-[A-Za-z0-9_-]{20,}", r"\bBearer\s+\S+", r"-----BEGIN .*PRIVATE KEY-----",
     r"(?i)password\s*[:=]", r"(?i)authorization\s*[:=]",
 ))
 _SECRET_PATTERNS = tuple(_SECRETS)

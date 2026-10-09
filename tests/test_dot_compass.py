@@ -65,6 +65,24 @@ class DotTest(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(res['ok'])
             self.assertEqual(res['error']['code'], 'unsafe_owner_evidence')
 
+    async def test_market_company_name_is_not_mistaken_for_api_secret(self):
+        g = DotReadGateway(
+            profile='market',
+            ports={'dot_signal_evidence': lambda _args: OwnerEvidence(
+                'data_os', '2026-10-09T02:59:00Z', ('signal@'+SHA,),
+                'BUILT_NOT_PROVEN', {'issuer': 'SK-Hynix', 'theme': 'memory'})},
+            reauthorize=lambda p,s: grant(s), now=lambda: NOW)
+        result = await g.call('dot_signal_evidence',
+            {'signal_ref': 'memory.leader', 'asof': '2026-10-09T00:00:00Z'},
+            principal=object())
+        self.assertTrue(result['ok'], result['error'])
+        self.assertEqual(result['data']['data']['issuer'], 'SK-Hynix')
+
+    async def test_long_api_secret_still_refused(self):
+        g = self.make(port=lambda _: company({'hint': 'sk-proj-' + 'x'*40}))
+        result = await g.call('dot_company_snapshot', {}, principal=object())
+        self.assertEqual(result['error']['code'], 'unsafe_owner_evidence')
+
     async def test_safe_references_and_plain_diagnostics_still_work(self):
         packet = dataclasses.replace(company(),
             issues=('DEGRADED_BACKEND',),
