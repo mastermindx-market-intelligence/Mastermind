@@ -81,3 +81,51 @@ is not an excuse to stop productive work; elapsed time is not quality, and a lon
 more reasoning. Use the existing fresh-session evaluation owner to test actual behavior, preserving exact
 observed surface identity and distinguishing context symptoms, transport errors, quota, safety refusal
 and voluntary premature stopping. Neither source-contract tests nor model labels prove native adoption.
+
+## 9. Adaptive three-level delegation
+
+Use three responsibility levels when the work benefits: principal owns consequential intent and
+architecture; a bounded project lead owns decomposition, integration and scoped acceptance; workers
+own independently checkable execution. This is an adaptive work shape, not a required chain or a
+model caste. Omit management for small frozen work, use deterministic tooling where sufficient,
+and retain a strong executor for an indivisible hard problem when total outcome cost is lower.
+A qualified inexpensive lead is allowed; a model name never grants authority or a promotion.
+
+Default bounded labor toward admitted, task-qualified economical model/surface combinations.
+Candidates may include MiniMax, GLM Flash, Qwen Flash, DeepSeek Flash, Luna and other economical
+routes. These examples are not runtime aliases, current prices, available entitlements or enrollment.
+Full GLM, Grok, Sol and Opus are not economical labor defaults merely because they cost less than
+Fable or Astra. Cursor and OpenCode are surfaces, not model tiers. Use exact configured model,
+harness, entitlement and qualification evidence, with current Provider Control consumption facts.
+
+When substantial routine labor stays on stronger compute, record `WHY_STRONG_EXECUTOR` in the
+existing brief/checkpoint: the task-specific capability or coupling requirement, unavailable or
+unqualified economical alternatives, or observed repair/accepted-outcome cost evidence. Include
+the existing approved budget envelope and stop condition; importance, availability, prestige and
+"cheaper than the CEO" are insufficient. This explanatory note is not a new public ingress field,
+closed runtime enum, spend authorization or permission to activate a held provider.
+
+An admission class such as `small` or `default` is not a measured price tier. Measure total cost per
+accepted outcome, including framing, execution, tools, review, integration and repair. Include failed
+and abandoned attempt costs in the numerator; only accepted outcomes count in that denominator.
+Report cash, API estimates and native
+subscription depletion separately, with missing data explicit. Do not invent a conversion, savings
+percentage, universal worker share or quota to make the preferred graph appear efficient.
+
+The existing Model Router source preview can explain its configured exclusions using
+`python -m scripts.executive_os_phase1b route implementation --explain` and optional bounded
+`--consider-model-alias` arguments. This inspects source policy only: NOT_CONFIGURED is not proof of
+fleet absence, FIRST_LAWFUL_TIER is not live qualification/admission, and no price comparison occurs.
+Follow through to existing runtime/placement evidence before attributing real spending to a cause.
+
+Decompose by bounded outcome, stable interfaces and compatible source custody, not by tiny shell
+commands. Pass role-appropriate inputs and compact artifact/test returns. A lead validates and
+integrates without routinely rebuilding every worker's result. Independent audit follows risk and
+existing review law; it is a separate role, not an obligatory fourth layer or duplicate full review.
+
+Nested responsibility must use the existing admission owner, child-specific tool/scope grants,
+root-envelope accounting, review/repair reservations and exact-parent return. A native nesting flag
+or model instruction is not enforcement. Do not raise admitted depth/fanout or spawn hidden children
+to realize this work shape; a graph may be represented by separately admitted existing Fabric jobs.
+Instruction publication, installed readback, fresh-session behavior, real worker execution, accepted
+results and measured cost improvement are separate proofs. No source-only test establishes adoption.
