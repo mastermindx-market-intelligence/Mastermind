@@ -614,13 +614,18 @@ def _etf_job():
 
 
 def _snapshot_job():
-    """Publish a static snapshot of the dashboard to the public Macro Dashboard (GitHub Pages).
-    Writes site/mastermind/mastermind_snapshot.json into the macro repo (via the vendor/macro
-    symlink) and pushes it to origin/main. Resilient — never raises into the scheduler."""
+    """Attempt the governed Macro snapshot publication and expose delivery failure.
+
+    The legacy exporter still requires a Macro-owned checkout.  A missing checkout or failed
+    push returns ``None`` and is recorded as an error rather than a false successful delivery.
+    The job remains scheduler-safe: failures are caught after the run ledger is updated.
+    """
     handle = _ledger_start("publish_macro_snapshot", trigger="cron")
     try:
         from scripts.export_macro_snapshot import run as export_snapshot
-        export_snapshot()
+        published = export_snapshot()
+        if published is None:
+            raise RuntimeError("Macro snapshot was not published")
         _ledger_end(handle, "ok")
     except Exception as exc:  # noqa: BLE001
         _ledger_end(handle, "error")
