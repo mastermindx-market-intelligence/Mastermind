@@ -133,7 +133,10 @@ def test_verify_ready_is_identity_first_exactly_one_canary_and_replay_safe() -> 
         'if [ "$ENROLL_SERVICE_ACCOUNT" = "true" ]; then', 1
     )[0]
     assert branch.count("provider-inference-canary.sh") == 1
-    assert branch.count("provider_identity_probe.py") == 2
+    # Two live probes plus the bounded offline formatter on pre-reservation failure.
+    assert branch.count("provider_identity_probe.py") == 3
+    assert branch.count('--binary "$INSTALLED_CODEX_BINARY" --provider-home "$PROVIDER_HOME"') == 2
+    assert branch.count("--refusal-code-stdin") == 1
     assert branch.count('provider_readiness.py" reuse') == 1
     assert branch.count('provider_readiness.py" reserve') == 1
     assert branch.count('provider_readiness.py" finalize') == 1
