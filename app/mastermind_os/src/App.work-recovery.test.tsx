@@ -45,7 +45,7 @@ describe("Work read recovery in the actual App", () => {
     expect(screen.queryByText("SOURCE_UNAVAILABLE")).toBeNull();
     expect(readWork).toHaveBeenCalledTimes(2);
   });
-  it("recovers a typed owner refusal and keeps keyboard focus through pending and success", async () => {
+  it("recovers a typed owner refusal with a focusable, guarded pending control", async () => {
     const retry = deferred<unknown>();
     const readPrograms = vi.fn(async () => controlRoomFixture());
     const readWork = vi.fn().mockResolvedValueOnce(structuredClone(workUnavailable)).mockReturnValueOnce(retry.promise);
@@ -55,7 +55,10 @@ describe("Work read recovery in the actual App", () => {
     expect(await screen.findByText("projection_refused")).toBeTruthy();
     const button = screen.getByRole<HTMLButtonElement>("button", { name: "Refresh Work" });
     button.focus(); await user.keyboard("{Enter}");
-    expect(button.disabled).toBe(true);
+    // jsdom does not reproduce native-disabled browser blur. Assert the DOM
+    // contract explicitly; real-browser Enter/Tab/focus proof is separate.
+    expect(button.disabled).toBe(false);
+    expect(button.getAttribute("aria-disabled")).toBe("true");
     expect(screen.queryByText("projection_refused")).toBeNull();
     expect(screen.getByText("Reading the bounded Work projection…")).toBeTruthy();
     await user.keyboard("{Enter}");
@@ -65,6 +68,7 @@ describe("Work read recovery in the actual App", () => {
     expect(await screen.findByText("JOB-2")).toBeTruthy();
     expect(document.activeElement).toBe(button);
     expect(button.disabled).toBe(false);
+    expect(button.getAttribute("aria-disabled")).toBe("false");
   });
 
   it("leaves repeated failures retryable without automatically polling", async () => {
@@ -182,7 +186,8 @@ describe("Work read recovery in the actual App", () => {
     await waitFor(() => expect(workCalls).toBe(3));
     await act(async () => retry.resolve(structuredClone(workAvailable)));
     expect(screen.queryByText("JOB-2")).toBeNull();
-    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Refresh Work" }).disabled).toBe(true);
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Refresh Work" }).disabled).toBe(false);
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Refresh Work" }).getAttribute("aria-disabled")).toBe("true");
     await act(async () => replacement.resolve(structuredClone(workUnavailable)));
     expect(await screen.findByText("projection_refused")).toBeTruthy();
     expect(screen.queryByText("JOB-2")).toBeNull();

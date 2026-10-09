@@ -2498,7 +2498,9 @@ export function App() {
   const workRefreshControl = (
     <button
       type="button"
-      disabled={workState.kind === "PENDING" || !workReadAvailable}
+      // Native disabled blurs the focused button in Chrome. Guard pending reads below.
+      disabled={!workReadAvailable}
+      aria-disabled={workState.kind === "PENDING" || !workReadAvailable}
       onClick={() => {
         if (workState.kind === "PENDING" || !workReadAvailable) return;
         setWorkState({ kind: "PENDING" });
