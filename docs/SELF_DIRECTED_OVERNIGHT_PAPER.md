@@ -1,84 +1,122 @@
-# Self-Directed US Equity Overnight Quotes & PAPER Limits
+# Mastermind Bot — Tiingo BOATS overnight quote & paper-limit contract
 
-Scope: `bot.mastermind-x.com/self` (the existing **Self-Directed** paper book),
-not the autonomous Brain, real holdings, an Alpaca brokerage account, or
-`data_layer/overnight.py`'s independent macro futures risk watcher.
+**Target:** existing user-driven Self-Directed paper book at
+`bot.mastermind-x.com/self`; no separate account, no real broker execution.
+**Source carrier:** Mastermind PR #1293 (same Web workspace, same branch).
+**Status:** code is built/testable; live data and production activation are held
+until the exact Tiingo account entitlement and approved licenses are verified.
 
-## Market/session contract
+## Vendor and commercial entitlement
 
-- **Regular** (unchanged): 09:30–16:00 ET on valid US sessions. The manual
-  existing ticket fills at the simulated regular quote or queues for the next open.
-- **Overnight** (opt-in on order ticket): Sunday–Thursday 20:00 ET until the
-  next US session day 04:00 ET. Friday and Saturday nights and nights before NYSE
-  holidays do not simulate overnight execution. Exceptional venue suspensions
-  are caught by quote freshness and asset eligibility.
-- Only **immediately marketable overnight paper LIMIT** orders are supported.
-  Buy crosses a recent ask not above the user's limit; sell hits a recent bid
-  not below the limit. The requested size must not exceed displayed top-of-book
-  size. Unmarketable limits are explicitly rejected—not left live, not converted
-  into a next-open regular market order. No partial fill or persistent overnight
-  resting order is claimed.
-- Existing long-only, cash, position, P&L and history accounting are reused.
-  No real-money brokerage order API, broker submit, or leverage route is added.
+Use **Tiingo BOATS Overnight Real-time** as the sole overnight stock quote
+provider. Do not use Alpaca, Polygon EOD, IEX daytime quotes, delayed prices,
+ordinary Tiingo composite closing prices or synthetic midpoints to qualify
+overnight paper fills.
 
-## Vendor configuration — on the authoritative VPS only
+Official primary references:
+- Tiingo BOATS REST: https://www.tiingo.com/documentation/boats
+- Tiingo BOATS product, subscription and rights:
+  https://www.tiingo.com/products/boats-blue-ocean-ats-real-time-overnight-stock-prices
+- Tiingo Commercial redistribution policy:
+  https://www.tiingo.com/documentation/general
+- Tiingo authentication: https://www.tiingo.com/documentation/general/connecting
 
-Use secrets from the existing server-side secret manager/environment; **never**
-place credentials in source, UI, browser, PRs or chat:
+BOATS uses `GET https://api.tiingo.com/boats/<ticker>`. A successful entitled
+response is a one-element JSON list containing `ticker`, `quoteTimestamp`,
+`bidPrice`, `askPrice`, `bidSize`, `askSize`, `last`,
+`lastSize`, etc. Header: `Authorization: Token <TIINGO_API_KEY>`.
+The token stays in server-side environment/secret storage and never appears in
+URLs, HTML, logs, API responses, this document or git.
 
-- `ALPACA_API_KEY_ID`, `ALPACA_API_SECRET_KEY` (alternative Alpaca-standard
-  `APCA_API_KEY_ID` / `APCA_API_SECRET_KEY`). Credentials authorize **market
-  data GET** and **asset GET** only. The code never sends a brokerage order.
-- Without real-time BOATS entitlement confirmation, the quote display requests
-  `feed=overnight`, explicitly **indicative**, and cannot simulate a fill.
-  Older cached regular/last-known marks remain clearly labeled as such.
-- After independently confirming a genuinely **real-time BOATS quote entitlement**
-  for that exact key, set `MASTERMIND_ALPACA_BOATS_REALTIME_CONFIRMED=1`. This
-  changes the quote source to `feed=boats`. The flag is an operator attestation,
-  not proof of subscription: the runtime cannot infer paid entitlement from 200 OK.
-- Only after validation of eligibility, holiday/session clock, quote timestamps,
-  UI/API authorization, and paper ledger tests set
-  `MASTERMIND_OVERNIGHT_PAPER_FILLS_ENABLED=1`. Both positive flags, active
-  instrument eligibility, quote sizes, valid spread and age <=30 seconds are
-  necessary to simulate an immediate fill. Missing flags, credentials, entitlement,
-  stale quote or asset eligibility **fail closed**.
-- Alpaca docs: https://docs.alpaca.markets/us/docs/245-trading-for-trading-api
-  and https://docs.alpaca.markets/us/reference/stocklatestquotes-1.
+Tiingo's **Commercial/Business plan is not evidence of BOATS entitlement**.
+BOATS Real-time is a separate add-on. Furthermore, ordinary Commercial API
+license is **internal use only**. Tiingo states separately that redistribution
+to website/app customers requires written permission; BOATS non-display
+trading use can require its own licensing. The operator must verify exact
+licensing for both product surfaces before enabling either one. Do not
+interpret a technical HTTP 200 response as licensing approval.
 
-## API and display
+## Independent fail-closed server settings
 
-`GET /api/self_directed/quote?ticker=AAPL` returns the existing last-known
-mark plus `overnight` bid/ask/provenance/status (when in overnight session).
-`GET /api/self_directed` overlays fresh midpoint marks for held symbols as
-**indicative overnight NAV preview**, not an official EOD settlement. It never
-writes paper positions on GET. The ticket communicates the current session,
-quote age/source, eligibility, and whether execution is available.
+All are OFF unless explicitly set on the authorized production environment:
 
-`POST /api/self_directed/order` (existing OPERATOR bearer protection) accepts
-`{ticker,side,shares|notional,session:"overnight",limit_price}`. Only explicit
-session selection uses the overnight route. Order limits remain enforced by
-the server; browser controls are not the security gate.
+| Variable | Effect |
+|---|---|
+| `TIINGO_API_KEY` (or `TIINGO_API_TOKEN`, `TIINGO_TOKEN`) | Existing confidential server-side Tiingo token |
+| `MASTERMIND_TIINGO_BOATS_DISPLAY_AUTHORIZED=1` | Allows network BOATS quote reads that can reach customer-facing `GET /api/self_directed*` and HTML; only after actual **redistribution/display** rights verified |
+| `MASTERMIND_TIINGO_BOATS_NONDISPLAY_AUTHORIZED=1` | Allows reading BOATS specifically to simulate orders under the verified **non-display** agreement |
+| `MASTERMIND_OVERNIGHT_PAPER_FILLS_ENABLED=1` | Independently arms **paper-only** instant limit fills; never real broker orders |
 
-## Release/acceptance checklist
+The **customer-facing order route needs all three authorizations**: display,
+non-display simulation, and paper rollout. Its fills and history reveal the
+venue quote/price to the user, so merely enabling non-display use would not
+justify execution under an internal-only agreement.
 
-1. Run `tests/test_overnight_equities.py`, `tests/test_self_directed.py`,
-   existing operator-auth and portfolio UI tests, plus JS syntax checks.
-2. Verify the candidate branch, CI and independent review; merge only via the
-   normal Mastermind delivery workflow. Do not deploy draft/unmerged source.
-3. Verify the exact merged master build on VPS, health HTTP 200, credentials
-   available without secret exposure, the provider entitlement and non-stale
-   named-symbol quotes during a natural overnight session.
-4. With the paper-book backup and operator authentication verified, place an
-   actual **paper** buy then sell in a test account under limit/size guards;
-   inspect cash, fills, positions, NAV and FIFO history. Repeat a
-   nonmarketable, stale, ineligible and outside-session order, proving no
-   mutation. Do not claim real broker execution or production coverage from
-   a local mocked test.
-5. Keep the feature unavailable if credentials or paid real-time entitlement
-   are absent. It is **not** appropriate to substitute a delayed, indicative or
-   previously cached quote merely to mark the feature enabled.
+The **same Tiingo data request** cannot be used to sidestep a missing display
+or non-display license. Internal calculations without an appropriate use grant
+stay held, regardless of whether the API key happens to return a quote.
+Successful entitlement, public redistribution permission, simulation/non-display
+permission and production feature activation are all distinct evidence.
 
-Limitations of this initial source slice: marketable immediate overnight limits
-only, no standing order lifecycle or depth/partial fills. The underlying
-Self-Directed paper ledger is an existing separate file-based portfolio; a
-comprehensive crash-recovery transaction migration is not implied by this slice.
+A denied 401/402/403 is `entitlement_required`, 429 is `rate_limited`,
+404 is `symbol_not_quoted`. All are structured non-executable statuses.
+Provider error bodies and exception messages are suppressed to prevent token
+leaks. No automatic fallback to another unlicensed feed.
+
+## Overnight clock and fill model
+
+- An overnight paper session runs Sunday–Thursday **20:00 to 04:00 ET**,
+  ceasing Friday at 04:00; no Friday/Saturday night or holiday-eve paper
+  fills. Venue closures and exceptional halts that cannot be confirmed must
+  fail closed through live quote freshness and a two-sided positive book.
+- **Marketable immediate limit only**. Buy uses the observed ask no higher than
+  the user's limit; sell uses bid no lower than the limit. An unmarketable or
+  too-large order is rejected, **never converted into a next-open regular
+  market order**, nor left as a resting order or assigned an invented fill.
+- Quotes must be at most 30 seconds old, with no more than 5 seconds future
+  clock skew, finite positive bid and ask, non-crossed (bid below ask),
+  spread <=5%, and positive displayed bid/ask sizes. `quoteTimestamp` is
+  mandatory. A fresh last trade or `timestamp` cannot refresh a stale BBO.
+- Requested share quantity cannot exceed available top-of-book size and
+  **must be fully affordable/held**. Long-only; no leverage or shorts.
+  The backend always re-fetches a live quote at order submission.
+- A current BOATS quote is *venue-observed liquidity*, not guaranteed broker
+  execution. A simulated fill is a paper modeling convention only.
+- All accepted fills write to the original Self-Directed cash/positions/
+  fills/history ledger, stamped with session, requested limit, venue/source,
+  quote timestamp and execution timestamp. Existing daily open queue remains
+  unchanged. No new ledger, account or exchange calendar owner is introduced.
+
+## Portfolio and UI
+
+Customer-facing quote API shows Tiingo bid/ask/mid/last, sizes, quote timestamp
+and typed freshness/entitlement status only after display authorization.
+During the overnight session the original paper-book UI may overlay a *preview*
+from a fresh BOATS midpoint for up to 16 held symbols. This is never an official
+daily NAV mark or an executable order price. A stale/unauthorized name remains
+clearly marked as last-known regular and cannot paper fill.
+The ticket requires explicit overnight-session selection and a positive limit.
+Show **Data sourced by Tiingo** linked to https://www.tiingo.com on licensed
+customer display, per Tiingo redistribution attribution requirement.
+
+## Acceptance/proof and release gates
+
+1. Run adapter contract tests (unauthorized display/non-display, no token,
+   403/429/500, non-BOATS/mismatched response, stale `quoteTimestamp`,
+   crossed/overspread/zero-size BBO, real list payload and header handling).
+2. Run existing Self-Directed order/ledger/UI/auth tests plus JS syntax.
+3. Confirm source code and license flags leave customer quote feeds held by
+   default. Missing entitlement never triggers a real-money or paper fill.
+4. Qualify exact head with CI, independent review and protected GitHub merge
+   procedure; deploy only exact merged `origin/master`, not PR branch.
+5. With the account's **BOATS Real-time** entitlement and licensed use
+   independently confirmed, perform a bounded natural-session VPS quote-read
+   and verify data freshness, actual entitlements, symbol and display rights.
+6. Back up existing paper state and perform a protected manual paper buy/sell,
+   plus rejection scenarios, verifying the same positions/cash/history ledger.
+   Confirm customer display attribution, latency, no secret leakage and
+   `/health` on deployed release.
+
+Unproven data rights, vendor entitlement, CI, production installation and
+natural overnight trading acceptance are explicit separate gates. A mock-test
+pass is not a production 24/5 trading claim.

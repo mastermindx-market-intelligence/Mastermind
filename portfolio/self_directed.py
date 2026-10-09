@@ -347,7 +347,8 @@ def _place_overnight_order(ticker: str, side: str, shares: float | None,
     except (TypeError, ValueError, OverflowError):
         return {"ok": False, "error": "overnight orders require a positive finite limit_price"}
     from data_layer import overnight_equities
-    quote = overnight_equities.latest(ticker, include_eligibility=True)
+    quote = overnight_equities.latest(
+        ticker, include_eligibility=True, purpose="execution")
     if not quote.get("executable"):
         return {
             "ok": False, "error": "overnight paper fill unavailable: "
@@ -378,7 +379,7 @@ def _place_overnight_order(ticker: str, side: str, shares: float | None,
         "session": "overnight",
         "order_type": "limit",
         "limit_price": round(limit, 4),
-        "quote_source": "alpaca_boats",
+        "quote_source": "tiingo_boats",
         "quote_time": quote["quoted_at"],
         "executed_at": _now_iso(),
         "paper_only": True,
@@ -688,8 +689,7 @@ def quote_info(ticker: str) -> dict:
         info["overnight"] = overnight
         if overnight.get("fresh") and overnight.get("mid"):
             info["price"] = overnight["mid"]
-            info["price_source"] = ("alpaca_boats_bbo_mid" if not overnight.get("indicative")
-                                    else "alpaca_overnight_indicative_mid")
+            info["price_source"] = "tiingo_boats_bbo_mid"
     return info
 
 

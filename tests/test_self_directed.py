@@ -479,3 +479,47 @@ def test_overnight_long_only_and_cash_guards(sd, monkeypatch):
 def test_legacy_regular_closed_orders_still_queue(sd):
     assert sd.place_order("AAPL", "buy", 2, market_open=False)["status"] == "pending"
     assert sd._load_pending()[0]["ticker"] == "AAPL"
+
+
+def test_real_tiingo_boats_paper_order_reuses_self_directed_ledger(sd, monkeypatch):
+    """No broker order is ever sent; the authenticated Tiingo GET backs a paper fill."""
+    from datetime import timezone
+    from data_layer import overnight_equities as oq
+    monkeypatch.setenv("TIINGO_API_KEY", "test_private_tiingo")
+    monkeypatch.setenv("MASTERMIND_TIINGO_BOATS_DISPLAY_AUTHORIZED", "1")
+    monkeypatch.setenv("MASTERMIND_TIINGO_BOATS_NONDISPLAY_AUTHORIZED", "1")
+    monkeypatch.setenv("MASTERMIND_OVERNIGHT_PAPER_FILLS_ENABLED", "1")
+    called = []
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return [{
+                "ticker": "AAPL",
+                "quoteTimestamp": datetime.now(timezone.utc).isoformat(),
+                "bidPrice": 99.9, "askPrice": 100.1,
+                "bidSize": 20, "askSize": 30,
+            }]
+
+    def get(url, headers=None, timeout=None):
+        called.append((url, timeout))
+        assert "test_private_tiingo" not in url
+        assert headers == {
+            "Authorization": "Token test_private_tiingo",
+            "Accept": "application/json",
+        }
+        return FakeResponse()
+
+    monkeypatch.setattr(oq.requests, "get", get)
+    result = sd.place_order(
+        "AAPL", "buy", 10, session="overnight", limit_price=100.20,
+        now=datetime(2026, 10, 8, 22))
+    assert result["ok"] and result["status"] == "filled"
+    assert result["fill"]["price"] == 100.1
+    assert result["fill"]["quote_source"] == "tiingo_boats"
+    assert result["fill"]["paper_only"]
+    assert sd._load_pending() == []
+    assert sd._load_account()["positions"]["AAPL"]["shares"] == 10
+    assert len(sd._load_fills()) == 1
+    assert called == [("https://api.tiingo.com/boats/aapl", 4)]

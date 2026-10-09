@@ -3060,7 +3060,7 @@ html[data-theme="light"] body.page-mm {
           <div class="mm-perf-stat"><div class="mm-perf-stat-label"><span class="l-en">Total Return</span><span class="l-zh">总回报</span></div><div class="mm-perf-stat-value neu" id="sd-return">—</div><div class="mm-perf-stat-sub"><span class="l-en">since funding</span><span class="l-zh">自注资以来</span></div></div>
         </div>
       </div>
-      <div class="mm-sd-hint"><span class="l-en">Your own book &mdash; you choose the names and the sizing; the engine just executes and keeps score. Long-only paper, no leverage. Orders fill at the live price while the market is open, or queue and fill at the next session&rsquo;s open when it&rsquo;s closed.</span><span class="l-zh">这是你自己的组合 &mdash; 标的与仓位由你决定，系统只负责执行与记账。仅做多模拟、无杠杆。开市时按实时价成交，休市时排队并于下个交易日开盘价成交。</span></div>
+      <div class="mm-sd-hint"><span class="l-en">Your own book: long-only paper trading, no leverage. Regular orders fill while the US cash market is open or queue for the next regular open. Opt into an overnight BOATS paper LIMIT order from 8 PM&ndash;4 AM ET where Tiingo data, display rights and paper execution are enabled. Unmarketable overnight limits are rejected, not carried into the morning.</span><span class="l-zh">自主操盘仅为模拟交易，不提供杠杆。常规交易于美股盘中成交，休市时排队至下一常规开盘。Tiingo BOATS 数据、展示许可及模拟执行均开启时，可选择美东时间 20:00&ndash;04:00 的隔夜限价模拟单；不可成交的隔夜限价单不会顺延至开盘。</span></div>
     </div>
   </div>
 
@@ -5855,9 +5855,15 @@ function renderSelf() {
 function renderSelfHeader() {
   var b = _self || {}, a = b.allocation || {};
   if (E('sd-nav'))   E('sd-nav').textContent = fmtNav(b.nav != null ? b.nav : 1000000);
-  if (E('sd-nav-kind')) E('sd-nav-kind').textContent =
-    b.nav_mark_kind === 'indicative_overnight_preview' ? 'Overnight NAV preview · quote midpoint, not official close' :
-    (b.nav_mark_kind === 'last_known_regular_marks' ? 'Overnight feed unavailable · showing prior marks' : '');
+  if (E('sd-nav-kind')) {
+    if (b.nav_mark_kind === 'indicative_overnight_preview') {
+      E('sd-nav-kind').innerHTML = 'Overnight NAV preview · midpoint, not official close · ' +
+        '<a href="https://www.tiingo.com" target="_blank" rel="noopener">Data sourced by Tiingo</a>';
+    } else {
+      E('sd-nav-kind').textContent = b.nav_mark_kind === 'last_known_regular_marks' ?
+        'Overnight feed unavailable · showing prior marks' : '';
+    }
+  }
   if (E('sd-cash'))  E('sd-cash').textContent = b.cash != null ? fmtNav(b.cash) : '—';
   if (E('sd-cash-pct')) E('sd-cash-pct').textContent = a.cash_pct != null ? pctInt(a.cash_pct) : '';
   if (E('sd-invested')) E('sd-invested').textContent = b.invested != null ? fmtNav(b.invested) : '—';
@@ -6151,11 +6157,16 @@ function renderSelfSelected(loading) {
   var q = s.overnight, quoteLine = '';
   if (q) {
     quoteLine = '<div class="mm-sd-sel-sub">' +
-      (q.bid != null ? 'Bid $' + Number(q.bid).toFixed(2) : 'Bid —') + ' · ' +
+      (q.bid != null ? 'Bid $' + Number(q.bid).toFixed(2) : 'Bid —') +
+      (q.bid_size != null ? ' × ' + fmtShares(q.bid_size) : '') + ' · ' +
       (q.ask != null ? 'Ask $' + Number(q.ask).toFixed(2) : 'Ask —') +
-      ' · ' + esc(q.feed || 'overnight') + (q.indicative ? ' (indicative only)' : '') +
+      (q.ask_size != null ? ' × ' + fmtShares(q.ask_size) : '') +
+      (q.last != null ? ' · Last $' + Number(q.last).toFixed(2) : '') +
+      ' · ' + esc(q.provider || q.feed || 'overnight') +
       ' · ' + esc(q.status || 'unknown') +
-      (q.quoted_at ? ' · ' + esc(String(q.quoted_at).replace('T', ' ').slice(0, 19)) + ' UTC' : '') +
+      (q.quoted_at ? ' · quote ' + esc(q.quoted_at) : '') +
+      (q.fresh && q.provider === 'tiingo' ?
+        ' · <a href="https://www.tiingo.com" target="_blank" rel="noopener">Data sourced by Tiingo</a>' : '') +
       '</div>';
   }
   el.innerHTML = '<div class="mm-sd-sel-top"><span class="mm-sd-sel-tk">' + esc(s.ticker) + '</span>' +
