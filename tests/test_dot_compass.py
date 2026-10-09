@@ -117,11 +117,29 @@ class DotTest(unittest.IsolatedAsyncioTestCase):
                 self.calls.append((name,args))
                 return {'schema':'mastermind.executive_mcp_result.v1','tool':name,'mode':'readonly','ok':True,
                         'grounding':{'mastermind':{'sha':SHA}},'generated_at':'2026-10-09T02:59:00Z',
-                        'degraded':[],'data':{'runtime':'current'}}
+                        'degraded':[],'data':{'runtime_counts':{'attempts':2},'runtime_db':{'path':'/private/var/db/mastermind'}}}
         owner=Executive(); reader=executive_read_port(owner,'executive_state'); g=self.make(port=reader)
         res=await g.call('dot_company_snapshot',{},principal=object())
-        self.assertTrue(res['ok']);self.assertEqual(res['data']['data']['runtime'],'current');self.assertEqual(owner.calls,[('executive_state',{})])
+        self.assertTrue(res['ok']);self.assertEqual(res['data']['data']['runtime_counts']['attempts'],2);self.assertNotIn('runtime_db',res['data']['data']);self.assertEqual(owner.calls,[('executive_state',{})])
         with self.assertRaises(ValueError): executive_read_port(owner,'submit_ceo_intent')
+
+    async def test_executive_inbox_projection_never_leaks_host_roots(self):
+        class Executive:
+            async def call(self,name,args):
+                return {'schema':'mastermind.executive_mcp_result.v1','tool':name,'mode':'readonly','ok':True,
+                        'grounding':{'mastermind':{'sha':SHA,'root':'/private/var/db/control'}},
+                        'generated_at':'2026-10-09T02:59:00Z','degraded':[],
+                        'data':{'attention':[{'attention_id':'a1','kind':'WORK','owner_seat':'coo',
+                                             'reason':'sensitive operator text',
+                                             'source':{'path':'/private/var/db/secret'}},
+                                            {'attention_id':'a2','kind':'BLOCKED','owner_seat':'ceo'}],
+                                 'grounding':{'root':'/private/var/db/control'}}}
+        g=DotReadGateway(profile='compass',ports={'dot_attention_snapshot':executive_read_port(Executive(),'executive_inbox')},
+                         reauthorize=lambda p,s:grant(s),now=lambda:NOW)
+        res=await g.call('dot_attention_snapshot',{},principal=object())
+        self.assertTrue(res['ok']);self.assertEqual(res['data']['data']['attention_count'],2)
+        self.assertEqual([x['attention_id'] for x in res['data']['data']['attention']],['a1','a2'])
+        self.assertNotIn('/private/',str(res));self.assertNotIn('sensitive operator',str(res))
 
     async def test_no_owner_adapter_writes_or_dynamic_profile_routing(self):
         g=self.make();self.assertEqual(g.tool_names,('dot_company_snapshot',))

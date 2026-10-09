@@ -1,4 +1,4 @@
-"""Read-only adapters to incumbent Executive MCP tools; no network or host selection."""
+"""Read-only projections of incumbent Executive MCP tools; no host selection."""
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -6,9 +6,32 @@ from typing import Any
 
 from .gateway import OwnerEvidence
 
+_COMPANY_FIELDS = ("strategic_state", "runtime_counts", "attention_counts", "boot_packet_schema", "inbox_schema", "next_recommended_act")
+_ATTENTION_FIELDS = ("attention_id", "kind", "owner_seat", "status", "workstream", "job_id", "root_job_id", "review_required")
+
+
+def _safe_projection(name: str, raw: Any) -> dict[str, Any]:
+    """Do not leak installed host roots, private workspace paths, or raw inbox payloads."""
+    if type(raw) is not dict:
+        raise ValueError("incumbent Executive data is not an object")
+    if name == "executive_state":
+        projection = {key: raw[key] for key in _COMPANY_FIELDS if key in raw}
+        if not projection:
+            raise ValueError("unrecognized Executive company source")
+        return projection
+    attention = raw.get("attention")
+    if type(attention) is not list or len(attention) > 32:
+        raise ValueError("incumbent Executive attention cannot be bounded")
+    projection = []
+    for item in attention:
+        if type(item) is not dict or type(item.get("attention_id")) is not str:
+            raise ValueError("malformed canonical attention item")
+        projection.append({key: item[key] for key in _ATTENTION_FIELDS if key in item})
+    return {"attention_count": len(attention), "attention": projection}
+
 
 def executive_read_port(gateway: Any, name: str) -> Callable[..., Any]:
-    """Bind exact Executive tools to an already-authenticated host-provisioned reader.
+    """Bind two existing Executive readers without exposing local host coordinates.
 
     Only executive_state and executive_inbox are projected. No submit path exists.
     A live host MUST independently authenticate/authorize every incoming Dot call;
@@ -43,7 +66,7 @@ def executive_read_port(gateway: Any, name: str) -> Callable[..., Any]:
         return OwnerEvidence(owner="executive", observed_at=response["generated_at"],
                              source_refs=source_refs,
                              capability_state="PARTIAL" if degraded else "BUILT_NOT_PROVEN",
-                             data=response["data"],
+                             data=_safe_projection(name, response["data"]),
                              issues=("OWNER_DEGRADED",) if degraded else ())
 
     return reader
