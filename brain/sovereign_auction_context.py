@@ -11,6 +11,7 @@ import json
 import re
 from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
+from http.client import HTTPS_PORT
 from pathlib import Path
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
@@ -103,7 +104,7 @@ def _url(value):
     try:
         parts = urlsplit(value)
         valid = (parts.scheme == "https" and parts.hostname in _OFFICIAL_HOSTS
-                 and not parts.username and not parts.password and parts.port in (None, 443)
+                 and not parts.username and not parts.password and parts.port in (None, HTTPS_PORT)
                  and not re.search(r"[\s\x00-\x1f\x7f]", value))
     except ValueError:
         valid = False
