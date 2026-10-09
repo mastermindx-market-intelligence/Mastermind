@@ -163,6 +163,11 @@ owned by that operation. `A2_REBIND_EFFECT_UNCERTAIN` or
 `A2_REBIND_MIXED_GENERATION` requires same-carrier reconciliation; do not retry,
 reenroll or start the relay to force convergence.
 
+Each forward and rollback publication re-attests the staged name and held file
+descriptor against the metadata sealed after writing, after all ACL and
+destination checks. Lost staging identity stops further publication and
+rollback; cleanup unlinks only the staged inode still owned by the operation.
+
 If the relay becomes loaded during publication, rollback permission is lost.
 Read-only identity reconciliation still distinguishes an operation-owned pair
 that was not restored (`A2_REBIND_MIXED_GENERATION`) from changed or unprovable

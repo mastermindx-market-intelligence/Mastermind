@@ -367,3 +367,65 @@ def test_missing_lock_namespace_refuses_without_creating_it(host):
         rebind()
     assert not a2.A2_REBIND_LOCK_DIR.exists()
     assert pair() == before
+
+
+@pytest.mark.parametrize('stage_number', [1, 2, 3, 4])
+@pytest.mark.parametrize('mutation', ['foreign_inode', 'equal_bytes_inode', 'in_place', 'missing'])
+def test_staged_source_drift_never_publishes_or_rolls_back(host, monkeypatch, stage_number, mutation):
+    # Stages 1/2 publish plist/config; stages 3/4 restore those same files.
+    real_acl, real_replace, real_sync = a2._rebind_acl, os.replace, os.fsync
+    stages, publications, changed, failure = [], [], [], []
+    config_parent = a2.CONFIG_PATH.parent.stat().st_ino
+
+    def fail_after_second_publication(fd):
+        if (stage_number > 2 and not failure and len(publications) == 2
+                and os.fstat(fd).st_ino == config_parent):
+            failure.append(True)
+            raise OSError('start owned rollback after both publications')
+        real_sync(fd)
+
+    def record_publication(*args, **kwargs):
+        real_replace(*args, **kwargs)
+        publications.append(args)
+
+    def change_staging(path, info):
+        real_acl(path, info)
+        if not path.name.startswith('.') or '.rebind-' not in path.name:
+            return
+        stages.append(path)
+        if len(stages) != stage_number:
+            return
+        original = path.read_bytes()
+        foreign = original if mutation == 'equal_bytes_inode' else b'FOREIGN-STAGED-SOURCE-BYTES'
+        if mutation in ('foreign_inode', 'equal_bytes_inode'):
+            other = path.with_name('foreign-stage')
+            other.write_bytes(foreign)
+            other.chmod(info.st_mode & 0o777)
+            real_replace(other, path)
+        elif mutation == 'in_place':
+            path.chmod(0o600)
+            path.write_bytes(foreign)
+            path.chmod(info.st_mode & 0o777)
+        else:
+            path.unlink()
+        changed.append((pair(), (a2.PLIST_PATH.stat().st_ino, a2.CONFIG_PATH.stat().st_ino),
+                        path, path.stat().st_ino if path.exists() else None, foreign))
+
+    monkeypatch.setattr(a2, '_rebind_acl', change_staging)
+    monkeypatch.setattr(os, 'replace', record_publication)
+    monkeypatch.setattr(os, 'fsync', fail_after_second_publication)
+    with pytest.raises(a2.A2EnrollmentError, match='EFFECT_UNCERTAIN'):
+        rebind()
+    assert len(changed) == 1
+    before, inodes, staged_path, staged_inode, foreign = changed[0]
+    assert pair() == before
+    assert (a2.PLIST_PATH.stat().st_ino, a2.CONFIG_PATH.stat().st_ino) == inodes
+    assert len(publications) == stage_number - 1
+    leftovers = [p for parent in (a2.CONFIG_PATH.parent, a2.PLIST_PATH.parent)
+                 for p in parent.iterdir() if '.rebind-' in p.name]
+    if mutation in ('foreign_inode', 'equal_bytes_inode'):
+        assert leftovers == [staged_path]
+        assert staged_path.stat().st_ino == staged_inode
+        assert staged_path.read_bytes() == foreign
+    else:
+        assert leftovers == []  # Only our own held inode may be unlinked.

@@ -1316,19 +1316,31 @@ class _A2Rebind:
                 if n <= 0:
                     raise OSError("short write")
                 view = view[n:]
+            sealed_stage = _rebind_identity(os.fstat(fd))
+
+            def attest_stage() -> os.stat_result:
+                try:
+                    observed = os.stat(name, dir_fd=parent, follow_symlinks=False)
+                    if (_rebind_identity(observed) != sealed_stage
+                            or _rebind_identity(os.fstat(fd)) != sealed_stage
+                            or not stat.S_ISREG(observed.st_mode) or observed.st_nlink != 1):
+                        raise A2EnrollmentError("A2_REBIND_EFFECT_UNCERTAIN")
+                    return observed
+                except OSError as exc:
+                    raise A2EnrollmentError("A2_REBIND_EFFECT_UNCERTAIN") from exc
+
             os.fsync(fd)
             self.check()  # includes sibling, lock, token and both namespaces
-            staged = os.stat(name, dir_fd=parent, follow_symlinks=False)
-            if (_rebind_identity(staged) != _rebind_identity(os.fstat(fd))
-                    or not stat.S_ISREG(staged.st_mode) or staged.st_nlink != 1):
-                raise A2EnrollmentError("A2_REBIND_EFFECT_UNCERTAIN")
-            _rebind_acl(path.parent / name, staged)
+            _rebind_acl(path.parent / name, attest_stage())
             # Staging/ACL inspection can race a modifier after the earlier
             # whole-pair check. Re-attest after that work, then attest the exact
             # destination immediately before publication, including its inode.
             self.check()
             if self._file(path) != self.expected[path]:
                 raise A2EnrollmentError("A2_REBIND_EFFECT_UNCERTAIN")
+            # Re-attest the source after all ACL and destination work. Comparing
+            # both observations to the write seal also catches in-place drift.
+            attest_stage()
             os.replace(name, path.name, src_dir_fd=parent, dst_dir_fd=parent)
             renamed = True
             # Record ownership immediately after an acknowledged rename, before
@@ -1349,13 +1361,18 @@ class _A2Rebind:
                     pass
 
     def restore(self, failure: Exception) -> None:
+        if isinstance(failure, A2EnrollmentError) and failure.code == "A2_REBIND_EFFECT_UNCERTAIN":
+            raise failure
         try:
             self.check()
             for path, preimage in self.preimages.items():
                 assert preimage.payload is not None
                 self.replace(path, preimage.payload)
             self.check()
-        except Exception:
+        except Exception as rollback_failure:
+            if (isinstance(rollback_failure, A2EnrollmentError)
+                    and rollback_failure.code == "A2_REBIND_EFFECT_UNCERTAIN"):
+                raise rollback_failure from failure
             # A service becoming loaded revokes write/rollback permission, not
             # the ability to observe our exact held identities. No further write
             # is attempted here. Unknown identities still refuse as uncertain.
