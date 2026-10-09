@@ -127,6 +127,29 @@ def test_economical_workers_handle_bounded_work_and_frontier_keeps_judgment():
             decision.job_constraints()
 
 
+def test_sol61_project_executive_alias_is_exact_inert_and_not_worker_claimable():
+    router = ModelRouter.load()
+
+    candidate = router.model_aliases["project.executive.sol61"]
+    assert candidate.provider_alias == "codex"
+    assert candidate.adapter_id == "codex-cli"
+    assert candidate.execution_profile_id == "operator.appserver.readonly.v1"
+    assert candidate.model == "gpt-6.1-sol"
+    assert candidate.effort == "xhigh"
+    assert candidate.capabilities == ("planning", "judgment", "escalation")
+    assert candidate.worker_eligible is False
+
+    for route in router.routes.values():
+        for risk in ("routine", "elevated"):
+            assert all(
+                "project.executive.sol61" not in tier.model_aliases
+                for tier in route[risk]
+            )
+
+    with pytest.raises(RoutingPolicyError, match="not worker eligible"):
+        router.resolve_model_alias("project.executive.sol61")
+
+
 def test_policy_has_unarmed_provider_seams_and_only_codex_is_currently_eligible():
     router = ModelRouter.load()
 

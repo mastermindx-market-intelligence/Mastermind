@@ -130,6 +130,7 @@ Current logical aliases:
 | Alias | Initial binding | Use |
 |---|---|---|
 | `frontier.orchestrator` | Sol / xhigh | planning, judgment, escalation; never worker-claimable |
+| `project.executive.sol61` | GPT-6.1 Sol / xhigh candidate | inert exact project-executive identity; never worker-claimable and selected by no route until separate admission/migration proof |
 | `coo.operator.readonly` | Sol / xhigh | one bounded read-only COO planner through App Server; worker-claimable only under the exact operator profile and dedicated quota |
 | `fast.engineering` | Luna / high | routine bounded implementation, mechanical edits, tests |
 | `standard.engineering` | Terra / high | elevated implementation and Luna fallback |
@@ -147,6 +148,12 @@ separate authority grant. The router never grants that seat, any executive role,
 review independence, merge/deploy rights, retry authority, or security authority
 from a provider or model alias. In particular, `frontier.orchestrator` remains a
 non-worker `frontier_lead` outcome even though it names a Codex/Sol model.
+
+The additive `project.executive.sol61` alias is intentionally inert. It records the exact
+model/profile candidate needed by the Sol-led project-executive program without changing
+`frontier.orchestrator`, any worker tier, or an installed/provider-home model. No route may
+select it until the separate native served-model canary, Runtime/Capacity admission, and
+project-executive selection contract are accepted.
 
 ## 3. Deterministic rules
 
