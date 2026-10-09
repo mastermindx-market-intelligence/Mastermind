@@ -475,6 +475,15 @@ def _parser() -> argparse.ArgumentParser:
         command.add_argument("--operation-id", required=True)
         command.add_argument("--lane", choices=sorted(ALLOWED_LANES), default="web")
         command.add_argument("--repository", choices=sorted(_REPOSITORIES))
+        command.add_argument(
+            "--published-branch",
+            help="exact existing origin branch whose head equals this clean workspace HEAD",
+        )
+        command.add_argument(
+            "--published-pull-request",
+            type=int,
+            help="exact origin pull-request number whose refs/pull/<N>/head equals this clean workspace HEAD",
+        )
     return parser
 
 
@@ -649,11 +658,21 @@ def main(argv: list[str] | None = None) -> int:
             )
         if args.action == "status":
             receipt = inspect_linked_worktree(
-                source, root, destination, expected_operation_id=args.operation_id,
+                source,
+                root,
+                destination,
+                expected_operation_id=args.operation_id,
+                published_branch=args.published_branch,
+                published_pull_request=args.published_pull_request,
             )
             return _emit("status", receipt, effect="NOT_APPLIED", repository=selected)
         receipt = release_linked_worktree(
-            source, root, destination, expected_operation_id=args.operation_id,
+            source,
+            root,
+            destination,
+            expected_operation_id=args.operation_id,
+            published_branch=args.published_branch,
+            published_pull_request=args.published_pull_request,
         )
         return _emit(
             "release", receipt,

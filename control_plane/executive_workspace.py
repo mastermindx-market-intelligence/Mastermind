@@ -2174,6 +2174,8 @@ def inspect_linked_worktree(
     workspace_path: str | Path,
     *,
     expected_operation_id: str | None = None,
+    published_branch: str | None = None,
+    published_pull_request: int | None = None,
 ) -> LinkedWorkspaceReleaseReceipt:
     """Classify whether a managed linked worktree can be removed without data loss."""
 
@@ -2194,6 +2196,33 @@ def inspect_linked_worktree(
         if observed_operation != expected_operation_id:
             raise WorkspaceError("workspace operation identity does not match the release request")
     base = _lock_value(lock_reason, "base") or ""
+    if published_branch is not None and published_pull_request is not None:
+        raise WorkspaceError("publication evidence selectors are mutually exclusive")
+    declared_publication_branch: str | None = None
+    if published_branch is not None:
+        if (
+            type(published_branch) is not str
+            or not published_branch
+            or published_branch != published_branch.strip()
+            or len(published_branch) > 256
+            or published_branch.startswith(("-", "/", ".", "refs/"))
+            or published_branch.endswith(("/", ".", ".lock"))
+            or ".." in published_branch
+            or "//" in published_branch
+            or "@{" in published_branch
+            or any(
+                character.isspace() or character in "\\~^:?*["
+                for character in published_branch
+            )
+        ):
+            raise WorkspaceError("published branch is invalid")
+        declared_publication_branch = published_branch
+    if published_pull_request is not None and (
+        type(published_pull_request) is not int
+        or published_pull_request < 1
+        or published_pull_request > 2_147_483_647
+    ):
+        raise WorkspaceError("published pull request is invalid")
     cleanliness = observe_launch_cleanliness(
         lambda arguments: _run_bytes(
             ["git", *arguments], cwd=destination, env=git_observation_env(env)
@@ -2237,10 +2266,46 @@ def inspect_linked_worktree(
             )
             if remote_code == 0:
                 remote_head = remote_value
+        declared_remote_head = ""
+        if declared_publication_branch is not None:
+            declared_code, declared_value, _ = _run_status(
+                [
+                    "git",
+                    "-C",
+                    str(source),
+                    "rev-parse",
+                    f"refs/remotes/origin/{declared_publication_branch}",
+                ],
+                cwd=None,
+                env=env,
+            )
+            if declared_code == 0:
+                declared_remote_head = declared_value
+        pull_remote_head = ""
+        if published_pull_request is not None:
+            pull_ref = f"refs/pull/{published_pull_request}/head"
+            pull_code, pull_value, _ = _run_status(
+                ["git", "-C", str(source), "ls-remote", "--refs", "origin", pull_ref],
+                cwd=None,
+                env=env,
+            )
+            rows = pull_value.splitlines() if pull_code == 0 else []
+            if len(rows) == 1:
+                observed_sha, separator, observed_ref = rows[0].partition("\t")
+                if (
+                    separator
+                    and observed_ref == pull_ref
+                    and _EXACT_SHA_RE.fullmatch(observed_sha)
+                ):
+                    pull_remote_head = observed_sha
         if ancestor_code == 0:
             recoverability = "HEAD_REACHABLE_FROM_ORIGIN_MASTER"
         elif remote_head.lower() == head.lower():
             recoverability = "HEAD_PUBLISHED_TO_ORIGIN_BRANCH"
+        elif declared_remote_head.lower() == head.lower():
+            recoverability = "HEAD_PUBLISHED_TO_DECLARED_ORIGIN_BRANCH"
+        elif pull_remote_head.lower() == head.lower():
+            recoverability = "HEAD_PUBLISHED_TO_PULL_REQUEST_REF"
         else:
             return LinkedWorkspaceReleaseReceipt(
                 source_repository=str(source),
@@ -2251,7 +2316,7 @@ def inspect_linked_worktree(
                 dirty=False,
                 recoverability="LOCAL_HEAD_NOT_RECOVERABLE_FROM_OBSERVED_ORIGIN_REFS",
                 removed=False,
-                reason="clean workspace has commits not observed on origin/master or origin branch",
+                reason="clean workspace has commits not observed on admitted origin publication refs",
             )
 
     return LinkedWorkspaceReleaseReceipt(
@@ -2273,6 +2338,8 @@ def release_linked_worktree(
     workspace_path: str | Path,
     *,
     expected_operation_id: str | None = None,
+    published_branch: str | None = None,
+    published_pull_request: int | None = None,
 ) -> LinkedWorkspaceReleaseReceipt:
     """Remove a managed linked worktree only after fail-closed recoverability checks."""
 
@@ -2281,6 +2348,8 @@ def release_linked_worktree(
         workspace_root,
         workspace_path,
         expected_operation_id=expected_operation_id,
+        published_branch=published_branch,
+        published_pull_request=published_pull_request,
     )
     if inspection.state != "RELEASABLE":
         return inspection
