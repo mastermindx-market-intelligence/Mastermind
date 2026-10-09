@@ -124,3 +124,59 @@ exactly, so dialogue cannot activate before the Slack admin scope migration.
 The two services receive separate local copies of the same Slack bot credential
 under their existing owner/mode boundaries. This is credential reuse inside the
 native host, not a second Slack credential or a new credential authority.
+
+## Existing A2 enrollment after a release upgrade
+
+For an already-enrolled A2 relay, preserve the token and use the installed
+`a2_agent_relay_enrollment.py rebind-release` owner. Do not repeat either
+`enroll` ceremony, rewrite the pair by hand, or copy a credential. The core
+installer does not publish A2's generation.
+
+This paired C1/A2 upgrade requires the existing shared lock namespace
+`/Library/Application Support/MastermindExecutive/locks`: a real root:wheel
+directory with mode 0700 and no ACL. The canonical C1 host preparation owner
+(`prepare-c1-sol-state-relay.sh`) provisions and checks that namespace. Verify
+this prerequisite before stopping A2. A2's initial enrollment preparation does
+not provision it, and `rebind-release` refuses a missing or unsafe namespace
+without creating or repairing it. Do not rerun enrollment preparation on an
+already-enrolled relay or weaken the namespace checks.
+
+After the exact accepted successor is installed, stop/disable A2 through
+`service-control.sh stop-agent-relay` and verify its unloaded/disabled state.
+Keep production execution disarmed under its existing owner. From the exact
+installed `RELEASE_ROOT`, with the pinned Executive Python, run:
+
+```text
+/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12 -I -S -B \
+  ops/executive_os/a2_agent_relay_enrollment.py \
+  rebind-release --expected-bot-user-id U0BT71H4FQE
+```
+
+The verb requires a coherent complete old generation. Under a private root
+flock it attests the existing token's metadata without reading its bytes,
+validates the old canonical config/plist, and replaces only their release
+binding. The existing admitted scope set and stored `w3c_enabled` boolean are
+preserved; there is no policy override or provider call. An already-current
+pair is a no-write success. Missing, mixed, unsafe or concurrently changed
+artifacts fail closed. A failed publication restores only identities still
+owned by that operation. `A2_REBIND_EFFECT_UNCERTAIN` or
+`A2_REBIND_MIXED_GENERATION` requires same-carrier reconciliation; do not retry,
+reenroll or start the relay to force convergence.
+
+Each forward and rollback publication re-attests the staged name and held file
+descriptor against the metadata sealed after writing, after all ACL and
+destination checks. Lost staging identity stops further publication and
+rollback; cleanup unlinks only the staged inode still owned by the operation.
+
+If the relay becomes loaded during publication, rollback permission is lost.
+Read-only identity reconciliation still distinguishes an operation-owned pair
+that was not restored (`A2_REBIND_MIXED_GENERATION`) from changed or unprovable
+identities (`A2_REBIND_EFFECT_UNCERTAIN`); neither permits another write.
+
+After a successful rebind, use the installed `verify` with the expected bot.
+Supply `--enable-w3c` only when the preserved enrollment already has W3C enabled;
+a false enrollment remains false. The verification requalifies the existing
+Slack identity/history and exact release. Then use the separate installed
+`start-agent-relay` owner after its ordinary admission gates, including the
+existing logs/socket-parent prerequisites, and read back health. Rebinding
+neither starts services nor proves reboot persistence.
