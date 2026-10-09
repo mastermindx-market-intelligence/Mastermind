@@ -1044,21 +1044,27 @@ def api_performance(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
         payload = paper_account.performance(portfolio_id=portfolio,
                                             prices=_book_marks(portfolio))
         return JSONResponse(payload)
-    except Exception as exc:
-        # never 500 — return a safe minimal payload
+    except Exception as exc:  # noqa: BLE001 — degrade without fabricating portfolio state
+        _log.warning("performance read failed for %s: %s", portfolio, type(exc).__name__)
         return JSONResponse({
             "inception_date": None,
-            "starting_nav": 1_000_000,
-            "current_nav": 1_000_000,
-            "cash": 1_000_000,
-            "invested": 0.0,
-            "total_return_pct": 0.0,
-            "vs_spy_pct": 0.0,
-            "day_change_pct": 0.0,
-            "max_drawdown_pct": 0.0,
+            "starting_nav": None,
+            "current_nav": None,
+            "cash": None,
+            "invested": None,
+            "total_return_pct": None,
+            "vs_benchmark_pct": None,
+            "vs_spy_pct": None,
+            "benchmark": None,
+            "benchmark_name": None,
+            "benchmark_name_zh": None,
+            "benchmark_as_of": None,
+            "day_change_pct": None,
+            "max_drawdown_pct": None,
             "realized_since": None,
             "series": [],
-            "note": f"Performance unavailable: {exc}",
+            "note": "Performance unavailable.",
+            "error": "performance_unavailable",
         })
 
 
