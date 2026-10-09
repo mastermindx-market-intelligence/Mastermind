@@ -1228,10 +1228,11 @@ class _A2Rebind:
         return fd
 
     def _file(self, path: Path, *, read: bool = True) -> _RebindFile:
+        plist_file_mode = 0o644
         contracts = {
             TOKEN_PATH: (RELAY_UID, RELAY_GID, 0o400),
             CONFIG_PATH: (RELAY_UID, RELAY_GID, 0o400),
-            PLIST_PATH: (PLIST_UID, PLIST_GID, 0o644),
+            PLIST_PATH: (PLIST_UID, PLIST_GID, plist_file_mode),
             A2_REBIND_LOCK_PATH: (REBIND_ROOT_UID, REBIND_ROOT_GID, 0o600),
         }
         if path not in contracts or (read and path in (TOKEN_PATH, A2_REBIND_LOCK_PATH)):
