@@ -128,6 +128,30 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.hits, ["/api/health"])
         self.assertEqual(result.body, b"")
 
+    async def test_default_transport_disables_ambient_tls_configuration(self):
+        options = []
+        def factory(**kwargs):
+            options.append(kwargs)
+            return httpx.MockTransport(lambda request: httpx.Response(200, json={"status": "ok"}))
+        with patch.object(self.module.httpx, "AsyncHTTPTransport", side_effect=factory):
+            result = await self.module.PublicTransport().read("health")
+        self.assertEqual(result.status, 200)
+        self.assertEqual(options, [{"retries": 0, "trust_env": False}])
+
+    async def test_compressed_response_refused_before_decompression(self):
+        attempted = []
+        class Body(httpx.AsyncByteStream):
+            async def __aiter__(self):
+                attempted.append("body_read")
+                yield b"untrusted_compressed_bytes"
+        def response(request):
+            attempted.append(request.headers.get("accept-encoding"))
+            return httpx.Response(200, headers={"Content-Type": "application/json", "Content-Encoding": "gzip"}, stream=Body())
+        transport = self.module.PublicTransport(transport_factory=lambda: httpx.MockTransport(response))
+        result = await transport.read("health")
+        self.assertEqual(result.error, "content_encoding_refused")
+        self.assertEqual(attempted, ["identity"])
+
     async def test_timeout_has_closed_error(self):
         async def timeout(request):
             raise httpx.ReadTimeout("PRIVATE_EXCEPTION")

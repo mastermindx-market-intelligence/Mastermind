@@ -35,10 +35,11 @@ class PublicTransport:
             raise ValueError("unexpected_symbols")
         status = None
         try:
-            transport = self._transport_factory() if self._transport_factory else httpx.AsyncHTTPTransport(retries=0)
+            transport = self._transport_factory() if self._transport_factory else httpx.AsyncHTTPTransport(retries=0, trust_env=False)
             async with asyncio.timeout(REQUEST_TIMEOUT_SECONDS):
                 async with httpx.AsyncClient(transport=transport, trust_env=False, follow_redirects=False,
-                                             timeout=REQUEST_TIMEOUT_SECONDS, headers={"Accept": "application/json"}) as client:
+                                             timeout=REQUEST_TIMEOUT_SECONDS,
+                                             headers={"Accept": "application/json", "Accept-Encoding": "identity"}) as client:
                     async with client.stream("GET", url) as response:
                         status = response.status_code
                         content_type = response.headers.get("Content-Type")
@@ -46,6 +47,10 @@ class PublicTransport:
                             return HttpObservation(status=status, error="redirect_refused")
                         if status != 200:
                             return HttpObservation(status=status, content_type=content_type)
+                        # Bound bytes before decoding; a compressed chunk can expand
+                        # far beyond the cap before an aiter_bytes size check runs.
+                        if response.headers.get("Content-Encoding", "identity").strip().lower() != "identity":
+                            return HttpObservation(status=status, error="content_encoding_refused")
                         if not content_type or content_type.split(";")[0].strip().lower() != "application/json":
                             return HttpObservation(status=status, error="invalid_content_type")
                         length = response.headers.get("Content-Length")

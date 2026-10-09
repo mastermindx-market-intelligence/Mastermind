@@ -63,6 +63,17 @@ class ObservationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status["data"]["checks"]["terminal_data"]["source_time"]["status"], "unknown")
         self.assertNotIn("fresh", result)
 
+    async def test_abbreviated_prefix_is_not_proof_of_checkout_drift(self):
+        self.payloads["health"].update(commit="abcdef0", checkout="abcdef0" + "1" * 33)
+        result = await self.reader.diagnostics()
+        self.assertIsNone(result["observations"][0]["data"]["checkout_drift"])
+
+    async def test_numeric_json_overflow_is_refused_even_in_unprojected_fields(self):
+        self.raw["status"] = b'{"status":"ok","commit":"abcdef0","checks":{},"unprojected":1e9999}'
+        result = await self.reader.diagnostics()
+        self.assertEqual(result["observations"][1]["state"], "invalid")
+        self.assertIsNone(result["observations"][1]["data"])
+
     async def test_body_digest_is_exact_not_a_reserialized_digest(self):
         self.raw["health"] = b'{ "status": "ok", "commit": "abcdef0", "checkout": "abcdef0" }\n'
         result = await self.reader.diagnostics()

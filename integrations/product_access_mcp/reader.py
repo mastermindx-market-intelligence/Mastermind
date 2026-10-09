@@ -22,9 +22,15 @@ def _health(value: dict, now: datetime) -> dict:
     if set(value) != {"status", "commit", "checkout"} or value["status"] != "ok":
         raise ValueError("health_contract_changed")
     process, checkout = revision(value["commit"]), revision(value["checkout"])
+    drift = None
+    if process and checkout:
+        if process == checkout:
+            drift = False
+        elif not (process.startswith(checkout) or checkout.startswith(process)):
+            drift = True
+        # A matching abbreviation and a longer revision cannot prove identity or drift.
     return {"reported_status": "ok", "process_revision": process, "checkout_revision": checkout,
-            "checkout_drift": process != checkout if process and checkout else None,
-            "exact_deployment_verified": False}
+            "checkout_drift": drift, "exact_deployment_verified": False}
 
 
 def _status(value: dict, now: datetime) -> dict:

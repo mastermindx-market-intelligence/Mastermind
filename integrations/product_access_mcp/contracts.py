@@ -89,7 +89,12 @@ def strict_json(body: bytes) -> dict[str, Any]:
         return result
     def constant(_):
         raise ValueError("nonfinite_json")
-    value = json.loads(body.decode("utf-8"), object_pairs_hook=pairs, parse_constant=constant)
+    def floating(token):
+        value = float(token)
+        if not math.isfinite(value):
+            raise ValueError("nonfinite_json")
+        return value
+    value = json.loads(body.decode("utf-8"), object_pairs_hook=pairs, parse_constant=constant, parse_float=floating)
     if type(value) is not dict:
         raise ValueError("invalid_shape")
     return value
