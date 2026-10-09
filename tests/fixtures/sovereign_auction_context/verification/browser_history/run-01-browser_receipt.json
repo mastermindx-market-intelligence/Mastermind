@@ -1,0 +1,2831 @@
+{
+  "schema_version": "mastermind_auction_browser_receipt_v1",
+  "started_at": "2026-10-08T23:28:47.176Z",
+  "status": "failed",
+  "source_files": [
+    {
+      "path": "/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs",
+      "sha256": "d250148f1e5cb609b5af2ab8ca3d2443c47f3c662e5849d18ebfee0b4a2b7e7d"
+    },
+    {
+      "path": "/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/mastermind_loopback_harness.py",
+      "sha256": "ac06f0f9b62c0639a140164cf0e441ef2a086a92635e0d9891c50a2f853d1f89"
+    }
+  ],
+  "proof_scope": "Actual Chromium page, exact existing FastAPI endpoint functions, source-bound real auction observations plus declared synthetic negative cases; no production/auth/lifespan/provider acceptance.",
+  "results": [
+    {
+      "width": 1440,
+      "height": 900,
+      "lang": "en",
+      "theme": "light",
+      "case": "observed",
+      "status": "review_required",
+      "screenshots": [
+        {
+          "path": "screenshots/1440x900-en-light-observed-page.png",
+          "sha256": "aa0c8d54759aad0c94bad5c9c81a1a3984d732c6ce15dc5a47c8da5f31efb520",
+          "bytes": 201018
+        },
+        {
+          "path": "screenshots/1440x900-en-light-observed-auction.png",
+          "sha256": "bfbf63e3069dcd896ee4e8b1acaa3fdfa19236ac95719b7bb9b21c139359a31d",
+          "bytes": 205108
+        },
+        {
+          "path": "screenshots/1440x900-en-light-observed-expanded-1.png",
+          "sha256": "2bba91face03174efd06de1df94f462a5b5e1080808ec0f79fb280956e8c2be7",
+          "bytes": 94221
+        },
+        {
+          "path": "screenshots/1440x900-en-light-observed-expanded-2.png",
+          "sha256": "4bbc75064a9b1560f45297a10e76419ff422604528c888c600858cc90cdc4c27",
+          "bytes": 95571
+        }
+      ],
+      "errors": [],
+      "warnings": [
+        "Expanded cards in 'Tentative calendar (28)' shrink below 75% of the same group's initial card width; inspect screenshot before acceptance.",
+        "Expanded cards in 'Observed results (43)' shrink below 75% of the same group's initial card width; inspect screenshot before acceptance."
+      ],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "panel": {
+          "left": 80,
+          "right": 1360,
+          "width": 1280,
+          "height": 3044.328125
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 518.5,
+        "theme": "light",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      },
+      "expandedGroups": [
+        {
+          "heading": "Tentative calendar (28)",
+          "geometry": {
+            "viewportWidth": 1440,
+            "documentWidth": 1440,
+            "bodyWidth": 1440,
+            "panel": {
+              "left": 80,
+              "right": 1360,
+              "width": 1280,
+              "height": 21731.015625
+            },
+            "clipping": [],
+            "visibleCardCount": 36,
+            "minVisibleCardWidth": 80.5,
+            "theme": "light",
+            "lang": "en",
+            "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+            "bodyBackground": "rgb(245, 247, 250)",
+            "fontStatus": "loaded",
+            "fonts": []
+          },
+          "initialCardWidths": [
+            518.5,
+            518.5,
+            518.5,
+            518.5,
+            518.5
+          ],
+          "expandedCardWidths": [
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5
+          ]
+        },
+        {
+          "heading": "Observed results (43)",
+          "geometry": {
+            "viewportWidth": 1440,
+            "documentWidth": 1440,
+            "bodyWidth": 1440,
+            "panel": {
+              "left": 80,
+              "right": 1360,
+              "width": 1280,
+              "height": 32503.359375
+            },
+            "clipping": [],
+            "visibleCardCount": 51,
+            "minVisibleCardWidth": 80.5,
+            "theme": "light",
+            "lang": "en",
+            "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+            "bodyBackground": "rgb(245, 247, 250)",
+            "fontStatus": "loaded",
+            "fonts": []
+          },
+          "initialCardWidths": [
+            518.5,
+            518.5,
+            518.5,
+            518.5,
+            518.5
+          ],
+          "expandedCardWidths": [
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5
+          ]
+        }
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "lang": "en",
+      "theme": "light",
+      "case": "unavailable",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/1440x900-en-light-unavailable-auction.png",
+          "sha256": "541d3879009de73b0320eac9b5a67cbb18857b488f96993a104dd4de5d9a6cfd",
+          "bytes": 140251
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "panel": {
+          "left": 80,
+          "right": 1360,
+          "width": 1280,
+          "height": 255.53125
+        },
+        "clipping": [],
+        "visibleCardCount": 0,
+        "minVisibleCardWidth": null,
+        "theme": "light",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "lang": "en",
+      "theme": "light",
+      "case": "source_failure",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/1440x900-en-light-source_failure-auction.png",
+          "sha256": "bfbf63e3069dcd896ee4e8b1acaa3fdfa19236ac95719b7bb9b21c139359a31d",
+          "bytes": 205108
+        },
+        {
+          "path": "screenshots/1440x900-en-light-source_failure-failure.png",
+          "sha256": "7747fe9bab92fffafe4c8a0529b0a00250dc0dfc31315e90f52f45cd0e972fa5",
+          "bytes": 178550
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "panel": {
+          "left": 80,
+          "right": 1360,
+          "width": 1280,
+          "height": 3044.328125
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 518.5,
+        "theme": "light",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "lang": "en",
+      "theme": "light",
+      "case": "awaiting_unknown",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/1440x900-en-light-awaiting_unknown-auction.png",
+          "sha256": "24bfa3d74b66ae47fd661a8be03de9226b0cf9fe1cd5e93ef8029018a6715ff1",
+          "bytes": 182625
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "panel": {
+          "left": 80,
+          "right": 1360,
+          "width": 1280,
+          "height": 656.453125
+        },
+        "clipping": [],
+        "visibleCardCount": 1,
+        "minVisibleCardWidth": 518.5,
+        "theme": "light",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "lang": "en",
+      "theme": "dark",
+      "case": "observed",
+      "status": "review_required",
+      "screenshots": [
+        {
+          "path": "screenshots/1440x900-en-dark-observed-page.png",
+          "sha256": "088447b6612a5bccdca3cd3ebfde51891fd310e696d0aa58b8eb88f05b436b65",
+          "bytes": 202452
+        },
+        {
+          "path": "screenshots/1440x900-en-dark-observed-auction.png",
+          "sha256": "885a9002d062bd241c1757e544440b807484ce90291b779a0a86caa7d08a5a56",
+          "bytes": 201919
+        },
+        {
+          "path": "screenshots/1440x900-en-dark-observed-expanded-1.png",
+          "sha256": "6acddd21bd8eac5988137686c88a8aa7017151cf28bbcfc895248dc35455f8bd",
+          "bytes": 89246
+        },
+        {
+          "path": "screenshots/1440x900-en-dark-observed-expanded-2.png",
+          "sha256": "aa45bf765be483b9a61bfe1d91f6fbe9d9f5c47e68d80f002d9523f50e2aa2f7",
+          "bytes": 90944
+        }
+      ],
+      "errors": [],
+      "warnings": [
+        "Expanded cards in 'Tentative calendar (28)' shrink below 75% of the same group's initial card width; inspect screenshot before acceptance.",
+        "Expanded cards in 'Observed results (43)' shrink below 75% of the same group's initial card width; inspect screenshot before acceptance."
+      ],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "panel": {
+          "left": 80,
+          "right": 1360,
+          "width": 1280,
+          "height": 3044.328125
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 518.5,
+        "theme": "dark",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      },
+      "expandedGroups": [
+        {
+          "heading": "Tentative calendar (28)",
+          "geometry": {
+            "viewportWidth": 1440,
+            "documentWidth": 1440,
+            "bodyWidth": 1440,
+            "panel": {
+              "left": 80,
+              "right": 1360,
+              "width": 1280,
+              "height": 21731.015625
+            },
+            "clipping": [],
+            "visibleCardCount": 36,
+            "minVisibleCardWidth": 80.5,
+            "theme": "dark",
+            "lang": "en",
+            "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+            "bodyBackground": "rgb(10, 12, 17)",
+            "fontStatus": "loaded",
+            "fonts": []
+          },
+          "initialCardWidths": [
+            518.5,
+            518.5,
+            518.5,
+            518.5,
+            518.5
+          ],
+          "expandedCardWidths": [
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5
+          ]
+        },
+        {
+          "heading": "Observed results (43)",
+          "geometry": {
+            "viewportWidth": 1440,
+            "documentWidth": 1440,
+            "bodyWidth": 1440,
+            "panel": {
+              "left": 80,
+              "right": 1360,
+              "width": 1280,
+              "height": 32503.359375
+            },
+            "clipping": [],
+            "visibleCardCount": 51,
+            "minVisibleCardWidth": 80.5,
+            "theme": "dark",
+            "lang": "en",
+            "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+            "bodyBackground": "rgb(10, 12, 17)",
+            "fontStatus": "loaded",
+            "fonts": []
+          },
+          "initialCardWidths": [
+            518.5,
+            518.5,
+            518.5,
+            518.5,
+            518.5
+          ],
+          "expandedCardWidths": [
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5
+          ]
+        }
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "lang": "en",
+      "theme": "dark",
+      "case": "unavailable",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/1440x900-en-dark-unavailable-auction.png",
+          "sha256": "da999df9135f114468ad4e03b52341d46714ab3bb52762ddce4e43e0e0ebbd6c",
+          "bytes": 138780
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "panel": {
+          "left": 80,
+          "right": 1360,
+          "width": 1280,
+          "height": 255.53125
+        },
+        "clipping": [],
+        "visibleCardCount": 0,
+        "minVisibleCardWidth": null,
+        "theme": "dark",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "lang": "en",
+      "theme": "dark",
+      "case": "source_failure",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/1440x900-en-dark-source_failure-auction.png",
+          "sha256": "885a9002d062bd241c1757e544440b807484ce90291b779a0a86caa7d08a5a56",
+          "bytes": 201919
+        },
+        {
+          "path": "screenshots/1440x900-en-dark-source_failure-failure.png",
+          "sha256": "7cb0469f63c1b28c703f2747f07deba5bff1abd2e1ace655f98e37ad9143aea4",
+          "bytes": 177830
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "panel": {
+          "left": 80,
+          "right": 1360,
+          "width": 1280,
+          "height": 3044.328125
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 518.5,
+        "theme": "dark",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "lang": "en",
+      "theme": "dark",
+      "case": "awaiting_unknown",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/1440x900-en-dark-awaiting_unknown-auction.png",
+          "sha256": "a8ea14d5d0f2641cd477bbeae5fc4247e2fce7e4241a164f127137657fa47262",
+          "bytes": 183391
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "panel": {
+          "left": 80,
+          "right": 1360,
+          "width": 1280,
+          "height": 656.453125
+        },
+        "clipping": [],
+        "visibleCardCount": 1,
+        "minVisibleCardWidth": 518.5,
+        "theme": "dark",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "lang": "zh",
+      "theme": "light",
+      "case": "observed",
+      "status": "review_required",
+      "screenshots": [
+        {
+          "path": "screenshots/1440x900-zh-light-observed-page.png",
+          "sha256": "420d76d332baa7b3ded406b8547b462c7c8bbb49bdd727a6225dd03ba134e73c",
+          "bytes": 201331
+        },
+        {
+          "path": "screenshots/1440x900-zh-light-observed-auction.png",
+          "sha256": "73916979df2d0e07fe70d29e2c289a446b63cb005e50930c4a931a70e20dabf8",
+          "bytes": 206022
+        },
+        {
+          "path": "screenshots/1440x900-zh-light-observed-expanded-1.png",
+          "sha256": "3eafaa0893f4fe42dafdac5299c0fb054750d2953583df9771b5bc277db567a7",
+          "bytes": 94589
+        },
+        {
+          "path": "screenshots/1440x900-zh-light-observed-expanded-2.png",
+          "sha256": "806805f17e7283780ac85ab1b6958e3722bb0b6166a065e590464eb2dd358c1d",
+          "bytes": 99052
+        }
+      ],
+      "errors": [],
+      "warnings": [
+        "Expanded cards in '暂定日历 (28)' shrink below 75% of the same group's initial card width; inspect screenshot before acceptance.",
+        "Expanded cards in '已观察结果 (43)' shrink below 75% of the same group's initial card width; inspect screenshot before acceptance."
+      ],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "panel": {
+          "left": 80,
+          "right": 1360,
+          "width": 1280,
+          "height": 2976.140625
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 518.5,
+        "theme": "light",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      },
+      "expandedGroups": [
+        {
+          "heading": "暂定日历 (28)",
+          "geometry": {
+            "viewportWidth": 1440,
+            "documentWidth": 1440,
+            "bodyWidth": 1440,
+            "panel": {
+              "left": 80,
+              "right": 1360,
+              "width": 1280,
+              "height": 18762.203125
+            },
+            "clipping": [],
+            "visibleCardCount": 36,
+            "minVisibleCardWidth": 80.5,
+            "theme": "light",
+            "lang": "zh",
+            "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+            "bodyBackground": "rgb(245, 247, 250)",
+            "fontStatus": "loaded",
+            "fonts": []
+          },
+          "initialCardWidths": [
+            518.5,
+            518.5,
+            518.5,
+            518.5,
+            518.5
+          ],
+          "expandedCardWidths": [
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5
+          ]
+        },
+        {
+          "heading": "已观察结果 (43)",
+          "geometry": {
+            "viewportWidth": 1440,
+            "documentWidth": 1440,
+            "bodyWidth": 1440,
+            "panel": {
+              "left": 80,
+              "right": 1360,
+              "width": 1280,
+              "height": 27459.84375
+            },
+            "clipping": [],
+            "visibleCardCount": 51,
+            "minVisibleCardWidth": 80.5,
+            "theme": "light",
+            "lang": "zh",
+            "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+            "bodyBackground": "rgb(245, 247, 250)",
+            "fontStatus": "loaded",
+            "fonts": []
+          },
+          "initialCardWidths": [
+            518.5,
+            518.5,
+            518.5,
+            518.5,
+            518.5
+          ],
+          "expandedCardWidths": [
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5
+          ]
+        }
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "lang": "zh",
+      "theme": "light",
+      "case": "unavailable",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/1440x900-zh-light-unavailable-auction.png",
+          "sha256": "202c7c5f94a0ac7432df97bac2a3d62b5cea12b1ef8158424f9d54007bef7dcd",
+          "bytes": 141233
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "panel": {
+          "left": 80,
+          "right": 1360,
+          "width": 1280,
+          "height": 255.53125
+        },
+        "clipping": [],
+        "visibleCardCount": 0,
+        "minVisibleCardWidth": null,
+        "theme": "light",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "lang": "zh",
+      "theme": "light",
+      "case": "source_failure",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/1440x900-zh-light-source_failure-auction.png",
+          "sha256": "73916979df2d0e07fe70d29e2c289a446b63cb005e50930c4a931a70e20dabf8",
+          "bytes": 206022
+        },
+        {
+          "path": "screenshots/1440x900-zh-light-source_failure-failure.png",
+          "sha256": "7367ae9ac78fd7bae0e6cbf8ab537925f553b151bb69e566dbdffe76b941a61c",
+          "bytes": 184204
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "panel": {
+          "left": 80,
+          "right": 1360,
+          "width": 1280,
+          "height": 2993.1875
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 518.5,
+        "theme": "light",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "lang": "zh",
+      "theme": "light",
+      "case": "awaiting_unknown",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/1440x900-zh-light-awaiting_unknown-auction.png",
+          "sha256": "fc0fc4b5a2a1f375bbd3dbdbffc2d350cf7e37ef681aefa4c30ef2839e19d43b",
+          "bytes": 177089
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "panel": {
+          "left": 80,
+          "right": 1360,
+          "width": 1280,
+          "height": 588.265625
+        },
+        "clipping": [],
+        "visibleCardCount": 1,
+        "minVisibleCardWidth": 518.5,
+        "theme": "light",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "lang": "zh",
+      "theme": "dark",
+      "case": "observed",
+      "status": "review_required",
+      "screenshots": [
+        {
+          "path": "screenshots/1440x900-zh-dark-observed-page.png",
+          "sha256": "381df12a967e005b1f060d033a54e60edd43bd41bbcfd2e36ed0659cf877545c",
+          "bytes": 202286
+        },
+        {
+          "path": "screenshots/1440x900-zh-dark-observed-auction.png",
+          "sha256": "e6adc2233890c1ac6c872477ff2b5e9844389bb9e05fa592d9db2665d58becd7",
+          "bytes": 201336
+        },
+        {
+          "path": "screenshots/1440x900-zh-dark-observed-expanded-1.png",
+          "sha256": "01b4fccea1879a0c129c2d5ca9c1c0d9cb5389c861cd8393be09641dc0e2dad6",
+          "bytes": 89907
+        },
+        {
+          "path": "screenshots/1440x900-zh-dark-observed-expanded-2.png",
+          "sha256": "81e9a149a5c4e5a6614320aa304dc3e1d3a313a993a8212ad29059678f6deda5",
+          "bytes": 93837
+        }
+      ],
+      "errors": [],
+      "warnings": [
+        "Expanded cards in '暂定日历 (28)' shrink below 75% of the same group's initial card width; inspect screenshot before acceptance.",
+        "Expanded cards in '已观察结果 (43)' shrink below 75% of the same group's initial card width; inspect screenshot before acceptance."
+      ],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "panel": {
+          "left": 80,
+          "right": 1360,
+          "width": 1280,
+          "height": 2976.140625
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 518.5,
+        "theme": "dark",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      },
+      "expandedGroups": [
+        {
+          "heading": "暂定日历 (28)",
+          "geometry": {
+            "viewportWidth": 1440,
+            "documentWidth": 1440,
+            "bodyWidth": 1440,
+            "panel": {
+              "left": 80,
+              "right": 1360,
+              "width": 1280,
+              "height": 18762.203125
+            },
+            "clipping": [],
+            "visibleCardCount": 36,
+            "minVisibleCardWidth": 80.5,
+            "theme": "dark",
+            "lang": "zh",
+            "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+            "bodyBackground": "rgb(10, 12, 17)",
+            "fontStatus": "loaded",
+            "fonts": []
+          },
+          "initialCardWidths": [
+            518.5,
+            518.5,
+            518.5,
+            518.5,
+            518.5
+          ],
+          "expandedCardWidths": [
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5
+          ]
+        },
+        {
+          "heading": "已观察结果 (43)",
+          "geometry": {
+            "viewportWidth": 1440,
+            "documentWidth": 1440,
+            "bodyWidth": 1440,
+            "panel": {
+              "left": 80,
+              "right": 1360,
+              "width": 1280,
+              "height": 27459.84375
+            },
+            "clipping": [],
+            "visibleCardCount": 51,
+            "minVisibleCardWidth": 80.5,
+            "theme": "dark",
+            "lang": "zh",
+            "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+            "bodyBackground": "rgb(10, 12, 17)",
+            "fontStatus": "loaded",
+            "fonts": []
+          },
+          "initialCardWidths": [
+            518.5,
+            518.5,
+            518.5,
+            518.5,
+            518.5
+          ],
+          "expandedCardWidths": [
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5,
+            80.5
+          ]
+        }
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "lang": "zh",
+      "theme": "dark",
+      "case": "unavailable",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/1440x900-zh-dark-unavailable-auction.png",
+          "sha256": "5550c72189fde95ea63bc95084aee9c341214748f478d6fa53df1638da577a32",
+          "bytes": 139862
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "panel": {
+          "left": 80,
+          "right": 1360,
+          "width": 1280,
+          "height": 255.53125
+        },
+        "clipping": [],
+        "visibleCardCount": 0,
+        "minVisibleCardWidth": null,
+        "theme": "dark",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "lang": "zh",
+      "theme": "dark",
+      "case": "source_failure",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/1440x900-zh-dark-source_failure-auction.png",
+          "sha256": "e6adc2233890c1ac6c872477ff2b5e9844389bb9e05fa592d9db2665d58becd7",
+          "bytes": 201336
+        },
+        {
+          "path": "screenshots/1440x900-zh-dark-source_failure-failure.png",
+          "sha256": "1032380d8c3784c591a53b07eb475dc0b99afd7ea5171db77c3c046bf3b6f629",
+          "bytes": 183389
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "panel": {
+          "left": 80,
+          "right": 1360,
+          "width": 1280,
+          "height": 2993.1875
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 518.5,
+        "theme": "dark",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "lang": "zh",
+      "theme": "dark",
+      "case": "awaiting_unknown",
+      "status": "passed",
+      "screenshots": [
+        {
+          "path": "screenshots/1440x900-zh-dark-awaiting_unknown-auction.png",
+          "sha256": "71b484e4913ba2cfcd279f49f951b72792c2397536194a3299852d4a19575e40",
+          "bytes": 176016
+        }
+      ],
+      "errors": [],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "panel": {
+          "left": 80,
+          "right": 1360,
+          "width": 1280,
+          "height": 588.265625
+        },
+        "clipping": [],
+        "visibleCardCount": 1,
+        "minVisibleCardWidth": 518.5,
+        "theme": "dark",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 820,
+      "height": 1180,
+      "lang": "en",
+      "theme": "light",
+      "case": "observed",
+      "status": "failed",
+      "screenshots": [
+        {
+          "path": "screenshots/820x1180-en-light-observed-page.png",
+          "sha256": "787190f5b188f59e4c605922c04bb24b7792bbfb2da0e78beefff589faef8d24",
+          "bytes": 180310
+        },
+        {
+          "path": "screenshots/820x1180-en-light-observed-auction.png",
+          "sha256": "49b200999a7760d6e5ea738c9334b9eb7768e0e7c6ca43bb7415844a82e46d84",
+          "bytes": 220094
+        },
+        {
+          "path": "screenshots/820x1180-en-light-observed-failure-evidence.png",
+          "sha256": "49b200999a7760d6e5ea738c9334b9eb7768e0e7c6ca43bb7415844a82e46d84",
+          "bytes": 220094
+        }
+      ],
+      "errors": [
+        "AssertionError [ERR_ASSERTION]: Document overflows horizontally: 924px > 820px\n    at assertGeometry (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:117:10)\n    at runCase (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:208:5)\n    at async main (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:277:24)"
+      ],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 820,
+        "documentWidth": 924,
+        "bodyWidth": 924,
+        "panel": {
+          "left": 12,
+          "right": 924,
+          "width": 912,
+          "height": 3154.75
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 436.5,
+        "theme": "light",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 820,
+      "height": 1180,
+      "lang": "en",
+      "theme": "light",
+      "case": "unavailable",
+      "status": "failed",
+      "screenshots": [
+        {
+          "path": "screenshots/820x1180-en-light-unavailable-auction.png",
+          "sha256": "b06c8e4b8859e914ccf0890c538d469d0f8fcb82b22603fdc1c9ae50c8152ce2",
+          "bytes": 119166
+        },
+        {
+          "path": "screenshots/820x1180-en-light-unavailable-failure-evidence.png",
+          "sha256": "b06c8e4b8859e914ccf0890c538d469d0f8fcb82b22603fdc1c9ae50c8152ce2",
+          "bytes": 119166
+        }
+      ],
+      "errors": [
+        "AssertionError [ERR_ASSERTION]: Document overflows horizontally: 924px > 820px\n    at assertGeometry (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:117:10)\n    at runCase (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:208:5)\n    at async main (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:277:24)"
+      ],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 820,
+        "documentWidth": 924,
+        "bodyWidth": 924,
+        "panel": {
+          "left": 12,
+          "right": 924,
+          "width": 912,
+          "height": 249.53125
+        },
+        "clipping": [],
+        "visibleCardCount": 0,
+        "minVisibleCardWidth": null,
+        "theme": "light",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 820,
+      "height": 1180,
+      "lang": "en",
+      "theme": "light",
+      "case": "source_failure",
+      "status": "failed",
+      "screenshots": [
+        {
+          "path": "screenshots/820x1180-en-light-source_failure-auction.png",
+          "sha256": "49b200999a7760d6e5ea738c9334b9eb7768e0e7c6ca43bb7415844a82e46d84",
+          "bytes": 220094
+        },
+        {
+          "path": "screenshots/820x1180-en-light-source_failure-failure-evidence.png",
+          "sha256": "49b200999a7760d6e5ea738c9334b9eb7768e0e7c6ca43bb7415844a82e46d84",
+          "bytes": 220094
+        }
+      ],
+      "errors": [
+        "AssertionError [ERR_ASSERTION]: Document overflows horizontally: 924px > 820px\n    at assertGeometry (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:117:10)\n    at runCase (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:208:5)\n    at async main (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:277:24)"
+      ],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 820,
+        "documentWidth": 924,
+        "bodyWidth": 924,
+        "panel": {
+          "left": 12,
+          "right": 924,
+          "width": 912,
+          "height": 3171.796875
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 436.5,
+        "theme": "light",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 820,
+      "height": 1180,
+      "lang": "en",
+      "theme": "light",
+      "case": "awaiting_unknown",
+      "status": "failed",
+      "screenshots": [
+        {
+          "path": "screenshots/820x1180-en-light-awaiting_unknown-auction.png",
+          "sha256": "b53389120c0f84a87bbbd10477ce95f2065077a03ed880666e365deb1dd84828",
+          "bytes": 187030
+        },
+        {
+          "path": "screenshots/820x1180-en-light-awaiting_unknown-failure-evidence.png",
+          "sha256": "b53389120c0f84a87bbbd10477ce95f2065077a03ed880666e365deb1dd84828",
+          "bytes": 187030
+        }
+      ],
+      "errors": [
+        "AssertionError [ERR_ASSERTION]: Document overflows horizontally: 924px > 820px\n    at assertGeometry (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:117:10)\n    at runCase (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:208:5)\n    at async main (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:277:24)"
+      ],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 820,
+        "documentWidth": 924,
+        "bodyWidth": 924,
+        "panel": {
+          "left": 12,
+          "right": 924,
+          "width": 912,
+          "height": 698.59375
+        },
+        "clipping": [],
+        "visibleCardCount": 1,
+        "minVisibleCardWidth": 436.5,
+        "theme": "light",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 820,
+      "height": 1180,
+      "lang": "en",
+      "theme": "dark",
+      "case": "observed",
+      "status": "failed",
+      "screenshots": [
+        {
+          "path": "screenshots/820x1180-en-dark-observed-page.png",
+          "sha256": "8c800f4ac15ac6a912465c796b9650c95955329f230ff746ff5f15e0bfacb115",
+          "bytes": 179853
+        },
+        {
+          "path": "screenshots/820x1180-en-dark-observed-auction.png",
+          "sha256": "9922364e2bd46139a74c9bce1101b355f21cff4d869bd4635657c16d92060512",
+          "bytes": 219699
+        },
+        {
+          "path": "screenshots/820x1180-en-dark-observed-failure-evidence.png",
+          "sha256": "9922364e2bd46139a74c9bce1101b355f21cff4d869bd4635657c16d92060512",
+          "bytes": 219699
+        }
+      ],
+      "errors": [
+        "AssertionError [ERR_ASSERTION]: Document overflows horizontally: 924px > 820px\n    at assertGeometry (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:117:10)\n    at runCase (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:208:5)\n    at async main (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:277:24)"
+      ],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 820,
+        "documentWidth": 924,
+        "bodyWidth": 924,
+        "panel": {
+          "left": 12,
+          "right": 924,
+          "width": 912,
+          "height": 3154.75
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 436.5,
+        "theme": "dark",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 820,
+      "height": 1180,
+      "lang": "en",
+      "theme": "dark",
+      "case": "unavailable",
+      "status": "failed",
+      "screenshots": [
+        {
+          "path": "screenshots/820x1180-en-dark-unavailable-auction.png",
+          "sha256": "38d138596c1963b277e350368a8e12761d11788dac052cdcb7fcca3ca77d2c95",
+          "bytes": 119373
+        },
+        {
+          "path": "screenshots/820x1180-en-dark-unavailable-failure-evidence.png",
+          "sha256": "38d138596c1963b277e350368a8e12761d11788dac052cdcb7fcca3ca77d2c95",
+          "bytes": 119373
+        }
+      ],
+      "errors": [
+        "AssertionError [ERR_ASSERTION]: Document overflows horizontally: 924px > 820px\n    at assertGeometry (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:117:10)\n    at runCase (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:208:5)\n    at async main (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:277:24)"
+      ],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 820,
+        "documentWidth": 924,
+        "bodyWidth": 924,
+        "panel": {
+          "left": 12,
+          "right": 924,
+          "width": 912,
+          "height": 249.53125
+        },
+        "clipping": [],
+        "visibleCardCount": 0,
+        "minVisibleCardWidth": null,
+        "theme": "dark",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 820,
+      "height": 1180,
+      "lang": "en",
+      "theme": "dark",
+      "case": "source_failure",
+      "status": "failed",
+      "screenshots": [
+        {
+          "path": "screenshots/820x1180-en-dark-source_failure-auction.png",
+          "sha256": "9922364e2bd46139a74c9bce1101b355f21cff4d869bd4635657c16d92060512",
+          "bytes": 219699
+        },
+        {
+          "path": "screenshots/820x1180-en-dark-source_failure-failure-evidence.png",
+          "sha256": "9922364e2bd46139a74c9bce1101b355f21cff4d869bd4635657c16d92060512",
+          "bytes": 219699
+        }
+      ],
+      "errors": [
+        "AssertionError [ERR_ASSERTION]: Document overflows horizontally: 924px > 820px\n    at assertGeometry (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:117:10)\n    at runCase (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:208:5)\n    at async main (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:277:24)"
+      ],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 820,
+        "documentWidth": 924,
+        "bodyWidth": 924,
+        "panel": {
+          "left": 12,
+          "right": 924,
+          "width": 912,
+          "height": 3171.796875
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 436.5,
+        "theme": "dark",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 820,
+      "height": 1180,
+      "lang": "en",
+      "theme": "dark",
+      "case": "awaiting_unknown",
+      "status": "failed",
+      "screenshots": [
+        {
+          "path": "screenshots/820x1180-en-dark-awaiting_unknown-auction.png",
+          "sha256": "7ae600f8cb4e7e3d58ed60304aaeedf36208e0d3092bfd666d5fbc4a0a247b7c",
+          "bytes": 188002
+        },
+        {
+          "path": "screenshots/820x1180-en-dark-awaiting_unknown-failure-evidence.png",
+          "sha256": "7ae600f8cb4e7e3d58ed60304aaeedf36208e0d3092bfd666d5fbc4a0a247b7c",
+          "bytes": 188002
+        }
+      ],
+      "errors": [
+        "AssertionError [ERR_ASSERTION]: Document overflows horizontally: 924px > 820px\n    at assertGeometry (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:117:10)\n    at runCase (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:208:5)\n    at async main (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:277:24)"
+      ],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 820,
+        "documentWidth": 924,
+        "bodyWidth": 924,
+        "panel": {
+          "left": 12,
+          "right": 924,
+          "width": 912,
+          "height": 698.59375
+        },
+        "clipping": [],
+        "visibleCardCount": 1,
+        "minVisibleCardWidth": 436.5,
+        "theme": "dark",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 820,
+      "height": 1180,
+      "lang": "zh",
+      "theme": "light",
+      "case": "observed",
+      "status": "failed",
+      "screenshots": [
+        {
+          "path": "screenshots/820x1180-zh-light-observed-page.png",
+          "sha256": "570436e17cad00819a21cae8f606eaaac4a78a44929d0c919c6da7855695b9e2",
+          "bytes": 179489
+        },
+        {
+          "path": "screenshots/820x1180-zh-light-observed-auction.png",
+          "sha256": "f30842b6eb2a9b90be9ca41c77c9f61f30d49b3a094c1a5640fb6c7c7a510c9d",
+          "bytes": 223954
+        },
+        {
+          "path": "screenshots/820x1180-zh-light-observed-failure-evidence.png",
+          "sha256": "f30842b6eb2a9b90be9ca41c77c9f61f30d49b3a094c1a5640fb6c7c7a510c9d",
+          "bytes": 223954
+        }
+      ],
+      "errors": [
+        "AssertionError [ERR_ASSERTION]: Document overflows horizontally: 924px > 820px\n    at assertGeometry (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:117:10)\n    at runCase (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:208:5)\n    at async main (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:277:24)"
+      ],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 820,
+        "documentWidth": 924,
+        "bodyWidth": 924,
+        "panel": {
+          "left": 12,
+          "right": 924,
+          "width": 912,
+          "height": 3154.75
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 436.5,
+        "theme": "light",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 820,
+      "height": 1180,
+      "lang": "zh",
+      "theme": "light",
+      "case": "unavailable",
+      "status": "failed",
+      "screenshots": [
+        {
+          "path": "screenshots/820x1180-zh-light-unavailable-auction.png",
+          "sha256": "3c182538aad1dd7ae475c468635a7d3ab395895f19c73adbcad9d910e77c168f",
+          "bytes": 119913
+        },
+        {
+          "path": "screenshots/820x1180-zh-light-unavailable-failure-evidence.png",
+          "sha256": "3c182538aad1dd7ae475c468635a7d3ab395895f19c73adbcad9d910e77c168f",
+          "bytes": 119913
+        }
+      ],
+      "errors": [
+        "AssertionError [ERR_ASSERTION]: Document overflows horizontally: 924px > 820px\n    at assertGeometry (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:117:10)\n    at runCase (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:208:5)\n    at async main (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:277:24)"
+      ],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 820,
+        "documentWidth": 924,
+        "bodyWidth": 924,
+        "panel": {
+          "left": 12,
+          "right": 924,
+          "width": 912,
+          "height": 249.53125
+        },
+        "clipping": [],
+        "visibleCardCount": 0,
+        "minVisibleCardWidth": null,
+        "theme": "light",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 820,
+      "height": 1180,
+      "lang": "zh",
+      "theme": "light",
+      "case": "source_failure",
+      "status": "failed",
+      "screenshots": [
+        {
+          "path": "screenshots/820x1180-zh-light-source_failure-auction.png",
+          "sha256": "f30842b6eb2a9b90be9ca41c77c9f61f30d49b3a094c1a5640fb6c7c7a510c9d",
+          "bytes": 223954
+        },
+        {
+          "path": "screenshots/820x1180-zh-light-source_failure-failure-evidence.png",
+          "sha256": "f30842b6eb2a9b90be9ca41c77c9f61f30d49b3a094c1a5640fb6c7c7a510c9d",
+          "bytes": 223954
+        }
+      ],
+      "errors": [
+        "AssertionError [ERR_ASSERTION]: Document overflows horizontally: 924px > 820px\n    at assertGeometry (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:117:10)\n    at runCase (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:208:5)\n    at async main (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:277:24)"
+      ],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 820,
+        "documentWidth": 924,
+        "bodyWidth": 924,
+        "panel": {
+          "left": 12,
+          "right": 924,
+          "width": 912,
+          "height": 3154.75
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 436.5,
+        "theme": "light",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 820,
+      "height": 1180,
+      "lang": "zh",
+      "theme": "light",
+      "case": "awaiting_unknown",
+      "status": "failed",
+      "screenshots": [
+        {
+          "path": "screenshots/820x1180-zh-light-awaiting_unknown-auction.png",
+          "sha256": "2947fb4916166a1c93cf67c13fe6694c6f5d90e564e1aca6741ab784affd9634",
+          "bytes": 186504
+        },
+        {
+          "path": "screenshots/820x1180-zh-light-awaiting_unknown-failure-evidence.png",
+          "sha256": "2947fb4916166a1c93cf67c13fe6694c6f5d90e564e1aca6741ab784affd9634",
+          "bytes": 186504
+        }
+      ],
+      "errors": [
+        "AssertionError [ERR_ASSERTION]: Document overflows horizontally: 924px > 820px\n    at assertGeometry (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:117:10)\n    at runCase (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:208:5)\n    at async main (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:277:24)"
+      ],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 820,
+        "documentWidth": 924,
+        "bodyWidth": 924,
+        "panel": {
+          "left": 12,
+          "right": 924,
+          "width": 912,
+          "height": 698.59375
+        },
+        "clipping": [],
+        "visibleCardCount": 1,
+        "minVisibleCardWidth": 436.5,
+        "theme": "light",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 820,
+      "height": 1180,
+      "lang": "zh",
+      "theme": "dark",
+      "case": "observed",
+      "status": "failed",
+      "screenshots": [
+        {
+          "path": "screenshots/820x1180-zh-dark-observed-page.png",
+          "sha256": "3b6663609fe64bf8d18b7465f5cdfd53f84e85b789a5939dd085a4248392f539",
+          "bytes": 178637
+        },
+        {
+          "path": "screenshots/820x1180-zh-dark-observed-auction.png",
+          "sha256": "35ddafa04d043e9ddbb9dc09f564ee88071ba815a24ce5a886845ae6c5a74985",
+          "bytes": 222872
+        },
+        {
+          "path": "screenshots/820x1180-zh-dark-observed-failure-evidence.png",
+          "sha256": "35ddafa04d043e9ddbb9dc09f564ee88071ba815a24ce5a886845ae6c5a74985",
+          "bytes": 222872
+        }
+      ],
+      "errors": [
+        "AssertionError [ERR_ASSERTION]: Document overflows horizontally: 924px > 820px\n    at assertGeometry (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:117:10)\n    at runCase (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:208:5)\n    at async main (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:277:24)"
+      ],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 820,
+        "documentWidth": 924,
+        "bodyWidth": 924,
+        "panel": {
+          "left": 12,
+          "right": 924,
+          "width": 912,
+          "height": 3154.75
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 436.5,
+        "theme": "dark",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 820,
+      "height": 1180,
+      "lang": "zh",
+      "theme": "dark",
+      "case": "unavailable",
+      "status": "failed",
+      "screenshots": [
+        {
+          "path": "screenshots/820x1180-zh-dark-unavailable-auction.png",
+          "sha256": "7e34b2254274cf3ab6f76aafb747cb65137f54ded0fc873aeecd4da6efa93ef3",
+          "bytes": 120050
+        },
+        {
+          "path": "screenshots/820x1180-zh-dark-unavailable-failure-evidence.png",
+          "sha256": "7e34b2254274cf3ab6f76aafb747cb65137f54ded0fc873aeecd4da6efa93ef3",
+          "bytes": 120050
+        }
+      ],
+      "errors": [
+        "AssertionError [ERR_ASSERTION]: Document overflows horizontally: 924px > 820px\n    at assertGeometry (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:117:10)\n    at runCase (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:208:5)\n    at async main (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:277:24)"
+      ],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 820,
+        "documentWidth": 924,
+        "bodyWidth": 924,
+        "panel": {
+          "left": 12,
+          "right": 924,
+          "width": 912,
+          "height": 249.53125
+        },
+        "clipping": [],
+        "visibleCardCount": 0,
+        "minVisibleCardWidth": null,
+        "theme": "dark",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 820,
+      "height": 1180,
+      "lang": "zh",
+      "theme": "dark",
+      "case": "source_failure",
+      "status": "failed",
+      "screenshots": [
+        {
+          "path": "screenshots/820x1180-zh-dark-source_failure-auction.png",
+          "sha256": "35ddafa04d043e9ddbb9dc09f564ee88071ba815a24ce5a886845ae6c5a74985",
+          "bytes": 222872
+        },
+        {
+          "path": "screenshots/820x1180-zh-dark-source_failure-failure-evidence.png",
+          "sha256": "35ddafa04d043e9ddbb9dc09f564ee88071ba815a24ce5a886845ae6c5a74985",
+          "bytes": 222872
+        }
+      ],
+      "errors": [
+        "AssertionError [ERR_ASSERTION]: Document overflows horizontally: 924px > 820px\n    at assertGeometry (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:117:10)\n    at runCase (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:208:5)\n    at async main (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:277:24)"
+      ],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 820,
+        "documentWidth": 924,
+        "bodyWidth": 924,
+        "panel": {
+          "left": 12,
+          "right": 924,
+          "width": 912,
+          "height": 3154.75
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 436.5,
+        "theme": "dark",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 820,
+      "height": 1180,
+      "lang": "zh",
+      "theme": "dark",
+      "case": "awaiting_unknown",
+      "status": "failed",
+      "screenshots": [
+        {
+          "path": "screenshots/820x1180-zh-dark-awaiting_unknown-auction.png",
+          "sha256": "398b0a7d6a2fe7fe489ccac8a551111bd312112c93c1ecf6aebbc68318bcc765",
+          "bytes": 186959
+        },
+        {
+          "path": "screenshots/820x1180-zh-dark-awaiting_unknown-failure-evidence.png",
+          "sha256": "398b0a7d6a2fe7fe489ccac8a551111bd312112c93c1ecf6aebbc68318bcc765",
+          "bytes": 186959
+        }
+      ],
+      "errors": [
+        "AssertionError [ERR_ASSERTION]: Document overflows horizontally: 924px > 820px\n    at assertGeometry (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:117:10)\n    at runCase (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:208:5)\n    at async main (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:277:24)"
+      ],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 820,
+        "documentWidth": 924,
+        "bodyWidth": 924,
+        "panel": {
+          "left": 12,
+          "right": 924,
+          "width": 912,
+          "height": 698.59375
+        },
+        "clipping": [],
+        "visibleCardCount": 1,
+        "minVisibleCardWidth": 436.5,
+        "theme": "dark",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "lang": "en",
+      "theme": "light",
+      "case": "observed",
+      "status": "failed",
+      "screenshots": [
+        {
+          "path": "screenshots/390x844-en-light-observed-page.png",
+          "sha256": "6d82261f3015b633e665c253a82b88876b0a7191b42cfb6acfd96cf7cc29e038",
+          "bytes": 109666
+        },
+        {
+          "path": "screenshots/390x844-en-light-observed-auction.png",
+          "sha256": "6c896af7a4047274b6c0944c10399b2c45acba14757119dd37a76396aaf06895",
+          "bytes": 102420
+        },
+        {
+          "path": "screenshots/390x844-en-light-observed-failure-evidence.png",
+          "sha256": "6c896af7a4047274b6c0944c10399b2c45acba14757119dd37a76396aaf06895",
+          "bytes": 102420
+        }
+      ],
+      "errors": [
+        "AssertionError [ERR_ASSERTION]: Document overflows horizontally: 924px > 390px\n    at assertGeometry (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:117:10)\n    at runCase (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:208:5)\n    at async main (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:277:24)"
+      ],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 390,
+        "documentWidth": 924,
+        "bodyWidth": 924,
+        "panel": {
+          "left": 12,
+          "right": 924,
+          "width": 912,
+          "height": 4679.796875
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 882,
+        "theme": "light",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "lang": "en",
+      "theme": "light",
+      "case": "unavailable",
+      "status": "failed",
+      "screenshots": [
+        {
+          "path": "screenshots/390x844-en-light-unavailable-auction.png",
+          "sha256": "853fe9e6b6e60fe3c98d34300f0a49481a7b60b8a251bfab4fb8f0c44613c86a",
+          "bytes": 65532
+        },
+        {
+          "path": "screenshots/390x844-en-light-unavailable-failure-evidence.png",
+          "sha256": "853fe9e6b6e60fe3c98d34300f0a49481a7b60b8a251bfab4fb8f0c44613c86a",
+          "bytes": 65532
+        }
+      ],
+      "errors": [
+        "AssertionError [ERR_ASSERTION]: Document overflows horizontally: 924px > 390px\n    at assertGeometry (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:117:10)\n    at runCase (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:208:5)\n    at async main (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:277:24)"
+      ],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 390,
+        "documentWidth": 924,
+        "bodyWidth": 924,
+        "panel": {
+          "left": 12,
+          "right": 924,
+          "width": 912,
+          "height": 249.53125
+        },
+        "clipping": [],
+        "visibleCardCount": 0,
+        "minVisibleCardWidth": null,
+        "theme": "light",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "lang": "en",
+      "theme": "light",
+      "case": "source_failure",
+      "status": "failed",
+      "screenshots": [
+        {
+          "path": "screenshots/390x844-en-light-source_failure-auction.png",
+          "sha256": "6c896af7a4047274b6c0944c10399b2c45acba14757119dd37a76396aaf06895",
+          "bytes": 102420
+        },
+        {
+          "path": "screenshots/390x844-en-light-source_failure-failure-evidence.png",
+          "sha256": "6c896af7a4047274b6c0944c10399b2c45acba14757119dd37a76396aaf06895",
+          "bytes": 102420
+        }
+      ],
+      "errors": [
+        "AssertionError [ERR_ASSERTION]: Document overflows horizontally: 924px > 390px\n    at assertGeometry (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:117:10)\n    at runCase (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:208:5)\n    at async main (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:277:24)"
+      ],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 390,
+        "documentWidth": 924,
+        "bodyWidth": 924,
+        "panel": {
+          "left": 12,
+          "right": 924,
+          "width": 912,
+          "height": 4696.84375
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 882,
+        "theme": "light",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "lang": "en",
+      "theme": "light",
+      "case": "awaiting_unknown",
+      "status": "failed",
+      "screenshots": [
+        {
+          "path": "screenshots/390x844-en-light-awaiting_unknown-auction.png",
+          "sha256": "27f9731723e5427b8b462dac2e61cfbe2ef21b71e8f4d85428dcd175999c95f6",
+          "bytes": 104721
+        },
+        {
+          "path": "screenshots/390x844-en-light-awaiting_unknown-failure-evidence.png",
+          "sha256": "27f9731723e5427b8b462dac2e61cfbe2ef21b71e8f4d85428dcd175999c95f6",
+          "bytes": 104721
+        }
+      ],
+      "errors": [
+        "AssertionError [ERR_ASSERTION]: Document overflows horizontally: 924px > 390px\n    at assertGeometry (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:117:10)\n    at runCase (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:208:5)\n    at async main (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:277:24)"
+      ],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 390,
+        "documentWidth": 924,
+        "bodyWidth": 924,
+        "panel": {
+          "left": 12,
+          "right": 924,
+          "width": 912,
+          "height": 680
+        },
+        "clipping": [],
+        "visibleCardCount": 1,
+        "minVisibleCardWidth": 882,
+        "theme": "light",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "lang": "en",
+      "theme": "dark",
+      "case": "observed",
+      "status": "failed",
+      "screenshots": [
+        {
+          "path": "screenshots/390x844-en-dark-observed-page.png",
+          "sha256": "ec5e3bd29a5f391260e640ee6573a474aa6b5634377a651d11e0aaddeaad769e",
+          "bytes": 111940
+        },
+        {
+          "path": "screenshots/390x844-en-dark-observed-auction.png",
+          "sha256": "16b62e0258fec1419ccb93c75be792a2da052a843da3c898633af3ab34f79e6f",
+          "bytes": 103150
+        },
+        {
+          "path": "screenshots/390x844-en-dark-observed-failure-evidence.png",
+          "sha256": "16b62e0258fec1419ccb93c75be792a2da052a843da3c898633af3ab34f79e6f",
+          "bytes": 103150
+        }
+      ],
+      "errors": [
+        "AssertionError [ERR_ASSERTION]: Document overflows horizontally: 924px > 390px\n    at assertGeometry (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:117:10)\n    at runCase (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:208:5)\n    at async main (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:277:24)"
+      ],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 390,
+        "documentWidth": 924,
+        "bodyWidth": 924,
+        "panel": {
+          "left": 12,
+          "right": 924,
+          "width": 912,
+          "height": 4679.796875
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 882,
+        "theme": "dark",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "lang": "en",
+      "theme": "dark",
+      "case": "unavailable",
+      "status": "failed",
+      "screenshots": [
+        {
+          "path": "screenshots/390x844-en-dark-unavailable-auction.png",
+          "sha256": "2ee8ab1c6a86d51b05395ec79f9b20a326d17e7fe05c7aacdea45c5c5bee0597",
+          "bytes": 63979
+        },
+        {
+          "path": "screenshots/390x844-en-dark-unavailable-failure-evidence.png",
+          "sha256": "2ee8ab1c6a86d51b05395ec79f9b20a326d17e7fe05c7aacdea45c5c5bee0597",
+          "bytes": 63979
+        }
+      ],
+      "errors": [
+        "AssertionError [ERR_ASSERTION]: Document overflows horizontally: 924px > 390px\n    at assertGeometry (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:117:10)\n    at runCase (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:208:5)\n    at async main (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:277:24)"
+      ],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 390,
+        "documentWidth": 924,
+        "bodyWidth": 924,
+        "panel": {
+          "left": 12,
+          "right": 924,
+          "width": 912,
+          "height": 249.53125
+        },
+        "clipping": [],
+        "visibleCardCount": 0,
+        "minVisibleCardWidth": null,
+        "theme": "dark",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "lang": "en",
+      "theme": "dark",
+      "case": "source_failure",
+      "status": "failed",
+      "screenshots": [
+        {
+          "path": "screenshots/390x844-en-dark-source_failure-auction.png",
+          "sha256": "16b62e0258fec1419ccb93c75be792a2da052a843da3c898633af3ab34f79e6f",
+          "bytes": 103150
+        },
+        {
+          "path": "screenshots/390x844-en-dark-source_failure-failure-evidence.png",
+          "sha256": "16b62e0258fec1419ccb93c75be792a2da052a843da3c898633af3ab34f79e6f",
+          "bytes": 103150
+        }
+      ],
+      "errors": [
+        "AssertionError [ERR_ASSERTION]: Document overflows horizontally: 924px > 390px\n    at assertGeometry (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:117:10)\n    at runCase (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:208:5)\n    at async main (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:277:24)"
+      ],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 390,
+        "documentWidth": 924,
+        "bodyWidth": 924,
+        "panel": {
+          "left": 12,
+          "right": 924,
+          "width": 912,
+          "height": 4696.84375
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 882,
+        "theme": "dark",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "lang": "en",
+      "theme": "dark",
+      "case": "awaiting_unknown",
+      "status": "failed",
+      "screenshots": [
+        {
+          "path": "screenshots/390x844-en-dark-awaiting_unknown-auction.png",
+          "sha256": "4d831be894b3ee1950fb241f56e3d4aef72f72cff03cbf0574c135eba66e4dea",
+          "bytes": 106529
+        },
+        {
+          "path": "screenshots/390x844-en-dark-awaiting_unknown-failure-evidence.png",
+          "sha256": "4d831be894b3ee1950fb241f56e3d4aef72f72cff03cbf0574c135eba66e4dea",
+          "bytes": 106529
+        }
+      ],
+      "errors": [
+        "AssertionError [ERR_ASSERTION]: Document overflows horizontally: 924px > 390px\n    at assertGeometry (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:117:10)\n    at runCase (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:208:5)\n    at async main (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:277:24)"
+      ],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 390,
+        "documentWidth": 924,
+        "bodyWidth": 924,
+        "panel": {
+          "left": 12,
+          "right": 924,
+          "width": 912,
+          "height": 680
+        },
+        "clipping": [],
+        "visibleCardCount": 1,
+        "minVisibleCardWidth": 882,
+        "theme": "dark",
+        "lang": "en",
+        "bodyFont": "-apple-system, \"system-ui\", \"SF Pro Text\", \"SF Pro Display\", Inter, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "lang": "zh",
+      "theme": "light",
+      "case": "observed",
+      "status": "failed",
+      "screenshots": [
+        {
+          "path": "screenshots/390x844-zh-light-observed-page.png",
+          "sha256": "ea6c43dc4fd42a7d4fce1f1a0da57e2b9fc5cfe23df556e7ba6ee4ccc8cd47c4",
+          "bytes": 109805
+        },
+        {
+          "path": "screenshots/390x844-zh-light-observed-auction.png",
+          "sha256": "168008948491230ed628a3e2c1b9faa31f426a2c819e55f5e7e5e6ebc24b63e7",
+          "bytes": 106760
+        },
+        {
+          "path": "screenshots/390x844-zh-light-observed-failure-evidence.png",
+          "sha256": "168008948491230ed628a3e2c1b9faa31f426a2c819e55f5e7e5e6ebc24b63e7",
+          "bytes": 106760
+        }
+      ],
+      "errors": [
+        "AssertionError [ERR_ASSERTION]: Document overflows horizontally: 924px > 390px\n    at assertGeometry (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:117:10)\n    at runCase (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:208:5)\n    at async main (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:277:24)"
+      ],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 390,
+        "documentWidth": 924,
+        "bodyWidth": 924,
+        "panel": {
+          "left": 12,
+          "right": 924,
+          "width": 912,
+          "height": 4679.796875
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 882,
+        "theme": "light",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "lang": "zh",
+      "theme": "light",
+      "case": "unavailable",
+      "status": "failed",
+      "screenshots": [
+        {
+          "path": "screenshots/390x844-zh-light-unavailable-auction.png",
+          "sha256": "a8edd23f4afaf1a1d84991c9b1098eb87085bb65963601cd2b0cb7cf0355f404",
+          "bytes": 66659
+        },
+        {
+          "path": "screenshots/390x844-zh-light-unavailable-failure-evidence.png",
+          "sha256": "a8edd23f4afaf1a1d84991c9b1098eb87085bb65963601cd2b0cb7cf0355f404",
+          "bytes": 66659
+        }
+      ],
+      "errors": [
+        "AssertionError [ERR_ASSERTION]: Document overflows horizontally: 924px > 390px\n    at assertGeometry (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:117:10)\n    at runCase (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:208:5)\n    at async main (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:277:24)"
+      ],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 390,
+        "documentWidth": 924,
+        "bodyWidth": 924,
+        "panel": {
+          "left": 12,
+          "right": 924,
+          "width": 912,
+          "height": 249.53125
+        },
+        "clipping": [],
+        "visibleCardCount": 0,
+        "minVisibleCardWidth": null,
+        "theme": "light",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "lang": "zh",
+      "theme": "light",
+      "case": "source_failure",
+      "status": "failed",
+      "screenshots": [
+        {
+          "path": "screenshots/390x844-zh-light-source_failure-auction.png",
+          "sha256": "168008948491230ed628a3e2c1b9faa31f426a2c819e55f5e7e5e6ebc24b63e7",
+          "bytes": 106760
+        },
+        {
+          "path": "screenshots/390x844-zh-light-source_failure-failure-evidence.png",
+          "sha256": "168008948491230ed628a3e2c1b9faa31f426a2c819e55f5e7e5e6ebc24b63e7",
+          "bytes": 106760
+        }
+      ],
+      "errors": [
+        "AssertionError [ERR_ASSERTION]: Document overflows horizontally: 924px > 390px\n    at assertGeometry (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:117:10)\n    at runCase (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:208:5)\n    at async main (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:277:24)"
+      ],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 390,
+        "documentWidth": 924,
+        "bodyWidth": 924,
+        "panel": {
+          "left": 12,
+          "right": 924,
+          "width": 912,
+          "height": 4679.796875
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 882,
+        "theme": "light",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "lang": "zh",
+      "theme": "light",
+      "case": "awaiting_unknown",
+      "status": "failed",
+      "screenshots": [
+        {
+          "path": "screenshots/390x844-zh-light-awaiting_unknown-auction.png",
+          "sha256": "f220a804a84bb5fca51ca0398b364b682a4e17bd93892154aa293c10126aff17",
+          "bytes": 115898
+        },
+        {
+          "path": "screenshots/390x844-zh-light-awaiting_unknown-failure-evidence.png",
+          "sha256": "f220a804a84bb5fca51ca0398b364b682a4e17bd93892154aa293c10126aff17",
+          "bytes": 115898
+        }
+      ],
+      "errors": [
+        "AssertionError [ERR_ASSERTION]: Document overflows horizontally: 924px > 390px\n    at assertGeometry (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:117:10)\n    at runCase (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:208:5)\n    at async main (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:277:24)"
+      ],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 390,
+        "documentWidth": 924,
+        "bodyWidth": 924,
+        "panel": {
+          "left": 12,
+          "right": 924,
+          "width": 912,
+          "height": 680
+        },
+        "clipping": [],
+        "visibleCardCount": 1,
+        "minVisibleCardWidth": 882,
+        "theme": "light",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(245, 247, 250)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "lang": "zh",
+      "theme": "dark",
+      "case": "observed",
+      "status": "failed",
+      "screenshots": [
+        {
+          "path": "screenshots/390x844-zh-dark-observed-page.png",
+          "sha256": "41970eb59b876fa3b23c203f0ef463300c1da9ea41f7917cd1281716a0d8283e",
+          "bytes": 111693
+        },
+        {
+          "path": "screenshots/390x844-zh-dark-observed-auction.png",
+          "sha256": "859bfc0ba18d990bc44a41328fd8dfd75d4a0595fe06401550da44ec49958306",
+          "bytes": 106749
+        },
+        {
+          "path": "screenshots/390x844-zh-dark-observed-failure-evidence.png",
+          "sha256": "859bfc0ba18d990bc44a41328fd8dfd75d4a0595fe06401550da44ec49958306",
+          "bytes": 106749
+        }
+      ],
+      "errors": [
+        "AssertionError [ERR_ASSERTION]: Document overflows horizontally: 924px > 390px\n    at assertGeometry (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:117:10)\n    at runCase (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:208:5)\n    at async main (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:277:24)"
+      ],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 390,
+        "documentWidth": 924,
+        "bodyWidth": 924,
+        "panel": {
+          "left": 12,
+          "right": 924,
+          "width": 912,
+          "height": 4679.796875
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 882,
+        "theme": "dark",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "lang": "zh",
+      "theme": "dark",
+      "case": "unavailable",
+      "status": "failed",
+      "screenshots": [
+        {
+          "path": "screenshots/390x844-zh-dark-unavailable-auction.png",
+          "sha256": "cd1aa461224692995dbaef818c5e5081ee8276524d0c35598af11be416137b87",
+          "bytes": 65177
+        },
+        {
+          "path": "screenshots/390x844-zh-dark-unavailable-failure-evidence.png",
+          "sha256": "cd1aa461224692995dbaef818c5e5081ee8276524d0c35598af11be416137b87",
+          "bytes": 65177
+        }
+      ],
+      "errors": [
+        "AssertionError [ERR_ASSERTION]: Document overflows horizontally: 924px > 390px\n    at assertGeometry (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:117:10)\n    at runCase (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:208:5)\n    at async main (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:277:24)"
+      ],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 390,
+        "documentWidth": 924,
+        "bodyWidth": 924,
+        "panel": {
+          "left": 12,
+          "right": 924,
+          "width": 912,
+          "height": 249.53125
+        },
+        "clipping": [],
+        "visibleCardCount": 0,
+        "minVisibleCardWidth": null,
+        "theme": "dark",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "lang": "zh",
+      "theme": "dark",
+      "case": "source_failure",
+      "status": "failed",
+      "screenshots": [
+        {
+          "path": "screenshots/390x844-zh-dark-source_failure-auction.png",
+          "sha256": "859bfc0ba18d990bc44a41328fd8dfd75d4a0595fe06401550da44ec49958306",
+          "bytes": 106749
+        },
+        {
+          "path": "screenshots/390x844-zh-dark-source_failure-failure-evidence.png",
+          "sha256": "859bfc0ba18d990bc44a41328fd8dfd75d4a0595fe06401550da44ec49958306",
+          "bytes": 106749
+        }
+      ],
+      "errors": [
+        "AssertionError [ERR_ASSERTION]: Document overflows horizontally: 924px > 390px\n    at assertGeometry (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:117:10)\n    at runCase (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:208:5)\n    at async main (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:277:24)"
+      ],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 390,
+        "documentWidth": 924,
+        "bodyWidth": 924,
+        "panel": {
+          "left": 12,
+          "right": 924,
+          "width": 912,
+          "height": 4679.796875
+        },
+        "clipping": [],
+        "visibleCardCount": 13,
+        "minVisibleCardWidth": 882,
+        "theme": "dark",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "lang": "zh",
+      "theme": "dark",
+      "case": "awaiting_unknown",
+      "status": "failed",
+      "screenshots": [
+        {
+          "path": "screenshots/390x844-zh-dark-awaiting_unknown-auction.png",
+          "sha256": "0f4a4e4d96bff595ccf120353e84a7e3f54a79711cb959ed7c12ad741705209d",
+          "bytes": 117363
+        },
+        {
+          "path": "screenshots/390x844-zh-dark-awaiting_unknown-failure-evidence.png",
+          "sha256": "0f4a4e4d96bff595ccf120353e84a7e3f54a79711cb959ed7c12ad741705209d",
+          "bytes": 117363
+        }
+      ],
+      "errors": [
+        "AssertionError [ERR_ASSERTION]: Document overflows horizontally: 924px > 390px\n    at assertGeometry (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:117:10)\n    at runCase (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:208:5)\n    at async main (/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs:277:24)"
+      ],
+      "warnings": [],
+      "blockedExternal": [],
+      "pageErrors": [],
+      "badLocalResponses": [],
+      "initialGeometry": {
+        "viewportWidth": 390,
+        "documentWidth": 924,
+        "bodyWidth": 924,
+        "panel": {
+          "left": 12,
+          "right": 924,
+          "width": 912,
+          "height": 680
+        },
+        "clipping": [],
+        "visibleCardCount": 1,
+        "minVisibleCardWidth": 882,
+        "theme": "dark",
+        "lang": "zh",
+        "bodyFont": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Microsoft JhengHei\", \"Heiti SC\", sans-serif",
+        "bodyBackground": "rgb(10, 12, 17)",
+        "fontStatus": "loaded",
+        "fonts": []
+      }
+    }
+  ],
+  "harnessProcess": {
+    "pid": 91706,
+    "python": "/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/.venv/bin/python",
+    "args": [
+      "/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/mastermind_loopback_harness.py",
+      "--mastermind-root",
+      "/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001",
+      "--macro-root",
+      "/Volumes/Mastermind/agent-workspaces/macro/web/sovereign-auction-pressure-20261008-sol-001",
+      "--capture-data-root",
+      "/Volumes/Mastermind/agent-workspaces/macro/web/sovereign-auction-pressure-20261008-sol-001/research/sovereign_auction_pressure/source_audit/forward_capture_primary",
+      "--out-dir",
+      "/tmp/sovereign-auction-mastermind-ui-proof-01",
+      "--cutoff",
+      "2026-10-08T23:00:00Z"
+    ]
+  },
+  "harness_manifest": {
+    "path": "harness_manifest.json",
+    "sha256": "ec6077009edb0ac24b8a25ccd3118f5ba6db3933b10c7baa7f9a0e21e3514f76"
+  },
+  "browser_version": "149.0.7827.55",
+  "playwright_module": "/Volumes/Mastermind/agent-workspaces/terminal/web/sovereign-auction-context-20261008-sol-terminal-001/terminal/node_modules/@playwright/test/index.js",
+  "counts": {
+    "review_required": 4,
+    "passed": 12,
+    "failed": 32
+  },
+  "completed_at": "2026-10-08T23:29:02.161Z"
+}

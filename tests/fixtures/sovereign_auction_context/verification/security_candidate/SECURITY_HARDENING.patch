@@ -1,0 +1,206 @@
+--- a/mastermind_patch/tests/test_sovereign_auction_renderer.cjs
++++ b/mastermind_patch/tests/test_sovereign_auction_renderer.cjs
+@@ -5,13 +5,50 @@
+ const path = require('node:path');
+ const root = path.resolve(__dirname, '..');
+ const page = fs.readFileSync(path.join(root, 'app/static/market_view.html'), 'utf8');
+-const script = [...page.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(x => x[1]).find(x => x.includes('function renderAuctions'));
+-assert.ok(script, 'actual auction renderer present');
++// Bind to the owned page's exact renderer and stop before its network call.
++// This is strict source selection, not HTML parsing or sanitization. A changed,
++// missing or duplicate boundary requires review instead of selecting other code.
++const ownedStart = '<script>\n(function () {\n  "use strict";\n\n  var root = document.getElementById("mv-root");';
++const ownedEnd = '\n})();\n</script>';
++const ownedFetch = '  fetch("/api/market_view", { headers: { "Accept": "application/json" } })';
++function ownedRendererPrefix(source) {
++  const uniqueIndex = marker => {
++    const at = source.indexOf(marker);
++    assert.ok(at >= 0 && source.indexOf(marker, at + marker.length) === -1, 'Owned renderer boundary missing or duplicated');
++    return at;
++  };
++  const start = uniqueIndex(ownedStart);
++  const end = uniqueIndex(ownedEnd);
++  const stop = uniqueIndex(ownedFetch);
++  assert.ok(start < stop && stop < end, 'Owned renderer boundaries out of order');
++  // HTML closes a script even when the closing tag appears inside a JS comment
++  // or string. Reject an earlier close rather than testing code the browser skips.
++  const body = source.slice(start + '<script>\n'.length, end);
++  assert.ok(!body.toLowerCase().includes('</script'), 'Unexpected early script close in owned renderer');
++  const prefix = source.slice(start + '<script>\n'.length, stop);
++  assert.ok(prefix.includes('function renderAuctions'), 'actual auction renderer present');
++  return prefix;
++}
++const prefix = ownedRendererPrefix(page);
++assert.equal(ownedRendererPrefix('<SCRIPT>unrelated_bootstrap()</SCRIPT>\n' + page), prefix);
++assert.throws(() => ownedRendererPrefix(page + ownedStart), /boundary missing or duplicated/);
++assert.throws(() => ownedRendererPrefix(page.replace(ownedStart, ownedStart.replace('<script>', '<SCRIPT>'))), /boundary missing or duplicated/);
++assert.throws(() => ownedRendererPrefix(page.replace(ownedEnd, '')), /boundary missing or duplicated/);
++assert.throws(() => ownedRendererPrefix(page.replace(ownedFetch, '')), /boundary missing or duplicated/);
++assert.throws(() => ownedRendererPrefix(ownedFetch + page.replace(ownedFetch, '')), /boundaries out of order/);
++for (const close of ['</script>', '</ScRiPt >', '</SCRIPT\t>']) {
++  assert.throws(() => ownedRendererPrefix(page.replace(ownedStart, ownedStart + '\n  // ' + close)), /Unexpected early script close/);
++}
+ let lang = 'en';
+ const sandbox = { URL, document: { getElementById: () => ({}), documentElement: { getAttribute: () => lang } } };
+ vm.createContext(sandbox);
+-const prefix = script.slice(0, script.indexOf('  fetch("/api/market_view"'));
+-vm.runInContext(prefix + '\nglobalThis.renderAuctions = renderAuctions; globalThis.renderAuctionRow = renderAuctionRow; globalThis.auctionDollars = auctionDollars;\n})();', sandbox);
++vm.runInContext(prefix + '\nglobalThis.renderAuctions = renderAuctions; globalThis.renderAuctionRow = renderAuctionRow; globalThis.auctionDollars = auctionDollars; globalThis.statusPill = statusPill;\n})();', sandbox);
++const hostileStatus = 'advisory" onmouseover="alert(1)\'&<>';
++const escapedStatus = 'advisory&quot; onmouseover=&quot;alert(1)&#39;&amp;&lt;&gt;';
++assert.equal(sandbox.statusPill({status: hostileStatus, freshness: {stale: true}}),
++  '<span class="pill ' + escapedStatus + '">' + escapedStatus + '</span> <span class="pill stale">stale</span>');
++assert.equal(sandbox.statusPill({status: 'validated'}), '<span class="pill validated">validated</span>');
++assert.equal(sandbox.statusPill({raw: {artifact_present: false}, status: hostileStatus}), '<span class="pill none">absent</span>');
+ const wrapper = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/sovereign_auction_context/event_calendar.json'), 'utf8'));
+ const original = wrapper.sovereign_auction_context;
+ const context = { ...structuredClone(original), available: true };
+--- a/ui_verification/mastermind_loopback_harness.py
++++ b/ui_verification/mastermind_loopback_harness.py
+@@ -23,6 +23,7 @@
+ from collections import Counter
+ from datetime import datetime, timedelta
+ from pathlib import Path
++from types import MappingProxyType
+ from zoneinfo import ZoneInfo
+ 
+ sys.dont_write_bytecode = True
+@@ -180,13 +181,37 @@
+     socket.getaddrinfo = getaddrinfo
+ 
+ 
++def trusted_static_assets(static_root):
++    """Snapshot approved local asset bytes before accepting any HTTP request.
++
++    Request paths only select exact keys from this immutable lookup. They never
++    reach Path construction, resolution, stat, file reads or FileResponse.
++    """
++    static_root = Path(static_root).resolve(strict=True)
++    media_types = {".css": "text/css", ".js": "text/javascript",
++                   ".woff2": "font/woff2", ".woff": "font/woff", ".ttf": "font/ttf",
++                   ".otf": "font/otf", ".svg": "image/svg+xml", ".png": "image/png",
++                   ".ico": "image/vnd.microsoft.icon", ".webp": "image/webp"}
++    assets = {}
++    for entry in sorted(static_root.rglob("*")):
++        try:
++            resolved = entry.resolve(strict=True)
++        except (OSError, RuntimeError):
++            continue
++        media_type = media_types.get(resolved.suffix.lower())
++        if not resolved.is_relative_to(static_root) or not resolved.is_file() or media_type is None:
++            continue
++        assets[entry.relative_to(static_root).as_posix()] = (resolved.read_bytes(), media_type)
++    return MappingProxyType(assets)
++
++
+ def serve(args, prepared):
+     root, cutoff, base, cases, manifest = prepared
+     out = Path(args.out_dir).resolve()
+     out.mkdir(parents=True, exist_ok=True)
+     sys.path.insert(0, str(root))
+     from fastapi import FastAPI, HTTPException
+-    from fastapi.responses import FileResponse, JSONResponse, Response
++    from fastapi.responses import JSONResponse, Response
+     from app import web
+     from brain import sovereign_auction_context as reader
+     import uvicorn
+@@ -195,6 +220,7 @@
+     if not theme.is_file():
+         raise RuntimeError("The real repository theme.css is required; no substitute theme is supplied")
+     manifest["source_files"].append({"path": str(theme), "sha256": sha(theme)})
++    static_assets = trusted_static_assets(root / "app/static")
+     original_reader = reader.read_context
+     reader.read_context = lambda path=None, **kwargs: original_reader(path, now=cutoff)
+     original_root = web._PROJECT_ROOT
+@@ -250,11 +276,10 @@
+         def contained_static_asset(asset_path: str):
+             if asset_path == "favicon.ico":
+                 return Response(status_code=204)
+-            static_root = (root / "app/static").resolve()
+-            path = (static_root / asset_path).resolve()
+-            if not path.is_relative_to(static_root) or not path.is_file() or path.suffix.lower() not in {".css", ".js", ".woff2", ".woff", ".ttf", ".otf", ".svg", ".png", ".ico", ".webp"}:
++            asset = static_assets.get(asset_path)
++            if asset is None:
+                 raise HTTPException(status_code=404)
+-            return FileResponse(path)
++            return Response(content=asset[0], media_type=asset[1])
+ 
+         listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+         listener.bind(("127.0.0.1", 0))
+--- a/mastermind_patch/app/static/market_view.html
++++ b/mastermind_patch/app/static/market_view.html
+@@ -338,7 +338,8 @@
+ 
+   function esc(s) {
+     return String(s == null ? "" : s)
+-      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
++      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
++      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+   }
+ 
+   function fmtNum(v, digits) {
+--- /dev/null
++++ b/ui_verification/test_mastermind_static_assets.py
+@@ -0,0 +1,62 @@
++"""Stdlib-only boundary checks for the diagnostic harness's static byte lookup."""
++import tempfile
++import unittest
++from pathlib import Path
++from unittest import mock
++
++from mastermind_loopback_harness import trusted_static_assets
++
++
++class StaticAssetBoundaryTests(unittest.TestCase):
++    def setUp(self):
++        self.temporary = tempfile.TemporaryDirectory(prefix="auction-static-boundary-")
++        self.addCleanup(self.temporary.cleanup)
++        self.root = Path(self.temporary.name) / "static"
++        self.root.mkdir()
++        (self.root / "nested").mkdir()
++        (self.root / "nested/style.css").write_bytes(b"body{color:blue}")
++        (self.root / "font.WOFF2").write_bytes(b"font-bytes")
++        (self.root / "private.json").write_bytes(b"not-an-approved-static-type")
++        (self.root / "page.html").write_bytes(b"not-served-by-the-static-catch-all")
++
++    def test_only_approved_files_are_snapshotted_with_correct_types(self):
++        assets = trusted_static_assets(self.root)
++        self.assertEqual(set(assets), {"nested/style.css", "font.WOFF2"})
++        self.assertEqual(assets["nested/style.css"], (b"body{color:blue}", "text/css"))
++        self.assertEqual(assets["font.WOFF2"], (b"font-bytes", "font/woff2"))
++        with self.assertRaises(TypeError):
++            assets["injected.css"] = (b"new", "text/css")
++
++    def test_resolved_file_and_directory_symlinks_cannot_escape_root(self):
++        outside = self.root.parent / "outside"
++        outside.mkdir()
++        (outside / "secret.css").write_bytes(b"outside-root")
++        (self.root / "escape.css").symlink_to(outside / "secret.css")
++        (self.root / "escape-dir").symlink_to(outside, target_is_directory=True)
++        (self.root / "inside-alias.css").symlink_to(self.root / "nested/style.css")
++        (self.root / "disguised.css").symlink_to(self.root / "private.json")
++        (self.root / "broken.css").symlink_to(outside / "missing.css")
++        assets = trusted_static_assets(self.root)
++        self.assertEqual(set(assets), {"nested/style.css", "font.WOFF2", "inside-alias.css"})
++        self.assertEqual(assets["inside-alias.css"], (b"body{color:blue}", "text/css"))
++        self.assertNotIn(b"outside-root", [payload[0] for payload in assets.values()])
++
++    def test_request_keys_are_literal_memory_lookups_after_source_changes(self):
++        assets = trusted_static_assets(self.root)
++        (self.root / "nested/style.css").write_bytes(b"changed-after-snapshot")
++        (self.root / "later.css").write_bytes(b"not-in-startup-snapshot")
++        invalid = ["../outside/secret.css", "../static/nested/style.css", "/nested/style.css",
++                   "nested/../font.WOFF2", "%2e%2e/outside/secret.css", "nested%2fstyle.css",
++                   "nested\\style.css", "nested/style.css\x00", "nested/style.css?x=1",
++                   "private.json", "page.html", "nested", "later.css"]
++        with mock.patch.object(Path, "resolve", side_effect=AssertionError("No request-time resolve")), \
++             mock.patch.object(Path, "is_file", side_effect=AssertionError("No request-time stat")), \
++             mock.patch.object(Path, "read_bytes", side_effect=AssertionError("No request-time file read")):
++            self.assertEqual(assets.get("nested/style.css"), (b"body{color:blue}", "text/css"))
++            for key in invalid:
++                with self.subTest(key=key):
++                    self.assertIsNone(assets.get(key))
++
++
++if __name__ == "__main__":
++    unittest.main()

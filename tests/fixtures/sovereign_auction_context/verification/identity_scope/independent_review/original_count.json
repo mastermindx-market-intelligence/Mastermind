@@ -1,0 +1,10 @@
+{
+  "base": "c7e47c859eb2925c5626931fd511800773ba09ac",
+  "count": 58,
+  "flags": {
+    "443": 1,
+    "_mastermind_static_assets": 6,
+    "_mastermind_ui": 51
+  },
+  "head": "55198ba62ff47d2a371397567418cb43fd98892c"
+}

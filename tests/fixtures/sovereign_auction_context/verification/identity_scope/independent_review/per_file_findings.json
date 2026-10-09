@@ -1,0 +1,244 @@
+[
+  {
+    "count": 1,
+    "flags": {
+      "443": 1
+    },
+    "path": "brain/sovereign_auction_context.py"
+  },
+  {
+    "count": 2,
+    "existing_structural_evidence_guard_flags": [],
+    "flags": {
+      "_mastermind_static_assets": 1,
+      "_mastermind_ui": 1
+    },
+    "path": "research/sovereign_auction_context/VERIFIED_SOURCE_MANIFEST.json"
+  },
+  {
+    "count": 2,
+    "existing_structural_evidence_guard_flags": [],
+    "flags": {
+      "_mastermind_ui": 2
+    },
+    "path": "research/sovereign_auction_context/presentation_final/ARCHIVAL_PROVENANCE.json"
+  },
+  {
+    "count": 1,
+    "existing_structural_evidence_guard_error": "evidence JSON must be an object record",
+    "flags": {
+      "_mastermind_ui": 1
+    },
+    "path": "research/sovereign_auction_context/presentation_final/PREIMAGES.json"
+  },
+  {
+    "count": 2,
+    "flags": {
+      "_mastermind_ui": 2
+    },
+    "path": "research/sovereign_auction_context/presentation_final/PRESENTATION.patch"
+  },
+  {
+    "count": 2,
+    "existing_structural_evidence_guard_flags": [],
+    "flags": {
+      "_mastermind_ui": 2
+    },
+    "path": "research/sovereign_auction_context/presentation_final/PRESENTATION_RECEIPT.json"
+  },
+  {
+    "count": 2,
+    "existing_structural_evidence_guard_flags": [],
+    "flags": {
+      "_mastermind_ui": 2
+    },
+    "path": "research/sovereign_auction_context/verification/HARNESS_FILES.json"
+  },
+  {
+    "count": 1,
+    "existing_structural_evidence_guard_flags": [
+      "796",
+      "808",
+      "820",
+      "820",
+      "820",
+      "796",
+      "808",
+      "820",
+      "820",
+      "820",
+      "796",
+      "808",
+      "820",
+      "820",
+      "820",
+      "796",
+      "808",
+      "820",
+      "820",
+      "820",
+      "796",
+      "808",
+      "820",
+      "820",
+      "820",
+      "796",
+      "808",
+      "820",
+      "820",
+      "820",
+      "796",
+      "808",
+      "820",
+      "820",
+      "820",
+      "796",
+      "808",
+      "820",
+      "820",
+      "820"
+    ],
+    "flags": {
+      "_mastermind_ui": 1
+    },
+    "path": "research/sovereign_auction_context/verification/browser_final/browser_receipt.json"
+  },
+  {
+    "count": 33,
+    "existing_structural_evidence_guard_flags": [],
+    "flags": {
+      "_mastermind_ui": 33
+    },
+    "path": "research/sovereign_auction_context/verification/browser_history/run-01-browser_receipt.json"
+  },
+  {
+    "count": 1,
+    "existing_structural_evidence_guard_flags": [
+      "796",
+      "808",
+      "820",
+      "820",
+      "820",
+      "796",
+      "808",
+      "820",
+      "820",
+      "820",
+      "796",
+      "808",
+      "820",
+      "820",
+      "820",
+      "796",
+      "808",
+      "820",
+      "820",
+      "820",
+      "796",
+      "808",
+      "820",
+      "820",
+      "820",
+      "796",
+      "808",
+      "820",
+      "820",
+      "820",
+      "796",
+      "808",
+      "820",
+      "820",
+      "820",
+      "796",
+      "808",
+      "820",
+      "820",
+      "820"
+    ],
+    "flags": {
+      "_mastermind_ui": 1
+    },
+    "path": "research/sovereign_auction_context/verification/browser_history/run-02-browser_receipt.json"
+  },
+  {
+    "count": 1,
+    "existing_structural_evidence_guard_flags": [
+      "796",
+      "808",
+      "820",
+      "820",
+      "820",
+      "796",
+      "808",
+      "820",
+      "820",
+      "820",
+      "796",
+      "808",
+      "820",
+      "820",
+      "820",
+      "796",
+      "808",
+      "820",
+      "820",
+      "820",
+      "796",
+      "808",
+      "820",
+      "820",
+      "820",
+      "796",
+      "808",
+      "820",
+      "820",
+      "820",
+      "796",
+      "808",
+      "820",
+      "820",
+      "820",
+      "796",
+      "808",
+      "820",
+      "820",
+      "820"
+    ],
+    "flags": {
+      "_mastermind_ui": 1
+    },
+    "path": "research/sovereign_auction_context/verification/browser_history/run03-before-security-hardening/browser_receipt.json"
+  },
+  {
+    "count": 1,
+    "flags": {
+      "_mastermind_static_assets": 1
+    },
+    "path": "research/sovereign_auction_context/verification/security_candidate/SECURITY_HARDENING.patch"
+  },
+  {
+    "count": 4,
+    "existing_structural_evidence_guard_flags": [],
+    "flags": {
+      "_mastermind_static_assets": 3,
+      "_mastermind_ui": 1
+    },
+    "path": "research/sovereign_auction_context/verification/security_candidate/SECURITY_HARDENING_RECEIPT.json"
+  },
+  {
+    "count": 4,
+    "existing_structural_evidence_guard_flags": [],
+    "flags": {
+      "_mastermind_static_assets": 1,
+      "_mastermind_ui": 3
+    },
+    "path": "research/sovereign_auction_context/verification/security_final/native_receipt.json"
+  },
+  {
+    "count": 1,
+    "flags": {
+      "_mastermind_ui": 1
+    },
+    "path": "research/sovereign_auction_context/verification/verify_mastermind_ui.cjs"
+  }
+]

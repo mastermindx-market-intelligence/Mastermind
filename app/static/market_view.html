@@ -96,6 +96,15 @@ table.mv-tbl tr.absent td { opacity: .5; }
 .mv-fresh { white-space: nowrap; color: var(--muted); font-size: 12px; }
 .num { font-variant-numeric: tabular-nums; }
 
+.auction-context .pair { overflow-wrap: anywhere; }
+.auction-context details { margin: 10px 0; }
+.auction-context summary { cursor: pointer; color: var(--muted); }
+.auction-context h3 { font-size: 13px; margin: 16px 0 8px; }
+body.page-mv .auction-context .brief-row > details { grid-column: 1 / -1; }
+body.page-mv .auction-context .auction-row-summary .metric { color: var(--text); font-family: var(--font-sans); }
+.auction-context .auction-amount { font-weight: 700; }
+.auction-context .auction-source-details summary { min-height: 32px; padding-block: 4px; }
+
 /* ── rotation pairs ──────────────────────────────────────────────────────── */
 .pairs { display: grid; gap: 8px; grid-template-columns: 1fr; }
 @media (min-width: 640px) { .pairs { grid-template-columns: 1fr 1fr; } }
@@ -133,6 +142,7 @@ body.page-mv {
 }
 body.page-mv #mv-root { display: grid; gap: 18px; }
 body.page-mv .panel {
+  min-width: 0;
   margin: 0;
   padding: 20px 22px;
   border-color: var(--line);
@@ -328,7 +338,8 @@ body.page-mv .footnote {
 
   function esc(s) {
     return String(s == null ? "" : s)
-      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
 
   function fmtNum(v, digits) {
@@ -513,6 +524,165 @@ body.page-mv .footnote {
     return out;
   }
 
+  // Independent observed context; outside the stored decision-plane coverage.
+  function auctionText(en, zh) {
+    return document.documentElement.getAttribute('data-lang') === 'zh' ? zh : en;
+  }
+  function auctionEsc(value) {
+    return esc(value).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  function auctionLink(value) {
+    try {
+      var u = new URL(value);
+      if (u.protocol !== 'https:' || u.username || u.password ||
+          (u.port && u.port !== '443') ||
+          !['treasurydirect.gov', 'www.treasurydirect.gov', 'fiscaldata.treasury.gov',
+            'home.treasury.gov', 'treasury.gov', 'www.treasury.gov'].includes(u.hostname)) return '';
+      return '<a href="' + auctionEsc(value) + '" target="_blank" rel="noopener noreferrer">' +
+        auctionEsc(auctionText('Official source', '官方来源')) + '</a>';
+    } catch (e) { return ''; }
+  }
+  function auctionDollars(value) {
+    var raw = String(value);
+    var parts = raw.match(/^([+-]?)(\d+)(\.\d*)?$/);
+    // Group the source's decimal characters; never round through Number.
+    return (parts ? parts[1] + parts[2].replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (parts[3] || '') : raw) + ' USD';
+  }
+  function auctionTitle(row) {
+    var names = { Bill: ['Treasury bill', '短期国债'], CMB: ['Cash management bill', '现金管理国库券'],
+      Note: ['Treasury note', '中期国债'], Bond: ['Treasury bond', '长期国债'],
+      TIPS: ['Inflation-protected Treasury (TIPS)', '通胀保值国债（TIPS）'], FRN: ['Floating-rate Treasury (FRN)', '浮动利率国债（FRN）'] };
+    var match = String(row.label).match(/^(.*?) (?:Bill|CMB|Note|Bond|TIPS|FRN) auction$/);
+    if (!match || !names[row.normalized_class]) return row.label;
+    var units = { Year: ['year', '年'], Month: ['month', '个月'], Week: ['week', '周'], Day: ['day', '天'] };
+    var term = match[1].replace(/(\d+)-(Year|Month|Week|Day)/g, function (_all, count, unit) {
+      return auctionText(count + '-' + units[unit][0], count + units[unit][1]);
+    });
+    return term + ' ' + auctionText(names[row.normalized_class][0], names[row.normalized_class][1]);
+  }
+  function auctionDeadline(value) {
+    return String(value).replace('T', ' ').replace(/(?:Z|\+00:00)$/, ' UTC');
+  }
+  function renderAuctionRow(row) {
+    var unknown = auctionText('Unknown', '未知');
+    var states = { ANNOUNCED: ['Auction announced', '拍卖已公告'], TENTATIVE: ['Tentative schedule', '暂定日程'],
+      AWAITING_RESULT: ['Awaiting observed results', '等待观测结果'], RESULT_OBSERVED: ['Results observed', '已观测到结果'] };
+    var status = states[row.physical_state] || ['Unknown', '未知'];
+    var out = '<div class="pair" data-auction-episode="' + auctionEsc(row.episode_id) + '"><div class="auction-row-summary">';
+    out += '<div class="lead">' + auctionEsc(auctionTitle(row)) + '</div><div class="metric">' +
+      auctionEsc(auctionText(status[0], status[1])) + '</div>';
+    out += '<div class="metric">' + auctionEsc(auctionText('Offering amount', '发行金额')) + ': <span class="auction-amount">' +
+      auctionEsc(row.offering_amount_usd == null ? unknown : auctionDollars(row.offering_amount_usd)) + '</span></div>';
+    var lines = [
+      [auctionText('Auction date', '拍卖日期'), row.auction_date],
+      [auctionText('Issue date', '发行日期'), row.issue_date],
+      [auctionText('Competitive deadline', '竞争性投标截止时间'), row.competitive_deadline_utc == null ? null : auctionDeadline(row.competitive_deadline_utc)],
+      [auctionText('Scheduled time (ET)', '计划时间（美东）'), row.time_et]
+    ];
+    lines.forEach(function (line) {
+      out += '<div class="metric">' + auctionEsc(line[0]) + ': ' +
+        auctionEsc(line[1] == null ? unknown : line[1]) + '</div>';
+    });
+    if (row.result == null) out += '<div class="metric">' + auctionEsc(auctionText('Results not observed', '尚未观察到结果')) + '</div>';
+    out += '<div class="metric">' + auctionEsc(row.issue_calendar_state === 'ISSUE_DATE_PASSED' ?
+      auctionText('Issue date has passed; settlement not observed', '发行日期已过；尚未观测到结算') :
+      auctionText('Issue date has not passed; settlement not observed', '发行日期尚未过；尚未观测到结算')) + '</div></div>';
+    out += '<details class="auction-source-details"><summary>' + auctionEsc(auctionText('Source details', '来源详情')) + '</summary>';
+    var audit = [
+      [auctionText('Event identifier', '事件标识'), row.episode_id],
+      [auctionText('Source label', '来源名称'), row.label],
+      [auctionText('Instrument class', '品种类别'), row.normalized_class],
+      [auctionText('Exact source amount (USD)', '来源精确金额（美元）'), row.offering_amount_usd],
+      [auctionText('Competitive deadline (UTC)', '竞标截止时间（UTC）'), row.competitive_deadline_utc],
+      [auctionText('Known at', '获知时间'), row.known_at],
+      [auctionText('First observed at', '首次观测时间'), row.first_observed_at],
+      [auctionText('Source state', '来源状态'), row.source_state],
+      [auctionText('Auction state', '拍卖状态'), row.physical_state],
+      [auctionText('Issue calendar state', '发行日历状态'), row.issue_calendar_state]
+    ];
+    audit.forEach(function (line) {
+      out += '<div class="metric">' + auctionEsc(line[0]) + ': ' + auctionEsc(line[1] == null ? unknown : line[1]) + '</div>';
+    });
+    if (row.result != null) {
+      out += '<div class="metric"><strong>' + auctionEsc(auctionText('Observed result fields', '已观察的结果字段')) + '</strong></div>';
+      Object.keys(row.result).forEach(function (key) {
+        out += '<div class="metric">' + auctionEsc(key) + ': ' +
+          auctionEsc(row.result[key] == null ? unknown : row.result[key]) + '</div>';
+      });
+    }
+    if (row.null_reasons && row.null_reasons.length) {
+      out += '<div class="metric">' + auctionEsc(auctionText('Unknown reasons', '未知原因')) + ': ' +
+        auctionEsc(row.null_reasons.join('; ')) + '</div>';
+    }
+    out += '<div class="metric">' + auctionEsc(auctionText('Importance: Not scored', '重要性：未评分')) + '</div>';
+    out += '<div class="metric">' + auctionLink(row.source_url) + '</div></details></div>';
+    return out;
+  }
+  function renderAuctions(view) {
+    var context = view.sovereign_auction_context;
+    var title = auctionText('Sovereign auctions — observed context', '国债拍卖 — 已观察背景');
+    var out = '<div class="panel auction-context"><h2>' + auctionEsc(title) + '</h2>';
+    out += '<div class="footnote">' + auctionEsc(auctionText(
+      'Research only · Not scored · Outside decision-plane coverage · Freshness unassessed',
+      '仅供研究 · 未评分 · 不计入决策层覆盖率 · 新鲜度未评估')) + '</div>';
+    if (!context) return out + '<div class="msg">' + auctionEsc(auctionText('Unavailable: producer context not published', '不可用：生产方背景未发布')) + '</div></div>';
+    out += '<div class="metric">' + auctionEsc(auctionText('Observed at', '观察时间')) + ': ' +
+      auctionEsc(context.source_observed_at || auctionText('Unknown', '未知')) + ' · ' +
+      auctionEsc(auctionText('Producer cutoff', '生产方截止时间')) + ': ' + auctionEsc(context.decision_cutoff_utc || auctionText('Unknown', '未知')) + '</div>';
+    if (context.available !== true) {
+      out += '<div class="msg">' + auctionEsc(auctionText('Unavailable', '不可用')) + ': ' +
+        auctionEsc(context.note || context.status || auctionText('Unknown', '未知')) + '</div>';
+    } else {
+      if (context.status === 'degraded') out += '<div class="metric" role="status">' + auctionEsc(auctionText('Source coverage degraded', '来源覆盖降级')) + '</div>';
+      var events = Array.isArray(context.events) ? context.events : [];
+      var groups = [
+        [auctionText('Scheduled auctions', '计划拍卖'), events.filter(function (r) { return r.physical_state === 'ANNOUNCED'; })],
+        [auctionText('Awaiting results', '等待结果'), events.filter(function (r) { return r.physical_state === 'AWAITING_RESULT'; })],
+        [auctionText('Tentative calendar', '暂定日历'), events.filter(function (r) { return r.physical_state === 'TENTATIVE'; })],
+        [auctionText('Observed results', '已观察结果'), events.filter(function (r) { return r.physical_state === 'RESULT_OBSERVED'; })]
+      ];
+      out += '<div class="metric">' + auctionEsc(auctionText('Observed episodes', '已观察事件')) + ': ' + auctionEsc(events.length) +
+        ' · ' + auctionEsc(auctionText('30-day context; observed counts are not a complete universe', '30天背景；观察数量不代表完整范围')) + '</div>';
+      groups.forEach(function (group) {
+        var rows = group[1];
+        if (!rows.length) return;
+        var initial = 5;
+        out += '<div class="brief-row"><h3>' + auctionEsc(group[0]) + ' (' + auctionEsc(rows.length) + ')</h3><div class="pairs">';
+        rows.slice(0, initial).forEach(function (row) { out += renderAuctionRow(row); });
+        out += '</div>';
+        if (rows.length > initial) {
+          out += '<details class="auction-group-expander"><summary>' + auctionEsc(auctionText('Show remaining', '显示其余')) + ' ' +
+            auctionEsc(rows.length - initial) + '</summary><div class="pairs">';
+          rows.slice(initial).forEach(function (row) { out += renderAuctionRow(row); });
+          out += '</div></details>';
+        }
+        out += '</div>';
+      });
+      if (!events.length) out += '<div class="msg">' + auctionEsc(auctionText('No episodes in observed coverage; future unannounced auctions remain unknown', '观察范围内无事件；未来未公告拍卖仍未知')) + '</div>';
+    }
+    var failures = (context.quarantine || []).concat(context.conflicts || []);
+    if ((context.source_health || []).length || failures.length) out += '<details class="auction-context-sources"><summary>' +
+      auctionEsc(auctionText('Source observations', '来源观测')) + '</summary>';
+    (context.source_health || []).forEach(function (source) {
+      out += '<div class="footnote">' + auctionLink(source.source_url) + ' · ' + auctionEsc(source.source_kind) + ' · ' +
+        auctionEsc(auctionText('Latest attempt', '最近尝试')) + ': ' + auctionEsc(source.latest_attempt_at) + ' (' +
+        auctionEsc(source.latest_attempt_status) + ') · ' + auctionEsc(auctionText('Last valid observation', '最近有效观察')) + ': ' +
+        auctionEsc(source.last_valid_observation_at || auctionText('Unknown', '未知')) + ' · ' +
+        auctionEsc(auctionText('Age at cutoff (seconds)', '截止时年龄（秒）')) + ': ' +
+        auctionEsc(source.last_valid_observation_age_seconds == null ? auctionText('Unknown', '未知') : source.last_valid_observation_age_seconds) +
+        ' · ' + auctionEsc(auctionText('Body received at', '响应接收时间')) + ': ' +
+        auctionEsc(source.last_successful_body_receipt_at || auctionText('Unknown', '未知')) +
+        ' · ' + auctionEsc(auctionText('Freshness unassessed', '新鲜度未评估')) +
+        (source.latest_failure_at ? ' · ' + auctionEsc(auctionText('Last failed attempt', '最近失败尝试')) + ': ' +
+          auctionEsc(source.latest_failure_at) + ' · ' + auctionEsc((source.latest_failure_reasons || []).join('; ')) : '') + '</div>';
+    });
+    if (failures.length) out += '<details><summary>' + auctionEsc(auctionText('Producer exclusions/conflicts', '生产方排除／冲突')) +
+      ' (' + auctionEsc(failures.length) + ')</summary><div class="footnote">' +
+      failures.map(function (r) { return auctionEsc(r.reason); }).join('<br>') + '</div></details>';
+    if ((context.source_health || []).length || failures.length) out += '</details>';
+    return out + '</div>';
+  }
+
   function render(view) {
     sub.textContent = "region " + (view.region || "us") + " · asof " +
       (view.asof || "—") + " · seq " + (view.seq == null ? 0 : view.seq) +
@@ -522,6 +692,7 @@ body.page-mv .footnote {
     html += '<div class="panel"><h2>Net Posture Tilt (validated planes only)</h2>' +
       renderTilt(view) + "</div>";
     html += '<div class="panel"><h2>Planes</h2>' + renderPlanes(view) + "</div>";
+    html += renderAuctions(view);
     html += '<div class="panel"><h2>Brief (deterministic — zero LLM)</h2>' + renderBrief(view) + "</div>";
     html += '<div class="panel"><h2>Top Rotation Pairs</h2>' + renderPairs(view) + "</div>";
     html += '<div class="footnote">Read-only mirror of data/market_view/latest.json. This view sizes ' +

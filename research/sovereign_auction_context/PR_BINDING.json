@@ -1,0 +1,14 @@
+{
+  "recorded_at": "2026-10-08T23:51:44.188903+00:00",
+  "repository": "mastermindx-market-intelligence/Mastermind",
+  "pr": 1284,
+  "url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/1284",
+  "accepted_product_source_commit": "8b74970c13a8915097d0d9e5849499904c1fcc2b",
+  "delivery": "Draft/HOLD source-only",
+  "program_owner": "macro WS:RATES-INFLATION-COMMAND",
+  "program_pr": "https://github.com/mastermindx-market-intelligence/macro/pull/8657",
+  "mastermind_pr": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/1284",
+  "terminal_pr": "https://github.com/mastermindx-market-intelligence/mastermind-terminal/pull/857",
+  "risk_authority_changed": false,
+  "production_deployed": false
+}

@@ -1,0 +1,14 @@
+[
+  {
+    "path": "mastermind_patch/app/static/market_view.html",
+    "sha256": "b8d84a7313bdd7c9f4bbcc3ddfeadaaeddd85b9976ca143a64acaf5146c8a043"
+  },
+  {
+    "path": "mastermind_patch/tests/test_sovereign_auction_renderer.cjs",
+    "sha256": "d2ef60d56f7b5301db79c667f529e38fd7fcfd7bad69d2213b3b14099635b97d"
+  },
+  {
+    "path": "ui_verification/verify_mastermind_ui.cjs",
+    "sha256": "d250148f1e5cb609b5af2ab8ca3d2443c47f3c662e5849d18ebfee0b4a2b7e7d"
+  }
+]

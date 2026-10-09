@@ -1,0 +1,22 @@
+[
+  {
+    "command": [
+      ".venv/bin/python",
+      "-m",
+      "pytest",
+      "-o",
+      "addopts=",
+      "-q",
+      "tests/test_sovereign_auction_context.py",
+      "tests/test_sovereign_auction_api.py"
+    ],
+    "exit_code": 0
+  },
+  {
+    "command": [
+      "node",
+      "tests/test_sovereign_auction_renderer.cjs"
+    ],
+    "exit_code": 0
+  }
+]
