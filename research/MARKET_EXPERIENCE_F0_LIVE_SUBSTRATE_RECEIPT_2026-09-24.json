@@ -1,0 +1,119 @@
+{
+  "schema": "market_experience.f0_live_substrate_receipt.v1",
+  "recorded_on": "2026-09-24",
+  "operation_id": "market-experience-direction-20260924-astra-001",
+  "evidence_class": "LIVE_READ_AND_CURRENT_OWNER_METADATA_NOT_PILOT_ADMISSION",
+  "massive_stock_day": {
+    "live_read": {
+      "url_class": "existing public R2 owner endpoint",
+      "http_status": 200,
+      "response_date": "2026-09-25T02:07:23Z",
+      "last_modified": "2026-09-24T04:33:08Z",
+      "content_length_bytes": 356108,
+      "etag": "e576030170455fddee255c96d41eec50"
+    },
+    "publish_manifest": {
+      "dir": "massive_stock_day",
+      "object_count": 21603,
+      "store": {
+        "n_tickers": 21602,
+        "latest_date": "2026-09-22",
+        "updated_at": "2026-09-23T13:35:55.927679+00:00",
+        "coverage": {
+          "first_day": "2021-07-06",
+          "last_day": "2026-09-22",
+          "n_processed_days": 1361,
+          "max_missing_run_weekdays": 0,
+          "max_missing_run_weekdays_recent": 0,
+          "recent_window_bdays": 90,
+          "missing_sample": []
+        },
+        "anchor": {
+          "ticker": "SPY",
+          "first": "2021-07-06",
+          "last": "2026-09-22",
+          "n_rows": 1310,
+          "max_gap_calendar_days": 4
+        }
+      }
+    },
+    "committed_manifest": {
+      "macro_ref": "3a29e6145ce53ca4551adef866a5f73e62c8c4ff",
+      "git_blob": "2ac6398c182130493544f49beb8f71a8ecd8a3c1"
+    },
+    "entitlement": {
+      "record": "research/licenses/MASSIVE_ENTITLEMENT_RECORD.md",
+      "git_blob": "3969a9aae918141b51baffbb0e17d8a2ec2485a0",
+      "rights_register": "research/licenses/PROPHET_US_SOURCE_RIGHTS_REGISTER_2026-09-23.md",
+      "rights_register_git_blob": "a9ee6f288bfb2716facd88dcf2c5135ca8125303",
+      "model_use": "RECORDED_FOR_MASSIVE_STOCK_DAY",
+      "note": "Per-feed written vendor conditions remain controlling."
+    },
+    "ruling": "CANDIDATE_TRAINABLE_PRICE_SUBSTRATE_AFTER_IDENTITY_AND_PER_SECURITY_COVERAGE_CHECK"
+  },
+  "company_intelligence_event_workspace": {
+    "live_marker": {
+      "schema": "event_workspace_manifest.v2",
+      "generation_id": "3be5e93e4bc42804dc816973",
+      "generated_at": "2026-07-30T20:30:28Z",
+      "status": "ready",
+      "event_count": 5,
+      "previous_generation_id": "100b0de63bed855a8fc3fdaf",
+      "previous_manifest_sha256": "bc3b770b51163bd5463ec6749278b5f231c40fe5beb9bbc3e7910899a3012620",
+      "warnings": [],
+      "canonical_aliases": [
+        "AAPL/2026Q3",
+        "DHI/2026Q3",
+        "KBH/2026Q3",
+        "PHM/2026Q2",
+        "TOL/2026Q3"
+      ]
+    },
+    "rights": "SEC_PRIMARY_RELEASES_USER_FACING_WITH_LIMITS; TRANSCRIPTS_SEPARATE_AND_UNRESOLVED",
+    "ruling": "RIGHTS_SAFE_EVENT_CONTRACT_EXISTS_BUT_CURRENT_LIVE_EVENT_POPULATION_IS_TOO_NARROW_FOR_BROAD_HISTORICAL_LEARNING"
+  },
+  "earnings_intelligence_display_plane": {
+    "macro_ref": "3a29e6145ce53ca4551adef866a5f73e62c8c4ff",
+    "health_path": "data/quality/earnings_intelligence_health.json",
+    "health_git_blob": "6e4230c983fef1f12b8c682d1d540776d2ff038a",
+    "generated_at": "2026-09-24T08:02:51.484649+00:00",
+    "status": "ready",
+    "data_source_tier": "r2_history_plus_score_overlay",
+    "source_rows": 54834,
+    "source_listings": 4505,
+    "source_issuers": 4472,
+    "valid_fiscal_source_rows": 54816,
+    "canonical_issuer_period_rows": 54527,
+    "same_period_superseded_rows": 289,
+    "quarantined_fiscal_rows": 18,
+    "qoq_eligible_issuers": 2937,
+    "transport_manifest_valid": true,
+    "latest_call_date": "2026-09-17",
+    "is_context_only": true,
+    "display_only": true,
+    "provenance_ruling": "R2 history is a transported EquityDesk archive plus score overlay; current rights register classifies EquityDesk / earnings-call scores internal-only or not registered for model use.",
+    "model_training_eligible": false,
+    "ruling": "BROAD_CONTEXT_AND_CALIBRATION_PLANE_NOT_A_TRAINING_CORPUS"
+  },
+  "integration_decision": {
+    "first_learning_loop_ready": false,
+    "blockers": [
+      "rights-qualified historical universe membership or equivalent licensed universe definition",
+      "canonical historical security-to-issuer join coverage for the selected window",
+      "broad primary-source SEC event history using existing Company Intelligence contracts",
+      "predeclared cohort/evaluation split before outcome inspection"
+    ],
+    "next_capability": "Extend the existing Company Intelligence owner with a historical SEC primary-source reconstruction/backfill path, preserving SEC availability clocks, actual acquisition clocks, revision identity, typed absence and public_reconstruction mode; audit Massive per-security coverage and identity in the same candidate window.",
+    "no_new_plane": true
+  },
+  "nonclaims": [
+    "No stock cohort is admitted.",
+    "No historical forecast, probability, ranking, sizing or trading authority is created.",
+    "No EquityDesk, transcript, consensus, Yahoo or recovered S&P membership source is newly authorized for model training.",
+    "Live R2 manifest health does not prove every ticker has complete every-session history.",
+    "Company Intelligence marker health does not imply broad event coverage."
+  ],
+  "provider_spend_usd": 0,
+  "model_calls": 0,
+  "production_writes": 0
+}

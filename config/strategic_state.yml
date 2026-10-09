@@ -28,7 +28,7 @@ meta:
   title: Mastermind-X company strategic state
   canonical_home: mastermind
   authority: advisory_and_orientation_only
-  as_of: 2026-08-30
+  as_of: 2026-09-24
   charter: research/MASTERMIND_CHARTER_V2.md
   contract: AGENTS.md
   origin: research/EXECUTIVE_OS_PHASE0_CENSUS.md   # Macro repo; census §5 item 2
@@ -45,12 +45,31 @@ constraint_levels: [permitted, constrained, prohibited]
 company_phase: PRE_REVENUE_MVP_CONVERGENCE
 
 north_star:
+  - >
+    Build continuously learning market intelligence: progressively preserve every
+    covered market day, week and issuer episode as time-correct experience;
+    integrate Market Memory, Earnings Intelligence and canonical relationships;
+    test mechanisms and improve calibrated forward assessments without claiming
+    exhaustive knowledge or granting unvalidated trading authority.
   - improve durable out_of_sample market forecasting
   - make Mastermind coherent and trustworthy enough for real users
   - establish first repeatable revenue acquisition loop
   - build a continuously improving AI-led organization
 
+# Direction recorded in research/MARKET_EXPERIENCE_INTELLIGENCE_PROGRAM_2026-09-24.md.
+# Existing resource-policy shares and all production/trading gates remain unchanged.
 p0:
+  - id: MARKET_EXPERIENCE_INTELLIGENCE
+    department: prophet
+    objective: >
+      Turn historical and prospective market observations into reproducible,
+      evidence-grounded experience and evaluated forward intelligence through
+      existing Data OS, Market Memory, Earnings Intelligence, GMI relationship
+      owners and domain evaluators. Prove one end-to-end learning slice before
+      scaling coverage or model complexity; preserve independent evaluation,
+      existing work ownership and explicit data/compute budgets.
+    status: active
+
   - id: US_PROPHET_ENTRY_TIMING
     department: prophet
     objective: >
