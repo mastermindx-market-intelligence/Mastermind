@@ -5,13 +5,50 @@ const vm = require('node:vm');
 const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const page = fs.readFileSync(path.join(root, 'app/static/market_view.html'), 'utf8');
-const script = [...page.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(x => x[1]).find(x => x.includes('function renderAuctions'));
-assert.ok(script, 'actual auction renderer present');
+// Bind to the owned page's exact renderer and stop before its network call.
+// This is strict source selection, not HTML parsing or sanitization. A changed,
+// missing or duplicate boundary requires review instead of selecting other code.
+const ownedStart = '<script>\n(function () {\n  "use strict";\n\n  var root = document.getElementById("mv-root");';
+const ownedEnd = '\n})();\n</script>';
+const ownedFetch = '  fetch("/api/market_view", { headers: { "Accept": "application/json" } })';
+function ownedRendererPrefix(source) {
+  const uniqueIndex = marker => {
+    const at = source.indexOf(marker);
+    assert.ok(at >= 0 && source.indexOf(marker, at + marker.length) === -1, 'Owned renderer boundary missing or duplicated');
+    return at;
+  };
+  const start = uniqueIndex(ownedStart);
+  const end = uniqueIndex(ownedEnd);
+  const stop = uniqueIndex(ownedFetch);
+  assert.ok(start < stop && stop < end, 'Owned renderer boundaries out of order');
+  // HTML closes a script even when the closing tag appears inside a JS comment
+  // or string. Reject an earlier close rather than testing code the browser skips.
+  const body = source.slice(start + '<script>\n'.length, end);
+  assert.ok(!body.toLowerCase().includes('</script'), 'Unexpected early script close in owned renderer');
+  const prefix = source.slice(start + '<script>\n'.length, stop);
+  assert.ok(prefix.includes('function renderAuctions'), 'actual auction renderer present');
+  return prefix;
+}
+const prefix = ownedRendererPrefix(page);
+assert.equal(ownedRendererPrefix('<SCRIPT>unrelated_bootstrap()</SCRIPT>\n' + page), prefix);
+assert.throws(() => ownedRendererPrefix(page + ownedStart), /boundary missing or duplicated/);
+assert.throws(() => ownedRendererPrefix(page.replace(ownedStart, ownedStart.replace('<script>', '<SCRIPT>'))), /boundary missing or duplicated/);
+assert.throws(() => ownedRendererPrefix(page.replace(ownedEnd, '')), /boundary missing or duplicated/);
+assert.throws(() => ownedRendererPrefix(page.replace(ownedFetch, '')), /boundary missing or duplicated/);
+assert.throws(() => ownedRendererPrefix(ownedFetch + page.replace(ownedFetch, '')), /boundaries out of order/);
+for (const close of ['</script>', '</ScRiPt >', '</SCRIPT\t>']) {
+  assert.throws(() => ownedRendererPrefix(page.replace(ownedStart, ownedStart + '\n  // ' + close)), /Unexpected early script close/);
+}
 let lang = 'en';
 const sandbox = { URL, document: { getElementById: () => ({}), documentElement: { getAttribute: () => lang } } };
 vm.createContext(sandbox);
-const prefix = script.slice(0, script.indexOf('  fetch("/api/market_view"'));
-vm.runInContext(prefix + '\nglobalThis.renderAuctions = renderAuctions; globalThis.renderAuctionRow = renderAuctionRow; globalThis.auctionDollars = auctionDollars;\n})();', sandbox);
+vm.runInContext(prefix + '\nglobalThis.renderAuctions = renderAuctions; globalThis.renderAuctionRow = renderAuctionRow; globalThis.auctionDollars = auctionDollars; globalThis.statusPill = statusPill;\n})();', sandbox);
+const hostileStatus = 'advisory" onmouseover="alert(1)\'&<>';
+const escapedStatus = 'advisory&quot; onmouseover=&quot;alert(1)&#39;&amp;&lt;&gt;';
+assert.equal(sandbox.statusPill({status: hostileStatus, freshness: {stale: true}}),
+  '<span class="pill ' + escapedStatus + '">' + escapedStatus + '</span> <span class="pill stale">stale</span>');
+assert.equal(sandbox.statusPill({status: 'validated'}), '<span class="pill validated">validated</span>');
+assert.equal(sandbox.statusPill({raw: {artifact_present: false}, status: hostileStatus}), '<span class="pill none">absent</span>');
 const wrapper = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/sovereign_auction_context/event_calendar.json'), 'utf8'));
 const original = wrapper.sovereign_auction_context;
 const context = { ...structuredClone(original), available: true };

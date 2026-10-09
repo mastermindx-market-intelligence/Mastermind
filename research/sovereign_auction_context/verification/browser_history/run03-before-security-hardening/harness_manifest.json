@@ -18,7 +18,7 @@
     },
     {
       "path": "/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/app/static/market_view.html",
-      "sha256": "dd002ea1b1afce03e00cf2bf566c841ed327f9f3e8cf4a68fb6eb7a9fd2e9f34"
+      "sha256": "c42e251ff86b1ee53cea017dc358b7e403fe8c82b46e6f3d8e0d06423754c911"
     },
     {
       "path": "/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/tests/test_sovereign_auction_api.py",
@@ -156,7 +156,7 @@
       "actual_api_response_sha256": "23b718468ae646b2f57e948fc5d5f6f78feab73f5e79b60a54c7b8875b481bf1"
     }
   },
-  "origin": "http://127.0.0.1:56889",
+  "origin": "http://127.0.0.1:63391",
   "served_routes": [
     "/api/market_view",
     "/market_view",

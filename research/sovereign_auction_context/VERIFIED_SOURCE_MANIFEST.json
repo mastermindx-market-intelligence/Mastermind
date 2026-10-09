@@ -1,6 +1,6 @@
 {
   "schema": "sovereign_auction_verified_source_v1",
-  "verified_at": "2026-10-08T23:48:59.300928+00:00",
+  "verified_at": "2026-10-09T00:06:48.659083+00:00",
   "base_commit": "c7e47c859eb2925c5626931fd511800773ba09ac",
   "branch": "sol/web-sovereign-auction-context-20261008-sol-mm-001",
   "source_binding": "Exact file hashes; the enclosing Git commit is the final revision identity.",
@@ -8,7 +8,9 @@
     "native_tests": 26,
     "actual_renderer": "passed",
     "browser_cases": 48,
-    "browser_passed": 48
+    "browser_passed": 48,
+    "static_boundary_tests": 3,
+    "security_hardening": "Native/renderer/static-boundary and all48 browser cases rerun on final hashes; exact-head CodeQL remains separately sampled."
   },
   "files": [
     {
@@ -18,8 +20,8 @@
     },
     {
       "path": "app/static/market_view.html",
-      "sha256": "c42e251ff86b1ee53cea017dc358b7e403fe8c82b46e6f3d8e0d06423754c911",
-      "bytes": 35384
+      "sha256": "dd002ea1b1afce03e00cf2bf566c841ed327f9f3e8cf4a68fb6eb7a9fd2e9f34",
+      "bytes": 35438
     },
     {
       "path": "brain/sovereign_auction_context.py",
@@ -43,8 +45,8 @@
     },
     {
       "path": "tests/test_sovereign_auction_renderer.cjs",
-      "sha256": "864008961197abac4eb7b1d37e14b86db8f9bda52913052e63e8542374fc82cf",
-      "bytes": 5870
+      "sha256": "55d35cae4cc1d8b1c46d375b4f71e0895b9225f6f3115bcbf4bdfdec59183d3d",
+      "bytes": 8588
     },
     {
       "path": "tests/fixtures/sovereign_auction_context/event_calendar.json",
@@ -68,8 +70,13 @@
     },
     {
       "path": "research/sovereign_auction_context/verification/mastermind_loopback_harness.py",
-      "sha256": "ac06f0f9b62c0639a140164cf0e441ef2a086a92635e0d9891c50a2f853d1f89",
-      "bytes": 16406
+      "sha256": "43833e3da426f7d15e6ac66da5058a4d25799cbd5df864d31a8ccbc8e07f3974",
+      "bytes": 17455
+    },
+    {
+      "path": "research/sovereign_auction_context/verification/test_mastermind_static_assets.py",
+      "sha256": "f7115ff3c56fbda56390332160a30044d06c3d964d4f3f3a809aca99bf0fa270",
+      "bytes": 3470
     }
   ],
   "production_deployed": false,

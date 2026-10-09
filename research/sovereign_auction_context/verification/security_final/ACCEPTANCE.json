@@ -1,0 +1,19 @@
+{
+  "schema": "mastermind_security_hardening_acceptance_v1",
+  "verified_at": "2026-10-09T00:06:48.659083+00:00",
+  "prior_head": "42476573407fcb882c65a9388f98ed038801fc50",
+  "source_binding": "Enclosing source commit and VERIFIED_SOURCE_MANIFEST.json",
+  "native_receipt": "verification/security_final/native_receipt.json",
+  "browser_receipt": "verification/browser_final/browser_receipt.json",
+  "browser_counts": {
+    "passed": 48
+  },
+  "browser_run": "04",
+  "all_five_retained_screenshots_identical_to_previously_inspected": true,
+  "live_escaping_sink_fixed": true,
+  "obsolete_preimages_retained_in_git_history": true,
+  "scanner_config_changed": false,
+  "alerts_dismissed": false,
+  "codeql_acceptance": "Pending exact-head check; local tests do not clear CI.",
+  "source_manifest_sha256": "b2d5f7437ce0153d6de03c09071ec0001d7aa6f90a223fff18b9045571f40a0c"
+}

@@ -23,6 +23,7 @@ import tempfile
 from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
+from types import MappingProxyType
 from zoneinfo import ZoneInfo
 
 sys.dont_write_bytecode = True
@@ -180,13 +181,37 @@ def deny_nonloopback_network():
     socket.getaddrinfo = getaddrinfo
 
 
+def trusted_static_assets(static_root):
+    """Snapshot approved local asset bytes before accepting any HTTP request.
+
+    Request paths only select exact keys from this immutable lookup. They never
+    reach Path construction, resolution, stat, file reads or FileResponse.
+    """
+    static_root = Path(static_root).resolve(strict=True)
+    media_types = {".css": "text/css", ".js": "text/javascript",
+                   ".woff2": "font/woff2", ".woff": "font/woff", ".ttf": "font/ttf",
+                   ".otf": "font/otf", ".svg": "image/svg+xml", ".png": "image/png",
+                   ".ico": "image/vnd.microsoft.icon", ".webp": "image/webp"}
+    assets = {}
+    for entry in sorted(static_root.rglob("*")):
+        try:
+            resolved = entry.resolve(strict=True)
+        except (OSError, RuntimeError):
+            continue
+        media_type = media_types.get(resolved.suffix.lower())
+        if not resolved.is_relative_to(static_root) or not resolved.is_file() or media_type is None:
+            continue
+        assets[entry.relative_to(static_root).as_posix()] = (resolved.read_bytes(), media_type)
+    return MappingProxyType(assets)
+
+
 def serve(args, prepared):
     root, cutoff, base, cases, manifest = prepared
     out = Path(args.out_dir).resolve()
     out.mkdir(parents=True, exist_ok=True)
     sys.path.insert(0, str(root))
     from fastapi import FastAPI, HTTPException
-    from fastapi.responses import FileResponse, JSONResponse, Response
+    from fastapi.responses import JSONResponse, Response
     from app import web
     from brain import sovereign_auction_context as reader
     import uvicorn
@@ -195,6 +220,7 @@ def serve(args, prepared):
     if not theme.is_file():
         raise RuntimeError("The real repository theme.css is required; no substitute theme is supplied")
     manifest["source_files"].append({"path": str(theme), "sha256": sha(theme)})
+    static_assets = trusted_static_assets(root / "app/static")
     original_reader = reader.read_context
     reader.read_context = lambda path=None, **kwargs: original_reader(path, now=cutoff)
     original_root = web._PROJECT_ROOT
@@ -250,11 +276,10 @@ def serve(args, prepared):
         def contained_static_asset(asset_path: str):
             if asset_path == "favicon.ico":
                 return Response(status_code=204)
-            static_root = (root / "app/static").resolve()
-            path = (static_root / asset_path).resolve()
-            if not path.is_relative_to(static_root) or not path.is_file() or path.suffix.lower() not in {".css", ".js", ".woff2", ".woff", ".ttf", ".otf", ".svg", ".png", ".ico", ".webp"}:
+            asset = static_assets.get(asset_path)
+            if asset is None:
                 raise HTTPException(status_code=404)
-            return FileResponse(path)
+            return Response(content=asset[0], media_type=asset[1])
 
         listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         listener.bind(("127.0.0.1", 0))

@@ -1,0 +1,89 @@
+{
+  "schema": "mastermind_security_native_verification_v1",
+  "started_at": "2026-10-09T00:04:39.594907+00:00",
+  "base_head": "42476573407fcb882c65a9388f98ed038801fc50",
+  "archival_retention_verified": {
+    "schema": "sovereign_auction_archival_preimage_retention_v1",
+    "retained_commit": "8b74970c13a8915097d0d9e5849499904c1fcc2b",
+    "retention": "Original immutable bytes remain reachable through the source branch Git history. Obsolete full-source duplicates are retired from the current tree after live source remediation; no scanner exclusion, alert dismissal, or filename masking is used.",
+    "historical_receipts": [
+      "PREIMAGES.json",
+      "PRESENTATION_RECEIPT.json",
+      "PRESENTATION.patch"
+    ],
+    "historical_receipts_unchanged": true,
+    "files": [
+      {
+        "former_tree_path": "research/sovereign_auction_context/presentation_final/preimages/market_view.html",
+        "sha256": "b8d84a7313bdd7c9f4bbcc3ddfeadaaeddd85b9976ca143a64acaf5146c8a043",
+        "bytes": 31238,
+        "git_object": "8b74970c13a8915097d0d9e5849499904c1fcc2b:research/sovereign_auction_context/presentation_final/preimages/market_view.html"
+      },
+      {
+        "former_tree_path": "research/sovereign_auction_context/presentation_final/preimages/test_sovereign_auction_renderer.cjs",
+        "sha256": "d2ef60d56f7b5301db79c667f529e38fd7fcfd7bad69d2213b3b14099635b97d",
+        "bytes": 4589,
+        "git_object": "8b74970c13a8915097d0d9e5849499904c1fcc2b:research/sovereign_auction_context/presentation_final/preimages/test_sovereign_auction_renderer.cjs"
+      },
+      {
+        "former_tree_path": "research/sovereign_auction_context/presentation_final/preimages/verify_mastermind_ui.cjs",
+        "sha256": "d250148f1e5cb609b5af2ab8ca3d2443c47f3c662e5849d18ebfee0b4a2b7e7d",
+        "bytes": 18413,
+        "git_object": "8b74970c13a8915097d0d9e5849499904c1fcc2b:research/sovereign_auction_context/presentation_final/preimages/verify_mastermind_ui.cjs"
+      }
+    ],
+    "recovery": "git show <git_object> returns the original bytes. Verify their SHA256 before using them for a historical replay; they are not current accepted source."
+  },
+  "runs": [
+    {
+      "command": [
+        "/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_sovereign_auction_context.py",
+        "tests/test_sovereign_auction_api.py"
+      ],
+      "exit_code": 0,
+      "log": "research/sovereign_auction_context/verification/security_final/native-1.log"
+    },
+    {
+      "command": [
+        "node",
+        "tests/test_sovereign_auction_renderer.cjs"
+      ],
+      "exit_code": 0,
+      "log": "research/sovereign_auction_context/verification/security_final/native-2.log"
+    },
+    {
+      "command": [
+        "/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/.venv/bin/python",
+        "research/sovereign_auction_context/verification/test_mastermind_static_assets.py"
+      ],
+      "exit_code": 0,
+      "log": "research/sovereign_auction_context/verification/security_final/native-3.log"
+    }
+  ],
+  "browser": {
+    "command": [
+      "node",
+      "/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs",
+      "--python",
+      "/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/.venv/bin/python",
+      "--mastermind-root",
+      "/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001",
+      "--macro-root",
+      "/Volumes/Mastermind/agent-workspaces/macro/web/sovereign-auction-pressure-20261008-sol-001",
+      "--capture-data-root",
+      "/Volumes/Mastermind/agent-workspaces/macro/web/sovereign-auction-pressure-20261008-sol-001/research/sovereign_auction_pressure/source_audit/forward_capture_primary",
+      "--playwright-root",
+      "/Volumes/Mastermind/agent-workspaces/terminal/web/sovereign-auction-context-20261008-sol-terminal-001/terminal/node_modules",
+      "--out-dir",
+      "/tmp/sovereign-auction-mastermind-ui-proof-04"
+    ],
+    "exit_code": 0,
+    "output_directory": "/tmp/sovereign-auction-mastermind-ui-proof-04",
+    "log": "research/sovereign_auction_context/verification/security_final/browser_run04.log"
+  },
+  "completed_at": "2026-10-09T00:05:10.600394+00:00"
+}

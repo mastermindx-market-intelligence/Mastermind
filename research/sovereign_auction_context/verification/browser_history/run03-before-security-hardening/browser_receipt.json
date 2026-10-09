@@ -1,6 +1,6 @@
 {
   "schema_version": "mastermind_auction_browser_receipt_v1",
-  "started_at": "2026-10-09T00:04:40.858Z",
+  "started_at": "2026-10-08T23:43:08.943Z",
   "status": "passed",
   "source_files": [
     {
@@ -9,7 +9,7 @@
     },
     {
       "path": "/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/mastermind_loopback_harness.py",
-      "sha256": "43833e3da426f7d15e6ac66da5058a4d25799cbd5df864d31a8ccbc8e07f3974"
+      "sha256": "ac06f0f9b62c0639a140164cf0e441ef2a086a92635e0d9891c50a2f853d1f89"
     }
   ],
   "proof_scope": "Actual Chromium page, exact existing FastAPI endpoint functions, source-bound real auction observations plus declared synthetic negative cases; no production/auth/lifespan/provider acceptance.",
@@ -4708,8 +4708,8 @@
         },
         {
           "path": "screenshots/390x844-en-light-observed-expanded-2.png",
-          "sha256": "0f1dc88050197b324fd8cd5d5f4881ac653ce7f472a64a51bb54d2484a6ffed2",
-          "bytes": 86213
+          "sha256": "b5e89c13b05167d47ace8d22eadbb9dccd21d6997973519855fe3c49a6f4d12d",
+          "bytes": 86212
         }
       ],
       "errors": [],
@@ -5043,8 +5043,8 @@
         },
         {
           "path": "screenshots/390x844-en-light-source_failure-failure.png",
-          "sha256": "fee80c23e6528eaee603322ecab85ab86ed9744588f6a9205f6dfed81ee7fb14",
-          "bytes": 106142
+          "sha256": "80768cd92b8506dfee6945b6e8645c986744e92ed157a76188030200f815823d",
+          "bytes": 106137
         }
       ],
       "errors": [],
@@ -5291,8 +5291,8 @@
         },
         {
           "path": "screenshots/390x844-en-dark-observed-expanded-2.png",
-          "sha256": "4dfb8db4f96da4c00b91c9db708c0fd1d473e634c71f5940840704e14ea39def",
-          "bytes": 87164
+          "sha256": "728af848523905729fac3071ab00f3300ab68b967f12d6107ccba06297aebbf3",
+          "bytes": 87162
         }
       ],
       "errors": [],
@@ -5626,8 +5626,8 @@
         },
         {
           "path": "screenshots/390x844-en-dark-source_failure-failure.png",
-          "sha256": "e28caa4d63a0101d2161492c89ee690ff816dc98db70b88f563f3885b202fe1c",
-          "bytes": 108411
+          "sha256": "73a5e8234f590cb65a2c97297988d04fec18e14e9600da0b66630ac242762cdb",
+          "bytes": 108394
         }
       ],
       "errors": [],
@@ -7012,7 +7012,7 @@
     }
   ],
   "harnessProcess": {
-    "pid": 57256,
+    "pid": 29004,
     "python": "/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/.venv/bin/python",
     "args": [
       "/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/mastermind_loopback_harness.py",
@@ -7023,19 +7023,19 @@
       "--capture-data-root",
       "/Volumes/Mastermind/agent-workspaces/macro/web/sovereign-auction-pressure-20261008-sol-001/research/sovereign_auction_pressure/source_audit/forward_capture_primary",
       "--out-dir",
-      "/tmp/sovereign-auction-mastermind-ui-proof-04",
+      "/tmp/sovereign-auction-mastermind-ui-proof-03",
       "--cutoff",
       "2026-10-08T23:00:00Z"
     ]
   },
   "harness_manifest": {
     "path": "harness_manifest.json",
-    "sha256": "d9214a5a1681e56d18578f2aab8bed19b06cc0ab1cb041da1facbb32222f2053"
+    "sha256": "3592f14d367072e71282b84db2924e36234063b0c0b1445326a28fbcca7d9a38"
   },
   "browser_version": "149.0.7827.55",
   "playwright_module": "/Volumes/Mastermind/agent-workspaces/terminal/web/sovereign-auction-context-20261008-sol-terminal-001/terminal/node_modules/@playwright/test/index.js",
   "counts": {
     "passed": 48
   },
-  "completed_at": "2026-10-09T00:05:10.588Z"
+  "completed_at": "2026-10-08T23:43:41.046Z"
 }

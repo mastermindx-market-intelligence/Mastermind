@@ -14,8 +14,9 @@ The section stays outside stored plane coverage and decision inputs. `auction_st
 
 | Gate | Result and evidence |
 |---|---|
-| Native reader and actual API | 26 tests passed with the workspace's actual FastAPI dependencies. Source: `verification/native_final/`. |
-| Actual page-script renderer | Passed exact decimal formatting, EN/ZH, original evidence, future-first grouping, explicit nulls, hostile text/link handling and unavailable states. |
+| Native reader and actual API | 26 tests passed with the workspace's actual FastAPI dependencies, rerun after security hardening. Source: `verification/security_final/`. |
+| Actual page-script renderer | Passed exact decimal formatting, EN/ZH, original evidence, future-first grouping, explicit nulls, hostile text/link handling, inherited status-attribute escaping and strict owned-script selection. |
+| Static harness boundary | Three stdlib tests passed: immutable approved-asset lookup, symlink containment, literal traversal-key rejection and no request-time filesystem access. |
 | Actual HTTP route and Chromium | 48/48 cases passed: desktop/tablet/mobile × EN/ZH × light/dark × observed/unavailable/source failure/awaiting with unknowns. Source: `verification/browser_final/browser_receipt.json`. |
 | Real source fixture | Four original Treasury captures project to 74 events at the declared cutoff; the three upcoming Bills are checked against the identical shared producer fixture. Synthetic negative cases are separately declared. |
 | Risk isolation | Native API tests retain original stored bytes, coverage, tilt, decision-context assembly, prompt summary, PM enrichment and legacy crash-leg behavior. |
@@ -24,6 +25,14 @@ The section stays outside stored plane coverage and decision inputs. `auction_st
 The first browser run exposed a new grid-expansion defect and an inherited narrow-screen containment defect. The repair spans native group expanders across the existing grid and lets panels shrink around the already scrollable planes table. Exact pre-auction baseline, diagnoses and historical browser receipts are retained. Final presentation validation also opens source disclosures and checks their geometry and raw evidence; it does not hide failures in closed elements.
 
 `VERIFIED_SOURCE_MANIFEST.json` binds the final product, test and harness files by SHA-256. Its enclosing Git commit binds the source revision. Earlier root-level candidate READMEs, `REVIEW_VERIFICATION.json` and `SOVEREIGN_AUCTION_SOURCE_CANDIDATE_HASHES.json` are historical phase records, not final-file manifests. Their earlier fixture/body-clock and HTML hashes must not be used as current acceptance.
+
+## Security review and evidence retention
+
+The exact-head CodeQL review of `42476573407fcb882c65a9388f98ed038801fc50` reported six annotations: two test-script regex findings, one archived HTML attribute sink and three request-derived path expressions in the loopback harness. Root review followed the archived HTML sink into the live page and reproduced an inherited double-quote attribute break before correcting it. The shared HTML escape helper now encodes both quote forms; existing display text and class values remain stable.
+
+The renderer unit test now selects one exact owned source block and rejects missing, duplicate, reordered or early-closing script boundaries. The static catch-all serves an immutable startup map of approved, contained bytes; request keys never reach filesystem operations. The existing loopback, no-lifespan, no-provider and negative-case constraints remain. The actual native suite, renderer, three boundary tests and all 48 browser cases were rerun against these final bytes in run04. Run03 remains historical evidence for the earlier source.
+
+Three obsolete full-source preimage copies have been removed from the working tree after verifying their unchanged bytes in reachable Git history at `8b74970c13a8915097d0d9e5849499904c1fcc2b`. `presentation_final/ARCHIVAL_PROVENANCE.json` records every original Git object and SHA-256; the original presentation patch and receipts remain unchanged. No scanner exclusion, filename masking, alert dismissal or historical-byte edit was used. Exact-head CodeQL status remains separately recorded; local acceptance alone does not clear that gate.
 
 ## Actual transport boundary
 

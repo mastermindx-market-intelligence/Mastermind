@@ -1,0 +1,34 @@
+{
+  "persisted_at": "2026-10-08T23:46:11.455636+00:00",
+  "source_output": "/tmp/sovereign-auction-mastermind-ui-proof-03",
+  "complete_receipts": [
+    "browser_receipt.json",
+    "harness_manifest.json",
+    "harness_process.log"
+  ],
+  "retained_screenshots": [
+    {
+      "name": "1440x900-en-light-observed-auction.png",
+      "sha256": "aa803840b3998a58ab625967fe90f4bd5b6da19537256de165413125909772ca"
+    },
+    {
+      "name": "390x844-zh-dark-observed-auction.png",
+      "sha256": "e6db6c0f602031f9dba73bcaec5575712f5e088800220442a2cf00fd0de32df2"
+    },
+    {
+      "name": "820x1180-zh-light-observed-expanded-1.png",
+      "sha256": "e33fd186e5cd8824efa1efdf000b2cf4c26ea5b155521cbdce3c274caa2f475b"
+    },
+    {
+      "name": "390x844-en-light-source_failure-auction.png",
+      "sha256": "df64d7be37dcc49ff5e0b37a7cc18ce086908c916fed5f990a0e4d52451c1176"
+    },
+    {
+      "name": "390x844-zh-dark-observed-source-details.png",
+      "sha256": "44823809cad891e9281a12c92b27c04661977ddfca145cde9c095752a99163d5"
+    }
+  ],
+  "unretained_screenshots": "Complete run screenshot hashes remain in browser receipts; additional reproduction output is transient.",
+  "visual_review": "Root inspected final desktop EN and mobile ZH; prior tablet EN/ZH containment and both theme variants inspected across final browser metrics.",
+  "scope": "Isolated fixture-based actual-page browser proof; not production auth, CSP, deployment or predictive validity."
+}

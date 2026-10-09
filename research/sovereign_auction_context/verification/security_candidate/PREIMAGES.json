@@ -1,0 +1,17 @@
+[
+  {
+    "path": "mastermind_patch/tests/test_sovereign_auction_renderer.cjs",
+    "sha256": "864008961197abac4eb7b1d37e14b86db8f9bda52913052e63e8542374fc82cf",
+    "bytes": 5870
+  },
+  {
+    "path": "ui_verification/mastermind_loopback_harness.py",
+    "sha256": "ac06f0f9b62c0639a140164cf0e441ef2a086a92635e0d9891c50a2f853d1f89",
+    "bytes": 16406
+  },
+  {
+    "path": "mastermind_patch/app/static/market_view.html",
+    "sha256": "c42e251ff86b1ee53cea017dc358b7e403fe8c82b46e6f3d8e0d06423754c911",
+    "bytes": 35384
+  }
+]
