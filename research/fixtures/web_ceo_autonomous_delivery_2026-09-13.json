@@ -1,0 +1,88 @@
+{
+  "schema": "mastermind.design_fixture.v1",
+  "synthetic": true,
+  "production_proof": false,
+  "runtime_executed": false,
+  "authority_status": "HYPOTHETICAL_NOT_ADMITTED",
+  "figma_file": "GfH3jNfel8F2cv7ZdTtiXt",
+  "purpose": "Design/acceptance expectations; never ingest as canonical Runtime evidence. All frames are observed current Figma nodes.",
+  "cases": [
+    {
+      "id": "web_absent_delivery_continues",
+      "frames": ["42:780", "45:780", "48:780"],
+      "web_turn": "not_running",
+      "mission_stage": "delivery",
+      "next_action": {"authority": "COO_OR_WORKER", "attention": "AUTONOMOUS_CONTINUE", "serviceability": "READY", "action": "request_in_scope_repair"},
+      "headline": "Delivery continues under the accepted brief",
+      "detail": "The API review found a correction defect. Fable can request the bounded repair; UI work continues independently.",
+      "chairman_action_required": false,
+      "forbidden": ["new_web_turn_required_for_every_repair", "claim_production_complete"]
+    },
+    {
+      "id": "strategic_exception_blocks_one_branch",
+      "frames": ["42:780", "48:780"],
+      "web_turn": "unavailable",
+      "mission_stage": "delivery_with_reserved_decision",
+      "next_action": {"authority": "SOL", "attention": "FOCUS_NOW", "serviceability": "BLOCKED", "action": "adjudicate_scope_change"},
+      "headline": "Source decision waiting for CEO review",
+      "detail": "The affected integration waits. Independent admitted UI verification continues.",
+      "chairman_action_required": false,
+      "forbidden": ["coo_self_grants_strategy_change", "hide_urgent_blocked_decision", "stop_all_unrelated_work"]
+    },
+    {
+      "id": "official_scheduled_review_candidate",
+      "frames": ["42:780"],
+      "web_turn": "native_task_profile_unqualified",
+      "mission_stage": "candidate_ready",
+      "next_action": {"authority": "SOL", "attention": "BATCH_NEXT", "serviceability": "UNKNOWN", "action": "qualify_then_run_native_review"},
+      "headline": "CEO review queued; scheduled profile not yet proven",
+      "detail": "A task registration alone does not prove the selected Pro model, write permission or result consumption.",
+      "chairman_action_required": null,
+      "forbidden": ["claim_astra_pro_from_task_registration", "substitute_work_or_api_silently"]
+    },
+    {
+      "id": "write_confirmation_required",
+      "frames": ["42:780"],
+      "web_turn": "native_task_paused",
+      "mission_stage": "candidate_ready",
+      "next_action": {"authority": "SOL", "attention": "FOCUS_NOW", "serviceability": "BLOCKED", "action": "obtain_required_host_approval"},
+      "headline": "Review action paused for app approval",
+      "detail": "The original decision and candidate remain current. No approval click is automated.",
+      "chairman_action_required": true,
+      "forbidden": ["mark_mutation_read_only", "automate_confirmation", "replay_via_other_account"]
+    },
+    {
+      "id": "restricted_carrier",
+      "frames": ["42:780", "49:780"],
+      "web_turn": "restricted",
+      "mission_stage": "delivery",
+      "next_action": {"authority": "ADMIN_OR_EXTERNAL", "attention": "FOCUS_NOW", "serviceability": "BLOCKED", "action": "diagnose_restricted_carrier"},
+      "headline": "Web review route unavailable; delegated delivery preserved",
+      "detail": "The restriction cause is not inferred. No new requests are routed through that restricted profile.",
+      "chairman_action_required": null,
+      "forbidden": ["account_rotation_to_defeat_restriction", "assume_all_provider_failures_are_quota", "invent_cause"]
+    },
+    {
+      "id": "delivery_effect_unknown",
+      "frames": ["59:780", "60:780"],
+      "web_turn": "irrelevant",
+      "mission_stage": "delivery",
+      "next_action": {"authority": "COO_OR_WORKER", "attention": "FOCUS_NOW", "serviceability": "BLOCKED", "action": "reconcile_original_action"},
+      "headline": "The reply was lost; the message may have arrived",
+      "detail": "Read the original canonical receipt. Do not resend or move the same uncertain action to another worker.",
+      "chairman_action_required": false,
+      "forbidden": ["blind_retry", "cross_carrier_failover", "complete_from_silence"]
+    },
+    {
+      "id": "candidate_not_production_accepted",
+      "frames": ["42:780", "45:780"],
+      "web_turn": "not_running",
+      "mission_stage": "integrated_candidate_ready",
+      "next_action": {"authority": "SOL", "attention": "BATCH_NEXT", "serviceability": "UNKNOWN", "action": "review_integrated_evidence"},
+      "headline": "Integrated candidate ready for CEO acceptance",
+      "detail": "Worker and independent review evidence are recorded. No production deployment or final acceptance is implied.",
+      "chairman_action_required": false,
+      "forbidden": ["mark_shipped_from_ci", "self_accept_reserved_final_gate"]
+    }
+  ]
+}
