@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import fcntl
 import grp
 import io
 import json
@@ -22,6 +23,7 @@ import pwd
 import re
 import stat
 import sys
+import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -76,6 +78,10 @@ ALLOWED_PARENT_USER_IDS = ("U0BRETDUAS2",)
 _RELAY_GROUP_MEMBERS = (EXEC_USER,)
 _RELEASE_RE = re.compile(r"^[0-9a-f]{40}$")
 _PLACEHOLDER_RE = re.compile(r"__[A-Z0-9_]+__")
+A2_REBIND_LOCK_DIR = SYSTEM_ROOT / "locks"
+A2_REBIND_LOCK_PATH = A2_REBIND_LOCK_DIR / "a2-agent-relay-rebind.lock"
+REBIND_ROOT_UID = 0
+REBIND_ROOT_GID = 0
 
 ERROR_CODES = frozenset(
     {
@@ -90,6 +96,11 @@ ERROR_CODES = frozenset(
         "A2_ENROLLMENT_ROLLBACK_REFUSED",
         "A2_ENROLLMENT_SECRET_SURFACE_REFUSED",
         "A2_ENROLLMENT_WRITE_REFUSED",
+        "A2_REBIND_BUSY",
+        "A2_REBIND_STATE_REFUSED",
+        "A2_REBIND_WRITE_REFUSED",
+        "A2_REBIND_EFFECT_UNCERTAIN",
+        "A2_REBIND_MIXED_GENERATION",
     }
 )
 
@@ -141,6 +152,8 @@ def build_parser() -> argparse.ArgumentParser:
         child = commands.add_parser(name)
         child.add_argument("--expected-bot-user-id", required=True)
         child.add_argument("--enable-w3c", action="store_true")
+    child = commands.add_parser("rebind-release")
+    child.add_argument("--expected-bot-user-id", required=True)
     return parser
 
 
@@ -1109,6 +1122,292 @@ async def _verify(*, bot_user_id: str, w3c_enabled: bool = False) -> dict[str, o
         os.close(binding.descriptor)
 
 
+@dataclass(frozen=True)
+class _RebindFile:
+    # Credential attestations deliberately contain metadata only, never bytes/digests.
+    identity: tuple[int, ...]
+    payload: bytes | None
+
+
+def _rebind_identity(info: os.stat_result) -> tuple[int, ...]:
+    return (info.st_dev, info.st_ino, info.st_uid, info.st_gid, info.st_mode,
+            info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
+def _rebind_acl(path: Path, info: os.stat_result) -> None:
+    if c1_enrollment.c1_runtime._path_has_acl(path, expected_info=info):  # noqa: SLF001
+        raise A2EnrollmentError("A2_REBIND_STATE_REFUSED")
+
+
+class _A2Rebind:
+    """One A2-owned flock and descriptor-bound, existing-file transaction.
+
+    Only config/plist payloads enter this object. The token is opened solely to
+    hold its inode and attest metadata. No provider or lifecycle call is made.
+    Directory descriptors anchor writes; every forward/rollback rename checks
+    the entire observed pair, token, lock and namespaces, not just its own path.
+    """
+
+    def __init__(self, binding: _BoundDirectory) -> None:
+        self.binding = binding
+        self.directories: dict[Path, tuple[int, tuple[int, int]]] = {}
+        self.lock_fd = -1
+        self.token_fd = -1
+        self.live = False
+        self.lock_identity: tuple[int, ...] | None = None
+        self.token_identity: tuple[int, ...] | None = None
+        self.expected: dict[Path, _RebindFile] = {}
+        self.preimages: dict[Path, _RebindFile] = {}
+
+    def __enter__(self) -> "_A2Rebind":
+        try:
+            if A2_REBIND_LOCK_PATH != A2_REBIND_LOCK_DIR / "a2-agent-relay-rebind.lock":
+                raise A2EnrollmentError("A2_REBIND_STATE_REFUSED")
+            for path in (A2_REBIND_LOCK_DIR, CONFIG_PATH.parent, PLIST_PATH.parent):
+                fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                info = os.fstat(fd)
+                self.directories[path] = (fd, (info.st_dev, info.st_ino))
+                self._directory(path)
+            flags = os.O_RDWR | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+            lock_dir = self.directories[A2_REBIND_LOCK_DIR][0]
+            try:
+                self.lock_fd = os.open(A2_REBIND_LOCK_PATH.name,
+                                       flags | os.O_CREAT | os.O_EXCL, 0o600,
+                                       dir_fd=lock_dir)
+                os.fchown(self.lock_fd, REBIND_ROOT_UID, REBIND_ROOT_GID)
+                os.fchmod(self.lock_fd, 0o600)
+                os.fsync(self.lock_fd)
+                os.fsync(lock_dir)
+            except FileExistsError:
+                self.lock_fd = os.open(A2_REBIND_LOCK_PATH.name, flags, dir_fd=lock_dir)
+            self.lock_identity = self._file(A2_REBIND_LOCK_PATH, read=False).identity
+            if _rebind_identity(os.fstat(self.lock_fd)) != self.lock_identity:
+                raise A2EnrollmentError("A2_REBIND_STATE_REFUSED")
+            try:
+                fcntl.flock(self.lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise A2EnrollmentError("A2_REBIND_BUSY") from None
+            self.token_fd = os.open(TOKEN_PATH.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                                    dir_fd=self.directories[CONFIG_PATH.parent][0])
+            self.token_identity = self._file(TOKEN_PATH, read=False).identity
+            if _rebind_identity(os.fstat(self.token_fd)) != self.token_identity:
+                raise A2EnrollmentError("A2_REBIND_STATE_REFUSED")
+            self.live = True
+            self.expected = {path: self._file(path) for path in (PLIST_PATH, CONFIG_PATH)}
+            self.preimages = dict(self.expected)
+            self.check()
+            return self
+        except BaseException:
+            self.__exit__(None, None, None)
+            raise
+
+    def __exit__(self, *_args: object) -> None:
+        self.live = False
+        # Never unlink the persistent flock inode: waiters must share its identity.
+        for fd in (self.token_fd, self.lock_fd, *(x[0] for x in self.directories.values())):
+            if fd >= 0:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+        self.token_fd = self.lock_fd = -1
+        self.directories.clear()
+
+    def _directory(self, path: Path) -> int:
+        fd, identity = self.directories[path]
+        info = path.lstat()
+        opened = os.fstat(fd)
+        if (not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode)
+                or (info.st_dev, info.st_ino) != identity
+                or (opened.st_dev, opened.st_ino) != identity
+                or info.st_uid != REBIND_ROOT_UID or info.st_gid != REBIND_ROOT_GID
+                or info.st_mode & 0o022
+                or (path == A2_REBIND_LOCK_DIR and stat.S_IMODE(info.st_mode) != 0o700)):
+            raise A2EnrollmentError("A2_REBIND_STATE_REFUSED")
+        _rebind_acl(path, info)
+        return fd
+
+    def _file(self, path: Path, *, read: bool = True) -> _RebindFile:
+        contracts = {
+            TOKEN_PATH: (RELAY_UID, RELAY_GID, 0o400),
+            CONFIG_PATH: (RELAY_UID, RELAY_GID, 0o400),
+            PLIST_PATH: (PLIST_UID, PLIST_GID, 0o644),
+            A2_REBIND_LOCK_PATH: (REBIND_ROOT_UID, REBIND_ROOT_GID, 0o600),
+        }
+        if path not in contracts or (read and path in (TOKEN_PATH, A2_REBIND_LOCK_PATH)):
+            raise A2EnrollmentError("A2_REBIND_STATE_REFUSED")
+        uid, gid, mode = contracts[path]
+        parent = self._directory(path.parent)
+        fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+        try:
+            info = os.fstat(fd)
+            if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                    or (info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode)) != (uid, gid, mode)
+                    or (path != A2_REBIND_LOCK_PATH and info.st_size == 0)
+                    or info.st_size > 64 * 1024):
+                raise A2EnrollmentError("A2_REBIND_STATE_REFUSED")
+            identity = _rebind_identity(info)
+            _rebind_acl(path, info)
+            raw = None
+            if read:
+                chunks = []
+                remaining = 64 * 1024 + 1
+                while remaining:
+                    chunk = os.read(fd, remaining)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                    remaining -= len(chunk)
+                raw = b"".join(chunks)
+                if not raw or len(raw) > 64 * 1024:
+                    raise A2EnrollmentError("A2_REBIND_STATE_REFUSED")
+            if (identity != _rebind_identity(os.fstat(fd))
+                    or identity != _rebind_identity(os.stat(path.name, dir_fd=parent,
+                                                           follow_symlinks=False))):
+                raise A2EnrollmentError("A2_REBIND_STATE_REFUSED")
+            return _RebindFile(identity, raw)
+        finally:
+            os.close(fd)
+
+    def check(self) -> None:
+        if not self.live:
+            raise A2EnrollmentError("A2_REBIND_EFFECT_UNCERTAIN")
+        _assert_disarmed()
+        _assert_bound_config_current(self.binding)
+        for path in self.directories:
+            self._directory(path)
+        for path, fd, identity in (
+            (A2_REBIND_LOCK_PATH, self.lock_fd, self.lock_identity),
+            (TOKEN_PATH, self.token_fd, self.token_identity),
+        ):
+            if (self._file(path, read=False).identity != identity
+                    or _rebind_identity(os.fstat(fd)) != identity):
+                raise A2EnrollmentError("A2_REBIND_EFFECT_UNCERTAIN")
+        for path, expected in self.expected.items():
+            if self._file(path) != expected:
+                raise A2EnrollmentError("A2_REBIND_EFFECT_UNCERTAIN")
+
+    def replace(self, path: Path, payload: bytes) -> None:
+        if path not in (PLIST_PATH, CONFIG_PATH) or not payload or len(payload) > 64 * 1024:
+            raise A2EnrollmentError("A2_REBIND_WRITE_REFUSED")
+        self.check()
+        if self.expected[path].payload == payload:
+            return
+        parent = self._directory(path.parent)
+        name = f".{path.name}.rebind-{uuid.uuid4().hex}"
+        fd = -1
+        staged_identity = None
+        renamed = False
+        try:
+            fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                         0o600, dir_fd=parent)
+            info = os.fstat(fd)
+            staged_identity = (info.st_dev, info.st_ino)
+            old = self.expected[path].identity
+            os.fchown(fd, old[2], old[3])
+            os.fchmod(fd, stat.S_IMODE(old[4]))
+            view = memoryview(payload)
+            while view:
+                n = os.write(fd, view)
+                if n <= 0:
+                    raise OSError("short write")
+                view = view[n:]
+            os.fsync(fd)
+            self.check()  # includes sibling, lock, token and both namespaces
+            staged = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            if (_rebind_identity(staged) != _rebind_identity(os.fstat(fd))
+                    or not stat.S_ISREG(staged.st_mode) or staged.st_nlink != 1):
+                raise A2EnrollmentError("A2_REBIND_EFFECT_UNCERTAIN")
+            _rebind_acl(path.parent / name, staged)
+            os.replace(name, path.name, src_dir_fd=parent, dst_dir_fd=parent)
+            renamed = True
+            # Record ownership immediately after an acknowledged rename, before
+            # fsync/readback. An exception with an unacknowledged rename remains
+            # uncertain; byte equality never licenses overwriting a foreign inode.
+            self.expected[path] = _RebindFile(_rebind_identity(os.fstat(fd)), payload)
+            os.fsync(parent)
+            self.check()
+        finally:
+            if fd >= 0:
+                os.close(fd)
+            if not renamed and staged_identity is not None:
+                try:
+                    info = os.stat(name, dir_fd=parent, follow_symlinks=False)
+                    if (info.st_dev, info.st_ino) == staged_identity:
+                        os.unlink(name, dir_fd=parent)
+                except FileNotFoundError:
+                    pass
+
+    def restore(self, failure: Exception) -> None:
+        try:
+            self.check()
+            for path, preimage in self.preimages.items():
+                assert preimage.payload is not None
+                self.replace(path, preimage.payload)
+            self.check()
+            if all(self.expected[p].payload == old.payload for p, old in self.preimages.items()):
+                raise A2EnrollmentError("A2_REBIND_WRITE_REFUSED") from failure
+        except A2EnrollmentError as exc:
+            if exc.code == "A2_REBIND_WRITE_REFUSED":
+                raise
+            raise A2EnrollmentError("A2_REBIND_EFFECT_UNCERTAIN") from failure
+        except Exception:
+            # Classify an owned, known mixed pair separately. Never repair drift.
+            try:
+                self.check()
+            except Exception:
+                raise A2EnrollmentError("A2_REBIND_EFFECT_UNCERTAIN") from failure
+            raise A2EnrollmentError("A2_REBIND_MIXED_GENERATION") from failure
+        raise A2EnrollmentError("A2_REBIND_EFFECT_UNCERTAIN") from failure
+
+
+async def _rebind(*, bot_user_id: str) -> dict[str, object]:
+    """Bind a coherent existing A2 enrollment to the installed source release."""
+    release_sha = _assert_host_prepared()
+    binding = _open_bound_config_directory()
+    try:
+        with _A2Rebind(binding) as tx:
+            try:
+                config = json.loads(tx.preimages[CONFIG_PATH].payload)
+                old_sha = config["release_sha"]
+                scopes = tuple(config["slack_scopes"])
+                w3c_enabled = config["w3c_enabled"]
+                old = _canonical_json_bytes(build_config_document(
+                    bot_user_id=bot_user_id, release_sha=old_sha,
+                    scopes=scopes, w3c_enabled=w3c_enabled))
+                old_plist = render_plist(bot_user_id=bot_user_id, release_sha=old_sha,
+                                         w3c_enabled=w3c_enabled)
+                if old != tx.preimages[CONFIG_PATH].payload or old_plist != tx.preimages[PLIST_PATH].payload:
+                    raise ValueError("noncanonical or mixed generation")
+            except Exception:
+                raise A2EnrollmentError("A2_REBIND_STATE_REFUSED") from None
+            tx.check()
+            if old_sha == release_sha:
+                return {"action": "already-current", "bot_user_id": bot_user_id,
+                        "release_sha": release_sha}
+            target = {
+                PLIST_PATH: render_plist(bot_user_id=bot_user_id, release_sha=release_sha,
+                                        w3c_enabled=w3c_enabled),
+                CONFIG_PATH: _canonical_json_bytes(build_config_document(
+                    bot_user_id=bot_user_id, release_sha=release_sha,
+                    scopes=scopes, w3c_enabled=w3c_enabled)),
+            }
+            try:
+                for path, payload in target.items():
+                    tx.replace(path, payload)
+                tx.check()
+            except Exception as exc:
+                tx.restore(exc)
+            return {"action": "rebound", "bot_user_id": bot_user_id,
+                    "previous_release_sha": old_sha, "release_sha": release_sha}
+    except A2EnrollmentError:
+        raise
+    except Exception:
+        raise A2EnrollmentError("A2_REBIND_STATE_REFUSED") from None
+    finally:
+        os.close(binding.descriptor)
+
+
 def _fixed_error(code: str) -> dict[str, object]:
     return {
         "error": code,
@@ -1157,6 +1456,8 @@ def _run_invocation(
             if args.enable_w3c:
                 shared_kwargs["w3c_enabled"] = True
             receipt = asyncio.run(_enroll_shared(**shared_kwargs))
+        elif args.command == "rebind-release":
+            receipt = asyncio.run(_rebind(bot_user_id=args.expected_bot_user_id))
         elif args.command == "verify":
             verify_kwargs = {"bot_user_id": args.expected_bot_user_id}
             if args.enable_w3c:
