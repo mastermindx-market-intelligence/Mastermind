@@ -58,9 +58,12 @@ def _timestamp(value: Any) -> datetime | None:
 
 def _read_snapshot(symbol: str, token: str) -> tuple[dict | None, str]:
     """Return only a typed status, never external error text or secrets."""
+    # Tiingo normalizes class-share symbols with hyphens (BRK-B), while
+    # the existing portfolio may hold their US dot aliases (BRK.B).
+    vendor_symbol = symbol.replace(".", "-")
     try:
         response = requests.get(
-            f"{_URL}/{symbol.lower()}",
+            f"{_URL}/{vendor_symbol.lower()}",
             headers={"Authorization": f"Token {token}", "Accept": "application/json"},
             timeout=4,
         )
@@ -80,7 +83,7 @@ def _read_snapshot(symbol: str, token: str) -> tuple[dict | None, str]:
             payload = payload[0]
         if not isinstance(payload, dict):
             return None, "invalid_provider_payload"
-        if str(payload.get("ticker") or "").upper() != symbol:
+        if str(payload.get("ticker") or "").upper() != vendor_symbol:
             return None, "ticker_mismatch"
         return payload, "ok"
     except Exception:

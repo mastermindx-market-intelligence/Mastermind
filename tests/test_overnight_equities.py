@@ -260,3 +260,15 @@ def test_customer_quote_enables_ticket_only_when_all_license_gates_are_armed(mon
     monkeypatch.setenv("MASTERMIND_OVERNIGHT_PAPER_FILLS_ENABLED", "0")
     held = oq.latest("AAPL", now=_now(), purpose="display", include_eligibility=True)
     assert held["fresh"] and not held["executable"]
+
+
+def test_tiingo_class_share_symbology_maps_dot_to_vendor_hyphen(monkeypatch):
+    _configure(monkeypatch, display=True)
+    urls = []
+    def mock_get(url, headers=None, timeout=None):
+        urls.append(url)
+        return _reply(_boat_quote(ticker="BRK-B"))
+    monkeypatch.setattr(oq.requests, "get", mock_get)
+    result = oq.latest("BRK.B", now=_now(), purpose="display")
+    assert result["ticker"] == "BRK.B" and result["fresh"] is True
+    assert urls == ["https://api.tiingo.com/boats/brk-b"]
