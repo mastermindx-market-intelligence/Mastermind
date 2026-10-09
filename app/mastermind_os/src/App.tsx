@@ -1237,6 +1237,7 @@ export function App() {
       state: "PENDING",
       reason: "SOURCE_READ_PENDING",
     }),
+    [programRevision, setProgramRevision] = useState(0),
     [workState, setWorkState] = useState<WorkState>({ kind: "PENDING" }),
     [workRevision, setWorkRevision] = useState(0),
     [mission, setMission] = useState<MissionDocument | UnavailableMission>(() =>
@@ -1699,6 +1700,7 @@ export function App() {
   }, [
     native,
     authRevision,
+    programRevision,
     authState?.acquisition,
     selection?.workRef,
     selection?.rootJobId,
@@ -2492,6 +2494,25 @@ export function App() {
     setProjectTab(null);
     setActive(view);
   };
+  const programsReadAvailable =
+    (typeof window.MastermindMissionHost?.readProgramsObservation === "function" ||
+      typeof window.MastermindMissionHost?.readPrograms === "function") &&
+    (!authState || authState.acquisition);
+  const programsRefreshControl = (
+    <button
+      type="button"
+      // Pending reads stay focusable; unavailable acquisition stays natively disabled.
+      disabled={!programsReadAvailable}
+      aria-disabled={index.state === "PENDING" || !programsReadAvailable}
+      onClick={() => {
+        if (index.state === "PENDING" || !programsReadAvailable) return;
+        setIndex({ programs: [], state: "PENDING", reason: "SOURCE_READ_PENDING" });
+        setProgramRevision((revision) => revision + 1);
+      }}
+    >
+      Refresh Projects
+    </button>
+  );
   const workReadAvailable =
     typeof window.MastermindMissionHost?.readWork === "function" &&
     (!authState || authState.acquisition);
@@ -2560,8 +2581,10 @@ export function App() {
   else if (active === "Knowledge")
     content = <Knowledge projection={office.projection} />;
   else if (active === "Projects")
-    content =
-      projectTab && selection ? (
+    content = (
+      <>
+        {programsRefreshControl}
+        {projectTab && selection ? (
         <>
           <section className="hero">
             <div>
@@ -2642,12 +2665,15 @@ export function App() {
               : undefined
           }
         />
-      );
+        )}
+      </>
+    );
   else if (active === "Programs")
     content = (
       <section className="card">
         <div className="section-title">
           <h2>Programs</h2>
+          {programsRefreshControl}
           <State
             value={
               index.state === "PENDING" ? "SOURCE_READ_PENDING" : index.state
