@@ -24,6 +24,8 @@ Do not add this orchestration layer to a greeting, simple transformation, one fa
 5. Execute the smallest useful capability step, then compare its result with the acceptance ruler. Reuse existing commission, reconciliation, return-review, PR-review and closeout skills at their actual boundaries. A good plan, delivered packet, green test or merge does not complete an end-to-end assignment.
 6. At a material return, inspect exact evidence, adjudicate what changed, and advance the unlocked dependency. Keep independent useful work moving while one lane is blocked. Choose mode and recovery through current source policy, not this skill's own mode table.
 
+For sustained delivery, load `skills/mastermind-fabric-orchestration/SKILL.md` and only the assigned role from the same exact commit already verified above. Prefer an admitted GLM/Grok-class operator for ordinary delegation, return adjudication, review/repair and integration; keep consequential principal decisions here. Direct worker dispatch retains adjudication. Role guidance is not tool availability, identity or admission; never create a native-helper bypass.
+
 ## Evidence and output
 
 Lead with the decision or verified capability delta, its decisive evidence, remaining uncertainty and exact next action. Keep the working frontier compact under existing continuity owners; persist material decisions and effects before a risky transition. Show completion against the original user outcome and required real-path proof. Do not manufacture background execution, native skill adoption, custody transfer or performance gains.

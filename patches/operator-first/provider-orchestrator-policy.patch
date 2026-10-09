@@ -1,0 +1,152 @@
+--- a/ops/executive_os/provider_orchestrator_policy.py
++++ b/ops/executive_os/provider_orchestrator_policy.py
+@@ -57,6 +57,10 @@
+ )
+ BACKUP_SUFFIX = ".mastermind-orchestrator-backup"
+ 
++# Fixed source assets, not a role/identity/grant registry.
++ROLE_PACKAGE = "mastermind-fabric-orchestration"
++ROLE_SHA256 = {'SKILL.md': '926cd8d3ec4930589a85f74feca22efbf83dad7cf1920589261eae756fe40558', 'references/meta-ceo.md': '01bc3da774de8bb1abc9339dc93b91eda17680897a78bed44a3334eda6b14389', 'references/program-ceo.md': '323c765dd98aacf5aab3ad8af241864f564b86eda76ccd0d71c70b8f8f679a24', 'references/operator.md': '00324679522fc5d07d10c4fc57dcaf00277f1a301eff26c4deff7aa45c9afe7b', 'references/worker.md': 'c43c135729a0565f1dabfc2e912c18cf7f7d8f3786f49cc7647853b84402b924', 'references/reviewer.md': '0d10a348c874d3288636e449fe1961357cb30e81fe0be87cefef3246feac5d5c'}
++
+ POLICY_BODY = f"""{BEGIN}
+ ## Mastermind CEO / orchestrator forward execution
+ 
+@@ -66,31 +70,7 @@
+ 
+ ### Operating shape
+ 
+-- Sol is the default day-to-day project executive for decomposition, dispatch, ordinary repair,
+-  integration, delivery, and return consumption inside the accepted charter.
+-- Astra is optional strategic/meta principal capacity for architecture, materially conflicting
+-  evidence, novel recovery, or strategic acceptance. Direct Astra -> routine worker fan-out is
+-  exceptional for major programs rather than the default shape.
+-- A qualified Fabric domain coordinator is optional only when it owns a complete bounded subsystem
+-  outcome and removes real integration load. It may not exist merely to relay summaries.
+-- Do not force a ceremonial hierarchy. If one principal plus bounded Fabric leaves is sufficient,
+-  omit the extra COO/coordinator. Insert Sol below Astra only when Sol owns real decomposition,
+-  integration, return consumption, or multiple workstreams; never use Sol as a message relay.
+-- When Astra hands sustained delivery to Sol, transmit a compact frozen mission/frontier capsule and
+-  exact artifact refs rather than cloning the parent transcript. Astra returns to strategic exceptions
+-  and acceptance instead of shadow-executing the same worker mechanics.
+-- Classify every delegated child under the current protected task-complexity/routing law. Prefer
+-  deterministic execution for mechanical work, then the least-scarce admitted worker for bounded
+-  labor. Frontier capacity requires a concrete FRONTIER_WITNESS; program prestige, child/reviewer
+-  status, free slots, or unused premium quota are not witnesses.
+-- Consequential builder output receives independent review when current law requires it. Review is
+-  not permission for the reviewer to self-start repair or become a second source writer.
+-- Routine independently executable labor routes through the existing Executive/Subagent Fabric.
+-  Native provider children are not the routine worker pool. A native-child exception requires a
+-  concrete principal-judgment or unique-native-access reason under the current provider rules.
+-- Every descendant preserves the original root identity, effective grant, source/effect fences,
+-  admitted depth, provider/host limits, and root budget. Never mint a new root/session to reset
+-  accounting, and never treat free slots as a utilization target.
++__OPERATOR_FIRST_CORE__
+ 
+ ### Forward-execution and burn guards
+ 
+@@ -340,7 +320,8 @@
+         raise OrchestratorPolicyError(
+             "managed orchestrator policy v2 markers are malformed/duplicated"
+         )
+-    block = POLICY_BODY.rstrip() + "\n"
++    core = _canonical_role_files()["SKILL.md"].decode("utf-8").split("---", 2)[2].strip()
++    block = POLICY_BODY.replace("__OPERATOR_FIRST_CORE__", core).rstrip() + "\n"
+     if begins == 1:
+         start = text.index(BEGIN)
+         finish = text.index(END, start) + len(END)
+@@ -519,7 +500,7 @@
+ 
+ def _paths(home: Path) -> dict[str, Path]:
+     home = home.expanduser().resolve()
+-    return {
++    paths = {
+         "codex_doc": home / ".codex" / "AGENTS.md",
+         "claude_doc": home / ".claude" / "CLAUDE.md",
+         "codex_hooks": home / ".codex" / "hooks.json",
+@@ -529,16 +510,41 @@
+         "claude_guard": home / ".claude" / "hooks" / "mastermind_fabric_routing_guard.py",
+     }
+ 
++    for provider, directory in (("codex", ".agents"), ("claude", ".claude")):
++        for index, relative in enumerate(ROLE_SHA256):
++            paths[f"{provider}_role_{index}"] = home / directory / "skills" / ROLE_PACKAGE / relative
++    return paths
++
+ 
+ def _canonical_guard(source: Path | None = None) -> bytes:
+     path = source or Path(__file__).with_name("provider_orchestrator_guard.py")
+     return _regular_bytes(path)
++
++
++def _canonical_role_files() -> dict[str, bytes]:
++    """Read a fixed reviewed instruction closure, never discover or select roles.
++
++    Presence/digest is installation evidence only. The existing launch/capability
++    owner must separately bind and attest one actual role for each Attempt.
++    """
++    source_root = Path(__file__).resolve().parents[2]
++    root = source_root / "skills" / ROLE_PACKAGE
++    rows: dict[str, bytes] = {}
++    for relative, expected in ROLE_SHA256.items():
++        path = root / relative
++        _preflight_destination(path, source_root)
++        payload = _regular_bytes(path)
++        if len(payload) > 8192 or _sha256(payload) != expected:
++            raise OrchestratorPolicyError("orchestration role source digest mismatch")
++        rows[relative] = payload
++    return rows
+ 
+ 
+ def apply_policy(home: Path, *, guard_source: Path | None = None) -> dict[str, object]:
+     resolved_home = Path(home).expanduser().resolve()
+     paths = _paths(resolved_home)
+     guard = _canonical_guard(guard_source)
++    roles = _canonical_role_files()
+ 
+     # Reject known unsafe path shapes before any managed file can change. Unexpected
+     # I/O failure can still interrupt a multi-file apply and is handled separately.
+@@ -572,6 +578,14 @@
+         ("codex_hooks", rendered["codex_hooks"]),
+         ("codex_config", rendered["codex_config"]),
+     ]
++    # Supporting references stay discoverable/on-demand. Only the shared core is
++    # embedded into the managed parent block; no role body is concatenated there.
++    role_operations = [
++        (f"{provider}_role_{index}", roles[relative])
++        for provider in ("codex", "claude")
++        for index, relative in enumerate(ROLE_SHA256)
++    ]
++    operations = operations[:2] + role_operations + operations[2:]
+     modified: list[str] = []
+     try:
+         for key, payload in operations:
+@@ -657,6 +671,19 @@
+     paths = _paths(home)
+     canonical = _canonical_guard(guard_source)
+     issues: list[str] = []
++    roles = _canonical_role_files()
++    for provider in ("codex", "claude"):
++        for index, relative in enumerate(ROLE_SHA256):
++            key = f"{provider}_role_{index}"
++            try:
++                _preflight_destination(paths[key], Path(home).expanduser().resolve())
++                installed = _regular_bytes(paths[key])
++            except OrchestratorPolicyError:
++                issues.append(f"{key}.missing_or_unsafe")
++                continue
++            if installed != roles[relative]:
++                issues.append(f"{key}.digest")
++
+ 
+     for name in ("codex_guard", "claude_guard"):
+         try:
+@@ -731,6 +758,9 @@
+         "home": str(Path(home).expanduser().resolve()),
+         "issues": issues,
+         "guard_sha256": _sha256(canonical),
++        "role_source_sha256": dict(ROLE_SHA256),
++        "session_loading_proven": False,
++        "runtime_admission_proven": False,
+         "managed_files": {key: str(value) for key, value in paths.items()},
+         "credentials_read": False,
+         "permissions_changed": False,
