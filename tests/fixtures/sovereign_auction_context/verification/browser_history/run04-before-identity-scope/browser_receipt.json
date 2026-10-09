@@ -1,14 +1,14 @@
 {
   "schema_version": "mastermind_auction_browser_receipt_v1",
-  "started_at": "2026-10-09T00:55:30.870Z",
+  "started_at": "2026-10-09T00:04:40.858Z",
   "status": "passed",
   "source_files": [
     {
-      "path": "/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/tests/fixtures/sovereign_auction_context/verification/verify_mastermind_ui.cjs",
+      "path": "/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/verify_mastermind_ui.cjs",
       "sha256": "d162597a3f6780b4f30e1fd8595a9db9da5f184e5f9c90be9bedf5d182514a7a"
     },
     {
-      "path": "/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/tests/fixtures/sovereign_auction_context/verification/mastermind_loopback_harness.py",
+      "path": "/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/mastermind_loopback_harness.py",
       "sha256": "43833e3da426f7d15e6ac66da5058a4d25799cbd5df864d31a8ccbc8e07f3974"
     }
   ],
@@ -5043,8 +5043,8 @@
         },
         {
           "path": "screenshots/390x844-en-light-source_failure-failure.png",
-          "sha256": "80768cd92b8506dfee6945b6e8645c986744e92ed157a76188030200f815823d",
-          "bytes": 106137
+          "sha256": "fee80c23e6528eaee603322ecab85ab86ed9744588f6a9205f6dfed81ee7fb14",
+          "bytes": 106142
         }
       ],
       "errors": [],
@@ -5626,8 +5626,8 @@
         },
         {
           "path": "screenshots/390x844-en-dark-source_failure-failure.png",
-          "sha256": "73a5e8234f590cb65a2c97297988d04fec18e14e9600da0b66630ac242762cdb",
-          "bytes": 108394
+          "sha256": "e28caa4d63a0101d2161492c89ee690ff816dc98db70b88f563f3885b202fe1c",
+          "bytes": 108411
         }
       ],
       "errors": [],
@@ -6209,8 +6209,8 @@
         },
         {
           "path": "screenshots/390x844-zh-light-source_failure-failure.png",
-          "sha256": "44425db6a4020229f003c2929b323a0e7063cdb635a18d538d14b7181688444e",
-          "bytes": 109617
+          "sha256": "66da7f9c580ea4d98cb21b3b0a925a4bd842686fc961d1ae37c0a0e2828ffa66",
+          "bytes": 109615
         }
       ],
       "errors": [],
@@ -7012,10 +7012,10 @@
     }
   ],
   "harnessProcess": {
-    "pid": 87870,
+    "pid": 57256,
     "python": "/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/.venv/bin/python",
     "args": [
-      "/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/tests/fixtures/sovereign_auction_context/verification/mastermind_loopback_harness.py",
+      "/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001/research/sovereign_auction_context/verification/mastermind_loopback_harness.py",
       "--mastermind-root",
       "/Volumes/Mastermind/agent-workspaces/web/sovereign-auction-context-20261008-sol-mm-001",
       "--macro-root",
@@ -7023,19 +7023,19 @@
       "--capture-data-root",
       "/Volumes/Mastermind/agent-workspaces/macro/web/sovereign-auction-pressure-20261008-sol-001/research/sovereign_auction_pressure/source_audit/forward_capture_primary",
       "--out-dir",
-      "/tmp/sovereign-auction-mastermind-ui-proof-05",
+      "/tmp/sovereign-auction-mastermind-ui-proof-04",
       "--cutoff",
       "2026-10-08T23:00:00Z"
     ]
   },
   "harness_manifest": {
     "path": "harness_manifest.json",
-    "sha256": "eb576cb29d8e94bbef20911d3b279d815d1e6655ee34b4caaf670ee49d01c152"
+    "sha256": "d9214a5a1681e56d18578f2aab8bed19b06cc0ab1cb041da1facbb32222f2053"
   },
   "browser_version": "149.0.7827.55",
   "playwright_module": "/Volumes/Mastermind/agent-workspaces/terminal/web/sovereign-auction-context-20261008-sol-terminal-001/terminal/node_modules/@playwright/test/index.js",
   "counts": {
     "passed": 48
   },
-  "completed_at": "2026-10-09T00:55:59.936Z"
+  "completed_at": "2026-10-09T00:05:10.588Z"
 }

@@ -1,6 +1,6 @@
 {
   "schema": "sovereign_auction_verified_source_v1",
-  "verified_at": "2026-10-09T00:06:48.659083+00:00",
+  "verified_at": "2026-10-09T00:57:49.323178+00:00",
   "base_commit": "c7e47c859eb2925c5626931fd511800773ba09ac",
   "branch": "sol/web-sovereign-auction-context-20261008-sol-mm-001",
   "source_binding": "Exact file hashes; the enclosing Git commit is the final revision identity.",
@@ -10,7 +10,10 @@
     "browser_cases": 48,
     "browser_passed": 48,
     "static_boundary_tests": 3,
-    "security_hardening": "Native/renderer/static-boundary and all48 browser cases rerun on final hashes; exact-head CodeQL remains separately sampled."
+    "security_hardening": "Native/renderer/static-boundary and all48 browser cases rerun on final hashes; exact-head CodeQL remains separately sampled.",
+    "protected_identity_test": "Actual committed-HEAD D8 topology/protected-default test passed; guard and registry unchanged",
+    "native_total_with_boundary_and_identity": 30,
+    "browser_run": "05 after stdlib HTTPS protocol constant and byte-preserving fixture relocation"
   },
   "files": [
     {
@@ -25,8 +28,8 @@
     },
     {
       "path": "brain/sovereign_auction_context.py",
-      "sha256": "7e9930bc77c1aafed2d8a3406e57af3558822c29cdb60c49d327c5685c6aac8e",
-      "bytes": 22613
+      "sha256": "1b2c11d38628b13f8ba5439f90f8ef9eefabf564cea5c3ed517398b1a4b5f276",
+      "bytes": 22655
     },
     {
       "path": "config/contracts.yml",
@@ -64,22 +67,23 @@
       "bytes": 8412
     },
     {
-      "path": "research/sovereign_auction_context/verification/verify_mastermind_ui.cjs",
+      "path": "tests/fixtures/sovereign_auction_context/verification/verify_mastermind_ui.cjs",
       "sha256": "d162597a3f6780b4f30e1fd8595a9db9da5f184e5f9c90be9bedf5d182514a7a",
       "bytes": 22232
     },
     {
-      "path": "research/sovereign_auction_context/verification/mastermind_loopback_harness.py",
+      "path": "tests/fixtures/sovereign_auction_context/verification/mastermind_loopback_harness.py",
       "sha256": "43833e3da426f7d15e6ac66da5058a4d25799cbd5df864d31a8ccbc8e07f3974",
       "bytes": 17455
     },
     {
-      "path": "research/sovereign_auction_context/verification/test_mastermind_static_assets.py",
+      "path": "tests/fixtures/sovereign_auction_context/verification/test_mastermind_static_assets.py",
       "sha256": "f7115ff3c56fbda56390332160a30044d06c3d964d4f3f3a809aca99bf0fa270",
       "bytes": 3470
     }
   ],
   "production_deployed": false,
   "forecast_authority": "RESEARCH_ONLY",
-  "data_owner_pr": "mastermindx-market-intelligence/macro#8657"
+  "data_owner_pr": "mastermindx-market-intelligence/macro#8657",
+  "source_snapshot_commit": "24ae789308bf5b9c417b1f8bd5c7e74938b11a7e"
 }

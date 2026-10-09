@@ -1,0 +1,440 @@
+{
+  "head": "55198ba62ff47d2a371397567418cb43fd98892c",
+  "source_base": "c7e47c859eb2925c5626931fd511800773ba09ac",
+  "candidate_only": true,
+  "source_writes": false,
+  "target_owner": "existing tests/fixtures; genuine verification harness and fixtures",
+  "move_count": 45,
+  "moves": [
+    {
+      "from": "research/sovereign_auction_context/VERIFIED_SOURCE_MANIFEST.json",
+      "to": "tests/fixtures/sovereign_auction_context/VERIFIED_SOURCE_MANIFEST.json",
+      "bytes": 3200,
+      "sha256": "b2d5f7437ce0153d6de03c09071ec0001d7aa6f90a223fff18b9045571f40a0c",
+      "git_blob": "ccae61490f7b30a16be447ec46444d5265494e67",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/presentation_final/ARCHIVAL_PROVENANCE.json",
+      "to": "tests/fixtures/sovereign_auction_context/presentation_final/ARCHIVAL_PROVENANCE.json",
+      "bytes": 1906,
+      "sha256": "46add3d99257e66d12deb0a1d5ac54d58d0e5b19e6765815b45b6054050f217f",
+      "git_blob": "0614045f0f9119d38445e53807ba64b97feee772",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/presentation_final/PREIMAGES.json",
+      "to": "tests/fixtures/sovereign_auction_context/presentation_final/PREIMAGES.json",
+      "bytes": 463,
+      "sha256": "b5fa63fa787d8f245125fe21a69fb0beaf6c8d898030bdcb66875f34d19b5cbe",
+      "git_blob": "f28a736d0ca02e9a815952935afb6f511fa0c4e1",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/presentation_final/PRESENTATION.patch",
+      "to": "tests/fixtures/sovereign_auction_context/presentation_final/PRESENTATION.patch",
+      "bytes": 24033,
+      "sha256": "bea11887599f6f8656e2d6dd40e9d0870cf30567b67ecadbadf281ea4b16fc1c",
+      "git_blob": "a4a2ad702149903d7ca939fa9b27d3f55d2b8dfe",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/presentation_final/PRESENTATION_RECEIPT.json",
+      "to": "tests/fixtures/sovereign_auction_context/presentation_final/PRESENTATION_RECEIPT.json",
+      "bytes": 5015,
+      "sha256": "4039b8f17dd08ba43b23f73275cdbe38b55ac642922b1f7178bd1b97c6c9ec1e",
+      "git_blob": "2bd61b230500758d2c7e4245fde4a70f3986be2c",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/verification/HARNESS_FILES.json",
+      "to": "tests/fixtures/sovereign_auction_context/verification/HARNESS_FILES.json",
+      "bytes": 821,
+      "sha256": "242c4a3b3ac2aad008e8dab4977cc150347b3e62a05bd73635b35e9b5c466590",
+      "git_blob": "f3178f1aefd8be51690885007a617767adbb67eb",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/verification/MASTERMIND_LAYOUT_DIAGNOSIS_RECEIPT.json",
+      "to": "tests/fixtures/sovereign_auction_context/verification/MASTERMIND_LAYOUT_DIAGNOSIS_RECEIPT.json",
+      "bytes": 24722,
+      "sha256": "29026b805d49f0d662b23e10ec5e5dc831f947d655a97ebbb574b7ea04d894bc",
+      "git_blob": "866231770a4946d1a2496bc508c3d04520365920",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/verification/MERGE_TREE_RECEIPT.json",
+      "to": "tests/fixtures/sovereign_auction_context/verification/MERGE_TREE_RECEIPT.json",
+      "bytes": 249,
+      "sha256": "a616fc56e3de787c8552330be08b3cfd3229697269b80acda9da8714458208e8",
+      "git_blob": "264e97c6afaa8971e777e834934692ea10a0aec7",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/verification/browser_final/PERSISTED_EVIDENCE.json",
+      "to": "tests/fixtures/sovereign_auction_context/verification/browser_final/PERSISTED_EVIDENCE.json",
+      "bytes": 1958,
+      "sha256": "d607e2eb096969d17f6cedacbab9aec1b8030fb364156c1b964de9f0dd8a9ea4",
+      "git_blob": "92a6edac6aa3501a0d7d57d2f9fcbdd3428570ab",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/verification/browser_final/browser_receipt.json",
+      "to": "tests/fixtures/sovereign_auction_context/verification/browser_final/browser_receipt.json",
+      "bytes": 219636,
+      "sha256": "c9dba0abdc2b2ceb4a83a60c1611e083a36322f542c035dc76efea1a283a218e",
+      "git_blob": "247d0d6278b8bfbf9a86685e6325f5cebeaaf6b4",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/verification/browser_final/harness_manifest.json",
+      "to": "tests/fixtures/sovereign_auction_context/verification/browser_final/harness_manifest.json",
+      "bytes": 8192,
+      "sha256": "d9214a5a1681e56d18578f2aab8bed19b06cc0ab1cb041da1facbb32222f2053",
+      "git_blob": "adae1d218420a9099ec93360723dd7d92883972f",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/verification/browser_final/harness_process.log",
+      "to": "tests/fixtures/sovereign_auction_context/verification/browser_final/harness_process.log",
+      "bytes": 142,
+      "sha256": "9867f192ac0cbf8db8c226f020871173d8b5844ed64103b92891b3de2f6e6db1",
+      "git_blob": "9746f6b4df3a1829fc10d6db95937a56126f48b4",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/verification/browser_final/screenshots/1440x900-en-light-observed-auction.png",
+      "to": "tests/fixtures/sovereign_auction_context/verification/browser_final/screenshots/1440x900-en-light-observed-auction.png",
+      "bytes": 168382,
+      "sha256": "aa803840b3998a58ab625967fe90f4bd5b6da19537256de165413125909772ca",
+      "git_blob": "4bbef98c4db853e4e4ad3b4bfaab47ff48696370",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/verification/browser_final/screenshots/390x844-en-light-source_failure-auction.png",
+      "to": "tests/fixtures/sovereign_auction_context/verification/browser_final/screenshots/390x844-en-light-source_failure-auction.png",
+      "bytes": 91435,
+      "sha256": "df64d7be37dcc49ff5e0b37a7cc18ce086908c916fed5f990a0e4d52451c1176",
+      "git_blob": "fcd425025d704d1b7c86d152e9ba446bfaa563cf",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/verification/browser_final/screenshots/390x844-zh-dark-observed-auction.png",
+      "to": "tests/fixtures/sovereign_auction_context/verification/browser_final/screenshots/390x844-zh-dark-observed-auction.png",
+      "bytes": 95279,
+      "sha256": "e6db6c0f602031f9dba73bcaec5575712f5e088800220442a2cf00fd0de32df2",
+      "git_blob": "dae5bc7310c6331c802457da467fa242111788b9",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/verification/browser_final/screenshots/390x844-zh-dark-observed-source-details.png",
+      "to": "tests/fixtures/sovereign_auction_context/verification/browser_final/screenshots/390x844-zh-dark-observed-source-details.png",
+      "bytes": 94287,
+      "sha256": "44823809cad891e9281a12c92b27c04661977ddfca145cde9c095752a99163d5",
+      "git_blob": "b882b6b23cd7d8c962b7da94267fea177e26f3e8",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/verification/browser_final/screenshots/820x1180-zh-light-observed-expanded-1.png",
+      "to": "tests/fixtures/sovereign_auction_context/verification/browser_final/screenshots/820x1180-zh-light-observed-expanded-1.png",
+      "bytes": 197775,
+      "sha256": "e33fd186e5cd8824efa1efdf000b2cf4c26ea5b155521cbdce3c274caa2f475b",
+      "git_blob": "b7e4d179602bb9ea90d6e6922b6d08993ccfdbe5",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/verification/browser_history/run-01-browser_receipt.json",
+      "to": "tests/fixtures/sovereign_auction_context/verification/browser_history/run-01-browser_receipt.json",
+      "bytes": 104878,
+      "sha256": "c61137cd723f7cfe6f1fed323fab9f4e35018fa98494936e5f4523d3e7727f3f",
+      "git_blob": "1e4f72e957905e67b1fa1a0d769e382f1e730564",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/verification/browser_history/run-02-browser_receipt.json",
+      "to": "tests/fixtures/sovereign_auction_context/verification/browser_history/run-02-browser_receipt.json",
+      "bytes": 105237,
+      "sha256": "41ed65a41a5ba494b0eb8fa4b44318c9cf1111725c18d181b69dc79b2debd574",
+      "git_blob": "9511ef2226aa67e92cad3c7b34afaed973c9641d",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/verification/browser_history/run03-before-security-hardening/PERSISTED_EVIDENCE.json",
+      "to": "tests/fixtures/sovereign_auction_context/verification/browser_history/run03-before-security-hardening/PERSISTED_EVIDENCE.json",
+      "bytes": 1465,
+      "sha256": "e8efe5a6ff06a812153d951aa70dee9f8a32ee785e0aaafe7099c678099abe83",
+      "git_blob": "d8b30b816c22e2a3f55e336047c2a045ce0baf42",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/verification/browser_history/run03-before-security-hardening/browser_receipt.json",
+      "to": "tests/fixtures/sovereign_auction_context/verification/browser_history/run03-before-security-hardening/browser_receipt.json",
+      "bytes": 219636,
+      "sha256": "abe289c2ae359fd1329fec3664a2e185d56e92e23f3aa7119336f15cf84346d9",
+      "git_blob": "f5b43e3ae20a9e42deb40807c12e2d64c50540ab",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/verification/browser_history/run03-before-security-hardening/harness_manifest.json",
+      "to": "tests/fixtures/sovereign_auction_context/verification/browser_history/run03-before-security-hardening/harness_manifest.json",
+      "bytes": 8192,
+      "sha256": "3592f14d367072e71282b84db2924e36234063b0c0b1445326a28fbcca7d9a38",
+      "git_blob": "7eb9c514cdc01a79023d75c8f1dfcb202b577a89",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/verification/browser_history/run03-before-security-hardening/harness_process.log",
+      "to": "tests/fixtures/sovereign_auction_context/verification/browser_history/run03-before-security-hardening/harness_process.log",
+      "bytes": 142,
+      "sha256": "e3cdc3d11a7371916e4d3ba9d8cd306f74bc530d0dbfb6c4111c1feaab3f5002",
+      "git_blob": "3c58173e2eb755796f0efeb2453aa3b832dae2a0",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/verification/browser_history/run03-before-security-hardening/screenshots/1440x900-en-light-observed-auction.png",
+      "to": "tests/fixtures/sovereign_auction_context/verification/browser_history/run03-before-security-hardening/screenshots/1440x900-en-light-observed-auction.png",
+      "bytes": 168382,
+      "sha256": "aa803840b3998a58ab625967fe90f4bd5b6da19537256de165413125909772ca",
+      "git_blob": "4bbef98c4db853e4e4ad3b4bfaab47ff48696370",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/verification/browser_history/run03-before-security-hardening/screenshots/390x844-en-light-source_failure-auction.png",
+      "to": "tests/fixtures/sovereign_auction_context/verification/browser_history/run03-before-security-hardening/screenshots/390x844-en-light-source_failure-auction.png",
+      "bytes": 91435,
+      "sha256": "df64d7be37dcc49ff5e0b37a7cc18ce086908c916fed5f990a0e4d52451c1176",
+      "git_blob": "fcd425025d704d1b7c86d152e9ba446bfaa563cf",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/verification/browser_history/run03-before-security-hardening/screenshots/390x844-zh-dark-observed-auction.png",
+      "to": "tests/fixtures/sovereign_auction_context/verification/browser_history/run03-before-security-hardening/screenshots/390x844-zh-dark-observed-auction.png",
+      "bytes": 95279,
+      "sha256": "e6db6c0f602031f9dba73bcaec5575712f5e088800220442a2cf00fd0de32df2",
+      "git_blob": "dae5bc7310c6331c802457da467fa242111788b9",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/verification/browser_history/run03-before-security-hardening/screenshots/390x844-zh-dark-observed-source-details.png",
+      "to": "tests/fixtures/sovereign_auction_context/verification/browser_history/run03-before-security-hardening/screenshots/390x844-zh-dark-observed-source-details.png",
+      "bytes": 94287,
+      "sha256": "44823809cad891e9281a12c92b27c04661977ddfca145cde9c095752a99163d5",
+      "git_blob": "b882b6b23cd7d8c962b7da94267fea177e26f3e8",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/verification/browser_history/run03-before-security-hardening/screenshots/820x1180-zh-light-observed-expanded-1.png",
+      "to": "tests/fixtures/sovereign_auction_context/verification/browser_history/run03-before-security-hardening/screenshots/820x1180-zh-light-observed-expanded-1.png",
+      "bytes": 197775,
+      "sha256": "e33fd186e5cd8824efa1efdf000b2cf4c26ea5b155521cbdce3c274caa2f475b",
+      "git_blob": "b7e4d179602bb9ea90d6e6922b6d08993ccfdbe5",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/verification/mastermind_layout_diagnosis.cjs",
+      "to": "tests/fixtures/sovereign_auction_context/verification/mastermind_layout_diagnosis.cjs",
+      "bytes": 7675,
+      "sha256": "bf996a6e00e2a71a7bc46cbfb0b61eac57b96581e449a2e22dded6f096287a64",
+      "git_blob": "dfaf6782dc02f8f935d50cfc11d1df04e060b58a",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/verification/mastermind_loopback_harness.py",
+      "to": "tests/fixtures/sovereign_auction_context/verification/mastermind_loopback_harness.py",
+      "bytes": 17455,
+      "sha256": "43833e3da426f7d15e6ac66da5058a4d25799cbd5df864d31a8ccbc8e07f3974",
+      "git_blob": "05d572bc99188732643f3d03eef8829ebf60f1ff",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/verification/native_final/receipt.json",
+      "to": "tests/fixtures/sovereign_auction_context/verification/native_final/receipt.json",
+      "bytes": 360,
+      "sha256": "3035c7e4e2350ac6dc3a23093f9ff8f302fe140b77bb6abb6b7a5729513330c2",
+      "git_blob": "cc1fd6440b59d734ee3fa831f3c456305189eebd",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/verification/native_final/run-1.txt",
+      "to": "tests/fixtures/sovereign_auction_context/verification/native_final/run-1.txt",
+      "bytes": 130,
+      "sha256": "e939a9fe2134f827f43b5888fd122774fdf9ffa199f64256e006a32c6d6f22f4",
+      "git_blob": "557f5d42682221f097af4b3757661145bcc60f51",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/verification/native_final/run-2.txt",
+      "to": "tests/fixtures/sovereign_auction_context/verification/native_final/run-2.txt",
+      "bytes": 206,
+      "sha256": "641b08d40cb4fd3988f6204ccd7e7fbfffd17d64394ad823f3f37e5dcd1549f6",
+      "git_blob": "c7aff7a09563fc816a1ba2df764e9a71050353e7",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/verification/security_candidate/PREIMAGES.json",
+      "to": "tests/fixtures/sovereign_auction_context/verification/security_candidate/PREIMAGES.json",
+      "bytes": 528,
+      "sha256": "b1ec187b384b55f129135b031d672ab0263e14648aa12de6e01f0deb9ad3f16d",
+      "git_blob": "237f37483e5c6489ddfd3effdb4ffcc37f68747b",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/verification/security_candidate/SECURITY_HARDENING.patch",
+      "to": "tests/fixtures/sovereign_auction_context/verification/security_candidate/SECURITY_HARDENING.patch",
+      "bytes": 11795,
+      "sha256": "5ab4fa08aad3b93af37f28e65860bd8b7547f05b8b5dd006585a68aa67a740ab",
+      "git_blob": "0d426c747297ffcf0b354af86f2bc458372db99a",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/verification/security_candidate/SECURITY_HARDENING_RECEIPT.json",
+      "to": "tests/fixtures/sovereign_auction_context/verification/security_candidate/SECURITY_HARDENING_RECEIPT.json",
+      "bytes": 7817,
+      "sha256": "0bda599ebeb06b769e9aa587a1abebf016369a2359514856c2ea20061d4f9e22",
+      "git_blob": "5346732a44180b5bb24cd8b4a6b46fd15becf10c",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/verification/security_final/ACCEPTANCE.json",
+      "to": "tests/fixtures/sovereign_auction_context/verification/security_final/ACCEPTANCE.json",
+      "bytes": 872,
+      "sha256": "688eae364fdb63b62ed895404a5156c998efe30d9b67ce48ce43452f516cde31",
+      "git_blob": "7689a03858623b2e4068c799016d1a57cb949045",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/verification/security_final/browser_run04.log",
+      "to": "tests/fixtures/sovereign_auction_context/verification/security_final/browser_run04.log",
+      "bytes": 2199,
+      "sha256": "8dc9172aad6809d163f4244c3a1ac654658782db9f08391f2e9549ba78f2f3e0",
+      "git_blob": "76fa868c04e2f72f38c35e66fbb05cb2692aafe0",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/verification/security_final/initial_codeql_annotations.json",
+      "to": "tests/fixtures/sovereign_auction_context/verification/security_final/initial_codeql_annotations.json",
+      "bytes": 3997,
+      "sha256": "e76c18f2b4bf37eab3e4266de3db7702a23b4c132863791540ae96d86c9b0263",
+      "git_blob": "1080c722d43531df9effc88a89e3e295c64260e7",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/verification/security_final/native-1.log",
+      "to": "tests/fixtures/sovereign_auction_context/verification/security_final/native-1.log",
+      "bytes": 91,
+      "sha256": "d3eb8a8b0ba7313714794507dd4b4359c9cb0a1d3af579fd91626227b01ed0b7",
+      "git_blob": "0d51a2c60829a31cc3a25639103f1f45a6b02e87",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/verification/security_final/native-2.log",
+      "to": "tests/fixtures/sovereign_auction_context/verification/security_final/native-2.log",
+      "bytes": 206,
+      "sha256": "641b08d40cb4fd3988f6204ccd7e7fbfffd17d64394ad823f3f37e5dcd1549f6",
+      "git_blob": "c7aff7a09563fc816a1ba2df764e9a71050353e7",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/verification/security_final/native-3.log",
+      "to": "tests/fixtures/sovereign_auction_context/verification/security_final/native-3.log",
+      "bytes": 101,
+      "sha256": "27c4a39d34ece4cbc66cc59cb0870c7abe4cc0a5f009205bdd0ea06a93f8b3ac",
+      "git_blob": "709fcb6172272d9ad3854c5d583093591968baca",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/verification/security_final/native_receipt.json",
+      "to": "tests/fixtures/sovereign_auction_context/verification/security_final/native_receipt.json",
+      "bytes": 4463,
+      "sha256": "6822debe379ffa3456ce7c348e8cde6b67b0d05a13d43f543fdde13b947020de",
+      "git_blob": "0ffcd2e04ac1fc0f7667c7bdb6dda0bd376b4a85",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/verification/test_mastermind_static_assets.py",
+      "to": "tests/fixtures/sovereign_auction_context/verification/test_mastermind_static_assets.py",
+      "bytes": 3470,
+      "sha256": "f7115ff3c56fbda56390332160a30044d06c3d964d4f3f3a809aca99bf0fa270",
+      "git_blob": "59f19d63094c71628ee1e6c0e26815665f2a7636",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    },
+    {
+      "from": "research/sovereign_auction_context/verification/verify_mastermind_ui.cjs",
+      "to": "tests/fixtures/sovereign_auction_context/verification/verify_mastermind_ui.cjs",
+      "bytes": 22232,
+      "sha256": "d162597a3f6780b4f30e1fd8595a9db9da5f184e5f9c90be9bedf5d182514a7a",
+      "git_blob": "adc9b4c9bb32c12cad7197c1cd7f7d81a8004332",
+      "matches_exact_head_blob": true,
+      "preserve_bytes": true
+    }
+  ],
+  "research_markdown_kept": [
+    "research/sovereign_auction_context/verification/MASTERMIND_LAYOUT_REPAIR.md",
+    "research/sovereign_auction_context/verification/README_mastermind_ui.md",
+    "research/sovereign_auction_context/verification/security_candidate/README.md"
+  ],
+  "brain_preimage": {
+    "path": "brain/sovereign_auction_context.py",
+    "revision": "55198ba62ff47d2a371397567418cb43fd98892c",
+    "bytes": 22613,
+    "sha256": "7e9930bc77c1aafed2d8a3406e57af3558822c29cdb60c49d327c5685c6aac8e"
+  },
+  "production_patch": {
+    "import": "from http.client import HTTPS_PORT",
+    "replace_old": "parts.port in (None, 443)",
+    "replace_new": "parts.port in (None, HTTPS_PORT)"
+  },
+  "historical_preservation": "Do not rewrite original receipt/preimage/patch contents; add separate relocation manifest. Old embedded paths describe historical execution and remain true.",
+  "brain_postimage": {
+    "path": "brain/sovereign_auction_context.py",
+    "revision": "24ae789308bf5b9c417b1f8bd5c7e74938b11a7e",
+    "bytes": 22655,
+    "sha256": "1b2c11d38628b13f8ba5439f90f8ef9eefabf564cea5c3ed517398b1a4b5f276"
+  },
+  "preimage_correction_note": "Initial brain_preimage was a concurrent working-tree capture after root applied HTTPS_PORT. This corrected record distinguishes exact source and exact committed postimage. All 45 move hashes were exact-55198 blob verified and remain unchanged.",
+  "root_applied_commit": "24ae789308bf5b9c417b1f8bd5c7e74938b11a7e"
+}

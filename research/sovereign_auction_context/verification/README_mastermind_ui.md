@@ -1,3 +1,5 @@
+Current checked-in harness owner: `tests/fixtures/sovereign_auction_context/verification/`. Current acceptance is run05; earlier output directories below are historical examples. Keep the Python and CJS sibling files together.
+
 # Mastermind auction display — actual browser verification harness
 
 This is a separate verification artifact. It does not change the frozen consumer,
@@ -67,7 +69,7 @@ AUCTION_MACRO_SOURCE='/Volumes/Mastermind/agent-workspaces/macro/web/sovereign-a
 AUCTION_TERMINAL_SOURCE='/Volumes/Mastermind/agent-workspaces/terminal/web/sovereign-auction-context-20261008-sol-terminal-001'
 AUCTION_MM_PYTHON='/absolute/path/to/the/native-test-python'
 
-node /tmp/sovereign-auction-ui-tools/verify_mastermind_ui.cjs \
+node "$AUCTION_MM_SOURCE/tests/fixtures/sovereign_auction_context/verification/verify_mastermind_ui.cjs" \
   --python "$AUCTION_MM_PYTHON" \
   --mastermind-root "$AUCTION_MM_SOURCE" \
   --macro-root "$AUCTION_MACRO_SOURCE" \
