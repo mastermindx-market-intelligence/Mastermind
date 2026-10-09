@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { readFileSync } from 'node:fs';
-import { URL as NodeURL } from 'node:url';
+import css from './styles.css?raw';
 import postcss from 'postcss';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { App } from './App';
@@ -13,7 +12,6 @@ import programs from './fixtures/programs-available-workspace-service.json';
 
 // Source/DOM proof only. jsdom has no layout: these tests never claim pixel fit.
 // Removing the mobile wrap override must fail the 390px CSS contract below.
-const css = readFileSync(process.env.OVERVIEW_CSS_PATH ?? new NodeURL('./styles.css', import.meta.url), 'utf8');
 const selector = 'main .grid > .card > dl .state';
 function cssAtWidth(width: number) {
   const sheet = postcss.parse(css);
