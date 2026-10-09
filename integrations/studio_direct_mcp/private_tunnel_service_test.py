@@ -182,6 +182,7 @@ def _stage_args(
     binary=None,
     organization_id=None,
     rotate_runtime_key=False,
+    upgrade_concurrency=False,
 ):
     _seed_gateway(account, port)
     key_ref = key_ref or _make_key(home, account)
@@ -194,6 +195,7 @@ def _stage_args(
         runtime_key_ref=key_ref,
         organization_id=organization_id,
         rotate_runtime_key=rotate_runtime_key,
+        upgrade_concurrency=upgrade_concurrency,
         tunnel_client=str(binary),
     ), binary, key_ref
 
@@ -562,6 +564,133 @@ class TestStageHappyPath(unittest.TestCase):
                 plistlib.loads(roots["plist"].read_bytes())["ProgramArguments"],
                 svc._expected_argv(binary, roots["profile"], 45021),
             )
+
+
+class TestConcurrencyMigration(unittest.TestCase):
+    def _downgrade_to_legacy_four(self, roots):
+        manifest = json.loads(roots["manifest"].read_text(encoding="utf-8"))
+        plist = plistlib.loads(roots["plist"].read_bytes())
+        argv = list(plist["ProgramArguments"])
+        idx = argv.index("--mcp.max-concurrent-requests") + 1
+        argv[idx] = str(svc.LEGACY_MAX_CONCURRENT_REQUESTS)
+        plist["ProgramArguments"] = argv
+        roots["plist"].write_bytes(plistlib.dumps(plist, fmt=plistlib.FMT_XML))
+        manifest["maxConcurrentRequests"] = svc.LEGACY_MAX_CONCURRENT_REQUESTS
+        manifest["plistHash"] = svc._sha256_file(roots["plist"])
+        roots["manifest"].write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+        return manifest
+
+    def test_exact_legacy_four_requires_explicit_upgrade(self):
+        with IsolatedHome() as (tmp, home):
+            rc, _, args, _, _, _ = _do_stage(home, tmp)
+            self.assertEqual(rc, 0)
+            roots = svc._build_tunnel_roots(C1)
+            before = self._downgrade_to_legacy_four(roots)
+            with mock.patch.object(svc, "_run", CmdRecorder(handler=_stopped_alias_handler(C1))):
+                with self.assertRaisesRegex(SystemExit, "requires explicit --upgrade-concurrency"):
+                    svc.cmd_stage(args)
+            self.assertEqual(json.loads(roots["manifest"].read_text()), before)
+
+    def test_exact_legacy_four_upgrades_stopped_without_identity_change(self):
+        with IsolatedHome() as (tmp, home):
+            rc, _, args, _, _, _ = _do_stage(home, tmp)
+            self.assertEqual(rc, 0)
+            roots = svc._build_tunnel_roots(C1)
+            prior = self._downgrade_to_legacy_four(roots)
+            args.upgrade_concurrency = True
+            with mock.patch.object(svc, "_run", CmdRecorder(handler=_stopped_alias_handler(C1))):
+                rc2, _ = _capture_stdout(lambda: svc.cmd_stage(args))
+            self.assertEqual(rc2, 0)
+            after = json.loads(roots["manifest"].read_text())
+            self.assertEqual(after["maxConcurrentRequests"], svc.MAX_CONCURRENT_REQUESTS)
+            for key in ("account", "label", "tunnelId", "gatewayPort", "healthPort", "runtimeKeyRef", "organizationId", "tunnelClient", "gatewayLabel", "managedAlias", "transportTTL"):
+                self.assertEqual(after[key], prior[key])
+            plist = plistlib.loads(roots["plist"].read_bytes())
+            argv = list(plist["ProgramArguments"])
+            self.assertEqual(argv[argv.index("--mcp.max-concurrent-requests") + 1], str(svc.MAX_CONCURRENT_REQUESTS))
+
+    def test_legacy_four_can_be_stopped_but_not_started_by_new_generation(self):
+        with IsolatedHome() as (tmp, home):
+            rc, _, _, _, _, _ = _do_stage(home, tmp)
+            self.assertEqual(rc, 0)
+            roots = svc._build_tunnel_roots(C1)
+            self._downgrade_to_legacy_four(roots)
+            label = svc._tunnel_label(C1)
+            rec = CmdRecorder(handler=lambda cmd: (
+                FakeResult(0, _print_running(str(roots["plist"]), label), "")
+                if cmd[:2] == ["launchctl", "print"] else
+                FakeResult(0, "", "") if cmd[:2] == ["launchctl", "bootout"] else
+                FakeResult(1, "", "not loaded")
+            ))
+            # Make the second launchctl read prove the job is gone.
+            calls = {"print": 0}
+            def handler(cmd):
+                if cmd[:2] == ["launchctl", "print"]:
+                    calls["print"] += 1
+                    if calls["print"] == 1:
+                        return FakeResult(0, _print_running(str(roots["plist"]), label), "")
+                    return FakeResult(1, "", "not loaded")
+                if cmd[:2] == ["launchctl", "bootout"]:
+                    return FakeResult(0, "", "")
+                return FakeResult(1, "", "unused")
+            with mock.patch.object(svc, "_run", CmdRecorder(handler=handler)):
+                rc2, _ = _capture_stdout(lambda: svc.cmd_stop(mock.Mock(account=C1)))
+            self.assertEqual(rc2, 0)
+            with mock.patch.object(svc, "_run", CmdRecorder(handler=_stopped_alias_handler(C1))):
+                with self.assertRaisesRegex(SystemExit, "corrupt tunnel manifest"):
+                    svc.cmd_start(mock.Mock(account=C1))
+
+    def test_status_projects_exact_legacy_four_as_configuration_drift(self):
+        with IsolatedHome() as (tmp, home):
+            rc, _, _, _, _, _ = _do_stage(home, tmp)
+            self.assertEqual(rc, 0)
+            roots = svc._build_tunnel_roots(C1)
+            self._downgrade_to_legacy_four(roots)
+            label = svc._tunnel_label(C1)
+            def handler(cmd):
+                if cmd[:2] == ["launchctl", "print"]:
+                    return FakeResult(0, _print_running(str(roots["plist"]), label), "")
+                return FakeResult(1, "", "must not execute legacy client")
+            with mock.patch.object(svc, "_run", CmdRecorder(handler=handler)):
+                rc2, out = _capture_stdout(lambda: svc.cmd_status(mock.Mock(account=C1)))
+            self.assertEqual(rc2, 0)
+            payload = json.loads(out)
+            self.assertTrue(payload["configurationDrift"])
+            self.assertEqual(payload["maxConcurrentRequests"], svc.LEGACY_MAX_CONCURRENT_REQUESTS)
+            self.assertFalse(payload["ready"])
+            self.assertFalse(payload["healthy"])
+
+    def test_unknown_concurrency_manifest_is_never_migrated(self):
+        with IsolatedHome() as (tmp, home):
+            rc, _, args, _, _, _ = _do_stage(home, tmp)
+            self.assertEqual(rc, 0)
+            roots = svc._build_tunnel_roots(C1)
+            manifest = self._downgrade_to_legacy_four(roots)
+            manifest["maxConcurrentRequests"] = 5
+            roots["manifest"].write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+            args.upgrade_concurrency = True
+            with mock.patch.object(svc, "_run", CmdRecorder(handler=_stopped_alias_handler(C1))):
+                with self.assertRaisesRegex(SystemExit, "corrupt tunnel manifest"):
+                    svc.cmd_stage(args)
+
+    def test_running_legacy_upgrade_refuses_before_writes(self):
+        with IsolatedHome() as (tmp, home):
+            rc, _, args, _, _, _ = _do_stage(home, tmp)
+            self.assertEqual(rc, 0)
+            roots = svc._build_tunnel_roots(C1)
+            self._downgrade_to_legacy_four(roots)
+            args.upgrade_concurrency = True
+            before = {path: path.read_bytes() for path in (roots["profile"], roots["plist"], roots["manifest"])}
+            label = svc._tunnel_label(C1)
+            def handler(cmd):
+                if cmd[:2] == ["launchctl", "print"]:
+                    return FakeResult(0, _print_running(str(roots["plist"]), label), "")
+                return FakeResult(1, "", "unused")
+            with mock.patch.object(svc, "_run", CmdRecorder(handler=handler)):
+                with self.assertRaisesRegex(SystemExit, "refusing restage while tunnel service is running"):
+                    svc.cmd_stage(args)
+            for path, content in before.items():
+                self.assertEqual(path.read_bytes(), content)
 
 
 class TestWrongInputs(unittest.TestCase):

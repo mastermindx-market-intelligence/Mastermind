@@ -35,6 +35,7 @@ PINNED_TUNNEL_CLIENT = (
 TRANSPORT_TTL = "5h"
 STARTUP_WAIT = "30s"
 MAX_CONCURRENT_REQUESTS = 8
+LEGACY_MAX_CONCURRENT_REQUESTS = 4
 CONTROL_PLANE_BASE_URL = "https://api.openai.com"
 
 # Known loopback mapping. Other safe accounts take port from the gateway manifest.
@@ -226,6 +227,8 @@ def _expected_argv(
     tunnel_client: Path,
     profile: Path,
     health_port: int,
+    *,
+    max_concurrent_requests: int = MAX_CONCURRENT_REQUESTS,
 ) -> list[str]:
     return [
         str(tunnel_client),
@@ -235,7 +238,7 @@ def _expected_argv(
         "--mcp.connection-max-ttl",
         TRANSPORT_TTL,
         "--mcp.max-concurrent-requests",
-        str(MAX_CONCURRENT_REQUESTS),
+        str(max_concurrent_requests),
         "--mcp.startup-wait-timeout",
         STARTUP_WAIT,
         "--health.listen-addr",
@@ -406,7 +409,13 @@ def _load_gateway(account: str) -> tuple[dict, dict, int]:
     return manifest, config, port
 
 
-def _valid_manifest(data, account: str, label: str) -> bool:
+def _valid_manifest(
+    data,
+    account: str,
+    label: str,
+    *,
+    expected_max_concurrent_requests: int = MAX_CONCURRENT_REQUESTS,
+) -> bool:
     if not isinstance(data, dict):
         return False
     if any(k not in data for k in MANIFEST_KEYS):
@@ -419,7 +428,7 @@ def _valid_manifest(data, account: str, label: str) -> bool:
         return False
     if data.get("transportTTL") != TRANSPORT_TTL:
         return False
-    if data.get("maxConcurrentRequests") != MAX_CONCURRENT_REQUESTS:
+    if data.get("maxConcurrentRequests") != expected_max_concurrent_requests:
         return False
     if data.get("tunnelClient") != PINNED_TUNNEL_CLIENT:
         return False
@@ -442,6 +451,7 @@ def _read_manifest(
     label: str,
     *,
     required: bool = False,
+    expected_max_concurrent_requests: int = MAX_CONCURRENT_REQUESTS,
 ) -> dict | None:
     if manifest_path.is_symlink():
         raise SystemExit("refusing symlink tunnel manifest")
@@ -453,9 +463,45 @@ def _read_manifest(
         data = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         raise SystemExit("corrupt tunnel manifest")
-    if not _valid_manifest(data, account, label):
+    if not _valid_manifest(
+        data,
+        account,
+        label,
+        expected_max_concurrent_requests=expected_max_concurrent_requests,
+    ):
         raise SystemExit("corrupt tunnel manifest")
     return data
+
+
+def _read_transition_manifest(
+    manifest_path: Path,
+    account: str,
+    label: str,
+    *,
+    allow_legacy: bool,
+) -> tuple[dict | None, int]:
+    if manifest_path.is_symlink():
+        raise SystemExit("refusing symlink tunnel manifest")
+    if not manifest_path.exists():
+        return None, MAX_CONCURRENT_REQUESTS
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        raise SystemExit("corrupt tunnel manifest")
+    if _valid_manifest(data, account, label):
+        return data, MAX_CONCURRENT_REQUESTS
+    if _valid_manifest(
+        data,
+        account,
+        label,
+        expected_max_concurrent_requests=LEGACY_MAX_CONCURRENT_REQUESTS,
+    ):
+        if not allow_legacy:
+            raise SystemExit(
+                "legacy tunnel concurrency requires explicit --upgrade-concurrency"
+            )
+        return data, LEGACY_MAX_CONCURRENT_REQUESTS
+    raise SystemExit("corrupt tunnel manifest")
 
 
 def _stage_dest_files(roots: dict) -> list[Path]:
@@ -507,6 +553,7 @@ def _verify_prior_install(
     health_port: int,
     organization_id: str | None,
     allow_runtime_key_rotation: bool,
+    prior_max_concurrent_requests: int,
     roots: dict,
 ) -> None:
     prior_organization_id = prior.get("organizationId")
@@ -553,13 +600,30 @@ def _verify_prior_install(
     plist = _load_plist(roots["plist"])
     if plist is None or plist.get("Label") != label:
         raise SystemExit("refusing restage: existing plist diverges")
-    expected = _expected_argv(tunnel_client, roots["profile"], health_port)
+    expected = _expected_argv(
+        tunnel_client,
+        roots["profile"],
+        health_port,
+        max_concurrent_requests=prior_max_concurrent_requests,
+    )
     if list(plist.get("ProgramArguments") or []) != expected:
         raise SystemExit("refusing restage: existing argv diverges")
 
 
-def _verify_staged_install(account: str, label: str, roots: dict) -> dict:
-    manifest = _read_manifest(roots["manifest"], account, label, required=True)
+def _verify_staged_install(
+    account: str,
+    label: str,
+    roots: dict,
+    *,
+    expected_max_concurrent_requests: int = MAX_CONCURRENT_REQUESTS,
+) -> dict:
+    manifest = _read_manifest(
+        roots["manifest"],
+        account,
+        label,
+        required=True,
+        expected_max_concurrent_requests=expected_max_concurrent_requests,
+    )
     for name, path, key in (
         ("profile", roots["profile"], "profileHash"),
         ("plist", roots["plist"], "plistHash"),
@@ -575,7 +639,10 @@ def _verify_staged_install(account: str, label: str, roots: dict) -> dict:
     if plist is None or plist.get("Label") != label:
         raise SystemExit("plist is not our exact install")
     expected = _expected_argv(
-        tunnel_client, roots["profile"], int(manifest["healthPort"])
+        tunnel_client,
+        roots["profile"],
+        int(manifest["healthPort"]),
+        max_concurrent_requests=expected_max_concurrent_requests,
     )
     if list(plist.get("ProgramArguments") or []) != expected:
         raise SystemExit("plist is not our exact install")
@@ -664,7 +731,13 @@ def cmd_stage(args) -> int:
     _assert_no_symlink_ancestors(roots["base"])
     _assert_no_symlink_ancestors(roots["plist"])
     _assert_no_symlink_ancestors(profile)
-    prior = _read_manifest(roots["manifest"], account, label)
+    allow_concurrency_upgrade = bool(getattr(args, "upgrade_concurrency", False))
+    prior, prior_max_concurrent_requests = _read_transition_manifest(
+        roots["manifest"],
+        account,
+        label,
+        allow_legacy=allow_concurrency_upgrade,
+    )
     if prior is not None:
         _verify_prior_install(
             prior,
@@ -677,6 +750,7 @@ def cmd_stage(args) -> int:
             health_port,
             organization_id,
             bool(getattr(args, "rotate_runtime_key", False)),
+            prior_max_concurrent_requests,
             roots,
         )
     else:
@@ -796,11 +870,20 @@ def cmd_status(args) -> int:
     running = bool(info) and _info_is_running(info)
     pid = info.get("pid") if info and running else None
 
-    manifest = _read_manifest(roots["manifest"], account, label)
+    manifest, installed_max_concurrent_requests = _read_transition_manifest(
+        roots["manifest"], account, label, allow_legacy=True
+    )
     configuration_drift = info is not None and manifest is None
     if manifest is not None:
         try:
-            _verify_staged_install(account, label, roots)
+            _verify_staged_install(
+                account,
+                label,
+                roots,
+                expected_max_concurrent_requests=installed_max_concurrent_requests,
+            )
+            if installed_max_concurrent_requests != MAX_CONCURRENT_REQUESTS:
+                configuration_drift = True
         except SystemExit:
             configuration_drift = True
     if info is not None and info.get("path") not in (None, str(roots["plist"])):
@@ -869,7 +952,15 @@ def cmd_stop(args) -> int:
         print(json.dumps({"stopped": True, "already": True, "account": account}))
         return 0
 
-    _verify_staged_install(account, label, roots)
+    manifest, installed_max_concurrent_requests = _read_transition_manifest(
+        roots["manifest"], account, label, allow_legacy=True
+    )
+    _verify_staged_install(
+        account,
+        label,
+        roots,
+        expected_max_concurrent_requests=installed_max_concurrent_requests,
+    )
     if info.get("path") != str(roots["plist"]):
         raise SystemExit("loaded job is not our exact install")
 
@@ -908,6 +999,14 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "allow an explicit runtime-key file-reference change for the same "
             "stopped account/tunnel; current owned artifacts must verify exactly"
+        ),
+    )
+    s.add_argument(
+        "--upgrade-concurrency",
+        action="store_true",
+        help=(
+            "allow the exact stopped legacy 4-request tunnel profile to migrate "
+            "one-way to the current bounded concurrency; all owned artifacts must verify"
         ),
     )
     s.add_argument("--tunnel-client", default=PINNED_TUNNEL_CLIENT)

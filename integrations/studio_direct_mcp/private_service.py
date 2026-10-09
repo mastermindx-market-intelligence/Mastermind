@@ -78,7 +78,8 @@ MAX_FLEET_ROUTES = 32
 # CLI adapters. gateway.mjs is still staged as the engine import, never argv[1].
 PRIVATE_GATEWAY_NAME = "private-tunnel-gateway.mjs"
 TAILNET_GATEWAY_NAME = "tailnet-gateway.mjs"
-TAILNET_FABRIC_ACCOUNTS = frozenset(("fabric-read", "fabric-design", "fleet-host"))
+FLEET_HOST_ACCOUNT = "fleet-host"
+TAILNET_FABRIC_ACCOUNTS = frozenset(("fabric-read", "fabric-design", FLEET_HOST_ACCOUNT))
 
 ACCOUNT_LABEL_MAX = 64
 ACCOUNT_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9._-]{0,63})?$")
@@ -726,9 +727,13 @@ def _build_config(
         "requestTimeoutMs": REQUEST_TIMEOUT_MS,
         "idleTimeoutMs": IDLE_TIMEOUT_MS,
         "reclaimIdleGraceMs": 30_000,
-        "gitPublish": _typed_git_config(user_root),
-        "paperDesign": _paper_design_config(user_root),
     }
+    # A fleet-host is a remote Desktop Commander execution endpoint only. It
+    # deliberately carries no Paper or typed-Git local capability dependency;
+    # those remain on the attended/local Studio seat that owns them.
+    if account != FLEET_HOST_ACCOUNT:
+        config["gitPublish"] = _typed_git_config(user_root)
+        config["paperDesign"] = _paper_design_config(user_root)
     if public_url is not None:
         config["publicUrl"] = public_url
     fleet_routing = _fleet_routing_config(fleet_routes)
@@ -1237,9 +1242,10 @@ def cmd_stage(args) -> int:
             raise SystemExit(
                 "refusing restage: fleet route config diverges; use upgrade while stopped"
             )
-    # The Paper-owned immutable runtime must exist and match before this
-    # lifecycle writes a config/plist that advertises the Paper capability.
-    _verify_paper_runtime(_user_root())
+    # Only routes that advertise the local Paper capability require the
+    # immutable Paper runtime. A fleet-host exposes Desktop Commander only.
+    if account != FLEET_HOST_ACCOUNT:
+        _verify_paper_runtime(_user_root())
     retained_dependency_hash = (
         prior.get("dependencyTreeHash")
         if isinstance(prior, dict) and prior.get("version") == MANIFEST_VERSION
@@ -1401,8 +1407,9 @@ def cmd_upgrade(args) -> int:
     for path in _stage_dest_files(roots):
         _assert_dest_safe(path)
     # Upgrade is still pre-effect here. Refuse before replacing any staged
-    # source/config if the Paper generation is missing or no longer exact.
-    _verify_paper_runtime(_user_root())
+    # source/config if an advertised Paper generation is missing or no longer exact.
+    if account != FLEET_HOST_ACCOUNT:
+        _verify_paper_runtime(_user_root())
 
     return _write_install(
         source, node_abs, backend_abs, account, label, host, port, roots,
