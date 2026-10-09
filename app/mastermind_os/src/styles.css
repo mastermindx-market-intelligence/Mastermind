@@ -451,7 +451,8 @@ code {
   border-color: var(--brass);
   background: var(--brass-wash);
 }
-.primary:hover {
+.primary:hover,
+main .form-actions button.primary:hover:not(:disabled) {
   background: #332b1f;
 }
 .programs {
@@ -766,4 +767,102 @@ a:focus-visible {
 .visible-text {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/* Shared command fields retain native semantics and the existing Noir tokens. */
+main .form-field {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin-bottom: 16px;
+}
+main .form-field label {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+main .form-field :is(textarea, select, input) {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--raised);
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+  line-height: 1.5;
+}
+main .form-field textarea {
+  min-height: 120px;
+  resize: vertical;
+}
+main .form-field textarea::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+main .form-field :is(textarea, select, input):focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: 2px;
+}
+main .form-field :is(textarea, select, input):disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+main .field-error,
+main .form-error {
+  color: var(--red);
+  overflow-wrap: anywhere;
+}
+main .field-error {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+main .form-error {
+  margin: 16px 0;
+  padding: 12px;
+  border: 1px solid var(--red);
+  border-radius: 9px;
+  background: var(--red-wash);
+}
+main .form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+main .form-actions > code {
+  flex: 1 1 100%;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+main .form-actions button {
+  min-height: 44px;
+  max-width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--raised);
+  color: var(--text);
+  cursor: pointer;
+}
+main .form-actions button.primary {
+  border-color: var(--brass);
+  background: var(--brass-wash);
+}
+main .form-actions button:hover:not(:disabled) {
+  border-color: var(--brass);
+}
+main .form-actions button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
