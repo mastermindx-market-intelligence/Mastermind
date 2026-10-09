@@ -3444,6 +3444,8 @@ var I18N = {
   'sd.filled':            { en: 'Filled', zh: '已成交' },
   'sd.queued':            { en: 'Queued — fills at the next market open.', zh: '已排队 —— 将于下次开盘成交。' },
   'sd.order_failed':      { en: 'Order rejected', zh: '订单被拒绝' },
+  'sd.operator_required': { en: 'No paper order placed. This shared desk requires an approved operator session; Pro access alone cannot authorize trading.', zh: '模拟订单未提交。本交易组合要求通过批准的操作员身份验证，仅有 Pro 访问权限不能授权交易。' },
+  'sd.operator_unready':  { en: 'No paper order placed. The operator authorization service is not configured.', zh: '模拟订单未提交。操作员授权服务尚未配置。' },
   'sd.at':                { en: 'at', zh: '价格' },
   'sd.alloc_cash':        { en: 'Cash', zh: '现金' },
   'sd.alloc_npos':        { en: 'Holdings', zh: '持仓数' },
@@ -6254,9 +6256,16 @@ window.placeSelfOrder = function(side, tickerOverride) {
   }
   fetch('/api/self_directed/order', { method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body) })
-    .then(function(r){ return r.json(); })
-    .then(function(d) {
-      if (!d || !d.ok) { _selfMsg('err', t('sd.order_failed') + (d && d.error ? ': ' + esc(d.error) : '')); return; }
+    .then(function(r){ return r.json().catch(function(){ return {}; }).then(function(d){ return { httpStatus: r.status, data: d }; }); })
+    .then(function(reply) {
+      var d = reply.data || {};
+      if (reply.httpStatus === 401 && d.error === 'operator_bearer_required') {
+        _selfMsg('err', t('sd.operator_required')); return;
+      }
+      if (reply.httpStatus === 503 && d.error === 'operator_auth_misconfigured') {
+        _selfMsg('err', t('sd.operator_unready')); return;
+      }
+      if (!d.ok) { _selfMsg('err', t('sd.order_failed') + (d.error ? ': ' + esc(d.error) : '')); return; }
       if (d.status === 'filled') {
         var f = d.fill || {};
         _selfMsg('ok', t('sd.filled') + ': ' + (side === 'buy' ? t('sd.buy') : t('sd.sell')) + ' ' + fmtShares(f.shares) + ' ' + esc(ticker) + ' ' + t('sd.at') + ' ' + (f.price != null && !isNaN(f.price) ? '$' + Number(f.price).toFixed(2) : '—'));
