@@ -1,0 +1,166 @@
+# 02 — Target Variable, Granularity, Hypothesis Tree, and Data Readiness
+
+> **FREEZE AUTHORITY NOTICE — FINAL HARDENING**  
+> This document is historical design context only and is **not freeze-authoritative**. Any language below that makes continuous survival/hazard the DL-1 primary endpoint, prefers an ex-U.S. confirmation route, requires a DL-1 interaction model or `I − A` contrast, calls `PROSPECTIVE_US_POST_FREEZE` operationally selected before its taxonomy-source gate clears, or otherwise conflicts with the final source/experiment specification is **SUPERSEDED**. `07_DL1_PREREG_DRAFT_FREEZE_READY.md` is the sole experiment authority. `06_DL0_QUALIFICATION_AND_OWNER_RECONCILIATION.md` is the sole owner/source-route authority. Historical text in this file may not be used to loosen, recover, or reinterpret a superseded design choice.
+
+## Target-variable ruling
+
+### Primary: leadership-state survival
+
+**STRONG INFERENCE —** Define persistence first as a transition of an observed leadership state, not as a noisy continuous-return regression. For a stock in the top quartile of a frozen relative-strength measure at formation, ask whether it remains in the top quartile after 20 and 60 sessions and model the transition probabilities.
+
+This directly matches the product question and reuses state-transition semantics already present in descriptive theme-persistence work without mistaking descriptive persistence for return alpha.
+
+### Co-primary structural model: state-exit / trend-break hazard
+
+A discrete-time hazard model should estimate first exit from the leader state. A secondary material-break endpoint should be entry into the bottom half of the relative-strength distribution.
+
+Survival/hazard framing is preferable to a large family of loosely related 5/10/20/40/60 binary regressions because the horizons arise from one time-to-event process, censoring is explicit, and outputs map naturally to survival probability, break hazard, and half-life.
+
+### Secondary: forward return
+
+Raw future return remains necessary for economic interpretation, but it should not define “persistence.” A model may predict stable leadership without producing incremental return alpha; that can still matter for holding / monitoring decisions. Conversely, raw return can hide a violent break followed by rebound.
+
+### Secondary diagnostic: holding-path durability
+
+MAE, recovery time, probability of reclaiming a prior high, and time below a trend reference are useful diagnostics. They should not gate DL-1 because B2 already showed how easily drawdown-shape results collapse into volatility persistence.
+
+### Later only: expected holding utility
+
+**SPECULATION —** A decomposition such as survival probability × expected upside − failure loss may eventually be useful. Do not combine components until each component is independently calibrated. A single opaque 0–100 score is not justified.
+
+---
+
+## Granularity ruling
+
+The old eleven-sector grouping was likely too coarse to preserve independent peer information. Finer groups improve economic fidelity but increase sparsity and PIT requirements.
+
+| Grouping | Economic fidelity | Statistical density | PIT difficulty | Hindsight flexibility | Ruling |
+|---|---|---:|---:|---:|---|
+| Broad sector | Low–medium | Excellent | Low | Low | Closed as primary for C1 exact construction; retain as nuisance/context comparator |
+| GICS industry group | High | Good | Medium | Low | **Primary static level** |
+| GICS industry | Higher | Medium / sometimes sparse | Medium | Low | **Secondary prespecified level with peer-count gate** |
+| Subindustry | Very high | Often poor | Medium | Low | Descriptive/exploratory until coverage proves adequate |
+| Fixed economic baskets | Variable but potentially high | Variable | High if membership history is missing | Medium | Test only with effective-dated membership |
+| ETF-defined groups | Tradable/economic | Usually adequate | Holdings history can be difficult | Medium | Secondary, not canonical company taxonomy |
+| Supply-chain groups | Very high causal relevance | Network-dependent | High / licensed | Medium | High-value later replication |
+| Dynamic market themes | Potentially highest narrative fidelity | Variable | **Very high PIT risk** | High | Prospective lane through GMI only |
+| Graph clusters | Potentially high | Model-dependent | High | **Very high** | Last, after fixed groups; freeze algorithm before outcomes |
+
+**STRONG INFERENCE —** GICS industry group is the best first static level. Eleven sectors provide too few independent group states; subindustries are often too sparse after focal-issuer exclusion. Industry group gives materially richer economic structure while retaining enough peers to estimate continuity, breadth, concentration, and dispersion. Industry is a prespecified secondary level when a frozen peer-count floor is met.
+
+---
+
+## Ranked hypothesis tree
+
+### Priority 1 — independent-peer continuity and breadth
+
+**HYPOTHESIS:** Among current leaders, a high share of independent peers that remain leaders from the prior observation — and a low replacement / turnover rate — predicts higher focal-stock leader survival beyond own momentum and volatility.
+
+Why first: existing independent_peer_continuity already distinguishes stable peer leadership from identical breadth generated by total leader replacement.
+
+### Priority 2 — independent peer residual strength
+
+**HYPOTHESIS:** Leave-issuer-out peer returns after broad-market / common-factor controls carry incremental information about focal leader survival.
+
+Why second: industry and network diffusion evidence is supportive, but factor momentum is a serious confounder.
+
+### Priority 3 — breadth versus leader dependency
+
+**HYPOTHESIS:** For groups with similar aggregate strength, broad participation predicts more durable focal leadership than the same aggregate return generated by one or two dominant leaders.
+
+The focal issuer must be excluded from breadth, group return, concentration, and leader-retention calculations.
+
+### Priority 4 — continuity × regime
+
+**HYPOTHESIS:** Peer continuity has different survival value in high-volatility / rebound regimes than in stable trending regimes.
+
+This is an interaction axis. It should not enlarge DL-1 unless the main effect first establishes incremental information.
+
+### Priority 5 — fundamental revision breadth
+
+**HYPOTHESIS:** Common positive earnings / revenue revision breadth across independent group members makes peer-confirmed leadership more durable.
+
+Mechanistically plausible, but historical analyst/revision data generally requires licensed data and strict timestamp/version semantics. Keep out of DL-1.
+
+### Priority 6 — supply-chain / network confirmation
+
+**HYPOTHESIS:** Independent economically linked firms provide stronger durability confirmation than taxonomy peers.
+
+The mechanism prior is strong, but topology, directionality, and effective-date issues make this a later replication.
+
+### Lower priority — flow, options, shorting, attention
+
+These families have credible evidence but add source-rights, timestamp, and interpretation complexity. Treat them as later break-hazard challengers, not reasons to turn DL-1 into a feature kitchen sink.
+
+### Price-path resilience boundary
+
+Potentially distinct state-transition features include pullbacks bought faster than peers, conditional recovery speed, failed-breakout rate, repeated reclaim behavior, and post-advance volatility compression.
+
+**RULING:** Do not admit these into DL-1. Before any later use, require a proof that the proposed variable is not merely a renamed function of focal-stock drawdown shape, path efficiency, gain retention, volatility, or distance from high — the closed B2 family.
+
+---
+
+## Data / PIT readiness
+
+| Required object | Status | Research ruling |
+|---|---|---|
+| PIT S&P 1500 membership | **AVAILABLE_NOW** | Reuse existing membership substrate |
+| Deep active + delisted U.S. closes | **AVAILABLE_NOW** | Reuse; do not create another price substrate |
+| Issuer identity / focal-exclusion semantics | **AVAILABLE_NOW** | Reuse Leadership Evidence / group-flow identity qualification |
+| Current fine industry identity | **AVAILABLE_WITH_REPAIR** | Suitable for prospective capture, not backward projection |
+| Historical PIT GICS industry-group / industry | **NEEDS_LICENSED_SOURCE** for clean retrospective study | S&P GICS History is a credible candidate with effective dates |
+| Current sector labels projected backward | **NOT_SCIENTIFICALLY_USABLE** as PIT history | C1 already records non-era-correct labels |
+| Existing published theme ranking archive | **AVAILABLE_NOW** for descriptive state work | RPH-0 already owns descriptive persistence; not fresh predictive evidence |
+| Historical dynamic-theme membership reconstructed after the fact | **NOT_SCIENTIFICALLY_USABLE** for confirmation | High hindsight / taxonomy leakage risk |
+| GMI effective-dated theme membership going forward | **PROSPECTIVE_ONLY** until enough vintages accrue | Consume GMI owner after acceptance |
+| Fixed baskets with effective-dated membership | **AVAILABLE_WITH_REPAIR / source-specific** | Admit basket by basket; no blanket backtest assumption |
+| Historical supply-chain relationships | **NEEDS_LICENSED_SOURCE** | FactSet Revere is a documented candidate |
+| Analyst revisions / forecast breadth | **NEEDS_LICENSED_SOURCE** for rigorous deep history | Freeze publication / announcement timestamp semantics |
+| Current volume / turnover | **AVAILABLE_NOW** | Secondary feature only |
+| Deep institutional ownership / flow | **AVAILABLE_WITH_REPAIR / LICENSED depending source** | Respect filing/reporting lag |
+| Sector ETF shares-outstanding flow | **PROSPECTIVE_ONLY** in current Macro history | Do not manufacture deep history from deployment-era capture |
+| Single-name options / skew deep history | **NEEDS_LICENSED_SOURCE** for serious confirmation | Delayed snapshots are not deep history |
+| Independent international price + PIT taxonomy panel | **NEEDS_LICENSED_SOURCE / entitlement check** | Preferred fast untouched confirmation route |
+
+### Historical classification source options
+
+Research-planning candidates include:
+
+- **S&P GICS History** for effective-dated historical company classifications.
+- **FactSet Revere** for historical industry classification and supply-chain relationships.
+- **LSEG** industry classification histories.
+
+Pricing, storage rights, redistribution, and model-use rights are contractual and must not be inferred from public marketing pages. This commission does not authorize procurement.
+
+---
+
+## Fresh-evidence strategy
+
+**FACT —** Bootstrap, cross-validation, relabeling, and repartitioning an already-inspected sample estimate uncertainty or support development. They do not create new information.
+
+### Preferred route: independent developed ex-U.S. historical equity panel
+
+Use a frozen set of developed ex-U.S. markets with:
+
+- point-in-time industry classifications;
+- delisted / dead securities;
+- stable issuer identifiers;
+- enough historical depth for 20- and 60-session outcomes;
+- lawful research/model-use rights;
+- outcome access blocked until the preregistration is frozen.
+
+Why this is preferred: it preserves the same economic object — company leadership supported by corporate peers — while providing genuinely independent observations without years of forward accrual.
+
+### Fallback route: prospective U.S. accrual
+
+If no admissible independent historical PIT panel exists, freeze DL-1 first and begin a prospective U.S. cohort. Snapshot industry-group membership contemporaneously and mature the prespecified 20- and 60-session outcomes.
+
+### Route-selection law
+
+1. Before any fresh outcome read, determine whether an independent historical PIT panel is legally and mechanically admissible.
+2. If yes, freeze it as DL-1's confirmation universe.
+3. If not, irrevocably choose prospective U.S.
+4. Do not inspect one route and switch to the other because the first result disappoints.
+
+**STRONG INFERENCE —** Independent international equities are preferable to another asset class for the first replication because the economic object transfers directly. Commodities, bonds, or futures may validate generic trend persistence but do not directly adjudicate stock leadership supported by economically related corporate peers.
