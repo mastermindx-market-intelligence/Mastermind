@@ -23,6 +23,27 @@ def native_config(root):
     return value
 
 
+def sealed_claude_config(root):
+    value = native_config(root)
+    value["schema_version"] = worker.SEALED_NATIVE_CONFIG_SCHEMA_VERSION
+    value["native_provider"] = "claude"
+    value["operator_harness_armed"] = False
+    for name in ("binary", "attestation_receipt"):
+        value["claude_" + name] = value.pop("codex_" + name)
+    value["allowed_claude_versions"] = ["2.1.275"]
+    del value["allowed_codex_versions"], value["required_team_identifier"]
+    value.update(
+        claude_sdk_python=str(root / "sdk-python"),
+        sealed_worker_model="claude-fable-5-1",
+        managed_policy_generation=1,
+        validation_codex_binary=str(root / "validation-codex"),
+        validation_codex_attestation_receipt=str(root / "validation-codex-receipt.json"),
+        validation_allowed_codex_versions=["0.106.0"],
+        validation_required_team_identifier="2DC432GLL2",
+    )
+    return value
+
+
 def test_native_schema_keeps_provider_fields_closed_and_unarmed_service_held(tmp_path):
     value = native_config(tmp_path)
     assert worker._load_config(_write_config(tmp_path, value), require_root_owner=False) == value
@@ -55,6 +76,40 @@ def test_claude_config_shape_is_distinct_and_does_not_claim_implemented_factory(
     value["claude_sdk_python"] = "python3"
     with pytest.raises(worker.WorkerConfigError, match="absolute path"):
         worker._load_config(_write_config(tmp_path, value), require_root_owner=False)
+
+
+def test_sealed_native_claude_v7_is_model_bound_and_keeps_operator_disarmed(tmp_path):
+    value = sealed_claude_config(tmp_path)
+    loaded = worker._load_config(
+        _write_config(tmp_path, value), require_root_owner=False
+    )
+    assert loaded == value
+    worker._assert_service_activation_allowed(value)
+    assert value["sealed_worker_model"] == "claude-fable-5-1"
+    assert value["managed_policy_generation"] == 1
+    assert value["operator_harness_armed"] is False
+
+
+@pytest.mark.parametrize(
+    "field,bad",
+    [
+        ("sealed_worker_model", ""),
+        ("managed_policy_generation", 0),
+        ("managed_policy_generation", True),
+        ("validation_allowed_codex_versions", []),
+        ("validation_required_team_identifier", "wrong-team"),
+        ("operator_harness_armed", True),
+    ],
+)
+def test_sealed_native_claude_v7_refuses_ambiguous_or_rich_policy(
+    tmp_path, field, bad
+):
+    value = sealed_claude_config(tmp_path)
+    value[field] = bad
+    with pytest.raises(worker.WorkerConfigError):
+        worker._load_config(
+            _write_config(tmp_path, value), require_root_owner=False
+        )
 
 
 def test_wrong_principal_refused_before_native_scope_or_socket(tmp_path, monkeypatch):
