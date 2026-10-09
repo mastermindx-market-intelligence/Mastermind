@@ -69,6 +69,21 @@ def is_open(now: datetime | None = None) -> bool:
     return is_session_day(now.date()) and _OPEN <= now.time() < _CLOSE
 
 
+def is_overnight(now: datetime | None = None) -> bool:
+    """Blue Ocean's Sun–Thu 20:00 to next session day 04:00 Eastern window.
+
+    Never paper-fill Friday/Saturday nights, or the night before an NYSE holiday.
+    Exchange/venue exceptional closures require the data/eligibility gate too.
+    """
+    now = now or now_et()
+    d, t = now.date(), now.time()
+    if t >= time(20, 0):
+        return d.weekday() in (6, 0, 1, 2, 3) and is_session_day(d + timedelta(days=1))
+    if t < time(4, 0):
+        return is_session_day(d) and (d - timedelta(days=1)).weekday() in (6, 0, 1, 2, 3)
+    return False
+
+
 def next_open(now: datetime | None = None) -> datetime:
     """The next regular-session open at/after `now` (09:30 ET on the next session day)."""
     now = now or now_et()
@@ -94,6 +109,8 @@ def status(now: datetime | None = None) -> dict:
     sd = is_session_day(now.date())
     if sd and _OPEN <= now.time() < _CLOSE:
         session = "open"
+    elif is_overnight(now):
+        session = "overnight"
     elif sd and now.time() < _OPEN:
         session = "pre"
     elif sd:
@@ -102,6 +119,7 @@ def status(now: datetime | None = None) -> dict:
         session = "closed"
     return {
         "is_open": session == "open",
+        "is_overnight": session == "overnight",
         "session": session,
         "now_et": now.isoformat(timespec="minutes"),
         "next_open": next_open(now).isoformat(timespec="minutes"),
