@@ -103,8 +103,9 @@ After the normal arming ceremony, only the descriptor's exact root may retain
 its qualified original source revision (transitively derived for v2). Its admission Event, immutable Job identity,
 model, profile, policy, routing, and harness identity must match.
 
-CEO-submit admits while the operator harness is closed. Full arming later
-enables global operator capacity. The preserved root keeps its original
+The historical preserved root was admitted while the operator harness was
+closed. Full arming later enables global operator capacity. Fresh roots may also
+use the [sealed coexistence path](EXECUTIVE_CEO_AUTONOMY_COEXISTENCE.md). The preserved root keeps its original
 `operator_harness_armed=false` binding and uses the existing sealed supervisor;
 maintenance never promotes it to an operator profile. Ordinary current roots
 keep their normal behavior.
