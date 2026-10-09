@@ -29,6 +29,9 @@ _SECRETS = (re.compile(p, re.I) for p in (
     r"(?i)password\s*[:=]", r"(?i)authorization\s*[:=]",
 ))
 _SECRET_PATTERNS = tuple(_SECRETS)
+# Restrict host-local coordinates even when embedded in an otherwise benign
+# sentence (e.g. a diagnostic summary). This is output policy, not file access.
+_HOST_PATHS = re.compile(r"(?:^|[\s=:'\"(])(?:/(?:Users|private|Library|Volumes|home|etc)/|[A-Za-z]:\\(?:Users|Windows|Program Files)\\)", re.I)
 _FORBIDDEN_KEYS = frozenset(("password", "authorization", "token", "credential", "secret", "private_key", "access_token", "refresh_token", "environment", "env", "raw_log", "shell", "command", "argv", "home_directory"))
 _STATES = frozenset(("PROVEN_LIVE", "BUILT_NOT_PROVEN", "PARTIAL", "DARK_OR_DISCONNECTED", "BROKEN", "SPEC_ONLY", "NOT_BUILT", "REJECTED_BY_DESIGN"))
 
@@ -78,7 +81,7 @@ def _check_data(value: Any, *, depth: int = 0) -> Any:
         if not math.isfinite(value): raise DotRefusal("unsafe_owner_evidence")
         return value
     if type(value) is str:
-        if value.startswith(("/Users/", "/private/", "/Library/", "/Volumes/", "/home/", "/etc/")):
+        if _HOST_PATHS.search(value):
             raise DotRefusal("unsafe_owner_evidence")
         if len(value) > 12000 or any(p.search(value) for p in _SECRET_PATTERNS):
             raise DotRefusal("unsafe_owner_evidence")
@@ -113,10 +116,14 @@ def _normalize_evidence(spec: Any, evidence: OwnerEvidence, now: datetime) -> di
         raise DotRefusal("invalid_owner_evidence")
     if any(type(ref) is not str or REF_PATTERN.fullmatch(ref) is None for ref in evidence.source_refs):
         raise DotRefusal("invalid_owner_evidence")
+    if any(_check_data(ref) != ref for ref in evidence.source_refs):
+        raise DotRefusal("unsafe_owner_evidence")
     if type(evidence.issues) is not tuple or len(evidence.issues) > 16:
         raise DotRefusal("invalid_owner_evidence")
     if any(type(v) is not str or REF_PATTERN.fullmatch(v) is None for v in evidence.issues):
         raise DotRefusal("invalid_owner_evidence")
+    if any(_check_data(code) != code for code in evidence.issues):
+        raise DotRefusal("unsafe_owner_evidence")
     data = _check_data(evidence.data)
     return {"owner": evidence.owner, "observed_at": evidence.observed_at,
             "source_refs": list(evidence.source_refs), "capability_state": evidence.capability_state,

@@ -1,6 +1,6 @@
 # Dot Compass R0 — authenticated owner-bound read families
 
-**Scope:** source implementation and hermetic tests. `BUILT_NOT_PROVEN`, **not installed**, not selected by Dot, not a live data service. Existing public Dot Operator plugin is a separate private skills package and grants no access.
+**Scope:** source implementation and hermetic tests. `BUILT_NOT_PROVEN`, **not installed**, not selected by Dot, not a live data service. The separately published Dot Operator plugin is private and grants no new tool or host access.
 
 ## User capability
 
@@ -26,7 +26,7 @@ The only included concrete owner adapter routes `dot_company_snapshot` -> existi
 
 - Existing authenticated MCP host must supply one request-bound verified principal and an independent `reauthorize(principal, required_scope)` callback. The callback must check resource, issuer, subject, client, token lifetime, scopes and organizational authorization through the *incumbent* policy owner. It runs before and after the owner read, and binding changes refuse the result. The gateway itself neither mints nor verifies bearer tokens.
 - Scope labels in this contract are **requirements**, not granted permissions. They must be explicitly enrolled in their actual resource policy before a profile can be exposed. Do not co-opt Executive read scope for the other domains.
-- Every port must provide fresh `OwnerEvidence(owner, observed_at, source_refs, capability_state, data, issues)`. Mismatched owners, malformed timestamps, missing source references, secret-like fields, output over 16 KiB, non-JSON data, nonfinite floats and excessive nesting refuse. Returned owner text is untrusted data, never instructions.
+- Every port must provide fresh `OwnerEvidence(owner, observed_at, source_refs, capability_state, data, issues)`. Mismatched owners, malformed timestamps, missing source references, secret-like fields (including references and issue codes), embedded host-local paths, output over 16 KiB, non-JSON data, nonfinite floats and excessive nesting refuse. Returned owner text is untrusted data, never instructions.
 - Tool input schemas are `additionalProperties: false`; no `cmd`, `path`, URL, root, SSH, host, account, principal or arbitrary query parameter exists. MCP annotations truthfully declare zero mutation; enforcement is in the gateway and host policy.
 - Cancellation propagates; read failures never retry. No modifying tools, new action registry, scheduler, queue or retry owner exist in R0.
 - A plugin name or merged source does not authorize API calls. Platform/organizational refusals cannot be rephrased through another transport or action.

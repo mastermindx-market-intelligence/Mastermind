@@ -42,6 +42,37 @@ class DotTest(unittest.IsolatedAsyncioTestCase):
         res=await g.call('dot_company_snapshot',{},principal=object())
         self.assertEqual(res['error']['code'],'unsafe_owner_evidence')
 
+    async def test_embedded_host_paths_and_windows_paths_refused(self):
+        values = (
+            'Diagnostic captured at /private/var/db/company in a failed read',
+            'The host file was C:\\Users\\Operator\\secrets.txt',
+            'Inspect (/Volumes/Mastermind/private) for errors',
+        )
+        for value in values:
+            with self.subTest(value=value):
+                res = await self.make(port=lambda _, msg=value: company({'message': msg})).call(
+                    'dot_company_snapshot', {}, principal=object())
+                self.assertFalse(res['ok'])
+                self.assertEqual(res['error']['code'], 'unsafe_owner_evidence')
+
+    async def test_source_and_issue_references_cannot_carry_secrets(self):
+        for packet in (
+            dataclasses.replace(company(), source_refs=('github_pat_1234567890',)),
+            dataclasses.replace(company(), issues=('ghp_ABC123TOKEN',)),
+        ):
+            res = await self.make(port=lambda _, p=packet: p).call(
+                'dot_company_snapshot', {}, principal=object())
+            self.assertFalse(res['ok'])
+            self.assertEqual(res['error']['code'], 'unsafe_owner_evidence')
+
+    async def test_safe_references_and_plain_diagnostics_still_work(self):
+        packet = dataclasses.replace(company(),
+            issues=('DEGRADED_BACKEND',),
+            data={'message': 'The public path /docs/guide is accessible'})
+        res = await self.make(port=lambda _: packet).call('dot_company_snapshot', {}, principal=object())
+        self.assertTrue(res['ok'])
+        self.assertEqual(res['data']['issues'], ['DEGRADED_BACKEND'])
+
     async def test_no_extra_args_even_for_empty_tools(self):
         g=self.make(); res=await g.call('dot_company_snapshot', {'cmd':'whoami'}, principal=object())
         self.assertEqual(res['error']['code'],'invalid_input')
