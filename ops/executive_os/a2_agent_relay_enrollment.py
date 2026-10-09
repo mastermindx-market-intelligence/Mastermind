@@ -1270,9 +1270,13 @@ class _A2Rebind:
             os.close(fd)
 
     def check(self) -> None:
+        _assert_disarmed()
+        self.check_identity()
+
+    def check_identity(self) -> None:
+        """Observe ownership without granting permission to publish or restore."""
         if not self.live:
             raise A2EnrollmentError("A2_REBIND_EFFECT_UNCERTAIN")
-        _assert_disarmed()
         _assert_bound_config_current(self.binding)
         for path in self.directories:
             self._directory(path)
@@ -1319,6 +1323,12 @@ class _A2Rebind:
                     or not stat.S_ISREG(staged.st_mode) or staged.st_nlink != 1):
                 raise A2EnrollmentError("A2_REBIND_EFFECT_UNCERTAIN")
             _rebind_acl(path.parent / name, staged)
+            # Staging/ACL inspection can race a modifier after the earlier
+            # whole-pair check. Re-attest after that work, then attest the exact
+            # destination immediately before publication, including its inode.
+            self.check()
+            if self._file(path) != self.expected[path]:
+                raise A2EnrollmentError("A2_REBIND_EFFECT_UNCERTAIN")
             os.replace(name, path.name, src_dir_fd=parent, dst_dir_fd=parent)
             renamed = True
             # Record ownership immediately after an acknowledged rename, before
@@ -1345,20 +1355,18 @@ class _A2Rebind:
                 assert preimage.payload is not None
                 self.replace(path, preimage.payload)
             self.check()
-            if all(self.expected[p].payload == old.payload for p, old in self.preimages.items()):
-                raise A2EnrollmentError("A2_REBIND_WRITE_REFUSED") from failure
-        except A2EnrollmentError as exc:
-            if exc.code == "A2_REBIND_WRITE_REFUSED":
-                raise
-            raise A2EnrollmentError("A2_REBIND_EFFECT_UNCERTAIN") from failure
         except Exception:
-            # Classify an owned, known mixed pair separately. Never repair drift.
-            try:
-                self.check()
-            except Exception:
-                raise A2EnrollmentError("A2_REBIND_EFFECT_UNCERTAIN") from failure
-            raise A2EnrollmentError("A2_REBIND_MIXED_GENERATION") from failure
-        raise A2EnrollmentError("A2_REBIND_EFFECT_UNCERTAIN") from failure
+            # A service becoming loaded revokes write/rollback permission, not
+            # the ability to observe our exact held identities. No further write
+            # is attempted here. Unknown identities still refuse as uncertain.
+            pass
+        try:
+            self.check_identity()
+        except Exception:
+            raise A2EnrollmentError("A2_REBIND_EFFECT_UNCERTAIN") from failure
+        if all(self.expected[p].payload == old.payload for p, old in self.preimages.items()):
+            raise A2EnrollmentError("A2_REBIND_WRITE_REFUSED") from failure
+        raise A2EnrollmentError("A2_REBIND_MIXED_GENERATION") from failure
 
 
 async def _rebind(*, bot_user_id: str) -> dict[str, object]:

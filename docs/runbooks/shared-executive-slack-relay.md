@@ -132,6 +132,15 @@ For an already-enrolled A2 relay, preserve the token and use the installed
 `enroll` ceremony, rewrite the pair by hand, or copy a credential. The core
 installer does not publish A2's generation.
 
+This paired C1/A2 upgrade requires the existing shared lock namespace
+`/Library/Application Support/MastermindExecutive/locks`: a real root:wheel
+directory with mode 0700 and no ACL. The canonical C1 host preparation owner
+(`prepare-c1-sol-state-relay.sh`) provisions and checks that namespace. Verify
+this prerequisite before stopping A2. A2's initial enrollment preparation does
+not provision it, and `rebind-release` refuses a missing or unsafe namespace
+without creating or repairing it. Do not rerun enrollment preparation on an
+already-enrolled relay or weaken the namespace checks.
+
 After the exact accepted successor is installed, stop/disable A2 through
 `service-control.sh stop-agent-relay` and verify its unloaded/disabled state.
 Keep production execution disarmed under its existing owner. From the exact
@@ -153,6 +162,11 @@ artifacts fail closed. A failed publication restores only identities still
 owned by that operation. `A2_REBIND_EFFECT_UNCERTAIN` or
 `A2_REBIND_MIXED_GENERATION` requires same-carrier reconciliation; do not retry,
 reenroll or start the relay to force convergence.
+
+If the relay becomes loaded during publication, rollback permission is lost.
+Read-only identity reconciliation still distinguishes an operation-owned pair
+that was not restored (`A2_REBIND_MIXED_GENERATION`) from changed or unprovable
+identities (`A2_REBIND_EFFECT_UNCERTAIN`); neither permits another write.
 
 After a successful rebind, use the installed `verify` with the expected bot.
 Supply `--enable-w3c` only when the preserved enrollment already has W3C enabled;

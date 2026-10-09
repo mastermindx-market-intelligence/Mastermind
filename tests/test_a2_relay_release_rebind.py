@@ -34,6 +34,9 @@ def host(monkeypatch, tmp_path):
     for directory in (config, locks, plists):
         directory.mkdir(parents=True, exist_ok=True)
         directory.chmod(0o700 if directory == locks else 0o755)
+    # Own the complete fixture namespace under either 002 or 022 umask.
+    for directory in (root.parent.parent, root.parent, root):
+        directory.chmod(0o755)
     uid, gid = os.getuid(), os.getgid()
     for key, val in {'SYSTEM_ROOT': root, 'SYSTEM_RELEASE_ROOT': root/'releases',
                      'CONFIG_PATH': config/'agent-relay.json', 'TOKEN_PATH': config/'agent-relay.token',
@@ -312,4 +315,55 @@ def test_failure_after_acknowledged_second_rename_can_restore_exact_pair(host, m
     with pytest.raises(a2.A2EnrollmentError, match='WRITE_REFUSED'):
         rebind()
     assert failed
+    assert pair() == before
+
+
+@pytest.mark.parametrize('same_bytes', [False, True])
+def test_destination_replaced_during_staged_acl_is_preserved(host, monkeypatch, same_bytes):
+    original = pair()
+    real_acl = a2._rebind_acl
+    foreign = original[0] if same_bytes else b'FOREIGN-MODIFIER-DESTINATION-BYTES'
+    replacement = []
+    def replace_destination(path, info):
+        real_acl(path, info)
+        if not replacement and path.name.startswith('.' + a2.PLIST_PATH.name + '.rebind-'):
+            other = a2.PLIST_PATH.with_name('foreign-plist')
+            other.write_bytes(foreign)
+            other.chmod(0o644)
+            os.replace(other, a2.PLIST_PATH)
+            replacement.append(a2.PLIST_PATH.stat().st_ino)
+    monkeypatch.setattr(a2, '_rebind_acl', replace_destination)
+    with pytest.raises(a2.A2EnrollmentError, match='EFFECT_UNCERTAIN'):
+        rebind()
+    assert replacement
+    assert a2.PLIST_PATH.stat().st_ino == replacement[0]
+    assert a2.PLIST_PATH.read_bytes() == foreign
+    assert a2.CONFIG_PATH.read_bytes() == original[1]
+    assert not list(a2.PLIST_PATH.parent.glob('*.rebind-*'))
+
+
+def test_loaded_after_first_write_reports_owned_mixed_pair_without_rollback(host, monkeypatch):
+    real = os.replace
+    calls = []
+    def replace(*args, **kwargs):
+        real(*args, **kwargs)
+        calls.append(args)
+    def loaded_after_write():
+        if calls:
+            raise a2.A2EnrollmentError('A2_ENROLLMENT_HOST_REFUSED')
+    monkeypatch.setattr(os, 'replace', replace)
+    monkeypatch.setattr(a2, '_assert_disarmed', loaded_after_write)
+    with pytest.raises(a2.A2EnrollmentError, match='MIXED_GENERATION'):
+        rebind()
+    assert len(calls) == 1
+    assert a2.PLIST_PATH.read_bytes() == a2.render_plist(bot_user_id=BOT, release_sha=NEW)
+    assert json.loads(a2.CONFIG_PATH.read_bytes())['release_sha'] == OLD
+
+
+def test_missing_lock_namespace_refuses_without_creating_it(host):
+    a2.A2_REBIND_LOCK_DIR.rmdir()
+    before = pair()
+    with pytest.raises(a2.A2EnrollmentError, match='STATE_REFUSED'):
+        rebind()
+    assert not a2.A2_REBIND_LOCK_DIR.exists()
     assert pair() == before
