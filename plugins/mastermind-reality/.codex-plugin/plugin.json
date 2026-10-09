@@ -1,0 +1,19 @@
+{
+  "name": "mastermind-reality",
+  "version": "0.1.0",
+  "description": "Governed inspection of one approved Mastermind product journey with actual visual, semantic, runtime, uncertainty, and negative-control evidence.",
+  "author": {
+    "name": "Mastermind-X"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Mastermind Reality",
+    "shortDescription": "Inspect real product journeys and degraded states",
+    "longDescription": "Inspect one approved Mastermind product journey through existing browser and observability owners, consume actual pixels, and return bounded evidence without creating another browser, lifecycle, identity, evidence, or control plane.",
+    "developerName": "Mastermind-X",
+    "category": "Productivity",
+    "capabilities": [
+      "Read"
+    ]
+  }
+}
