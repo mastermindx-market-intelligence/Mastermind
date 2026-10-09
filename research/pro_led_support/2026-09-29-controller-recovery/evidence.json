@@ -1,0 +1,180 @@
+{
+  "capability": "BUILT_NOT_PROVEN",
+  "operation": "mastermind-pro-led-project-delivery-20260929-sol-001",
+  "procedure_pin": "8b08228e6126fe4654b04ec4cf1b85ee7b00af3a",
+  "target_pr": 1046,
+  "target_head": "17ed169f071af69205cf7a074db32a7cd148c4c0",
+  "files": [
+    {
+      "path": "app/mastermind_os/src/orchestration/operation-controller.ts",
+      "original_sha256": "cc1a044ad42bd45c2379b2ab784b52bd951699117dd4e1fa2932af6389ff8963",
+      "repaired_sha256": "f6c7c9ce4cc4db25ac7b1dbef325408b2b8336751fa7b8dfc25f1a14a6b625ed"
+    },
+    {
+      "path": "app/mastermind_os/src/App.test.tsx",
+      "original_sha256": "9a8f9f45ca99de1756ee9f89ab88f0dc032d623f9bc139bb4d245dd5c568ac60",
+      "repaired_sha256": "b6434de1596023fb773d955ac45e076d12f58b2460af5b1eb66f259605521459"
+    }
+  ],
+  "new_test_path": "app/mastermind_os/src/orchestration/operation-controller-recovery.test.ts",
+  "new_test_sha256": "f446034403de5708a046d9eb1882ac7ef53bba5807383c4cf16d90a1f63555ba",
+  "patch_sha256": "d2d3a00c2ae79a741f7e7dabc3295b9b5929baba89cfcc711465c4933a5b076a",
+  "original_app_paths_verified": 77,
+  "changed_original_paths": [
+    {
+      "path": "app/mastermind_os/src/App.test.tsx",
+      "original_blob": "9db08cc3cabaaf4e9ffc35716ab00260e5394bef",
+      "candidate_blob": "80c7af53f957ef4be08bd02103119f81780f3774"
+    },
+    {
+      "path": "app/mastermind_os/src/orchestration/operation-controller.ts",
+      "original_blob": "d3bf12ac8936077778ddfc44121364cf2d468b5b",
+      "candidate_blob": "72b3be184cc8e7a730c958844eeb1386f3e9e8b9"
+    }
+  ],
+  "checks": [
+    {
+      "name": "unit-regression-red",
+      "exit_code": 1,
+      "log_sha256": "8a7e34210e6624413bbfd762fd98b0ad8ab3f4fe00817cd109b11bdaaf0dcdf3",
+      "log_name": "pr1046-regression-red-final.log"
+    },
+    {
+      "name": "unit-regression-green",
+      "exit_code": 0,
+      "log_sha256": "5a3a8323b304f6d17e2d77e112922434a3c35ba71feddab79574ea5746bdf00b",
+      "log_name": "pr1046-regression-green-final.log"
+    },
+    {
+      "name": "ui-regression-red",
+      "exit_code": 1,
+      "log_sha256": "30ce10996bee7bbf33daf9a2a7c121850297a0c965a18edd6cc19c33020d46da",
+      "log_name": "pr1046-ui-red.log"
+    },
+    {
+      "name": "ui-regression-green",
+      "exit_code": 0,
+      "log_sha256": "6e7dfebbea62c0b3af9623b28334b0e2141024a9412accbd46afa90401ebaffa",
+      "log_name": "pr1046-ui-green.log"
+    },
+    {
+      "name": "conversation-final-red",
+      "command": [
+        "npm",
+        "test",
+        "--",
+        "src/App.test.tsx",
+        "-t",
+        "Pro/native Conversation recovery"
+      ],
+      "exit_code": 1,
+      "log_sha256": "834b61f5ed81ace8f40a600e9ef9d0556d3349d9ea49f8df80e22518bd37b2a0",
+      "log_name": "pr1046-conversation-final-red.log"
+    },
+    {
+      "name": "conversation-final-green",
+      "command": [
+        "npm",
+        "test",
+        "--",
+        "src/App.test.tsx",
+        "-t",
+        "Pro/native Conversation recovery"
+      ],
+      "exit_code": 0,
+      "log_sha256": "d92a6e974c1d58be86072dda8f98d4bbe390271f02d0b3928bf805b1bfeb54c7",
+      "log_name": "pr1046-conversation-final-green.log"
+    },
+    {
+      "name": "typecheck-final-all",
+      "command": [
+        "npm",
+        "run",
+        "typecheck"
+      ],
+      "exit_code": 0,
+      "log_sha256": "20aa618c5feed49ebeca9949c4e1449d20443655e0fc77de19db43e4dfa2194c",
+      "log_name": "pr1046-typecheck-final-all.log"
+    },
+    {
+      "name": "frontend-final-all",
+      "command": [
+        "npm",
+        "test"
+      ],
+      "exit_code": 0,
+      "log_sha256": "c785286f449b9740c76841f2abc4e0e76b4b5074e62567aa5522725652300fea",
+      "log_name": "pr1046-frontend-final-all.log"
+    },
+    {
+      "name": "web-build-final-all",
+      "command": [
+        "npm",
+        "run",
+        "build"
+      ],
+      "exit_code": 0,
+      "log_sha256": "fe9b850f75065273da48b9939542f4af6e626cf8280616b2d44cf82d67c2d13b",
+      "log_name": "pr1046-web-build-final-all.log"
+    },
+    {
+      "name": "native-assets-final-all",
+      "command": [
+        "npm",
+        "run",
+        "build",
+        "--",
+        "--mode",
+        "native"
+      ],
+      "exit_code": 0,
+      "log_sha256": "7c59a278f000d61d71b2f098b21ee0daf56664ba2319020a722c539cd69d39ad",
+      "log_name": "pr1046-native-assets-final-all.log"
+    }
+  ],
+  "unit_regressions_before": {
+    "failed": 7,
+    "passed": 2
+  },
+  "unit_regressions_after": {
+    "passed": 9
+  },
+  "app_regression_before": {
+    "failed": 1,
+    "filtered": 64
+  },
+  "app_regression_after": {
+    "passed": 1,
+    "filtered": 64
+  },
+  "frontend_after": {
+    "passed": 558,
+    "skipped": 1,
+    "test_files": 13
+  },
+  "patch_reverse_check_exit": 0,
+  "self_repair": "The added App test initially accessed .mock on an interface-typed method, causing TS2339. Replaced it with the typed call-argument matcher; all final checks passed. Production repair unchanged. The added Conversation assertion initially selected Send while the existing uncertain state names that disabled button Sending\u2026; corrected the selector and reran original RED and repaired GREEN plus the complete suite.",
+  "limits": [
+    "Injected host ports; not live provider transport.",
+    "Full frontend suite, not repository-wide Python or native Rust.",
+    "No independent review, deployment, or native recipient consumption.",
+    "Existing Tauri static/dynamic import warning retained.",
+    "Publication is a patch for the incumbent #1046 carrier, not a replacement App source owner."
+  ],
+  "recorded_at": "2026-09-29T05:56:25.821128+00:00",
+  "conversation_regressions_before": {
+    "failed": 2,
+    "filtered": 65
+  },
+  "conversation_regressions_after": {
+    "passed": 2,
+    "filtered": 65
+  },
+  "patch_byte_verified_roundtrip": {
+    "forward_check_exit": 0,
+    "forward_apply_exit": 0,
+    "all_three_postimages_equal_tested_bytes": true,
+    "reverse_apply_exit": 0,
+    "both_preimages_restored_and_new_test_removed": true
+  }
+}
