@@ -114,11 +114,11 @@ aside {
   letter-spacing: 1.2px;
   padding: 0 12px;
 }
-nav {
+.shell > aside nav {
   display: grid;
   gap: 4px;
 }
-nav button {
+.shell > aside nav button {
   width: 100%;
   min-height: 36px;
   border: 0;
@@ -138,15 +138,15 @@ nav button {
   font-size: 14px;
   text-align: center;
 }
-nav button:hover {
+.shell > aside nav button:hover {
   background: var(--raised);
   color: var(--text);
 }
-nav button.active {
+.shell > aside nav button.active {
   background: var(--brass-wash);
   color: var(--text);
 }
-nav button.active .nav-glyph {
+.shell > aside nav button.active .nav-glyph {
   color: var(--brass);
 }
 .mission-context {
@@ -486,6 +486,15 @@ code {
 .segmented button {
   padding: 7px 10px;
 }
+/* Contextual actions keep text layout independently of sidebar icon collapse. */
+main nav.card .segmented {
+  flex-wrap: wrap;
+}
+main nav.card .segmented button {
+  min-height: 44px;
+  max-width: 100%;
+}
+
 .segmented button[aria-pressed="true"] {
   border-color: var(--brass);
   color: var(--brass);
@@ -658,10 +667,10 @@ a:focus-visible {
     display: none;
   }
   .nav-section,
-  nav {
+  .shell > aside nav {
     width: 100%;
   }
-  nav button {
+  .shell > aside nav button {
     position: relative;
     width: 40px;
     height: 40px;

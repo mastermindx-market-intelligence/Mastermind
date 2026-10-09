@@ -360,7 +360,7 @@ describe("React read lifecycle fences", () => {
         "?work_ref=WS%3AALPHA&root_job_id=JOB-A",
       ),
     );
-    expect(await screen.findByText("JOB-A")).toBeTruthy();
+    expect(await screen.findByText("Exact project context · JOB-A")).toBeTruthy();
 
     cleanup();
     render(<App />);
