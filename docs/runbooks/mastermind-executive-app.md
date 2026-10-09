@@ -358,3 +358,19 @@ not establish an installed generation, accepted identity provider, live tunnel,
 or real ChatGPT canary. Production qualification still requires all five tools
 through the actual registered app, one separately confirmed harmless admission,
 same-operation duplicate/conflict checks, and zero Attempts or Workers.
+
+### Network-process self-healing
+
+The installed Executive MCP and its production Secure MCP Tunnel are critical always-on
+network services. Their launchd jobs must use `RunAtLoad=true`, unconditional
+`KeepAlive=true`, and a bounded throttle interval. This is restart policy only: it does not
+create another supervisor, queue, retry owner, OAuth session owner, or lifecycle plane. A
+deliberate operator stop removes the job with `launchctl bootout`; terminating only the
+process is not a stop operation and must be healed by launchd.
+
+`ops/executive_os/executive_network_launchd.py` is the fail-closed repair/check primitive
+for already-installed production jobs. It verifies exact service identity and canonical
+entry/config coordinates before atomically changing only launchd restart policy. Service
+reload and production reconciliation remain explicit operator actions. Production proof
+requires a replacement PID plus endpoint readiness and a real ChatGPT Executive tool call;
+a replacement PID alone is not acceptance.
