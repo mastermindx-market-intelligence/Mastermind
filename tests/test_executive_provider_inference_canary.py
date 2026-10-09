@@ -607,6 +607,53 @@ def test_corrected_451_hierarchy_is_worker_traversable(tmp_path: Path) -> None:
     assert canary.WORKER_GID == 451
 
 
+@pytest.mark.parametrize(
+    ("slot_id", "worker_user", "worker_gid"),
+    [
+        ("codex-01", "_mastermind_worker", 451),
+        ("codex-pro-01", "_mastermind_codex_01", 454),
+        ("codex-pro-02", "_mastermind_codex_02", 455),
+        ("codex-pro-03", "_mastermind_codex_03", 456),
+    ],
+)
+def test_live_runner_preserves_selected_slot_principal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    slot_id: str,
+    worker_user: str,
+    worker_gid: int,
+) -> None:
+    config = canary.production_config(
+        probe_root=tmp_path / "probe",
+        operator_home=canary.LIVE_OPERATOR_HOME,
+        slot_id=slot_id,
+    )
+    config.probe_root.mkdir()
+    invocation = canary.prepare_probe(config)
+    # Capture the privileged process boundary without changing host principals
+    # or invoking Codex. The hierarchy's fail-closed behavior is tested below.
+    monkeypatch.setattr(canary, "assign_probe_tree_to_worker", lambda *_: None)
+    monkeypatch.setattr(canary, "assert_worker_probe_hierarchy", lambda *_: None)
+    calls: list[object] = []
+
+    def capture(inner: object, *, timeout_seconds: float) -> object:
+        calls.append(inner)
+        assert timeout_seconds == config.timeout_seconds
+        assert inner.argv[:4] == ("/usr/bin/sudo", "-n", "-u", worker_user)
+        assert inner.argv[4] == "-g"
+        assert inner.argv[5] in {worker_user, f"#{worker_gid}"}
+        assert inner.argv[6:8] == ("/usr/bin/env", "-i")
+        assert inner.env == {}
+        assert inner.cwd == invocation.cwd
+        assert inner.stdin == invocation.stdin
+        assert inner.argv[-len(invocation.argv):] == invocation.argv
+        return canary.CodexRunResult(0, b"", b"", timed_out=False)
+
+    monkeypatch.setattr(canary, "subprocess_runner", capture)
+    assert canary.live_worker_runner(config, invocation).exit_code == 0
+    assert len(calls) == 1
+
+
 def test_outer_root_not_worker_owned_never_invokes_codex(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

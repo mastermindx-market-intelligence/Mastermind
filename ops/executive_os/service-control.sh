@@ -413,7 +413,10 @@ qualify_gateway_release() {
   [ -f "$MCP_PLIST" ] && [ ! -L "$MCP_PLIST" ] || return 1
   [ -f "$MCP_CONFIG" ] && [ ! -L "$MCP_CONFIG" ] || return 1
   /usr/bin/plutil -lint "$MCP_PLIST" >/dev/null 2>&1 || return 1
-  /usr/bin/plutil -lint "$MCP_CONFIG" >/dev/null 2>&1 || return 1
+  # plutil -lint accepts plist input only. Parse the JSON config through its
+  # conversion reader without rewriting it; deep preflight still owns schema,
+  # policy, principal and sealed-generation qualification before any effect.
+  /usr/bin/plutil -convert json -o /dev/null "$MCP_CONFIG" >/dev/null 2>&1 || return 1
   [ "$(gateway_field "$MCP_CONFIG" schema string)" = "mastermind.executive_mcp_install.v1" ] || return 1
   [ "$(gateway_field "$MCP_CONFIG" release_sha string)" = "$expected_sha" ] || return 1
   service_uid="$(gateway_field "$MCP_CONFIG" service_uid integer)" || return 1
