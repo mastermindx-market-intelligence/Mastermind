@@ -109,6 +109,17 @@ export function createComputerUseFacet({authorize,dispatch,recordUncertainEffect
       // from a previous listing/other session's permission.
       const grant=await decision(context,{mode,toolName:name,app:args.app??null});
       if(!validGrant(grant,mode))refuse("owner denied request or binding");
+      if(name==="cuse_click"){
+        // Pixel coordinates and non-left/multiple clicks are substantially
+        // wider than a fresh AX element click. They require additional native
+        // owner authorization; the model cannot elect these capabilities.
+        if((args.x!==undefined||args.y!==undefined) &&
+           grant.allowCoordinateClick!==true)refuse("coordinate click not owner-authorized");
+        if(args.mouse_button!==undefined&&args.mouse_button!=="left" &&
+           grant.allowAlternateButtons!==true)refuse("alternate button not owner-authorized");
+        if(args.click_count!==undefined&&args.click_count!==1 &&
+           grant.allowMultipleClicks!==true)refuse("multiple clicks not owner-authorized");
+      }
       const invokeRequest={
         context,
         principalRef:grant.principalRef,
