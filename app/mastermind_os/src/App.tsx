@@ -1398,15 +1398,23 @@ export function App() {
     };
   }, [resultContext]);
   const routeHeading = useRef<HTMLHeadingElement>(null),
-    previousView = useRef(active);
+    // Project tabs and data refreshes retain focus. Collection/detail and exact
+    // project identity changes can remove the content action that held it.
+    viewIdentity = JSON.stringify([
+      active,
+      active === "Projects" && projectTab && selection
+        ? [selection.workRef, selection.rootJobId]
+        : null,
+    ]),
+    previousView = useRef(viewIdentity);
   useLayoutEffect(() => {
-    if (previousView.current === active) return;
-    previousView.current = active;
+    if (previousView.current === viewIdentity) return;
+    previousView.current = viewIdentity;
     // A removed content action leaves focus on body. Preserve connected
     // controls (including navigation), and never move focus for data refreshes.
     if (!document.activeElement || document.activeElement === document.body)
       routeHeading.current?.focus();
-  }, [active]);
+  }, [viewIdentity]);
   useEffect(
     () =>
       window.MastermindMissionHost?.auth?.subscribe((state) => {
@@ -2527,7 +2535,16 @@ export function App() {
               </div>
               <div>
                 <small>OWNER STATE</small>
-                <State value={d?.read_state.state ?? "SOURCE_READ_PENDING"} />
+                <State
+                  value={
+                    d?.read_state.state ??
+                    ("reason" in mission &&
+                    (mission.reason === "SOURCE_READ_PENDING" ||
+                      mission.reason === "PROGRAM_SELECTION_PENDING")
+                      ? "SOURCE_READ_PENDING"
+                      : "UNAVAILABLE")
+                  }
+                />
               </div>
             </div>
           </section>
