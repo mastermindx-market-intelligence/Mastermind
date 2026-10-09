@@ -10,6 +10,10 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from control_plane.operator_continuation import (
+    ContinuationAck, OperatorContinuation, OperatorContinuationDraft,
+)
+
 from control_plane.executive_runtime import (
     AttemptLease, AttemptStatus, Runtime, StateConflict,
     _interactive_tx5_admitted, orchestration_digest,
@@ -59,6 +63,26 @@ class ExecutiveOperatorHarnessPort:
     def _require_attempt(self, attempt_id: str) -> None:
         if attempt_id != self.attempt_id:
             raise StateConflict("RuntimePort is bound to a different AttemptLease")
+
+    def prepare_operator_continuation(
+        self, attempt_id: str, draft: "OperatorContinuationDraft"
+    ) -> "OperatorContinuation":
+        """Prepare once through the existing fenced Runtime Event transaction."""
+        self._require_attempt(attempt_id)
+        return self.runtime.prepare_operator_continuation(
+            attempt_id, fence_generation=self.fence_generation,
+            lease_token=self.lease_token, draft=draft,
+        )
+
+    def acknowledge_operator_continuation(
+        self, attempt_id: str, ack: "ContinuationAck"
+    ) -> None:
+        """Record exact consumption evidence, not lifecycle or Wake completion."""
+        self._require_attempt(attempt_id)
+        self.runtime.acknowledge_operator_continuation(
+            attempt_id, fence_generation=self.fence_generation,
+            lease_token=self.lease_token, ack=ack,
+        )
 
     def seal_operator_attempt(
         self, attempt_id: str, requested: RequestedExecutionProfile

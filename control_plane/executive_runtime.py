@@ -26,6 +26,10 @@ import os
 import re
 import secrets
 import sqlite3
+
+from control_plane.operator_continuation import (
+    ContinuationAck, OperatorContinuation, OperatorContinuationDraft,
+)
 import threading
 from types import MappingProxyType
 from abc import ABC, abstractmethod
@@ -24554,6 +24558,271 @@ class Runtime:
             requested_profile_digest=str(row["requested_execution_profile_digest"]),
             observed_attestation_digest=str(row["observed_attestation_digest"]),
         )
+
+    def _continuation_current_facts(
+        self, connection: sqlite3.Connection, *, attempt_id: str,
+        fence_generation: int, lease_token: str, draft: "OperatorContinuationDraft",
+    ) -> ActiveOperatorBindingFacts:
+        """Recheck runtime-derived draft material inside the PREPARE/ACK transaction.
+
+        External references remain bounded source-compiler inputs, not grants.
+        This method never terminalizes, requeues, selects a realm, or dispatches.
+        """
+        target = self.operator_harness._leased(
+            connection, attempt_id=attempt_id, fence_generation=fence_generation,
+            lease_token=lease_token, timestamp=self.store.now_ms(),
+            statuses={AttemptStatus.RUNNING, AttemptStatus.CHECKPOINTED},
+        )
+        facts = self.current_harness_binding_source(attempt_id, connection=connection)
+        source = connection.execute(
+            "SELECT * FROM attempts WHERE attempt_id=?", (draft.source_attempt_id,)
+        ).fetchone()
+        job = connection.execute(
+            "SELECT * FROM jobs WHERE job_id=?", (target["job_id"],)
+        ).fetchone()
+        if (
+            source is None or job is None
+            or source["job_id"] != target["job_id"]
+            or source["status"] not in {"RATE_LIMITED", "FAILED", "LOST", "COMPLETED", "CANCELLED"}
+            or source["finished_at_ms"] is None
+            or int(source["attempt_number"]) >= int(target["attempt_number"])
+            or draft.target_attempt_id != attempt_id
+            or draft.job_id != target["job_id"]
+            or draft.root_job_id != (job["root_job_id"] or job["job_id"])
+            or draft.target_seat != facts.owner_seat
+            or draft.effective_grant_digest != target["effective_grant_digest"]
+        ):
+            raise StateConflict("continuation source/target identity or authority drifted")
+        # Reuse durable owner observations; absence of death/release is not clearance.
+        if connection.execute(
+            """SELECT 1 FROM process_generations g
+               JOIN harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id
+               WHERE e.attempt_id=? LIMIT 1""",
+            (source["attempt_id"],),
+        ).fetchone() is None:
+            raise StateConflict("continuation predecessor process evidence is missing")
+        unsafe_generation = connection.execute(
+            """SELECT 1 FROM process_generations g
+               JOIN harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id
+               WHERE e.attempt_id=? AND
+                 (g.ended_at_ms IS NULL OR g.executive_writer_held!=0
+                  OR g.provider_writer_state IS NOT 'RELEASED') LIMIT 1""",
+            (source["attempt_id"],),
+        ).fetchone()
+        if unsafe_generation is not None:
+            raise StateConflict("continuation predecessor process/writer is not released")
+        # The current owner has no accepted RECONCILED operation receipt writer.
+        # Do not infer clearance from a later observation, terminal status or empty diff.
+        if connection.execute(
+            """SELECT 1 FROM events WHERE event_type='OPERATOR_OPERATION_EFFECT_UNKNOWN'
+               AND attempt_id IN (?,?) LIMIT 1""",
+            (source["attempt_id"], attempt_id),
+        ).fetchone() is not None:
+            raise StateConflict("continuation has an unreconciled operation effect")
+        try:
+            placement = _load_canonical_digest_pair(
+                source["placement_snapshot_json"], source["placement_snapshot_digest"],
+                name="continuation predecessor placement",
+            )
+            checkpoint = (
+                None if source["checkpoint_json"] is None else
+                _strict_canonical_json_loads(source["checkpoint_json"], name="continuation checkpoint")
+            )
+        except PersistenceError as exc:
+            raise StateConflict("continuation source evidence is invalid") from exc
+        if (
+            not isinstance(placement, dict)
+            or placement.get("worker_id") != source["worker_id"]
+            or placement.get("quota_class") != source["quota_class"]
+            or not isinstance(placement.get("provider"), str) or not placement["provider"]
+            or not isinstance(placement.get("account_label"), str) or not placement["account_label"]
+            or (placement["provider"], placement["account_label"]) == (facts.provider, facts.account_label)
+        ):
+            raise StateConflict("continuation lacks a distinct accepted predecessor realm")
+        if checkpoint is not None:
+            if not isinstance(checkpoint, dict):
+                raise StateConflict("continuation checkpoint is not an object")
+            keys = ("summary", "completed_steps", "current_state", "artifacts",
+                    "next_actions", "errors", "verdict")
+            checkpoint = {key: checkpoint[key] for key in keys if key in checkpoint}
+        next_actions = [] if checkpoint is None else checkpoint.get("next_actions") or []
+        errors = [] if checkpoint is None else checkpoint.get("errors") or []
+        if not isinstance(next_actions, list) or not isinstance(errors, list):
+            raise StateConflict("continuation checkpoint lists are invalid")
+        next_action = str(next_actions[0] if next_actions else "").strip()
+        next_action = (next_action or f"Continue job {job['job_id']}: {job['objective']}")[:512]
+        unknowns = tuple((str(item or "").strip() or "unknown")[:512] for item in errors[:16])
+        receipt = {
+            "attempt_id": source["attempt_id"], "status": source["status"], "terminal": True,
+            "worker_id": source["worker_id"], "quota_class": source["quota_class"],
+            "checkpoint_sequence": source["checkpoint_sequence"],
+        }
+        material = draft.to_dict()
+        if (material["prior_attempt_receipt"] != receipt
+                or material["checkpoint"] != checkpoint
+                or draft.next_action != next_action or draft.known_unknowns != unknowns):
+            raise StateConflict("continuation draft does not match current source material")
+        return facts
+
+    def _continuation_event(
+        self, connection: sqlite3.Connection, *, command_id: str, event_type: str,
+        facts: ActiveOperatorBindingFacts,
+    ) -> sqlite3.Row | None:
+        """Require one exact Event owner; do not reinterpret a command collision."""
+        rows = connection.execute(
+            "SELECT * FROM events WHERE command_id=? OR (event_type=? AND attempt_id=?)",
+            (command_id, event_type, facts.attempt_id),
+        ).fetchall()
+        if not rows:
+            return None
+        if len(rows) != 1:
+            raise StateConflict("continuation Event cardinality conflicts")
+        row = rows[0]
+        if (row["command_id"] != command_id or row["event_type"] != event_type
+                or row["actor"] != "supervisor" or row["aggregate_type"] != "attempt"
+                or row["aggregate_id"] != facts.attempt_id or row["attempt_id"] != facts.attempt_id
+                or row["job_id"] != facts.job_id or row["worker_id"] != facts.worker_id
+                or row["quota_class"] != self._continuation_quota_class(connection, facts.attempt_id)):
+            raise StateConflict("continuation Event ownership conflicts")
+        return row
+
+    @staticmethod
+    def _continuation_prepared_payload(capsule: "OperatorContinuation", facts: ActiveOperatorBindingFacts) -> dict[str, Any]:
+        return {
+            "schema_version": "mastermind.operator_continuation_prepared/v1",
+            "source_attempt_id": capsule.source_attempt_id,
+            "target_attempt_id": capsule.target_attempt_id,
+            "capsule_id": capsule.capsule_id,
+            "capsule_semantic_digest": capsule.semantic_digest,
+            "provider_session_id": facts.provider_session_id,
+            "session_epoch_id": facts.session_epoch_id,
+            "capsule": capsule.to_dict(),
+        }
+
+    def _continuation_from_event(
+        self, row: sqlite3.Row, facts: ActiveOperatorBindingFacts,
+    ) -> "OperatorContinuation":
+        from datetime import datetime, timezone
+        from control_plane.operator_continuation import OperatorContinuationError, validate_continuation
+        try:
+            payload = _strict_canonical_json_loads(row["payload_json"], name="prepared continuation Event")
+            if not isinstance(payload, dict) or "capsule" not in payload:
+                raise StateConflict("prepared continuation Event has no capsule")
+            capsule = validate_continuation(payload["capsule"])
+            timestamp = datetime.fromtimestamp(row["created_at_ms"] / 1000, timezone.utc)
+            stamp = timestamp.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+            if (payload != self._continuation_prepared_payload(capsule, facts)
+                    or capsule.generated_at != stamp):
+                raise StateConflict("prepared continuation binding or timestamp drifted")
+            return capsule
+        except (OperatorContinuationError, PersistenceError, TypeError, ValueError) as exc:
+            raise StateConflict("prepared continuation Event is invalid") from exc
+
+    def prepare_operator_continuation(
+        self, attempt_id: str, *, fence_generation: int, lease_token: str,
+        draft: "OperatorContinuationDraft",
+    ) -> "OperatorContinuation":
+        """Persist one immutable capsule in Events, under the exact target lease.
+
+        No provider work or source/realm transition is performed here. The source
+        compiler and existing lifecycle/admission owners remain prerequisites.
+        """
+        from datetime import datetime, timezone
+        from control_plane.operator_continuation import (
+            OperatorContinuationDraft, OperatorContinuationError, finalize_continuation,
+        )
+        try:
+            if not isinstance(draft, OperatorContinuationDraft):
+                raise StateConflict("continuation preparation requires a typed semantic draft")
+            draft = OperatorContinuationDraft.from_dict(draft.to_dict())
+            with self.store.transaction() as connection:
+                facts = self._continuation_current_facts(
+                    connection, attempt_id=attempt_id, fence_generation=fence_generation,
+                    lease_token=lease_token, draft=draft,
+                )
+                command = f"operator-continuation:prepare:{attempt_id}"
+                row = self._continuation_event(
+                    connection, command_id=command, event_type="OPERATOR_CONTINUATION_PREPARED", facts=facts,
+                )
+                if row is not None:
+                    capsule = self._continuation_from_event(row, facts)
+                    if capsule.draft.to_dict() != draft.to_dict():
+                        raise StateConflict("target Attempt already prepared different semantic material")
+                    return capsule
+                now = self.store.now_ms()
+                stamp = datetime.fromtimestamp(now / 1000, timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+                capsule = finalize_continuation(draft, generated_at=stamp)
+                self.store.append_event(
+                    connection, aggregate_type="attempt", aggregate_id=attempt_id,
+                    event_type="OPERATOR_CONTINUATION_PREPARED", command_id=command,
+                    actor="supervisor", job_id=facts.job_id, attempt_id=attempt_id,
+                    worker_id=facts.worker_id, quota_class=self._continuation_quota_class(connection, attempt_id),
+                    payload=self._continuation_prepared_payload(capsule, facts), timestamp_ms=now,
+                )
+                return capsule
+        except OperatorContinuationError as exc:
+            raise StateConflict("continuation semantic material is invalid") from exc
+
+    @staticmethod
+    def _continuation_quota_class(connection: sqlite3.Connection, attempt_id: str) -> str:
+        """Read the already-fenced Attempt's existing quota identity."""
+        return str(connection.execute("SELECT quota_class FROM attempts WHERE attempt_id=?", (attempt_id,)).fetchone()[0])
+
+    def acknowledge_operator_continuation(
+        self, attempt_id: str, *, fence_generation: int, lease_token: str,
+        ack: "ContinuationAck",
+    ) -> None:
+        """Append exact consumption evidence; never complete a Job or Wake."""
+        from control_plane.operator_continuation import (
+            OperatorContinuationError, validate_continuation_ack,
+        )
+        try:
+            ack = validate_continuation_ack(ack)
+            if ack.target_attempt_id != attempt_id:
+                raise StateConflict("continuation ACK names a different Attempt")
+            with self.store.transaction() as connection:
+                self.operator_harness._leased(
+                    connection, attempt_id=attempt_id, fence_generation=fence_generation,
+                    lease_token=lease_token, timestamp=self.store.now_ms(),
+                    statuses={AttemptStatus.RUNNING, AttemptStatus.CHECKPOINTED},
+                )
+                facts = self.current_harness_binding_source(attempt_id, connection=connection)
+                prepared_command = f"operator-continuation:prepare:{attempt_id}"
+                prepared = self._continuation_event(
+                    connection, command_id=prepared_command,
+                    event_type="OPERATOR_CONTINUATION_PREPARED", facts=facts,
+                )
+                if prepared is None:
+                    raise StateConflict("continuation ACK has no prepared capsule")
+                capsule = self._continuation_from_event(prepared, facts)
+                self._continuation_current_facts(
+                    connection, attempt_id=attempt_id, fence_generation=fence_generation,
+                    lease_token=lease_token, draft=capsule.draft,
+                )
+                ack = validate_continuation_ack(ack, capsule=capsule, provider_session_id=facts.provider_session_id)
+                command = f"operator-continuation:ack:{attempt_id}"
+                payload = {
+                    "schema_version": "mastermind.operator_continuation_acknowledged/v1",
+                    "prepared_command_id": prepared_command,
+                    "session_epoch_id": facts.session_epoch_id, "ack": ack.to_dict(),
+                }
+                previous = self._continuation_event(
+                    connection, command_id=command, event_type="OPERATOR_CONTINUATION_ACKNOWLEDGED", facts=facts,
+                )
+                if previous is not None:
+                    if (_strict_canonical_json_loads(previous["payload_json"], name="continuation ACK Event") != payload
+                            or previous["event_id"] <= prepared["event_id"]):
+                        raise StateConflict("continuation ACK Event conflicts")
+                    return
+                self.store.append_event(
+                    connection, aggregate_type="attempt", aggregate_id=attempt_id,
+                    event_type="OPERATOR_CONTINUATION_ACKNOWLEDGED", command_id=command,
+                    actor="supervisor", job_id=facts.job_id, attempt_id=attempt_id,
+                    worker_id=facts.worker_id, quota_class=self._continuation_quota_class(connection, attempt_id),
+                    payload=payload,
+                )
+        except (OperatorContinuationError, PersistenceError) as exc:
+            raise StateConflict("continuation acknowledgement is invalid") from exc
 
     def current_harness_binding_source(
         self,
