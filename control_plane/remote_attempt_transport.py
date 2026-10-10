@@ -839,6 +839,10 @@ class _AttemptBoundRemoteProcessController:
             self.owner._controller_for_attempt(attempt).absence_verified(attempt)
         )
 
+    def expected_worker_uid(self, attempt: Attempt) -> int:
+        """Resolve the trusted UID through the same pinned recovery controller."""
+        return self.owner._controller_for_attempt(attempt).expected_worker_uid
+
     def terminate(self, attempt: Attempt) -> None:
         self.owner._controller_for_attempt(attempt).terminate(attempt)
 
@@ -1007,14 +1011,30 @@ class AttemptBoundRemoteWorkerAdapter:
         resolution = self._resolve_attempt(attempt, purpose=purpose)
         current = self._controllers.get(attempt.attempt_id)
         if current is not None:
-            if current.client.identity != resolution.client.identity:
+            if (
+                current.client.identity != resolution.client.identity
+                or current.client.binding != resolution.client.binding
+                or current.expected_worker_uid != resolution.endpoint.worker_uid
+                or current.expected_adapter_id != resolution.endpoint.adapter_id
+            ):
                 raise BrokerStateError(
                     "remote process carrier identity changed during recovery"
                 )
-            return current
+            if current.client.allowed_operations == resolution.client.allowed_operations:
+                return current
+            if not (
+                purpose is RemoteTransportPurpose.PROOF_RECOVERY
+                and current.client.allowed_operations == REMOTE_RECOVERY_OPERATIONS
+                and resolution.client.allowed_operations == REMOTE_PROOF_RECOVERY_OPERATIONS
+            ):
+                raise BrokerStateError("remote process recovery authority changed")
+            # Canonical loss narrows authority on the same pinned endpoint.
+            # The status-only successor must obtain fresh absence evidence;
+            # never carry an active controller's receipt or cancel capability.
         controller = RemoteWorkerProcessController(
             resolution.client,
             expected_worker_uid=resolution.endpoint.worker_uid,
+            expected_adapter_id=resolution.endpoint.adapter_id,
         )
         self._controllers[attempt.attempt_id] = controller
         return controller

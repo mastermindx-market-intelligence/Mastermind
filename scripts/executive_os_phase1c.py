@@ -1775,6 +1775,12 @@ def _service_from_config(
             raise ServiceError("proof capacity has no fresh broker absence")
         return dict(controller.uid_sweep_receipt(attempt))
 
+    def proof_capacity_recovery_worker_uid(attempt):
+        controller = recovery_controller.get("current")
+        if controller is None:
+            raise ServiceError("proof capacity has no recovery controller")
+        return controller.expected_worker_uid(attempt)
+
     def supervisor_factory(runtime):
         def validations(spec):
             job = runtime.jobs.get_job(spec.job_id)
@@ -2267,7 +2273,10 @@ def _service_from_config(
         supervisor_factory=supervisor_factory,
         privileged_readiness_controller_factory=readiness_factory,
         proof_capacity_recovery_observer=proof_capacity_recovery_observer,
-        proof_capacity_recovery_worker_uid=int(raw["worker_uid"]),
+        proof_capacity_recovery_worker_uid=(
+            int(raw["worker_uid"]) if remote_worker_binding_source is None
+            else proof_capacity_recovery_worker_uid
+        ),
         operator_supervisor_factory=operator_supervisor_factory,
         operator_identity_verifier=(
             verify_operator_identity if expected_operator_arm else None
