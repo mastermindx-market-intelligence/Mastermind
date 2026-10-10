@@ -23,6 +23,12 @@ not a global or remotely exposed server.
 2. Start the installed interactive Claude Code CLI with \`~/.local/bin/claude\`.
    Do **not** use \`-p\`, a headless Agent SDK run, an allow-all permission mode,
    direct edits to \`~/.claude.json\`, or a bypass flag to approve.
+**Safety mode on the M2 pilot:** The first observed Claude Terminal session
+showed `bypass permissions on` in its status bar. Before using the MCP,
+switch with Shift+Tab to `manual` permissions or relaunch interactively
+with `claude --permission-mode manual`. Do not use global
+bypassPermissions to suppress project or app approval prompts.
+
 3. If Claude asks "Is this a project you created or one you trust?", review the
    exact directory and explicitly choose "Yes, I trust this folder" *only if
    the human operator accepts its contents*. This is one real human ceremony.
