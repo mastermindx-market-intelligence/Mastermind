@@ -67,7 +67,11 @@ function KnowledgeBody({ projection, onOpenSource }: KnowledgeProps) {
             <div><p className="knowledge-eyebrow">Evidence reference · {evidence.owner}</p>
               <h3>{facet} · {evidence.field}</h3><p className="knowledge-ref">{evidence.ref}</p></div>
             <div className="knowledge-row-action"><span data-state={referenceState(evidence, source.state)}>{referenceState(evidence, source.state)}</span>
-              <button type="button" aria-label={`Inspect ${facet} · ${evidence.field}`} onClick={event => { trigger.current = event.currentTarget; setSelectedId(index); }}>Inspect</button></div>
+              <button type="button" aria-label={`Inspect ${facet} · ${evidence.field}`} onClick={event => {
+                trigger.current = event.currentTarget;
+                if (selectedId === index) detail.current?.focus();
+                else setSelectedId(index);
+              }}>Inspect</button></div>
           </li>)}</ul> : <p className="knowledge-empty">{term ? "No supplied references match this search." : "No references were supplied. This does not establish zero knowledge."}</p>}
       </section>
       <aside className="knowledge-companion">
