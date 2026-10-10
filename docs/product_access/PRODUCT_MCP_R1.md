@@ -64,8 +64,11 @@ never RISK_ON/zero/reconstructed stale data.
 
 - Existing Business MCP policy verifies exact issuer/audience/scope/signature,
   subject allowlist, client and expiry. Dedicated read scope:
-  mastermind.product.read. Executive/OIDC access alone does not grant
-  Macro or Terminal product-user permissions.
+  mastermind.product.read when the issuer supports custom scopes, or exactly
+  openid when Supabase OAuth 2.1 is the issuer. Supabase does not presently
+  offer custom OAuth scopes. Neither scope independently grants product-user
+  access: the separate current product-identity/entitlement check is mandatory.
+  Resource audience, consent, client and session identity remain release gates.
 - Required injected product-user grant is checked before I/O and rechecked
   after SDK credential verification, immediately before the buffered result.
   A revoked grant never becomes a public-user fallback.

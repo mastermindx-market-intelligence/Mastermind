@@ -248,3 +248,21 @@ def test_result_field_and_nan_fences():
         canonical_result({**out, "data": {"score": float("nan")}})
     with pytest.raises(ProductRefused):
         canonical_result({**out, "data": {"x": "a" * 17000}})
+
+
+def test_supabase_standard_oidc_scope_is_supported_but_not_a_product_grant():
+    from integrations.product_access_mcp.contracts import OIDC_READ_SCOPE
+    caller = ProductCaller(
+        subject_digest="a" * 64, client_ref="oidc-fixture",
+        resource="https://product.example.test/mcp",
+        scopes=(OIDC_READ_SCOPE,), expires_at=1792000000)
+    # No action permission is ever derived from 'openid' alone. Actual
+    # authorization remains mandatory at the authenticated SDK boundary.
+    assert caller.scopes == ("openid",)
+    assert caller.public_identity() == {
+        "subject_digest": "a" * 64, "client_ref": "oidc-fixture"}
+    with pytest.raises(ProductRefused):
+        ProductCaller(
+            subject_digest="a" * 64, client_ref="oidc-fixture",
+            resource="https://product.example.test/mcp",
+            scopes=("email",), expires_at=1792000000)

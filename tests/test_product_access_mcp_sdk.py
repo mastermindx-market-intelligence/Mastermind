@@ -71,7 +71,8 @@ class ProductAppTests(unittest.IsolatedAsyncioTestCase):
             "unknown_kid_refresh_cooldown_seconds": 1,
             "fetch_failure_backoff_seconds": 1,
         })
-        self.auth = JwtAuthenticator(policy=self.policy, jwks_cache=Keys(jwk))
+        self.keys = Keys(jwk)
+        self.auth = JwtAuthenticator(policy=self.policy, jwks_cache=self.keys)
         self.audit = Audit()
         self.reads = 0
         self.grant_checks = 0
@@ -284,3 +285,49 @@ class ProductAppTests(unittest.IsolatedAsyncioTestCase):
         self.parsed(await self.call(token=raw))
         self.assertNotIn(raw, json.dumps(self.audit.events))
         self.assertNotIn("product-a", json.dumps(self.audit.events))
+
+    async def test_standard_oidc_oauth_still_requires_owner_product_grant(self):
+        # Supabase OAuth 2.1 currently supports standard 'openid', NOT a custom
+        # mastermind.product.read OAuth scope. The product-user gate is separate.
+        from integrations.product_access_mcp.contracts import OIDC_READ_SCOPE
+        policy = dataclasses.replace(self.policy, required_scopes=(OIDC_READ_SCOPE,))
+        auth = JwtAuthenticator(policy=policy, jwks_cache=self.keys)
+        calls = []
+        async def forbidden_port(caller, request):
+            calls.append("read")
+            raise AssertionError("private product read must not run")
+        def deny_grant(caller, request):
+            raise ProductRefused("PRODUCT_GRANT_CHANGED")
+        server = create_authenticated_product_server(
+            authenticator=auth, policy=policy, now=lambda: self.clock,
+            audit_sink=self.audit, read_port=forbidden_port,
+            final_authorization=deny_grant,
+            allowed_hosts=("127.0.0.1", "127.0.0.1:*"))
+        app = server.streamable_http_app()
+        ready = asyncio.Event()
+        stop = asyncio.Event()
+        async def owner():
+            async with app.router.lifespan_context(app):
+                ready.set()
+                await stop.wait()
+        task = asyncio.create_task(owner())
+        await asyncio.wait_for(ready.wait(), timeout=5)
+        try:
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                         base_url="http://127.0.0.1") as client:
+                res = await client.post("/mcp", headers={
+                    "Authorization": "Bearer " + self.token(scope=OIDC_READ_SCOPE),
+                    "Accept": "application/json, text/event-stream",
+                    "MCP-Protocol-Version": "2025-03-26",
+                }, json={
+                    "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                    "params": {"name": "product_observe", "arguments": {
+                        "product": "terminal", "view": "market_risk",
+                    }},
+                })
+                self.assertEqual(res.status_code, 200)
+                self.assertTrue(res.json()["result"]["isError"])
+                self.assertFalse(calls)
+        finally:
+            stop.set()
+            await asyncio.wait_for(task, timeout=5)

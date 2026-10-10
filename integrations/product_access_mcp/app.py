@@ -27,7 +27,7 @@ from integrations.business_mcp_auth.mcp_adapter import MastermindTokenVerifier
 
 from .contracts import (
     MANIFEST_INPUT_SCHEMA, OBSERVE_INPUT_SCHEMA, OUTPUT_SCHEMA,
-    READ_SCOPE, RESULT_CAP, SERVER_NAME, SERVER_VERSION, SOURCES,
+    ALLOWED_READ_SCOPES, RESULT_CAP, SERVER_NAME, SERVER_VERSION, SOURCES,
     ProductCaller, ProductRefused, canonical_arguments, canonical_result,
 )
 from .observer import product_manifest
@@ -58,7 +58,7 @@ def create_authenticated_product_server(
     product-user grant, audit, execution/capacity and app transport boundaries.
     """
     selected = validate_resource_policy(policy)
-    if selected.required_scopes != (READ_SCOPE,):
+    if selected.required_scopes not in ALLOWED_READ_SCOPES:
         raise ValueError("dedicated product-read policy required")
     if (not callable(now) or not callable(read_port)
         or not callable(final_authorization) or not allowed_hosts):
@@ -115,7 +115,9 @@ def create_authenticated_product_server(
                 scopes=tuple(access.scopes),
                 expires_at=access.expires_at,
             )
-            if caller.resource != selected.resource or caller.expires_at <= now():
+            if (caller.resource != selected.resource
+                or caller.scopes != selected.required_scopes
+                or caller.expires_at <= now()):
                 raise ProductRefused("AUTHENTICATION_REQUIRED")
         except ProductRefused as exc:
             return _error(exc.code)

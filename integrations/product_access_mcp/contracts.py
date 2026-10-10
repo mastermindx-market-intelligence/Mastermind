@@ -16,7 +16,9 @@ PROFILE = "mastermind.product_mcp.v1"
 RESULT_SCHEMA = "mastermind.product_observation.v1"
 SERVER_NAME = "Mastermind Product Observations"
 SERVER_VERSION = "0.1.0"
-READ_SCOPE = "mastermind.product.read"
+READ_SCOPE = "mastermind.product.read"  # resource-specific issuer, when supported
+OIDC_READ_SCOPE = "openid"             # Supabase OAuth 2.1 standard scope
+ALLOWED_READ_SCOPES = frozenset({(READ_SCOPE,), (OIDC_READ_SCOPE,)})
 
 # Static owner-selected sources. Neither tool accepts a URL or a bearer token.
 SOURCES = MappingProxyType({
@@ -101,7 +103,7 @@ class ProductCaller:
             raise ProductRefused("AUTHENTICATION_REQUIRED")
         if not isinstance(self.resource, str) or not self.resource.startswith("https://"):
             raise ProductRefused("AUTHENTICATION_REQUIRED")
-        if self.scopes != (READ_SCOPE,) or type(self.expires_at) is not int:
+        if self.scopes not in ALLOWED_READ_SCOPES or type(self.expires_at) is not int:
             raise ProductRefused("AUTHENTICATION_REQUIRED")
 
     def public_identity(self) -> dict[str, str]:
