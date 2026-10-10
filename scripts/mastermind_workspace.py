@@ -628,8 +628,11 @@ def main(argv: list[str] | None = None) -> int:
                 if (len(args.base_sha) != 40 or any(c not in "0123456789abcdef" for c in args.base_sha)
                         or _repository_git(source, "rev-parse", "--verify", args.base_sha + "^{commit}") != args.base_sha):
                     raise WorkspaceError("REPOSITORY_BASE_INVALID: expected an available exact commit")
-            # The enrolled policy names the host root, not a repository subroot.
-            if not _storage_status(host_root)["admission_allowed"]:
+            # A verified existing operation workspace is re-used without allocation.
+            # Preserve the reserve for creation; prepare_linked_worktree below
+            # still verifies the exact source, operation lock, branch and base.
+            requested_path = _workspace_path(root, args.lane, args.operation_id)
+            if not requested_path.exists() and not _storage_status(host_root)["admission_allowed"]:
                 raise WorkspaceError("STORAGE_LOW_SPACE: available storage is below the host reserve")
             # Storage observation may block: re-observe the source at the effect boundary.
             if _selected_repository(alias, explicit=selected is not None) != source:
