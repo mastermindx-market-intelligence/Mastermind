@@ -86,6 +86,29 @@ function validGrant(grant,mode){
  *   -> persists effect uncertainty to incumbent Executive/Agent owners, not
  *      to this adapter. Must be wired before write tools may be issued.
  */
+const MAX_AX_CHARS=200000;
+const MAX_IMAGE_BASE64_CHARS=8500000;
+const MAX_TOOL_CONTENT_BLOCKS=5;
+const IMAGE_MIME=new Set(["image/png","image/jpeg","image/webp"]);
+function sanitizeResponse(result){
+  if(!result||typeof result!=="object"||!Array.isArray(result.content) ||
+     result.content.length>MAX_TOOL_CONTENT_BLOCKS)refuse("invalid tool result shape");
+  const content=[];
+  for(const item of result.content){
+    if(item?.type==="text"&&typeof item.text==="string" &&
+       item.text.length<=MAX_AX_CHARS){
+      content.push({type:"text",text:item.text});
+    }else if(item?.type==="image"&&typeof item.data==="string" &&
+       item.data.length<=MAX_IMAGE_BASE64_CHARS &&
+       IMAGE_MIME.has(item.mimeType)){
+      content.push({type:"image",data:item.data,mimeType:item.mimeType});
+    }else{
+      refuse("unexpected or oversize tool result block");
+    }
+  }
+  return {content,isError:result.isError===true};
+}
+
 export function createComputerUseFacet({authorize,dispatch,recordUncertainEffect}={}){
   if(typeof authorize!=="function"||typeof dispatch!=="function")refuse("owner callbacks required");
   const decision=(context,request)=>authorize(context,request);
@@ -150,7 +173,12 @@ export function createComputerUseFacet({authorize,dispatch,recordUncertainEffect
         refuse("malformed backend response");
       }
       if(mode==="write"&&result.isError===true)return await ambiguous("unconfirmed_tool_error");
-      return result;
+      try{
+        return sanitizeResponse(result);
+      }catch(error){
+        if(mode==="write")return await ambiguous("unsafe_or_oversize_result");
+        throw error;
+      }
     },
   };
 }
