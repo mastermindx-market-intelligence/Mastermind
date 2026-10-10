@@ -331,3 +331,13 @@ class ProductAppTests(unittest.IsolatedAsyncioTestCase):
         finally:
             stop.set()
             await asyncio.wait_for(task, timeout=5)
+
+
+    async def test_supabase_default_authenticated_audience_is_not_resource_access(self):
+        # Real Supabase OAuth access tokens use aud='authenticated' by default.
+        # A valid token from that issuer must NOT be silently treated as a
+        # Product MCP resource token by the Business MCP verifier.
+        result = await self.call(token=self.token(
+            aud="authenticated", scope="openid"))
+        self.assertEqual(result.status_code, 401)
+        self.assertEqual(self.reads, 0)

@@ -69,6 +69,15 @@ never RISK_ON/zero/reconstructed stale data.
   offer custom OAuth scopes. Neither scope independently grants product-user
   access: the separate current product-identity/entitlement check is mandatory.
   Resource audience, consent, client and session identity remain release gates.
+  **Provider incompatibility:** Supabase OAuth access-token documentation states
+  the default aud claim is the literal `authenticated`, whereas this existing
+  Business MCP resource policy requires an exact HTTPS audience. An ordinary
+  Supabase access token therefore correctly receives HTTP 401 in the MCP
+  boundary, even if its scope is `openid`. Do not relax resource validation,
+  treat `authenticated` as the Product audience, or assume an OAuth hook is
+  installed. A separately qualified issuer/resource policy or existing
+  identity-owner-approved audience/consent integration must close this gate.
+  Source: https://supabase.com/docs/guides/auth/oauth-server/token-security
 - Required injected product-user grant is checked before I/O and rechecked
   after SDK credential verification, immediately before the buffered result.
   A revoked grant never becomes a public-user fallback.
