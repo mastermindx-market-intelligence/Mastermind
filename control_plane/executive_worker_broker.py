@@ -4381,14 +4381,20 @@ class RemoteWorkerProcessController:
     """Synchronous restart-reconciliation facade over broker status/cancel."""
 
     def __init__(
-        self, client: WorkerBrokerClient, *, expected_worker_uid: int | None = None
+        self, client: WorkerBrokerClient, *, expected_worker_uid: int | None = None,
+        expected_adapter_id: str = "codex-cli",
     ) -> None:
         if expected_worker_uid is not None and (
             type(expected_worker_uid) is not int or expected_worker_uid <= 0
         ):
             raise ValueError("expected worker UID must be a positive integer")
+        if type(expected_adapter_id) is not str or expected_adapter_id not in {
+            "codex-cli", "claude-code",
+        }:
+            raise ValueError("expected worker adapter must be a supported identity")
         self.client = client
         self.expected_worker_uid = expected_worker_uid
+        self.expected_adapter_id = expected_adapter_id
         self._uid_sweeps: dict[str, Mapping[str, Any]] = {}
 
     def uid_sweep_receipt(self, attempt_or_run_id: Any) -> Mapping[str, Any]:
@@ -4500,7 +4506,7 @@ class RemoteWorkerProcessController:
                 return False
             broker_pid = status.get("broker_pid")
             if (
-                status.get("adapter_id") != "codex-cli"
+                status.get("adapter_id") != self.expected_adapter_id
                 or not _positive_pid(broker_pid)
                 or type(status.get("worker_uid")) is not int
                 or status["worker_uid"] != self.expected_worker_uid

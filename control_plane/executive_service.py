@@ -2053,7 +2053,7 @@ class ExecutiveControlService:
             | None
         ) = None,
         proof_capacity_recovery_observer: Callable[[Any], Mapping[str, Any]] | None = None,
-        proof_capacity_recovery_worker_uid: int | None = None,
+        proof_capacity_recovery_worker_uid: int | Callable[[Any], int] | None = None,
         operator_identity_verifier: Callable[[], Awaitable[None]] | None = None,
         autonomy_guard: Callable[[], None] | None = None,
         ceo_submit_admission_guard: Callable[[], None] | None = None,
@@ -2099,8 +2099,11 @@ class ExecutiveControlService:
         self._operator_supervisor_factory = operator_supervisor_factory
         if (proof_capacity_recovery_observer is not None
                 and (not callable(proof_capacity_recovery_observer)
-                     or type(proof_capacity_recovery_worker_uid) is not int
-                     or proof_capacity_recovery_worker_uid <= 0)):
+                     or not (
+                         callable(proof_capacity_recovery_worker_uid)
+                         or (type(proof_capacity_recovery_worker_uid) is int
+                             and proof_capacity_recovery_worker_uid > 0)
+                     ))):
             raise ValueError("proof recovery requires a fixed observer and worker UID")
         if proof_capacity_recovery_observer is None and proof_capacity_recovery_worker_uid is not None:
             raise ValueError("proof recovery UID requires its observer")
@@ -5793,14 +5796,22 @@ class ExecutiveControlService:
                 snapshot = runtime.workers.proof_capacity_recovery_snapshot(
                     job_id, lost_attempt_id, **target)
                 attempt = runtime.attempts.get_attempt(lost_attempt_id)
+                uid_source = self._proof_capacity_recovery_worker_uid
+                expected_uid = uid_source(attempt) if callable(uid_source) else uid_source
+                if type(expected_uid) is not int or expected_uid <= 0:
+                    raise StateConflict("proof recovery requires a positive worker UID")
                 started = datetime.now(timezone.utc)
                 sweep = await self._run_physical(observer, attempt)
                 finished = datetime.now(timezone.utc)
                 if self._closing or self._service_state != "READY":
                     raise StateConflict("proof recovery lost READY service custody")
+                if callable(uid_source):
+                    current_uid = uid_source(attempt)
+                    if type(current_uid) is not int or current_uid != expected_uid:
+                        raise StateConflict("proof recovery worker UID changed during observation")
                 return runtime.workers.recover_proof_capacity(
                     job_id, lost_attempt_id, **target, expected_snapshot=snapshot,
-                    uid_sweep=sweep, expected_worker_uid=self._proof_capacity_recovery_worker_uid,
+                    uid_sweep=sweep, expected_worker_uid=expected_uid,
                     observation_started_at=started, observation_finished_at=finished)
 
     def _require_ceo_submit_admission(self) -> None:
