@@ -28,7 +28,7 @@ test("read dispatch uses owner binding and unchanged MCP response",async()=>{
     dispatch:async(x)=>{calls.push(x);return result},
   });
   const output=await facet.callTool({name:"cuse_get_app_state",arguments:{app:"com.apple.calculator"}},context);
-  assert.equal(output,result);
+  assert.deepEqual(output,{...result,isError:false});
   assert.equal(calls[0].toolName,"get_app_state");
   assert.equal(calls[0].bindingRef,"owner-runtime-binding");
   assert.equal(calls[0].operationRef,"owner-operation");
