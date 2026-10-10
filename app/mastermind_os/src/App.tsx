@@ -1280,6 +1280,7 @@ export function App() {
     [viewTick, setViewTick] = useState(0),
     [commandStatus, setCommandStatus] = useState<OperationState | null>(null),
     [heldKind, setHeldKind] = useState<OperationKind | null>(null),
+    [launchDraftDismissed, setLaunchDraftDismissed] = useState(false),
     // True only while a Check-status recover() is actually in flight. A
     // static checking/PENDING_POINTER hold (a persisted pointer with no
     // recovery promise) is NOT busy — its recovery control stays usable.
@@ -1398,15 +1399,23 @@ export function App() {
     };
   }, [resultContext]);
   const routeHeading = useRef<HTMLHeadingElement>(null),
-    previousView = useRef(active);
+    // Project tabs and data refreshes retain focus. Collection/detail and exact
+    // project identity changes can remove the content action that held it.
+    viewIdentity = JSON.stringify([
+      active,
+      active === "Projects" && projectTab && selection
+        ? [selection.workRef, selection.rootJobId]
+        : null,
+    ]),
+    previousView = useRef(viewIdentity);
   useLayoutEffect(() => {
-    if (previousView.current === active) return;
-    previousView.current = active;
+    if (previousView.current === viewIdentity) return;
+    previousView.current = viewIdentity;
     // A removed content action leaves focus on body. Preserve connected
     // controls (including navigation), and never move focus for data refreshes.
     if (!document.activeElement || document.activeElement === document.body)
       routeHeading.current?.focus();
-  }, [active]);
+  }, [viewIdentity]);
   useEffect(
     () =>
       window.MastermindMissionHost?.auth?.subscribe((state) => {
@@ -2219,7 +2228,23 @@ export function App() {
     </div>
   ) : null;
   const commandPanel =
-    canLaunch && commandView ? (
+    canLaunch && commandView && launchDraftDismissed ? (
+      <section className="card">
+        <div className="section-title">
+          <h2>Launch Orchestrator</h2>
+        </div>
+        <p className="muted">Launch draft dismissed.</p>
+        <button
+          type="button"
+          onClick={() => {
+            setLaunchDraftDismissed(false);
+            routeHeading.current?.focus();
+          }}
+        >
+          New launch
+        </button>
+      </section>
+    ) : canLaunch && commandView ? (
       <>
         <LaunchOrchestrator
           projects={commandView.projects}
@@ -2243,7 +2268,16 @@ export function App() {
             const intent = launchIntentFromBinding(binding, form);
             beginCommand("launch", intent, onComplete);
           }}
-          onCancel={() => {}}
+          onCancel={() => {
+            // Dismiss an unsent draft only. A held command keeps its original
+            // completion handle and durable pointer until owner reconciliation.
+            if (
+              pendingCommand.current?.kind === "launch" ||
+              heldKind === "launch"
+            ) return;
+            setLaunchDraftDismissed(true);
+            routeHeading.current?.focus();
+          }}
         />
         {heldKind === "launch" ? checkStatusControl : null}
       </>
@@ -2527,7 +2561,16 @@ export function App() {
               </div>
               <div>
                 <small>OWNER STATE</small>
-                <State value={d?.read_state.state ?? "SOURCE_READ_PENDING"} />
+                <State
+                  value={
+                    d?.read_state.state ??
+                    ("reason" in mission &&
+                    (mission.reason === "SOURCE_READ_PENDING" ||
+                      mission.reason === "PROGRAM_SELECTION_PENDING")
+                      ? "SOURCE_READ_PENDING"
+                      : "UNAVAILABLE")
+                  }
+                />
               </div>
             </div>
           </section>

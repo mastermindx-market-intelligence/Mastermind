@@ -1,0 +1,19 @@
+{
+  "schema": "mastermind.research_read_mcp.grant.v1",
+  "grant_id": "research-read-example-v1",
+  "policy_id": "mastermind-research-read-v1",
+  "entries": [
+    {
+      "subject_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "content_classes": ["catalog_metadata", "report_text", "evidence_passage"],
+      "quote_limit_chars": 1200,
+      "expires_at": 4102444800
+    },
+    {
+      "subject_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+      "content_classes": ["catalog_metadata"],
+      "quote_limit_chars": 1,
+      "expires_at": 4102444800
+    }
+  ]
+}

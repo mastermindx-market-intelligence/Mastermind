@@ -360,7 +360,7 @@ describe("React read lifecycle fences", () => {
         "?work_ref=WS%3AALPHA&root_job_id=JOB-A",
       ),
     );
-    expect(await screen.findByText("JOB-A")).toBeTruthy();
+    expect(await screen.findByText("Exact project context · JOB-A")).toBeTruthy();
 
     cleanup();
     render(<App />);
@@ -1695,6 +1695,71 @@ async function launchFromWork(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("App command composition", () => {
+  it.each(["pointer", "keyboard"])("dismisses an unsent launch draft with %s Cancel and restores page focus", async (input) => {
+    const made = makeCommandBinding({
+      view: {
+        projects: [{ ref: "proj-a", label: "Project A" }, { ref: "proj-b", label: "Project B" }],
+        profiles: [{ ref: "prof-a", label: "Profile A" }, { ref: "prof-b", label: "Profile B" }],
+        session: defaultSession,
+      },
+    });
+    installCommandHost(made.binding);
+    const user = userEvent.setup();
+    render(<App />);
+    await navigateCompanyOperation(user, "Work");
+    const location = window.location.href;
+    await user.type(screen.getByLabelText("Goal"), "Unsent draft");
+    await user.selectOptions(screen.getByLabelText("Project"), "proj-b");
+    await user.selectOptions(screen.getByLabelText("Profile"), "prof-b");
+    const cancel = screen.getByRole("button", { name: "Cancel" });
+    if (input === "keyboard") {
+      cancel.focus();
+      await user.keyboard("{Enter}");
+    } else await user.click(cancel);
+    expect(screen.queryByLabelText("Goal")).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Work", level: 1 }));
+    expect(window.location.href).toBe(location);
+    await user.click(screen.getByRole("button", { name: "New launch" }));
+    expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe("");
+    expect((screen.getByLabelText("Project") as HTMLSelectElement).value).toBe("proj-a");
+    expect((screen.getByLabelText("Profile") as HTMLSelectElement).value).toBe("prof-a");
+    expect(made.prepare).not.toHaveBeenCalled();
+    expect(made.submit).not.toHaveBeenCalled();
+    expect(made.readOperation).not.toHaveBeenCalled();
+  });
+
+  it.each(["pending", "lost-response"])("keeps Cancel disabled and the original pointer during a %s launch", async (state) => {
+    const response = deferred<EffectReceipt>();
+    const store = memoryStore();
+    const made = makeCommandBinding({ store, submit: vi.fn(() => response.promise) });
+    installCommandHost(made.binding);
+    const user = userEvent.setup();
+    render(<App />);
+    await launchFromWork(user);
+    await waitFor(() => expect(made.submit).toHaveBeenCalledTimes(1));
+    if (state === "lost-response") {
+      await act(async () => response.reject(new Error("lost response")));
+      await screen.findByRole("button", { name: "Check status" });
+    }
+    const pointer = await store.read("owner-a");
+    expect(pointer?.operationKey).toBe("op-1");
+    const cancel = screen.getByRole("button", { name: "Cancel" });
+    expect(cancel.hasAttribute("disabled")).toBe(true);
+    await user.click(cancel);
+    expect(screen.queryByRole("button", { name: "New launch" })).toBeNull();
+    expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe("Ship the orchestrator");
+    expect(await store.read("owner-a")).toEqual(pointer);
+    expect(made.prepare).toHaveBeenCalledTimes(1);
+    expect(made.submit).toHaveBeenCalledTimes(1);
+    expect(made.readOperation).not.toHaveBeenCalled();
+    if (state === "lost-response") {
+      await user.click(screen.getByRole("button", { name: "Check status" }));
+      await waitFor(() => expect(made.readOperation).toHaveBeenCalledTimes(1));
+      expect(made.readOperation).toHaveBeenCalledWith(pointer, expect.any(AbortSignal));
+      expect(made.submit).toHaveBeenCalledTimes(1);
+    }
+  });
+
   it("dispatches nothing for absent, incomplete, or unauthenticated bindings", async () => {
     const incomplete = makeCommandBinding();
     const user = userEvent.setup();
@@ -1704,6 +1769,8 @@ describe("App command composition", () => {
     await navigateCompanyOperation(user, "Work");
     expect(screen.getByText(COMMAND_ROUTE_UNAVAILABLE)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Launch" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "New launch" })).toBeNull();
     cleanup();
 
     window.MastermindMissionHost = {
@@ -1735,6 +1802,8 @@ describe("App command composition", () => {
     expect(screen.getByText(COMMAND_ROUTE_UNAVAILABLE)).toBeTruthy();
     expect(incomplete.prepare).not.toHaveBeenCalled();
     expect(incomplete.submit).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "New launch" })).toBeNull();
     cleanup();
 
     const signedOut = makeCommandBinding();
@@ -1750,6 +1819,8 @@ describe("App command composition", () => {
     expect(screen.queryByRole("button", { name: "Launch" })).toBeNull();
     expect(signedOut.prepare).not.toHaveBeenCalled();
     expect(signedOut.submit).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "New launch" })).toBeNull();
   });
 
   it("selects the exact returned mission after an accepted launch", async () => {
