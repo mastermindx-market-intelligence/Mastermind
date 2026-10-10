@@ -26,6 +26,17 @@ not a global or remotely exposed server.
 3. If Claude asks "Is this a project you created or one you trust?", review the
    exact directory and explicitly choose "Yes, I trust this folder" *only if
    the human operator accepts its contents*. This is one real human ceremony.
+**Authentication gate (observed on all four hosts 2026-10-09):**
+`~/.local/bin/claude auth status` reports `loggedIn: false` for
+M2 Studio and minis 1, 2 and 4. On the target host, the human operator
+must run `/login` in Claude Code and finish the official sign-in
+process in the provider UI. Do not copy authentication tokens or cookies
+from another machine or route them through MCP/agent tools. If the plan
+is to operate the minis from one centrally authenticated M2 Claude
+session through the governed remote gateway, only the M2 Claude seat
+needs Claude login; the minis still need their separate macOS app/privacy
+consents. Login does not imply project trust or MCP approval.
+
 4. From Claude's interactive prompt, enter \`/mcp\`. Find
    \`mastermind-computer-use\`; review the command and the absolute path,
    and select **Approve**. If the server appears as pending, do not rely on
