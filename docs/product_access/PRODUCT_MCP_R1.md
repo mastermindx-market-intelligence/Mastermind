@@ -103,6 +103,14 @@ Native SDK tests use ephemeral RSA test credentials and synthetic product grants
 They do NOT prove real OAuth consent, product identity/entitlements, an
 installed listener, a real Web CEO plugin invocation or screenshots.
 
+An additional opt-in test (`tests/test_product_access_mcp_public_canary.py`)
+would compose signed fixture MCP/ASGI requests through the existing bounded
+executor to the two exact public product endpoints; it is OFF by default and
+is **NOT_RUN**. The original live opt-in execution was refused before dispatch
+by the platform on October 10, 2026. No retry/alternate-carrier execution was
+attempted. Offline suite executes only the skip declaration. This held canary
+is an explicit network-integration acceptance obligation, not proof of M1.
+
 ## Remain held
 
 Terminal #894: observed October 9 risk JSON publication returned HTTP200
