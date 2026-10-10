@@ -44,3 +44,14 @@ Files: update `ACCEPTANCE.md`, `CHECKPOINT.md`; no automatic install/registratio
 Operation `product-access-browser-20261009-astra-001`, branch `sol/web-product-access-browser-20261009-astra-001`, acquired through canonical mmx-workspace at protected SHA `326c8469a21d7f50fc9ecb1848196bf1c6e66685`. Source namespace did not displace any incumbent browser/context writer. Repository push permission observed true; this grants no merge or deployment approval.
 
 A fresh isolated test venv was created at `/tmp/mmx-product-access-20261009-astra-001-venv`, preserving global packages; MCP upgraded there only from 1.28.0 to pinned 1.28.1. PyJWT 2.13.0 is available. Baseline actual auth/Workbench tests passed (60 cases, no production calls). No worker, listener, plugin, browser or live action was started.
+
+## Task 4 — exact deployment composition without a new service
+
+The active Product MCP source now adds `integrations/product_access_mcp/deployment.py` plus `tests/product_access_mcp/test_deployment.py`. This is a source-ready, **inert** factory. It borrows the existing `ResourcePolicy`/`JwtAuthenticator`/`AuthAuditSink`, host-approved clocks and exact ingress host/origin authority; it selects only `PublicTransport()` and returns an ASGI app wrapped with the inherited `PreAuthMcpBodyApp`. No identity exchange, private product data, listener, plug-in registration, session, scheduler, or production action is created.
+
+- [x] Create exact source-only deployment factory and owner-binding refusal cases.
+- [x] Add constructor and local ASGI/JWT fixture tests for read-only authenticated diagnostics and invalid subject/action refusal. Fake public responses are injected into `PublicTransport.read` only inside tests.
+- [ ] Complete independent qualification of **this exact head** through required CI and source review. The previous Studio process attempt to run host pytest was refused before dispatch; do not replay or switch carriers to obtain that action.
+- [ ] Deployment authority selects the live resource policy/issuer, subject allowlist, actual process/Host/TLS/tunnel, and authenticates a real Web CEO account. All these remain separate gates and are unproven.
+
+Do not mistake a constructor or CI result for an installed or production-proven capability. The relevant remaining work is the first *real* authorized Web account → Product MCP read, followed by BrowserResource approval and actual protected-page visual evidence.
