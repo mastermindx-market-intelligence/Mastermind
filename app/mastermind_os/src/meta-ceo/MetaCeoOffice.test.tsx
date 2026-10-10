@@ -51,16 +51,153 @@ describe("Daily Office consumer", () => {
       return <MetaCeoOffice projection={projectOffice(input(), context)} draft={{ text: draft, context }} onDraftChange={setDraft} />;
     }
     render(<ControlledOffice />);
-    fireEvent.click(screen.getByRole("button", { name: "Review sources" }));
-    expect(screen.getByRole("complementary", { name: "Source evidence" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Review direction preview" }));
+    const sourcesButton = screen.getByRole("button", { name: "Review sources" });
+    const previewButton = screen.getByRole("button", { name: "Review direction preview" });
+    sourcesButton.focus();
+    fireEvent.click(sourcesButton);
+    const sources = screen.getByRole("complementary", { name: "Source evidence" });
+    expect(document.activeElement).toBe(sources);
+    previewButton.focus();
+    fireEvent.click(previewButton);
     const preview = screen.getByRole("region", { name: "Direction preview" });
+    expect(document.activeElement).toBe(preview);
     expect(preview.textContent).toContain("EFFECT_NONE");
     expect(preview.textContent).toContain("Keep the exact session context.");
-    fireEvent.keyDown(preview, { key: "Escape" });
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
     expect(screen.queryByRole("region", { name: "Direction preview" })).toBeNull();
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Review direction preview" }));
+    expect(screen.getByRole("complementary", { name: "Source evidence" })).toBe(sources);
+    sources.focus();
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(screen.queryByRole("complementary", { name: "Source evidence" })).toBeNull();
+    expect(document.activeElement).toBe(sourcesButton);
     expect((screen.getByRole("textbox", { name: "Direction to Meta-CEO" }) as HTMLTextAreaElement).value).toBe("Keep the exact session context.");
+  });
+
+  it.each([
+    ["Review sources", "complementary", "Source evidence", "Close sources"],
+    ["Review direction preview", "region", "Direction preview", "Close preview"],
+  ] as const)("opens and closes %s repeatedly with stable controls and focus", (triggerName, role, panelName, closeName) => {
+    render(<MetaCeoOffice projection={projectOffice(input(), context)} draft={{ text: "Keep this draft.", context }} onDraftChange={() => {}} />);
+    const trigger = screen.getByRole("button", { name: triggerName });
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    const panelId = trigger.getAttribute("aria-controls");
+    expect(panelId).toBeTruthy();
+    for (const dismissal of ["escape", "button", "escape"]) {
+      trigger.focus();
+      fireEvent.click(trigger);
+      const panel = screen.getByRole(role, { name: panelName });
+      expect(panel.id).toBe(panelId);
+      expect(panel.tabIndex).toBe(-1);
+      expect(trigger.getAttribute("aria-expanded")).toBe("true");
+      expect(document.activeElement).toBe(panel);
+      if (dismissal === "escape") fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+      else {
+        const close = screen.getByRole("button", { name: closeName });
+        close.focus();
+        fireEvent.click(close);
+      }
+      expect(screen.queryByRole(role, { name: panelName })).toBeNull();
+      expect(trigger.getAttribute("aria-expanded")).toBe("false");
+      expect(document.activeElement).toBe(trigger);
+    }
+  });
+
+  it("closes sources without closing the independently open preview", () => {
+    render(<MetaCeoOffice projection={projectOffice(input(), context)} draft={{ text: "Keep this draft.", context }} onDraftChange={() => {}} />);
+    const previewButton = screen.getByRole("button", { name: "Review direction preview" });
+    previewButton.focus();
+    fireEvent.click(previewButton);
+    const preview = screen.getByRole("region", { name: "Direction preview" });
+    const sourcesButton = screen.getByRole("button", { name: "Review sources" });
+    sourcesButton.focus();
+    fireEvent.click(sourcesButton);
+    expect(document.activeElement).toBe(screen.getByRole("complementary", { name: "Source evidence" }));
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(document.activeElement).toBe(sourcesButton);
+    expect(screen.getByRole("region", { name: "Direction preview" })).toBe(preview);
+    preview.focus();
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(document.activeElement).toBe(previewButton);
+  });
+
+  it("does not refocus or dismiss either nonmodal panel on ordinary rerenders or outside focus", () => {
+    const office = (text: string) => <MetaCeoOffice projection={projectOffice(input(), { ...context })} draft={{ text, context }} onDraftChange={() => {}} />;
+    const { rerender } = render(office("Original draft"));
+    fireEvent.click(screen.getByRole("button", { name: "Review sources" }));
+    fireEvent.click(screen.getByRole("button", { name: "Review direction preview" }));
+    const sources = screen.getByRole("complementary", { name: "Source evidence" });
+    const preview = screen.getByRole("region", { name: "Direction preview" });
+    const textbox = screen.getByRole("textbox", { name: "Direction to Meta-CEO" });
+    textbox.focus();
+    fireEvent.click(textbox);
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    rerender(office("Edited draft"));
+    expect(document.activeElement).toBe(textbox);
+    expect(screen.getByRole("complementary", { name: "Source evidence" })).toBe(sources);
+    expect(screen.getByRole("region", { name: "Direction preview" })).toBe(preview);
+    expect(preview.textContent).toContain("Original draft");
+    expect(preview.textContent).not.toContain("Edited draft");
+    expect((textbox as HTMLTextAreaElement).value).toBe("Edited draft");
+    sources.focus();
+    rerender(office("Edited again"));
+    expect(document.activeElement).toBe(sources);
+    expect(preview.getAttribute("aria-modal")).toBeNull();
+    expect(sources.getAttribute("aria-modal")).toBeNull();
+  });
+
+  it("focuses a newly generated preview without reopening or refocusing sources", () => {
+    const office = (text: string) => <MetaCeoOffice projection={projectOffice(input(), context)} draft={{ text, context }} onDraftChange={() => {}} />;
+    const { rerender } = render(office("Original draft"));
+    fireEvent.click(screen.getByRole("button", { name: "Review sources" }));
+    const sources = screen.getByRole("complementary", { name: "Source evidence" });
+    const trigger = screen.getByRole("button", { name: "Review direction preview" });
+    for (const text of ["Original draft", "Edited draft", "Edited draft"]) {
+      rerender(office(text));
+      trigger.focus();
+      fireEvent.click(trigger);
+      const preview = screen.getByRole("region", { name: "Direction preview" });
+      expect(document.activeElement).toBe(preview);
+      expect(preview.textContent).toContain(text);
+      expect(screen.getByRole("complementary", { name: "Source evidence" })).toBe(sources);
+    }
+  });
+
+  it.each([
+    [{ ...context, authGeneration: 2 }, ""],
+    [{ ...context, selection: { workRef: "WS:TWO", rootJobId: "JOB-1" } }, ""],
+    [{ ...context, selection: { workRef: "WS:ONE", rootJobId: "JOB-2" } }, ""],
+    [{ ...context, sessionRef: "session:other" }, ""],
+    [{ ...context, bindingGeneration: 2 }, ""],
+    [{ ...context, revisions: { ...context.revisions, mission: "rev:2" } }, "Private draft"],
+  ] as const)("invalidates a preview without restoring or stealing outside focus: %j", (changedContext, expectedDraft) => {
+    const office = (currentContext: ProjectionContext) => <MetaCeoOffice projection={projectOffice(input(), currentContext)} draft={{ text: "Private draft", context }} onDraftChange={() => {}} />;
+    const { rerender } = render(office(context));
+    fireEvent.click(screen.getByRole("button", { name: "Review direction preview" }));
+    fireEvent.click(screen.getByRole("button", { name: "Review sources" }));
+    const closeSources = screen.getByRole("button", { name: "Close sources" });
+    closeSources.focus();
+    rerender(office(changedContext));
+    expect(screen.queryByRole("region", { name: "Direction preview" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Review direction preview" }).getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(closeSources);
+    expect((screen.getByRole("textbox", { name: "Direction to Meta-CEO" }) as HTMLTextAreaElement).value).toBe(expectedDraft);
+    rerender(office(context));
+    expect(screen.getByRole("region", { name: "Direction preview" })).toBeTruthy();
+    expect(document.activeElement).toBe(closeSources);
+    expect((screen.getByRole("textbox", { name: "Direction to Meta-CEO" }) as HTMLTextAreaElement).value).toBe("Private draft");
+  });
+
+  it("does not restore trigger focus during unmount", () => {
+    const { unmount } = render(<MetaCeoOffice projection={projectOffice(input(), context)} draft={{ text: "Keep this draft.", context }} onDraftChange={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "Review sources" }));
+    fireEvent.click(screen.getByRole("button", { name: "Review direction preview" }));
+    const outside = document.createElement("button");
+    document.body.append(outside);
+    outside.focus();
+    unmount();
+    expect(document.activeElement).toBe(outside);
+    outside.remove();
   });
 
   it("labels a receipt digest and local acquisition time without calling them an owner clock or session ref", () => {
