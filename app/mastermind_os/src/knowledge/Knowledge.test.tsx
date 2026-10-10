@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Knowledge } from "./Knowledge";
 import { projectOffice, type OfficeInput, type ProjectionContext, type SourceState } from "../meta-ceo/projection";
@@ -56,6 +57,80 @@ describe("Knowledge owner-reference view", () => {
     fireEvent.keyDown(detail, { key: "Escape" });
     expect(screen.queryByRole("region", { name: "Selected source reference" })).toBeNull();
     expect(document.activeElement).toBe(trigger);
+  });
+  it.each([
+    { state: "CURRENT" as const, key: "{Enter}" }, { state: "CURRENT" as const, key: " " },
+    { state: "STALE" as const, key: "{Enter}" }, { state: "STALE" as const, key: " " },
+  ])("refocuses the same $state reference on keyboard reactivation with $key", async ({ state, key }) => {
+    const user = userEvent.setup(); render(<Knowledge projection={projectOffice(input(state), context)} />);
+    const trigger = screen.getByRole("button", { name: "Inspect Program · review" });
+    await user.click(trigger);
+    const detail = screen.getByRole("region", { name: "Selected source reference" });
+    expect(document.activeElement).toBe(detail);
+    trigger.focus(); expect(document.activeElement).toBe(trigger);
+    await user.keyboard(key);
+    expect(document.activeElement).toBe(detail);
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("region", { name: "Selected source reference" })).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+  it("focuses a different reference and restores its own invoking trigger", async () => {
+    const user = userEvent.setup(), i = input();
+    i.mission!.value!.mission.evidence = [{ ...i.mission!.value!.program.evidence[0],
+      ref: "https://github.com/example/repo/pull/43", source_revision: "exact:43" }];
+    render(<Knowledge projection={projectOffice(i, context)} />);
+    await user.click(screen.getByRole("button", { name: "Inspect Program · review" }));
+    const trigger = screen.getByRole("button", { name: "Inspect Mission · review" });
+    trigger.focus(); await user.keyboard("{Enter}");
+    const detail = screen.getByRole("region", { name: "Selected source reference" });
+    expect(document.activeElement).toBe(detail); expect(detail.textContent).toContain("exact:43");
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("region", { name: "Selected source reference" })).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+  it("preserves outside focus through passive rerenders and unrelated revision round trips", () => {
+    const i = input(), r = render(<Knowledge projection={projectOffice(i, context)} />);
+    fireEvent.click(screen.getByRole("button", { name: "Inspect Program · review" }));
+    const detail = screen.getByRole("region", { name: "Selected source reference" });
+    const search = screen.getByRole("searchbox", { name: "Search supplied knowledge" });
+    search.focus();
+    for (const next of [context, { ...context, revisions: { ...context.revisions, programs: "rev:2" } }, context]) {
+      r.rerender(<Knowledge projection={projectOffice(i, next)} />);
+      expect(document.activeElement).toBe(search);
+      expect(screen.getByRole("region", { name: "Selected source reference" })).toBe(detail);
+    }
+  });
+  it("does not autofocus when source invalidation and restoration clear the selection", () => {
+    const view = (state: SourceState) => <><button type="button">Outside knowledge</button><Knowledge projection={projectOffice(input(state), context)} /></>;
+    const r = render(view("CURRENT"));
+    fireEvent.click(screen.getByRole("button", { name: "Inspect Program · review" }));
+    const outside = screen.getByRole("button", { name: "Outside knowledge" }); outside.focus();
+    for (const state of ["UNKNOWN", "CURRENT"] as const) {
+      r.rerender(view(state));
+      expect(screen.queryByRole("region", { name: "Selected source reference" })).toBeNull();
+      expect(document.activeElement).toBe(outside);
+    }
+  });
+  it("clears selection on a passive Mission revision without autofocus", () => {
+    const i = input(), view = (c: ProjectionContext) => <><button type="button">Outside knowledge</button><Knowledge projection={projectOffice(i, c)} /></>;
+    const r = render(view(context));
+    fireEvent.click(screen.getByRole("button", { name: "Inspect Program · review" }));
+    const outside = screen.getByRole("button", { name: "Outside knowledge" }); outside.focus();
+    r.rerender(view({ ...context, revisions: { ...context.revisions, mission: "rev:2" } }));
+    expect(screen.queryByRole("region", { name: "Selected source reference" })).toBeNull();
+    expect(document.activeElement).toBe(outside);
+  });
+  it("returns Escape focus to search when its invoking trigger was filtered out", async () => {
+    const user = userEvent.setup(); render(<Knowledge projection={projectOffice(input(), context)} />);
+    const trigger = screen.getByRole("button", { name: "Inspect Program · review" });
+    await user.click(trigger);
+    const search = screen.getByRole("searchbox", { name: "Search supplied knowledge" });
+    await user.type(search, "absent"); expect(trigger.isConnected).toBe(false);
+    await user.tab();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close source context" }));
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("region", { name: "Selected source reference" })).toBeNull();
+    expect(document.activeElement).toBe(search);
   });
   it("does not treat a PARTIAL reference as current inside a current Mission", () => {
     const i = input(); i.mission!.value!.program.evidence[0].freshness_state = "PARTIAL";
