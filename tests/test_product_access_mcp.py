@@ -266,3 +266,51 @@ def test_supabase_standard_oidc_scope_is_supported_but_not_a_product_grant():
             subject_digest="a" * 64, client_ref="oidc-fixture",
             resource="https://product.example.test/mcp",
             scopes=("email",), expires_at=1792000000)
+
+
+@pytest.mark.parametrize("part,field", [
+    ("data", "authorization"),
+    ("freshness", "private_token"),
+    ("source", "set_cookie"),
+    ("caller", "email"),
+])
+def test_output_cannot_leak_undeclared_nested_fields(part, field):
+    out, _ = snap(R, payload(risk()))
+    out[part][field] = "PRIVATE_SECRET"
+    with pytest.raises(ProductRefused):
+        canonical_result(out)
+
+
+def test_result_error_cannot_echo_raw_credentials():
+    out, _ = snap(R, payload(risk()))
+    out["error"] = "PRIVATE_SECRET authorization=Bearer abc"
+    with pytest.raises(ProductRefused):
+        canonical_result(out)
+
+
+def test_result_must_reject_non_object_provenance():
+    out, _ = snap(R, payload(risk()))
+    out["source"] = "https://credential.example"
+    with pytest.raises(ProductRefused):
+        canonical_result(out)
+
+
+def test_result_rejects_fabricated_observation_clock():
+    out, _ = snap(R, payload(risk()))
+    out["observed_at"] = "not-a-clockZ"
+    with pytest.raises(ProductRefused):
+        canonical_result(out)
+
+
+def test_positive_observation_must_have_positive_representation_evidence():
+    out, _ = snap(R, payload(risk()))
+    out["source"]["body_bytes"] = 0
+    with pytest.raises(ProductRefused):
+        canonical_result(out)
+
+
+def test_positive_observation_cannot_include_upstream_refusal_error():
+    out, _ = snap(R, payload(risk()))
+    out["error"] = "UPSTREAM_ACCESS_REFUSED"
+    with pytest.raises(ProductRefused):
+        canonical_result(out)

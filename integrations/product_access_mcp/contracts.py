@@ -7,6 +7,7 @@ product-user login, scheduler, session store, or source-publication authority.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from types import MappingProxyType
 from typing import Any, Mapping
 import json
@@ -136,18 +137,162 @@ def canonical_arguments(tool: str, arguments: Any) -> Mapping[str, str]:
 
 
 def canonical_result(value: Mapping[str, Any]) -> dict[str, Any]:
-    """Freeze JSON data, apply a whole-frame byte cap, reject NaN/unknown fields."""
+    """Validate nested producer fields before copying a bounded JSON result.
+
+    A trusted port can fail or return a structurally unexpected object. The
+    transport must never blindly forward new fields such as tokens, cookies,
+    user identifiers or private service URLs into the Web CEO transcript.
+    """
+    def refuse() -> None:
+        raise ProductRefused("RESULT_UNVERIFIED")
+
     if not isinstance(value, Mapping) or set(value) != set(OUTPUT_SCHEMA["required"]):
-        raise ProductRefused("RESULT_UNVERIFIED")
+        refuse()
     if value.get("schema") != RESULT_SCHEMA or value.get("profile") != PROFILE:
-        raise ProductRefused("RESULT_UNVERIFIED")
-    if value.get("tool") not in _TOOL_NAMES or value.get("status") not in ALLOWED_STATUSES:
-        raise ProductRefused("RESULT_UNVERIFIED")
+        refuse()
+    tool, status = value.get("tool"), value.get("status")
+    if tool not in _TOOL_NAMES or status not in ALLOWED_STATUSES:
+        refuse()
+    observed_at = value.get("observed_at")
+    if (type(observed_at) is not str
+        or re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:[.][0-9]{1,6})?Z", observed_at) is None):
+        refuse()
+    try:
+        datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
+    except ValueError:
+        refuse()
+    caller = value.get("caller")
+    if type(caller) is not dict or set(caller) != {"subject_digest", "client_ref"}:
+        refuse()
+    if not isinstance(caller["subject_digest"], str) or not _DIGEST.fullmatch(caller["subject_digest"]):
+        refuse()
+    if type(caller["client_ref"]) is not str or not 1 <= len(caller["client_ref"]) <= 128:
+        refuse()
+    fresh = value.get("freshness")
+    allowed_fresh = {"qualified", "reasons", "clock_basis", "reported_age_minutes",
+                     "source_session", "market_timezone", "owner_stale"}
+    if type(fresh) is not dict or not set(fresh) <= allowed_fresh:
+        refuse()
+    if type(fresh.get("qualified")) is not bool or type(fresh.get("reasons")) is not list:
+        refuse()
+    if len(fresh["reasons"]) > 32 or any(
+        type(r) is not str or len(r) > 100 or
+        re.fullmatch(r"[A-Za-z0-9._:-]+", r) is None for r in fresh["reasons"]
+    ):
+        refuse()
+    ages = fresh.get("reported_age_minutes")
+    if ages is not None:
+        if type(ages) is not dict or len(ages) > 12:
+            refuse()
+        for k, age in ages.items():
+            if type(k) is not str or len(k) > 40 or type(age) not in (int, float):
+                refuse()
+    source = value.get("source")
+    allowed_source = {"source_id", "evidence_class", "representation",
+                      "http_status", "body_bytes", "body_sha256", "content_type",
+                      "etag", "last_modified", "cache_age_seconds"}
+    if source is not None:
+        if type(source) is not dict or not set(source) <= allowed_source:
+            refuse()
+        if source.get("source_id") not in {x[0] for x in SOURCES.values()}:
+            refuse()
+        if source.get("evidence_class") != "public_upstream":
+            refuse()
+        if "body_sha256" in source and (
+            type(source["body_sha256"]) is not str
+            or _DIGEST.fullmatch(source["body_sha256"]) is None
+        ):
+            refuse()
+        if "http_status" in source and type(source["http_status"]) is not int:
+            refuse()
+        if "body_bytes" in source and (
+            type(source["body_bytes"]) is not int or source["body_bytes"] < 0
+        ):
+            refuse()
+        if "representation" in source and source["representation"] not in (
+            "complete", "retained_prefix", "not_observed"
+        ):
+            refuse()
+        for key in ("etag", "content_type", "last_modified", "cache_age_seconds"):
+            item = source.get(key)
+            if item is not None and (
+                type(item) is not str or len(item) > 150
+                or any(ord(ch) < 32 or ord(ch) == 127 for ch in item)
+            ):
+                refuse()
+    data = value.get("data")
+    if type(data) is not dict:
+        refuse()
+    macro_fields = {"reported_status", "reported_service_commit",
+                    "reported_site_commit", "checks"}
+    risk_fields = {"schema", "verdict", "score", "asof", "built",
+                   "source_event_time", "stale_after", "source_basis",
+                   "cause_basis", "stale", "stale_reasons", "display_only"}
+    errors = {None, "READ_UNAVAILABLE", "REDIRECT_REFUSED",
+              "UPSTREAM_ACCESS_REFUSED", "UPSTREAM_UNAVAILABLE",
+              "INVALID_REPRESENTATION"}
+    if type(value.get("error")) not in (str, type(None)) or value["error"] not in errors:
+        refuse()
+    if tool == "product_manifest":
+        if source is not None or status != "OK":
+            refuse()
+        if set(data) != {"views", "mode", "private_product_user_grant_proven"}:
+            refuse()
+        if data["mode"] != "readonly" or data["private_product_user_grant_proven"] is not False:
+            refuse()
+        views = data["views"]
+        if type(views) is not list or len(views) != len(SOURCES):
+            refuse()
+        for view in views:
+            if type(view) is not dict or set(view) != {
+                "product", "view", "source_id", "evidence_class"}:
+                refuse()
+            if (view.get("product"), view.get("view")) not in SOURCES:
+                refuse()
+            if (view["source_id"] != SOURCES[(view["product"], view["view"])][0]
+                or view["evidence_class"] != "public_upstream"):
+                refuse()
+    else:
+        if source is None:
+            refuse()
+        if status in ("OK", "PARTIAL", "STALE") and (
+            value["error"] is not None
+            or source.get("http_status") != 200
+            or type(source.get("body_bytes")) is not int
+            or source["body_bytes"] <= 0
+            or source.get("representation") != "complete"
+        ):
+            refuse()
+        selected_fields = (macro_fields if source["source_id"] == "macro.public_status"
+                           else risk_fields)
+        if not set(data) <= selected_fields:
+            refuse()
+        if "checks" in data:
+            checks = data["checks"]
+            allowed_components = {"site", "overlay", "risk_state", "china_risk_state",
+                                  "breadth", "prophet_live", "terminal_data",
+                                  "flow_pulse", "basket_pulse", "orchestrator",
+                                  "release_publications", "quotes"}
+            allowed_check_fields = {"schema", "built", "as_of", "asof", "age_min",
+                                    "stale", "fresh", "freshness", "commit",
+                                    "source_asof", "pack_as_of", "pack_ok",
+                                    "expected_now", "session_et", "status",
+                                    "usable", "n", "coverage_pct"}
+            if type(checks) is not dict or not set(checks) <= allowed_components:
+                refuse()
+            if any(type(fields) is not dict or not set(fields) <= allowed_check_fields
+                   for fields in checks.values()):
+                refuse()
+        if "stale_reasons" in data and (
+            type(data["stale_reasons"]) is not list or
+            any(type(x) is not str or len(x) > 100 for x in data["stale_reasons"])
+        ):
+            refuse()
     try:
         wire = json.dumps(dict(value), allow_nan=False, ensure_ascii=False,
                           separators=(",", ":")).encode("utf-8")
         if len(wire) > RESULT_CAP:
-            raise ProductRefused("RESULT_UNVERIFIED")
+            refuse()
         return json.loads(wire)
     except (ValueError, TypeError, UnicodeError) as exc:
         if isinstance(exc, ProductRefused):
