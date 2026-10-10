@@ -3,8 +3,8 @@
 This module owns a single local, private JSON file that maps a work reference
 (``WS:...`` / ``JOB:...`` / ``PR:...``) plus a seat role to *where a human or
 agent seat already is* on some external chat/session surface — a ChatGPT tab,
-a Claude Code session, a Cursor thread, a Codex thread.  ChatGPT's three
-explicitly named Personal-Pro seats are distinct navigation destinations, so
+a Claude Code session, a Cursor thread, a Codex thread.  ChatGPT's four
+explicitly named Chairman-owned seats are distinct navigation destinations, so
 their effective local key is ``(work_ref, role, seat_ref)``; one seat may also
 have different exact-chat rows for different work references.  It exists so the
 Chairman Control Room compositor (:mod:`control_plane.chairman_control_room`)
@@ -570,7 +570,7 @@ def save_bindings(doc: dict, path: str | Path | None = None) -> None:
 def find_conflicts(doc: dict) -> list[dict]:
     """Return ambiguous binding groups without collapsing distinct ChatGPT seats.
 
-    For ChatGPT, three explicitly named Personal-Pro seats are separate
+    For ChatGPT, four explicitly named Chairman-owned seats are separate
     destinations and may intentionally share ``(work_ref, role)``.  A true
     duplicate is two rows sharing ``(work_ref, role, seat_ref)``.  A mixed
     provider group remains ambiguous because it would make one role's Open
