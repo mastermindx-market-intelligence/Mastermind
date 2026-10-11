@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from ops.executive_os.provider_worker_slots import all_slots, get_slot
+from ops.executive_os.provider_identity_policy import COMPANY_DEVICE_DRIFT_PREDECESSOR_SHA256
 
 
 REQUEST_SCHEMA = "mastermind.executive_privileged_action_request.v1"
@@ -171,6 +172,7 @@ def _validate_verify_ready_args(args: Mapping[str, Any]) -> tuple[tuple[str, str
         )
     requalification_keys = (
         "requalify_terminal_adverse_sha256", "renew_device_revalidation_sha256",
+        "requalify_company_device_drift_sha256",
     )
     if keys not in (company_keys, *(company_keys | {key} for key in requalification_keys)):
         raise PrivilegedActionError(
@@ -192,6 +194,9 @@ def _validate_verify_ready_args(args: Mapping[str, Any]) -> tuple[tuple[str, str
             digest = _require_string(args[requalification_key], requalification_key)
             if kind != "device-auth" or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
                 raise PrivilegedActionError("requalification requires device-auth and an exact receipt SHA256")
+            if (requalification_key == "requalify_company_device_drift_sha256"
+                    and digest != COMPANY_DEVICE_DRIFT_PREDECESSOR_SHA256):
+                raise PrivilegedActionError("company-device drift preimage is not the reviewed incident")
             values[requalification_key] = digest
     return tuple(sorted(values.items()))
 
@@ -291,6 +296,8 @@ def build_argv(request: ValidatedPrivilegedAction, release_root: str | Path) -> 
         argv.extend(("--requalify-terminal-adverse-sha256", args["requalify_terminal_adverse_sha256"]))
     if "renew_device_revalidation_sha256" in args:
         argv.extend(("--renew-device-revalidation-sha256", args["renew_device_revalidation_sha256"]))
+    if "requalify_company_device_drift_sha256" in args:
+        argv.extend(("--requalify-company-device-drift-sha256", args["requalify_company_device_drift_sha256"]))
     return tuple(argv)
 
 

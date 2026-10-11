@@ -136,7 +136,7 @@ def test_default_policy_is_secret_free_unarmed_and_resolves_closed_profiles():
     registry = ExecutionCapabilityRegistry.load()
     assert registry.lifecycle_authority == "executive_os"
     assert registry.production_armed is False
-    assert registry.policy_version == "2026-10-03.company-consultation-edge-p0"
+    assert registry.policy_version == "2026-10-11.native-return-host-source"
     assert len(registry.policy_digest) == 64
 
     sealed = registry.resolve("sealed.worker.write.no-extensions.v1")
@@ -703,6 +703,9 @@ def test_v3_ratified_generation_and_schema_constants_remain_exact(tmp_path):
     raw = _raw_policy()
     del raw["profiles"]["operator.browser.isolated.v1"]
     del raw["resources"]["worker-browser-isolated"]
+    del raw["profiles"]["operator.appserver.interactive.native-return.v1"]
+    del raw["mcp_servers"]["native-return-mcp-v1"]
+    raw["policy_version"] = "2026-10-03.company-consultation-edge-p0"
     previous = ExecutionCapabilityRegistry.load(_write(tmp_path, raw))
     assert registry.policy_digest != previous.policy_digest
     registry = previous

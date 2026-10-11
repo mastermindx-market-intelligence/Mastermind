@@ -131,4 +131,32 @@ __all__ = [
     "build_tools",
     "initialization_options",
     "run_company_consultation_stdio",
+    "build_native_return_mcp_server",
+    "run_native_return_stdio",
 ]
+
+
+def build_native_return_mcp_server(gateway: Any) -> Server:
+    """One static, separately versioned native tool; registration grants nothing."""
+    import copy
+    from integrations.mastermind_company_mcp import native_return as contract
+    server = Server(contract.SERVER_IDENTITY, version=contract.SERVER_VERSION)
+
+    @server.list_tools()
+    async def list_native_tools():
+        return [mcp_types.Tool(name=contract.TOOL_NAME, description=contract.TOOL_DESCRIPTION,
+            inputSchema=copy.deepcopy(contract.INPUT_SCHEMA),
+            annotations=mcp_types.ToolAnnotations(**contract.ANNOTATIONS))]
+
+    @server.call_tool()
+    async def call_native_tool(name, arguments):
+        result = await gateway.call(name, arguments or {})
+        return [mcp_types.TextContent(type="text", text=canonical_company_consultation_json(result).decode("utf-8"))]
+
+    return server
+
+
+async def run_native_return_stdio(gateway: Any) -> None:
+    server = build_native_return_mcp_server(gateway)
+    async with stdio_server() as (reader, writer):
+        await server.run(reader, writer, initialization_options(server))

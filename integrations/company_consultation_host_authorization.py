@@ -46,7 +46,7 @@ class CompanyCallerAuthority:
         self._closed = False
         self._expected = self._observe()
 
-    def _project(self, parent_pid: int) -> ActiveMcpCapabilityBindingFacts:
+    def _project(self, parent_pid: int, *, connection=None) -> ActiveMcpCapabilityBindingFacts:
         return self._runtime.current_harness_mcp_binding_for_parent_pid(
             parent_pid,
             config_name=COMPANY_MCP_CONFIG_NAME,
@@ -55,9 +55,10 @@ class CompanyCallerAuthority:
             tool_schema_digest=COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST,
             # Stdio uses the authenticated local channel, not MCP OAuth.
             auth_status="unsupported",
+            **({"connection": connection} if connection is not None else {}),
         )
 
-    def _observe(self) -> ActiveMcpCapabilityBindingFacts:
+    def _observe(self, *, connection=None) -> ActiveMcpCapabilityBindingFacts:
         if self._closed:
             raise StateConflict("Company request is closed")
         # Capture provenance is checked before trusting even the numeric UID.
@@ -65,7 +66,7 @@ class CompanyCallerAuthority:
         if self._peer.euid != self._worker_uid:
             raise StateConflict("Company caller is not the installed worker")
         parent_pid = immediate_parent_pid(self._peer, inspector=self._inspector)
-        current = self._project(parent_pid)
+        current = self._project(parent_pid, connection=connection)
         if type(current) is not ActiveMcpCapabilityBindingFacts:
             raise StateConflict("Company capability projection is unavailable")
         writer = current.binding
@@ -79,13 +80,13 @@ class CompanyCallerAuthority:
         )
         # Runtime can rotate while the kernel is observed. Never join facts
         # from opposite sides of that rotation into an apparently valid caller.
-        if self._project(parent_pid) != current:
+        if self._project(parent_pid, connection=connection) != current:
             raise StateConflict("Company current writer or capability changed")
         _current_capture(self._peer)
         return current
 
-    def revalidate(self) -> ActiveMcpCapabilityBindingFacts:
-        current = self._observe()
+    def revalidate(self, *, connection=None) -> ActiveMcpCapabilityBindingFacts:
+        current = self._observe(connection=connection)
         if current != self._expected:
             raise StateConflict("Company request authority changed")
         return current

@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { createDirectionPreview, previewIsCurrent, type DirectionPreview } from "./preview";
 import { sameTarget, type OfficeProjection, type ProjectionContext, type SourceClaim } from "./projection";
 import "./office.css";
@@ -20,6 +20,10 @@ export function MetaCeoOffice({ projection, draft, onDraftChange }: MetaCeoOffic
   const [preview, setPreview] = useState<DirectionPreview | null>(null);
   const previewButton = useRef<HTMLButtonElement>(null);
   const sourcesButton = useRef<HTMLButtonElement>(null);
+  const previewPanel = useRef<HTMLElement>(null);
+  const sourcesPanel = useRef<HTMLElement>(null);
+  const previewPanelId = useId();
+  const sourcesPanelId = useId();
   const mission = projection.mission.value;
   const current = projection.mission.source.state === "CURRENT";
   const needsChairman = current && mission?.principal.owed_turn?.seat === "chairman" &&
@@ -30,11 +34,25 @@ export function MetaCeoOffice({ projection, draft, onDraftChange }: MetaCeoOffic
   const unknownEffect = projection.receipts.effect === "EFFECT_UNKNOWN";
   const draftAssociated = draft.context.authGeneration === projection.context.authGeneration && sameTarget(draft.context, projection.context);
   const visiblePreview = preview && previewIsCurrent(preview, projection.context) ? preview : null;
+  useEffect(() => {
+    if (sourcesOpen) sourcesPanel.current?.focus();
+  }, [sourcesOpen]);
+  useEffect(() => {
+    // Only a Review action creates a new preview; revalidation must not steal focus.
+    if (preview) previewPanel.current?.focus();
+  }, [preview]);
   const sources = [
     ["Mission", projection.mission], ["Projects", projection.programs],
     ["Return", projection.result], ["Conversation", projection.conversation],
   ] as const;
-  const closePreview = () => { setPreview(null); previewButton.current?.focus(); };
+  const closePreview = () => {
+    setPreview(null);
+    if (previewButton.current?.isConnected) previewButton.current.focus();
+  };
+  const closeSources = () => {
+    setSourcesOpen(false);
+    if (sourcesButton.current?.isConnected) sourcesButton.current.focus();
+  };
 
   return <section className="meta-ceo-office" aria-label="Meta-CEO office">
     <header className="office-heading">
@@ -119,9 +137,9 @@ export function MetaCeoOffice({ projection, draft, onDraftChange }: MetaCeoOffic
     </details>
     <section className="office-sources" aria-label="Source qualification">
       {sources.map(([name, read]) => <div key={name}><span>{name}</span><SourceBadge source={read.source} /><span className="office-muted">{read.source.coverage}</span></div>)}
-      <button ref={sourcesButton} type="button" aria-expanded={sourcesOpen} onClick={() => setSourcesOpen(!sourcesOpen)}>Review sources</button>
+      <button ref={sourcesButton} type="button" aria-controls={sourcesPanelId} aria-expanded={sourcesOpen} onClick={() => sourcesOpen ? closeSources() : setSourcesOpen(true)}>Review sources</button>
     </section>
-    {sourcesOpen && <aside className="office-panel office-evidence" aria-label="Source evidence" onKeyDown={event => { if (event.key === "Escape") { setSourcesOpen(false); sourcesButton.current?.focus(); } }}>
+    {sourcesOpen && <aside ref={sourcesPanel} id={sourcesPanelId} tabIndex={-1} className="office-panel office-evidence" aria-label="Source evidence" onKeyDown={event => { if (event.key === "Escape") closeSources(); }}>
       <h2>Exact source provenance</h2>
       {sources.map(([name, read]) => <div key={name}><h3>{name} · {read.source.owner}</h3>
         <p className="office-ref">{read.source.ref_kind === "CONTROL_ROOM_DOCUMENT_DIGEST" ? "Control Room document digest · " : ""}{read.source.ref ?? "Ref unavailable"} · revision {read.source.revision ?? "unknown"}</p>
@@ -132,7 +150,7 @@ export function MetaCeoOffice({ projection, draft, onDraftChange }: MetaCeoOffic
         review: mission.review.evidence, acceptance: mission.acceptance.evidence,
         missingness: mission.missingness, degraded: mission.degraded,
       }, null, 2)}</pre></details>}
-      <button type="button" onClick={() => { setSourcesOpen(false); sourcesButton.current?.focus(); }}>Close sources</button>
+      <button type="button" onClick={closeSources}>Close sources</button>
     </aside>}
 
     <section className="office-composer" aria-label="Direction intake">
@@ -143,9 +161,10 @@ export function MetaCeoOffice({ projection, draft, onDraftChange }: MetaCeoOffic
         <p className="office-muted">{draftAssociated ? "Preview only · no message, Job, session, acceptance or deployment." : "A draft is retained for another identity or session. Return to that exact context to continue it."}</p>
       </div>
       <button ref={previewButton} className="office-primary" type="button" disabled={!draftAssociated || !draft.text.trim()}
+        aria-controls={previewPanelId} aria-expanded={!!visiblePreview}
         onClick={() => setPreview(createDirectionPreview(projection, draft.text))}>Review direction preview</button>
     </section>
-    {visiblePreview && <section className="office-panel office-preview" aria-label="Direction preview" onKeyDown={event => { if (event.key === "Escape") closePreview(); }}>
+    {visiblePreview && <section ref={previewPanel} id={previewPanelId} tabIndex={-1} className="office-panel office-preview" aria-label="Direction preview" onKeyDown={event => { if (event.key === "Escape") closePreview(); }}>
       <div className="office-section-label"><h2>Frozen direction preview</h2><span className="office-state">EFFECT_NONE</span></div>
       <p>{visiblePreview.draft}</p>
       <p className="office-ref">{visiblePreview.context.selection?.workRef ?? "Project unavailable"} · {visiblePreview.context.selection?.rootJobId ?? "Root unavailable"} · {visiblePreview.context.sessionRef ?? "Session unavailable"}</p>

@@ -811,7 +811,9 @@ def company_consultation_launchd_entry(config: Mapping[str, Any]) -> dict[str, A
     if "company_consultation" not in config:
         return None
     if (type(value) is not dict
-            or set(value) != {"armed", "socket_path", "launchd_socket_name"}
+            or set(value) not in ({"armed", "socket_path", "launchd_socket_name"},
+                                  {"armed", "socket_path", "launchd_socket_name", "native_return_armed"})
+            or type(value.get("native_return_armed", False)) is not bool
             or type(value["armed"]) is not bool
             or value["socket_path"] != _CANONICAL_COMPANY_CONSULTATION_SOCKET
             or value["launchd_socket_name"] != _COMPANY_CONSULTATION_SOCKET_NAME):
@@ -1629,6 +1631,7 @@ def _service_from_config(
     claimed_operator_adapter_factory: Callable[..., Any] | None = None,
     remote_operator_binding_source: Callable[..., Any] | None = None,
     dialogue_canary_profile: Any | None = None,
+    remote_worker_binding_source: Callable[..., Any] | None = None,
 ) -> ExecutiveControlService:
     from control_plane.dialogue_wake_canary_activation import DialogueWakeCanaryProfile
     if dialogue_canary_profile is None:
@@ -1636,6 +1639,9 @@ def _service_from_config(
     if type(dialogue_canary_profile) is not DialogueWakeCanaryProfile:
         raise ServiceError("dialogue canary profile requires trusted composition")
     # This is trusted host composition, never a JSON/model-selected factory.
+    if (remote_worker_binding_source is not None
+            and not callable(remote_worker_binding_source)):
+        raise ServiceError("remote worker binding source must be callable")
     if (claimed_operator_adapter_factory is not None
             and not callable(claimed_operator_adapter_factory)):
         raise ServiceError("claimed operator factory must be callable")
@@ -1771,6 +1777,12 @@ def _service_from_config(
             raise ServiceError("proof capacity has no fresh broker absence")
         return dict(controller.uid_sweep_receipt(attempt))
 
+    def proof_capacity_recovery_worker_uid(attempt):
+        controller = recovery_controller.get("current")
+        if controller is None:
+            raise ServiceError("proof capacity has no recovery controller")
+        return controller.expected_worker_uid(attempt)
+
     def supervisor_factory(runtime):
         def validations(spec):
             job = runtime.jobs.get_job(spec.job_id)
@@ -1778,10 +1790,27 @@ def _service_from_config(
                 raise ServiceError("remote validation lookup lost Job/Attempt identity")
             return tuple(tuple(command) for command in job.validation_commands)
 
-        adapter = RemoteCodexWorkerAdapter(
-            client,
-            validation_commands_for_spec=validations,
-        )
+        if remote_worker_binding_source is None:
+            adapter = RemoteCodexWorkerAdapter(
+                client,
+                validation_commands_for_spec=validations,
+            )
+            process_controller = RemoteWorkerProcessController(
+                client, expected_worker_uid=int(raw["worker_uid"])
+            )
+        else:
+            from control_plane.remote_attempt_transport import (
+                AttemptBoundRemoteWorkerAdapter,
+            )
+
+            # Resolve only the already-claimed Worker. A missing or uncertain
+            # remote binding must never fall back to the primary local broker.
+            adapter = AttemptBoundRemoteWorkerAdapter(
+                runtime,
+                remote_worker_binding_source,
+                validation_commands_for_spec=validations,
+            )
+            process_controller = adapter.process_controller
         # Only the attended subscription-canary lane gets a claim provider;
         # ordinary composition passes ``None`` so the supervisor never calls
         # the observation owner and never enriches the LaunchSpec.
@@ -1805,9 +1834,7 @@ def _service_from_config(
                 )
 
             claim_binding_id = str(realm["binding_id"])
-        controller = RemoteWorkerProcessController(
-            client, expected_worker_uid=int(raw["worker_uid"]))
-        recovery_controller["current"] = controller
+        recovery_controller["current"] = process_controller
         return ExecutiveSupervisor(
             runtime,
             adapter,
@@ -1823,7 +1850,7 @@ def _service_from_config(
             shared_run_gid=raw["shared_run_gid"],
             secret_canary_verdict=canary,
             require_complete_launch_attestation=initially_ready,
-            process_controller=controller,
+            process_controller=process_controller,
             exact_target_provider=(
                 (lambda job_id: exact_target_source.for_job(job_id, now_ms=runtime.store.now_ms()))
                 if exact_target_source is not None else None
@@ -2212,7 +2239,8 @@ def _service_from_config(
                 runtime=runtime, repository_root=company_repository,
                 worker_uid=company_worker_uid, relay_socket_path=_CANONICAL_AGENT_RELAY_SOCKET,
                 workspace_id=SLACK_WORKSPACE_ID, channel_id=SLACK_CHANNEL_ID,
-                requester_answer_wake_dispatch=dispatch_answer)
+                requester_answer_wake_dispatch=dispatch_answer,
+                native_return_armed=raw["company_consultation"].get("native_return_armed", False))
         company_listener = activate_launchd_socket(_COMPANY_CONSULTATION_SOCKET_NAME)
         activated_listeners.append(company_listener)
         company_binding = CompanyConsultationBinding(
@@ -2248,7 +2276,10 @@ def _service_from_config(
         supervisor_factory=supervisor_factory,
         privileged_readiness_controller_factory=readiness_factory,
         proof_capacity_recovery_observer=proof_capacity_recovery_observer,
-        proof_capacity_recovery_worker_uid=int(raw["worker_uid"]),
+        proof_capacity_recovery_worker_uid=(
+            int(raw["worker_uid"]) if remote_worker_binding_source is None
+            else proof_capacity_recovery_worker_uid
+        ),
         operator_supervisor_factory=operator_supervisor_factory,
         operator_identity_verifier=(
             verify_operator_identity if expected_operator_arm else None

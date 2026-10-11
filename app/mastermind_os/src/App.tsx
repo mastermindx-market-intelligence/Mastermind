@@ -1237,7 +1237,9 @@ export function App() {
       state: "PENDING",
       reason: "SOURCE_READ_PENDING",
     }),
+    [programRevision, setProgramRevision] = useState(0),
     [workState, setWorkState] = useState<WorkState>({ kind: "PENDING" }),
+    [workRevision, setWorkRevision] = useState(0),
     [mission, setMission] = useState<MissionDocument | UnavailableMission>(() =>
       unavailableMission(
         initial,
@@ -1273,12 +1275,24 @@ export function App() {
       binding: OrchestratorCommandBinding;
       kind: OperationKind;
       selectionSeq: number;
+      sessionKey: string | null;
+      presentationSeq: number;
       complete: (
         outcome: { status: "accepted" } | { status: "refused" },
       ) => void;
     } | null>(null),
     [viewTick, setViewTick] = useState(0),
     [commandStatus, setCommandStatus] = useState<OperationState | null>(null),
+    [commandRefusal, setCommandRefusal] = useState<{
+      binding: OrchestratorCommandBinding;
+      principalScope: string;
+      generation: string;
+      kind: OperationKind;
+      selectionSeq: number;
+      sessionKey: string | null;
+      presentationSeq: number;
+      reason: string;
+    } | null>(null),
     [heldKind, setHeldKind] = useState<OperationKind | null>(null),
     [launchDraftDismissed, setLaunchDraftDismissed] = useState(false),
     // True only while a Check-status recover() is actually in flight. A
@@ -1349,6 +1363,33 @@ export function App() {
   const sessionExact =
     commandReady &&
     sessionMatchesSelection(commandView?.session ?? null, selection);
+  const presentationKey = JSON.stringify([ownerContext?.principalScope,
+    ownerContext?.generation, commandView?.session?.sessionKey,
+    selectionSeq.current, authRevision]);
+  const commandPresentation = useRef({ binding: commandBinding, key: presentationKey, seq: 0 });
+  if (commandPresentation.current.binding !== commandBinding ||
+      commandPresentation.current.key !== presentationKey) {
+    commandPresentation.current = {
+      binding: commandBinding, key: presentationKey,
+      seq: commandPresentation.current.seq + 1,
+    };
+  }
+  // A terminal receipt clears its pointer and held kind. Keep only its safe
+  // local reason with the original presentation identity; never attribute it
+  // to a new session, owner epoch, binding, selection, or command kind.
+  const currentRefusal = commandRefusal &&
+    signedIn && commandRefusal.binding === commandBinding &&
+    commandRefusal.principalScope === ownerContext?.principalScope &&
+    commandRefusal.generation === ownerContext?.generation &&
+    commandRefusal.selectionSeq === selectionSeq.current &&
+    commandRefusal.presentationSeq === commandPresentation.current.seq &&
+    (commandRefusal.kind === "launch" ||
+      (sessionExact && commandRefusal.sessionKey === commandView?.session?.sessionKey))
+    ? commandRefusal : null;
+  useEffect(() => {
+    setCommandRefusal(null);
+  }, [commandBinding, ownerContext?.principalScope, ownerContext?.generation,
+    commandView?.session?.sessionKey, selection?.workRef, selection?.rootJobId]);
   useEffect(() => {
     if (!commandBinding) return;
     return subscribeCommandView(commandBinding, () =>
@@ -1438,6 +1479,7 @@ export function App() {
           pendingCommand.current = null;
         }
         setHeldKind(null);
+        setCommandRefusal(null);
         bumpInvalidation();
         // Invalidate rendered and in-flight source data at the notification,
         // not after replacement reads resolve or a passive effect runs.
@@ -1698,6 +1740,7 @@ export function App() {
   }, [
     native,
     authRevision,
+    programRevision,
     authState?.acquisition,
     selection?.workRef,
     selection?.rootJobId,
@@ -1761,7 +1804,7 @@ export function App() {
       attached = false;
       controller.abort();
     };
-  }, [native, authRevision, authState?.acquisition]);
+  }, [native, authRevision, authState?.acquisition, workRevision]);
   useEffect(() => {
     const restoreSelection = () => {
       const next = selectionFromLocation();
@@ -2104,6 +2147,24 @@ export function App() {
       setHeldKind(pending.kind);
       return;
     }
+    const liveSession = readCommandView(bindingAtStart)?.session;
+    if (state.status === "refused" &&
+        pending.selectionSeq === selectionSeq.current &&
+        pending.presentationSeq === commandPresentation.current.seq &&
+        (pending.kind === "launch" ||
+          (sessionMatchesSelection(liveSession ?? null, selection) &&
+            liveSession?.sessionKey === pending.sessionKey))) {
+      setCommandRefusal({
+        binding: pending.binding,
+        principalScope: pending.principalScope,
+        generation: pending.generation,
+        kind: pending.kind,
+        selectionSeq: pending.selectionSeq,
+        sessionKey: pending.sessionKey,
+        presentationSeq: pending.presentationSeq,
+        reason: state.reason,
+      });
+    }
     if (state.status === "accepted" && pending.kind === "launch") {
       if (pending.selectionSeq !== selectionSeq.current) {
         pending.complete({ status: "refused" });
@@ -2127,6 +2188,7 @@ export function App() {
       outcome: { status: "accepted" } | { status: "refused" },
     ) => void,
   ) => {
+    setCommandRefusal(null);
     const binding = completeOrchestratorCommandBinding(
       window.MastermindMissionHost?.commandBinding,
     );
@@ -2170,6 +2232,8 @@ export function App() {
       binding,
       kind,
       selectionSeq: selectionSeq.current,
+      sessionKey: kind === "launch" ? null : readCommandView(binding)?.session?.sessionKey ?? null,
+      presentationSeq: commandPresentation.current.seq,
       complete: onComplete,
     };
     setHeldKind(kind);
@@ -2244,15 +2308,24 @@ export function App() {
           New launch
         </button>
       </section>
-    ) : canLaunch && commandView ? (
+    ) : commandReady && commandView ? (
       <>
         <LaunchOrchestrator
+          key={JSON.stringify([
+            ownerContext?.principalScope,
+            ownerContext?.generation,
+          ])}
           projects={commandView.projects}
           profiles={commandView.profiles}
+          unavailableReason={
+            canLaunch
+              ? undefined
+              : "Launch choices are unavailable. Your draft is retained."
+          }
           submitting={heldKind === "launch" && commandBusy}
           error={
-            commandStatus?.status === "refused"
-              ? commandStatus.reason
+            currentRefusal?.kind === "launch"
+              ? currentRefusal.reason
               : undefined
           }
           onSubmit={(form: LaunchForm, onComplete) => {
@@ -2327,6 +2400,8 @@ export function App() {
           turnBusy={commandView.session.turnBusy}
           sending={heldKind === "message" && commandBusy}
           unavailableReason={commandView.session.unavailableReason}
+          error={currentRefusal && currentRefusal.kind !== "launch"
+            ? currentRefusal.reason : commandView.session.error}
           stopLabel={commandView.session.stopLabel}
           stopping={heldKind === "stop" && commandBusy}
           onSend={(text, onComplete) => {
@@ -2491,6 +2566,43 @@ export function App() {
     setProjectTab(null);
     setActive(view);
   };
+  const programsReadAvailable =
+    (typeof window.MastermindMissionHost?.readProgramsObservation === "function" ||
+      typeof window.MastermindMissionHost?.readPrograms === "function") &&
+    (!authState || authState.acquisition);
+  const programsRefreshControl = (
+    <button
+      type="button"
+      // Pending reads stay focusable; unavailable acquisition stays natively disabled.
+      disabled={!programsReadAvailable}
+      aria-disabled={index.state === "PENDING" || !programsReadAvailable}
+      onClick={() => {
+        if (index.state === "PENDING" || !programsReadAvailable) return;
+        setIndex({ programs: [], state: "PENDING", reason: "SOURCE_READ_PENDING" });
+        setProgramRevision((revision) => revision + 1);
+      }}
+    >
+      Refresh Projects
+    </button>
+  );
+  const workReadAvailable =
+    typeof window.MastermindMissionHost?.readWork === "function" &&
+    (!authState || authState.acquisition);
+  const workRefreshControl = (
+    <button
+      type="button"
+      // Native disabled blurs the focused button in Chrome. Guard pending reads below.
+      disabled={!workReadAvailable}
+      aria-disabled={workState.kind === "PENDING" || !workReadAvailable}
+      onClick={() => {
+        if (workState.kind === "PENDING" || !workReadAvailable) return;
+        setWorkState({ kind: "PENDING" });
+        setWorkRevision((revision) => revision + 1);
+      }}
+    >
+      Refresh Work
+    </button>
+  );
   let content: React.ReactNode;
   if (active === "Today")
     content = (
@@ -2524,6 +2636,11 @@ export function App() {
           projection={observedConversation.projection}
           draft={observedConversation.draft}
           onDraftChange={observedConversation.changeDraft}
+          readResult={window.MastermindMissionHost?.readResult}
+          draftRevision={observedConversation.draftRevision}
+          draftInsertion={observedConversation.draftInsertion}
+          onAppendSource={observedConversation.appendSource}
+          onUndoSource={observedConversation.undoSource}
         />
         <button
           type="button"
@@ -2541,8 +2658,10 @@ export function App() {
   else if (active === "Knowledge")
     content = <Knowledge projection={office.projection} />;
   else if (active === "Projects")
-    content =
-      projectTab && selection ? (
+    content = (
+      <>
+        {programsRefreshControl}
+        {projectTab && selection ? (
         <>
           <section className="hero">
             <div>
@@ -2601,6 +2720,7 @@ export function App() {
           ) : projectTab === "Work" ? (
             <>
               {commandPanel}
+              {workRefreshControl}
               <WorkQueue state={workState} rootJobId={selection.rootJobId} />
             </>
           ) : projectTab === "Evidence" ? (
@@ -2622,12 +2742,15 @@ export function App() {
               : undefined
           }
         />
-      );
+        )}
+      </>
+    );
   else if (active === "Programs")
     content = (
       <section className="card">
         <div className="section-title">
           <h2>Programs</h2>
+          {programsRefreshControl}
           <State
             value={
               index.state === "PENDING" ? "SOURCE_READ_PENDING" : index.state
@@ -2681,6 +2804,7 @@ export function App() {
     content = (
       <>
         {commandPanel}
+        {workRefreshControl}
         <WorkQueue state={workState} />
       </>
     );
