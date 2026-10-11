@@ -292,6 +292,13 @@ def test_installer_source_reads_work_without_persistent_ownership_trust(
     ]
     assert len(statements) == 1
     script = "set -euo pipefail\n" + statements[0] + "\n"
+    if operation == "archive":
+        # Exercise the complete production archive/extraction statement, which
+        # may include a stream-draining consumer before ownership is applied.
+        lines = INSTALL.read_text(encoding="utf-8").splitlines()
+        start = next(i for i, line in enumerate(lines) if selectors[operation] in line)
+        end = next(i for i in range(start + 1, len(lines)) if "/usr/sbin/chown" in lines[i])
+        script = "set -euo pipefail\n" + "\n".join(lines[start:end]) + "\n"
     if operation == "tree":
         script += 'printf "%s\\n" "$TREE_SHA"\n'
     completed = subprocess.run(
