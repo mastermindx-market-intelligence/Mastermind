@@ -251,7 +251,118 @@ def test_nonzero_child_is_failed_and_external_text_is_bounded_and_redacted(tmp_p
     assert result["exit_code"] == 65
     assert secret not in json.dumps(result)
     assert "<redacted>" in result["stderr_excerpt"]
-    assert len(result["stderr_excerpt"]) <= 320
+    assert len(result["stderr_excerpt"]) <= 300
+
+
+def test_oversized_streams_generate_exact_three_hundred_character_excerpts(tmp_path: Path) -> None:
+    marker = "...[truncated]"
+    stdout = ("output line " * 40).encode()
+    secret = "sk-ant-" + "x" * 47
+    stderr = ("ok " * 92 + secret + " trailing" * 40).encode()
+    executor = FakeExecutor(returncode=65, stdout=stdout, stderr=stderr)
+    broker = _broker(tmp_path, executor)
+
+    receipt = broker.handle(_raw(), peer_uid=501)
+    persisted = json.loads(broker.receipt_path("req-001").read_text())
+
+    assert receipt == persisted
+    assert len(receipt["stdout_excerpt"]) == 300
+    assert len(receipt["stderr_excerpt"]) == 300
+    assert receipt["stdout_excerpt"] == ("output line " * 40)[:286] + marker
+    assert receipt["stderr_excerpt"] == ("ok " * 92 + "<redacted>" + " trailing" * 40)[:286] + marker
+    assert "x" * 8 not in receipt["stderr_excerpt"]
+    assert receipt["stdout_bytes"] == len(stdout)
+    assert receipt["stderr_bytes"] == len(stderr)
+    assert receipt["stdout_sha256"] == hashlib.sha256(stdout).hexdigest()
+    assert receipt["stderr_sha256"] == hashlib.sha256(stderr).hexdigest()
+    assert len(executor.calls) == 1
+
+    assert broker.handle(_raw(), peer_uid=501) == receipt
+    assert len(executor.calls) == 1
+
+
+def test_serve_connection_generates_valid_oversized_stream_excerpts(
+    tmp_path: Path,
+) -> None:
+    class MemoryConnection:
+        def __init__(self, payload: bytes) -> None:
+            self.payload = payload
+            self.sent = bytearray()
+
+        def recv(self, _size: int) -> bytes:
+            payload, self.payload = self.payload, b""
+            return payload
+
+        def sendall(self, payload: bytes) -> None:
+            self.sent.extend(payload)
+
+    stdout = ("output line " * 40).encode()
+    stderr = ("error line " * 40).encode()
+    executor = FakeExecutor(returncode=65, stdout=stdout, stderr=stderr)
+    broker = _broker(tmp_path, executor)
+    connection = MemoryConnection(
+        (json.dumps(_raw(), sort_keys=True, separators=(",", ":")) + "\n").encode()
+    )
+
+    serve_connection(broker, connection, peer_resolver=lambda _connection: 501)
+    response = json.loads(bytes(connection.sent))
+
+    assert response["ok"] is True
+    assert response["receipt"]["stdout_excerpt"] == ("output line " * 40)[:286] + "...[truncated]"
+    assert response["receipt"]["stderr_excerpt"] == ("error line " * 40)[:286] + "...[truncated]"
+    assert response["receipt"]["stdout_sha256"] == hashlib.sha256(stdout).hexdigest()
+    assert response["receipt"]["stderr_sha256"] == hashlib.sha256(stderr).hexdigest()
+    assert len(executor.calls) == 1
+
+
+def test_legacy_314_character_excerpts_replay_without_effect_or_rewrite(tmp_path: Path) -> None:
+    executor = FakeExecutor()
+    broker = _broker(tmp_path, executor)
+    broker.handle(_raw(), peer_uid=501)
+    path = broker.receipt_path("req-001")
+    receipt = json.loads(path.read_text())
+    marker = "...[truncated]"
+    receipt["stdout_excerpt"] = "o" * 300 + marker
+    receipt["stderr_excerpt"] = "e" * 300 + marker
+    raw = (json.dumps(receipt, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    path.write_bytes(raw)
+    before = path.stat()
+
+    replayed = broker.handle(_raw(), peer_uid=501)
+    projection = broker.query_status(_status(), peer_uid=501)
+    after = path.stat()
+
+    assert replayed["stdout_excerpt"] == "o" * 300 + marker
+    assert replayed["stderr_excerpt"] == "e" * 300 + marker
+    assert projection["receipt"]["request_id"] == "req-001"
+    assert projection["installed_release_sha"] == broker.config.release_root.name
+    assert path.read_bytes() == raw
+    assert (after.st_mtime_ns, after.st_size, after.st_ino) == (
+        before.st_mtime_ns, before.st_size, before.st_ino
+    )
+    assert len(executor.calls) == 1
+
+
+@pytest.mark.parametrize("length", [301, 313, 314, 315])
+def test_nonlegacy_oversized_excerpts_fail_read_without_effect(tmp_path: Path, length: int) -> None:
+    executor = FakeExecutor()
+    broker = _broker(tmp_path, executor)
+    broker.handle(_raw(), peer_uid=501)
+    path = broker.receipt_path("req-001")
+    receipt = json.loads(path.read_text())
+    receipt["stdout_excerpt"] = "o" * length
+    if length == 314:
+        receipt["stdout_excerpt"] = "o" * 300 + "...[truncatex]"
+    path.write_text(json.dumps(receipt))
+
+    with pytest.raises(BrokerTrustError, match="stdout_excerpt is invalid"):
+        broker.handle(_raw(), peer_uid=501)
+    assert len(executor.calls) == 1
+
+    path.write_text(json.dumps(receipt))
+    with pytest.raises(BrokerTrustError, match="stdout_excerpt is invalid"):
+        broker.query_status(_status(), peer_uid=501)
+    assert len(executor.calls) == 1
 
 
 def test_receipt_failure_after_spawn_preserves_inflight_as_effect_unknown(tmp_path: Path, monkeypatch) -> None:

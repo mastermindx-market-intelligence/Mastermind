@@ -56,16 +56,38 @@ class RemoteWorkerBrokerClient:
         normalized_identity = dict(identity)
         for operation in operations:
             build_request(normalized_identity, operation, {})
-        payload_identity = dict(bound_payload_identity or {})
+        payload_identity = self._validated_payload_identity(bound_payload_identity or {})
+        self.identity = normalized_identity
+        self.allowed_operations = operations
+        self.bound_payload_identity = payload_identity
+
+    @staticmethod
+    def _validated_payload_identity(value: Mapping[str, str]) -> dict[str, str]:
+        payload_identity = dict(value)
         if payload_identity and set(payload_identity) != _BOUND_PAYLOAD_IDENTITY_KEYS:
             raise TransportValidationError("remote broker payload identity is invalid")
         if any(
-            not isinstance(value, str) or COMMAND_ID_RE.fullmatch(value) is None
-            for value in payload_identity.values()
+            not isinstance(item, str) or COMMAND_ID_RE.fullmatch(item) is None
+            for item in payload_identity.values()
         ):
             raise TransportValidationError("remote broker payload identity is invalid")
-        self.identity = normalized_identity
-        self.allowed_operations = operations
+        return payload_identity
+
+    def bind_payload_identity(
+        self, *, session_epoch_id: str, process_generation_id: str
+    ) -> None:
+        """Bind one Runtime-issued OHF generation after allocation, exactly once."""
+
+        payload_identity = self._validated_payload_identity({
+            "session_epoch_id": session_epoch_id,
+            "process_generation_id": process_generation_id,
+        })
+        if self.bound_payload_identity:
+            if self.bound_payload_identity != payload_identity:
+                raise TransportValidationError(
+                    "remote broker payload identity is already bound"
+                )
+            return
         self.bound_payload_identity = payload_identity
 
     async def _open_connection(self) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:

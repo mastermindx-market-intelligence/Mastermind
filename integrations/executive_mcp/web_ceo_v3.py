@@ -1,22 +1,80 @@
-"""Additive Web CEO v3 profile with read-only MDM telemetry.
+"""Additive Web CEO v3 profile with Session Bridge and read-only observations.
 
-Legacy, web_ceo_v1 and web_ceo_v2 contracts remain unchanged.  V3 adds one
-sensor-only tool; it does not add lifecycle, placement, retry or MDM command
-authority.
+Legacy, web_ceo_v1, web_ceo_v2 and web_ceo_sessions_v1 contracts remain
+unchanged. V3 composes the already-reviewed Session Bridge tools plus one
+sensor-only MDM tool and same-request reconciliation. It creates no lifecycle,
+placement, retry or command plane.
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 from collections.abc import Mapping
 from typing import Any
 
+from control_plane.ceo_request import AUTOMATED_REQUEST_REF_RE
 from integrations.executive_mcp import schemas as legacy
 from integrations.executive_mcp import web_ceo as v2
+from integrations.executive_mcp import web_ceo_sessions as sessions
+from integrations.executive_mcp.personal_read import PERSONAL_READ_PROFILE
+from integrations.executive_mcp.release_control import RELEASE_CONTROL_PROFILE
+from integrations.executive_mcp.web_ceo_release import WEB_CEO_RELEASE_PROFILE
 
 WEB_CEO_V3_PROFILE = "web_ceo_v3"
 WEB_CEO_V3_SERVER_NAME = legacy.SERVER_NAME
-WEB_CEO_V3_SERVER_VERSION = "1.3.0"
+WEB_CEO_V3_SERVER_VERSION = "1.5.0"
 MDM_TOOL_NAME = "executive_mdm"
+RECONCILE_TOOL_NAME = "reconcile_ceo_request"
+
+RECONCILE_TOOL_SPEC = legacy.ToolSpec(
+    name=RECONCILE_TOOL_NAME,
+    description=(
+        "Read the canonical status of an earlier CEO request using its exact "
+        "returned request_ref. Requires the existing CEO submit scope, but "
+        "sends only a status read: it never submits, dispatches, or retries. "
+        "Use after an unavailable or ambiguous submit response. Preserve the "
+        "original reference; not_found or an unavailable status does not "
+        "authorize resubmission."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "request_ref": {
+                "type": "string",
+                "pattern": AUTOMATED_REQUEST_REF_RE.pattern,
+                "maxLength": 100,
+                "description": "The exact AD-ID1 reference returned for the original request.",
+            },
+        },
+        "required": ["request_ref"],
+        "additionalProperties": False,
+    },
+    output_description=(
+        "Existing Executive App admission outcome keyed by the same request_ref, "
+        "with the canonical receipt or typed refusal/unavailability. An accepted "
+        "status read does not imply worker execution."
+    ),
+    read_only=True,
+)
+
+
+# ChatGPT App SDK transport schemas must remain flat. Conditional request law
+# stays in the profile validator below so the server, not a lossy schema adapter,
+# remains the authority for which selector combinations are accepted.
+FABRIC_V3_TOOL_SPEC = legacy.ToolSpec(
+    name=v2.FABRIC_V2_TOOL_SPEC.name,
+    description=v2.FABRIC_V2_TOOL_SPEC.description,
+    input_schema={
+        "type": "object",
+        "properties": copy.deepcopy(
+            v2.FABRIC_V2_TOOL_SPEC.input_schema["properties"]
+        ),
+        "required": ["view"],
+        "additionalProperties": False,
+    },
+    output_description=v2.FABRIC_V2_TOOL_SPEC.output_description,
+    read_only=True,
+)
 
 MDM_TOOL_SPEC = legacy.ToolSpec(
     name=MDM_TOOL_NAME,
@@ -31,28 +89,32 @@ MDM_TOOL_SPEC = legacy.ToolSpec(
     input_schema={
         "type": "object",
         "properties": {
-            "view": {"type": "string", "enum": ["fleet", "device"]},
-            "serial_number": {"type": "string", "minLength": 1, "maxLength": 128},
-            "hostname": {"type": "string", "minLength": 1, "maxLength": 256},
+            "view": {
+                "type": "string",
+                "enum": ["fleet", "device"],
+                "description": "Bounded fleet inventory or one exact device.",
+            },
+            "serial_number": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "description": (
+                    "Device selector. Supply exactly one of serial_number or hostname "
+                    "when view=device; omit for view=fleet."
+                ),
+            },
+            "hostname": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "description": (
+                    "Device selector. Supply exactly one of hostname or serial_number "
+                    "when view=device; omit for view=fleet."
+                ),
+            },
         },
         "required": ["view"],
         "additionalProperties": False,
-        "oneOf": [
-            {
-                "properties": {
-                    "view": {"const": "fleet"},
-                    "serial_number": False,
-                    "hostname": False,
-                }
-            },
-            {
-                "properties": {"view": {"const": "device"}},
-                "oneOf": [
-                    {"required": ["serial_number"], "properties": {"hostname": False}},
-                    {"required": ["hostname"], "properties": {"serial_number": False}},
-                ],
-            },
-        ],
     },
     output_description=(
         "mastermind.executive_mcp_result.v1 envelope containing a bounded "
@@ -62,11 +124,17 @@ MDM_TOOL_SPEC = legacy.ToolSpec(
     read_only=True,
 )
 
-if v2.WEB_CEO_V2_TOOL_SPECS[-1].name != legacy.MODIFYING_TOOL:
-    raise RuntimeError("Web CEO v2 modifying-tool position changed")
+if sessions.WEB_CEO_SESSIONS_TOOL_SPECS[-1].name != legacy.MODIFYING_TOOL:
+    raise RuntimeError("Web CEO sessions modifying-tool position changed")
 
+_V3_BASE_TOOL_SPECS = tuple(
+    FABRIC_V3_TOOL_SPEC if spec.name == v2.FABRIC_TOOL_NAME else spec
+    for spec in sessions.WEB_CEO_SESSIONS_TOOL_SPECS[:-1]
+)
 WEB_CEO_V3_TOOL_SPECS = (
-    v2.WEB_CEO_V2_TOOL_SPECS[:-1] + (MDM_TOOL_SPEC,) + v2.WEB_CEO_V2_TOOL_SPECS[-1:]
+    _V3_BASE_TOOL_SPECS
+    + (MDM_TOOL_SPEC, RECONCILE_TOOL_SPEC)
+    + sessions.WEB_CEO_SESSIONS_TOOL_SPECS[-1:]
 )
 _BY_NAME = {spec.name: spec for spec in WEB_CEO_V3_TOOL_SPECS}
 
@@ -85,8 +153,8 @@ def web_ceo_v3_tool_spec(name: str) -> legacy.ToolSpec:
 def validate_web_ceo_v3_tool_arguments(
     tool_name: str, arguments: Any
 ) -> dict[str, Any]:
-    if tool_name != MDM_TOOL_NAME:
-        return v2.validate_web_ceo_v2_tool_arguments(tool_name, arguments)
+    if tool_name not in (MDM_TOOL_NAME, RECONCILE_TOOL_NAME):
+        return sessions.validate_web_ceo_sessions_tool_arguments(tool_name, arguments)
     if arguments is None:
         arguments = {}
     if not isinstance(arguments, Mapping):
@@ -97,6 +165,13 @@ def validate_web_ceo_v3_tool_arguments(
             "invalid_input",
             f"request is {len(raw)} bytes, over the {legacy.MAX_REQUEST_BYTES}-byte ceiling",
         )
+    if tool_name == RECONCILE_TOOL_NAME:
+        legacy._exact_keys(arguments, "arguments", frozenset({"request_ref"}), frozenset())
+        request_ref = arguments["request_ref"]
+        if (type(request_ref) is not str or len(request_ref) > 100
+                or AUTOMATED_REQUEST_REF_RE.fullmatch(request_ref) is None):
+            raise legacy.GatewayError("invalid_input", "request_ref must be a valid AD-ID1 reference")
+        return {"request_ref": request_ref}
     legacy._exact_keys(
         arguments,
         "arguments",
@@ -161,15 +236,21 @@ def web_ceo_v3_schema_snapshot_sha256() -> str:
 
 
 # Filled from the deterministic snapshot by the implementation test.
-WEB_CEO_V3_SCHEMA_SNAPSHOT_SHA256 = "07be259eaf9df920bd68b542b0e38793c606d14f89736ca11b928d621b34e333"
+WEB_CEO_V3_SCHEMA_SNAPSHOT_SHA256 = "968205a25e11142a017d7351fbbbc8c579e74e9b1c148af817c83628e375f9ea"
 
 
 def validate_installed_mcp_profile_current(value: Any = "legacy") -> str:
     """Current installed selector; older v2 validator remains frozen."""
+    from integrations.executive_mcp.web_ceo_sessions import WEB_CEO_SESSIONS_PROFILE
+
     if type(value) is str and value in {
         v2.INSTALLED_MCP_PROFILE_LEGACY,
         v2.WEB_CEO_V2_PROFILE,
         WEB_CEO_V3_PROFILE,
+        PERSONAL_READ_PROFILE,
+        RELEASE_CONTROL_PROFILE,
+        WEB_CEO_RELEASE_PROFILE,
+        WEB_CEO_SESSIONS_PROFILE,
     }:
         return value
     raise ValueError("installed Executive MCP profile is invalid")

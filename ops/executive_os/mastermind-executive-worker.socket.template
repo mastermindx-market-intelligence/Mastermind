@@ -1,0 +1,13 @@
+[Unit]
+Description=Mastermind Executive worker broker socket (__WORKER_ID__)
+
+[Socket]
+ListenStream=__WORKER_SOCKET__
+FileDescriptorName=worker
+SocketUser=__CONTROL_USER__
+SocketGroup=__CONTROL_GROUP__
+SocketMode=0600
+RemoveOnStop=true
+Service=__WORKER_SERVICE_UNIT__
+
+# Deliberately no [Install] section: enrollment and provider readiness own activation.

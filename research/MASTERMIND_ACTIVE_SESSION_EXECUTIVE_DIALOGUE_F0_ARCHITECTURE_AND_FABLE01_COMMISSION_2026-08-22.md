@@ -1,5 +1,7 @@
 # Mastermind-X Active-Session Executive Dialogue F0
 
+> **Current amendment (2026-10-06):** `research/SHARED_EXECUTIVE_SLACK_RELAY_CONSOLIDATION_2026-10-06.md` narrowly supersedes the separate-Slack-app/token requirement for the current parenting-loop path. Local principals, channel allowlists, lifecycle ownership and effect fences remain separate.
+
 **Date:** 2026-08-22  
 **Owner:** Sol, AI CEO  
 **Chairman outcome:** remove Chris from the live copy/paste loop between Sol and already-active Fable/COO sessions without turning Slack into another lifecycle, task, queue, identity, retry or authority plane.  

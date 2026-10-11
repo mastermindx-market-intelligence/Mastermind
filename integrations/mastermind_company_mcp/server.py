@@ -1,7 +1,8 @@
 """The only company-dialogue module that imports the MCP SDK.
 
-WP-2 advertises tools only. It has no launcher, listener, resource, prompt,
-sampling, roots, elicitation, dynamic registration, or production binding.
+The Company facets advertise tools only. The consultation stdio runner uses
+a host-supplied fixed Unix binding; it owns no listener, Runtime identity,
+resource, prompt, sampling, roots, elicitation, or dynamic registration.
 """
 from __future__ import annotations
 
@@ -10,10 +11,11 @@ from typing import Any
 import mcp.types as mcp_types
 from mcp.server.lowlevel import NotificationOptions, Server
 from mcp.server.models import InitializationOptions
+from mcp.server.stdio import stdio_server
 
 from integrations.mastermind_company_mcp.adapter import CompanyDialogueGateway
 from integrations.mastermind_company_mcp.consultation import (
-    COMPANY_CONSULTATION_SERVER_NAME,
+    COMPANY_CONSULTATION_SERVER_IDENTITY,
     COMPANY_CONSULTATION_SERVER_VERSION,
     COMPANY_CONSULTATION_TOOL_SPECS,
     canonical_company_consultation_json,
@@ -81,7 +83,7 @@ def build_company_consultation_mcp_server(gateway: Any) -> Server:
     """Register only list/call handlers for the distinct consultation facet."""
 
     server: Server = Server(
-        COMPANY_CONSULTATION_SERVER_NAME,
+        COMPANY_CONSULTATION_SERVER_IDENTITY,
         version=COMPANY_CONSULTATION_SERVER_VERSION,
     )
     tools = build_company_consultation_tools()
@@ -105,6 +107,14 @@ def build_company_consultation_mcp_server(gateway: Any) -> Server:
     return server
 
 
+
+async def run_company_consultation_stdio(gateway: Any) -> None:
+    """Run the four-tool SDK frontend using its externally composed gateway."""
+    server = build_company_consultation_mcp_server(gateway)
+    async with stdio_server() as (reader, writer):
+        await server.run(reader, writer, initialization_options(server))
+
+
 def initialization_options(server: Server) -> InitializationOptions:
     """Build tools-only MCP initialization options."""
 
@@ -120,4 +130,5 @@ __all__ = [
     "build_mcp_server",
     "build_tools",
     "initialization_options",
+    "run_company_consultation_stdio",
 ]

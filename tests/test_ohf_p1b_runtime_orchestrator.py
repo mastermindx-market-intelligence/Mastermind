@@ -234,7 +234,7 @@ def _attestation(profile: RequestedExecutionProfile) -> ObservedHarnessAttestati
 
 
 class FakeAdapter:
-    interface_version = "mastermind.operator_harness/v1"
+    interface_version = "mastermind.operator_harness/v2"
 
     def __init__(self, profile: RequestedExecutionProfile) -> None:
         self.profile = profile

@@ -75,6 +75,23 @@ def compose_realm_receipt_digest(
 __all__ = [
     "ProviderRealmEnrollmentReceipt",
     "ProviderRealmFactError",
+    "NativeRealmIdentityObservation",
     "compose_realm_receipt_digest",
     "issue_provider_realm_enrollment_receipt",
 ]
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class NativeRealmIdentityObservation:
+    """Secret-free observation; not a bearer receipt or admission capability.
+
+    Only the revalidating owner callback can establish current identity. This
+    value cannot replace legacy keyed enrollment receipts or worker readiness.
+    """
+    slot_id: str
+    host_ref: str
+    os_principal_ref: str
+    config_custody_ref: str
+    generation: int
+    source_config_sha256: str
+    provider_binary_sha256: str

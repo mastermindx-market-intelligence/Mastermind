@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import dataclasses
 import hashlib
 from pathlib import Path
 from typing import Any
@@ -9,9 +10,11 @@ from typing import Any
 import pytest
 import yaml
 
+import control_plane.executive_authority as executive_authority_module
 from control_plane.executive_authority import (
     PHASE1B_ALLOWED,
     PHASE1B_REQUIRED_DENIES,
+    AuthorityDecision,
     AuthorityDenied,
     AuthorityPolicyError,
     ExecutiveAuthorityPolicy,
@@ -21,7 +24,9 @@ from control_plane.executive_coo_policy import CooCyclePolicy, CooCyclePolicyErr
 
 _ROOT = Path(__file__).resolve().parent.parent
 _POLICY_PATH = _ROOT / "config" / "authority_map.yml"
-_EXPECTED_ALLOWED = frozenset({"READ", "RESEARCH", "WRITE_BRANCH", "RUN_TESTS"})
+_EXPECTED_ALLOWED = frozenset(
+    {"READ", "RESEARCH", "WRITE_BRANCH", "RUN_TESTS", "REQUEST_WORKER_LOGIN_CHECK"}
+)
 _EXPECTED_REQUIRED_DENIES = frozenset(
     {
         "OPEN_PR",
@@ -47,6 +52,7 @@ def _canonical_section() -> dict[str, Any]:
         "scope_requirements": {
             "WRITE_BRANCH": "assigned_workspace_and_declared_paths",
             "RUN_TESTS": "declared_argv_commands",
+            "REQUEST_WORKER_LOGIN_CHECK": "current_attempt_assigned_worker_slot",
         },
     }
 
@@ -388,6 +394,11 @@ def test_allowed_and_denied_overlap_fails_closed(tmp_path):
     [
         ("WRITE_BRANCH", "repository_wide", "workspace and path scoped"),
         ("RUN_TESTS", "shell_commands", "declared argv commands"),
+        (
+            "REQUEST_WORKER_LOGIN_CHECK",
+            "worker_selected_at_runtime",
+            "current-attempt assigned worker slot",
+        ),
     ],
 )
 def test_scope_requirement_drift_fails_closed(tmp_path, capability, scope, message):
@@ -396,3 +407,57 @@ def test_scope_requirement_drift_fails_closed(tmp_path, capability, scope, messa
 
     with pytest.raises(AuthorityPolicyError, match=message):
         ExecutiveAuthorityPolicy.load(_write_section(tmp_path, section))
+
+
+def test_worker_readiness_scope_requirement_deleted_fails_closed(tmp_path):
+    section = _canonical_section()
+    del section["scope_requirements"]["REQUEST_WORKER_LOGIN_CHECK"]
+
+    with pytest.raises(AuthorityPolicyError, match="current-attempt assigned worker slot"):
+        ExecutiveAuthorityPolicy.load(_write_section(tmp_path, section))
+
+
+def test_worker_readiness_capability_requires_code_constant_not_yaml_alone(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        executive_authority_module,
+        "PHASE1B_ALLOWED",
+        frozenset({"READ", "RESEARCH", "WRITE_BRANCH", "RUN_TESTS"}),
+    )
+    section = _canonical_section()
+
+    with pytest.raises(AuthorityPolicyError, match="allow-list drifted"):
+        ExecutiveAuthorityPolicy.load(_write_section(tmp_path, section))
+
+
+def test_worker_readiness_capability_is_declarative_and_needs_no_evidence():
+    policy = ExecutiveAuthorityPolicy.load(_POLICY_PATH)
+
+    assert policy.scope_requirements["REQUEST_WORKER_LOGIN_CHECK"] == (
+        "current_attempt_assigned_worker_slot"
+    )
+
+    decision = policy.authorize("REQUEST_WORKER_LOGIN_CHECK")
+
+    assert decision.to_dict() == {
+        "requested": ["REQUEST_WORKER_LOGIN_CHECK"],
+        "policy_sha256": policy.sha256,
+        "policy_schema_version": 1,
+        "worktree": None,
+        "allowed_write_paths": [],
+        "validation_commands": [],
+    }
+
+
+def test_worker_readiness_authority_decision_gains_no_new_fields():
+    field_names = {field.name for field in dataclasses.fields(AuthorityDecision)}
+
+    assert field_names == {
+        "requested",
+        "policy_sha256",
+        "policy_schema_version",
+        "worktree",
+        "allowed_write_paths",
+        "validation_commands",
+    }

@@ -433,8 +433,67 @@ def test_fixed_blob_fetch_cannot_escape_canonical_raw_host(
             assert request.get_header("User-agent") == "Mastermind-Web-Commission-Source/1"
             return Response()
 
-    monkeypatch.setattr(source_mod.urllib.request, "build_opener", lambda *_: Opener())
+    verified_context = object()
+    handlers = []
+    monkeypatch.setattr(source_mod, "_system_tls_context", lambda: verified_context)
+    monkeypatch.setattr(
+        source_mod.urllib.request,
+        "build_opener",
+        lambda *value: handlers.extend(value) or Opener(),
+    )
     assert source_mod.fetch_commission_blob(commit=commit) == content
+    assert len(handlers) == 2
+    assert isinstance(handlers[0], source_mod.urllib.request.ProxyHandler)
+    assert isinstance(handlers[1], source_mod.urllib.request.HTTPSHandler)
+
+
+def test_system_tls_context_uses_fixed_ca_and_keeps_verification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import integrations.mastermind_executive_app.web_commission_source as source_mod
+
+    class Context:
+        verify_mode = source_mod.ssl.CERT_REQUIRED
+        check_hostname = True
+
+    calls = []
+    context = Context()
+    monkeypatch.setattr(
+        source_mod.ssl,
+        "create_default_context",
+        lambda *, cafile: calls.append(cafile) or context,
+    )
+
+    assert source_mod._system_tls_context() is context
+    assert calls == ["/etc/ssl/cert.pem"]
+
+
+@pytest.mark.parametrize(
+    "verify_mode,check_hostname",
+    [
+        (0, True),
+        (1, False),
+    ],
+)
+def test_system_tls_context_refuses_weakened_verification(
+    monkeypatch: pytest.MonkeyPatch, verify_mode: int, check_hostname: bool
+) -> None:
+    import integrations.mastermind_executive_app.web_commission_source as source_mod
+
+    class Context:
+        pass
+
+    context = Context()
+    context.verify_mode = verify_mode
+    context.check_hostname = check_hostname
+    monkeypatch.setattr(
+        source_mod.ssl,
+        "create_default_context",
+        lambda *, cafile: context,
+    )
+
+    with pytest.raises(WebCommissionSourceError, match="verification policy"):
+        source_mod._system_tls_context()
 
 
 @pytest.mark.parametrize(

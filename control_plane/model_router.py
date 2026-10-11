@@ -23,6 +23,7 @@ from typing import Any, Mapping, Sequence
 from control_plane.executive_agent_capabilities import (
     CapabilityPolicyError,
     ExecutionCapabilityRegistry,
+    adapter_supports_execution_surface,
 )
 from control_plane.worker_adapter import adapter_descriptor
 
@@ -700,12 +701,11 @@ class ModelRouter:
                 raise RoutingPolicyError(
                     f"worker alias {alias!r} requires an enabled autonomous provider"
                 )
-            if worker_eligible and execution_profile.execution_surface not in {
-                "codex-exec",
-                "codex-app-server",
-            }:
+            if worker_eligible and not adapter_supports_execution_surface(
+                provider.adapter_id, execution_profile.execution_surface
+            ):
                 raise RoutingPolicyError(
-                    f"worker alias {alias!r} requires an implemented Codex execution surface"
+                    f"worker alias {alias!r} has an adapter/execution-surface mismatch"
                 )
             model_aliases[alias] = ModelAlias(
                 model_alias=alias,
@@ -1155,3 +1155,104 @@ __all__ = [
     "set_capacity_owner_test_key",
     "verify_capacity_owner_fact",
 ]
+
+
+SUBSCRIPTION_CLAIM_SCHEMA = "mastermind.subscription_canary_claim/v1"
+SUBSCRIPTION_CLAIM_MAX_AGE_MS = 15_000
+
+
+def observe_subscription_canary_claim(runtime: Any, *, attempt_id: str, binding_id: str) -> dict[str, Any]:
+    """Read a current, already-claimed READ canary from the canonical Runtime.
+
+    The result is secret-free, non-bearer evidence for the existing authenticated
+    Control-to-worker broker request. It is NOT an admission capability, claim,
+    lease, reservation or replacement for kernel peer authentication. No owner
+    key, credential or Runtime lease token crosses that boundary. Recovery uses
+    the already-started broker run rather than minting another observation.
+    """
+    from datetime import datetime
+    from control_plane.executive_runtime import Runtime, AttemptStatus, JobStatus, WorkerStatus
+    from control_plane.subscription_catalog import compose_catalog_digest, get_binding
+    from control_plane.subscription_provider_profiles import get_profile
+
+    def refuse():
+        raise RoutingPolicyError("SUBSCRIPTION_CANARY_CLAIM_UNAVAILABLE")
+
+    if (type(runtime) is not Runtime or type(attempt_id) is not str
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", attempt_id)):
+        refuse()
+    try:
+        binding = get_binding(binding_id)
+        profile = get_profile(binding.profile_id)
+    except ValueError:
+        refuse()
+    if (binding.adapter_id != "codex-cli" or binding.implementation_state == "SPEC_ONLY"
+            or binding.autonomous_allowed is not False or profile.autonomous_allowed is not False):
+        refuse()
+    attempt = runtime.attempts.get_attempt(attempt_id)
+    if attempt is None or attempt.status is not AttemptStatus.CLAIMED:
+        refuse()
+    job = runtime.jobs.get_job(attempt.job_id)
+    worker = runtime.workers.get_worker(attempt.worker_id)
+    quota = runtime.workers.get_quota_class(attempt.worker_id, attempt.quota_class)
+    if (job is None or worker is None or quota is None
+            or job.status is not JobStatus.RUNNING
+            or job.current_attempt_id != attempt_id
+            or job.assigned_worker_id != attempt.worker_id
+            or job.assigned_quota_class != attempt.quota_class
+            or job.requested_authorities != ["READ"]
+            or job.allowed_write_paths or job.validation_commands
+            or worker.provider != binding.provider or quota.provider != binding.provider
+            or worker.status is not WorkerStatus.BUSY or quota.status is not WorkerStatus.BUSY
+            or worker.active_job_id != job.job_id or quota.active_job_id != job.job_id
+            or quota.active_attempt_id != attempt_id
+            or quota.fence_generation != attempt.fence_generation
+            or type(attempt.fence_generation) is not int or attempt.fence_generation < 1
+            or "read" not in quota.capabilities):
+        refuse()
+    models = {binding.model_for(profile, key).casefold(): binding.model_for(profile, key)
+              for key in binding.model_classes}
+    if type(quota.model) is not str or quota.model.casefold() not in models:
+        refuse()
+    selected_model = models[quota.model.casefold()]
+    realm = quota.metadata.get("subscription_canary_realm")
+    if (type(realm) is not dict or set(realm) != {"binding_id", "config_sha256", "generation"}
+            or realm["binding_id"] != binding.binding_id
+            or type(realm["config_sha256"]) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", realm["config_sha256"]) is None
+            or type(realm["generation"]) is not int or not 1 <= realm["generation"] < 2**63):
+        refuse()
+    try:
+        expiry = datetime.fromisoformat(attempt.lease_expires_at.replace("Z", "+00:00"))
+        if expiry.tzinfo is None:
+            refuse()
+        expiry_ms = int(expiry.timestamp() * 1000)
+    except (ValueError, TypeError, OverflowError):
+        refuse()
+    # Bracket public owner reads. A changed attempt or registration refuses;
+    # the existing Runtime claim remains the sole atomic occupancy operation.
+    if (runtime.attempts.get_attempt(attempt_id) != attempt
+            or runtime.jobs.get_job(job.job_id) != job
+            or runtime.workers.get_worker(worker.worker_id) != worker
+            or runtime.workers.get_quota_class(quota.worker_id, quota.quota_class) != quota):
+        refuse()
+    now_ms = runtime.store.now_ms()
+    if expiry_ms <= now_ms:
+        refuse()
+    payload = {
+        "schema": SUBSCRIPTION_CLAIM_SCHEMA,
+        "execution_mode": "interactive_canary",
+        "run_id": attempt_id, "job_id": job.job_id, "worker_id": worker.worker_id,
+        "quota_class": quota.quota_class, "fence_generation": attempt.fence_generation,
+        "capacity_generation": quota.fence_generation, "capacity_state": "BUSY",
+        "held_attempt_id": quota.active_attempt_id, "current_attempt_id": job.current_attempt_id,
+        "binding_id": binding.binding_id, "profile_id": binding.profile_id,
+        "adapter_id": binding.adapter_id, "model": selected_model,
+        "realm_config_sha256": realm["config_sha256"], "realm_generation": realm["generation"],
+        "catalog_digest": compose_catalog_digest(), "issued_at_ms": now_ms,
+        "expires_at_ms": min(expiry_ms, now_ms + SUBSCRIPTION_CLAIM_MAX_AGE_MS),
+    }
+    payload["observation_digest"] = hashlib.sha256(json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False,
+    ).encode("utf-8")).hexdigest()
+    return payload

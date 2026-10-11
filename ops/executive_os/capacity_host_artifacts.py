@@ -7469,7 +7469,10 @@ class _RepositoryView:
                         relation_parent=self.guard_descriptors[-1],
                         observed=observed,
                         native_tmp=(
-                            native_alias_name == "tmp"
+                            sys.platform == "darwin"
+                            # The alias and its canonical spelling reach the
+                            # same native root; both retain its strict policy.
+                            and components[:2] == ["private", "tmp"]
                             and component_index == 1
                             and component == "tmp"
                         ),

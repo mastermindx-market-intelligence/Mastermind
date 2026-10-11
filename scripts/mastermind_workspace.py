@@ -8,11 +8,19 @@ caller supplies only an operation identity, exact base SHA, and a closed lane.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
+import hashlib
 import json
 import os
+import plistlib
+import shutil
+import shlex
+import stat
 import subprocess
 import sys
+import uuid
 from pathlib import Path
+from xml.parsers.expat import ExpatError
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -44,6 +52,378 @@ def _workspace_root() -> Path:
     return (Path.home() / ".mastermind" / "agent-workspaces").resolve()
 
 
+
+# Installation configuration for this existing allocator, not a second registry.
+# Only the installed wrapper supplies paths. Public callers select closed aliases.
+_REPOSITORY_SCHEMA = "mastermind.workspace_repositories/v1"
+_REPOSITORIES = {
+    "mastermind": ("mastermindx-market-intelligence/Mastermind", "master"),
+    "macro": ("mastermindx-market-intelligence/macro", "main"),
+    "terminal": ("mastermindx-market-intelligence/mastermind-terminal", "master"),
+}
+_REPOSITORY_CONFIG_ENV = "MASTERMIND_WORKSPACE_REPOSITORIES"
+
+
+def _repository_git(source: Path, *arguments: str) -> str:
+    """Bounded local observation; never fetch, write config, or create metadata."""
+    environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    environment.update({"PATH": "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin",
+                        "GIT_OPTIONAL_LOCKS": "0", "GIT_NO_LAZY_FETCH": "1",
+                        "GIT_NO_REPLACE_OBJECTS": "1", "GIT_TERMINAL_PROMPT": "0"})
+    try:
+        result = subprocess.run(["git", "-C", str(source), *arguments],
+                                env=environment, stdin=subprocess.DEVNULL,
+                                capture_output=True, text=True, timeout=10, check=False)
+        if result.returncode or len(result.stdout.encode("utf-8")) > 65536:
+            raise ValueError("repository observation failed")
+        return result.stdout.strip()
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        raise WorkspaceError("REPOSITORY_SOURCE_UNAVAILABLE: local Git observation failed") from exc
+
+
+def _repository_path(value: object) -> Path:
+    if (type(value) is not str or not value or len(value) > 4096
+            or any(ord(character) < 32 for character in value)
+            or not Path(value).is_absolute()):
+        raise WorkspaceError("REPOSITORY_BINDING_INVALID: expected an absolute host-owned path")
+    return Path(value)
+
+
+def _inspect_repository_binding(alias: str, value: object) -> dict[str, str]:
+    if alias not in _REPOSITORIES or type(value) is not dict or set(value) != {"source_repository", "common_git_dir"}:
+        raise WorkspaceError("REPOSITORY_BINDING_INVALID: repository fields are not closed")
+    source = _repository_path(value["source_repository"])
+    expected_common = _repository_path(value["common_git_dir"])
+    try:
+        if source.resolve(strict=True) != source or not source.is_dir():
+            raise ValueError("source identity changed")
+        if expected_common.resolve(strict=True) != expected_common or not expected_common.is_dir():
+            raise ValueError("common directory changed")
+        top = Path(_repository_git(source, "rev-parse", "--show-toplevel")).resolve(strict=True)
+        common = Path(_repository_git(source, "rev-parse", "--git-common-dir"))
+        common = (common if common.is_absolute() else source / common).resolve(strict=True)
+        if top != source or common != expected_common:
+            raise ValueError("Git identity changed")
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise WorkspaceError("REPOSITORY_SOURCE_CHANGED: installed Git identity no longer matches") from exc
+    repository, default_branch = _REPOSITORIES[alias]
+    remote = f"https://github.com/{repository}.git"
+    # Check complete effective fetch AND push destinations, including rewrites.
+    # Multiple or noncanonical origins cannot be admitted as one bound target.
+    for direction in ((), ("--push",)):
+        if _repository_git(source, "remote", "get-url", *direction, "--all", "origin") != remote:
+            raise WorkspaceError("REPOSITORY_REMOTE_MISMATCH: origin is not the installed canonical repository")
+    return {"alias": alias, "repository_full_name": repository,
+            "default_branch": default_branch, "remote_url": remote,
+            "source_repository": str(source), "common_git_dir": str(common)}
+
+
+def _parse_repository_bindings(raw: str) -> dict[str, object]:
+    if not raw:
+        return {}
+    try:
+        if len(raw.encode("utf-8")) > 32768:
+            raise ValueError("repository configuration exceeds bound")
+        value = json.loads(raw, object_pairs_hook=_unique_policy_pairs)
+        if (type(value) is not dict or set(value) != {"schema", "repositories"}
+                or value["schema"] != _REPOSITORY_SCHEMA
+                or type(value["repositories"]) is not dict
+                or "mastermind" not in value["repositories"]
+                or not set(value["repositories"]).issubset(_REPOSITORIES)):
+            raise ValueError("repository configuration is not closed")
+        return value["repositories"]
+    except (TypeError, ValueError, UnicodeError, RecursionError) as exc:
+        raise WorkspaceError("REPOSITORY_BINDING_INVALID: installed repository configuration is invalid") from exc
+
+
+
+def _installed_repository_bindings() -> dict[str, object]:
+    return _parse_repository_bindings(os.environ.get(_REPOSITORY_CONFIG_ENV, ""))
+
+
+def _retained_installer_bindings(launcher: Path | None) -> dict[str, object]:
+    """Read the prior wrapper's literal; never execute/source an old shell file."""
+    if launcher is None:
+        return {}
+    descriptor = -1
+    try:
+        if not launcher.exists() and not launcher.is_symlink():
+            return {}
+        descriptor = os.open(launcher, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                             | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0))
+        before = os.fstat(descriptor)
+        if (not stat.S_ISREG(before.st_mode) or before.st_uid not in {0, os.geteuid()}
+                or before.st_nlink != 1 or stat.S_IMODE(before.st_mode) & 0o022
+                or not 0 < before.st_size <= 65536):
+            raise ValueError("prior launcher identity is unsafe")
+        raw = os.read(descriptor, before.st_size + 1)
+        after = os.fstat(descriptor)
+        named = launcher.lstat()
+        fields = ("st_dev", "st_ino", "st_mode", "st_uid", "st_nlink", "st_size", "st_mtime_ns", "st_ctime_ns")
+        if len(raw) != before.st_size or any(getattr(before, key) != getattr(item, key)
+                for item in (after, named) for key in fields):
+            raise ValueError("prior launcher changed while reading")
+        text = raw.decode("utf-8")
+        if not text.startswith("#!/bin/sh\n") or "mastermind_workspace.py" not in text:
+            raise ValueError("prior launcher is not a workspace wrapper")
+        marker = "export " + _REPOSITORY_CONFIG_ENV + "="
+        lines = [line for line in text.splitlines() if line.startswith(marker)]
+        if not lines:
+            return {}  # The exact pre-repository wrapper remains compatible.
+        if len(lines) != 1:
+            raise ValueError("prior wrapper has ambiguous bindings")
+        values = shlex.split(lines[0], posix=True)
+        if len(values) != 2 or values[0] != "export" or not values[1].startswith(_REPOSITORY_CONFIG_ENV + "="):
+            raise ValueError("prior wrapper binding is not a shell literal")
+        retained = _parse_repository_bindings(values[1].split("=", 1)[1])
+        if not retained:
+            raise ValueError("prior wrapper has an empty repository binding")
+        return retained
+    except (OSError, ValueError, UnicodeError) as exc:
+        raise WorkspaceError("REPOSITORY_BINDING_INVALID: prior installed bindings cannot be preserved safely") from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def _selected_repository(alias: str, *, explicit: bool) -> Path:
+    bindings = _installed_repository_bindings()
+    if not bindings and alias == "mastermind" and not explicit:
+        # Preserve the unconfigured legacy administrative/test seam. Installed
+        # launchers always pin the new configuration and cannot take this path.
+        return _source_repo()
+    if alias not in bindings:
+        raise WorkspaceError("REPOSITORY_NOT_ENROLLED: requested repository is not installed on this host")
+    return Path(_inspect_repository_binding(alias, bindings[alias])["source_repository"])
+
+
+def _repository_workspace_root(root: Path, alias: str) -> Path:
+    selected = root if alias == "mastermind" else root / alias
+    # Refuse a substituted per-repository directory before the constructor runs.
+    if selected.resolve() != selected:
+        raise WorkspaceError("REPOSITORY_SOURCE_CHANGED: repository workspace root is indirect")
+    return selected
+
+
+def _repository_discovery(root: Path) -> dict[str, object]:
+    bindings = _installed_repository_bindings()
+    rows: list[dict[str, object]] = []
+    for alias, (repository, branch) in _REPOSITORIES.items():
+        row: dict[str, object] = {"alias": alias, "repository_full_name": repository,
+                                  "default_branch": branch, "state": "NOT_ENROLLED"}
+        if alias in bindings:
+            try:
+                row.update(_inspect_repository_binding(alias, bindings[alias]))
+                row["workspace_root"] = str(_repository_workspace_root(root, alias))
+                row["state"] = "READY"
+            except WorkspaceError as exc:
+                row.update(state="UNAVAILABLE", code=str(exc).split(":", 1)[0])
+        rows.append(row)
+    return {"schema": _REPOSITORY_SCHEMA, "repositories": rows,
+            "admission_check_only": True, "workspace_created": False}
+
+
+def installation_repository_bindings(
+    source: Path, registrations: list[str], *, installed_launcher: Path | None = None,
+) -> dict[str, object]:
+    """Validate new selections and retain prior host bindings on normal upgrades."""
+    bindings = _retained_installer_bindings(installed_launcher)
+    selected = {"mastermind": source.resolve()}
+    explicit: set[str] = set()
+    for registration in registrations:
+        alias, separator, raw_path = registration.partition("=")
+        if not separator or alias not in _REPOSITORIES or alias == "mastermind" or alias in explicit:
+            raise WorkspaceError("REPOSITORY_BINDING_INVALID: duplicate or unsupported installer target")
+        explicit.add(alias)
+        selected[alias] = _repository_path(raw_path).resolve()
+    for alias, repository in selected.items():
+        common = Path(_repository_git(repository, "rev-parse", "--git-common-dir"))
+        common = (common if common.is_absolute() else repository / common).resolve()
+        candidate = {"source_repository": str(repository), "common_git_dir": str(common)}
+        if alias == "mastermind" and alias in bindings and bindings[alias] != candidate:
+            raise WorkspaceError("REPOSITORY_SOURCE_CHANGED: reinstall would change the incumbent Mastermind binding")
+        bindings[alias] = candidate
+    for alias, candidate in bindings.items():
+        _inspect_repository_binding(alias, candidate)
+    if len({value["common_git_dir"] for value in bindings.values()}) != len(bindings):
+        raise WorkspaceError("REPOSITORY_BINDING_INVALID: independent repositories share Git metadata")
+    return {"schema": _REPOSITORY_SCHEMA, "repositories": bindings}
+
+
+_STORAGE_POLICY_FIELDS = frozenset(
+    {"version", "mount_point", "volume_uuid", "root", "min_free_bytes"}
+)
+_STORAGE_POLICY_METADATA_FIELDS = frozenset({"_why"})
+_STORAGE_POLICY_MAX_BYTES = 16 * 1024
+_STORAGE_POLICY_MAX_RATIONALE_BYTES = 8 * 1024
+
+
+def _unique_policy_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate policy field")
+        result[key] = value
+    return result
+
+
+def _read_storage_policy(path: Path) -> tuple[dict[str, object], str]:
+    """Read the existing host policy without following a substituted file."""
+    descriptor = -1
+    try:
+        if not path.is_absolute():
+            raise ValueError("policy path is not absolute")
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        flags |= getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
+        descriptor = os.open(path, flags)
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_nlink != 1
+            or before.st_uid not in {0, os.geteuid()}
+            or stat.S_IMODE(before.st_mode) & 0o022
+            or not 0 < before.st_size <= _STORAGE_POLICY_MAX_BYTES
+        ):
+            raise ValueError("policy file identity is invalid")
+        chunks: list[bytes] = []
+        remaining = _STORAGE_POLICY_MAX_BYTES + 1
+        while remaining:
+            chunk = os.read(descriptor, remaining)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        payload = b"".join(chunks)
+        after = os.fstat(descriptor)
+        named = path.lstat()
+        fields = ("st_dev", "st_ino", "st_mode", "st_uid", "st_gid", "st_nlink",
+                  "st_size", "st_mtime_ns", "st_ctime_ns")
+        if len(payload) != before.st_size or any(
+            getattr(before, key) != getattr(observed, key)
+            for observed in (after, named) for key in fields
+        ):
+            raise ValueError("policy changed while reading")
+        data = json.loads(payload.decode("utf-8"), object_pairs_hook=_unique_policy_pairs)
+        if (
+            not isinstance(data, dict)
+            or not _STORAGE_POLICY_FIELDS.issubset(data)
+            or not set(data).issubset(_STORAGE_POLICY_FIELDS | _STORAGE_POLICY_METADATA_FIELDS)
+        ):
+            raise ValueError("policy fields are not closed")
+        if "_why" in data:
+            rationale = data["_why"]
+            if (
+                type(rationale) is not str
+                or not rationale
+                or len(rationale.encode("utf-8")) > _STORAGE_POLICY_MAX_RATIONALE_BYTES
+            ):
+                raise ValueError("policy rationale metadata is invalid")
+        if type(data["version"]) is not int or data["version"] != 1:
+            raise ValueError("unsupported policy version")
+        minimum = data["min_free_bytes"]
+        if type(minimum) is not int or not 0 < minimum < 2**63:
+            raise ValueError("invalid storage floor")
+        for key in ("mount_point", "root"):
+            value = data[key]
+            if not isinstance(value, str) or "\x00" in value or not Path(value).is_absolute():
+                raise ValueError("invalid storage path")
+        identity = data["volume_uuid"]
+        if not isinstance(identity, str) or str(uuid.UUID(identity)).lower() != identity.lower():
+            raise ValueError("invalid volume identity")
+        return data, hashlib.sha256(payload).hexdigest()
+    except (OSError, ValueError, TypeError, UnicodeError) as exc:
+        raise WorkspaceError("STORAGE_POLICY_INVALID: enrolled host policy cannot be trusted") from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def _volume_identity(mount: Path) -> dict[str, object]:
+    """Observe macOS volume identity; do not infer UUIDs on other platforms."""
+    if sys.platform != "darwin":
+        raise WorkspaceError("STORAGE_IDENTITY_UNSUPPORTED: configured volume requires a qualified host probe")
+    try:
+        result = subprocess.run(
+            ["/usr/sbin/diskutil", "info", "-plist", str(mount)],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            env={"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LC_ALL": "C"},
+            timeout=5, check=False,
+        )
+        if result.returncode != 0 or len(result.stdout) > 1024 * 1024:
+            raise ValueError("volume probe failed")
+        value = plistlib.loads(result.stdout)
+        if not isinstance(value, dict):
+            raise ValueError("volume probe is not an object")
+        return value
+    except (OSError, ValueError, plistlib.InvalidFileException, ExpatError, subprocess.SubprocessError) as exc:
+        raise WorkspaceError("STORAGE_OBSERVATION_FAILED: volume identity unavailable") from exc
+
+
+def _storage_free_bytes(mount: Path) -> int:
+    return shutil.disk_usage(mount).free
+
+
+def _storage_status(root: Path) -> dict[str, object]:
+    """One current admission observation, never a disk reservation or lease."""
+    policy_path = os.environ.get("MASTERMIND_WORKSPACE_STORAGE_POLICY", "")
+    observation: dict[str, object] = {
+        "schema_version": "mastermind.workspace_storage/v1",
+        "observed_at": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
+        "admission_check_only": True,
+        "state": "NOT_CONFIGURED", "admission_allowed": True,
+        "free_bytes": None, "min_free_bytes": None, "policy_sha256": None,
+    }
+    if not policy_path:
+        return observation
+    policy, digest = _read_storage_policy(Path(policy_path))
+    try:
+        mount = Path(str(policy["mount_point"]))
+        if mount.is_symlink() or not mount.is_dir():
+            raise WorkspaceError("STORAGE_MOUNT_UNAVAILABLE: enrolled volume is not mounted")
+        mount = mount.resolve()
+        configured_root = Path(str(policy["root"])).resolve()
+        if configured_root != root or root == mount or not root.is_relative_to(mount):
+            raise WorkspaceError("STORAGE_ROOT_MISMATCH: host policy does not name the selected workspace root")
+        before = mount.stat()
+        anchor = root
+        while not anchor.exists() and anchor != mount:
+            anchor = anchor.parent
+        if not anchor.is_dir() or anchor.stat().st_dev != before.st_dev:
+            raise WorkspaceError("STORAGE_ROOT_MISMATCH: workspace root is on another filesystem")
+        observed = _volume_identity(mount)
+        observed_uuid = observed.get("VolumeUUID")
+        if (
+            # APFS Data is a diskutil mount even though pathlib.is_mount()
+            # reports false across the macOS firmlink. Exact native
+            # MountPoint/UUID plus Writable provide the positive witness.
+            observed.get("Mounted", True) is not True
+            or observed.get("MountPoint") != str(mount)
+            or not isinstance(observed_uuid, str)
+            or observed_uuid.lower() != str(policy["volume_uuid"]).lower()
+        ):
+            raise WorkspaceError("STORAGE_VOLUME_IDENTITY_MISMATCH: mounted volume is not the enrolled volume")
+        if observed.get("Writable") is not True:
+            raise WorkspaceError("STORAGE_VOLUME_READ_ONLY: writable volume is not proven")
+        free = _storage_free_bytes(mount)
+        after = mount.stat()
+        if type(free) is not int or free < 0 or (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
+            raise WorkspaceError("STORAGE_OBSERVATION_FAILED: storage observation is not stable")
+        minimum = int(policy["min_free_bytes"])
+        observation.update({
+            "state": "READY" if free >= minimum else "LOW_SPACE",
+            "admission_allowed": free >= minimum,
+            "free_bytes": free, "min_free_bytes": minimum,
+            "policy_sha256": digest,
+            "mount_point": str(mount), "workspace_root": str(root),
+            "volume_uuid": observed_uuid,
+        })
+        return observation
+    except WorkspaceError:
+        raise
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise WorkspaceError("STORAGE_OBSERVATION_FAILED: storage readiness unavailable") from exc
+
+
 def _branch(operation_id: str, lane: str) -> str:
     operation = operation_id.strip().lower()
     if lane == "sol":
@@ -55,15 +435,16 @@ def _workspace_path(root: Path, lane: str, operation_id: str) -> Path:
     return root / lane / operation_id.strip().lower()
 
 
-def _emit(action: str, receipt: object, *, effect: str) -> int:
+def _emit(action: str, receipt: object, *, effect: str, repository: str | None = None) -> int:
     body = receipt.to_dict() if hasattr(receipt, "to_dict") else receipt
     print(
         json.dumps(
             {
-                "schema_version": SCHEMA,
+                "schema_version": SCHEMA if repository is None else "mastermind.workspace_cli/v2",
                 "action": action,
                 "effect": effect,
                 "receipt": body,
+                **({"repository": repository} if repository is not None else {}),
             },
             sort_keys=True,
         )
@@ -75,19 +456,25 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
 
+    sub.add_parser("repositories", help="read-only discovery of installed repository bindings")
     acquire = sub.add_parser("acquire", help="acquire or reuse one linked workspace")
     acquire.add_argument("--operation-id", required=True)
     acquire.add_argument("--base-sha", required=True)
     acquire.add_argument("--lane", choices=sorted(ALLOWED_LANES), default="web")
+    acquire.add_argument("--repository", choices=sorted(_REPOSITORIES))
 
-    sub.add_parser("census", help="read-only census of registered source worktrees")
+    census = sub.add_parser("census", help="read-only census of registered source worktrees")
+    census.add_argument("--repository", choices=sorted(_REPOSITORIES))
+    sub.add_parser("storage", help="read-only enrolled volume and free-space admission check")
     prune = sub.add_parser("prune-missing", help="prune only registrations whose paths Git proves missing")
     prune.add_argument("--apply", action="store_true", help="apply; default is dry-run")
+    prune.add_argument("--repository", choices=sorted(_REPOSITORIES))
 
     for name in ("status", "release"):
         command = sub.add_parser(name, help=f"{name} one managed linked workspace")
         command.add_argument("--operation-id", required=True)
         command.add_argument("--lane", choices=sorted(ALLOWED_LANES), default="web")
+        command.add_argument("--repository", choices=sorted(_REPOSITORIES))
     return parser
 
 
@@ -214,20 +601,39 @@ def _prune_missing(source: Path, *, apply: bool) -> dict[str, object]:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    source = _source_repo()
-    root = _workspace_root()
-    destination = (
-        _workspace_path(root, args.lane, args.operation_id)
-        if args.action in {"status", "release"}
-        else None
-    )
+    selected = getattr(args, "repository", None)
+    alias = selected or "mastermind"
     try:
+        host_root = _workspace_root()
+        if args.action == "repositories":
+            return _emit("repositories", _repository_discovery(host_root), effect="NOT_APPLIED")
+        if args.action == "storage":
+            return _emit("storage", _storage_status(host_root), effect="NOT_APPLIED")
+        source = _selected_repository(alias, explicit=selected is not None)
+        root = _repository_workspace_root(host_root, alias)
+        destination = (
+            _workspace_path(root, args.lane, args.operation_id)
+            if args.action in {"status", "release"}
+            else None
+        )
         if args.action == "census":
-            return _emit("census", _census(source, root), effect="NOT_APPLIED")
+            return _emit("census", _census(source, root), effect="NOT_APPLIED", repository=selected)
         if args.action == "prune-missing":
             receipt = _prune_missing(source, apply=args.apply)
-            return _emit("prune-missing", receipt, effect="APPLIED" if args.apply and receipt["lines"] else "NOT_APPLIED")
+            return _emit("prune-missing", receipt,
+                         effect="APPLIED" if args.apply and receipt["lines"] else "NOT_APPLIED",
+                         repository=selected)
         if args.action == "acquire":
+            if selected is not None:
+                if (len(args.base_sha) != 40 or any(c not in "0123456789abcdef" for c in args.base_sha)
+                        or _repository_git(source, "rev-parse", "--verify", args.base_sha + "^{commit}") != args.base_sha):
+                    raise WorkspaceError("REPOSITORY_BASE_INVALID: expected an available exact commit")
+            # The enrolled policy names the host root, not a repository subroot.
+            if not _storage_status(host_root)["admission_allowed"]:
+                raise WorkspaceError("STORAGE_LOW_SPACE: available storage is below the host reserve")
+            # Storage observation may block: re-observe the source at the effect boundary.
+            if _selected_repository(alias, explicit=selected is not None) != source:
+                raise WorkspaceError("REPOSITORY_SOURCE_CHANGED: selected repository changed")
             receipt = prepare_linked_worktree(
                 source,
                 root,
@@ -237,37 +643,32 @@ def main(argv: list[str] | None = None) -> int:
                 branch=_branch(args.operation_id, args.lane),
             )
             return _emit(
-                "acquire",
-                receipt,
+                "acquire", receipt,
                 effect="NOT_APPLIED" if receipt.reused else "APPLIED",
+                repository=selected,
             )
         if args.action == "status":
             receipt = inspect_linked_worktree(
-                source,
-                root,
-                destination,
-                expected_operation_id=args.operation_id,
+                source, root, destination, expected_operation_id=args.operation_id,
             )
-            return _emit("status", receipt, effect="NOT_APPLIED")
+            return _emit("status", receipt, effect="NOT_APPLIED", repository=selected)
         receipt = release_linked_worktree(
-            source,
-            root,
-            destination,
-            expected_operation_id=args.operation_id,
+            source, root, destination, expected_operation_id=args.operation_id,
         )
         return _emit(
-            "release",
-            receipt,
+            "release", receipt,
             effect="APPLIED" if receipt.removed else "NOT_APPLIED",
+            repository=selected,
         )
     except WorkspaceError as exc:
         print(
             json.dumps(
                 {
-                    "schema_version": SCHEMA,
+                    "schema_version": SCHEMA if selected is None else "mastermind.workspace_cli/v2",
                     "action": args.action,
                     "effect": "NOT_APPLIED",
                     "error": str(exc),
+                    **({"repository": selected} if selected is not None else {}),
                 },
                 sort_keys=True,
             ),
@@ -278,3 +679,58 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+def installation_storage_profile(
+    home: Path, *, external_mount: Path = Path("/Volumes/Mastermind")
+) -> dict[str, str]:
+    """Choose host-owned launcher inputs, not runtime admission or a reservation."""
+    home = home.expanduser().resolve()
+    policy_path = home / ".config/mastermind/worktree-storage.json"
+    if policy_path.exists() or policy_path.is_symlink():
+        policy, _digest = _read_storage_policy(policy_path)
+        volume = Path(str(policy["mount_point"]))
+        root = Path(str(policy["root"])).resolve()
+        if volume.is_symlink():
+            raise WorkspaceError("STORAGE_ROOT_MISMATCH: enrolled volume is indirect")
+        volume = volume.resolve()
+        if root == volume or not root.is_relative_to(volume):
+            raise WorkspaceError("STORAGE_ROOT_MISMATCH: enrolled root escapes its volume")
+        # Keep an explicitly required mount pinned even while disconnected.
+        # The installed launcher and existing storage owner refuse use until ready.
+        return {
+            "root": str(root),
+            "mount_point": str(volume),
+            "policy_path": str(policy_path),
+        }
+
+    selected = {
+        "root": str((home / ".mastermind/agent-workspaces").resolve()),
+        "mount_point": "",
+        "policy_path": "",
+    }
+    if (
+        external_mount.is_symlink()
+        or not external_mount.is_dir()
+        or not external_mount.is_mount()
+    ):
+        return selected
+
+    volume = external_mount.resolve()
+    try:
+        observed = _volume_identity(volume)
+    except WorkspaceError:
+        return selected
+    filesystem = observed.get("FilesystemType")
+    if (
+        observed.get("MountPoint") != str(volume)
+        or observed.get("Writable") is not True
+        or not isinstance(filesystem, str)
+        or filesystem.lower() not in {"apfs", "hfs", "hfsx"}
+    ):
+        return selected
+    return {
+        "root": str((volume / "agent-workspaces").resolve()),
+        "mount_point": str(volume),
+        "policy_path": "",
+    }

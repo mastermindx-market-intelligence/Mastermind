@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import concurrent.futures
 import configparser
+import contextvars
+import copy
 import ctypes
 import hashlib
 import json
@@ -16,6 +18,7 @@ import re
 import shutil
 import stat
 import tempfile
+import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -39,6 +42,7 @@ PacketRunner = Callable[..., Mapping[str, Any]]
 _default_packet_runner = ceo_boot_packet.bounded_subprocess_runner
 _PACKET_SETTLEMENT_MARGIN_SECONDS = 0.75
 _INSTALLED_PACKET_TOTAL_TIMEOUT_SECONDS = READ_TIMEOUT_SECONDS - 2.0
+_OBJECT_TYPE_PROBE_SHARD_SIZE = 48_000
 
 
 def _valid_sha(value: object) -> bool:
@@ -454,6 +458,74 @@ class _MacroMaterializationPlan:
     file_objects: Mapping[str, tuple[str, str]]
 
 
+def _scoped_worktree_path_sets(
+    root: Path, *, files: set[str], directories: set[str],
+    deadline: float | None, label: str, verify_record_namespaces: bool = False,
+) -> tuple[dict[str, str], set[str], str]:
+    """Seal only paths that can be observed by one admitted sparse consumer."""
+    if files & directories:
+        raise OSError("scoped worktree files and directories overlap")
+    seal = hashlib.sha256()
+    root_stat = root.lstat()
+    if not stat.S_ISDIR(root_stat.st_mode) or stat.S_ISLNK(root_stat.st_mode):
+        raise OSError("installed worktree root is not a direct directory")
+    _seal_stat(seal, rel="", kind="directory", observed=root_stat)
+
+    actual_types: dict[str, str] = {}
+    actual_directories: set[str] = set()
+    # Parents must be proven as direct directories before any descendant path is
+    # observed. Otherwise a live directory->symlink substitution could make a
+    # later ``lstat(root / child)`` resolve outside the admitted Macro root.
+    ordered_paths = sorted(
+        files | directories,
+        key=lambda rel: (len(rel.split("/")), os.fsencode(rel)),
+    )
+    for rel in ordered_paths:
+        _check_deadline(deadline, label=label)
+        if not rel or rel.startswith("/") or "\x00" in rel or "\\" in rel:
+            raise OSError("scoped worktree path is unsafe")
+        parts = rel.split("/")
+        if any(part in {"", ".", ".."} for part in parts):
+            raise OSError("scoped worktree path is unsafe")
+        observed = (root / rel).lstat()
+        if rel in directories:
+            if not stat.S_ISDIR(observed.st_mode) or stat.S_ISLNK(observed.st_mode):
+                raise OSError("scoped worktree directory topology differs")
+            kind = "directory"
+            actual_directories.add(rel)
+        elif stat.S_ISLNK(observed.st_mode):
+            kind = "symlink"
+            actual_types[rel] = kind
+        elif stat.S_ISREG(observed.st_mode):
+            kind = "regular"
+            actual_types[rel] = kind
+        else:
+            raise OSError("scoped worktree file topology differs")
+        _seal_stat(seal, rel=rel, kind=kind, observed=observed)
+
+    if verify_record_namespaces:
+        for prefix in _MACRO_RECORD_DIRS:
+            directory_rel = prefix.removesuffix("/")
+            expected_names = {
+                rel[len(prefix):]
+                for rel in files
+                if rel.startswith(prefix)
+                and "/" not in rel[len(prefix):]
+                and rel[len(prefix):].endswith(".md")
+            }
+            if directory_rel not in directories and not expected_names:
+                continue
+            _check_deadline(deadline, label=label)
+            with os.scandir(root / directory_rel) as raw_entries:
+                actual_names = {
+                    entry.name for entry in raw_entries if entry.name.endswith(".md")
+                }
+            if actual_names != expected_names:
+                raise OSError("installed Macro record namespace differs")
+
+    return actual_types, actual_directories, seal.hexdigest()
+
+
 def _bounded_git_text(
     path: Path, args: list[str], *, runner: PacketRunner, env: Mapping[str, str],
     deadline: float | None, label: str, max_bytes: int,
@@ -479,6 +551,68 @@ def _bounded_git_text(
     ):
         raise GatewayError("backend_unavailable", f"installed {label} observation failed")
     return result["stdout"]
+
+
+def _macro_plan_generation_observation(
+    path: Path, *, plan: _MacroMaterializationPlan, runner: PacketRunner,
+    env: Mapping[str, str], deadline: float | None,
+) -> tuple[str, str]:
+    """Seal the canonical Macro paths that the sparse child can actually observe."""
+    label = "Macro source"
+    git_metadata = _direct_git_directory(path, label=label)
+    if git_metadata is None:
+        raise GatewayError(
+            "backend_unavailable", "installed Macro repository topology is unsafe"
+        )
+    head = _bounded_git_text(
+        path, ["rev-parse", "--verify", "HEAD^{commit}"],
+        runner=runner, env=env, deadline=deadline, label=label, max_bytes=256,
+    ).strip()
+    if head != plan.head:
+        raise GatewayError("backend_unavailable", "installed Macro source SHA changed")
+    try:
+        actual_types, actual_directories, worktree_seal = _scoped_worktree_path_sets(
+            path, files=set(plan.files), directories=set(plan.directories),
+            deadline=deadline, label=label, verify_record_namespaces=True,
+        )
+    except (OSError, TimeoutError) as exc:
+        raise GatewayError(
+            "backend_unavailable", "installed Macro source worktree observation failed"
+        ) from exc
+    expected_types = {rel: "regular" for rel in plan.files}
+    if actual_types != expected_types or actual_directories != set(plan.directories):
+        raise GatewayError(
+            "backend_unavailable", "installed Macro source worktree path set differs"
+        )
+    for rel in sorted(plan.files):
+        mode, expected_oid = plan.file_objects[rel]
+        try:
+            observed_oid = _raw_worktree_blob_oid(
+                path / rel, mode=mode, deadline=deadline, label=label,
+            )
+        except (OSError, TimeoutError) as exc:
+            raise GatewayError(
+                "backend_unavailable", "installed Macro source worktree observation failed"
+            ) from exc
+        if observed_oid != expected_oid:
+            raise GatewayError(
+                "backend_unavailable", "installed Macro source worktree bytes differ"
+            )
+    post_head = _bounded_git_text(
+        path, ["rev-parse", "--verify", "HEAD^{commit}"],
+        runner=runner, env=env, deadline=deadline, label=label, max_bytes=256,
+    ).strip()
+    if post_head != head:
+        raise GatewayError("backend_unavailable", "installed Macro source HEAD changed")
+    try:
+        generation_seal = _git_generation_seal(
+            git_metadata, worktree_seal=worktree_seal, deadline=deadline, label=label,
+        )
+    except (OSError, TimeoutError) as exc:
+        raise GatewayError(
+            "backend_unavailable", "installed Macro source generation seal failed"
+        ) from exc
+    return head, generation_seal
 
 
 def _git_head_tree(
@@ -532,56 +666,93 @@ def _require_git_object_types(
     """Prove exact object existence/type without inflating packed object headers."""
     if not expected_types:
         return
-    object_input = ("\n".join(sorted(expected_types)) + "\n").encode("ascii")
-    try:
-        object_result = runner(
-            [
-                "git", "cat-file", "--buffer",
-                "--batch-check=%(objectname) %(objecttype)",
-            ],
-            cwd=path,
-            timeout=_remaining_deadline_seconds(
-                deadline, label=label, ceiling=10.0,
-            ),
-            max_bytes=32 * 1024 * 1024, env=env, input_bytes=object_input,
-        )
-    except Exception as exc:
-        raise GatewayError(
-            "backend_unavailable", f"installed {label} repository objects are incomplete"
-        ) from exc
-    if not isinstance(object_result, Mapping) or any(
-        object_result.get(flag) is True
-        for flag in ("timed_out", "limit_exceeded", "invalid_utf8")
-    ):
-        raise GatewayError(
-            "backend_unavailable", f"installed {label} repository objects are incomplete"
-        )
-    object_stdout = object_result.get("stdout")
-    if object_result.get("code") != 0 or type(object_stdout) is not str:
-        raise GatewayError(
-            "backend_unavailable", f"installed {label} repository objects are incomplete"
-        )
-    observed_objects: dict[str, str] = {}
-    for line in object_stdout.splitlines():
-        parts = line.split()
-        if (
-            len(parts) != 2
-            or not _valid_sha(parts[0])
-            or parts[1] not in {"blob", "commit", "tree", "tag"}
-            or parts[0] in observed_objects
+
+    ordered_ids = sorted(expected_types)
+    shards = [
+        ordered_ids[offset:offset + _OBJECT_TYPE_PROBE_SHARD_SIZE]
+        for offset in range(0, len(ordered_ids), _OBJECT_TYPE_PROBE_SHARD_SIZE)
+    ]
+
+    def probe(object_ids: list[str]) -> dict[str, str]:
+        object_input = ("\n".join(object_ids) + "\n").encode("ascii")
+        try:
+            object_result = runner(
+                [
+                    "git", "cat-file", "--buffer",
+                    "--batch-check=%(objectname) %(objecttype)",
+                ],
+                cwd=path,
+                timeout=_remaining_deadline_seconds(
+                    deadline, label=label, ceiling=10.0,
+                ),
+                max_bytes=32 * 1024 * 1024, env=env, input_bytes=object_input,
+            )
+        except Exception as exc:
+            raise GatewayError(
+                "backend_unavailable",
+                f"installed {label} repository objects are incomplete",
+            ) from exc
+        if not isinstance(object_result, Mapping) or any(
+            object_result.get(flag) is True
+            for flag in ("timed_out", "limit_exceeded", "invalid_utf8")
         ):
             raise GatewayError(
-                "backend_unavailable", f"installed {label} repository objects are incomplete"
+                "backend_unavailable",
+                f"installed {label} repository objects are incomplete",
             )
-        observed_objects[parts[0]] = parts[1]
-    if set(observed_objects) != set(expected_types) or any(
-        observed_objects.get(object_id) != expected_type
-        for object_id, expected_type in expected_types.items()
-    ):
-        raise GatewayError(
-            "backend_unavailable", f"installed {label} repository objects are incomplete"
-        )
+        object_stdout = object_result.get("stdout")
+        if object_result.get("code") != 0 or type(object_stdout) is not str:
+            raise GatewayError(
+                "backend_unavailable",
+                f"installed {label} repository objects are incomplete",
+            )
+        observed: dict[str, str] = {}
+        for line in object_stdout.splitlines():
+            parts = line.split()
+            if (
+                len(parts) != 2
+                or not _valid_sha(parts[0])
+                or parts[1] not in {"blob", "commit", "tree", "tag"}
+                or parts[0] in observed
+            ):
+                raise GatewayError(
+                    "backend_unavailable",
+                    f"installed {label} repository objects are incomplete",
+                )
+            observed[parts[0]] = parts[1]
+        if set(observed) != set(object_ids) or any(
+            observed.get(object_id) != expected_types[object_id]
+            for object_id in object_ids
+        ):
+            raise GatewayError(
+                "backend_unavailable",
+                f"installed {label} repository objects are incomplete",
+            )
+        return observed
 
+    if len(shards) == 1:
+        probe(shards[0])
+        return
+
+    failures: list[BaseException] = []
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=min(2, len(shards)),
+        thread_name_prefix="mmx-object-types",
+    ) as executor:
+        futures = [executor.submit(probe, shard) for shard in shards]
+        for future in futures:
+            try:
+                future.result()
+            except BaseException as exc:  # noqa: BLE001 - re-raised fail-closed below
+                failures.append(exc)
+    if failures:
+        failure = failures[0]
+        if isinstance(failure, GatewayError):
+            raise failure
+        raise GatewayError(
+            "backend_unavailable",
+            f"installed {label} repository objects are incomplete",
+        ) from failure
 
 def _frontmatter_scalar(raw: str) -> str:
     value = raw.strip()
@@ -1099,11 +1270,15 @@ def _clean_git_snapshot(
             path, {object_id: "commit" for object_id in ancestry_commits},
             runner=runner, env=env, deadline=deadline, label=label,
         )
-        _require_git_object_types(
-            path, {object_oid: "blob" for _rel, (_mode, object_oid) in expected.items()},
-            runner=runner, env=env, deadline=deadline, label=label,
-        )
-        if content_scope == "macro_brief":
+
+        def current_blobs() -> None:
+            _require_git_object_types(
+                path,
+                {object_oid: "blob" for _rel, (_mode, object_oid) in expected.items()},
+                runner=runner, env=env, deadline=deadline, label=label,
+            )
+
+        def historical_record_trees() -> None:
             try:
                 record_history = _bounded_git_text(
                     path,
@@ -1127,8 +1302,33 @@ def _clean_git_snapshot(
                     "backend_unavailable", f"installed {label} repository objects are incomplete"
                 ) from exc
 
+        if content_scope == "macro_brief":
+            _overlap_full_proofs(
+                object_closure=current_blobs,
+                worktree_inventory=historical_record_trees,
+            )
+        else:
+            current_blobs()
+
+    scoped_capture_files = (
+        _macro_brief_content_paths(set(expected))
+        if content_scope == "macro_brief" and snapshot_capture is not None
+        else None
+    )
+    scoped_capture_directories = (
+        _tree_directory_paths(scoped_capture_files)
+        if scoped_capture_files is not None
+        else None
+    )
+
     def _worktree_inventory() -> tuple[dict[str, str], set[str], str]:
         try:
+            if scoped_capture_files is not None and scoped_capture_directories is not None:
+                return _scoped_worktree_path_sets(
+                    path, files=set(scoped_capture_files),
+                    directories=set(scoped_capture_directories),
+                    deadline=deadline, label=label, verify_record_namespaces=True,
+                )
             return _worktree_path_sets(path, deadline=deadline, label=label)
         except (OSError, TimeoutError) as exc:
             raise GatewayError(
@@ -1147,7 +1347,10 @@ def _clean_git_snapshot(
     )
 
     all_tree_directories = _tree_directory_paths(set(expected))
-    if admitted_worktree_files is None and admitted_worktree_directories is None:
+    if scoped_capture_files is not None and scoped_capture_directories is not None:
+        expected_leaves = set(scoped_capture_files)
+        expected_directories = set(scoped_capture_directories)
+    elif admitted_worktree_files is None and admitted_worktree_directories is None:
         expected_leaves = set(expected)
         expected_directories = all_tree_directories
     elif admitted_worktree_files is None or admitted_worktree_directories is None:
@@ -1232,6 +1435,7 @@ def _clean_git_snapshot(
                     expected=MappingProxyType(dict(expected)),
                     worktree_seal=metadata_seal,
                     generation_seal=generation_seal,
+                    sealed_to_caller=scoped_capture_files is not None,
                 )
             )
         return head, generation_seal
@@ -1513,6 +1717,14 @@ def _inner_packet_timeout(total_timeout: float) -> float:
     return max(0.01, total_timeout - margin)
 
 
+@dataclass
+class _PacketCollection:
+    future: concurrent.futures.Future[dict[str, Any]]
+    subscribers: int = 0
+    physical: int = 0
+    started: bool = False
+
+
 class InstalledBootPacketCollector:
     """Build one canonical packet from immutable code plus stable clean data roots."""
 
@@ -1541,6 +1753,57 @@ class InstalledBootPacketCollector:
         if expected_source_sha is not None and not _valid_sha(expected_source_sha):
             raise ValueError("expected installed source SHA must be lowercase hexadecimal")
         self._expected_source_sha = expected_source_sha
+        self._collection_lock = threading.Lock()
+        self._collections: dict[tuple[str | None, float], _PacketCollection] = {}
+        self._request_collection: contextvars.ContextVar[
+            tuple[tuple[str | None, float], _PacketCollection] | None
+        ] = contextvars.ContextVar("installed_packet_request", default=None)
+
+    def _discard_unused_collection(self, key, collection):
+        if (not collection.started and collection.subscribers == 0
+                and collection.physical == 0 and self._collections.get(key) is collection):
+            del self._collections[key]
+
+    @contextmanager
+    def request_scope(self, *, now: str | None, timeout: float):
+        """Join before executor admission, without starting any physical work.
+
+        Only already-overlapping requests retain this future after publication.
+        A later request cannot discover a completed packet in the collection map.
+        asyncio.to_thread in the existing executor carries this request context.
+        """
+        key = (now, float(timeout))
+        with self._collection_lock:
+            collection = self._collections.get(key)
+            if collection is None:
+                collection = _PacketCollection(concurrent.futures.Future())
+                self._collections[key] = collection
+            collection.subscribers += 1
+        token = self._request_collection.set((key, collection))
+        try:
+            yield
+        finally:
+            self._request_collection.reset(token)
+            with self._collection_lock:
+                collection.subscribers -= 1
+                self._discard_unused_collection(key, collection)
+
+    @contextmanager
+    def physical_scope(self):
+        """Keep an admitted thread's subscription through real physical drain."""
+        bound = self._request_collection.get()
+        if bound is None:
+            yield
+            return
+        key, collection = bound
+        with self._collection_lock:
+            collection.physical += 1
+        try:
+            yield
+        finally:
+            with self._collection_lock:
+                collection.physical -= 1
+                self._discard_unused_collection(key, collection)
 
     def _repository_observation_pair(
         self, source_observer: Callable[[], tuple[str, str]],
@@ -1648,18 +1911,27 @@ class InstalledBootPacketCollector:
 
     def _generation_pair(
         self, env: Mapping[str, str], *, deadline: float | None,
+        macro_plan: _MacroMaterializationPlan | None = None,
     ) -> tuple[str, str, str, str]:
+        macro_observer: Callable[[], tuple[str, str]]
+        if macro_plan is None or self._allow_synthetic_fixture:
+            macro_observer = lambda: _snapshot_generation_observation(
+                self._macro_root, runner=self._runner, env=env,
+                label="Macro source", deadline=deadline,
+                _allow_synthetic_fixture=self._allow_synthetic_fixture,
+            )
+        else:
+            macro_observer = lambda: _macro_plan_generation_observation(
+                self._macro_root, plan=macro_plan, runner=self._runner,
+                env=env, deadline=deadline,
+            )
         source_observation, macro_observation = self._repository_observation_pair(
             lambda: _snapshot_generation_observation(
                 self._source_root, runner=self._runner, env=env,
                 label="Mastermind source", deadline=deadline,
                 _allow_synthetic_fixture=self._allow_synthetic_fixture,
             ),
-            lambda: _snapshot_generation_observation(
-                self._macro_root, runner=self._runner, env=env,
-                label="Macro source", deadline=deadline,
-                _allow_synthetic_fixture=self._allow_synthetic_fixture,
-            ),
+            macro_observer,
             deadline=deadline, label="generation pair",
         )
         source_sha, source_seal = source_observation
@@ -1677,7 +1949,49 @@ class InstalledBootPacketCollector:
         total_timeout = float(timeout)
         if total_timeout <= 0:
             raise GatewayError("backend_unavailable", "installed boot-packet timeout is invalid")
-        deadline = time.monotonic() + total_timeout
+        # Share only overlapping identical source observations. The existing read
+        # executor still owns admission and physical capacity; every caller builds
+        # its own fresh Runtime/inbox projection after this packet is returned.
+        # Remove the entry before publication, so completed packets and failures
+        # are never cached or reused by a later call.
+        key = (now, total_timeout)
+        bound = self._request_collection.get()
+        with self._collection_lock:
+            collection = (bound[1] if bound is not None and bound[0] == key
+                          else self._collections.get(key))
+            if collection is None:
+                collection = _PacketCollection(concurrent.futures.Future())
+                self._collections[key] = collection
+            owner = not collection.started
+            if owner:
+                collection.started = True
+            future = collection.future
+        if not owner:
+            try:
+                return copy.deepcopy(future.result(timeout=total_timeout))
+            except concurrent.futures.TimeoutError as exc:
+                raise GatewayError(
+                    "backend_unavailable",
+                    "installed boot-packet collector exceeded its cumulative deadline",
+                ) from exc
+        try:
+            packet = self._collect_packet(repo=repo, now=now, timeout=total_timeout)
+            shared_packet = copy.deepcopy(packet)
+        except BaseException as exc:
+            with self._collection_lock:
+                if self._collections.get(key) is collection:
+                    del self._collections[key]
+                future.set_exception(exc)
+            raise
+        with self._collection_lock:
+            if self._collections.get(key) is collection:
+                del self._collections[key]
+            future.set_result(shared_packet)
+        return packet
+
+    def _collect_packet(self, *, repo: Path, now: str | None,
+                        timeout: float) -> dict[str, Any]:
+        deadline = time.monotonic() + timeout
 
         def remaining() -> float:
             try:
@@ -1717,6 +2031,10 @@ class InstalledBootPacketCollector:
                 raise GatewayError(
                     "backend_unavailable", "installed Macro materialization SHA differs"
                 )
+            pre_macro_sha, pre_macro_seal = _macro_plan_generation_observation(
+                self._macro_root, plan=materialization_plan, runner=self._runner,
+                env=live_env, deadline=deadline,
+            )
         with _materialized_macro_root(
             self._macro_root, timeout=remaining(), plan=materialization_plan,
             _allow_synthetic_fixture=self._allow_synthetic_fixture,
@@ -1808,9 +2126,30 @@ class InstalledBootPacketCollector:
             if packet_source_sha != pre_source_sha or packet_macro_sha != pre_macro_sha:
                 raise GatewayError("backend_unavailable", "installed boot-packet SHA binding differs")
 
-            post_source_sha, post_macro_sha, post_source_seal, post_macro_seal = (
-                self._generation_pair(live_env, deadline=deadline)
-            )
+            try:
+                post_source_sha, post_macro_sha, post_source_seal, post_macro_seal = (
+                    self._generation_pair(
+                        live_env, deadline=deadline, macro_plan=materialization_plan
+                    )
+                )
+            except GatewayError as exc:
+                source_drift_messages = {
+                    "installed Mastermind source SHA changed",
+                    "installed Mastermind source HEAD changed",
+                    "installed Macro source SHA changed",
+                    "installed Macro source HEAD changed",
+                    "installed Macro source worktree path set differs",
+                    "installed Macro source worktree bytes differ",
+                }
+                if (
+                    exc.code == "backend_unavailable"
+                    and exc.message in source_drift_messages
+                ):
+                    raise GatewayError(
+                        "backend_unavailable",
+                        "installed source changed during boot-packet read",
+                    ) from exc
+                raise
             if (
                 post_source_sha != pre_source_sha
                 or post_macro_sha != pre_macro_sha
@@ -1872,6 +2211,23 @@ class InstalledExecutiveReaders(ExecutiveMcpGateway):
             packet_builder=packet_builder, inbox_builder=self._canonical_inbox,
             runtime_factory=lambda _root: _open_readonly_runtime(self._installed_runtime_root),
         )
+
+    async def _run_read_attempt(self, name, arguments, generated_at):
+        collector = self._packet_builder
+        if isinstance(collector, InstalledBootPacketCollector) and name in {
+            "executive_state", "executive_inbox",
+        }:
+            with collector.request_scope(now=self.config.now,
+                                         timeout=self.config.boot_packet_timeout):
+                return await super()._run_read_attempt(name, arguments, generated_at)
+        return await super()._run_read_attempt(name, arguments, generated_at)
+
+    def _read(self, name, arguments, generated_at):
+        collector = self._packet_builder
+        if isinstance(collector, InstalledBootPacketCollector):
+            with collector.physical_scope():
+                return super()._read(name, arguments, generated_at)
+        return super()._read(name, arguments, generated_at)
 
     def _installed_packet(self, **kwargs: Any) -> dict[str, Any]:
         """Preserve #697's optional degraded path when no boot runtime is bound."""

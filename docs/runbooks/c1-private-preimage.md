@@ -62,7 +62,7 @@ Plist parsing is in-process, and only validated projections enter the receipt.
 Unknown fields are deliberately not projected.
 
 The worker configuration and Codex attestation identify the installer's fixed
-destination, `/Library/Application Support/MastermindExecutive/bin/codex-0.147.0`.
+destination, `/Library/Application Support/MastermindExecutive/bin/codex-0.159.2`.
 The Homebrew executable is installer input, not the installed worker identity.
 
 Private config, tokens, keys, canaries, provider auth, DR, job, backup, relay,
@@ -190,8 +190,12 @@ config and token metadata are both present and safe, the Relay principal
 matches, and the Relay is explicitly disabled and unloaded. The core release is
 derived independently from `control.json` plus the control/worker/backup
 plists; a mixed core never becomes stale-safe. The credential-free
-prepared-only Agent Relay state may coexist under its own stricter absence
-predicate. Any enabled/loaded SOL_STATE Relay, missing config/token, unsafe
+prepared-only Agent Relay state may coexist when its principal matches, it is
+unloaded, and its plist, config, token and socket are absent. Current A2 host
+preparation also establishes an explicit disabled override. The legacy absent
+override remains acceptable for this install-safety census; A2 enrollment still
+requires an explicitly disabled, unloaded Relay before it reads a token.
+Any enabled/loaded SOL_STATE Relay, missing config/token, unsafe
 metadata, foreign/malformed plist, or additional generation disagreement
 remains `EFFECT_UNKNOWN`.
 

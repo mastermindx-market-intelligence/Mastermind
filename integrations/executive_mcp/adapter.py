@@ -62,6 +62,7 @@ from integrations.executive_mcp.schemas import (
     GatewayError,
     ServerMode,
     bound_document,
+    bound_job_document,
     derive_authorities,
     derive_branch,
     derive_intent_id,
@@ -547,7 +548,8 @@ class ExecutiveMcpGateway:
             data, grounding, degraded = self._ceo_intent_status(str(arguments["intent_id"]))
         else:  # pragma: no cover — tool_spec already refused an unknown name
             raise GatewayError("not_found", f"unknown tool {name!r}")
-        bounded_data, receipts = bound_document(data, limit=self.config.max_response_bytes)
+        bound = bound_job_document if name == "executive_job" else bound_document
+        bounded_data, receipts = bound(data, limit=self.config.max_response_bytes)
         return result_envelope(
             name, mode=self.config.mode, generated_at=generated_at,
             data=bounded_data, grounding=grounding, degraded=degraded, bounded=receipts,

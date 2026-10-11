@@ -1,0 +1,409 @@
+import { describe, expect, it } from "vitest";
+import { decodeWorkDocument, type WorkDocument } from "./work";
+
+const digest = (c: string) => c.repeat(64);
+export function workAvailable(): WorkDocument {
+  return {
+    schema: "mastermind.workspace_work_queue.v1",
+    generated_at: "2026-09-26T07:00:00Z",
+    availability: "AVAILABLE",
+    lifecycle_source: {
+      schema: "mastermind.fabric_job_root_list.v2",
+      runtime: {
+        root: "/runtime",
+        db_present: true,
+        identity: null,
+        acquisition: {
+          schema: "mastermind.fabric_runtime_acquisition.v1",
+          query: { kind: "root_discovery" },
+          owner: "executive_runtime",
+          snapshot_digest: digest("a"),
+          budgets: {
+            jobs: 17,
+            roots: 64,
+            attempts_total: 340,
+            attempts_per_job: 20,
+            creation_events_per_job: 1,
+          },
+          truncation: {
+            jobs: false,
+            roots: false,
+            projection: false,
+            attempt_job_ids: [],
+          },
+          provenance: { state: "COMPLETE", unjoined_job_ids: [] },
+          generation: {
+            schema: "mastermind.runtime_read_observation.v1",
+            state: "SAME",
+            source_identity: digest("b"),
+            before: 9,
+            after: 9,
+          },
+        },
+      },
+      degraded: [],
+    },
+    effect_exception: {
+      value: "NONE",
+      scope: "RUNTIME_CURRENT_WORKER",
+      observable: false,
+      reason: "no_exception_observed",
+    },
+    coverage: { count: 4, total: 4, truncated: false, completeness: "COMPLETE" },
+    groups: {
+      EFFECT_EXCEPTION: [],
+      NEEDS_SOL: [],
+      NEEDS_WORKER: [],
+      WAITING_CAPACITY: [],
+      RUNNING: [row("JOB-2", "CHECKPOINTED", "RUNNING", true)],
+      QUEUED: [row("JOB-1", "QUEUED", "QUEUED", false)],
+      COMPLETED_NOT_ACCEPTED: [row("JOB-3", "COMPLETED", "COMPLETED_NOT_ACCEPTED", true)],
+      TERMINAL: [row("JOB-4", "CANCELLED", "TERMINAL", true)],
+      UNKNOWN: [],
+    },
+    source_observation: {
+      schema: "mastermind.workspace_source_observation.v1",
+      state: "SAME",
+      selection: null,
+      control_room: {
+        instance_before: "owner-instance",
+        instance_after: "owner-instance",
+        publication_before: 3,
+        publication_after: 3,
+        document_digest: digest("c"),
+        source_validity_digest: digest("d"),
+        cache_currentness_digest: digest("e"),
+      },
+      runtime: {
+        schema: "mastermind.runtime_read_observation.v1",
+        state: "SAME",
+        source_identity: digest("b"),
+        before: 9,
+        after: 9,
+        snapshot_digest: digest("a"),
+      },
+    },
+    reason_codes: [],
+  };
+}
+
+function row(root: string, status: string, group: string, postStart: boolean): any {
+  return {
+    root_job_id: root,
+    lifecycle: {
+      status,
+      source: "EXECUTIVE_RUNTIME",
+      orchestration_role: "aggregation",
+      depth: 0,
+    },
+    next_actor: {
+      value: "UNKNOWN",
+      source: null,
+      reason: "no_producer",
+      evidence_ref: null,
+      observed_at: null,
+    },
+    capacity: {
+      value: postStart ? "NOT_APPLICABLE" : "UNKNOWN",
+      source: postStart ? "EXECUTIVE_RUNTIME" : null,
+      reason: postStart ? "post_start_lifecycle" : "no_producer",
+      evidence_ref: null,
+      observed_at: null,
+    },
+    effect: {
+      value: "UNKNOWN",
+      source: null,
+      reason: "no_producer",
+      evidence_ref: null,
+      observed_at: null,
+    },
+    acceptance: {
+      state: "NOT_PROJECTED",
+      producer_owner: null,
+      reason: "product acceptance has no producer in this projection",
+    },
+    group,
+  };
+}
+
+export function workUnavailable(): WorkDocument {
+  const value = workAvailable();
+  return {
+    ...value,
+    availability: "UNAVAILABLE",
+    lifecycle_source: null,
+    coverage: { count: 0, total: null, truncated: false, completeness: "PARTIAL" },
+    groups: Object.fromEntries(
+      Object.keys(value.groups).map((key) => [key, []]),
+    ) as unknown as WorkDocument["groups"],
+    effect_exception: {
+      value: "UNKNOWN",
+      scope: "RUNTIME_CURRENT_WORKER",
+      observable: false,
+      reason: "read_refused",
+    },
+    source_observation: {
+      schema: "mastermind.workspace_source_observation.v1",
+      state: "UNKNOWN",
+      selection: null,
+      control_room: null,
+      runtime: null,
+    },
+    reason_codes: ["projection_refused"],
+  };
+}
+
+describe("closed Work document", () => {
+  it("accepts an authenticated SAME document and preserves raw lifecycle status", () => {
+    const decoded = decodeWorkDocument(workAvailable());
+    expect(decoded?.groups.RUNNING[0].lifecycle.status).toBe("CHECKPOINTED");
+    expect(decoded?.groups.QUEUED[0].next_actor).toMatchObject({
+      value: "UNKNOWN",
+      reason: "no_producer",
+    });
+  });
+
+  it("accepts an owner-supplied null Runtime root used by installed workspace reads", () => {
+    const value: any = structuredClone(workAvailable());
+    value.lifecycle_source.runtime.root = null;
+    expect(decodeWorkDocument(value)?.lifecycle_source?.runtime.root).toBeNull();
+  });
+
+  it("accepts the typed 503 unavailable body but never turns it into an empty healthy queue", () => {
+    const decoded = decodeWorkDocument(workUnavailable());
+    expect(decoded).toMatchObject({
+      availability: "UNAVAILABLE",
+      coverage: { count: 0, total: null, completeness: "PARTIAL" },
+      reason_codes: ["projection_refused"],
+    });
+  });
+
+  it.each([
+    ["composer-only observation", (d: any) => (d.source_observation = null)],
+    ["unknown top-level key", (d: any) => (d.extra = true)],
+    ["unknown group", (d: any) => (d.groups.NEW_GROUP = [])],
+    ["group field mismatch", (d: any) => (d.groups.QUEUED[0].group = "RUNNING")],
+    ["lifecycle/group mismatch", (d: any) => (d.groups.QUEUED[0].lifecycle.status = "FAILED")],
+    ["status drift", (d: any) => (d.groups.RUNNING[0].lifecycle.status = "PAUSED")],
+    ["post-start capacity drift", (d: any) => {
+      d.groups.RUNNING[0].capacity = {
+        value: "UNKNOWN",
+        source: null,
+        reason: "no_producer",
+        evidence_ref: null,
+        observed_at: null,
+      };
+    }],
+    ["effect precedence drift", (d: any) => {
+      d.groups.QUEUED[0].effect = {
+        value: "EFFECT_UNKNOWN",
+        source: "EFFECT_PRODUCER",
+        reason: "evidence_supplied",
+        evidence_ref: "f".repeat(64),
+        observed_at: d.generated_at,
+      };
+    }],
+    ["actor precedence drift", (d: any) => {
+      d.groups.QUEUED[0].next_actor = {
+        value: "NEEDS_SOL",
+        source: "AGENT_OS",
+        reason: "evidence_supplied",
+        evidence_ref: "f".repeat(64),
+        observed_at: d.generated_at,
+      };
+    }],
+    ["capacity precedence drift", (d: any) => {
+      d.groups.QUEUED[0].capacity = {
+        value: "WAITING_CAPACITY",
+        source: "AUTONOMY",
+        reason: "pre_start_placement_evidence",
+        evidence_ref: "f".repeat(64),
+        observed_at: d.generated_at,
+      };
+    }],
+    ["acceptance promotion", (d: any) => (d.groups.QUEUED[0].acceptance.state = "ACCEPTED")],
+    ["count mismatch", (d: any) => (d.coverage.count = 3)],
+    ["coverage completeness drift", (d: any) => {
+      d.coverage.truncated = true;
+      d.coverage.total = 4;
+      d.coverage.completeness = "COMPLETE";
+    }],
+    ["budget shape drift", (d: any) => {
+      d.lifecycle_source.runtime.acquisition.budgets.extra = 1;
+    }],
+    ["truncation shape drift", (d: any) => {
+      d.lifecycle_source.runtime.acquisition.truncation.roots = "yes";
+    }],
+    ["provenance vocabulary drift", (d: any) => {
+      d.lifecycle_source.runtime.acquisition.provenance.state = "MYSTERY";
+    }],
+    ["queue effect reason drift", (d: any) => {
+      d.effect_exception = {
+        value: "UNKNOWN",
+        scope: "RUNTIME_CURRENT_WORKER",
+        observable: false,
+        reason: "no_exception_observed",
+      };
+    }],
+    ["runtime drift", (d: any) => (d.source_observation.runtime.after = 10)],
+    ["unknown refusal", (d: any) => (d.reason_codes = ["mystery"])],
+  ])("refuses %s", (_name, mutate) => {
+    const value: any = structuredClone(workAvailable());
+    mutate(value);
+    expect(decodeWorkDocument(value)).toBeNull();
+  });
+
+  it.each([
+    ["EFFECT_EXCEPTION", (row: any, generatedAt: string) => {
+      row.effect = {
+        value: "EFFECT_UNKNOWN",
+        source: "EFFECT_PRODUCER",
+        reason: "evidence_supplied",
+        evidence_ref: "f".repeat(64),
+        observed_at: generatedAt,
+      };
+    }],
+    ["NEEDS_SOL", (row: any, generatedAt: string) => {
+      row.next_actor = {
+        value: "NEEDS_SOL",
+        source: "AGENT_OS",
+        reason: "evidence_supplied",
+        evidence_ref: "f".repeat(64),
+        observed_at: generatedAt,
+      };
+    }],
+    ["WAITING_CAPACITY", (row: any, generatedAt: string) => {
+      row.capacity = {
+        value: "WAITING_CAPACITY",
+        source: "AUTONOMY",
+        reason: "pre_start_placement_evidence",
+        evidence_ref: "f".repeat(64),
+        observed_at: generatedAt,
+      };
+    }],
+  ])("accepts the closed %s precedence promotion", (group, mutate) => {
+    const value: any = structuredClone(workAvailable());
+    const row = value.groups.QUEUED.shift();
+    mutate(row, value.generated_at);
+    row.group = group;
+    const key = group as keyof WorkDocument["groups"];
+    value.groups[key].push(row);
+    expect(decodeWorkDocument(value)?.groups[key][0]?.root_job_id).toBe("JOB-1");
+  });
+
+  it("does not coerce unsupported COO ownership into a Work row", () => {
+    const value: any = structuredClone(workAvailable());
+    value.groups.QUEUED[0].next_actor.value = "NEEDS_COO";
+    expect(decodeWorkDocument(value)).toBeNull();
+  });
+});
+
+
+// Reject JSON containers before any enum membership or precedence calculation.
+// A string-looking array is not a scalar enum; objects must never throw.
+describe("Work source recovery regressions", () => {
+  const malformed = [
+    ["array", (token: string) => [token]],
+    ["object", (_token: string) => ({ toString: "not-a-function" })],
+  ] as const;
+  const enumFields = [
+    ["availability", "AVAILABLE"],
+    ["coverage.completeness", "COMPLETE"],
+    ["effect_exception.value", "NONE"],
+    ["effect_exception.reason", "no_exception_observed"],
+    ["source_observation.state", "SAME"],
+    ["source_observation.runtime.state", "SAME"],
+    ["lifecycle_source.runtime.acquisition.provenance.state", "COMPLETE"],
+    ["lifecycle_source.runtime.acquisition.generation.state", "SAME"],
+    ["groups.QUEUED.0.lifecycle.status", "QUEUED"],
+    ["groups.QUEUED.0.next_actor.reason", "no_producer"],
+    ["groups.QUEUED.0.capacity.reason", "no_producer"],
+    ["groups.QUEUED.0.effect.reason", "no_producer"],
+  ] as const;
+  for (const [kind, wrap] of malformed) {
+    it.each(enumFields)(`rejects ${kind} enum at %s without throwing`, (path, token) => {
+      const value: any = workAvailable();
+      const keys = path.split(".");
+      let target = value;
+      for (const key of keys.slice(0, -1)) target = target[key];
+      target[keys[keys.length - 1]] = wrap(token);
+      expect(() => decodeWorkDocument(value)).not.toThrow();
+      expect(decodeWorkDocument(value)).toBeNull();
+    });
+    it.each(["effect", "next_actor"] as const)(`rejects ${kind} evidence token in %s`, (column) => {
+      const value: any = workAvailable();
+      value.groups.QUEUED[0][column] = {
+        value: wrap(column === "effect" ? "EFFECT_UNKNOWN" : "NEEDS_SOL"),
+        source: column === "effect" ? "EFFECT_PRODUCER" : "AGENT_OS",
+        reason: "evidence_supplied",
+        evidence_ref: digest("f"),
+        observed_at: value.generated_at,
+      };
+      expect(() => decodeWorkDocument(value)).not.toThrow();
+      expect(decodeWorkDocument(value)).toBeNull();
+    });
+    it(`rejects ${kind} evidence reason without throwing`, () => {
+      const value: any = workAvailable();
+      value.groups.QUEUED[0].effect = {
+        value: "NONE", source: "EFFECT_PRODUCER",
+        reason: wrap("evidence_supplied"), evidence_ref: digest("f"),
+        observed_at: value.generated_at,
+      };
+      expect(() => decodeWorkDocument(value)).not.toThrow();
+      expect(decodeWorkDocument(value)).toBeNull();
+    });
+  }
+  it("preserves correctly declared truncated coverage", () => {
+    const value = workAvailable();
+    value.lifecycle_source!.runtime.acquisition.truncation.roots = true;
+    value.coverage = { count: 4, total: null, truncated: true, completeness: "PARTIAL" };
+    expect(decodeWorkDocument(value)?.coverage).toEqual(value.coverage);
+  });
+  it("refuses a complete claim over partial acquisition provenance", () => {
+    const value = workAvailable();
+    value.lifecycle_source!.runtime.acquisition.provenance.state = "PARTIAL";
+    expect(decodeWorkDocument(value)).toBeNull();
+    value.coverage.completeness = "PARTIAL";
+    expect(decodeWorkDocument(value)?.coverage.completeness).toBe("PARTIAL");
+  });
+  it("refuses a known total on truncated coverage", () => {
+    const value = workAvailable();
+    value.lifecycle_source!.runtime.acquisition.truncation.roots = true;
+    value.coverage = { count: 4, total: 4, truncated: true, completeness: "PARTIAL" };
+    expect(decodeWorkDocument(value)).toBeNull();
+  });
+});
+
+
+describe("Work root acquisition budget", () => {
+  it.each([
+    [64, false, true],
+    [65, false, false],
+    [64, true, true],
+    [65, true, false],
+  ] as const)("enforces %i roots with truncated=%s", (count, truncated, accepted) => {
+    const value = workAvailable();
+    for (const group of Object.keys(value.groups) as Array<keyof WorkDocument["groups"]>)
+      value.groups[group] = [];
+    for (let id = 1; id <= count; id++)
+      value.groups.QUEUED.push(row(`JOB-${id}`, "QUEUED", "QUEUED", false));
+    value.lifecycle_source!.runtime.acquisition.truncation.roots = truncated;
+    value.coverage = {
+      count, total: truncated ? null : count, truncated,
+      completeness: truncated ? "PARTIAL" : "COMPLETE",
+    };
+    const decoded = decodeWorkDocument(value);
+    if (accepted) expect(decoded?.coverage.count).toBe(count);
+    else expect(decoded).toBeNull();
+  });
+});
+
+
+it.each([0, 1, -1, 0.5, false, "0", null])(
+  "only accepts root-discovery depth zero, not %s", (depth) => {
+    const value: any = workAvailable();
+    value.groups.QUEUED[0].lifecycle.depth = depth;
+    if (depth === 0) expect(decodeWorkDocument(value)).not.toBeNull();
+    else expect(decodeWorkDocument(value)).toBeNull();
+  },
+);

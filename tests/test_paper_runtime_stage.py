@@ -79,7 +79,28 @@ class RuntimeStageTests(unittest.TestCase):
 
     def test_valid_but_unreviewed_generation_refuses(self):
         with self.assertRaisesRegex(stage.Refusal, "GENERATION_UNSUPPORTED"):
-            stage.stage("v5", root=self.root, _source_dir=self.source)
+            stage.stage("v7", root=self.root, _source_dir=self.source)
+
+    def test_current_v10_reviewed_hash_matches_bridge_source(self):
+        bridge = ROOT / "integrations" / "paper_desktop" / "bridge.py"
+        current = load_local(
+            "paper_runtime_stage_current_source_pin",
+            ROOT / "integrations" / "paper_desktop" / "runtime_stage.py",
+        )
+        self.assertEqual(
+            current.REVIEWED_GENERATIONS["v10"]["bridge.py"],
+            current._sha256(bridge.read_bytes()),
+        )
+
+    def test_historical_v9_pin_remains_immutable(self):
+        current = load_local(
+            "paper_runtime_stage_historical_pin",
+            ROOT / "integrations" / "paper_desktop" / "runtime_stage.py",
+        )
+        self.assertEqual(
+            current.REVIEWED_GENERATIONS["v9"]["bridge.py"],
+            "a784fefceb7b1bb1164289700b22a6f53d09ae60d007f506ac015ebaca8c3725",
+        )
 
     def test_source_hash_must_match_reviewed_generation(self):
         with mock.patch.object(

@@ -345,7 +345,7 @@ def test_cardinality_and_identity_constants():
     assert LIVE_APP_SERVER_ADOPTION == "NOT_SUPPORTED"
     assert V1_QUALITY_TRADEOFF == "V1_QUALITY_TRADEOFF_ACCEPTED"
     assert ACCOUNT_REALM_STATUS == "ACCOUNT_REALM_ATTESTATION_UNPROVEN"
-    assert OPERATOR_HARNESS_INTERFACE_VERSION == "mastermind.operator_harness/v1"
+    assert OPERATOR_HARNESS_INTERFACE_VERSION == "mastermind.operator_harness/v2"
     assert OPERATION_AGGREGATE_TYPE == "operator_operation"
     assert "silently rebound" in WORKER_SLOT_AUTH_BINDING_PRODUCTION_INVARIANT
     source = Path("control_plane/operator_harness_contract.py").read_text(encoding="utf-8")

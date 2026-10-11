@@ -1,4 +1,4 @@
-"""Executive-owned composition for one read-only App Server planning Attempt.
+"""Executive-owned composition for one read-only operator planning Attempt.
 
 This is not a scheduler and owns no durable state.  It claims one exact
 command-bound planner through Executive Runtime, delegates provider effects to
@@ -9,13 +9,18 @@ abandoned.
 from __future__ import annotations
 
 import asyncio
+import copy
+import hashlib
 import json
 import re
 import subprocess
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Protocol
 
 from control_plane.executive_agent_capabilities import (
+    CLAUDE_OPERATOR_EXECUTION_SURFACE,
+    CLAUDE_OPERATOR_HARNESS_KIND,
+    CLAUDE_OPERATOR_PROVIDER,
     CapabilityPolicyError,
     ExecutionCapabilityRegistry,
 )
@@ -26,6 +31,8 @@ from control_plane.executive_orchestration_result import (
     parse_canonical_json,
 )
 from control_plane.executive_runtime import (
+    INTERACTIVE_TX5_EXECUTION_PROFILE,
+    Attempt,
     AttemptLease,
     AttemptStatus,
     Job,
@@ -38,10 +45,13 @@ from control_plane.executive_supervisor import (
     ExecutiveSupervisor,
     ReconcileReceipt,
     ReconcileStatus,
+    VerifiedCommission,
+    verify_commission_for_job,
     worker_result_schema,
 )
 from control_plane.operator_harness_contract import (
     AuthRealmRequirement,
+    OperatorHarnessAdapter,
     EventCursor,
     LaunchDecision,
     OperationId,
@@ -82,6 +92,17 @@ RemoteAdapterFactory = Callable[
     [Callable[[Any], str]], RemoteCodexOperatorAdapter
 ]
 
+# Installed host observations for the already-claimed Worker; no placement authority.
+ClaimedWorkspaceIdentitySource = Callable[[Attempt, Job], WorkspaceIdentity]
+
+
+class ClaimedOperatorAdapterFactory(Protocol):
+    """Host-owned construction, not placement or permission to perform I/O."""
+
+    def __call__(self, attempt: Attempt, requested: RequestedExecutionProfile,
+                 turn_input_loader: Callable[[Any], str], *,
+                 recovery: bool) -> OperatorHarnessAdapter: ...
+
 
 class ExecutiveOperatorSupervisor:
     """Run only ``plan`` roles through the Runtime-owned OHF lifecycle."""
@@ -90,14 +111,76 @@ class ExecutiveOperatorSupervisor:
         self,
         runtime: Runtime,
         *,
-        adapter_factory: RemoteAdapterFactory,
+        adapter_factory: RemoteAdapterFactory | None = None,
         prompt_source: ExecutiveSupervisor,
         instance_id: str = "executive-coo-operator",
+        claimed_adapter_factory: ClaimedOperatorAdapterFactory | None = None,
+        workspace_identity_source: ClaimedWorkspaceIdentitySource | None = None,
     ) -> None:
+        if ((adapter_factory is None) == (claimed_adapter_factory is None)
+                or (adapter_factory is not None and not callable(adapter_factory))
+                or (claimed_adapter_factory is not None and not callable(claimed_adapter_factory))):
+            raise ExecutiveOperatorSupervisorError("exactly one callable operator factory is required")
+        if workspace_identity_source is not None and (
+            not callable(workspace_identity_source) or claimed_adapter_factory is None
+        ):
+            raise ExecutiveOperatorSupervisorError(
+                "selected-host workspace identity requires a claim-aware factory"
+            )
         self.runtime = runtime
         self.adapter_factory = adapter_factory
+        self._claimed_adapter_factory = claimed_adapter_factory
+        self._workspace_identity_source = workspace_identity_source
         self.prompt_source = prompt_source
         self.instance_id = instance_id
+
+    def _adapter_for_attempt(
+        self, lease: AttemptLease, requested: RequestedExecutionProfile,
+        loader: Callable[[Any], str], *, recovery: bool,
+    ) -> OperatorHarnessAdapter:
+        factory = self._claimed_adapter_factory
+        if factory is None:
+            assert self.adapter_factory is not None
+            return self.adapter_factory(loader)
+
+        # Construction must not start a provider. Runtime retains the lease and
+        # final effect admission; the callback receives no lease token or new authority.
+        def current_binding() -> tuple[Attempt, tuple[Any, ...]]:
+            current = self.runtime.attempts.get_attempt(lease.attempt.attempt_id)
+            allowed = ({AttemptStatus.CLAIMED, AttemptStatus.RUNNING,
+                        AttemptStatus.CHECKPOINTED, AttemptStatus.CANCEL_REQUESTED}
+                       if recovery else {AttemptStatus.CLAIMED})
+            identity = ("attempt_id", "job_id", "worker_id", "quota_class",
+                        "fence_generation", "lease_owner", "authority_policy_hash")
+            if (not isinstance(current, Attempt) or current.status not in allowed
+                    or any(getattr(current, key) != getattr(lease.attempt, key)
+                           for key in identity)
+                    or requested.worker_id != current.worker_id
+                    or requested.authority_policy_hash != current.authority_policy_hash):
+                raise ExecutiveOperatorSupervisorError("claimed operator identity is no longer current")
+            job = self.runtime.jobs.get_job(current.job_id)
+            if (job is None or job.current_attempt_id != current.attempt_id
+                    or job.assigned_worker_id != current.worker_id
+                    or job.assigned_quota_class != current.quota_class):
+                raise ExecutiveOperatorSupervisorError("claimed operator Job binding moved")
+            signature = tuple(getattr(current, key) for key in identity) + (
+                current.status, current.execution_mode,
+                current.requested_execution_profile_digest,
+                current.effective_grant_digest, current.placement_snapshot_digest,
+                current.execution_principal_snapshot_digest, job.status,
+            )
+            return current, signature
+
+        current, before = current_binding()
+        try:
+            adapter = factory(copy.deepcopy(current), copy.deepcopy(requested),
+                              loader, recovery=recovery)
+        except Exception:
+            raise ExecutiveOperatorSupervisorError("claimed operator construction refused") from None
+        _, after = current_binding()
+        if before != after:
+            raise ExecutiveOperatorSupervisorError("claimed operator binding changed during construction")
+        return adapter
 
     @staticmethod
     def _git_head(workspace: Path) -> str:
@@ -125,7 +208,77 @@ class ExecutiveOperatorSupervisor:
             )
         return value
 
-    def _workspace_identity(self, job: Job) -> WorkspaceIdentity:
+    def _workspace_identity(
+        self, job: Job, attempt: Attempt | None = None
+    ) -> WorkspaceIdentity:
+        source = self._workspace_identity_source
+        if source is not None:
+            # Validate the logical identity without touching the host filesystem.
+            base = job.constraints.get("base_sha")
+            if (type(job.worktree) is not str or not job.worktree
+                    or not Path(job.worktree).is_absolute()
+                    or str(Path(job.worktree)) != job.worktree
+                    or ".." in Path(job.worktree).parts
+                    or job.worktree.startswith("//")
+                    or type(base) is not str
+                    or re.fullmatch(r"[0-9a-f]{40}", base) is None):
+                raise ExecutiveOperatorSupervisorError(
+                    "selected-host workspace identity Job is invalid"
+                )
+            # A remote path must never be stat'ed or resolved on the Control host.
+            # The installed owner supplies physical facts from the selected host.
+            if attempt is None:
+                raise ExecutiveOperatorSupervisorError(
+                    "selected-host workspace identity has no claimed Attempt"
+                )
+            current_job = self.runtime.jobs.get_job(job.job_id)
+            current = self.runtime.attempts.get_attempt(attempt.attempt_id)
+            keys = ("attempt_id", "job_id", "worker_id", "quota_class",
+                    "fence_generation", "lease_owner", "authority_policy_hash")
+            if (current_job is None or current is None
+                    or current.status is not AttemptStatus.CLAIMED
+                    or any(getattr(current, key) != getattr(attempt, key)
+                           for key in keys)
+                    or current_job.current_attempt_id != current.attempt_id
+                    or current_job.assigned_worker_id != current.worker_id
+                    or current_job.assigned_quota_class != current.quota_class
+                    or current_job.worktree != job.worktree
+                    or current_job.constraints != job.constraints):
+                raise ExecutiveOperatorSupervisorError(
+                    "selected-host workspace identity claim is no longer current"
+                )
+            def stable_claim(value: Attempt) -> dict[str, Any]:
+                fields = value.to_dict()
+                for field in ("version", "heartbeat_at", "lease_expires_at"):
+                    fields.pop(field)
+                return fields
+
+            before_job = copy.deepcopy(current_job)
+            before_claim = stable_claim(current)
+            try:
+                observed = source(copy.deepcopy(current), copy.deepcopy(current_job))
+            except Exception:
+                raise ExecutiveOperatorSupervisorError(
+                    "selected-host workspace identity source refused"
+                ) from None
+            after_job = self.runtime.jobs.get_job(job.job_id)
+            after = self.runtime.attempts.get_attempt(attempt.attempt_id)
+            if (after_job != before_job or after is None
+                    or stable_claim(after) != before_claim):
+                raise ExecutiveOperatorSupervisorError(
+                    "selected-host workspace binding moved during observation"
+                )
+            if (type(observed) is not WorkspaceIdentity
+                    or observed.workspace_path != job.worktree
+                    or observed.base_sha != job.constraints.get("base_sha")
+                    or any(type(getattr(observed, field)) is not int
+                           or getattr(observed, field) < 0
+                           for field in ("device", "inode", "uid", "gid"))
+                    or observed.inode == 0):
+                raise ExecutiveOperatorSupervisorError(
+                    "selected-host workspace identity is invalid"
+                )
+            return observed
         if not job.worktree:
             raise ExecutiveOperatorSupervisorError(
                 "operator planner has no assigned workspace"
@@ -153,6 +306,13 @@ class ExecutiveOperatorSupervisor:
     def _requested_profile(
         self, job: Job, lease: AttemptLease
     ) -> RequestedExecutionProfile:
+        constraints = job.constraints
+        if constraints.get("execution_profile_id") == (
+            "operator.appserver.interactive.v1"
+        ):
+            raise ExecutiveOperatorSupervisorError(
+                "App Server supervisor refuses the interactive profile before claim"
+            )
         if job.orchestration_role != "plan":
             raise ExecutiveOperatorSupervisorError(
                 "App Server composition accepts only the read-only planner role"
@@ -212,7 +372,6 @@ class ExecutiveOperatorSupervisor:
             == job.constraints.get("capability_policy_digest")
             and profile.profile_digest
             == job.constraints.get("execution_profile_digest")
-            and profile.execution_surface == "codex-app-server"
             and profile.auth_realm == "dedicated-worker-account"
             and profile.sandbox_policy == "read-only"
             and profile.approval_policy == "never"
@@ -223,6 +382,7 @@ class ExecutiveOperatorSupervisor:
         docs_profile_ok = (
             profile.profile_id
             == "operator.appserver.readonly.docs-mcp.native-helper.v1"
+            and profile.execution_surface == "codex-app-server"
             and profile.network_policy == "disabled"
             and profile.native_helper_policy.value == "PARENT_READ_ONLY_CEILING"
             and profile.native_helper is not None
@@ -231,6 +391,7 @@ class ExecutiveOperatorSupervisor:
         )
         browser_profile_ok = (
             profile.profile_id == "operator.browser.local-review.v1"
+            and profile.execution_surface == "codex-app-server"
             and profile.network_policy == "loopback-browser-only"
             and profile.native_helper_policy.value == "DISABLED"
             and profile.native_helper is None
@@ -242,9 +403,29 @@ class ExecutiveOperatorSupervisor:
             and tuple(grant.resource_id for grant in profile.resource_grants)
             == ("worker-browser-b1-local",)
         )
-        if not common_profile_ok or not (docs_profile_ok or browser_profile_ok):
+        native_claude_profile_ok = (
+            profile.profile_id == "operator.claude.readonly.v1"
+            and profile.enabled is True
+            and profile.execution_surface == CLAUDE_OPERATOR_EXECUTION_SURFACE
+            and profile.network_policy == "disabled"
+            and profile.native_helper_policy.value == "DISABLED"
+            and profile.native_helper is None
+            and not profile.skill_grants
+            and not profile.mcp_server_grants
+            and not profile.resource_grants
+        )
+        if not common_profile_ok or not (
+            docs_profile_ok or browser_profile_ok or native_claude_profile_ok
+        ):
             raise ExecutiveOperatorSupervisorError(
                 "operator planner profile is not one reviewed rich read-only lane"
+            )
+        if native_claude_profile_ok and (
+            quota.provider != CLAUDE_OPERATOR_PROVIDER
+            or job.constraints.get("provider") != CLAUDE_OPERATOR_PROVIDER
+        ):
+            raise ExecutiveOperatorSupervisorError(
+                "native Claude planner provider drifted after claim"
             )
         if quota.model != job.constraints.get("model") or quota.effort != job.constraints.get(
             "effort"
@@ -254,12 +435,21 @@ class ExecutiveOperatorSupervisor:
             )
         return RequestedExecutionProfile(
             worker_id=lease.attempt.worker_id,
-            provider="openai-codex",
+            provider=(
+                CLAUDE_OPERATOR_PROVIDER if native_claude_profile_ok else "openai-codex"
+            ),
             requested_model=str(quota.model),
-            harness_kind="codex-app-server",
+            harness_kind=(
+                CLAUDE_OPERATOR_HARNESS_KIND
+                if native_claude_profile_ok else "codex-app-server"
+            ),
             harness_binary_digest=harness_digest,
             harness_version=harness_version,
-            workspace=self._workspace_identity(job),
+            workspace=(
+                self._workspace_identity(job, lease.attempt)
+                if self._workspace_identity_source is not None
+                else self._workspace_identity(job)
+            ),
             sandbox_policy="read-only",
             approval_policy="never",
             network_policy=profile.network_policy,
@@ -274,7 +464,12 @@ class ExecutiveOperatorSupervisor:
             write_capable=False,
         )
 
-    def _prompt(self, job: Job, lease: AttemptLease) -> str:
+    def _prompt(
+        self,
+        job: Job,
+        lease: AttemptLease,
+        commission: VerifiedCommission | None = None,
+    ) -> str:
         grant = ExecutiveSupervisor._effective_grant(job, lease.attempt)
         schema = worker_result_schema(
             job_id=job.job_id,
@@ -284,14 +479,57 @@ class ExecutiveOperatorSupervisor:
             orchestration_role="plan",
             root_job_id=job.root_job_id,
         )
-        return (
+        base_prompt = (
             self.prompt_source._prompt(job, lease.attempt, grant)
+            if commission is None
+            else self.prompt_source._prompt(
+                job,
+                lease.attempt,
+                grant,
+                commission=commission.ref_dict(),
+                inline_commission=commission.content.decode("utf-8"),
+            )
+        )
+        return (
+            base_prompt
             + "\n\nThe output schema is embedded below because this App Server lane "
             "has no separate schema-file argument. Return exactly one minified, "
             "UTF-8 JSON object with keys recursively sorted lexicographically, no "
             "markdown fence, no leading BOM, no trailing newline, and no commentary.\n"
             + json.dumps(schema, sort_keys=True, ensure_ascii=False, indent=2)
         )
+
+    @staticmethod
+    def _turn_operation_id(
+        attempt_id: str,
+        commission: VerifiedCommission | None,
+    ) -> OperationId:
+        """Bind commission-bearing TX-5 to stable immutable input identity.
+
+        The model-visible prompt may include observational routing capacity that
+        legitimately changes between the original turn and restart. Recovery
+        identity therefore binds the durable Attempt to the exact immutable
+        commission reference/content digest rather than re-hashing ambient
+        routing observations. Source-free jobs retain their historical identity.
+        """
+
+        if commission is None:
+            return OperationId(f"ohf-op:turn:{attempt_id}")
+        binding = {
+            "schema_version": "mastermind.operator_turn_commission_binding/v1",
+            "attempt_id": attempt_id,
+            "commission_ref": commission.ref_dict(),
+        }
+        binding_digest = hashlib.sha256(
+            json.dumps(
+                binding,
+                sort_keys=True,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8", errors="strict")
+        ).hexdigest()
+        return OperationId(f"ohf-op:turn-commission:{binding_digest}")
 
     @staticmethod
     def _terminal_payload(
@@ -480,7 +718,7 @@ class ExecutiveOperatorSupervisor:
         lease: AttemptLease,
         *,
         require_turn: bool = True,
-    ) -> tuple[OperatorSessionReceipt, TurnRef | None]:
+    ) -> tuple[OperatorSessionReceipt, TurnRef | None, OperationId | None]:
         """Reconstruct exact CURRENT G1, optionally before its first turn."""
 
         profile_raw = lease.attempt.requested_execution_profile
@@ -593,7 +831,7 @@ class ExecutiveOperatorSupervisor:
                 "operator recovery has invalid begin-turn INTENT cardinality"
             )
         if not turn_matches:
-            return session, None
+            return session, None, None
         turn_event, turn_payload = turn_matches[0]
         operation = OperationId(str(turn_event["command_id"]))
         applied = self.runtime.events.get_event_by_command_id(
@@ -638,7 +876,7 @@ class ExecutiveOperatorSupervisor:
             process_generation_id=generation.process_generation_id,
             attempt_id=lease.attempt.attempt_id,
         )
-        return session, turn
+        return session, turn, operation
 
     def _cleanup_failed_session(
         self,
@@ -711,7 +949,25 @@ class ExecutiveOperatorSupervisor:
         self, job: Job, lease: AttemptLease
     ) -> OrchestrationDispatchOutcome:
         requested = self._requested_profile(job, lease)
-        prompt_by_turn: dict[str, str] = {}
+        if not job.worktree:
+            raise ExecutiveOperatorSupervisorError(
+                "operator planner has no assigned workspace"
+            )
+        # Remote physical identity is not a local Git source. Source-free Jobs
+        # need no local read; strict commissions still require a qualified source.
+        try:
+            verified_commission = verify_commission_for_job(
+                self.runtime, job,
+                (None if self._workspace_identity_source is not None
+                 else Path(job.worktree).resolve(strict=True))
+            )
+        except Exception as exc:
+            raise ExecutiveOperatorSupervisorError(
+                f"operator immutable commission verification failed: {exc}"
+            ) from exc
+        prompt_by_turn: dict[str, str] = {
+            "pending": self._prompt(job, lease, verified_commission)
+        }
 
         def load_turn(turn: Any) -> str:
             try:
@@ -721,11 +977,14 @@ class ExecutiveOperatorSupervisor:
                     "operator turn prompt is not bound to the Runtime turn"
                 ) from exc
 
-        adapter = self.adapter_factory(load_turn)
+        adapter = self._adapter_for_attempt(lease, requested, load_turn, recovery=False)
         orchestrator = self._orchestrator(lease, adapter)
         attempt_id = lease.attempt.attempt_id
         start_operation = OperationId(f"ohf-op:start:{attempt_id}")
-        turn_operation = OperationId(f"ohf-op:turn:{attempt_id}")
+        turn_operation = self._turn_operation_id(
+            attempt_id,
+            verified_commission,
+        )
         stop_operation = OperationId(f"ohf-op:stop:{attempt_id}")
         session: OperatorSessionReceipt | None = None
         try:
@@ -734,7 +993,6 @@ class ExecutiveOperatorSupervisor:
                 requested=requested,
                 operation_id=start_operation,
             )
-            prompt_by_turn["pending"] = self._prompt(job, lease)
 
             def bound_prompt(turn: Any) -> str:
                 value = prompt_by_turn.pop("pending")
@@ -844,6 +1102,16 @@ class ExecutiveOperatorSupervisor:
             raise ExecutiveOperatorSupervisorError(
                 "operator recovery Attempt disappeared"
             )
+        previous_job = self.runtime.jobs.get_job(previous.job_id)
+        if previous_job is not None and previous_job.constraints.get(
+            "execution_profile_id"
+        ) == INTERACTIVE_TX5_EXECUTION_PROFILE:
+            return ReconcileReceipt(
+                attempt_id=attempt_id,
+                job_id=previous.job_id,
+                status=ReconcileStatus.AWAITING_LEASE_EXPIRY,
+                process_was_live=False,
+            )
         try:
             lease = self.runtime.attempts.takeover_expired_operator_harness(
                 attempt_id,
@@ -915,12 +1183,49 @@ class ExecutiveOperatorSupervisor:
                 )
         process_was_live = False
         try:
-            session, existing_turn = self._recovery_session(
+            session, existing_turn, existing_turn_operation = self._recovery_session(
                 lease,
                 require_turn=False,
             )
-            prompt = self._prompt(job, lease)
-            adapter = self.adapter_factory(lambda _turn: prompt)
+            verified_commission = None
+            if lease.attempt.status is not AttemptStatus.CANCEL_REQUESTED:
+                try:
+                    verified_commission = verify_commission_for_job(
+                        self.runtime,
+                        job,
+                        (Path(job.worktree).resolve(strict=True)
+                         if job.worktree and self._workspace_identity_source is None
+                         else None),
+                    )
+                except Exception as exc:
+                    raise ExecutiveOperatorSupervisorError(
+                        f"operator immutable commission verification failed: {exc}"
+                    ) from exc
+            # Cancellation/containment of an already-live writer must never depend
+            # on later availability of the immutable commission. No new/resumed
+            # turn is permitted without verification; this source-free prompt is
+            # only a loader placeholder for reconcile/cancel mechanics.
+            prompt = self._prompt(job, lease, verified_commission)
+            expected_turn_operation = (
+                self._turn_operation_id(attempt_id, verified_commission)
+                if verified_commission is not None
+                else None
+            )
+            if (
+                expected_turn_operation is not None
+                and existing_turn is not None
+                and (
+                    existing_turn_operation is None
+                    or existing_turn_operation.command_id
+                    != expected_turn_operation.command_id
+                )
+            ):
+                raise ExecutiveOperatorSupervisorError(
+                    "operator recovery turn input is not bound to the verified commission"
+                )
+            adapter = self._adapter_for_attempt(
+                lease, session.launch.requested, lambda _turn: prompt, recovery=True
+            )
             orchestrator = self._orchestrator(lease, adapter)
             port = ExecutiveOperatorHarnessPort(self.runtime, lease)
             try:
@@ -1042,8 +1347,12 @@ class ExecutiveOperatorSupervisor:
                 if existing_turn is None:
                     turn = orchestrator.run_turn(
                         session,
-                        operation_id=OperationId(
-                            f"ohf-op:recover-first-turn:{attempt_id}"
+                        operation_id=(
+                            expected_turn_operation
+                            if expected_turn_operation is not None
+                            else OperationId(
+                                f"ohf-op:recover-first-turn:{attempt_id}"
+                            )
                         ),
                         timeout_seconds=300.0,
                     )
@@ -1102,8 +1411,12 @@ class ExecutiveOperatorSupervisor:
                 )
                 turn = orchestrator.run_turn(
                     resumed,
-                    operation_id=OperationId(
-                        f"ohf-op:recover-turn:{attempt_id}"
+                    operation_id=(
+                        expected_turn_operation
+                        if expected_turn_operation is not None
+                        else OperationId(
+                            f"ohf-op:recover-turn:{attempt_id}"
+                        )
                     ),
                     timeout_seconds=300.0,
                 )

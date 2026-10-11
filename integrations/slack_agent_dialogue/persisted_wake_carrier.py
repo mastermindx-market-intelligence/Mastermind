@@ -617,6 +617,7 @@ class RequesterAnswerWakeExtension:
             job_id=identity.requester_job_id,
             attempt_id=identity.requester_attempt_id,
             root_job_id=identity.root_job_id,
+            emitted_at=self.projection.obligation.emitted_at,
         )
         if self.projection.obligation != expected:
             raise StateConflict("requester answer obligation identity drifted")

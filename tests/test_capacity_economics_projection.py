@@ -92,3 +92,28 @@ def test_refuses_parallelism_larger_than_available_startable_jobs():
     doc["options"][0]["suggested_parallelism"] = 7
     with pytest.raises(CapacityEconomicsProjectionError, match="cannot exceed"):
         project_quota_preference(TIERS, doc)
+
+
+@pytest.mark.parametrize("starts,parallelism", [(0, 0), (4, 0)])
+def test_refuses_zero_actionable_capacity_even_when_preview_claims_eligibility(starts, parallelism):
+    doc = preview()
+    row = doc["options"][0]
+    row["estimated_startable_jobs"] = starts
+    row["suggested_parallelism"] = parallelism
+    before = copy.deepcopy(doc)
+    with pytest.raises(CapacityEconomicsProjectionError, match="positive actionable capacity"):
+        project_quota_preference(TIERS, doc)
+    assert doc == before
+
+
+def test_one_startable_job_remains_an_advisory_preference_not_a_claim():
+    doc = preview()
+    doc["options"][0]["estimated_startable_jobs"] = 1
+    doc["options"][0]["suggested_parallelism"] = 1
+    before = copy.deepcopy(doc)
+    result = project_quota_preference(TIERS, doc)
+    assert result.estimated_startable_jobs == 1
+    assert result.suggested_parallelism == 1
+    assert result.claim_time_revalidation_required is True
+    assert result.selection_is_commitment is False
+    assert doc == before
