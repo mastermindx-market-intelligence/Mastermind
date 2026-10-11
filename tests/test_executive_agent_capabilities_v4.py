@@ -682,11 +682,130 @@ def test_v4_profile_refuses_codex_exec_with_skill_capabilities(tmp_path):
         ExecutionCapabilityRegistry.load(_write(tmp_path, raw), source_root=REPO_ROOT)
 
 
-def test_v4_profile_refuses_write_capable_with_skill_capabilities(tmp_path):
+def test_v4_profile_admits_source_verified_skills_with_workspace_write(tmp_path):
+    """Rich engineering profiles may combine verified methods and bounded writes.
+
+    This is a Codex App Server profile, not a sealed CLI worker.  Materialized
+    source packages remain separately required; the registry does not load them
+    or grant extra tools simply because a Skill is available.
+    """
     raw = _raw_with_mutated_fixture_profile(
         write_capable=True, sandbox_policy="workspace-write"
     )
-    with pytest.raises(CapabilityPolicyError, match="write-capable"):
+    registry = ExecutionCapabilityRegistry.load(_write(tmp_path, raw), source_root=REPO_ROOT)
+    rich = registry.resolve(FIXTURE_PROFILE_ID)
+    original = ExecutionCapabilityRegistry.load(V4_FIXTURE, source_root=REPO_ROOT)
+    restricted = original.resolve(FIXTURE_PROFILE_ID)
+    assert rich.write_capable is True
+    assert rich.sandbox_policy == "workspace-write"
+    assert rich.execution_surface == "codex-app-server"
+    assert rich.native_helper_policy is NativeHelperPolicy.DISABLED
+    assert rich.plugins == ()
+    assert rich.skill_grants == restricted.skill_grants
+    assert rich.required_capability_names == restricted.required_capability_names
+    assert rich.profile_digest != restricted.profile_digest
+    assert registry.policy_digest != original.policy_digest
+    assert rich.app_server_config_projection()["skills"] == {
+        "bundled": {"enabled": False}, "config": None,
+    }
+    manifest = rich.capability_manifest(harness_binary_digest="a" * 64)
+    assert {(item.kind, item.name, item.skill_content_digest) for item in manifest.required} == {
+        ("skill", name, digest)
+        for name, digest in FROZEN_SKILL_CONTENT_DIGESTS.items()
+    }
+    assert manifest.unclassified_policy == "fail_closed_on_write"
+
+
+def test_v4_rich_write_skill_launch_requires_exact_observed_digests(tmp_path):
+    """A writable method bundle is not usable until OHF sees every exact Skill.
+
+    This is a hermetic policy-to-launch acceptance contract, not a real provider
+    admission or proof that a package was installed on any host.
+    """
+    from dataclasses import replace
+    from control_plane.operator_harness_contract import (
+        AuthIdentityConfidence,
+        AuthRealmFact,
+        LaunchDecision,
+        ObservedCapabilityIdentity,
+        ObservedHarnessAttestation,
+        RequestedExecutionProfile,
+        WorkspaceIdentity,
+        compare_launch,
+    )
+
+    raw = _raw_with_mutated_fixture_profile(
+        write_capable=True, sandbox_policy="workspace-write"
+    )
+    profile = ExecutionCapabilityRegistry.load(
+        _write(tmp_path, raw), source_root=REPO_ROOT
+    ).resolve(FIXTURE_PROFILE_ID)
+    workspace = WorkspaceIdentity("/tmp/attested-worker", "a" * 40, 1, 2, 501, 20)
+    binary_digest = "b" * 64
+    manifest = profile.capability_manifest(harness_binary_digest=binary_digest)
+    requested = RequestedExecutionProfile(
+        worker_id="worker-1", provider="codex", requested_model="gpt-5.6-sol",
+        harness_kind="codex-app-server", harness_binary_digest=binary_digest,
+        harness_version="0.159.3", workspace=workspace,
+        sandbox_policy=profile.sandbox_policy,
+        approval_policy=profile.approval_policy,
+        network_policy=profile.network_policy,
+        capabilities=manifest, native_helper_policy=profile.native_helper_policy,
+        authority_policy_hash="c" * 64,
+        expected_config_digest=profile.expected_config_digest,
+        write_capable=profile.write_capable,
+        allowed_write_paths=("tests/",),
+    )
+    observed_skills = tuple(
+        ObservedCapabilityIdentity(
+            kind=item.kind, name=item.name,
+            skill_content_digest=item.skill_content_digest,
+        ) for item in manifest.required
+    )
+    observed = ObservedHarnessAttestation(
+        served_model="gpt-5.6-sol", harness_version="0.159.3",
+        harness_binary_digest=binary_digest,
+        capabilities=observed_skills, effective_skills=profile.skills,
+        effective_mcp=(), effective_plugins_or_apps=(),
+        sandbox_state="workspace-write", approval_state=profile.approval_policy,
+        network_state=profile.network_policy,
+        effective_config_digest=profile.expected_config_digest,
+        auth=AuthRealmFact(worker_id="worker-1", provider="codex",
+                           identity_confidence=AuthIdentityConfidence.UNKNOWN),
+        workspace=workspace,
+    )
+    assert compare_launch(requested, observed).decision is LaunchDecision.ALLOW
+
+    # A metadata list alone cannot substitute for missing Skill identity.
+    missing = replace(observed, capabilities=observed.capabilities[1:])
+    assert compare_launch(requested, missing).decision is LaunchDecision.REFUSE_MISSING_REQUIRED
+    changed = replace(
+        observed,
+        capabilities=(replace(observed_skills[0], skill_content_digest="d" * 64),
+                      *observed_skills[1:]),
+    )
+    assert compare_launch(requested, changed).decision is not LaunchDecision.ALLOW
+    unclassified = replace(
+        observed,
+        capabilities=(*observed_skills,
+                      ObservedCapabilityIdentity(kind="plugin", name="extra-app")),
+        effective_plugins_or_apps=("extra-app",),
+    )
+    assert compare_launch(requested, unclassified).decision is LaunchDecision.REFUSE_UNCLASSIFIED
+    assert compare_launch(
+        requested, replace(observed, sandbox_state="read-only")
+    ).decision is LaunchDecision.REFUSE_SANDBOX_MISMATCH
+
+
+@pytest.mark.parametrize("sandbox,write_capable", [
+    ("read-only", True),
+    ("workspace-write", False),
+])
+def test_v4_rich_skills_refuse_sandbox_write_mismatch(tmp_path, sandbox, write_capable):
+    raw = _raw_with_mutated_fixture_profile(
+        write_capable=write_capable, sandbox_policy=sandbox,
+    )
+    with pytest.raises(CapabilityPolicyError, match="requires"):
         ExecutionCapabilityRegistry.load(_write(tmp_path, raw), source_root=REPO_ROOT)
 
 

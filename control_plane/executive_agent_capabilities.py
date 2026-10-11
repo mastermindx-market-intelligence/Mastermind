@@ -1670,11 +1670,12 @@ class ExecutionCapabilityRegistry:
                         f"profile {profile_id!r} cannot grant skill_capabilities "
                         f"to sealed worker execution surface {execution_surface!r}"
                     )
-                if write_capable:
-                    raise CapabilityPolicyError(
-                        f"profile {profile_id!r} write-capable profiles cannot "
-                        "grant skill_capabilities"
-                    )
+                # Source-verified V4 Skill methods may accompany a writable
+                # Codex App Server workspace.  This is not a tool, credential,
+                # network or sandbox grant: the existing sandbox/write checks,
+                # capability manifest and exact package digests still apply.
+                # Sealed worker surfaces and browser profiles remain rejected
+                # by their separate launch/admission fences.
                 if is_browser_profile:
                     raise CapabilityPolicyError(
                         f"profile {profile_id!r} browser profile cannot grant "
