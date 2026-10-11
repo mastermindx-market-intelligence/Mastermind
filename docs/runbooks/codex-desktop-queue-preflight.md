@@ -1,0 +1,88 @@
+# Read-only Codex desktop queue topology preflight
+
+This is a **diagnostic for the existing #515 / #1143 Codex native-session work**, not a new
+listener, an App Server client, a worker registry or a RuntimeBinding authority.
+It supplements [codex-queued-wake.md](codex-queued-wake.md), which remains the
+owner of the actual Wake reservation, queue-add, and read-only reconciliation.
+
+## Run on an approved macOS host
+
+Use an exact reviewed and installed Mastermind source revision, from its repo root:
+
+```sh
+python3 -B scripts/ohf/codex_desktop_queue_preflight.py
+```
+
+The command emits one bounded JSON record with schema
+`mastermind.codex_desktop_queue_preflight.v1`. It performs no API login,
+native App Server RPC, socket connection, account or thread discovery, queue
+insertion, turn start, session resume, database-content read, browser action,
+process restart or listener installation. It reads only process-parent
+metadata, owner-only socket metadata, selected process open-file identities
+and desktop app version metadata. It never returns PIDs, raw process arguments,
+paths, file names, conversation content, authentication material or transcript
+information. On non-macOS hosts it reports `UNSUPPORTED_OS`; it does not
+attempt compatibility by choosing another transport.
+
+`TOPOLOGY_CANDIDATE_ONLY` requires:
+- one directly desktop-owned Codex App Server rather than descendant helper
+  processes;
+- one current owned native Unix App Server socket with owner-only permissions;
+- exactly one managed App Server holding that socket;
+- at least one shared state-database file identity observed from live open
+  file metadata; and
+- a syntactically valid installed desktop app version.
+
+Every error, incomplete inspection, missing observation or ambiguity keeps
+the result `UNQUALIFIED`. This output is **not** an authorization token.
+A candidate cannot assert an eligible thread, supported account, matching
+desktop-bundled protocol, actual queue consumption, output correctness,
+completed provider turn, or original-parent result return. Those proof fields
+remain permanently `false` for this diagnostic.
+
+The bounded process scan is current-state metadata; it does not retain a
+snapshot registry. A socket can disappear after inspection, so the native
+host-owner/connection-generation admission is freshly rechecked by the actual
+writer immediately before any effect. Nothing in this command removes or
+replaces that check.
+
+## Required next real proof — separate admitted operation
+
+The existing #1143 integration owner selects one **disposable,
+non-sensitive ordinary desktop-owned Codex thread** and confirms its exact
+authenticated native RuntimeBinding, account, current writer, provider
+generation, original parent and current Wake reservation. Do not discover
+a random existing ChatGPT conversation by newest title, window or timestamp.
+Do not substitute a newly resumed CLI thread for the current GUI-owned writer.
+
+Only the admitted existing Codex Wake owner may submit a single fixed
+`thread/queue/add` through a qualified already-running App Server connection.
+Treat `clientUserMessageId` as a correlation value, not vendor-enforced
+idempotency. The desktop writer consumes the queued item at its permitted
+turn boundary. Record accepted enqueue, target consumption, turn start,
+completion, useful result, canonical result commitment and originating-parent
+consumption **as distinct observations**.
+
+Test busy/unloaded/archived targets, wrong account/thread, missing or changed
+native generation, concurrent human draft or action, host sleep/app close,
+provider error, authorization revocation, lost queue response, queue-item
+consumption before reconciliation, duplicate return and changed original
+parent. A missing queue item does not prove no effect: reconcile the same
+operation, never submit a second queue-add or switch writer/host/account.
+
+If a qualified provider-native reply producer is not installed and selected
+through its actual current owner, keep original-parent consumption unproven.
+The ongoing CODEX-02 NativeReplyWriter repair under #1143 is separately
+owned; do not create a parallel callback or install its unpublished patch.
+
+## Source verification
+
+```sh
+python3 -B -m pytest -q -p no:cacheprovider tests/test_codex_desktop_queue_preflight.py
+```
+
+Focused unit tests use synthetic process trees and disposable local Unix
+sockets; neither they nor `TOPOLOGY_CANDIDATE_ONLY` meet the real-path
+acceptance above. The script has no always-running daemon and adds no
+configuration state. This is a source-only qualification contribution until
+review, release and selection are independently proven.

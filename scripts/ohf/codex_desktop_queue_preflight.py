@@ -1,0 +1,282 @@
+"""Read-only, privacy-bounded topology evidence for a Codex desktop queue canary.
+
+This utility does not connect to App Server, discover threads, read databases,
+send queue messages, install listeners, reserve Wake, or grant Runtime authority.
+A candidate result means only that the selected local process/storage topology
+is consistent with a later *separately admitted* same-thread canary.
+"""
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+import plistlib
+import re
+import stat
+import subprocess
+from dataclasses import dataclass
+from typing import Any, Collection, Mapping, Sequence
+
+SCHEMA = "mastermind.codex_desktop_queue_preflight.v1"
+_PS_LINE = re.compile(r"^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.+?)\s*$")
+_CODEX_BINARY = re.compile(r"(?:^|[/\s])codex(?:\s|$)", re.I)
+_DESKTOP_APP_MARKERS = (
+    "/ChatGPT.app/Contents/MacOS/ChatGPT",
+    "/Codex.app/Contents/MacOS/Codex",
+)
+_MAX_PS_BYTES = 2 * 1024 * 1024
+_MAX_FD_BYTES = 512 * 1024
+_MAX_FD_TARGETS = 5
+
+
+@dataclass(frozen=True)
+class ProcessInfo:
+    pid: int
+    ppid: int
+    uid: int
+    command: str
+
+
+def parse_ps_rows(payload: str) -> list[ProcessInfo]:
+    """Parse only PID/PPID/UID/argv. Raw argv never enters a public receipt."""
+    result = []
+    for line in payload.splitlines():
+        match = _PS_LINE.fullmatch(line)
+        if match is None:
+            continue
+        pid, ppid, uid = (int(match.group(i)) for i in (1, 2, 3))
+        if not (pid > 0 and ppid >= 0 and uid >= 0):
+            continue
+        result.append(ProcessInfo(pid, ppid, uid, match.group(4)))
+    return result
+
+
+def _app_server(command: str) -> bool:
+    return bool(_CODEX_BINARY.search(command) and
+                re.search(r"(?:^|\s)app-server(?:\s|$)", command))
+
+
+def _managed_unix(command: str) -> bool:
+    return bool(
+        re.search(r"(?:^|\s)--listen(?:=|\s+)unix://", command)
+    )
+
+
+def _desktop_direct_parent(process: ProcessInfo, table: Mapping[int, ProcessInfo],
+                           owner_uid: int) -> bool:
+    """Only a directly desktop-owned engine is a candidate, not helper descendants."""
+    parent = table.get(process.ppid)
+    if not parent or parent.uid != owner_uid:
+        return False
+    # A pathname in an argument cannot impersonate the desktop executable.
+    executable = parent.command.split(maxsplit=1)[0]
+    return any(executable.endswith(marker) for marker in _DESKTOP_APP_MARKERS)
+
+
+def reduce_topology(
+    processes: Sequence[ProcessInfo], *, owner_uid: int,
+    socket_private: bool,
+    socket_owner_pids: Collection[int],
+    state_db_inodes: Mapping[int, set[tuple[int, int]] | None],
+    app_version: str | None,
+) -> dict[str, Any]:
+    """Conservatively classify process/socket/store evidence without any authority effect."""
+    reasons = []
+    table = {}
+    for process in processes:
+        if process.pid in table:
+            reasons.append("DUPLICATE_PROCESS_ID")
+        else:
+            table[process.pid] = process
+
+    source = [p for p in table.values()
+              if p.uid == owner_uid and _app_server(p.command)]
+    desktops = [p for p in source if _desktop_direct_parent(p, table, owner_uid)]
+    managed = [p for p in source if _managed_unix(p.command)]
+    active = [p for p in managed if p.pid in socket_owner_pids]
+
+    if not desktops:
+        reasons.append("DESKTOP_APP_SERVER_NOT_OBSERVED")
+    if (not isinstance(app_version, str) or
+            not re.fullmatch(r"[0-9]+(?:\.[0-9]+){1,4}", app_version)):
+        reasons.append("DESKTOP_VERSION_NOT_OBSERVED")
+    if not socket_private:
+        reasons.append("PRIVATE_SOCKET_NOT_VERIFIED")
+    if not active:
+        reasons.append("MANAGED_SOCKET_OWNER_NOT_VERIFIED")
+    if len(active) > 1:
+        reasons.append("MULTIPLE_MANAGED_SOCKET_OWNERS")
+    overlap = False
+    complete = bool(desktops and len(active) == 1)
+    if complete:
+        for process in (*desktops, *active):
+            if not isinstance(state_db_inodes.get(process.pid), set):
+                complete = False
+                break
+        if complete:
+            combined = state_db_inodes[active[0].pid]
+            overlap = any(bool(state_db_inodes[p.pid] & combined) for p in desktops)
+            if not overlap:
+                reasons.append("STATE_DATABASE_OVERLAP_NOT_OBSERVED")
+        else:
+            reasons.append("STATE_DATABASE_OBSERVATION_INCOMPLETE")
+
+    if reasons:
+        status = "UNQUALIFIED"
+    else:
+        status = "TOPOLOGY_CANDIDATE_ONLY"
+    safe_version = app_version if (
+        isinstance(app_version, str)
+        and re.fullmatch(r"[0-9]+(?:\.[0-9]+){1,4}", app_version)
+    ) else None
+    return {
+        "schema": SCHEMA,
+        "status": status,
+        "reasons": sorted(set(reasons)),
+        "proof": "READ_ONLY_METADATA",
+        "provider_effect": "NONE",
+        "app_version": safe_version,
+        "desktop_app_server_count": len(desktops),
+        "managed_socket_owner_count": len(active),
+        "private_socket_verified": socket_private,
+        "shared_state_database_observed": overlap,
+        "eligible_thread_proven": False,
+        "authorization_proven": False,
+        "native_delivery_proven": False,
+        "turn_completion_proven": False,
+        "original_parent_return_proven": False,
+    }
+
+
+def _run_fixed(args: list[str], byte_limit: int) -> str | None:
+    """Bound output and never print the raw command, paths, stderr or exceptions."""
+    try:
+        output = subprocess.run(
+            args, capture_output=True, timeout=6.0, check=False,
+        )
+        if output.returncode != 0 or len(output.stdout) > byte_limit:
+            return None
+        return output.stdout.decode("utf-8", errors="replace")
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return None
+
+
+def _lsof_paths(pid: int) -> list[str] | None:
+    text = _run_fixed(
+        ["/usr/sbin/lsof", "-n", "-p", str(pid), "-F", "n"], _MAX_FD_BYTES,
+    )
+    if text is None:
+        return None
+    return [line[1:] for line in text.splitlines()
+            if line.startswith("n/") and "\x00" not in line]
+
+
+def _state_db_ids(paths: list[str] | None) -> set[tuple[int, int]] | None:
+    if paths is None:
+        return None
+    result = set()
+    for name in paths:
+        leaf = Path(name).name.lower()
+        if not (leaf.startswith("state") and leaf.endswith((".sqlite", ".db", ".sqlite3"))):
+            continue
+        try:
+            item = os.stat(name)
+            if stat.S_ISREG(item.st_mode) and item.st_uid == os.getuid():
+                result.add((item.st_dev, item.st_ino))
+        except OSError:
+            continue
+    return result
+
+
+def _socket_metadata(path: Path) -> tuple[bool, str | None]:
+    """Follow an owner-local symlink, but qualify the resolved socket itself."""
+    try:
+        link = path.lstat()
+        if not (stat.S_ISLNK(link.st_mode) or stat.S_ISSOCK(link.st_mode)):
+            return False, None
+        if link.st_uid != os.getuid():
+            return False, None
+        resolved = str(path.resolve(strict=True))
+        info = os.stat(resolved)
+        if (not stat.S_ISSOCK(info.st_mode) or info.st_uid != os.getuid()
+                or stat.S_IMODE(info.st_mode) & 0o077):
+            return False, None
+        return True, resolved
+    except (OSError, RuntimeError):
+        return False, None
+
+
+def _app_version() -> str | None:
+    for app in ("/Applications/ChatGPT.app", "/Applications/Codex.app"):
+        try:
+            with (Path(app) / "Contents" / "Info.plist").open("rb") as file:
+                value = plistlib.load(file).get("CFBundleShortVersionString")
+            if isinstance(value, str):
+                return value
+        except (OSError, ValueError, TypeError, plistlib.InvalidFileException):
+            continue
+    return None
+
+
+def collect_local() -> dict[str, Any]:
+    """No sockets are opened and no provider/session/database content is read."""
+    if os.uname().sysname != "Darwin":
+        result = reduce_topology(
+            [], owner_uid=os.getuid(), socket_private=False,
+            socket_owner_pids=set(), state_db_inodes={}, app_version=None,
+        )
+        result["reasons"] = ["UNSUPPORTED_OS"]
+        return result
+    ps = _run_fixed(
+        ["/bin/ps", "-axo", "pid=,ppid=,uid=,command="], _MAX_PS_BYTES,
+    )
+    if ps is None:
+        result = reduce_topology(
+            [], owner_uid=os.getuid(), socket_private=False,
+            socket_owner_pids=set(), state_db_inodes={}, app_version=None,
+        )
+        result["reasons"] = ["PROCESS_QUERY_UNAVAILABLE"]
+        return result
+    processes = parse_ps_rows(ps)
+    owner_uid = os.getuid()
+    table = {p.pid: p for p in processes}
+    sources = [p for p in processes
+               if p.uid == owner_uid and _app_server(p.command)]
+    desktops = [p for p in sources
+                if _desktop_direct_parent(p, table, owner_uid)]
+    managed = [p for p in sources if _managed_unix(p.command)]
+    target = Path.home() / ".codex" / "app-server-control" / "app-server-control.sock"
+    private_socket, resolved = _socket_metadata(target)
+    ids: dict[int, set[tuple[int, int]] | None] = {}
+    socket_owners = set()
+    targets = sorted({p.pid for p in (*desktops, *managed)})
+    if len(targets) > _MAX_FD_TARGETS:
+        result = reduce_topology(
+            processes, owner_uid=owner_uid, socket_private=private_socket,
+            socket_owner_pids=set(), state_db_inodes={},
+            app_version=_app_version(),
+        )
+        result["status"] = "UNQUALIFIED"
+        result["reasons"] = ["FD_TARGET_BUDGET_EXCEEDED"]
+        return result
+    for pid in targets:
+        paths = _lsof_paths(pid)
+        ids[pid] = _state_db_ids(paths)
+        if resolved is not None and paths is not None and any(
+            os.path.realpath(name) == resolved for name in paths
+        ):
+            socket_owners.add(pid)
+    return reduce_topology(
+        processes, owner_uid=owner_uid, socket_private=private_socket,
+        socket_owner_pids=socket_owners, state_db_inodes=ids,
+        app_version=_app_version(),
+    )
+
+
+def main() -> int:
+    print(json.dumps(collect_local(), sort_keys=True, separators=(",", ":")))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
