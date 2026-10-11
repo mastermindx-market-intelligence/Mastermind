@@ -97,6 +97,8 @@ def reduce_topology(
 
     if not desktops:
         reasons.append("DESKTOP_APP_SERVER_NOT_OBSERVED")
+    if len(desktops) > 1:
+        reasons.append("MULTIPLE_DESKTOP_APP_SERVERS")
     if (not isinstance(app_version, str) or
             not re.fullmatch(r"[0-9]+(?:\.[0-9]+){1,4}", app_version)):
         reasons.append("DESKTOP_VERSION_NOT_OBSERVED")
@@ -208,16 +210,28 @@ def _socket_metadata(path: Path) -> tuple[bool, str | None]:
         return False, None
 
 
-def _app_version() -> str | None:
-    for app in ("/Applications/ChatGPT.app", "/Applications/Codex.app"):
-        try:
-            with (Path(app) / "Contents" / "Info.plist").open("rb") as file:
-                value = plistlib.load(file).get("CFBundleShortVersionString")
-            if isinstance(value, str):
-                return value
-        except (OSError, ValueError, TypeError, plistlib.InvalidFileException):
-            continue
-    return None
+def _app_version(
+    desktops: Sequence[ProcessInfo], table: Mapping[int, ProcessInfo],
+) -> str | None:
+    """Observe version from the *actual* desktop parent, not another installed app."""
+    if len(desktops) != 1:
+        return None
+    parent = table.get(desktops[0].ppid)
+    if parent is None:
+        return None
+    executable = parent.command.split(maxsplit=1)[0]
+    if not any(executable.endswith(marker) for marker in _DESKTOP_APP_MARKERS):
+        return None
+    app = next((path for path in Path(executable).parents
+                if path.suffix == ".app"), None)
+    if app is None:
+        return None
+    try:
+        with (app / "Contents" / "Info.plist").open("rb") as file:
+            value = plistlib.load(file).get("CFBundleShortVersionString")
+        return value if isinstance(value, str) else None
+    except (OSError, ValueError, TypeError, plistlib.InvalidFileException):
+        return None
 
 
 def collect_local() -> dict[str, Any]:
@@ -256,7 +270,7 @@ def collect_local() -> dict[str, Any]:
         result = reduce_topology(
             processes, owner_uid=owner_uid, socket_private=private_socket,
             socket_owner_pids=set(), state_db_inodes={},
-            app_version=_app_version(),
+            app_version=_app_version(desktops, table),
         )
         result["status"] = "UNQUALIFIED"
         result["reasons"] = ["FD_TARGET_BUDGET_EXCEEDED"]
@@ -271,7 +285,7 @@ def collect_local() -> dict[str, Any]:
     return reduce_topology(
         processes, owner_uid=owner_uid, socket_private=private_socket,
         socket_owner_pids=socket_owners, state_db_inodes=ids,
-        app_version=_app_version(),
+        app_version=_app_version(desktops, table),
     )
 
 

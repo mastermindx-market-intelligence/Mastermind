@@ -219,3 +219,33 @@ def test_read_only_collector_never_returns_untrusted_process_paths(monkeypatch):
     text = str(q.collect_local())
     assert "UNSUPPORTED_OS" in text
     assert "NO_SUCH_SECRET" not in text
+
+
+def test_multiple_direct_desktop_engines_cannot_claim_one_writer():
+    rows = _rows() + [
+        q.ProcessInfo(105, 101, 501, "/opt/homebrew/bin/codex app-server --listen stdio://"),
+    ]
+    out = _evaluate(rows=rows, inodes={
+        102: {(4, 15)}, 105: {(4, 15)}, 201: {(4, 15)},
+    })
+    assert out["status"] == "UNQUALIFIED"
+    assert "MULTIPLE_DESKTOP_APP_SERVERS" in out["reasons"]
+
+
+def test_app_version_is_selected_from_actual_desktop_parent(tmp_path):
+    import plistlib
+    app = tmp_path / "Codex.app"
+    (app / "Contents" / "MacOS").mkdir(parents=True)
+    with (app / "Contents" / "Info.plist").open("wb") as stream:
+        plistlib.dump({"CFBundleShortVersionString": "1.3.7"}, stream)
+    parent = q.ProcessInfo(101, 1, 501, str(app / "Contents" / "MacOS" / "Codex"))
+    worker = q.ProcessInfo(102, 101, 501, "/opt/homebrew/bin/codex app-server")
+    assert q._app_version([worker], {101: parent, 102: worker}) == "1.3.7"
+
+
+def test_other_installed_desktop_does_not_substitute_missing_selected_version(tmp_path):
+    app = tmp_path / "Codex.app"
+    (app / "Contents" / "MacOS").mkdir(parents=True)
+    parent = q.ProcessInfo(101, 1, 501, str(app / "Contents" / "MacOS" / "Codex"))
+    worker = q.ProcessInfo(102, 101, 501, "/opt/homebrew/bin/codex app-server")
+    assert q._app_version([worker], {101: parent, 102: worker}) is None

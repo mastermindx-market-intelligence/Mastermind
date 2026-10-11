@@ -25,13 +25,14 @@ information. On non-macOS hosts it reports `UNSUPPORTED_OS`; it does not
 attempt compatibility by choosing another transport.
 
 `TOPOLOGY_CANDIDATE_ONLY` requires:
-- one directly desktop-owned Codex App Server rather than descendant helper
-  processes;
+- exactly one directly desktop-owned Codex App Server rather than descendant
+  helper processes or competing direct writers;
 - one current owned native Unix App Server socket with owner-only permissions;
 - exactly one managed App Server holding that socket;
 - at least one shared state-database file identity observed from live open
   file metadata; and
-- a syntactically valid installed desktop app version.
+- a syntactically valid app version read from the bundle that actually owns
+  the observed desktop process, never from a different installed app.
 
 Every error, incomplete inspection, missing observation or ambiguity keeps
 the result `UNQUALIFIED`. This output is **not** an authorization token.
