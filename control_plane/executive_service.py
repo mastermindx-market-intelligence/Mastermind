@@ -2505,6 +2505,23 @@ class ExecutiveControlService:
             raise ValueError(
                 "configured COO alias must be a sealed, extension-free, write-capable worker"
             )
+        reviewed_docs_operator = (
+            operator_profile.profile_id
+            == "operator.appserver.readonly.docs-mcp.native-helper.v1"
+            and operator_profile.native_helper_policy.value
+            == "PARENT_READ_ONLY_CEILING"
+            and operator_profile.native_helper is not None
+            and operator_profile.mcp_servers == ("openai-developer-docs-v1",)
+        )
+        reviewed_native_return_operator = (
+            operator_profile.profile_id
+            == "operator.appserver.interactive.native-return.v1"
+            and operator_profile.native_helper_policy.value == "DISABLED"
+            and operator_profile.native_helper is None
+            and operator_profile.mcp_servers == ("native-return-mcp-v1",)
+            and not operator_profile.skill_grants
+            and not operator_profile.resource_grants
+        )
         if (
             not operator_alias.worker_eligible
             or operator_alias.adapter_id != "codex-cli"
@@ -2514,18 +2531,14 @@ class ExecutiveControlService:
             or operator_profile.sandbox_policy != "read-only"
             or operator_profile.approval_policy != "never"
             or operator_profile.network_policy != "disabled"
-            or operator_profile.native_helper_policy.value
-            != "PARENT_READ_ONLY_CEILING"
-            or operator_profile.native_helper is None
             or operator_profile.skills
-            or operator_profile.profile_id
-            != "operator.appserver.readonly.docs-mcp.native-helper.v1"
-            or operator_profile.mcp_servers != ("openai-developer-docs-v1",)
             or operator_profile.plugins
+            or not (reviewed_docs_operator or reviewed_native_return_operator)
         ):
             raise ValueError(
                 "configured COO operator alias must be read-only and use the "
-                "reviewed depth-one docs-MCP native-helper App Server profile"
+                "reviewed docs-MCP native-helper or closed native-return "
+                "App Server profile"
             )
         binding = {
             "eligible_quota_classes": sorted(
