@@ -69,7 +69,8 @@ start_one() {
     /bin/echo "service registration missing after start: $label (launchctl print exit $after_status)" >&2
     return 1
   fi
-  /bin/echo "$after_output" | /usr/bin/awk -v label="$label" '/state =/ {print "service=" label " " $0; exit}'
+  # Drain captured launchctl output: early exit can SIGPIPE echo under pipefail.
+  /bin/echo "$after_output" | /usr/bin/awk -v label="$label" '!found && /state =/ {print "service=" label " " $0; found=1}'
 }
 
 stop_one() {
@@ -167,16 +168,16 @@ agent_relay_disabled_state() {
   fi
   state="$(
     /bin/echo "$output" | /usr/bin/awk -v label="\"$AGENT_RELAY_LABEL\"" '
-      index($0, label) {
+      !found && index($0, label) {
         if ($0 ~ /=>[[:space:]]*(disabled|true)([[:space:]]|$)/) {
           print "disabled"
           found=1
-          exit
+          next
         }
         if ($0 ~ /=>[[:space:]]*(enabled|false)([[:space:]]|$)/) {
           print "enabled"
           found=1
-          exit
+          next
         }
         bad=1
       }
@@ -508,11 +509,12 @@ WORKER_OBSERVED_PID=""
 
 pid_from_output() {
   /bin/echo "$1" | /usr/bin/awk '
-    {
+    !found {
       for (i = 1; i <= NF - 2; i++) {
         if ($i == "pid" && $(i + 1) == "=" && $(i + 2) ~ /^[0-9]+$/) {
           print $(i + 2)
-          exit 0
+          found=1
+          break
         }
       }
     }

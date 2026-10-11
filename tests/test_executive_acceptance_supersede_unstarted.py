@@ -406,7 +406,8 @@ def test_acceptance_revalidates_full_selected_prestate_before_marker(tmp_path, m
         'schema_version': m.SCHEMA_SUPERSEDE, 'descriptor_sha256': m.digest(d)}
 
 
-def test_preparation_publishes_one_new_descriptor_without_modifying_selected(tmp_path, monkeypatch):
+@pytest.mark.parametrize('prejob', [False, True])
+def test_preparation_publishes_one_new_descriptor_without_modifying_selected(tmp_path, monkeypatch, prejob):
     import dataclasses
     from control_plane.executive_runtime import Runtime
     from ops.executive_os import autonomy_control as ac
@@ -461,15 +462,21 @@ def test_preparation_publishes_one_new_descriptor_without_modifying_selected(tmp
     for filename, value in [('descriptor.json', selected), ('preparing.json', {'schema_version': m.SCHEMA_V2}),
                             ('baseline.json', before), ('inventory.json', artifacts), ('prior-secret-canary.json', canary)]:
         m.write_sealed(bundle/filename, value, public=filename == 'descriptor.json')
+    if prejob:
+        from tests.test_executive_acceptance_supersede_prejob import receipt_prefix
+        receipt_prefix(runtime_root, selected, monkeypatch)
     originals = {p.name: p.read_bytes() for p in bundle.iterdir()}
     args = argparse.Namespace(predecessor_sha=accepted, successor_sha=successor, root_job_id=root.job_id,
         recovery_job_id=None, recovery_attempt_id=None, carry_terminal_dispatch=True,
-        supersede_unstarted_sha=selected_sha, superseded_descriptor_sha256=m.digest(selected))
+        supersede_unstarted_sha=None if prejob else selected_sha,
+        supersede_prejob_sha=selected_sha if prejob else None,
+        superseded_descriptor_sha256=m.digest(selected))
     result = m.prepare(args)
     d = m.descriptor_for(successor)
     assert result == m.bundle_path(successor)
-    assert d['schema_version'] == m.SCHEMA_SUPERSEDE
-    assert d['predecessor_sha'] == accepted and d['superseded_unstarted_sha'] == selected_sha
+    assert d['schema_version'] == (m.SCHEMA_PREJOB if prejob else m.SCHEMA_SUPERSEDE)
+    assert d['predecessor_sha'] == accepted
+    assert d['interrupted_prejob_sha' if prejob else 'superseded_unstarted_sha'] == selected_sha
     assert d['template_proof_job_id'] == proof.job_id and d['frozen_base_sha'] == 'a'*40
     assert {p.name: p.read_bytes() for p in bundle.iterdir()} == originals
     assert m.snapshot(runtime.store.path) == before
