@@ -192,15 +192,52 @@ class RuntimeSessionReturn:
             "message_sha256": _digest(message),
         }
 
+    def _native_commit_admission(self, event, events, *, connection=None):
+        """Recognize only the closed native admission bound to this request.
+
+        Its opaque reply hashes attest admission, not carrier success. Parent
+        recovery must not need a live native writer or a visible native reply.
+        """
+        command = _NATIVE_COMMIT_PREFIX + event.aggregate_id
+        indexed = self.runtime.store.get_event_by_command_id(command, connection=connection)
+        native = [item for item in events if item.event_type == _NATIVE_COMMIT_EVENT]
+        if not native and indexed is None:
+            return None
+        expected_key = "asd-native-reply-" + hashlib.sha256(
+            ("mastermind.session_bridge.native_reply.v1\n" + event.payload["operation_key"]).encode()
+        ).hexdigest()[:40]
+        if (len(native) != 1 or indexed is None or native[0].to_dict() != indexed.to_dict()
+                or indexed.actor != _ACTOR or indexed.command_id != command
+                or indexed.aggregate_type != event.aggregate_type
+                or indexed.aggregate_id != event.aggregate_id
+                or (indexed.job_id, indexed.attempt_id, indexed.worker_id) !=
+                   (event.job_id, event.attempt_id, event.worker_id)):
+            raise ValueError("native reply admission changed")
+        payload = indexed.payload
+        if (set(payload) != {"schema", "request_event_id", "request_event_sha256",
+                            "message_key", "fingerprint", "message_sha256", "binding_sha256"}
+                or payload["schema"] != "mastermind.session_bridge.native_reply_commit.v1"
+                or type(payload["request_event_id"]) is not int
+                or payload["request_event_id"] != event.event_id
+                or payload["request_event_sha256"] != _digest(event.to_dict())
+                or payload["message_key"] != expected_key
+                or any(type(payload[key]) is not str or _SHA.fullmatch(payload[key]) is None
+                       for key in ("fingerprint", "message_sha256", "binding_sha256"))):
+            raise ValueError("native reply admission payload changed")
+        return indexed
+
     def _commit_started(self, event, message, *, connection=None):
         """Validate the sole commit-start fact on the existing request aggregate."""
         events = self.runtime.store.list_events(
             aggregate_type="session_bridge_continue", aggregate_id=event.aggregate_id,
             connection=connection)
         others = [item for item in events if item.event_id != event.event_id]
+        native = self._native_commit_admission(event, others, connection=connection)
+        if native is not None:
+            others = [item for item in others if item.event_id != native.event_id]
         command = _COMMIT_PREFIX + event.aggregate_id
         indexed = self.runtime.store.get_event_by_command_id(command, connection=connection)
-        if not others and indexed is None:
+        if not others and indexed is None and native is None:
             return False
         if (len(others) != 1 or indexed is None or others[0].to_dict() != indexed.to_dict()
                 or indexed.event_type != _COMMIT_EVENT or indexed.actor != _ACTOR
@@ -209,6 +246,8 @@ class RuntimeSessionReturn:
                    (event.job_id, event.attempt_id, event.worker_id)
                 or indexed.payload != self._commit_payload(event, message)):
             raise ValueError("continuation commit fact changed")
+        if native is not None and native.event_id <= indexed.event_id:
+            raise ValueError("native admission precedes continuation commit")
         return True
 
     def begin_continuation_commit(self, principal, arguments, *,
