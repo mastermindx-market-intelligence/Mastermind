@@ -160,7 +160,7 @@ def test_repository_plugin_package_is_valid() -> None:
         "plugins": [
             {
                 "name": "mastermind-sol",
-                "version": "0.2.0",
+                "version": "0.2.1",
                 "manifest": "plugins/mastermind-sol/.codex-plugin/plugin.json",
                 "skills": list(SOL_SKILLS),
             },
@@ -654,7 +654,7 @@ def test_repository_documents_match_the_closed_contract() -> None:
         ],
     }
     for plugin, display_name, version, template_version in (
-        ("mastermind-sol", "Mastermind CEO", "0.2.0", "0.1.0"),
+        ("mastermind-sol", "Mastermind CEO", "0.2.1", "0.1.0"),
         ("mastermind-operator", "Mastermind Operator", "0.1.0", "0.1.0"),
     ):
         manifest = json.loads(
@@ -775,7 +775,7 @@ def test_personal_ceo_release_preserves_frozen_business_u1_generation_one() -> N
     from integrations.business_sol_installation import bindings as business_u1
 
     assert manifest["name"] == "mastermind-sol"
-    assert manifest["version"] == "0.2.0"
+    assert manifest["version"] == "0.2.1"
     assert manifest["interface"]["displayName"] == "Mastermind CEO"
 
     assert template["plugin"] == "mastermind-sol"

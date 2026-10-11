@@ -326,6 +326,16 @@ def _validate_row(profile_id: str, row: Any) -> Mapping[str, Any]:
     default = mapping.get("default_model_class")
     if default not in models:
         _raise(f"profile {profile_id!r} default model class is absent")
+    if default != "routine":
+        _raise(f"profile {profile_id!r} default model class must remain routine")
+    if "subagent" in models and "routine" in models:
+        routine_model = _model_identifier(models["routine"], f"{path}.models.routine")
+        subagent_model = _model_identifier(models["subagent"], f"{path}.models.subagent")
+        if subagent_model != routine_model:
+            _raise(
+                f"profile {profile_id!r} subagent topology cannot select a different model; "
+                "classify the bounded child difficulty before provider selection"
+            )
     _exact_bool(mapping.get("supported_tool_only"), f"{path}.supported_tool_only")
     if mapping.get("activation_gate") != _ACTIVATION_GATE:
         _raise(f"profile {profile_id!r} weakens activation gate")

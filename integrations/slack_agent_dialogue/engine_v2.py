@@ -699,6 +699,23 @@ class DialogueEngineV2:
             raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
         return bound
 
+    async def read_bound_parent(
+        self, *, context: DialogueContextV2, thread_ts: str
+    ) -> DiscoveredDialogueParent:
+        """Read the exact Relay-owned canonical parent without creating a thread."""
+        match = self._scan_parent(
+            await self._parent_history(), normalized_context=context.normalized()
+        )
+        if match is None:
+            raise DialogueEngineError("THREAD_BINDING_AMBIGUOUS")
+        transport, parent = match
+        if (
+            transport.ts != thread_ts
+            or transport.author_user_id != self.policy.relay_bot_user_id
+        ):
+            raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
+        return DiscoveredDialogueParent(thread_ts=transport.ts, parent=parent)
+
     @staticmethod
     def _ensure_flight_key(
         normalized: Mapping[str, Any],

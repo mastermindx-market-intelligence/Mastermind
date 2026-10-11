@@ -232,9 +232,9 @@ def test_installed_boot_packet_collector_refuses_live_macro_mutate_and_restore(
     code = tmp_path / "immutable-release"
     repo.mkdir(); macro.mkdir(); (code / "scripts").mkdir(parents=True)
     (repo / "README.md").write_text("source\n", encoding="utf-8")
-    record = macro / "agentos" / "record.md"
-    record.parent.mkdir()
-    record.write_text("original\n", encoding="utf-8")
+    record = macro / "agentos" / "workstreams" / "WS-TEST.md"
+    record.parent.mkdir(parents=True)
+    record.write_text("---\nkey: TEST\n---\noriginal\n", encoding="utf-8")
     for root in (repo, macro):
         subprocess.run(["git", "init", "-q", str(root)], check=True)
         subprocess.run(["git", "-C", str(root), "config", "user.email", "test@example.invalid"], check=True)

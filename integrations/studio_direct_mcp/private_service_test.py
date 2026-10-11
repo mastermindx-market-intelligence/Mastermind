@@ -188,6 +188,8 @@ def _stage_args(source, node, backend, account: str = "test-account", port: int 
         source=str(source),
         node=str(node),
         backend=str(backend),
+        enable_repository_workspaces=False,
+        os_commission_config_sha256=None,
     )
 
 
@@ -228,6 +230,7 @@ def _convert_to_legacy_install(roots: dict, *, typed_git: bool = False) -> dict:
     config = json.loads(roots["config"].read_text(encoding="utf-8"))
     config.pop("paperDesign", None)
     config.pop("fleetStatus", None)
+    config.pop("repositoryWorkspaces", None)
     if not typed_git:
         config.pop("gitPublish", None)
     roots["config"].write_text(json.dumps(config, indent=2, sort_keys=True), encoding="utf-8")
@@ -238,6 +241,7 @@ def _convert_to_legacy_install(roots: dict, *, typed_git: bool = False) -> dict:
     removed = ("fleet-status.mjs", "paper-design.mjs", "output-budget.mjs") if typed_git else (
         "fleet-status.mjs", "paper-design.mjs", "output-budget.mjs", "git-publish.mjs"
     )
+    removed = (*removed, "workspace-access.mjs", "commission-prepare.mjs", "commission-service.mjs")
     for name in removed:
         (roots["base"] / name).unlink()
         manifest["files"].pop(name)
@@ -266,6 +270,9 @@ class TestIdentity(unittest.TestCase):
                 "gateway.mjs",
                 "output-budget.mjs",
                 "git-publish.mjs",
+                "workspace-access.mjs",
+                "commission-prepare.mjs",
+                "commission-service.mjs",
                 "paper-design.mjs",
                 "fleet-status.mjs",
                 "private-tunnel-auth.mjs",
@@ -378,11 +385,11 @@ class TestIdentity(unittest.TestCase):
         self.assertEqual(svc.IDLE_TIMEOUT_MS, 1_800_000)
         self.assertEqual(svc.REQUEST_TIMEOUT_MS, 300_000)
 
-    def test_paper_runtime_pin_matches_reviewed_v4_generation(self):
-        self.assertEqual(svc.PAPER_RUNTIME_REL.name, "v4")
+    def test_paper_runtime_pin_matches_reviewed_v10_generation(self):
+        self.assertEqual(svc.PAPER_RUNTIME_REL.name, "v10")
         self.assertEqual(
             svc.PAPER_BRIDGE_SHA256,
-            paper_runtime_stage.REVIEWED_GENERATIONS["v4"]["bridge.py"],
+            paper_runtime_stage.REVIEWED_GENERATIONS["v10"]["bridge.py"],
         )
 
 

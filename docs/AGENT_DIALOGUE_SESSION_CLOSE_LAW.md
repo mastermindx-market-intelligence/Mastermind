@@ -80,6 +80,37 @@ The message must:
 4. tell the worker to re-arm its approved wait/watch path after its next nonterminal return;
 5. preserve any current source-law, authority, scope and stop conditions.
 
+### Bounded installed continuation canary
+
+For an already-authorized acceptance operation, the installed
+`ops/executive_os/autonomy-control.sh` owns
+`dialogue-canary-publish --expected-sha <installed-sha> --read-ref <session-reply-ref> --validity-seconds <1..900>`.
+The reference must come from the original authenticated parent's committed CONTINUE.
+The publisher derives the exact current source, worker, binding, process generation,
+policy and obligation from Runtime and canonical Relay reads; the operator cannot
+supply those facts. It uses the existing global `AUTONOMY_TRANSACTION` owner.
+
+Publication changes only `dialogue_wake_canary_activation` and its fixed root-owned
+`dialogue-wake-canary-publication-v1.json` receipt, preserving worker config and generic
+wake/arming flags. An omitted nullable field in an older config is equivalent to null.
+An unexpired grant cannot be replaced. Expired replacement archives both exact prior
+config and receipt, including receipt absence. The control service accepts the profile
+only when its installed release, live config digest and sealed publication receipt agree.
+The receipt's worker digest is archived publication evidence, not a live worker read;
+the effect guard separately rechecks the exact current Runtime tuple before delivery.
+
+After interrupted or unknown publication, use
+`dialogue-canary-reconcile --expected-sha <same-installed-sha>`. This restores only
+the owned known preimages through the same global transaction; it neither republishes
+nor retries a provider turn. Unknown third-party config/receipt changes retain the
+transaction for reconciliation. Ordinary autonomy disarm cannot adopt this transaction.
+
+A published grant, successful attention delivery, terminal ACK, correlated native
+`PROGRESS/message_reply`, original-parent read and next parent edge are separate
+evidence. This ceremony alone proves none of the latter steps. The canary expires
+without renewing itself; wider consultation, native intake and autonomous multiworker
+acceptance remain outside this bounded proof.
+
 ### 2.2 Terminal child-wave boundary
 
 Use a clear terminal edge such as:

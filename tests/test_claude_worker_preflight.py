@@ -98,6 +98,7 @@ def test_command_builder_allows_only_provider_work_free_observations(tmp_path: P
             "",
             "auth",
             "status",
+            "--json",
         )
         for forbidden in (
             "print",
@@ -203,6 +204,74 @@ def test_auth_status_fails_closed_on_unknown_wire_and_discards_pii():
     assert normalized.auth_ready is True
     assert "private@example.com" not in repr(normalized)
     assert "private-org" not in repr(normalized)
+
+
+def test_auth_status_accepts_current_orgid_orgname_as_discard_only_input():
+    module = _load()
+    normalized = module.normalize_auth_status(
+        {
+            "loggedIn": True,
+            "authMethod": "claude.ai",
+            "apiProvider": "firstParty",
+            "email": "private@example.com",
+            "organization": "private-org",
+            "orgId": "org-9f3a",
+            "orgName": "private-org-name",
+            "subscriptionType": "max",
+        }
+    )
+    assert normalized == module.AuthObservation(
+        auth_ready=True,
+        auth_method="claudeai",
+        api_provider="first_party",
+        reason_codes=(),
+    )
+    serialized = repr(normalized)
+    # orgId/orgName values are INPUT-only and must never reach the receipt.
+    assert "org-9f3a" not in serialized
+    assert "private-org-name" not in serialized
+    assert "private-org" not in serialized
+    assert "private@example.com" not in serialized
+
+
+def test_auth_status_still_refuses_secret_shaped_orgid_and_orgname():
+    module = _load()
+    bearer = "Bearer " + "x" * 24
+    with pytest.raises(module.PreflightError, match="AUTH_STATUS_UNSUPPORTED"):
+        module._parse_auth_status(
+            json.dumps(
+                {
+                    "loggedIn": True,
+                    "authMethod": "claude.ai",
+                    "apiProvider": "firstParty",
+                    "orgId": bearer,
+                }
+            )
+        )
+    with pytest.raises(module.PreflightError, match="AUTH_STATUS_UNSUPPORTED"):
+        module._parse_auth_status(
+            json.dumps(
+                {
+                    "loggedIn": True,
+                    "authMethod": "claude.ai",
+                    "apiProvider": "firstParty",
+                    "orgName": "ghp_" + "A" * 24,
+                }
+            )
+        )
+    # Unknown keys (including non-secret wire drift) still refused.
+    with pytest.raises(module.PreflightError, match="AUTH_STATUS_UNSUPPORTED"):
+        module._parse_auth_status(
+            json.dumps(
+                {
+                    "loggedIn": True,
+                    "authMethod": "claude.ai",
+                    "apiProvider": "firstParty",
+                    "unknownDiagnostic": True,
+                    "projectsDirectory": "/tmp",
+                }
+            )
+        )
 
 
 def test_auth_status_exit_one_is_logged_out_not_transport_failure(
@@ -737,7 +806,7 @@ def test_f1_settings_and_customizations_are_fenced_in_one_private_empty_cwd(
             "    stream.write(json.dumps(record, sort_keys=True) + '\\n')\n"
             "if '--version' in args:\n"
             "    print('2.1.259')\n"
-            "elif args[-2:] == ['auth', 'status']:\n"
+            "elif args[-3:] == ['auth', 'status', '--json']:\n"
             "    if effective_env or helper is not None:\n"
             "        print(json.dumps({'loggedIn': True, 'authMethod': 'api_key', 'apiProvider': 'other'}))\n"
             "    else:\n"
@@ -765,7 +834,7 @@ def test_f1_settings_and_customizations_are_fenced_in_one_private_empty_cwd(
     )
     assert [item["argv"] for item in observations] == [
         ["--safe-mode", "--setting-sources", "", "--version"],
-        ["--safe-mode", "--setting-sources", "", "auth", "status"],
+        ["--safe-mode", "--setting-sources", "", "auth", "status", "--json"],
     ]
     assert observations[0]["cwd"] == observations[1]["cwd"]
     assert Path(observations[0]["cwd"]) != project
@@ -1624,3 +1693,124 @@ def test_f5_auth_json_rejects_a_second_frame(
 
     with pytest.raises(module.PreflightError, match="^AUTH_STATUS_UNSUPPORTED$"):
         module.observe_auth(binary)
+
+
+def test_current_safe_mode_diagnostics_are_validated_and_discarded():
+    module = _load()
+    wire = {"loggedIn": True, "authMethod": "claude.ai", "apiProvider": "firstParty",
+            "orgId": "org-fixture", "orgName": "private-org", "analyticsDisabled": True,
+            "projectsDirectory": "/private-fixture/projects", "configDirectory": "/private-fixture/config"}
+    observation = module.normalize_auth_status(module._parse_auth_status(json.dumps(wire)))
+    assert observation.auth_ready
+    assert "private-fixture" not in repr(observation)
+    for key, value in [("analyticsDisabled", "true"), ("configDirectory", {"path": "/x"}),
+                       ("projectsDirectory", "Bearer " + "A" * 32)]:
+        with pytest.raises(module.PreflightError, match="AUTH_STATUS_UNSUPPORTED"):
+            module._parse_auth_status(json.dumps({**wire, key: value}))
+
+
+def test_native_auth_environment_uses_actual_principal_not_caller_identity():
+    import pwd
+    module = _load()
+    env = module._closed_child_environment({"USER": "wrong-account", "LOGNAME": "wrong-account"})
+    assert env["USER"] == env["LOGNAME"] == pwd.getpwuid(os.geteuid()).pw_name
+
+
+def _native_storage_fixture(tmp_path):
+    home = tmp_path.resolve() / "provider-home"
+    home.mkdir(mode=0o700)
+    config = home / ".claude"
+    config.mkdir(mode=0o700)
+    credential = config / ".credentials.json"
+    credential.write_text("DO-NOT-READ-CREDENTIAL-CONTENTS")
+    credential.chmod(0o600)
+    return home, config, credential
+
+
+def test_native_storage_observer_uses_only_metadata(tmp_path, monkeypatch):
+    module = _load()
+    home, config, credential = _native_storage_fixture(tmp_path)
+    real_open = module.os.open
+    def guarded_open(path, *args, **kwargs):
+        if ".credentials.json" in str(path):
+            metadata_flag = getattr(os, "O_EVTONLY", None) or getattr(os, "O_PATH", None)
+            assert args[0] & metadata_flag
+        return real_open(path, *args, **kwargs)
+    monkeypatch.setattr(module.os, "open", guarded_open)
+    assert module.observe_native_credential_storage(provider_home=home, config_dir=config,
+        expected_uid=os.geteuid()) == "NATIVE_PRIVATE_FILE"
+    credential.unlink()
+    assert module.observe_native_credential_storage(provider_home=home, config_dir=config,
+        expected_uid=os.geteuid()) == "UNKNOWN"
+
+
+@pytest.mark.parametrize("case", ["file_mode", "home_mode", "config_mode", "symlink",
+                                  "hardlink", "fifo", "wrong_uid", "config_symlink"])
+def test_native_storage_refuses_unsafe_custody(tmp_path, case):
+    module = _load()
+    home, config, credential = _native_storage_fixture(tmp_path)
+    uid = os.geteuid()
+    if case == "file_mode": credential.chmod(0o640)
+    elif case == "home_mode": home.chmod(0o750)
+    elif case == "config_mode": config.chmod(0o755)
+    elif case == "hardlink": os.link(credential, config / "second-link")
+    elif case == "wrong_uid": uid += 1
+    elif case == "config_symlink":
+        other = home / "moved"
+        config.rename(other)
+        config.symlink_to(other, target_is_directory=True)
+    else:
+        credential.unlink()
+        if case == "symlink": credential.symlink_to(config / "missing")
+        elif case == "fifo": os.mkfifo(credential, 0o600)
+    with pytest.raises(module.PreflightError, match="NATIVE_STORAGE_UNSAFE"):
+        module.observe_native_credential_storage(provider_home=home, config_dir=config, expected_uid=uid)
+
+
+@pytest.mark.parametrize("target", ["home", "config", "credential"])
+def test_native_storage_rejects_extended_acl(tmp_path, monkeypatch, target):
+    from control_plane import fs_security
+    module = _load()
+    home, config, credential = _native_storage_fixture(tmp_path)
+    rejected = {"home": home, "config": config, "credential": credential}[target]
+    monkeypatch.setattr(fs_security, "has_macos_acl", lambda path, **kwargs: Path(path) == rejected)
+    with pytest.raises(module.PreflightError, match="NATIVE_STORAGE_UNSAFE"):
+        module.observe_native_credential_storage(provider_home=home, config_dir=config, expected_uid=os.geteuid())
+
+
+def test_identity_owner_is_explicit_composition_and_absence_stays_closed():
+    module = _load()
+    calls = []
+    host, principal = "host-fixture01", "principal-fixture01"
+    with pytest.raises(module.PreflightError, match="HOST_IDENTITY_SEAM_UNAVAILABLE"):
+        module.require_current_identity_owner(host, principal)
+    module.require_current_identity_owner(host, principal,
+        identity_owner=lambda h, p: calls.append((h, p)))
+    assert calls == [(host, principal)]
+    for owner in (True, lambda h, p: True, lambda h, p: {"ready": True}):
+        with pytest.raises(module.PreflightError, match="PRINCIPAL_CONTEXT_MISMATCH"):
+            module.require_current_identity_owner(host, principal, identity_owner=owner)
+    def refusing_owner(h, p):
+        raise RuntimeError("private realm mismatch")
+    with pytest.raises(module.PreflightError, match="^PRINCIPAL_CONTEXT_MISMATCH$"):
+        module.require_current_identity_owner(host, principal, identity_owner=refusing_owner)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Darwin service-ancestor traversal")
+def test_native_storage_uses_search_only_directory_handles(tmp_path, monkeypatch):
+    module = _load()
+    home, config, credential = _native_storage_fixture(tmp_path)
+    real_open = module.os.open
+    observed = []
+    search_flag = getattr(os, "O_SEARCH", 0x40000000 | os.O_DIRECTORY)
+    def search_only_ancestor(path, flags, *args, **kwargs):
+        if flags & os.O_DIRECTORY:
+            # Simulate an ancestor granting search without directory-list access.
+            if flags & search_flag != search_flag:
+                raise PermissionError("ancestor is searchable, not readable")
+            observed.append(str(path))
+        return real_open(path, flags, *args, **kwargs)
+    monkeypatch.setattr(module.os, "open", search_only_ancestor)
+    assert module.observe_native_credential_storage(provider_home=home, config_dir=config,
+        expected_uid=os.geteuid()) == "NATIVE_PRIVATE_FILE"
+    assert observed[0] == "/" and observed[-1] == ".claude"

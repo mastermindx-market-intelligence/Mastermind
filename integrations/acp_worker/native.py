@@ -38,6 +38,7 @@ from control_plane.worker_execution_contract import (
 )
 from integrations.acp_worker.adapter import AcpProcessCompletion, AcpRunResources
 from integrations.acp_worker.turn import _nonfinite, _object_pairs
+from integrations.acp_worker.tool_admission import AcpAdmissionChannel, AcpNativeToolGate, FD_ENV
 
 _ENV_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,127}\Z")
 _PROFILE_ID = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}\Z")
@@ -63,6 +64,8 @@ class AcpNativeProfile:
     argv: tuple[str, ...]
     stdout_limit_bytes: int = _DEFAULT_STDOUT_LIMIT
     stderr_limit_bytes: int = _DEFAULT_STDERR_LIMIT
+    private_startup: bool = False
+    allowed_environment_keys: tuple[str, ...] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "argv", tuple(self.argv))
@@ -78,6 +81,21 @@ class AcpNativeProfile:
         for value in (self.stdout_limit_bytes, self.stderr_limit_bytes):
             if type(value) is not int or not 1024 <= value <= 64 * 1024 * 1024:
                 raise ValueError("ACP capture limit is outside reviewed bounds")
+        if type(self.private_startup) is not bool:
+            raise ValueError("ACP private startup must be a boolean")
+        keys = self.allowed_environment_keys
+        if self.private_startup != (keys is not None):
+            raise ValueError("ACP private startup requires a fixed environment ceiling")
+        if keys is not None:
+            if isinstance(keys, str):
+                raise ValueError("ACP environment ceiling must be a sequence of keys")
+            keys = tuple(keys)
+            if (len(keys) > 128
+                    or any(not isinstance(key, str) or _ENV_KEY.fullmatch(key) is None for key in keys)
+                    or len(set(keys)) != len(keys)
+                    or {"HOME", "TMPDIR", FD_ENV}.intersection(keys)):
+                raise ValueError("ACP environment ceiling is invalid or contains owner-reserved keys")
+            object.__setattr__(self, "allowed_environment_keys", keys)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -100,6 +118,7 @@ class _NativeRun:
     launch_attestation: Mapping[str, Any]
     finish_task: asyncio.Task[AcpProcessCompletion] | None = None
     finish_reason: str | None = None
+    admission_channel: AcpAdmissionChannel | None = None
 
 
 class AcpNativeProcessOwner:
@@ -111,9 +130,16 @@ class AcpNativeProcessOwner:
         *,
         environment_loader: EnvironmentLoader,
         inspector: ProcessInspector | None = None,
+        tool_gate: AcpNativeToolGate | None = None,
     ) -> None:
         if not callable(environment_loader):
             raise ValueError("ACP environment loader is required")
+        if tool_gate is not None:
+            if not isinstance(tool_gate, AcpNativeToolGate) or not profile.private_startup:
+                raise ValueError("ACP tool gate requires reviewed private startup")
+            if len(profile.argv) < 2 or profile.argv[1] not in {p for p, _ in tool_gate.artifacts}:
+                raise ValueError("ACP tool bootstrap is outside the fixed artifact closure")
+        self.tool_gate = tool_gate
         self.profile = profile
         self.environment_loader = environment_loader
         self.inspector = inspector or LocalProcessInspector()
@@ -149,6 +175,46 @@ class AcpNativeProcessOwner:
         if not isinstance(value, (dict, bool)):
             raise AcpNativeProcessError("ACP native result schema root is invalid")
         return value
+
+    def _startup(
+        self, run_dir: Path, workspace: Path, env: dict[str, str],
+    ) -> tuple[Path, Mapping[str, Any] | None]:
+        """Isolate startup configuration, not OS filesystem/network authority.
+
+        These directories belong to the existing run and cannot be supplied by
+        the Job or reused from a prior launch. The trusted profile owns the
+        loader-key ceiling; the native owner alone supplies HOME and TMPDIR.
+        """
+        if not self.profile.private_startup:
+            return workspace, None
+        if set(env).difference(self.profile.allowed_environment_keys or ()):
+            raise AcpNativeProcessError("ACP environment exceeds the fixed startup ceiling")
+        startup = run_dir / "startup"
+        home, scratch = startup / "home", startup / "tmp"
+        env["HOME"], env["TMPDIR"] = str(home), str(scratch)
+        # Owner-supplied values still count toward the existing final size and
+        # key ceilings. Validate before creating any startup artifacts.
+        self._environment(lambda: env)
+        try:
+            # Refuse an existing directory or symlink instead of inheriting
+            # configuration left by an earlier or foreign process.
+            for directory in (startup, home, scratch):
+                directory.mkdir(mode=0o700, exist_ok=False)
+        except OSError:
+            raise AcpNativeProcessError("ACP private startup directory is not fresh") from None
+        directories = {}
+        for name, directory in (("cwd", startup), ("home", home), ("tmp", scratch)):
+            info = directory.stat()
+            directories[name] = {
+                "path": str(directory), "device": info.st_dev, "inode": info.st_ino,
+                "uid": info.st_uid, "gid": info.st_gid, "mode": info.st_mode & 0o7777,
+            }
+        return startup, {
+            "schema_version": "mastermind.acp_private_startup/v1",
+            "directories": directories,
+            "allowed_loader_keys": sorted(self.profile.allowed_environment_keys or ()),
+            "os_sandbox_proven": False,
+        }
 
     def _identity_matches(self, ref: WorkerProcessRef) -> bool:
         try:
@@ -226,28 +292,42 @@ class AcpNativeProcessOwner:
         if spec.expected_worker_gid is not None and os.getegid() != int(spec.expected_worker_gid):
             raise AcpNativeProcessError("ACP native worker gid does not match admission")
         schema = self._schema(spec)
+        env = self._environment(self.environment_loader)
+        startup_cwd, startup_attestation = self._startup(run_dir, workspace, env)
         logs = run_dir / "logs"
         output = run_dir / "output"
-        logs.mkdir(mode=0o700, exist_ok=True)
-        output.mkdir(mode=0o700, exist_ok=True)
         stdout_path = logs / "acp-stdout.ndjson"
         stderr_path = logs / "acp-stderr.log"
         result_path = output / "result.json"
-        stdout_fd = _create_private_file(stdout_path)
-        stderr_fd = _create_private_file(stderr_path)
-        result_fd = _create_private_file(result_path)
-        os.close(result_fd)
-        env = self._environment(self.environment_loader)
+        stdout_fd: int | None = None
+        stderr_fd: int | None = None
         process: asyncio.subprocess.Process | None = None
+        admission_channel: AcpAdmissionChannel | None = None
         try:
+            logs.mkdir(mode=0o700, exist_ok=True)
+            output.mkdir(mode=0o700, exist_ok=True)
+            stdout_fd = _create_private_file(stdout_path)
+            stderr_fd = _create_private_file(stderr_path)
+            result_fd = _create_private_file(result_path)
+            os.close(result_fd)
+            pass_fds: tuple[int, ...] = ()
+            if FD_ENV in env:
+                raise AcpNativeProcessError("ACP attestation descriptor is owner-reserved")
+            if self.tool_gate is not None:
+                self.tool_gate.verify_artifacts()
+                admission_channel = AcpAdmissionChannel(self.tool_gate)
+                pass_fds = (admission_channel.child.fileno(),)
+                env[FD_ENV] = str(pass_fds[0])
+                env = self._environment(lambda: env)
             process = await asyncio.create_subprocess_exec(
                 *self.profile.argv,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                cwd=str(workspace),
+                cwd=str(startup_cwd),
                 env=env,
                 start_new_session=True,
+                pass_fds=pass_fds,
                 limit=_PIPE_LIMIT,
             )
             if process.stdin is None or process.stdout is None or process.stderr is None:
@@ -282,6 +362,8 @@ class AcpNativeProcessOwner:
                 raise AcpNativeProcessError("ACP child effective uid does not match admission")
             if spec.expected_worker_gid is not None and ref.effective_gid != int(spec.expected_worker_gid):
                 raise AcpNativeProcessError("ACP child effective gid does not match admission")
+            if admission_channel is not None:
+                await admission_channel.start(spec, ref, self._identity_matches)
             proxy = asyncio.StreamReader(limit=_PIPE_LIMIT)
             stdout_task = asyncio.create_task(
                 self._pump(process.stdout, proxy, stdout_fd, self.profile.stdout_limit_bytes)
@@ -311,11 +393,18 @@ class AcpNativeProcessOwner:
                     "effective_gid": ref.effective_gid,
                 },
             }
+            if startup_attestation is not None:
+                attestation["private_startup"] = startup_attestation
             run = _NativeRun(spec, process, ref, process.stdin, proxy, wait_task,
-                             stdout_task, stderr_task, attestation)
+                             stdout_task, stderr_task, attestation, admission_channel=admission_channel)
             self._runs[spec.run_id] = run
             self._active = spec.run_id
         except BaseException:
+            if admission_channel is not None:
+                try:
+                    await asyncio.wait_for(admission_channel.close(), timeout=1)
+                except Exception:
+                    admission_channel.close_unstarted()
             if process is not None and process.returncode is None:
                 try:
                     os.killpg(process.pid, signal.SIGKILL)
@@ -326,6 +415,8 @@ class AcpNativeProcessOwner:
                 except Exception:
                     pass
             for fd in (stdout_fd, stderr_fd):
+                if fd is None:
+                    continue
                 try:
                     os.close(fd)
                 except OSError:
@@ -335,7 +426,8 @@ class AcpNativeProcessOwner:
         async def finish(reason: str | None) -> AcpProcessCompletion:
             return await self._finish(run, reason)
 
-        return AcpRunResources(ref, process.stdin, proxy, attestation, schema, finish)
+        return AcpRunResources(ref, process.stdin, proxy, attestation, schema, finish,
+                               admission_channel.prepare_prompt if admission_channel is not None else None)
 
     async def _finish(self, run: _NativeRun, reason: str | None) -> AcpProcessCompletion:
         normalized = reason.strip() if isinstance(reason, str) else None
@@ -365,6 +457,13 @@ class AcpNativeProcessOwner:
                 close_task.cancel()
         except Exception:
             writer_settled = False
+        admission_settled = True
+        if run.admission_channel is not None:
+            try:
+                await asyncio.wait_for(run.admission_channel.close(),
+                                       timeout=max(0.001, min(0.5, deadline - loop.time())))
+            except Exception:
+                admission_settled = False
 
         if not run.wait_task.done():
             done, _ = await asyncio.wait({run.wait_task}, timeout=max(0.0, min(0.25, deadline - loop.time())))
@@ -393,7 +492,7 @@ class AcpNativeProcessOwner:
         process_done = run.wait_task.done() and run.process.returncode is not None
         captures_done = stdout is not None and stderr is not None
         settled = bool(
-            process_done and captures_done and writer_settled
+            process_done and captures_done and writer_settled and admission_settled
             and not stdout.overflow and not stderr.overflow
         )
         finished_at = _utc_now()

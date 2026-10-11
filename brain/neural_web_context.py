@@ -6,7 +6,7 @@ Never imports Macro engine modules.
 
 PUBLIC API
 ----------
-* context()            — cached-per-process full artifact dict; {} when absent/stale/invalid.
+* context()            — full artifact cached by source identity; {} when absent/stale/invalid.
 * candidate(ticker)    — per-ticker advisory context dict; {} when not present.
 * market_plane()       — compact dict for the neural_web market_view plane.
 * seat_prompt_block(tickers, max_chars=1200) — compact text for prompt injection (NO cortex prose).
@@ -29,9 +29,11 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
+from threading import RLock
 from typing import Any
+from zoneinfo import ZoneInfo
 
 log = logging.getLogger(__name__)
 
@@ -81,13 +83,17 @@ _DECISION_MODE_DEFAULT = "shrink"
 # --------------------------------------------------------------------------- #
 _CACHE: dict[str, Any] | None = None   # None = not yet loaded; {} = empty/absent
 _CACHE_LOADED: bool = False
+_CACHE_SIGNATURE: tuple[int, int, int, int] | None = None
+_CACHE_LOCK = RLock()
 
 
 def _reset_context_cache() -> None:
     """Invalidate the per-process cache.  Tests MUST call this around fixtures."""
-    global _CACHE, _CACHE_LOADED
-    _CACHE = None
-    _CACHE_LOADED = False
+    global _CACHE, _CACHE_LOADED, _CACHE_SIGNATURE
+    with _CACHE_LOCK:
+        _CACHE = None
+        _CACHE_LOADED = False
+        _CACHE_SIGNATURE = None
 
 
 # --------------------------------------------------------------------------- #
@@ -195,7 +201,7 @@ def decision_signals(ticker: str) -> dict[str, Any]:
             return _inert_signals(mode)
 
         c = context()
-        row = candidate(ticker)
+        row = candidate(ticker, ctx=c)
         # per-name inert: absent row, or a name not cleared by the FDR batch.
         kernel = row.get("kernel") if isinstance(row, dict) else None
         reliability_fresh = not lobe_freshness("reliability", c).get("stale", True)
@@ -230,13 +236,13 @@ def decision_signals(ticker: str) -> dict[str, Any]:
 
             # --- clean_in_conflicted (available at candidacy+) --- #
             try:
-                contradictions = int((market_plane() or {}).get("contradiction_count") or 0)
+                contradictions = int((market_plane(ctx=c) or {}).get("contradiction_count") or 0)
             except Exception:  # noqa: BLE001
                 contradictions = 0
             signals["clean_in_conflicted"] = (
                 conflicts == 0
                 and contradictions_fresh
-                and not (market_plane() or {}).get("stale", True)
+                and not (market_plane(ctx=c) or {}).get("stale", True)
                 and contradictions >= NW_CONTRADICTIONS_MIN
             )
 
@@ -322,6 +328,255 @@ def lobe_freshness(name: str, ctx: dict[str, Any] | None = None) -> dict[str, An
             "stale": True,
             "source": "error",
         }
+# The Risk Envelope is a native descriptive projection, never another decision
+# plane. These fields keep source clocks and overlap disclosures together.
+_RISK_SCHEMA = "mastermind.risk_envelope/v1"
+_RISK_TIMEZONE = ZoneInfo("America/New_York")
+_RISK_FIELDS = (
+    "schema", "definition_id", "market", "revision", "bundle_id", "source_session",
+    "as_of", "observed_at", "produced_at", "stale_after", "measured_state",
+    "hazard_summary", "policy_summary", "data_state", "authority", "coverage",
+    "freshness", "coherence", "rotation_context", "confluence", "market_transition",
+)
+_RISK_AUTHORITY_FLAGS = (
+    "envelope_may_rank", "envelope_may_gate",
+    "envelope_may_size", "envelope_may_execute",
+)
+_ROTATION_LABELS = {
+    "DEFENSIVE_RELATIVE_STRENGTH": "Defensive relative strength",
+    "BROADENING": "Broader-market proxies gaining relative strength",
+    "MIXED_ROTATION": "Defensive groups and broader-market proxies gaining relative strength",
+    "NO_EARLY_SHIFT": "No early relative shift observed",
+}
+
+
+def _risk_date(value: Any) -> date | None:
+    try:
+        parsed = date.fromisoformat(value) if isinstance(value, str) else None
+        return parsed if parsed and parsed.isoformat() == value else None
+    except ValueError:
+        return None
+
+
+def _risk_timestamp(value: Any) -> datetime | None:
+    try:
+        stamp = datetime.fromisoformat(value.replace("Z", "+00:00")) if isinstance(value, str) else None
+        return stamp.astimezone(timezone.utc) if stamp and stamp.tzinfo is not None else None
+    except (ValueError, OverflowError):
+        return None
+
+
+def _risk_envelope_context(
+    raw: Any, asof: Any, *, now: datetime | None = None,
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    # Optional context failures must never erase independent legacy market data
+    # or change typed decision eligibility.
+    try:
+        return _qualify_risk_envelope_context(raw, asof, now=now)
+    except Exception as exc:  # noqa: BLE001 — isolate this optional projection
+        log.debug("neural_web_context: invalid optional risk context (%s)", type(exc).__name__)
+        return None, {"qualified": False, "reasons": ["invalid_envelope"], "context_exclusions": {}}
+
+
+def _qualify_risk_envelope_context(
+    raw: Any, asof: Any, *, now: datetime | None = None,
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    """Qualify the inner source on EVERY call, including a cached outer bridge.
+
+    A fresh wrapper cannot refresh an old observation. Optional off-session
+    context does not invalidate independently qualified measured/hazard data.
+    No scores, votes, posture, caps or confidence are derived here.
+    """
+    status: dict[str, Any] = {"qualified": False, "reasons": [], "context_exclusions": {}}
+    if not isinstance(raw, dict) or not raw:
+        status["reasons"] = ["missing_envelope"]
+        return None, status
+    now = now or datetime.now(timezone.utc)
+    reasons: list[str] = []
+    session = raw.get("source_session")
+    session_date = _risk_date(session)
+    status["source_session"] = session if session_date else None
+    for key in ("observed_at", "produced_at", "stale_after"):
+        status[key] = raw.get(key) if _risk_timestamp(raw.get(key)) else None
+    if raw.get("schema") != _RISK_SCHEMA:
+        reasons.append("invalid_schema")
+    if not session_date or not 0 <= (now.astimezone(_RISK_TIMEZONE).date() - session_date).days <= _STALE_DAYS:
+        reasons.append("invalid_future_or_expired_session")
+    if not _risk_date(asof) or session != asof or raw.get("as_of") != session:
+        reasons.append("source_session_mismatch")
+    if raw.get("revision") not in ("settled", "corrected", "live_provisional"):
+        reasons.append("invalid_revision")
+    if raw.get("data_state") not in ("FRESH", "PARTIAL", "DEGRADED"):
+        reasons.append("unusable_data_state")
+    if not isinstance(raw.get("bundle_id"), str) or not raw["bundle_id"]:
+        reasons.append("missing_bundle_id")
+    for key in ("measured_state", "hazard_summary", "policy_summary"):
+        if not isinstance(raw.get(key), dict):
+            reasons.append("invalid_" + key)
+    authority = raw.get("authority")
+    if (not isinstance(authority, dict)
+            or any(authority.get(key) is not False for key in _RISK_AUTHORITY_FLAGS)
+            or authority.get("policy_actions_require_individual_authority") is not True):
+        reasons.append("unqualified_authority")
+    for key in ("hazard_summary", "policy_summary"):
+        block = raw.get(key)
+        if isinstance(block, dict) and block.get("display_only") is not True:
+            reasons.append("invalid_" + key + "_authority")
+    observed, produced = (_risk_timestamp(raw.get(key)) for key in ("observed_at", "produced_at"))
+    for key, stamp in (("observed_at", observed), ("produced_at", produced)):
+        if stamp is None:
+            reasons.append("missing_or_invalid_" + key)
+        elif stamp > now:
+            reasons.append("future_" + key)
+    if observed and produced and observed > produced:
+        reasons.append("incoherent_publication_clocks")
+    if observed and session_date and observed.astimezone(_RISK_TIMEZONE).date() < session_date:
+        reasons.append("observation_before_source_session")
+    expires = _risk_timestamp(raw.get("stale_after"))
+    if raw.get("stale_after") is not None and (expires is None or expires <= now or (produced and expires < produced)):
+        reasons.append("invalid_or_expired_envelope")
+    if raw.get("revision") == "live_provisional" and expires is None:
+        reasons.append("missing_live_expiry")
+    measured = raw.get("measured_state") or {}
+    if isinstance(measured, dict) and measured.get("usable") is True:
+        if measured.get("as_of") != session:
+            reasons.append("measured_session_mismatch")
+        if measured.get("verdict") not in ("RISK_ON", "MIXED", "RISK_OFF"):
+            reasons.append("invalid_measured_verdict")
+    freshness = raw.get("freshness") or {}
+    if not isinstance(freshness, dict):
+        reasons.append("invalid_freshness")
+    else:
+        if freshness.get("source_session") not in (None, session):
+            reasons.append("freshness_session_mismatch")
+        if freshness.get("stale") is True:
+            reasons.append("owner_stale")
+    if raw.get("stale") is True:
+        reasons.append("owner_stale")
+    confluence = raw.get("confluence")
+    if isinstance(confluence, dict) and any(confluence.get(key) is not False for key in (
+        "statistical_independence_established", "changes_hazard_stage", "changes_policy",
+    )):
+        reasons.append("invalid_confluence_authority")
+
+    # Whitelist and detach: neither raw Cortex/provenance prose nor mutations of a
+    # caller's returned view can enter/change the canonical process cache.
+    envelope = {key: raw[key] for key in _RISK_FIELDS if key in raw}
+    try:
+        encoded = json.dumps(envelope, allow_nan=False, separators=(",", ":"))
+        if len(encoded.encode("utf-8")) > 32768:
+            reasons.append("context_size_limit")
+        envelope = json.loads(encoded)
+    except (ValueError, TypeError):
+        reasons.append("invalid_json_values")
+    if reasons:
+        status["reasons"] = sorted(set(reasons))
+        return None, status
+
+    excluded: dict[str, str] = status["context_exclusions"]
+    for key in ("rotation_context", "confluence", "market_transition"):
+        value = envelope.get(key)
+        if value is not None and (not isinstance(value, dict) or value.get("display_only") is not True):
+            excluded[key] = "invalid_descriptive_context"
+            envelope[key] = None
+    rotation = envelope.get("rotation_context")
+    if isinstance(rotation, dict) and rotation.get("usable") is True:
+        early = rotation.get("early_context")
+        if (rotation.get("as_of") != session or not isinstance(early, dict)
+                or early.get("as_of") != session or early.get("display_only") is not True
+                or early.get("prior_loser_constituent_claim") is not False
+                or not isinstance(rotation.get("state"), str)
+                or rotation.get("state") not in _ROTATION_LABELS
+                or early.get("state") != rotation.get("state")):
+            excluded["rotation_context"] = "rotation_source_session_mismatch"
+            envelope["rotation_context"] = None
+    confluence = envelope.get("confluence")
+    if isinstance(confluence, dict):
+        rotation = envelope.get("rotation_context")
+        expected_rotation = rotation.get("state") if isinstance(rotation, dict) and rotation.get("usable") is True else None
+        expected_backdrop = measured.get("verdict") if measured.get("usable") is True else None
+        if confluence.get("rotation_state") != expected_rotation or confluence.get("measured_backdrop") != expected_backdrop:
+            excluded["confluence"] = "source_context_unavailable_or_mismatched"
+            envelope["confluence"] = None
+        elif ((confluence.get("lineage_status") != "COMPLETE" or confluence.get("unknown_lineage_sources"))
+                and confluence.get("nonredundant_component_count") is not None):
+            excluded["confluence"] = "incomplete_lineage_count"
+            envelope["confluence"] = None
+    transition = envelope.get("market_transition")
+    if isinstance(transition, dict):
+        records = [transition.get(key) for key in ("latest_recorded", "previous_recorded", "current_snapshot")]
+        for key in ("latest_comparison", "latest_recorded_change"):
+            comparison = transition.get(key)
+            if isinstance(comparison, dict):
+                records.extend((comparison.get("before"), comparison.get("after")))
+        invalid_records = False
+        for record in records:
+            if record is None:
+                continue
+            if not isinstance(record, dict):
+                invalid_records = True
+                break
+            dates = [_risk_date(record[key]) for key in ("asof", "as_of", "source_session", "session_date")
+                     if record.get(key) is not None]
+            clocks = [_risk_timestamp(record[key]) for key in (
+                "logged_at", "observed_at", "produced_at", "available_at",
+                "generated_at", "generated_utc", "updated_at", "timestamp", "ts",
+            ) if record.get(key) is not None]
+            # Every recognized present alias must agree with the source session
+            # and precede this envelope publication. Missing clocks stay unknown.
+            if (not dates or any(stamp is None or stamp > session_date for stamp in dates)
+                    or len(set(dates)) != 1
+                    or any(stamp is None or stamp > produced for stamp in clocks)):
+                invalid_records = True
+                break
+        if (transition.get("source_session") != session
+                or transition.get("basis") != "market_state_forward_log_first_writer"
+                or invalid_records):
+            excluded["market_transition"] = "invalid_transition_source_or_record"
+            envelope["market_transition"] = None
+    # freshness.all_on_session includes optional sources and is disclosure only.
+    status["qualified"] = True
+    return envelope, status
+
+
+def _risk_token(value: Any) -> str:
+    """Closed scalar copy for prompts; no arbitrary owner prose."""
+    return value if isinstance(value, str) and 0 < len(value) <= 64 and all(
+        ch.isupper() or ch.isdigit() or ch == "_" for ch in value
+    ) else "unavailable"
+
+
+def _risk_prompt_lines(envelope: dict[str, Any] | None, status: dict[str, Any]) -> list[str]:
+    if envelope is None:
+        return ["Risk/rotation context unavailable: " + ",".join(status.get("reasons") or ["unknown"])]
+    measured = envelope.get("measured_state") or {}
+    hazard = envelope.get("hazard_summary") or {}
+    policy = envelope.get("policy_summary") or {}
+    state = _risk_token(measured.get("verdict")) if measured.get("usable") is True else "unavailable"
+    lines = [
+        "Risk context is descriptive: no extra evidence vote or sizing authority; overlap is not independent confirmation.",
+        f"Backdrop: {state} asof={envelope.get('source_session')}; hazard={_risk_token(hazard.get('stage'))}; native policy={_risk_token(policy.get('posture'))}; data={_risk_token(envelope.get('data_state'))}.",
+    ]
+    rotation = envelope.get("rotation_context") or {}
+    rotation_label = _ROTATION_LABELS.get(rotation.get("state"), "unavailable") if rotation.get("usable") is True and isinstance(rotation.get("state"), str) else "unavailable"
+    lines.append(f"Early rotation: {rotation_label}; asof={rotation.get('as_of') if _risk_date(rotation.get('as_of')) else 'unknown'}. Relative prices do not establish fund flows.")
+    confluence = envelope.get("confluence") or {}
+    # Never present an incomplete dependency inventory as an independent vote count.
+    lineage = _risk_token(confluence.get("lineage_status"))
+    lines.append(f"Confluence lineage={lineage}; statistical independence is not established.")
+    transition = envelope.get("market_transition") or {}
+    change = transition.get("latest_recorded_change")
+    if isinstance(change, dict) and change.get("verdict_changed") is True:
+        before, after = change.get("before") or {}, change.get("after") or {}
+        if isinstance(before, dict) and isinstance(after, dict) and _risk_date(before.get("asof")) and _risk_date(after.get("asof")):
+            lines.append(f"Last recorded change: {_risk_token(before.get('verdict'))} {before['asof']} -> {_risk_token(after.get('verdict'))} {after['asof']} (first-writer record; cause not inferred).")
+        else:
+            lines.append("Recorded market transition unavailable.")
+    else:
+        lines.append("Recorded market transition unavailable." if not transition else "No recorded verdict change supplied.")
+    return lines
+
+
 def _load_raw() -> dict[str, Any] | None:
     """Read and JSON-parse the artifact.  Returns None on any IO/parse error."""
     try:
@@ -358,18 +613,42 @@ def _validate(raw: Any) -> tuple[bool, str]:
 # public API
 # --------------------------------------------------------------------------- #
 
-def context() -> dict[str, Any]:
-    """Return the cached artifact dict.  {} when absent / malformed / stale / wrong-schema.
+def _artifact_identity() -> tuple[int, int, int, int] | None:
+    """File metadata invalidates cached bytes; it never establishes market freshness."""
+    try:
+        info = _ARTIFACT_PATH.stat()
+        return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns
+    except OSError:
+        return None
 
-    Result is cached for the lifetime of the process.  Call _reset_context_cache() to force
-    a fresh read (tests, intraday refresh).
+
+def context() -> dict[str, Any]:
+    """Read the existing source cache with a coherent identity/value pair."""
+    with _CACHE_LOCK:
+        return _context_locked()
+
+
+def _context_locked() -> dict[str, Any]:
+    """Return cached source bytes while source identity and source age remain valid.
+
+    Atomic replacement is visible to long-running consumers without a restart.
+    Missing/malformed/stale data remains empty; mtime never supplies evidence age.
     """
-    global _CACHE, _CACHE_LOADED
-    if _CACHE_LOADED:
+    global _CACHE, _CACHE_LOADED, _CACHE_SIGNATURE
+    identity = _artifact_identity()
+    if _CACHE_LOADED and identity == _CACHE_SIGNATURE:
+        if _CACHE and not _validate(_CACHE)[0]:
+            _CACHE = {}
         return _CACHE or {}
     _CACHE_LOADED = True
+    _CACHE_SIGNATURE = identity
     try:
         raw = _load_raw()
+        if _artifact_identity() != identity:
+            # The source changed during the read. Abstain for this call and let
+            # the next caller read one coherent replacement; never retry writes.
+            _reset_context_cache()
+            return {}
         if raw is None:
             _CACHE = {}
             return {}
@@ -386,10 +665,10 @@ def context() -> dict[str, Any]:
         return {}
 
 
-def candidate(ticker: str) -> dict[str, Any]:
-    """Return per-ticker advisory context dict; {} when not present or context absent."""
+def candidate(ticker: str, *, ctx: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Return advisory context; optional ctx binds reads to an already captured source."""
     try:
-        c = context()
+        c = context() if ctx is None else ctx
         if not c:
             return {}
         cc = c.get("candidate_context")
@@ -401,18 +680,20 @@ def candidate(ticker: str) -> dict[str, Any]:
         return {}
 
 
-def market_plane() -> dict[str, Any]:
+def market_plane(*, ctx: dict[str, Any] | None = None) -> dict[str, Any]:
     """Return a compact dict for the neural_web market_view plane.
 
-    Shape: {verdict, regime, vol, breadth, liquidity, contradiction_count, asof, stale}
+    Shape: {verdict, regime, vol, breadth, liquidity, contradiction_count, asof, stale,
+            risk_envelope, risk_envelope_status}. Risk context is descriptive only.
     Returns an empty-stale dict if context is absent/stale.
 
     ``liquidity`` is distilled fail-soft from the market lobe's liquidity_plumbing block:
     {state, netliq_bn, tga_bn, tga_impulse} — every field None (tga_impulse None, not {})
     when the plumbing block is absent, so the shape is stable for pass-through consumers.
+    Optional ctx keeps a decision on the same already captured source generation.
     """
     try:
-        c = context()
+        c = context() if ctx is None else ctx
         if not c:
             return {"stale": True, "asof": None}
         lobes = c.get("lobes") or {}
@@ -428,6 +709,9 @@ def market_plane() -> dict[str, Any]:
                 "lobe_freshness": market_health,
             }
 
+        risk_envelope, risk_status = _risk_envelope_context(
+            market.get("risk_envelope"), market_health.get("asof"),
+        )
         verdict_raw = market.get("verdict") or {}
         regime_raw = market.get("regime") or {}
         vol_raw = market.get("vol") or {}
@@ -482,6 +766,8 @@ def market_plane() -> dict[str, Any]:
             "liquidity": liquidity,
             "contradiction_count": contr_count,
             "contradiction_summary": contr_summary,
+            "risk_envelope": risk_envelope,
+            "risk_envelope_status": risk_status,
             "asof": asof,
             "stale": stale,
             "lobe_freshness": market_health,
@@ -494,7 +780,8 @@ def seat_prompt_block(tickers: list[str], max_chars: int = 1200) -> str:
     """Return compact text lines suitable for prompt injection (bounded to max_chars).
 
     STRUCTURAL EXCLUSION: cortex memo text is NEVER included — this function reads
-    only candidate_context rows and market-level regime/vol/breadth fields.
+    only candidate_context rows, market-level regime/vol/breadth, and qualified
+    native descriptive risk fields. Risk context supplies no additional evidence vote.
     It never touches lobes['cortex'] or any memo field.
 
     Returns empty string when context is absent/stale or flag is OFF.
@@ -518,6 +805,10 @@ def seat_prompt_block(tickers: list[str], max_chars: int = 1200) -> str:
 
         lines: list[str] = []
         lines.append(f"NW asof={asof}")
+        risk_envelope, risk_status = _risk_envelope_context(
+            market.get("risk_envelope"), market_health.get("asof"),
+        )
+        lines.extend(_risk_prompt_lines(risk_envelope, risk_status))
         source_lobes = ("market", "reliability", "contradictions",
                         "bottom_sensors", "options_entry")
         stale_lobes = [name for name in source_lobes

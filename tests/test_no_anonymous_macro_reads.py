@@ -16,12 +16,12 @@ the `macro` repo name, never on the bare host. `raw.githubusercontent.com`,
 (e.g. the Supabase SDK from jsdelivr in app/static/account.js) and must pass by
 construction -- see test_supabase_sdk_url_is_not_flagged below.
 
-The one known, deliberate exception -- `data_layer/macro_refresh.py`'s `_REMOTE` default,
-which preserves today's exact behavior when `MACRO_GIT_REMOTE` is unset and makes an
-unconfigured post-flip host fail LOUDLY (404) rather than silently -- is allowlisted by
-exact (file, matched-string) pair, not by weakening any pattern. See _ALLOWLIST below;
-it is asserted to still exist and still match, so the exception stays reviewable rather
-than silently rotting into a blanket exemption.
+Known, deliberately reasoned exceptions are allowlisted only by exact
+(file, matched-string) pair, never by weakening a pattern. They cover the production
+`_REMOTE` compatibility default, its direct unit-test constant, and a synthetic local-Git
+workspace-origin fixture that never performs a network read. See _ALLOWLIST below; every
+entry is asserted to still exist and match so exceptions stay reviewable instead of
+silently widening into blanket exemptions.
 
 A SECOND, structural fence lives at the bottom of this file
 (find_unauthenticated_macro_checkouts): the URL-regex fence above cannot see a
@@ -68,9 +68,9 @@ _BANNED_PATTERNS: dict[str, re.Pattern] = {
 }
 
 # --- allowlist ------------------------------------------------------------------
-# Exactly ONE known, explicitly-reasoned exception. Keyed on (relative_path, the exact
-# matched substring) -- NOT a per-file or per-pattern blanket exemption, so any OTHER
-# banned occurrence in the same file (or a different match text) still fails the guard.
+# Explicitly reasoned exceptions only. Keyed on (relative_path, the exact matched
+# substring) -- NOT a per-file or per-pattern blanket exemption, so any OTHER banned
+# occurrence in the same file (or a different match text) still fails the guard.
 _ALLOWLIST: dict[tuple[str, str], str] = {
     ("data_layer/macro_refresh.py",
      "https://github.com/mastermindx-market-intelligence/macro.git"): (
@@ -87,6 +87,13 @@ _ALLOWLIST: dict[tuple[str, str], str] = {
         "public HTTPS form when MACRO_GIT_REMOTE is unset; it is compared against, "
         "never used to perform a real clone/fetch (every subprocess.run call in that "
         "section is monkeypatched)."
+    ),
+    ("tests/test_mastermind_workspace_repositories.py",
+     "https://github.com/mastermindx-market-intelligence/macro.git"): (
+        "DEC:B1-MACRO-PRIVATE-CUTOVER -- synthetic local-Git fixture config used to "
+        "prove the installed workspace owner accepts only the canonical Macro fetch/push "
+        "origin. The fixture creates local repositories and writes this URL into local "
+        "Git config for identity comparison; it never performs an anonymous clone/fetch."
     ),
 }
 
@@ -183,16 +190,16 @@ def test_allowlist_entry_is_visible_and_still_matches():
     """Every allowlisted exception must still exist verbatim in its file, still
     match the pattern shape it claims to be exempted from, and cite its authorizing
     decision -- proves each exception is live and reviewable, not a stale or vacuous
-    entry quietly widening into a blanket exemption. Both known entries share the
-    same underlying string (the production public-HTTPS default): one is the real
-    default in data_layer/macro_refresh.py, the other is a test constant in
-    tests/test_macro_refresh.py that asserts against it (never performs a real
-    clone/fetch) -- kept as two entries, one per file, so each is independently
-    reviewable and neither silently covers for drift in the other."""
-    assert len(_ALLOWLIST) == 2, (
-        f"expected exactly two allowlist entries (the production _REMOTE default in "
-        f"data_layer/macro_refresh.py, and the mirroring test constant in "
-        f"tests/test_macro_refresh.py), found {len(_ALLOWLIST)}: {list(_ALLOWLIST)}")
+    entry quietly widening into a blanket exemption. The two historical entries
+    cover the production public-HTTPS default and its direct unit-test constant.
+    The third is a synthetic local-Git workspace fixture that stores the same URL
+    only to assert canonical-origin matching and performs no network clone/fetch.
+    Each exception remains keyed by exact file and matched text so none silently
+    covers drift in another file."""
+    assert len(_ALLOWLIST) == 3, (
+        f"expected exactly three allowlist entries (production _REMOTE, its direct "
+        f"test constant, and the synthetic workspace-origin fixture), found "
+        f"{len(_ALLOWLIST)}: {list(_ALLOWLIST)}")
     for (rel, matched), reason in _ALLOWLIST.items():
         path = _ROOT / rel
         assert path.exists(), f"allowlisted file {rel} no longer exists"

@@ -17,6 +17,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from tests.executive_identity_review import mask_reviewed_identity_literals
+
 
 ROOT = Path(__file__).parents[1]
 PHASE1C = ROOT / "scripts" / "executive_os_phase1c.py"
@@ -911,11 +913,17 @@ def _scan_added_identity_diff(
         if _scope_language(path) != "py" or source_postimages is None or path not in source_postimages:
             continue
         source_lines = source_postimages[path].splitlines()
-        masked, accounts = _python_multiline_string_view(source_postimages[path])
-        rendered, literal_flags = [], []
-        for line, number in zip(lines, added_numbers.get(path, [])):
+        numbers = added_numbers.get(path, [])
+        for line, number in zip(lines, numbers):
             assert number is not None and 1 <= number <= len(source_lines), "missing postimage line"
             assert source_lines[number - 1] == line, "diff/postimage line mismatch"
+        # Validate every original diff line before computing this test-only
+        # projection. Only exact independently reviewed literal tokens can be
+        # neutralized; surrounding code and all unreviewed identities stay visible.
+        reviewed = mask_reviewed_identity_literals(path, source_postimages[path])
+        masked, accounts = _python_multiline_string_view(reviewed)
+        rendered, literal_flags = [], []
+        for number in numbers:
             rendered.append(masked[number - 1])
             literal_flags.append(accounts.get(number, []))
         production[path] = rendered
@@ -1301,7 +1309,7 @@ def test_d6_no_new_transport_and_all_arm_defaults_are_false():
         for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if line.startswith("class CeoIngressClient"):
                 clients.append((path.relative_to(ROOT).as_posix(), line_number))
-    assert clients == [("integrations/mastermind_executive_app/gateway.py", 353)]
+    assert clients == [("integrations/mastermind_executive_app/gateway.py", 355)]
     tree = ast.parse(source)
     assert not any(isinstance(node, (ast.Import, ast.ImportFrom)) and any(alias.name == "socket" for alias in node.names) for node in tree.body)
 

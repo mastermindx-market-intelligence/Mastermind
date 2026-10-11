@@ -85,7 +85,8 @@ def stage(destination: Path, python: str, allow_write=False):
     (workspace / "AGENTS.md").write_text(
         "# Paper design workspace\n\n"
         "Use mastermindPaper MCP after current client approval. Inspect and read the catalog first.\n"
-        "Only one designer owns the active desktop file; no subagent write fan-out.\n"
+        "Multiple designers may modify the same Paper file/page across admitted hosts; partition board/artboard/node targets.\n"
+        "Known same-board overlap requires disjoint node targets plus fresh re-read/re-plan, not a file-wide lease.\n"
         "Snapshot hashes are observations, not revisions or permission. Preserve the intended file.\n"
         "Stop on EFFECT_UNKNOWN and inspect the original edit; never replay blindly.\n"
         "Do not delete, export to arbitrary host paths, purchase, log into accounts, or deploy code.\n"

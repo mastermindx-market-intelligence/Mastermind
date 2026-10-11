@@ -1339,7 +1339,7 @@ class _ScriptedCanaryClient:
     def __getattr__(self, name):
         return getattr(self._inner, name)
 
-    def request(self, method, params=None, *, timeout: float = 15.0):
+    def request(self, method, params=None, *, timeout: float = 15.0, before_send=None):
         self.calls.append((method, dict(params or {})))
         if method == "skills/extraRoots/set" and self._force_post_clear_nonempty:
             if isinstance(params, dict) and params.get("extraRoots") == []:
@@ -1362,7 +1362,8 @@ class _ScriptedCanaryClient:
             self._turn_start_calls += 1
             if self._fail_turn_start_at == self._turn_start_calls:
                 raise ConnectionError("synthetic transport failure")
-        result = self._inner.request(method, params, timeout=timeout)
+        kwargs = {} if before_send is None else {"before_send": before_send}
+        result = self._inner.request(method, params, timeout=timeout, **kwargs)
         if (
             method == "turn/start"
             and self._inject_skills_changed_after_turn_starts == self._turn_start_calls
@@ -1375,25 +1376,54 @@ class _ScriptedCanaryClient:
             native_turn_id = str(turn_obj.get("id") or "")
             if native_turn_id:
                 self._native_turn_replies[native_turn_id] = self._replies.pop(0)
-        elif method == "thread/turns/list" and isinstance(result.get("data"), list):
-            patched = []
-            for row in result["data"]:
-                native_id = str(row.get("id") or "")
-                if native_id in self._native_turn_replies:
-                    reply = self._native_turn_replies[native_id]
-                    row = dict(row)
-                    row["text"] = reply
-                    row["items"] = [
-                        {
-                            "type": "agentMessage",
-                            "text": reply,
-                            "content": [{"type": "text", "text": reply}],
-                        }
-                    ]
-                patched.append(row)
-            result = dict(result)
-            result["data"] = patched
+        elif method == "thread/turns/list":
+            result = self._script_turn_replies(result)
         return result
+
+
+    def _script_turn_replies(self, result):
+        """Patch one page identically on the ordinary and private test seam."""
+        if not isinstance(result.get("data"), list):
+            return result
+        patched = []
+        for row in result["data"]:
+            native_id = str(row.get("id") or "")
+            if native_id in self._native_turn_replies:
+                reply = self._native_turn_replies[native_id]
+                row = dict(row)
+                row["text"] = reply
+                row["items"] = [
+                    {
+                        "type": "agentMessage",
+                        "text": reply,
+                        "content": [{"type": "text", "text": reply}],
+                    }
+                ]
+            patched.append(row)
+        result = dict(result)
+        result["data"] = patched
+        return result
+
+
+    def request_raw_turn_page(
+        self, *, thread_id, native_turn_id, cursor=None, timeout: float = 15.0
+    ):
+        from scripts.ohf.laboratory import PrivateRawTurnPage
+
+        self.calls.append(("thread/turns/list", {"threadId": thread_id, "cursor": cursor}))
+        page = self._inner.request_raw_turn_page(
+            thread_id=thread_id, native_turn_id=native_turn_id,
+            cursor=cursor, timeout=timeout,
+        )
+        original = page.consume()
+        scripted = self._script_turn_replies(original)
+        # Keep the private frame's original envelope cost while accounting
+        # for the changed fixture text. Production byte bounds stay intact.
+        def size(value):
+            return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+        frame_bytes = page.frame_byte_length + size(scripted) - size(original)
+        return PrivateRawTurnPage(scripted, frame_bytes)
+
 
 
 def _canary_client_factory(
@@ -8056,3 +8086,31 @@ def test_completed_cap_s1_result_projects_attempt_local_paths_to_safe_identities
             "provider_attempt_id": raw["provider_attempt"]["attempt_id"],
         }
     )
+
+
+@pytest.mark.parametrize("cursor", [None, "next-page"])
+def test_scripted_reply_is_identical_on_public_and_private_page_readers(cursor):
+    """A test injection must reach the same native result on both read paths."""
+    from scripts.ohf.laboratory import PrivateRawTurnPage
+    import copy
+
+    document = {"data": [{"id": "native-turn", "text": "old",
+                         "items": [{"type": "agentMessage", "text": "old"}]}],
+                "nextCursor": "following-page"}
+    calls = []
+    class Inner:
+        def request(self, method, params=None, *, timeout=15.0):
+            calls.append(("ordinary", method, params, timeout))
+            return copy.deepcopy(document)
+        def request_raw_turn_page(self, *, thread_id, native_turn_id, cursor=None, timeout=15.0):
+            calls.append(("private", thread_id, native_turn_id, cursor, timeout))
+            return PrivateRawTurnPage(copy.deepcopy(document), len(json.dumps(document).encode()))
+    client = _ScriptedCanaryClient(Inner())
+    client._native_turn_replies["native-turn"] = "PROGRESS COMPLETE scripted failure"
+    ordinary = client.request("thread/turns/list", {"threadId": "thread"}, timeout=3.0)
+    page = client.request_raw_turn_page(thread_id="thread", native_turn_id="native-turn",
+                                        cursor=cursor, timeout=2.0)
+    assert page.consume() == ordinary
+    assert page.frame_byte_length > 0
+    assert calls[-1] == ("private", "thread", "native-turn", cursor, 2.0)
+    assert document["data"][0]["text"] == "old"

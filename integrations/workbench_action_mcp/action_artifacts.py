@@ -34,8 +34,15 @@ ACTION_RESULT_SCHEMA = "mastermind.workbench_action_result.v1"
 ACTION_PROCESS_SCHEMA = "mastermind.workbench_command_process.v1"
 ACTION_PURPOSE_TEXT_PATCH = "text_patch"
 ACTION_PURPOSE_CLOSED_COMMAND = "closed_command"
+ACTION_PURPOSE_BROWSER_RESOURCE = "browser_resource"
+ACTION_PURPOSE_BROWSER_ACTION = "browser_action"
 ACTION_PURPOSES = frozenset(
-    {ACTION_PURPOSE_TEXT_PATCH, ACTION_PURPOSE_CLOSED_COMMAND}
+    {
+        ACTION_PURPOSE_TEXT_PATCH,
+        ACTION_PURPOSE_CLOSED_COMMAND,
+        ACTION_PURPOSE_BROWSER_RESOURCE,
+        ACTION_PURPOSE_BROWSER_ACTION,
+    }
 )
 ACTION_ARTIFACT_KINDS = frozenset(
     {"claim", "process", "result", "stdout", "stderr"}
@@ -401,7 +408,7 @@ def claim_action(
             created=False, claim=classified.claim,
             uncertain=classified.evidence_status == "uncertain" or not classified.store_valid,
         )
-    if identity.purpose == ACTION_PURPOSE_CLOSED_COMMAND:
+    if identity.purpose in {ACTION_PURPOSE_CLOSED_COMMAND, ACTION_PURPOSE_BROWSER_RESOURCE}:
         # A crash or damaged store can leave command evidence without the
         # claim/result pair. Under the same writer mutex, every closed
         # per-action name must be absent before this action can be claimed.
@@ -546,7 +553,7 @@ def write_action_process(
     store = revalidate_artifact_store(store)
     identity = validate_artifact_identity(identity)
     _assert_store_binding(store, identity)
-    if identity.purpose != ACTION_PURPOSE_CLOSED_COMMAND:
+    if identity.purpose not in {ACTION_PURPOSE_CLOSED_COMMAND, ACTION_PURPOSE_BROWSER_RESOURCE}:
         raise ActionArtifactUncertain("process record purpose mismatch")
     _validate_process_values(
         identity,
@@ -1163,6 +1170,8 @@ def _read_result_record(store, identity, *, require_match) -> _RecordRead:
 __all__ = [
     "ACTION_ARTIFACT_KINDS",
     "ACTION_CLAIM_SCHEMA",
+    "ACTION_PURPOSE_BROWSER_ACTION",
+    "ACTION_PURPOSE_BROWSER_RESOURCE",
     "ACTION_PURPOSE_CLOSED_COMMAND",
     "ACTION_PURPOSE_TEXT_PATCH",
     "ACTION_PURPOSES",

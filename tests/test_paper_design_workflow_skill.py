@@ -148,3 +148,87 @@ def test_integration_declares_one_adapter_two_clients_not_two_gateways():
     assert "Studio Direct absence grants it no authority" in text
     assert "not a second gateway, auth plane, write authority, or permission fallback" in text
     assert "publication/surface drift" in text
+
+
+def test_direct_business_route_is_explicit_and_enrollment_gated():
+    for path in (INDEX, SKILL, CONNECTION, INTEGRATION):
+        text = norm(path)
+        assert "Mastermind Paper" in text
+        assert "Business" in text
+        assert "enrollment" in text.lower()
+    text = norm(CONNECTION)
+    assert "legacy/non-migrated" in text
+    assert "no fallback after a denial" in text
+    assert "docs/PAPER_DIRECT_CHATGPT.md" in text
+
+
+def test_direct_runbook_separates_build_setup_and_live_proof():
+    guide = ROOT / "docs/PAPER_DIRECT_CHATGPT.md"
+    assert guide.exists(), "Missing direct Paper operator runbook"
+    text = norm(guide)
+    for required in ("STAGED_NOT_ENROLLED", "Business", "runtime key", "admin key",
+                     "already-open", "paper_prepare", "PROVEN_LIVE", "Ryan Business",
+                     "LOCAL_STDIO_PROVEN", "EFFECT_UNKNOWN", "one existing tunnel",
+                     "Plugin Creator", "C1/C2/C3/C4/Chris Admin"):
+        assert required in text
+    assert "Direct `paper_prepare`: BUILT_NOT_LIVE" not in text
+    assert "do not invent a backend workspace ID" in text
+    assert "com.mastermind.paper-direct.business.<seat>.plist" in text
+    assert "DIRECT_TOOL_PUBLICATION_DRIFT / EFFECT_NONE" in text
+    assert "same app's" in text
+
+
+def test_stdio_module_permits_guarded_private_tunnel_without_host_tools():
+    text = norm(ROOT / "integrations/paper_desktop/mcp_server.py")
+    assert "private Business" in text
+    assert "do not enroll a second Paper web gateway from this module" not in text
+
+
+def test_direct_business_multiseat_reuses_one_paper_plane():
+    runbook = norm(ROOT / "docs/PAPER_DIRECT_CHATGPT.md")
+    connection = norm(CONNECTION)
+    integration = norm(INTEGRATION)
+    for text in (runbook, connection, integration):
+        assert "multi-seat" in text.lower()
+        assert "desktop.lock" in text
+    assert "transport singleton" in runbook.lower()
+    assert "must **not invent a workspace id**" in runbook.lower()
+    assert "one Paper execution plane" in runbook
+
+def test_paper_concurrency_is_target_scoped_not_file_leased():
+    runbook = norm(ROOT / "docs/PAPER_DIRECT_CHATGPT.md")
+    integration = norm(INTEGRATION)
+    skill = norm(SKILL)
+    connection = norm(CONNECTION)
+    prepare = norm(ROOT / "integrations/paper_desktop/prepare.py")
+    studio = norm(ROOT / "integrations/studio_direct_mcp/paper-design.mjs")
+    direct_service = norm(ROOT / "integrations/paper_desktop/direct_service.py")
+    install = norm(ROOT / "integrations/paper_desktop/install.py")
+    mcp_server = norm(ROOT / "integrations/paper_desktop/mcp_server.py")
+    combined = " ".join((runbook, integration, skill, connection, prepare, studio,
+                         direct_service, install, mcp_server))
+
+    assert "MULTI_WRITER_PER_FILE_TARGET_SCOPED" in prepare
+    assert "MULTI_WRITER_PER_FILE_TARGET_SCOPED" in studio
+    assert "same exact `fileId`" in integration
+    assert "same page" in integration.lower()
+    assert "board/artboard/node" in integration
+    assert "file-wide or page-wide lease" in integration
+    assert "operation/target-scoped" in skill
+    assert "local bridge-call mutex" in connection
+    assert "Multiple admitted designers may modify the same file/page across hosts" in mcp_server
+    assert "board/artboard/node" in mcp_server
+    assert "MULTI_WRITER_PER_FILE_TARGET_SCOPED" in mcp_server
+
+    for forbidden in (
+        "ONE_WRITER_PER_FILE_ACROSS_HOSTS",
+        "exactly one modifying session may own",
+        "Keep ONE assigned designer per desktop document",
+        "one-writer-per-file rule remains unchanged",
+        "one writer per file across all hosts remains required",
+        "Only one designer owns the active desktop file",
+        "exclusive design-task ownership",
+        "Only one design operator may own a desktop document",
+    ):
+        assert forbidden.lower() not in combined.lower()
+

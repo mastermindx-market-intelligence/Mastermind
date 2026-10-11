@@ -83,6 +83,7 @@ __all__ = [
     "create_web_ceo_app",
     "create_web_ceo_v2_app",
     "create_web_ceo_v3_app",
+    "create_release_control_app",
 ]
 
 _MAX_BODY_BYTES = 65536
@@ -420,6 +421,7 @@ def _create_profile_app(
     ingress_gateway_type: type[CeoIngressReadGateway],
     read_gateway_builder: Callable[..., Any],
     prereply_reverify: bool = False,
+    release_control_profile: bool = False,
 ) -> Any:
     """Build one stateless ASGI app from one compile-time selected profile.
 
@@ -435,6 +437,8 @@ def _create_profile_app(
     before-invoke verifier call, byte for byte.
     """
 
+    if release_control_profile and (settings.read_only or not settings.read_from_ceo_ingress):
+        raise ValueError("release controls require the installed authenticated ingress")
     metadata_policy, metadata_path = _metadata_policy_and_path(settings.policies)
     authenticator_variants = make_jwt_authenticator_variants(
         settings.policies,
@@ -567,6 +571,44 @@ def _create_profile_app(
             )
         return _outcome_response(outcome)
 
+    async def call_release_tool(request: Request) -> JSONResponse:
+        from control_plane.executive_release_ingress import ReleaseIngressError
+        from integrations.business_mcp_auth.principal_projection import PrincipalProjectionError
+        from integrations.mastermind_executive_app.release_admission import compose_release_admission
+        principal = await _authenticate(request, submit_authenticator, clock=settings.clock)
+        if isinstance(principal, JSONResponse):
+            return principal
+        raw = await request.body()
+        if len(raw) > _MAX_BODY_BYTES:
+            return JSONResponse({"ok": False, "error": {"code": "RELEASE_FRAME_TOO_LARGE"}}, status_code=413)
+        def pairs(items):
+            result = {}
+            for key, value in items:
+                if key in result:
+                    raise ValueError("duplicate key")
+                result[key] = value
+            return result
+        def reject_number(_):
+            raise ValueError("unsupported number")
+        try:
+            body = json.loads(raw.decode("utf-8", errors="strict"), object_pairs_hook=pairs,
+                              parse_float=reject_number, parse_constant=reject_number)
+            if type(body) is not dict or set(body) != {"arguments"}:
+                raise ValueError("invalid envelope")
+        except (ValueError, UnicodeError, RecursionError):
+            return JSONResponse({"ok": False, "error": {"code": "RELEASE_ARGUMENTS_INVALID"}}, status_code=400)
+        # The route owns the operation. A model cannot choose a principal or
+        # replace it with a projection in its tool arguments.
+        operation = request.url.path.rsplit("/", 1)[-1]
+        try:
+            result = await compose_release_admission(
+                operation=operation, arguments=body["arguments"], principal=principal,
+                client=ceo_ingress_client, socket_path=settings.ceo_ingress_socket_path,
+            )
+        except (ReleaseIngressError, PrincipalProjectionError):
+            return JSONResponse({"ok": False, "error": {"code": "RELEASE_ARGUMENTS_INVALID"}}, status_code=400)
+        return JSONResponse(result, status_code=202 if result.get("effect") == "EFFECT_UNKNOWN" else 200)
+
     async def protected_resource_document(request: Request) -> JSONResponse:
         return JSONResponse(protected_resource_metadata(metadata_policy), status_code=200)
 
@@ -579,6 +621,10 @@ def _create_profile_app(
             Route("/v1/tools/submit_ceo_intent/reconcile", reconcile_submit_tool, methods=["POST"]),
             Route("/v1/tools/submit_ceo_intent", call_submit_tool, methods=["POST"]),
         ]
+    if release_control_profile:
+        from control_plane.executive_release_ingress import OPERATIONS as RELEASE_OPERATIONS
+        routes[1:1] = [Route("/v1/tools/" + name, call_release_tool, methods=["POST"])
+                       for name in sorted(RELEASE_OPERATIONS)]
     application = Starlette(routes=routes)
     # Never implicitly rewrite a trailing-slash alias onto a different route:
     # an encoded/trailing-slash/raw-path ambiguity must refuse as a plain
@@ -631,12 +677,19 @@ def create_web_ceo_v2_app(settings: AppSettings) -> Any:
 
 
 def create_web_ceo_v3_app(settings: AppSettings, *, mdm_reader: Any) -> Any:
-    """Installed Web-CEO v3: v2 Executive reads plus local MDM observation."""
+    """Installed Web-CEO v3 with direct Session Bridge + local MDM observation."""
 
     if not settings.read_from_ceo_ingress:
         raise ValueError("Web CEO v3 is installed-only")
+    from integrations.executive_mcp.web_ceo_sessions import SESSION_TOOL_NAMES
+    from integrations.executive_mcp.web_ceo_v3 import RECONCILE_TOOL_NAME
+
+    # Session Bridge tools are authenticated direct-owner calls in the outer
+    # MCP host. Never fall through to the ordinary Executive read gateway.
     read_names = tuple(
-        name for name in web_ceo_v3_tool_names() if name != "submit_ceo_intent"
+        name
+        for name in web_ceo_v3_tool_names()
+        if name not in ("submit_ceo_intent", RECONCILE_TOOL_NAME) and name not in SESSION_TOOL_NAMES
     )
     gateway = partial(WebCeoV3CeoIngressReadGateway, mdm_reader=mdm_reader)
     return _create_profile_app(
@@ -645,4 +698,20 @@ def create_web_ceo_v3_app(settings: AppSettings, *, mdm_reader: Any) -> Any:
         ingress_gateway_type=gateway,
         read_gateway_builder=build_web_ceo_v2_read_gateway,
         prereply_reverify=True,
+    )
+
+
+def create_release_control_app(settings: AppSettings) -> Any:
+    """Separate installed release profile; old tool profiles remain frozen.
+
+    Route visibility does not enable owner approval or preparation. Installed
+    same-process qualification and root-owner policy remain Control's gates;
+    release commit is unconditionally disarmed in the C1 consumer.
+    """
+    read_names = tuple(name for name in web_ceo_v2_tool_names() if name != "submit_ceo_intent")
+    return _create_profile_app(
+        settings, read_tool_names=read_names,
+        ingress_gateway_type=WebCeoV2CeoIngressReadGateway,
+        read_gateway_builder=build_web_ceo_v2_read_gateway,
+        prereply_reverify=True, release_control_profile=True,
     )

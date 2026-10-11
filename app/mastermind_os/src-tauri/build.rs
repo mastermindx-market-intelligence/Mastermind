@@ -17,6 +17,7 @@ fn required(name: &str) -> String {
 }
 
 fn main() {
+    println!("cargo:rerun-if-env-changed=MM_EXECUTIVE_RESOURCE");
     println!("cargo:rerun-if-env-changed=MM_NATIVE_CLIENT_ID");
     match std::env::var("MM_NATIVE_CLIENT_ID") {
         Ok(value) => native_client::validate_native_client_id(&value)

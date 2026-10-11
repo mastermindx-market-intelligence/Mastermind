@@ -130,6 +130,7 @@ class _PlannerSealedWorkerAdapter(FakeAdapter):
             "rendered_argv": [ref.binary.real_path, "exec", "--json", "-"],
             "environment_keys": ["CODEX_HOME", "HOME", "PATH"],
             "permission_profile_sha256": "c" * 64,
+            "isolation_manifest_sha256": self.spec.isolation_manifest_sha256,
             "prompt_sha256": hashlib.sha256(
                 self.spec.prompt.encode("utf-8")
             ).hexdigest(),
@@ -375,6 +376,27 @@ def test_reducer_projects_positive_canonical_sealed_worker_completion(
         planner.job_id,
         expected_attempt_id=receipt.attempt.attempt_id,
     )
+    # The existing sealed reader can still read the exact historical v1 wire,
+    # while fresh principal sealing cannot admit that missing-evidence shape.
+    from control_plane.executive_runtime import _validated_sealed_worker_launch_material
+    with reopened.store.read() as connection:
+        row = dict(connection.execute(
+            "SELECT * FROM attempts WHERE attempt_id=?", (receipt.attempt.attempt_id,),
+        ).fetchone())
+    modern = _validated_sealed_worker_launch_material(row)
+    legacy_metadata = json.loads(row["launch_metadata_json"])
+    legacy_metadata["launch_attestation"].pop("isolation_manifest_sha256")
+    legacy_metadata["launch_attestation_sha256"] = hashlib.sha256(
+        json.dumps(legacy_metadata["launch_attestation"], sort_keys=True,
+                   separators=(",", ":"), ensure_ascii=False).encode()
+    ).hexdigest()
+    legacy_row = {**row, "launch_metadata_json": json.dumps(
+        legacy_metadata, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    )}
+    assert _validated_sealed_worker_launch_material(legacy_row)[1:] == modern[1:]
+    with pytest.raises(StateConflict, match="complete launch attestation"):
+        _validated_sealed_worker_launch_material(legacy_row, allow_unsealed_principal=True)
+
     candidate = reduce_terminal_return(material=material)
 
     terminal = material.terminal_receipt
