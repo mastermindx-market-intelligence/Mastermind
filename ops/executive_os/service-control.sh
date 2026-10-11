@@ -69,7 +69,8 @@ start_one() {
     /bin/echo "service registration missing after start: $label (launchctl print exit $after_status)" >&2
     return 1
   fi
-  /bin/echo "$after_output" | /usr/bin/awk -v label="$label" '/state =/ {print "service=" label " " $0; exit}'
+  # Drain captured output under pipefail; the builtin also avoids exec argv limits.
+  builtin printf '%s\n' "$after_output" | /usr/bin/awk -v label="$label" '!found && /state =/ {print "service=" label " " $0; found=1}'
 }
 
 stop_one() {
@@ -104,7 +105,7 @@ stop_one() {
 
 
 is_running_output() {
-  /bin/echo "$1" | /usr/bin/awk '
+  builtin printf '%s\n' "$1" | /usr/bin/awk '
     $1 == "state" && $2 == "=" && $3 == "running" {found=1}
     END {exit(found ? 0 : 1)}
   '
@@ -166,17 +167,17 @@ agent_relay_disabled_state() {
     return 1
   fi
   state="$(
-    /bin/echo "$output" | /usr/bin/awk -v label="\"$AGENT_RELAY_LABEL\"" '
-      index($0, label) {
+    builtin printf '%s\n' "$output" | /usr/bin/awk -v label="\"$AGENT_RELAY_LABEL\"" '
+      !found && index($0, label) {
         if ($0 ~ /=>[[:space:]]*(disabled|true)([[:space:]]|$)/) {
           print "disabled"
           found=1
-          exit
+          next
         }
         if ($0 ~ /=>[[:space:]]*(enabled|false)([[:space:]]|$)/) {
           print "enabled"
           found=1
-          exit
+          next
         }
         bad=1
       }
@@ -469,7 +470,7 @@ require_gateway_enabled() {
     /bin/echo "gateway must already be enabled: state unreadable" >&2
     return 1
   fi
-  if ! /bin/echo "$output" | /usr/bin/awk -v label="$MCP_LABEL" '
+  if ! builtin printf '%s\n' "$output" | /usr/bin/awk -v label="$MCP_LABEL" '
     NF == 0 {next}
     $1 == "disabled" && $2 == "services" && $3 == "=" && $4 == "{" && NF == 4 {
       if (state != 0) invalid=1
@@ -507,12 +508,13 @@ WORKER_OBSERVED_STATE=""
 WORKER_OBSERVED_PID=""
 
 pid_from_output() {
-  /bin/echo "$1" | /usr/bin/awk '
-    {
+  builtin printf '%s\n' "$1" | /usr/bin/awk '
+    !found {
       for (i = 1; i <= NF - 2; i++) {
         if ($i == "pid" && $(i + 1) == "=" && $(i + 2) ~ /^[0-9]+$/) {
           print $(i + 2)
-          exit 0
+          found=1
+          break
         }
       }
     }

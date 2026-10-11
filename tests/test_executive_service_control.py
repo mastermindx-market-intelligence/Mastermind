@@ -344,6 +344,31 @@ def test_start_confirms_registration_after_kickstart(tmp_path: Path) -> None:
     assert f"service={CONTROL_LABEL} state = running" in out
 
 
+@pytest.mark.parametrize("registered", [False, True])
+def test_start_drains_large_registration_output(tmp_path: Path, registered: bool) -> None:
+    # launchctl can print a large environment after the first state line.
+    # An early-exiting reader SIGPIPEs /bin/echo under production pipefail.
+    _script, control_plist, worker_plist = _prepare_script(tmp_path)
+    plan = (
+        _start_via_kickstart(WORKER_LABEL) + _start_via_kickstart(CONTROL_LABEL)
+        if registered else
+        _start_via_bootstrap(WORKER_LABEL, worker_plist)
+        + _start_via_bootstrap(CONTROL_LABEL, control_plist)
+    )
+    large_output = "state = running\n" + "environment entry = value\n" * 16000 + "state = ignored\n"
+    for index in (3, 7):
+        key, status, _out, err = plan[index]
+        plan[index] = (key, status, large_output, err)
+    code, out, err, log, remaining, *_ = _run(tmp_path, "start", plan)
+    assert code == 0, err
+    assert out.splitlines() == [
+        f"service={WORKER_LABEL} state = running",
+        f"service={CONTROL_LABEL} state = running",
+    ]
+    assert log == [key for key, *_ in plan]
+    assert remaining == ""
+
+
 def test_start_fails_when_bootstrap_claims_success_but_registration_absent(
     tmp_path: Path,
 ) -> None:
@@ -627,8 +652,9 @@ def test_start_readside_is_idempotent_for_already_running_read_services(
     assert "existing=1" in out
 
 
+@pytest.mark.parametrize("large_output", [False, True])
 def test_start_readside_preserves_running_worker_without_mutating_it(
-    tmp_path: Path,
+    tmp_path: Path, large_output: bool,
 ) -> None:
     plan = (
         _readside_preflight(worker_pid=4242)
@@ -636,6 +662,10 @@ def test_start_readside_preserves_running_worker_without_mutating_it(
         + _ensure_running_already(CONTROL_LABEL)
         + _readside_postflight(worker_pid=4242)
     )
+    if large_output:
+        plan = [(key, status, out + "\n" + "environment entry = value\n" * 16000
+                 + "pid = 9999\n" if "pid = 4242" in out else out, err)
+                for key, status, out, err in plan]
     code, out, err, log, remaining, *_ = _run(tmp_path, "start-readside", plan)
     assert code == 0, err
     assert remaining == ""
@@ -1015,10 +1045,15 @@ def test_stop_agent_relay_refuses_unresolved_disable_without_bootout(
     assert not any(call.startswith("bootout ") for call in log)
 
 
+@pytest.mark.parametrize("large_output", [False, True])
 def test_status_agent_relay_is_read_only_and_reports_exact_state(
-    tmp_path: Path,
+    tmp_path: Path, large_output: bool,
 ) -> None:
     plan = _agent_relay_disabled("disabled") + _observe_absent(AGENT_RELAY_LABEL)
+    if large_output:
+        key, status, out, err = plan[0]
+        plan[0] = (key, status, out + "\n" + '"other.service" => enabled\n' * 16000
+                   + f'"{AGENT_RELAY_LABEL}" => enabled\n', err)
 
     code, out, err, log, remaining, *_ = _run(
         tmp_path, "status-agent-relay", plan
