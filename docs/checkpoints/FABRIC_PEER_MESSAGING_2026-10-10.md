@@ -328,3 +328,41 @@ The original typed Studio Git publisher remains the one source carrier;
 source publication is a separate bounded action with its own host precheck,
 not a claim that the denied shell inspection succeeded. Actual production
 host/commit path inspection remains separately action-blocked.
+
+## October 11 — native/Runtime revalidation race repair
+
+Resumed under current Chairman direction using installed Mastermind Pro
+Execution. Protected master pin `f381af6758533906865361373addbb0514f86d7d`
+remains schema `mastermind.sol_skillpack.v1`, version 1.0.1, bootstrap 1.
+Original registered Studio Web source carrier remained current, clean, and
+published at `3e14a0ef7d3132f63bd341d82ff573783955d5a4` before this change;
+the prior interrupted push was thereby canonically reconciled APPLIED.
+No other source writer or uncertain effect was evidenced in the bounded checks.
+
+Found a read-consistency race in the mixed owner join: the second Runtime
+worker recheck could run after native validation and before evidence release,
+allowing a native session rotation to go unobserved. This phase adds a final
+native management/principal observation, checks equal native identities and
+revision, verifies the scope/owner clock is still valid, and uses the minimum
+expiry across all observed snapshots. The join explicitly remains read-only and
+non-atomic; **the message commit owner must still fence authorization**.
+Added regression for native session rotation during Runtime revalidation and
+for expiry following the last owner read; documentation updated.
+
+Author-run tests, M2 source-only:
+- Initial new native rotation + revised expiry regression: 2 passed.
+- Selected mixed/native/Runtime/policy/gateway/journey suite, PID 54672,
+  exit code 0, JUnit `/tmp/mmx-fabric-mixed-final-20261011.xml`:
+  **195 tests, 0 failures/errors/skips**, source fixtures not live providers.
+- The first version of the expiry test used a brittle absolute clock-call
+  count and failed; test fixture was corrected to key off second native-owner
+  read. No production implementation repair resulted from that test error.
+No live provider/client enrollment, production host selection or deployment.
+
+This checkpoint update and the three source/test/doc edits belong in the
+next bounded Studio typed Git commit on the **same registered operation**,
+then exact remote publication and CI/review. Current assignment remains
+BUILT_NOT_PROVEN and MISSION_COMPLETE=false; native/worker real delivery
+remains held by missing authenticated production wiring/native transport
+acceptance, and earlier explicit action-specific source inspection denials
+remain unretried.

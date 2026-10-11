@@ -134,10 +134,10 @@ class CompositeCoordinationObservationSource:
             ):
                 _refuse()
 
-            # A worker could rotate while the native source is being checked.
-            # Re-attest Runtime after native observation and require identical
-            # current peer and generation evidence. No inter-owner atomicity
-            # is asserted; the actual effect owner must still fence commit.
+            # A worker could rotate while the native source is checked;
+            # conversely a native session can rotate while Runtime is reread.
+            # Observe each owner again and require its exact attested identity.
+            # This is best-effort read consistency, NOT an atomic commit fence.
             rechecked_workers = runtime_source.observe()
             if (
                 rechecked_workers.snapshot.revision != workers.snapshot.revision
@@ -145,11 +145,22 @@ class CompositeCoordinationObservationSource:
                 != tuple(sorted(p.peer_ref for p in workers.peers))
             ):
                 _refuse()
+            rechecked_native = native_source.observe()
+            if (
+                rechecked_native.snapshot_revision != native.snapshot_revision
+                or rechecked_native.identities != native.identities
+            ):
+                _refuse()
             checked = self._scope()
+            last_now = runtime_source.now()
             if (
                 checked.revision != original.revision
                 or checked.participants != original.participants
                 or checked.grants != original.grants
+                or not original.observed_at <= last_now < original.valid_until
+                or not checked.observed_at <= last_now < checked.valid_until
+                or rechecked_native.valid_until <= last_now
+                or rechecked_workers.snapshot.valid_until <= last_now
             ):
                 _refuse()
             # All returned roles/identity pairs come from one active owner scope
@@ -169,8 +180,9 @@ class CompositeCoordinationObservationSource:
             }, sort_keys=True, separators=(",", ":")).encode()
             return CompositeCoordinationEvidence(
                 snapshot=replace(original, valid_until=min(
-                    original.valid_until, final.valid_until, native.valid_until,
-                    workers.snapshot.valid_until,
+                    original.valid_until, final.valid_until, checked.valid_until,
+                    native.valid_until, rechecked_native.valid_until,
+                    workers.snapshot.valid_until, rechecked_workers.snapshot.valid_until,
                 )),
                 worker_peer_refs=worker_refs,
                 native_ids=native.identities,

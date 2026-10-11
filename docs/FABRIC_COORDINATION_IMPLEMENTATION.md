@@ -206,12 +206,15 @@ worker role self-enrollment, new registry, queue, provider endpoint or message
 dispatch are created.
 
 The composite owner checks source scope before and after the two existing
-joins and re-reads current Runtime worker generation after the native join.
-A same-generation native target must also be rechecked by the native manager;
-mid-read role, scope, grant, native principal, session or worker changes fail
-closed. **The reads are not atomic across two owners**, and the evidence
-is not a bearer permission or authority to send; only the established
-effect owner may authenticate the caller and commit a message after its own
+joins, re-reads current Runtime worker generation after the native join, and
+re-attests the native session owner after that worker recheck. Exact native
+session generation, verified principal and role must still agree. The final
+membership read and clock must remain inside every observed expiry; the
+returned evidence retains the shortest observed validity interval. Mid-read
+role, scope, grant, native principal, session or worker changes fail closed.
+**The reads are not atomic across two owners**, and the evidence is not a
+bearer permission or authority to send; only the established effect owner
+may authenticate the caller and commit a message after its own
 current-writer/permission fence.
 
 The existing four-tool Company consultation wire still only accepts

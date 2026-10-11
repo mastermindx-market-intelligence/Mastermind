@@ -115,6 +115,56 @@ def test_no_sender_identity_from_public_args(tmp_path, monkeypatch):
     assert "authorized" not in evidence.__dataclass_fields__
 
 
+def test_native_rotation_during_worker_recheck_refuses(tmp_path, monkeypatch):
+    """A rotated COO must not be trusted after workers are re-attested."""
+    from integrations.fabric_coordination_runtime import RuntimeCoordinationObservationSource
+    observation, _, port = fixture(tmp_path, monkeypatch)
+    original = RuntimeCoordinationObservationSource.observe
+    count = [0]
+
+    def rotate_after_second_worker_observation(self):
+        result = original(self)
+        count[0] += 1
+        if count[0] == 2:
+            port.current[SESSION] = session(generation="gen-002")
+        return result
+
+    monkeypatch.setattr(RuntimeCoordinationObservationSource, "observe",
+                        rotate_after_second_worker_observation)
+    deny(observation)
+    assert count[0] == 2
+    assert port.send_calls == [] and port.reconcile_calls == []
+
+
+def test_scope_expiring_after_last_owner_read_refuses(tmp_path, monkeypatch):
+    """Expiration after both owner reads is not extended by prior admission."""
+    from integrations.fabric_coordination_native import NativeCoordinationObservationSource
+    from integrations.fabric_coordination_runtime import RuntimeCoordinationObservationSource
+    observation, owner, port = fixture(tmp_path, monkeypatch)
+    real_native = NativeCoordinationObservationSource.observe
+    real_now = RuntimeCoordinationObservationSource.now
+    native_reads = [0]
+    after_both_owner_reads = [False]
+
+    def last_native_read(self):
+        result = real_native(self)
+        native_reads[0] += 1
+        if native_reads[0] == 2:
+            after_both_owner_reads[0] = True
+        return result
+
+    def clock(self):
+        if after_both_owner_reads[0]:
+            return owner.snapshot.valid_until
+        return real_now(self)
+
+    monkeypatch.setattr(NativeCoordinationObservationSource, "observe", last_native_read)
+    monkeypatch.setattr(RuntimeCoordinationObservationSource, "now", clock)
+    deny(observation)
+    assert native_reads[0] == 2
+    assert not port.send_calls and not port.reconcile_calls
+
+
 def test_worker_rotation_during_native_join_refuses(tmp_path, monkeypatch):
     from integrations.fabric_coordination_runtime import RuntimeCoordinationObservationSource
     observation, _, port = fixture(tmp_path, monkeypatch)
