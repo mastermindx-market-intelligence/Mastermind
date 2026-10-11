@@ -49,7 +49,8 @@ def service_case(tmp_path,monkeypatch):
 
 
 @pytest.mark.parametrize("reply_committed",[True,False])
-def test_existing_cycle_and_wake_edge_reach_one_native_turn_then_exact_cleanup(tmp_path,monkeypatch,reply_committed):
+@pytest.mark.parametrize("early_ack",[False,True])
+def test_existing_cycle_and_wake_edge_reach_one_native_turn_then_exact_cleanup(tmp_path,monkeypatch,reply_committed,early_ack):
     async def scenario():
         service,runtime,root,adapters=service_case(tmp_path,monkeypatch)
         created=await service._run_coo_cycle_once(root.job_id)
@@ -81,25 +82,41 @@ def test_existing_cycle_and_wake_edge_reach_one_native_turn_then_exact_cleanup(t
         # Only external source/attention/carrier boundaries are fixtures.
         # Service locks, dispatch occupancy, Runtime claim and OHF turns are real.
         monkeypatch.setattr(service,"_native_return_source",lambda _:source)
+        def publish(retained):
+            with runtime.store.transaction() as conn:
+                runtime.store.append_event(conn,aggregate_type="session_bridge_continue",aggregate_id="fixture",
+                    event_type=_EVENT,actor=_ACTOR,job_id=job.job_id,attempt_id=retained.session.attempt_id,
+                    worker_id=retained.lease.attempt.worker_id,command_id="fixture-continue",
+                    payload={"operation_key":"original-operation","request_message_key":"continue-fixture",
+                        "read_ref":"fixture-read","carrier":{"workspace_id":"T-FIXTURE","channel_id":"C-FIXTURE"}})
+        if early_ack:
+            original_start=service.operator_supervisor.start_retained_native_job
+            async def start_and_receive(*args,**kwargs):
+                retained=await original_start(*args,**kwargs)
+                state.update(retained=retained,task=service._dispatch_tasks[job.job_id])
+                publish(retained)
+                state["ack"]=True
+                assert service._native_operator_dispatch.retained is None
+                await service._signal_native_continuation()
+                assert not service._native_operator_dispatch.continuation.done()
+                return retained
+            monkeypatch.setattr(service.operator_supervisor,"start_retained_native_job",start_and_receive)
         outcome=await service._run_coo_cycle_once(root.job_id)
         assert outcome.action=="DISPATCHED"
-        task=service._dispatch_tasks[job.job_id]
-        retained=service._native_operator_dispatch.retained
+        task=state["task"] if early_ack else service._dispatch_tasks[job.job_id]
+        retained=state["retained"] if early_ack else service._native_operator_dispatch.retained
         seal=runtime.events.get_event_by_command_id(f"orchestration-result-seal:{retained.session.attempt_id}")
-        assert adapters[0].begin_turn_calls==1 and adapters[0].stop_calls==0
-        with runtime.store.transaction() as conn:
-            runtime.store.append_event(conn,aggregate_type="session_bridge_continue",aggregate_id="fixture",
-                event_type=_EVENT,actor=_ACTOR,job_id=job.job_id,attempt_id=retained.session.attempt_id,
-                worker_id=retained.lease.attempt.worker_id,command_id="fixture-continue",
-                payload={"operation_key":"original-operation","request_message_key":"continue-fixture",
-                    "read_ref":"fixture-read","carrier":{"workspace_id":"T-FIXTURE","channel_id":"C-FIXTURE"}})
-        await service._signal_native_continuation()
-        assert not service._native_operator_dispatch.continuation.done()
-        no_action=await service._run_coo_cycle_once(root.job_id)
-        assert no_action.action=="NO_ACTION" and adapters[0].begin_turn_calls==1
-        state["ack"]=True
-        await service._signal_native_continuation()
-        await asyncio.wait_for(task,timeout=10)
+        if not early_ack:
+            assert adapters[0].begin_turn_calls==1 and adapters[0].stop_calls==0
+            publish(retained)
+            await service._signal_native_continuation()
+            assert not service._native_operator_dispatch.continuation.done()
+            no_action=await service._run_coo_cycle_once(root.job_id)
+            assert no_action.action=="NO_ACTION" and adapters[0].begin_turn_calls==1
+            state["ack"]=True
+            await service._signal_native_continuation()
+            await service._signal_native_continuation()
+        await asyncio.wait_for(task,timeout=2)
         assert adapters[0].begin_turn_calls==2
         assert state["reply_reads"]==1
         assert runtime.events.get_event_by_command_id(seal.command_id)==seal

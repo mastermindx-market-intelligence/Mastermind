@@ -6463,6 +6463,10 @@ class ExecutiveControlService:
             dispatch.started.set_result(OrchestrationDispatchOutcome(
                 command_id=dispatch.command_id, job_id=dispatch.job_id,
                 attempt=current_attempt, outcome="ACTIVE", lease_token=lease.lease_token))
+            # The initial seal exposes this writer before the thread returns
+            # its retained handle. Re-read a persisted ACK once at attachment;
+            # an ingress edge in that interval must not need redelivery.
+            await self._signal_native_continuation()
             # Wake owns delivery and persisted ACK; no polling or provider retry.
             read_ref = await asyncio.wait_for(dispatch.continuation, timeout=_NATIVE_CONTINUATION_WAIT_SECONDS)
             root = self._require_runtime().jobs.get_job(dispatch.retained.job.root_job_id)
@@ -6515,7 +6519,10 @@ class ExecutiveControlService:
                 channel_id=value["carrier"]["channel_id"])
         except Exception:
             return  # A Wake receipt alone is never authenticated consumption.
-        dispatch.continuation.set_result(value["read_ref"])
+        try:
+            dispatch.continuation.set_result(value["read_ref"])
+        except asyncio.InvalidStateError:
+            return  # A settled waiter never grants another provider turn.
 
     async def _run_coo_cycle_once(self, root_job_id: str) -> CooCycleOutcome:
         if self._closing:
