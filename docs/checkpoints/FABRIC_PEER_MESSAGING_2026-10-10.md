@@ -538,3 +538,58 @@ resolver membership binding and documentation/checkpoint files. The 409-case
 suite is local fixture evidence and does not replace exact-head hosted CI,
 independent review, installed source revision/selection or actual native
 provider message/answer consumption.
+
+## October 11 — authenticated host composition source phase
+
+Current Chairman: resume original operation and lead end-to-end completion.
+Pinned protected procedure remains `f381af6758533906865361373addbb0514f86d7d`,
+schema `mastermind.sol_skillpack.v1`, version 1.0.1/boot 1.
+Protected master advanced to `70e9ef1ede16628d00a7cc1d749387d893a1d5b3`
+with no changes to procedural/lifecycle components in the bounded comparison;
+the prior compatible pin remains usable. Existing registered worktree/branch:
+`/Volumes/Mastermind/agent-workspaces/web/fabric-peer-messaging-20261010`,
+`sol/web-fabric-peer-messaging-20261010`, operation
+`fabric-peer-messaging-20261010`. Last published source head before this phase:
+`c4a11ffea33db115305352b018e8bec911caa4bf`,
+Studio typed publisher reported local=remote and clean. GitHub REST PR mergeable
+`true`, state `behind` (not a proven conflict); #1318 draft, no accepted
+reviews. Latest hosted CI `38131208710` in progress at the last bounded
+observation.
+
+Added `integrations/fabric_coordination_host.py`: an opt-in
+`AuthenticatedScopedTargetHost` binding existing canonical Runtime /
+Session Bridge native target reader(s), a host-owned organizational
+membership source and host-authenticated *fresh* caller source, fixed topic
+and clock. Domain selection is exact: mixed needs both incumbents, native-only
+or worker-only needs that one established owner; source mode changes or
+missing/mismatched owners refuse instead of silent fallback. The installed
+caller is re-read both before and after each discovery/target resolution;
+a rotating principal, expired scope, bad target or unexpected actor cannot
+leak a stale peer. Synchronous required host readers only. The service exposes
+read-only `visible_targets()` and `resolve(target_ref)`; it does not
+register/send/reply/summon/publish a tool, grant operational authority,
+mint identities or create a shadow transport/queue. Canonical existing message
+COMMIT owner still owes fresh permission/identity fence and authenticated
+client enrollment; production source inspection of the denied action
+family was not retried or shifted connectors.
+
+Added `tests/test_fabric_coordination_host.py` for native-only, worker-only,
+mixed, no mixed downgrade, fresh caller, mid-read caller/principal changes,
+rotation, scope expiry, exact target, projector/source mismatches, malformed
+public inputs, and absence of provider side effects.
+Hermetic host composition 15 tests initially green. Combined
+host+native+Runtime+Session Bridge+Fabric regression test run on M2 PID 48410
+exited 0: **258 selected tests, no failures/errors/skips**,
+`/tmp/mmx-fabric-host-assembly-regression-20261011.xml`. After adding
+the final post-read caller fence and rejecting async sources, focused test
+run PID 57888 exited 0: **18 tests, zero failures/errors/skips**,
+`/tmp/mmx-fabric-host-release-20261011.xml`. All are SOURCE fixtures, not
+installed/live provider delivery.
+
+**Immediate next action:** verify exact changed paths and diff/syntax, commit
+and push via original Studio typed writer, obtain new exact-head hosted CI
+and review. DO_NOT_REDO: earlier policy, Runtime, single-domain, mixed,
+Session Bridge target source regression proofs. MISSION_COMPLETE=false.
+Real blocker remains production authenticated organizational membership +
+commit-owner authorization selection, executable/native provider attention,
+and two distinct Ubuntu provider-consumed question/answer acceptance.

@@ -309,6 +309,48 @@ A failed mixed observation must NOT automatically downgrade to a
 single-domain observation: domain selection follows the authenticated
 organizational scope and its authoritative ownership facts.
 
+## Authenticated host-side composition (opt-in; still no send)
+
+`integrations/fabric_coordination_host.py` adds
+`AuthenticatedScopedTargetHost`, a production-facing *read-only* assembly
+entrypoint that accepts only incumbent host-controlled readers: authenticated
+current caller, canonical organizational membership, Runtime and/or native
+management-owner projector/principal source, scope topic and clock. It does not
+parse identity, role, project, session ID, account or principal from a
+public/worker message. The current caller reader is invoked **again on every
+target discovery and exact resolution**. The hostname/role label and earlier
+discovered peer do not authorize subsequent calls.
+
+The host reads organizational actor kinds and chooses exactly one of three
+admitted modes. The authenticated caller and organizational scope are also
+re-read after discovery or resolution, so mid-read principal rotation fails
+closed. Host readers are required to be synchronous; asynchronous credentials
+or coroutine readers are not silently accepted. Mixed scopes require
+**both** Runtime and current native
+Session Bridge owners. Worker-only requires the incumbent Runtime and
+projector; native-only requires the incumbent Session Bridge Claude projector
+and native principal owner. Unexpected optional readers/owners and a changed
+actor-domain are refused instead of using another provider or relaxing
+authorization. A worker target projector must be bound to the same Runtime
+instance as the Runtime identity reader. Existing per-source observations,
+hierarchy decisions and exact-target re-resolution remain authoritative.
+
+The only public read operations are `visible_targets()` (filtered public
+projections) and `resolve(target_ref)` (internal exact recipient proof). No
+`send` / `reply` / `summon` / `register_worker` action exists here. The
+installed authenticated host must **explicitly select** this service; merely
+importing it cannot enroll workers or expose new tools. The message writer
+must bind the authenticated caller and peer/hierarchy policy at its own
+canonical transactional COMMIT. A target proof is not a bearer permission;
+this module is not a substitute for native attention and answer-consumption
+proof. The host may not treat the operational Session Bridge
+`session_send` API as an unrestricted same-rank consultation permission.
+
+Hermetic `tests/test_fabric_coordination_host.py` prove host-side mode
+selection, dynamically current callers, exact recipients, no mixed downgrade,
+domain-change refusal, bad owner/projector rejection, stale principal and
+native generation refusal, and absence of transport-side effects.
+
 ## Verification at the current source milestone
 
 The current October 11 homogeneous-source increment passed **53 focused
