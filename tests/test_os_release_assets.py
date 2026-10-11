@@ -277,6 +277,11 @@ def test_nonroot_operator_build_accepts_existing_user_owned_node_without_root_pr
         assert kwargs["extra_groups"] == []
         assert kwargs["env"]["VITE_MM_WEB_CLIENT_ID"] == "test-public-client-id"
         assert "NODE_OPTIONS" not in kwargs["env"]
+        user_config = Path(kwargs["env"]["npm_config_userconfig"])
+        global_config = Path(kwargs["env"]["npm_config_globalconfig"])
+        assert user_config != global_config
+        assert user_config.read_bytes() == global_config.read_bytes() == b""
+        assert user_config.parent == global_config.parent == app.parents[1]
 
 
 def test_import_uses_captured_bytes_even_if_input_changes(bundle, tmp_path):

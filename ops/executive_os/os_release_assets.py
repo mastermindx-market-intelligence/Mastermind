@@ -197,11 +197,19 @@ def _build(app, *, build_user, node, npm_cli, web_client_id):
     if not os.access(node, os.X_OK):
         raise ValueError("build Node executable refused")
     workspace = app.parents[1]
+    # npm rejects loading one pathname for two configuration scopes. Use two
+    # distinct empty files so neither scope reads the operator's saved config.
+    user_config = workspace / ".npm-user-config"
+    global_config = workspace / ".npm-global-config"
+    for config in (user_config, global_config):
+        with config.open("x"):
+            pass
+        config.chmod(0o444)
     for path in [workspace, *workspace.rglob("*")]:
         os.chown(path, operator.pw_uid, operator.pw_gid, follow_symlinks=False)
     env = {"PATH": f"{node.parent}:/usr/bin:/bin", "HOME": str(workspace), "LC_ALL": "C",
-           "npm_config_cache": str(workspace / ".npm-cache"), "npm_config_userconfig": "/dev/null",
-           "npm_config_globalconfig": "/dev/null", "VITE_MM_WEB_CLIENT_ID": _client(web_client_id)}
+           "npm_config_cache": str(workspace / ".npm-cache"), "npm_config_userconfig": str(user_config),
+           "npm_config_globalconfig": str(global_config), "VITE_MM_WEB_CLIENT_ID": _client(web_client_id)}
     for args in (("ci", "--ignore-scripts"), ("run", "build")):
         subprocess.run([str(node), str(npm_cli), *args], cwd=app, env=env, check=True,
                        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
