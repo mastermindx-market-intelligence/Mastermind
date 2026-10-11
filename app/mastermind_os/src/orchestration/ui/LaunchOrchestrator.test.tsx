@@ -805,3 +805,292 @@ describe("LaunchOrchestrator host completion contract", () => {
     },
   );
 });
+
+// ---------------------------------------------------------------------------
+// Stale-selection retention and explicit reselection
+// ---------------------------------------------------------------------------
+
+describe("LaunchOrchestrator stale selection retention", () => {
+  it("retains a stale project ref as a disabled previous-selection option with explanation until explicit reselection", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const { rerender } = render(
+      <LaunchOrchestrator {...makeProps({ onSubmit })} />,
+    );
+    fireEvent.change(screen.getByLabelText("Goal"), {
+      target: { value: "Stale project goal" },
+    });
+    await user.selectOptions(screen.getByLabelText("Project"), "proj-gamma");
+    await user.selectOptions(screen.getByLabelText("Profile"), "prof-2");
+    expect(launchButton().disabled).toBe(false);
+
+    // Drop the chosen project, leaving exactly one eligible option behind.
+    rerender(
+      <LaunchOrchestrator
+        {...makeProps({
+          onSubmit,
+          projects: [
+            { ref: "proj-alpha", label: "Alpha Project" },
+            {
+              ref: "proj-beta",
+              label: "Beta Project",
+              unavailableReason: "Beta is read-only",
+            },
+          ],
+        })}
+      />,
+    );
+
+    const projectSelect = screen.getByLabelText("Project") as HTMLSelectElement;
+    // Stale ref remains the displayed value rather than collapsing to a default.
+    expect(projectSelect.value).toBe("proj-gamma");
+    const staleOption = Array.from(projectSelect.options).find(
+      (o) => o.value === "proj-gamma",
+    );
+    expect(staleOption).toBeTruthy();
+    expect(staleOption?.disabled).toBe(true);
+    // Accessible explanation text and the aria-describedby link back to it.
+    expect(screen.getByText(/^Your previous project/i)).toBeTruthy();
+    const describedById = projectSelect.getAttribute("aria-describedby");
+    expect(describedById).toBeTruthy();
+    expect(
+      document.getElementById(describedById as string)?.textContent,
+    ).toMatch(/previous project/i);
+    // Goal draft survives the catalog churn untouched.
+    expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe(
+      "Stale project goal",
+    );
+    // Forced submit is refused while the selection is stale; no dispatch.
+    expect(launchButton().disabled).toBe(true);
+    fireEvent.submit(goalForm());
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    // Explicit eligible reselection clears staleness and re-arms a single dispatch.
+    await user.selectOptions(projectSelect, "proj-alpha");
+    expect(launchButton().disabled).toBe(false);
+    await user.click(launchButton());
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0][0]).toEqual({
+      goal: "Stale project goal",
+      projectRef: "proj-alpha",
+      profileRef: "prof-2",
+    });
+  });
+
+  it("retains a stale profile ref as a disabled previous-selection option with explanation until explicit reselection", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const { rerender } = render(
+      <LaunchOrchestrator {...makeProps({ onSubmit })} />,
+    );
+    fireEvent.change(screen.getByLabelText("Goal"), {
+      target: { value: "Stale profile goal" },
+    });
+    await user.selectOptions(screen.getByLabelText("Project"), "proj-alpha");
+    await user.selectOptions(screen.getByLabelText("Profile"), "prof-2");
+    expect(launchButton().disabled).toBe(false);
+
+    rerender(
+      <LaunchOrchestrator
+        {...makeProps({
+          onSubmit,
+          profiles: [
+            { ref: "prof-1", label: "Profile One" },
+            {
+              ref: "prof-3",
+              label: "Profile Three",
+              unavailableReason: "Profile Three requires admin",
+            },
+          ],
+        })}
+      />,
+    );
+
+    const profileSelect = screen.getByLabelText("Profile") as HTMLSelectElement;
+    expect(profileSelect.value).toBe("prof-2");
+    const staleOption = Array.from(profileSelect.options).find(
+      (o) => o.value === "prof-2",
+    );
+    expect(staleOption).toBeTruthy();
+    expect(staleOption?.disabled).toBe(true);
+    expect(screen.getByText(/^Your previous profile/i)).toBeTruthy();
+    const describedById = profileSelect.getAttribute("aria-describedby");
+    expect(describedById).toBeTruthy();
+    expect(
+      document.getElementById(describedById as string)?.textContent,
+    ).toMatch(/previous profile/i);
+    expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe(
+      "Stale profile goal",
+    );
+    expect(launchButton().disabled).toBe(true);
+    fireEvent.submit(goalForm());
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    await user.selectOptions(profileSelect, "prof-1");
+    expect(launchButton().disabled).toBe(false);
+    await user.click(launchButton());
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0][0]).toEqual({
+      goal: "Stale profile goal",
+      projectRef: "proj-alpha",
+      profileRef: "prof-1",
+    });
+  });
+
+  it("retains both stale project and profile with explanation, blocking submit until explicit dual reselect", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const twoEach = (override: Record<string, unknown> = {}) => ({
+      ...makeProps({
+        projects: [
+          { ref: "proj-alpha", label: "Alpha Project" },
+          { ref: "proj-gamma", label: "Gamma Project" },
+        ],
+        profiles: [
+          { ref: "prof-1", label: "Profile One" },
+          { ref: "prof-2", label: "Profile Two" },
+        ],
+      }),
+      onSubmit,
+      ...override,
+    });
+
+    const { rerender } = render(<LaunchOrchestrator {...twoEach()} />);
+    fireEvent.change(screen.getByLabelText("Goal"), {
+      target: { value: "Both stale" },
+    });
+    await user.selectOptions(screen.getByLabelText("Project"), "proj-gamma");
+    await user.selectOptions(screen.getByLabelText("Profile"), "prof-2");
+    expect(launchButton().disabled).toBe(false);
+
+    rerender(
+      <LaunchOrchestrator
+        {...twoEach({
+          onSubmit,
+          projects: [{ ref: "proj-alpha", label: "Alpha Project" }],
+          profiles: [{ ref: "prof-1", label: "Profile One" }],
+        })}
+      />,
+    );
+
+    const projectSelect = screen.getByLabelText("Project") as HTMLSelectElement;
+    const profileSelect = screen.getByLabelText("Profile") as HTMLSelectElement;
+    expect(projectSelect.value).toBe("proj-gamma");
+    expect(profileSelect.value).toBe("prof-2");
+    expect(screen.getByText(/^Your previous project/i)).toBeTruthy();
+    expect(screen.getByText(/^Your previous profile/i)).toBeTruthy();
+    expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe(
+      "Both stale",
+    );
+    expect(launchButton().disabled).toBe(true);
+    fireEvent.submit(goalForm());
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    // Resolving only the stale project keeps the form blocked on the profile.
+    await user.selectOptions(projectSelect, "proj-alpha");
+    expect(launchButton().disabled).toBe(true);
+    await user.selectOptions(profileSelect, "prof-1");
+    expect(launchButton().disabled).toBe(false);
+    await user.click(launchButton());
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0][0]).toEqual({
+      goal: "Both stale",
+      projectRef: "proj-alpha",
+      profileRef: "prof-1",
+    });
+  });
+
+  it.each(["Project", "Profile"] as const)("describes an empty %s list without inventing a previous choice", (field) => {
+    const onSubmit = vi.fn();
+    render(<LaunchOrchestrator {...makeProps({ onSubmit,
+      ...(field === "Project" ? { projects: [] } : { profiles: [] }),
+    })} />);
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Retain an unstarted goal" } });
+    const select = screen.getByLabelText(field) as HTMLSelectElement;
+    expect(select.options).toHaveLength(1);
+    expect(select.options[0].value).toBe("");
+    expect(select.options[0].disabled).toBe(true);
+    expect(select.value).toBe("");
+    const description = document.getElementById(select.getAttribute("aria-describedby")!);
+    expect(description?.textContent).toBe(`No ${field.toLowerCase()}s are currently available.`);
+    expect(description?.textContent).not.toMatch(/previous/i);
+    expect(select.getAttribute("aria-invalid")).toBe("true");
+    expect(launchButton().disabled).toBe(true);
+    fireEvent.submit(goalForm());
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe("Retain an unstarted goal");
+  });
+
+  it("preserves a never-selected fresh form default when the choice set grows", () => {
+    const { rerender } = render(<LaunchOrchestrator {...makeProps()} />);
+    expect((screen.getByLabelText("Project") as HTMLSelectElement).value).toBe(
+      "proj-alpha",
+    );
+    rerender(
+      <LaunchOrchestrator
+        {...makeProps({
+          projects: [
+            { ref: "proj-alpha", label: "Alpha Project" },
+            { ref: "proj-delta", label: "Delta Project" },
+            {
+              ref: "proj-beta",
+              label: "Beta Project",
+              unavailableReason: "Beta is read-only",
+            },
+            { ref: "proj-gamma", label: "Gamma Project" },
+          ],
+        })}
+      />,
+    );
+    expect((screen.getByLabelText("Project") as HTMLSelectElement).value).toBe(
+      "proj-alpha",
+    );
+  });
+
+  it("keeps the pending latch when the chosen option is dropped mid-pending; no second dispatch", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    function Host() {
+      const [projects, setProjects] = useState([
+        { ref: "proj-alpha", label: "Alpha Project" },
+        { ref: "proj-gamma", label: "Gamma Project" },
+      ]);
+      const [profiles] = useState([
+        { ref: "prof-1", label: "Profile One" },
+        { ref: "prof-2", label: "Profile Two" },
+      ]);
+      return (
+        <LaunchOrchestrator
+          projects={projects}
+          profiles={profiles}
+          submitting={false}
+          onSubmit={(intent) => {
+            onSubmit(intent);
+            // Owner churns the catalog while the launch never completes.
+            if (intent.projectRef === "proj-gamma") {
+              setProjects([{ ref: "proj-alpha", label: "Alpha Project" }]);
+            }
+          }}
+          onCancel={vi.fn()}
+        />
+      );
+    }
+    render(<Host />);
+    fireEvent.change(screen.getByLabelText("Goal"), {
+      target: { value: "Churn goal" },
+    });
+    await user.selectOptions(screen.getByLabelText("Project"), "proj-gamma");
+    await user.selectOptions(screen.getByLabelText("Profile"), "prof-2");
+    expect(launchButton().disabled).toBe(false);
+    await user.click(launchButton());
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    // Options churned mid-pending; the latch keeps the form visibly blocked.
+    expect(pendingLaunchButton().disabled).toBe(true);
+    fireEvent.submit(goalForm());
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(pendingLaunchButton().disabled).toBe(true);
+    expect(
+      (screen.getByLabelText("Project") as HTMLSelectElement).value,
+    ).toBe("proj-gamma");
+  });
+});
