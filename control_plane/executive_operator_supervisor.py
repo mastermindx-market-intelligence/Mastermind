@@ -1180,8 +1180,8 @@ class ExecutiveOperatorSupervisor:
 
     async def run_native_continuation(self, retained: RetainedNativeOperatorSession, *, source, read_ref: str):
         """Bind a post-ACK turn to the original canonical CONTINUE only."""
-        from integrations.session_bridge.runtime_return import RuntimeSessionReturn
-        if type(source) is not RuntimeSessionReturn or source.runtime is not self.runtime:
+        from control_plane.native_continuation import NativeContinuationSource
+        if not isinstance(source, NativeContinuationSource) or source.runtime is not self.runtime:
             raise StateConflict("native continuation requires the existing canonical Runtime owner")
         facts = self._require_retained_native(retained)
         captured = await source.read_continuation_source(read_ref=read_ref)

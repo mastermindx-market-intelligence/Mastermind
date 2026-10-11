@@ -16,6 +16,7 @@ from control_plane.native_continuation import _EVENT, _ACTOR
 from integrations.session_bridge.runtime_return import RuntimeSessionReturn
 from integrations.session_bridge.runtime_owner import RuntimeFabricTargetProjector, RuntimeCodexTargetProjector
 from integrations.session_bridge.schemas import BridgeError
+from integrations.company_consultation_host import CompanyConsultationHost
 from tests.test_native_retained_runtime import _NativeAdapter
 from tests.test_executive_operator_supervisor import _PromptSource
 from tests.test_executive_service import _config, _coo_intent
@@ -38,14 +39,41 @@ def service_case(tmp_path,monkeypatch):
         adapters.append(adapter)
         return adapter
     service.operator_supervisor=ExecutiveOperatorSupervisor(runtime,adapter_factory=factory,prompt_source=_PromptSource())
-    service._company_consultation_host=SimpleNamespace(runtime=runtime,native_return_armed=True,
-        relay_socket_path=tmp_path/"relay.sock")
+    service._company_consultation_host=CompanyConsultationHost(runtime=runtime,
+        repository_root=tmp_path,worker_uid=451,relay_socket_path=tmp_path/"relay.sock",
+        workspace_id="T0000000001",channel_id="C0000000001",native_return_armed=True)
     service._company_consultation_ready=True
     service._company_consultation_binding=object()
     service._ceo_ingress_app_binding=SimpleNamespace(armed=True,session_bridge_provider_factory=lambda r:None)
     # Current v3 root, registered quotas and workspace qualification are real.
     # Ambient host capabilities and provider/ACK/carrier are fixture boundaries.
     return service,runtime,root,adapters
+
+
+def test_installed_company_owner_composes_the_native_source_without_core_imports(tmp_path,monkeypatch):
+    service,runtime,root,adapters=service_case(tmp_path,monkeypatch)
+    before=runtime.events.list_events()
+    source=service._native_return_source(root)
+    assert type(source) is RuntimeSessionReturn and source.runtime is runtime
+    assert runtime.events.list_events()==before and not adapters
+
+
+@pytest.mark.parametrize("invalid",["unarmed","missing_factory","foreign_runtime"])
+def test_native_source_composition_refuses_missing_or_foreign_installed_owner(tmp_path,monkeypatch,invalid):
+    service,runtime,root,adapters=service_case(tmp_path,monkeypatch)
+    before=runtime.events.list_events()
+    host=service._company_consultation_host
+    if invalid=="unarmed":
+        host.native_return_armed=False
+    elif invalid=="missing_factory":
+        service._company_consultation_host=SimpleNamespace(runtime=runtime,native_return_armed=True)
+    else:
+        source=host.native_continuation_source()
+        source.runtime=object()
+        monkeypatch.setattr(host,"native_continuation_source",lambda:source)
+    with pytest.raises(StateConflict,match="native.*(armed|composition)"):
+        service._native_return_source(root)
+    assert runtime.events.list_events()==before and not adapters
 
 
 @pytest.mark.parametrize("reply_committed",[True,False])

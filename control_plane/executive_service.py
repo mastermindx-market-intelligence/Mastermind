@@ -6397,8 +6397,7 @@ class ExecutiveControlService:
 
     def _native_return_source(self, root: Job):
         """Reuse the existing authenticated Company/Dialogue composition."""
-        from integrations.session_bridge.runtime_owner import RuntimeFabricTargetProjector, RuntimeCodexTargetProjector
-        from integrations.session_bridge.runtime_return import RuntimeSessionReturn
+        from control_plane.native_continuation import NativeContinuationSource
         self._require_company_answer_attention()
         host = self._company_consultation_host
         app = self._ceo_ingress_app_binding
@@ -6407,13 +6406,14 @@ class ExecutiveControlService:
                 or host.native_return_armed is not True
                 or app is None or app.armed is not True
                 or not callable(app.session_bridge_provider_factory)
+                or not callable(getattr(host, "native_continuation_source", None))
                 or binding["operator_harness_armed"] is not True
                 or binding["operator_execution_profile_id"] != NATIVE_RETURN_TX5_EXECUTION_PROFILE):
             raise StateConflict("exact native return composition is not armed")
-        fabric = RuntimeFabricTargetProjector(host.runtime)
-        return RuntimeSessionReturn(host.runtime, fabric=fabric,
-            codex=RuntimeCodexTargetProjector(fabric, owner_configured=lambda: host.native_return_armed),
-            socket_path=host.relay_socket_path)
+        source = host.native_continuation_source()
+        if not isinstance(source, NativeContinuationSource) or source.runtime is not host.runtime:
+            raise StateConflict("native source differs from installed Runtime composition")
+        return source
 
     async def _native_cycle_once(self, root: Job, children: list[Job]) -> CooCycleOutcome | None:
         """Start only the selected private native profile within COO custody."""
