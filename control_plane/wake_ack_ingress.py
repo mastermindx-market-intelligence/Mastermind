@@ -179,7 +179,7 @@ def acknowledge_consumed_wakes(
             if existing_count:
                 for obligation, delivered, existing in prepared:
                     if existing is not None and existing.ack is not None and existing.ack.native_continuation is not None:
-                        from integrations.session_bridge.native_ack import native_continuation_ack_evidence
+                        from control_plane.native_continuation import native_continuation_ack_evidence
                         request_record = next(item for item in repository.list_ledger_records_on_connection(
                             connection, obligation.obligation_id) if item.phase is LedgerPhase.WAKE_REQUESTED)
                         try:
@@ -307,7 +307,7 @@ def acknowledge_consumed_wakes(
                     # explicit self-targeted CONTINUE. Generic source inference
                     # remains forbidden. The transport already checked the exact
                     # terminal native turn before creating the trusted projection.
-                    from integrations.session_bridge.native_ack import native_continuation_ack_evidence
+                    from control_plane.native_continuation import native_continuation_ack_evidence
                     request_record = next(item for item in repository.list_ledger_records_on_connection(
                         connection, obligation.obligation_id) if item.phase is LedgerPhase.WAKE_REQUESTED)
                     try:
