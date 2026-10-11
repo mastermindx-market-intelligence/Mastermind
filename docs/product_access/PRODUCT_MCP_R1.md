@@ -132,3 +132,63 @@ source branch is disjoint; it does not take custody or grant a retry. Preserve
 #1071 recovery and #838 artifact-return ownership.
 
 Implementation source != merged != installed != selected != live/accepted.
+
+
+## M1 follow-on: host composition and revocation-safe product authorization
+
+New module: integrations/product_access_mcp/deployment.py.
+
+create_product_deployment(ProductDeploymentServices(...)) now constructs the
+read-only authenticated MCP/ASGI server with a **mandatory incumbent owner**
+permission resolver, existing OAuth/JWKS authenticator, existing audit sink,
+caller clock, bounded read port and exact Host/Origin policies. It allocates
+**no socket, daemon, login, secret, browser process, custom user database or
+worker lifecycle**. Running or installing the returned ASGI object is an
+independent host-authorized operation.
+
+The injected resolver returns a ProductReadBinding, an immutable projection of
+a separately verified **existing** grant, containing the same verified OAuth
+caller, product/view/source ID, owner reference, grant generation and deadline.
+The edge snapshots this specific binding before awaiting the read, then
+synchronously re-resolves and compares it after OAuth revalidation and after
+the read, with no additional await before returning buffered output. If a
+grant was revoked, replaced, retargeted or expired, the request returns
+PRODUCT_GRANT_CHANGED instead of the previously read product data.
+Manifest calls also require an explicit owner grant for catalog/manifest;
+they do not silently bypass product authorization.
+
+This contract is NOT a new grant issuer. The installing identity/product owner
+must provide the actual product-user mapping and current grant resolver.
+A callback that simply returns an unconditional ProductReadBinding is **not**
+acceptable production evidence: proper real-user entitlement, client binding,
+session/revocation and denial tests are still required. The factory validates
+structural compatibility, not business authorization authority.
+
+The composition rejects a different authenticator resource policy and
+wildcard Host/Origin configuration. Tests cover same-grant acceptance,
+cross-product/source mismatches, changed product grant generation, owner
+revocation during an awaited read, token and grant expiry, malformed binding,
+and actual MCP/ASGI signed synthetic token flows with two distinct users.
+
+The real installation owner must explicitly own socket selection, runtime
+resource allocation, TLS/tunnel routing, ASGI lifespan and graceful shutdown.
+Do not mount this service at an unapproved public port, accept a broad
+audience such as Supabase's generic authenticated claim, mint new tokens,
+register a Web CEO plugin or grant access to private product data from this
+source-only package. Source tests are not installed-service or product-account
+acceptance. Existing Browser Fabric and Workbench process owners remain
+unchanged.
+
+A future consumer may import:
+
+    from integrations.product_access_mcp.deployment import (
+        ProductDeploymentServices, ProductReadBinding,
+        create_product_deployment,
+    )
+
+The host must supply every constructor field, including its existing
+read_port and resolve_binding. Missing values fail closed; there is no
+unconditional product permission adapter or default credentials.
+
+Review before release: tests/test_product_access_mcp_deployment.py and the
+deployment/late-revocation test in tests/test_product_access_mcp_sdk.py.

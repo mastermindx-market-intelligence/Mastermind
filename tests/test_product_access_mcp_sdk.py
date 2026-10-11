@@ -341,3 +341,115 @@ class ProductAppTests(unittest.IsolatedAsyncioTestCase):
             aud="authenticated", scope="openid"))
         self.assertEqual(result.status_code, 401)
         self.assertEqual(self.reads, 0)
+
+    async def test_owner_bound_deployment_positive_then_revoke_after_await(self):
+        """Owner-supplied binding → native MCP/ASGI → signed caller → late fence."""
+        from zoneinfo import ZoneInfo
+        from integrations.product_access_mcp.deployment import (
+            ProductDeploymentServices, ProductReadBinding,
+            create_product_deployment,
+        )
+        from integrations.product_access_mcp.contracts import SOURCES
+        from integrations.product_access_mcp.observer import HttpPayload, product_observe
+
+        granted_generation = ["v1"]
+        seen = []
+
+        def owner(caller, product, view):
+            if caller.subject_digest != self.subject_a or granted_generation[0] == "revoked":
+                raise ProductRefused("PRODUCT_GRANT_CHANGED")
+            source = ("catalog.static" if product == "catalog"
+                      else SOURCES[(product, view)][0])
+            return ProductReadBinding(
+                caller=caller, product=product, view=view, source_id=source,
+                owner_ref="incumbent-product-auth",
+                grant_generation=granted_generation[0],
+                expires_at=caller.expires_at,
+            )
+
+        def fake_public_get(url, cap):
+            self.assertEqual(url, SOURCES[("terminal", "market_risk")][1])
+            now = datetime.now(timezone.utc)
+            session = now.astimezone(ZoneInfo("America/New_York")).date().isoformat()
+            data = {
+                "schema": "market_risk/v1", "verdict": "MIXED", "score": 44,
+                "asof": session, "stale": False,
+                "stale_after": (now + timedelta(hours=1)).isoformat(),
+            }
+            raw = json.dumps(data).encode()
+            return HttpPayload(200, raw, {
+                "content-type": "application/json",
+                "content-length": str(len(raw)),
+            })
+
+        async def read_port(caller, request):
+            seen.append((caller, dict(request)))
+            await asyncio.sleep(0)
+            if self.mode == "change-generation":
+                granted_generation[0] = "v2"
+            return product_observe(
+                caller, request, datetime.now(timezone.utc), fake_public_get,
+            )
+
+        deployment = create_product_deployment(ProductDeploymentServices(
+            authenticator=self.auth, policy=self.policy,
+            now=lambda: self.clock, audit_sink=self.audit,
+            read_port=read_port, resolve_binding=owner,
+            allowed_hosts=("127.0.0.1",),
+        ))
+        app = deployment.streamable_http_app()
+        started = asyncio.Event()
+        stop = asyncio.Event()
+
+        async def run_owner():
+            async with app.router.lifespan_context(app):
+                started.set()
+                await stop.wait()
+
+        worker = asyncio.create_task(run_owner())
+        await asyncio.wait_for(started.wait(), timeout=5)
+        try:
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app),
+                base_url="http://127.0.0.1",
+            ) as client:
+                async def call(token, name="product_observe", arguments=None):
+                    return await client.post("/mcp", headers={
+                        "Authorization": "Bearer " + token,
+                        "Accept": "application/json, text/event-stream",
+                        "MCP-Protocol-Version": "2025-03-26",
+                    }, json={
+                        "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                        "params": {"name": name, "arguments":
+                                   arguments if arguments is not None else {
+                                       "product": "terminal", "view": "market_risk",
+                                   }},
+                    })
+
+                valid = await call(self.token())
+                self.assertEqual(valid.status_code, 200, valid.text[:150])
+                positive = valid.json()["result"]
+                self.assertFalse(positive.get("isError", False), positive)
+                self.assertEqual(positive["structuredContent"]["data"]["verdict"], "MIXED")
+                self.assertEqual(len(seen), 1)
+
+                denied_user = await call(self.token("product-b"))
+                self.assertEqual(denied_user.status_code, 200)
+                self.assertTrue(denied_user.json()["result"]["isError"])
+                self.assertEqual(len(seen), 1)
+
+                self.mode = "change-generation"
+                changed = await call(self.token())
+                self.assertEqual(changed.status_code, 200)
+                self.assertTrue(changed.json()["result"]["isError"])
+                self.assertNotIn("MIXED", json.dumps(changed.json()))
+                self.assertEqual(len(seen), 2)
+
+                granted_generation[0] = "revoked"
+                self.mode = "normal"
+                rejected = await call(self.token())
+                self.assertTrue(rejected.json()["result"]["isError"])
+                self.assertEqual(len(seen), 2)
+        finally:
+            stop.set()
+            await asyncio.wait_for(worker, timeout=5)
