@@ -275,3 +275,31 @@ no previously denied public-network canary was run or retried, and no live
 production overlay/market claim is made here. The installed producer, current
 source runtime and actual availability must be independently verified by its
 existing product/release owner after lawful source and identity admission.
+
+
+## OAuth resource discovery: genuine pinned-SDK wire contract
+
+With the repository-maintained MCP SDK pin 1.28.1 (and PyJWT
+2.13.0), the authenticated Product edge advertises the official
+RFC 9728 protected-resource metadata at:
+
+    /.well-known/oauth-protected-resource/mcp
+
+for the resource URI configured in the external ResourcePolicy. The SDK
+advertises the host owner-selected authorization server and exact policy
+scope (and normalizes a bare HTTPS issuer origin with a terminal slash).
+A missing bearer token receives HTTP 401 and WWW-Authenticate with the
+resource_metadata location. The same discovery contract works when
+the SDK is mounted behind create_product_asgi_app, after an explicitly
+qualified owner readiness predicate allows the request.
+
+Native SDK/ASGI tests exercise these HTTP responses without a real
+login, listener, user-product entitlement, tunnel or external network
+call. Resource discovery does not establish the presence of an OAuth
+authorization UI, registered ChatGPT client, user consent, matching JWT
+audience or installed resource; it is merely the production-relevant
+MCP transport/discovery contract needed before those gates can close.
+
+Read-only reference: tests/test_product_access_mcp_sdk.py method
+test_oauth_resource_metadata_and_missing_token_challenge and the
+mounted deployment positive/revocation test.

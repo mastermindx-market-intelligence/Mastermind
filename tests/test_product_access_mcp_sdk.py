@@ -433,6 +433,12 @@ class ProductAppTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(len(seen), 0)
                 ready[0] = True
                 self.assertEqual((await client.get("/readyz")).status_code, 200)
+                metadata = await client.get("/.well-known/oauth-protected-resource/mcp")
+                self.assertEqual(metadata.status_code, 200, metadata.text[:160])
+                self.assertEqual(metadata.json()["resource"], RESOURCE)
+                self.assertEqual(metadata.json()["authorization_servers"], [ISSUER + "/"])
+                self.assertEqual(metadata.json()["scopes_supported"], [READ_SCOPE])
+                self.assertNotIn("client_secret", metadata.text)
 
                 valid = await call(self.token())
                 self.assertEqual(valid.status_code, 200, valid.text[:150])
@@ -461,3 +467,22 @@ class ProductAppTests(unittest.IsolatedAsyncioTestCase):
         finally:
             stop.set()
             await asyncio.wait_for(worker, timeout=5)
+
+
+    async def test_oauth_resource_metadata_and_missing_token_challenge(self):
+        """SDK should advertise exactly this verifier resource, not a user identity."""
+        r = await self.client.get("/.well-known/oauth-protected-resource/mcp")
+        self.assertEqual(r.status_code, 200, r.text[:220])
+        meta = r.json()
+        self.assertEqual(meta["resource"], RESOURCE)
+        self.assertEqual(meta["authorization_servers"], [ISSUER + "/"])
+        self.assertEqual(meta["scopes_supported"], [READ_SCOPE])
+        self.assertNotIn("client_secret", json.dumps(meta))
+        self.assertEqual(self.reads, 0)
+
+        no_token = await self.rpc("tools/list")
+        self.assertEqual(no_token.status_code, 401)
+        challenge = no_token.headers.get("www-authenticate", "")
+        self.assertIn("resource_metadata", challenge)
+        self.assertIn("oauth-protected-resource/mcp", challenge)
+        self.assertEqual(self.reads, 0)
