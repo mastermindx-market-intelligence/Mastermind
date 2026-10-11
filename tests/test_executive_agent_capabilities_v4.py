@@ -682,6 +682,35 @@ def test_v4_profile_refuses_codex_exec_with_skill_capabilities(tmp_path):
         ExecutionCapabilityRegistry.load(_write(tmp_path, raw), source_root=REPO_ROOT)
 
 
+def test_v4_rich_operator_candidate_is_a_real_but_unarmed_source_profile():
+    """Stage a pinned package+write composition without changing the default.
+
+    The existing V3 production policy is unchanged; an installer and provider
+    must separately prove this candidate's admission/materialization.
+    """
+    candidate = (
+        REPO_ROOT / "scripts" / "ohf" / "fixtures"
+        / "executive_agent_capabilities_v4_rich_write_operator.json"
+    )
+    registry = ExecutionCapabilityRegistry.load(candidate, source_root=REPO_ROOT)
+    base = ExecutionCapabilityRegistry.load(V4_FIXTURE, source_root=REPO_ROOT)
+    assert registry.production_armed is False
+    rich = registry.resolve("operator.appserver.write.mastermind-operator.v1")
+    readonly = registry.resolve(FIXTURE_PROFILE_ID)
+    assert rich.enabled is True
+    assert rich.write_capable is True
+    assert rich.sandbox_policy == "workspace-write"
+    assert rich.skill_grants == readonly.skill_grants
+    assert rich.skill_grants == base.resolve(FIXTURE_PROFILE_ID).skill_grants
+    assert rich.profile_digest != readonly.profile_digest
+    assert registry.policy_digest != base.policy_digest
+    assert rich.native_helper_policy is NativeHelperPolicy.DISABLED
+    assert rich.plugins == ()
+    assert rich.mcp_server_grants == ()
+    assert rich.app_server_config_projection()["skills"]["bundled"] == {"enabled": False}
+    assert all(name in rich.required_capability_names for name in rich.skills)
+
+
 def test_v4_profile_admits_source_verified_skills_with_workspace_write(tmp_path):
     """Rich engineering profiles may combine verified methods and bounded writes.
 
