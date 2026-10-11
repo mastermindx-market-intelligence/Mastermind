@@ -21,7 +21,8 @@ from integrations.fabric_coordination_native import NativeCoordinationObservatio
 from integrations.fabric_coordination_runtime import RuntimeCoordinationObservationSource
 from integrations.fabric_coordination_single import SingleDomainCoordinationObservationSource
 from integrations.fabric_coordination_targets import (
-    ScopedSessionTarget, ScopedSessionTargetResolver, _grant_digest,
+    ScopedSessionTarget, ScopedSessionTargetResolver,
+    _grant_digest, _authorization_context_digest,
 )
 from integrations.session_bridge.claude_native import ClaudeNativeTargetProjector
 from integrations.session_bridge.runtime_owner import RuntimeFabricTargetProjector
@@ -182,6 +183,9 @@ class AuthenticatedScopedTargetHost:
                 or decision.relation != target.relation
                 or decision.grant_ref != target.grant_ref
                 or _grant_digest(scope, decision.grant_ref) != target.grant_digest
+                or _authorization_context_digest(
+                    scope, current, target.recipient, self._topic,
+                ) != target.authorization_context_digest
             ):
                 _refuse()
 

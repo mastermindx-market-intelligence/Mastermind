@@ -73,6 +73,8 @@ class HierarchyEffectOwnerGuard:
                 or current.recipient != self._recipient.recipient
                 or current.role is not self._recipient.role
                 or current.relation != self._recipient.relation
+                or current.authorization_context_digest
+                != self._recipient.authorization_context_digest
                 or current.grant_ref != self._recipient.grant_ref
                 or current.grant_digest != self._recipient.grant_digest
             ):

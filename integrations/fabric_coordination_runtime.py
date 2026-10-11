@@ -183,42 +183,46 @@ class RuntimeCoordinationObservationSource:
             if len(intents) != 1:
                 _refuse()
             payload = intents[0].payload
-            for key, identity in (("requester_actor_ref", parties.requester),
-                                  ("recipient_actor_ref", parties.recipient)):
-                if payload.get(key) != {
-                    "kind": "worker_attempt", "job_id": identity.job_id,
-                    "attempt_id": identity.attempt_id, "worker_id": identity.worker_id,
-                }:
-                    _refuse()
-            # Actor refs alone do not pin the physical recipient session: an
-            # unchanged Attempt can acquire a new binding epoch/generation.
-            # The incumbent INTENT stores the exact recipient RuntimeBinding.
-            # Never let a freshly admitted recipient claim an older question.
-            pinned = payload.get("recipient_binding")
-            if (
-                not isinstance(pinned, dict)
-                or set(pinned) != {"binding_id", "binding_generation", "reasoning_surface"}
-                or pinned.get("binding_id") != parties.recipient.binding_id
-                or type(pinned.get("binding_generation")) is not int
-                or pinned["binding_generation"] != parties.recipient.binding_generation
-            ):
-                _refuse()
-            # The same epoch/generation cannot silently switch providers:
-            # pin the consultation's recipient reasoning surface to the
-            # incumbent current harness owner as well as the stored binding.
+            # Both consultation actors must retain their ORIGINAL current
+            # Harness bindings, not just stable Job/Attempt/Worker triples.
+            # The incumbent INTENT persists BOTH binding snapshots; verify
+            # them against current Runtime owner facts in ONE read transaction.
+            # A requester rearm/provider remap must never claim an old answer.
             with self.runtime.store.read() as connection:
-                facts = self.runtime.current_harness_binding_source(
-                    parties.recipient.attempt_id, connection=connection,
-                )
-            if (
-                facts.attempt_id != parties.recipient.attempt_id
-                or runtime_binding_id_for(facts.attempt_id, facts.session_epoch_id)
-                != parties.recipient.binding_id
-                or facts.generation_number != parties.recipient.binding_generation
-                or reasoning_surface_for_provider(facts.provider)
-                != pinned["reasoning_surface"]
-            ):
-                _refuse()
+                for prefix, identity in (
+                    ("requester", parties.requester),
+                    ("recipient", parties.recipient),
+                ):
+                    if payload.get(prefix + "_actor_ref") != {
+                        "kind": "worker_attempt", "job_id": identity.job_id,
+                        "attempt_id": identity.attempt_id,
+                        "worker_id": identity.worker_id,
+                    }:
+                        _refuse()
+                    pinned = payload.get(prefix + "_binding")
+                    if (
+                        type(pinned) is not dict
+                        or set(pinned) != {
+                            "binding_id", "binding_generation", "reasoning_surface",
+                        }
+                        or pinned.get("binding_id") != identity.binding_id
+                        or type(pinned.get("binding_generation")) is not int
+                        or pinned["binding_generation"] != identity.binding_generation
+                    ):
+                        _refuse()
+                    facts = self.runtime.current_harness_binding_source(
+                        identity.attempt_id, connection=connection,
+                    )
+                    if (
+                        facts.attempt_id != identity.attempt_id
+                        or runtime_binding_id_for(
+                            facts.attempt_id, facts.session_epoch_id,
+                        ) != identity.binding_id
+                        or facts.generation_number != identity.binding_generation
+                        or reasoning_surface_for_provider(facts.provider)
+                        != pinned["reasoning_surface"]
+                    ):
+                        _refuse()
             return parties
         except RuntimeCoordinationUnavailable:
             raise

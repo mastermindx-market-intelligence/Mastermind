@@ -206,3 +206,37 @@ def test_forged_original_consultation_fails_constructor():
             original_target=target, original_topic_ref="wrong-topic",
         )
     assert not port.send_calls
+
+
+@pytest.mark.parametrize("mutation", [
+    "joint_tenant_portfolio_move",
+    "single_ceo_project_reassignment",
+    "joint_program_reassignment",
+])
+def test_accepted_consultation_cannot_follow_organizational_reassignment(mutation):
+    """C3 review: same principals/relation must not carry an old grant of context."""
+    host, owner, port, caller = native_host()
+    guard, original = guard_for(host, FIRST)
+    assert guard.verify_inside_owner_effect() is None
+    first, second = owner[0].participants
+    if mutation == "joint_tenant_portfolio_move":
+        changed = (
+            replace(first, tenant_ref="new-tenant", portfolio_ref="new-portfolio"),
+            replace(second, tenant_ref="new-tenant", portfolio_ref="new-portfolio"),
+        )
+    elif mutation == "single_ceo_project_reassignment":
+        changed = (first, replace(second, project_ref="new-project"))
+    else:
+        changed = (
+            replace(first, program_ref="new-program"),
+            replace(second, program_ref="new-program"),
+        )
+    owner[0] = replace(owner[0], participants=changed)
+    # A new consultation could be approved under the current scope, but an
+    # already accepted request must not follow this organizational transfer.
+    refreshed = host.resolve(original.target_ref)
+    assert refreshed.recipient == original.recipient
+    assert refreshed.relation == original.relation
+    with pytest.raises(ScopedEffectRefused):
+        guard.verify_inside_owner_effect()
+    assert not port.send_calls and not port.reconcile_calls

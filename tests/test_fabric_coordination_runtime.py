@@ -174,6 +174,39 @@ def test_runtime_factory_question_reply_and_consume_journey(tmp_path, monkeypatc
                 assert parties.recipient == owner.participants[1].identity
                 with pytest.raises(RuntimeCoordinationUnavailable):
                     source.verify_parties(replace(parties, requester=replace(parties.requester, worker_id="impostor")))
+                # The persisted requester epoch is just as important as the
+                # recipient: a successor may not consume an older requester's
+                # answer after a silent binding rearm under the same actor IDs.
+                with pytest.raises(RuntimeCoordinationUnavailable):
+                    source.verify_parties(replace(parties, requester=replace(
+                        parties.requester,
+                        binding_generation=parties.requester.binding_generation + 1,
+                    )))
+                with pytest.raises(RuntimeCoordinationUnavailable):
+                    source.verify_parties(replace(parties, requester=replace(
+                        parties.requester, binding_id="bind-" + "a" * 40,
+                    )))
+                # Remap only the requester provider; recipient stays exactly
+                # current. This must NOT pass merely because its actor triple
+                # and old binding ID/generation are unchanged.
+                original_source = seed.runtime.current_harness_binding_source
+                original_requester_facts = original_source(parties.requester.attempt_id)
+                alternate = (
+                    "openai-codex" if original_requester_facts.provider != "openai-codex"
+                    else "chatgpt"
+                )
+                with monkeypatch.context() as patched:
+                    def requester_provider_remap(_runtime, attempt_id, *args, **kwargs):
+                        facts = original_source(attempt_id, *args, **kwargs)
+                        if attempt_id == parties.requester.attempt_id:
+                            return replace(facts, provider=alternate)
+                        return facts
+                    patched.setattr(
+                        type(seed.runtime), "current_harness_binding_source",
+                        requester_provider_remap,
+                    )
+                    with pytest.raises(RuntimeCoordinationUnavailable):
+                        source.verify_parties(parties)
                 # The persisted consultation pins the original recipient epoch.
                 # A replacement binding may have the same Job/Attempt/Worker.
                 with pytest.raises(RuntimeCoordinationUnavailable):

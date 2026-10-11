@@ -429,7 +429,65 @@ rotated principals/generations, revoked or replacement exact dependency
 grants, expired/widened scope, and the absence of any sending/commit method.
 This is source validation, not permission to bypass incumbent release gates.
 
+## Independent C3 technical review repairs — source only
+
+Independent reviewer `mastermindx-3` identified three deterministic source
+counterexamples in PR #1318 at the prior head (GitHub comment
+`6108401687`). Formal GitHub review disposition was **not** accepted by
+the platform, so the comment is technical evidence, not an `APPROVED`
+or `REQUEST_CHANGES` state. The original source owner reproduced the
+previous false admits and made these bounded repairs:
+
+1. `ScopedSessionTarget.authorization_context_digest` hashes the
+   ORIGINAL host-attested **sender and recipient participant scope plus
+   exact topic**. Both identities, organizational tenant/portfolio,
+   project/program, roles, workstream/team group, and parent lineage are
+   pinned. Snapshot labels and short-lived observation/expiry clocks are
+   intentionally excluded, so ordinary authorized snapshot renewal
+   still works. The read-only authenticated host's final recipient
+   check and `HierarchyEffectOwnerGuard.verify_inside_owner_effect()`
+   now require the original contextual digest to match current policy
+   facts. Moving both peers together to a new tenant/portfolio, moving
+   a CEO to another project, or changing programs can no longer
+   authorize an OLD consultation solely because the current relation
+   string happens to match. This is **not** a bearer authorization or
+   writer transaction.
+2. An explicit `parent_identity` is immutable and takes precedence
+   over `parent_job_id`. A stale explicit attempt/generation may not
+   fall back to a live replacement with the same Job ID. Legacy Job
+   parentage remains compatible **only when no explicit parent
+   identity is provided**; matching explicit+legacy pins remain valid.
+3. The Runtime source `verify_parties()` checks the persisted
+   `INTENT` **requester_binding AND recipient_binding** against the
+   exact current Harness ID, generation and admitted provider reasoning
+   surface. Both owner observations share one Runtime read transaction.
+   A new requester epoch/provider cannot inherit the earlier
+   consultation's answer even if its Job/Attempt/Worker actor triple
+   appears unchanged. Existing Company consultation wire and its
+   frozen public schemas are unchanged.
+
+These are source/fixture proof points, not a live cross-host message.
+The independent reviewer also flagged the incumbent downstream
+consultation detail reader for possible requester-binding parity.
+That incumbent production/COMMIT reader was **not** inspected, modified,
+or routed via another tool after the prior action-specific platform
+denial. Its original owner must independently reconcile the exact
+installed effect path and source/permission controls before production
+acceptance.
+
 ## Verification at the current source milestone
+
+Latest independent C3 security-source repair: M2 selected regression
+**461 passed, 0 failures/errors/skips**, PID `53810` exit 0,
+JUnit `/tmp/mmx-fabric-c3-security-repairs-full-20261011.xml`.
+Focused prior repair suite **160 passed**, PID `47238`,
+JUnit `/tmp/mmx-fabric-c3-security-repairs-focused-20261011.xml`;
+two additional final host authority-change tests passed (PID `52825`).
+The prepatch test runs deliberately reproduced the old authorization
+failures (PIDs `41829` and `43040`). These are source-only fixtures;
+independent approval, new exact-head hosted CI, production COMMIT
+selection, native client consumption and installed release remain
+independent acceptance obligations.
 
 Latest historical-generation availability fix: **453 selected tests passed,
 zero failures, errors or skips**, M2 PID `25214` exit 0, JUnit

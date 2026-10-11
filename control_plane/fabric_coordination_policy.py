@@ -221,9 +221,15 @@ class CoordinationSnapshot:
         for child in self.participants:
             legacy = by_job.get(child.parent_job_id)
             explicit = by_identity.get(child.parent_identity)
-            if legacy is not None and explicit is not None and legacy != explicit:
-                raise CoordinationRefused("INVALID_PARENT_RELATION")
-            parent = explicit or legacy
+            # An explicit immutable parent identity outranks the legacy
+            # Job-only reference. A stale explicit pin must never be
+            # redirected to the current generation of the same Job.
+            if child.parent_identity is not None:
+                if legacy is not None and explicit != legacy:
+                    raise CoordinationRefused("INVALID_PARENT_RELATION")
+                parent = explicit
+            else:
+                parent = legacy
             if parent is not None and (
                 _ORDER[parent.role] >= _ORDER[child.role]
                 or parent.tenant_ref != child.tenant_ref
@@ -281,9 +287,11 @@ def authorize_coordination(
         if (
             first.parent_identity == second.identity
             or second.parent_identity == first.identity
-            or (type(second.identity) is CoordinationIdentity
+            or (first.parent_identity is None
+                and type(second.identity) is CoordinationIdentity
                 and first.parent_job_id == second.identity.job_id)
-            or (type(first.identity) is CoordinationIdentity
+            or (second.parent_identity is None
+                and type(first.identity) is CoordinationIdentity
                 and second.parent_job_id == first.identity.job_id)
         ):
             return CoordinationDecision("direct_parent_child", snapshot.revision)

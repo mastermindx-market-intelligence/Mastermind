@@ -825,3 +825,98 @@ Prepatch four liveness failures are intentionally preserved as
 reproducing evidence only, NOT final test failures.
 Publication, hosted exact-head CI and independent review are still
 distinct. No installed provider/auth/fleet/worker or service change.
+
+## October 11 — C3 independent technical review fixes (source only)
+
+C3 reviewer `mastermindx-3` issued source findings on PR #1318
+GitHub comment [6108401687](https://github.com/mastermindx-market-intelligence/Mastermind/pull/1318#issuecomment-6108401687)
+at prior head `d57945dc3d9034f9285c98c8e153aa143317ddbc`.
+The comment is independent READ-ONLY evidence, **not** an accepted
+formal review: C3's attempted `REQUEST_CHANGES` tool action was
+permission-denied, and no approval or formal blocking disposition exists.
+Our original source owner/custody stays `fabric-peer-messaging-20261010`,
+`sol/web-fabric-peer-messaging-20261010`,
+`/Volumes/Mastermind/agent-workspaces/web/fabric-peer-messaging-20261010`.
+Last verified matching local/remote published head before this phase:
+`701429020bf37cb7685e269fee9e8f3c318f5b9a`.
+Requested external reviewer still has no accepted formal review.
+
+Three deterministic source issues verified with PREPATCH RED tests:
+(1) joint tenant+portfolio migration, CEO project/program changes
+while same `portfolio_ceo_peer` relation allowed an old consultation
+to pass the effect-hook check;
+(2) stale explicit `parent_identity` absent from the roster fell back
+to the fresh parent with the same `parent_job_id`, authorizing a
+different generation; and
+(3) `RuntimeCoordinationObservationSource.verify_parties` checked
+recipient RuntimeBinding but not persisted requester RuntimeBinding
+under same actor triple. Provider rearm was also unchecked for requester.
+The first targeted run PID `41829` failed four expected old-behavior
+cases. The old requester test PID `43040` also failed as expected.
+
+Fixes within existing source ownership, with no new bus or writer:
+- `ScopedSessionTarget.authorization_context_digest` hashes immutable
+  host-attested sender/recipient participant scopes + exact topic.
+  It excludes renewable observation clock/revision while pinning
+  tenant, portfolio, project, program, workstream/group, roles and
+  parent lineage. `AuthenticatedScopedTargetHost` rechecks this
+  fingerprint on the final read; the existing
+  `HierarchyEffectOwnerGuard` compares the original digest against
+  freshly authenticated current scope. Existing exact grant fingerprint
+  remains separately pinned.
+- `CoordinationSnapshot` explicit parent identity takes precedence
+  over legacy Job ID; missing/stale explicit cannot inherit a currently
+  live Job generation. `authorize_coordination` Job-only fallback
+  is permitted only where `parent_identity is None`. Matching explicit
+  and legacy, native parent and deliberate legacy-only behavior remain.
+- `RuntimeCoordinationObservationSource.verify_parties` now checks
+  original INTENT `requester_actor_ref/requester_binding` and
+  `recipient_actor_ref/recipient_binding`, including exact current
+  Harness binding ID, generation and supported provider reasoning
+  surface, within one Runtime store read snapshot. Does not alter
+  the canonical existing detail reader/COMMIT writer.
+
+Postpatch focused integration PID `47238` completed exit 0:
+**160 passed, zero failures/errors/skips**, JUnit
+`/tmp/mmx-fabric-c3-security-repairs-focused-20261011.xml`.
+Additional host last-read joint authority-change negative test
+PID `52825` completed exit 0: **2 passed**.
+A broader original Runtime/native/Company/Session Bridge/Fabric suite
+is running PID `53810`, JUnit
+`/tmp/mmx-fabric-c3-security-repairs-full-20261011.xml`;
+do not assert full success before receipt.
+
+INCUMBENT NEXT GATE: C3 also identified possible downstream
+`integrations/company_consultation_dispatch.py` requester-binding parity.
+The original downstream production effect/COMMIT path has a prior
+platform-denied inspection action. No retry/alternate tool/source
+inspection or modification was attempted; the incumbent owner must
+reconcile that reader and the actual transactional effect fence
+through its lawful original custody. The new source guard is not atomic.
+No live provider message/worker admission, authenticated host install,
+merger or deployment occurred. MISSION_COMPLETE=false.
+
+### C3 repair full regression return
+
+Original carrier PID `53810` completed exit 0 after 84.45s.
+JUnit `/tmp/mmx-fabric-c3-security-repairs-full-20261011.xml`
+reports **461 tests, 0 failures, 0 errors, 0 skipped**.
+This includes previous 453 current-head selection plus the independent
+reviewer's eight new security regression cases: three old-context
+organization reassignment negatives, explicit-vs-legacy parent
+precision with legacy/matching compatibility, and two host post-read
+joint-reassignment negatives. The amended real Runtime
+question/reply/consumption test also checks both persisted requester
+and recipient binding generations/IDs plus requester-only provider
+remap; it passes. Focused **160 tests** and final two host cases
+are independently green. Before patch, deterministic negative tests
+for original-scope/parent/requester holes RED-reproduced, not acceptance.
+
+Next: `git diff --check` and syntax then typed
+`studio_git_commit_current_changes` + `studio_git_push_current_branch`
+using original operation `fabric-peer-messaging-20261010`, verified
+exact previous published head `701429020bf37cb7685e269fee9e8f3c318f5b9a`,
+followed by new-head hosted CI and independent C3 review response.
+No installed provider message, native client enrollment, production
+Company/COMMIT edit, runtime admission, merge or deployment.
+MISSION_COMPLETE=false.

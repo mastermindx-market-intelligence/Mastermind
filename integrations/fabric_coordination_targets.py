@@ -43,6 +43,30 @@ def _refuse() -> None:
     raise ScopedTargetUnavailable("SCOPED_TARGET_UNAVAILABLE")
 
 
+def _authorization_context_digest(
+    scope: CoordinationSnapshot,
+    sender: CoordinationActorIdentity,
+    recipient: CoordinationActorIdentity,
+    topic_ref: str,
+) -> str:
+    """Pin original exact party scope, NOT expiring snapshot clocks/revision.
+
+    This is evidence from the host-authenticated membership owner, never
+    supplied as a public target argument or a reusable authorization token.
+    """
+    if type(scope) is not CoordinationSnapshot or type(topic_ref) is not str:
+        _refuse()
+    source = scope.participant(sender, now=scope.observed_at)
+    target = scope.participant(recipient, now=scope.observed_at)
+    data = json.dumps({
+        "topic": topic_ref,
+        "sender_scope": asdict(source),
+        "recipient_scope": asdict(target),
+    }, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+       allow_nan=False).encode("ascii")
+    return hashlib.sha256(data).hexdigest()
+
+
 def _grant_digest(scope: CoordinationSnapshot, grant_ref: str | None) -> str | None:
     if grant_ref is None:
         return None
@@ -64,6 +88,7 @@ class ScopedSessionTarget:
     relation: str
     evidence_digest: str
     valid_until: int
+    authorization_context_digest: str
     grant_ref: str | None = None
     grant_digest: str | None = None
 
@@ -77,6 +102,8 @@ class ScopedSessionTarget:
             or type(self.evidence_digest) is not str
             or not re.fullmatch(r"[0-9a-f]{64}", self.evidence_digest)
             or type(self.valid_until) is not int
+            or type(self.authorization_context_digest) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", self.authorization_context_digest) is None
             or (self.grant_ref is None) != (self.grant_digest is None)
             or (self.grant_ref is not None
                 and (type(self.grant_ref) is not str
@@ -228,6 +255,9 @@ class ScopedSessionTargetResolver:
                 permitted.append(ScopedSessionTarget(
                     ref, actor, scope.participant(actor, now=now).role,
                     decision.relation, evidence.evidence_digest, scope.valid_until,
+                    authorization_context_digest=_authorization_context_digest(
+                        scope, self._caller, actor, self._topic,
+                    ),
                     grant_ref=decision.grant_ref,
                     grant_digest=_grant_digest(scope, decision.grant_ref),
                 ))

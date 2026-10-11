@@ -493,3 +493,38 @@ def test_historical_worker_attempt_remains_audit_only_not_addressable(
     assert selected.recipient == owner.snapshot.participants[1].identity
     assert host._owner.observe().snapshot.participants[-1] == past
     assert past.identity.attempt_id not in str(visible)
+
+
+@pytest.mark.parametrize("mutation", [
+    "joint_tenant_portfolio_move", "ceo_project_reassignment",
+])
+def test_host_final_scope_fence_detects_still_permitted_edge_context_change(
+    mutation,
+):
+    """C3 review: same policy relation cannot return old peer after reassignment."""
+    host, owner, port, caller = native_host()
+    original = host._authenticated_caller
+    calls = [0]
+
+    def move_after_target_projection():
+        calls[0] += 1
+        if calls[0] == 2:
+            original_scope = owner[0]
+            first, second = original_scope.participants
+            if mutation == "joint_tenant_portfolio_move":
+                members = (
+                    replace(first, tenant_ref="relocated-tenant",
+                            portfolio_ref="relocated-portfolio"),
+                    replace(second, tenant_ref="relocated-tenant",
+                            portfolio_ref="relocated-portfolio"),
+                )
+            else:
+                members = (first, replace(second, project_ref="moved-project"))
+            owner[0] = replace(original_scope, participants=members)
+        return original()
+
+    host._authenticated_caller = move_after_target_projection
+    with pytest.raises(ScopedHostUnavailable):
+        host.visible_targets()
+    assert calls[0] >= 2
+    assert not port.send_calls and not port.reconcile_calls

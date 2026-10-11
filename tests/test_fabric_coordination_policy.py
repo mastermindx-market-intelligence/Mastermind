@@ -303,3 +303,44 @@ def test_current_parent_edge_ignores_old_inactive_parent_attempt():
         authorize_coordination(
             scope, retired.identity, child.identity, topic_ref="topic-a", now=NOW,
         )
+
+
+def test_stale_explicit_parent_pin_must_not_fallback_to_current_job_owner():
+    historical = actor(1, Role.PROJECT_CEO)
+    current = replace(
+        historical,
+        identity=Identity("JOB-1", "ATT-new", "worker-new", "bind-new", 2),
+    )
+    child = actor(
+        2, Role.WORKER, parent_job_id=current.identity.job_id,
+        parent_identity=historical.identity,
+    )
+    with pytest.raises(CoordinationRefused):
+        snapshot(current, child)
+
+
+def test_matching_explicit_and_legacy_parent_still_permitted():
+    parent = actor(1, Role.PROJECT_CEO)
+    child = actor(
+        2, Role.WORKER, parent_job_id=parent.identity.job_id,
+        parent_identity=parent.identity,
+    )
+    snap = snapshot(parent, child)
+    assert authorize_coordination(
+        snap, child.identity, parent.identity,
+        topic_ref="topic-a", now=NOW,
+    ).relation == "direct_parent_child"
+    assert authorize_coordination(
+        snap, parent.identity, child.identity,
+        topic_ref="topic-a", now=NOW,
+    ).relation == "direct_parent_child"
+
+
+def test_legacy_job_only_parent_remains_explicit_compatibility_mode():
+    parent = actor(1, Role.PROJECT_CEO)
+    child = actor(2, Role.WORKER, parent_job_id=parent.identity.job_id)
+    snap = snapshot(parent, child)
+    assert authorize_coordination(
+        snap, child.identity, parent.identity,
+        topic_ref="topic-a", now=NOW,
+    ).relation == "direct_parent_child"
