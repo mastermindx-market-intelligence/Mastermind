@@ -9,6 +9,15 @@ Native Codex's configured concurrent-child ceiling is a separate host setting.
 
 ## Plan and reservation
 
+The public planner schema defaults to the frozen V1 wire and eight-step limit.
+Trusted callers may select `orchestration_result_schema("plan",
+plan_schema_version="mastermind.execution_plan/v5")` and obtain its distinct
+digest through `role_schema_digest` with the same selector. V3/V4 retain their
+existing closed schemas. Schema selection does not change a native helper's
+contract, select an adapter, or admit a live Runtime Attempt; those bindings
+must be supplied by the existing version-aware host composition. Default native
+V1 handshakes remain unchanged.
+
 Use `mastermind.execution_plan/v5` with `root_job_id` equal to the original root
 and `coordinator_job_id` equal to the coordinator whose planner produced the plan.
 Each step retains v4 routing and dependency fields and adds `delegation`:

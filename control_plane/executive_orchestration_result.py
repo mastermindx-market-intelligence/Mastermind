@@ -324,16 +324,29 @@ def orchestration_result_schema(
     run_id: str | None = None,
     worker_id: str | None = None,
     root_job_id: str | None = None,
+    plan_schema_version: str = PLAN_SCHEMA_V1,
 ) -> dict[str, Any]:
     """Return the closed executable envelope schema for ``role``.
 
     The unbound form is the stable golden schema.  The supervisor supplies the
     four optional constants so a provider cannot swap Job, Attempt, worker, or
     root identity while still satisfying the same role shape.
+
+    The default planner remains V1. Selecting a newer closed schema does not
+    select a native adapter or grant Runtime admission for that version.
     """
 
     if role not in ROLES:
         raise OrchestrationResultError("role is not in the closed orchestration set")
+    admitted_plan_versions = {
+        PLAN_SCHEMA_V1: 0, PLAN_SCHEMA_V3: 2, PLAN_SCHEMA_V4: 3, PLAN_SCHEMA_V5: 4,
+    }
+    if (
+        type(plan_schema_version) is not str
+        or plan_schema_version not in admitted_plan_versions
+        or (role != "plan" and plan_schema_version != PLAN_SCHEMA_V1)
+    ):
+        raise OrchestrationResultError("plan producer schema version is not admitted")
     for name, value in {
         "job_id": job_id,
         "run_id": run_id,
@@ -348,12 +361,18 @@ def orchestration_result_schema(
 
     role_body = _role_body_schema(role)
     if role == "plan":
-        # The public provider contract remains the frozen V1-only schema.
+        # Project one closed version; removing conditional guards alone leaks
+        # the union's V5 properties and array limit into the frozen V1 wire.
         role_body.pop("allOf")
-        role_body["properties"]["schema_version"] = {"const": PLAN_SCHEMA_V1}
+        role_body["properties"]["schema_version"] = {"const": plan_schema_version}
         role_body["properties"]["steps"]["items"] = role_body["properties"][
             "steps"
-        ]["items"]["anyOf"][0]
+        ]["items"]["anyOf"][admitted_plan_versions[plan_schema_version]]
+        role_body["properties"]["steps"]["maxItems"] = 16 if plan_schema_version == PLAN_SCHEMA_V5 else 8
+        if plan_schema_version == PLAN_SCHEMA_V5:
+            role_body["required"].append("coordinator_job_id")
+        else:
+            del role_body["properties"]["coordinator_job_id"]
     if root_job_id is not None:
         role_body = json.loads(json.dumps(role_body))
         role_body["properties"]["root_job_id"] = {"const": root_job_id}
@@ -379,10 +398,10 @@ def orchestration_result_schema(
     }
 
 
-def role_schema_digest(role: str) -> str:
+def role_schema_digest(role: str, *, plan_schema_version: str = PLAN_SCHEMA_V1) -> str:
     """Content identity of the unbound executable schema for one role."""
 
-    return canonical_digest(orchestration_result_schema(role))
+    return canonical_digest(orchestration_result_schema(role, plan_schema_version=plan_schema_version))
 
 
 def canonical_bytes(value: Any) -> bytes:
