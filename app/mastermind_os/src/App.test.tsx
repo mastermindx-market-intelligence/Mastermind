@@ -1695,6 +1695,114 @@ async function launchFromWork(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("App command composition", () => {
+  it("does not show a late refusal after leaving and returning to the same session", async () => {
+    const response = deferred<EffectReceipt>();
+    const made = makeCommandBinding({ submit: vi.fn(() => response.promise) });
+    installCommandHost(made.binding); const user = userEvent.setup(); render(<App />);
+    await user.click(screen.getByRole("button", { name: "Conversation" }));
+    await user.type(screen.getByLabelText("Message"), "original draft");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(made.submit).toHaveBeenCalledTimes(1));
+    const view = made.binding.getView();
+    act(() => made.setView({ ...view, session: { ...defaultSession, sessionKey: "sess-2" } }));
+    act(() => made.setView(view));
+    await user.type(screen.getByLabelText("Message"), "new draft");
+    const pointer = await made.binding.store.read("owner-a");
+    await act(async () => response.resolve({ ...pointer!, disposition: "refused" }));
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect((screen.getByLabelText("Message") as HTMLTextAreaElement).value).toBe("new draft");
+    expect(made.submit).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears an earlier refusal when a new Send is awaiting its own outcome", async () => {
+    const response = deferred<EffectReceipt>();
+    const submit = vi.fn<FiniteCommandPort["submit"]>()
+      .mockImplementationOnce(async pointer => ({ ...pointer, disposition: "refused" }))
+      .mockImplementationOnce(() => response.promise);
+    const made = makeCommandBinding({ submit });
+    installCommandHost(made.binding); const user = userEvent.setup(); render(<App />);
+    await user.click(screen.getByRole("button", { name: "Conversation" }));
+    await user.type(screen.getByLabelText("Message"), "draft survives refusal");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    await screen.findByRole("alert");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(submit).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect((screen.getByLabelText("Message") as HTMLTextAreaElement).value).toBe("draft survives refusal");
+    await act(async () => response.resolve({ ...(await made.binding.store.read("owner-a"))!, disposition: "accepted" }));
+  });
+
+  it.each(["session", "binding", "owner", "auth", "selection"])("never retains a command refusal across a %s change", async (change) => {
+    const submit = vi.fn(async (pointer: OperationPointer): Promise<EffectReceipt> => ({
+      ...pointer, disposition: "refused", reason: "private-receipt-reason",
+    }));
+    const made = makeCommandBinding({ submit });
+    const host = installCommandHost(made.binding);
+    const user = userEvent.setup();
+    const page = render(<App />);
+    await user.click(screen.getByRole("button", { name: "Conversation" }));
+    await user.type(screen.getByLabelText("Message"), "keep this draft");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("REFUSED");
+    expect(screen.queryByText("private-receipt-reason")).toBeNull();
+    if (change === "session") {
+      const view = made.binding.getView();
+      act(() => made.setView({ ...view, session: { ...defaultSession, sessionKey: "sess-2" } }));
+      expect(screen.queryByRole("alert")).toBeNull();
+      act(() => made.setView(view));
+    } else if (change === "binding") {
+      const replacement = makeCommandBinding();
+      window.MastermindMissionHost!.commandBinding = replacement.binding;
+      page.rerender(<App />);
+    } else if (change === "owner") {
+      made.setCtx({ principalScope: "owner-a", generation: "gen-2" });
+      page.rerender(<App />);
+      made.setCtx({ principalScope: "owner-a", generation: "gen-1" });
+      page.rerender(<App />);
+    } else if (change === "auth") {
+      act(() => host.notify({ status: "signed_out", reason: null, acquisition: false, content: false }));
+      act(() => host.notify({ status: "signed_in", reason: null, acquisition: true, content: true }));
+    } else {
+      act(() => {
+        history.pushState(null, "", "/os/?work_ref=WS%3ABETA&root_job_id=JOB-B");
+        window.dispatchEvent(new PopStateEvent("popstate"));
+      });
+      act(() => {
+        history.pushState(null, "", "/os/?work_ref=WS%3AALPHA&root_job_id=JOB-A");
+        window.dispatchEvent(new PopStateEvent("popstate"));
+      });
+      await user.click(screen.getByRole("button", { name: "Conversation" }));
+    }
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(submit).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not present a refused message as a Launch error", async () => {
+    const made = makeCommandBinding({ submit: vi.fn(async (pointer): Promise<EffectReceipt> => ({ ...pointer, disposition: "refused" })) });
+    installCommandHost(made.binding);
+    const user = userEvent.setup(); render(<App />);
+    await user.click(screen.getByRole("button", { name: "Conversation" }));
+    await user.type(screen.getByLabelText("Message"), "keep this draft");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(made.submit).toHaveBeenCalledTimes(1));
+    await navigateCompanyOperation(user, "Work");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("shows a qualified exact-session owner error in Conversation", async () => {
+    const made = makeCommandBinding({ view: {
+      projects: [{ ref: "proj-a", label: "Project A" }],
+      profiles: [{ ref: "prof-a", label: "Profile A" }],
+      session: { ...defaultSession, error: "SESSION_OWNER_UNAVAILABLE" },
+    } });
+    installCommandHost(made.binding);
+    render(<App />);
+    await userEvent.setup().click(screen.getByRole("button", { name: "Conversation" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("SESSION_OWNER_UNAVAILABLE");
+    expect(made.prepare).not.toHaveBeenCalled();
+    expect(made.submit).not.toHaveBeenCalled();
+  });
+
   it.each(["pointer", "keyboard"])("dismisses an unsent launch draft with %s Cancel and restores page focus", async (input) => {
     const made = makeCommandBinding({
       view: {
