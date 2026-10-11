@@ -133,6 +133,24 @@ that current version; historical receipts and persisted Job identities are
 unchanged. Existing host, quota, grant and root bindings must qualify the new
 policy identity through their owners before native selection.
 
+An ordinary native-return planner still stops after its one sealed plan. A
+retained native proof requires the existing deterministic `create-interactive`
+creator and an already sealed native root profile; creation rejects stale
+identity rather than refreshing it. It reuses Runtime's bounded interactive
+turns and the same Operator Harness start, lease, attestation and cleanup.
+The extension-free `operator.appserver.interactive.v1` profile is unchanged.
+
+The attended supervisor retains the exact native generation after the first
+plan seal. The existing Wake owner must finish its idle attention turn and
+persist the causal native ACK before a follow-up is admitted. That later turn
+gets the actual instruction from `RuntimeSessionReturn.read_continuation_source`
+and can call only the existing `native.reply` capability. Its original operation
+cannot replay the provider turn. The canonical reply still uses the existing
+atomic current-writer COMMIT fence. Cleanup waits through authenticated parent
+read and observed useful action because the current return reader needs that
+live writer. This source composition adds no session registry or listener and
+does not arm production or qualify a GUI-owned conversation.
+
 Current logical aliases:
 
 | Alias | Initial binding | Use |

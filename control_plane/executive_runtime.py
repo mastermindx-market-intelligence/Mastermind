@@ -174,6 +174,7 @@ BOUNDED_ROLE_RESULT_MAX_CELL_BYTES = 8_388_608
 BOUNDED_ROLE_RESULT_MAX_TOTAL_BYTES = 33_554_432
 BOUNDED_ROLE_RESULT_MAX_VM_STEPS = 200_000
 INTERACTIVE_TX5_EXECUTION_PROFILE = "operator.appserver.interactive.v1"
+NATIVE_RETURN_TX5_EXECUTION_PROFILE = "operator.appserver.interactive.native-return.v1"
 INTERACTIVE_TX5_MAX_TURNS_PER_GENERATION = 8
 _BOUNDED_FETCH_BATCH = 32
 _ROOT = Path(__file__).resolve().parent.parent
@@ -1876,9 +1877,16 @@ def _interactive_tx5_admitted(row: sqlite3.Row) -> bool:
     )
     if not isinstance(constraints, dict):
         raise StateConflict("interactive parent constraints are malformed")
-    if constraints.get("execution_profile_id") != INTERACTIVE_TX5_EXECUTION_PROFILE:
+    profile_id = constraints.get("execution_profile_id")
+    if profile_id not in {INTERACTIVE_TX5_EXECUTION_PROFILE, NATIVE_RETURN_TX5_EXECUTION_PROFILE}:
         return False
     _role, provenance, _digest = _decode_orchestration_job_fields(row)
+    # The ordinary native planner stays one-shot. Only the existing explicit,
+    # deterministic interactive creator can admit retained native turns.
+    if (profile_id == NATIVE_RETURN_TX5_EXECUTION_PROFILE
+            and (provenance is None or provenance.get("command_id")
+                 != f"coo-cycle:{row['root_job_id']}:create-interactive:0")):
+        return False
     if (
         row["parent_job_id"] != row["root_job_id"]
         or int(row["depth"]) != 1
@@ -1894,7 +1902,7 @@ def _interactive_tx5_admitted(row: sqlite3.Row) -> bool:
     ):
         raise StateConflict("interactive child provenance is not deterministic")
     identity = {
-        "execution_profile_id": INTERACTIVE_TX5_EXECUTION_PROFILE,
+        "execution_profile_id": profile_id,
         "execution_profile_digest": None,
         "capability_policy_version": None,
         "capability_policy_digest": None,
@@ -1906,7 +1914,7 @@ def _interactive_tx5_admitted(row: sqlite3.Row) -> bool:
         raise StateConflict("interactive stored capability identity is malformed")
     try:
         registry = ExecutionCapabilityRegistry.load()
-        profile = registry.resolve(INTERACTIVE_TX5_EXECUTION_PROFILE)
+        profile = registry.resolve(profile_id)
     except CapabilityPolicyError as exc:
         raise StateConflict(f"interactive capability policy is invalid: {exc}") from exc
     closed = (
@@ -1920,7 +1928,11 @@ def _interactive_tx5_admitted(row: sqlite3.Row) -> bool:
         and profile.native_helper is None
         and not profile.skills
         and not profile.skill_grants
-        and not profile.mcp_server_grants
+        and ((not profile.mcp_server_grants)
+             if profile_id == INTERACTIVE_TX5_EXECUTION_PROFILE else
+             (profile.mcp_server_grants == (registry.mcp_servers.get("native-return-mcp-v1"),)
+              and profile.mcp_servers == ("native-return-mcp-v1",)
+              and constraints.get("provider") == "codex"))
         and not profile.resource_grants
         and not profile.plugins
         and not profile.forbidden
@@ -12372,16 +12384,27 @@ class JobRegistry:
                 "interactive creation requires a strict v2 aggregation root"
             )
         constraints = self._operator_child_constraints(root)
-        constraints["execution_profile_id"] = INTERACTIVE_TX5_EXECUTION_PROFILE
-        profile = ExecutionCapabilityRegistry.load().resolve(
-            INTERACTIVE_TX5_EXECUTION_PROFILE
-        )
+        native = (root.constraints.get("operator_harness_armed") is True
+                  and root.constraints.get("operator_execution_profile_id")
+                  == NATIVE_RETURN_TX5_EXECUTION_PROFILE)
+        profile_id = NATIVE_RETURN_TX5_EXECUTION_PROFILE if native else INTERACTIVE_TX5_EXECUTION_PROFILE
+        registry = ExecutionCapabilityRegistry.load()
+        profile = registry.resolve(profile_id)
+        if native and any(constraints.get(key) != value for key, value in {
+            "execution_profile_id": profile_id,
+            "execution_profile_digest": profile.profile_digest,
+            "capability_policy_version": registry.policy_version,
+            "capability_policy_digest": registry.policy_digest,
+            "provider": "codex",
+        }.items()):
+            raise StateConflict("native interactive root capability identity is stale or incomplete")
+        constraints["execution_profile_id"] = profile_id
         constraints["execution_profile_digest"] = profile.profile_digest
         constraints["capability_policy_version"] = (
-            ExecutionCapabilityRegistry.load().policy_version
+            registry.policy_version
         )
         constraints["capability_policy_digest"] = (
-            ExecutionCapabilityRegistry.load().policy_digest
+            registry.policy_digest
         )
         if not constraints.get("routing_policy_version"):
             constraints["routing_policy_version"] = "interactive-routing"
@@ -17737,6 +17760,12 @@ def _ohf_process(process: ProcessIdentityObservation) -> tuple[int, int, str, st
 
 class OperatorHarnessRegistry:
     """The sole durable OHF state-plane; it owns no provider or process calls."""
+
+    def is_interactive_job(self, job_id: str) -> bool:
+        """Read existing deterministic retained-turn admission; grant nothing."""
+        with self.store.read() as connection:
+            row = connection.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+            return row is not None and _interactive_tx5_admitted(row)
 
     def __init__(self, store: RuntimeStore) -> None:
         self.store = store
@@ -24965,7 +24994,23 @@ class Runtime:
                WHERE event_type='ORCHESTRATION_ROLE_RESULT_SEALED' AND attempt_id=?""",
             (token,),
         ).fetchall()
-        if len(admissions) != 1 or len(decisions) != 1 or seals:
+        if seals:
+            retained_job = connection.execute(
+                "SELECT * FROM main.jobs WHERE job_id=?", (row["job_id"],)
+            ).fetchone()
+            retained_attempt = connection.execute(
+                "SELECT * FROM main.attempts WHERE attempt_id=?", (token,)
+            ).fetchone()
+            if (len(seals) != 1 or retained_job is None or retained_attempt is None
+                    or not _interactive_tx5_admitted(retained_job)
+                    or _json_loads(retained_job["constraints_json"], fallback={}).get("execution_profile_id")
+                    != NATIVE_RETURN_TX5_EXECUTION_PROFILE):
+                raise StateConflict("runtime binding source is not a retained native writer")
+            retained_seal = _validated_interactive_active_plan_seal(
+                connection, attempt_row=retained_attempt, job_row=retained_job)
+            if retained_seal["process_generation_id"] != row["process_generation_id"]:
+                raise StateConflict("runtime binding retained native generation changed")
+        if len(admissions) != 1 or len(decisions) != 1:
             raise StateConflict(
                 "runtime binding source lacks one active work admission"
             )
