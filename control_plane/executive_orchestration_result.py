@@ -291,6 +291,7 @@ def orchestration_result_schema(
     run_id: str | None = None,
     worker_id: str | None = None,
     root_job_id: str | None = None,
+    plan_schema_version: str = PLAN_SCHEMA_V1,
 ) -> dict[str, Any]:
     """Return the closed executable envelope schema for ``role``.
 
@@ -301,6 +302,13 @@ def orchestration_result_schema(
 
     if role not in ROLES:
         raise OrchestrationResultError("role is not in the closed orchestration set")
+    admitted_plan_versions = {PLAN_SCHEMA_V1: 0, PLAN_SCHEMA_V3: 2, PLAN_SCHEMA_V4: 3}
+    if (
+        type(plan_schema_version) is not str
+        or plan_schema_version not in admitted_plan_versions
+        or (role != "plan" and plan_schema_version != PLAN_SCHEMA_V1)
+    ):
+        raise OrchestrationResultError("plan producer schema version is not admitted")
     for name, value in {
         "job_id": job_id,
         "run_id": run_id,
@@ -315,12 +323,12 @@ def orchestration_result_schema(
 
     role_body = _role_body_schema(role)
     if role == "plan":
-        # The public provider contract remains the frozen V1-only schema.
+        # Versioned provider-output schema: the default V1 remains byte-identical.
         role_body.pop("allOf")
-        role_body["properties"]["schema_version"] = {"const": PLAN_SCHEMA_V1}
+        role_body["properties"]["schema_version"] = {"const": plan_schema_version}
         role_body["properties"]["steps"]["items"] = role_body["properties"][
             "steps"
-        ]["items"]["anyOf"][0]
+        ]["items"]["anyOf"][admitted_plan_versions[plan_schema_version]]
     if root_job_id is not None:
         role_body = json.loads(json.dumps(role_body))
         role_body["properties"]["root_job_id"] = {"const": root_job_id}

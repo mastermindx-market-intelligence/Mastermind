@@ -26,6 +26,7 @@ from control_plane.executive_agent_capabilities import (
 )
 from control_plane.executive_operator_harness_port import ExecutiveOperatorHarnessPort
 from control_plane.executive_orchestration_result import (
+    PLAN_SCHEMA_V1, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4,
     canonical_bytes,
     canonical_digest,
     parse_canonical_json,
@@ -116,6 +117,7 @@ class ExecutiveOperatorSupervisor:
         instance_id: str = "executive-coo-operator",
         claimed_adapter_factory: ClaimedOperatorAdapterFactory | None = None,
         workspace_identity_source: ClaimedWorkspaceIdentitySource | None = None,
+        plan_schema_version: str = PLAN_SCHEMA_V1,
     ) -> None:
         if ((adapter_factory is None) == (claimed_adapter_factory is None)
                 or (adapter_factory is not None and not callable(adapter_factory))
@@ -127,6 +129,15 @@ class ExecutiveOperatorSupervisor:
             raise ExecutiveOperatorSupervisorError(
                 "selected-host workspace identity requires a claim-aware factory"
             )
+        if type(plan_schema_version) is not str or plan_schema_version not in {
+            PLAN_SCHEMA_V1, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4,
+        }:
+            raise ExecutiveOperatorSupervisorError("operator plan schema is not admitted")
+        if plan_schema_version != PLAN_SCHEMA_V1 and claimed_adapter_factory is None:
+            raise ExecutiveOperatorSupervisorError(
+                "versioned producer requires a claim-aware adapter factory"
+            )
+        self.plan_schema_version = plan_schema_version
         self.runtime = runtime
         self.adapter_factory = adapter_factory
         self._claimed_adapter_factory = claimed_adapter_factory
@@ -180,6 +191,15 @@ class ExecutiveOperatorSupervisor:
         _, after = current_binding()
         if before != after:
             raise ExecutiveOperatorSupervisorError("claimed operator binding changed during construction")
+        if self.plan_schema_version != PLAN_SCHEMA_V1:
+            required = {
+                PLAN_SCHEMA_V3: "executive-plan-v3",
+                PLAN_SCHEMA_V4: "executive-plan-v4",
+            }[self.plan_schema_version]
+            if getattr(adapter, "plan_contract", None) != required:
+                raise ExecutiveOperatorSupervisorError(
+                    "claim-bound adapter plan contract differs from producer selection"
+                )
         return adapter
 
     @staticmethod
@@ -478,6 +498,7 @@ class ExecutiveOperatorSupervisor:
             effective_grant_digest=lease.attempt.effective_grant_digest,
             orchestration_role="plan",
             root_job_id=job.root_job_id,
+            plan_schema_version=self.plan_schema_version,
         )
         base_prompt = (
             self.prompt_source._prompt(job, lease.attempt, grant)
