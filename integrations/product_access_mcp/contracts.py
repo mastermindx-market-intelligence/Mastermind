@@ -1,7 +1,7 @@
 """Static, non-authorizing Product MCP contracts.
 
 Executive OS owns runtime/admission. Macro/Terminal own market data and identity.
-This module only names two already-public producer observations; it provides no
+This module only names exact approved public producer observations; it provides no
 product-user login, scheduler, session store, or source-publication authority.
 """
 from __future__ import annotations
@@ -27,6 +27,10 @@ SOURCES = MappingProxyType({
         "macro.public_status",
         "https://www.mastermind-x.com/api/status",
     ),
+    ("macro", "overlay"): (
+        "macro.public_live_overlay",
+        "https://www.mastermind-x.com/api/overlay",
+    ),
     ("terminal", "market_risk"): (
         "terminal.public_risk_projection",
         "https://app.mastermind-x.com/data/market_risk.json",
@@ -40,6 +44,8 @@ _TOOL_NAMES = frozenset({"product_manifest", "product_observe"})
 ARGUMENT_CAP = 2048
 RESULT_CAP = 16384
 BODY_CAP = 65536
+OVERLAY_BODY_CAP = 524288
+MAX_BODY_CAP = OVERLAY_BODY_CAP
 
 MANIFEST_INPUT_SCHEMA: dict[str, Any] = {
     "type": "object", "properties": {}, "additionalProperties": False,
@@ -48,7 +54,7 @@ OBSERVE_INPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "product": {"type": "string", "enum": ["macro", "terminal"]},
-        "view": {"type": "string", "enum": ["status", "market_risk"]},
+        "view": {"type": "string", "enum": ["status", "market_risk", "overlay"]},
     },
     "required": ["product", "view"],
     "additionalProperties": False,
@@ -228,6 +234,9 @@ def canonical_result(value: Mapping[str, Any]) -> dict[str, Any]:
     risk_fields = {"schema", "verdict", "score", "asof", "built",
                    "source_event_time", "stale_after", "source_basis",
                    "cause_basis", "stale", "stale_reasons", "display_only"}
+    overlay_fields = {"schema", "built", "quote_ts_max", "n", "n_fresh",
+                      "n_quotes", "delayed_min", "reported_realtime",
+                      "market", "sessions"}
     errors = {None, "READ_UNAVAILABLE", "REDIRECT_REFUSED",
               "UPSTREAM_ACCESS_REFUSED", "UPSTREAM_UNAVAILABLE",
               "INVALID_REPRESENTATION"}
@@ -263,10 +272,48 @@ def canonical_result(value: Mapping[str, Any]) -> dict[str, Any]:
             or source.get("representation") != "complete"
         ):
             refuse()
-        selected_fields = (macro_fields if source["source_id"] == "macro.public_status"
-                           else risk_fields)
+        selected_fields = {
+            "macro.public_status": macro_fields,
+            "macro.public_live_overlay": overlay_fields,
+            "terminal.public_risk_projection": risk_fields,
+        }[source["source_id"]]
         if not set(data) <= selected_fields:
             refuse()
+        if source["source_id"] == "macro.public_live_overlay" and data:
+            if (status not in ("PARTIAL", "STALE") or
+                not {"schema", "built", "n", "n_fresh", "n_quotes",
+                     "delayed_min", "reported_realtime", "market", "sessions"} <= set(data)
+                or data["schema"] != "live.overlay.v2"
+                or any(type(data[k]) is not int or not 0 <= data[k] <= 500
+                       for k in ("n", "n_fresh", "n_quotes"))
+                or data["n_fresh"] > data["n"]
+                or type(data["delayed_min"]) is not int
+                or not 0 <= data["delayed_min"] <= 1440
+                or type(data["reported_realtime"]) is not bool
+                or type(data["built"]) is not str
+                or len(data["built"]) > 40):
+                refuse()
+            market, sessions = data["market"], data["sessions"]
+            if (type(market) is not dict or
+                not set(market) <= {"SPY", "QQQ", "VIX"}
+                or type(sessions) is not dict or
+                not set(sessions) <= {"us", "cn", "hk", "ca"}):
+                refuse()
+            market_fields = {"stale", "band", "data_state", "data_frozen",
+                             "data_through", "session_state"}
+            session_fields = {"state", "calendar_verified", "data_frozen",
+                              "expected_session"}
+            for rows, permitted in ((market, market_fields),
+                                     (sessions, session_fields)):
+                for entry in rows.values():
+                    if type(entry) is not dict or not set(entry) <= permitted:
+                        refuse()
+                    if any(
+                        value is not None and type(value) not in (str, bool)
+                        or (type(value) is str and len(value) > 180)
+                        for value in entry.values()
+                    ):
+                        refuse()
         if "checks" in data:
             checks = data["checks"]
             allowed_components = {"site", "overlay", "risk_state", "china_risk_state",

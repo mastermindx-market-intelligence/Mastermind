@@ -82,7 +82,7 @@ def create_authenticated_product_server(
 
     specs = (
         ("product_manifest", MANIFEST_INPUT_SCHEMA,
-         "Describe the two public owner observations; does not authorize private reads."),
+         "Describe approved public owner observations; does not authorize private reads."),
         ("product_observe", OBSERVE_INPUT_SCHEMA,
          "Observe one owner-enumerated Macro/Terminal public source with immutable provenance."),
     )

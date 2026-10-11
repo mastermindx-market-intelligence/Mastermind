@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from integrations.product_access_mcp.contracts import (
-    BODY_CAP, ProductCaller, ProductRefused, SOURCES,
+    BODY_CAP, MAX_BODY_CAP, OVERLAY_BODY_CAP, ProductCaller, ProductRefused, SOURCES,
     canonical_arguments, canonical_result, OUTPUT_SCHEMA,
     READ_SCOPE, PROFILE, RESULT_SCHEMA,
 )
@@ -236,7 +236,7 @@ def test_invalid_clock_and_http_payload_refuse():
     with pytest.raises(ProductRefused):
         product_manifest(CALLER, NOW.replace(tzinfo=None))
     with pytest.raises(ValueError):
-        HttpPayload(200, b"x" * (BODY_CAP+2), {})
+        HttpPayload(200, b"x" * (MAX_BODY_CAP+2), {})
 
 
 def test_result_field_and_nan_fences():
@@ -314,3 +314,116 @@ def test_positive_observation_cannot_include_upstream_refusal_error():
     out["error"] = "UPSTREAM_ACCESS_REFUSED"
     with pytest.raises(ProductRefused):
         canonical_result(out)
+
+
+# Canonical Macro owner: app/main.py exposes public /api/overlay. The producer
+# scripts/build_live_overlay.py emits live.overlay.v2 with delayed quote status.
+# These tests never fetch live vendor quotes or redistribute ticker payloads.
+O = {"product": "macro", "view": "overlay"}
+
+
+def overlay_fixture(**changes):
+    return {
+        "schema": "live.overlay.v2",
+        "built": "2026-10-09 23:55:00 UTC",
+        "quote_ts_max": "2026-10-09T23:54:59Z",
+        "n": 3, "n_fresh": 2, "n_quotes": 3,
+        "delayed_min": 15, "realtime": False,
+        "market": {
+            "SPY": {"price": 620.5, "stale": False, "data_frozen": True,
+                    "data_state": "current", "session_state": "closed",
+                    "PRIVATE_VENDOR_KEY": "never-forward"},
+            "VIX": {"price": 17.3, "band": "normal", "stale": False},
+        },
+        "sessions": {
+            "us": {"state": "closed", "calendar_verified": True, "data_frozen": True},
+            "cn": {"state": "closed", "calendar_verified": True},
+        },
+        "tickers": {"PRIVATE_RAW_TAPE": {"trade_id": "never-forward"}},
+        **changes,
+    }
+
+
+def test_macro_overlay_projects_status_and_provenance_without_raw_market_tape():
+    raw = overlay_fixture()
+    output = payload(raw)
+    got, calls = snap(O, output)
+    assert calls == [(SOURCES[("macro", "overlay")][1], OVERLAY_BODY_CAP)]
+    assert got["status"] == "PARTIAL"
+    assert got["source"]["source_id"] == "macro.public_live_overlay"
+    assert got["source"]["body_sha256"] == hashlib.sha256(output.body).hexdigest()
+    assert got["data"]["n"] == 3
+    assert got["data"]["n_fresh"] == 2
+    assert got["data"]["delayed_min"] == 15
+    assert got["data"]["reported_realtime"] is False
+    assert got["data"]["market"]["SPY"]["data_frozen"] is True
+    assert got["data"]["sessions"]["cn"]["state"] == "closed"
+    assert got["freshness"]["qualified"] is False
+    assert "reported_delayed_feed" in got["freshness"]["reasons"]
+    assert "price" not in json.dumps(got)
+    assert "PRIVATE_RAW_TAPE" not in json.dumps(got)
+    assert "PRIVATE_VENDOR_KEY" not in json.dumps(got)
+    assert got["freshness"]["reported_age_minutes"]["overlay"] == 5.0
+
+
+def test_macro_overlay_larger_published_json_is_projected_not_truncated():
+    raw = overlay_fixture(tickers={"large": "x" * (BODY_CAP + 1500)})
+    body = payload(raw)
+    assert BODY_CAP < len(body.body) < OVERLAY_BODY_CAP
+    got, calls = snap(O, body)
+    assert got["status"] == "PARTIAL"
+    assert got["source"]["body_bytes"] == len(body.body)
+    assert len(json.dumps(got)) < 16384
+    assert "large" not in json.dumps(got)
+
+
+@pytest.mark.parametrize("bad", [
+    {"schema": "other"}, {"built": None},
+    {"built": "2026-10-10 00:01:00 UTC"},
+    {"n": 0, "n_fresh": 2},
+    {"n": True}, {"n_quotes": -1},
+    {"delayed_min": -1}, {"realtime": "true"},
+    {"sessions": None}, {"market": None},
+])
+def test_invalid_owner_overlay_shape_does_not_synthesize_market_signal(bad):
+    got, _ = snap(O, payload(overlay_fixture(**bad)))
+    assert got["status"] == "INVALID"
+    assert got["data"] == {}
+    assert got["freshness"]["qualified"] is False
+
+
+def test_overlay_realtime_claim_with_delay_cannot_be_qualified():
+    got, _ = snap(O, payload(overlay_fixture(realtime=True)))
+    assert got["status"] == "PARTIAL"
+    assert "reported_delay_realtime_conflict" in got["freshness"]["reasons"]
+    assert got["data"]["reported_realtime"] is True
+
+
+def test_oversized_overlay_is_invalid_and_retains_bounded_prefix_digest():
+    body = b"x" * (OVERLAY_BODY_CAP + 1)
+    response = HttpPayload(200, body, {"content-type": "application/json"}, True)
+    got, _ = snap(O, response)
+    assert got["status"] == "INVALID"
+    assert got["source"]["representation"] == "retained_prefix"
+    assert got["source"]["body_bytes"] == len(body)
+
+
+def test_source_cap_cannot_be_raised_for_other_product_urls():
+    # These are pre-network invalid argument refusals; no I/O attempted.
+    with pytest.raises(ProductRefused):
+        fetch_public_source(SOURCES[("terminal", "market_risk")][1],
+                            cap=OVERLAY_BODY_CAP)
+    with pytest.raises(ProductRefused):
+        fetch_public_source(SOURCES[("macro", "overlay")][1],
+                            cap=OVERLAY_BODY_CAP + 1)
+
+
+def test_overlay_result_cannot_exfiltrate_undeclared_price_or_secret():
+    got, _ = snap(O, payload(overlay_fixture()))
+    got["data"]["market"]["SPY"]["price"] = 631.00
+    with pytest.raises(ProductRefused):
+        canonical_result(got)
+    got["data"]["market"]["SPY"].pop("price")
+    got["data"]["sessions"]["us"]["session_access_token"] = "PRIVATE"
+    with pytest.raises(ProductRefused):
+        canonical_result(got)

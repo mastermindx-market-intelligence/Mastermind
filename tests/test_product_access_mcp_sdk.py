@@ -209,7 +209,7 @@ class ProductAppTests(unittest.IsolatedAsyncioTestCase):
     async def test_manifest_never_reads_upstream(self):
         result = self.parsed(await self.call({}, name="product_manifest"))
         self.assertFalse(result.get("isError"))
-        self.assertEqual(len(result["structuredContent"]["data"]["views"]), 2)
+        self.assertEqual(len(result["structuredContent"]["data"]["views"]), 3)
         self.assertEqual(self.reads, 0)
 
     async def test_valid_token_without_product_grant_refuses(self):

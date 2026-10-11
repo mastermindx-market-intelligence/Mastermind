@@ -17,7 +17,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from zoneinfo import ZoneInfo
 
 from .contracts import (
-    BODY_CAP, PROFILE, RESULT_SCHEMA, SOURCES,
+    BODY_CAP, MAX_BODY_CAP, OVERLAY_BODY_CAP, PROFILE, RESULT_SCHEMA, SOURCES,
     ProductCaller, ProductRefused, canonical_result,
 )
 
@@ -41,7 +41,7 @@ class HttpPayload:
     def __post_init__(self) -> None:
         if type(self.status) is not int or not 100 <= self.status <= 599:
             raise ValueError("bad HTTP status")
-        if not isinstance(self.body, bytes) or len(self.body) > BODY_CAP + 1:
+        if not isinstance(self.body, bytes) or len(self.body) > MAX_BODY_CAP + 1:
             raise ValueError("bad body bounds")
 
 
@@ -56,13 +56,15 @@ class _NoRedirect(HTTPRedirectHandler):
 def fetch_public_source(url: str, cap: int = BODY_CAP) -> HttpPayload:
     """Reference fetch only; the admitting host owns executor/time budget.
 
-    This function accepts ONLY one of the two exact product owner URLs. It
+    This function accepts ONLY the exact public product owner URLs. It
     follows no redirect and sends no product-user/OAuth/website credentials.
     It does not let the MCP request supply URL, headers, or redirects.
     """
     if type(url) is not str or url not in {x[1] for x in SOURCES.values()}:
         raise ProductRefused("INVALID_REQUEST")
-    if type(cap) is not int or not 1 <= cap <= BODY_CAP:
+    limit = (OVERLAY_BODY_CAP if url == SOURCES[("macro", "overlay")][1]
+             else BODY_CAP)
+    if type(cap) is not int or not 1 <= cap <= limit:
         raise ProductRefused("INVALID_REQUEST")
     opener = build_opener(_NoRedirect)
     req = Request(url, method="GET", headers={
@@ -166,6 +168,84 @@ def _macro(raw: Any, now: datetime) -> tuple[str, dict[str, Any], dict[str, Any]
     }
 
 
+def _overlay(raw: Any, now: datetime) -> tuple[str, dict[str, Any], dict[str, Any]]:
+    """Project existing Macro live.overlay.v2 without republishing quotes.
+
+    Fast overlay is not the settled regime/GTAA decision spine and quote delay
+    cannot be inferred from the timestamp alone. Data and calendar freshness
+    remain owned by the original market/session producers.
+    """
+    if type(raw) is not dict or raw.get("schema") != "live.overlay.v2":
+        return "INVALID", {}, {"qualified": False, "reasons": ["invalid_overlay_schema"]}
+    built_raw = raw.get("built")
+    built = _clock(built_raw)
+    if built is None:
+        return "INVALID", {}, {"qualified": False, "reasons": ["invalid_overlay_build"]}
+    if built > now:
+        return "INVALID", {}, {"qualified": False, "reasons": ["future_overlay_build"]}
+    for field in ("n", "n_fresh", "n_quotes"):
+        value = raw.get(field)
+        if type(value) is not int or not 0 <= value <= 500:
+            return "INVALID", {}, {"qualified": False, "reasons": ["invalid_overlay_counts"]}
+    if raw["n_fresh"] > raw["n"]:
+        return "INVALID", {}, {"qualified": False, "reasons": ["invalid_overlay_counts"]}
+    delay = raw.get("delayed_min")
+    realtime = raw.get("realtime")
+    if (type(delay) is not int or not 0 <= delay <= 1440
+        or type(realtime) is not bool):
+        return "INVALID", {}, {"qualified": False, "reasons": ["invalid_overlay_delay"]}
+    market = raw.get("market")
+    sessions = raw.get("sessions")
+    if type(market) is not dict or type(sessions) is not dict:
+        return "INVALID", {}, {"qualified": False, "reasons": ["missing_overlay_context"]}
+    # Exact assets and venues only. Never forward underlying raw price, options
+    # contracts, licensed tape rows, credentials or vendor-specific feeds.
+    market_fields = ("stale", "band", "data_state", "data_frozen",
+                     "data_through", "session_state")
+    session_fields = ("state", "calendar_verified", "data_frozen",
+                      "expected_session")
+    selected_market = {
+        k: _select_fields(market[k], market_fields)
+        for k in ("SPY", "QQQ", "VIX")
+        if type(market.get(k)) is dict
+    }
+    selected_sessions = {
+        k: _select_fields(sessions[k], session_fields)
+        for k in ("us", "cn", "hk", "ca")
+        if type(sessions.get(k)) is dict
+    }
+    elapsed_minutes = round((now - built).total_seconds() / 60.0, 2)
+    reasons = ["intraday_cadence_unqualified", "producer_build_not_regime_state"]
+    if raw["n_fresh"] == 0:
+        reasons.append("no_fresh_quote_claim")
+    if delay > 0:
+        reasons.append("reported_delayed_feed")
+    elif realtime:
+        reasons.append("claimed_realtime_not_independently_verified")
+    if delay > 0 and realtime:
+        reasons.append("reported_delay_realtime_conflict")
+    data = {
+        "schema": "live.overlay.v2",
+        "built": built_raw,
+        "n": raw["n"],
+        "n_fresh": raw["n_fresh"],
+        "n_quotes": raw["n_quotes"],
+        "delayed_min": delay,
+        "reported_realtime": realtime,
+        "market": selected_market,
+        "sessions": selected_sessions,
+    }
+    observed_quote = _scalar(raw.get("quote_ts_max"))
+    if observed_quote is not None:
+        data["quote_ts_max"] = observed_quote
+    return "PARTIAL", data, {
+        "qualified": False,
+        "reasons": reasons,
+        "clock_basis": "producer_build_only; individual markets may be closed",
+        "reported_age_minutes": {"overlay": elapsed_minutes},
+    }
+
+
 def _risk(raw: Any, now: datetime) -> tuple[str, dict[str, Any], dict[str, Any]]:
     if not isinstance(raw, dict) or raw.get("schema") != "market_risk/v1":
         return "INVALID", {}, {"qualified": False, "reasons": ["invalid_risk_schema"]}
@@ -252,9 +332,10 @@ def product_observe(caller: ProductCaller, request: Mapping[str, str],
     if set(request) != {"product", "view"} or (request["product"], request["view"]) not in SOURCES:
         raise ProductRefused("INVALID_REQUEST")
     source_id, url = SOURCES[request["product"], request["view"]]
+    cap = OVERLAY_BODY_CAP if (request["product"], request["view"]) == ("macro", "overlay") else BODY_CAP
     # The configured target is never supplied by a model or derived from an ID.
     try:
-        payload = getter(url, BODY_CAP)
+        payload = getter(url, cap)
     except ProductRefused:
         return _base(tool="product_observe", caller=caller, now=now,
                      status="DEPENDENCY_UNAVAILABLE",
@@ -273,7 +354,7 @@ def product_observe(caller: ProductCaller, request: Mapping[str, str],
         "etag": str(payload.headers.get("etag", ""))[:140] or None,
         "last_modified": str(payload.headers.get("last-modified", ""))[:140] or None,
         "cache_age_seconds": _scalar(payload.headers.get("age")),
-        "representation": "retained_prefix" if payload.truncated else "complete",
+        "representation": "retained_prefix" if payload.truncated or len(payload.body) > cap else "complete",
     }
     if 300 <= payload.status <= 399:
         return _base(tool="product_observe", caller=caller, now=now, status="INVALID",
@@ -296,7 +377,7 @@ def product_observe(caller: ProductCaller, request: Mapping[str, str],
                      data={}, error="UPSTREAM_UNAVAILABLE")
     content_type = payload.headers.get("content-type", "").lower().split(";", 1)[0].strip()
     content_len = payload.headers.get("content-length")
-    if (payload.truncated or not payload.body
+    if (payload.truncated or len(payload.body) > cap or not payload.body
         or content_type != "application/json"
         or (content_len is not None and (
             not content_len.isdecimal() or int(content_len) != len(payload.body)
@@ -312,8 +393,11 @@ def product_observe(caller: ProductCaller, request: Mapping[str, str],
                      status="INVALID", source=meta,
                      freshness={"qualified": False, "reasons": ["invalid_json_representation"]},
                      data={}, error="INVALID_REPRESENTATION")
-    status, data, freshness = (
-        _macro(decoded, now) if request["product"] == "macro" else _risk(decoded, now)
-    )
+    if (request["product"], request["view"]) == ("macro", "status"):
+        status, data, freshness = _macro(decoded, now)
+    elif (request["product"], request["view"]) == ("macro", "overlay"):
+        status, data, freshness = _overlay(decoded, now)
+    else:
+        status, data, freshness = _risk(decoded, now)
     return _base(tool="product_observe", caller=caller, now=now,
                  status=status, source=meta, freshness=freshness, data=data)

@@ -40,6 +40,7 @@ source IDs without consulting their contents.
 
 product_observe accepts only these product/view pairs:
 - macro/status -> macro.public_status
+- macro/overlay -> macro.public_live_overlay (published intraday context only)
 - terminal/market_risk -> terminal.public_risk_projection
 
 There is no model-selected URL, host, method, header, token, cookie, query,
@@ -229,3 +230,48 @@ authorization/grants/selected ChatGPT plugin or real Chrome/Browser Fabric
 profile has been installed by adding this source. Do not use a dummy
 owner_ready=lambda: True in real deployment, expose health endpoints through
 an unreviewed public ingress, or call a source constructor PROVEN_LIVE.
+
+
+## M1 public Macro live overlay: source-owned intraday context
+
+Macro read-only source pinned at
+mastermindx-market-intelligence/macro@f5321bb68ca43310d72a58f8c4f583e3abbee1ca.
+Its app/main.py exposes a GET /api/overlay route that directly reads the
+existing live/overlay.json owner artifact without invoking user authorization.
+The current producer in scripts/build_live_overlay.py emits
+schema live.overlay.v2, a producer build clock, delayed_min, per-region session
+status, market context and contributor/quote counts. The fast intraday overlay
+must NOT be confused with the separate nightly regime/GTAA decision spine.
+
+The static Product catalog now includes macro/overlay under the existing
+read-only product_observe tool. This is a *public* owner source, not an
+authenticated private-product or user-entitlement endpoint. No new data
+producer, quote signing, market state classifier, GTAA score, trading action
+or vendor entitlement authority is introduced.
+
+The adapter allocates a distinct bounded 512 KiB upstream representation cap
+for this source (existing Macro status and Terminal risk remain at 64 KiB),
+while retaining the unchanged 16 KiB entire MCP result cap. It forwards
+ONLY selected published source observations: schema, built timestamp, producer
+count fields, declared quote delay/realtime flag (as *unverified source claim*),
+and minimal stale/calendar/session context for selected SPY/QQQ/VIX and
+US/China/Hong Kong/Canada venue records.
+
+It does NOT return any raw licensed quote price, raw options-flow row,
+contract/strike/ticker tape, vendor key/diagnostic, stock allocation, raw
+per-symbol snapshot, secret or bulk source JSON. A large source response
+retains its original body digest and byte count, but only the safe bounded
+summary becomes a Web CEO tool result.
+
+The overlay is PARTIAL by design: producer built time and per-session
+freshness are not proof of current live risk-on/off regime or true real-time
+data. Invalid/future built clocks, inconsistent counts, unknown schema and
+unqualified delay produce explicit invalid/partial states. A feed reporting
+real-time alongside a nonzero delay is explicitly contradicted, never
+silently promoted to true real-time.
+
+Local tests use synthetic owner-compatible live.overlay.v2 fixtures only:
+no previously denied public-network canary was run or retried, and no live
+production overlay/market claim is made here. The installed producer, current
+source runtime and actual availability must be independently verified by its
+existing product/release owner after lawful source and identity admission.
