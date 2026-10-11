@@ -2308,11 +2308,20 @@ export function App() {
           New launch
         </button>
       </section>
-    ) : canLaunch && commandView ? (
+    ) : commandReady && commandView ? (
       <>
         <LaunchOrchestrator
+          key={JSON.stringify([
+            ownerContext?.principalScope,
+            ownerContext?.generation,
+          ])}
           projects={commandView.projects}
           profiles={commandView.profiles}
+          unavailableReason={
+            canLaunch
+              ? undefined
+              : "Launch choices are unavailable. Your draft is retained."
+          }
           submitting={heldKind === "launch" && commandBusy}
           error={
             currentRefusal?.kind === "launch"

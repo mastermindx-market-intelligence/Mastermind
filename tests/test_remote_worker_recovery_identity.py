@@ -23,7 +23,7 @@ from test_ceo_submit_armed_composition import _raw, _write
 from test_executive_service import _proof_absence
 from test_remote_attempt_transport import (
     HOST_A, WORKER, QUOTA, _claimed_runtime, _host_binding, _join,
-    _lost_requeued_runtime,
+    _lost_requeued_runtime, _pin_remote_claim,
 )
 
 
@@ -129,6 +129,8 @@ def _composed_claim(tmp_path, monkeypatch, *, adapter_id="codex-cli", source_fau
         job.job_id, worker_id=WORKER, quota_class=QUOTA, lease_owner="fixture",
     )
     assert lease is not None
+    pinned = _pin_remote_claim(runtime, lease, binding)
+    lease = dataclasses.replace(lease, attempt=pinned)
     return service, supervisor, job, lease, binding
 
 
@@ -165,7 +167,7 @@ def test_composed_unbound_restart_uses_endpoint_uid_and_reaches_expiry(
     )
     attempt = lease.attempt
     assert attempt.status is AttemptStatus.CLAIMED
-    assert attempt.pid is None and attempt.launch_metadata == {}
+    assert attempt.pid is None and attempt.launch_metadata["remote_launch_identity"]
     assert binding.worker_uid != supervisor.worker_uid
     Path(job.worktree).mkdir(parents=True, mode=0o700)
     supervisor._run_dir(attempt.attempt_id).mkdir(parents=True, mode=0o700)
@@ -301,6 +303,7 @@ def test_cached_controller_refuses_endpoint_identity_migration_before_io(tmp_pat
     runtime, _, lease = _claimed_runtime(tmp_path)
     binding = _host_binding(tmp_path)
     current = [binding]
+    _pin_remote_claim(runtime, lease, binding)
     adapter = AttemptBoundRemoteWorkerAdapter(runtime, lambda h, w: current[0])
     original = adapter._controller_for_attempt(lease.attempt)
     current[0] = dataclasses.replace(binding, **{field: value})
@@ -312,6 +315,7 @@ def test_cached_controller_refuses_endpoint_identity_migration_before_io(tmp_pat
 
 def test_cached_active_controller_never_retains_cancel_authority_after_lost(tmp_path, monkeypatch):
     runtime, job, lease = _claimed_runtime(tmp_path, attempt_limit=2)
+    _pin_remote_claim(runtime, lease, _host_binding(tmp_path))
     adapter = AttemptBoundRemoteWorkerAdapter(runtime, lambda h, w: _host_binding(tmp_path))
     active = adapter._controller_for_attempt(lease.attempt)
     assert "cancel" in active.client.allowed_operations
@@ -350,7 +354,7 @@ def test_endpoint_uid_drift_during_observation_cannot_requalify(tmp_path, monkey
 
     _fake_status(monkeypatch, lost, fault=migrate)
     before = service.runtime.workers.get_quota_class(WORKER, QUOTA)
-    with pytest.raises((broker.BrokerStateError, StateConflict)):
+    with pytest.raises((broker.BrokerStateError, StateConflict, RemoteAttemptTransportError)):
         asyncio.run(service._recover_proof_capacity(job.job_id, lost.attempt_id))
     assert service.runtime.workers.get_quota_class(WORKER, QUOTA) == before
 
