@@ -1238,6 +1238,7 @@ export function App() {
       reason: "SOURCE_READ_PENDING",
     }),
     [workState, setWorkState] = useState<WorkState>({ kind: "PENDING" }),
+    [workRevision, setWorkRevision] = useState(0),
     [mission, setMission] = useState<MissionDocument | UnavailableMission>(() =>
       unavailableMission(
         initial,
@@ -1761,7 +1762,7 @@ export function App() {
       attached = false;
       controller.abort();
     };
-  }, [native, authRevision, authState?.acquisition]);
+  }, [native, authRevision, authState?.acquisition, workRevision]);
   useEffect(() => {
     const restoreSelection = () => {
       const next = selectionFromLocation();
@@ -2491,6 +2492,24 @@ export function App() {
     setProjectTab(null);
     setActive(view);
   };
+  const workReadAvailable =
+    typeof window.MastermindMissionHost?.readWork === "function" &&
+    (!authState || authState.acquisition);
+  const workRefreshControl = (
+    <button
+      type="button"
+      // Native disabled blurs the focused button in Chrome. Guard pending reads below.
+      disabled={!workReadAvailable}
+      aria-disabled={workState.kind === "PENDING" || !workReadAvailable}
+      onClick={() => {
+        if (workState.kind === "PENDING" || !workReadAvailable) return;
+        setWorkState({ kind: "PENDING" });
+        setWorkRevision((revision) => revision + 1);
+      }}
+    >
+      Refresh Work
+    </button>
+  );
   let content: React.ReactNode;
   if (active === "Today")
     content = (
@@ -2601,6 +2620,7 @@ export function App() {
           ) : projectTab === "Work" ? (
             <>
               {commandPanel}
+              {workRefreshControl}
               <WorkQueue state={workState} rootJobId={selection.rootJobId} />
             </>
           ) : projectTab === "Evidence" ? (
@@ -2681,6 +2701,7 @@ export function App() {
     content = (
       <>
         {commandPanel}
+        {workRefreshControl}
         <WorkQueue state={workState} />
       </>
     );
