@@ -811,7 +811,9 @@ def company_consultation_launchd_entry(config: Mapping[str, Any]) -> dict[str, A
     if "company_consultation" not in config:
         return None
     if (type(value) is not dict
-            or set(value) != {"armed", "socket_path", "launchd_socket_name"}
+            or set(value) not in ({"armed", "socket_path", "launchd_socket_name"},
+                                  {"armed", "socket_path", "launchd_socket_name", "native_return_armed"})
+            or type(value.get("native_return_armed", False)) is not bool
             or type(value["armed"]) is not bool
             or value["socket_path"] != _CANONICAL_COMPANY_CONSULTATION_SOCKET
             or value["launchd_socket_name"] != _COMPANY_CONSULTATION_SOCKET_NAME):
@@ -2237,7 +2239,8 @@ def _service_from_config(
                 runtime=runtime, repository_root=company_repository,
                 worker_uid=company_worker_uid, relay_socket_path=_CANONICAL_AGENT_RELAY_SOCKET,
                 workspace_id=SLACK_WORKSPACE_ID, channel_id=SLACK_CHANNEL_ID,
-                requester_answer_wake_dispatch=dispatch_answer)
+                requester_answer_wake_dispatch=dispatch_answer,
+                native_return_armed=raw["company_consultation"].get("native_return_armed", False))
         company_listener = activate_launchd_socket(_COMPANY_CONSULTATION_SOCKET_NAME)
         activated_listeners.append(company_listener)
         company_binding = CompanyConsultationBinding(
