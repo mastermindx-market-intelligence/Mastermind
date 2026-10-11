@@ -2752,7 +2752,7 @@ describe("host-composition repair regressions (R2)", () => {
 
 
 describe("host-composition repair regressions (R4)", () => {
-  it("F5: Check status after a pre-render binding replacement recovers through nothing and keeps the original uncertainty", async () => {
+  it("F5: pre-render replacement blocks status reads, then qualified empty replacement storage removes the old recovery control", async () => {
     const seeded: OperationPointer = {
       operationKey: "op-seeded",
       kind: "launch",
@@ -2830,7 +2830,8 @@ describe("host-composition repair regressions (R4)", () => {
     const user = userEvent.setup();
     render(<App />);
     await launchFromWork(user);
-    // Static PENDING_POINTER hold: recovery reachable, zero dispatch.
+    // Discovery exposes the retained pointer and blocks a new Launch;
+    // recovery is reachable with zero dispatch.
     await waitFor(() =>
       expect(
         screen
@@ -2862,26 +2863,23 @@ describe("host-composition repair regressions (R4)", () => {
         .hasAttribute("disabled"),
     ).toBe(false);
 
-    // Once the composition observes the replacement (a rerender swaps the
-    // slot), Check status recovers through the LIVE binding's controller.
-    // The seeded pointer lives only in the old store, so the live recover
-    // is read-only and reaches no old-port call; the uncertainty survives.
+    // Once a rerender observes the replacement, discovery reads its store.
+    // Successful empty storage removes the old route's recovery surface and
+    // admits an eligible new Launch while preserving the old store's hint.
     await user.click(screen.getByRole("button", { name: "Today" }));
     await navigateCompanyOperation(user, "Work");
-    await user.click(screen.getByRole("button", { name: "Check status" }));
-    await act(async () => {
-      for (let i = 0; i < 8; i++) await Promise.resolve();
-    });
+    // Leaving Work remounts its unsent form; supply an eligible new goal.
+    await user.type(screen.getByLabelText("Goal"), "A replacement-route draft");
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Check status" })).toBeNull());
+    expect(screen.queryByText(seeded.operationKey)).toBeNull();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Launch" }).hasAttribute("disabled")).toBe(false));
     expect(oldRead).not.toHaveBeenCalled();
     expect(replacementRead).not.toHaveBeenCalled();
     expect(window.location.search).toContain("work_ref=WS%3AALPHA");
     expect(store1.read("owner-a")).toEqual(seeded);
-    // Re-entry: the in-flight flag reset and the control is usable again.
-    expect(
-      screen
-        .getByRole("button", { name: "Check status" })
-        .hasAttribute("disabled"),
-    ).toBe(false);
+    // Availability is not a new effect: no new Launch is clicked here.
+    expect(old.prepare).not.toHaveBeenCalled();
+    expect(old.submit).not.toHaveBeenCalled();
     expect(replacement.prepare).not.toHaveBeenCalled();
     expect(replacement.submit).not.toHaveBeenCalled();
   });
