@@ -72,3 +72,11 @@ python scripts/mastermind_product_access_app.py --describe
 ```
 
 The host-side production invocation cannot be constructed by this source: its actual policy path, exact audience/issuer, allowed ChatGPT Origins, process identity, TLS route, audit directory, and explicit reviewer/operations approval are not yet established. Never replace those with `product.example` fixtures.
+
+## Launcher owner-file trust hardening (source only, 2026-10-11)
+
+The explicit Product launcher opens its policy and audit directories through a descriptor-relative `O_DIRECTORY|O_NOFOLLOW` chain. Every ancestor is checked for exact opened entry identity, root/current-principal custody, unsafe write bits, and extended macOS ACLs using the pre-existing first-party `control_plane.fs_security` checker. The only shared writable ancestors admitted are known root-owned mode-01777 sticky temporary directories. All other writable or symlinked ancestors fail closed. The regular policy file must be owned by the current service principal, mode 0600, single-link, ACL-free, nonempty and at most 64 KiB; the bounded read must retain its named/open inode, size, mode, ownership and modification/change-time identity. These checks operate before parsing the closed Business `ResourcePolicy`.
+
+The audit directory is separately proven through the same ancestor chain before the existing `DurableAuthAuditSink` opens it. This source does **not** implement a second audit sink, file-event journal or model-controlled policy path. The shared Business audit file's macOS ACL qualification remains a distinct original-owner security/release decision: a safe Product policy read is not sufficient evidence that all audit-file permissions are safe.
+
+Fixture-only negative tests verify invalid ACLs, writable ancestors, symlink ancestry changes, in-place equal-length policy rewrites, named-file replacement and guaranteed audit owner close after a simulated Uvicorn failure. They do not prove a real macOS ACL, server startup, live OAuth, real HTTPS route, ChatGPT installation, or user account consent. Preserve all earlier no-network/no-credential and source/release constraints.

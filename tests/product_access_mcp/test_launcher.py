@@ -143,3 +143,158 @@ def test_no_service_acquisition_without_explicit_audit_owner(tmp_path, monkeypat
             "--policy-file", str(p), "--audit-directory", str(tmp_path / "missing"),
             "--port", "8767",
         ])
+
+
+def test_policy_refuses_extended_acl_on_file(tmp_path, monkeypatch):
+    """Darwin ACL entries are independent of visible 0600 mode bits."""
+    unit = launcher()
+    candidate = make_policy(tmp_path)
+    seen = []
+
+    def acl_reader(path, *, expected_identity, descriptor):
+        seen.append(Path(path))
+        return Path(path) == candidate
+
+    monkeypatch.setattr(unit, "has_macos_acl", acl_reader)
+    with pytest.raises(ValueError, match="POLICY_FILE_REFUSED"):
+        unit._load_policy(str(candidate))
+    assert candidate in seen
+
+
+def test_policy_refuses_extended_acl_on_ancestor(tmp_path, monkeypatch):
+    unit = launcher()
+    private = tmp_path / "private"
+    private.mkdir(mode=0o700)
+    candidate = make_policy(private)
+
+    def acl_reader(path, *, expected_identity, descriptor):
+        return Path(path) == private
+
+    monkeypatch.setattr(unit, "has_macos_acl", acl_reader)
+    with pytest.raises(ValueError, match="POLICY_DIRECTORY_REFUSED"):
+        unit._load_policy(str(candidate))
+
+
+def test_policy_refuses_untrusted_writable_parent(tmp_path):
+    unit = launcher()
+    private = tmp_path / "unsafe-parent"
+    private.mkdir(mode=0o700)
+    candidate = make_policy(private)
+    private.chmod(0o777)
+    try:
+        with pytest.raises(ValueError, match="POLICY_DIRECTORY_REFUSED"):
+            unit._load_policy(str(candidate))
+    finally:
+        private.chmod(0o700)
+
+
+def test_verified_directory_walk_rejects_ancestor_symlink_swap(tmp_path):
+    unit = launcher()
+    parent = tmp_path / "policy-parent"
+    parent.mkdir(mode=0o700)
+    candidate = make_policy(parent)
+    canonical = unit._canonical_path(str(candidate))
+    renamed = tmp_path / "original-parent"
+    parent.rename(renamed)
+    alternate = tmp_path / "alternate-parent"
+    alternate.mkdir(mode=0o700)
+    parent.symlink_to(alternate, target_is_directory=True)
+    # This simulates the change *after* the original canonical-path check.
+    with pytest.raises((OSError, ValueError)):
+        unit._open_verified_directory(canonical.parent)
+
+
+def test_policy_refuses_same_length_in_place_rewrite(tmp_path, monkeypatch):
+    unit = launcher()
+    candidate = make_policy(tmp_path)
+    original_read = unit._read_policy_fd
+
+    def racing_read(fd):
+        raw = original_read(fd)
+        altered = raw.replace(b'"policy_id"', b'"policy_iD"')
+        assert altered != raw and len(altered) == len(raw)
+        with candidate.open("r+b") as stream:
+            stream.write(altered)
+            stream.flush()
+            os.fsync(stream.fileno())
+        # A deliberate metadata epoch change makes the race deterministic
+        # on filesystems whose timestamp resolution is coarser than one write.
+        prior = candidate.stat()
+        os.utime(candidate, ns=(prior.st_atime_ns, prior.st_mtime_ns + 2_000_000_000))
+        return raw
+
+    monkeypatch.setattr(unit, "_read_policy_fd", racing_read)
+    with pytest.raises(ValueError, match="POLICY_FILE_CHANGED"):
+        unit._load_policy(str(candidate))
+
+
+def test_policy_refuses_post_read_named_file_replacement(tmp_path, monkeypatch):
+    unit = launcher()
+    candidate = make_policy(tmp_path)
+    original_read = unit._read_policy_fd
+
+    def racing_read(fd):
+        raw = original_read(fd)
+        replacement = tmp_path / "other-policy.json"
+        replacement.write_bytes(raw)
+        replacement.chmod(0o600)
+        replacement.replace(candidate)
+        return raw
+
+    monkeypatch.setattr(unit, "_read_policy_fd", racing_read)
+    with pytest.raises(ValueError, match="POLICY_FILE_CHANGED"):
+        unit._load_policy(str(candidate))
+
+
+def test_audit_directory_acl_refuses_before_durable_acquisition(tmp_path, monkeypatch):
+    unit = launcher()
+    import uvicorn
+
+    candidate = make_policy(tmp_path)
+    audit = tmp_path / "audit"
+    audit.mkdir(mode=0o700)
+
+    def acl_reader(path, *, expected_identity, descriptor):
+        return Path(path) == audit
+
+    monkeypatch.setattr(unit, "has_macos_acl", acl_reader)
+    monkeypatch.setattr(unit.DurableAuthAuditSink, "open",
+                        lambda *_args, **_kwargs: pytest.fail("audit owner acquired"))
+    monkeypatch.setattr(uvicorn, "run",
+                        lambda *_args, **_kwargs: pytest.fail("listener started"))
+    with pytest.raises(SystemExit, match="PRODUCT_AUDIT_DIRECTORY_REFUSED"):
+        unit.main([
+            "--policy-file", str(candidate),
+            "--audit-directory", str(audit),
+            "--port", "8767",
+        ])
+    assert list(audit.iterdir()) == []
+
+
+def test_borrowed_audit_owner_is_closed_when_uvicorn_fails(tmp_path, monkeypatch):
+    unit = launcher()
+    import uvicorn
+
+    candidate = make_policy(tmp_path)
+    audit = tmp_path / "audit"
+    audit.mkdir(mode=0o700)
+    closed = []
+    real_close = unit.DurableAuthAuditSink.close
+
+    def observed_close(self):
+        closed.append(True)
+        return real_close(self)
+
+    monkeypatch.setattr(unit.DurableAuthAuditSink, "close", observed_close)
+
+    def fail_listener(_app, **_options):
+        raise RuntimeError("SYNTHETIC_LISTENER_FAILURE")
+
+    monkeypatch.setattr(uvicorn, "run", fail_listener)
+    with pytest.raises(RuntimeError, match="SYNTHETIC_LISTENER_FAILURE"):
+        unit.main([
+            "--policy-file", str(candidate),
+            "--audit-directory", str(audit),
+            "--port", "8767",
+        ])
+    assert closed == [True]

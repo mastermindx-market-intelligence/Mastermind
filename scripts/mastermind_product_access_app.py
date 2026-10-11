@@ -22,6 +22,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
 from integrations.business_mcp_auth.audit import DurableAuthAuditSink
 from integrations.business_mcp_auth.contracts import load_resource_policy
 from integrations.business_mcp_auth.jwks import BoundedJwksCache, HttpxJwksFetcher
@@ -59,23 +60,122 @@ def _no_constant(_value: str) -> object:
     raise ValueError("NONFINITE_POLICY_NUMBER")
 
 
-def _load_policy(raw_path: str):
-    """Load one exact owner-supplied 0600 policy without following a symlink."""
-    path = _canonical_path(raw_path)
+# These are the only explicitly admitted shared temporary ancestors. The
+# sticky bit prevents foreign users from replacing an owner-owned entry.
+_ROOT_STICKY_DIRECTORIES = frozenset({
+    Path("/tmp"), Path("/var/tmp"), Path("/private/tmp"), Path("/private/var/tmp"),
+})
+
+
+def _file_identity(info: os.stat_result) -> tuple[int, ...]:
+    """Bind an opened policy file to a stable inode and observable content epoch."""
+    return (
+        info.st_dev, info.st_ino, info.st_uid, info.st_gid,
+        info.st_mode, info.st_nlink, info.st_size,
+        info.st_mtime_ns, info.st_ctime_ns,
+    )
+
+
+def _check_directory(fd: int, path: Path) -> None:
+    info = os.fstat(fd)
+    mode = stat.S_IMODE(info.st_mode)
+    sticky_root_temp = (
+        path in _ROOT_STICKY_DIRECTORIES
+        and info.st_uid == 0
+        and mode == 0o1777
+    )
+    if (not stat.S_ISDIR(info.st_mode)
+            or info.st_uid not in (0, os.geteuid())
+            or (mode & 0o022 and not sticky_root_temp)):
+        raise ValueError("POLICY_DIRECTORY_REFUSED")
+    try:
+        if has_macos_acl(path, expected_identity=info, descriptor=fd):
+            raise ValueError("POLICY_DIRECTORY_REFUSED")
+    except FilesystemSecurityError:
+        raise ValueError("POLICY_DIRECTORY_REFUSED") from None
+
+
+def _open_verified_directory(path: Path) -> int:
+    """Walk the full parent chain through O_NOFOLLOW directory descriptors.
+
+    Each admitted directory is root-owned or owned by the current service
+    principal. Other writers and unqualified extended macOS ACLs are refused.
+    The returned descriptor is owned by the caller and must be closed.
+    """
+    directory = getattr(os, "O_DIRECTORY", 0)
     nofollow = getattr(os, "O_NOFOLLOW", 0)
     cloexec = getattr(os, "O_CLOEXEC", 0)
-    if not nofollow or not cloexec:
+    if not directory or not nofollow or not cloexec:
         raise ValueError("POLICY_PLATFORM_REFUSED")
-    fd = os.open(path, os.O_RDONLY | nofollow | cloexec)
+    flags = os.O_RDONLY | directory | nofollow | cloexec | getattr(os, "O_NONBLOCK", 0)
+    fd = os.open("/", flags)
+    current = Path("/")
     try:
-        entry = os.fstat(fd)
-        if (not stat.S_ISREG(entry.st_mode) or entry.st_uid != os.geteuid()
-                or stat.S_IMODE(entry.st_mode) != 0o600 or entry.st_nlink != 1
-                or not 0 < entry.st_size <= MAX_POLICY_FILE_BYTES):
+        _check_directory(fd, current)
+        for component in path.parts[1:]:
+            # Inspect the actual directory entry relative to the proven parent,
+            # then bind the opened child to that same entry's identity.
+            before = os.stat(component, dir_fd=fd, follow_symlinks=False)
+            next_fd = os.open(component, flags, dir_fd=fd)
+            try:
+                opened = os.fstat(next_fd)
+                if (not stat.S_ISDIR(before.st_mode)
+                        or (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino)):
+                    raise ValueError("POLICY_DIRECTORY_CHANGED")
+                current = current / component
+                _check_directory(next_fd, current)
+                after = os.stat(component, dir_fd=fd, follow_symlinks=False)
+                if (after.st_dev, after.st_ino) != (opened.st_dev, opened.st_ino):
+                    raise ValueError("POLICY_DIRECTORY_CHANGED")
+            except BaseException:
+                os.close(next_fd)
+                raise
+            try:
+                os.close(fd)
+            except BaseException:
+                os.close(next_fd)
+                raise
+            fd = next_fd
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def _read_policy_fd(fd: int) -> bytes:
+    with os.fdopen(fd, "rb", closefd=False) as stream:
+        return stream.read(MAX_POLICY_FILE_BYTES + 1)
+
+
+def _load_policy(raw_path: str):
+    """Load one descriptor-bound, ACL-free, stable owner-only policy file."""
+    path = _canonical_path(raw_path)
+    dir_fd = _open_verified_directory(path.parent)
+    fd = -1
+    try:
+        before_named = os.stat(path.name, dir_fd=dir_fd, follow_symlinks=False)
+        flags = (os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC
+                 | getattr(os, "O_NONBLOCK", 0))
+        fd = os.open(path.name, flags, dir_fd=dir_fd)
+        before = os.fstat(fd)
+        if (not stat.S_ISREG(before.st_mode)
+                or before.st_uid != os.geteuid()
+                or stat.S_IMODE(before.st_mode) != 0o600 or before.st_nlink != 1
+                or not 0 < before.st_size <= MAX_POLICY_FILE_BYTES):
             raise ValueError("POLICY_FILE_REFUSED")
-        with os.fdopen(fd, "rb", closefd=False) as stream:
-            raw = stream.read(MAX_POLICY_FILE_BYTES + 1)
-        if len(raw) != entry.st_size:
+        if _file_identity(before_named) != _file_identity(before):
+            raise ValueError("POLICY_FILE_CHANGED")
+        try:
+            if has_macos_acl(path, expected_identity=before, descriptor=fd):
+                raise ValueError("POLICY_FILE_REFUSED")
+        except FilesystemSecurityError:
+            raise ValueError("POLICY_FILE_REFUSED") from None
+        raw = _read_policy_fd(fd)
+        after = os.fstat(fd)
+        after_named = os.stat(path.name, dir_fd=dir_fd, follow_symlinks=False)
+        if (len(raw) != before.st_size
+                or _file_identity(before) != _file_identity(after)
+                or _file_identity(after) != _file_identity(after_named)):
             raise ValueError("POLICY_FILE_CHANGED")
         selected = load_resource_policy(json.loads(
             raw.decode("utf-8"),
@@ -86,7 +186,9 @@ def _load_policy(raw_path: str):
             raise ValueError("PRODUCT_SCOPE_REQUIRED")
         return selected
     finally:
-        os.close(fd)
+        if fd >= 0:
+            os.close(fd)
+        os.close(dir_fd)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -150,8 +252,14 @@ def main(argv: list[str] | None = None) -> int:
     directory_fd = -1
     sink = None
     try:
-        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
-        directory_fd = os.open(audit_path, flags)
+        # Bind the audit directory through the same owned, ACL-free ancestor
+        # chain before handing its descriptor to the existing durable owner.
+        # This pre-acquisition failure is safe to coarsen; failures inside the
+        # durable sink retain their original effect/cleanup classification.
+        try:
+            directory_fd = _open_verified_directory(audit_path)
+        except (OSError, ValueError):
+            raise SystemExit("PRODUCT_AUDIT_DIRECTORY_REFUSED") from None
         sink = DurableAuthAuditSink.open(directory_fd, policy_id=policy.policy_id)
         os.close(directory_fd)
         directory_fd = -1
