@@ -2674,7 +2674,10 @@ class ProductionArmHost(ProductionStatusHost):
         from scripts.executive_os_phase1c import company_consultation_launchd_entry, ServiceError
         try:
             expected = company_consultation_launchd_entry(config.control)
-            raw, _info = _read_root_file(CONTROL_PLIST, modes=frozenset({0o644}), gid=0)
+            public_plist_mode = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH
+            raw, _info = _read_root_file(
+                CONTROL_PLIST, modes=frozenset({public_plist_mode}), gid=0
+            )
             value = plistlib.loads(raw)
             sockets = value.get("Sockets", {})
             if (expected is None or type(sockets) is not dict
