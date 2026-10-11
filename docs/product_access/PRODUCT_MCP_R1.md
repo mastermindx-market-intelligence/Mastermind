@@ -192,3 +192,40 @@ unconditional product permission adapter or default credentials.
 
 Review before release: tests/test_product_access_mcp_deployment.py and the
 deployment/late-revocation test in tests/test_product_access_mcp_sdk.py.
+
+
+## M1 follow-on: mountable ASGI boundary and process readiness
+
+New module: integrations/product_access_mcp/mount.py.
+
+The existing admitted service owner can compose
+create_product_asgi_app(server=..., owner_ready=...) with the separately
+constructed authenticated Product server. It exposes GET /healthz (process
+liveness only), GET /readyz (explicit owner-supplied current readiness)
+and the existing FastMCP HTTP routes. The SDK session manager runs within the
+mount's ASGI lifespan and is not represented as a new Executive Job, worker,
+account, socket or browser resource. This module DOES NOT start a listener.
+
+The owner readiness callback must be a fast, synchronous check of the actual
+incumbent listener/identity/grant/capacity installation; no default True.
+If it returns anything other than literal True or raises, readyz returns 503.
+A failing readiness check also gates all MCP HTTP requests at the mount
+boundary with a generic 503. A request that entered while ready is still
+subject to the late existing OAuth and product-grant authorization fence.
+Neither a healthy liveness route nor an isolated ASGI suite is proof that the
+real Web CEO plugin is connected or the user can access protected data.
+
+Red-first tests established that an SDK server can be running while its
+host is unready; without an admission gate, the SDK still processed the
+request. The mount now refuses these calls until the existing owner declares
+readiness. Positive tests use disposable signed JWTs and synthetic upstream
+data, with revocation and two-user isolation intact.
+
+Tests: tests/test_product_access_mcp_mount.py, and the composed
+deployment/SDK test in tests/test_product_access_mcp_sdk.py.
+
+Production gate remains held: no listener/TLS/OAuth consent/client/product
+authorization/grants/selected ChatGPT plugin or real Chrome/Browser Fabric
+profile has been installed by adding this source. Do not use a dummy
+owner_ready=lambda: True in real deployment, expose health endpoints through
+an unreviewed public ingress, or call a source constructor PROVEN_LIVE.

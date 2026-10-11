@@ -397,7 +397,9 @@ class ProductAppTests(unittest.IsolatedAsyncioTestCase):
             read_port=read_port, resolve_binding=owner,
             allowed_hosts=("127.0.0.1",),
         ))
-        app = deployment.streamable_http_app()
+        from integrations.product_access_mcp.mount import create_product_asgi_app
+        ready = [False]
+        app = create_product_asgi_app(server=deployment, owner_ready=lambda: ready[0])
         started = asyncio.Event()
         stop = asyncio.Event()
 
@@ -425,6 +427,12 @@ class ProductAppTests(unittest.IsolatedAsyncioTestCase):
                                        "product": "terminal", "view": "market_risk",
                                    }},
                     })
+
+                not_ready = await call(self.token())
+                self.assertEqual(not_ready.status_code, 503)
+                self.assertEqual(len(seen), 0)
+                ready[0] = True
+                self.assertEqual((await client.get("/readyz")).status_code, 200)
 
                 valid = await call(self.token())
                 self.assertEqual(valid.status_code, 200, valid.text[:150])
