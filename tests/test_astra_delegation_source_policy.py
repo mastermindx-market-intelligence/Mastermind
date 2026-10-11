@@ -166,3 +166,20 @@ def test_attended_astra_profile_does_not_claim_executive_parent_cutover():
         "served-model canary",
     ):
         assert phrase in runbook
+
+
+def test_runbook_documents_legacy_absence_hold_and_verified_registration():
+    text = RUNBOOK.read_text(encoding="utf-8")
+    required = (
+        "--legacy-absence-reconcile",
+        "state=absence_reconciled",
+        "--resume-legacy-after-absence",
+        "Legacy absence reconciliation and resume are held",
+        "reconcilable=false",
+        "authenticated evidence verifier",
+        "pending marker must be written and read back exactly",
+        "completed registration is also read back exactly",
+        "original #633 attempt remains EFFECT_UNKNOWN",
+    )
+    for phrase in required:
+        assert phrase in text

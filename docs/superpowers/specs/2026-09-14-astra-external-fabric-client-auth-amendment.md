@@ -25,6 +25,8 @@ When no prior Codex Executive client exists, enrollment may dynamically register
 
 DCR is never repeated merely because login or token refresh fails. The returned `client_id` is retained with the credential bundle and reused for later reauthorization. If the tenant/API has not granted dynamically registered third-party clients the required Executive scopes, enrollment stops as `BLOCKED_AUTH0_CLIENT_GRANT`; it does not request broader scopes or create another client.
 
+A legacy pre-fingerprint DCR attempt whose response was lost may leave one `EFFECT_UNKNOWN` marker without an exact client name. That operation may be reconciled as absent only from authoritative tenant evidence that binds the same attempt/callback/policy, covers the complete local attempt interval with retained and fully paginated audit history, proves zero current-client, Create-a-client, and DCR matches, and supplies immutable SHA-256 digests for the marker metadata, audit receipt, current application inventory, and local-outcome bound. Absence reconciliation performs no network call and keeps the same `attempt_ref` in the same Keychain item. One explicit same-operation resume may then precommit the fingerprinted v2 pending name and issue exactly one DCR POST. A lost resume response is again `EFFECT_UNKNOWN` and cannot be posted a second time without new reconciliation. A definitive registration refusal moves that same item to a terminal refusal state and consumes the resume opportunity.
+
 The one-time browser authorization remains a user-delegated Auth0 ceremony. A later machine-to-machine service principal may supersede it only through a separately reviewed Auth0 client grant and Executive subject-policy update.
 
 ## 4. Credential custody

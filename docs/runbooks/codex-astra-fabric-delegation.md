@@ -81,9 +81,21 @@ python3 -m ops.codex_fabric.enroll_executive_mcp --pending-status
 The status receipt contains only the pending `attempt_ref`, exact client name when one was precommitted,
 callback, installed-policy digest, `state=effect_unknown`, and whether the marker is reconcilable. It does
 not make a DCR call, exchange a token, or expose a credential. A legacy **pre-fingerprint** marker reports
-`reconcilable=false` and `client_name=null`; it must remain blocked. Do not guess a name, retrofit an
-attempt fingerprint, clear the marker, or retry. Recovery of that historical operation requires a
-separately reviewed same-operation ceremony based on authoritative tenant evidence.
+`reconcilable=false` and `client_name=null`; it remains blocked until authoritative tenant evidence
+resolves the original effect. Do not guess a name, clear the marker, or issue a replacement attempt.
+**Legacy absence reconciliation and resume are held.** The
+`--legacy-absence-reconcile` and `--resume-legacy-after-absence` options refuse before
+policy reads, mutex acquisition, Keychain access or HTTP. The Python entrypoints
+retain the shared mutex and refuse before registration storage or network access.
+Caller-supplied counts, completeness booleans and SHA-256 strings are claims, not
+an authenticated evidence verifier. They cannot establish that an uncertain request
+had no effect, even when syntactically valid.
+
+Historical v3 absence markers remain readable as `state=absence_reconciled`, with
+`reconcilable=false`. That state describes stored history, not permission to retry.
+Existing markers are preserved. Re-enabling this path requires independent review
+of an authenticated evidence verifier, exact-operation custody and resolution of
+the original effect through its existing owner. Do not construct a replacement marker.
 
 For a newly admitted attempt, source precommits the exact client name as
 `Mastermind Codex Astra <first-16-attempt-ref-characters>`. Only when `--pending-status` reports
@@ -100,13 +112,38 @@ python3 -m ops.codex_fabric.enroll_executive_mcp \
 
 The client id and pending coordinates are public metadata; the command stores only the exact reconciled
 public client identity and prints a digest-only receipt. It performs no DCR call and no token exchange.
-A missing, duplicate, stale, differently named, differently callback-bound, or otherwise ambiguous tenant
-observation stays blocked. Tenant proof that no client exists does not itself authorize this client to
-clear/re-admit the pending effect or issue a new DCR attempt.
+A duplicate, stale, differently named, differently callback-bound, or otherwise ambiguous tenant
+observation stays blocked.
 
-The current Chrome profile was checked only for serviceability and reached the Auth0 Dashboard login
-page, so it did not provide tenant reconciliation. No token or secret should be pasted into this runbook
-or chat as a workaround.
+All five mutating registration entrypoints use the existing local auth mutex.
+Enabled registration and known-client reconciliation hold it from state read through
+settlement; the disabled absence paths retain the same exclusion boundary. Contention,
+unsafe lock state or timeout refuses before registration storage or HTTP. Before a new
+admitted registration POST, the pending marker must be written and read back exactly.
+A success is returned only after the completed registration is also read back exactly.
+A failed or mismatched readback remains effect-unknown and is never a successful receipt.
+
+The mutex and durable marker have separate roles: process exit releases the mutex,
+while a persisted pending marker still prohibits another automatic registration.
+Serialization and readback grant no operation custody, historical effect clearance,
+request admission or approval to retry the original operation.
+
+For the historical legacy operation, retained read-only tenant-admin summaries report a selected
+paginated audit view with event extrema 2026-09-13T19:28:09.807Z through
+2026-09-17T23:20:36.881Z (236 events / 5 pages), seven `Create a client` events and zero exact
+`Mastermind Codex Astra` or DCR matches in that view. The September 26 Applications view also
+reported zero exact matching clients; it is not a current inventory. Selected-view extrema and
+pagination do not establish complete tenant capture, retention, permissions, ingestion completeness
+or deletion relevance for the original request interval.
+
+The original marker was created and last modified at 2026-09-14T18:26:28Z. Git commit
+`33e94cb567188604a914d27bb58af38f7345bad4` at 2026-09-14T18:47:45Z records source history;
+it does not establish HTTP dispatch or completion. The exact request interval and local outcome
+upper bound remain UNKNOWN until the original operation owner supplies retained execution-linked
+evidence with clock basis, uncertainty and digest. Do not use the commit timestamp as
+`attempt_local_outcome_by_epoch`, or turn incomplete/unknown capture into complete absence.
+The original #633 attempt remains EFFECT_UNKNOWN. These are non-secret reconciliation coordinates;
+the retained receipts remain with their evidence owner. No token or secret belongs in this runbook or chat.
 
 ## 4. Connection proof after enrollment
 
