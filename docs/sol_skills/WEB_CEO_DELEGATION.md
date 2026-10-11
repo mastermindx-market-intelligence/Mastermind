@@ -47,13 +47,30 @@ Model Router fixes the first lawful suitability tier; Capacity Fabric ranks only
 
 Keep all applicable provider/credential/activation holds effective before any credential read or provider call. Cheap workers are not exceptions. Use the existing approved worker-spend envelope and include review/repair consumption; willingness to spend more is not an unlimited cap. Keep metered executive cognition separate from economical worker execution. Do not invent a direct-spawn, raw-socket, alternate-queue or ad hoc credential fallback when the supported path is absent. Before any effect begins, an already-approved available manual/operator route may still be used under current placement/custody law; report it as manual transport with separate pickup/START/evidence, not Executive dispatch. Missing Web tools do not prove the entire fabric is down. This is not permission to retry a platform-blocked action through another actor or carrier.
 
-Concurrency is bounded globally by independent ready work, admitted provider/host capacity, workspace custody, the approved budget and the principal's review/integration capacity. Include the existing COO policy's reserved review/repair descendants and depth/child limits, not just currently running workers; a free execution slot does not prove the full admitted work-and-review graph fits. Do not multiply a per-chat allowance across the fleet or split tightly coupled edits among conflicting workers. The Chairman permits useful three- or four-level hierarchies, including Astra -> Astra coordinator ->
-Sol coordinator -> workers. Sol remains the economical default and Astra is optional for useful
-judgment. Native children use the configured ceiling of 16 and the supported runtime depth; Fabric
-uses its actual admitted depth and shared descendant accounting. A coordinator may delegate within
-the original root grant; a leaf does not recursively expand its scope. These ceilings are flexibility,
-not utilization targets. Do not multiply allowances across levels or claim a not-yet-supported Fabric
-graph is running.
+Sol is the default coordinator for sustained orchestration, analysis, review and integration; Astra
+is optional for useful frontier judgment. Eligible bounded leaf work defaults to admitted paid Fabric
+workers, including GLM, Qwen/Bailian and Grok when suitable under the existing routing law. A Sol
+coordinator uses the current Executive ingress when serviceable, or the already accepted attended
+stable-handle adapter when its procedure permits it. Native Codex children are not a substitute for
+that paid-provider route merely because the native spawn tool is available or familiar.
+
+A native Sol leaf requires a concrete frontier-judgment or unique approved-access need, or established
+pre-effect unavailability of suitable paid workers. Record that brief reason in the existing
+commission/checkpoint; no new form or approval round is required. One unavailable pool does not
+establish that every suitable paid pool is unavailable. An optional native Executive integration gap
+does not qualify while an eligible accepted Fabric route is available. Preserve any existing worker
+and unresolved effect; do not cancel, replace or move started work merely to change its token source.
+An explicit permission refusal remains attached to its exact operation and is never a fallback trigger.
+
+Concurrency is bounded globally by independent ready work, admitted provider/host capacity, workspace
+custody, the approved budget and the principal's review/integration capacity. Include the existing COO
+policy's reserved review/repair descendants and depth/child limits. Use the runtime's actually
+advertised slots and supported depth within the original root grant; a configured ceiling or a free
+slot does not prove that the full work-and-review graph is admitted. Useful coordinator levels are
+permitted only where supported, with shared descendant accounting; a leaf does not recursively expand
+its scope. Do not multiply allowances across chats or levels, split conflicting edits, or claim a
+not-yet-supported Fabric graph is running. A native Sol-to-Sol return proves that native path only:
+paid-provider START, retained result and parent consumption require evidence from the actual Fabric run.
 
 ## 5. Remain productive after dispatch
 
