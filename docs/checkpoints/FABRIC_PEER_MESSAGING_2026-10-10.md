@@ -240,3 +240,22 @@ verified against exact new remote SHA. Hosted CI/review remain separate later
 gates. Native session delivery still requires accepted production host/management
 owner and native attention/consumption proof; avoid treating the source test as
 runtime capability.
+
+## Native split-brain identity follow-up
+
+The native hierarchy source was published at
+`ffa60ffcd0728fedc57684dd6b39f00959657940`; same original Studio
+commit+push returned APPLIED, matching local/remote HEAD and clean workspace.
+The pure policy originally de-duplicated native UUIDs only per host. A session
+migrating from Ubuntu1 to Ubuntu2 could therefore appear twice in one owner
+snapshot. The policy now enforces **globally unique native session UUID** in
+a snapshot regardless of host, principal, or generation. The duplicate regression
+adds a cross-host case and implementation docs reflect this. This is a new
+local source delta awaiting publication; do not represent it as installed.
+
+Focused native policy+legacy policy+gateway run PID 84975 completed
+**137 passed, zero failures/errors/skips** on M2 Studio,
+JUnit `/tmp/mmx-native-splitbrain-20261011.xml` SHA256
+`9c9cfa17bbe6b8d150b33a2952dd290081f74de30fc29657c8c7437b71eef770`.
+The prior 162-case policy/gateway/Runtime run also passed before this
+one-line uniqueness change. No actual native session has been enrolled or messaged.

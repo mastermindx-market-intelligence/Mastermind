@@ -153,6 +153,7 @@ def test_native_session_cannot_claim_runtime_job_parent():
 def test_duplicate_native_session_even_across_generation_or_principal_refused():
     a = p(COO_A, CoordinationRole.COO)
     for rotated in (replace(COO_A, generation="gen-2"),
+                    replace(COO_A, host_ref="other-host"),
                     replace(COO_A, principal_ref="another")):
         with pytest.raises(CoordinationRefused, match="AMBIGUOUS_OWNER_FACTS"):
             s(a, replace(a, identity=rotated))

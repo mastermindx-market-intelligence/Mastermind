@@ -181,7 +181,7 @@ class CoordinationSnapshot:
             raise CoordinationRefused("INVALID_OWNER_FACTS")
         jobs: set[str] = set()
         bindings: set[str] = set()
-        native_sessions: set[tuple[str, str]] = set()
+        native_sessions: set[str] = set()
         actor_ids: set[CoordinationActorIdentity] = set()
         for participant in self.participants:
             if type(participant) is not CoordinationParticipant:
@@ -196,9 +196,10 @@ class CoordinationSnapshot:
                 jobs.add(identity.job_id)
                 bindings.add(identity.binding_id)
             else:
-                # The same physical native session cannot acquire parallel
-                # generations or principals inside one owner observation.
-                native_key = (identity.host_ref, identity.session_id)
+                # A provider session migrating between hosts must not appear
+                # twice: reject parallel generations, hosts, or principals.
+                # A canonical native UUID identifies one session globally.
+                native_key = identity.session_id
                 if native_key in native_sessions:
                     raise CoordinationRefused("AMBIGUOUS_OWNER_FACTS")
                 native_sessions.add(native_key)

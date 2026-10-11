@@ -152,8 +152,8 @@ represent an exact native parent of an admitted child. This adds no session
 discovery, provider wake, authentication owner or message transport.
 
 Native identities are accepted only for PROJECT_CEO and COO roles, not worker or
-task-operator self-enrollment. Native session duplicates (even with different
-generations/principals), invalid UUIDs, cross-project parentage, inverted role
+task-operator self-enrollment. Native session duplicates (even across hosts, generations or principals),
+invalid UUIDs, cross-project parentage, inverted role
 hierarchy, expired grants and generation drift fail closed. Existing Runtime
 parent_job_id checks, canonical Job/Attempt identity, and peer scopes are kept.
 Only exact, owner-present actors can become peers; an asserted but absent parent
