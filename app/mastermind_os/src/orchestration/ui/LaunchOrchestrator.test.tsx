@@ -85,6 +85,8 @@ describe("LaunchOrchestrator", () => {
       fireEvent.click(launchButton());
       expect(onSubmit).toHaveBeenCalledTimes(1);
       const submitted = onSubmit.mock.calls[0][0] as LaunchForm;
+      expect(submitted.goal).toContain("[MASTERMIND_ACCEPTANCE_CRITERIA_V1]\n");
+      expect(submitted.goal).toContain("\n[/MASTERMIND_ACCEPTANCE_CRITERIA_V1]");
       expect(submitted.goal).toContain("1. One message is delivered");
       expect(submitted.goal).toContain("2. Reopening does not duplicate it");
     });
@@ -95,6 +97,28 @@ describe("LaunchOrchestrator", () => {
       fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "A goal" } });
       fireEvent.change(screen.getByLabelText(/Acceptance criteria/), { target: { value: "x\n".repeat(7) } });
       expect(launchButton().disabled).toBe(true);
+      expect(onSubmit).not.toHaveBeenCalled();
+    });
+
+    it("refuses preexisting versioned markers in a goal before launch", () => {
+      const onSubmit = vi.fn();
+      render(<LaunchOrchestrator {...makeProps({ onSubmit })} />);
+      fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Report on [MASTERMIND_ACCEPTANCE_CRITERIA_V1] syntax" } });
+      fireEvent.change(screen.getByLabelText(/Acceptance criteria/), { target: { value: "Verify report" } });
+      expect(launchButton().disabled).toBe(true);
+      expect(screen.getByRole("alert")).toBeTruthy();
+      fireEvent.submit(goalForm());
+      expect(onSubmit).not.toHaveBeenCalled();
+    });
+
+    it("refuses ambiguous markers and control characters inside criteria", () => {
+      const onSubmit = vi.fn();
+      render(<LaunchOrchestrator {...makeProps({ onSubmit })} />);
+      fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Goal" } });
+      for (const text of ["Report [/MASTERMIND_ACCEPTANCE_CRITERIA_V1]", "Bad\tcriterion", "Nested [MASTERMIND_ACCEPTANCE_CRITERIA_V1]"]) {
+        fireEvent.change(screen.getByLabelText(/Acceptance criteria/), { target: { value: text } });
+        expect(launchButton().disabled).toBe(true);
+      }
       expect(onSubmit).not.toHaveBeenCalled();
     });
 

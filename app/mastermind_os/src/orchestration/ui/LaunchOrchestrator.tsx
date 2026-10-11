@@ -67,12 +67,25 @@ export interface LaunchOrchestratorProps {
 // launch the existing command adapter will reject.
 const MAX_GOAL_BYTES = 4000;
 const MAX_ACCEPTANCE_ITEMS = 6;
+// Versioned human-readable section in the existing objective. This is a
+// requirement description, not signed proof or a product-acceptance verdict.
+const ACCEPTANCE_OPEN = "\n\n[MASTERMIND_ACCEPTANCE_CRITERIA_V1]\n";
+const ACCEPTANCE_CLOSE = "\n[/MASTERMIND_ACCEPTANCE_CRITERIA_V1]";
 /** Criteria are sent as part of the existing goal: no new command or lifecycle schema. */
 export function composeAcceptanceGoal(goal: string, criteria: string): string | null {
   const lines = criteria.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  if (lines.length > MAX_ACCEPTANCE_ITEMS || lines.some((line) => line.length > 500)) return null;
+  if (lines.length > MAX_ACCEPTANCE_ITEMS || lines.some((line) =>
+    line.length > 500 || /[\x00-\x1f\x7f]/.test(line),
+  )) return null;
   if (!lines.length) return utf8ByteLength(goal) <= MAX_GOAL_BYTES ? goal : null;
-  const composed = `${goal.trim()}\n\nAcceptance criteria (verify against the delivered result):\n${lines.map((line, i) => `${i + 1}. ${line}`).join("\n")}`;
+  // If the goal already contains a structured criteria delimiter, the
+  // boundary could be ambiguous to an Executive-side reader. Refuse before
+  // creating the canonical operation key rather than silently truncating.
+  if ([goal, ...lines].some((part) =>
+    part.includes("[MASTERMIND_ACCEPTANCE_CRITERIA_V1]") ||
+    part.includes("[/MASTERMIND_ACCEPTANCE_CRITERIA_V1]"),
+  )) return null;
+  const composed = `${goal.trim()}${ACCEPTANCE_OPEN}${lines.map((line, i) => `${i + 1}. ${line}`).join("\n")}${ACCEPTANCE_CLOSE}`;
   return utf8ByteLength(composed) <= MAX_GOAL_BYTES ? composed : null;
 }
 
