@@ -190,15 +190,20 @@ class CoordinationSnapshot:
             if identity in actor_ids:
                 raise CoordinationRefused("AMBIGUOUS_OWNER_FACTS")
             actor_ids.add(identity)
+            # Historical inactive generations are retained for audit and
+            # grant binding, but cannot compete with the ONE active owner.
+            # Exact duplicate identities remain ambiguous regardless of state.
+            if not participant.active:
+                continue
             if type(identity) is CoordinationIdentity:
                 if identity.job_id in jobs or identity.binding_id in bindings:
                     raise CoordinationRefused("AMBIGUOUS_OWNER_FACTS")
                 jobs.add(identity.job_id)
                 bindings.add(identity.binding_id)
             else:
-                # A provider session migrating between hosts must not appear
-                # twice: reject parallel generations, hosts, or principals.
-                # A canonical native UUID identifies one session globally.
+                # Reject simultaneous live provider generations/hosts/principals
+                # for one UUID. An inactive prior generation has no addressability
+                # or permission and must not veto a unique current generation.
                 native_key = identity.session_id
                 if native_key in native_sessions:
                     raise CoordinationRefused("AMBIGUOUS_OWNER_FACTS")
@@ -210,7 +215,7 @@ class CoordinationSnapshot:
             grant_refs.add(grant.grant_ref)
         by_job = {
             p.identity.job_id: p for p in self.participants
-            if type(p.identity) is CoordinationIdentity
+            if p.active and type(p.identity) is CoordinationIdentity
         }
         by_identity = {p.identity: p for p in self.participants}
         for child in self.participants:

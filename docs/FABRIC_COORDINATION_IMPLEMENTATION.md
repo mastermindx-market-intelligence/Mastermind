@@ -296,7 +296,20 @@ scope**, including another domain becoming active during target discovery,
 rather than silently dropping a failed identity layer or weakening
 mixed-source checks. All-inactive rosters also refuse. An unreadable owner,
 rotated binding, revoked membership, stale timestamp, divergent role or
-unrecognized source fails closed. The source returns the same bounded, non-authoritative evidence
+unrecognized source fails closed.
+
+A completed or revoked native session/Runtime Attempt can remain in that
+historical scope alongside its current generation. The policy now enforces
+**unique active** Job IDs, Runtime binding IDs and native session UUIDs,
+rather than letting an inactive prior generation veto the one admitted
+current actor. Exact duplicate participant identities always refuse; two
+active generations for the same Job, binding or native session still refuse.
+Old generations are **never** allowed to send or claim a dependency grant
+addressed to the current generation. Legacy parent-Job resolution uses
+the unique active parent, not a later-listed inactive parent record.
+The installed Runtime/native owner must still independently verify that
+the purported active generation is genuinely current; organizational
+history alone provides no addressability or permission. The source returns the same bounded, non-authoritative evidence
 shape consumed by `ScopedSessionTargetResolver`. The resolver accepts
 the existing composite only with both canonical target projectors, a
 worker-only observation only with a Runtime target projector, and a
@@ -417,6 +430,17 @@ grants, expired/widened scope, and the absence of any sending/commit method.
 This is source validation, not permission to bypass incumbent release gates.
 
 ## Verification at the current source milestone
+
+Latest historical-generation availability fix: **453 selected tests passed,
+zero failures, errors or skips**, M2 PID `25214` exit 0, JUnit
+`/tmp/mmx-fabric-history-full-20261011.xml`. Focused pure policy
+and authenticated host/projector regression: **104 passed**, PID
+`23651`, JUnit `/tmp/mmx-fabric-history-rotation-20261011.xml`.
+The unmodified earlier policy had four reproducible false refusals in
+retired Attempt/native-generation cases (PID `21924`); after the fix
+both these positive cases and simultaneous-live-generation negatives
+pass. All source-level/fixture proof, **not** installed native session
+sending, production COMMIT atomicity or live model consumption.
 
 Current dormant-roster availability fix: **446 selected tests passed,
 zero failures/errors/skips**, M2 PID `91754` (exit 0), JUnit

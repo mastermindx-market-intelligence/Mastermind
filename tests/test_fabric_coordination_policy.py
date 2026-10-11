@@ -214,3 +214,92 @@ def test_snapshot_is_bounded_and_immutable():
         Snapshot("rev", NOW, NOW+30, [a])
     with pytest.raises(FrozenInstanceError):
         a.role = Role.PROJECT_CEO
+
+
+def test_inactive_old_attempt_cannot_block_unique_current_generation():
+    """Runtime may retain completed Attempts after a Job's active rebinding."""
+    past = replace(actor(1, Role.WORKER), active=False)
+    current = replace(
+        actor(1, Role.WORKER),
+        identity=Identity("JOB-1", "ATT-new", "worker-new", "bind-new", 2),
+    )
+    peer = actor(2, Role.WORKER)
+    scope = snapshot(past, current, peer)
+    assert authorize_coordination(
+        scope, current.identity, peer.identity, topic_ref="topic-a", now=NOW,
+    ).relation == "task_group_worker_peer"
+    with pytest.raises(CoordinationRefused):
+        authorize_coordination(
+            scope, past.identity, peer.identity, topic_ref="topic-a", now=NOW,
+        )
+
+
+def test_inactive_old_binding_epoch_does_not_block_unique_current_generation():
+    old = replace(actor(1, Role.WORKER), active=False)
+    fresh = replace(
+        actor(1, Role.WORKER),
+        identity=replace(old.identity, binding_generation=2),
+    )
+    peer = actor(2, Role.WORKER)
+    scope = snapshot(old, fresh, peer)
+    assert authorize_coordination(
+        scope, fresh.identity, peer.identity, topic_ref="topic-a", now=NOW,
+    ).relation == "task_group_worker_peer"
+    with pytest.raises(CoordinationRefused):
+        authorize_coordination(
+            scope, old.identity, peer.identity, topic_ref="topic-a", now=NOW,
+        )
+
+
+def test_native_managed_session_old_inactive_generation_not_a_second_live_session():
+    from control_plane.fabric_coordination_policy import CoordinationNativeIdentity
+    old = CoordinationNativeIdentity(
+        "f71c3451-edd7-4e88-93d8-1fe483eac293", "gen-001",
+        "ubuntu1", "principal-old",
+    )
+    new = replace(old, generation="gen-002", principal_ref="principal-current")
+    peer = CoordinationNativeIdentity(
+        "11111111-2222-4333-8444-555555555555", "gen-001",
+        "ubuntu2", "principal-peer",
+    )
+    def native(identity, active=True):
+        return Participant(
+            identity, Role.COO, "tenant", "portfolio", "project",
+            "program", active=active,
+        )
+    scope = snapshot(native(old, active=False), native(new), native(peer))
+    assert authorize_coordination(
+        scope, new, peer, topic_ref="topic-a", now=NOW,
+    ).relation == "project_coo_peer"
+    with pytest.raises(CoordinationRefused):
+        authorize_coordination(
+            scope, old, peer, topic_ref="topic-a", now=NOW,
+        )
+    with pytest.raises(CoordinationRefused):
+        snapshot(native(old), native(new), native(peer))
+
+
+def test_two_active_epochs_for_one_runtime_job_remain_ambiguous():
+    old = actor(1, Role.WORKER)
+    newer = replace(
+        old, identity=Identity("JOB-1", "ATT-new", "worker-new", "bind-new", 2),
+    )
+    with pytest.raises(CoordinationRefused):
+        snapshot(old, newer)
+
+
+def test_current_parent_edge_ignores_old_inactive_parent_attempt():
+    retired = replace(actor(1, Role.PROJECT_CEO), active=False)
+    current = replace(
+        actor(1, Role.PROJECT_CEO),
+        identity=Identity("JOB-1", "ATT-new", "worker-new", "bind-new", 2),
+    )
+    child = actor(2, Role.WORKER, parent_job_id="JOB-1")
+    scope = snapshot(current, retired, child)
+    assert authorize_coordination(
+        scope, current.identity, child.identity, topic_ref="topic-a", now=NOW,
+    ).relation == "direct_parent_child"
+    with pytest.raises(CoordinationRefused):
+        authorize_coordination(
+            scope, retired.identity, child.identity, topic_ref="topic-a", now=NOW,
+        )

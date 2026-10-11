@@ -447,3 +447,49 @@ def test_all_inactive_members_are_not_a_discoverable_domain():
             native_principal_reader=lambda *_: FIRST.principal_ref,
         )
     assert not port.send_calls
+
+
+def test_historical_native_generation_remains_audit_only_not_addressable():
+    """A single live native UUID is valid alongside its inactive old generation."""
+    host, owner, port, caller = native_host()
+    earlier = replace(
+        owner[0].participants[0],
+        identity=replace(FIRST, generation="gen-before", principal_ref="prior-principal"),
+        active=False,
+    )
+    owner[0] = replace(
+        owner[0], participants=(*owner[0].participants, earlier),
+    )
+    visible = host.visible_targets()
+    assert len(visible) == 1
+    assert visible[0]["kind"] == "claude"
+    assert host.resolve(visible[0]["target_ref"]).recipient == SECOND
+    assert host._owner.observe().snapshot.participants[-1] == earlier
+    assert earlier.identity.session_id not in str(visible)
+    assert not port.send_calls and not port.reconcile_calls
+
+
+def test_historical_worker_attempt_remains_audit_only_not_addressable(
+    tmp_path, monkeypatch,
+):
+    """A retained old binding for the same Job never overrides current Runtime."""
+    host, owner, caller, seed = worker_host(tmp_path, monkeypatch)
+    past = replace(
+        owner.snapshot.participants[0],
+        identity=replace(
+            owner.snapshot.participants[0].identity,
+            attempt_id="ATT-previous",
+            binding_id="binding-previous",
+        ),
+        active=False,
+    )
+    owner.snapshot = replace(
+        owner.snapshot, participants=(*owner.snapshot.participants, past),
+    )
+    visible = host.visible_targets()
+    assert len(visible) == 1
+    assert visible[0]["kind"] == "fabric_attempt"
+    selected = host.resolve(visible[0]["target_ref"])
+    assert selected.recipient == owner.snapshot.participants[1].identity
+    assert host._owner.observe().snapshot.participants[-1] == past
+    assert past.identity.attempt_id not in str(visible)

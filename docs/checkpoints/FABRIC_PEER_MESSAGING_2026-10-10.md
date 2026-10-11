@@ -763,3 +763,65 @@ installed source pin, authenticated owner selection, two-host
 mixed-provider consumption and refusals required for PROVEN_LIVE.
 Next operation: typed git commit/push and verify, request ready-for-review
 transition if accepted; no unsafe replay of denied host/COMMIT inspection.
+
+## October 11 — historical-generation liveness without privilege inheritance
+
+Original source operation remains `fabric-peer-messaging-20261010`;
+the last verified typed remote+local publication before this phase is
+`d57945dc3d9034f9285c98c8e153aa143317ddbc`.
+PR #1318 is READY FOR SOURCE REVIEW, not merged; two independent
+reviewers requested. The current exact-head hosted workflow
+`38134200644` was in progress at the latest bounded read; its
+`test` and Rust analysis were active, other CodeQL analyses successful.
+The known specific production Company host/COMMIT inspection denial
+is still in force and was not retried or routed through another lane.
+
+An independent policy/host inspection found a concrete availability fault:
+`CoordinationSnapshot.__post_init__` rejected any two records with the
+same Job ID, binding ID or native UUID even if the old historical Attempt/
+session was inactive and there was exactly ONE current active replacement.
+This clashes with preserving inactive audit members in canonical
+organizational scopes. Four new positive historical-generation examples
+RED-tested that existing rejection; the negative that two active epochs
+are ambiguous already passed before the fix.
+
+Scoped policy fix: uniqueness of Job IDs, Runtime binding IDs and native
+UUIDs is enforced across **ACTIVE** participants. Every exact actor
+identity remains unique in the entire snapshot, active or inactive;
+two active conflicting generations still reject. Legacy parent
+Job lookup selects only active parent records, so inactive old parent
+entries cannot take precedence. `snapshot.participant()` still refuses
+all inactive identities; owner Runtime/Claude target revalidation
+remains required. Old grants cannot transfer to a rotated generation.
+
+Added five policy cases (inactive attempt, inactive reused binding,
+inactive native UUID generation, two active ambiguity, active parent
+lookup) plus native/worker real canonical projector host tests with
+historical duplicate logical identity. The reproducer prepatch test
+run PID `21924` exited 1 with four expected failing liveness cases.
+The patched policy+host campaign PID `23651` exited 0: **104 passed,
+0 failures/errors/skips**, JUnit
+`/tmp/mmx-fabric-history-rotation-20261011.xml`.
+A broad selected Runtime/Company consultation/native/Session Bridge/
+effect guard regression is running at PID `25214` with JUnit
+`/tmp/mmx-fabric-history-full-20261011.xml`; no result claimed yet.
+
+NOT PUBLISHED at this checkpoint: only source workspace files changed
+via original Studio Direct edit carrier. Next check broad process/JUnit,
+then check diff/syntax and exact original Studio Git status, commit/push
+once. No new peer API, worker service, native transport, install, send or
+fleet action was performed; MISSION_COMPLETE=false.
+
+### Verification return for historical rotation repair
+
+M2 broad source integration PID `25214` completed exit 0 (99.17 sec).
+JUnit `/tmp/mmx-fabric-history-full-20261011.xml` reports
+**453 tests, zero failures, zero errors, zero skipped**. Includes current
+historical-generation changes plus original Company consultation,
+hierarchy, native/Runtime joins, mixed/single domain,
+scoped host+effect guard, Session Bridge projector and dispatcher tests.
+Focused after-patch PID `23651` also exited 0 with **104 passed**.
+Prepatch four liveness failures are intentionally preserved as
+reproducing evidence only, NOT final test failures.
+Publication, hosted exact-head CI and independent review are still
+distinct. No installed provider/auth/fleet/worker or service change.
