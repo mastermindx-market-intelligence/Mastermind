@@ -1,18 +1,24 @@
 {
+  "operation": "bot-intelligence-renewal-20261011",
   "source_basis": "cbc7503536b6853ec7c35c2192abdfaccb87b561",
   "macro_ci_source": "256c757b3c4f0ec759571c29a30a71387d0a18f8",
-  "operation": "bot-intelligence-renewal-20261011",
-  "test_scope": "289 scoped cases, Python 3.12.13, no failures or skips",
+  "test_scope": "469 passed, 1 existing no-live-book-state skip; scoped suite, Python 3.12.13",
+  "manifest_self_excluded": true,
   "files": [
     {
+      "path": "docs/runbooks/portfolio-v3-decision-snapshot.md",
+      "bytes": 6050,
+      "sha256": "71ae4ecb4d8a09d40e178d34959cac0623c833616f20ad664f664b327aabff33"
+    },
+    {
       "path": "docs/superpowers/plans/2026-10-11-bot-autonomy-renewal-execution.md",
-      "bytes": 10278,
-      "sha256": "8d0ed2e633f380b9b84094af41cdeeffae0cc779867ebf40a8970a95b1d4c2b0"
+      "bytes": 12018,
+      "sha256": "285713fb7852e36513ad78b6d6a0af60771c9c72636b38ebf7f3243323ffeabe"
     },
     {
       "path": "docs/superpowers/plans/2026-10-11-bot-autonomy-renewal-validation.md",
-      "bytes": 8327,
-      "sha256": "92622f27b4f1c8501650588d4e3646716dd9aa598e390049e3926a3b16a5798c"
+      "bytes": 10673,
+      "sha256": "d03eb6a0e88a36d125786f6830b858593256d8e7514ed4933645a153032d0dbf"
     },
     {
       "path": "docs/superpowers/plans/2026-10-11-bot-autonomy-source-capture.acceptance.py.txt",
@@ -31,8 +37,8 @@
     },
     {
       "path": "portfolio/decision_snapshot.py",
-      "bytes": 14431,
-      "sha256": "5fd3f5bf3f8c1d793ef1248a288db65fdbe1c28afa759a808641dce789b7da0a"
+      "bytes": 16635,
+      "sha256": "ccc70b3d7830e080c32f6c5e5c7fd728caa00650e1d3d55ca3ae023b7b9ebc36"
     },
     {
       "path": "portfolio/decision_snapshot_contracts.py",
@@ -50,14 +56,24 @@
       "sha256": "230266ea45adcb96938c1e0e4d7fe9af567ff7f5d364b16acf7f18ff4f95c3a9"
     },
     {
+      "path": "scripts/portfolio_decision_snapshot.py",
+      "bytes": 2531,
+      "sha256": "27b3f487d7cfd10adc0412ed7e910db21f386a2fa650a997afe69477a52c70ee"
+    },
+    {
       "path": "tests/test_calendar_authority_consistency.py",
       "bytes": 2369,
       "sha256": "8f65a4910fb1ad0c03df584ae6641d5aa809894bcce09efd786a9dd30ed6238a"
     },
     {
       "path": "tests/test_decision_snapshot.py",
-      "bytes": 8991,
-      "sha256": "db58e1b837ad74331e71d1862afd992619532f6d15aa6e5726ba37b4560e77bf"
+      "bytes": 12365,
+      "sha256": "784095a6bc3a1057670edfdfe7c965a81e6e87969f939713bba6b5a6c6ec6068"
+    },
+    {
+      "path": "tests/test_decision_snapshot_cli.py",
+      "bytes": 4004,
+      "sha256": "4c29a7315b1975935df1c9d1ed407a2d1044374c61a6d826852a852b3dcc6e67"
     },
     {
       "path": "tests/test_decision_snapshot_contracts.py",

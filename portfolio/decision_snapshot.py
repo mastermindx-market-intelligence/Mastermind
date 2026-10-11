@@ -79,6 +79,9 @@ def _directory(book: str, *, create: bool = False):
             if create:
                 try:
                     os.mkdir(part, mode=0o700, dir_fd=current)
+                    # A synced leaf alone does not durably link newly created
+                    # ancestors. Sync each parent before publishing beneath it.
+                    os.fsync(current)
                 except FileExistsError:
                     pass
             child = os.open(part, flags, dir_fd=current)
@@ -101,6 +104,8 @@ def _checked(snapshot: Mapping[str, Any]) -> tuple[dict[str, Any], bytes]:
         raw = c._json_bytes(snapshot)
         value = json.loads(raw)
         c.verify_snapshot(value)
+        if set(value['sections']) != set(c.SECTION_IDS):
+            raise c.DecisionSnapshotContractError('stored evidence must describe all twelve domains')
         return value, raw
     except (c.DecisionSnapshotContractError, TypeError, ValueError) as exc:
         raise SnapshotCorrupt("snapshot contract or digest verification failed") from exc
@@ -304,4 +309,42 @@ def section_page(snapshot: Mapping[str, Any], section_id: str, *, offset: int, l
         c._json_bytes(result, limit=c.MAX_SECTION_RESPONSE_BYTES)
     except c.DecisionSnapshotContractError as exc:
         raise SnapshotInvalidRequest("section response exceeds limit") from exc
+    return result
+
+
+def read_projection(book: str, *, snapshot_id: str | None, section_id: str | None,
+                    offset: int, limit: int) -> dict[str, Any]:
+    """Inspect existing evidence only; neither absent state nor reads create files.
+
+    Without an explicit identity, return the latest manifest and up to ``limit``
+    recent manifests. An exact identity reads only that record. Raw section rows
+    are returned only when the caller explicitly names a bounded section.
+    """
+    _book(book)
+    _page_args(offset, limit)
+    if snapshot_id is not None:
+        _identity(snapshot_id)
+    if section_id is not None and (not isinstance(section_id, str) or section_id not in c.SECTION_IDS):
+        raise SnapshotInvalidRequest('unknown section identity')
+    if section_id is None and offset != 0:
+        raise SnapshotInvalidRequest('offset requires an explicit section')
+    if snapshot_id is None:
+        manifests = list_snapshots(book, limit=limit)
+        selected = load_snapshot(book, manifests[0]['snapshot_id']) if manifests else None
+    else:
+        selected = load_snapshot(book, snapshot_id)
+        manifests = [_manifest(selected)]
+    result = {
+        'book': book,
+        'status': 'AVAILABLE' if selected is not None else 'ABSENT',
+        'snapshot': _manifest(selected) if selected is not None else None,
+        'snapshots': manifests,
+        'section': section_page(selected, section_id, offset=offset, limit=limit)
+            if selected is not None and section_id is not None else None,
+        'authority': {'write_permitted': False, 'execution_authority': False, 'numeric_target_authority': False},
+    }
+    try:
+        c._json_bytes(result)
+    except c.DecisionSnapshotContractError as exc:
+        raise SnapshotInvalidRequest('projection response exceeds its closed JSON bounds') from exc
     return result

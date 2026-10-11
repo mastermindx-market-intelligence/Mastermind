@@ -155,6 +155,9 @@ def test_directory_sync_failure_preserves_uncertain_publication_identity(store, 
     import os
     import stat
     p = sealed(); original = os.fsync
+    # Isolate the intended post-publication durability failure, not initial
+    # ancestor creation (which now also requires parent-directory sync).
+    store.snapshot_dir('autonomous').mkdir(parents=True)
     def fail_directory(fd):
         if stat.S_ISDIR(os.fstat(fd).st_mode):
             raise OSError("injected directory sync failure")
@@ -181,3 +184,72 @@ def test_correction_predecessor_must_have_the_same_decision_cutoff(store):
     with pytest.raises(store.SnapshotInvalidRequest, match="cutoff"):
         store.persist_snapshot(p)
     assert len(store.list_snapshots("autonomous")) == 1
+
+
+def test_store_refuses_a_sealed_fixture_missing_required_domains(store, tmp_path):
+    from portfolio import decision_snapshot_contracts as c
+    incomplete = c.seal_snapshot(unsealed())
+    with pytest.raises(store.SnapshotCorrupt):
+        store.persist_snapshot(incomplete)
+    assert not (tmp_path / 'data').exists()
+
+
+def test_deeply_nested_corrupt_json_is_a_typed_failure(store):
+    p = sealed(); path = store._snapshot_path('autonomous', p['snapshot_id'])
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b'[' * 2000 + b'0' + b']' * 2000)
+    with pytest.raises(store.SnapshotCorrupt):
+        store.load_snapshot('autonomous', p['snapshot_id'])
+
+
+def projection(store, **kwargs):
+    assert callable(getattr(store, 'read_projection', None)), 'missing read-only projection'
+    args = dict(snapshot_id=None, section_id=None, offset=0, limit=20)
+    args.update(kwargs)
+    return store.read_projection('autonomous', **args)
+
+
+def test_absent_projection_does_not_create_storage(store, tmp_path):
+    result = projection(store)
+    assert result['status'] == 'ABSENT' and result['snapshot'] is None
+    assert result['snapshots'] == [] and result['section'] is None
+    assert all(value is False for value in result['authority'].values())
+    assert not (tmp_path / 'data').exists()
+
+
+def test_projection_is_summary_only_until_a_section_is_requested(store):
+    p = sealed(); receipt = store.persist_snapshot(p)
+    before = Path(receipt['path']).read_bytes()
+    result = projection(store)
+    assert result['status'] == 'AVAILABLE'
+    assert result['snapshot']['state'] == 'PARTIAL'
+    assert 'sections' not in result['snapshot']
+    assert 'cash' not in json.dumps(result)
+    detail = projection(store, snapshot_id=p['snapshot_id'], section_id='book_truth', limit=1)
+    assert detail['section']['rows'][0]['cash'] == 1000000.0
+    assert Path(receipt['path']).read_bytes() == before
+
+
+@pytest.mark.parametrize('args', [
+    {'snapshot_id': '../../private'}, {'section_id': 'unknown'},
+    {'offset': True}, {'limit': 101}, {'offset': -1}, {'offset': 1},
+])
+def test_projection_validates_query_before_any_storage_read(store, monkeypatch, args):
+    monkeypatch.setattr(store, 'list_snapshots', lambda *a, **k: pytest.fail('invalid query reached disk'))
+    monkeypatch.setattr(store, 'load_snapshot', lambda *a, **k: pytest.fail('invalid query reached disk'))
+    with pytest.raises(store.SnapshotInvalidRequest): projection(store, **args)
+
+
+def test_new_store_syncs_each_created_parent_before_publication(store, tmp_path, monkeypatch):
+    import os
+    import stat
+    original = os.fsync; synced_directories = set()
+    def recording_sync(fd):
+        info = os.fstat(fd)
+        if stat.S_ISDIR(info.st_mode): synced_directories.add((info.st_dev, info.st_ino))
+        return original(fd)
+    monkeypatch.setattr(store.os, 'fsync', recording_sync)
+    store.persist_snapshot(sealed())
+    expected = [tmp_path, tmp_path / 'data', tmp_path / 'data/shadow',
+                tmp_path / 'data/shadow/decision_snapshots', store.snapshot_dir('autonomous')]
+    assert all((p.stat().st_dev, p.stat().st_ino) in synced_directories for p in expected)
