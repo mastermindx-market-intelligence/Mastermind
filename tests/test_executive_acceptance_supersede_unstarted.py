@@ -164,6 +164,130 @@ def test_absence_requires_existing_canonical_parent_and_propagates_access_denial
         m._require_absent(leaf)
 
 
+
+
+@pytest.mark.skipif(m.sys.platform != 'darwin', reason='macOS OS alias proof')
+def test_actual_macos_var_alias_preserves_generic_absence_guard(tmp_path, monkeypatch):
+    canonical = tmp_path.resolve(strict=True)
+    if not canonical.is_relative_to('/private/var'):
+        pytest.skip('host temporary directory is outside the OS /var alias')
+    logical = Path('/var') / canonical.relative_to('/private/var') / S
+    with pytest.raises(m.MaintenanceError, match='canonical'):
+        m._require_absent(logical)
+    # Verify the actual OS alias and production spelling without reading or
+    # modifying the live Runtime. The strict leaf check uses our own fixture.
+    physical = Path('/private/var/db/mastermind-executive/control/acceptance') / S
+    original = m._require_absent
+    observed = []
+    def observe(path):
+        assert path == physical
+        observed.append(path)
+        original(canonical/S)
+    monkeypatch.setattr(m, '_require_absent', observe)
+    m._require_runtime_acceptance_absent(Path('/var/db/mastermind-executive/control/acceptance') / S)
+    assert observed == [physical]
+    assert not (canonical/S).exists()
+
+
+def _var_alias_fixture(tmp_path, monkeypatch, *, absolute=False):
+    from ops.executive_os import autonomy_control as ac
+    values = _fixture(tmp_path, monkeypatch)
+    physical = tmp_path/'private'/'var'
+    physical.mkdir(parents=True)
+    (physical/'db').mkdir()
+    values[-1].rename(physical/'db'/'mastermind-executive')
+    alias = tmp_path/'var'
+    alias.symlink_to(physical if absolute else 'private/var', target_is_directory=True)
+    monkeypatch.setattr(m, '_MACOS_VAR_ALIAS', alias, raising=False)
+    monkeypatch.setattr(m, '_MACOS_VAR_PHYSICAL', physical, raising=False)
+    monkeypatch.setattr(m, 'sys', SimpleNamespace(platform='darwin'))
+    monkeypatch.setattr(ac, 'RUNTIME_ROOT', alias/'db'/'mastermind-executive')
+    return values, alias, physical
+
+
+@pytest.mark.parametrize('absolute', [False, True])
+def test_supersession_accepts_only_standard_os_var_alias(tmp_path, monkeypatch, absolute):
+    values, alias, physical = _var_alias_fixture(tmp_path, monkeypatch, absolute=absolute)
+    d, _, before, artifacts, canary, bundle, _ = values
+    originals = {p.name: p.read_bytes() for p in bundle.iterdir()}
+    m.validate_superseded_binding(d, before=before, artifacts=artifacts, prior_canary=canary)
+    assert {p.name: p.read_bytes() for p in bundle.iterdir()} == originals
+    # Admission is limited to the trusted Runtime seam; arbitrary evidence stays strict.
+    with pytest.raises(m.MaintenanceError, match='canonical'):
+        m._require_absent(alias/'db'/'mastermind-executive'/'control'/'acceptance'/S)
+
+
+
+@pytest.mark.parametrize('relative', [
+    'db/other/control/acceptance/' + S,
+    'db/mastermind-executive/control/acceptance/not-a-sha',
+    'db/mastermind-executive/control/acceptance/' + S.upper(),
+])
+def test_os_alias_exception_is_limited_to_exact_runtime_acceptance(tmp_path, monkeypatch, relative):
+    _, alias, physical = _var_alias_fixture(tmp_path, monkeypatch)
+    (physical/relative).parent.mkdir(parents=True, exist_ok=True)
+    with pytest.raises(m.MaintenanceError, match='canonical'):
+        m._require_runtime_acceptance_absent(alias/relative)
+
+@pytest.mark.parametrize('fault', [
+    'unexpected-target', 'normalized-target', 'alias-directory', 'untrusted-owner',
+    'symlink-descendant', 'symlink-physical-parent', 'missing-parent',
+    'denied-parent', 'denied-leaf', 'existing-file', 'existing-directory',
+    'dangling-leaf', 'alias-changed', 'non-darwin',
+])
+def test_runtime_alias_does_not_weaken_absence_guards(tmp_path, monkeypatch, fault):
+    values, alias, physical = _var_alias_fixture(tmp_path, monkeypatch)
+    d, _, before, artifacts, canary, _, _ = values
+    parent = physical/'db'/'mastermind-executive'/'control'/'acceptance'
+    leaf = parent/S
+    if fault in {'unexpected-target', 'normalized-target', 'alias-directory'}:
+        alias.unlink()
+        if fault == 'alias-directory':
+            alias.mkdir()
+        else:
+            alias.symlink_to(physical.parent if fault == 'unexpected-target' else 'private/./var')
+    elif fault == 'untrusted-owner':
+        original = Path.lstat
+        def foreign_owner(path, *args, **kwargs):
+            info = original(path, *args, **kwargs)
+            if path == alias:
+                return SimpleNamespace(**{name: getattr(info, name) for name in dir(info)
+                    if name.startswith('st_') and name != 'st_uid'}, st_uid=info.st_uid + 1)
+            return info
+        monkeypatch.setattr(Path, 'lstat', foreign_owner)
+    elif fault in {'symlink-descendant', 'symlink-physical-parent'}:
+        selected = parent if fault == 'symlink-descendant' else physical.parent
+        moved = tmp_path/'moved'
+        selected.rename(moved)
+        selected.symlink_to(moved, target_is_directory=True)
+    elif fault == 'missing-parent':
+        parent.rmdir()
+    elif fault in {'denied-parent', 'denied-leaf'}:
+        method = 'resolve' if fault == 'denied-parent' else 'lstat'
+        original = getattr(Path, method)
+        def denied(path, *args, **kwargs):
+            if path == (parent if fault == 'denied-parent' else leaf):
+                raise PermissionError('protected read denied')
+            return original(path, *args, **kwargs)
+        monkeypatch.setattr(Path, method, denied)
+    elif fault == 'existing-file':
+        leaf.write_text('prior acceptance')
+    elif fault == 'existing-directory':
+        leaf.mkdir()
+    elif fault == 'dangling-leaf':
+        leaf.symlink_to(tmp_path/'absent')
+    elif fault == 'alias-changed':
+        original = m._require_absent
+        def changed(path):
+            original(path)
+            alias.unlink()
+            alias.symlink_to('private/./var')
+        monkeypatch.setattr(m, '_require_absent', changed)
+    elif fault == 'non-darwin':
+        monkeypatch.setattr(m, 'sys', SimpleNamespace(platform='linux'))
+    with pytest.raises((m.MaintenanceError, OSError)):
+        m.validate_superseded_binding(d, before=before, artifacts=artifacts, prior_canary=canary)
+
 def test_new_shape_remains_closed_and_sha_identities_distinct(tmp_path, monkeypatch):
     d, *_ = _fixture(tmp_path, monkeypatch)
     bundle = m.bundle_path(N)
@@ -235,7 +359,7 @@ def test_prepare_selector_requires_exact_installed_selected_release(tmp_path, mo
     (system/'config'/'worker-codex.json').write_text('{"operator_harness_armed":false}')
     monkeypatch.setattr(m, 'SYSTEM_ROOT', system)
     monkeypatch.setattr(m.os, 'geteuid', lambda: 0)
-    monkeypatch.setattr(m.sys, 'platform', 'darwin')
+    monkeypatch.setattr(m, 'sys', SimpleNamespace(platform='darwin'))
     monkeypatch.setattr(m, 'require_stopped', lambda: None)
     def forbidden(*args):
         raise AssertionError('invalid selector reached runtime read')
@@ -282,7 +406,8 @@ def test_acceptance_revalidates_full_selected_prestate_before_marker(tmp_path, m
         'schema_version': m.SCHEMA_SUPERSEDE, 'descriptor_sha256': m.digest(d)}
 
 
-def test_preparation_publishes_one_new_descriptor_without_modifying_selected(tmp_path, monkeypatch):
+@pytest.mark.parametrize('prejob', [False, True])
+def test_preparation_publishes_one_new_descriptor_without_modifying_selected(tmp_path, monkeypatch, prejob):
     import dataclasses
     from control_plane.executive_runtime import Runtime
     from ops.executive_os import autonomy_control as ac
@@ -302,7 +427,8 @@ def test_preparation_publishes_one_new_descriptor_without_modifying_selected(tmp
     monkeypatch.setattr(m, '_sealed_ancestors', lambda path: [])
     monkeypatch.setattr(m, 'has_macos_acl', lambda *args, **kwargs: False)
     monkeypatch.setattr(m.os, 'geteuid', lambda: 0)
-    monkeypatch.setattr(m.sys, 'platform', 'darwin')
+    # Keep the ACL observer on its actual host while simulating the Mac entry gate.
+    monkeypatch.setattr(m, 'sys', SimpleNamespace(platform='darwin'))
     monkeypatch.setattr(m, 'require_stopped', lambda: None)
     runtime_root = tmp_path/'runtime'
     (runtime_root/'control'/'acceptance').mkdir(parents=True)
@@ -337,15 +463,21 @@ def test_preparation_publishes_one_new_descriptor_without_modifying_selected(tmp
     for filename, value in [('descriptor.json', selected), ('preparing.json', {'schema_version': m.SCHEMA_V2}),
                             ('baseline.json', before), ('inventory.json', artifacts), ('prior-secret-canary.json', canary)]:
         m.write_sealed(bundle/filename, value, public=filename == 'descriptor.json')
+    if prejob:
+        from tests.test_executive_acceptance_supersede_prejob import receipt_prefix
+        receipt_prefix(runtime_root, selected, monkeypatch)
     originals = {p.name: p.read_bytes() for p in bundle.iterdir()}
     args = argparse.Namespace(predecessor_sha=accepted, successor_sha=successor, root_job_id=root.job_id,
         recovery_job_id=None, recovery_attempt_id=None, carry_terminal_dispatch=True,
-        supersede_unstarted_sha=selected_sha, superseded_descriptor_sha256=m.digest(selected))
+        supersede_unstarted_sha=None if prejob else selected_sha,
+        supersede_prejob_sha=selected_sha if prejob else None,
+        superseded_descriptor_sha256=m.digest(selected))
     result = m.prepare(args)
     d = m.descriptor_for(successor)
     assert result == m.bundle_path(successor)
-    assert d['schema_version'] == m.SCHEMA_SUPERSEDE
-    assert d['predecessor_sha'] == accepted and d['superseded_unstarted_sha'] == selected_sha
+    assert d['schema_version'] == (m.SCHEMA_PREJOB if prejob else m.SCHEMA_SUPERSEDE)
+    assert d['predecessor_sha'] == accepted
+    assert d['interrupted_prejob_sha' if prejob else 'superseded_unstarted_sha'] == selected_sha
     assert d['template_proof_job_id'] == proof.job_id and d['frozen_base_sha'] == 'a'*40
     assert {p.name: p.read_bytes() for p in bundle.iterdir()} == originals
     assert m.snapshot(runtime.store.path) == before

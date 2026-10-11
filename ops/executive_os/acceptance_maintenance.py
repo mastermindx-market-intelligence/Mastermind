@@ -26,11 +26,14 @@ if str(_RELEASE) not in sys.path:
 from control_plane.fs_security import has_macos_acl
 
 SYSTEM_ROOT = Path("/Library/Application Support/MastermindExecutive")
+_MACOS_VAR_ALIAS = Path("/var")
+_MACOS_VAR_PHYSICAL = Path("/private/var")
 SCHEMA = "mastermind.executive_acceptance_maintenance/v1"
 SCHEMA_V2 = "mastermind.executive_acceptance_maintenance/v2"
 # Same-schema supersession is separate from the schema-migration V3 contract.
 SCHEMA_SUPERSEDE = "mastermind.executive_acceptance_maintenance/supersede_unstarted_v1"
-_TERMINAL_CARRY_SCHEMAS = {SCHEMA_V2, SCHEMA_SUPERSEDE}
+SCHEMA_PREJOB = "mastermind.executive_acceptance_maintenance/supersede_prejob_v1"
+_TERMINAL_CARRY_SCHEMAS = {SCHEMA_V2, SCHEMA_SUPERSEDE, SCHEMA_PREJOB}
 _TRUSTED_UID = 0
 _TRUSTED_GID = 0
 # The artifact inventory can exceed 16 MiB on an otherwise quiescent host.
@@ -63,6 +66,9 @@ _DESCRIPTOR_V2_KEYS = (_DESCRIPTOR_KEYS - {
 
 _DESCRIPTOR_SUPERSEDE_KEYS = _DESCRIPTOR_V2_KEYS | {
     "superseded_unstarted_sha", "superseded_descriptor_sha256",
+}
+_DESCRIPTOR_PREJOB_KEYS = _DESCRIPTOR_V2_KEYS | {
+    "interrupted_prejob_sha", "superseded_descriptor_sha256", "prejob_evidence_sha256",
 }
 
 class MaintenanceError(RuntimeError):
@@ -139,7 +145,8 @@ def descriptor_for(sha: str) -> dict[str, Any] | None:
     schema = value.get("schema_version")
     keys = _DESCRIPTOR_KEYS if schema == SCHEMA else (
         _DESCRIPTOR_V2_KEYS if schema == SCHEMA_V2 else (
-            _DESCRIPTOR_SUPERSEDE_KEYS if schema == SCHEMA_SUPERSEDE else set()
+            _DESCRIPTOR_SUPERSEDE_KEYS if schema == SCHEMA_SUPERSEDE else (
+                _DESCRIPTOR_PREJOB_KEYS if schema == SCHEMA_PREJOB else set())
         )
     )
     if not keys or set(value) != keys:
@@ -159,6 +166,12 @@ def descriptor_for(sha: str) -> dict[str, Any] | None:
         or value["superseded_unstarted_sha"] in {sha, value["predecessor_sha"]}
     ):
         raise MaintenanceError("maintenance superseded release is invalid")
+    if schema == SCHEMA_PREJOB and (
+        not isinstance(value["interrupted_prejob_sha"], str)
+        or _SHA.fullmatch(value["interrupted_prejob_sha"]) is None
+        or value["interrupted_prejob_sha"] in {sha, value["predecessor_sha"]}
+    ):
+        raise MaintenanceError("maintenance interrupted release is invalid")
     for key in (key for key in keys if key.endswith("_sha256")):
         if not isinstance(value[key], str) or _DIGEST.fullmatch(value[key]) is None:
             raise MaintenanceError("maintenance descriptor digest is invalid")
@@ -256,7 +269,7 @@ def validate_prior_carry_binding(descriptor: dict, *, _seen: frozenset[str] = fr
                ("root_job_id", "root_identity_sha256", "root_event_id", "root_event_sha256")):
             raise MaintenanceError("maintenance predecessor root binding changed")
 
-    if descriptor["schema_version"] == SCHEMA_SUPERSEDE:
+    if descriptor["schema_version"] in {SCHEMA_SUPERSEDE, SCHEMA_PREJOB}:
         validate_superseded_binding(descriptor)
 
 
@@ -696,6 +709,29 @@ def _require_absent(path: Path) -> None:
     raise MaintenanceError("superseded release already has acceptance state")
 
 
+
+def _require_runtime_acceptance_absent(path: Path) -> None:
+    """Admit only the OS /var alias at the trusted Runtime absence-check seam."""
+    expected_parent = _MACOS_VAR_ALIAS / "db/mastermind-executive/control/acceptance"
+    if (sys.platform != "darwin" or path.parent != expected_parent
+            or _SHA.fullmatch(path.name) is None):
+        _require_absent(path)
+        return
+    alias_info = _MACOS_VAR_ALIAS.lstat()
+    if not stat.S_ISLNK(alias_info.st_mode) or alias_info.st_uid != _TRUSTED_UID:
+        raise MaintenanceError("Runtime /var alias is not trusted")
+    target = os.readlink(_MACOS_VAR_ALIAS)
+    if target not in ("private/var", os.fspath(_MACOS_VAR_PHYSICAL)):
+        raise MaintenanceError("Runtime /var alias target is not canonical")
+    physical = _MACOS_VAR_PHYSICAL / path.relative_to(_MACOS_VAR_ALIAS)
+    # Do not resolve arbitrary ancestors into acceptance: the unchanged guard
+    # rejects every further alias and still requires an exact missing leaf.
+    _require_absent(physical)
+    if (_identity(_MACOS_VAR_ALIAS.lstat()) != _identity(alias_info)
+            or os.readlink(_MACOS_VAR_ALIAS) != target):
+        raise MaintenanceError("Runtime /var alias changed during absence check")
+
+
 def legacy_backup_sidecars(path: Path) -> tuple:
     """Observe only the sealed legacy WAL/SHM metadata; read no sidecar bytes."""
     observed = []
@@ -752,6 +788,80 @@ def sealed_backup_snapshot(path: Path, expected_digest: str) -> dict:
         os.close(fd)
 
 
+def prejob_evidence(sha: str) -> str:
+    """Hash only the two control-owned receipts preceding service attestation.
+
+    This is evidence of an interrupted prefix, never a successful acceptance.
+    No receipt, marker, service or Runtime state is modified.
+    """
+    import pwd
+    import grp
+    from ops.executive_os.autonomy_control import (
+        RUNTIME_ROOT, CONTROL_USER, CONTROL_GROUP, _root_json, HostControlError,
+    )
+    if _SHA.fullmatch(sha) is None:
+        raise MaintenanceError("invalid interrupted release")
+    uid = pwd.getpwnam(CONTROL_USER).pw_uid
+    gid = grp.getgrnam(CONTROL_GROUP).gr_gid
+    logical = RUNTIME_ROOT / "control/acceptance" / sha
+    path = logical
+    alias = None
+    if (sys.platform == "darwin" and logical.parent ==
+            _MACOS_VAR_ALIAS / "db/mastermind-executive/control/acceptance"):
+        info = _MACOS_VAR_ALIAS.lstat()
+        target = os.readlink(_MACOS_VAR_ALIAS)
+        if (not stat.S_ISLNK(info.st_mode) or info.st_uid != _TRUSTED_UID
+                or target not in ("private/var", os.fspath(_MACOS_VAR_PHYSICAL))):
+            raise MaintenanceError("Runtime /var alias is not trusted")
+        alias = (_identity(info), target)
+        path = _MACOS_VAR_PHYSICAL / logical.relative_to(_MACOS_VAR_ALIAS)
+    if not path.is_absolute() or path.resolve(strict=True) != path:
+        raise MaintenanceError("interrupted acceptance path is not canonical")
+    directories = []
+    for directory in (path.parent, path):
+        info = directory.lstat()
+        if (not stat.S_ISDIR(info.st_mode) or info.st_uid != uid or info.st_gid != gid
+                or stat.S_IMODE(info.st_mode) != 0o700 or has_macos_acl(directory)):
+            raise MaintenanceError("interrupted acceptance directory identity drifted")
+        directories.append((directory, _identity(info)))
+    names = {"nonexecutive-launchd-before.json", "protected-group-membership.json"}
+    if {item.name for item in path.iterdir()} != names:
+        raise MaintenanceError("interrupted acceptance passed the pre-Job boundary")
+    manifest = {}
+    files = []
+    for name in sorted(names):
+        receipt = path / name
+        initial = receipt.lstat()
+        try:
+            value, raw = _root_json(receipt, modes=frozenset({0o400}), uid=uid, gid=gid)
+        except HostControlError as exc:
+            raise MaintenanceError("interrupted acceptance receipt is unsafe") from exc
+        if _identity(receipt.lstat()) != _identity(initial):
+            raise MaintenanceError("interrupted acceptance receipt changed")
+        files.append((receipt, _identity(initial)))
+        if name == "nonexecutive-launchd-before.json":
+            valid = (set(value) == {"sha256", "labels_excluded"}
+                     and isinstance(value["sha256"], str)
+                     and _DIGEST.fullmatch(value["sha256"]) is not None
+                     and type(value["labels_excluded"]) is int and value["labels_excluded"] == 2)
+        else:
+            valid = (set(value) == {"passed", "effective_members", "primary_gid_census",
+                                   "name_members", "uuid_members", "nested_groups"}
+                     and value["passed"] is True and isinstance(value["effective_members"], dict)
+                     and value["primary_gid_census"] == "COMPLETE"
+                     and value["name_members"] == value["uuid_members"] == "EXACT"
+                     and value["nested_groups"] == "ABSENT")
+        if not valid:
+            raise MaintenanceError("interrupted acceptance receipt schema drifted")
+        manifest[name] = hashlib.sha256(raw).hexdigest()
+    if (any(_identity(p.lstat()) != identity for p, identity in directories + files)
+            or {item.name for item in path.iterdir()} != names
+            or (alias is not None and
+                (_identity(_MACOS_VAR_ALIAS.lstat()), os.readlink(_MACOS_VAR_ALIAS)) != alias)):
+        raise MaintenanceError("interrupted acceptance namespace changed")
+    return digest(manifest)
+
+
 def validate_superseded_binding(descriptor: dict, *, before: dict | None = None,
                                  artifacts: dict | None = None,
                                  prior_canary: dict | None = None) -> None:
@@ -761,7 +871,8 @@ def validate_superseded_binding(descriptor: dict, *, before: dict | None = None,
     granted. Future carry validation retains this immutable selected binding,
     but compares live prestate only before this successor starts acceptance.
     """
-    selected_sha = descriptor["superseded_unstarted_sha"]
+    prejob = descriptor["schema_version"] == SCHEMA_PREJOB
+    selected_sha = descriptor["interrupted_prejob_sha" if prejob else "superseded_unstarted_sha"]
     selected = descriptor_for(selected_sha)
     if (selected is None or selected["schema_version"] != SCHEMA_V2
             or digest(selected) != descriptor["superseded_descriptor_sha256"]
@@ -775,6 +886,8 @@ def validate_superseded_binding(descriptor: dict, *, before: dict | None = None,
     bundle = bundle_path(selected_sha)
     expected = {"descriptor.json", "preparing.json", "baseline.json", "inventory.json",
                 "prior-secret-canary.json", "prestate.sqlite3"}
+    if prejob:
+        expected.add("run-started.json")
     entries = {entry.name for entry in bundle.iterdir()}
     legacy_pair = {"prestate.sqlite3-wal", "prestate.sqlite3-shm"}
     if entries not in (expected, expected | legacy_pair):
@@ -782,7 +895,13 @@ def validate_superseded_binding(descriptor: dict, *, before: dict | None = None,
     if sealed_json(bundle/"preparing.json") != {"schema_version": SCHEMA_V2}:
         raise MaintenanceError("superseded preparation state is invalid")
     from ops.executive_os.autonomy_control import RUNTIME_ROOT
-    _require_absent(RUNTIME_ROOT/"control"/"acceptance"/selected_sha)
+    if prejob:
+        if (sealed_json(bundle/"run-started.json") != {
+                "schema_version": SCHEMA_V2, "descriptor_sha256": digest(selected)}
+                or prejob_evidence(selected_sha) != descriptor["prejob_evidence_sha256"]):
+            raise MaintenanceError("interrupted pre-Job evidence drifted")
+    else:
+        _require_runtime_acceptance_absent(RUNTIME_ROOT/"control"/"acceptance"/selected_sha)
     baseline = sealed_json(bundle/"baseline.json")
     inventory_value = sealed_json(bundle/"inventory.json")
     canary = sealed_json(bundle/"prior-secret-canary.json")
@@ -808,7 +927,11 @@ def prepare(args: argparse.Namespace) -> Path:
     worker_config = json.loads((SYSTEM_ROOT/"config/worker-codex.json").read_text())
     if worker_config.get("operator_harness_armed") is not False:
         raise MaintenanceError("maintenance requires closed worker harness")
-    selected_sha = getattr(args, "supersede_unstarted_sha", None)
+    unstarted_sha = getattr(args, "supersede_unstarted_sha", None)
+    prejob_sha = getattr(args, "supersede_prejob_sha", None)
+    if unstarted_sha and prejob_sha:
+        raise MaintenanceError("select one supersession mode")
+    selected_sha = prejob_sha or unstarted_sha
     selected_digest = getattr(args, "superseded_descriptor_sha256", None)
     if bool(selected_sha) != bool(selected_digest):
         raise MaintenanceError("supersession requires an exact selected release and descriptor digest")
@@ -857,21 +980,27 @@ def prepare(args: argparse.Namespace) -> Path:
     artifacts = inventory(artifact_roots)
     prior_canary = Path(config["secret_canary_receipt_path"])
     prior_canary_value = json.loads(prior_canary.read_text())
-    schema = SCHEMA_SUPERSEDE if selected_sha else (SCHEMA_V2 if terminal_carry else SCHEMA)
+    schema = SCHEMA_PREJOB if prejob_sha else (
+        SCHEMA_SUPERSEDE if selected_sha else (SCHEMA_V2 if terminal_carry else SCHEMA))
     if selected_sha:
         # Qualify every selected seal and the actual prestate before any new
         # preparation directory or marker is written.
+        selected_fields = dict(superseded_descriptor_sha256=selected_digest)
+        if prejob_sha:
+            selected_fields.update(interrupted_prejob_sha=prejob_sha,
+                                   prejob_evidence_sha256=prejob_evidence(prejob_sha))
+        else:
+            selected_fields["superseded_unstarted_sha"] = selected_sha
         candidate = dict(schema_version=schema, predecessor_sha=args.predecessor_sha,
             successor_sha=args.successor_sha, root_job_id=root.job_id,
             root_identity_sha256=root_identity(root), root_event_id=events[0]["event_id"],
             root_event_sha256=digest(events[0]), worker_id=config["worker_id"],
             quota_class=config["quota_class"], baseline_sha256=digest(before),
             inventory_sha256=digest(artifacts), prior_canary_sha256=digest(prior_canary_value),
-            superseded_unstarted_sha=selected_sha, superseded_descriptor_sha256=selected_digest, **extra)
+            **selected_fields, **extra)
         validate_superseded_binding(candidate, before=before, artifacts=artifacts,
                                      prior_canary=prior_canary_value)
-        extra.update(superseded_unstarted_sha=selected_sha,
-                     superseded_descriptor_sha256=selected_digest)
+        extra.update(selected_fields)
     parent = bundle_path(args.successor_sha).parent
     parent.mkdir(mode=0o755, exist_ok=True)
     parent_info = parent.lstat()
@@ -947,7 +1076,7 @@ class Maintenance:
                 or snapshot(self.database) != self.before):
             raise MaintenanceError("maintenance prestate drifted")
         verify_inventory(self.inventory)
-        if self.descriptor["schema_version"] == SCHEMA_SUPERSEDE:
+        if self.descriptor["schema_version"] in {SCHEMA_SUPERSEDE, SCHEMA_PREJOB}:
             validate_superseded_binding(self.descriptor, before=self.before,
                                          artifacts=self.inventory, prior_canary=prior_canary)
         if self.descriptor["schema_version"] in _TERMINAL_CARRY_SCHEMAS:
@@ -990,6 +1119,8 @@ def main() -> int:
                         help="Preserve one failed planner and prior PASS chain; grant no predecessor recovery.")
     parser.add_argument("--supersede-unstarted-sha",
                         help="Explicitly retire an installed unstarted V2 release on unchanged schema v5.")
+    parser.add_argument("--supersede-prejob-sha",
+                        help="Preserve an interrupted V2 pre-Job prefix; never replay its acceptance.")
     parser.add_argument("--superseded-descriptor-sha256",
                         help="Exact selected V2 descriptor digest; predecessor remains its accepted ancestor.")
     args = parser.parse_args()
