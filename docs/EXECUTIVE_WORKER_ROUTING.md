@@ -140,16 +140,30 @@ identity rather than refreshing it. It reuses Runtime's bounded interactive
 turns and the same Operator Harness start, lease, attestation and cleanup.
 The extension-free `operator.appserver.interactive.v1` profile is unchanged.
 
-The attended supervisor retains the exact native generation after the first
-plan seal. The existing Wake owner must finish its idle attention turn and
+The installed service's existing COO, dispatch and workspace owners start one
+retained native generation after the first plan seal. Its task stays in the
+existing dispatch occupancy. The existing Wake owner must finish its idle attention turn and
 persist the causal native ACK before a follow-up is admitted. That later turn
 gets the actual instruction from `RuntimeSessionReturn.read_continuation_source`
 and can call only the existing `native.reply` capability. Its original operation
 cannot replay the provider turn. The canonical reply still uses the existing
-atomic current-writer COMMIT fence. Cleanup waits through authenticated parent
-read and observed useful action because the current return reader needs that
-live writer. This source composition adds no session registry or listener and
-does not arm production or qualify a GUI-owned conversation.
+atomic current-writer COMMIT fence. The service reads that exact canonical
+commit before ordinary proven-dead/released cleanup. Immutable original
+principal provenance and the canonical COMMIT let the parent read the result
+after cleanup; only actual parent evidence establishes consumption and useful
+action. The disposable root remains queued until the parent acts and uses
+canonical cancellation; this probe never labels a business Mission completed.
+The bounded native profile cannot admit a child plan.
+
+The incumbent root grant publisher has an explicit native mode that publishes
+the same sealed receipt file without changing Control or Worker configuration
+or restarting Control. The selected private profile, full-arm receipt, exact
+installed source, original CONTINUE and live writer remain required. The same
+Control process reads that grant on the existing observation listener, refusing
+an unsettled transaction, changed file or revoked grant without a cached
+fallback. Ordinary grant publication keeps its existing configuration and
+reconciliation behavior. This source composition adds no session registry or
+listener and does not arm production or qualify a GUI-owned conversation.
 
 Current logical aliases:
 

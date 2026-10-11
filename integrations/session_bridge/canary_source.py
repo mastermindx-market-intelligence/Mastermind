@@ -153,7 +153,7 @@ async def derive_canary_grant_proposal(
     )
 
 
-def installed_proposal_json(expected_sha: str, read_ref: str, validity_seconds: int) -> str:
+def installed_proposal_json(expected_sha: str, read_ref: str, validity_seconds: int, *, native_return=False) -> str:
     """Fixed UID450 read probe invoked by the existing root transaction owner."""
     import asyncio
     import time
@@ -169,6 +169,11 @@ def installed_proposal_json(expected_sha: str, read_ref: str, validity_seconds: 
         installed_release_sha=expected_sha, validity_seconds=validity_seconds,
         now_provider=lambda: int(time.time()),
     ))
+    if native_return:
+        from ops.executive_os.dialogue_wake_canary_control import require_native_selection, require_native_source
+        require_native_selection(config)
+        require_native_source(runtime, proposal.grant, read_ref=read_ref,
+            source_event_sha256=proposal.source_event_sha256)
     return json.dumps({
         "grant": proposal.grant.to_dict(), "read_ref": proposal.read_ref,
         "source_event_sha256": proposal.source_event_sha256,

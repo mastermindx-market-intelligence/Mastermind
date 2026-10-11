@@ -737,6 +737,8 @@ def _parser() -> argparse.ArgumentParser:
     canary_publish.add_argument("--expected-sha", type=_exact_sha, action=_StoreOnce, required=True)
     canary_publish.add_argument("--read-ref", action=_StoreOnce, required=True)
     canary_publish.add_argument("--validity-seconds", type=int, action=_StoreOnce, required=True)
+    canary_publish.add_argument("--native-return", action="store_true",
+        help="Publish the exact native grant on the existing receipt without restarting Control.")
     canary_reconcile = sub.add_parser(
         "dialogue-canary-reconcile", help="Restore one interrupted grant publication's exact preimages."
     )

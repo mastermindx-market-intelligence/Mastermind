@@ -1147,8 +1147,9 @@ class ExecutiveOperatorSupervisor:
         """Start one explicit native interactive Job under the existing owners.
 
         This attended composition creates no registry, loop or replay path.
-        The caller retains this handle until authenticated parent read/action,
-        then uses the ordinary proven-dead/released terminalization below.
+        The installed service retains it for one bounded authenticated native
+        continuation. Canonical result read survives ordinary cleanup; only
+        actual parent evidence can establish delivery or useful action.
         """
         job = self.runtime.jobs.get_job(job_id)
         if (job is None or job.status.value != "QUEUED"
@@ -1219,12 +1220,27 @@ class ExecutiveOperatorSupervisor:
             retained.session, operation_id=operation, timeout_seconds=300.0)
 
     async def finish_retained_native_job(self, retained: RetainedNativeOperatorSession) -> None:
-        """Use ordinary cleanup after the parent has read and acted on the result."""
+        """Use ordinary cleanup; this never asserts parent consumption."""
         self._require_retained_native(retained)
         await asyncio.to_thread(self._complete_after_stop,
             job=retained.job, lease=retained.lease, session=retained.session,
             adapter=retained.adapter, canonical_result_json=retained.canonical_plan_json,
             stop_operation=OperationId(f"ohf-op:stop:{retained.session.attempt_id}"))
+
+    async def abort_retained_native_job(self, retained: RetainedNativeOperatorSession, *, reason: str) -> bool:
+        """Settle a failed bounded continuation through the incumbent cleanup."""
+        if not isinstance(retained, RetainedNativeOperatorSession) or retained.owner is not self:
+            raise StateConflict("retained native handle belongs to another owner")
+        return await asyncio.to_thread(self._cleanup_failed_session,
+            lease=retained.lease, orchestrator=self._orchestrator(retained.lease, retained.adapter),
+            handle=retained.session,
+            stop_operation=OperationId(f"ohf-op:stop:{retained.session.attempt_id}"), reason=reason)
+
+    def retain_native_wait_window(self, retained: RetainedNativeOperatorSession) -> None:
+        """One bounded lease extension for the service's existing ACK waiter."""
+        self._require_retained_native(retained)
+        self._orchestrator(retained.lease, retained.adapter).runtime.extend_operator_lease(
+            retained.session.attempt_id, 600)
 
     def _recover_one(
         self, attempt_id: str

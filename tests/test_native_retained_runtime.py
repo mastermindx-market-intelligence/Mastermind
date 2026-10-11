@@ -44,6 +44,16 @@ def test_native_interactive_child_remains_outside_one_shot_coo_dispatch(tmp_path
     assert runtime.attempts.list_attempts() == []
 
 
+def test_bounded_native_return_cannot_admit_children_that_need_a_retained_parent(tmp_path):
+    runtime, supervisor, retained, _adapter = _retained(tmp_path)
+    before = runtime.events.list_events()
+    with pytest.raises(StateConflict, match="bounded native return"):
+        runtime.jobs.admit_cycle_plan(retained.job.root_job_id,
+            command_id=f"coo-cycle:{retained.job.root_job_id}:admit-plan:{retained.session.attempt_id}")
+    assert runtime.events.list_events() == before
+    assert len(runtime.jobs.list_jobs()) == 2
+
+
 def test_native_retained_first_seal_and_followup_use_the_same_current_writer(tmp_path):
     runtime, root, planner = _case(tmp_path)
     dispatch = runtime.attempts.dispatch_cycle_job(planner.job_id,

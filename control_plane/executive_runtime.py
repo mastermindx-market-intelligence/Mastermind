@@ -12595,6 +12595,9 @@ class JobRegistry:
                     "plan admission requires exactly one planner and no other child"
                 )
             planner = children[0]
+            if _strict_canonical_json_loads(str(planner["constraints_json"]),
+                    name="native planner constraints").get("execution_profile_id") == NATIVE_RETURN_TX5_EXECUTION_PROFILE:
+                raise StateConflict("bounded native return cannot admit a child plan")
             interactive = False
             if _interactive_tx5_admitted(planner):
                 expected_command = (
