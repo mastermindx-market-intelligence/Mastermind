@@ -62,15 +62,18 @@ export interface LaunchOrchestratorProps {
 // ---------------------------------------------------------------------------
 
 /** Conservative UI ceiling for user-supplied goal text */
-const MAX_GOAL_BYTES = 16384;
+// The Executive launch adapter limits objective to 4,000 characters.
+// Use a conservative UTF-8 byte ceiling so the visible UI never promises a
+// launch the existing command adapter will reject.
+const MAX_GOAL_BYTES = 4000;
 const MAX_ACCEPTANCE_ITEMS = 6;
 /** Criteria are sent as part of the existing goal: no new command or lifecycle schema. */
 export function composeAcceptanceGoal(goal: string, criteria: string): string | null {
   const lines = criteria.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   if (lines.length > MAX_ACCEPTANCE_ITEMS || lines.some((line) => line.length > 500)) return null;
-  if (!lines.length) return goal;
+  if (!lines.length) return utf8ByteLength(goal) <= MAX_GOAL_BYTES ? goal : null;
   const composed = `${goal.trim()}\n\nAcceptance criteria (verify against the delivered result):\n${lines.map((line, i) => `${i + 1}. ${line}`).join("\n")}`;
-  return new TextEncoder().encode(composed).length <= 4000 ? composed : null;
+  return utf8ByteLength(composed) <= MAX_GOAL_BYTES ? composed : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -272,7 +275,7 @@ export function LaunchOrchestrator({
             />
             {acceptanceInvalid && (
               <p id={`${acceptanceId}-error`} className="field-error" role="alert">
-                Use at most six criteria (500 characters each); the complete submitted goal must fit 4,000 UTF-8 bytes.
+                Use at most six criteria (500 characters each). Goal and criteria together must fit 4,000 UTF-8 bytes.
               </p>
             )}
             <p className="muted">Criteria travel with the existing mission goal. They are requirements for validation, not a claim that checks have passed.</p>

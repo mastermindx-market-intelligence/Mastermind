@@ -21,7 +21,7 @@ import {
   type ExecutiveToolEnvelope,
   type LaunchBindingConfig,
 } from "./executive-launch-command-port";
-import type { LaunchForm } from "./ui/LaunchOrchestrator";
+import { composeAcceptanceGoal, type LaunchForm } from "./ui/LaunchOrchestrator";
 import type { OrchestratorSessionPresentation } from "./host-command-bindings";
 
 const PRINCIPAL = "scope-A";
@@ -378,6 +378,19 @@ describe("T3 makeLaunchIntent", () => {
         validation: { git_diff_check: true },
       }).makeLaunchIntent(boundedForm),
     ).toBeNull();
+  });
+
+  it("carries acceptance criteria through the existing exact operation payload, without new fields", () => {
+    const objective = composeAcceptanceGoal("Ship project conversation", "Messages are sent once\nReopen restores the original selection");
+    expect(objective).not.toBeNull();
+    const form = { ...RESEARCH_FORM, goal: objective! };
+    const intent = binding.makeLaunchIntent(form);
+    expect(intent).toEqual({ kind: "launch", targetKey: WORKSTREAM, payload: expectedResearchPayload(form) });
+    expect(intent?.payload.objective).toContain("1. Messages are sent once");
+    expect(Object.keys(intent?.payload ?? {}).sort()).toEqual(Object.keys(expectedResearchPayload(form)).sort());
+    const pointer = binding.port.prepare(intent!);
+    expect(pointer.operationKey).toBe(intent?.payload.operation_key);
+    expect(binding.makeLaunchIntent(RESEARCH_FORM)?.payload.operation_key).not.toBe(pointer.operationKey);
   });
 
   it("returns the exact launch payload on the happy path", () => {

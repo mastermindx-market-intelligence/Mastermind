@@ -98,6 +98,30 @@ describe("LaunchOrchestrator", () => {
       expect(onSubmit).not.toHaveBeenCalled();
     });
 
+    it("blocks goals whose criteria push the combined objective beyond the adapter limit", () => {
+      const onSubmit = vi.fn();
+      render(<LaunchOrchestrator {...makeProps({ onSubmit })} />);
+      fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "a".repeat(3990) } });
+      expect(launchButton().disabled).toBe(false);
+      fireEvent.change(screen.getByLabelText(/Acceptance criteria/), { target: { value: "Demonstrate proof" } });
+      expect(launchButton().disabled).toBe(true);
+      expect(screen.getByRole("alert").textContent).toContain("4,000 UTF-8 bytes");
+      fireEvent.submit(goalForm());
+      expect(onSubmit).not.toHaveBeenCalled();
+    });
+
+    it("rejects criteria above 500 characters and handles UTF-8 multibyte limits", () => {
+      const onSubmit = vi.fn();
+      render(<LaunchOrchestrator {...makeProps({ onSubmit })} />);
+      fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "A goal" } });
+      fireEvent.change(screen.getByLabelText(/Acceptance criteria/), { target: { value: "z".repeat(501) } });
+      expect(launchButton().disabled).toBe(true);
+      fireEvent.change(screen.getByLabelText(/Acceptance criteria/), { target: { value: "é".repeat(300) } });
+      expect(launchButton().disabled).toBe(false);
+      fireEvent.click(launchButton());
+      expect((onSubmit.mock.calls[0][0] as LaunchForm).goal).toContain("é".repeat(300));
+    });
+
     it("preserves criteria on refusal and clears on accepted completion", () => {
       const onSubmit = vi.fn();
       render(<LaunchOrchestrator {...makeProps({ onSubmit })} />);
@@ -214,10 +238,10 @@ describe("LaunchOrchestrator", () => {
       expect(btn.disabled).toBe(true);
     });
 
-    it("shows byte length error when goal exceeds 16384 bytes", () => {
+    it("shows byte length error when goal exceeds the adapter-compatible 4000 bytes", () => {
       render(<LaunchOrchestrator {...makeProps()} />);
       const textarea = screen.getByLabelText("Goal") as HTMLTextAreaElement;
-      fireEvent.change(textarea, { target: { value: "a".repeat(16385) } });
+      fireEvent.change(textarea, { target: { value: "a".repeat(4001) } });
       expect(screen.getByText(/bytes/)).toBeTruthy();
       expect(launchButton().disabled).toBe(true);
     });
@@ -225,7 +249,7 @@ describe("LaunchOrchestrator", () => {
     it("allows submit when goal is exactly at the ASCII byte limit", () => {
       render(<LaunchOrchestrator {...makeProps()} />);
       const textarea = screen.getByLabelText("Goal") as HTMLTextAreaElement;
-      fireEvent.change(textarea, { target: { value: "a".repeat(16384) } });
+      fireEvent.change(textarea, { target: { value: "a".repeat(4000) } });
       expect(screen.queryByText(/bytes/)).toBeNull();
       expect(launchButton().disabled).toBe(false);
     });
@@ -233,12 +257,12 @@ describe("LaunchOrchestrator", () => {
     it("counts multi-byte UTF-8 characters against the byte ceiling", () => {
       render(<LaunchOrchestrator {...makeProps()} />);
       const textarea = screen.getByLabelText("Goal") as HTMLTextAreaElement;
-      // é is two bytes: 8192 chars = 16384 bytes, exactly at the ceiling
-      fireEvent.change(textarea, { target: { value: "é".repeat(8192) } });
+      // é is two bytes: 2000 chars = 4000 bytes, exactly at the ceiling
+      fireEvent.change(textarea, { target: { value: "é".repeat(2000) } });
       expect(screen.queryByText(/bytes/)).toBeNull();
       expect(launchButton().disabled).toBe(false);
 
-      fireEvent.change(textarea, { target: { value: "é".repeat(8193) } });
+      fireEvent.change(textarea, { target: { value: "é".repeat(2001) } });
       expect(screen.getByText(/bytes/)).toBeTruthy();
       expect(launchButton().disabled).toBe(true);
     });
