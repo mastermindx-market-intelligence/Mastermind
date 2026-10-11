@@ -1,0 +1,9 @@
+{
+  "AGENTS.md": "b09e88df9a02512f53d2e5a806366b1a59e85488bb7ddce5435723e5d491108b",
+  "CLAUDE.md": "61753fc37954f8c9e57a174cfdcfa8f8dbe31fbd3b53fd4798ace304e121c464",
+  "docs/DELIVERY_WORKFLOW.md": "8399bfa8f527a12f309280c07957515dbd6fbcfbf824f0c6d6d7d2dde1232f69",
+  "docs/SOL_CEO_ACCOUNT_INSTRUCTIONS.md": "9d64c5dd7589c127a32dab00a1ae5452d4c8a82f7a8a8422b774b584a08096e3",
+  "scripts/project_execution_brief.py": "f6ff0b40179f6ce67d77be52702b1ae6e1343ed38db5f5ac373d31971c6b7284",
+  "tests/test_execution_brief_projection.py": "67cf92fa0d0549975b52650d68b52c34cb03242dee9e88df30dcc72d0aa7cebe",
+  "tests/test_execution_policy_contract.py": "309dd74d59d117771e3c83028f43ac2988de120417a26e667b0ed2f7fc58d26e"
+}
