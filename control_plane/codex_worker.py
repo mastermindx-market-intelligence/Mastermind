@@ -92,7 +92,14 @@ _MAX_VALIDATION_ARGV_BYTES = 64 * 1024
 _MAX_PROJECT_CONFIG_BYTES = 64 * 1024
 _LOCAL_TRANSPORT_FINALIZATION_SECONDS = 5.0
 _LOCAL_STREAM_DRAIN_SECONDS = 0.1
-_AUDITED_PROJECT_CONFIG_SHA256 = "d7e836eb5a6cbd4cb4e97de41f8182add663cb2a152dc4e381f82553f571bb7f"
+# Both exact project configurations are audited. The legacy pin preserves
+# already-selected source workspaces; the current pin permits the Chairman's
+# coordinator defaults. Leaf launches still disable agents and both multi-agent
+# feature generations in their explicit argv, regardless of these defaults.
+_AUDITED_PROJECT_CONFIG_SHA256S = frozenset({
+    "d7e836eb5a6cbd4cb4e97de41f8182add663cb2a152dc4e381f82553f571bb7f",
+    "f29f8839f10304b69fd24571aa2303dfe11900ac6ca3bad02b7dc764ec5c2bca",
+})
 _ALLOWED_AUTHORITIES = frozenset({"READ", "RESEARCH", "WRITE_BRANCH", "RUN_TESTS"})
 _GIT_COMMAND_TIMEOUT_SECONDS = 15.0
 _SAFE_GIT_OPERATION_IDENTITIES = {
@@ -1488,7 +1495,7 @@ def _validate_project_configuration(workspace: Path) -> None:
         raise LaunchValidationError("workspace .codex/config.toml is not immutable enough")
     raw = _read_limited(config_path, _MAX_PROJECT_CONFIG_BYTES)
     actual_hash = hashlib.sha256(raw).hexdigest()
-    if actual_hash != _AUDITED_PROJECT_CONFIG_SHA256:
+    if actual_hash not in _AUDITED_PROJECT_CONFIG_SHA256S:
         raise LaunchValidationError(
             "workspace .codex/config.toml does not match the audited worker-safe hash"
         )
