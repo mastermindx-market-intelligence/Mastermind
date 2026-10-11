@@ -516,6 +516,7 @@ def worker_result_schema(
     effective_grant_digest: str | None = None,
     orchestration_role: str | None = None,
     root_job_id: str | None = None,
+    aggregation_schema_version: str = "mastermind.aggregation_result/v1",
 ) -> dict[str, Any]:
     """Return the strict final-output contract for one immutable attempt."""
 
@@ -532,10 +533,13 @@ def worker_result_schema(
             run_id=run_id,
             worker_id=worker_id,
             root_job_id=root_job_id,
+            aggregation_schema_version=aggregation_schema_version,
         )
         result["x-mastermind-effective-grant-digest"] = effective_grant_digest
         return result
 
+    if aggregation_schema_version != "mastermind.aggregation_result/v1":
+        raise SupervisorError("aggregation producer schema requires an aggregation role")
     string_list = {"type": "array", "items": {"type": "string"}}
     result = {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1449,6 +1453,81 @@ class ExecutiveSupervisor:
             "verified_bytes": len(commission.content),
         }
 
+    def _result_schema(
+        self,
+        *,
+        job: Job,
+        attempt: Attempt,
+        effective_grant: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Select the aggregation producer from Runtime's immutable handoff.
+
+        The handoff is revalidated by its existing owner against the admitted
+        plan and current tree. Service configuration cannot reselect an older
+        Job/Attempt's output version after a restart.
+        """
+
+        aggregation_version = "mastermind.aggregation_result/v1"
+        if job.orchestration_role == "aggregation":
+            if attempt.job_id != job.job_id:
+                raise SupervisorError("aggregation producer Attempt differs from its Job")
+            handoff = self.runtime.jobs.get_cycle_handoff(job.job_id)
+            aggregation_version = (
+                handoff.get("aggregate_result_schema")
+                if isinstance(handoff, Mapping) else None
+            )
+            if (
+                type(aggregation_version) is not str
+                or aggregation_version not in {
+                    "mastermind.aggregation_result/v1", "mastermind.aggregation_result/v2",
+                }
+            ):
+                raise SupervisorError("aggregation producer schema is not admitted by the handoff")
+        return worker_result_schema(
+            job_id=job.job_id,
+            run_id=attempt.attempt_id,
+            worker_id=attempt.worker_id,
+            effective_grant_digest=(
+                attempt.effective_grant_digest if effective_grant is not None else None
+            ),
+            orchestration_role=job.orchestration_role,
+            root_job_id=(job.root_job_id if job.orchestration_role else None),
+            aggregation_schema_version=aggregation_version,
+        )
+
+    def _validate_aggregation_schema(
+        self,
+        *,
+        job: Job,
+        attempt: Attempt,
+        effective_grant: Mapping[str, Any] | None,
+        schema_path: Path,
+    ) -> None:
+        """Refuse retained producer-schema drift before launch or adoption."""
+
+        if job.orchestration_role != "aggregation":
+            return
+        from control_plane.executive_orchestration_result import canonical_digest
+
+        expected = self._result_schema(
+            job=job, attempt=attempt, effective_grant=effective_grant,
+        )
+        try:
+            info = schema_path.lstat()
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_nlink != 1
+                or info.st_uid != os.geteuid()
+                or stat.S_IMODE(info.st_mode) & 0o022
+            ):
+                raise SupervisorError("aggregation producer schema is not control-owned")
+            retained = json.loads(schema_path.read_text(encoding="utf-8"))
+            matches = canonical_digest(retained) == canonical_digest(expected)
+        except (OSError, UnicodeError, ValueError) as exc:
+            raise SupervisorError("aggregation producer schema cannot be verified") from exc
+        if not matches:
+            raise SupervisorError("aggregation producer schema differs from immutable handoff")
+
     def _write_schema(
         self,
         run_dir: Path,
@@ -1457,6 +1536,9 @@ class ExecutiveSupervisor:
         attempt: Attempt,
         effective_grant: Mapping[str, Any] | None = None,
     ) -> Path:
+        schema = self._result_schema(
+            job=job, attempt=attempt, effective_grant=effective_grant,
+        )
         run_dir.mkdir(parents=True, exist_ok=False, mode=0o700)
         os.chmod(run_dir, 0o770 if self.shared_run_gid is not None else 0o700)
         input_dir = run_dir / "input"
@@ -1464,18 +1546,7 @@ class ExecutiveSupervisor:
         schema_path = input_dir / "worker-result.schema.json"
         _write_private_json(
             schema_path,
-            worker_result_schema(
-                job_id=job.job_id,
-                run_id=attempt.attempt_id,
-                worker_id=attempt.worker_id,
-                effective_grant_digest=(
-                    attempt.effective_grant_digest
-                    if effective_grant is not None
-                    else None
-                ),
-                orchestration_role=job.orchestration_role,
-                root_job_id=(job.root_job_id if job.orchestration_role else None),
-            ),
+            schema,
         )
         if self.shared_run_gid is not None:
             for path, mode in (
@@ -2068,6 +2139,10 @@ class ExecutiveSupervisor:
             if exact_target is not None:
                 exact_target.revalidate_source()
                 self.runtime.attempts._validate_exact_target_launch(exact_target, lease)
+            self._validate_aggregation_schema(
+                job=job, attempt=lease.attempt, effective_grant=effective_grant,
+                schema_path=schema_path,
+            )
             start_invoked = True
             process_ref = await self.adapter.start(spec)
             launch_metadata = self._launch_metadata(
@@ -3010,6 +3085,10 @@ class ExecutiveSupervisor:
             raise SupervisorError(
                 "worker recovery orchestration grant changed"
             )
+        self._validate_aggregation_schema(
+            job=job, attempt=attempt, effective_grant=effective_grant,
+            schema_path=spec.result_schema_path,
+        )
         attestation = attempt.launch_metadata.get("launch_attestation")
         identity = (
             attestation.get("process_identity")

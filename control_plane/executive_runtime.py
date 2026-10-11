@@ -10830,7 +10830,7 @@ def _job_coo_policy(connection: sqlite3.Connection, job_id: str) -> CooCyclePoli
         parent = connection.execute("SELECT * FROM jobs WHERE job_id=?", (row["parent_job_id"],)).fetchone()
         if parent is not None and parent["parent_job_id"] is not None:
             return CooCyclePolicy.for_digest(_coordinator_grant(parent)["policy_sha256"])
-        return CooCyclePolicy.load()
+        return CooCyclePolicy.load(version=1)
     scope = row["job_id"] if row["orchestration_role"] == "aggregation" else row["parent_job_id"]
     event = connection.execute("SELECT payload_json FROM events WHERE event_type='COO_PLAN_ADMITTED' AND job_id=?", (scope,)).fetchone()
     if event is not None:
@@ -10838,7 +10838,7 @@ def _job_coo_policy(connection: sqlite3.Connection, job_id: str) -> CooCyclePoli
         return CooCyclePolicy.for_digest(admission.get("policy_sha"))
     if row["parent_job_id"] is not None and row["orchestration_role"] == "aggregation":
         return CooCyclePolicy.for_digest(_coordinator_grant(row)["policy_sha256"])
-    return CooCyclePolicy.load()
+    return CooCyclePolicy.load(version=1)
 
 
 def _coordinator_grant(row: sqlite3.Row) -> dict[str, Any]:

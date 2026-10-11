@@ -25,6 +25,8 @@ PLAN_SCHEMA_V2 = "mastermind.execution_plan/v2"
 PLAN_SCHEMA_V3 = "mastermind.execution_plan/v3"
 PLAN_SCHEMA_V4 = "mastermind.execution_plan/v4"
 PLAN_SCHEMA_V5 = "mastermind.execution_plan/v5"
+AGGREGATION_SCHEMA_V1 = "mastermind.aggregation_result/v1"
+AGGREGATION_SCHEMA_V2 = "mastermind.aggregation_result/v2"
 MAX_CANONICAL_RESULT_BYTES = 8_388_608
 ROLES = frozenset({"plan", "work", "review", "repair", "aggregation"})
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -93,7 +95,9 @@ def _lineage_schema_properties() -> dict[str, dict[str, Any]]:
     }
 
 
-def _role_body_schema(role: str) -> dict[str, Any]:
+def _role_body_schema(
+    role: str, *, aggregation_schema_version: str = AGGREGATION_SCHEMA_V1,
+) -> dict[str, Any]:
     """Executable JSON Schema 2020-12 body for one frozen role.
 
     Relational checks (for example, a review target matching the persisted
@@ -105,6 +109,12 @@ def _role_body_schema(role: str) -> dict[str, Any]:
 
     if role not in ROLES:
         raise OrchestrationResultError("role is not in the closed orchestration set")
+    if (
+        type(aggregation_schema_version) is not str
+        or aggregation_schema_version not in {AGGREGATION_SCHEMA_V1, AGGREGATION_SCHEMA_V2}
+        or (role != "aggregation" and aggregation_schema_version != AGGREGATION_SCHEMA_V1)
+    ):
+        raise OrchestrationResultError("aggregation producer schema version is not admitted")
     text = _schema_string()
     digest = _schema_digest()
     identifier = _schema_identifier()
@@ -297,7 +307,7 @@ def _role_body_schema(role: str) -> dict[str, Any]:
     )
     legacy = _schema_object(
         {
-            "schema_version": {"const": "mastermind.aggregation_result/v1"},
+            "schema_version": {"const": AGGREGATION_SCHEMA_V1},
             "root_job_id": identifier,
             "handoff_digest": digest,
             "policy_sha": digest,
@@ -308,13 +318,15 @@ def _role_body_schema(role: str) -> dict[str, Any]:
             "evidence_digests": evidence,
         }
     )
+    if aggregation_schema_version == AGGREGATION_SCHEMA_V1:
+        return legacy
     nested = copy.deepcopy(legacy)
-    nested["properties"]["schema_version"] = {"const": "mastermind.aggregation_result/v2"}
+    nested["properties"]["schema_version"] = {"const": AGGREGATION_SCHEMA_V2}
     nested["properties"]["coordinator_job_id"] = identifier
     nested["required"].append("coordinator_job_id")
     nested["properties"]["revisions"]["maxItems"] = 16
     nested["properties"]["revisions"]["items"]["properties"]["ordinal"]["maximum"] = 15
-    return {"oneOf": [legacy, nested]}
+    return nested
 
 
 def orchestration_result_schema(
@@ -325,6 +337,7 @@ def orchestration_result_schema(
     worker_id: str | None = None,
     root_job_id: str | None = None,
     plan_schema_version: str = PLAN_SCHEMA_V1,
+    aggregation_schema_version: str = AGGREGATION_SCHEMA_V1,
 ) -> dict[str, Any]:
     """Return the closed executable envelope schema for ``role``.
 
@@ -332,8 +345,8 @@ def orchestration_result_schema(
     four optional constants so a provider cannot swap Job, Attempt, worker, or
     root identity while still satisfying the same role shape.
 
-    The default planner remains V1. Selecting a newer closed schema does not
-    select a native adapter or grant Runtime admission for that version.
+    The default planner and aggregator remain V1. Selecting a newer closed
+    schema does not select a native adapter or grant Runtime admission for it.
     """
 
     if role not in ROLES:
@@ -359,7 +372,7 @@ def orchestration_result_schema(
     def bound_identifier(value: str | None) -> dict[str, Any]:
         return {"const": value} if value is not None else _schema_identifier()
 
-    role_body = _role_body_schema(role)
+    role_body = _role_body_schema(role, aggregation_schema_version=aggregation_schema_version)
     if role == "plan":
         # Project one closed version; removing conditional guards alone leaks
         # the union's V5 properties and array limit into the frozen V1 wire.
@@ -398,10 +411,16 @@ def orchestration_result_schema(
     }
 
 
-def role_schema_digest(role: str, *, plan_schema_version: str = PLAN_SCHEMA_V1) -> str:
+def role_schema_digest(
+    role: str, *, plan_schema_version: str = PLAN_SCHEMA_V1,
+    aggregation_schema_version: str = AGGREGATION_SCHEMA_V1,
+) -> str:
     """Content identity of the unbound executable schema for one role."""
 
-    return canonical_digest(orchestration_result_schema(role, plan_schema_version=plan_schema_version))
+    return canonical_digest(orchestration_result_schema(
+        role, plan_schema_version=plan_schema_version,
+        aggregation_schema_version=aggregation_schema_version,
+    ))
 
 
 def canonical_bytes(value: Any) -> bytes:
@@ -1056,6 +1075,8 @@ GOLDEN_ROLE_SCHEMA_DIGESTS = {
 
 
 __all__ = [
+    "AGGREGATION_SCHEMA_V1",
+    "AGGREGATION_SCHEMA_V2",
     "GOLDEN_ROLE_SCHEMA_DIGESTS",
     "MAX_CANONICAL_RESULT_BYTES",
     "OrchestrationResultError",

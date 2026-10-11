@@ -3603,7 +3603,7 @@ def test_five_role_schema_golden_digests_are_frozen():
         "work": "cc4953a932c9e4031dbdcdc6e444a77381cce12acf6a06f33b095f626d3b5f89",
         "review": "a0e853358f325d95b9d94c61161c40e7e7bae67e44679614b5ebea229b3d102c",
         "repair": "2f105a0b3c3bd55c0118fb003b13dd25e7074402d8d963d294944341ea47f90f",
-        "aggregation": "fc95c7a907777e747e4b94b096d5bbbd662e06c6f219c9a4cec4799e3b5a724a",
+        "aggregation": "7a042278d90f4d3e477c5f9d4c51a8553c64ac53947a70ccb40e96fea55ca933",
     }
 
 
@@ -3670,11 +3670,11 @@ def test_offline_acceptance_receipt_is_deterministic_and_proves_tx9_quarantine()
     assert exhaustion["second_terminal_status"] == "LOST"
     assert exhaustion["blocked_reason"] == "plan_terminal_adverse"
     assert len(exhaustion["supervisor_dispatch_calls"]) == 2
-    # Aggregation-v2 changes the expanded contract, but the default planner
-    # digest remains the original V1 value. Restoring that value changes only
-    # this outer receipt pin; every scenario digest below remains unchanged.
+    # Both default producer contracts remain V1. Restoring the aggregation
+    # digest changes only this derived outer receipt pin; every scenario digest
+    # below remains unchanged. Explicit V2 is tested under its own selection.
     assert receipt["receipt_digest"] == (
-        "5e59e38621c1bd8878a6af36a65fbe14df59babfd0e2c6976e75b71510b8feed"
+        "b0d30cab1399fbd36eeef679ecbf71a1efc90eb9573a6ed3aaa25f81c6ec5b6d"
     )
     assert receipt["dispatch_boundary"]["acceptance_digest"] == (
         "02af618a1a926bde4b6a92fb2e697aa3b2d41538ae81350dbd954891a5dd2bcc"
