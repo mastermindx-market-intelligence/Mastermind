@@ -260,6 +260,12 @@ def enroll_existing_parent(registry, *, attempt_id, fence_generation, lease_toke
                 connection.execute("""UPDATE attempts SET status='RUNNING',updated_at_ms=?,
                     version=version+1 WHERE attempt_id=?""", (now,attempt_id))
             revalidate()  # The real host fence remains held through SQLite COMMIT.
+            # Host qualification may consume the remaining lease time. Recheck
+            # the canonical fence/token at the final transaction boundary.
+            registry._leased(connection, attempt_id=attempt_id,
+                fence_generation=fence_generation, lease_token=lease_token,
+                timestamp=registry.store.now_ms(), statuses={AttemptStatus.RUNNING},
+                allow_existing_parent=True)
         return SessionEpochRef(eid,attempt_id,str(row["worker_id"]),1), ProcessGenerationRef(gid,eid,1,str(row["worker_id"]))
 
 

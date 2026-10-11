@@ -323,3 +323,20 @@ def test_binding_refuses_corrupt_canonical_evidence(tmp_path, monkeypatch, targe
                 ("f"*64,lease.attempt.attempt_id))
         assert changed.rowcount == 1
     with pytest.raises(StateConflict): runtime.current_harness_binding_source(lease.attempt.attempt_id)
+
+
+def test_lease_expiring_during_host_revalidation_rolls_back(tmp_path, monkeypatch):
+    _, runtime, lease, _, _, _, enroll = setup_enrollment(tmp_path, monkeypatch)
+    with runtime.store.read() as connection:
+        expiry = connection.execute('SELECT lease_expires_at_ms FROM attempts WHERE attempt_id=?',
+            (lease.attempt.attempt_id,)).fetchone()[0]
+    original_append = runtime.store.append_event
+    def append(*args, **kwargs):
+        result = original_append(*args, **kwargs)
+        if kwargs.get('aggregate_type') == 'operator_operation':
+            monkeypatch.setattr(runtime.store, 'now_ms', lambda: expiry + 1)
+        return result
+    monkeypatch.setattr(runtime.store, 'append_event', append)
+    before=counts(runtime)
+    with pytest.raises(StateConflict): enroll()
+    assert counts(runtime)==before
