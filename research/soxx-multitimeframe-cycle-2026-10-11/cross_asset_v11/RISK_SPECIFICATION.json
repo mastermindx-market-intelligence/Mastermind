@@ -1,0 +1,42 @@
+{
+  "models": {
+    "fixed_1p5": {
+      "rule": "fixed",
+      "scalar": 1.5,
+      "cap": 1.5
+    },
+    "ATR_1p0_cap3": {
+      "rule": "atr",
+      "scalar": 1.0,
+      "cap": 3.0
+    },
+    "ATR_1p5_cap4": {
+      "rule": "atr",
+      "scalar": 1.5,
+      "cap": 4.0
+    },
+    "max_fixed_1p5_or_ATR1_cap3": {
+      "rule": "max",
+      "scalar": 1.0,
+      "cap": 3.0
+    }
+  },
+  "exits": [
+    "time",
+    "old_guard"
+  ],
+  "universe_precommitted": [
+    "SOXX",
+    "SMH",
+    "AMD",
+    "AVGO",
+    "MU",
+    "INTC",
+    "NVDA",
+    "AMAT",
+    "LRCX",
+    "KLAC"
+  ],
+  "rules": "As-of ATR at frozen signal; no widening an open stop, no extra shares or notional optimisation. Same 52 regular-hour expiry, 25% at 2% for all; count unfilled/rejected opportunities as zero; no price/quote proof",
+  "retrospective": true
+}

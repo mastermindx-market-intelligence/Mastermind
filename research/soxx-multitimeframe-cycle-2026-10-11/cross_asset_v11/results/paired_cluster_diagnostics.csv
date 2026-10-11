@@ -1,0 +1,13 @@
+mode,category,n,unique_assets,weeks,lift_mean,positive,negative,sum_avoided,sum_sacrificed,winner_harmed,week_bootstrap95
+old_guard,new_semis,53,8,23,-0.31811,7,4,15.2616,32.1216,4,"[-1.5215, 0.3531]"
+old_guard,new_controls,10,2,10,-0.04948,0,2,0,0.4948,2,"[-0.1474, 0.0]"
+old_guard,all_semis,71,10,24,-0.16551,12,9,23.4812,35.2327,9,"[-1.0994, 0.4206]"
+old_guard,all_assets,88,13,27,-0.15008,12,12,23.4812,36.6884,12,"[-0.8496, 0.3384]"
+fast_weak_control,new_semis,53,8,23,-0.18102,9,3,16.0388,25.6328,3,"[-0.8491, 0.3325]"
+fast_weak_control,new_controls,10,2,10,-1.16381,3,5,2.841,14.4792,5,"[-2.616, 0.0796]"
+fast_weak_control,all_semis,71,10,24,-0.49547,15,7,25.5428,60.7214,7,"[-1.6079, 0.4298]"
+fast_weak_control,all_assets,88,13,27,-0.5396,22,13,31.4264,78.911,13,"[-1.5819, 0.3297]"
+momentum_reset,new_semis,53,8,23,-0.12036,1,1,0.8412,7.2203,1,"[-0.4814, 0.0388]"
+momentum_reset,new_controls,10,2,10,-0.53801,3,2,2.2346,7.6147,2,"[-2.0335, 0.4278]"
+momentum_reset,all_semis,71,10,24,-0.0363,4,1,4.6429,7.2203,1,"[-0.3502, 0.1251]"
+momentum_reset,all_assets,88,13,27,-0.08224,8,3,7.5982,14.835,3,"[-0.3711, 0.1296]"
