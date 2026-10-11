@@ -44,6 +44,7 @@ from control_plane.executive_service import (
     CEO_WEB_CEO_V2_READ_SCHEMA,
     ServiceConfig,
     ServiceError,
+    CeoAdmissionPhaseRefusal,
     activate_launchd_socket,
     send_control_request,
 )
@@ -385,6 +386,11 @@ def _parser() -> argparse.ArgumentParser:
         ("backup", "Create an online DB backup in the configured backup root."),
     ):
         cmd_parser = sub.add_parser(name, help=help_text)
+        if name == "status":
+            cmd_parser.add_argument(
+                "--ceo-admission", action="store_true",
+                help="As Control UID, observe current CEO guard only; never submit work.",
+            )
         if name.startswith("content-observer-"):
             cmd_parser.add_argument(
                 "--profile-key",
@@ -2335,6 +2341,31 @@ async def _request_boot_autonomy_canary(
     return validated
 
 
+def _ceo_admission_guard(raw: Mapping[str, Any], config_path: Path,
+                         attestation_loader: Callable[[], Mapping[str, Any]]) -> Callable[[], None]:
+    """One production callback shared by submission and private current observation."""
+    own_config_sha256 = _sha256_file(config_path)
+
+    def require_ceo_admission() -> None:
+        from ops.executive_os.autonomy_control import require_ceo_submit_runtime_admission
+        try:
+            attestation = attestation_loader()
+        except Exception as exc:
+            raise CeoAdmissionPhaseRefusal("attestation_refused") from exc
+        try:
+            if (attestation["config_sha256"] != own_config_sha256
+                    or _sha256_file(config_path) != own_config_sha256):
+                raise ServiceError("CEO admission config changed")
+        except Exception as exc:
+            raise CeoAdmissionPhaseRefusal("config_binding_refused") from exc
+        try:
+            require_ceo_submit_runtime_admission(raw, own_config_sha256=own_config_sha256)
+        except Exception as exc:
+            raise CeoAdmissionPhaseRefusal("receipt_refused") from exc
+
+    return require_ceo_admission
+
+
 async def _serve_from_config(config_path: Path) -> None:
     raw = load_control_config(config_path)
     control_attestation = _load_control_environment_attestation(
@@ -2436,15 +2467,7 @@ async def _serve_from_config(config_path: Path) -> None:
                 control_sha256=bound_native_control_sha256, release_sha=raw["proof_base_sha"])
     # Bind fresh public CEO admission to the exact running config and the
     # existing root-owned receipt pair. Never read worker-codex.json as Control.
-    own_ceo_config_sha256 = _sha256_file(config_path)
-
-    def require_ceo_admission() -> None:
-        from ops.executive_os.autonomy_control import require_ceo_submit_runtime_admission
-        attestation = content_attestation_loader()
-        if (attestation["config_sha256"] != own_ceo_config_sha256
-                or _sha256_file(config_path) != own_ceo_config_sha256):
-            raise ServiceError("CEO admission config changed")
-        require_ceo_submit_runtime_admission(raw, own_config_sha256=own_ceo_config_sha256)
+    require_ceo_admission = _ceo_admission_guard(raw, config_path, content_attestation_loader)
 
     service = _service_from_config(
         raw,
@@ -2463,6 +2486,8 @@ async def _serve_from_config(config_path: Path) -> None:
 
 
 def _client_request(args: argparse.Namespace) -> tuple[str, dict[str, Any]]:
+    if args.command == "status" and getattr(args, "ceo_admission", False):
+        return "status", {"ceo_admission": True}
     if args.command in {
         "content-observer-enroll", "content-observer-status", "content-observer-revoke",
         "status",

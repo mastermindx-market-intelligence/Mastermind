@@ -183,6 +183,18 @@ class ServiceError(RuntimeProofError):
     """A private control-service request could not be completed safely."""
 
 
+class CeoAdmissionPhaseRefusal(ServiceError):
+    """Closed private diagnostic category; exception details never cross a socket."""
+
+    PHASES = frozenset({"attestation_refused", "config_binding_refused", "receipt_refused"})
+
+    def __init__(self, phase: str) -> None:
+        if phase not in self.PHASES:
+            raise ValueError("unknown CEO admission phase")
+        self.phase = phase
+        super().__init__("CEO admission phase refused")
+
+
 class _CeoSubmitUnarmedError(ServiceError):
     code = "ceo_submit_unarmed"
 
@@ -3860,6 +3872,23 @@ class ExecutiveControlService:
             except (UnicodeDecodeError, json.JSONDecodeError):
                 await self._send_error(writer, "invalid_json", "request is not valid UTF-8 JSON")
                 return
+            if (isinstance(request, dict) and request.get("command") == "status"
+                    and isinstance(request.get("args"), dict)
+                    and "ceo_admission" in request["args"]):
+                if not control_peer:
+                    await self._send_error(writer, "peer_denied", "admission observation requires control uid")
+                    return
+                try:
+                    _, args = self._request(request)
+                    self._exact_args(args, {"ceo_admission"})
+                    if args["ceo_admission"] is not True:
+                        raise ValueError("invalid admission observation")
+                except ValueError:
+                    await self._send_error(writer, "request_failed", "invalid admission observation")
+                    return
+                result = await self._run_physical(self._observe_ceo_submit_admission)
+                await self._send(writer, {"ok": True, "result": result})
+                return
             lifecycle_commands = {"content-observer-enroll": "enroll", "content-observer-status": "status", "content-observer-revoke": "revoke"}
             if isinstance(request, dict) and isinstance(request.get("command"), str) and request["command"] in lifecycle_commands:
                 if not control_peer:
@@ -5866,6 +5895,37 @@ class ExecutiveControlService:
                     job_id, lost_attempt_id, **target, expected_snapshot=snapshot,
                     uid_sweep=sweep, expected_worker_uid=expected_uid,
                     observation_started_at=started, observation_finished_at=finished)
+
+    def _observe_ceo_submit_admission(self) -> dict[str, str]:
+        """Observe the SAME current guard, without constructing an intent or Runtime read.
+
+        This is neither historical refusal attribution nor sink/dispatch readiness.
+        The socket handler admits it only for the Control UID's explicit status flag.
+        """
+        guard, config = self._ceo_submit_admission_guard, self.config
+        if self._closing:
+            phase = "closing"
+        elif not config.ceo_submit_armed:
+            phase = "unarmed"
+        elif not callable(guard):
+            phase = "unconfigured"
+        else:
+            try:
+                self._require_ceo_submit_admission()
+                phase = "admitted"
+            except _CeoSubmitUnarmedError as exc:
+                cause = exc.__cause__
+                phase = (cause.phase if isinstance(cause, CeoAdmissionPhaseRefusal)
+                         and isinstance(cause.phase, str)
+                         and cause.phase in CeoAdmissionPhaseRefusal.PHASES
+                         else "guard_refused")
+            except Exception:
+                phase = "guard_refused"
+            if (self._closing or self.config is not config
+                    or self._ceo_submit_admission_guard is not guard):
+                phase = "composition_changed"
+        return {"schema": "mastermind.executive_ceo_admission_observation/v1",
+                "scope": "CURRENT_ONLY", "phase": phase}
 
     def _require_ceo_submit_admission(self) -> None:
         guard = self._ceo_submit_admission_guard
