@@ -83,40 +83,19 @@ callback, installed-policy digest, `state=effect_unknown`, and whether the marke
 not make a DCR call, exchange a token, or expose a credential. A legacy **pre-fingerprint** marker reports
 `reconcilable=false` and `client_name=null`; it remains blocked until authoritative tenant evidence
 resolves the original effect. Do not guess a name, clear the marker, or issue a replacement attempt.
-The reviewed absence path requires the same stored `attempt_ref`, callback and policy digest, the
-marker creation time, a bounded local-outcome upper bound, a fully paginated authoritative tenant audit
-whose retained window covers that whole interval, and zero current-client, Create-a-client and DCR
-matches. Only then may the same Keychain item be advanced with:
+**Legacy absence reconciliation and resume are held.** The
+`--legacy-absence-reconcile` and `--resume-legacy-after-absence` options refuse before
+policy reads, mutex acquisition, Keychain access or HTTP. The Python entrypoints
+retain the shared mutex and refuse before registration storage or network access.
+Caller-supplied counts, completeness booleans and SHA-256 strings are claims, not
+an authenticated evidence verifier. They cannot establish that an uncertain request
+had no effect, even when syntactically valid.
 
-```bash
-python3 -m ops.codex_fabric.enroll_executive_mcp \
-  --legacy-absence-reconcile \
-  --reconcile-attempt-ref "$PENDING_ATTEMPT_REF" \
-  --reconcile-redirect-uri "$PENDING_CALLBACK" \
-  --reconcile-policy-digest "$PENDING_POLICY_DIGEST" \
-  --absence-marker-created-at-epoch "$MARKER_CREATED_AT" \
-  --absence-attempt-outcome-by-epoch "$LOCAL_OUTCOME_BY" \
-  --absence-audit-start-epoch "$AUDIT_START" \
-  --absence-audit-end-epoch "$AUDIT_END" \
-  --absence-audit-events-total "$AUDIT_EVENTS" \
-  --absence-audit-pages-total "$AUDIT_PAGES" \
-  --absence-audit-pagination-complete \
-  --absence-audit-retention-complete \
-  --absence-marker-metadata-digest "$MARKER_METADATA_SHA256" \
-  --absence-audit-receipt-digest "$AUDIT_RECEIPT_SHA256" \
-  --absence-inventory-receipt-digest "$INVENTORY_RECEIPT_SHA256" \
-  --absence-local-outcome-evidence-digest "$LOCAL_OUTCOME_EVIDENCE_SHA256" \
-  --absence-current-client-match-count 0 \
-  --absence-create-client-match-count 0 \
-  --absence-dcr-match-count 0 \
-  --absence-deleted-tpc-match-count 0 \
-  --reconcile-observed-at-epoch "$OBSERVED_AT"
-```
-
-This performs no Auth0 request. It preserves the same `attempt_ref`, derives the fingerprinted client
-name from that identity, requires immutable SHA-256 evidence digests for the Keychain metadata, tenant
-audit, current application inventory, and local-outcome bound, records only the aggregate absence digest
-in the existing Keychain item, and makes `--pending-status` report `state=absence_reconciled`.
+Historical v3 absence markers remain readable as `state=absence_reconciled`, with
+`reconcilable=false`. That state describes stored history, not permission to retry.
+Existing markers are preserved. Re-enabling this path requires independent review
+of an authenticated evidence verifier, exact-operation custody and resolution of
+the original effect through its existing owner. Do not construct a replacement marker.
 
 For a newly admitted attempt, source precommits the exact client name as
 `Mastermind Codex Astra <first-16-attempt-ref-characters>`. Only when `--pending-status` reports
@@ -136,30 +115,35 @@ public client identity and prints a digest-only receipt. It performs no DCR call
 A duplicate, stale, differently named, differently callback-bound, or otherwise ambiguous tenant
 observation stays blocked.
 
-When the separately reviewed authoritative tenant audit instead proves absence and `--pending-status`
-reports `state=absence_reconciled`, one explicit same-operation resume is available:
+All five mutating registration entrypoints use the existing local auth mutex.
+Enabled registration and known-client reconciliation hold it from state read through
+settlement; the disabled absence paths retain the same exclusion boundary. Contention,
+unsafe lock state or timeout refuses before registration storage or HTTP. Before a new
+admitted registration POST, the pending marker must be written and read back exactly.
+A success is returned only after the completed registration is also read back exactly.
+A failed or mismatched readback remains effect-unknown and is never a successful receipt.
 
-```bash
-python3 -m ops.codex_fabric.enroll_executive_mcp --resume-legacy-after-absence
-```
+The mutex and durable marker have separate roles: process exit releases the mutex,
+while a persisted pending marker still prohibits another automatic registration.
+Serialization and readback grant no operation custody, historical effect clearance,
+request admission or approval to retry the original operation.
 
-The resume writes the fingerprinted v2 pending marker with the same `attempt_ref` **before the retry POST**,
-then performs one same-operation DCR request. A lost/invalid response therefore returns to
-`effect_unknown` with a reconcilable exact name and cannot be posted twice by another resume call. A
-successful response replaces the same Keychain item with the completed public client registration.
-A definitive Auth0 registration refusal writes `state=definitive_refusal` into that same Keychain item
-and consumes the resume opportunity; another `--resume-legacy-after-absence` is refused rather than
-issuing another POST.
+For the historical legacy operation, retained read-only tenant-admin summaries report a selected
+paginated audit view with event extrema 2026-09-13T19:28:09.807Z through
+2026-09-17T23:20:36.881Z (236 events / 5 pages), seven `Create a client` events and zero exact
+`Mastermind Codex Astra` or DCR matches in that view. The September 26 Applications view also
+reported zero exact matching clients; it is not a current inventory. Selected-view extrema and
+pagination do not establish complete tenant capture, retention, permissions, ingestion completeness
+or deletion relevance for the original request interval.
 
-For the historical legacy operation, later read-only tenant-admin evidence established a fully paginated
-retained audit window spanning 2026-09-13T19:28:09.807Z through 2026-09-17T23:20:36.881Z (236
-events / 5 pages), with seven `Create a client` events and zero exact `Mastermind Codex Astra` or DCR
-matches. The current Applications census also had zero exact matching client. The same Keychain item was
-created and last modified at 2026-09-14T18:26:28Z, and Git commit
-`33e94cb567188604a914d27bb58af38f7345bad4` (`feat: reconcile ambiguous Executive DCR client`)
-at 2026-09-14T18:47:45Z provides a source-side upper bound showing the ambiguous local attempt had
-already returned by then. These are non-secret reconciliation coordinates; the stored tenant receipts
-remain the evidence owner. No token or secret belongs in this runbook or chat.
+The original marker was created and last modified at 2026-09-14T18:26:28Z. Git commit
+`33e94cb567188604a914d27bb58af38f7345bad4` at 2026-09-14T18:47:45Z records source history;
+it does not establish HTTP dispatch or completion. The exact request interval and local outcome
+upper bound remain UNKNOWN until the original operation owner supplies retained execution-linked
+evidence with clock basis, uncertainty and digest. Do not use the commit timestamp as
+`attempt_local_outcome_by_epoch`, or turn incomplete/unknown capture into complete absence.
+The original #633 attempt remains EFFECT_UNKNOWN. These are non-secret reconciliation coordinates;
+the retained receipts remain with their evidence owner. No token or secret belongs in this runbook or chat.
 
 ## 4. Connection proof after enrollment
 

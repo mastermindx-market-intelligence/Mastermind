@@ -269,7 +269,7 @@ def _exclusive_refresh_lock(
     lock_root: Path | None = None,
     timeout_seconds: float = REFRESH_LOCK_TIMEOUT_SECONDS,
 ):
-    """One bounded, non-secret local mutex for refresh-token rotation."""
+    """One bounded local auth mutex for token rotation and DCR transactions."""
 
     root = (
         Path(lock_root)
