@@ -5,6 +5,8 @@ This is an on-demand text maintenance utility, not a hook, permission manager,
 policy engine, registry, scheduler or memory service. It changes no settings,
 runtime permissions, provider defaults, active tasks or source leases.
 Default mode is preview. Applying requires the exact target preimage and backup.
+The caller must exclude concurrent writers. Preimage checks plus atomic rename
+are not a filesystem compare-and-swap transaction or an execution-lease grant.
 """
 from __future__ import annotations
 
@@ -84,7 +86,9 @@ def project(text: str, brief: str, profile: str) -> str:
             # Only named sections are retired. Preserve modal consent, actual
             # transport instructions, native restrictions and unknown user text.
             parts = re.split(r'(?m)^(?=##? )', rest)
-            retained = []
+            # Unclassified preamble text is user content, not a named retired
+            # section. Preserve it even when the legacy heading has no children.
+            retained = [parts[0]]
             for section in parts[1:]:
                 first = section.splitlines()[0]
                 if first.startswith('## ') and first[3:] in CODEX_SECTIONS:

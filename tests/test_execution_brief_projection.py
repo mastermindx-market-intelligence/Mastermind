@@ -45,6 +45,24 @@ class ProjectionTests(unittest.TestCase):
         self.assertIn('Exact admitted carrier stays.', new)
         self.assertIn('User data stays.', new)
 
+    def test_codex_preserves_unknown_preamble_under_legacy_heading(self):
+        mod = self.module()
+        old = ('# Execution-first defaults for assigned work\n'
+               'User-specific recovery location: /safe/current-checkpoint.md\n\n'
+               '## Act under the assignment\nRetired duplicate.\n'
+               '## Personal note\nKeep this too.\n')
+        first = mod.project(old, 'Current brief.', 'codex')
+        self.assertIn('User-specific recovery location: /safe/current-checkpoint.md', first)
+        self.assertIn('Keep this too.', first)
+        self.assertNotIn('Retired duplicate.', first)
+        self.assertEqual(mod.project(first, 'Current brief.', 'codex'), first)
+
+    def test_codex_legacy_heading_without_sections_preserves_its_body(self):
+        mod = self.module()
+        old = '# Execution-first defaults for assigned work\nA personal instruction must survive.\n'
+        new = mod.project(old, 'Current brief.', 'codex')
+        self.assertIn('A personal instruction must survive.', new)
+
     def test_projection_is_idempotent(self):
         mod = self.module()
         for profile in ['codex', 'claude', 'memory']:
