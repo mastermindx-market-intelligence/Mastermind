@@ -3,8 +3,9 @@
 This is a host-composed adapter, not an endpoint, registry, credential service,
 writer lease or retry owner. The installed host must authenticate the native
 connection, resolve its current RuntimeBinding and enforce the existing writer
-fence at the service commit. A second pre-send read detects intervening drift;
-it does not replace that atomic owner check. No tool is auto-registered here.
+fence at the service commit. Re-resolution after the final carrier read runs
+between canonical READY and COMMIT; it does not replace the host's atomic
+owner check. No tool is auto-registered here.
 """
 from __future__ import annotations
 
@@ -23,7 +24,7 @@ from integrations.slack_agent_dialogue.contract_v2 import (
 )
 from integrations.slack_agent_dialogue.engine_v2 import DialogueContextV2
 from integrations.slack_agent_dialogue.service import (
-    CONTROL_VERSION_V2, EXACT_SEND_PROTOCOL, call_service,
+    CONTROL_VERSION_V2, EXACT_SEND_PROTOCOL, DialogueServiceError, call_service,
 )
 from .schemas import BridgeError
 
@@ -231,8 +232,37 @@ class NativeReplyWriter:
         payload = {"version": CONTROL_VERSION_V2, "operation": "send_message", "args": {
             "context": context, "thread_ts": binding.thread_ts,
             "message": message, "send_protocol": EXACT_SEND_PROTOCOL}}
+        commit_refusal = None
+
+        async def before_write():
+            nonlocal commit_refusal
+            try:
+                # The canonical service invokes this after READY, before it
+                # writes COMMIT. Re-read the original carrier, then resolve the
+                # host's current writer again after that awaited read.
+                latest_items = await self._read(binding, context)
+                _, _, final_identity = await self._resolve(args)
+                if final_identity != identity:
+                    raise BridgeError("binding_unavailable", "native return binding changed before COMMIT")
+                latest_request = [(ts, m) for ts, m in latest_items
+                                  if m["message_key"] == binding.request_message_key]
+                if latest_request != [(request_ts, request)]:
+                    raise BridgeError("carrier_stale", "original request changed before COMMIT")
+                if any(m["message_key"] == key for _, m in latest_items):
+                    raise BridgeError("carrier_stale", "reply appeared during preparation; reconcile original operation")
+                if any(m["actor_ref"].get("kind") == "executive_surface"
+                       and (ts > request_ts or (ts == request_ts
+                            and m["message_key"] != binding.request_message_key))
+                       for ts, m in latest_items):
+                    raise BridgeError("carrier_stale", "a newer executive instruction supersedes this request")
+            except BridgeError as exc:
+                # Only this callback proves that our rejection precedes COMMIT.
+                # An arbitrary transport BridgeError is still an unknown effect.
+                commit_refusal = exc
+                raise
+
         try:
-            response = await self._service_call(self._socket_path, payload)
+            response = await self._service_call(self._socket_path, payload, before_write=before_write)
             if not isinstance(response, dict) or response.get("ok") is not True:
                 raise ValueError
             receipt = response["result"]
@@ -240,7 +270,12 @@ class NativeReplyWriter:
                     or receipt.get("message_key") != key
                     or receipt.get("fingerprint") != message["fingerprint"]):
                 raise ValueError
-        except Exception:
+        except DialogueServiceError as exc:
+            code = "carrier_effect_unknown" if exc.code == "SEND_EFFECT_UNKNOWN" else "carrier_unavailable"
+            raise BridgeError(code, exc.code) from None
+        except Exception as exc:
+            if exc is commit_refusal:
+                raise
             # After send entry, only an exact canonical receipt establishes an
             # effect. Do not infer absence from timeout or arbitrary diagnostics.
             # Cancellation propagates; the owning operation must reconcile it.

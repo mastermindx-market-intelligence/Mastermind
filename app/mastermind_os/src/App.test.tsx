@@ -1695,6 +1695,169 @@ async function launchFromWork(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("App command composition", () => {
+  it.each(["projects", "profiles"] as const)("retains the unsent launch draft across unavailable %s and requires reselection", async (field) => {
+    const original = {
+      projects: [{ ref: "proj-a", label: "Project A" }, { ref: "proj-b", label: "Project B" }],
+      profiles: [{ ref: "prof-a", label: "Profile A" }, { ref: "prof-b", label: "Profile B" }],
+      session: defaultSession,
+    };
+    const made = makeCommandBinding({ view: original });
+    installCommandHost(made.binding);
+    const user = userEvent.setup();
+    render(<App />);
+    await navigateCompanyOperation(user, "Work");
+    await user.type(screen.getByLabelText("Goal"), "Keep this draft while choices are unavailable");
+    await user.selectOptions(screen.getByLabelText("Project"), "proj-b");
+    await user.selectOptions(screen.getByLabelText("Profile"), "prof-b");
+    act(() => made.setView({ ...original, [field]: [] }));
+    expect(screen.queryByLabelText("Goal")).toBeNull();
+    expect(made.prepare).not.toHaveBeenCalled();
+    expect(made.submit).not.toHaveBeenCalled();
+    act(() => made.setView({ ...original, [field]: [original[field][0]] }));
+    expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe("Keep this draft while choices are unavailable");
+    expect((screen.getByLabelText(field === "projects" ? "Project" : "Profile") as HTMLSelectElement).value)
+      .toBe(field === "projects" ? "proj-b" : "prof-b");
+    expect(screen.getByRole("button", { name: "Launch" }).hasAttribute("disabled")).toBe(true);
+    expect(made.prepare).not.toHaveBeenCalled();
+    await user.selectOptions(screen.getByLabelText(field === "projects" ? "Project" : "Profile"), field === "projects" ? "proj-a" : "prof-a");
+    await user.click(screen.getByRole("button", { name: "Launch" }));
+    await waitFor(() => expect(made.submit).toHaveBeenCalledTimes(1));
+    expect(made.prepare).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["pending", "lost-response"])("retains draft and pointer through a whole-catalog interruption during %s", async (state) => {
+    const response = deferred<EffectReceipt>(), store = memoryStore();
+    const made = makeCommandBinding({ store, submit: vi.fn(() => response.promise) });
+    const original = made.binding.getView();
+    installCommandHost(made.binding);
+    const user = userEvent.setup();
+    render(<App />);
+    await launchFromWork(user);
+    await waitFor(() => expect(made.submit).toHaveBeenCalledTimes(1));
+    const pointer = await store.read("owner-a");
+    if (state === "lost-response") await act(async () => response.reject(new Error("lost response")));
+    act(() => made.setView({ projects: [], profiles: [], session: null }));
+    expect(screen.getByText("Launch choices are unavailable. Your draft is retained.")).toBeTruthy();
+    expect(screen.queryByLabelText("Goal")).toBeNull();
+    expect(await store.read("owner-a")).toEqual(pointer);
+    if (state === "lost-response") expect(screen.getByRole("button", { name: "Check status" })).toBeTruthy();
+    act(() => made.setView(original));
+    expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe("Ship the orchestrator");
+    expect(screen.getByRole("button", { name: "Launching…" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Cancel" }).hasAttribute("disabled")).toBe(true);
+    expect(made.prepare).toHaveBeenCalledTimes(1);
+    expect(made.submit).toHaveBeenCalledTimes(1);
+    expect(made.readOperation).not.toHaveBeenCalled();
+    if (state === "lost-response") {
+      await user.click(screen.getByRole("button", { name: "Check status" }));
+      await waitFor(() => expect(made.readOperation).toHaveBeenCalledTimes(1));
+      expect(made.readOperation).toHaveBeenCalledWith(pointer, expect.any(AbortSignal));
+      expect(made.prepare).toHaveBeenCalledTimes(1);
+      expect(made.submit).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it.each(["principal", "generation", "sign-out"])("does not restore a retained launch draft across %s changes", async (change) => {
+    const made = makeCommandBinding(), original = made.binding.getView();
+    const auth = installCommandHost(made.binding);
+    const user = userEvent.setup();
+    render(<App />);
+    await navigateCompanyOperation(user, "Work");
+    await user.type(screen.getByLabelText("Goal"), "Draft of the original owner epoch");
+    act(() => made.setView({ projects: [], profiles: [], session: null }));
+    if (change === "sign-out") {
+      act(() => auth.notify({ status: "signed_out", reason: null, acquisition: false, content: false }));
+      act(() => auth.notify({ status: "signed_in", reason: null, acquisition: true, content: true }));
+    } else {
+      act(() => made.setCtx({ principalScope: change === "principal" ? "owner-b" : "owner-a", generation: change === "generation" ? "gen-2" : "gen-1" }));
+    }
+    act(() => made.setView(original));
+    expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe("");
+    expect(made.prepare).not.toHaveBeenCalled();
+    expect(made.submit).not.toHaveBeenCalled();
+  });
+
+  it.each(["Project", "Profile"] as const)("requires explicit eligible %s reselection before preparing a launch", async (field) => {
+    const original = {
+      projects: [{ ref: "proj-a", label: "Project A" }, { ref: "proj-b", label: "Project B" }],
+      profiles: [{ ref: "prof-a", label: "Profile A" }, { ref: "prof-b", label: "Profile B" }],
+      session: defaultSession,
+    };
+    const made = makeCommandBinding({ view: original });
+    installCommandHost(made.binding);
+    const user = userEvent.setup();
+    render(<App />);
+    await navigateCompanyOperation(user, "Work");
+    await user.type(screen.getByLabelText("Goal"), "Keep the original launch goal");
+    await user.selectOptions(screen.getByLabelText("Project"), "proj-b");
+    await user.selectOptions(screen.getByLabelText("Profile"), "prof-b");
+    act(() => made.setView({ ...original,
+      ...(field === "Project" ? { projects: [original.projects[0]] } : { profiles: [original.profiles[0]] }),
+    }));
+    const select = screen.getByLabelText(field) as HTMLSelectElement;
+    const staleRef = field === "Project" ? "proj-b" : "prof-b";
+    expect(select.value).toBe(staleRef);
+    expect(select.selectedOptions[0].disabled).toBe(true);
+    expect(select.getAttribute("aria-describedby")).toBeTruthy();
+    expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe("Keep the original launch goal");
+    expect(screen.getByRole("button", { name: "Launch" }).hasAttribute("disabled")).toBe(true);
+    act(() => { screen.getByLabelText("Goal").closest("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
+    expect(made.prepare).not.toHaveBeenCalled();
+    expect(made.submit).not.toHaveBeenCalled();
+    await user.selectOptions(select, field === "Project" ? "proj-a" : "prof-a");
+    await user.click(screen.getByRole("button", { name: "Launch" }));
+    await waitFor(() => expect(made.submit).toHaveBeenCalledTimes(1));
+    expect(made.prepare).toHaveBeenCalledTimes(1);
+    expect(made.prepare.mock.calls[0][0]).toMatchObject({ kind: "launch", payload: {
+      goal: "Keep the original launch goal",
+      projectRef: field === "Project" ? "proj-a" : "proj-b",
+      profileRef: field === "Profile" ? "prof-a" : "prof-b",
+    } });
+    expect(made.readOperation).not.toHaveBeenCalled();
+  });
+
+  it.each(["pending", "lost-response"])("preserves the original operation while launch choices change during %s", async (state) => {
+    const response = deferred<EffectReceipt>(), store = memoryStore();
+    const original = {
+      projects: [{ ref: "proj-a", label: "Project A" }, { ref: "proj-b", label: "Project B" }],
+      profiles: [{ ref: "prof-a", label: "Profile A" }, { ref: "prof-b", label: "Profile B" }],
+      session: defaultSession,
+    };
+    const made = makeCommandBinding({ view: original, store, submit: vi.fn(() => response.promise) });
+    installCommandHost(made.binding);
+    const user = userEvent.setup();
+    render(<App />);
+    await navigateCompanyOperation(user, "Work");
+    await user.type(screen.getByLabelText("Goal"), "Keep the pending launch goal");
+    await user.selectOptions(screen.getByLabelText("Project"), "proj-b");
+    await user.selectOptions(screen.getByLabelText("Profile"), "prof-b");
+    await user.click(screen.getByRole("button", { name: "Launch" }));
+    await waitFor(() => expect(made.submit).toHaveBeenCalledTimes(1));
+    const pointer = await store.read("owner-a");
+    if (state === "lost-response") {
+      await act(async () => response.reject(new Error("lost response")));
+      await screen.findByRole("button", { name: "Check status" });
+    }
+    act(() => made.setView({ ...original, projects: [original.projects[0]], profiles: [original.profiles[0]] }));
+    expect((screen.getByLabelText("Project") as HTMLSelectElement).value).toBe("proj-b");
+    expect((screen.getByLabelText("Profile") as HTMLSelectElement).value).toBe("prof-b");
+    expect(screen.getByLabelText("Project").hasAttribute("disabled")).toBe(true);
+    expect(screen.getByLabelText("Profile").hasAttribute("disabled")).toBe(true);
+    expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe("Keep the pending launch goal");
+    act(() => { screen.getByLabelText("Goal").closest("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
+    expect(await store.read("owner-a")).toEqual(pointer);
+    expect(made.prepare).toHaveBeenCalledTimes(1);
+    expect(made.submit).toHaveBeenCalledTimes(1);
+    expect(made.readOperation).not.toHaveBeenCalled();
+    if (state === "lost-response") {
+      await user.click(screen.getByRole("button", { name: "Check status" }));
+      await waitFor(() => expect(made.readOperation).toHaveBeenCalledTimes(1));
+      expect(made.readOperation).toHaveBeenCalledWith(pointer, expect.any(AbortSignal));
+      expect(made.prepare).toHaveBeenCalledTimes(1);
+      expect(made.submit).toHaveBeenCalledTimes(1);
+    }
+  });
+
   it.each(["pointer", "keyboard"])("dismisses an unsent launch draft with %s Cancel and restores page focus", async (input) => {
     const made = makeCommandBinding({
       view: {

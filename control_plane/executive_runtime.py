@@ -15300,6 +15300,10 @@ class JobRegistry:
         return job
 
 
+REMOTE_LAUNCH_IDENTITY_KEY = "remote_launch_identity"
+REMOTE_LAUNCH_IDENTITY_SCHEMA = "mastermind.remote_launch_identity/v1"
+
+
 class AttemptRegistry:
     def __init__(self, store: RuntimeStore) -> None:
         self.store = store
@@ -16543,6 +16547,95 @@ class AttemptRegistry:
         assert value is not None
         return AttemptLease(attempt=value, lease_token=token)
 
+    def pin_remote_launch_identity(
+        self,
+        attempt_id: str,
+        *,
+        fence_generation: int,
+        lease_token: str,
+        expected_version: int,
+        identity_digest: str,
+    ) -> Attempt:
+        """Commit one physical launch identity before remote I/O, never a retry.
+
+        Physical connection material stays in trusted host composition; only
+        its digest enters the existing Attempt metadata. An existing pin is
+        refused even when identical: a lost start reply is not launch authority.
+        """
+        if not isinstance(identity_digest, str) or not re.fullmatch(r"[0-9a-f]{64}", identity_digest):
+            raise StateConflict("remote launch identity must be a SHA256 digest")
+        timestamp = self.store.now_ms()
+        with self.store.transaction() as connection:
+            row = self._leased_row(
+                connection, attempt_id=attempt_id, fence_generation=fence_generation,
+                lease_token=lease_token, timestamp=timestamp, statuses={AttemptStatus.CLAIMED},
+            )
+            self.current_authority_snapshot(
+                connection, job_id=str(row["job_id"]), attempt_id=attempt_id,
+                fence_generation=fence_generation, timestamp=timestamp,
+                statuses={AttemptStatus.CLAIMED},
+            )
+            if row["version"] != expected_version or row["quota_status"] != "BUSY":
+                raise StateConflict("remote launch claim moved before identity pin")
+            metadata = json.loads(row["launch_metadata_json"] or "{}")
+            if (REMOTE_LAUNCH_IDENTITY_KEY in metadata or row["pid"] is not None
+                    or row["provider_session_id"] is not None):
+                raise StateConflict("remote launch already attempted; recovery required")
+            _finite_existing_effect(self.store, connection, str(row["job_id"]))
+            metadata[REMOTE_LAUNCH_IDENTITY_KEY] = {
+                "schema_version": REMOTE_LAUNCH_IDENTITY_SCHEMA, "sha256": identity_digest,
+            }
+            connection.execute(
+                """UPDATE attempts SET execution_mode=COALESCE(execution_mode,'SEALED_WORKER'),
+                   launch_metadata_json=?, updated_at_ms=?, version=version+1
+                   WHERE attempt_id=?""",
+                (_json_dumps(metadata), timestamp, attempt_id),
+            )
+            self.store.append_event(
+                connection, aggregate_type="attempt", aggregate_id=attempt_id,
+                event_type="ATTEMPT_REMOTE_LAUNCH_PINNED", actor="supervisor",
+                job_id=str(row["job_id"]), attempt_id=attempt_id,
+                worker_id=str(row["worker_id"]), quota_class=str(row["quota_class"]),
+                payload={"identity_digest": identity_digest}, timestamp_ms=timestamp,
+            )
+        value = self.get_attempt(attempt_id)
+        assert value is not None
+        return value
+
+    def validate_pinned_remote_launch(
+        self, pinned: Attempt, *, lease_token: str,
+    ) -> Attempt:
+        """Recheck the pin's lease and full authority, allowing heartbeat bookkeeping.
+
+        The opaque token is validated inside Runtime, never projected into
+        Attempt. Only heartbeat time, nondecreasing expiry and version may
+        differ; all process/profile/grant/placement/principal/pin fields stay
+        exact. This read grants no repeat pin, start or lifecycle transition.
+        """
+        if (not isinstance(pinned, Attempt) or pinned.status is not AttemptStatus.CLAIMED
+                or not pinned.launch_metadata.get(REMOTE_LAUNCH_IDENTITY_KEY)):
+            raise StateConflict("remote launch requires a pinned CLAIMED Attempt")
+        timestamp = self.store.now_ms()
+        with self.store.read() as connection:
+            row = self._leased_row(
+                connection, attempt_id=pinned.attempt_id,
+                fence_generation=pinned.fence_generation, lease_token=lease_token,
+                timestamp=timestamp, statuses={AttemptStatus.CLAIMED},
+            )
+            current = self.current_authority_snapshot(
+                connection, job_id=pinned.job_id, attempt_id=pinned.attempt_id,
+                fence_generation=pinned.fence_generation, timestamp=timestamp,
+                statuses={AttemptStatus.CLAIMED},
+            ).attempt
+            if (row["quota_status"] != "BUSY" or current.version < pinned.version
+                    or current.lease_expires_at < pinned.lease_expires_at
+                    or dataclasses.replace(
+                        current, version=pinned.version, heartbeat_at=pinned.heartbeat_at,
+                        lease_expires_at=pinned.lease_expires_at,
+                    ) != pinned):
+                raise StateConflict("remote launch authority moved after identity pin")
+            return current
+
     def record_process(
         self,
         attempt_id: str,
@@ -16608,6 +16701,15 @@ class AttemptRegistry:
                     "OPERATOR_HARNESS may not write legacy Attempt identity"
                 )
             _finite_existing_effect(self.store, connection, str(row["job_id"]))
+            metadata = dict(launch_metadata or {})
+            prior_metadata = json.loads(row["launch_metadata_json"] or "{}")
+            pin = prior_metadata.get(REMOTE_LAUNCH_IDENTITY_KEY)
+            if REMOTE_LAUNCH_IDENTITY_KEY in metadata and (
+                pin is None or metadata[REMOTE_LAUNCH_IDENTITY_KEY] != pin
+            ):
+                raise StateConflict("process metadata cannot replace a remote launch pin")
+            if pin is not None:
+                metadata[REMOTE_LAUNCH_IDENTITY_KEY] = pin
             connection.execute(
                 """
                 UPDATE attempts
@@ -16630,7 +16732,7 @@ class AttemptRegistry:
                     str(stdout_path) if stdout_path is not None else None,
                     str(stderr_path) if stderr_path is not None else None,
                     str(result_path) if result_path is not None else None,
-                    _json_dumps(launch_metadata or {}),
+                    _json_dumps(metadata),
                     timestamp,
                     attempt_id,
                 ),

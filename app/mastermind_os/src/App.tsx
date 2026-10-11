@@ -1237,7 +1237,9 @@ export function App() {
       state: "PENDING",
       reason: "SOURCE_READ_PENDING",
     }),
+    [programRevision, setProgramRevision] = useState(0),
     [workState, setWorkState] = useState<WorkState>({ kind: "PENDING" }),
+    [workRevision, setWorkRevision] = useState(0),
     [mission, setMission] = useState<MissionDocument | UnavailableMission>(() =>
       unavailableMission(
         initial,
@@ -1698,6 +1700,7 @@ export function App() {
   }, [
     native,
     authRevision,
+    programRevision,
     authState?.acquisition,
     selection?.workRef,
     selection?.rootJobId,
@@ -1761,7 +1764,7 @@ export function App() {
       attached = false;
       controller.abort();
     };
-  }, [native, authRevision, authState?.acquisition]);
+  }, [native, authRevision, authState?.acquisition, workRevision]);
   useEffect(() => {
     const restoreSelection = () => {
       const next = selectionFromLocation();
@@ -2244,11 +2247,20 @@ export function App() {
           New launch
         </button>
       </section>
-    ) : canLaunch && commandView ? (
+    ) : commandReady && commandView ? (
       <>
         <LaunchOrchestrator
+          key={JSON.stringify([
+            ownerContext?.principalScope,
+            ownerContext?.generation,
+          ])}
           projects={commandView.projects}
           profiles={commandView.profiles}
+          unavailableReason={
+            canLaunch
+              ? undefined
+              : "Launch choices are unavailable. Your draft is retained."
+          }
           submitting={heldKind === "launch" && commandBusy}
           error={
             commandStatus?.status === "refused"
@@ -2491,6 +2503,43 @@ export function App() {
     setProjectTab(null);
     setActive(view);
   };
+  const programsReadAvailable =
+    (typeof window.MastermindMissionHost?.readProgramsObservation === "function" ||
+      typeof window.MastermindMissionHost?.readPrograms === "function") &&
+    (!authState || authState.acquisition);
+  const programsRefreshControl = (
+    <button
+      type="button"
+      // Pending reads stay focusable; unavailable acquisition stays natively disabled.
+      disabled={!programsReadAvailable}
+      aria-disabled={index.state === "PENDING" || !programsReadAvailable}
+      onClick={() => {
+        if (index.state === "PENDING" || !programsReadAvailable) return;
+        setIndex({ programs: [], state: "PENDING", reason: "SOURCE_READ_PENDING" });
+        setProgramRevision((revision) => revision + 1);
+      }}
+    >
+      Refresh Projects
+    </button>
+  );
+  const workReadAvailable =
+    typeof window.MastermindMissionHost?.readWork === "function" &&
+    (!authState || authState.acquisition);
+  const workRefreshControl = (
+    <button
+      type="button"
+      // Native disabled blurs the focused button in Chrome. Guard pending reads below.
+      disabled={!workReadAvailable}
+      aria-disabled={workState.kind === "PENDING" || !workReadAvailable}
+      onClick={() => {
+        if (workState.kind === "PENDING" || !workReadAvailable) return;
+        setWorkState({ kind: "PENDING" });
+        setWorkRevision((revision) => revision + 1);
+      }}
+    >
+      Refresh Work
+    </button>
+  );
   let content: React.ReactNode;
   if (active === "Today")
     content = (
@@ -2546,8 +2595,10 @@ export function App() {
   else if (active === "Knowledge")
     content = <Knowledge projection={office.projection} />;
   else if (active === "Projects")
-    content =
-      projectTab && selection ? (
+    content = (
+      <>
+        {programsRefreshControl}
+        {projectTab && selection ? (
         <>
           <section className="hero">
             <div>
@@ -2606,6 +2657,7 @@ export function App() {
           ) : projectTab === "Work" ? (
             <>
               {commandPanel}
+              {workRefreshControl}
               <WorkQueue state={workState} rootJobId={selection.rootJobId} />
             </>
           ) : projectTab === "Evidence" ? (
@@ -2627,12 +2679,15 @@ export function App() {
               : undefined
           }
         />
-      );
+        )}
+      </>
+    );
   else if (active === "Programs")
     content = (
       <section className="card">
         <div className="section-title">
           <h2>Programs</h2>
+          {programsRefreshControl}
           <State
             value={
               index.state === "PENDING" ? "SOURCE_READ_PENDING" : index.state
@@ -2686,6 +2741,7 @@ export function App() {
     content = (
       <>
         {commandPanel}
+        {workRefreshControl}
         <WorkQueue state={workState} />
       </>
     );
