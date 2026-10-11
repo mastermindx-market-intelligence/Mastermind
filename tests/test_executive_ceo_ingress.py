@@ -1293,13 +1293,29 @@ def test_paused_submit_survives_client_disconnect_and_close_holds_lock_until_ter
         # Trigger service close while submit is paused: listeners stop
         # accepting, but close() must NOT release the lock/marker until this
         # admission reaches a real terminal outcome.
-        close_task = asyncio.create_task(service.close())
-        await asyncio.sleep(0.05)
-        assert not close_task.done()
-        assert service.running_marker_path.exists()
+        from control_plane.executive_service import ServiceError
+        try:
+            # Keep the physical mutation paused for the complete grace window.
+            # Timeout must retain custody, independent of CI scheduling speed.
+            with pytest.raises(ServiceError, match="custody retained"):
+                await asyncio.wait_for(service.close(), timeout=5)
+            assert service.running_marker_path.exists()
+            assert any(not task.done() for task in service._ceo_ingress_tasks)
+            second = _service_with_ingress(
+                tmp_path, socket_root=short_socket_root, grounding=_FakeGrounding()
+            )
+            with pytest.raises(Exception, match="holds the socket lock"):
+                await second.start()
+        finally:
+            release.set()
 
-        release.set()
-        await asyncio.wait_for(close_task, timeout=2)
+        # Wait for the actual terminal return instead of spending most of the
+        # short shutdown grace on a sleep and racing the SQLite worker's drain.
+        await _wait_until(
+            lambda: not service._physical_workers and not service._ceo_ingress_tasks,
+            timeout=5,
+        )
+        await asyncio.wait_for(service.close(), timeout=5)
 
         assert not service.running_marker_path.exists()
         jobs = service.runtime.jobs.list_jobs()
