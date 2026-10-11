@@ -109,10 +109,11 @@ def test_new_roles_add_no_plugin_identity_tools_hooks_or_runtime_store() -> None
 
 
 @pytest.mark.parametrize("name", SKILLS)
-def test_pin_reuse_is_limited_to_the_current_turn(name: str) -> None:
+def test_pin_reuse_is_mission_scoped_until_material_invalidation(name: str) -> None:
     text = _text(name)
-    assert "already loaded in the current turn" in text
-    assert "new-turn recovery must re-establish current source" in text
+    assert "Reuse the verified pin for the mission" in text
+    assert "new turn or phase completion alone does not restart bootstrap" in text
+    assert "material governing-procedure change" in text
 
 
 DEEP_RESEARCH_ADMISSION_CASE_IDS = {
