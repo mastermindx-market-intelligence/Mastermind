@@ -38,7 +38,10 @@ def _refuse() -> None:
 def _domain(snapshot: CoordinationSnapshot) -> str:
     if type(snapshot) is not CoordinationSnapshot:
         _refuse()
-    actors = {type(p.identity) for p in snapshot.participants}
+    # Dormant records remain in the attested organizational scope but must
+    # not demand an unused provider backend. Any dormant member becoming
+    # active changes the domain and is checked again after target discovery.
+    actors = {type(p.identity) for p in snapshot.participants if p.active}
     if not actors or not actors <= {CoordinationIdentity, CoordinationNativeIdentity}:
         _refuse()
     if actors == {CoordinationIdentity}:

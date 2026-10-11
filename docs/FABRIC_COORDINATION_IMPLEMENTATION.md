@@ -6,6 +6,17 @@ This change implements an advisory coordination policy and integrates it with th
 existing Company consultation gateway. It does not yet install or enable that
 policy in the fleet. Capability: BUILT_NOT_PROVEN. Parent mission: incomplete.
 
+**Two independent release gates prevent a circular stall:** Source review/merge
+requires the current exact-head hosted checks, meaningful independent semantic
+review, and source-level safety evidence. It does **not** require a previously
+impossible installed fleet canary. Merge is not deployment, enrollment,
+effect authorization, or production acceptance. A separate existing release
+owner must verify installation permissions, pin the installed revision, select
+the host composition and message-COMMIT fence, and prove real provider
+consumption with two admitted Ubuntu workers before reporting
+PROVEN_LIVE. This source author cannot mark that second gate complete.
+Requesting source review may proceed without changing the latter gate.
+
 The intended consumer is an admitted native/Fabric participant which needs to
 ask a related participant an implementation question without obtaining authority
 to redirect that participant's work. Public operations remain `company.peers`,
@@ -276,12 +287,16 @@ the corresponding already-admitted identity owner, with no fabricated
 Runtime Job for a native session and no requirement to contact a missing
 native manager in worker-only mode.
 
-The source requires an entirely homogeneous host-authenticated scope and
-exactly one selected identity owner. It **refuses mixed scopes**, rather
-than silently dropping an absent or failed identity layer and weakening
-the mixed-source checks. An unreadable owner, rotated binding, revoked
-membership, stale timestamp, divergent role or unrecognized source fails
-closed. The source returns the same bounded, non-authoritative evidence
+The source requires a single **active** actor domain in the
+host-authenticated scope and exactly one selected identity owner. Inactive
+members of another domain remain in the full attested snapshot, including
+roles, grants and revocation records, but no longer require a running
+provider owner for an unavailable session. It **refuses a mixed active
+scope**, including another domain becoming active during target discovery,
+rather than silently dropping a failed identity layer or weakening
+mixed-source checks. All-inactive rosters also refuse. An unreadable owner,
+rotated binding, revoked membership, stale timestamp, divergent role or
+unrecognized source fails closed. The source returns the same bounded, non-authoritative evidence
 shape consumed by `ScopedSessionTargetResolver`. The resolver accepts
 the existing composite only with both canonical target projectors, a
 worker-only observation only with a Runtime target projector, and a
@@ -402,6 +417,18 @@ grants, expired/widened scope, and the absence of any sending/commit method.
 This is source validation, not permission to bypass incumbent release gates.
 
 ## Verification at the current source milestone
+
+Current dormant-roster availability fix: **446 selected tests passed,
+zero failures/errors/skips**, M2 PID `91754` (exit 0), JUnit
+`/tmp/mmx-fabric-inactive-roster-full-20261011.xml`.
+Focused worker/native dormant roster + activation refusal selection:
+**38 tests passed**, PID `90174`, JUnit
+`/tmp/mmx-fabric-inactive-roster-20261011.xml`.
+The active-only domain change retains inactive participant and grant
+bytes in current issuer observations. All-inactive scopes and an
+unexpected live second domain are refused. No actual provider message or
+installed host/COMMIT proof occurred. Exact-head hosted CI and
+independent code review remain separate gates.
 
 The current October 11 homogeneous-source increment passed **53 focused
 native-only/worker-only/native-integrity/mixed-target tests**, zero failures,

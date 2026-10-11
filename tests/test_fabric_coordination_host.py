@@ -329,3 +329,121 @@ def test_scope_dependency_grant_revoke_after_resolve_never_exposes_target():
         host.resolve(reference)
     assert reads[0] >= 2
     assert not port.send_calls and not port.reconcile_calls
+
+
+def test_worker_only_still_operates_with_dormant_native_roster_record(tmp_path, monkeypatch):
+    """A revoked/inactive CEO cannot force worker peer discovery to need Claude."""
+    from tests.test_fabric_coordination_single import worker_fixture
+    seed, owner, _single, projector = worker_fixture(tmp_path, monkeypatch)
+    dormant = CoordinationParticipant(
+        FIRST, CoordinationRole.PROJECT_CEO, "tenant", "portfolio",
+        "retired-project", "retired-program", active=False,
+    )
+    owner.snapshot = replace(
+        owner.snapshot,
+        participants=(*owner.snapshot.participants, dormant),
+    )
+    caller = owner.snapshot.participants[0].identity
+    host = Host(
+        membership_reader=lambda: owner.snapshot,
+        authenticated_caller_reader=lambda: caller,
+        topic_ref="schema",
+        now=lambda: seed.runtime.store.now_ms() // 1000,
+        runtime=seed.runtime, worker_targets=projector,
+    )
+    visible = host.visible_targets()
+    assert len(visible) == 1
+    assert visible[0]["kind"] == "fabric_attempt"
+    assert host.resolve(visible[0]["target_ref"]).recipient == owner.snapshot.participants[1].identity
+    assert "retired-project" not in str(visible)
+    assert host._owner.observe().snapshot.participants[-1] == dormant
+
+
+def test_native_only_still_operates_with_dormant_worker_without_runtime():
+    """No synthetic Executive Attempt is needed for a retired worker record."""
+    owner, port, _single, projector = native_fixture()
+    dormant = CoordinationParticipant(
+        CoordinationIdentity("JOB-retired", "ATT-retired", "worker-retired",
+                             "binding-retired", 1),
+        CoordinationRole.WORKER,
+        "tenant", "portfolio", "project-b", "program-1",
+        workstream_ref="retired-stream", coordination_group_ref="retired-group",
+        active=False,
+    )
+    owner[0] = replace(
+        owner[0], participants=(*owner[0].participants, dormant),
+    )
+    host = Host(
+        membership_reader=lambda: owner[0],
+        authenticated_caller_reader=lambda: FIRST,
+        topic_ref="schema", now=lambda: owner[0].observed_at + 1,
+        native_targets=projector,
+        native_principal_reader=lambda sid, hostref:
+            FIRST.principal_ref if (sid, hostref) == (FIRST.session_id, FIRST.host_ref)
+            else SECOND.principal_ref if (sid, hostref) == (SECOND.session_id, SECOND.host_ref)
+            else "missing",
+    )
+    visible = host.visible_targets()
+    assert len(visible) == 1
+    assert visible[0]["kind"] == "claude"
+    assert host.resolve(visible[0]["target_ref"]).recipient == SECOND
+    assert host._owner.observe().snapshot.participants[-1] == dormant
+    assert not port.send_calls and not port.reconcile_calls
+
+
+def test_dormant_other_domain_reactivation_during_target_read_refuses():
+    owner, port, _single, projector = native_fixture()
+    dormant = CoordinationParticipant(
+        CoordinationIdentity("JOB-retired", "ATT-retired", "worker-retired",
+                             "binding-retired", 1),
+        CoordinationRole.WORKER,
+        "tenant", "portfolio", "project-b", "program-1",
+        workstream_ref="retired-stream", coordination_group_ref="retired-group",
+        active=False,
+    )
+    owner[0] = replace(owner[0], participants=(*owner[0].participants, dormant))
+    principal = {
+        (FIRST.session_id, FIRST.host_ref): FIRST.principal_ref,
+        (SECOND.session_id, SECOND.host_ref): SECOND.principal_ref,
+    }
+    host = Host(
+        membership_reader=lambda: owner[0],
+        authenticated_caller_reader=lambda: FIRST,
+        topic_ref="schema", now=lambda: owner[0].observed_at + 1,
+        native_targets=projector,
+        native_principal_reader=lambda sid, hostref: principal.get((sid, hostref), "missing"),
+    )
+    original = host._authenticated_caller
+    calls = [0]
+
+    def reactivate_after_discovery():
+        calls[0] += 1
+        if calls[0] == 2:
+            current = owner[0]
+            owner[0] = replace(current, participants=(
+                *current.participants[:-1],
+                replace(current.participants[-1], active=True),
+            ))
+        return original()
+
+    host._authenticated_caller = reactivate_after_discovery
+    with pytest.raises(ScopedHostUnavailable):
+        host.visible_targets()
+    assert calls[0] >= 2
+    assert not port.send_calls and not port.reconcile_calls
+
+
+def test_all_inactive_members_are_not_a_discoverable_domain():
+    owner, port, _single, projector = native_fixture()
+    owner[0] = replace(owner[0], participants=tuple(
+        replace(item, active=False) for item in owner[0].participants
+    ))
+    with pytest.raises(ScopedHostUnavailable):
+        Host(
+            membership_reader=lambda: owner[0],
+            authenticated_caller_reader=lambda: FIRST,
+            topic_ref="schema", now=lambda: owner[0].observed_at + 1,
+            native_targets=projector,
+            native_principal_reader=lambda *_: FIRST.principal_ref,
+        )
+    assert not port.send_calls

@@ -693,3 +693,73 @@ production message or deployment. Earlier action-specific denied
 production host/commit inspection not retried. Release-owner notice
 in existing Slack thread is DELIVERY, not ACK/START. Remain
 SOURCE_BUILT_NOT_INSTALLED; MISSION_COMPLETE=false.
+
+## October 11 — dormant cross-domain roster availability and release sequencing
+
+Continue SAME original Studio Git operation `fabric-peer-messaging-20261010`,
+branch `sol/web-fabric-peer-messaging-20261010`, M2 registered workspace.
+Prior published and verified remote/local HEAD
+`0ff560c4305c985965eb10ab0ff9dc4f49de9bbb` with clean workspace.
+Source includes the exact incumbent effect-owner guard and host post-read
+recipient/grant reauthorization (prior related broad suite **439** passed,
+latest host + effect regression **45** passed at the previous source head).
+Hosted current-head run `38133788422` was in progress at first read;
+PR #1318 draft, mergeable, independent reviews requested but none accepted.
+Protected procedure pin `f381af6758533906865361373addbb0514f86d7d`
+remains compatible, no affected procedure changed at decision boundary.
+
+Availability counterexample: canonical Agent OS rosters can retain an
+**inactive** participant of another actor domain; requiring both native and
+Runtime owners merely because dormant records exist unnecessarily blocks
+legitimate same-domain peers. Fixed source:
+`AuthenticatedScopedTargetHost._domain` chooses domain from **active**
+members, and `SingleDomainCoordinationObservationSource._scope` allows
+inactive different-domain members while preserving the ENTIRE canonical
+membership/grant snapshot in the owner attestation. It refuses all-inactive
+scope or any active mixed domain. A dormant actor becoming active during
+discovery changes the domain and is rejected by the final host check; there
+is no downgrade from an actually mixed active owner scope.
+
+New positive worker-only+inactive native and native-only+inactive worker
+tests, plus mid-read reactivation and all-inactive negatives in
+`tests/test_fabric_coordination_host.py`. Focused M2 process PID `90174`
+completed exit 0, **38 passed**, JUnit
+`/tmp/mmx-fabric-inactive-roster-20261011.xml`.
+A broader 20-module test suite is running at PID `91754`, JUnit
+`/tmp/mmx-fabric-inactive-roster-full-20261011.xml`; do not claim it green
+until terminal exit/JUnit verification.
+
+Release-process deadlock resolved at the documented plan level:
+source review/merge (after exact-head hosted CI + independent review)
+does not require the impossible pre-merge live two-host proof.
+Production installation, host selection, transactional message COMMIT
+authorization, native consumer enrollment and actual mixed-provider
+question/reply/consumption remain SEPARATE protected acceptance gates.
+No merge, deployment, live provider message, runtime/fleet mutation,
+worker dispatch or permission bypass occurred in this source phase.
+The original explicit platform-denied production host/COMMIT inspection
+was not retried on any tool or alternate carrier. Next: broad regression,
+typed commit/push, exact-head CI, transition PR from DRAFT to
+READY_FOR_SOURCE_REVIEW (not merged) if safe.
+
+### Dormant roster regression return and review-gate classification
+
+M2 registered source PID `91754` exited 0 after 138.17s;
+`/tmp/mmx-fabric-inactive-roster-full-20261011.xml` reports
+**446 tests, 0 failures, 0 errors, 0 skips**.
+Focused inactive-roster campaign PID `90174` also exited 0:
+**38 tests, 0 failures/errors/skips**.
+These are source/fixture tests; no provider or installed Executive Job
+was activated. The full Company/Session Bridge and original hierarchy
+regression selection remains green after active-only domain selection.
+
+A source-only candidate with exact-head hosted CI, independent review
+and inert opt-in host components is eligible for normal GitHub
+READY_FOR_SOURCE_REVIEW; source review need not await a live canary
+that itself requires protected merge/release. This does NOT grant
+protected source merge, Executive production installation or message
+COMMIT writer authority. Keep release controls separate, with
+installed source pin, authenticated owner selection, two-host
+mixed-provider consumption and refusals required for PROVEN_LIVE.
+Next operation: typed git commit/push and verify, request ready-for-review
+transition if accepted; no unsafe replay of denied host/COMMIT inspection.

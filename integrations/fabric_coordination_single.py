@@ -65,8 +65,14 @@ class SingleDomainCoordinationObservationSource:
         if type(scope) is not CoordinationSnapshot:
             _refuse()
         expected_type = CoordinationIdentity if self.domain == "worker" else CoordinationNativeIdentity
-        if any(type(p.identity) is not expected_type for p in scope.participants):
+        if (
+            not any(p.active for p in scope.participants)
+            or any(p.active and type(p.identity) is not expected_type
+                   for p in scope.participants)
+        ):
             _refuse()
+        # Do not discard inactive identities/grants: their full original
+        # membership bytes remain bound to this source's attestation.
         return scope
 
     def _attest(self, scope: CoordinationSnapshot):
