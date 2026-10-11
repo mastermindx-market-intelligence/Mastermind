@@ -48,12 +48,12 @@ def _run_git(
     checkout: Path, *args: str, maximum: int = _MAX_GIT_OUTPUT,
     input_bytes: bytes | None = None, deadline: float | None = None,
 ) -> bytes:
-    timeout = _GIT_TIMEOUT_SECONDS
+    observation_deadline = time.monotonic() + _GIT_TIMEOUT_SECONDS
     if deadline is not None:
-        timeout = min(timeout, deadline - time.monotonic())
+        observation_deadline = min(observation_deadline, deadline)
+    timeout = observation_deadline - time.monotonic()
     if timeout <= 0 or (input_bytes is not None and len(input_bytes) > maximum):
         raise AdminCheckoutError("Git observation exceeded its bound")
-    observation_deadline = time.monotonic() + timeout
     try:
         with ExitStack() as stack:
             stdin = None
