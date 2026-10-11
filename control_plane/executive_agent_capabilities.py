@@ -751,8 +751,17 @@ def app_server_security_config_projection(
     # read-only config/digests retain their exact established JSON shape.
     # Presence matters: omitting this table is not proof that the sandbox has
     # no network or supplemental writable roots.
-    if "sandbox_workspace_write" in root:
-        raw_write = root.get("sandbox_workspace_write")
+    raw_write = root.get("sandbox_workspace_write")
+    active_write_sandbox = str(
+        root.get("sandbox_mode") or root.get("sandboxMode") or ""
+    ).strip() == "workspace-write"
+    # Real Codex 0.159.3 includes `sandbox_workspace_write: null` in config/read
+    # even while a read-only sandbox is active.  That null is not an active
+    # writable policy and must not break the established V3 read-only digest.
+    # A writable sandbox with null/missing settings remains unattestable.
+    if "sandbox_workspace_write" in root and (
+        raw_write is not None or active_write_sandbox
+    ):
         if isinstance(raw_write, Mapping):
             roots = raw_write.get("writable_roots")
             projected["sandbox_workspace_write"] = {

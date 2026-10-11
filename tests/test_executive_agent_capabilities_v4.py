@@ -682,6 +682,40 @@ def test_v4_profile_refuses_codex_exec_with_skill_capabilities(tmp_path):
         ExecutionCapabilityRegistry.load(_write(tmp_path, raw), source_root=REPO_ROOT)
 
 
+def test_real_codex_readonly_write_table_null_preserves_legacy_config_digest():
+    """Read-only config/read may expose inactive sandbox_workspace_write:null.
+
+    The observed model-provided table is inactive in read-only mode and must
+    not change legacy read-only config attestation; a non-null table remains
+    visible to drift checks, and an active writable sandbox with null refuses.
+    """
+    from control_plane.executive_agent_capabilities import (
+        app_server_security_config_digest, app_server_security_config_projection,
+    )
+
+    profile = ExecutionCapabilityRegistry.load(
+        V4_FIXTURE, source_root=REPO_ROOT
+    ).resolve(FIXTURE_PROFILE_ID)
+    expected = profile.app_server_config_projection()
+    # Exact observed property on the installed Codex 0.159.3 config/read.
+    readonly_observed = {
+        **expected, "sandbox_mode": "read-only",
+        "approval_policy": "never", "sandbox_workspace_write": None,
+    }
+    assert app_server_security_config_digest(readonly_observed) == profile.expected_config_digest
+    assert "sandbox_workspace_write" not in app_server_security_config_projection(readonly_observed)
+    malformed_active = {
+        **expected, "sandbox_mode": "workspace-write",
+        "approval_policy": "never", "sandbox_workspace_write": None,
+    }
+    assert app_server_security_config_digest(malformed_active) != profile.expected_config_digest
+    nonnull_readonly = {
+        **readonly_observed,
+        "sandbox_workspace_write": {"network_access": True, "writable_roots": ["/tmp"]},
+    }
+    assert app_server_security_config_digest(nonnull_readonly) != profile.expected_config_digest
+
+
 def test_v4_rich_operator_attests_explicit_workspace_write_network_config():
     """Fail closed on any missing or wider effective workspace-write settings."""
     from control_plane.executive_agent_capabilities import (
