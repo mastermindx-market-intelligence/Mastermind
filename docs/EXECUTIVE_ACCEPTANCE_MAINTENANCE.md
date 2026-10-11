@@ -97,6 +97,88 @@ The normal selector validates and skips its canonical block before checking
 current dispatch policy. A subsequent capability-policy rotation can therefore
 preserve terminal history without re-enabling that operation.
 
+## V3: explicit, offline schema 5 to 6 maintenance
+
+This path consumes the existing `upgrade_v5_to_v6` owner's completed operation.
+It never invokes migration, starts a service, clears quarantine, restores a
+database, issues an Attempt or publishes acceptance PASS. It is deliberately
+limited to an **actually accepted v2 predecessor on exact schema 5**, carrying
+the same terminal dispatch/root. It is not a generic schema-version exception.
+An unstarted predecessor acceptance (including the retained exact-326c operation)
+does not qualify and is not retired by preparing this source change.
+
+The approved cutover plan must bind these phases before execution:
+
+1. Reconcile the predecessor acceptance owner and consume its genuine acceptance
+   summary and matching PASS carry. Quiesce through the existing service owner,
+   with all arms and the worker harness closed. With that predecessor still
+   selected in `control.json`, invoke the reviewed maintenance preparation owner
+   with the predecessor/successor/root selectors, `--carry-terminal-dispatch`
+   and `--seal-v5-source`. No recovery selectors are permitted. This phase must
+   precede migration; existing 5-to-6 preflight/completion receipts refuse a
+   retrospective baseline. The current database must be offline with no SQLite
+   sidecars. Maintenance does not checkpoint or remove them; that remains an
+   existing database-owner/quiescence prerequisite.
+2. Retain the exclusive root-owned `schema-source-<successor>` evidence directory
+   under `acceptance-maintenance`. Its immutable intent binds the accepted
+   predecessor chain/root, exact database path/device/inode/bytes, full schema-5
+   snapshot and backup/drill proof, configuration and old artifact inventory.
+   It verifies the real predecessor proof delta against the predecessor's
+   original sealed baseline. A summary alone, an unaccepted descriptor, or
+   unchanged-looking rows cannot replace PASS. The source baseline is never
+   overwritten or promoted into a target baseline.
+3. Install/seal the reviewed target through the existing owner, preserving the
+   qualified namespace, principals and disarmed configuration. Only
+   `proof_base_sha` may change in the bound control configuration; any other
+   change needs an explicit source/plan reconciliation, not a whitelist override.
+   The permitted database principal then runs the existing installed-release
+   migration owner once, explicitly from version 5. Maintenance does not supply
+   a privilege wrapper, migration implementation, lock or retry path.
+4. Consume that same operation's exact owner-return `operation_id`,
+   `preflight_receipt_digest` and `completion_receipt_digest`. With the successor
+   selected and services still stopped, invoke maintenance with the same
+   selectors and `--carry-terminal-dispatch`, plus
+   `--schema-transition-operation`, `--migration-preflight-sha256` and
+   `--migration-completion-sha256`. These digests use the migration owner's
+   canonical JSON encoding. No completion means no target descriptor.
+5. Consumption captures private control-owned receipts and both backup/manifest
+   pairs through stable, no-follow reads into exclusive root-owned evidence;
+   original ownership/permissions remain unchanged. The existing backup owner
+   verifies both copies, exact known schema/migration checksums and restore
+   drills. Completion must bind preflight, operation, release, namespace,
+   source/target schemas, full-v4 history and the migration-5 receipt. Every
+   pre-existing table row and migration receipt remains exact; the only history
+   addition is M6. No changed root, event, lease, grant, quota or arbitrary
+   schema object is admitted. The actual target must match the completed
+   operation and verified target backup.
+6. Only then prepare a distinct, root-sealed **v3 target acceptance baseline**.
+   Its descriptor binds the retained transition-chain digest. It also retains
+   every v2 terminal-dispatch/assignment/PASS requirement. Acceptance rechecks
+   the immutable source chain, verified backup/drill evidence and target
+   namespace/baseline before creating its ordinary one-run marker. Normal
+   Runtime reads can materialize an empty WAL/SHM pair; acceptance compares the
+   full logical snapshot including WAL. Raw offline evidence capture requires
+   no sidecars and uses immutable reads so it does not create them.
+7. Run the existing separate successor acceptance with the printed descriptor
+   digest. V3 grants no predecessor recovery, uses the same two fresh proof
+   jobs/three terminal Attempts as v2, and retains strict target-schema/history
+   equality throughout acceptance. Only the existing successful acceptance
+   owner can publish the matching summary and carry-forward PASS. Migration
+   completion is not that PASS or original-parent/live-provider acceptance.
+
+Ordinary v1/v2 preservation remains strict. An ordinary v2 preparation or
+acceptance entry cannot silently rebaseline across a changed predecessor schema
+or migration history; it must use the explicit verified transition. Unknown
+versions, missing/foreign/partial receipts, replaced database identity, altered
+backups or old history, and mismatched predecessor evidence all refuse.
+
+Consumption is single-use. Partial evidence directories are retained, never
+deleted or overwritten by retry. If migration committed but completion is
+uncertain, preserve the owner's quarantine/barrier and all evidence, reconcile
+the same operation, and do not restart the v5 binary, replay migration, copy a
+backup over the runtime or synthesize an acceptance receipt. This source contract
+does not itself authorize an installed cutover or resolve any human-only gate.
+
 ## Continuing the preserved root
 
 After the normal arming ceremony, only the descriptor's exact root may retain

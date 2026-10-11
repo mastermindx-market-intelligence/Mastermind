@@ -8,6 +8,7 @@ Only passing acceptance publishes an exact queued-root compatibility receipt.
 from __future__ import annotations
 
 import argparse
+from contextlib import closing
 import hashlib
 import json
 import os
@@ -28,6 +29,7 @@ from control_plane.fs_security import has_macos_acl
 SYSTEM_ROOT = Path("/Library/Application Support/MastermindExecutive")
 SCHEMA = "mastermind.executive_acceptance_maintenance/v1"
 SCHEMA_V2 = "mastermind.executive_acceptance_maintenance/v2"
+SCHEMA_V3 = "mastermind.executive_acceptance_maintenance/v3"
 _TRUSTED_UID = 0
 # The artifact inventory can exceed 16 MiB on an otherwise quiescent host.
 # Keep every other maintenance document on its existing budget, and apply
@@ -56,6 +58,7 @@ _DESCRIPTOR_V2_KEYS = (_DESCRIPTOR_KEYS - {
     "terminal_marker_event_sha256", "terminal_state_sha256",
     "assignment_seal_sha256", "predecessor_quota_sha256",
 }
+_DESCRIPTOR_V3_KEYS = _DESCRIPTOR_V2_KEYS | {"schema_transition_sha256"}
 
 class MaintenanceError(RuntimeError):
     pass
@@ -130,7 +133,8 @@ def descriptor_for(sha: str) -> dict[str, Any] | None:
     value = sealed_json(path)
     schema = value.get("schema_version")
     keys = _DESCRIPTOR_KEYS if schema == SCHEMA else (
-        _DESCRIPTOR_V2_KEYS if schema == SCHEMA_V2 else set()
+        _DESCRIPTOR_V2_KEYS if schema == SCHEMA_V2 else (
+            _DESCRIPTOR_V3_KEYS if schema == SCHEMA_V3 else set())
     )
     if not keys or set(value) != keys:
         raise MaintenanceError("maintenance descriptor schema mismatch")
@@ -138,7 +142,7 @@ def descriptor_for(sha: str) -> dict[str, Any] | None:
             or _SHA.fullmatch(value["predecessor_sha"]) is None
             or value["predecessor_sha"] == sha):
         raise MaintenanceError("maintenance descriptor release mismatch")
-    if schema == SCHEMA_V2 and (
+    if schema in {SCHEMA_V2, SCHEMA_V3} and (
         not isinstance(value["frozen_base_sha"], str)
         or _SHA.fullmatch(value["frozen_base_sha"]) is None
     ):
@@ -230,7 +234,7 @@ def validate_carry_receipt(
 
 
 def validate_prior_carry_binding(descriptor: dict, *, _seen: frozenset[str] = frozenset()) -> None:
-    if descriptor["schema_version"] == SCHEMA_V2:
+    if descriptor["schema_version"] in {SCHEMA_V2, SCHEMA_V3}:
         prior, _summary, material = prior_carry_material(
             descriptor["predecessor_sha"], _seen=_seen | {descriptor["successor_sha"]}
         )
@@ -272,8 +276,11 @@ def recovery_permitted(job: Any, attempt_id: str, sha: str, worker_id: str, quot
                 and digest(job.to_dict()) == descriptor["recovery_job_sha256"]
                 and job.constraints.get("base_sha") == descriptor["predecessor_sha"])
 
-def snapshot(database: Path) -> dict:
-    with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True) as conn:
+def snapshot(database: Path, *, immutable: bool = False) -> dict:
+    # Immutable reads are reserved for sealed/offline migration evidence. Live
+    # acceptance retains normal SQLite snapshot semantics (including its WAL).
+    uri = database.as_uri() + "?mode=ro" + ("&immutable=1" if immutable else "")
+    with closing(sqlite3.connect(uri, uri=True)) as conn:
         conn.row_factory = sqlite3.Row
         conn.execute("BEGIN")
         if conn.execute("PRAGMA quick_check").fetchall()[0][0] != "ok" or conn.execute("PRAGMA foreign_key_check").fetchall():
@@ -339,7 +346,7 @@ def verify_preserved(before: dict, after: dict, descriptor: dict, proof_ids: lis
         raise MaintenanceError("maintenance proof job lineage mismatch")
     if any(r["status"] != "COMPLETED" or r["orchestration_role"] is not None for r in new["jobs"]):
         raise MaintenanceError("maintenance proof did not complete")
-    v2 = descriptor["schema_version"] == SCHEMA_V2
+    v2 = descriptor["schema_version"] in {SCHEMA_V2, SCHEMA_V3}
     template_id = descriptor["template_proof_job_id" if v2 else "recovery_job_id"]
     predecessor_proof = next(r for r in bt["jobs"] if r["job_id"] == template_id)
     proof_fields = ("objective", "department", "priority", "authority_level", "attempt_limit",
@@ -664,7 +671,18 @@ def terminal_carry_fields(runtime: Any, root: Any, config: dict, before: dict, p
     return proof, fields
 
 
-def prepare(args: argparse.Namespace) -> Path:
+def require_unchanged_schema(predecessor: str, before: dict) -> None:
+    """An ordinary terminal carry cannot silently rebaseline across a migration."""
+    prior = descriptor_for(predecessor)
+    baseline = sealed_json(bundle_path(predecessor)/"baseline.json")
+    if (prior is None or digest(baseline) != prior["baseline_sha256"]
+            or baseline["schema"] != before["schema"]
+            or digest(baseline["tables"].get("schema_migrations"))
+            != digest(before["tables"].get("schema_migrations"))):
+        raise MaintenanceError("schema change requires an explicit verified maintenance transition")
+
+
+def preparation_config(args: argparse.Namespace) -> dict:
     if os.geteuid() != 0 or sys.platform != "darwin":
         raise MaintenanceError("maintenance preparation requires root on macOS")
     require_stopped()
@@ -673,10 +691,26 @@ def prepare(args: argparse.Namespace) -> Path:
     worker_config = json.loads((SYSTEM_ROOT/"config/worker-codex.json").read_text())
     if worker_config.get("operator_harness_armed") is not False:
         raise MaintenanceError("maintenance requires closed worker harness")
-    if config["proof_base_sha"] != args.predecessor_sha:
-        raise MaintenanceError("predecessor differs from installed release")
+    expected = args.successor_sha if getattr(args, "schema_transition_operation", None) else args.predecessor_sha
+    if config["proof_base_sha"] != expected:
+        raise MaintenanceError("maintenance phase differs from installed release")
+    return config
+
+
+def prepare(args: argparse.Namespace) -> Path:
+    config = preparation_config(args)
+    transition = None
+    if getattr(args, "schema_transition_operation", None):
+        if (not args.carry_terminal_dispatch or args.recovery_job_id or args.recovery_attempt_id
+                or not getattr(args, "migration_preflight_sha256", None)
+                or not getattr(args, "migration_completion_sha256", None)):
+            raise MaintenanceError("schema transition requires terminal carry and exact owner return")
+        from ops.executive_os.acceptance_schema_transition import consume
+        transition = consume(args, config)
     database = Path(config["runtime_root"])/"data/control_plane/executive.sqlite3"
     before = snapshot(database)
+    if transition is not None and digest(before) != transition["target_baseline_sha256"]:
+        raise MaintenanceError("completed migration target changed before preparation")
     from control_plane.executive_runtime import Runtime
     runtime = Runtime.at(config["runtime_root"], create=False)
     root = runtime.jobs.get_job(args.root_job_id)
@@ -701,6 +735,8 @@ def prepare(args: argparse.Namespace) -> Path:
         raise MaintenanceError("maintenance runtime is not quiescent")
     extra = {}
     if terminal_carry:
+        if transition is None:
+            require_unchanged_schema(args.predecessor_sha, before)
         proof, extra = terminal_carry_fields(runtime, root, config, before, args.predecessor_sha)
     else:
         runtime.workers.proof_capacity_recovery_snapshot(
@@ -722,11 +758,12 @@ def prepare(args: argparse.Namespace) -> Path:
     if final_bundle.exists() or final_bundle.is_symlink():
         raise MaintenanceError("maintenance descriptor already exists; reconcile the existing operation")
     bundle = Path(tempfile.mkdtemp(prefix=".preparing-"+args.successor_sha+"-",dir=parent))
-    write_sealed(bundle/"preparing.json",{"schema_version":SCHEMA_V2 if terminal_carry else SCHEMA})
+    schema = SCHEMA_V3 if transition is not None else (SCHEMA_V2 if terminal_carry else SCHEMA)
+    write_sealed(bundle/"preparing.json",{"schema_version":schema})
     backup = bundle/"prestate.sqlite3"
     fd = os.open(backup,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
     os.close(fd)
-    with sqlite3.connect(database.as_uri()+"?mode=ro",uri=True) as source, sqlite3.connect(backup) as destination:
+    with closing(sqlite3.connect(database.as_uri()+"?mode=ro",uri=True)) as source, closing(sqlite3.connect(backup)) as destination:
         source.backup(destination)
     os.chmod(backup,0o400)
     with backup.open("rb") as stream:
@@ -738,7 +775,7 @@ def prepare(args: argparse.Namespace) -> Path:
     write_sealed(bundle/"prior-secret-canary.json",prior_canary_value)
     write_sealed(bundle/"baseline.json",before)
     write_sealed(bundle/"inventory.json",artifacts)
-    descriptor = dict(schema_version=SCHEMA_V2 if terminal_carry else SCHEMA,predecessor_sha=args.predecessor_sha,
+    descriptor = dict(schema_version=schema,predecessor_sha=args.predecessor_sha,
         successor_sha=args.successor_sha,root_job_id=root.job_id,root_identity_sha256=root_identity(root),
         root_event_id=events[0]["event_id"],root_event_sha256=digest(events[0]),
         worker_id=config["worker_id"],quota_class=config["quota_class"],
@@ -748,6 +785,10 @@ def prepare(args: argparse.Namespace) -> Path:
         "recovery_job_id": proof.job_id, "recovery_attempt_id": args.recovery_attempt_id,
         "recovery_job_sha256": digest(proof.to_dict()),
     })
+    if transition is not None:
+        from ops.executive_os.acceptance_schema_transition import validate_sealed
+        descriptor["schema_transition_sha256"] = digest(transition)
+        validate_sealed(descriptor, before, config)
     write_sealed(bundle/"descriptor.json",descriptor,public=True)
     os.chmod(bundle,0o755)
     directory_fd = os.open(bundle,os.O_RDONLY)
@@ -788,7 +829,12 @@ class Maintenance:
                 or snapshot(self.database) != self.before):
             raise MaintenanceError("maintenance prestate drifted")
         verify_inventory(self.inventory)
-        if self.descriptor["schema_version"] == SCHEMA_V2:
+        if self.descriptor["schema_version"] == SCHEMA_V3:
+            from ops.executive_os.acceptance_schema_transition import validate_sealed
+            validate_sealed(self.descriptor, self.before, config)
+        elif self.descriptor["schema_version"] == SCHEMA_V2:
+            require_unchanged_schema(self.descriptor["predecessor_sha"], self.before)
+        if self.descriptor["schema_version"] in {SCHEMA_V2, SCHEMA_V3}:
             from control_plane.executive_runtime import Runtime
             runtime = Runtime.at(config["runtime_root"], create=False)
             root = runtime.jobs.get_job(self.descriptor["root_job_id"])
@@ -826,8 +872,22 @@ def main() -> int:
     parser.add_argument("--recovery-attempt-id")
     parser.add_argument("--carry-terminal-dispatch", action="store_true",
                         help="Preserve one failed planner and prior PASS chain; grant no predecessor recovery.")
+    phase = parser.add_mutually_exclusive_group()
+    phase.add_argument("--seal-v5-source", action="store_true",
+                       help="Seal an actually accepted v5 source before the existing owner migrates it.")
+    phase.add_argument("--schema-transition-operation",
+                       help="Consume this exact completed 5-to-6 operation; prepare v3 acceptance, never migrate.")
+    parser.add_argument("--migration-preflight-sha256")
+    parser.add_argument("--migration-completion-sha256")
     args = parser.parse_args()
     try:
+        if args.seal_v5_source:
+            from ops.executive_os.acceptance_schema_transition import seal_source
+            bundle = seal_source(args, preparation_config(args))
+            print(json.dumps({"source_bundle":str(bundle), "successor_acceptance":"NOT_STARTED"}))
+            return 0
+        if not args.schema_transition_operation and (args.migration_preflight_sha256 or args.migration_completion_sha256):
+            raise MaintenanceError("migration digests require the exact schema transition operation")
         bundle = prepare(args)
         descriptor = descriptor_for(args.successor_sha)
         print(json.dumps({"bundle":str(bundle),"descriptor_sha256":digest(descriptor)}))
