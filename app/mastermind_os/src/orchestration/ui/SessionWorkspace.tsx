@@ -327,6 +327,17 @@ export function SessionWorkspace({
                 id={sendId}
                 value={draft}
                 onChange={(e) => setDraftText(e.target.value)}
+                onKeyDown={(event) => {
+                  if (
+                    event.key !== "Enter" || event.shiftKey || event.altKey ||
+                    event.ctrlKey || event.metaKey || event.nativeEvent.isComposing ||
+                    event.nativeEvent.keyCode === 229
+                  ) return;
+                  event.preventDefault();
+                  // Reuse form submission and its synchronous duplicate guard.
+                  // A held Enter must not submit a later draft after completion.
+                  if (!event.repeat) event.currentTarget.form?.requestSubmit();
+                }}
                 rows={3}
                 placeholder={
                   connection !== "connected"
