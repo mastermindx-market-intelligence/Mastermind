@@ -1570,6 +1570,20 @@ class ExecutiveSupervisor:
                 commission.get("verified_local_path") if commission is not None else None
             ),
         }
+        if "responsibility_intent" in job.constraints:
+            from control_plane.executive_responsibility import (
+                ResponsibilityIntentError, normalize_responsibility_intent,
+            )
+            try:
+                role = normalize_responsibility_intent(job.constraints["responsibility_intent"])
+                role.require_phase(job.orchestration_role or "work")
+                if role.digest != job.constraints.get("responsibility_intent_digest"):
+                    raise ResponsibilityIntentError("role intent digest mismatch")
+            except ResponsibilityIntentError as exc:
+                raise SupervisorError(str(exc)) from exc
+            packet["responsibility_intent"] = role.to_dict()
+            packet["responsibility_intent_digest"] = role.digest
+            packet["responsibility_scope"] = "Describes assigned work only; grants no model, tools, children, or approval authority."
         routing_options = _planner_routing_options(self.runtime, job)
         if routing_options is not None:
             packet["routing_options"] = routing_options

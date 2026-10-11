@@ -1048,7 +1048,15 @@ wait_for_launchd_absent "$PRIVILEGED_LABEL" privileged || exit 65
 
 if [ ! -d "$RELEASE_ROOT" ]; then
   STAGING="$(/usr/bin/mktemp -d "$SYSTEM_ROOT/releases/.install.$EXPECTED_SHA.XXXXXX")"
-  /usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" -C "$SOURCE_REPO" archive --format=tar "$EXPECTED_SHA" | /usr/bin/tar -xf - -C "$STAGING"
+  /usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" -C "$SOURCE_REPO" archive --format=tar "$EXPECTED_SHA" | (
+    archive_extract_status=0
+    /usr/bin/tar -xf - -C "$STAGING" || archive_extract_status=$?
+    # BSD tar can stop at its end marker before Git finishes trailing padding.
+    # Drain to EOF so Git can report its real status; pipefail still rejects a
+    # producer error, and the subshell preserves any extraction error.
+    /bin/cat >/dev/null
+    exit "$archive_extract_status"
+  )
   /usr/sbin/chown -R root:wheel "$STAGING"
   /bin/chmod -R go-w "$STAGING"
   # mktemp creates the staging root as 0700. Both non-root service UIDs need

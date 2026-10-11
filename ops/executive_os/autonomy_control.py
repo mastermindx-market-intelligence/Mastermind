@@ -2460,6 +2460,9 @@ class ProductionArmHost(ProductionStatusHost):
     def __init__(self) -> None:
         self._admission_sha: str | None = None
 
+    def effective_uid(self) -> int:
+        return os.geteuid()
+
     def require_exact_install(self, expected_sha: str) -> str:
         try:
             self._require_host()
