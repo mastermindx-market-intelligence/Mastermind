@@ -536,6 +536,7 @@ def _seed_dispatchable_operator_planner(
     commission_ref_commit: str | None = None,
     clock: _Clock | None = None,
     routing_capacity: bool = False,
+    operator_model_alias: str = "coo.operator.readonly",
 ):
     workspace_root = tmp_path / "workspaces"
     workspace = workspace_root / "g2-planner"
@@ -578,7 +579,7 @@ def _seed_dispatchable_operator_planner(
     )
     router = ModelRouter.load()
     sealed = router.model_aliases["coo.sealed"]
-    operator = router.model_aliases["coo.operator.readonly"]
+    operator = router.model_aliases[operator_model_alias]
     binding = {
         "eligible_quota_classes": ["codex-coo", "codex-coo-default"],
         "provider": sealed.provider_alias,

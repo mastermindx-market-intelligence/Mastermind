@@ -403,6 +403,19 @@ class ExecutiveOperatorSupervisor:
             and tuple(grant.resource_id for grant in profile.resource_grants)
             == ("worker-browser-b1-local",)
         )
+        native_return_profile_ok = (
+            profile.profile_id == "operator.appserver.interactive.native-return.v1"
+            and profile.execution_surface == "codex-app-server"
+            and profile.network_policy == "disabled"
+            and profile.native_helper_policy.value == "DISABLED"
+            and profile.native_helper is None
+            and not profile.skill_grants
+            and not profile.resource_grants
+            and profile.mcp_servers == ("native-return-mcp-v1",)
+            and profile.mcp_server_grants == (
+                registry.mcp_servers.get("native-return-mcp-v1"),
+            )
+        )
         native_claude_profile_ok = (
             profile.profile_id == "operator.claude.readonly.v1"
             and profile.enabled is True
@@ -415,10 +428,17 @@ class ExecutiveOperatorSupervisor:
             and not profile.resource_grants
         )
         if not common_profile_ok or not (
-            docs_profile_ok or browser_profile_ok or native_claude_profile_ok
+            docs_profile_ok or browser_profile_ok or native_return_profile_ok
+            or native_claude_profile_ok
         ):
             raise ExecutiveOperatorSupervisorError(
                 "operator planner profile is not one reviewed rich read-only lane"
+            )
+        if native_return_profile_ok and (
+            quota.provider != "codex" or job.constraints.get("provider") != "codex"
+        ):
+            raise ExecutiveOperatorSupervisorError(
+                "native Codex return planner provider drifted after claim"
             )
         if native_claude_profile_ok and (
             quota.provider != CLAUDE_OPERATOR_PROVIDER
