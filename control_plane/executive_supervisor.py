@@ -1059,7 +1059,7 @@ def verify_commission_for_job(
     )
 
 
-PLANNER_ROUTING_OPTIONS_SCHEMA = "mastermind.planner_routing_options/v1"
+PLANNER_ROUTING_OPTIONS_SCHEMA = "mastermind.planner_routing_options/v2"
 _PLANNER_ROUTING_MODEL_LIMIT = 16
 
 
@@ -1074,14 +1074,27 @@ def _planner_routing_options(runtime: Runtime, job: Job) -> dict[str, Any] | Non
 
     if job.orchestration_role != "plan":
         return None
-    root_id = str(job.root_job_id or "")
+    root_id = str(job.parent_job_id or "")
     root = runtime.jobs.get_job(root_id)
     if root is None:
         raise SupervisorError("planner routing options lost their root Job")
+    from control_plane.executive_coo_hierarchy import root_grant, validate_grant
+    grant = (root.orchestration_provenance or {}).get("hierarchy_grant")
+    hierarchy = {
+        "plan_schema": "mastermind.execution_plan/v5",
+        "root_job_id": root.root_job_id,
+        "coordinator_job_id": root.job_id,
+        "coordinator_depth": root.depth,
+        "grant": validate_grant(grant) if grant is not None else root_grant(),
+        "budget_includes": ["planner", "coordinator", "work", "review", "repair"],
+        "coordinator_step": {"delegation": {"descendant_limit": "reserved subtree allowance", "max_depth": "absolute maximum depth"}},
+        "leaf_step": {"delegation": None},
+    }
     raw_union = root.constraints.get("work_placement_union")
     if not isinstance(raw_union, list) or not raw_union:
         return {
             "schema_version": PLANNER_ROUTING_OPTIONS_SCHEMA,
+            "hierarchy": hierarchy,
             "default_mode": "AUTO",
             "default_route": {
                 "provider_realm": root.constraints.get("provider"),
@@ -1090,7 +1103,7 @@ def _planner_routing_options(runtime: Runtime, job: Job) -> dict[str, Any] | Non
                 ),
                 "model": root.constraints.get("model"),
             },
-            "manual_override_plan_schema": "mastermind.execution_plan/v4",
+            "manual_override_plan_schema": "mastermind.execution_plan/v5",
             "pools": [],
             "degraded": ["work_placement_union_unavailable"],
         }
@@ -1141,6 +1154,7 @@ def _planner_routing_options(runtime: Runtime, job: Job) -> dict[str, Any] | Non
 
     return {
         "schema_version": PLANNER_ROUTING_OPTIONS_SCHEMA,
+            "hierarchy": hierarchy,
         "default_mode": "AUTO",
         "default_route": {
             "provider_realm": root.constraints.get("provider"),
@@ -1149,7 +1163,7 @@ def _planner_routing_options(runtime: Runtime, job: Job) -> dict[str, Any] | Non
             ),
             "model": root.constraints.get("model"),
         },
-        "manual_override_plan_schema": "mastermind.execution_plan/v4",
+        "manual_override_plan_schema": "mastermind.execution_plan/v5",
         "pools": sorted(
             pools,
             key=lambda item: (item["provider_realm"], item["quota_class"]),

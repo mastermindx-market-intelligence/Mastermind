@@ -726,7 +726,7 @@ def test_fresh_schema_v4_has_exact_additive_columns_and_migration(tmp_path):
             row[1] for row in connection.execute("PRAGMA table_info(attempts)")
         ]
 
-    assert [tuple(row) for row in migrations][-2:] == [
+    assert [tuple(row) for row in migrations][3:5] == [
         (4, "executive_phase1fc_orchestration_contract"),
         (5, "executive_finite_drive_arm_contract"),
     ]
@@ -3599,11 +3599,11 @@ def test_run_once_cycle_persists_reviewed_policy_digest_when_policy_is_invalid(
 
 def test_five_role_schema_golden_digests_are_frozen():
     assert GOLDEN_ROLE_SCHEMA_DIGESTS == {
-        "plan": "8413f6b0777e2adceff2a9fd262760bf1d01c5cc92314e6abb5f8dc1079bbbe4",
+        "plan": "51e4882f72b8b09af05beb237caad9bc01c1060b113ccc3afbb0fef79a149148",
         "work": "cc4953a932c9e4031dbdcdc6e444a77381cce12acf6a06f33b095f626d3b5f89",
         "review": "a0e853358f325d95b9d94c61161c40e7e7bae67e44679614b5ebea229b3d102c",
         "repair": "2f105a0b3c3bd55c0118fb003b13dd25e7074402d8d963d294944341ea47f90f",
-        "aggregation": "7a042278d90f4d3e477c5f9d4c51a8553c64ac53947a70ccb40e96fea55ca933",
+        "aggregation": "fc95c7a907777e747e4b94b096d5bbbd662e06c6f219c9a4cec4799e3b5a724a",
     }
 
 
@@ -3670,29 +3670,29 @@ def test_offline_acceptance_receipt_is_deterministic_and_proves_tx9_quarantine()
     assert exhaustion["second_terminal_status"] == "LOST"
     assert exhaustion["blocked_reason"] == "plan_terminal_adverse"
     assert len(exhaustion["supervisor_dispatch_calls"]) == 2
-    # The controller-only authority changes the reviewed policy SHA; the
-    # acceptance producer binds that SHA into orchestration grants, so only
-    # derived digest goldens move while all non-digest behavior remains fixed.
+    # The additive plan-v5/aggregation-v2 executable schemas change sealed
+    # contract digests. The legacy scenarios and their non-digest assertions
+    # remain unchanged; these pins identify the expanded schema contract.
     assert receipt["receipt_digest"] == (
-        "06599ec9b4843a33e6325799620dcd6b37b425a96c5f9bb4fd49f2f09c108c36"
+        "efd4065c357dc87e7d79333af04a9f2da29e6dc3ffeb183eb4ab25bc4eb71a59"
     )
     assert receipt["dispatch_boundary"]["acceptance_digest"] == (
         "02af618a1a926bde4b6a92fb2e697aa3b2d41538ae81350dbd954891a5dd2bcc"
     )
     assert receipt["dispatch_crash_replay"]["acceptance_digest"] == (
-        "38e42503ea5426cbf82684f6704ae1989d46de6fe5bd10cbeec650bac45fb551"
+        "a3beaf6a567915e9c1c184b55247f14c151d6e7cf874e82965c281c87156be5a"
     )
     assert receipt["happy_path"]["acceptance_digest"] == (
-        "7a9c987d722816502bf1c5a9254872328aaca01db0a52937ae1822b9e5622ee7"
+        "aee0738902c6839d9c98622a00c718643ad6ab648c5f2954f4f839086ef7d104"
     )
     assert receipt["repair_path"]["acceptance_digest"] == (
-        "cfa81f98c2b8cf30f5eda5a4a98276a1fadc7e6e9dcaa65573f312753f5b7c3f"
+        "235fd205730dc7c76f3b52519e89e4971d508d3c13fc765488813c4dd134b851"
     )
     assert receipt["void_replacement"]["acceptance_digest"] == (
-        "63b4f2a845884aef0ecbde055236b85cf06ea2dcec1cf4332ebed88d3dc28051"
+        "52c4c2820c7db353380965544480c65d057d5ca8566584c880222a7b36419fb8"
     )
     assert receipt["cycle"]["acceptance_digest"] == (
-        "88ab6c7621304c174d9f2e0ac43a98d8d71bfa4fdb45528fda802700bf640e66"
+        "de01a0e61bd21db927684ccf5622e856bd5a18306a7fd45b8769e7c8b9dbb89a"
     )
     assert receipt["tx9"]["acceptance_digest"] == (
         "9a43476a06fb3ecc4351b96d5646c7b0e521fd30092c3882bc5e8d4532825585"
@@ -4247,7 +4247,7 @@ def test_fph0_v3_refuses_caller_union_collision(
 
 
 def test_fph0_d7_composition_and_v2_constant_are_byte_preserved():
-    assert executive_runtime.SCHEMA_VERSION == 5
+    assert executive_runtime.SCHEMA_VERSION == 6
     assert executive_runtime.V3_HOST_EXECUTION_BINDING_KEYS == (
         executive_runtime.V2_HOST_EXECUTION_BINDING_KEYS
         | {"work_placement_union"}
