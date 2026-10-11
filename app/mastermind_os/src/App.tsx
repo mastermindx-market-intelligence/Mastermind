@@ -15,6 +15,7 @@ import { useObservedConversation } from "./conversations/useObservedConversation
 import {
   OperationController,
   type OperationKind,
+  type OperationPointer,
   type OperationState,
 } from "./orchestration/operation-controller";
 import {
@@ -142,6 +143,25 @@ type WorkState =
   | { kind: "PENDING" }
   | { kind: "DOCUMENT"; document: WorkDocument }
   | { kind: "UNAVAILABLE"; reason: string };
+// Only a pointer is restored; drafts, callbacks and authority are never inferred
+// from durable storage. Recovery still goes through the controller's decoder.
+function isRetainedOperation(value: unknown): value is OperationPointer {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const pointer = value as Record<string, unknown>;
+  return Object.keys(pointer).every(key => ["operationKey", "kind", "targetKey"].includes(key)) &&
+    typeof pointer.operationKey === "string" && pointer.operationKey.length > 0 &&
+    typeof pointer.kind === "string" && ["launch", "message", "stop"].includes(pointer.kind) &&
+    (pointer.targetKey === null || typeof pointer.targetKey === "string");
+}
+type ReopenedOperation = {
+  binding: OrchestratorCommandBinding;
+  principalScope: string;
+  generation: string;
+  authRevision: number;
+  selectionSeq: number;
+  pointer: OperationPointer | null;
+  reason: "READING" | OperationState["reason"];
+};
 const display = (v: unknown, f = "Not established") =>
   typeof v === "string" && v ? v : f;
 const label = (v: unknown) => display(v, "UNKNOWN").replaceAll("_", " ");
@@ -1299,6 +1319,8 @@ export function App() {
     // static checking/PENDING_POINTER hold (a persisted pointer with no
     // recovery promise) is NOT busy — its recovery control stays usable.
     [recoverInFlight, setRecoverInFlight] = useState(false),
+    recoveryFlight = useRef(0),
+    [reopenedOperation, setReopenedOperation] = useState<ReopenedOperation | null>(null),
     previousAuth = useRef<string | null>(
       authState ? JSON.stringify(authState) : null,
     ),
@@ -1355,6 +1377,14 @@ export function App() {
   const ownerContext =
     signedIn && commandBinding ? readOwnerContext(commandBinding.port) : null;
   const commandReady = !!commandBinding && signedIn && !!ownerContext;
+  const commandSelectionRevision = selectionSeq.current;
+  const currentReopened = reopenedOperation && commandReady &&
+    reopenedOperation.binding === commandBinding &&
+    reopenedOperation.principalScope === ownerContext?.principalScope &&
+    reopenedOperation.generation === ownerContext?.generation &&
+    reopenedOperation.authRevision === authRevision &&
+    reopenedOperation.selectionSeq === selectionSeq.current
+      ? reopenedOperation : null;
   const canLaunch =
     commandReady &&
     !!commandView &&
@@ -1427,6 +1457,47 @@ export function App() {
       generation: ownerContext.generation,
     };
   }, [commandBinding, ownerContext?.principalScope, ownerContext?.generation]);
+  useEffect(() => {
+    // Discover the retained hint without invoking prepare, submit or even a
+    // status request. This is available before any launch catalog is loaded.
+    recoveryFlight.current++;
+    setRecoverInFlight(false);
+    setReopenedOperation(null);
+    if (!commandBinding || !ownerContext) return;
+    const binding = commandBinding;
+    const ctx = ownerContext;
+    const sequence = commandSelectionRevision;
+    const revision = recoveryFlight.current;
+    const slot = commandSlot.current;
+    // An in-memory action already owns its callback and recovery surface.
+    // Discovery must not create a second hold for that same route.
+    if (pendingCommand.current?.binding === binding) return;
+    const abort = new AbortController();
+    let cancelled = false;
+    const ownsDiscovery = () => {
+      const liveBinding = completeOrchestratorCommandBinding(window.MastermindMissionHost?.commandBinding);
+      const liveContext = liveBinding ? readOwnerContext(liveBinding.port) : null;
+      return !cancelled && recoveryFlight.current === revision && selectionSeq.current === sequence &&
+        window.MastermindMissionHost?.auth?.getState().status === "signed_in" &&
+        liveBinding === binding && liveContext?.principalScope === ctx.principalScope &&
+        liveContext.generation === ctx.generation && commandSlot.current === slot &&
+        (!pendingCommand.current || pendingCommand.current.binding !== binding) &&
+        slot?.controller.getState().status === "idle";
+    };
+    const identity = { binding, ...ctx, authRevision, selectionSeq: sequence };
+    setReopenedOperation({ ...identity, pointer: null, reason: "READING" });
+    void Promise.resolve().then(() => binding.store.read(ctx.principalScope, abort.signal)).then(value => {
+      if (!ownsDiscovery()) return;
+      if (value === null) setReopenedOperation(null);
+      else if (isRetainedOperation(value)) setReopenedOperation({ ...identity, pointer: value, reason: "PENDING_POINTER" });
+      else setReopenedOperation({ ...identity, pointer: null, reason: "MALFORMED_POINTER" });
+    }).catch(() => {
+      if (ownsDiscovery()) setReopenedOperation({ ...identity, pointer: null, reason: "LOCAL_UNAVAILABLE" });
+    });
+    return () => { cancelled = true; abort.abort(); };
+  }, [commandBinding, ownerContext?.principalScope, ownerContext?.generation,
+    authRevision, commandSelectionRevision, selection?.workRef, selection?.rootJobId]);
+  useEffect(() => () => { commandSlot.current?.controller.invalidate(); recoveryFlight.current++; }, []);
   const currentResultContext = useRef(resultContext);
   currentResultContext.current = resultContext;
   const resultController = useRef<AbortController | null>(null);
@@ -1480,6 +1551,9 @@ export function App() {
         }
         setHeldKind(null);
         setCommandRefusal(null);
+        setReopenedOperation(null);
+        recoveryFlight.current++;
+        setRecoverInFlight(false);
         bumpInvalidation();
         // Invalidate rendered and in-flight source data at the notification,
         // not after replacement reads resolve or a passive effect runs.
@@ -2198,6 +2272,12 @@ export function App() {
       onComplete({ status: "refused" });
       return;
     }
+    if (currentReopened) {
+      // An unreadable store is not evidence of absence. Only a successful
+      // empty read admits an ordinary new command.
+      onComplete({ status: "refused" });
+      return;
+    }
     if (pendingCommand.current) {
       // Another action is already held for this composition: refuse the NEW
       // callback exactly once so its own guard releases immediately. The
@@ -2236,6 +2316,7 @@ export function App() {
       presentationSeq: commandPresentation.current.seq,
       complete: onComplete,
     };
+    setReopenedOperation(null);
     setHeldKind(kind);
     void Promise.resolve()
       .then(() => controller.begin(intent))
@@ -2265,12 +2346,52 @@ export function App() {
     // never prepares or submits. The control is disabled exactly while this
     // asynchronous recovery is in flight — not for a static held pointer.
     setRecoverInFlight(true);
+    const flight = ++recoveryFlight.current;
+    const restored = currentReopened;
+    const sequence = selectionSeq.current;
+    const ownsRecovery = () => {
+      const liveBinding = completeOrchestratorCommandBinding(window.MastermindMissionHost?.commandBinding);
+      const liveContext = liveBinding ? readOwnerContext(liveBinding.port) : null;
+      return recoveryFlight.current === flight &&
+        selectionSeq.current === sequence && commandSlot.current === slot &&
+        liveBinding === binding && window.MastermindMissionHost?.auth?.getState().status === "signed_in" &&
+        liveContext?.principalScope === ctx.principalScope && liveContext.generation === ctx.generation;
+    };
     void Promise.resolve()
-      .then(() => slot.controller.recover())
-      .then((state) => settleCommand(state, binding))
+      .then(() => ownsRecovery() ? slot.controller.recover() : null)
+      .then((state) => {
+        if (!state || !ownsRecovery()) return;
+        if (!restored || pendingCommand.current?.binding === binding) { settleCommand(state, binding); return; }
+        if (state.status === "accepted" || (state.status === "refused" && state.reason === "REFUSED") ||
+            (state.status === "idle" && state.reason === "RECOVER_NO_POINTER")) {
+          setReopenedOperation(null);
+          // Only the controller-qualified accepted launch can carry a
+          // mission selection, including when initial discovery had failed.
+          if (state.status === "accepted") {
+            const next = state.missionSelection ? normalizeSelection(state.missionSelection) : null;
+            if (next) open(next.workRef, next.rootJobId);
+          }
+        } else {
+          setReopenedOperation({ ...restored, pointer: state.pointer ?? restored.pointer, reason: state.reason });
+        }
+      })
       .catch(() => {})
-      .finally(() => setRecoverInFlight(false));
+      .finally(() => { if (recoveryFlight.current === flight) setRecoverInFlight(false); });
   };
+  const reopenedOperationControl = currentReopened ? (
+    <section className="card" aria-label="Retained operation">
+      <h2>{currentReopened.pointer ? "Retained operation" : "Operation recovery"}</h2>
+      {currentReopened.pointer ? (
+        <p>Original {currentReopened.pointer.kind} reference: <code>{currentReopened.pointer.operationKey}</code></p>
+      ) : <p>{currentReopened.reason === "READING" ? "Checking for a retained operation…" : "The retained operation could not be read. Check status before starting a new command."}</p>}
+      {currentReopened.reason !== "READING" ? (
+        <div className="form-actions">
+          <code>{currentReopened.reason}</code>
+          <button type="button" onClick={checkCommandStatus} disabled={recoverInFlight}>Check status</button>
+        </div>
+      ) : null}
+    </section>
+  ) : null;
   const commandBusy =
     commandStatus?.status === "submitting" ||
     commandStatus?.status === "checking";
@@ -2323,6 +2444,7 @@ export function App() {
               : "Launch choices are unavailable. Your draft is retained."
           }
           submitting={heldKind === "launch" && commandBusy}
+          blocked={!!currentReopened}
           error={
             currentRefusal?.kind === "launch"
               ? currentRefusal.reason
@@ -3143,6 +3265,7 @@ export function App() {
             </dl>
           </details>
         ) : null}
+        {reopenedOperationControl}
         {content}
         {d && missionNavigation.includes(active) && !conversationActive && (
           <section className="card">

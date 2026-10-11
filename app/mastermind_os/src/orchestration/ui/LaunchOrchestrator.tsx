@@ -51,6 +51,8 @@ export interface LaunchOrchestratorProps {
   profiles: readonly LaunchChoice[];
   /** Owner-side pending signal. Disables the form; never releases the guard. */
   submitting: boolean;
+  /** A retained operation or unreadable store prevents a new submission. */
+  blocked?: boolean;
   unavailableReason?: string;
   error?: string;
   onSubmit: (intent: LaunchForm, onComplete: LaunchCompletion) => void;
@@ -99,6 +101,7 @@ export function LaunchOrchestrator({
   projects,
   profiles,
   submitting,
+  blocked = false,
   unavailableReason,
   error,
   onSubmit,
@@ -168,6 +171,7 @@ export function LaunchOrchestrator({
   const goalBlank = draftGoal.trim().length === 0;
 
   const canSubmit =
+    !blocked &&
     !unavailableReason &&
     !launchPending &&
     !projectStale &&
