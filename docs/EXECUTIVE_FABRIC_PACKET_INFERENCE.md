@@ -21,6 +21,9 @@ identity before consuming first-use authority. Returning from a fabricated
 callback is not admission. A reconstructed Python object does not prove unused
 authority; the owner must refuse an already-used, uncertain or mismatched Attempt.
 The in-memory lock only prevents concurrent/repeated use of the current object.
+The callback is synchronous, returns `None` only after successful consumption,
+and raises on refusal or uncertainty. Boolean verdicts and un-awaited coroutine
+objects are rejected before provider forwarding.
 
 The kernel builds a single fixed `messages` request with one plain-text user
 packet, explicit model, token bound and streaming enabled. It offers no tool,
@@ -54,6 +57,13 @@ absence, shared-UID isolation, workspace access revocation or Worker assignment
 revocation. A noncooperative forwarder remains an outer-owner timeout/recovery
 obligation; the kernel does not create a timer service, task queue or process
 controller to disguise it.
+
+Cancellation observed before the owner claim avoids that claim. Once `execute()`
+has entered its active section, shutdown can race an in-flight owner claim;
+there is no claim rollback. A successful claim followed by cancellation before
+provider forwarding is recorded as `OWNER_CLAIMED_PROVIDER_NOT_INVOKED`, not an
+unconfirmed claim or reusable Attempt. Only the incumbent owner can reconcile
+that durable effect. Local cancellation cannot atomically revoke remote authority.
 
 ## Remaining composition
 

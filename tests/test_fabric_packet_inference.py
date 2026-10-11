@@ -151,6 +151,35 @@ def test_cancel_before_start_never_claims_or_forwards():
     assert not seen and not claims
 
 
+def test_shutdown_after_owner_claim_records_consumed_authority_without_provider_call():
+    claims = []
+    def fence(identity):
+        claims.append(identity)
+        obj.close()
+    obj, seen, _ = kernel(fence=fence)
+    with pytest.raises(PacketInferenceError): obj.execute()
+    receipt = json.loads(obj.forwarding_shutdown_receipt())
+    assert receipt["outcome"] == "OWNER_CLAIMED_PROVIDER_NOT_INVOKED"
+    assert len(claims) == 1 and not seen
+
+
+def test_shutdown_observed_before_owner_claim_does_not_consume_durable_authority():
+    obj, seen, claims = kernel()
+    original = obj._lock
+    class CloseAfterBegin:
+        first = True
+        def __enter__(self): original.acquire()
+        def __exit__(self, *_):
+            original.release()
+            if self.first:
+                self.first = False
+                obj.close()
+    obj._lock = CloseAfterBegin()
+    with pytest.raises(PacketInferenceError): obj.execute()
+    assert not claims and not seen
+    assert json.loads(obj.forwarding_shutdown_receipt())["outcome"] == "CLOSED_BEFORE_OWNER_CLAIM"
+
+
 def test_concurrent_cancel_and_reentry_do_not_claim_provider_cancel_or_cleanup():
     started, release = threading.Event(), threading.Event()
     calls, errors = [], []
@@ -189,6 +218,21 @@ def test_failed_durable_owner_claim_never_enters_provider_or_allows_replay():
     assert not seen
 
 
+@pytest.mark.parametrize("verdict", [False, True, "accepted"])
+def test_untyped_fence_verdict_does_not_grant_provider_access(verdict):
+    obj, seen, _ = kernel(fence=lambda _: verdict)
+    with pytest.raises(PacketInferenceError, match="OWNER_CLAIM_UNCONFIRMED"): obj.execute()
+    assert not seen
+
+
+def test_unawaited_fence_is_not_mistaken_for_completed_authority_consumption():
+    claims = []
+    async def fence(identity): claims.append(identity)
+    obj, seen, _ = kernel(fence=fence)
+    with pytest.raises(PacketInferenceError, match="OWNER_CLAIM_UNCONFIRMED"): obj.execute()
+    assert not claims and not seen
+
+
 def test_reconstructed_kernel_still_needs_original_owner_durable_first_use():
     # Inert owner fixture: production must use its actual existing Attempt fence.
     claimed = set()
@@ -223,3 +267,8 @@ def test_invalid_packet_contract_refuses_before_any_effect(changes):
 def test_protocol_or_attempt_cannot_be_reinterpreted(route):
     with pytest.raises(PacketInferenceError, match="FOREIGN_ATTEMPT_OR_PROTOCOL"):
         kernel(route=route)
+
+
+def test_invalid_route_has_finite_kernel_diagnostic():
+    with pytest.raises(PacketInferenceError, match="INVALID_INFERENCE_ROUTE"):
+        kernel(route=replace(ROUTE, route_generation="invalid"))

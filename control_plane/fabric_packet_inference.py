@@ -16,13 +16,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import hashlib
+import inspect
 import json
 import re
 import threading
 from typing import Callable
 
 from control_plane.attempt_inference_endpoint import (
-    AttemptInferenceBinding, InferenceForwardReceipt, InferenceForwardRefused,
+    AttemptInferenceBinding, InferenceEndpointContractError, InferenceForwardRefused,
     _validate_binding, _validate_receipt,
 )
 from control_plane.opencode_go_pooled_transport import ProviderRequest, _freeze_request
@@ -232,7 +233,10 @@ class PacketOnlyInference:
                  *, forward: Callable, claim_once: Callable):
         if type(contract) is not PacketInferenceContract:
             _refuse("INVALID_CONTRACT")
-        _validate_binding(route)
+        try:
+            _validate_binding(route)
+        except InferenceEndpointContractError:
+            raise PacketInferenceError("INVALID_INFERENCE_ROUTE") from None
         if route.protocol != "anthropic" or route.session_id != contract.attempt_id:
             _refuse("FOREIGN_ATTEMPT_OR_PROTOCOL")
         if not callable(forward) or not callable(claim_once):
@@ -273,7 +277,21 @@ class PacketOnlyInference:
 
         outcome = "OWNER_CLAIM_UNCONFIRMED"
         try:
-            self._claim_once(self._identity)
+            if self._cancel.is_set():
+                outcome = "CLOSED_BEFORE_OWNER_CLAIM"
+                _refuse(outcome)
+            claim_result = self._claim_once(self._identity)
+            # The incumbent synchronous fence acknowledges by returning None.
+            # A false verdict or un-awaited async callback is not admission.
+            if claim_result is not None:
+                if inspect.iscoroutine(claim_result):
+                    claim_result.close()
+                _refuse("OWNER_CLAIM_UNCONFIRMED")
+            # A successful original-owner claim is a known effect even when
+            # cancellation prevents the subsequent provider call. Never undo it
+            # or call it unconfirmed. close() may race an already-active claim;
+            # only the incumbent owner can reconcile its durable state.
+            outcome = "OWNER_CLAIMED_PROVIDER_NOT_INVOKED"
             if self._cancel.is_set():
                 _refuse("CLOSED_BEFORE_PROVIDER_FORWARD")
             outcome = "PROVIDER_EFFECT_UNRESOLVED"
