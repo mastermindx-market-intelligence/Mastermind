@@ -157,3 +157,69 @@ Verified: compatible protected Skillpack pin; isolated workspace acquired for th
 Next: implement and test the recovered S0 contract in new isolated source files, then advance the remaining source-capture/storage/API dependencies when their exact contracts and write surfaces are verified. Keep the broader Fabric integration as a separate vertical so a source-only adapter is never mislabeled as real worker execution. Do not repeat the prior full-plan archaeology or denied tool actions. Do not touch #633's DCR marker, #1293's workspace or any existing account/settlement data.
 
 No worker has been dispatched by this operation. No autonomous wake or background execution is claimed. No production, credential, licensing, trading or deployment setting has been changed.
+
+## 13. Material recovery amendment — use the existing VPS service-inference bridge
+
+The deeper targeted provider census recovered **Mastermind PR #1147**, operation `vps-fabric-llm-convergence-20261001-sol-001`, at current published head `b832ee7d67f7a5060d7088dcb5a257328728f041`. This is the existing non-CEO VPS-to-Executive/Subagent-Fabric foundation. It supersedes any interpretation of F1 above as a new bridge design. Reuse its existing client, service identity, sink admission, host binding, transport, I/O contracts and same-operation reconciliation. Do not copy them into another service or create a second load balancer.
+
+The PR description and `docs/VPS_INFERENCE_SERVICE_FOUNDATION.md` lag its latest published I/O/transport commits. The decisive cumulative frontier is issue comment `5966698046`, with current source verified at b832. It distinguishes three states:
+
+| State | Recovered work | What is not proven |
+|---|---|---|
+| Published source | Non-CEO `svc-vps-inference`, READ/RESEARCH A0 ceiling; service client and host-owned route binding; pure request/result/ref/document contracts; 60 KiB service-only ingress frame ceiling | Installed service, credentials, qualified workers, actual dispatch and Bot consumption |
+| Retained uncommitted candidate | Eight-path request-wiring patch, SHA-256 `9ff757d2b9348f71926a6f3aacdfd49f790d70f40759f2118b388fb4fd1cead5` | A full-green committed wiring candidate; one fixture edit was explicitly refused and remains held |
+| Unbuilt/unproven integration | Operation-bound direct result projection, installed service mount and host execution, call-site migration and streaming | Any claim that VPS reasoning is already Fabric-converged |
+
+The current source-custody owner lookup found no registered sol-lane workspace for #1147 and no matching worktree in this shared Git repository. That is not evidence that its retained dirty patch disappeared or that a replacement writer may overwrite it. Preserve the original patch/refusal frontier and reconcile its original source before reuse. Do not recreate the refused fixture change through another tool, account or worker. A historical author's name is not a live lease, but an unlocated dirty candidate is not a clean cutover either.
+
+### 13.1 Retire stale dependency gates, not real integration work
+
+Two blockers still written into #1147 are stale:
+
+- **#1112 merged October 3**, merge `4766adc84deae7efd6a4ced1fb727e77c224c766`. Its old open-PR shared-server custody is no longer a reason to wait. The actual service route still needs current-source composition, authentication and installation proof; the merge did not install that route.
+- **#1041 closed unmerged October 6**, head retained as reference `b3816bb75fa328ec6df1f92a77e8377016efdc8e`. Its terminal disposition, comment `6009530697`, says protected V1 already supplies the aggregation-root/planner/work/review/repair graph needed by the relevant downstream program. Do not reopen or import its rejected depth-2/domain/schema/provider-accounting layer merely to unblock the Bot. Use the existing protected V1 owners and current role-correct ingress requirements instead.
+
+The H4 downstream note on #1147 (comment `6012088566`) separately requires role-correct principal admission. A Bot service principal is not a CEO or a COO. Preserve that separation while sharing the existing authenticated app and Runtime owners; do not solve service admission by borrowing a human CEO token or pretending every inference is a CEO commission.
+
+### 13.2 Three workload classes, one shared execution estate
+
+**Pure/background inference** — classifier, extraction, bounded JSON reasoning, summaries and related non-tool application calls — uses **one ordinary role-null READ/RESEARCH Executive Job**. The host supplies the reviewed source/workspace/quota/profile binding; Model Router supplies lawful suitability; Capacity and Runtime claim the worker; the common Supervisor owns execution and validation. A planner/reviewer/aggregation hierarchy for every small JSON call would waste frontier capacity and delay the product. The service cannot select credentials, host, worker or a custom command.
+
+**Agentic PM/research turns** — bounded research with approved tools — use the existing governed COO/Operator/worker graph where that authority is actually admitted. Children remain read-only and return claims to the originating decision; they cannot inherit root book-submission tools. Existing original-parent, grant, budget, source and effect fences remain mandatory. No new hierarchy is required merely because a specialist uses a different model.
+
+**Interactive UI reasoning and chat** require a separately proven streaming consumer. #1147's terminal-result client is not a drop-in replacement for `/chat` SSE. Keep streaming state, disconnect/cancel semantics, source identity and result consumption explicit. Do not cut over an interactive surface to a terminal-only route and call it feature parity.
+
+### 13.3 Exact payload and result boundaries
+
+The published `control_plane/executive_inference_io.py` at b832 contains these existing contracts:
+
+- `mastermind.executive_service_inference_request.v1`: exactly `schema`, `system_prompt`, `input_text`, `max_output_chars`; **48 KiB canonical request limit**.
+- `mastermind.executive_service_inference_worker_result.v1`: dedicated `answer`, plus exact Job/Attempt/Worker binding and COMPLETED status; **128 Ki characters maximum requested output** and **192 KiB total worker-result limit**.
+- Existing direct result-reference and result-document schemas bind the answer to exact Job, Attempt, Worker and raw-result digest.
+- Service frames may be at most **60 KiB**. Legacy CEO ingress remains **8 KiB**. The local status-response path is **32 KiB**, whereas the public MCP/read plane is **256 KiB**.
+
+These are distinct ceilings, not interchangeable token budgets. A Unicode response can satisfy a character limit and still exceed its byte limit. A full 262,144-byte V3 snapshot does not fit inside the pure-inference request. Select explicitly scoped, bounded evidence sections and include their immutable snapshot/claim identity in the authorized payload; never silently truncate the snapshot or lose coverage denominators. Tool-enabled research may use a separately admitted read capability for additional sections.
+
+Do not overload the generic `JobPayload.summary` as the model answer or force a full prompt through the 4,000-character business objective. The retained wiring candidate binds the closed inference payload into existing immutable JOB_CREATED provenance; it does not add another prompt store. Status remains small and returns an exact result reference. Actual answers belong on the existing `executive_fabric` read plane through the direct service-inference view, not a fourth service tool, arbitrary child selector or result database.
+
+### 13.4 Capacity and failover acceptance
+
+The October 3 #1147 runtime report observed a stale AVAILABLE worker projection whose provider-readiness receipt was failed/expired, and a VPS using Claude fallback because Codex was unavailable. Those are dated observations, not current health claims. The later October 11 Executive read showing one AVAILABLE worker does **not** independently prove that provider readiness, service eligibility or fallback parity has since been repaired.
+
+A cutover must therefore prove current service-eligible capacity, not just a registered slot or installed binary. Require an actual economical-worker result and an actual justified frontier result through the same admitted service/agentic estate, followed by validated consumption at the originating Bot decision. Verify cost attribution, admitted budget, latency, cancellation/late-result handling and an allowed degraded path. Do not cut over the only working legacy reasoning path to a single unqualified worker or add a hidden direct-provider fallback behind the Fabric client.
+
+The targeted source census also recovered #715 (`9539c9647cdff5621e523c57c367b0403f276a57`) and #668 (`9a524adaa7624e497170f0869bad23bd98e65fcc`). #715 repairs false-green failed `submit_book` results and demonstrates why forwarding a tool error containing quota/auth keywords can cause an unsafe waterfall replay. #668 removes pool-ranking ledger scans from health availability. They already own relevant `cli_bridge`/`codex_bridge`/waterfall/test paths; this renewal does not duplicate those edits.
+
+Adversarial acceptance must include both returned and interrupted tool-capable turns: a quota/auth-looking error after possible tool effects cannot authorize another provider or key attempt. Review inner SDK/key rotation as well as the outer provider waterfall. A string classifier, a missing tool list or a changed provider is not effect reconciliation. This is an explicit open safety-review obligation, not a claimed new repair in #1357.
+
+### 13.5 Revised direct integration sequence
+
+1. Recover #1147's published source and original retained wiring/effect frontier; keep the refused edit held. Do not rebuild that work in #1357.
+2. Reconcile against current protected V1, removing the stale wait for closed #1041 and merged #1112 without removing real source/identity/installation gates.
+3. Complete the existing request binding and direct result-view composition under those existing owners; retain 48/60/32/192/256 KiB boundaries and exact result identity.
+4. Enroll the service-to-service identity through the existing Auth0/admin owner, with the distinct service scope and subject. Human tokens, new secret stores and CEO impersonation are prohibited.
+5. Prove freshly qualified worker/frontier capacity and resilience for this exact service profile. Do not interpret Runtime AVAILABLE as sufficient readiness.
+6. Migrate pure/background call sites first, agentic PM loops next, and interactive streaming separately. Preserve paper books, decision generation, source lineage and rollback evidence through each cutover.
+7. Accept only after installed exact-version proof, authenticated consumer journeys and real decision-to-result-to-paper-outcome evidence. Neither #1147 nor #1357 alone completes this commission.
+
+Current #1357 implementation status: snapshot contracts/store/inspector and calendar source repairs are built and locally tested; source capture, authenticated web integration, Fabric cutover and production acceptance remain incomplete. This amendment and the validation record are the current navigation points; the earlier census remains an explicitly dated source baseline.

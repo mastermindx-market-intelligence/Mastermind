@@ -17,8 +17,8 @@
     },
     {
       "path": "docs/superpowers/plans/2026-10-11-bot-autonomy-renewal-validation.md",
-      "bytes": 10673,
-      "sha256": "d03eb6a0e88a36d125786f6830b858593256d8e7514ed4933645a153032d0dbf"
+      "bytes": 12861,
+      "sha256": "24220d517012554c8961721e17358d5725f82e5cecffce1fc837fe50200fd6e9"
     },
     {
       "path": "docs/superpowers/plans/2026-10-11-bot-autonomy-source-capture.acceptance.py.txt",
@@ -27,8 +27,8 @@
     },
     {
       "path": "docs/superpowers/specs/2026-10-11-bot-autonomy-fabric-renewal.md",
-      "bytes": 22950,
-      "sha256": "16f06118086c9f71fb8111d969f2eb11bbd06981bc7d95776c4b009e2d6dc353"
+      "bytes": 33504,
+      "sha256": "3a5e2d77cc0f94595f93c003d0c30ab12d79801cb20fe70d27b2cf4e0f5c807b"
     },
     {
       "path": "portfolio/china_calendar.py",
