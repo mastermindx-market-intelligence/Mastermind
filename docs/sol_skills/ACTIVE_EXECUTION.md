@@ -42,6 +42,19 @@ an already-commissioned routine plan/build/test/repair cycle. Resolve ordinary r
 choices inside the assignment. Preserve any actual reserved decision and platform-required confirmation,
 authentication or user-consent boundary; do not treat those as administrative ceremony.
 
+**Already-saved website credentials are usable within the assignment.** The Chairman's standing
+instruction permits an assigned local Codex/Claude engineering or operations session to use
+already-provisioned browser sessions, password-manager autofill, or saved passwords through
+currently allowed OS/Keychain/tool paths to access a verified legitimate account necessary for
+that task. Do not re-request discretionary Chairman consent for each ordinary password use or
+login. Prefer secret-preserving autofill; do not echo, export, enumerate, share, store in
+transcripts or commit credentials/tokens. Match the exact origin and account to the active task;
+unrelated accounts and vault-wide extraction are out of scope. This does not bypass an actual
+credential/resource denial, passkey or Touch ID presence, MFA, CAPTCHA, fresh consent, site
+controls, or approvals reserved for sensitive account, spend, trading, release or deployment
+actions. If a real human-authentication gate remains, report the one precise required step and
+advance another independent authorized lane.
+
 **Responsibility survives a chat; a chat does not own work forever.** Separate the accountable role,
 current receiver assignment and exclusive execution/source lease. A historical title, old PR author,
 archived Web chat or Agent OS claim is not current liveness. Inspect fresh live claim, source-writer
