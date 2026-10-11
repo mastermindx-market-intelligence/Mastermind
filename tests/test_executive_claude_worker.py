@@ -2024,6 +2024,7 @@ def test_process_group_census_refuses_empty_error_for_existing_group(
 def test_process_group_census_accepts_darwin_state_flags(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")
     real_popen = subprocess.Popen
 
     def flagged_state_popen(
@@ -2040,6 +2041,38 @@ def test_process_group_census_accepts_darwin_state_flags(
         claude_worker._ProcessGroupMember(42, "S"),
         claude_worker._ProcessGroupMember(43, "Z"),
     )
+
+
+@pytest.mark.parametrize("state_token", ["D", "t", "X", "I"])
+def test_process_group_census_accepts_linux_state_codes(
+    monkeypatch: pytest.MonkeyPatch, state_token: str,
+) -> None:
+    """Linux ps state codes are not Darwin's state-code alphabet."""
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    real_popen = subprocess.Popen
+
+    def linux_state_popen(_argv: object, **kwargs: object) -> subprocess.Popen[bytes]:
+        return real_popen(("/usr/bin/printf", f"42 99 {state_token}\n"), **kwargs)
+
+    monkeypatch.setattr(claude_worker.subprocess, "Popen", linux_state_popen)
+    assert claude_worker._process_group_member_pids(99) == (
+        claude_worker._ProcessGroupMember(42, state_token),
+    )
+
+
+@pytest.mark.parametrize("state_token", ["?", "S!", "D+"])
+def test_process_group_census_refuses_invalid_linux_state_column(
+    monkeypatch: pytest.MonkeyPatch, state_token: str,
+) -> None:
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    real_popen = subprocess.Popen
+
+    def invalid_state_popen(_argv: object, **kwargs: object) -> subprocess.Popen[bytes]:
+        return real_popen(("/usr/bin/printf", f"42 99 {state_token}\n"), **kwargs)
+
+    monkeypatch.setattr(claude_worker.subprocess, "Popen", invalid_state_popen)
+    with pytest.raises(claude_worker.ClaudeProcessIdentityError):
+        claude_worker._process_group_member_pids(99)
 
 
 def test_exited_launch_pid_reuse_never_signals_foreign_group(
