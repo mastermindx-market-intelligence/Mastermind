@@ -351,6 +351,52 @@ selection, dynamically current callers, exact recipients, no mixed downgrade,
 domain-change refusal, bad owner/projector rejection, stale principal and
 native generation refusal, and absence of transport-side effects.
 
+## Existing effect-owner COMMIT revalidation adapter (source only)
+
+`integrations/fabric_coordination_effect.py` introduces
+`HierarchyEffectOwnerGuard`: it accepts the original authenticated sender,
+original exact `ScopedSessionTarget`, and fixed topic **only from the
+accepted incumbent consultation request**. `verify_inside_owner_effect()`
+rechecks the *current* authenticated caller and recomputes the exact scoped
+Session Bridge target and authorized role/relation. It checks the original
+and current **grant_ref**, preventing a new dependency grant for the same
+recipient from silently inheriting an earlier consultation authorization.
+An expired current scope, revoked/replaced grant, rotated
+Runtime/native binding, changed tenant/project/role, or forged caller refuses
+under one opaque error code. An unchanged currently authorized edge remains
+valid across ordinary short-lived snapshot refreshes.
+
+The source-level target observation now preserves the internal
+`CoordinationDecision.grant_ref` **and a digest of the canonical grant's
+full owner-supplied payload**, without exposing either in public discovery.
+A replacement grant, even if it reuses the same reference but changes
+validity or approved project facts, cannot silently inherit an old request.
+Grant identity is tied to the incumbent approval owner; there is **no new
+grant issuance, permission store or sender-requested override**. Fresh
+short-lived organizational snapshots may renew during long bounded work:
+the effect guard independently rechecks the *new* current scope, while
+pinning the exact durable grant payload whenever a dependency grant is
+needed. It does not require every subsequent reply to finish before the
+initial 30-second observation expires.
+
+**Critical installation boundary:** The guard is a *verification hook*, not a
+commit writer, lock, atomic transaction, message queue, native prompt or
+provider delivery. It MUST run under the incumbent Dialogue/consultation
+owner's own active current-writer transaction immediately before its
+canonical durable message effect. The owning service also MUST verify the
+persisted consultation's requester/recipient/operation identity in that
+same transaction; a prior read-only target reference or this hook's
+successful return does not confer a reusable permission. The platform
+restriction on the production host/commit-owner source inspection remains
+unresolved; this additive adapter does **not** select or replace that owner.
+No current source fixture proves transaction atomicity or live consumption.
+
+Hermetic `tests/test_fabric_coordination_effect.py` covers original
+sender/recipient pinning, native/worker/mixed legitimate hierarchy edges,
+rotated principals/generations, revoked or replacement exact dependency
+grants, expired/widened scope, and the absence of any sending/commit method.
+This is source validation, not permission to bypass incumbent release gates.
+
 ## Verification at the current source milestone
 
 The current October 11 homogeneous-source increment passed **53 focused

@@ -593,3 +593,64 @@ Session Bridge target source regression proofs. MISSION_COMPLETE=false.
 Real blocker remains production authenticated organizational membership +
 commit-owner authorization selection, executable/native provider attention,
 and two distinct Ubuntu provider-consumed question/answer acceptance.
+
+## October 11 — incumbent effect-owner revalidation contract
+
+Continued same mission and registered source operation
+`fabric-peer-messaging-20261010` on
+`sol/web-fabric-peer-messaging-20261010`,
+`/Volumes/Mastermind/agent-workspaces/web/fabric-peer-messaging-20261010`.
+Prior verified pushed head was
+`511567f777b6ec8c1fef983400ed648763390aab`, remote/local matching
+and clean, PR #1318 still draft with requested independent reviewers
+`mastermindx-3` and `chriswong6031-creator`, no accepted review. Its
+hosted CI run `38131996892` was in progress at the last read. Compatible
+protected procedural pin reused `f381af6758533906865361373addbb0514f86d7d`,
+master subsequently advanced by unrelated commits.
+
+Added `integrations/fabric_coordination_effect.py`:
+`HierarchyEffectOwnerGuard.verify_inside_owner_effect()` is an
+**effect-owner-facing verification hook**, *not* an independent message
+transaction/writer, transport, endpoint or permission grant. The canonical
+existing effect owner must invoke it INSIDE its own live current-writer/
+authorization fence, and must separately verify durable consultation
+requester/recipient/operation identity under the same transaction.
+This source-only hook re-resolves the original exact recipient, checks
+current authenticated caller against original accepted sender, and
+requires unchanged recipient identity, role, relationship and dependency
+grant. An ordinary refreshed 30-second organizational observation may
+prolong a legitimate bounded task, but the current permission is ALWAYS
+re-read. A replaced, revoked, rotated or expired authority refuses.
+
+`ScopedSessionTarget` now retains an INTERNAL original grant_ref and
+sha256 of the entire owner-supplied `CoordinationGrant` payload.
+No grant token/digest is exposed in public `visible_targets()`.
+A same-ref grant payload mutation can no longer inherit old consultation
+admission. Retains one opaque refusal outcome and no provider-management
+send, native wake or worker creation.
+
+M2 targeted effect guard+target+host tests PID `49575` exited 0:
+**42 passed**, JUnit `/tmp/mmx-fabric-effect-guard-20261011.xml`.
+M2 initial broad consultation/Runtime/native/Session Bridge/Fabric suite
+PID `53708` completed exit 0 after 128.45 sec:
+**439 passed, zero failures/errors/skips**, JUnit
+`/tmp/mmx-fabric-effect-full-related-20261011.xml`.
+Subsequent narrow source fixes removed an incorrect permanent expiry
+pin and added same-reference grant-payload fingerprint validation:
+M2 targeted PID `63998` exited 0, **43 passed**,
+`/tmp/mmx-fabric-effect-grant-payload-20261011.xml`.
+Hosted new exact-head CI still required after publication; old broad suite
+was before this final narrow refinement. No installed sender/client, native
+provider live message, production host config change or source merge.
+
+Original platform-denied production host/commit inspection remains
+unrepeated and remains a lane-local gate; no alternate carrier or tool was
+used to obtain the denied action. Project/Company runtime owner has not
+acknowledged release in existing Slack thread. The independent existing
+release owner was notified of this dependency in #metaceo; notification
+does not establish ACK/START/installation.
+MISSION_COMPLETE=false; current result SOURCE_READY_WITH_EFFECT_GUARD.
+Next: typed Studio Git commit/push on the exact registered operation,
+hosted exact-head CI and independent code review; incumbent production
+host transaction binding and real mixed-provider two-Ubuntu question,
+reply and *consumption* acceptance after legitimate install.

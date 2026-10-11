@@ -8,12 +8,15 @@ messages, enroll or wake sessions, grant permissions, or create a target store.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
+import hashlib
+import json
 import re
 
 from control_plane.fabric_coordination_policy import (
     CoordinationActorIdentity, CoordinationIdentity, CoordinationNativeIdentity,
-    CoordinationRefused, CoordinationRole, authorize_coordination,
+    CoordinationRefused, CoordinationRole, CoordinationSnapshot,
+    authorize_coordination,
 )
 from control_plane.operator_harness_contract import runtime_binding_id_for
 from integrations.fabric_coordination_composite import (
@@ -40,6 +43,19 @@ def _refuse() -> None:
     raise ScopedTargetUnavailable("SCOPED_TARGET_UNAVAILABLE")
 
 
+def _grant_digest(scope: CoordinationSnapshot, grant_ref: str | None) -> str | None:
+    if grant_ref is None:
+        return None
+    matches = [grant for grant in scope.grants if grant.grant_ref == grant_ref]
+    if len(matches) != 1:
+        _refuse()
+    data = json.dumps(
+        asdict(matches[0]), sort_keys=True, separators=(",", ":"),
+        ensure_ascii=True, allow_nan=False,
+    ).encode("ascii")
+    return hashlib.sha256(data).hexdigest()
+
+
 @dataclass(frozen=True, slots=True)
 class ScopedSessionTarget:
     target_ref: str
@@ -48,6 +64,8 @@ class ScopedSessionTarget:
     relation: str
     evidence_digest: str
     valid_until: int
+    grant_ref: str | None = None
+    grant_digest: str | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -59,6 +77,13 @@ class ScopedSessionTarget:
             or type(self.evidence_digest) is not str
             or not re.fullmatch(r"[0-9a-f]{64}", self.evidence_digest)
             or type(self.valid_until) is not int
+            or (self.grant_ref is None) != (self.grant_digest is None)
+            or (self.grant_ref is not None
+                and (type(self.grant_ref) is not str
+                     or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}", self.grant_ref) is None))
+            or (self.grant_digest is not None
+                and (type(self.grant_digest) is not str
+                     or re.fullmatch(r"[0-9a-f]{64}", self.grant_digest) is None))
         ):
             _refuse()
 
@@ -203,6 +228,8 @@ class ScopedSessionTargetResolver:
                 permitted.append(ScopedSessionTarget(
                     ref, actor, scope.participant(actor, now=now).role,
                     decision.relation, evidence.evidence_digest, scope.valid_until,
+                    grant_ref=decision.grant_ref,
+                    grant_digest=_grant_digest(scope, decision.grant_ref),
                 ))
             # Recheck after both native/Runtime Session Bridge target projections:
             # an owner drift must not create an authorization snapshot.
