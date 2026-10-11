@@ -184,6 +184,16 @@ def test_runtime_factory_question_reply_and_consume_journey(tmp_path, monkeypatc
                     source.verify_parties(replace(parties, recipient=replace(
                         parties.recipient, binding_id="bind-" + "0" * 40,
                     )))
+                # The persisted recipient surface is immutable across an
+                # unchanged Attempt/binding: a provider remap cannot inherit
+                # the older consultation.
+                with monkeypatch.context() as patched:
+                    patched.setattr(
+                        "integrations.fabric_coordination_runtime.reasoning_surface_for_provider",
+                        lambda provider: "claude",
+                    )
+                    with pytest.raises(RuntimeCoordinationUnavailable):
+                        source.verify_parties(parties)
                 receiver = gateway(1, _dispatch(seed, bindings, socket, caller_index=1))
                 read = await receiver.call("company.consultation", {"consultation_ref": reference})
                 assert read["ok"] is True, read

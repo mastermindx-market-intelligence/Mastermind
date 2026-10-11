@@ -203,6 +203,22 @@ class RuntimeCoordinationObservationSource:
                 or pinned["binding_generation"] != parties.recipient.binding_generation
             ):
                 _refuse()
+            # The same epoch/generation cannot silently switch providers:
+            # pin the consultation's recipient reasoning surface to the
+            # incumbent current harness owner as well as the stored binding.
+            with self.runtime.store.read() as connection:
+                facts = self.runtime.current_harness_binding_source(
+                    parties.recipient.attempt_id, connection=connection,
+                )
+            if (
+                facts.attempt_id != parties.recipient.attempt_id
+                or runtime_binding_id_for(facts.attempt_id, facts.session_epoch_id)
+                != parties.recipient.binding_id
+                or facts.generation_number != parties.recipient.binding_generation
+                or reasoning_surface_for_provider(facts.provider)
+                != pinned["reasoning_surface"]
+            ):
+                _refuse()
             return parties
         except RuntimeCoordinationUnavailable:
             raise

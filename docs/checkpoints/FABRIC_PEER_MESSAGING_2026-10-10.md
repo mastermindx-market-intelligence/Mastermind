@@ -366,3 +366,37 @@ BUILT_NOT_PROVEN and MISSION_COMPLETE=false; native/worker real delivery
 remains held by missing authenticated production wiring/native transport
 acceptance, and earlier explicit action-specific source inspection denials
 remain unretried.
+
+## October 11 — current harness/provider surface is pinned to consultation
+
+Previous native/Runtime revalidation race repair was committed/pushed through
+the original Studio Git carrier at
+`491c7b21039cac30b313799f3f1aca404fea0cf4`, matching remote and
+clean. The current next source delta, still to be published when this paragraph
+was written, hardens `RuntimeCoordinationObservationSource.verify_parties`:
+after validating the persisted consultation recipient actor, RuntimeBinding ID
+and generation, read the incumbent **current** harness facts. Require exact
+recipient Attempt, epoch-derived binding ID, generation and persisted
+`recipient_binding.reasoning_surface` matching the current provider mapping.
+A provider remap that fails to rotate the original binding can no longer
+claim a prior consultation through this source path.
+
+Added a negative provider-surface drift assertion inside the actual
+Runtime/dispatcher/local socket question/answer integration test. The single
+targeted journey passed, then dependent `runtime+composite+journey` campaign
+PID `70528` completed exit code **0**, JUnit
+`/tmp/mmx-fabric-recipient-surface-regression-20261011.xml`:
+**42 passed, 0 failures/errors/skips**. No installed host, worker,
+permission, native provider session, or fleet setting changed.
+Current production authenticated host selection and effect-owner COMMIT
+fence remain required; this reader validation is not atomic admission.
+Do not infer live cross-provider consumption from the fixture pass.
+
+Procedure pin: protected master
+`f381af6758533906865361373addbb0514f86d7d`,
+Skillpack schema v1/version 1.0.1/bootstrap 1.
+Same operation `fabric-peer-messaging-20261010`, same registered
+`sol/web-fabric-peer-messaging-20261010` workspace. Reconcile and publish
+only this known source delta via incumbent Studio typed Git; full PR hosted CI
+and independent review remain acceptance gates. The earlier explicit denied
+host/commit source-inspection action was not retried or routed elsewhere.

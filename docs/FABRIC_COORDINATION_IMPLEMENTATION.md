@@ -124,8 +124,11 @@ grants as well as Runtime identity evidence. Native handles and account labels
 are not projected.
 
 The factory reuses the existing hierarchy gateway and dispatcher. It validates
-caller membership, checks owner-supplied consultation parties against the actual
-consultation INTENT, and retains per-send Runtime revalidation. It requires the
+caller membership and checks owner-supplied consultation parties against the
+actual consultation INTENT, including the persisted recipient binding ID,
+generation **and reasoning surface** against the current admitted harness
+facts. A provider remap without a new binding cannot inherit an old question.
+Per-send Runtime revalidation remains in place. The factory requires the
 host's observed tool-schema digest rather than self-attesting a constant.
 
 This is not an organizational assignment issuer or a caller-authentication
