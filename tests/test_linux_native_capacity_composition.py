@@ -126,3 +126,21 @@ def test_extra_untrusted_capture_field_does_not_enter_closed_wire():
     reads["provider_credentials"] = lf.Read(b"secret\n")
     with pytest.raises(lf.ObservationError):
         composed(reads=reads)
+
+
+def test_real_linux_leaf_cpuset_missing_is_partial_not_fake_cpu_supply():
+    # Ubuntu1/2 unprivileged read-only census: cgroup v2 CPU/memory limits
+    # existed at each non-root level, but the leaf effective cpuset file did
+    # not. The collector cannot assert COMPLETE scope or fabricate a fallback.
+    scope = replace(fx.scope(), cpuset_effective=lf.Read(None, failure=lf.Reason.MISSING))
+    snapshot = composed(scope=scope)
+    assert snapshot["metrics"]["effective_cpu_capacity_millicores"] == {
+        "value": None, "null_reason": "MISSING"
+    }
+    assert snapshot["telemetry_status"] == "PARTIAL"
+    assert "effective_cpu_capacity_millicores" in snapshot["unknown_fields"]
+    projected = hc.project_native_host_capacity(
+        snapshot, expected_binding=reference.binding(), now_ms=100100, max_age_ms=5000
+    )
+    assert projected["admission_state"] == "NOT_EVALUATED"
+    assert projected["can_place_work"] is False
