@@ -226,6 +226,46 @@ production Session Bridge owner to implement and bind the corresponding
 accepted native dialogue consumer. No fixture or source join automatically
 publishes a new public tool or enables unsupported Claude wake.
 
+## Scoped Session Bridge exact-target discovery (source only)
+
+`integrations/fabric_coordination_targets.py` adds a **read-only**, opt-in
+`ScopedSessionTargetResolver` over the existing
+`RuntimeFabricTargetProjector` and `ClaudeNativeTargetProjector`.
+Its authenticated host-provided caller is evaluated against the current mixed
+native/Runtime evidence; exact current Session Bridge target references
+(`fabric_attempt:<digest>` and `claude:<digest>`) are shown only when
+the organization's existing hierarchy policy permits that advisory edge.
+It never constructs an alternate target registry or selects a newest session.
+
+Runtime target identity is tied to the current exact Job/Attempt/Worker,
+harness epoch-derived binding ID and generation. Native target identity is
+tied to the current session UUID, generation, host and independently attested
+principal through the composite source. A target's native/worker owner is
+rechecked, the organizational scope is re-observed, and exact target resolution
+has no fallback after rotation or revocation. After the second owner observation,
+a second Session Bridge projection must retain the exact target refs for every
+permitted recipient; a physical dialogue-carrier rotation that preserves the
+worker's Job/Attempt identity is still refused. Public projections omit native
+session UUID, principal reference, provider token, account, dialogue channel,
+thread and worktree coordinates. Unrelated or stale targets are not presented.
+
+This projection is **not automatically wired** into `session_targets` or
+`company.peers`. Existing `session_send` carries operational instruction
+semantics; merely filtering its target list would not turn it into a safe
+peer-consultation transport or fence a guessed direct send. Therefore this
+adapter implements **discovery and exact validation only**. The production
+authenticated host must still select and authenticate the caller, verify the
+advisory message contract and enforce the hierarchy at its *actual* canonical
+commit boundary. Neither a permitted target nor a return receipt is permission
+to change work assignments, spawn agents or grant sender control authority.
+Standalone native Codex/other provider management is not silently assumed
+from the existing Claude projector.
+
+The hermetic Session Bridge target tests use the actual temporary Runtime/OHF
+identity facts and the existing Runtime/Claude target projectors with fake
+management/physical carrier observations. These tests prove projection and
+stale/foreign/expired refusal, **not live provider delivery or acceptance**.
+
 ## Verification at the current source milestone
 
 The latest October 11 Runtime-join continuation recorded **577 passed, zero

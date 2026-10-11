@@ -400,3 +400,62 @@ Same operation `fabric-peer-messaging-20261010`, same registered
 only this known source delta via incumbent Studio typed Git; full PR hosted CI
 and independent review remain acceptance gates. The earlier explicit denied
 host/commit source-inspection action was not retried or routed elsewhere.
+
+## October 11 — scoped Session Bridge target discovery (read-only source)
+
+Current mission continuation via installed `mastermind-pro-execution` skill.
+Protected law pin remains `f381af6758533906865361373addbb0514f86d7d`
+(skillpack v1.0.1, bootstrap 1). Same original operation
+`fabric-peer-messaging-20261010`, workspace and branch. Last confirmed source
+head before this phase: `5ec3b94f6ce2e83d6cecb5d28cea063c48281710`,
+verified by the incumbent Studio Git publisher as matching local/remote,
+clean, published. CI run `38127872238` was still in progress at the
+repository test gate during initial observation; no accepted independent
+review or installed deployment was asserted.
+
+Source addition `integrations/fabric_coordination_targets.py`: a *read-only*
+`ScopedSessionTargetResolver` composes canonical
+`CompositeCoordinationObservationSource`, incumbent
+`RuntimeFabricTargetProjector`, and `ClaudeNativeTargetProjector`.
+Authenticated host-owned caller identity is checked in the same scoped
+hierarchy policy. Only exact owner-attested `fabric_attempt:<digest>` and
+`claude:<digest>` Session Bridge target refs are disclosed; unrelated
+native sessions and out-of-scope workers remain hidden. Runtime
+Job/Attempt/Worker + epoch-derived binding ID/generation must match.
+Native UUID/host/generation/principal must match the preexisting native
+management/verified-principal owner. Scope is reread after target
+enumeration; exact permitted refs are enumerated a second time to refuse
+carrier-only rotation. Exact re-resolution never falls back to a successor,
+and all failures have one opaque refusal code. Public target projection
+omits native session UUID, principal, provider credentials, dialogue
+carrier data and source workspace. This is not a new recipient registry,
+session writer, worker lifecycle owner or message service.
+
+Tests in `tests/test_fabric_coordination_targets.py` use current temporary
+Runtime identities and the existing canonical Session Bridge projectors,
+with fake native management and physical return records. First selected
+integration suite PID `44579` finished exit 0: **227 passed, 0 failures,
+0 errors, 0 skipped**, JUnit
+`/tmp/mmx-fabric-scoped-targets-regression-20261011.xml`.
+A narrower final source delta added the double target enumeration
+after the second owner observation, preventing a changed physical
+carrier target_ref from inheriting an unchanged worker identity.
+Final targeted suite PID `50140` exited 0: **12 passed, no failures/errors/
+skips**, JUnit `/tmp/mmx-fabric-target-rotation-20261011.xml`.
+
+**Capability boundary:** This module proves safe target discovery/source-level
+exact re-resolution, NOT target consumption, native message delivery,
+Company MCP enrollment, operational role authentication in production,
+atomic commit authorization or transport activation. Existing
+`session_send` is an operational instruction channel; simply filtering
+its public list cannot make direct sends safe advisory consultations.
+Do not auto-expose this projection as a complete native CEO/COO-to-worker
+message bridge. Production owner must select/admit this source, enforce
+its scope at actual message COMMIT, and attach an accepted advisory
+protocol/client through existing Dialogue/Session Bridge owners.
+
+No live provider call, source merge, installation, fleet setting or
+production release occurred in this phase. This additive source is
+ready for the original **typed Studio Git** commit/push and exact-head CI.
+The previously action-blocked production host/dispatcher inspection
+was not retried or moved to another carrier.
