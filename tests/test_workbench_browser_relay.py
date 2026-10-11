@@ -292,7 +292,8 @@ def test_client_disconnect_does_not_stop_relay(tmp_path, monkeypatch, phase, err
     or (sys.platform != "darwin" and not sys.platform.startswith("linux")),
     reason="Unix peer-PID credentials required",
 )
-def test_relay_refuses_same_uid_sibling_before_browser_dispatch(tmp_path):
+@pytest.mark.parametrize("refusal_reply", [True, False])
+def test_relay_refuses_same_uid_sibling_before_browser_dispatch(tmp_path, monkeypatch, refusal_reply):
     socket_path = tmp_path / "relay-peer-pid.sock"
     session = _CountingSession()
     now = {"value": 1000}
@@ -305,6 +306,15 @@ def test_relay_refuses_same_uid_sibling_before_browser_dispatch(tmp_path):
         expires_at_ms=2000,
         clock_ms=lambda: now["value"],
     )
+    if not refusal_reply:
+        original_write = relay._write_response
+
+        def close_without_refusal_reply(connection, value):
+            # A refusal may close before its response reaches the rejected peer.
+            if value.get("error") != "REQUEST_REFUSED":
+                original_write(connection, value)
+
+        monkeypatch.setattr(relay, "_write_response", close_without_refusal_reply)
     thread = threading.Thread(target=relay.serve_forever, daemon=True)
     thread.start()
     relay.wait_ready(timeout=3)
@@ -347,12 +357,15 @@ print(line.decode() if line else json.dumps({"transport_closed":True}))
         timeout=3,
         check=True,
     )
-    refused = json.loads(completed.stdout)
-    if "transport_closed" in refused:
-        assert refused == {"transport_closed": True}
-    else:
-        assert refused["ok"] is False
-        assert refused["error"] == "REQUEST_REFUSED"
+    def assert_refused(output):
+        refused = json.loads(output)
+        if "transport_closed" in refused:
+            assert refused == {"transport_closed": True}
+        else:
+            assert refused["ok"] is False
+            assert refused["error"] == "REQUEST_REFUSED"
+
+    assert_refused(completed.stdout)
     assert session.calls == 0
 
     authorized = relay_request(
@@ -378,7 +391,8 @@ print(line.decode() if line else json.dumps({"transport_closed":True}))
         [sys.executable, "-c", child_program, str(socket_path), json.dumps(snapshot_request)],
         capture_output=True, text=True, timeout=3, check=True,
     )
-    assert json.loads(sibling.stdout)["error"] == "REQUEST_REFUSED"
+    assert_refused(sibling.stdout)
+    assert session.calls == 1
     retained = relay_request(socket_path, {**snapshot_request, "request_id": "e" * 32}, timeout=2)
     assert retained["ok"] is True
     assert retained["result"]["isError"] is False
