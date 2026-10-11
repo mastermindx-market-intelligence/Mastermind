@@ -249,3 +249,100 @@ def test_other_installed_desktop_does_not_substitute_missing_selected_version(tm
     parent = q.ProcessInfo(101, 1, 501, str(app / "Contents" / "MacOS" / "Codex"))
     worker = q.ProcessInfo(102, 101, 501, "/opt/homebrew/bin/codex app-server")
     assert q._app_version([worker], {101: parent, 102: worker}) is None
+
+
+def test_process_output_is_enforced_during_read_and_child_is_reaped(monkeypatch):
+    """Oversized metadata is refused immediately; a runaway child cannot linger."""
+    import subprocess
+    import sys
+    import time
+
+    spawned = []
+    actual_popen = q.subprocess.Popen
+
+    def tracked(*args, **kwargs):
+        child = actual_popen(*args, **kwargs)
+        spawned.append(child)
+        return child
+
+    monkeypatch.setattr(q.subprocess, "Popen", tracked)
+    started = time.monotonic()
+    result = q._run_fixed(
+        [sys.executable, "-c",
+         "import sys,time;sys.stdout.buffer.write(b'x'*524288);"
+         "sys.stdout.flush();time.sleep(8)"],
+        byte_limit=1024,
+    )
+    duration = time.monotonic() - started
+    assert result is None
+    assert duration < 3.0
+    assert len(spawned) == 1
+    assert spawned[0].poll() is not None
+
+
+def test_process_deadline_reaps_quiet_child(monkeypatch):
+    import subprocess
+    import sys
+    import time
+
+    spawned = []
+    actual = q.subprocess.Popen
+    def tracked(*args, **kwargs):
+        child = actual(*args, **kwargs)
+        spawned.append(child)
+        return child
+
+    monkeypatch.setattr(q.subprocess, "Popen", tracked)
+    monkeypatch.setattr(q, "_RUN_TIMEOUT_SECONDS", 0.25, raising=False)
+    start = time.monotonic()
+    assert q._run_fixed(
+        [sys.executable, "-c", "import time;time.sleep(8)"],
+        byte_limit=1024,
+    ) is None
+    assert time.monotonic() - start < 2.0
+    assert len(spawned) == 1 and spawned[0].poll() is not None
+
+
+def test_bounded_subprocess_good_result_and_nonzero_exit():
+    import sys
+    assert q._run_fixed(
+        [sys.executable, "-c", "print('alpha')"], byte_limit=32
+    ) == "alpha\n"
+    assert q._run_fixed(
+        [sys.executable, "-c", "import sys;print('beta');sys.exit(5)"], byte_limit=32
+    ) is None
+
+
+def test_python_argv_cannot_impersonate_codex_app_server():
+    rows = [
+        q.ProcessInfo(101, 1, 501, "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT"),
+        q.ProcessInfo(102, 101, 501, "/usr/bin/python /tmp/codex app-server --listen stdio://"),
+        q.ProcessInfo(201, 1, 501, "/opt/homebrew/bin/codex app-server --listen unix:///tmp/s.sock"),
+    ]
+    out = _evaluate(rows=rows)
+    assert out["status"] == "UNQUALIFIED"
+    assert "DESKTOP_APP_SERVER_NOT_OBSERVED" in out["reasons"]
+
+
+def test_unrelated_app_cannot_impersonate_managed_unix_listener():
+    rows = [
+        q.ProcessInfo(101, 1, 501, "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT"),
+        q.ProcessInfo(102, 101, 501, "/opt/homebrew/bin/codex app-server --listen stdio://"),
+        q.ProcessInfo(201, 1, 501, "/usr/bin/python /tmp/codex app-server --listen unix:///tmp/s.sock"),
+    ]
+    out = _evaluate(rows=rows)
+    assert out["status"] == "UNQUALIFIED"
+    assert "MANAGED_SOCKET_OWNER_NOT_VERIFIED" in out["reasons"]
+
+
+def test_codex_executable_and_both_unix_argument_spellings():
+    assert q._app_server("/opt/homebrew/bin/codex app-server --listen stdio://")
+    assert q._managed_unix("/opt/homebrew/bin/codex app-server --listen unix:///tmp/x")
+    assert q._managed_unix("codex app-server --listen=unix:///tmp/x")
+    assert not q._managed_unix("/opt/homebrew/bin/codex app-server --listen stdio://")
+
+
+def test_real_codex_command_with_pre_subcommand_flags_is_eligible():
+    assert q._app_server("/opt/homebrew/bin/codex --config proto=1 --feature=f2 app-server --listen stdio://")
+    assert q._managed_unix("/opt/homebrew/bin/codex --config proto=1 app-server --listen unix:///tmp/server.sock")
+    assert not q._app_server("/usr/bin/python --config proto=1 codex app-server --listen unix:///tmp/server.sock")

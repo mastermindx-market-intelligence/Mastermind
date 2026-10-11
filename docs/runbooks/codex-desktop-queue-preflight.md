@@ -19,9 +19,13 @@ native App Server RPC, socket connection, account or thread discovery, queue
 insertion, turn start, session resume, database-content read, browser action,
 process restart or listener installation. It reads only process-parent
 metadata, owner-only socket metadata, selected process open-file identities
-and desktop app version metadata. It never returns PIDs, raw process arguments,
-paths, file names, conversation content, authentication material or transcript
-information. On non-macOS hosts it reports `UNSUPPORTED_OS`; it does not
+and desktop app version metadata. Fixed local process-inspection commands use a 6-second
+collection deadline with a hard stdout byte cap applied *while reading*;
+oversized or stalled children are killed/reaped, not buffered first.
+It checks that the executable is actually Codex instead of accepting an unrelated
+process whose arguments merely mention `codex app-server`. It never returns
+PIDs, raw process arguments, paths, file names, conversation content,
+authentication material or transcript information. On non-macOS hosts it reports `UNSUPPORTED_OS`; it does not
 attempt compatibility by choosing another transport.
 
 `TOPOLOGY_CANDIDATE_ONLY` requires:

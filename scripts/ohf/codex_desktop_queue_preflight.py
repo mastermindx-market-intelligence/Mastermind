@@ -12,14 +12,15 @@ import os
 from pathlib import Path
 import plistlib
 import re
+import select
 import stat
 import subprocess
+import time
 from dataclasses import dataclass
 from typing import Any, Collection, Mapping, Sequence
 
 SCHEMA = "mastermind.codex_desktop_queue_preflight.v1"
 _PS_LINE = re.compile(r"^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.+?)\s*$")
-_CODEX_BINARY = re.compile(r"(?:^|[/\s])codex(?:\s|$)", re.I)
 _DESKTOP_APP_MARKERS = (
     "/ChatGPT.app/Contents/MacOS/ChatGPT",
     "/Codex.app/Contents/MacOS/Codex",
@@ -27,6 +28,8 @@ _DESKTOP_APP_MARKERS = (
 _MAX_PS_BYTES = 2 * 1024 * 1024
 _MAX_FD_BYTES = 512 * 1024
 _MAX_FD_TARGETS = 5
+_RUN_TIMEOUT_SECONDS = 6.0
+_READ_CHUNK_BYTES = 16 * 1024
 
 
 @dataclass(frozen=True)
@@ -52,14 +55,25 @@ def parse_ps_rows(payload: str) -> list[ProcessInfo]:
 
 
 def _app_server(command: str) -> bool:
-    return bool(_CODEX_BINARY.search(command) and
-                re.search(r"(?:^|\s)app-server(?:\s|$)", command))
+    # Commands are observational metadata, not trusted identity. At minimum,
+    # require Codex to be the executable and app-server to be its subcommand,
+    # rather than a string appearing in some unrelated process argument.
+    words = command.split()
+    return bool(len(words) >= 2 and Path(words[0]).name.lower() == "codex"
+                and "app-server" in words[1:])
 
 
 def _managed_unix(command: str) -> bool:
-    return bool(
-        re.search(r"(?:^|\s)--listen(?:=|\s+)unix://", command)
-    )
+    if not _app_server(command):
+        return False
+    words = command.split()
+    for index, value in enumerate(words[2:], start=2):
+        if value.startswith("--listen=unix://"):
+            return True
+        if (value == "--listen" and index + 1 < len(words)
+                and words[index + 1].startswith("unix://")):
+            return True
+    return False
 
 
 def _desktop_direct_parent(process: ProcessInfo, table: Mapping[int, ProcessInfo],
@@ -153,16 +167,62 @@ def reduce_topology(
 
 
 def _run_fixed(args: list[str], byte_limit: int) -> str | None:
-    """Bound output and never print the raw command, paths, stderr or exceptions."""
-    try:
-        output = subprocess.run(
-            args, capture_output=True, timeout=6.0, check=False,
-        )
-        if output.returncode != 0 or len(output.stdout) > byte_limit:
-            return None
-        return output.stdout.decode("utf-8", errors="replace")
-    except (OSError, subprocess.TimeoutExpired, ValueError):
+    """Bound reads *during* collection, then always reap the exact child.
+
+    This code runs only fixed local metadata utilities under the caller's
+    principal. Stdout is read in small nonblocking chunks; stderr is discarded
+    rather than stored or returned. No captured unbounded payload is allowed.
+    """
+    if type(byte_limit) is not int or byte_limit <= 0:
         return None
+    try:
+        child = subprocess.Popen(
+            args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, close_fds=True,
+        )
+    except (OSError, ValueError):
+        return None
+    deadline = time.monotonic() + _RUN_TIMEOUT_SECONDS
+    chunks: list[bytes] = []
+    accepted_bytes = 0
+    try:
+        if child.stdout is None:
+            return None
+        fd = child.stdout.fileno()
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None
+            readable, _, _ = select.select([fd], [], [], remaining)
+            if not readable:
+                return None
+            # The extra byte is an overflow witness, not accepted data.
+            count = min(_READ_CHUNK_BYTES, byte_limit + 1 - accepted_bytes)
+            payload = os.read(fd, count)
+            if not payload:
+                break
+            accepted_bytes += len(payload)
+            if accepted_bytes > byte_limit:
+                return None
+            chunks.append(payload)
+        remaining = max(0, deadline - time.monotonic())
+        if child.wait(timeout=remaining) != 0:
+            return None
+        return b"".join(chunks).decode("utf-8", errors="replace")
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
+    finally:
+        if child.poll() is None:
+            try:
+                child.kill()
+            except OSError:
+                pass
+        try:
+            child.wait(timeout=2.0)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        if child.stdout is not None:
+            child.stdout.close()
 
 
 def _lsof_paths(pid: int) -> list[str] | None:
