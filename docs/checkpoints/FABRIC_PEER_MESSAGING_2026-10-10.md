@@ -139,3 +139,61 @@ stale/foreign/revoked/replayed rejection and verify no extra task is spawned.
 Do not replay research, relax SDK isolation, infer roles from owner_seat/model
 names, copy synthetic FixtureOwner into production, self-attest capabilities,
 claim a future worker is running, or label source tests as full fleet rollout.
+
+## October 11 Extra High continuation — local hardening, publication held
+
+The live Chairman continued the same operation and requested Extra High effort; the
+served reasoning mode is not independently attested. Current protected master pin
+`8d62a8571d2a6ad9da9d50e5e4624de6eecaac4c` supplies compatible Skillpack
+schema `mastermind.sol_skillpack.v1`, version `1.0.1`, bootstrap major 1.
+Master advanced ten commits after the PR base; changes include native Session
+Bridge reply composition. PR #1318 remains draft and unmerged; exact remote HEAD
+`1b0100fcf5ebc1dabb4357c868d9ce763e4d1af2`, latest known published.
+
+New local source change on this same registered worktree, NOT COMMITTED/PUSHED:
+`integrations/fabric_coordination_runtime.py` now checks the persisted
+consultation INTENT `recipient_binding.binding_id` and
+`recipient_binding.binding_generation` against the claimed recipient identity.
+Before this, comparing only actor job/attempt/worker refs could accept a successor
+binding generation for an old consultation. The stored binding retains its closed
+three-field shape including reasoning surface. No Runtime/transport owner was
+modified. `tests/test_fabric_coordination_runtime.py` now checks mismatched
+binding ID and generation within the existing real-dispatcher/local-socket test.
+
+Focused M2 test PID 53334 completed exit code 0; JUnit on M2
+`/tmp/mmx-fabric-binding-pin-20261011.xml` reports **24 tests passed, zero
+failures/errors/skips**, host `m2studio`. This is source/fixture proof, not a
+production cross-host native-consumption receipt. No worker was launched.
+
+Studio Direct `studio_git_publish_status` refused twice with
+`TYPED_GIT_PRECHECK_REFUSED`, `effect_state=NOT_APPLIED`. Exact directory,
+worktree git-pointer and source file metadata could be read; that does NOT clear
+the precheck or authorize an alternate Git carrier. Do not blindly retry the
+same action or commit through another transport. New local changes remain
+uncommitted on the previously verified registered workspace; treat GitHub HEAD
+as last remote durable code. No source commit/push, installation or fleet
+configuration was performed in this continuation.
+
+Current Executive state at `2026-10-11T08:38:49Z`: service 1.5.0 is
+`readonly`, 0 running Attempts, 3 QUEUED Jobs and 1 AVAILABLE Worker. A queued
+Job does not prove an active worker. Hosted exact-head CI run `38124794508`
+was last observed in-progress in its repository test gate; no review acceptance
+on record. Avoid unchanging status polling.
+
+Important distinction on current master:
+`integrations/session_bridge/claude_native.py` already provides a source-level
+exact-target Claude management attention adapter, and
+`integrations/session_bridge/installed.py` adds guarded native reply
+composition. Neither proves a bound installed Claude management owner;
+`control_plane/wake_transport.py` still marks `claude-code-session`
+unimplemented. Reuse that existing adapter rather than creating a competing
+provider message service. The runtime-backed Fabric adapter does not yet
+represent authenticated native CEO/COO sessions; do not infer CEO/COO identity
+from `owner_seat` or fabricate Job/Attempt identities.
+
+Current frontier: obtain supported original Git publication precheck recovery;
+reconcile exact worktree source and publish the two locally tested changes using
+the original source carrier. Then qualify exact-head hosted CI and independent
+review. The production host/authenticated membership/commit-boundary and native
+client enrollment lanes remain held by their actual action-specific gates.
+End-to-end two-Ubuntu/mixed-provider consumption is NOT PROVEN.

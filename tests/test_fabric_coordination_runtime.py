@@ -174,6 +174,16 @@ def test_runtime_factory_question_reply_and_consume_journey(tmp_path, monkeypatc
                 assert parties.recipient == owner.participants[1].identity
                 with pytest.raises(RuntimeCoordinationUnavailable):
                     source.verify_parties(replace(parties, requester=replace(parties.requester, worker_id="impostor")))
+                # The persisted consultation pins the original recipient epoch.
+                # A replacement binding may have the same Job/Attempt/Worker.
+                with pytest.raises(RuntimeCoordinationUnavailable):
+                    source.verify_parties(replace(parties, recipient=replace(
+                        parties.recipient, binding_generation=parties.recipient.binding_generation + 1,
+                    )))
+                with pytest.raises(RuntimeCoordinationUnavailable):
+                    source.verify_parties(replace(parties, recipient=replace(
+                        parties.recipient, binding_id="bind-" + "0" * 40,
+                    )))
                 receiver = gateway(1, _dispatch(seed, bindings, socket, caller_index=1))
                 read = await receiver.call("company.consultation", {"consultation_ref": reference})
                 assert read["ok"] is True, read

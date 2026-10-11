@@ -190,6 +190,19 @@ class RuntimeCoordinationObservationSource:
                     "attempt_id": identity.attempt_id, "worker_id": identity.worker_id,
                 }:
                     _refuse()
+            # Actor refs alone do not pin the physical recipient session: an
+            # unchanged Attempt can acquire a new binding epoch/generation.
+            # The incumbent INTENT stores the exact recipient RuntimeBinding.
+            # Never let a freshly admitted recipient claim an older question.
+            pinned = payload.get("recipient_binding")
+            if (
+                not isinstance(pinned, dict)
+                or set(pinned) != {"binding_id", "binding_generation", "reasoning_surface"}
+                or pinned.get("binding_id") != parties.recipient.binding_id
+                or type(pinned.get("binding_generation")) is not int
+                or pinned["binding_generation"] != parties.recipient.binding_generation
+            ):
+                _refuse()
             return parties
         except RuntimeCoordinationUnavailable:
             raise
