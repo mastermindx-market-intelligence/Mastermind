@@ -54,15 +54,19 @@ coordinator uses the current Executive ingress when serviceable, or the already 
 stable-handle adapter when its procedure permits it. Native Codex children are not a substitute for
 that paid-provider route merely because the native spawn tool is available or familiar.
 
-A native Sol leaf requires a concrete frontier-judgment or unique approved-access need, or established
-pre-effect unavailability of suitable paid workers. These are the three native-leaf exceptions;
-section 2's overhead and shortcut reasons justify direct principal work, not another native leaf.
-Record that brief reason and supporting current route/capability evidence in the existing
+A native child requires a genuinely needed reasoning/coordinator role. Never explicitly select Sol
+for routine implementation, tests, research or repair labor. Section 2's direct-work reasons justify
+principal retention, not native labor children. If Fabric has a real admission, host or permission
+blocker, perform permitted work directly or return that exact blocker; do not silently substitute
+native Sol labor. An optional native Executive integration gap does not block an admitted existing
+adapter route, and a QUEUED Executive receipt is not a running worker or permission to duplicate it
+through that adapter.
+
+Record the role decision and supporting current route/capability evidence briefly in the existing
 commission/checkpoint; no new form or approval round is required. One unavailable pool does not
 establish that every suitable paid pool is unavailable, and unknown capability is not an observed
 outage. Use existing evidence without probing refused routes or requiring a provider census.
-An optional native Executive integration gap
-does not qualify while an eligible accepted Fabric route is available. Preserve any existing worker
+Preserve any existing worker
 and unresolved effect; do not cancel, replace or move started work merely to change its token source.
 An explicit permission refusal remains attached to its exact operation and is never a fallback trigger.
 Apply the default at the next pre-effect delegation decision. Record an earlier native-for-paid
