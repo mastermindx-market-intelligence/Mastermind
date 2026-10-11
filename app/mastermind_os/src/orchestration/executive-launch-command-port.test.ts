@@ -386,9 +386,9 @@ describe("T3 makeLaunchIntent", () => {
     const form = { ...RESEARCH_FORM, goal: objective! };
     const intent = binding.makeLaunchIntent(form);
     expect(intent).toEqual({ kind: "launch", targetKey: WORKSTREAM, payload: expectedResearchPayload(form) });
-    expect(intent?.payload.objective).toContain("1. Messages are sent once");
-    expect(intent?.payload.objective).toContain("[MASTERMIND_ACCEPTANCE_CRITERIA_V1]");
-    expect(intent?.payload.objective).toContain("[/MASTERMIND_ACCEPTANCE_CRITERIA_V1]");
+    expect(intent?.payload.objective).toContain("Messages are sent once");
+    expect(intent?.payload.objective).toContain("[MASTERMIND_ACCEPTANCE_CRITERIA_V1:");
+    expect(intent?.payload.objective).toContain('["Messages are sent once","Reopen restores the original selection"]]');
     expect(Object.keys(intent?.payload ?? {}).sort()).toEqual(Object.keys(expectedResearchPayload(form)).sort());
     const pointer = binding.port.prepare(intent!);
     expect(pointer.operationKey).toBe(intent?.payload.operation_key);

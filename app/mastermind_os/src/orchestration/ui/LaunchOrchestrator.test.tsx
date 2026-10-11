@@ -85,10 +85,10 @@ describe("LaunchOrchestrator", () => {
       fireEvent.click(launchButton());
       expect(onSubmit).toHaveBeenCalledTimes(1);
       const submitted = onSubmit.mock.calls[0][0] as LaunchForm;
-      expect(submitted.goal).toContain("[MASTERMIND_ACCEPTANCE_CRITERIA_V1]\n");
-      expect(submitted.goal).toContain("\n[/MASTERMIND_ACCEPTANCE_CRITERIA_V1]");
-      expect(submitted.goal).toContain("1. One message is delivered");
-      expect(submitted.goal).toContain("2. Reopening does not duplicate it");
+      expect(submitted.goal).toContain(" [MASTERMIND_ACCEPTANCE_CRITERIA_V1:");
+      expect(submitted.goal).toContain('["One message is delivered","Reopening does not duplicate it"]]');
+      expect(submitted.goal).toContain("One message is delivered");
+      expect(submitted.goal).toContain("Reopening does not duplicate it");
     });
 
     it("blocks oversized or excessive criteria without dispatch", () => {
@@ -100,10 +100,30 @@ describe("LaunchOrchestrator", () => {
       expect(onSubmit).not.toHaveBeenCalled();
     });
 
+    it("encodes newlines for the real Executive normalizer without discarding paragraph boundaries", () => {
+      const onSubmit = vi.fn();
+      render(<LaunchOrchestrator {...makeProps({ onSubmit })} />);
+      fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Plan first\nImplement second" } });
+      fireEvent.click(launchButton());
+      const sent = onSubmit.mock.calls[0][0] as LaunchForm;
+      expect(sent.goal).toBe("Plan first\u2028Implement second");
+      expect(sent.goal).not.toContain("\n");
+    });
+
+    it("refuses unsupported controls even without optional criteria", () => {
+      const onSubmit = vi.fn();
+      render(<LaunchOrchestrator {...makeProps({ onSubmit })} />);
+      fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Goal\x00invalid" } });
+      expect(launchButton().disabled).toBe(true);
+      expect(screen.getByRole("alert")).toBeTruthy();
+      fireEvent.submit(goalForm());
+      expect(onSubmit).not.toHaveBeenCalled();
+    });
+
     it("refuses preexisting versioned markers in a goal before launch", () => {
       const onSubmit = vi.fn();
       render(<LaunchOrchestrator {...makeProps({ onSubmit })} />);
-      fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Report on [MASTERMIND_ACCEPTANCE_CRITERIA_V1] syntax" } });
+      fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Report on [MASTERMIND_ACCEPTANCE_CRITERIA_V1: syntax" } });
       fireEvent.change(screen.getByLabelText(/Acceptance criteria/), { target: { value: "Verify report" } });
       expect(launchButton().disabled).toBe(true);
       expect(screen.getByRole("alert")).toBeTruthy();
@@ -115,7 +135,7 @@ describe("LaunchOrchestrator", () => {
       const onSubmit = vi.fn();
       render(<LaunchOrchestrator {...makeProps({ onSubmit })} />);
       fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Goal" } });
-      for (const text of ["Report [/MASTERMIND_ACCEPTANCE_CRITERIA_V1]", "Bad\tcriterion", "Nested [MASTERMIND_ACCEPTANCE_CRITERIA_V1]"]) {
+      for (const text of ["Report [MASTERMIND_ACCEPTANCE_CRITERIA_V1:", "Bad\tcriterion", "Nested [MASTERMIND_ACCEPTANCE_CRITERIA_V1:"]) {
         fireEvent.change(screen.getByLabelText(/Acceptance criteria/), { target: { value: text } });
         expect(launchButton().disabled).toBe(true);
       }

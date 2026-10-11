@@ -69,23 +69,32 @@ const MAX_GOAL_BYTES = 4000;
 const MAX_ACCEPTANCE_ITEMS = 6;
 // Versioned human-readable section in the existing objective. This is a
 // requirement description, not signed proof or a product-acceptance verdict.
-const ACCEPTANCE_OPEN = "\n\n[MASTERMIND_ACCEPTANCE_CRITERIA_V1]\n";
-const ACCEPTANCE_CLOSE = "\n[/MASTERMIND_ACCEPTANCE_CRITERIA_V1]";
-/** Criteria are sent as part of the existing goal: no new command or lifecycle schema. */
+const ACCEPTANCE_OPEN = " [MASTERMIND_ACCEPTANCE_CRITERIA_V1:";
+const ACCEPTANCE_CLOSE = "]";
+/**
+ * Executive rejects Cc/Cs characters, including CR/LF, in its 4000-char
+ * objective. Preserve paragraph boundaries as U+2028 (Zl) and reject invalid
+ * controls/surrogates. Do not loosen or duplicate the Executive normalizer.
+ */
+function executiveGoal(goal: string): string | null {
+  const normalized = goal.trim().replace(/\r\n?|\n/g, "\u2028").replace(/\t/g, " ");
+  return /[\p{Cc}\p{Cs}]/u.test(normalized) ? null : normalized;
+}
+/** A versioned requirements suffix, not signed proof or a product verdict. */
 export function composeAcceptanceGoal(goal: string, criteria: string): string | null {
   const lines = criteria.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   if (lines.length > MAX_ACCEPTANCE_ITEMS || lines.some((line) =>
-    line.length > 500 || /[\x00-\x1f\x7f]/.test(line),
+    line.length > 500 || /[\p{Cc}\p{Cs}\u2028\u2029]/u.test(line),
   )) return null;
-  if (!lines.length) return utf8ByteLength(goal) <= MAX_GOAL_BYTES ? goal : null;
-  // If the goal already contains a structured criteria delimiter, the
-  // boundary could be ambiguous to an Executive-side reader. Refuse before
-  // creating the canonical operation key rather than silently truncating.
-  if ([goal, ...lines].some((part) =>
-    part.includes("[MASTERMIND_ACCEPTANCE_CRITERIA_V1]") ||
-    part.includes("[/MASTERMIND_ACCEPTANCE_CRITERIA_V1]"),
+  const normalizedGoal = executiveGoal(goal);
+  if (normalizedGoal === null) return null;
+  // The marker is reserved: a second occurrence makes the source ambiguous.
+  if ([normalizedGoal, ...lines].some((part) =>
+    part.includes("[MASTERMIND_ACCEPTANCE_CRITERIA_V1:"),
   )) return null;
-  const composed = `${goal.trim()}${ACCEPTANCE_OPEN}${lines.map((line, i) => `${i + 1}. ${line}`).join("\n")}${ACCEPTANCE_CLOSE}`;
+  const composed = lines.length
+    ? `${normalizedGoal}${ACCEPTANCE_OPEN}${JSON.stringify(lines)}${ACCEPTANCE_CLOSE}`
+    : normalizedGoal;
   return utf8ByteLength(composed) <= MAX_GOAL_BYTES ? composed : null;
 }
 
@@ -185,6 +194,7 @@ export function LaunchOrchestrator({
   const composedGoal = composeAcceptanceGoal(draftGoal, draftAcceptance);
   const acceptanceInvalid = draftAcceptance.trim().length > 0 && composedGoal === null;
   const goalTooLong = goalBytes > MAX_GOAL_BYTES;
+  const goalInvalid = !acceptanceInvalid && !goalTooLong && composedGoal === null;
   const goalBlank = draftGoal.trim().length === 0;
 
   const canSubmit =
@@ -196,7 +206,7 @@ export function LaunchOrchestrator({
     !selectedProfileChoice?.unavailableReason &&
     !goalBlank &&
     !goalTooLong &&
-    !acceptanceInvalid;
+    composedGoal !== null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -230,7 +240,9 @@ export function LaunchOrchestrator({
     ? `Goal exceeds ${MAX_GOAL_BYTES} byte UTF-8 limit.`
     : goalBlank
       ? "Goal is required."
-      : undefined;
+      : goalInvalid
+        ? "Goal contains an unsupported control or a reserved marker, or exceeds the serialized limit."
+        : undefined;
 
   return (
     <section className="card">
@@ -264,12 +276,17 @@ export function LaunchOrchestrator({
               rows={4}
               placeholder="Describe the objective for this launch…"
               disabled={launchPending}
-              aria-describedby={goalTooLong ? `${goalId}-length` : undefined}
+              aria-describedby={goalTooLong ? `${goalId}-length` : goalInvalid ? `${goalId}-invalid` : undefined}
               aria-invalid={!!goalError}
             />
             {goalTooLong && (
               <p id={`${goalId}-length`} className="field-error">
                 Goal exceeds the {MAX_GOAL_BYTES} byte UTF-8 ceiling.
+              </p>
+            )}
+            {goalInvalid && (
+              <p id={`${goalId}-invalid`} className="field-error" role="alert">
+                Remove unsupported control characters or reserved markers. The original objective must fit 4,000 UTF-8 bytes.
               </p>
             )}
           </div>
