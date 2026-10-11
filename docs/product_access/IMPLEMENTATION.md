@@ -55,3 +55,20 @@ The active Product MCP source now adds `integrations/product_access_mcp/deployme
 - [ ] Deployment authority selects the live resource policy/issuer, subject allowlist, actual process/Host/TLS/tunnel, and authenticates a real Web CEO account. All these remain separate gates and are unproven.
 
 Do not mistake a constructor or CI result for an installed or production-proven capability. The relevant remaining work is the first *real* authorized Web account → Product MCP read, followed by BrowserResource approval and actual protected-page visual evidence.
+
+## 2026-10-10 follow-on: inert Product MCP loopback process entrypoint
+
+The reviewed public-only Product MCP source is now accompanied by `scripts/mastermind_product_access_app.py`. This file is an explicit **existing-owner process composition**, not a launch daemon, installer, IdP, new token/session store or authorization grant.
+
+`--describe` returns the fixed Product MCP catalog/version/hash without loading a policy, touching an audit directory, connecting to a backend, or opening a socket. A real invocation requires ALL owner-selected coordinates: `--policy-file` (a canonical absolute, regular 0600 owner-only JSON policy, exact `product.observe` resource), `--audit-directory` (pre-existing private owner-owned directory), and `--port` (1–65535). `--host` is fixed to loopback IPv4 by default and supports IPv6 loopback; public binds refuse. The ingress Host is derived from the policy's exact HTTPS `/mcp` resource, never taken from a model argument or arbitrary CLI URL. Optional repeated `--allowed-origin` accepts only exact vetted origins.
+
+When an admitted operator *explicitly starts it*, it borrows `BoundedJwksCache` / `HttpxJwksFetcher`, the existing `JwtAuthenticator`, `DurableAuthAuditSink`, Product `create_deployment`, and the existing Uvicorn HTTP owner. It sets `proxy_headers=False`, `access_log=False`, a 16-client concurrency limit, and loopback-only listener binding. The durable audit owner is opened through its existing descriptor-fenced code and closed during shutdown. Source-only launcher and unit tests do not prove service installation or public account access.
+
+This source should reach separate *new-head* CI + security review **before** a release owner binds it. The prior host `pytest` attempt and production HTTPS probe were explicitly refused and are not retried. The correct operator install sequence remains: (1) approved Business OAuth issuer/resource/subject allowlist and JWK rotation, (2) actual existing host audit directory and isolated runtime, (3) loopback process launch and readiness, (4) existing TLS edge host/resource/metadata path routing and upstream denial tests, (5) ChatGPT plugin registration and each account's explicit OAuth consent, selection and real endpoint canary. Do not infer acceptance from code compilation, mock-Uvicorn tests, metadata discovery, or installation alone.
+
+Example *source-only* inspection:
+```bash
+python scripts/mastermind_product_access_app.py --describe
+```
+
+The host-side production invocation cannot be constructed by this source: its actual policy path, exact audience/issuer, allowed ChatGPT Origins, process identity, TLS route, audit directory, and explicit reviewer/operations approval are not yet established. Never replace those with `product.example` fixtures.
