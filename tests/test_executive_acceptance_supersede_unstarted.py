@@ -167,15 +167,27 @@ def test_absence_requires_existing_canonical_parent_and_propagates_access_denial
 
 
 @pytest.mark.skipif(m.sys.platform != 'darwin', reason='macOS OS alias proof')
-def test_actual_macos_var_alias_preserves_generic_absence_guard(tmp_path):
+def test_actual_macos_var_alias_preserves_generic_absence_guard(tmp_path, monkeypatch):
     canonical = tmp_path.resolve(strict=True)
     if not canonical.is_relative_to('/private/var'):
         pytest.skip('host temporary directory is outside the OS /var alias')
     logical = Path('/var') / canonical.relative_to('/private/var') / S
     with pytest.raises(m.MaintenanceError, match='canonical'):
         m._require_absent(logical)
-    m._require_runtime_acceptance_absent(logical)
+    # Verify the actual OS alias and production spelling without reading or
+    # modifying the live Runtime. The strict leaf check uses our own fixture.
+    physical = Path('/private/var/db/mastermind-executive/control/acceptance') / S
+    original = m._require_absent
+    observed = []
+    def observe(path):
+        assert path == physical
+        observed.append(path)
+        original(canonical/S)
+    monkeypatch.setattr(m, '_require_absent', observe)
+    m._require_runtime_acceptance_absent(Path('/var/db/mastermind-executive/control/acceptance') / S)
+    assert observed == [physical]
     assert not (canonical/S).exists()
+
 
 def _var_alias_fixture(tmp_path, monkeypatch, *, absolute=False):
     from ops.executive_os import autonomy_control as ac
@@ -204,6 +216,18 @@ def test_supersession_accepts_only_standard_os_var_alias(tmp_path, monkeypatch, 
     with pytest.raises(m.MaintenanceError, match='canonical'):
         m._require_absent(alias/'db'/'mastermind-executive'/'control'/'acceptance'/S)
 
+
+
+@pytest.mark.parametrize('relative', [
+    'db/other/control/acceptance/' + S,
+    'db/mastermind-executive/control/acceptance/not-a-sha',
+    'db/mastermind-executive/control/acceptance/' + S.upper(),
+])
+def test_os_alias_exception_is_limited_to_exact_runtime_acceptance(tmp_path, monkeypatch, relative):
+    _, alias, physical = _var_alias_fixture(tmp_path, monkeypatch)
+    (physical/relative).parent.mkdir(parents=True, exist_ok=True)
+    with pytest.raises(m.MaintenanceError, match='canonical'):
+        m._require_runtime_acceptance_absent(alias/relative)
 
 @pytest.mark.parametrize('fault', [
     'unexpected-target', 'normalized-target', 'alias-directory', 'untrusted-owner',

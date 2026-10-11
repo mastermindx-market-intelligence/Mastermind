@@ -701,7 +701,9 @@ def _require_absent(path: Path) -> None:
 
 def _require_runtime_acceptance_absent(path: Path) -> None:
     """Admit only the OS /var alias at the trusted Runtime absence-check seam."""
-    if sys.platform != "darwin" or not path.is_relative_to(_MACOS_VAR_ALIAS):
+    expected_parent = _MACOS_VAR_ALIAS / "db/mastermind-executive/control/acceptance"
+    if (sys.platform != "darwin" or path.parent != expected_parent
+            or _SHA.fullmatch(path.name) is None):
         _require_absent(path)
         return
     alias_info = _MACOS_VAR_ALIAS.lstat()
