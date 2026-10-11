@@ -2167,6 +2167,31 @@ _CAP_S1_PYTEST_SOURCE_MODULES = (
         "control_plane.operator_harness_contract",
         "control_plane/operator_harness_contract.py",
     ),
+    # Explicit transitive import closure for isolated pytest bootstrap.
+    # The child imports these modules during the eight pinned top-level
+    # imports; hash-binding only the top-level files allowed mutable
+    # dependencies to execute without a source-row identity.
+    ('common', 'common/__init__.py'),
+    ('common.agent_dialogue_consultation_contract', 'common/agent_dialogue_consultation_contract.py'),
+    ('common.agent_dialogue_contract', 'common/agent_dialogue_contract.py'),
+    ('common.agent_dialogue_contract_v2', 'common/agent_dialogue_contract_v2.py'),
+    ('common.commission_ref', 'common/commission_ref.py'),
+    ('common.company_consultation_host_contract', 'common/company_consultation_host_contract.py'),
+    ('common.redaction', 'common/redaction.py'),
+    ('control_plane', 'control_plane/__init__.py'),
+    ('control_plane.executive_orchestration_principal', 'control_plane/executive_orchestration_principal.py'),
+    ('control_plane.executive_orchestration_result', 'control_plane/executive_orchestration_result.py'),
+    ('control_plane.executive_peer_identity', 'control_plane/executive_peer_identity.py'),
+    ('control_plane.executive_process_identity', 'control_plane/executive_process_identity.py'),
+    ('control_plane.flags', 'control_plane/flags.py'),
+    ('control_plane.native_company_receipt', 'control_plane/native_company_receipt.py'),
+    ('control_plane.visible_turn_projection', 'control_plane/visible_turn_projection.py'),
+    ('control_plane.worker_browser_b1', 'control_plane/worker_browser_b1.py'),
+    ('scripts', 'scripts/__init__.py'),
+    ('scripts.ohf', 'scripts/ohf/__init__.py'),
+    ('scripts.ohf.fixtures', 'scripts/ohf/fixtures/__init__.py'),
+    ('scripts.ohf.redaction', 'scripts/ohf/redaction.py'),
+
 )
 _CAP_S1_PYTEST_BOOTSTRAP = r'''import hashlib
 import importlib
