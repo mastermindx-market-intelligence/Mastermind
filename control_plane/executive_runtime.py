@@ -19396,7 +19396,7 @@ class OperatorHarnessRegistry:
             != attempt_row["execution_principal_snapshot_digest"]
             or seal["placement_snapshot_digest"]
             != attempt_row["placement_snapshot_digest"]
-            or seal["policy_sha"] != _job_coo_policy(connection, str(row["job_id"])).policy_sha256
+            or seal["policy_sha"] != _job_coo_policy(connection, str(job_row["job_id"])).policy_sha256
         ):
             raise StateConflict(
                 "interactive active plan seal does not match its durable identity"
