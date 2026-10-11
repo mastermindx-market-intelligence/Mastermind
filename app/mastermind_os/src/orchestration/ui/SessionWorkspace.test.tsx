@@ -159,14 +159,14 @@ describe("SessionWorkspace", () => {
       expect(messageBox().disabled).toBe(true);
     });
 
-    it("disables the send textarea when turnBusy is true", () => {
+    it("allows drafting while turnBusy prevents sending", () => {
       render(<SessionWorkspace {...makeProps({ turnBusy: true })} />);
-      expect(messageBox().disabled).toBe(true);
+      expect(messageBox().disabled).toBe(false);
     });
 
-    it("disables the send textarea when sending is true", () => {
+    it("allows drafting while sending prevents another dispatch", () => {
       render(<SessionWorkspace {...makeProps({ sending: true })} />);
-      expect(messageBox().disabled).toBe(true);
+      expect(messageBox().disabled).toBe(false);
     });
   });
 
@@ -456,24 +456,24 @@ describe("SessionWorkspace", () => {
   });
 
   describe("busy turn display", () => {
-    it("shows disabled textarea when turnBusy is true", () => {
+    it("keeps the draft editable during a busy turn", () => {
       render(<SessionWorkspace {...makeProps({ turnBusy: true })} />);
-      expect(messageBox().disabled).toBe(true);
+      expect(messageBox().disabled).toBe(false);
     });
 
-    it("shows disabled textarea when sending is true", () => {
+    it("keeps the draft editable while sending", () => {
       render(<SessionWorkspace {...makeProps({ sending: true })} />);
-      expect(messageBox().disabled).toBe(true);
+      expect(messageBox().disabled).toBe(false);
     });
 
     it("textarea placeholder reflects busy state", () => {
       render(<SessionWorkspace {...makeProps({ turnBusy: true })} />);
-      expect(messageBox().placeholder).toBe("Wait for the current turn to complete.");
+      expect(messageBox().placeholder).toBe("Draft your next message…");
     });
 
     it("textarea placeholder reflects sending state", () => {
       render(<SessionWorkspace {...makeProps({ sending: true })} />);
-      expect(messageBox().placeholder).toBe("Wait for the current turn to complete.");
+      expect(messageBox().placeholder).toBe("Draft your next message…");
     });
 
     it("textarea placeholder reflects disconnected state", () => {
@@ -690,7 +690,7 @@ describe("SessionWorkspace host completion contract", () => {
       sendButton().click();
     });
     expect(pendingSendButton().disabled).toBe(true);
-    expect(messageBox().disabled).toBe(true);
+    expect(messageBox().disabled).toBe(false);
     await act(async () => {
       settle?.({ status: "refused" });
     });
@@ -803,8 +803,8 @@ describe("SessionWorkspace host completion contract", () => {
     await act(async () => {
       sendButton().click();
     });
-    expect(messageBox().disabled).toBe(true);
-    // The user force-edits the box while the send is still in flight.
+    expect(messageBox().disabled).toBe(false);
+    // The user edits the next draft while the prior send is still in flight.
     fireEvent.change(messageBox(), { target: { value: "edited meanwhile" } });
     await act(async () => {
       held?.({ status: "accepted" });
@@ -815,6 +815,30 @@ describe("SessionWorkspace host completion contract", () => {
       sendButton().click();
     });
     expect(screen.getByRole("button", { name: "Sending…" })).toBeTruthy();
+  });
+
+  it("late acceptance preserves an edited draft even when its wording matches the submitted text", async () => {
+    const user = userEvent.setup();
+    let held: SessionCompletion | undefined;
+    const onSend = vi.fn((_text: string, complete: SessionCompletion) => { held = complete; });
+    render(<SessionWorkspace {...base} sending={false} onSend={onSend} />);
+    await user.type(messageBox(), "Original");
+    await user.keyboard("{Enter}");
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(messageBox().disabled).toBe(false);
+    await user.type(messageBox(), " edited");
+    await user.clear(messageBox());
+    await user.type(messageBox(), "Original");
+    await user.keyboard("{Enter}");
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(pendingSendButton().disabled).toBe(true);
+    await act(async () => { held?.({ status: "accepted" }); });
+    expect(messageBox().value).toBe("Original");
+    expect(sendButton().disabled).toBe(false);
+    // Settlement does not send the newer draft; an explicit action is required.
+    expect(onSend).toHaveBeenCalledTimes(1);
+    await user.keyboard("{Enter}");
+    expect(onSend).toHaveBeenCalledTimes(2);
   });
 
   it("a late completion from session A cannot resolve or clear session B", async () => {
