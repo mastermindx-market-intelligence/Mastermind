@@ -98,7 +98,7 @@ class Binding:
     workstream: str
     macro_root: Path
     expected_macro_sha: str
-    expected_mastermind_sha: str
+    expected_reader_sha: str
     continuation_ref: str | None = None
 
     def __post_init__(self) -> None:
@@ -109,7 +109,7 @@ class Binding:
             raise ContextError("invalid_workstream")
         object.__setattr__(self, "workstream", key)
         object.__setattr__(self, "macro_root", _absolute(self.macro_root))
-        for value in (self.expected_macro_sha, self.expected_mastermind_sha):
+        for value in (self.expected_macro_sha, self.expected_reader_sha):
             if type(value) is not str or not _SHA.fullmatch(value):
                 raise ContextError("invalid_source_pin")
         if self.continuation_ref is not None:
@@ -229,7 +229,7 @@ def render_hook(raw_event: bytes, *, provider: str,
         return _envelope(text + "State: UNBOUND. No workstream context was requested or loaded.\n")
     text += (f"Assigned workstream reference: WS:{binding.workstream}\n"
              f"Declared Macro pin: {binding.expected_macro_sha}\n"
-             f"Declared reader pin: {binding.expected_mastermind_sha}\n")
+             f"Declared reader pin: {binding.expected_reader_sha}\n")
     if binding.continuation_ref:
         text += "Exact continuation reference (not read by this hook): " + binding.continuation_ref + "\n"
     else:

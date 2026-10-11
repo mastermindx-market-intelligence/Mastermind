@@ -130,3 +130,17 @@ def test_fragment_cannot_smuggle_control_fields(extra):
     fragment["hooks"]["SessionStart"][0]["hooks"][0].update(extra)
     with pytest.raises(IntegrationConflict):
         compose_fragment({}, fragment)
+
+
+@pytest.mark.parametrize("provider", ["codex", "claude"])
+def test_bound_nonhydrating_cli_retains_public_pin_argument(provider):
+    output = invoke("--provider", provider, "--workstream", "EXAMPLE-CONTEXT",
+                    "--macro-root", "/approved/Macro",
+                    "--expected-macro-sha", "a" * 40,
+                    "--expected-mastermind-sha", "b" * 40,
+                    input=b'{"hook_event_name":"SessionStart","source":"startup"}')
+    assert output.returncode == 0 and output.stderr == b""
+    context = json.loads(output.stdout)["hookSpecificOutput"]["additionalContext"]
+    assert "ORIENTATION_ONLY" in context
+    assert "Declared reader pin: " + "b" * 40 in context
+    assert "CANONICAL_PAYLOAD_INCLUDED" not in context

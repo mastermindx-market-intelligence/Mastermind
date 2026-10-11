@@ -43,7 +43,7 @@ class CanonicalBootReader:
 
     def __call__(self, binding: Binding, budget: int, timeout: float) -> ReaderResult:
         try:
-            if self.git_sha(self.root) != binding.expected_mastermind_sha:
+            if self.git_sha(self.root) != binding.expected_reader_sha:
                 return ReaderResult(False, reason="reader_source_pin_mismatch")
             # Macro exact root/pin/record provenance and reader settlement are owned by #1273.
             args = canonical_argv(binding, compiler_budget=budget, timeout=timeout)
@@ -57,7 +57,7 @@ class CanonicalBootReader:
                 return ReaderResult(False, reason="canonical_cli_incompatible")
             if type(code) is not int or code != 0:
                 return ReaderResult(False, reason="canonical_read_failed")
-            if self.git_sha(self.root) != binding.expected_mastermind_sha:
+            if self.git_sha(self.root) != binding.expected_reader_sha:
                 return ReaderResult(False, reason="reader_source_drift")
             raw = output.bytes()
             if len(raw) > MAX_READER_BYTES:

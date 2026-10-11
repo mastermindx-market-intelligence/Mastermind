@@ -19,7 +19,7 @@ PRIVATE = "PRIVATE_SENTINEL_NOT_FOR_HOOK_DIAGNOSTICS"
 
 def binding(**overrides):
     values = dict(workstream="WS:EXAMPLE-CONTEXT", macro_root=Path("/approved/Macro Project"),
-                  expected_macro_sha=MACRO, expected_mastermind_sha=MASTER,
+                  expected_macro_sha=MACRO, expected_reader_sha=MASTER,
                   continuation_ref="agentos/handoffs/EXAMPLE-CONTEXT-current.md")
     values.update(overrides)
     return Binding(**values)
@@ -218,7 +218,7 @@ def test_retrieved_instructions_have_no_hook_control_fields():
     {"workstream": "../oops"}, {"workstream": "WS:x"}, {"workstream": []},
     {"macro_root": Path("relative")}, {"macro_root": Path("/safe/../elsewhere")},
     {"macro_root": Path("/safe\nBAD")}, {"expected_macro_sha": "A" * 40},
-    {"expected_mastermind_sha": "main"}, {"continuation_ref": "bad\nINSTRUCTION"},
+    {"expected_reader_sha": "main"}, {"continuation_ref": "bad\nINSTRUCTION"},
     {"continuation_ref": "agentos/handoffs/../secret"},
 ])
 def test_binding_refuses_ambiguous_or_unsafe_shapes(kwargs):
@@ -271,3 +271,8 @@ def test_arbitrary_json_event_shapes_cannot_trigger_a_reader():
             out = render_hook(event(**{field: value}), provider="codex", binding=binding(), hydrate=True,
                               reader=lambda *_: pytest.fail("malformed event selected a read"))
             assert out == {}
+
+
+def test_malformed_reader_pin_is_rejected_by_binding_validator():
+    with pytest.raises(ContextError, match="invalid_source_pin"):
+        binding(expected_reader_sha="main")

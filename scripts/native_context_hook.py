@@ -26,7 +26,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--workstream")
     result.add_argument("--macro-root", type=Path)
     result.add_argument("--expected-macro-sha")
-    result.add_argument("--expected-mastermind-sha")
+    result.add_argument("--expected-mastermind-sha", dest="expected_reader_sha")
     result.add_argument("--continuation-ref")
     result.add_argument("--hydrate", action="store_true")
     result.add_argument("--max-context-bytes", type=int, default=6000)
@@ -40,7 +40,7 @@ def parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     p = parser()
     args = p.parse_args(argv)
-    supplied = (args.workstream, args.macro_root, args.expected_macro_sha, args.expected_mastermind_sha)
+    supplied = (args.workstream, args.macro_root, args.expected_macro_sha, args.expected_reader_sha)
     if any(value is not None for value in supplied) and not all(value is not None for value in supplied):
         p.error("bound mode requires workstream, explicit Macro root, and both expected source pins")
     if (args.hydrate or args.continuation_ref) and not args.workstream:
@@ -53,7 +53,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     try:
         binding = (Binding(args.workstream, args.macro_root, args.expected_macro_sha,
-                           args.expected_mastermind_sha, args.continuation_ref)
+                           args.expected_reader_sha, args.continuation_ref)
                    if args.workstream else None)
         # Reject oversize input without parsing or using any transcript/cwd path.
         raw = sys.stdin.buffer.read(MAX_EVENT_BYTES + 1)
