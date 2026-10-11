@@ -459,3 +459,82 @@ production release occurred in this phase. This additive source is
 ready for the original **typed Studio Git** commit/push and exact-head CI.
 The previously action-blocked production host/dispatcher inspection
 was not retried or moved to another carrier.
+
+## October 11 — independent homogeneous actor scopes
+
+Mission remains end-to-end hierarchy-scoped peer messaging across project CEO,
+native COO, Fabric task operators and workers, reusing existing Company Dialogue
+and Session Bridge owners; DONE_WHEN requires actual two-Ubuntu/mixed-provider
+message receipt and consumption, strict hierarchy refusals, release/installation
+proof. **BUILT_NOT_PROVEN; MISSION_COMPLETE=false.**
+
+Protected law pin reused: `f381af6758533906865361373addbb0514f86d7d`,
+Skillpack 1.0.1/bootstrap major 1. Original registered operation
+`fabric-peer-messaging-20261010`, workspace
+`/Volumes/Mastermind/agent-workspaces/web/fabric-peer-messaging-20261010`,
+branch `sol/web-fabric-peer-messaging-20261010`.
+Last verified remote HEAD before this phase
+`5e0f2f41f5edf3b27d7d6d0460b3bd676c0c9408`, matching clean Studio
+source carrier, and exact-head hosted CI `38129036948` was SUCCESS.
+No independent PR review or installed fleet acceptance was reported.
+
+Source bug closed locally: `CompositeCoordinationObservationSource` requires
+both native and worker identities; zero current Runtime Attempts must not
+disable native CEO/COO peers, and zero native managers must not disable
+worker-only peers. Added `integrations/fabric_coordination_single.py`,
+a read-only **homogeneous** member projection using exactly one preexisting
+Runtime or native identity owner, refusing mixed/unknown mode rather than
+fallback on an unavailable identity owner. The existing
+`ScopedSessionTargetResolver` now accepts canonical mixed mode with both
+target projectors or a homogeneous mode with only the corresponding
+incumbent projector. Neither path sends, enqueues, changes approvals, or
+self-authenticates a caller.
+
+Native owner attestations now carry a sha256 digest of their **complete
+membership snapshot**, not only stable session UUIDs/revision: exact roles,
+projects, parentage, grants and observation window are bound to the proven
+native current session principal. Both homogeneous and mixed sources enforce
+digest equality with their actual owner scope; same-revision divergent role
+assignments fail closed. This is not a bearer authorization or transaction
+fence. Added positive worker-only and native-CEO-only discovery, no-hidden
+fallback, stale/rotated principal/binding, revoked membership and scope
+mismatch regressions.
+
+Source/local tests to date: focused homogeneous+target suite
+`/tmp/mmx-fabric-single-domain-20261011.xml` passed 25 tests (exit 0);
+focused homogeneous/native/composite/target campaign
+`/tmp/mmx-fabric-independent-domains-20261011.xml` passed **53 tests,
+0 failures/errors/skips**, exit 0, M2. The first draft unit run had two
+incorrect refusal/test-counter expectations, fixed before acceptance.
+A broader selected consultation, Session Bridge, native and Fabric
+suite was launched as PID `99181`, JUnit
+`/tmp/mmx-fabric-all-related-20261011.xml`; final count/result
+unverified when this checkpoint was recorded. Do not assert it passed
+until terminal process/JUnit evidence is observed.
+
+The source change is still **LOCAL AND UNCOMMITTED** when this paragraph
+was written. Reconcile/test then publish ONLY via original Studio typed
+Git owner, verify exact remote HEAD, and qualify new hosted CI.
+No production Company host selection, message commit mutation, native
+provider send, installed release, or worker enrollment occurred.
+Earlier explicit platform-denied production host/commit inspection was
+not retried, rephrased or moved to another carrier.
+
+Critical frontier: keep mixed identity sources strict and homogeneous
+ones independently admitted; complete broad test, then publish; remaining
+live gates are incumbent authenticated production membership, native
+session delivery/consumption and canonical commit-time effect fencing.
+
+### Verified test return for homogeneous scope (supersedes pending count)
+
+M2 PID `99181` completed **exit 0** (runtime 109.76 seconds).
+`/tmp/mmx-fabric-all-related-20261011.xml` reports **409 selected tests,
+zero failures, zero errors and zero skips**. The suite covers scoped/native/
+Runtime policy, actual temporary consultation dispatch/target resolution,
+Session Bridge native projections and the frozen Company MCP boundary.
+`git diff --check` and Python compilation also exited 0; exact changed
+paths are the additive single-domain module/tests plus the native/composite/
+resolver membership binding and documentation/checkpoint files. The 409-case
+suite is local fixture evidence and does not replace exact-head hosted CI,
+independent review, installed source revision/selection or actual native
+provider message/answer consumption.

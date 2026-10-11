@@ -19,6 +19,9 @@ from control_plane.operator_harness_contract import runtime_binding_id_for
 from integrations.fabric_coordination_composite import (
     CompositeCoordinationEvidence, CompositeCoordinationObservationSource,
 )
+from integrations.fabric_coordination_single import (
+    SingleDomainCoordinationObservationSource,
+)
 from integrations.session_bridge.claude_native import (
     ClaudeNativeTarget, ClaudeNativeTargetProjector,
 )
@@ -81,17 +84,32 @@ class ScopedSessionTargetResolver:
 
     def __init__(
         self, *,
-        owner: CompositeCoordinationObservationSource,
-        worker_targets: RuntimeFabricTargetProjector,
-        native_targets: ClaudeNativeTargetProjector,
+        owner: CompositeCoordinationObservationSource | SingleDomainCoordinationObservationSource,
+        worker_targets: RuntimeFabricTargetProjector | None = None,
+        native_targets: ClaudeNativeTargetProjector | None = None,
         caller: CoordinationActorIdentity,
         topic_ref: str,
         now: Callable[[], int],
     ) -> None:
+        valid_mixed = (
+            type(owner) is CompositeCoordinationObservationSource
+            and type(worker_targets) is RuntimeFabricTargetProjector
+            and type(native_targets) is ClaudeNativeTargetProjector
+        )
+        valid_single = (
+            type(owner) is SingleDomainCoordinationObservationSource
+            and (
+                (owner.domain == "worker"
+                 and type(worker_targets) is RuntimeFabricTargetProjector
+                 and native_targets is None)
+                or
+                (owner.domain == "native"
+                 and type(native_targets) is ClaudeNativeTargetProjector
+                 and worker_targets is None)
+            )
+        )
         if (
-            type(owner) is not CompositeCoordinationObservationSource
-            or type(worker_targets) is not RuntimeFabricTargetProjector
-            or type(native_targets) is not ClaudeNativeTargetProjector
+            not (valid_mixed or valid_single)
             or type(caller) not in (CoordinationIdentity, CoordinationNativeIdentity)
             or type(topic_ref) is not str or not topic_ref
             or not callable(now)
@@ -112,7 +130,7 @@ class ScopedSessionTargetResolver:
         actors: set[CoordinationActorIdentity] = set()
         found: list[tuple[str, CoordinationActorIdentity]] = []
 
-        for target in self._workers.list_targets():
+        for target in (self._workers.list_targets() if self._workers is not None else ()):
             if type(target) is not RuntimeFabricTarget:
                 _refuse()
             epoch = target.epoch
@@ -137,7 +155,7 @@ class ScopedSessionTargetResolver:
             actors.add(actor)
             found.append((target.target_ref, actor))
 
-        for target in self._natives.list_targets():
+        for target in (self._natives.list_targets() if self._natives is not None else ()):
             if type(target) is not ClaudeNativeTarget:
                 _refuse()
             owners = [a for a in active if type(a) is CoordinationNativeIdentity

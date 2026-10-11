@@ -9,8 +9,11 @@ a native attestation alone is not a Company consultation dispatch capability.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+import hashlib
 import inspect
+import json
+import re
 
 from control_plane.fabric_coordination_policy import (
     CoordinationNativeIdentity, CoordinationRefused, CoordinationSnapshot,
@@ -28,6 +31,14 @@ def _refuse() -> None:
     raise NativeCoordinationUnavailable("NATIVE_COORDINATION_UNAVAILABLE")
 
 
+def native_membership_digest(scope: CoordinationSnapshot) -> str:
+    """Bind an attestation to full owner facts, not a mutable revision label."""
+    if type(scope) is not CoordinationSnapshot:
+        _refuse()
+    payload = json.dumps(asdict(scope), sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(payload).hexdigest()
+
+
 @dataclass(frozen=True, slots=True)
 class NativeCoordinationAttestation:
     """Per-read exact native owners, not a persistent registry or bearer grant."""
@@ -35,6 +46,7 @@ class NativeCoordinationAttestation:
     observed_at: int
     valid_until: int
     identities: tuple[CoordinationNativeIdentity, ...]
+    membership_digest: str
 
     def __post_init__(self) -> None:
         if (
@@ -43,6 +55,8 @@ class NativeCoordinationAttestation:
             or type(self.observed_at) is not int
             or type(self.valid_until) is not int
             or self.valid_until <= self.observed_at
+            or type(self.membership_digest) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", self.membership_digest) is None
             or type(self.identities) is not tuple
             or not self.identities
             or any(type(identity) is not CoordinationNativeIdentity
@@ -150,6 +164,7 @@ class NativeCoordinationObservationSource:
                 initial.revision, initial.observed_at,
                 min(initial.valid_until, refreshed.valid_until),
                 identities,
+                native_membership_digest(initial),
             )
         except NativeCoordinationUnavailable:
             raise

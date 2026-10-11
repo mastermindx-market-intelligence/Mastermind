@@ -266,7 +266,65 @@ identity facts and the existing Runtime/Claude target projectors with fake
 management/physical carrier observations. These tests prove projection and
 stale/foreign/expired refusal, **not live provider delivery or acceptance**.
 
+## Independent native-only and worker-only scopes
+
+A peer-messaging topology cannot require both actor types to be running.
+`integrations/fabric_coordination_single.py` provides an opt-in,
+**read-only single-domain owner observation** for either a Runtime-only
+Job/Attempt/Worker scope or a native CEO/COO-only session scope. It reuses
+the corresponding already-admitted identity owner, with no fabricated
+Runtime Job for a native session and no requirement to contact a missing
+native manager in worker-only mode.
+
+The source requires an entirely homogeneous host-authenticated scope and
+exactly one selected identity owner. It **refuses mixed scopes**, rather
+than silently dropping an absent or failed identity layer and weakening
+the mixed-source checks. An unreadable owner, rotated binding, revoked
+membership, stale timestamp, divergent role or unrecognized source fails
+closed. The source returns the same bounded, non-authoritative evidence
+shape consumed by `ScopedSessionTargetResolver`. The resolver accepts
+the existing composite only with both canonical target projectors, a
+worker-only observation only with a Runtime target projector, and a
+native-only observation only with a Claude native target projector.
+Neither missing/foreign target nor failed authentication triggers
+another provider/model or session-selection fallback.
+
+Native owner attestation now includes a digest of its **complete**
+organizational membership snapshot (roles, projects, parent edges,
+grants, revision and observation time), not merely the native session
+UUIDs and an updateable revision label. Homogeneous and mixed
+observations compare this digest against the exact scope they use.
+Even when two host readers agree on session UUIDs, disagreeing role
+or project information cannot be treated as a valid peer permission.
+An admitted native CEO can therefore discover an admitted portfolio
+CEO peer with no active Executive Attempts, and Fabric workers can
+discover their task-group peers with no active native CEO/COO session,
+**subject to actual installed transport and commit controls**.
+
+This is source-level discovery only. These read-only components are
+not production principal authentication, native delivery, atomically
+fenced sends, worker enrollment, operational instructions, Slack
+publication or model consumption. Installed selection must be explicit.
+A failed mixed observation must NOT automatically downgrade to a
+single-domain observation: domain selection follows the authenticated
+organizational scope and its authoritative ownership facts.
+
 ## Verification at the current source milestone
+
+The current October 11 homogeneous-source increment passed **53 focused
+native-only/worker-only/native-integrity/mixed-target tests**, zero failures,
+errors or skips (M2 JUnit `/tmp/mmx-fabric-independent-domains-20261011.xml`).
+A broader original-owner integration regression selection of **409 tests**
+passed, zero failures/errors/skips, exit 0, using the existing MCP-capable
+Python 3.12 environment on M2 Studio (JUnit
+`/tmp/mmx-fabric-all-related-20261011.xml`, PID `99181`).
+It includes native and Runtime attestation, Session Bridge target/projector,
+consultation host and dispatch, frozen SDK boundary, native hierarchy and
+single-domain discovery tests. Syntax compilation and `git diff --check`
+passed. This campaign is source/fixture proof, not hosted CI or
+installed cross-host delivery.
+
+
 
 The latest October 11 Runtime-join continuation recorded **577 passed, zero
 failures/errors, zero skipped** in the existing MCP-capable Python 3.12 environment.

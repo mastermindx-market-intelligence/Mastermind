@@ -18,7 +18,9 @@ from control_plane.fabric_coordination_policy import (
     CoordinationIdentity, CoordinationNativeIdentity,
     CoordinationRefused, CoordinationSnapshot,
 )
-from integrations.fabric_coordination_native import NativeCoordinationObservationSource
+from integrations.fabric_coordination_native import (
+    NativeCoordinationObservationSource, native_membership_digest,
+)
 from integrations.fabric_coordination_runtime import RuntimeCoordinationObservationSource
 from integrations.session_bridge.claude_native import ClaudeNativeTargetProjector
 
@@ -109,6 +111,14 @@ class CompositeCoordinationObservationSource:
             )
             workers = runtime_source.observe()
             native = native_source.observe()
+            native_scope = replace(
+                original, participants=tuple(
+                    p for p in original.participants
+                    if type(p.identity) is CoordinationNativeIdentity
+                ),
+            )
+            if native.membership_digest != native_membership_digest(native_scope):
+                _refuse()
 
             # Two independent joins are not atomic. No evidence is usable if
             # the organizational owner changes during either read.
@@ -148,6 +158,7 @@ class CompositeCoordinationObservationSource:
             rechecked_native = native_source.observe()
             if (
                 rechecked_native.snapshot_revision != native.snapshot_revision
+                or rechecked_native.membership_digest != native.membership_digest
                 or rechecked_native.identities != native.identities
             ):
                 _refuse()

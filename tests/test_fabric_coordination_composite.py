@@ -197,3 +197,18 @@ def test_same_owner_revision_with_changed_membership_changes_evidence_digest(tmp
     assert original.snapshot.revision == changed.snapshot.revision
     assert original.evidence_digest != changed.evidence_digest
     assert port.send_calls == []
+
+
+def test_native_attestation_must_bind_full_organizational_scope(tmp_path, monkeypatch):
+    """The native owner cannot attest foreign role/grant facts under same label."""
+    from integrations.fabric_coordination_native import NativeCoordinationObservationSource
+    observation, _, port = fixture(tmp_path, monkeypatch)
+    original = NativeCoordinationObservationSource.observe
+
+    def tampered(self):
+        proof = original(self)
+        return replace(proof, membership_digest="0" * 64)
+
+    monkeypatch.setattr(NativeCoordinationObservationSource, "observe", tampered)
+    deny(observation)
+    assert not port.send_calls and not port.reconcile_calls
