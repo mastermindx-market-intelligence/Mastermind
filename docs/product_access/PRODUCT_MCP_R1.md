@@ -329,3 +329,45 @@ Tests establish the original invalid response is now refused both by the
 pure contract and by a native signed-test-JWT MCP call; output details are
 withheld from the authenticated caller on contract failure. The tests use
 owned synthetic source data and do not imply positive production access.
+
+
+## Risk projection producer-semantic hardening — October 10 continuation
+
+Read-only current Terminal source inspected at:
+mastermindx-market-intelligence/mastermind-terminal@1148477475dbff4ab49397e2ecfc10f7e98ab70a
+in ingest/pull_macro_risk.py (build_market_risk). It emits
+market_risk/v1 with both is_display_only=true and an independently qualified
+freshness object (qualified/reasons), as well as its existing stale flag,
+source session, built timestamp and optional quote expiry.
+
+The first Product MCP adapter projected display_only=true without verifying
+the owner's is_display_only field and could label a source with
+freshness.qualified=false as OK if the other clocks were plausible. This
+would give a Web CEO overstated trust in incomplete risk observations.
+A first RED run of source-faithful tests proved the misclassification.
+
+The Product reader now requires literal is_display_only=true before returning
+any accepted numeric/word risk projection. A missing or false source authority
+flag returns INVALID with no market verdict. The reader also cross-checks
+the original producer's freshness.qualified and reasons against the observed
+source clocks/stale flag. Missing, inconsistent or explicitly unqualified
+freshness is never promoted to OK. Malformed source built/event/expiry clocks
+produce a bounded unqualified reason; genuine future/expired clocks remain
+STALE as previously accepted. Source-supplied reason values must be single
+safe identifiers before they can enter the Web CEO result; free-form strings
+or attempted instruction/credential text are replaced by a closed marker
+rather than being echoed.
+
+This does NOT re-evaluate market regime, rewrite producer freshness, infer
+an absent exchange calendar, or claim independent source admission. It
+preserves the original owner's status and reduces the reader's trust level
+when necessary. The producer, release and market-risk classification owner
+remain Terminal. Synthetic fixtures are matched to the actual current
+producer's emitted schema; the platform-denied live signed-network MCP
+canary remains NOT_RUN. The source-only tests do not prove installed
+producer/result accuracy or live browser state.
+
+Relevant negative/positive cases:
+- tests/test_product_access_mcp.py owner display-only/freshness cases
+- tests/test_product_access_mcp_runtime.py bounded read port current shape
+- tests/test_product_access_mcp_sdk.py signed synthetic MCP/ASGI current shape

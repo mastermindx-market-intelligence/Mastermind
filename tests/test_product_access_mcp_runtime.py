@@ -29,6 +29,8 @@ def fake_getter(url, cap):
         "schema": "market_risk/v1", "verdict": "MIXED",
         "score": 45, "asof": "2026-10-09",
         "stale": False, "stale_after": "2026-10-10T01:00:00Z",
+        "is_display_only": True,
+        "freshness": {"qualified": True, "reasons": []},
     }).encode()
     return HttpPayload(200, raw, {
         "content-type": "application/json", "content-length": str(len(raw)),

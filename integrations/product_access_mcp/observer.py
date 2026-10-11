@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 from datetime import date, datetime, timezone
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping
@@ -260,12 +261,41 @@ def _risk(raw: Any, now: datetime) -> tuple[str, dict[str, Any], dict[str, Any]]
     asof = _day(raw.get("asof"))
     if asof is None or asof > now.astimezone(MARKET_TZ).date():
         return "INVALID", {}, {"qualified": False, "reasons": ["invalid_or_future_session"]}
+    if raw.get("is_display_only") is not True:
+        return "INVALID", {}, {"qualified": False, "reasons": ["unqualified_display_authority"]}
     if type(raw.get("stale")) is not bool:
         return "PARTIAL", {}, {"qualified": False, "reasons": ["unknown_owner_freshness"]}
     observed_expiry = _clock(raw.get("stale_after"))
     built = _clock(raw.get("built"))
     event = _clock(raw.get("source_event_time"))
     reasons = []
+    # Terminal's canonical producer carries the separately qualified
+    # freshness verdict; never promote an unqualified owner result to OK.
+    source_fresh = raw.get("freshness")
+    if not isinstance(source_fresh, dict):
+        reasons.append("owner_freshness_missing")
+    else:
+        source_qualified = source_fresh.get("qualified")
+        if type(source_qualified) is not bool or source_qualified is False:
+            reasons.append("owner_freshness_unqualified")
+        owner_fresh_reasons = source_fresh.get("reasons")
+        if not isinstance(owner_fresh_reasons, list):
+            reasons.append("owner_reasons_unavailable")
+        else:
+            if owner_fresh_reasons and source_qualified is True:
+                reasons.append("owner_freshness_incoherent")
+            for reason in owner_fresh_reasons[:8]:
+                if (type(reason) is str and
+                    re.fullmatch(r"[A-Za-z0-9._:-]{1,100}", reason)):
+                    reasons.append(reason)
+                else:
+                    reasons.append("untrusted_owner_reason")
+    if raw.get("built") is not None and built is None:
+        reasons.append("invalid_build")
+    if raw.get("source_event_time") is not None and event is None:
+        reasons.append("invalid_source_event_time")
+    if raw.get("stale_after") is not None and observed_expiry is None:
+        reasons.append("invalid_stale_after")
     if score is None:
         reasons.append("score_unavailable")
     if built is not None and built > now:
@@ -278,7 +308,11 @@ def _risk(raw: Any, now: datetime) -> tuple[str, dict[str, Any], dict[str, Any]]
         reasons.append("unqualified_intraday_expiry")
     owner_reasons = raw.get("stale_reasons")
     if isinstance(owner_reasons, list):
-        reasons += [x[:100] for x in owner_reasons[:8] if type(x) is str]
+        for reason in owner_reasons[:8]:
+            if type(reason) is str and re.fullmatch(r"[A-Za-z0-9._:-]{1,100}", reason):
+                reasons.append(reason)
+            else:
+                reasons.append("untrusted_owner_reason")
     if raw["stale"]:
         reasons.append("owner_stale")
     out = _select_fields(raw, ("schema", "verdict", "score", "asof", "built",

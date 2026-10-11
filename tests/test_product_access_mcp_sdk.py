@@ -119,6 +119,8 @@ class ProductAppTests(unittest.IsolatedAsyncioTestCase):
                     "schema": "market_risk/v1", "verdict": "MIXED", "score": 48,
                     "asof": day, "stale": False,
                     "stale_after": (now + timedelta(hours=1)).isoformat(),
+                    "is_display_only": True,
+                    "freshness": {"qualified": True, "reasons": []},
                 }
             else:
                 data = {"status": "ok", "commit": "server123", "checks": {"site": {"commit": "site123"}}}
@@ -378,6 +380,8 @@ class ProductAppTests(unittest.IsolatedAsyncioTestCase):
                 "schema": "market_risk/v1", "verdict": "MIXED", "score": 44,
                 "asof": session, "stale": False,
                 "stale_after": (now + timedelta(hours=1)).isoformat(),
+                "is_display_only": True,
+                "freshness": {"qualified": True, "reasons": []},
             }
             raw = json.dumps(data).encode()
             return HttpPayload(200, raw, {
