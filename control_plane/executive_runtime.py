@@ -629,6 +629,22 @@ def _normalise_constraints(
     if value is not None and not isinstance(value, dict):
         raise StateConflict("job constraints must be a mapping")
     raw = value or {}
+    role_fields: dict[str, Any] = {}
+    if "responsibility_intent" in raw or "responsibility_intent_digest" in raw:
+        from control_plane.executive_responsibility import (
+            ResponsibilityIntentError, normalize_responsibility_intent,
+        )
+        try:
+            role = normalize_responsibility_intent(raw.get("responsibility_intent"))
+            # This normal worker path must not relabel work as a coordinator.
+            # Coordinator adoption belongs to the existing hierarchy owner.
+            role.require_phase("work")
+            if raw.get("responsibility_intent_digest") != role.digest:
+                raise ResponsibilityIntentError("role intent digest mismatch")
+        except ResponsibilityIntentError as exc:
+            raise StateConflict(str(exc)) from exc
+        role_fields = {"responsibility_intent": role.to_dict(),
+                       "responsibility_intent_digest": role.digest}
     provider = str(raw.get("provider") or "").strip().lower()
     capabilities = _normalise_capabilities(
         raw.get("required_capabilities") or raw.get("capabilities") or []
@@ -643,7 +659,7 @@ def _normalise_constraints(
     eligible = sorted(
         {str(item).strip().lower() for item in quota_values if str(item).strip()}
     ) or ["default"]
-    result: dict[str, Any] = {"eligible_quota_classes": eligible}
+    result: dict[str, Any] = {"eligible_quota_classes": eligible, **role_fields}
 
     aliases_raw = raw.get("preferred_model_aliases") or []
     if isinstance(aliases_raw, str):
