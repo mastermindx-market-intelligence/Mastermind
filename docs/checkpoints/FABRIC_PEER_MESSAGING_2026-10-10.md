@@ -259,3 +259,34 @@ JUnit `/tmp/mmx-native-splitbrain-20261011.xml` SHA256
 `9c9cfa17bbe6b8d150b33a2952dd290081f74de30fc29657c8c7437b71eef770`.
 The prior 162-case policy/gateway/Runtime run also passed before this
 one-line uniqueness change. No actual native session has been enrolled or messaged.
+
+## October 11 — native Session Bridge identity join (source only)
+
+Next bounded source phase adds
+`integrations/fabric_coordination_native.py`, using the existing
+`ClaudeNativeTargetProjector` rather than new native messaging transport.
+It checks exact owner-supplied CEO/COO session UUID/generation/host and a
+host-attested verified principal against the canonical native management
+port's current list/get observations. Revalidates management, principal and
+organizational membership before returning an **ephemeral native-only**
+attestation. Runtime worker identities are deliberately excluded from
+that attestation; they still require their Runtime Join owner. This is NOT
+production authentication, enrollment, native wake, transport, message sending,
+or mixed actor gateway composition. It writes no registry, account data, queue,
+credentials or lifecycle state.
+
+`tests/test_fabric_coordination_native.py` exercises fake management and
+principal observations, drift/revocation, inactive state, foreign host,
+generation, principal, changed owner scope, timestamp replay and no send effects.
+Selected suite PID 98710 ended exit code 0 in 19.51 seconds:
+**178 passed, zero failures/errors/skips**, JUnit
+`/tmp/mmx-fabric-native-owner-20261011.xml`, SHA256
+`0483d346e00d9cdd6f1e6c4cb740c6481a6c5c49e80df001a5cd23541fe89c7e`.
+This includes existing native hierarchy policy, gateway and Runtime tests.
+Author-run fixture evidence; **no live native session consumed a message**.
+
+The immediately prior split-brain fix was published on the same original
+carrier at `53ce68cfcdc03ebbbd64e5a0089ae8cec71a936e` with an APPLIED
+push and matching local/remote HEAD. The current native owner join and
+related tests/documentation are additional local source changes awaiting
+the same typed Git publication. Do not redo accepted policy or past suites.

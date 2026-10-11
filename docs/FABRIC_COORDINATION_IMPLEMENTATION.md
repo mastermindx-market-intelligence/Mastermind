@@ -172,6 +172,28 @@ owners. At the current protected master revision the source includes
 but no installed management-owner proof or supported Claude wake descriptor.
 Do not widen a tool schema or mark a transport implemented based on policy tests.
 
+## Read-only native Session Bridge owner join
+
+`integrations/fabric_coordination_native.py` provides a deliberately
+**read-only** `NativeCoordinationObservationSource`. It joins the exact current
+native CEO/COO identities from owner-supplied membership to the incumbent
+`ClaudeNativeTargetProjector`/Session Bridge management owner. The verified
+session UUID, generation and host must agree. The authenticated host separately
+supplies an exact verified-principal reference per native session; mismatches,
+revocations, ambiguous sessions, expired membership, and any mid-read
+membership/principal/management changes fail closed.
+
+The result `NativeCoordinationAttestation` includes only verified **native**
+identities; it does not claim that Runtime worker identities within the same
+membership snapshot have been validated. Workers require the separate
+`RuntimeCoordinationObservationSource`. The join is a reusable component, not
+an installed native caller-authentication service, message producer, endpoint,
+Session Bridge tool registration, or atomically fenced send. No direct native
+socket and no provider-management send are invoked. Tests exercise a fake
+already-admitted management port; the actual installed host must still inject
+and prove its trusted management and verified-principal owners. This cannot
+be labeled live cross-host CEO/COO↔worker messaging.
+
 ## Verification at the current source milestone
 
 The latest October 11 Runtime-join continuation recorded **577 passed, zero
