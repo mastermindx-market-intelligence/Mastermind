@@ -1027,7 +1027,13 @@ def _build_profile_mcp_app(
         if is_direct:
             active = submit_authenticators if name in direct_submit_names else read_authenticators
             principal_or_response = await _authenticate(
-                request, active, clock=configured.clock
+                request, active, clock=configured.clock,
+                # Match the existing read gateway: a combined read/submit
+                # token still undergoes the exact submit policy's checks.
+                submit_fallback=(
+                    submit_authenticators if name not in direct_submit_names
+                    and configured.allow_submit_authorized_reads else None
+                ),
             )
             if isinstance(principal_or_response, JSONResponse):
                 payload = json.loads(principal_or_response.body)

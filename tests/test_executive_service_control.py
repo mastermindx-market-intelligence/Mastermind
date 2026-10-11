@@ -1238,6 +1238,7 @@ GATEWAY_CONFIG_PATH = "/Library/Application Support/MastermindExecutive/config/e
 def _qualified_gateway_run(tmp_path, plan, *, changes=None, config_changes=None,
                            extra_args=("--expected-sha", GATEWAY_SHA),
                            missing_config=False, symlink_config=False, native_plutil=False,
+                           raw_config=None,
                            preflight_exit=0, preflight_exits=None, helper_kind="regular",
                            controller_from_release=True,
                            source_with_spoofed_argv0=False,
@@ -1322,10 +1323,14 @@ def _qualified_gateway_run(tmp_path, plan, *, changes=None, config_changes=None,
         (tmp_path / "mcp.plist").write_bytes(plistlib.dumps(document))
         if not missing_config:
             target = tmp_path / "actual-config.json" if symlink_config else config_path
-            target.write_text(json.dumps(config))
+            target.write_text(json.dumps(config) if raw_config is None else raw_config)
             if symlink_config:
                 config_path.symlink_to(target)
         if native_plutil:
+            # Exercise every parser operation, including validation; the base
+            # shim intentionally accepts placeholder plists for unrelated tests.
+            _write_executable(tmp_path / "native-shims" / "plutil",
+                              '#!/bin/bash\nexec /usr/bin/plutil "$@"\n')
             return
         shim = tmp_path / "native-shims" / "plutil"
         shim.write_text("#!" + sys.executable + "\n" + r'''import sys,json,plistlib
@@ -1335,7 +1340,11 @@ try:
     raw=Path(args[-1]).read_bytes()
     try: obj=json.loads(raw)
     except (ValueError, UnicodeError): obj=plistlib.loads(raw)
-    if args[0] == '-lint': sys.exit(0)
+    if args[0] == '-lint':
+        plistlib.loads(raw)
+        sys.exit(0)
+    if args[:4] == ['-convert', 'json', '-o', '/dev/null']:
+        sys.exit(0)
     if args[0] == '-type':
         assert args[1] in obj
         print(type(obj[args[1]]).__name__)
@@ -1688,3 +1697,15 @@ def test_gateway_qualification_uses_real_native_plutil_with_disposable_files(tmp
     assert code == 0, err
     assert remaining == ""
     assert calls == [entry[0] for entry in plan]
+
+
+@pytest.mark.parametrize("native_plutil", [False, pytest.param(
+    True, marks=pytest.mark.skipif(sys.platform != "darwin", reason="requires macOS"))])
+@pytest.mark.parametrize("raw_config", ["{", '{"schema":', '{"schema":"x"} trailing'])
+def test_gateway_malformed_json_refuses_before_lifecycle(tmp_path, native_plutil, raw_config):
+    code, _, err, calls, remaining, *_ = _qualified_gateway_run(
+        tmp_path, [], native_plutil=native_plutil, raw_config=raw_config)
+    assert code == 65
+    assert "gateway release qualification failed" in err
+    assert calls == []
+    assert remaining == ""

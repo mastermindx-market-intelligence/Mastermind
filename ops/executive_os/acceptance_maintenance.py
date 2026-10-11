@@ -29,6 +29,11 @@ SYSTEM_ROOT = Path("/Library/Application Support/MastermindExecutive")
 SCHEMA = "mastermind.executive_acceptance_maintenance/v1"
 SCHEMA_V2 = "mastermind.executive_acceptance_maintenance/v2"
 _TRUSTED_UID = 0
+# The artifact inventory can exceed 16 MiB on an otherwise quiescent host.
+# Keep every other maintenance document on its existing budget, and apply
+# the same finite limit before either publishing or parsing a document.
+_MAX_DOCUMENT_BYTES = 16 * 1024 * 1024
+_MAX_INVENTORY_BYTES = 64 * 1024 * 1024
 _SHA = re.compile(r"[0-9a-f]{40}")
 _DIGEST = re.compile(r"[0-9a-f]{64}")
 _TERMINAL = {"COMPLETED", "FAILED", "LOST", "CANCELLED", "RATE_LIMITED"}
@@ -85,6 +90,9 @@ def _sealed_ancestors(path: Path) -> list:
         ancestors.append((parent, _identity(info)))
     return ancestors
 
+def _document_limit(path: Path) -> int:
+    return _MAX_INVENTORY_BYTES if path.name == "inventory.json" else _MAX_DOCUMENT_BYTES
+
 def sealed_json(path: Path) -> dict[str, Any]:
     """Read a root-owned immutable document through a stable no-follow FD."""
     if not path.is_absolute() or path.resolve(strict=True) != path:
@@ -95,10 +103,16 @@ def sealed_json(path: Path) -> dict[str, Any]:
         before = os.fstat(fd)
         if (not stat.S_ISREG(before.st_mode) or before.st_uid != _TRUSTED_UID
                 or before.st_nlink != 1 or stat.S_IMODE(before.st_mode) not in {0o400, 0o444}
-                or before.st_size > 16 * 1024 * 1024 or has_macos_acl(path)):
+                or has_macos_acl(path)):
             raise MaintenanceError("maintenance document is not sealed")
+        maximum = _document_limit(path)
+        if before.st_size > maximum:
+            raise MaintenanceError("maintenance document exceeds size limit")
         with os.fdopen(os.dup(fd), "rb") as stream:
-            value = json.load(stream)
+            raw = stream.read(maximum + 1)
+        if len(raw) > maximum:
+            raise MaintenanceError("maintenance document exceeds size limit")
+        value = json.loads(raw)
         if (_identity(before) != _identity(os.fstat(fd))
                 or _identity(before) != _identity(path.lstat())
                 or any(_identity(p.lstat()) != identity for p, identity in ancestors)):
@@ -464,6 +478,8 @@ def verify_inventory(baseline: dict) -> None:
 
 def write_sealed(path: Path, value: dict, *, public: bool = False) -> None:
     data = (json.dumps(value, sort_keys=True, indent=2, allow_nan=False)+"\n").encode()
+    if len(data) > _document_limit(path):
+        raise MaintenanceError("maintenance document exceeds size limit")
     fd = os.open(path, os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW, 0o600)
     try:
         with os.fdopen(os.dup(fd),"wb") as stream:

@@ -13,6 +13,10 @@ one expected account email from a private bounded pipe and prints only
 ``MATCH``, ``MISMATCH`` or ``UNKNOWN``.  That expected email is never taken
 from argv, environment, or a file, is never forwarded to a child process,
 and is never persisted or echoed back.
+
+``--refusal-code-stdin`` is an offline formatter for the provisioner's failed
+probe document. It reads at most 16 KiB plus one overflow byte and prints one
+closed refusal code. It never initiates a live probe or opens a credential.
 """
 from __future__ import annotations
 
@@ -56,6 +60,25 @@ except ModuleNotFoundError:  # pragma: no cover - installed direct-script mode
 
 
 SCHEMA_VERSION = "mastermind.executive_provider_identity/v1"
+REFUSAL_CODE_FLAG = "--refusal-code-stdin"
+_REFUSAL_DOCUMENT_MAX_BYTES = 16 * 1024
+# These codes are observations, never authority to retry or requalify identity.
+# Do not accept arbitrary exception messages or merely regex-shaped strings.
+IDENTITY_REFUSAL_CODES = frozenset({
+    "identity_probe_failed", "live_probe_requires_darwin_root",
+    "binary_acl_invalid", "binary_metadata_invalid", "binary_sha256_invalid",
+    "binary_signature_invalid", "binary_team_invalid", "binary_version_invalid",
+    "credential_metadata_invalid", "worker_identity_invalid",
+    "app_server_closed", "app_server_timeout", "app_server_malformed",
+    "app_server_request_failed", "login_status_unreviewed",
+    "forced_auth_configuration_present", "login_status_changed_during_probe",
+    "binary_identity_changed_during_probe", "credential_identity_changed_during_probe",
+    "credential_kind_unknown", "auth_mode_missing_or_unknown", "auth_mode_policy_mismatch",
+    "account_read_malformed", "account_read_spoofed_auth_mode", "account_missing",
+    "account_type_not_chatgpt", "plan_type_missing", "openai_auth_requirement_malformed",
+    "company_plan_required", "personal_pro_device_auth_required",
+    "personal_pro_plan_required", "workspace_binding_class_unknown",
+})
 PINNED_CODEX_VERSION = "0.159.2"
 WORKER_USER = "_mastermind_worker"
 WORKER_GROUP = "_mastermind_worker"
@@ -106,6 +129,49 @@ _SEAT_DOMAIN_LABEL_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9]
 
 class IdentityProbeError(RuntimeError):
     """A bounded, non-secret identity refusal."""
+
+
+def _bounded_refusal_code(value: Any) -> str:
+    if type(value) is str and value in IDENTITY_REFUSAL_CODES:
+        return value
+    return "identity_probe_failed"
+
+
+def bounded_refusal_from_document(value: Any) -> str:
+    """Project only a reviewed code; discard all identity/account/error fields."""
+    if (type(value) is not dict or value.get("schema_version") != SCHEMA_VERSION
+            or value.get("passed") is not False):
+        return "identity_probe_failed"
+    return _bounded_refusal_code(value.get("refusal"))
+
+
+def _unique_diagnostic_fields(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate diagnostic field")
+        result[key] = value
+    return result
+
+
+def _refusal_code_main(tokens: Sequence[str]) -> int:
+    code = "identity_probe_failed"
+    if list(tokens) == [REFUSAL_CODE_FLAG]:
+        try:
+            payload = sys.stdin.buffer.read(_REFUSAL_DOCUMENT_MAX_BYTES + 1)
+            if len(payload) <= _REFUSAL_DOCUMENT_MAX_BYTES:
+                code = bounded_refusal_from_document(json.loads(
+                    payload, object_pairs_hook=_unique_diagnostic_fields
+                ))
+        except (Exception, SystemExit, KeyboardInterrupt):
+            # Never echo malformed input, exception text, or a traceback.
+            pass
+    try:
+        sys.stdout.write(code + "\n")
+        sys.stdout.flush()
+    except (OSError, ValueError):
+        return 2
+    return 0
 
 
 def now_iso() -> str:
@@ -779,6 +845,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         for token in tokens
     ):
         return _seat_compare_main(tokens)
+    if any(token.split("=", 1)[0] == REFUSAL_CODE_FLAG for token in tokens):
+        return _refusal_code_main(tokens)
     args = _parser().parse_args(tokens)
     if args.compare_seat_stdin is True:
         # Only an abbreviation can reach here; comparison mode never abbreviates.
@@ -797,7 +865,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 worker_uid=args.worker_uid,
                 worker_gid=args.worker_gid,
             )
-        except (IdentityProbeError, OSError, subprocess.SubprocessError):
+        except IdentityProbeError as exc:
+            code = _bounded_refusal_code(exc.args[0] if len(exc.args) == 1 else None)
+            result = _refusal(code, expected_kind=args.expected_kind)
+        except (OSError, subprocess.SubprocessError):
             result = _refusal("identity_probe_failed", expected_kind=args.expected_kind)
     json.dump(result, sys.stdout, sort_keys=True, separators=(",", ":"))
     sys.stdout.write("\n")

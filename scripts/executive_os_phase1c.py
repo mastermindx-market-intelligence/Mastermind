@@ -1619,6 +1619,7 @@ def _service_from_config(
     *,
     canary_loader: Callable[[], Mapping[str, Any]] | None = None,
     autonomy_guard: Callable[[], None] | None = None,
+    ceo_submit_admission_guard: Callable[[], None] | None = None,
     initial_canary: Mapping[str, Any] | None = None,
     content_profile_loader: Callable[[], Any] | None = None,
     workspace_acquisition_loader: Callable[[], Any] | None = None,
@@ -2253,6 +2254,7 @@ def _service_from_config(
             verify_operator_identity if expected_operator_arm else None
         ),
         autonomy_guard=autonomy_guard,
+        ceo_submit_admission_guard=ceo_submit_admission_guard,
         activated_socket=listener,
         service_state="READY" if initially_ready else "AWAITING_CANARY",
         canary_loader=canary_loader,
@@ -2382,11 +2384,24 @@ async def _serve_from_config(config_path: Path) -> None:
         release_sha=raw["proof_base_sha"],
         grant=raw.get("dialogue_wake_canary_activation"),
     )
+    # Bind fresh public CEO admission to the exact running config and the
+    # existing root-owned receipt pair. Never read worker-codex.json as Control.
+    own_ceo_config_sha256 = _sha256_file(config_path)
+
+    def require_ceo_admission() -> None:
+        from ops.executive_os.autonomy_control import require_ceo_submit_runtime_admission
+        attestation = content_attestation_loader()
+        if (attestation["config_sha256"] != own_ceo_config_sha256
+                or _sha256_file(config_path) != own_ceo_config_sha256):
+            raise ServiceError("CEO admission config changed")
+        require_ceo_submit_runtime_admission(raw, own_config_sha256=own_ceo_config_sha256)
+
     service = _service_from_config(
         raw,
         dialogue_canary_profile=dialogue_canary_profile,
         canary_loader=load_canary,
         autonomy_guard=autonomy_guard,
+        ceo_submit_admission_guard=require_ceo_admission,
         initial_canary=initial_canary,
         content_profile_loader=content_profile_loader,
         workspace_acquisition_loader=lambda: load_control_config(config_path)["workspace_acquisition"],
