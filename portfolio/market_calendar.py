@@ -9,8 +9,8 @@ arithmetic; `paper_account` owns the pending-order lifecycle that depends on it.
 
 Pure-stdlib (zoneinfo), offline, deterministic. Holidays are a hard-coded NYSE
 set for 2025–2027 (the live track's lifetime); extend as years roll forward.
-Half-day early closes are treated as regular sessions — close enough for a
-paper sim and never *opens* a session that should be shut.
+Published early cash-session closes are enforced here for both settlement and
+dashboard consumers. Extended-session trading is a separate, qualified mandate.
 """
 from __future__ import annotations
 
@@ -23,13 +23,24 @@ ET = ZoneInfo("America/New_York")
 _OPEN = time(9, 30)
 _CLOSE = time(16, 0)
 
+# NYSE/ICE published cash-equity sessions, 2025–2027 (November 8, 2024
+# announcement; verified October 11, 2026). Previously display-only knowledge
+# now lives with the existing US calendar authority, not a second timing layer.
+_EARLY_CLOSES: frozenset[date] = frozenset(
+    date.fromisoformat(value)
+    for value in (
+        "2025-07-03", "2025-11-28", "2025-12-24",
+        "2026-11-27", "2026-12-24", "2027-11-26",
+    )
+)
+
 # NYSE full-day closures (observed dates). Juneteenth 2026-06-19 is the holiday
 # that, with the weekend, keeps the desk shut Fri–Sun before the 2026-06-22 open.
 _HOLIDAYS: frozenset[date] = frozenset(
     date.fromisoformat(s)
     for s in (
-        # 2025
-        "2025-01-01", "2025-01-20", "2025-02-17", "2025-04-18", "2025-05-26",
+        # 2025; January 9 is the separately announced National Day of Mourning.
+        "2025-01-01", "2025-01-09", "2025-01-20", "2025-02-17", "2025-04-18", "2025-05-26",
         "2025-06-19", "2025-07-04", "2025-09-01", "2025-11-27", "2025-12-25",
         # 2026
         "2026-01-01", "2026-01-19", "2026-02-16", "2026-04-03", "2026-05-25",
@@ -59,12 +70,22 @@ def _now_et(now: datetime | None) -> datetime:
     return now.astimezone(ET)
 
 
+def is_early_close(d: date) -> bool:
+    """Whether this is a published shortened US cash-equity session."""
+    return d in _EARLY_CLOSES
+
+
+def session_close_time(d: date) -> time:
+    """Scheduled cash close; callers must separately check trading-day eligibility."""
+    return time(13, 0) if is_early_close(d) else _CLOSE
+
+
 def is_open(now: datetime | None = None) -> bool:
-    """True iff the US cash session is open right now (regular hours, ET)."""
+    """True iff the US cash session is open, including shortened sessions."""
     et = _now_et(now)
     if not is_trading_day(et.date()):
         return False
-    return _OPEN <= et.time() < _CLOSE
+    return _OPEN <= et.time() < session_close_time(et.date())
 
 
 def previous_trading_day(d: date) -> date:

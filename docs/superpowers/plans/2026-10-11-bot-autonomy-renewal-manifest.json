@@ -1,0 +1,73 @@
+{
+  "source_basis": "cbc7503536b6853ec7c35c2192abdfaccb87b561",
+  "macro_ci_source": "256c757b3c4f0ec759571c29a30a71387d0a18f8",
+  "operation": "bot-intelligence-renewal-20261011",
+  "test_scope": "289 scoped cases, Python 3.12.13, no failures or skips",
+  "files": [
+    {
+      "path": "docs/superpowers/plans/2026-10-11-bot-autonomy-renewal-execution.md",
+      "bytes": 10278,
+      "sha256": "8d0ed2e633f380b9b84094af41cdeeffae0cc779867ebf40a8970a95b1d4c2b0"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-10-11-bot-autonomy-renewal-validation.md",
+      "bytes": 8327,
+      "sha256": "92622f27b4f1c8501650588d4e3646716dd9aa598e390049e3926a3b16a5798c"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-10-11-bot-autonomy-source-capture.acceptance.py.txt",
+      "bytes": 9450,
+      "sha256": "3993af80ecd1c78e8936bd783ce686ac91ce6ede544284b8742f69aa3238c3d7"
+    },
+    {
+      "path": "docs/superpowers/specs/2026-10-11-bot-autonomy-fabric-renewal.md",
+      "bytes": 22950,
+      "sha256": "16f06118086c9f71fb8111d969f2eb11bbd06981bc7d95776c4b009e2d6dc353"
+    },
+    {
+      "path": "portfolio/china_calendar.py",
+      "bytes": 14563,
+      "sha256": "e041a3441a0d32b8448ee6e2dd020a56e5f1fe0dbf04d09628f0b880b5e0e59c"
+    },
+    {
+      "path": "portfolio/decision_snapshot.py",
+      "bytes": 14431,
+      "sha256": "5fd3f5bf3f8c1d793ef1248a288db65fdbe1c28afa759a808641dce789b7da0a"
+    },
+    {
+      "path": "portfolio/decision_snapshot_contracts.py",
+      "bytes": 16698,
+      "sha256": "26253130461dd56b65bf188e9fbb820b0ac678264497c437184ab815567d8f7f"
+    },
+    {
+      "path": "portfolio/market_calendar.py",
+      "bytes": 5047,
+      "sha256": "dc67b89e6e19bc2281ed2c06e37ef0b30afbefd0d2de0a89901c4fc52bf1b055"
+    },
+    {
+      "path": "portfolio/market_sessions.py",
+      "bytes": 4644,
+      "sha256": "230266ea45adcb96938c1e0e4d7fe9af567ff7f5d364b16acf7f18ff4f95c3a9"
+    },
+    {
+      "path": "tests/test_calendar_authority_consistency.py",
+      "bytes": 2369,
+      "sha256": "8f65a4910fb1ad0c03df584ae6641d5aa809894bcce09efd786a9dd30ed6238a"
+    },
+    {
+      "path": "tests/test_decision_snapshot.py",
+      "bytes": 8991,
+      "sha256": "db58e1b837ad74331e71d1862afd992619532f6d15aa6e5726ba37b4560e77bf"
+    },
+    {
+      "path": "tests/test_decision_snapshot_contracts.py",
+      "bytes": 10406,
+      "sha256": "218872ee2090d55d3aa34b2818654b8ba13e5ad61f362e314ab25f603c31b146"
+    },
+    {
+      "path": "tests/test_market_calendar.py",
+      "bytes": 5356,
+      "sha256": "005cb223d506392c603101e67135c88d7f8c57db38e22bf47dda7531f2951570"
+    }
+  ]
+}
