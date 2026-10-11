@@ -1,0 +1,64 @@
+# Execution-friction repair — resumed verification and frontier
+
+Mission: finish the Chairman's cross-platform execution-efficiency repair, not merely publish policy. Operation remains `execution-friction-repair-20261011-astra-001`; source carrier remains Mastermind PR #1341 and its existing Web workspace. This is a continuation of the existing evidence package, not a new lifecycle, policy or memory store.
+
+## Recovered and verified
+
+Recovered source head `100282db0147ddec02effa0570a01555d2a4067c`, based on the already-compatible procedure pin `8e38a4ce8365fb3f0591d5729f228394b35d125d`. The workspace was clean before this resumed phase. PR #1341 was OPEN/DRAFT. Do not redo the earlier instruction patch or reinstall its unchanged M2 projections by habit.
+
+Both installed M2 user instruction files were read back during this continuation. Their managed execution block exactly equals the candidate `docs/SOL_CEO_ACCOUNT_INSTRUCTIONS.md`:
+
+- `/Users/chriswong/.codex/AGENTS.md`: SHA256 `6c4833eb413a5f097b7664597bacd2e88a58f1903b4552759f195d4f524484cb`.
+- `/Users/chriswong/.claude/CLAUDE.md`: SHA256 `4383f7b851cc8baeec8c64d7b570ac6a0a5594461a313776ae0d68ba78cdb126`.
+
+These are installation/readback proofs only. No fresh Codex, Claude, ChatGPT or Fabric model behavior is claimed. No additional host instructions or memory were modified in this continuation.
+
+The installed shared routing hook remains byte-for-byte unchanged at SHA256 `bb6299ee580cf8a80d4cf5ef3f8e7ada8c93efc1b1e502666c171f44ec46ba0c`. Its previously refused repair was not retried.
+
+## New working diagnostic
+
+`scripts/audit_execution_instructions.py` is an explicitly invoked, read-only static audit. It reports Codex global/override/repository/nested instruction precedence, shared project byte-budget effects, file digests, literal legacy-rule signals, and metadata for explicitly selected Markdown files. It emits no full instruction contents, executes no hooks, edits no settings, launches no model, and grants no authority.
+
+The CLI reads provider-home discovery configuration only. Repository/profile/managed overrides, injected Project context, plugin selection, remote accounts and actual model context are explicitly outside its proof. Only Markdown fallback files are supported.
+
+Verification: `python3.11 -m unittest discover -s tests -p test_execution_instruction_audit.py -v` → **12 passed, 0 failed**, after the missing-module baseline and correction of a macOS `/tmp` versus `/private/tmp` test-path assumption. This proof covers the auditor, not repaired agent behavior. The final subsequent source edit clarified the module docstring only; it did not change the tested algorithm.
+
+Run against the actual M2 paths and saved the bounded result in `CONTINUATION_AUDIT.json`. Its SHA256 at creation was `d0dc05193d3b97cfb63842e0d19ce06a3a379a3815de0ac421b94e5bad06a675`.
+
+Observed: the Codex user file is 13,558 bytes; this candidate's repository AGENTS.md is 17,086 bytes. The static project chain leaves 15,682 bytes of the default 32 KiB project budget; global instructions are separate. This is not a total provider-context measurement. Four imported ChatGPT Project instruction files remain present with older kernel forms. Their cached bytes are not proof of the live Project settings, and the cache was not rewritten as a substitute for updating the source setting.
+
+Configured concurrency differs: the M2 provider-home file says 12, while this repository says 16. The effective runtime value and loaded precedence were not observed; no capacity change was made. Codex reports version `0.159.3`, with a separate stale-temporary-directory cleanup permission warning. That warning was not treated as blanket inability to use Codex, nor bypassed.
+
+The pinned mandatory ACTIVE_EXECUTION file is 700 lines / 50,184 bytes and SESSION_RELIABILITY is 321 lines / 16,465 bytes. These measurements establish instruction volume, not a measured causal latency or performance penalty.
+
+## Concrete remaining failures
+
+### PR #1341 CI
+
+Exact GitHub Actions run `38133529942` at source head `100282db0147ddec02effa0570a01555d2a4067c` failed `tests/test_ceo_submit_armed_composition.py::test_d8_template_topology_and_protected_defaults`.
+
+The protected-identity scanner reported four `_mastermind_scope` matches in the copied diagnostic hook and one `0o700` permission constant from the Markdown projection utility. The scanner's NAME-token branch searches for a substring rather than requiring an account-like identifier prefix. The permission classifier does not recognize the utility's directory-creation form in its full source context.
+
+New `tests/test_execution_identity_classification.py` isolates the function-name false positive: **10 controls passed, 1 regression failed**. The simplified directory-mode control did not reproduce the full-source issue; further discriminating work remains necessary. A request to refine that test and rerun it was platform-blocked and was NOT retried. The test file remains an honest failing regression, not an xfail, skipped assertion, path exemption or suppressed gate. No scanner implementation was changed.
+
+### Original independent review
+
+The original review identity remains `execution-friction-review-20261011-001`. Its existing log under the installed pool owner's `ext/state/remote_sub/` records LEASE_OK, attempted support transport, SUPPORT_PUBLICATION_REFUSED and SCP_FAILED rc=75. The earlier preserved result identifies `SUPPORT_POLICY_HASH_MISMATCH` and prelaunch failure. No new review was dispatched and no reviewer acceptance exists.
+
+Read-only diagnosis located `ensure_policy` in the existing `ext/support_bundle.py` and the exact transport boundary in `ext/remote_sub.sh`. The validator compares received policy bytes with an expected hash before applying policy. Do not weaken that validation or replace the original operation to force review through. A subsequent source-metadata/remote-digest diagnostic was explicitly platform-blocked; it was not repeated through another route.
+
+The separate Executive V3 state read returned `mode=readonly`, 0 RUNNING Jobs/Attempts and 1 AVAILABLE worker in that Runtime projection. This does not describe every attended pool: the pool's own read showed three held leases for other operations. Neither an available worker nor readonly ingress proves this review can launch.
+
+### Adjacent policy work
+
+Read all 253 diff lines of PR #1342 at `1d957a3d6c37abff870994dfca8139df00e22178`. Its Extra High additions preserve genuine permissions, required identity invariants, original-carrier effect reconciliation and bounded research-only completion while rejecting checkpoint-first/advisory-only stopping. No blocking issue was found in those additions during this scoped source review. Its eight scenario prompts are evaluation inputs, not completed served-model tests.
+
+No GitHub approval was submitted: the active GitHub actor and that PR's author were both `mastermindxryan`. This source review is not a formal independent-account approval, merge, installation or behavior proof. No duplicate edits were made on its five files.
+
+## Effect fences, next action and acceptance
+
+Platform-refused targets remain held: the shared-hook mutation; earlier broader role-retirement/native-memory modifications; the denied test-refinement operation; and the denied remote support diagnostic. One attempted combined read of the earlier README/install receipt/PR-check state was also refused; it was not replayed via a different tool. Successful independent reads and new auditor/evidence writes are recorded above. No settings, credentials, accounts, policies, workers, leases or releases were changed to overcome a refusal.
+
+Next useful delivery action is to restore a permitted original-carrier path for the held technical repair/review, finish the scanner's semantic classification repair while preserving its true identity controls, satisfy required review/CI, and then publish/install the approved instructions at their actual source owners. Do not re-run unchanged full suites or redeploy the bot for a source-only policy change. Keep all-account installation and fresh-session behavioral acceptance separate; existing chats and historical memory do not prove adoption.
+
+The organization-wide mission remains **PARTIAL / NOT COMPLETE**. No background work or autonomous wake is claimed. The current workspace is retained because it contains unfinished source evidence. This continuation saves verified progress and the exact outstanding constraints; it does not erase the requested end-to-end outcome.
