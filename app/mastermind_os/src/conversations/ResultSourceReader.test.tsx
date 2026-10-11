@@ -63,6 +63,21 @@ async function openReader() {
 }
 
 describe("exact result source to original unsent draft", () => {
+  it("does not offer a result from another root even in a contradictory projection", async () => {
+    const f = await fixture(); const read = vi.fn().mockResolvedValue(f.result);
+    const projection = structuredClone(f.projection);
+    if (projection.mission.value?.schema !== "mastermind.mission_workspace.v3") throw new Error("V3 required");
+    projection.mission.value.result_refs.refs[0].root_job_id = "JOB-999";
+    render(<Harness projection={projection} readResult={read} />);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Keep the original draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Review evidence" }));
+    const source = screen.getByRole<HTMLButtonElement>("button", { name: "Read exact result source" });
+    expect(source.disabled).toBe(true);
+    fireEvent.click(source);
+    expect(read).not.toHaveBeenCalled();
+    expect(screen.queryByRole("region", { name: "Result source reader" })).toBeNull();
+    expect(screen.getByRole<HTMLTextAreaElement>("textbox").value).toBe("Keep the original draft");
+  });
   it("performs one fixed exact read, inserts once, undoes only the insertion, and restores nested focus", async () => {
     const f = await fixture(); const read = vi.fn().mockResolvedValue(f.result);
     render(<Harness projection={f.projection} readResult={read} />);

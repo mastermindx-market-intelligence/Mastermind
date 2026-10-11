@@ -40,7 +40,8 @@ function ConversationBody({ projection, draft, onDraftChange, readResult, draftR
     ? observedMissionAssociation(read.value, mission.value, context.selection) : null;
   const document = retained && association ? read.value : null;
   const refs = mission.value?.schema === "mastermind.mission_workspace.v3" ? mission.value.result_refs.refs : [];
-  const candidates = association ? refs.filter(ref => ref.job_id === association.job_id && ref.attempt_id === association.attempt_id) : [];
+  const candidates = association ? refs.filter(ref => ref.root_job_id === context.selection?.rootJobId &&
+    ref.job_id === association.job_id && ref.attempt_id === association.attempt_id) : [];
   const exactResult = candidates.length === 1 ? normalizeResultSelection({
     workRef: context.selection?.workRef, rootJobId: candidates[0].root_job_id,
     jobId: candidates[0].job_id, attemptId: candidates[0].attempt_id, resultEnvelopeDigest: candidates[0].result_envelope_digest,
