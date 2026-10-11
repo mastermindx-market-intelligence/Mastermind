@@ -222,9 +222,15 @@ def validate_fabric_cleanup_receipt(
         _refuse("foreign_lane_generation")
     if type(lane["returncode"]) is not int or type(lane["timed_out"]) is not bool:
         _refuse("incomplete_lane_exit")
-    for field in ("nice_requested", "nice_applied"):
-        if lane[field] is not None and (type(lane[field]) is not int or not -20 <= lane[field] <= 19):
-            _refuse("invalid_lane_record")
+    requested_nice = lane["nice_requested"]
+    if requested_nice is not None and (type(requested_nice) is not int or not -20 <= requested_nice <= 19):
+        _refuse("invalid_lane_record")
+    # Installed lane_runtime records whether setpriority succeeded, not the
+    # applied priority value. False is valid cleanup evidence even when the
+    # best-effort priority change could not be applied.
+    if (type(lane["nice_applied"]) is not bool
+            or (lane["nice_applied"] and requested_nice is None)):
+        _refuse("invalid_lane_record")
     for field in ("stdout_bytes", "stderr_bytes"):
         if type(lane[field]) is not int or not 0 <= lane[field] < 2**63:
             _refuse("invalid_capture_count")

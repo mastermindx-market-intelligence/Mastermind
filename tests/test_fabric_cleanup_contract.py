@@ -22,7 +22,7 @@ def example():
     lane = dict(schema="mastermind.local_owned_process_receipt.v1", label="ATT-1",
                 pid=100, pgid=100, started_at="2026-10-11T10:00:00+00:00",
                 ended_at="2026-10-11T10:00:10+00:00", returncode=0, timed_out=False,
-                nice_requested=None, nice_applied=None, stdout_bytes=10,
+                nice_requested=None, nice_applied=False, stdout_bytes=10,
                 stderr_bytes=0, stdout_truncated=False, stderr_truncated=False,
                 runtime_failure_code=None,
                 cleanup=dict(status="not_needed", reason="normal_completion",
@@ -223,4 +223,17 @@ def test_raw_byte_digest_does_not_replace_canonical_record_digest(example):
     # Reformatting preserves the canonical record, but original bytes remain bound.
     raw = json.dumps(json.loads(example["lane_receipt_bytes"]), sort_keys=True).encode() + b"\n"
     example["lane_receipt_bytes"] = raw
+    _refuses(example)
+
+
+@pytest.mark.parametrize("requested,applied", [(10, True), (10, False), (None, False)])
+def test_actual_lane_runtime_boolean_nice_application_is_compatible(example, requested, applied):
+    _replace_lane(example, lambda lane: lane.update(nice_requested=requested, nice_applied=applied))
+    assert _validate(example).capability == "same_run_process_group_cleanup"
+
+
+@pytest.mark.parametrize("requested,applied", [(10, 1), (10, None), (10, "true"),
+                                              (None, True), (True, True), (20, True)])
+def test_malformed_nice_application_is_not_producer_evidence(example, requested, applied):
+    _replace_lane(example, lambda lane: lane.update(nice_requested=requested, nice_applied=applied))
     _refuses(example)

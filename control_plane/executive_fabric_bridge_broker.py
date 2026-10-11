@@ -18,7 +18,9 @@ import os
 from pathlib import Path
 import re
 import stat
+import time
 from typing import Any, Mapping, Protocol
+from control_plane import fabric_cleanup_transport as cleanup_transport
 
 from ops.executive_os.capacity_broker_topology import CONTROL_UID
 
@@ -65,6 +67,11 @@ class Backend(Protocol):
         The backend must compare that route atomically at its effect boundary;
         broker status preflight is not permission to reroute between calls.
         Neither missing receipt nor NOT_FOUND proves safe first use.
+
+        A status payload with cleanup_query is a read-only original-record
+        retrieval. The readback selector requires a second retrieval from the
+        retained owner store, not an echo or reuse of the first in-memory object.
+        It must never initiate a census, signal, seal, lease mutation or restamp.
         """
         ...
 
@@ -361,12 +368,20 @@ class FabricBridgeBroker:
         if operation=='status' and type(payload) is dict and 'start_request_sha256' in payload:
             extra=extra|{'start_request_sha256'}
             _digest(payload['start_request_sha256'])
+        if operation=='status' and type(payload) is dict and 'cleanup_query' in payload:
+            if 'start_request_sha256' in payload:_refuse()
+            extra=extra|{'cleanup_query'}
         _object(payload,{'binding','physical_binding_sha256'}|extra)
         _digest(payload['physical_binding_sha256'])
         binding=_binding(payload['binding'])
         if operation!='start':
             if payload['run_id']!=binding['attempt_id']:_refuse()
             _identifier(payload['run_id'])
+        if operation=='status' and 'cleanup_query' in payload:
+            try:
+                cleanup_transport.validate_query(payload['cleanup_query'],run_id=payload['run_id'])
+            except (ValueError,TypeError,KeyError) as exc:
+                raise BridgeProtocolError('BrokerProtocolError','Invalid bound cleanup query') from exc
         if operation=='start':
             spec=payload['launch_spec']
             fields={f.name for f in dataclasses.fields(OrchestrationLaunchSpec)}
@@ -410,6 +425,17 @@ class FabricBridgeBroker:
         common={'adapter_id','binding','physical_binding_sha256'}
         if result.get('physical_binding_sha256')!=payload['physical_binding_sha256']:
             _refuse('EFFECT_UNKNOWN','Backend route differs from the Runtime-pinned physical binding')
+        if operation=='status' and 'cleanup_query' in payload:
+            _object(result,common|{'cleanup','cleanup_query_sha256'})
+            if result['cleanup_query_sha256']!=cleanup_transport.digest(payload['cleanup_query']):
+                _refuse('BackendRefusedError','Cleanup query identity differs')
+            try:
+                cleanup_transport.validate_package(result['cleanup'],query=payload['cleanup_query'],
+                    binding=payload['binding'],physical_digest=payload['physical_binding_sha256'],
+                    observed_before=time.time())
+            except (ValueError,TypeError,KeyError) as exc:
+                raise BridgeProtocolError('BackendRefusedError','Original cleanup record is unavailable or foreign') from exc
+            return
         if operation=='status' and 'start_request_sha256' in payload:
             _same_backend_binding(result,payload['binding'],payload['start_request_sha256'])
             extra={'start_state','request_sha256'}
@@ -510,11 +536,15 @@ class FabricBridgeBroker:
                 raise BridgeProtocolError('EFFECT_UNKNOWN','Original Attempt requires status-only reconciliation') from exc
         else:
             try:
-                if operation in {'cancel','validate'}:
+                if operation in {'cancel','validate'} or 'cleanup_query' in payload:
                     query={key:payload[key] for key in ('binding','run_id','physical_binding_sha256')}
                     observed=_strict_json(_canonical(await self.backend.execute('status',_strict_json(_canonical(query)))))
                     _same_backend_binding(observed,binding)
                     self._operation_result('status',observed,query)
+                    if 'cleanup_query' in payload and (
+                            observed['run']['process_ref']!=payload['cleanup_query']['process_ref']
+                            or observed['run']['status'] in {'STARTING','RUNNING','CANCELLING'}):
+                        _refuse('BackendRefusedError','Cleanup does not match an original terminal process')
                 result=_strict_json(_canonical(await self.backend.execute(operation,_strict_json(_canonical(payload)))))
                 _same_backend_binding(result,binding)
                 self._operation_result(operation,result,payload)

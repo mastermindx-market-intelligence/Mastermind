@@ -14,9 +14,11 @@ import hashlib
 import json
 import re
 import stat
+import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
+from control_plane import fabric_cleanup_transport as cleanup_transport
 
 from ops.executive_os.capacity_broker_topology import CONTROL_UID
 
@@ -216,6 +218,8 @@ class AttendedFabricWorkerAdapter:
         self._leases: dict[str, AttemptLease] = {}
         self._refs: dict[str, WorkerProcessRef] = {}
         self._attestations: dict[str, dict[str, Any]] = {}
+        self._cleanup_pairs: dict[tuple[str, str], tuple[dict, dict, dict]] = {}
+        self._cleanup_not_before: dict[str, float] = {}
 
     @property
     def process_controller(self):
@@ -291,12 +295,75 @@ class AttendedFabricWorkerAdapter:
         }
 
     def fabric_cleanup_receipt(self, subject, *, operation, observed_after):
-        self._subject_ref(subject)
-        raise BrokerStateError("FABRIC_CLEANUP_UNAVAILABLE: backend has no authenticated same-run cleanup package")
+        ref = self._subject_ref(subject)
+        pair = self._cleanup_pairs.get((ref.run_id, operation))
+        # Recovery runs outside the event loop. Normal async paths must prime
+        # explicitly; never block the loop or infer fresh absence from a cache.
+        if pair is None or cleanup_transport.stamp(pair[1]["observed_at"]) < observed_after:
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                asyncio.run(self.prepare_fabric_cleanup(ref, operation=operation, observed_after=observed_after))
+            else:
+                raise BrokerStateError("FABRIC_CLEANUP_UNAVAILABLE: scoped evidence was not primed")
+        query, first, _ = self._cleanup_pair(ref, operation)
+        check = {**query, "observed_after": observed_after}
+        return cleanup_transport.validate_package(first, query=check,
+            binding=self._known(ref)[1]["binding"], physical_digest=self._known(ref)[2].digest,
+            observed_before=time.time())
 
     def fabric_cleanup_receipt_readback(self, subject, *, operation):
-        self._subject_ref(subject)
-        raise BrokerStateError("FABRIC_CLEANUP_UNAVAILABLE: no retained owner package to read back")
+        ref = self._subject_ref(subject)
+        _, _, second = self._cleanup_pair(ref, operation)
+        return json.loads(cleanup_transport.canonical(second))
+
+    def _cleanup_query(self, ref, operation, observed_after):
+        expected = self.fabric_cleanup_expectation(ref)
+        observed_after = max(observed_after, self._cleanup_not_before.get(ref.run_id, observed_after))
+        query = dict(schema_version=cleanup_transport.SCHEMA, scope=operation,
+            process_ref=dataclasses.asdict(ref), host_ref=expected["process_identity"]["host_ref"],
+            observed_after=observed_after, readback_sha256=None)
+        cleanup_transport.validate_query(query, run_id=ref.run_id)
+        return query
+
+    def _cleanup_pair(self, ref, operation):
+        try:
+            query, first, second = self._cleanup_pairs[(ref.run_id, operation)]
+        except KeyError as exc:
+            raise BrokerStateError("FABRIC_CLEANUP_UNAVAILABLE: no retained owner readback") from exc
+        # Revalidate the original Runtime lease, physical route and full process
+        # generation on every cache access, not merely the stable run id.
+        if self._cleanup_query(ref, operation, query["observed_after"]) != query:
+            raise BrokerStateError("Fabric cleanup cache identity changed")
+        return query, first, second
+
+    async def prepare_fabric_cleanup(self, subject, *, operation, observed_after):
+        ref = self._subject_ref(subject)
+        key = (ref.run_id, operation)
+        self._cleanup_pairs.pop(key, None)
+        query = self._cleanup_query(ref, operation, observed_after)
+        observed_after = query["observed_after"]
+        original = self._known(ref)[1]
+        physical = self._known(ref)[2]
+
+        async def retrieve(selected):
+            result = await self._request(ref, "status", cleanup_query=selected)
+            if (set(result) != {"adapter_id", "binding", "physical_binding_sha256",
+                               "cleanup_query_sha256", "cleanup"}
+                    or result["cleanup_query_sha256"] != cleanup_transport.digest(selected)):
+                raise BrokerProtocolError("Fabric cleanup response query changed")
+            return cleanup_transport.validate_package(result["cleanup"], query=selected,
+                binding=original["binding"], physical_digest=physical.digest,
+                observed_before=time.time())
+
+        first = await retrieve(query)
+        second = await retrieve({**query, "readback_sha256": cleanup_transport.digest(first)})
+        if (cleanup_transport.canonical(first) != cleanup_transport.canonical(second)
+                or self._cleanup_query(ref, operation, observed_after) != query):
+            raise BrokerProtocolError("Fabric original owner readback changed")
+        # Both independent authenticated reads succeed before publishing any
+        # evidence to Supervisor's synchronous readers.
+        self._cleanup_pairs[key] = (query, first, second)
 
     def _resolve(self, spec: WorkerLaunchSpec, *, launch: bool):
         job, attempt, quota, join = _read_claim(self.runtime, job_id=spec.job_id,
@@ -417,6 +484,11 @@ class AttendedFabricWorkerAdapter:
         current = self._validate_lease(ref.run_id)
         if operation == "validate" and current.status is AttemptStatus.CANCEL_REQUESTED:
             raise BrokerStateError("cancelled Fabric attempt cannot begin validation")
+        if operation in {"collect", "validate", "cancel"}:
+            self._cleanup_pairs = {key: value for key, value in self._cleanup_pairs.items()
+                                   if key[0] != ref.run_id}
+        if operation in {"validate", "cancel"}:
+            self._cleanup_not_before[ref.run_id] = time.time()
         attempt, check, check_payload = self._resolve(spec, launch=False)
         self._pin_matches(attempt, check, check_payload)
         options = {} if request_timeout is None else {"timeout_seconds": request_timeout}
@@ -479,6 +551,8 @@ class AttendedFabricWorkerAdapter:
     def reattach(self, spec: WorkerLaunchSpec, binding: WorkerRecoveryBinding, *, lease: AttemptLease | None = None):
         if not isinstance(lease, AttemptLease) or lease.attempt.attempt_id != spec.run_id:
             raise BrokerStateError("Fabric recovery requires the actual adopted Supervisor lease")
+        self._cleanup_pairs = {key: value for key, value in self._cleanup_pairs.items()
+                               if key[0] != spec.run_id}
         self._leases[spec.run_id] = lease
         self._validate_lease(spec.run_id)
         if binding.adapter_id != ADAPTER_ID or binding.recover_launch_spec(type(spec)) != spec:

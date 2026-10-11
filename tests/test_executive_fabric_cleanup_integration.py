@@ -243,6 +243,42 @@ def test_absent_fabric_cleanup_never_terminalizes_durable_attempt(tmp_path):
         asyncio.run(supervisor._terminalize(active, collection, tmp_path / "collection.json"))
     assert runtime.attempts.get_attempt(active.lease.attempt.attempt_id).status is owner.AttemptStatus.CHECKPOINTED
     assert runtime.jobs.get_job(job_id).status is owner.JobStatus.CHECKPOINTED
+    assert runtime.attempts.get_attempt(active.lease.attempt.attempt_id).exit_code == 1
+    assert not supervisor._terminal_assignment_receipt_path(active.lease.attempt.attempt_id).exists()
+
+
+@pytest.mark.parametrize("kind", ["collection", "validation"])
+def test_cleanup_failure_preserves_unqualified_received_evidence(tmp_path, kind):
+    runtime, job_id, _ = _runtime_and_job(tmp_path)
+    fake = FakeAdapter(FakeInspector())
+    active = asyncio.run(_supervisor(runtime, tmp_path, fake).start_job(job_id))
+    collection = asyncio.run(fake.collect_result(active.process_ref))
+    adapter = AttendedFabricWorkerAdapter(runtime, lambda *_args: None)
+    supervisor = ExecutiveSupervisor(runtime, adapter, cleanup_policy=_policy(),
+        require_complete_launch_attestation=True, runs_root=tmp_path / "runs")
+    async def collected(_ref):
+        return collection
+    adapter.collect_result = collected
+    async def validated(*_args, **_kwargs):
+        from control_plane.worker_execution_contract import ValidationReceipt
+        return ValidationReceipt(argv=("/usr/bin/true",), exit_code=0, stdout_sha256="a"*64,
+            stdout_size=0, stderr_sha256="b"*64, stderr_size=0, timed_out=False, error=None)
+    adapter.run_validation_argv = validated
+    with pytest.raises(SupervisorError):
+        if kind == "collection":
+            asyncio.run(supervisor.finish_job(active))
+        else:
+            job = dataclasses.replace(runtime.jobs.get_job(job_id), validation_commands=[["/usr/bin/true"]])
+            asyncio.run(supervisor._run_supervisor_validations(active, job))
+    path = supervisor._receipt_path(active.lease.attempt.attempt_id,
+        f"fabric-unqualified-{kind}.json",
+        legacy=active.launch_spec.run_dir / "output" / f"fabric-unqualified-{kind}.json")
+    assert path.exists(), "independently received evidence must survive failed cleanup retrieval"
+    retained = json.loads(path.read_text())
+    assert retained["eligible_for_terminalization"] is False
+    assert retained["attempt_id"] == active.lease.attempt.attempt_id
+    assert retained["evidence"]
+    assert runtime.attempts.get_attempt(active.lease.attempt.attempt_id).status is owner.AttemptStatus.CHECKPOINTED
     assert not supervisor._terminal_assignment_receipt_path(active.lease.attempt.attempt_id).exists()
 
 

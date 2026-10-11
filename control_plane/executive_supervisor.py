@@ -2179,6 +2179,11 @@ class ExecutiveSupervisor:
                         raise SupervisorError(
                             f"Codex launch failed: {type(exc).__name__}: {exc}"
                         ) from exc
+                    if process_ref is not None:
+                        await self._prepare_fabric_cleanup(
+                            ActiveRun(lease=lease, process_ref=process_ref, launch_spec=spec),
+                            operation="terminal",
+                        )
                     sweep = (
                         self._active_terminal_uid_sweep(
                             ActiveRun(
@@ -2275,6 +2280,32 @@ class ExecutiveSupervisor:
             path, payload, name="collection receipt"
         )
         return path
+
+    def _retain_unqualified_fabric_evidence(self, active: ActiveRun, *, kind: str, evidence: Any) -> None:
+        """Preserve received bytes even if cleanup cannot qualify them.
+
+        This separate private record is never a collection/validation seal and
+        is not read by Runtime's terminal-evidence validator. The original
+        qualified receipt paths and all terminal gates remain unchanged.
+        """
+        if self.cleanup_policy is not CleanupPolicy.FABRIC_PROCESS_GROUP:
+            return
+        if kind not in {"collection", "validation"}:
+            raise SupervisorError("unsupported unqualified Fabric evidence")
+        attempt = active.lease.attempt
+        payload = {
+            "schema_version": "mastermind.executive_fabric_unqualified_evidence/v1",
+            "root_id": self._job(attempt.job_id).root_job_id,
+            "job_id": attempt.job_id, "attempt_id": attempt.attempt_id,
+            "effective_grant_digest": attempt.effective_grant_digest,
+            "process_ref": _jsonable(active.process_ref), "kind": kind,
+            "eligible_for_terminalization": False, "evidence": _jsonable(evidence),
+        }
+        _write_or_verify_private_json(
+            self._receipt_path(attempt.attempt_id, f"fabric-unqualified-{kind}.json",
+                legacy=active.launch_spec.run_dir / "output" / f"fabric-unqualified-{kind}.json"),
+            payload, name=f"unqualified Fabric {kind} evidence",
+        )
 
     @staticmethod
     def _read_private_receipt(path: Path, *, name: str) -> dict[str, Any]:
@@ -2552,6 +2583,37 @@ class ExecutiveSupervisor:
             return self._validate_terminal_uid_sweep(value)
         return value if isinstance(value, Mapping) else None
 
+    async def _prepare_fabric_cleanup(self, active: ActiveRun, *, operation: str) -> None:
+        """Retrieve original evidence under the existing lease heartbeat loop.
+
+        Only the opt-in Fabric adapter uses this path. It adds no census,
+        cancellation, retry or terminal authority; assignment sealing is still
+        independently required and remains unavailable for shared principals.
+        """
+        if self.cleanup_policy is not CleanupPolicy.FABRIC_PROCESS_GROUP:
+            return
+        floor = datetime.fromisoformat(active.process_ref.started_at.replace("Z", "+00:00")).timestamp()
+        task = asyncio.create_task(self.adapter.prepare_fabric_cleanup(
+            active.process_ref, operation=operation, observed_after=floor))
+        try:
+            while True:
+                done, _ = await asyncio.wait({task}, timeout=self.heartbeat_interval_seconds)
+                if task in done:
+                    task.result()
+                    return
+                attempt = active.lease.attempt
+                self.runtime.attempts.heartbeat_attempt(attempt.attempt_id,
+                    fence_generation=attempt.fence_generation, lease_token=active.lease.lease_token)
+        except Exception as exc:
+            raise TerminalAssignmentSealError(
+                "Fabric original cleanup retrieval is unavailable; retain the Attempt"
+            ) from exc
+        finally:
+            if not task.done():
+                # Stop only the local read await. No provider effect is sent.
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
     def _fabric_cleanup_evidence(
         self, subject: WorkerProcessRef | Attempt, attempt: Attempt, *, operation: str
     ) -> Mapping[str, Any]:
@@ -2759,6 +2821,9 @@ class ExecutiveSupervisor:
             ):
                 break
         persisted = tuple(receipts)
+        self._retain_unqualified_fabric_evidence(active, kind="validation", evidence=persisted)
+        await self._prepare_fabric_cleanup(active, operation="validation")
+        await self._prepare_fabric_cleanup(active, operation="terminal")
         path = self._persist_validations(active, persisted)
         if len(persisted) != len(validation_commands):
             return (
@@ -2834,6 +2899,7 @@ class ExecutiveSupervisor:
             raise SupervisorError(
                 "persisted process-exit evidence differs from recovered collection"
             )
+        await self._prepare_fabric_cleanup(active, operation="terminal")
         job = self._job(attempt.job_id)
         if job.status == JobStatus.CANCEL_REQUESTED:
             await self._settle_recovered_terminal_owner(active)
@@ -3000,6 +3066,8 @@ class ExecutiveSupervisor:
 
     async def finish_job(self, active: ActiveRun) -> SupervisorReceipt:
         receipt = await self._collect_with_heartbeats(active)
+        self._retain_unqualified_fabric_evidence(active, kind="collection", evidence=receipt)
+        await self._prepare_fabric_cleanup(active, operation="collection")
         receipt_path = self._persist_collection(active, receipt)
         job, validations, validation_path, seal_path = await self._terminalize(
             active, receipt, receipt_path
