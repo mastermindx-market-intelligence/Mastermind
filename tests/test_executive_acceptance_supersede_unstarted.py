@@ -200,7 +200,7 @@ def _var_alias_fixture(tmp_path, monkeypatch, *, absolute=False):
     alias.symlink_to(physical if absolute else 'private/var', target_is_directory=True)
     monkeypatch.setattr(m, '_MACOS_VAR_ALIAS', alias, raising=False)
     monkeypatch.setattr(m, '_MACOS_VAR_PHYSICAL', physical, raising=False)
-    monkeypatch.setattr(m.sys, 'platform', 'darwin')
+    monkeypatch.setattr(m, 'sys', SimpleNamespace(platform='darwin'))
     monkeypatch.setattr(ac, 'RUNTIME_ROOT', alias/'db'/'mastermind-executive')
     return values, alias, physical
 
@@ -284,7 +284,7 @@ def test_runtime_alias_does_not_weaken_absence_guards(tmp_path, monkeypatch, fau
             alias.symlink_to('private/./var')
         monkeypatch.setattr(m, '_require_absent', changed)
     elif fault == 'non-darwin':
-        monkeypatch.setattr(m.sys, 'platform', 'linux')
+        monkeypatch.setattr(m, 'sys', SimpleNamespace(platform='linux'))
     with pytest.raises((m.MaintenanceError, OSError)):
         m.validate_superseded_binding(d, before=before, artifacts=artifacts, prior_canary=canary)
 
@@ -359,7 +359,7 @@ def test_prepare_selector_requires_exact_installed_selected_release(tmp_path, mo
     (system/'config'/'worker-codex.json').write_text('{"operator_harness_armed":false}')
     monkeypatch.setattr(m, 'SYSTEM_ROOT', system)
     monkeypatch.setattr(m.os, 'geteuid', lambda: 0)
-    monkeypatch.setattr(m.sys, 'platform', 'darwin')
+    monkeypatch.setattr(m, 'sys', SimpleNamespace(platform='darwin'))
     monkeypatch.setattr(m, 'require_stopped', lambda: None)
     def forbidden(*args):
         raise AssertionError('invalid selector reached runtime read')
@@ -406,7 +406,8 @@ def test_acceptance_revalidates_full_selected_prestate_before_marker(tmp_path, m
         'schema_version': m.SCHEMA_SUPERSEDE, 'descriptor_sha256': m.digest(d)}
 
 
-def test_preparation_publishes_one_new_descriptor_without_modifying_selected(tmp_path, monkeypatch):
+@pytest.mark.parametrize('prejob', [False, True])
+def test_preparation_publishes_one_new_descriptor_without_modifying_selected(tmp_path, monkeypatch, prejob):
     import dataclasses
     from control_plane.executive_runtime import Runtime
     from ops.executive_os import autonomy_control as ac
@@ -426,7 +427,8 @@ def test_preparation_publishes_one_new_descriptor_without_modifying_selected(tmp
     monkeypatch.setattr(m, '_sealed_ancestors', lambda path: [])
     monkeypatch.setattr(m, 'has_macos_acl', lambda *args, **kwargs: False)
     monkeypatch.setattr(m.os, 'geteuid', lambda: 0)
-    monkeypatch.setattr(m.sys, 'platform', 'darwin')
+    # Keep the ACL observer on its actual host while simulating the Mac entry gate.
+    monkeypatch.setattr(m, 'sys', SimpleNamespace(platform='darwin'))
     monkeypatch.setattr(m, 'require_stopped', lambda: None)
     runtime_root = tmp_path/'runtime'
     (runtime_root/'control'/'acceptance').mkdir(parents=True)
@@ -461,15 +463,21 @@ def test_preparation_publishes_one_new_descriptor_without_modifying_selected(tmp
     for filename, value in [('descriptor.json', selected), ('preparing.json', {'schema_version': m.SCHEMA_V2}),
                             ('baseline.json', before), ('inventory.json', artifacts), ('prior-secret-canary.json', canary)]:
         m.write_sealed(bundle/filename, value, public=filename == 'descriptor.json')
+    if prejob:
+        from tests.test_executive_acceptance_supersede_prejob import receipt_prefix
+        receipt_prefix(runtime_root, selected, monkeypatch)
     originals = {p.name: p.read_bytes() for p in bundle.iterdir()}
     args = argparse.Namespace(predecessor_sha=accepted, successor_sha=successor, root_job_id=root.job_id,
         recovery_job_id=None, recovery_attempt_id=None, carry_terminal_dispatch=True,
-        supersede_unstarted_sha=selected_sha, superseded_descriptor_sha256=m.digest(selected))
+        supersede_unstarted_sha=None if prejob else selected_sha,
+        supersede_prejob_sha=selected_sha if prejob else None,
+        superseded_descriptor_sha256=m.digest(selected))
     result = m.prepare(args)
     d = m.descriptor_for(successor)
     assert result == m.bundle_path(successor)
-    assert d['schema_version'] == m.SCHEMA_SUPERSEDE
-    assert d['predecessor_sha'] == accepted and d['superseded_unstarted_sha'] == selected_sha
+    assert d['schema_version'] == (m.SCHEMA_PREJOB if prejob else m.SCHEMA_SUPERSEDE)
+    assert d['predecessor_sha'] == accepted
+    assert d['interrupted_prejob_sha' if prejob else 'superseded_unstarted_sha'] == selected_sha
     assert d['template_proof_job_id'] == proof.job_id and d['frozen_base_sha'] == 'a'*40
     assert {p.name: p.read_bytes() for p in bundle.iterdir()} == originals
     assert m.snapshot(runtime.store.path) == before
