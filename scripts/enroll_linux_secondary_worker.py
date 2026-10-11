@@ -208,6 +208,29 @@ def verify_root_source_custody(
     repo = Path(repo)
     git_dir = repo / ".git"
 
+    # Checking only the checkout itself does not fence its pathname. A user
+    # who can write a parent directory can rename even a root-owned checkout
+    # and replace its path before later root Git/Python operations.
+    if not repo.is_absolute() or ".." in repo.parts:
+        raise EnrollmentError("source_ancestor_custody_invalid")
+    for ancestor in reversed(repo.parents):
+        try:
+            info = ancestor.lstat()
+        except OSError as exc:
+            raise EnrollmentError("source_ancestor_custody_invalid") from exc
+        if (
+            not stat.S_ISDIR(info.st_mode)
+            or stat.S_ISLNK(info.st_mode)
+            or info.st_uid not in (0, int(expected_owner_uid))
+        ):
+            raise EnrollmentError("source_ancestor_custody_invalid")
+        if stat.S_IMODE(info.st_mode) & 0o022:
+            # A root-owned sticky directory (for example /tmp) prevents
+            # unprivileged renames of root-owned descendants. Other writable
+            # ancestors leave the checked checkout path replaceable.
+            if not (info.st_uid == 0 and info.st_mode & stat.S_ISVTX):
+                raise EnrollmentError("source_ancestor_custody_invalid")
+
     def require_directory(path: Path, *, code: str) -> None:
         try:
             info = path.lstat()
