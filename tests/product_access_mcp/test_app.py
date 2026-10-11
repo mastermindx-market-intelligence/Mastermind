@@ -131,7 +131,8 @@ class ProductAppTests(unittest.IsolatedAsyncioTestCase):
         for tool in tools:
             self.assertFalse(tool["inputSchema"]["additionalProperties"])
             self.assertTrue(tool["annotations"]["readOnlyHint"])
-            self.assertEqual(tool["_meta"]["securitySchemes"], [{"type": "oauth2", "scopes": ["product.observe"]}])
+            self.assertEqual(tool["securitySchemes"], [{"type": "oauth2", "scopes": ["product.observe"]}])
+            self.assertNotIn("securitySchemes", tool.get("_meta", {}))
         self.assertEqual(self.calls, [])
 
     async def test_catalog_is_compact_without_weakening_output_validation(self):
@@ -145,6 +146,7 @@ class ProductAppTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["structuredContent"]["observations"][0]["data"]["process_revision"], "a" * 7)
         self.assertEqual(self.calls, [("health", ()), ("status", ())])
         self.assertNotIn(self.token(), json.dumps(result))
+        self.assertNotIn("mcp/www_authenticate", json.dumps(result))
 
     async def test_missing_auth_never_reaches_reader(self):
         result = await self.rpc("tools/call", {"name": "product_diagnostics", "arguments": {}})
@@ -181,6 +183,17 @@ class ProductAppTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn("structuredContent", result)
                 self.assertNotIn("process_revision", json.dumps(result))
                 self.assertNotIn("PRIVATE_AUDIT_FAILURE", json.dumps(result))
+                challenges = result.get("_meta", {}).get("mcp/www_authenticate", [])
+                if mode == "expire":
+                    self.assertEqual(len(challenges), 1)
+                    self.assertIn('error="invalid_token"', challenges[0])
+                    self.assertIn('error_description="Authentication required"', challenges[0])
+                    self.assertIn(self.policy.resource_metadata_url, challenges[0])
+                else:
+                    # Product policy revocation or audit failure cannot be
+                    # remedied by asking the user to re-link their OAuth token.
+                    self.assertEqual(challenges, [])
+                self.assertNotIn(self.token(), json.dumps(result))
 
     async def test_unknown_arguments_identity_and_mutation_tools_are_refused(self):
         for args in ({"url": "https://private.invalid"}, {"user_id": "user-b"}, {"headers": {"Cookie": "PRIVATE"}},
@@ -191,6 +204,7 @@ class ProductAppTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn("PRIVATE", json.dumps(result))
         result = self.result(await self.read(name="execute_trade"))
         self.assertTrue(result["isError"])
+        self.assertNotIn("mcp/www_authenticate", json.dumps(result))
         self.assertEqual(self.calls, [])
 
     async def test_invalid_symbol_requests_are_closed_before_reader(self):
@@ -295,7 +309,7 @@ class ProductAppTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_catalog_schema_snapshot_is_pinned(self):
         from integrations.product_access_mcp.schemas import SCHEMA_SNAPSHOT_SHA256, TOOL_SPECS
-        self.assertEqual(SCHEMA_SNAPSHOT_SHA256, "62b935d4f89f6b377dc51eb5968e236fdd08ce03c4008be62377b83c168aebc6")
+        self.assertEqual(SCHEMA_SNAPSHOT_SHA256, "3f7d8141b1af5a56c6b7f6b480e1f5a2fb052a6d42e0710a7e7f1d276db614db")
         tools = self.result(await self.rpc("tools/list", token=self.token()))["tools"]
         self.assertEqual(tools, list(TOOL_SPECS))
 

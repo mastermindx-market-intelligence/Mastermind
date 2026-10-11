@@ -7,7 +7,7 @@ import json
 from .contracts import ENDPOINTS, MAX_SYMBOLS, SCHEMA, SYMBOL_PATTERN
 from .reader import CHECKS, COUNTS
 
-SERVER_VERSION = "1.1.0"
+SERVER_VERSION = "1.2.0"
 SCOPE = "product.observe"
 
 
@@ -104,6 +104,8 @@ TOOL_SPECS = (
 )
 for spec in TOOL_SPECS:
     spec["annotations"] = {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}
-    spec["_meta"] = {"securitySchemes": [{"type": "oauth2", "scopes": [SCOPE]}]}
+    # Per-tool top-level securitySchemes is necessary for ChatGPT OAuth linking.
+    # A nested _meta.securitySchemes field is not an equivalent SDK wire contract.
+    spec["securitySchemes"] = [{"type": "oauth2", "scopes": [SCOPE]}]
 SCHEMA_SNAPSHOT_SHA256 = hashlib.sha256(json.dumps({"server_version": SERVER_VERSION, "tools": TOOL_SPECS},
     sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()

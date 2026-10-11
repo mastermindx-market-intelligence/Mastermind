@@ -14,7 +14,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import CallToolResult, TextContent, Tool
 
-from integrations.business_mcp_auth.contracts import AuthAuditSink, ResourcePolicy, validate_resource_policy
+from integrations.business_mcp_auth.contracts import AuthAuditSink, AuthErrorCode, ResourcePolicy, validate_resource_policy
 from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
 from integrations.business_mcp_auth.mcp_adapter import MastermindTokenVerifier
 
@@ -32,8 +32,22 @@ def _snapshot(value, limit):
     return json.loads(text)
 
 
-def _error(code):
-    return CallToolResult(content=[TextContent(type="text", text=json.dumps({"code": code}))], isError=True)
+def _error(code, *, resource_metadata_url=None):
+    """Return only closed errors; expose a relink hint for credential failures."""
+    params = {
+        "content": [TextContent(type="text", text=json.dumps({"code": code}))],
+        "isError": True,
+    }
+    if resource_metadata_url is not None and code in {
+        "AUTHENTICATION_REQUIRED", "AUTHENTICATION_CHANGED",
+    }:
+        # Do not include the bearer, caller, rejected input, or upstream errors.
+        # The resource URL comes only from an already validated owner policy.
+        params["_meta"] = {"mcp/www_authenticate": [
+            'Bearer resource_metadata="' + resource_metadata_url +
+            '", error="invalid_token", error_description="Authentication required"',
+        ]}
+    return CallToolResult(**params)
 
 
 def create_product_server(*, authenticator: JwtAuthenticator, policy: ResourcePolicy,
@@ -58,6 +72,8 @@ def create_product_server(*, authenticator: JwtAuthenticator, policy: ResourcePo
     if str(build_resource_metadata_url(settings.resource_server_url)) != selected.resource_metadata_url:
         raise ValueError("SDK metadata URL differs from the admitted resource policy")
     verifier = MastermindTokenVerifier(authenticator=authenticator, policy=selected, now=now, audit_sink=audit_sink)
+    def oauth_error(code):
+        return _error(code, resource_metadata_url=selected.resource_metadata_url)
     specs = copy.deepcopy(TOOL_SPECS)
     by_name = {row["name"]: row for row in specs}
     for row in specs:
@@ -82,7 +98,7 @@ def create_product_server(*, authenticator: JwtAuthenticator, policy: ResourcePo
     async def call_tool(name: str, arguments: dict | None) -> CallToolResult:
         access = get_access_token()
         if access is None:
-            return _error("AUTHENTICATION_REQUIRED")
+            return oauth_error("AUTHENTICATION_REQUIRED")
         if name not in by_name:
             return _error("TOOL_NOT_AVAILABLE")
         try:
@@ -92,7 +108,7 @@ def create_product_server(*, authenticator: JwtAuthenticator, policy: ResourcePo
             original_identity = (access.subject, access.client_id, str(access.resource), tuple(access.scopes), access.expires_at)
             if (type(access.subject) is not str or re.fullmatch(r"[0-9a-f]{64}", access.subject) is None
                     or str(access.resource) != selected.resource or tuple(access.scopes) != selected.required_scopes):
-                return _error("AUTHENTICATION_REQUIRED")
+                return oauth_error("AUTHENTICATION_REQUIRED")
         except Exception:
             # SDK's default validator includes rejected values; never use that renderer.
             return _error("INVALID_REQUEST")
@@ -102,12 +118,24 @@ def create_product_server(*, authenticator: JwtAuthenticator, policy: ResourcePo
         except Exception:
             return _error("READ_UNAVAILABLE")
         try:
-            current = await verifier.verify_token(original_token)
+            current, refusal = await verifier.verify_token_with_code(original_token)
             if current is None:
+                # Only a refreshable/invalid bearer should induce re-linking.
+                # A failed durable audit or revoked owner policy is not an OAuth
+                # credential problem and must not prompt repeated consent.
+                if refusal in {AuthErrorCode.TOKEN_EXPIRED,
+                               AuthErrorCode.TOKEN_SIGNATURE_REFUSED,
+                               AuthErrorCode.TOKEN_CLAIMS_REFUSED,
+                               AuthErrorCode.RESOURCE_REFUSED,
+                               AuthErrorCode.SCOPE_REFUSED}:
+                    return oauth_error("AUTHENTICATION_CHANGED")
                 return _error("AUTHENTICATION_CHANGED")
             current_identity = (current.subject, current.client_id, str(current.resource), tuple(current.scopes), current.expires_at)
-            if current_identity != original_identity or type(current.expires_at) is not int or current.expires_at <= now():
+            if current_identity != original_identity:
+                # Identity or policy drift is not safely remedied by re-link.
                 return _error("AUTHENTICATION_CHANGED")
+            if type(current.expires_at) is not int or current.expires_at <= now():
+                return oauth_error("AUTHENTICATION_CHANGED")
             # No await after the final credential recheck. Copy and validate the entire
             # buffered return, including nested data, before it can leave this resource.
             result = _snapshot(observed, MAX_RESULT_BYTES)

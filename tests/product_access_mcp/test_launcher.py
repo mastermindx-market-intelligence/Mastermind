@@ -21,10 +21,11 @@ def test_describe_is_inert_and_has_pinned_public_tools(capsys, monkeypatch):
     packet = json.loads(capsys.readouterr().out)
     assert packet["schema"] == "mastermind.product_mcp_launcher_descriptor.v1"
     assert packet["capability_state"] == "BUILT_NOT_PROVEN"
+    assert packet["server_version"] == "1.2.0"
     assert packet["tools"] == ["product_diagnostics", "product_market_pulse"]
     assert packet["scope"] == "product.observe"
     assert packet["schema_sha256"] == (
-        "62b935d4f89f6b377dc51eb5968e236fdd08ce03c4008be62377b83c168aebc6"
+        "3f7d8141b1af5a56c6b7f6b480e1f5a2fb052a6d42e0710a7e7f1d276db614db"
     )
 
 
