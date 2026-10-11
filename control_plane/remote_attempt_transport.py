@@ -15,6 +15,9 @@ resolution, the resolver fails closed before any remote request.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
+import json
+from pathlib import Path
 from collections.abc import Callable, Mapping, Sequence
 from enum import Enum
 from typing import Any, TYPE_CHECKING
@@ -34,6 +37,9 @@ from control_plane.executive_capacity_join import (
 )
 from control_plane.executive_runtime import (
     Attempt,
+    AttemptLease,
+    REMOTE_LAUNCH_IDENTITY_KEY,
+    REMOTE_LAUNCH_IDENTITY_SCHEMA,
     AttemptStatus,
     Job,
     JobStatus,
@@ -185,6 +191,34 @@ class ResolvedRemoteAttemptTransport:
     capacity_capability_id: str
     endpoint: RemoteWorkerBrokerEndpoint
     client: RemoteWorkerBrokerClient
+
+
+def _physical_identity_digest(client, endpoint) -> str:
+    """Hash local physical identity without persisting endpoints or credentials.
+
+    CA/client certificates are public identity material. Private key contents
+    are never read: its configured path is pinned and TLS validates that the
+    selected key matches the pinned certificate before an authenticated call.
+    CA/client-certificate rotation invalidates an existing pin; recovery does
+    not backfill the new host identity into an in-flight Attempt.
+    """
+    binding = client.binding
+    try:
+        transport = dataclasses.asdict(binding)
+        for key in ("ca_path", "client_cert_path", "client_key_path"):
+            transport[key] = str(transport[key])
+        material = {
+            "client_identity": dict(client.identity), "transport": transport,
+            "ca_sha256": hashlib.sha256(Path(binding.ca_path).read_bytes()).hexdigest(),
+            "client_cert_sha256": hashlib.sha256(Path(binding.client_cert_path).read_bytes()).hexdigest(),
+            "worker_id": endpoint.worker_id, "worker_user": endpoint.worker_user,
+            "worker_uid": endpoint.worker_uid, "worker_gid": endpoint.worker_gid,
+            "adapter_id": endpoint.adapter_id,
+        }
+        return hashlib.sha256(json.dumps(material, sort_keys=True, separators=(",", ":"),
+                                         allow_nan=False).encode()).hexdigest()
+    except (OSError, TypeError, ValueError) as exc:
+        raise RemoteAttemptTransportError("HOST_BINDING_MISMATCH") from exc
 
 
 def _require_identity(value: str, *, code: str = "INVALID_INPUT") -> str:
@@ -452,6 +486,17 @@ def resolve_remote_attempt_transport(
         endpoint = host_binding.endpoint_for(client)
     except (TransportValidationError, WorkerBrokerError, TypeError, ValueError) as exc:
         raise RemoteAttemptTransportError("HOST_BINDING_MISMATCH") from exc
+
+    pin = final_attempt.launch_metadata.get(REMOTE_LAUNCH_IDENTITY_KEY)
+    if resolved_purpose is RemoteTransportPurpose.LAUNCH:
+        if pin is not None:
+            raise RemoteAttemptTransportError("CLAIM_NOT_LAUNCHABLE")
+    elif pin != {
+        "schema_version": REMOTE_LAUNCH_IDENTITY_SCHEMA,
+        "sha256": _physical_identity_digest(client, endpoint),
+    }:
+        # Never bless today's binding as evidence of an ambiguous prior launch.
+        raise RemoteAttemptTransportError("HOST_BINDING_MISMATCH")
 
     return ResolvedRemoteAttemptTransport(
         purpose=resolved_purpose,
@@ -870,15 +915,16 @@ class AttemptBoundRemoteWorkerAdapter:
 
     ExecutiveSupervisor may keep this adapter for its whole process lifetime.
     No carrier exists until start(spec) supplies the already-claimed Attempt id.
-    The chosen fleet is cached before remote I/O so an ambiguous start cannot
-    silently resolve to another endpoint. Restart recovery derives the same
-    Worker/host again from canonical Runtime + Capacity state and uses a
+    The Supervisor lease commits a physical identity digest to the canonical
+    Attempt before remote I/O. An ambiguous start retains that immutable pin;
+    restart recovery must match it against trusted host composition and uses a
     recovery-only remote client that cannot issue start. Explicit proof-capacity
     requalification may resolve an exact LOST/requeued Attempt only through the
     Runtime's existing proof-recovery snapshot and receives a status-only client.
     """
 
     adapter_id = "attempt-bound-remote-worker"
+    requires_attempt_lease = True
 
     def __init__(
         self,
@@ -983,6 +1029,7 @@ class AttemptBoundRemoteWorkerAdapter:
     def _fleet_for_ref(self, ref: WorkerProcessRef) -> Any:
         if not isinstance(ref, WorkerProcessRef):
             raise BrokerStateError("remote operation requires a WorkerProcessRef")
+        self._resolve_attempt(self._attempt_for_run(ref.run_id), purpose=RemoteTransportPurpose.RECOVERY)
         try:
             return self._fleets[ref.run_id]
         except KeyError as exc:
@@ -993,6 +1040,7 @@ class AttemptBoundRemoteWorkerAdapter:
     def _fleet_for_spec(self, spec: WorkerLaunchSpec) -> Any:
         if not isinstance(spec, WorkerLaunchSpec):
             raise BrokerStateError("remote operation requires a WorkerLaunchSpec")
+        self._resolve_attempt(self._attempt_for_run(spec.run_id), purpose=RemoteTransportPurpose.RECOVERY)
         fleet = self._fleets.get(spec.run_id)
         if fleet is None or self._specs.get(spec.run_id) != spec:
             raise BrokerStateError(
@@ -1039,21 +1087,40 @@ class AttemptBoundRemoteWorkerAdapter:
         self._controllers[attempt.attempt_id] = controller
         return controller
 
-    async def start(self, spec: WorkerLaunchSpec) -> WorkerProcessRef:
+    async def start(
+        self, spec: WorkerLaunchSpec, *, lease: AttemptLease | None = None,
+    ) -> WorkerProcessRef:
+        if not isinstance(lease, AttemptLease):
+            raise BrokerStateError("remote start requires the current Supervisor Attempt lease")
         if not isinstance(spec, WorkerLaunchSpec):
             raise BrokerStateError("remote start requires a WorkerLaunchSpec")
         if spec.run_id in self._fleets:
             raise BrokerStateError("remote run already has an attempt carrier")
         attempt = self._attempt_for_run(spec.run_id)
-        if attempt.job_id != spec.job_id or attempt.worker_id != spec.worker_id:
+        if (attempt.job_id != spec.job_id or attempt.worker_id != spec.worker_id
+                or lease.attempt != attempt):
             raise BrokerStateError(
-                "remote LaunchSpec differs from the canonical claim"
+                "remote LaunchSpec or lease differs from the canonical claim"
             )
         resolution = self._resolve_attempt(
             attempt, purpose=RemoteTransportPurpose.LAUNCH
         )
+        identity_digest = _physical_identity_digest(resolution.client, resolution.endpoint)
         fleet = self._build_fleet(
             resolution, expected_worker_id=attempt.worker_id
+        )
+        if _physical_identity_digest(resolution.client, resolution.endpoint) != identity_digest:
+            raise BrokerStateError("remote client identity moved during fleet composition")
+        pinned = self.runtime.attempts.pin_remote_launch_identity(
+            attempt.attempt_id, fence_generation=lease.attempt.fence_generation,
+            lease_token=lease.lease_token, expected_version=attempt.version,
+            identity_digest=identity_digest,
+        )
+        # Re-resolve after local fleet composition and canonical persistence.
+        # A binding move refuses before I/O, retaining the original pin.
+        self._resolve_attempt(pinned, purpose=RemoteTransportPurpose.RECOVERY)
+        self.runtime.attempts.validate_pinned_remote_launch(
+            pinned, lease_token=lease.lease_token,
         )
         self._bind_fleet(spec, fleet)
         return await fleet.start(spec)
@@ -1111,6 +1178,7 @@ class AttemptBoundRemoteWorkerAdapter:
         return self.process_controller.uid_sweep_receipt(attempt)
 
     async def cleanup_unbound_run(self, run_id: str) -> Mapping[str, Any]:
+        self._resolve_attempt(self._attempt_for_run(run_id), purpose=RemoteTransportPurpose.RECOVERY)
         fleet = self._fleets.get(run_id)
         if fleet is not None:
             return await fleet.cleanup_unbound_run(run_id)
