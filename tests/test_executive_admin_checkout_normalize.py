@@ -7,6 +7,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -104,11 +105,12 @@ def test_git_input_timeout_reaps_child_and_closes_private_spool(tmp_path: Path, 
     assert len(handles) == 1 and handles[0].closed
 
 
-def test_git_input_staging_does_not_reset_shared_deadline(tmp_path: Path, monkeypatch):
+@pytest.mark.parametrize("ticks", [(1.0, 1.0, 2.0), (1.0, 2.0, 2.0)])
+def test_git_input_staging_does_not_reset_shared_deadline(tmp_path: Path, monkeypatch, ticks):
     from ops.executive_os import admin_checkout
 
-    clock = iter([1.0, 1.0, 2.0])
-    monkeypatch.setattr(admin_checkout.time, "monotonic", lambda: next(clock))
+    clock = iter(ticks)
+    monkeypatch.setattr(admin_checkout, "time", SimpleNamespace(monotonic=lambda: next(clock)))
 
     def must_not_launch(*args, **kwargs):
         pytest.fail("expired observation must not launch Git")
