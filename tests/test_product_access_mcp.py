@@ -427,3 +427,45 @@ def test_overlay_result_cannot_exfiltrate_undeclared_price_or_secret():
     got["data"]["sessions"]["us"]["session_access_token"] = "PRIVATE"
     with pytest.raises(ProductRefused):
         canonical_result(got)
+
+
+def test_forged_healthy_risk_requires_source_owned_verdict_and_session():
+    observed, _ = snap(R, payload(risk()))
+    assert observed["status"] == "OK"
+    for changed in (
+        {},
+        {"verdict": "MIXED"},
+        {"schema": "market_risk/v1", "verdict": "RISK_ZERO"},
+        {"schema": "market_risk/v1", "verdict": "MIXED", "stale": False},
+    ):
+        forged = {**observed, "data": changed}
+        with pytest.raises(ProductRefused):
+            canonical_result(forged)
+
+
+def test_forged_status_and_overlay_cannot_be_promoted_to_fresh():
+    status, _ = snap(M, payload({"status": "ok", "checks": {"site": {}}}))
+    assert status["status"] == "PARTIAL"
+    with pytest.raises(ProductRefused):
+        canonical_result({**status, "status": "OK"})
+    overlay, _ = snap(O, payload(overlay_fixture()))
+    assert overlay["status"] == "PARTIAL"
+    with pytest.raises(ProductRefused):
+        canonical_result({**overlay, "status": "OK", "data": {}})
+
+
+def test_healthy_risk_cannot_claim_qualified_when_source_is_stale():
+    observed, _ = snap(R, payload(risk(stale=True)))
+    assert observed["status"] == "STALE"
+    with pytest.raises(ProductRefused):
+        canonical_result({**observed, "status": "OK",
+                          "freshness": {"qualified": True, "reasons": []}})
+
+
+def test_missing_risk_score_never_claims_fully_qualified_read():
+    result, _ = snap(R, payload(risk(score=None)))
+    assert result["status"] == "PARTIAL"
+    assert result["freshness"]["qualified"] is False
+    assert "score_unavailable" in result["freshness"]["reasons"]
+    assert result["data"]["verdict"] == "MIXED"
+    assert "score" not in result["data"]

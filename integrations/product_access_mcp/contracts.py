@@ -7,7 +7,7 @@ product-user login, scheduler, session store, or source-publication authority.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from types import MappingProxyType
 from typing import Any, Mapping
 import json
@@ -279,6 +279,53 @@ def canonical_result(value: Mapping[str, Any]) -> dict[str, Any]:
         }[source["source_id"]]
         if not set(data) <= selected_fields:
             refuse()
+        source_name = source["source_id"]
+        if status == "INVALID" and data:
+            refuse()
+        if status in ("OK", "PARTIAL", "STALE"):
+            if source_name == "macro.public_status":
+                # The public status endpoint is not a whole-market freshness
+                # authority; it only projects individual producer observations.
+                if status != "PARTIAL" or fresh["qualified"] is not False or not data:
+                    refuse()
+                if type(data.get("reported_status")) is not str:
+                    refuse()
+            elif source_name == "macro.public_live_overlay":
+                # A fast-price overlay is never the settled regime state, nor
+                # are its quote/session clocks proof of true real-time data.
+                if status != "PARTIAL" or fresh["qualified"] is not False or not data:
+                    refuse()
+            else:
+                if not data:
+                    # The risk owner can report unknown freshness without
+                    # supplying a qualified verdict. Never call that healthy.
+                    if status != "PARTIAL" or fresh["qualified"] is not False or not fresh["reasons"]:
+                        refuse()
+                else:
+                    if (not {"schema", "verdict", "asof", "stale",
+                             "stale_reasons", "display_only"} <= set(data)
+                        or data["schema"] != "market_risk/v1"
+                        or data["verdict"] not in ("RISK_ON", "MIXED", "RISK_OFF")
+                        or type(data["stale"]) is not bool
+                        or data["display_only"] is not True
+                        or type(data["asof"]) is not str
+                        or re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", data["asof"]) is None):
+                        refuse()
+                    try:
+                        date.fromisoformat(data["asof"])
+                    except ValueError:
+                        refuse()
+                    if status == "OK" and (
+                        data["stale"] or fresh["qualified"] is not True
+                        or fresh["reasons"] or
+                        type(data.get("score")) not in (int, float) or
+                        not 0 <= data["score"] <= 100
+                    ):
+                        refuse()
+                    if status != "OK" and (
+                        fresh["qualified"] is not False or not fresh["reasons"]
+                    ):
+                        refuse()
         if source["source_id"] == "macro.public_live_overlay" and data:
             if (status not in ("PARTIAL", "STALE") or
                 not {"schema", "built", "n", "n_fresh", "n_quotes",

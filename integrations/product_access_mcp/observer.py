@@ -266,6 +266,8 @@ def _risk(raw: Any, now: datetime) -> tuple[str, dict[str, Any], dict[str, Any]]
     built = _clock(raw.get("built"))
     event = _clock(raw.get("source_event_time"))
     reasons = []
+    if score is None:
+        reasons.append("score_unavailable")
     if built is not None and built > now:
         reasons.append("future_build")
     if event is not None and event > now:

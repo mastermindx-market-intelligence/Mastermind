@@ -303,3 +303,29 @@ MCP transport/discovery contract needed before those gates can close.
 Read-only reference: tests/test_product_access_mcp_sdk.py method
 test_oauth_resource_metadata_and_missing_token_challenge and the
 mounted deployment positive/revocation test.
+
+
+## Output assurance: a healthy market verdict must be actually qualified
+
+Adversarial RED fixtures demonstrated the prior response validator could
+accept status OK with an empty or incomplete risk payload, or allow a stale
+result to be relabeled OK, if a future borrowed read port returned a
+mismatched response. The observer itself selected fields correctly, but
+the final OAuth/MCP transport cannot assume a borrowed port is infallible.
+
+The response envelope now rejects:
+- any Macro status projection presented as fully healthy/qualified; its
+  individual producer cadences remain independent, so it is PARTIAL;
+- the Macro fast overlay promoted to a complete regime/market OK;
+- Terminal risk OK without explicit schema market_risk/v1, supported verdict,
+  valid session, stale=False, display_only=True, nonempty source evidence and
+  a finite score between 0 and 100;
+- changed freshness claiming qualified=True while risk is stale/partial;
+- owner risk responses lacking a score being rendered fully qualified.
+  Missing score remains available as an explicit PARTIAL with
+  score_unavailable, not a synthetic numeric zero or recovered last score.
+
+Tests establish the original invalid response is now refused both by the
+pure contract and by a native signed-test-JWT MCP call; output details are
+withheld from the authenticated caller on contract failure. The tests use
+owned synthetic source data and do not imply positive production access.

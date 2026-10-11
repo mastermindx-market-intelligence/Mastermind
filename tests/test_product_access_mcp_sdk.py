@@ -106,7 +106,10 @@ class ProductAppTests(unittest.IsolatedAsyncioTestCase):
             if self.mode == "malformed":
                 return {"data": {"private": "PRIVATE_SECRET"}}
             await asyncio.sleep(0)
-            return product_observe(caller, request, datetime.now(timezone.utc), getter)
+            response = product_observe(caller, request, datetime.now(timezone.utc), getter)
+            if self.mode == "fake-healthy":
+                response["data"] = {}
+            return response
 
         def getter(url, cap):
             now = datetime.now(timezone.utc)
@@ -486,3 +489,11 @@ class ProductAppTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("resource_metadata", challenge)
         self.assertIn("oauth-protected-resource/mcp", challenge)
         self.assertEqual(self.reads, 0)
+
+
+    async def test_incomplete_healthy_port_result_withheld_from_authenticated_mcp(self):
+        self.mode = "fake-healthy"
+        result = self.parsed(await self.call())
+        self.assertTrue(result["isError"])
+        self.assertNotIn("MIXED", json.dumps(result))
+        self.assertEqual(self.reads, 1)
