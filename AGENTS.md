@@ -84,6 +84,30 @@ Use `docs/sol_skills/ACTIVE_EXECUTION.md` for the shared recovery procedure; thi
 runtime authority, required form, new watcher or extra human approval. Existing exact grants,
 source custody, effect reconciliation, review and release controls remain in force.
 
+### Standing authorization: saved credentials for assigned website access
+
+The Chairman authorizes an actively assigned Mastermind engineering/operations session to use
+**already-provisioned saved credentials** and existing authenticated browser sessions to log into
+the legitimate website/service required by that assignment. This includes browser/password-manager
+autofill and any macOS Keychain or other secure-store access that the current OS/tool permissions
+actually allow. **Do not request separate Chairman permission for each routine in-scope
+saved-password use or website login**; try the permitted route, then verify the resulting
+signed-in state. This is standing task-scoped consent, not permission to access arbitrary
+accounts.
+
+Verify the exact website origin, intended account, and relation to the current task before
+supplying a credential. Prefer autofill or another secret-preserving path; never write plaintext
+passwords, tokens, recovery codes, or cookies to transcripts, prompts, argv, logs, source, memory,
+or handoffs. Do not bulk-extract/export a vault, copy secrets to another host/account, or use
+unrelated personal accounts. A saved secret is not independent authority for account/security
+changes, spending, money movement, trading, production deployment, or other reserved actions.
+
+This instruction does not override OS/tool permissions, site controls, explicit access refusals,
+fresh user-consent requirements, passkey/Touch ID or other user-presence checks, MFA, or CAPTCHA.
+If a genuine human-only step remains, name that exact gate once and continue independent
+authorized work. Do not treat an ordinary login page as an administrative approval gate when a
+legitimate, permitted saved credential is already available.
+
 ### Reciprocal dialogue and watcher invariant
 
 For any watcher-enabled Sol↔worker/COO loop, `docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md` is the
