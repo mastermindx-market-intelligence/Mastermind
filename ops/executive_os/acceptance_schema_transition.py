@@ -171,7 +171,7 @@ def seal_source(args, config: dict) -> Path:
     m._sealed_ancestors(parent / "unused")
     _require(_absent(m.bundle_path(args.successor_sha)), "successor descriptor already exists")
     bundle = source_bundle(args.successor_sha)
-    bundle.mkdir(mode=0o700)  # O_EXCL namespace; partial preparation is retained.
+    bundle.mkdir(mode=stat.S_IRWXU)  # O_EXCL namespace; partial preparation is retained.
     identity = _copy(database, bundle / "prestate.sqlite3", config["control_uid"])
     proof = _proof(bundle / "prestate.sqlite3", 5)
     _require(m.digest(_snapshot(bundle / "prestate.sqlite3")) == m.digest(before)
@@ -205,7 +205,7 @@ def _load_source(successor: str) -> tuple[dict, dict]:
 def _backup_copy(item: dict, directory: Path, uid: int, version: int) -> tuple[dict, dict]:
     _require(set(item) == set("database_path database_sha256 manifest_path manifest_sha256 restore_drill_receipt restore_drill_digest full_v4_content_digest".split()),
              "backup receipt shape")
-    directory.mkdir(mode=0o700)
+    directory.mkdir(mode=stat.S_IRWXU)
     db, manifest = Path(item["database_path"]), Path(item["manifest_path"])
     local_db, local_manifest = directory / db.name, directory / manifest.name
     _offline(db)
@@ -280,7 +280,7 @@ def consume(args, config: dict) -> dict:
     _require(m.digest(inventory) == intent["inventory_sha256"], "source inventory digest changed")
     m.verify_inventory(inventory)
     completion_bundle = bundle / "completion"
-    completion_bundle.mkdir(mode=0o700)  # Partial/replayed consumption fails closed.
+    completion_bundle.mkdir(mode=stat.S_IRWXU)  # Partial/replayed consumption fails closed.
     uid = config["control_uid"]
     for name, original in (("preflight.json", backup._UPGRADE_V5_TO_V6_PREFLIGHT_NAME),
                            ("completion.json", backup._UPGRADE_V5_TO_V6_COMPLETION_NAME)):
