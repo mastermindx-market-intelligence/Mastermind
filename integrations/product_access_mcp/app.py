@@ -38,12 +38,23 @@ FinalAuthorization = Callable[
 ]
 
 
-def _error(code: str) -> CallToolResult:
-    # Closed codes only. Never echo JWT, a credential, URL or third-party error.
-    return CallToolResult(
-        content=[TextContent(type="text", text=json.dumps({"code": code}))],
-        isError=True,
-    )
+def _error(code: str, *, resource_metadata_url: str | None = None) -> CallToolResult:
+    # Closed codes only. Never echo JWT, caller identifiers or provider errors.
+    args: dict[str, Any] = {
+        "content": [TextContent(type="text", text=json.dumps({"code": code}))],
+        "isError": True,
+    }
+    if resource_metadata_url is not None and code in (
+        "AUTHENTICATION_REQUIRED", "AUTHENTICATION_CHANGED",
+    ):
+        # The SDK's runtime alias is literally "_meta", not "meta".
+        # The host supplies a validated HTTPS protected-resource metadata URL;
+        # only missing/expired OAuth credentials may trigger a relink prompt.
+        args["_meta"] = {"mcp/www_authenticate": [
+            'Bearer resource_metadata="' + resource_metadata_url +
+            '", error="invalid_token", error_description="Authentication required"',
+        ]}
+    return CallToolResult(**args)
 
 
 def create_authenticated_product_server(
@@ -63,6 +74,9 @@ def create_authenticated_product_server(
     if (not callable(now) or not callable(read_port)
         or not callable(final_authorization) or not allowed_hosts):
         raise ValueError("explicit clock, port, grant and transport required")
+    def oauth_error(code: str) -> CallToolResult:
+        return _error(code, resource_metadata_url=selected.resource_metadata_url)
+
     verifier = MastermindTokenVerifier(
         authenticator=authenticator, policy=selected, now=now, audit_sink=audit_sink)
     server = FastMCP(
@@ -92,6 +106,12 @@ def create_authenticated_product_server(
         return [
             Tool(name=name, description=description,
                  inputSchema=schema, outputSchema=OUTPUT_SCHEMA,
+                 # ChatGPT linking needs per-tool OAuth metadata as well as
+                 # RFC9728 resource discovery and runtime 401 challenges.
+                 # Both tools require the same exact independently qualified
+                 # resource policy; public upstream data is NOT noauth access.
+                 securitySchemes=[{"type": "oauth2",
+                                   "scopes": list(selected.required_scopes)}],
                  annotations=ToolAnnotations(
                      readOnlyHint=True, destructiveHint=False,
                      idempotentHint=True, openWorldHint=False))
@@ -104,7 +124,7 @@ def create_authenticated_product_server(
     async def call_tool(name: str, arguments: dict[str, Any] | None) -> CallToolResult:
         access = get_access_token()
         if access is None:
-            return _error("AUTHENTICATION_REQUIRED")
+            return oauth_error("AUTHENTICATION_REQUIRED")
         try:
             request = canonical_arguments(name, arguments)
             token = access.token
@@ -120,9 +140,9 @@ def create_authenticated_product_server(
                 or caller.expires_at <= now()):
                 raise ProductRefused("AUTHENTICATION_REQUIRED")
         except ProductRefused as exc:
-            return _error(exc.code)
+            return oauth_error(exc.code)
         except Exception:
-            return _error("AUTHENTICATION_REQUIRED")
+            return oauth_error("AUTHENTICATION_REQUIRED")
 
         try:
             revalidate = final_authorization(caller, request)
@@ -159,7 +179,7 @@ def create_authenticated_product_server(
                 or tuple(current.scopes) != caller.scopes
                 or current.expires_at <= now()
             ):
-                return _error("AUTHENTICATION_CHANGED")
+                return oauth_error("AUTHENTICATION_CHANGED")
             fence = revalidate()
             if inspect.isawaitable(fence):
                 if inspect.iscoroutine(fence):

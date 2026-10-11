@@ -199,6 +199,9 @@ class ProductAppTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(tool["annotations"]["readOnlyHint"])
             self.assertFalse(tool["annotations"]["destructiveHint"])
             self.assertFalse(tool["inputSchema"]["additionalProperties"])
+            self.assertEqual(tool["securitySchemes"], [
+                {"type": "oauth2", "scopes": [READ_SCOPE]}
+            ])
         self.assertEqual(self.reads, 0)
 
     async def test_authenticated_product_observation(self):
@@ -253,13 +256,22 @@ class ProductAppTests(unittest.IsolatedAsyncioTestCase):
         res = self.parsed(await self.call())
         self.assertTrue(res["isError"])
         self.assertNotIn('"verdict"', json.dumps(res))
+        # Revoked product entitlement is NOT an OAuth login problem.
+        self.assertNotIn("mcp/www_authenticate", json.dumps(res))
         self.assertEqual(self.reads, 1)
 
     async def test_expired_token_after_await_withholds_result(self):
         self.mode = "expire"
-        res = self.parsed(await self.call())
+        raw_token = self.token()
+        res = self.parsed(await self.call(token=raw_token))
         self.assertTrue(res["isError"])
         self.assertNotIn('"verdict"', json.dumps(res))
+        challenges = res.get("_meta", {}).get("mcp/www_authenticate", [])
+        self.assertEqual(len(challenges), 1)
+        self.assertIn("resource_metadata=", challenges[0])
+        self.assertIn("invalid_token", challenges[0])
+        self.assertIn("oauth-protected-resource/mcp", challenges[0])
+        self.assertNotIn(raw_token, json.dumps(res))
         self.assertEqual(self.reads, 1)
 
     async def test_wrong_source_reply_refused(self):
@@ -320,11 +332,21 @@ class ProductAppTests(unittest.IsolatedAsyncioTestCase):
         try:
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
                                          base_url="http://127.0.0.1") as client:
-                res = await client.post("/mcp", headers={
+                headers = {
                     "Authorization": "Bearer " + self.token(scope=OIDC_READ_SCOPE),
                     "Accept": "application/json, text/event-stream",
                     "MCP-Protocol-Version": "2025-03-26",
-                }, json={
+                }
+                catalog = await client.post("/mcp", headers=headers, json={
+                    "jsonrpc": "2.0", "id": 1, "method": "tools/list",
+                    "params": {},
+                })
+                self.assertEqual(catalog.status_code, 200)
+                for tool in catalog.json()["result"]["tools"]:
+                    self.assertEqual(tool["securitySchemes"], [{
+                        "type": "oauth2", "scopes": [OIDC_READ_SCOPE],
+                    }])
+                res = await client.post("/mcp", headers=headers, json={
                     "jsonrpc": "2.0", "id": 1, "method": "tools/call",
                     "params": {"name": "product_observe", "arguments": {
                         "product": "terminal", "view": "market_risk",
@@ -501,3 +523,18 @@ class ProductAppTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["isError"])
         self.assertNotIn("MIXED", json.dumps(result))
         self.assertEqual(self.reads, 1)
+
+
+    async def test_resource_audience_alone_without_scope_claim_is_not_authorization(self):
+        # The documented Supabase access-token example has aud + client_id
+        # but does not show a scope claim. Exact Product authorization must
+        # not be inferred solely from a valid token or adjusted audience.
+        claims = jwt.decode(self.token(), options={"verify_signature": False})
+        claims.pop("scope", None)
+        no_scope = jwt.encode(
+            claims, self.private, algorithm="RS256",
+            headers={"kid": "product-test"},
+        )
+        response = await self.call(token=no_scope)
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(self.reads, 0)

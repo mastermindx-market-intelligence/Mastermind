@@ -371,3 +371,73 @@ Relevant negative/positive cases:
 - tests/test_product_access_mcp.py owner display-only/freshness cases
 - tests/test_product_access_mcp_runtime.py bounded read port current shape
 - tests/test_product_access_mcp_sdk.py signed synthetic MCP/ASGI current shape
+
+
+## R7: ChatGPT tool-level OAuth discovery and authenticated relink
+
+Source: https://developers.openai.com/plugins/build/auth
+Current pinned SDK: mcp==1.28.1 (its Tool Pydantic model allows unknown
+extension fields and preserves them in native tools/list wire responses).
+
+The Product server now explicitly advertises securitySchemes
+[{type:oauth2, scopes:<exact owner-selected resource scope>}]
+on EACH of product_manifest and product_observe. The scope list is taken
+only from the already validated ResourcePolicy. There is NO noauth scheme:
+although their source URLs are public, the Product MCP entrypoint requires
+authenticated caller, owner product grant and late revalidation.
+
+Native MCP/ASGI test coverage proves:
+- Tool catalogs advertise exact mastermind.product.read for an issuer that
+  supports that scope and only openid when the host's separate issuer policy
+  exactly selects the current Supabase OIDC-compatible option.
+- SDK exposes actual RFC 9728 resource metadata and 401 WWW-Authenticate
+  for a missing bearer.
+- A token that expires after an awaited read returns an error with the
+  mcp/www_authenticate result metadata linking to the canonical protected
+  resource. Under mcp==1.28.1 the Pydantic alias MUST be "_meta", not "meta".
+- A revoked product entitlement does NOT carry that OAuth relink metadata;
+  logging in again must not bypass current product authorization.
+- Authentication results carry neither bearer bytes, user identifiers,
+  arbitrary third-party URLs nor broad permission claims.
+
+OAuth linking is a separate live consumer action. ChatGPT Plugin guidance
+requires protected-resource discovery, authorization-server discovery,
+supported client registration/identity (CIMD/DCR or predefined client),
+PKCE, resource parameter propagation, and tool-level auth metadata plus
+runtime challenge. Only the code-level metadata/challenge behavior has been
+qualified here; a mounted ASGI test is not proof that any HTTPS endpoint,
+tunnel, login page, token issuer, client or ChatGPT account exists.
+
+Existing Supabase Auth may be a qualified identity owner, but its documented
+standard access-token audience is "authenticated". Supabase's current
+Custom Access Token Hooks MAY set a dedicated resource audience for a
+specifically admitted OAuth client without touching regular user tokens:
+  https://supabase.com/docs/guides/auth/oauth-server/token-security
+  https://supabase.com/docs/guides/auth/oauth-server/getting-started
+  https://supabase.com/docs/guides/auth/auth-hooks/custom-access-token-hook
+The docs' sample access token does not demonstrate a "scope" JWT claim,
+and this Product SDK verifier intentionally REQUIRES its exact approved scope.
+Owner must verify actual issued claims, client ID/audience/issuer/subject
+and the full resource-parameter flow, rather than presuming the hook solves
+scope and token exchange. Do not deploy a new auth hook or broaden scopes
+from this source. Existing RLS-based user product entitlements remain separate
+from OAuth identity; refresh/revocation and cross-account denial must be
+tested on the real installed account. There is no new user identity database
+or verified client allowlist here.
+
+Install acceptance checklist, under incumbent host/auth/product owners:
+1. Confirm the intended user/account and product entitlement authority.
+2. Obtain specifically authorized OAuth issuer/client configuration,
+   dedicated resource/audience, supported token scope claims, protected
+   metadata and correct consent/refresh flow.
+3. Qualify actual callback and ProductReadBinding owner/ref/generation,
+   including correct cross-account denial and live revocation.
+4. Admit an existing owner process, healthy listener and TLS/tunnel identity.
+   Check real /healthz vs /readyz vs /mcp independently; a "ready" fixture
+   is NOT acceptable evidence.
+5. In an authorized ChatGPT account create/select the intended developer
+   Product MCP app and complete human-only consent; scan tools and verify
+   resource metadata, actual list securitySchemes and signed calls.
+6. Verify real positive Product source read and expired/unauthorized/revoked
+   negative calls, then review/CI/source/installed SHA/rollback evidence.
+No step is claimed performed by adding this read-only source code.
