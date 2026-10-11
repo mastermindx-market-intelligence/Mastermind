@@ -1283,6 +1283,74 @@ class CeoIngressReadGateway:
         return CeoIngressReadGateway._valid_job_payload(value)
 
     @staticmethod
+    def _valid_terminal_result(
+        value: object, *, job: Mapping[str, Any], attempt: object
+    ) -> bool:
+        from control_plane import executive_orchestration_result as result_owner
+        from control_plane.executive_runtime import (
+            StateConflict, _validate_orchestration_terminal_receipt_value,
+        )
+
+        if not (
+            type(value) is dict
+            and type(attempt) is dict
+            and attempt.get("job_id") == job.get("job_id")
+            and attempt.get("status") == "COMPLETED"
+            and job.get("orchestration_role") in result_owner.ROLES
+        ):
+            return False
+        try:
+            envelope = result_owner.validate_envelope(
+                value.get("result_envelope"),
+                expected_job_id=job["job_id"],
+                expected_run_id=attempt["attempt_id"],
+                expected_worker_id=attempt["worker_id"],
+                expected_role=job["orchestration_role"],
+                expected_root_job_id=job["root_job_id"],
+            )
+            # This checks the read wire only. Runtime remains the owner of the
+            # persisted seal and authority evidence used to complete an Attempt.
+            return _validate_orchestration_terminal_receipt_value(
+                value,
+                job_id=job["job_id"],
+                attempt_id=attempt["attempt_id"],
+                expected_role=job["orchestration_role"],
+                execution_mode=attempt["execution_mode"],
+                seal={
+                    "result_envelope": envelope,
+                    "result_envelope_digest": result_owner.canonical_digest(envelope),
+                    "effective_grant_digest": attempt["effective_grant_digest"],
+                },
+            ) == value
+        except (StateConflict, result_owner.OrchestrationResultError, KeyError, TypeError, ValueError):
+            return False
+
+    @staticmethod
+    def _valid_sealed_launch_metadata(attempt: Mapping[str, Any]) -> bool:
+        import json
+        from control_plane.executive_runtime import (
+            PersistenceError, StateConflict, _validated_sealed_worker_launch_material,
+        )
+
+        if attempt.get("execution_mode") != "SEALED_WORKER":
+            return False
+        # The canonical validator uses immutable row values only; serialize the
+        # public Attempt fields into that representation without a DB read.
+        try:
+            row = dict(attempt)
+            for name in (
+                "launch_metadata", "effective_grant", "placement_snapshot",
+                "execution_principal_snapshot",
+            ):
+                row[f"{name}_json"] = json.dumps(
+                    attempt[name], sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+                )
+            _validated_sealed_worker_launch_material(row)
+            return True
+        except (PersistenceError, StateConflict, KeyError, TypeError, ValueError):
+            return False
+
+    @staticmethod
     def _valid_requested_profile(value: object, digest: object) -> bool:
         from control_plane import operator_harness_wire
         from control_plane.operator_materialization_receipt import (
@@ -1498,6 +1566,10 @@ class CeoIngressReadGateway:
             return False
 
         for field in ("checkpoint", "result", "error"):
+            if field == "result" and CeoIngressReadGateway._valid_terminal_result(
+                attempt.get(field), job=job, attempt=attempt,
+            ):
+                continue
             if not CeoIngressReadGateway._valid_payload_or_bound(
                 attempt.get(field),
                 field=f"{prefix}.{field}",
@@ -1509,6 +1581,7 @@ class CeoIngressReadGateway:
         launch_metadata = attempt.get("launch_metadata")
         if not (
             launch_metadata == {}
+            or CeoIngressReadGateway._valid_sealed_launch_metadata(attempt)
             or CeoIngressReadGateway._valid_bounded_aggregate(
                 launch_metadata,
                 field=f"{prefix}.launch_metadata",
@@ -1676,6 +1749,14 @@ class CeoIngressReadGateway:
             return False
 
         for field in ("checkpoint", "result"):
+            if (
+                field == "result"
+                and job.get("status") == "COMPLETED"
+                and CeoIngressReadGateway._valid_terminal_result(
+                    job.get(field), job=job, attempt=value["latest_attempt"],
+                )
+            ):
+                continue
             if not CeoIngressReadGateway._valid_payload_or_bound(
                 job.get(field),
                 field=f"job.{field}",
