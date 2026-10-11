@@ -20,6 +20,8 @@ import re
 import stat
 from typing import Any, Mapping, Protocol
 
+from ops.executive_os.capacity_broker_topology import CONTROL_UID
+
 from control_plane.executive_worker_broker import (
     BROKER_REQUEST_SCHEMA_VERSION, BROKER_RESPONSE_SCHEMA_VERSION,
     PeerCredentials, PeerAuthorizationError, get_peer_credentials,
@@ -162,8 +164,9 @@ class BridgeConfig:
         fields={f.name for f in dataclasses.fields(cls)}-{'source_sha256','_trust'}
         _object(value,fields)
         if (value['schema_version']!=CONFIG_SCHEMA_VERSION or value['adapter_id']!=ADAPTER_ID
-                or type(value['bridge_uid']) is not int or value['bridge_uid']!=501
-                or type(value['control_uid']) is not int or value['control_uid']!=450):
+                or type(value['bridge_uid']) is not int or value['bridge_uid']<=0
+                or value['bridge_uid']==CONTROL_UID
+                or type(value['control_uid']) is not int or value['control_uid']!=CONTROL_UID):
             _refuse('ConfigTrustError','Fixed bridge/control principal or schema mismatch')
         _identifier(value['launchd_socket_name'])
         for key,minimum,maximum in [('max_request_bytes',1024,1024*1024),
@@ -343,13 +346,14 @@ class FabricBridgeBroker:
         self.peer_resolver=peer_resolver
 
     def require_service_identity(self):
-        if os.geteuid()!=501:
-            _refuse('BridgeIdentityError','Bridge must run as its fixed UID501 principal')
-        # UID501 is shared: it is NEVER enumerated, swept or claimed dedicated.
+        if os.geteuid()!=self.config.bridge_uid:
+            _refuse('BridgeIdentityError','Bridge must run as its configured principal')
+        # The bridge principal is shared: NEVER enumerated, swept or claimed dedicated.
 
     def _authorize_peer(self,peer):
-        if not isinstance(peer,PeerCredentials) or type(peer.uid) is not int or peer.uid!=450:
-            _refuse('PeerAuthorizationError','Only authenticated Control UID450 is accepted')
+        if (not isinstance(peer,PeerCredentials) or type(peer.uid) is not int
+                or peer.uid!=CONTROL_UID):
+            _refuse('PeerAuthorizationError','Only the authenticated Control principal is accepted')
 
     def _payload(self,operation,payload):
         extra={'start':{'launch_spec','validation_commands'},'status':{'run_id'},

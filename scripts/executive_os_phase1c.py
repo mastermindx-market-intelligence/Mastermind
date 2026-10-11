@@ -1846,14 +1846,15 @@ def _service_from_config(
                 raise ServiceError("remote validation lookup lost Job/Attempt identity")
             return tuple(tuple(command) for command in job.validation_commands)
 
-        cleanup_options = {}
+        from control_plane.worker_execution_contract import CleanupPolicy
+
+        cleanup_policy = CleanupPolicy.DEDICATED_UID
         if fabric_worker_binding_source is not None:
             from control_plane.executive_fabric_adapter import AttendedFabricWorkerAdapter
-            from control_plane.worker_execution_contract import CleanupPolicy
 
             adapter = AttendedFabricWorkerAdapter(runtime, fabric_worker_binding_source)
             process_controller = adapter
-            cleanup_options = {"cleanup_policy": CleanupPolicy.FABRIC_PROCESS_GROUP}
+            cleanup_policy = CleanupPolicy.FABRIC_PROCESS_GROUP
         elif remote_worker_binding_source is None:
             adapter = RemoteCodexWorkerAdapter(
                 client,
@@ -1916,7 +1917,7 @@ def _service_from_config(
             require_complete_launch_attestation=(
                 True if fabric_worker_binding_source is not None else initially_ready
             ),
-            **cleanup_options,
+            cleanup_policy=cleanup_policy,
             process_controller=process_controller,
             exact_target_provider=(
                 (lambda job_id: exact_target_source.for_job(job_id, now_ms=runtime.store.now_ms()))

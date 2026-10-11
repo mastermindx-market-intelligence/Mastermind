@@ -18,6 +18,8 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from ops.executive_os.capacity_broker_topology import CONTROL_UID
+
 from control_plane.executive_runtime import (
     AttemptLease, AttemptStatus, Runtime, REMOTE_LAUNCH_IDENTITY_KEY,
     _dialogue_source_from_root_creation, _attempt_from_row,
@@ -53,7 +55,7 @@ class FabricHostBinding:
     """Trusted physical route, never model-selected launch options.
 
     The host/profile/source facts must describe the actual worker behind the
-    bridge, not the UID501 bridge process. A router may select this route only
+    bridge, not the configured bridge principal. A router may select this route only
     before the effect and must refuse if its actual choice differs.
     """
     socket_path: str
@@ -69,11 +71,12 @@ class FabricHostBinding:
     provider_home: str
     binary_sha256: str
     permission_profile_sha256: str
-    bridge_uid: int = 501
+    bridge_uid: int
 
     def __post_init__(self) -> None:
-        if self.bridge_uid != 501 or type(self.bridge_uid) is not int:
-            raise BrokerStateError("attended Fabric service requires the fixed UID501 principal")
+        if (type(self.bridge_uid) is not int or self.bridge_uid <= 0
+                or self.bridge_uid == CONTROL_UID):
+            raise BrokerStateError("attended Fabric service requires an explicit non-Control principal")
         for name in ("worker_uid", "worker_gid"):
             if type(getattr(self, name)) is not int or getattr(self, name) < 1:
                 raise BrokerStateError("Fabric worker principal is invalid")
@@ -94,7 +97,7 @@ class FabricHostBinding:
 
 
 def _fixed_client(binding: FabricHostBinding) -> WorkerBrokerClient:
-    # UID501 alone is not a code identity. The launchd socket must also live in
+    # The configured UID alone is not a code identity. The launchd socket must also live in
     # a root-controlled namespace, so other processes under that shared user
     # cannot replace the fixed service endpoint before the kernel peer check.
     path = Path(binding.socket_path)

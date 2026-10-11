@@ -2,6 +2,7 @@
 import asyncio
 import copy
 import dataclasses
+import stat
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -18,7 +19,69 @@ def physical():
         host_ref='host-'+'1'*64,worker_id='worker-1',worker_uid=1001,worker_gid=1001,
         provider='fixture',model='fixture-model',worker_source_config_digest='2'*64,
         execution_profile_digest='3'*64,service_source_sha256='4'*64,
-        provider_home='/srv/fabric/provider',binary_sha256='e'*64,permission_profile_sha256='f'*64)
+        provider_home='/srv/fabric/provider',binary_sha256='e'*64,permission_profile_sha256='f'*64,
+        bridge_uid=501)
+
+
+def test_bridge_principal_requires_explicit_binding():
+    fields=dataclasses.asdict(physical())
+    fields.pop('bridge_uid')
+    with pytest.raises(TypeError,match='bridge_uid'):
+        module.FabricHostBinding(**fields)
+
+
+@pytest.mark.parametrize('bridge_uid',[None,True,0,-1,450])
+def test_bridge_principal_refuses_invalid_or_control_identity(bridge_uid):
+    with pytest.raises(BrokerStateError,match='explicit non-Control principal'):
+        dataclasses.replace(physical(),bridge_uid=bridge_uid)
+
+
+def test_explicit_bridge_principal_participates_in_route_digest():
+    pinned=physical()
+    alternate=dataclasses.replace(pinned,bridge_uid=502)
+    assert alternate.bridge_uid==502
+    assert alternate.digest!=pinned.digest
+
+
+def test_client_authenticates_exact_bound_bridge_principal(monkeypatch):
+    pinned=dataclasses.replace(physical(),bridge_uid=502)
+    monkeypatch.setattr(Path,'stat',lambda path:SimpleNamespace(
+        st_mode=stat.S_IFDIR|0o755,st_uid=0))
+    monkeypatch.setattr(Path,'lstat',lambda path:SimpleNamespace(
+        st_mode=stat.S_IFSOCK|0o660,st_uid=0))
+    captured={}
+    def client(path,**kwargs):
+        captured.update(path=path,**kwargs)
+        return captured
+    monkeypatch.setattr(module,'WorkerBrokerClient',client)
+    assert module._fixed_client(pinned)['expected_peer_uid']==502
+
+
+def test_broker_identity_uses_protected_binding_without_default_fallback(tmp_path,monkeypatch):
+    import test_executive_fabric_bridge_broker as fixtures
+    bridge=fixtures.api()
+    document=fixtures.config_document()
+    document['bridge_uid']=502
+    monkeypatch.setattr(fixtures,'config_document',lambda:document)
+    config=fixtures.config(tmp_path,monkeypatch)
+    service=bridge.FabricBridgeBroker(config,fixtures.Backend())
+    monkeypatch.setattr(bridge.os,'geteuid',lambda:501)
+    with pytest.raises(bridge.BridgeProtocolError,match='BridgeIdentityError'):
+        service.require_service_identity()
+    monkeypatch.setattr(bridge.os,'geteuid',lambda:502)
+    assert service.require_service_identity() is None
+    assert service._authorize_peer(fixtures.PeerCredentials(uid=450,gid=450)) is None
+    with pytest.raises(bridge.BridgeProtocolError,match='PeerAuthorizationError'):
+        service._authorize_peer(fixtures.PeerCredentials(uid=502,gid=450))
+
+
+@pytest.mark.parametrize('bridge_uid',[None,True,0,-1,450])
+def test_broker_binding_refuses_invalid_or_control_principal(bridge_uid):
+    import test_executive_fabric_bridge_broker as fixtures
+    document=fixtures.config_document()
+    document['bridge_uid']=bridge_uid
+    with pytest.raises(fixtures.api().BridgeProtocolError,match='ConfigTrustError'):
+        fixtures.api().BridgeConfig.from_document(document)
 
 
 def payload():
