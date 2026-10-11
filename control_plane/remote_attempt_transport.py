@@ -38,6 +38,7 @@ from control_plane.executive_runtime import (
     Job,
     JobStatus,
     Runtime,
+    StateConflict,
     WorkerQuotaClass,
     WorkerStatus,
 )
@@ -69,6 +70,7 @@ REMOTE_WORKER_OPERATIONS = frozenset(
 REMOTE_RECOVERY_OPERATIONS = frozenset(
     {"status", "collect", "cancel", "validate"}
 )
+REMOTE_PROOF_RECOVERY_OPERATIONS = frozenset({"status"})
 _ACTIVE_RECOVERY_ATTEMPTS = frozenset(
     {
         AttemptStatus.CLAIMED,
@@ -102,6 +104,7 @@ _ERROR_CODES = frozenset(
 class RemoteTransportPurpose(str, Enum):
     LAUNCH = "launch"
     RECOVERY = "recovery"
+    PROOF_RECOVERY = "proof_recovery"
 
 
 class RemoteAttemptTransportError(RuntimeError):
@@ -288,6 +291,62 @@ def _read_claim(
     return job, attempt, quota, join
 
 
+def _read_proof_recovery_claim(
+    runtime: Runtime,
+    *,
+    job_id: str,
+    attempt_id: str,
+) -> tuple[Job, Attempt, WorkerQuotaClass, RegisteredCapacityJoin, Mapping[str, Any]]:
+    """Read one exact LOST/requeued proof carrier without reviving its claim.
+
+    The Runtime proof-capacity owner validates the closed LOST -> requeue state,
+    including the loss/requeue Events, fence, ERROR/unheld quota and online
+    Worker. Capacity metadata remains immutable registration evidence; this
+    helper never makes the quota BUSY or assigns the Job again.
+    """
+
+    job = runtime.jobs.get_job(job_id)
+    attempt = runtime.attempts.get_attempt(attempt_id)
+    if job is None or attempt is None:
+        raise RemoteAttemptTransportError("RUNTIME_UNAVAILABLE")
+    if attempt.job_id != job.job_id:
+        raise RemoteAttemptTransportError("CLAIM_MISMATCH")
+    try:
+        snapshot = runtime.workers.proof_capacity_recovery_snapshot(
+            job_id,
+            attempt_id,
+            worker_id=attempt.worker_id,
+            quota_class=attempt.quota_class,
+        )
+        rows = read_remote_capacity_joins(
+            runtime.workers,
+            ((attempt.worker_id, attempt.quota_class),),
+        )
+    except (StateConflict, CapacityJoinError) as exc:
+        # This is a zero-I/O resolver. Runtime/capacity refusal is projected as
+        # a closed transport refusal without leaking internal state.
+        raise RemoteAttemptTransportError("CLAIM_MISMATCH") from exc
+    if len(rows) != 1:
+        raise RemoteAttemptTransportError("CAPACITY_UNAVAILABLE")
+    join = rows[0]
+    quota = runtime.workers.get_quota_class(attempt.worker_id, attempt.quota_class)
+    if quota is None:
+        raise RemoteAttemptTransportError("CAPACITY_UNAVAILABLE")
+    if (
+        quota.worker_id != attempt.worker_id
+        or quota.quota_class != attempt.quota_class
+        or quota.provider != join.provider
+    ):
+        raise RemoteAttemptTransportError("CLAIM_MISMATCH")
+    try:
+        current_join = validate_capacity_join(quota.metadata.get("capacity_join"))
+    except (AttributeError, CapacityJoinError) as exc:
+        raise RemoteAttemptTransportError("CAPACITY_UNAVAILABLE") from exc
+    if current_join != join.capacity_join:
+        raise RemoteAttemptTransportError("STATE_MOVED")
+    return job, attempt, quota, join, snapshot
+
+
 def resolve_remote_attempt_transport(
     runtime: Runtime,
     *,
@@ -307,12 +366,20 @@ def resolve_remote_attempt_transport(
     except (TypeError, ValueError) as exc:
         raise RemoteAttemptTransportError("INVALID_INPUT") from exc
 
-    job, attempt, quota, join = _read_claim(
-        runtime,
-        job_id=job_token,
-        attempt_id=attempt_token,
-        purpose=resolved_purpose,
-    )
+    proof_snapshot: Mapping[str, Any] | None = None
+    if resolved_purpose is RemoteTransportPurpose.PROOF_RECOVERY:
+        job, attempt, quota, join, proof_snapshot = _read_proof_recovery_claim(
+            runtime,
+            job_id=job_token,
+            attempt_id=attempt_token,
+        )
+    else:
+        job, attempt, quota, join = _read_claim(
+            runtime,
+            job_id=job_token,
+            attempt_id=attempt_token,
+            purpose=resolved_purpose,
+        )
     host_ref = join.capacity_join.host_ref
     try:
         host_binding = binding_source(host_ref, attempt.worker_id)
@@ -334,22 +401,39 @@ def resolve_remote_attempt_transport(
 
     # Re-observe the complete critical claim after root-managed host resolution.
     # Any concurrent claim/lifecycle movement refuses before the client exists.
-    final_job, final_attempt, final_quota, final_join = _read_claim(
-        runtime,
-        job_id=job_token,
-        attempt_id=attempt_token,
-        purpose=resolved_purpose,
-    )
-    if _claim_signature(job, attempt, quota, join) != _claim_signature(
-        final_job, final_attempt, final_quota, final_join
+    final_proof_snapshot: Mapping[str, Any] | None = None
+    if resolved_purpose is RemoteTransportPurpose.PROOF_RECOVERY:
+        (
+            final_job,
+            final_attempt,
+            final_quota,
+            final_join,
+            final_proof_snapshot,
+        ) = _read_proof_recovery_claim(
+            runtime,
+            job_id=job_token,
+            attempt_id=attempt_token,
+        )
+    else:
+        final_job, final_attempt, final_quota, final_join = _read_claim(
+            runtime,
+            job_id=job_token,
+            attempt_id=attempt_token,
+            purpose=resolved_purpose,
+        )
+    if (
+        _claim_signature(job, attempt, quota, join)
+        != _claim_signature(final_job, final_attempt, final_quota, final_join)
+        or proof_snapshot != final_proof_snapshot
     ):
         raise RemoteAttemptTransportError("STATE_MOVED")
 
-    allowed_operations = (
-        REMOTE_WORKER_OPERATIONS
-        if resolved_purpose is RemoteTransportPurpose.LAUNCH
-        else REMOTE_RECOVERY_OPERATIONS
-    )
+    if resolved_purpose is RemoteTransportPurpose.LAUNCH:
+        allowed_operations = REMOTE_WORKER_OPERATIONS
+    elif resolved_purpose is RemoteTransportPurpose.PROOF_RECOVERY:
+        allowed_operations = REMOTE_PROOF_RECOVERY_OPERATIONS
+    else:
+        allowed_operations = REMOTE_RECOVERY_OPERATIONS
     identity = {
         "host_ref": host_ref,
         "job_id": job.job_id,
@@ -755,6 +839,10 @@ class _AttemptBoundRemoteProcessController:
             self.owner._controller_for_attempt(attempt).absence_verified(attempt)
         )
 
+    def expected_worker_uid(self, attempt: Attempt) -> int:
+        """Resolve the trusted UID through the same pinned recovery controller."""
+        return self.owner._controller_for_attempt(attempt).expected_worker_uid
+
     def terminate(self, attempt: Attempt) -> None:
         self.owner._controller_for_attempt(attempt).terminate(attempt)
 
@@ -785,7 +873,9 @@ class AttemptBoundRemoteWorkerAdapter:
     The chosen fleet is cached before remote I/O so an ambiguous start cannot
     silently resolve to another endpoint. Restart recovery derives the same
     Worker/host again from canonical Runtime + Capacity state and uses a
-    recovery-only remote client that cannot issue start.
+    recovery-only remote client that cannot issue start. Explicit proof-capacity
+    requalification may resolve an exact LOST/requeued Attempt only through the
+    Runtime's existing proof-recovery snapshot and receives a status-only client.
     """
 
     adapter_id = "attempt-bound-remote-worker"
@@ -913,17 +1003,39 @@ class AttemptBoundRemoteWorkerAdapter:
     def _controller_for_attempt(self, attempt: Attempt) -> RemoteWorkerProcessController:
         if not isinstance(attempt, Attempt):
             raise BrokerStateError("remote process control requires an Attempt")
-        resolution = self._resolve_attempt(
-            attempt, purpose=RemoteTransportPurpose.RECOVERY
+        purpose = (
+            RemoteTransportPurpose.PROOF_RECOVERY
+            if attempt.status is AttemptStatus.LOST
+            else RemoteTransportPurpose.RECOVERY
         )
+        resolution = self._resolve_attempt(attempt, purpose=purpose)
         current = self._controllers.get(attempt.attempt_id)
         if current is not None:
-            if current.client.identity != resolution.client.identity:
+            if (
+                current.client.identity != resolution.client.identity
+                or current.client.binding != resolution.client.binding
+                or current.expected_worker_uid != resolution.endpoint.worker_uid
+                or current.expected_adapter_id != resolution.endpoint.adapter_id
+            ):
                 raise BrokerStateError(
                     "remote process carrier identity changed during recovery"
                 )
-            return current
-        controller = RemoteWorkerProcessController(resolution.client)
+            if current.client.allowed_operations == resolution.client.allowed_operations:
+                return current
+            if not (
+                purpose is RemoteTransportPurpose.PROOF_RECOVERY
+                and current.client.allowed_operations == REMOTE_RECOVERY_OPERATIONS
+                and resolution.client.allowed_operations == REMOTE_PROOF_RECOVERY_OPERATIONS
+            ):
+                raise BrokerStateError("remote process recovery authority changed")
+            # Canonical loss narrows authority on the same pinned endpoint.
+            # The status-only successor must obtain fresh absence evidence;
+            # never carry an active controller's receipt or cancel capability.
+        controller = RemoteWorkerProcessController(
+            resolution.client,
+            expected_worker_uid=resolution.endpoint.worker_uid,
+            expected_adapter_id=resolution.endpoint.adapter_id,
+        )
         self._controllers[attempt.attempt_id] = controller
         return controller
 
@@ -1030,6 +1142,7 @@ class AttemptBoundRemoteWorkerAdapter:
 __all__ = [
     "RemoteOperatorHostBinding",
     "build_claimed_remote_operator_factory",
+    "REMOTE_PROOF_RECOVERY_OPERATIONS",
     "REMOTE_RECOVERY_OPERATIONS",
     "REMOTE_WORKER_OPERATIONS",
     "AttemptBoundRemoteWorkerAdapter",

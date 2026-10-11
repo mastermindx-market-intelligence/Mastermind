@@ -12,6 +12,7 @@ from control_plane.executive_supervisor import (
     ReconcileStatus,
 )
 from control_plane.remote_attempt_transport import (
+    REMOTE_PROOF_RECOVERY_OPERATIONS,
     REMOTE_RECOVERY_OPERATIONS,
     AttemptBoundRemoteWorkerAdapter,
     REMOTE_WORKER_OPERATIONS,
@@ -54,7 +55,9 @@ def _join(host_ref: str = HOST_A) -> dict:
     }
 
 
-def _claimed_runtime(tmp_path: Path, *, host_ref: str = HOST_A):
+def _claimed_runtime(
+    tmp_path: Path, *, host_ref: str = HOST_A, attempt_limit: int = 1
+):
     runtime = Runtime.at(tmp_path / "runtime")
     runtime.workers.register_worker(
         WORKER,
@@ -73,7 +76,7 @@ def _claimed_runtime(tmp_path: Path, *, host_ref: str = HOST_A):
         "bounded remote transport proof",
         requested_authorities=["READ"],
         constraints={"eligible_quota_classes": [QUOTA]},
-        attempt_limit=1,
+        attempt_limit=attempt_limit,
     )
     lease = runtime.attempts.claim_job(
         job.job_id,
@@ -83,6 +86,32 @@ def _claimed_runtime(tmp_path: Path, *, host_ref: str = HOST_A):
     )
     assert lease is not None
     return runtime, job, lease
+
+
+def _lost_requeued_runtime(tmp_path: Path):
+    runtime, job, lease = _claimed_runtime(tmp_path, attempt_limit=2)
+    runtime.attempts.record_process(
+        lease.attempt.attempt_id,
+        fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+        provider_session_id="missing-provider-session",
+    )
+    runtime.attempts.mark_running(
+        lease.attempt.attempt_id,
+        fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+    )
+    runtime.attempts.mark_lost(
+        lease.attempt.attempt_id,
+        fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+        reason="process identity absent during supervisor restart",
+        verified_process_absent=True,
+    )
+    runtime.jobs.requeue_job(job.job_id)
+    lost = runtime.attempts.get_attempt(lease.attempt.attempt_id)
+    assert lost is not None and lost.status is AttemptStatus.LOST
+    return runtime, job, lost
 
 
 def _host_binding(
@@ -553,6 +582,70 @@ def test_launch_resolves_only_the_already_claimed_worker_and_host(tmp_path: Path
         "passed": True,
         "worker_id": WORKER,
     }
+
+
+def test_lost_proof_recovery_uses_closed_requeued_state_and_recovery_only_client(
+    tmp_path: Path,
+) -> None:
+    runtime, job, lost = _lost_requeued_runtime(tmp_path)
+    source = lambda host_ref, worker_id: _host_binding(
+        tmp_path, host_ref=host_ref, worker_id=worker_id
+    )
+
+    active_runtime, active_job, active_lease = _claimed_runtime(tmp_path / "active")
+    with pytest.raises(RemoteAttemptTransportError) as active:
+        resolve_remote_attempt_transport(
+            active_runtime,
+            job_id=active_job.job_id,
+            attempt_id=active_lease.attempt.attempt_id,
+            purpose=RemoteTransportPurpose.PROOF_RECOVERY,
+            binding_source=lambda host_ref, worker_id: _host_binding(
+                tmp_path / "active", host_ref=host_ref, worker_id=worker_id
+            ),
+        )
+    assert active.value.code == "CLAIM_MISMATCH"
+
+    with pytest.raises(RemoteAttemptTransportError) as ordinary:
+        resolve_remote_attempt_transport(
+            runtime,
+            job_id=job.job_id,
+            attempt_id=lost.attempt_id,
+            purpose=RemoteTransportPurpose.RECOVERY,
+            binding_source=source,
+        )
+    assert ordinary.value.code == "CLAIM_MISMATCH"
+
+    resolved = resolve_remote_attempt_transport(
+        runtime,
+        job_id=job.job_id,
+        attempt_id=lost.attempt_id,
+        purpose=RemoteTransportPurpose.PROOF_RECOVERY,
+        binding_source=source,
+    )
+    assert resolved.purpose is RemoteTransportPurpose.PROOF_RECOVERY
+    assert resolved.endpoint.worker_uid == 451
+    assert resolved.client.allowed_operations == REMOTE_PROOF_RECOVERY_OPERATIONS
+    assert resolved.client.allowed_operations == frozenset({"status"})
+
+
+def test_attempt_bound_controller_binds_worker_uid_for_active_and_lost_recovery(
+    tmp_path: Path,
+) -> None:
+    runtime, job, lease = _claimed_runtime(tmp_path / "active")
+    source = lambda host_ref, worker_id: _host_binding(
+        tmp_path / "active", host_ref=host_ref, worker_id=worker_id
+    )
+    adapter = AttemptBoundRemoteWorkerAdapter(runtime, source)
+    active_controller = adapter._controller_for_attempt(lease.attempt)
+    assert active_controller.expected_worker_uid == 451
+
+    lost_runtime, _lost_job, lost = _lost_requeued_runtime(tmp_path / "lost")
+    lost_source = lambda host_ref, worker_id: _host_binding(
+        tmp_path / "lost", host_ref=host_ref, worker_id=worker_id
+    )
+    lost_adapter = AttemptBoundRemoteWorkerAdapter(lost_runtime, lost_source)
+    lost_controller = lost_adapter._controller_for_attempt(lost)
+    assert lost_controller.expected_worker_uid == 451
 
 
 def test_resolution_is_runtime_read_only(tmp_path: Path) -> None:

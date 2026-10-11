@@ -752,7 +752,9 @@ if [ "$VERIFY_READY" = "true" ]; then
       --expected-kind "$EXPECTED_CREDENTIAL_KIND" \
       --workspace-binding-class "$WORKSPACE_BINDING_CLASS" \
       >"$IDENTITY_RESULT" 2>/dev/null; then
-    /bin/echo "provider identity policy refused before inference; no canary spent" >&2
+    refusal_code="$("$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/provider_identity_probe.py" \
+      --refusal-code-stdin 2>/dev/null <"$IDENTITY_RESULT")" || refusal_code=identity_probe_failed
+    /bin/echo "provider identity policy refused before inference: $refusal_code; no canary spent" >&2
     exit 65
   fi
 
