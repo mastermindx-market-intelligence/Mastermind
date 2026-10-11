@@ -3583,7 +3583,8 @@ def test_run_once_cycle_persists_reviewed_policy_digest_when_policy_is_invalid(
     root = runtime.jobs.get_job(receipt["job_id"])
     assert root is not None
 
-    def invalid_policy():
+    def invalid_policy(*, version):
+        assert version == 1
         raise executive_coo_cycle.CooCyclePolicyError("fixture policy drift")
 
     monkeypatch.setattr(
