@@ -1,0 +1,15 @@
+{
+  "classification": "invented_toy_example_not_market_evidence",
+  "currency": "USD",
+  "assumptions": "Every value is illustrative; no company or prediction is represented.",
+  "baseline_revenue": "100000000",
+  "scenario_revenue": "107100000",
+  "revenue_delta": "7100000",
+  "gross_profit_delta": "3911000.00",
+  "operating_profit_delta": "2911000.00",
+  "net_income_delta": "2033250.0000",
+  "conditional_eps_delta": "0.203325",
+  "fcf_delta": null,
+  "share_price_effect": null,
+  "assertions_passed": true
+}
