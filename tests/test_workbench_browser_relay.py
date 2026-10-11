@@ -260,14 +260,16 @@ def test_relay_refuses_same_uid_sibling_before_browser_dispatch(tmp_path):
         "tool": "browser_click",
         "arguments": {"target": "button"},
     }
+    # The peer-PID guard refuses before reading a request. Wait for that
+    # refusal without sending a frame: a send can race the server's close and
+    # raise BrokenPipeError even though the guard correctly rejected the peer.
+    # If the guard is removed, this silent peer times out instead of passing.
     child_program = r"""
-import json,socket,sys
+import socket,sys
 path=sys.argv[1]
-request=json.loads(sys.argv[2])
 client=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
 client.settimeout(2)
 client.connect(path)
-client.sendall(json.dumps(request,separators=(",",":")).encode()+b"\n")
 data=b""
 while b"\n" not in data:
     part=client.recv(65536)
@@ -278,12 +280,13 @@ client.close()
 print(data.split(b"\n",1)[0].decode())
 """
     completed = subprocess.run(
-        [sys.executable, "-c", child_program, str(socket_path), json.dumps(bypass_request)],
+        [sys.executable, "-c", child_program, str(socket_path)],
         capture_output=True,
         text=True,
         timeout=3,
-        check=True,
+        check=False,
     )
+    assert completed.returncode == 0, completed.stderr
     refused = json.loads(completed.stdout)
     assert refused["ok"] is False
     assert refused["error"] == "REQUEST_REFUSED"
@@ -309,9 +312,10 @@ print(data.split(b"\n",1)[0].decode())
         "arguments": {},
     }
     sibling = subprocess.run(
-        [sys.executable, "-c", child_program, str(socket_path), json.dumps(snapshot_request)],
-        capture_output=True, text=True, timeout=3, check=True,
+        [sys.executable, "-c", child_program, str(socket_path)],
+        capture_output=True, text=True, timeout=3, check=False,
     )
+    assert sibling.returncode == 0, sibling.stderr
     assert json.loads(sibling.stdout)["error"] == "REQUEST_REFUSED"
     retained = relay_request(socket_path, {**snapshot_request, "request_id": "e" * 32}, timeout=2)
     assert retained["ok"] is True
