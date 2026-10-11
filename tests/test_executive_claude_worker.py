@@ -21,6 +21,7 @@ from control_plane.claude_worker import (
     ClaudeAuthObservation,
     ClaudeCodeWorkerAdapter,
     ClaudeWorkerContractError,
+    PersonalMaxManagedPolicyObserver,
     attest_claude_code_binary,
 )
 from control_plane.worker_adapter import (
@@ -76,6 +77,9 @@ def _fixture_claude_binary(
         'if [ "$1" = "--safe-mode" ] && [ "$2" = "--setting-sources" ] && [ -z "$3" ] && [ "$4" = "auth" ] && [ "$5" = "status" ] && [ "$6" = "--json" ] && [ "$#" -eq 6 ]; then\n'
         '  case "$mode" in\n'
         '    auth-ready) printf \'{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","email":"person@example.invalid","organization":"discard-me","subscriptionType":"discard-me","apiKeySource":"/login managed key"}\\n\'; exit 0 ;;\n'
+        '    auth-max) printf \'{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","email":"person@example.invalid","subscriptionType":"max","apiKeySource":"/login managed key"}\\n\'; exit 0 ;;\n'
+        '    auth-max-and-success) printf \'{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"max"}\\n\'; exit 0 ;;\n'
+        '    auth-max-worker-context) expected="$root/provider-home/.claude"; principal=$(id -un); if [ "$USER" = "$principal" ] && [ "$LOGNAME" = "$principal" ] && [ "$CLAUDE_CONFIG_DIR" = "$expected" ] && [ "$HOME" = "/var/empty" ]; then printf \'{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"max"}\\n\'; exit 0; fi; printf \'{"loggedIn":false}\\n\'; exit 1 ;;\n'
         '    auth-logged-out) printf \'{"loggedIn":false}\\n\'; exit 1 ;;\n'
         '    auth-malformed) printf \'not-json\\n\'; exit 0 ;;\n'
         '    auth-unknown) printf \'{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","credential":"CREDENTIAL-SENTINEL"}\\n\'; exit 0 ;;\n'
@@ -90,7 +94,7 @@ def _fixture_claude_binary(
         '  esac\n'
         'fi\n'
         'case "$mode" in\n'
-        '  success) printf \'{"is_error":false,"model":"claude-opus-4-6","session_id":"fixture-session","usage":{"input_tokens":1,"output_tokens":2},"structured_output":{"outcome":"ok","run_id":"run-1","job_id":"job-1","worker_id":"worker-1","artifacts":[]}}\\n\' ;;\n'
+        '  success|auth-max-and-success) printf \'{"is_error":false,"model":"claude-opus-4-6","session_id":"fixture-session","usage":{"input_tokens":1,"output_tokens":2},"structured_output":{"outcome":"ok","run_id":"run-1","job_id":"job-1","worker_id":"worker-1","artifacts":[]}}\\n\' ;;\n'
         '  refusal) printf \'{"is_error":true,"subtype":"error","message":"refused"}\\n\' ;;\n'
         '  malformed) printf \'not-json\\n\' ;;\n'
         '  model-mismatch) printf \'{"is_error":false,"model":"another-model","structured_output":{"outcome":"ok","artifacts":[]}}\\n\' ;;\n'
@@ -612,6 +616,133 @@ def test_auth_observation_uses_exact_fenced_argv_and_closed_environment(
     assert "CLAUDE_CODE_" not in child_environment
 
 
+def test_personal_max_managed_policy_observer_projects_only_closed_model_facts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    (tmp_path / "mode").write_text("auth-max", encoding="utf-8")
+    (tmp_path / ".claude").mkdir(mode=0o700)
+    attestation = attest_claude_code_binary(
+        binary, allowed_versions=frozenset({_FIXTURE_VERSION})
+    )
+    monkeypatch.setattr(
+        claude_worker, "_darwin_managed_policy_source_present", lambda home: False
+    )
+    observer = PersonalMaxManagedPolicyObserver(
+        binary=attestation,
+        exact_model=_EXACT_MODEL,
+        generation=7,
+        provider_home=tmp_path,
+    )
+
+    observation = observer.observe()
+
+    assert observation.exact_model == _EXACT_MODEL
+    assert observation.binary_sha256 == attestation.sha256
+    assert observation.binary_version == _FIXTURE_VERSION
+    assert observation.generation == 7
+    assert observation.allow_alternate_models == ()
+    assert observation.fallback_models == ()
+    assert "person@example.invalid" not in repr(observation)
+    auth = claude_worker._observe_auth_status_for_binary(
+        attestation, timeout_seconds=1
+    )
+    assert auth.subscription_scope == "personal_max"
+
+
+def test_personal_max_managed_policy_observer_refuses_source_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    (tmp_path / "mode").write_text("auth-max", encoding="utf-8")
+    (tmp_path / ".claude").mkdir(mode=0o700)
+    attestation = attest_claude_code_binary(
+        binary, allowed_versions=frozenset({_FIXTURE_VERSION})
+    )
+    observations = iter((False, True))
+    monkeypatch.setattr(
+        claude_worker,
+        "_darwin_managed_policy_source_present",
+        lambda home: next(observations),
+    )
+    observer = PersonalMaxManagedPolicyObserver(
+        binary=attestation,
+        exact_model=_EXACT_MODEL,
+        generation=3,
+        provider_home=tmp_path,
+    )
+
+    with pytest.raises(ClaudeWorkerContractError, match="changed during observation"):
+        observer.observe()
+
+
+def test_personal_max_managed_policy_observer_refuses_unqualified_subscription(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    (tmp_path / "mode").write_text("auth-ready", encoding="utf-8")
+    (tmp_path / ".claude").mkdir(mode=0o700)
+    attestation = attest_claude_code_binary(
+        binary, allowed_versions=frozenset({_FIXTURE_VERSION})
+    )
+    monkeypatch.setattr(
+        claude_worker, "_darwin_managed_policy_source_present", lambda home: False
+    )
+    observer = PersonalMaxManagedPolicyObserver(
+        binary=attestation,
+        exact_model=_EXACT_MODEL,
+        generation=1,
+        provider_home=tmp_path,
+    )
+
+    with pytest.raises(ClaudeWorkerContractError, match="personal Max"):
+        observer.observe()
+
+
+def test_darwin_managed_preferences_distinguishes_absence_from_probe_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    defaults = tmp_path / "defaults"
+    defaults.write_text("#!/bin/sh\n", encoding="utf-8")
+    defaults.chmod(0o700)
+
+    monkeypatch.setattr(
+        claude_worker,
+        "_run_bounded_auth_status",
+        lambda *args, **kwargs: (
+            b"",
+            b"Domain com.anthropic.claudecode does not exist\n",
+            1,
+        ),
+    )
+    assert claude_worker._darwin_managed_preferences_present(defaults) is False
+
+    monkeypatch.setattr(
+        claude_worker,
+        "_run_bounded_auth_status",
+        lambda *args, **kwargs: (b"", b"permission denied\n", 1),
+    )
+    with pytest.raises(ClaudeWorkerContractError, match="ambiguous"):
+        claude_worker._darwin_managed_preferences_present(defaults)
+
+
+def test_darwin_managed_preferences_refuses_bounded_probe_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    defaults = tmp_path / "defaults"
+    defaults.write_text("#!/bin/sh\n", encoding="utf-8")
+    defaults.chmod(0o700)
+
+    def overflow(*args, **kwargs):
+        raise claude_worker.ClaudeAuthStatusError(
+            "auth observation output exceeded its bounded contract"
+        )
+
+    monkeypatch.setattr(claude_worker, "_run_bounded_auth_status", overflow)
+    with pytest.raises(ClaudeWorkerContractError, match="not observable"):
+        claude_worker._darwin_managed_preferences_present(defaults)
+
+
 def test_auth_observation_discards_pii_and_reports_logged_out(
     tmp_path: Path,
 ) -> None:
@@ -851,6 +982,51 @@ def test_complete_launch_attestation_is_redacted_and_principal_bound(
     assert sorted(document["environment_keys"]) == document["environment_keys"]
 
 
+def test_native_config_dir_is_preserved_in_real_provider_launch_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    provider_home = tmp_path / "provider-home"
+    config_dir = provider_home / ".claude"
+    config_dir.mkdir(parents=True, mode=0o700)
+    attestation = attest_claude_code_binary(
+        binary, allowed_versions=frozenset({_FIXTURE_VERSION})
+    )
+    monkeypatch.setattr(
+        claude_worker, "_darwin_managed_policy_source_present", lambda home: False
+    )
+    (tmp_path / "mode").write_text("auth-max-and-success", encoding="utf-8")
+    observer = PersonalMaxManagedPolicyObserver(
+        binary=attestation,
+        exact_model=_EXACT_MODEL,
+        generation=_VALID_GENERATION,
+        provider_home=provider_home,
+    )
+    adapter = ClaudeCodeWorkerAdapter(
+        binary,
+        allowed_versions=frozenset({_FIXTURE_VERSION}),
+        exact_model=_EXACT_MODEL,
+        max_turns=4,
+        managed_policy_observer=observer,
+    )
+    principal = __import__("pwd").getpwuid(os.geteuid()).pw_name
+    spec = _workspace_and_spec(
+        tmp_path,
+        expected_worker_uid=os.geteuid(),
+        expected_worker_gid=os.getegid(),
+        worker_user=principal,
+    )
+
+    async def execute() -> None:
+        ref = await adapter.start(spec)
+        await adapter.collect_result(ref)
+
+    asyncio.run(execute())
+    child_environment = (tmp_path / "environment").read_text(encoding="utf-8")
+    assert f"HOME={Path(spec.run_dir) / 'home'}" in child_environment
+    assert f"CLAUDE_CONFIG_DIR={config_dir}" in child_environment
+    assert f"USER={principal}" in child_environment
+    assert f"LOGNAME={principal}" in child_environment
 
 
 def test_process_ref_construction_failure_reaps_unpublished_process(
