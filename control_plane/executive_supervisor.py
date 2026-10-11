@@ -2055,7 +2055,10 @@ class ExecutiveSupervisor:
                 exact_target.revalidate_source()
                 self.runtime.attempts._validate_exact_target_launch(exact_target, lease)
             start_invoked = True
-            process_ref = await self.adapter.start(spec)
+            if getattr(self.adapter, "requires_attempt_lease", False) is True:
+                process_ref = await self.adapter.start(spec, lease=lease)
+            else:
+                process_ref = await self.adapter.start(spec)
             launch_metadata = self._launch_metadata(
                 job=job,
                 lease=lease,
