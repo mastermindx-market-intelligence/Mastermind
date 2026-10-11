@@ -215,4 +215,4 @@ def test_extra_unknown_check_remains_counted_and_hidden():
 def test_catalog_is_versioned_and_within_existing_tool_budget():
     assert len(json.dumps(TOOL_SPECS).encode()) < 16000
     from integrations.product_access_mcp.schemas import SERVER_VERSION
-    assert SERVER_VERSION == "1.1.0"
+    assert SERVER_VERSION == "1.2.0"
