@@ -63,6 +63,15 @@ export interface LaunchOrchestratorProps {
 
 /** Conservative UI ceiling for user-supplied goal text */
 const MAX_GOAL_BYTES = 16384;
+const MAX_ACCEPTANCE_ITEMS = 6;
+/** Criteria are sent as part of the existing goal: no new command or lifecycle schema. */
+export function composeAcceptanceGoal(goal: string, criteria: string): string | null {
+  const lines = criteria.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (lines.length > MAX_ACCEPTANCE_ITEMS || lines.some((line) => line.length > 500)) return null;
+  if (!lines.length) return goal;
+  const composed = `${goal.trim()}\n\nAcceptance criteria (verify against the delivered result):\n${lines.map((line, i) => `${i + 1}. ${line}`).join("\n")}`;
+  return new TextEncoder().encode(composed).length <= 4000 ? composed : null;
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -108,9 +117,11 @@ export function LaunchOrchestrator({
   const goalId = `${formId}-goal`;
   const projectId = `${formId}-project`;
   const profileId = `${formId}-profile`;
+  const acceptanceId = `${formId}-acceptance`;
 
   // Draft state — preserved across error and rerender
   const [draftGoal, setDraftGoal] = useState("");
+  const [draftAcceptance, setDraftAcceptance] = useState("");
   const [draftProject, setDraftProject] = useState("");
   const [draftProfile, setDraftProfile] = useState("");
 
@@ -136,6 +147,7 @@ export function LaunchOrchestrator({
       // Success consumes the goal so the same intent cannot be launched twice
       // by a parent that stays mounted. A refusal keeps the draft.
       setDraftGoal("");
+      setDraftAcceptance("");
     }
   };
 
@@ -154,6 +166,8 @@ export function LaunchOrchestrator({
   const profileStale = !selectedProfileChoice;
 
   const goalBytes = utf8ByteLength(draftGoal);
+  const composedGoal = composeAcceptanceGoal(draftGoal, draftAcceptance);
+  const acceptanceInvalid = draftAcceptance.trim().length > 0 && composedGoal === null;
   const goalTooLong = goalBytes > MAX_GOAL_BYTES;
   const goalBlank = draftGoal.trim().length === 0;
 
@@ -165,7 +179,8 @@ export function LaunchOrchestrator({
     !selectedProjectChoice?.unavailableReason &&
     !selectedProfileChoice?.unavailableReason &&
     !goalBlank &&
-    !goalTooLong;
+    !goalTooLong &&
+    !acceptanceInvalid;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -176,7 +191,7 @@ export function LaunchOrchestrator({
     try {
       onSubmit(
         {
-          goal: draftGoal,
+          goal: composedGoal ?? draftGoal,
           projectRef: selectedProject,
           profileRef: selectedProfile,
         },
@@ -241,6 +256,26 @@ export function LaunchOrchestrator({
                 Goal exceeds the {MAX_GOAL_BYTES} byte UTF-8 ceiling.
               </p>
             )}
+          </div>
+
+          <div className="form-field">
+            <label htmlFor={acceptanceId}>Acceptance criteria (optional, one per line)</label>
+            <textarea
+              id={acceptanceId}
+              value={draftAcceptance}
+              onChange={(e) => setDraftAcceptance(e.target.value)}
+              rows={3}
+              placeholder="What must be demonstrably true when this mission is finished?"
+              disabled={launchPending}
+              aria-invalid={acceptanceInvalid}
+              aria-describedby={acceptanceInvalid ? `${acceptanceId}-error` : undefined}
+            />
+            {acceptanceInvalid && (
+              <p id={`${acceptanceId}-error`} className="field-error" role="alert">
+                Use at most six criteria (500 characters each); the complete submitted goal must fit 4,000 UTF-8 bytes.
+              </p>
+            )}
+            <p className="muted">Criteria travel with the existing mission goal. They are requirements for validation, not a claim that checks have passed.</p>
           </div>
 
           {/* Project select */}

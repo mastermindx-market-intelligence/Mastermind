@@ -76,6 +76,42 @@ describe("LaunchOrchestrator", () => {
     });
   });
 
+  describe("acceptance contract", () => {
+    it("sends specified criteria in the existing launch goal", () => {
+      const onSubmit = vi.fn();
+      render(<LaunchOrchestrator {...makeProps({ onSubmit })} />);
+      fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Implement project chat" } });
+      fireEvent.change(screen.getByLabelText(/Acceptance criteria/), { target: { value: "One message is delivered\nReopening does not duplicate it" } });
+      fireEvent.click(launchButton());
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+      const submitted = onSubmit.mock.calls[0][0] as LaunchForm;
+      expect(submitted.goal).toContain("1. One message is delivered");
+      expect(submitted.goal).toContain("2. Reopening does not duplicate it");
+    });
+
+    it("blocks oversized or excessive criteria without dispatch", () => {
+      const onSubmit = vi.fn();
+      render(<LaunchOrchestrator {...makeProps({ onSubmit })} />);
+      fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "A goal" } });
+      fireEvent.change(screen.getByLabelText(/Acceptance criteria/), { target: { value: "x\n".repeat(7) } });
+      expect(launchButton().disabled).toBe(true);
+      expect(onSubmit).not.toHaveBeenCalled();
+    });
+
+    it("preserves criteria on refusal and clears on accepted completion", () => {
+      const onSubmit = vi.fn();
+      render(<LaunchOrchestrator {...makeProps({ onSubmit })} />);
+      fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "A goal" } });
+      fireEvent.change(screen.getByLabelText(/Acceptance criteria/), { target: { value: "Requirement" } });
+      fireEvent.click(launchButton());
+      act(() => onSubmit.mock.calls[0][1]({ status: "refused" }));
+      expect((screen.getByLabelText(/Acceptance criteria/) as HTMLTextAreaElement).value).toBe("Requirement");
+      fireEvent.click(launchButton());
+      act(() => onSubmit.mock.calls[1][1]({ status: "accepted" }));
+      expect((screen.getByLabelText(/Acceptance criteria/) as HTMLTextAreaElement).value).toBe("");
+    });
+  });
+
   describe("default selections", () => {
     it("selects first eligible project and profile by default", () => {
       render(<LaunchOrchestrator {...makeProps()} />);
