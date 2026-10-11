@@ -125,6 +125,14 @@ elevated review uses `standard.review`. No provider, model binding, cost class,
 profile, capability, worker eligibility, or production-arm value changes in this
 migration.
 
+The later native-return host-selection catalogue advances both routing and
+capability policy versions to `2026-10-11.native-return-host-selection`. It adds
+only the explicit private host alias `coo.operator.native-return`; default tiers,
+docs selection and production arms are unchanged. Newly run R1 fixtures qualify
+that current version; historical receipts and persisted Job identities are
+unchanged. Existing host, quota, grant and root bindings must qualify the new
+policy identity through their owners before native selection.
+
 Current logical aliases:
 
 | Alias | Initial binding | Use |
