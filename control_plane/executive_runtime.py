@@ -629,6 +629,22 @@ def _normalise_constraints(
     if value is not None and not isinstance(value, dict):
         raise StateConflict("job constraints must be a mapping")
     raw = value or {}
+    role_fields: dict[str, Any] = {}
+    if "responsibility_intent" in raw or "responsibility_intent_digest" in raw:
+        from control_plane.executive_responsibility import (
+            ResponsibilityIntentError, normalize_responsibility_intent,
+        )
+        try:
+            role = normalize_responsibility_intent(raw.get("responsibility_intent"))
+            # This normal worker path must not relabel work as a coordinator.
+            # Coordinator adoption belongs to the existing hierarchy owner.
+            role.require_phase("work")
+            if raw.get("responsibility_intent_digest") != role.digest:
+                raise ResponsibilityIntentError("role intent digest mismatch")
+        except ResponsibilityIntentError as exc:
+            raise StateConflict(str(exc)) from exc
+        role_fields = {"responsibility_intent": role.to_dict(),
+                       "responsibility_intent_digest": role.digest}
     provider = str(raw.get("provider") or "").strip().lower()
     capabilities = _normalise_capabilities(
         raw.get("required_capabilities") or raw.get("capabilities") or []
@@ -643,7 +659,7 @@ def _normalise_constraints(
     eligible = sorted(
         {str(item).strip().lower() for item in quota_values if str(item).strip()}
     ) or ["default"]
-    result: dict[str, Any] = {"eligible_quota_classes": eligible}
+    result: dict[str, Any] = {"eligible_quota_classes": eligible, **role_fields}
 
     aliases_raw = raw.get("preferred_model_aliases") or []
     if isinstance(aliases_raw, str):
@@ -7582,7 +7598,9 @@ def _validated_sealed_worker_launch_material(
         "gid",
         "mtime_ns",
     }
-    if not isinstance(metadata, dict) or set(metadata) != metadata_keys:
+    if not isinstance(metadata, dict) or set(metadata) not in (
+        metadata_keys, metadata_keys | {"worker_recovery_binding"},
+    ):
         raise StateConflict("sealed-worker launch metadata is not the closed wire")
     attestation = metadata.get("launch_attestation")
     worker = (
@@ -7765,6 +7783,66 @@ def _validated_sealed_worker_launch_material(
         "execution_principal_snapshot_digest"
     ] != orchestration_digest(principal):
         raise StateConflict("sealed-worker principal snapshot drifted from launch")
+    if "worker_recovery_binding" in metadata:
+        from control_plane.worker_execution_contract import (
+            WorkerRecoveryBinding, WorkerRecoveryContractError,
+        )
+
+        try:
+            binding = WorkerRecoveryBinding.from_dict(
+                metadata["worker_recovery_binding"]
+            ).validate_wire()
+        except (WorkerRecoveryContractError, TypeError, ValueError) as exc:
+            raise StateConflict("sealed-worker recovery binding is invalid") from exc
+        fields = binding.to_dict()["launch_spec"]["fields"]
+        ref = binding.to_dict()["process_ref"]
+        if not isinstance(attestation["workspace_identity"], dict):
+            raise StateConflict("sealed-worker recovery workspace identity is invalid")
+        launch_pins = {
+            "job_id": attempt_row["job_id"],
+            "run_id": attempt_row["attempt_id"],
+            "worker_id": attempt_row["worker_id"],
+            "workspace_path": attestation["workspace_identity"].get("path"),
+            "worker_user": observed_user,
+            "expected_worker_uid": worker["expected_uid"],
+            "expected_worker_gid": worker["expected_gid"],
+            "expected_base_sha": attestation["expected_base_sha"],
+            "isolation_manifest_sha256": attestation.get("isolation_manifest_sha256"),
+            "authorities": grant["authorities"],
+            "allowed_artifact_paths": grant["write_paths"],
+            "effective_grant_digest": attempt_row["effective_grant_digest"],
+        }
+        process_pins = {
+            "run_id": attempt_row["attempt_id"],
+            "pid": attempt_row["pid"], "pgid": attempt_row["pgid"],
+            "process_start_identity": attempt_row["process_start_identity"],
+            "boot_session_id": attempt_row["boot_id"],
+            "launch_nonce": attestation["launch_nonce"],
+            "binary": attestation["binary"],
+            "base_sha": attestation["observed_base_sha"],
+            "session_id": process["session_id"],
+            **{name: process[name] for name in (
+                "effective_uid", "effective_gid", "real_uid", "real_gid",
+            )},
+            **{name: attempt_row[name] for name in (
+                "stdout_path", "stderr_path", "result_path",
+            )},
+        }
+        if (
+            binding.to_dict() != metadata["worker_recovery_binding"]
+            or any(fields.get(name) != value for name, value in launch_pins.items())
+            or any(ref.get(name) != value for name, value in process_pins.items())
+            or binding.launch_spec["prompt_sha256"] != attestation["prompt_sha256"]
+            or (
+                ref["provider_session_id"] is not None
+                and ref["provider_session_id"] != attempt_row["provider_session_id"]
+            )
+            or (
+                metadata["routing"].get("adapter_id") is not None
+                and metadata["routing"]["adapter_id"] != binding.adapter_id
+            )
+        ):
+            raise StateConflict("sealed-worker recovery binding lost launch identity")
     return dict(attestation), principal, placement, dict(grant)
 
 
