@@ -306,3 +306,26 @@ def test_factory_does_not_self_attest_the_observed_tool_schema(tmp_path, monkeyp
     assert result["error"]["code"] == "CAPABILITY_NOT_ATTESTED"
     assert calls == []
     assert _event_count(seed) == before
+
+
+def test_worker_runtime_gateway_does_not_claim_native_ceo_enrollment(tmp_path, monkeypatch):
+    """A pure native policy actor cannot impersonate a Fabric Job/Attempt."""
+    from control_plane.fabric_coordination_policy import (
+        CoordinationNativeIdentity, CoordinationParticipant, CoordinationRole,
+    )
+
+    _, _, _, owner, source = setup(tmp_path, monkeypatch)
+    native = CoordinationParticipant(
+        identity=CoordinationNativeIdentity(
+            "99999999-1111-4333-8444-555555555555", "gen-1",
+            "ubuntu1", "native-principal",
+        ),
+        role=CoordinationRole.PROJECT_CEO,
+        tenant_ref="fixture-tenant",
+        portfolio_ref="fixture-portfolio",
+        project_ref="fixture-project",
+        program_ref="fixture-program",
+    )
+    owner.snapshot = replace(owner.snapshot, participants=owner.snapshot.participants + (native,))
+    with pytest.raises(RuntimeCoordinationUnavailable):
+        source.observe()

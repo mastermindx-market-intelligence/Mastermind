@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 import re
+from uuid import UUID
 
 
 class CoordinationRefused(ValueError):
@@ -56,8 +57,41 @@ class CoordinationIdentity:
 
 
 @dataclass(frozen=True, slots=True)
+class CoordinationNativeIdentity:
+    """Host-attested native CEO/COO session; never a synthetic Runtime Job.
+
+    The canonical native session-management/verified-principal owner must
+    construct these facts. This class does not discover, authenticate or arm
+    a provider session. Generation and principal are part of exact identity.
+    """
+    session_id: str
+    generation: str
+    host_ref: str
+    principal_ref: str
+
+    def __post_init__(self) -> None:
+        if type(self.session_id) is not str:
+            raise CoordinationRefused("INVALID_OWNER_FACTS")
+        try:
+            if str(UUID(self.session_id)) != self.session_id:
+                raise ValueError("noncanonical UUID")
+        except (ValueError, TypeError, AttributeError):
+            raise CoordinationRefused("INVALID_OWNER_FACTS") from None
+        for value in (self.generation, self.host_ref, self.principal_ref):
+            _token(value)
+
+
+CoordinationActorIdentity = CoordinationIdentity | CoordinationNativeIdentity
+_ACTOR_TYPES = (CoordinationIdentity, CoordinationNativeIdentity)
+
+
+def _actor_identity(value: object) -> bool:
+    return type(value) in _ACTOR_TYPES
+
+
+@dataclass(frozen=True, slots=True)
 class CoordinationParticipant:
-    identity: CoordinationIdentity
+    identity: CoordinationActorIdentity
     role: CoordinationRole
     tenant_ref: str
     portfolio_ref: str
@@ -67,15 +101,25 @@ class CoordinationParticipant:
     workstream_ref: str | None = None
     coordination_group_ref: str | None = None
     active: bool = True
+    parent_identity: CoordinationActorIdentity | None = None
 
     def __post_init__(self) -> None:
-        if type(self.identity) is not CoordinationIdentity or type(self.role) is not CoordinationRole:
+        if not _actor_identity(self.identity) or type(self.role) is not CoordinationRole:
             raise CoordinationRefused("INVALID_OWNER_FACTS")
         for value in (self.tenant_ref, self.portfolio_ref, self.project_ref, self.program_ref):
             _token(value)
         for value in (self.parent_job_id, self.workstream_ref, self.coordination_group_ref):
             _token(value, optional=True)
-        if type(self.active) is not bool or self.parent_job_id == self.identity.job_id:
+        if (
+            type(self.active) is not bool
+            or (self.parent_identity is not None and not _actor_identity(self.parent_identity))
+            or (self.parent_identity is not None and self.parent_identity == self.identity)
+            or (type(self.identity) is CoordinationIdentity
+                and self.parent_job_id == self.identity.job_id)
+            or (type(self.identity) is CoordinationNativeIdentity
+                and (self.role not in {CoordinationRole.PROJECT_CEO, CoordinationRole.COO}
+                     or self.parent_job_id is not None))
+        ):
             raise CoordinationRefused("INVALID_OWNER_FACTS")
         if self.role in {CoordinationRole.TASK_OPERATOR, CoordinationRole.WORKER} and not self.workstream_ref:
             raise CoordinationRefused("INVALID_OWNER_FACTS")
@@ -91,8 +135,8 @@ class CoordinationGrant:
     never a list accepted from the public caller. No new grant issuer is added.
     """
     grant_ref: str
-    first: CoordinationIdentity
-    second: CoordinationIdentity
+    first: CoordinationActorIdentity
+    second: CoordinationActorIdentity
     topic_ref: str
     approved_project_refs: tuple[str, ...]
     not_before: int
@@ -102,7 +146,7 @@ class CoordinationGrant:
     def __post_init__(self) -> None:
         _token(self.grant_ref)
         _token(self.topic_ref)
-        if type(self.first) is not CoordinationIdentity or type(self.second) is not CoordinationIdentity or self.first == self.second:
+        if not _actor_identity(self.first) or not _actor_identity(self.second) or self.first == self.second:
             raise CoordinationRefused("INVALID_OWNER_FACTS")
         if type(self.approved_project_refs) is not tuple or not 1 <= len(self.approved_project_refs) <= 2:
             raise CoordinationRefused("INVALID_OWNER_FACTS")
@@ -137,22 +181,43 @@ class CoordinationSnapshot:
             raise CoordinationRefused("INVALID_OWNER_FACTS")
         jobs: set[str] = set()
         bindings: set[str] = set()
+        native_sessions: set[tuple[str, str]] = set()
+        actor_ids: set[CoordinationActorIdentity] = set()
         for participant in self.participants:
             if type(participant) is not CoordinationParticipant:
                 raise CoordinationRefused("INVALID_OWNER_FACTS")
             identity = participant.identity
-            if identity.job_id in jobs or identity.binding_id in bindings:
+            if identity in actor_ids:
                 raise CoordinationRefused("AMBIGUOUS_OWNER_FACTS")
-            jobs.add(identity.job_id)
-            bindings.add(identity.binding_id)
+            actor_ids.add(identity)
+            if type(identity) is CoordinationIdentity:
+                if identity.job_id in jobs or identity.binding_id in bindings:
+                    raise CoordinationRefused("AMBIGUOUS_OWNER_FACTS")
+                jobs.add(identity.job_id)
+                bindings.add(identity.binding_id)
+            else:
+                # The same physical native session cannot acquire parallel
+                # generations or principals inside one owner observation.
+                native_key = (identity.host_ref, identity.session_id)
+                if native_key in native_sessions:
+                    raise CoordinationRefused("AMBIGUOUS_OWNER_FACTS")
+                native_sessions.add(native_key)
         grant_refs: set[str] = set()
         for grant in self.grants:
             if type(grant) is not CoordinationGrant or grant.grant_ref in grant_refs:
                 raise CoordinationRefused("AMBIGUOUS_OWNER_FACTS")
             grant_refs.add(grant.grant_ref)
-        by_job = {p.identity.job_id: p for p in self.participants}
+        by_job = {
+            p.identity.job_id: p for p in self.participants
+            if type(p.identity) is CoordinationIdentity
+        }
+        by_identity = {p.identity: p for p in self.participants}
         for child in self.participants:
-            parent = by_job.get(child.parent_job_id)
+            legacy = by_job.get(child.parent_job_id)
+            explicit = by_identity.get(child.parent_identity)
+            if legacy is not None and explicit is not None and legacy != explicit:
+                raise CoordinationRefused("INVALID_PARENT_RELATION")
+            parent = explicit or legacy
             if parent is not None and (
                 _ORDER[parent.role] >= _ORDER[child.role]
                 or parent.tenant_ref != child.tenant_ref
@@ -162,7 +227,7 @@ class CoordinationSnapshot:
             ):
                 raise CoordinationRefused("INVALID_PARENT_RELATION")
 
-    def participant(self, identity: CoordinationIdentity, *, now: int) -> CoordinationParticipant:
+    def participant(self, identity: CoordinationActorIdentity, *, now: int) -> CoordinationParticipant:
         _integer(now)
         if not self.observed_at <= now < self.valid_until:
             raise CoordinationRefused("STALE_OWNER_FACTS")
@@ -183,8 +248,8 @@ class CoordinationDecision:
 
 def authorize_coordination(
     snapshot: CoordinationSnapshot,
-    sender: CoordinationIdentity,
-    recipient: CoordinationIdentity,
+    sender: CoordinationActorIdentity,
+    recipient: CoordinationActorIdentity,
     *,
     topic_ref: str,
     now: int,
@@ -196,7 +261,7 @@ def authorize_coordination(
     same-rank, bilateral, topic-bound and time-bounded; they never cross tenants
     or portfolios. Underlying admission and native-channel isolation still apply.
     """
-    if type(snapshot) is not CoordinationSnapshot or type(sender) is not CoordinationIdentity or type(recipient) is not CoordinationIdentity:
+    if type(snapshot) is not CoordinationSnapshot or not _actor_identity(sender) or not _actor_identity(recipient):
         raise CoordinationRefused("INVALID_OWNER_FACTS")
     _token(topic_ref)
     first = snapshot.participant(sender, now=now)
@@ -207,7 +272,14 @@ def authorize_coordination(
         raise CoordinationRefused("RELATION_NOT_PERMITTED")
     same_project = first.project_ref == second.project_ref
     if same_project:
-        if first.parent_job_id == second.identity.job_id or second.parent_job_id == first.identity.job_id:
+        if (
+            first.parent_identity == second.identity
+            or second.parent_identity == first.identity
+            or (type(second.identity) is CoordinationIdentity
+                and first.parent_job_id == second.identity.job_id)
+            or (type(first.identity) is CoordinationIdentity
+                and second.parent_job_id == first.identity.job_id)
+        ):
             return CoordinationDecision("direct_parent_child", snapshot.revision)
     if first.role is second.role:
         role = first.role

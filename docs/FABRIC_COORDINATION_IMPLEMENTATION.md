@@ -27,11 +27,12 @@ scheduler, or grant issuer is added.
 | Unrelated cross-rank or self messaging | Denied |
 
 A dependency grant is an observation supplied by the existing authorization
-owner. It identifies both exact Runtime identities and binding generations,
-both project approvals, topic, validity interval, and revocation. This module
-cannot issue such a grant. Role names describe assigned responsibility, not
-provider/model/host or command authority. Native provider choice does not change
-the organizational policy.
+owner. It identifies both exact admitted actor identities (Runtime Job/Attempt
+bindings or authenticated native CEO/COO session generations), both project
+approvals, topic, validity interval, and revocation. This module cannot issue
+such a grant. Role names describe assigned responsibility, not provider/model/
+host or command authority. Native provider choice does not change the
+organizational policy.
 
 A permitted exchange never grants operational authority or forwarding rights.
 Task creation, reassignment, scope changes, approval, cancellation, spend and
@@ -139,6 +140,37 @@ also support a mapped surface. The native transport descriptor currently marks
 `codex-app-server` implemented but not `claude-code-session`. Adding a role policy
 or this identity join therefore does not prove mixed-provider delivery. Those
 accepted-source native transport gaps remain explicit and were not switched on.
+
+## Pure native CEO/COO hierarchy identity — source extension
+
+`CoordinationNativeIdentity` is a distinct immutable owner-supplied actor
+identity: canonical native session UUID, generation, host reference and
+verified-principal reference. It never invents a Runtime Job or Attempt.
+`CoordinationActorIdentity` permits it alongside the existing Runtime identity
+within the **pure policy**, and `CoordinationParticipant.parent_identity` can
+represent an exact native parent of an admitted child. This adds no session
+discovery, provider wake, authentication owner or message transport.
+
+Native identities are accepted only for PROJECT_CEO and COO roles, not worker or
+task-operator self-enrollment. Native session duplicates (even with different
+generations/principals), invalid UUIDs, cross-project parentage, inverted role
+hierarchy, expired grants and generation drift fail closed. Existing Runtime
+parent_job_id checks, canonical Job/Attempt identity, and peer scopes are kept.
+Only exact, owner-present actors can become peers; an asserted but absent parent
+is not discoverable. No peer message grants operational or forwarding authority.
+
+**Crucial separation:** the existing Company consultation wire
+(`ConsultationPeer`, `HierarchyScopedPeerResolver`, and
+`build_runtime_coordination_gateway`) still exclusively admits
+`worker_attempt` actor refs and RuntimeBinding tuples; it is not a native
+CEO/COO transport. The current worker Runtime adapter explicitly refuses a
+snapshot containing a native actor rather than silently enabling a new caller
+kind. An authenticated native host must separately attest and compose an
+accepted native actor/transport with the *existing* Session Bridge and dialogue
+owners. At the current protected master revision the source includes
+`integrations/session_bridge/claude_native.py` and guarded native reply seams,
+but no installed management-owner proof or supported Claude wake descriptor.
+Do not widen a tool schema or mark a transport implemented based on policy tests.
 
 ## Verification at the current source milestone
 

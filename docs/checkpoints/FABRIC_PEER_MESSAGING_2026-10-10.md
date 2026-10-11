@@ -197,3 +197,46 @@ the original source carrier. Then qualify exact-head hosted CI and independent
 review. The production host/authenticated membership/commit-boundary and native
 client enrollment lanes remain held by their actual action-specific gates.
 End-to-end two-Ubuntu/mixed-provider consumption is NOT PROVEN.
+
+## October 11 Extra High — native hierarchy policy and published binding fix
+
+The prior local binding-generation fix was published on the same original Studio
+Git carrier as commit `8eb64aa33149a7cfdfe690142b727d29d46a6c71`;
+typed commit and push both returned APPLIED, matching remote/local SHA and clean
+workspace. The earlier checkpoint/comment claiming that fix uncommitted is
+superseded. Source publication is NOT installation or live consumption.
+
+In the next phase, the existing `control_plane/fabric_coordination_policy.py`
+was extended with `CoordinationNativeIdentity` (canonical exact session UUID,
+generation, host, principal), a union actor identity, and explicit
+`parent_identity` for scoped native CEO/COO parents. This preserves the existing
+Runtime Job/Attempt actor structure rather than forging synthetic Jobs for native
+sessions. Native actor role is limited to CEO and COO. Snapshot uniqueness
+rejects duplicate physical native sessions even across changed generations or
+principals. Parent/rank/project/tenant/portfolio checks and exact time/topic-
+bound grants remain in place. No new control, credential, transport, lifecycle or
+identity registry is introduced.
+
+`tests/test_fabric_coordination_native_policy.py` adds native hierarchy
+policy cases with exact native identity, grant and parent relationship checks.
+`tests/test_fabric_coordination_runtime.py` adds a regression confirming the
+current worker-only Runtime composition **fails closed** for native participants.
+The existing public `ConsultationPeer` / Company consultation wire remains
+worker_attempt-only; the new pure policy identity DOES NOT enroll a native
+CEO/COO client or arm its transport. Source documentation explicitly records
+this separation. Authenticated native session owner/transport is still pending.
+
+Focused suite PID 76476 completed exit code 0 in 24.44s, with **162 selected
+cases, 0 failures/errors/skips**, JUnit
+`/tmp/mmx-fabric-native-hierarchy-runtime-20261011.xml` on M2 Studio,
+SHA256 `c9f9d6a4990e974ad79134758c59fd6e8b27b6b12057f78bff8a759d23f3caa8`.
+Covers prior policy/gateway tests, the native policy extension and current Runtime
+join. No live provider messages or fleet changes occurred.
+
+Current source changes include the pure policy, new native policy tests,
+Runtime fail-closed test and implementation documentation. This phase must be
+committed/pushed via the **same registered Studio Git publication owner** and
+verified against exact new remote SHA. Hosted CI/review remain separate later
+gates. Native session delivery still requires accepted production host/management
+owner and native attention/consumption proof; avoid treating the source test as
+runtime capability.
