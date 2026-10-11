@@ -320,6 +320,33 @@ def test_completed_registration_requires_verified_settlement(mutex, failure):
             post_json=lambda *a: pytest.fail("unsettled operation posted again"))
 
 
+@pytest.mark.parametrize("failure", ["storage", "unavailable", "mismatch"])
+def test_known_client_reconciliation_requires_verified_settlement(mutex, failure):
+    api = SyntheticApi()
+    store = enroll.KeychainRegistrationStore(api=api)
+    store.save_pending(enroll.PendingRegistration(
+        ATTEMPT, enroll.CALLBACK_URL, POLICY.policy_digest, V3.client_name))
+    before = api.raw
+
+    if failure == "storage":
+        def unavailable_write(value):
+            raise OSError("synthetic reconciliation write unavailable")
+        api.on_write = unavailable_write
+    elif failure == "unavailable":
+        def unavailable_read(snapshot):
+            raise OSError("synthetic reconciliation read unavailable")
+        api.on_write = lambda value: setattr(api, "on_read", unavailable_read)
+    else:
+        api.upsert = lambda *a: None
+
+    with pytest.raises(enroll.EnrollmentEffectUnknown):
+        enroll.reconcile_pending_registration(POLICY, store=store,
+            observed_client_id="tpc_fixture", observed_attempt_ref=ATTEMPT,
+            observed_client_name=V3.client_name)
+    if failure != "unavailable":
+        assert api.raw == before
+
+
 def _process_ensure(raw, lock_root, sender, http_gate):
     def forbid_live(event, args):
         if event in {"socket.connect", "socket.connect_ex", "socket.bind",

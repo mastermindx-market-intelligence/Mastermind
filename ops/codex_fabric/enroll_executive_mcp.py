@@ -561,10 +561,15 @@ def reconcile_pending_registration(
     )
     try:
         store.save(registration)
+        readback = store.load_state()
     except Exception:
         raise EnrollmentEffectUnknown(
             "Executive public client registration reconciliation effect is unknown"
         ) from None
+    if readback != registration:
+        raise EnrollmentEffectUnknown(
+            "Executive public client registration reconciliation effect is unknown"
+        )
     return registration
 
 
