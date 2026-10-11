@@ -3,16 +3,19 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import json
+from datetime import datetime
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from control_plane import executive_worker_broker as broker
-from control_plane.executive_runtime import Runtime, StateConflict
+from control_plane.executive_runtime import AttemptStatus, Runtime, StateConflict
 from control_plane.executive_service import ExecutiveControlService
-from control_plane.executive_supervisor import ProcessPresence
+from control_plane.executive_supervisor import ProcessPresence, ReconcileStatus, SupervisorError
 from control_plane.remote_attempt_transport import (
-    AttemptBoundRemoteWorkerAdapter, RemoteAttemptTransportError,
+    AttemptBoundRemoteWorkerAdapter, RemoteAttemptTransportError, REMOTE_RECOVERY_OPERATIONS,
 )
 from control_plane.remote_worker_broker_client import RemoteWorkerBrokerClient
 from scripts import executive_os_phase1c as cli
@@ -55,7 +58,27 @@ def _fake_status(monkeypatch, attempt, *, adapter_id="codex-cli", uid=451, fault
     return calls
 
 
-def _composed_lost(tmp_path, monkeypatch, *, adapter_id="codex-cli", source_fault=None):
+def _fake_unbound_status(monkeypatch, attempt, *, adapter_id="codex-cli", fault=None):
+    def request_sync(self, operation, payload):
+        assert self.allowed_operations == REMOTE_RECOVERY_OPERATIONS
+        if "run_id" in payload:
+            assert payload["run_id"] == attempt.attempt_id
+            if operation == "cancel":
+                return {"uid_sweep": _broker_absence(attempt)["status_sweep"]}
+            assert operation == "status"
+            # The broker retained the run, but its start result never reached
+            # control, so no persisted ProcessRef can match the exact Attempt.
+            return {"run": {"run_id": attempt.attempt_id}}
+        assert operation == "status" and payload == {"fresh_uid_sweep": True}
+        status = _broker_absence(attempt, adapter_id=adapter_id)
+        if fault is not None:
+            fault(status)
+        return status
+
+    monkeypatch.setattr(RemoteWorkerBrokerClient, "request_sync", request_sync)
+
+
+def _composed_claim(tmp_path, monkeypatch, *, adapter_id="codex-cli", source_fault=None):
     raw = cli.load_control_config(_write(tmp_path, _raw(
         tmp_path, worker_id=WORKER, quota_class=QUOTA,
     )))
@@ -106,6 +129,14 @@ def _composed_lost(tmp_path, monkeypatch, *, adapter_id="codex-cli", source_faul
         job.job_id, worker_id=WORKER, quota_class=QUOTA, lease_owner="fixture",
     )
     assert lease is not None
+    return service, supervisor, job, lease, binding
+
+
+def _composed_lost(tmp_path, monkeypatch, **kwargs):
+    service, supervisor, job, lease, binding = _composed_claim(
+        tmp_path, monkeypatch, **kwargs,
+    )
+    runtime = service.runtime
     runtime.attempts.record_process(
         lease.attempt.attempt_id, fence_generation=lease.attempt.fence_generation,
         lease_token=lease.lease_token, provider_session_id="fixture-missing",
@@ -123,6 +154,104 @@ def _composed_lost(tmp_path, monkeypatch, *, adapter_id="codex-cli", source_faul
     runtime.jobs.requeue_job(job.job_id)
     lost = runtime.attempts.get_attempt(lease.attempt.attempt_id)
     return service, supervisor, job, lost, binding
+
+
+@pytest.mark.parametrize("adapter_id", ["codex-cli", "claude-code"])
+def test_composed_unbound_restart_uses_endpoint_uid_and_reaches_expiry(
+    tmp_path, monkeypatch, adapter_id,
+):
+    service, supervisor, job, lease, binding = _composed_claim(
+        tmp_path, monkeypatch, adapter_id=adapter_id,
+    )
+    attempt = lease.attempt
+    assert attempt.status is AttemptStatus.CLAIMED
+    assert attempt.pid is None and attempt.launch_metadata == {}
+    assert binding.worker_uid != supervisor.worker_uid
+    Path(job.worktree).mkdir(parents=True, mode=0o700)
+    supervisor._run_dir(attempt.attempt_id).mkdir(parents=True, mode=0o700)
+    _fake_unbound_status(monkeypatch, attempt, adapter_id=adapter_id)
+
+    outcomes = supervisor.reconcile_restart()
+    assert outcomes[0].status is ReconcileStatus.AWAITING_LEASE_EXPIRY, outcomes[0]
+    receipt = json.loads(Path(outcomes[0].uid_sweep_receipt_path).read_text())
+    assert receipt["uid_sweep"]["worker_uid"] == 451
+    assert service.runtime.attempts.get_attempt(attempt.attempt_id) == attempt
+    receipt_path = Path(outcomes[0].uid_sweep_receipt_path)
+    before = receipt_path.read_bytes()
+
+    expires = int(datetime.fromisoformat(attempt.lease_expires_at).timestamp() * 1000)
+    service.runtime.store.clock = lambda: expires + 2000
+    outcomes = supervisor.reconcile_restart()
+    assert outcomes[0].status is ReconcileStatus.REQUEUED, outcomes[0]
+    assert service.runtime.attempts.get_attempt(attempt.attempt_id).status is AttemptStatus.LOST
+    assert len(service.runtime.attempts.list_attempts(job.job_id)) == 1
+    assert service.runtime.jobs.get_job(job.job_id).status.value == "QUEUED"
+    assert receipt_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("value", [None, 0, -1, True, "451"])
+def test_unbound_restart_invalid_endpoint_uid_refuses_before_cleanup(tmp_path, monkeypatch, value):
+    service, supervisor, _, lease, _ = _composed_claim(tmp_path, monkeypatch)
+    controller = supervisor.process_controller
+    monkeypatch.setattr(controller, "expected_worker_uid", lambda attempt: value)
+    monkeypatch.setattr(controller, "cleanup_unbound_run",
+                        lambda run_id: pytest.fail("invalid UID reached cleanup"))
+    with pytest.raises(SupervisorError, match="positive worker UID"):
+        supervisor._cleanup_unbound_claim(lease.attempt)
+    assert service.runtime.attempts.get_attempt(lease.attempt.attempt_id) == lease.attempt
+
+
+def test_unbound_restart_endpoint_uid_is_rechecked_before_seal(tmp_path, monkeypatch):
+    service, supervisor, _, lease, _ = _composed_claim(tmp_path, monkeypatch)
+    attempt = lease.attempt
+    current_uid = [451]
+    monkeypatch.setattr(supervisor.process_controller, "expected_worker_uid",
+                        lambda attempt: current_uid[0])
+    _fake_unbound_status(monkeypatch, attempt, fault=lambda status: current_uid.__setitem__(0, 452))
+
+    outcomes = supervisor.reconcile_restart()
+    assert outcomes[0].status is ReconcileStatus.IDENTITY_AMBIGUOUS
+    assert "worker UID changed" in outcomes[0].error
+    assert outcomes[0].uid_sweep_receipt_path is None
+    assert outcomes[0].assignment_seal_receipt_path is None
+    assert service.runtime.attempts.get_attempt(attempt.attempt_id) == attempt
+
+
+@pytest.mark.parametrize("fault", ["uid", "stale", "nonpassing"])
+def test_unbound_restart_foreign_or_invalid_sweep_keeps_claim_fenced(tmp_path, monkeypatch, fault):
+    service, supervisor, _, lease, _ = _composed_claim(tmp_path, monkeypatch)
+    attempt = lease.attempt
+
+    def corrupt(status):
+        if fault == "uid":
+            status["status_sweep"]["worker_uid"] = supervisor.worker_uid
+        elif fault == "stale":
+            status["status_sweep"]["observed_at"] = "2000-01-01T00:00:00+00:00"
+        else:
+            status["status_sweep"]["passed"] = False
+
+    _fake_unbound_status(monkeypatch, attempt, fault=corrupt)
+    outcomes = supervisor.reconcile_restart()
+    assert outcomes[0].status is ReconcileStatus.IDENTITY_AMBIGUOUS
+    assert outcomes[0].assignment_seal_receipt_path is None
+    assert service.runtime.attempts.get_attempt(attempt.attempt_id) == attempt
+
+
+def test_unbound_restart_canonical_endpoint_drift_keeps_claim_fenced(tmp_path, monkeypatch):
+    current = [None]
+    service, supervisor, _, lease, binding = _composed_claim(
+        tmp_path, monkeypatch, source_fault=lambda original: current[0] or original,
+    )
+    attempt = lease.attempt
+
+    def migrate(status):
+        current[0] = dataclasses.replace(binding, worker_uid=452)
+
+    _fake_unbound_status(monkeypatch, attempt, fault=migrate)
+    outcomes = supervisor.reconcile_restart()
+    assert outcomes[0].status is ReconcileStatus.IDENTITY_AMBIGUOUS
+    assert outcomes[0].assignment_seal_receipt_path is None
+    assert service.runtime.attempts.get_attempt(attempt.attempt_id) == attempt
 
 
 @pytest.mark.parametrize("adapter_id", ["codex-cli", "claude-code"])

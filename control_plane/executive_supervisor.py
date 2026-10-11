@@ -3403,6 +3403,18 @@ class ExecutiveSupervisor:
         cleanup = getattr(self.process_controller, "cleanup_unbound_run", None)
         if not callable(cleanup):
             raise SupervisorError("unbound claim has no exact-run cleanup owner")
+        # Attempt-bound controllers pin the endpoint before cleanup I/O. The
+        # service's local worker UID is not authority for a remote endpoint.
+        uid_source = getattr(self.process_controller, "expected_worker_uid", None)
+        if callable(uid_source):
+            expected_uid = uid_source(attempt)
+            if type(expected_uid) is not int or expected_uid <= 0:
+                raise SupervisorError("unbound cleanup requires a positive worker UID")
+        else:
+            expected_uid = (
+                self.worker_uid if self.worker_uid is not None
+                else pwd.getpwnam(self.worker_user).pw_uid
+            )
         requested_at = time.time()
         sweep = self._validate_terminal_uid_sweep(cleanup(attempt.attempt_id))
         completed_at = time.time()
@@ -3410,10 +3422,6 @@ class ExecutiveSupervisor:
         if not isinstance(observed_at, str):
             raise SupervisorError("unbound cleanup has no observation time")
         observed = datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
-        expected_uid = (
-            self.worker_uid if self.worker_uid is not None
-            else pwd.getpwnam(self.worker_user).pw_uid
-        )
         if (
             observed.tzinfo is None
             or not requested_at <= observed.timestamp() <= completed_at
@@ -3422,6 +3430,10 @@ class ExecutiveSupervisor:
             or self._restart_uid_sweep(attempt) != sweep
         ):
             raise SupervisorError("unbound cleanup absence receipt is stale or foreign")
+        if callable(uid_source):
+            current_uid = uid_source(attempt)
+            if type(current_uid) is not int or current_uid != expected_uid:
+                raise SupervisorError("unbound cleanup worker UID changed during observation")
         return sweep
 
     def reconcile_restart(self, *, requeue_lost: bool = True) -> list[ReconcileReceipt]:
