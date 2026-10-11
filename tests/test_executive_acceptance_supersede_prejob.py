@@ -221,7 +221,8 @@ def test_existing_prejob_receipts_accept_only_trusted_var_alias(tmp_path, monkey
     alias.symlink_to(physical if fault == "absolute" else "private/var")
     monkeypatch.setattr(m, "_MACOS_VAR_ALIAS", alias)
     monkeypatch.setattr(m, "_MACOS_VAR_PHYSICAL", physical)
-    monkeypatch.setattr(m.sys, "platform", "linux" if fault == "linux" else "darwin")
+    # Isolate the target-platform branch without changing the real ACL host.
+    monkeypatch.setattr(m, "sys", SimpleNamespace(platform="linux" if fault == "linux" else "darwin"))
     monkeypatch.setattr(ac, "RUNTIME_ROOT", alias / "db/mastermind-executive")
     if fault == "target":
         alias.unlink()

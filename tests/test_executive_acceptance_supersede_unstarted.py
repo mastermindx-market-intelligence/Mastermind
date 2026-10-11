@@ -200,7 +200,7 @@ def _var_alias_fixture(tmp_path, monkeypatch, *, absolute=False):
     alias.symlink_to(physical if absolute else 'private/var', target_is_directory=True)
     monkeypatch.setattr(m, '_MACOS_VAR_ALIAS', alias, raising=False)
     monkeypatch.setattr(m, '_MACOS_VAR_PHYSICAL', physical, raising=False)
-    monkeypatch.setattr(m.sys, 'platform', 'darwin')
+    monkeypatch.setattr(m, 'sys', SimpleNamespace(platform='darwin'))
     monkeypatch.setattr(ac, 'RUNTIME_ROOT', alias/'db'/'mastermind-executive')
     return values, alias, physical
 
@@ -284,7 +284,7 @@ def test_runtime_alias_does_not_weaken_absence_guards(tmp_path, monkeypatch, fau
             alias.symlink_to('private/./var')
         monkeypatch.setattr(m, '_require_absent', changed)
     elif fault == 'non-darwin':
-        monkeypatch.setattr(m.sys, 'platform', 'linux')
+        monkeypatch.setattr(m, 'sys', SimpleNamespace(platform='linux'))
     with pytest.raises((m.MaintenanceError, OSError)):
         m.validate_superseded_binding(d, before=before, artifacts=artifacts, prior_canary=canary)
 
@@ -359,7 +359,7 @@ def test_prepare_selector_requires_exact_installed_selected_release(tmp_path, mo
     (system/'config'/'worker-codex.json').write_text('{"operator_harness_armed":false}')
     monkeypatch.setattr(m, 'SYSTEM_ROOT', system)
     monkeypatch.setattr(m.os, 'geteuid', lambda: 0)
-    monkeypatch.setattr(m.sys, 'platform', 'darwin')
+    monkeypatch.setattr(m, 'sys', SimpleNamespace(platform='darwin'))
     monkeypatch.setattr(m, 'require_stopped', lambda: None)
     def forbidden(*args):
         raise AssertionError('invalid selector reached runtime read')
@@ -427,7 +427,8 @@ def test_preparation_publishes_one_new_descriptor_without_modifying_selected(tmp
     monkeypatch.setattr(m, '_sealed_ancestors', lambda path: [])
     monkeypatch.setattr(m, 'has_macos_acl', lambda *args, **kwargs: False)
     monkeypatch.setattr(m.os, 'geteuid', lambda: 0)
-    monkeypatch.setattr(m.sys, 'platform', 'darwin')
+    # Keep the ACL observer on its actual host while simulating the Mac entry gate.
+    monkeypatch.setattr(m, 'sys', SimpleNamespace(platform='darwin'))
     monkeypatch.setattr(m, 'require_stopped', lambda: None)
     runtime_root = tmp_path/'runtime'
     (runtime_root/'control'/'acceptance').mkdir(parents=True)
