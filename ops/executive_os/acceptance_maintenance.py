@@ -28,7 +28,11 @@ from control_plane.fs_security import has_macos_acl
 SYSTEM_ROOT = Path("/Library/Application Support/MastermindExecutive")
 SCHEMA = "mastermind.executive_acceptance_maintenance/v1"
 SCHEMA_V2 = "mastermind.executive_acceptance_maintenance/v2"
+# Same-schema supersession is separate from the schema-migration V3 contract.
+SCHEMA_SUPERSEDE = "mastermind.executive_acceptance_maintenance/supersede_unstarted_v1"
+_TERMINAL_CARRY_SCHEMAS = {SCHEMA_V2, SCHEMA_SUPERSEDE}
 _TRUSTED_UID = 0
+_TRUSTED_GID = 0
 # The artifact inventory can exceed 16 MiB on an otherwise quiescent host.
 # Keep every other maintenance document on its existing budget, and apply
 # the same finite limit before either publishing or parsing a document.
@@ -55,6 +59,10 @@ _DESCRIPTOR_V2_KEYS = (_DESCRIPTOR_KEYS - {
     "terminal_job_id", "terminal_attempt_id", "terminal_marker_event_id",
     "terminal_marker_event_sha256", "terminal_state_sha256",
     "assignment_seal_sha256", "predecessor_quota_sha256",
+}
+
+_DESCRIPTOR_SUPERSEDE_KEYS = _DESCRIPTOR_V2_KEYS | {
+    "superseded_unstarted_sha", "superseded_descriptor_sha256",
 }
 
 class MaintenanceError(RuntimeError):
@@ -130,7 +138,9 @@ def descriptor_for(sha: str) -> dict[str, Any] | None:
     value = sealed_json(path)
     schema = value.get("schema_version")
     keys = _DESCRIPTOR_KEYS if schema == SCHEMA else (
-        _DESCRIPTOR_V2_KEYS if schema == SCHEMA_V2 else set()
+        _DESCRIPTOR_V2_KEYS if schema == SCHEMA_V2 else (
+            _DESCRIPTOR_SUPERSEDE_KEYS if schema == SCHEMA_SUPERSEDE else set()
+        )
     )
     if not keys or set(value) != keys:
         raise MaintenanceError("maintenance descriptor schema mismatch")
@@ -138,11 +148,17 @@ def descriptor_for(sha: str) -> dict[str, Any] | None:
             or _SHA.fullmatch(value["predecessor_sha"]) is None
             or value["predecessor_sha"] == sha):
         raise MaintenanceError("maintenance descriptor release mismatch")
-    if schema == SCHEMA_V2 and (
+    if schema in _TERMINAL_CARRY_SCHEMAS and (
         not isinstance(value["frozen_base_sha"], str)
         or _SHA.fullmatch(value["frozen_base_sha"]) is None
     ):
         raise MaintenanceError("maintenance frozen base is invalid")
+    if schema == SCHEMA_SUPERSEDE and (
+        not isinstance(value["superseded_unstarted_sha"], str)
+        or _SHA.fullmatch(value["superseded_unstarted_sha"]) is None
+        or value["superseded_unstarted_sha"] in {sha, value["predecessor_sha"]}
+    ):
+        raise MaintenanceError("maintenance superseded release is invalid")
     for key in (key for key in keys if key.endswith("_sha256")):
         if not isinstance(value[key], str) or _DIGEST.fullmatch(value[key]) is None:
             raise MaintenanceError("maintenance descriptor digest is invalid")
@@ -230,7 +246,7 @@ def validate_carry_receipt(
 
 
 def validate_prior_carry_binding(descriptor: dict, *, _seen: frozenset[str] = frozenset()) -> None:
-    if descriptor["schema_version"] == SCHEMA_V2:
+    if descriptor["schema_version"] in _TERMINAL_CARRY_SCHEMAS:
         prior, _summary, material = prior_carry_material(
             descriptor["predecessor_sha"], _seen=_seen | {descriptor["successor_sha"]}
         )
@@ -239,6 +255,9 @@ def validate_prior_carry_binding(descriptor: dict, *, _seen: frozenset[str] = fr
         if any(descriptor[key] != prior[key] for key in
                ("root_job_id", "root_identity_sha256", "root_event_id", "root_event_sha256")):
             raise MaintenanceError("maintenance predecessor root binding changed")
+
+    if descriptor["schema_version"] == SCHEMA_SUPERSEDE:
+        validate_superseded_binding(descriptor)
 
 
 def prior_carry_material(sha: str, *, _seen: frozenset[str] = frozenset()) -> tuple[dict, dict, dict]:
@@ -272,8 +291,9 @@ def recovery_permitted(job: Any, attempt_id: str, sha: str, worker_id: str, quot
                 and digest(job.to_dict()) == descriptor["recovery_job_sha256"]
                 and job.constraints.get("base_sha") == descriptor["predecessor_sha"])
 
-def snapshot(database: Path) -> dict:
-    with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True) as conn:
+def snapshot(database: Path, *, immutable: bool = False) -> dict:
+    uri = database.as_uri() + "?mode=ro" + ("&immutable=1" if immutable else "")
+    with sqlite3.connect(uri, uri=True) as conn:
         conn.row_factory = sqlite3.Row
         conn.execute("BEGIN")
         if conn.execute("PRAGMA quick_check").fetchall()[0][0] != "ok" or conn.execute("PRAGMA foreign_key_check").fetchall():
@@ -339,7 +359,7 @@ def verify_preserved(before: dict, after: dict, descriptor: dict, proof_ids: lis
         raise MaintenanceError("maintenance proof job lineage mismatch")
     if any(r["status"] != "COMPLETED" or r["orchestration_role"] is not None for r in new["jobs"]):
         raise MaintenanceError("maintenance proof did not complete")
-    v2 = descriptor["schema_version"] == SCHEMA_V2
+    v2 = descriptor["schema_version"] in _TERMINAL_CARRY_SCHEMAS
     template_id = descriptor["template_proof_job_id" if v2 else "recovery_job_id"]
     predecessor_proof = next(r for r in bt["jobs"] if r["job_id"] == template_id)
     proof_fields = ("objective", "department", "priority", "authority_level", "attempt_limit",
@@ -664,6 +684,121 @@ def terminal_carry_fields(runtime: Any, root: Any, config: dict, before: dict, p
     return proof, fields
 
 
+
+def _require_absent(path: Path) -> None:
+    """Only an exact missing leaf beneath an existing canonical parent is absence."""
+    if not path.is_absolute() or path.parent.resolve(strict=True) != path.parent:
+        raise MaintenanceError("superseded acceptance parent is not canonical")
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return
+    raise MaintenanceError("superseded release already has acceptance state")
+
+
+def legacy_backup_sidecars(path: Path) -> tuple:
+    """Observe only the sealed legacy WAL/SHM metadata; read no sidecar bytes."""
+    observed = []
+    for suffix, size in (("-wal", 0), ("-shm", 32768)):
+        sidecar = path.with_name(path.name + suffix)
+        try:
+            info = sidecar.lstat()
+        except FileNotFoundError:
+            observed.append(None)
+            continue
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != _TRUSTED_UID
+                or info.st_gid != _TRUSTED_GID or info.st_nlink != 1
+                or stat.S_IMODE(info.st_mode) != 0o400 or info.st_size != size
+                or has_macos_acl(sidecar)):
+            raise MaintenanceError("legacy backup sidecar is not sealed or has unexpected size")
+        fd = os.open(sidecar, os.O_RDONLY | os.O_NOFOLLOW)
+        try:
+            if (_identity(info) != _identity(os.fstat(fd))
+                    or _identity(info) != _identity(sidecar.lstat())):
+                raise MaintenanceError("legacy backup sidecar changed during observation")
+        finally:
+            os.close(fd)
+        observed.append(_identity(info))
+    if (observed[0] is None) != (observed[1] is None):
+        raise MaintenanceError("legacy backup sidecars must be one exact sealed pair")
+    return tuple(observed)
+
+
+def sealed_backup_snapshot(path: Path, expected_digest: str) -> dict:
+    """Validate the sealed backup bytes and its full semantic prestate."""
+    if not path.is_absolute() or path.resolve(strict=True) != path:
+        raise MaintenanceError("maintenance backup path is not canonical")
+    ancestors = _sealed_ancestors(path)
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        before = os.fstat(fd)
+        if (not stat.S_ISREG(before.st_mode) or before.st_uid != _TRUSTED_UID
+                or before.st_nlink != 1 or stat.S_IMODE(before.st_mode) != 0o400
+                or has_macos_acl(path)):
+            raise MaintenanceError("maintenance backup is not sealed")
+        if _file_digest(path) != expected_digest:
+            raise MaintenanceError("maintenance backup digest mismatch")
+        # The immutable read ignores sidecars only after proving the WAL is
+        # empty. The SHM contents are neither read nor trusted as state.
+        sidecars = legacy_backup_sidecars(path)
+        value = snapshot(path, immutable=True)
+        if (_identity(before) != _identity(os.fstat(fd))
+                or _identity(before) != _identity(path.lstat())
+                or any(_identity(p.lstat()) != identity for p, identity in ancestors)
+                or legacy_backup_sidecars(path) != sidecars):
+            raise MaintenanceError("maintenance backup changed during read")
+        return value
+    finally:
+        os.close(fd)
+
+
+def validate_superseded_binding(descriptor: dict, *, before: dict | None = None,
+                                 artifacts: dict | None = None,
+                                 prior_canary: dict | None = None) -> None:
+    """Keep the selected unstarted V2 bundle separate from the accepted ancestor.
+
+    No provider recovery, schema translation, or partial-acceptance replay is
+    granted. Future carry validation retains this immutable selected binding,
+    but compares live prestate only before this successor starts acceptance.
+    """
+    selected_sha = descriptor["superseded_unstarted_sha"]
+    selected = descriptor_for(selected_sha)
+    if (selected is None or selected["schema_version"] != SCHEMA_V2
+            or digest(selected) != descriptor["superseded_descriptor_sha256"]
+            or selected["predecessor_sha"] != descriptor["predecessor_sha"]):
+        raise MaintenanceError("superseded descriptor or accepted ancestor mismatch")
+    # Every V2 semantic carry field stays exactly bound; only release identity
+    # and the successor's newly created backup bytes may differ.
+    shared = _DESCRIPTOR_V2_KEYS - {"schema_version", "successor_sha", "backup_sha256"}
+    if any(selected[key] != descriptor[key] for key in shared):
+        raise MaintenanceError("superseded sealed binding differs from successor")
+    bundle = bundle_path(selected_sha)
+    expected = {"descriptor.json", "preparing.json", "baseline.json", "inventory.json",
+                "prior-secret-canary.json", "prestate.sqlite3"}
+    entries = {entry.name for entry in bundle.iterdir()}
+    legacy_pair = {"prestate.sqlite3-wal", "prestate.sqlite3-shm"}
+    if entries not in (expected, expected | legacy_pair):
+        raise MaintenanceError("superseded bundle contains acceptance or partial state")
+    if sealed_json(bundle/"preparing.json") != {"schema_version": SCHEMA_V2}:
+        raise MaintenanceError("superseded preparation state is invalid")
+    from ops.executive_os.autonomy_control import RUNTIME_ROOT
+    _require_absent(RUNTIME_ROOT/"control"/"acceptance"/selected_sha)
+    baseline = sealed_json(bundle/"baseline.json")
+    inventory_value = sealed_json(bundle/"inventory.json")
+    canary = sealed_json(bundle/"prior-secret-canary.json")
+    if (digest(baseline) != selected["baseline_sha256"]
+            or digest(inventory_value) != selected["inventory_sha256"]
+            or digest(canary) != selected["prior_canary_sha256"]
+            or sealed_backup_snapshot(bundle/"prestate.sqlite3", selected["backup_sha256"]) != baseline
+            or (before is not None and baseline != before)
+            or (artifacts is not None and inventory_value != artifacts)
+            or (prior_canary is not None and canary != prior_canary)):
+        raise MaintenanceError("superseded sealed baseline drifted")
+    versions = [row.get("version") for row in baseline["tables"].get("schema_migrations", [])]
+    if not versions or any(type(version) is not int for version in versions) or max(versions) != 5:
+        raise MaintenanceError("supersession requires unchanged schema v5")
+
+
 def prepare(args: argparse.Namespace) -> Path:
     if os.geteuid() != 0 or sys.platform != "darwin":
         raise MaintenanceError("maintenance preparation requires root on macOS")
@@ -673,7 +808,16 @@ def prepare(args: argparse.Namespace) -> Path:
     worker_config = json.loads((SYSTEM_ROOT/"config/worker-codex.json").read_text())
     if worker_config.get("operator_harness_armed") is not False:
         raise MaintenanceError("maintenance requires closed worker harness")
-    if config["proof_base_sha"] != args.predecessor_sha:
+    selected_sha = getattr(args, "supersede_unstarted_sha", None)
+    selected_digest = getattr(args, "superseded_descriptor_sha256", None)
+    if bool(selected_sha) != bool(selected_digest):
+        raise MaintenanceError("supersession requires an exact selected release and descriptor digest")
+    if selected_sha and (not getattr(args, "carry_terminal_dispatch", False)
+                         or not isinstance(selected_digest, str)
+                         or _DIGEST.fullmatch(selected_digest) is None
+                         or selected_sha in {args.predecessor_sha, args.successor_sha}):
+        raise MaintenanceError("supersession requires distinct terminal-carry releases")
+    if config["proof_base_sha"] != (selected_sha or args.predecessor_sha):
         raise MaintenanceError("predecessor differs from installed release")
     database = Path(config["runtime_root"])/"data/control_plane/executive.sqlite3"
     before = snapshot(database)
@@ -711,6 +855,23 @@ def prepare(args: argparse.Namespace) -> Path:
     artifact_roots = [Path(config[k]) for k in ("proof_workspace_root","worker_runs_root","receipts_root","backup_root")]
     artifact_roots.append(Path(config["runtime_root"]).parent.parent/"canary-fixtures")
     artifacts = inventory(artifact_roots)
+    prior_canary = Path(config["secret_canary_receipt_path"])
+    prior_canary_value = json.loads(prior_canary.read_text())
+    schema = SCHEMA_SUPERSEDE if selected_sha else (SCHEMA_V2 if terminal_carry else SCHEMA)
+    if selected_sha:
+        # Qualify every selected seal and the actual prestate before any new
+        # preparation directory or marker is written.
+        candidate = dict(schema_version=schema, predecessor_sha=args.predecessor_sha,
+            successor_sha=args.successor_sha, root_job_id=root.job_id,
+            root_identity_sha256=root_identity(root), root_event_id=events[0]["event_id"],
+            root_event_sha256=digest(events[0]), worker_id=config["worker_id"],
+            quota_class=config["quota_class"], baseline_sha256=digest(before),
+            inventory_sha256=digest(artifacts), prior_canary_sha256=digest(prior_canary_value),
+            superseded_unstarted_sha=selected_sha, superseded_descriptor_sha256=selected_digest, **extra)
+        validate_superseded_binding(candidate, before=before, artifacts=artifacts,
+                                     prior_canary=prior_canary_value)
+        extra.update(superseded_unstarted_sha=selected_sha,
+                     superseded_descriptor_sha256=selected_digest)
     parent = bundle_path(args.successor_sha).parent
     parent.mkdir(mode=0o755, exist_ok=True)
     parent_info = parent.lstat()
@@ -722,7 +883,7 @@ def prepare(args: argparse.Namespace) -> Path:
     if final_bundle.exists() or final_bundle.is_symlink():
         raise MaintenanceError("maintenance descriptor already exists; reconcile the existing operation")
     bundle = Path(tempfile.mkdtemp(prefix=".preparing-"+args.successor_sha+"-",dir=parent))
-    write_sealed(bundle/"preparing.json",{"schema_version":SCHEMA_V2 if terminal_carry else SCHEMA})
+    write_sealed(bundle/"preparing.json",{"schema_version":schema})
     backup = bundle/"prestate.sqlite3"
     fd = os.open(backup,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
     os.close(fd)
@@ -731,14 +892,12 @@ def prepare(args: argparse.Namespace) -> Path:
     os.chmod(backup,0o400)
     with backup.open("rb") as stream:
         os.fsync(stream.fileno())
-    if snapshot(backup) != before or snapshot(database) != before:
+    if snapshot(backup, immutable=True) != before or snapshot(database) != before:
         raise MaintenanceError("runtime changed during maintenance preparation")
-    prior_canary = Path(config["secret_canary_receipt_path"])
-    prior_canary_value = json.loads(prior_canary.read_text())
     write_sealed(bundle/"prior-secret-canary.json",prior_canary_value)
     write_sealed(bundle/"baseline.json",before)
     write_sealed(bundle/"inventory.json",artifacts)
-    descriptor = dict(schema_version=SCHEMA_V2 if terminal_carry else SCHEMA,predecessor_sha=args.predecessor_sha,
+    descriptor = dict(schema_version=schema,predecessor_sha=args.predecessor_sha,
         successor_sha=args.successor_sha,root_job_id=root.job_id,root_identity_sha256=root_identity(root),
         root_event_id=events[0]["event_id"],root_event_sha256=digest(events[0]),
         worker_id=config["worker_id"],quota_class=config["quota_class"],
@@ -788,7 +947,10 @@ class Maintenance:
                 or snapshot(self.database) != self.before):
             raise MaintenanceError("maintenance prestate drifted")
         verify_inventory(self.inventory)
-        if self.descriptor["schema_version"] == SCHEMA_V2:
+        if self.descriptor["schema_version"] == SCHEMA_SUPERSEDE:
+            validate_superseded_binding(self.descriptor, before=self.before,
+                                         artifacts=self.inventory, prior_canary=prior_canary)
+        if self.descriptor["schema_version"] in _TERMINAL_CARRY_SCHEMAS:
             from control_plane.executive_runtime import Runtime
             runtime = Runtime.at(config["runtime_root"], create=False)
             root = runtime.jobs.get_job(self.descriptor["root_job_id"])
@@ -826,6 +988,10 @@ def main() -> int:
     parser.add_argument("--recovery-attempt-id")
     parser.add_argument("--carry-terminal-dispatch", action="store_true",
                         help="Preserve one failed planner and prior PASS chain; grant no predecessor recovery.")
+    parser.add_argument("--supersede-unstarted-sha",
+                        help="Explicitly retire an installed unstarted V2 release on unchanged schema v5.")
+    parser.add_argument("--superseded-descriptor-sha256",
+                        help="Exact selected V2 descriptor digest; predecessor remains its accepted ancestor.")
     args = parser.parse_args()
     try:
         bundle = prepare(args)
