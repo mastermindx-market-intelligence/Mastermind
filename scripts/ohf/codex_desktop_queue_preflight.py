@@ -30,6 +30,7 @@ _MAX_FD_BYTES = 512 * 1024
 _MAX_FD_TARGETS = 5
 _RUN_TIMEOUT_SECONDS = 6.0
 _READ_CHUNK_BYTES = 16 * 1024
+_MAX_PLIST_BYTES = 64 * 1024
 
 
 @dataclass(frozen=True)
@@ -38,6 +39,15 @@ class ProcessInfo:
     ppid: int
     uid: int
     command: str
+
+
+@dataclass(frozen=True)
+class OpenFileRecord:
+    """File metadata reported for an open descriptor, not its current pathname."""
+    name: str
+    file_type: str
+    device: int | None
+    inode: int | None
 
 
 def parse_ps_rows(payload: str) -> list[ProcessInfo]:
@@ -225,30 +235,87 @@ def _run_fixed(args: list[str], byte_limit: int) -> str | None:
             child.stdout.close()
 
 
-def _lsof_paths(pid: int) -> list[str] | None:
+def _parse_lsof_records(payload: str) -> list[OpenFileRecord]:
+    """Associate lsof file device/inode fields with their exact FD record.
+
+    Parsing a pathname and re-statting it is unsafe: SQLite may replace that
+    path while either process still holds the old file generation open.
+    """
+    records: list[OpenFileRecord] = []
+    fields: dict[str, str] | None = None
+    invalid = False
+
+    def flush() -> None:
+        if fields is None or invalid:
+            return
+        name = fields.get("n")
+        file_type = fields.get("t", "")
+        if not name or not name.startswith("/") or "\x00" in name:
+            return
+        device = None
+        inode = None
+        if "D" in fields:
+            value = fields["D"]
+            if re.fullmatch(r"0x[0-9a-fA-F]{1,16}|[1-9][0-9]{0,19}", value):
+                try:
+                    device = int(value, 0) if value.startswith("0x") else int(value, 10)
+                except ValueError:
+                    pass
+        if "i" in fields:
+            value = fields["i"]
+            if re.fullmatch(r"[1-9][0-9]{0,19}", value):
+                try:
+                    inode = int(value, 10)
+                except ValueError:
+                    pass
+        limit = (1 << 64) - 1
+        if device is not None and not 0 < device <= limit:
+            device = None
+        if inode is not None and not 0 < inode <= limit:
+            inode = None
+        records.append(OpenFileRecord(
+            name=name, file_type=file_type, device=device, inode=inode,
+        ))
+
+    for line in payload.splitlines():
+        if not line:
+            continue
+        key, value = line[:1], line[1:]
+        if key == "f":
+            flush()
+            fields = {"f": value}
+            invalid = not bool(value)
+        elif fields is not None and key in {"t", "D", "i", "n"}:
+            if key in fields:
+                invalid = True
+            fields[key] = value
+    flush()
+    return records
+
+
+def _lsof_records(pid: int) -> list[OpenFileRecord] | None:
     text = _run_fixed(
-        ["/usr/sbin/lsof", "-n", "-p", str(pid), "-F", "n"], _MAX_FD_BYTES,
+        ["/usr/sbin/lsof", "-n", "-p", str(pid), "-F", "fDtin"], _MAX_FD_BYTES,
     )
     if text is None:
         return None
-    return [line[1:] for line in text.splitlines()
-            if line.startswith("n/") and "\x00" not in line]
+    return _parse_lsof_records(text)
 
 
-def _state_db_ids(paths: list[str] | None) -> set[tuple[int, int]] | None:
-    if paths is None:
+def _state_db_ids(
+    records: list[OpenFileRecord] | None,
+) -> set[tuple[int, int]] | None:
+    """Use only the open FD's own stable identity; never stat its pathname."""
+    if records is None:
         return None
-    result = set()
-    for name in paths:
-        leaf = Path(name).name.lower()
-        if not (leaf.startswith("state") and leaf.endswith((".sqlite", ".db", ".sqlite3"))):
+    result: set[tuple[int, int]] = set()
+    for row in records:
+        leaf = Path(row.name).name.lower()
+        if (row.file_type != "REG" or row.device is None or row.inode is None
+                or not (leaf.startswith("state") and
+                        leaf.endswith((".sqlite", ".db", ".sqlite3")))):
             continue
-        try:
-            item = os.stat(name)
-            if stat.S_ISREG(item.st_mode) and item.st_uid == os.getuid():
-                result.add((item.st_dev, item.st_ino))
-        except OSError:
-            continue
+        result.add((row.device, row.inode))
     return result
 
 
@@ -273,7 +340,7 @@ def _socket_metadata(path: Path) -> tuple[bool, str | None]:
 def _app_version(
     desktops: Sequence[ProcessInfo], table: Mapping[int, ProcessInfo],
 ) -> str | None:
-    """Observe version from the *actual* desktop parent, not another installed app."""
+    """Read a bounded regular plist from the exact owning application bundle."""
     if len(desktops) != 1:
         return None
     parent = table.get(desktops[0].ppid)
@@ -286,12 +353,31 @@ def _app_version(
                 if path.suffix == ".app"), None)
     if app is None:
         return None
+    path = app / "Contents" / "Info.plist"
+    fd = None
     try:
-        with (app / "Contents" / "Info.plist").open("rb") as file:
-            value = plistlib.load(file).get("CFBundleShortVersionString")
+        fd = os.open(
+            path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC,
+        )
+        info = os.fstat(fd)
+        if (not stat.S_ISREG(info.st_mode) or
+                not 0 < info.st_size <= _MAX_PLIST_BYTES):
+            return None
+        # The descriptor, not the path, is checked. A change after fstat
+        # cannot exceed this bound or trick us into parsing a FIFO/symlink.
+        data = os.read(fd, _MAX_PLIST_BYTES + 1)
+        if not 0 < len(data) <= _MAX_PLIST_BYTES:
+            return None
+        parsed = plistlib.loads(data)
+        if not isinstance(parsed, dict):
+            return None
+        value = parsed.get("CFBundleShortVersionString")
         return value if isinstance(value, str) else None
     except (OSError, ValueError, TypeError, plistlib.InvalidFileException):
         return None
+    finally:
+        if fd is not None:
+            os.close(fd)
 
 
 def collect_local() -> dict[str, Any]:
@@ -336,10 +422,10 @@ def collect_local() -> dict[str, Any]:
         result["reasons"] = ["FD_TARGET_BUDGET_EXCEEDED"]
         return result
     for pid in targets:
-        paths = _lsof_paths(pid)
-        ids[pid] = _state_db_ids(paths)
-        if resolved is not None and paths is not None and any(
-            os.path.realpath(name) == resolved for name in paths
+        records = _lsof_records(pid)
+        ids[pid] = _state_db_ids(records)
+        if resolved is not None and records is not None and any(
+            os.path.realpath(row.name) == resolved for row in records
         ):
             socket_owners.add(pid)
     return reduce_topology(

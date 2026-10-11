@@ -33,10 +33,14 @@ attempt compatibility by choosing another transport.
   helper processes or competing direct writers;
 - one current owned native Unix App Server socket with owner-only permissions;
 - exactly one managed App Server holding that socket;
-- at least one shared state-database file identity observed from live open
-  file metadata; and
+- at least one shared state-database identity derived from each process's
+  **open file descriptor** (the `lsof -F fDtin` device/inode fields), never
+  from restatting a pathname that SQLite could have replaced; and
 - a syntactically valid app version read from the bundle that actually owns
-  the observed desktop process, never from a different installed app.
+  the observed desktop process, never from a different installed app. The
+  `Info.plist` descriptor must be a regular file, opened without following
+  symlinks and without blocking on a FIFO; its bytes are capped at 64 KiB
+  before property-list parsing.
 
 Every error, incomplete inspection, missing observation or ambiguity keeps
 the result `UNQUALIFIED`. This output is **not** an authorization token.

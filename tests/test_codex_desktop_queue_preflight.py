@@ -346,3 +346,104 @@ def test_real_codex_command_with_pre_subcommand_flags_is_eligible():
     assert q._app_server("/opt/homebrew/bin/codex --config proto=1 --feature=f2 app-server --listen stdio://")
     assert q._managed_unix("/opt/homebrew/bin/codex --config proto=1 app-server --listen unix:///tmp/server.sock")
     assert not q._app_server("/usr/bin/python --config proto=1 codex app-server --listen unix:///tmp/server.sock")
+
+
+def test_open_descriptor_inode_wins_after_database_path_replacement(tmp_path):
+    """Review P2: pathname reuse must not conflate two open SQLite generations."""
+    import os
+
+    current = tmp_path / "state.sqlite"
+    previous = tmp_path / "previous.sqlite"
+    current.write_bytes(b"old generation")
+    with current.open("rb") as held:
+        old = os.fstat(held.fileno())
+        current.rename(previous)
+        current.write_bytes(b"new generation")
+        new = current.stat()
+        assert (old.st_dev, old.st_ino) != (new.st_dev, new.st_ino)
+        wire = (
+            f"p123\nf9\ntREG\nD{old.st_dev:#x}\ni{old.st_ino}\nn{current}\n"
+        )
+        records = q._parse_lsof_records(wire)
+        assert q._state_db_ids(records) == {(old.st_dev, old.st_ino)}
+        assert (new.st_dev, new.st_ino) not in q._state_db_ids(records)
+
+
+def test_lsof_records_are_descriptor_scoped_and_reject_malformed_fields():
+    good = (
+        "p123\nf3\ntREG\nD0x1000023\ni42\nn/tmp/state.sqlite\n"
+        "f4\ntREG\nD0x1000023\ni47\nn/tmp/state.sqlite\n"
+        "f5\ntunix\nn/tmp/control.sock\n"
+    )
+    records = q._parse_lsof_records(good)
+    assert q._state_db_ids(records) == {(0x1000023, 42), (0x1000023, 47)}
+    assert [r.name for r in records if r.name.endswith(".sock")] == [
+        "/tmp/control.sock"
+    ]
+    for bad in (
+        "f3\ntREG\nD0x1000023\ni42\ni43\nn/tmp/state.sqlite\n",
+        "f3\ntREG\nD0xGHI\ni42\nn/tmp/state.sqlite\n",
+        "f3\ntREG\nD0x1000023\ni0\nn/tmp/state.sqlite\n",
+        "f3\ntREG\nD0x1000023\ni42\nn/tmp/state.sqlite\nn/tmp/a.sqlite\n",
+    ):
+        assert not q._state_db_ids(q._parse_lsof_records(bad))
+
+
+def test_info_plist_fifo_rejected_without_open(tmp_path, monkeypatch):
+    import os
+    from pathlib import Path
+    app = tmp_path / "Codex.app"
+    (app / "Contents" / "MacOS").mkdir(parents=True)
+    entry = app / "Contents" / "Info.plist"
+    os.mkfifo(entry)
+    original = Path.open
+
+    def guarded_open(self, *a, **kw):
+        if self == entry:
+            raise AssertionError("FIFO Info.plist must not be opened")
+        return original(self, *a, **kw)
+
+    monkeypatch.setattr(Path, "open", guarded_open)
+    parent = q.ProcessInfo(101, 1, 501, str(app / "Contents" / "MacOS" / "Codex"))
+    worker = q.ProcessInfo(102, 101, 501, "/opt/homebrew/bin/codex app-server")
+    assert q._app_version([worker], {101: parent, 102: worker}) is None
+
+
+def test_large_info_plist_is_rejected_before_parse(tmp_path, monkeypatch):
+    import plistlib
+    app = tmp_path / "Codex.app"
+    (app / "Contents" / "MacOS").mkdir(parents=True)
+    entry = app / "Contents" / "Info.plist"
+    with entry.open("wb") as stream:
+        plistlib.dump({
+            "CFBundleShortVersionString": "1.2.3",
+            "long": "a" * (256 * 1024),
+        }, stream)
+    def forbidden_parser(*a, **kw):
+        raise AssertionError("oversized plist must not reach parser")
+    monkeypatch.setattr(plistlib, "load", forbidden_parser)
+    monkeypatch.setattr(plistlib, "loads", forbidden_parser)
+    parent = q.ProcessInfo(101, 1, 501, str(app / "Contents" / "MacOS" / "Codex"))
+    worker = q.ProcessInfo(102, 101, 501, "/opt/homebrew/bin/codex app-server")
+    assert q._app_version([worker], {101: parent, 102: worker}) is None
+
+
+def test_symlinked_info_plist_is_rejected_without_open(tmp_path, monkeypatch):
+    from pathlib import Path
+    app = tmp_path / "Codex.app"
+    (app / "Contents" / "MacOS").mkdir(parents=True)
+    entry = app / "Contents" / "Info.plist"
+    target = tmp_path / "external.plist"
+    target.write_bytes(b"<plist>not the bundle's own version</plist>")
+    entry.symlink_to(target)
+    orig = Path.open
+
+    def forbidden_open(self, *a, **kw):
+        if self == entry:
+            raise AssertionError("symlinked plist must not be followed")
+        return orig(self, *a, **kw)
+
+    monkeypatch.setattr(Path, "open", forbidden_open)
+    parent = q.ProcessInfo(101, 1, 501, str(app / "Contents" / "MacOS" / "Codex"))
+    worker = q.ProcessInfo(102, 101, 501, "/opt/homebrew/bin/codex app-server")
+    assert q._app_version([worker], {101: parent, 102: worker}) is None
