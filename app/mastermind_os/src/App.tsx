@@ -2636,6 +2636,11 @@ export function App() {
           projection={observedConversation.projection}
           draft={observedConversation.draft}
           onDraftChange={observedConversation.changeDraft}
+          readResult={window.MastermindMissionHost?.readResult}
+          draftRevision={observedConversation.draftRevision}
+          draftInsertion={observedConversation.draftInsertion}
+          onAppendSource={observedConversation.appendSource}
+          onUndoSource={observedConversation.undoSource}
         />
         <button
           type="button"
