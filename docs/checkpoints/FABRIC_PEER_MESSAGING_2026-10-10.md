@@ -290,3 +290,41 @@ carrier at `53ce68cfcdc03ebbbd64e5a0089ae8cec71a936e` with an APPLIED
 push and matching local/remote HEAD. The current native owner join and
 related tests/documentation are additional local source changes awaiting
 the same typed Git publication. Do not redo accepted policy or past suites.
+
+## October 11 Extra High — mixed native/Runtime composition source
+
+Added `integrations/fabric_coordination_composite.py` to combine the
+already-built Runtime worker identity join and read-only native Claude
+session-management/verified-principal join over one canonical membership scope.
+It returns bounded mixed evidence and proves that native COO/CEO parent edges
+can be evaluated alongside live-style Runtime worker identity facts without
+inventing synthetic Runtime Jobs or registering a new message service.
+The composite rechecks scope before/after both joins and re-reads worker
+generation after native validation, rejecting mid-read rotation. The evidence
+digest binds full membership content, not a revision string alone. It never
+authenticates a public sender, commits a message, sends a native notification,
+or claims atomicity across independent identity owners.
+
+`tests/test_fabric_coordination_composite.py` includes admitted native COO
+→ Runtime worker parent policy evaluation, stale/foreign owner rejection,
+unattested worker refusal, interleaved native/Runtime drift, mixed-domain
+presence requirements, digest membership change, and zero send effects.
+Author-run selected suite process PID `24557` completed exit code **0** with
+all tests displayed as passing. The immediately previous suite PID `20631`
+also exited 0 with 185 selected cases; this final suite added one regression
+and updated digest binding. The latest JUnit was written at
+`/tmp/mmx-fabric-composite-digest-final-20261011.xml` but its exact
+hash/count readback is **NOT VERIFIED** because a subsequent combined
+`Studio_Direct_-_C2_Business.start_process` inspection of test receipt,
+hash, git diff and status was explicitly **platform-blocked** with
+"couldn't determine the safety status". That precise combined read action
+was not retried, rephrased, or moved to another carrier. Do not fabricate a
+SHA256 or treat the process exit as live provider message consumption.
+
+Last confirmed published source is
+`0072e9fa2579deece0a4b43d84a5327417da1581`. This new composite
+module and its tests/doc are additional **local uncommitted source**.
+The original typed Studio Git publisher remains the one source carrier;
+source publication is a separate bounded action with its own host precheck,
+not a claim that the denied shell inspection succeeded. Actual production
+host/commit path inspection remains separately action-blocked.

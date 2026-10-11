@@ -194,6 +194,32 @@ already-admitted management port; the actual installed host must still inject
 and prove its trusted management and verified-principal owners. This cannot
 be labeled live cross-host CEO/COO↔worker messaging.
 
+## Mixed native + Runtime observation (source proof)
+
+`integrations/fabric_coordination_composite.py` composes the **existing**
+Runtime worker identity join and Claude native management/verified-principal join
+against one host-supplied organizational membership snapshot. It validates the
+full CEO/COO/operator/worker hierarchy in the shared pure policy, then derives
+a bounded `CompositeCoordinationEvidence` with verified native identities
+and exact Runtime worker peer references. No synthetic Runtime Jobs, native
+worker role self-enrollment, new registry, queue, provider endpoint or message
+dispatch are created.
+
+The composite owner checks source scope before and after the two existing
+joins and re-reads current Runtime worker generation after the native join.
+A same-generation native target must also be rechecked by the native manager;
+mid-read role, scope, grant, native principal, session or worker changes fail
+closed. **The reads are not atomic across two owners**, and the evidence
+is not a bearer permission or authority to send; only the established
+effect owner may authenticate the caller and commit a message after its own
+current-writer/permission fence.
+
+The existing four-tool Company consultation wire still only accepts
+`worker_attempt` actors. Native CEO/COO-to-worker messaging requires the
+production Session Bridge owner to implement and bind the corresponding
+accepted native dialogue consumer. No fixture or source join automatically
+publishes a new public tool or enables unsupported Claude wake.
+
 ## Verification at the current source milestone
 
 The latest October 11 Runtime-join continuation recorded **577 passed, zero
