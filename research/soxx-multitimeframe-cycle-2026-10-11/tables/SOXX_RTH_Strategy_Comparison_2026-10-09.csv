@@ -1,0 +1,14 @@
+<PARSED TEXT FOR SHEET: 1 / 1 TABS
+TAB NAME: SOXX_RTH_Strategy_Comparison_2026-10-09.csv>
+index,family,case,train_n,train_mean,test_n,test_win,test_mean,test_cum,test_mdd,stress_mean,without_best
+0,extreme_turn,fixed,9,0.0026,16,50.0,0.1358,1.942,-7.656,-0.0644,0.0183
+1,extreme_turn,wide_fixed,8,1.5057,14,57.14,0.4092,4.763,-13.322,0.2087,0.1408
+2,extreme_turn,structure,8,-0.2571,14,50.0,-0.0231,-1.973,-19.319,-0.2232,-0.5957
+3,reclaim_only,fixed,8,0.5872,14,42.86,-0.2226,-3.307,-9.125,-0.4225,-0.3858
+4,reclaim_only,wide_fixed,7,0.5889,12,66.67,1.2787,15.725,-10.909,1.0773,1.0406
+5,reclaim_only,structure,7,0.4112,11,63.64,1.3142,14.14,-10.365,1.1128,0.7036
+6,late_MACD_cross,fixed,11,0.1623,12,66.67,0.7329,8.982,-3.32,0.5321,0.6269
+7,late_MACD_cross,wide_fixed,9,-1.1939,12,75.0,1.7551,22.584,-6.244,1.5532,1.5603
+8,late_MACD_cross,structure,8,1.7262,11,81.82,3.6887,47.554,-6.112,3.4849,3.0759
+9,ordinary_MACD_cross_control,fixed,34,0.1675,47,59.57,0.3971,19.438,-8.125,0.1966,0.3645
+10,ordinary_MACD_cross_control,wide_fixed,30,0.2489,42,54.76,0.6118,26.545,-14.761,0.4111,0.5317
