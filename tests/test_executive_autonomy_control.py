@@ -9133,3 +9133,25 @@ def test_native_arm_cli_selector_is_opt_in_and_closed():
     assert parser.parse_args([*args, "--native-return"]).native_return is True
     with pytest.raises(SystemExit):
         parser.parse_args([*args, "--native-return", "some-unreviewed-alias"])
+
+
+def test_native_quota_boundary_composes_with_incumbent_immutable_registry(tmp_path):
+    from control_plane.executive_runtime import Runtime, StateConflict
+    host = NativeSelectionHost()
+    readonly = "q" * 49
+    host.control_config["coo_operator_quota_class"] = readonly
+    control.execute_arm(host, _arm_request(native_return=True), now=NOW)
+    native = host.control_config["coo_operator_quota_class"]
+    assert len(native) == 63
+    runtime = Runtime.at(tmp_path / "runtime")
+    runtime.workers.register_worker("boundary-worker", provider="codex",
+        account_label="fixture", worker_type="fixture", capabilities=["planning"],
+        quota_classes={readonly: {"provider": "codex", "capabilities": ["planning"],
+                                  "metadata": {"profile": "readonly"}}})
+    runtime.workers.register_quota_class("boundary-worker", native, provider="codex",
+        capabilities=["planning"], metadata={"profile": "native"})
+    assert runtime.workers.get_quota_class("boundary-worker", readonly).metadata == {"profile": "readonly"}
+    assert runtime.workers.get_quota_class("boundary-worker", native).metadata == {"profile": "native"}
+    with pytest.raises(StateConflict, match="different policy"):
+        runtime.workers.register_quota_class("boundary-worker", readonly, provider="codex",
+            capabilities=["planning"], metadata={"profile": "native"})
