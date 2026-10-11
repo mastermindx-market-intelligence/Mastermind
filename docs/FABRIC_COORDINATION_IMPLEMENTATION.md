@@ -46,7 +46,7 @@ owner observations and a deterministic relation policy. Malformed, ambiguous,
 expired, terminal, or stale identities fail closed. A snapshot is not a new
 registry; it is a short-lived projection of canonical owner state.
 
-`integrations/mastermind_company_mcp/fabric_coordination.py` implements
+`integrations/fabric_coordination.py` implements
 `HierarchyScopedPeerResolver` and `HierarchyCompanyConsultationGateway`.
 Discovery and direct sending use the same relation checks. Sending re-reads the
 current observations after resolving the target and before invoking the existing
@@ -107,18 +107,34 @@ request, or a merged PR proof of recipient consumption or work acceptance.
 
 ## Verification at the current source milestone
 
-The final selected regression run recorded **490 passed, zero failures/errors,
-zero skipped** using an existing MCP-capable virtual environment. It includes
-73 new hierarchy policy tests and 39 new gateway tests, plus existing consultation,
-host, identity, target, inbox, transport and MCP/stdio regressions. The additional
-callback tests reject asynchronous and non-void guards and prove that a guard
-cannot rewrite the normalized outgoing request. Syntax parsing and
-`git diff --check` also passed.
+The October 11 continuation recorded **553 passed, zero failures/errors,
+zero skipped** in the existing MCP-capable Python 3.12 environment. This includes
+73 hierarchy policy cases, 39 unit gateway cases, seven new composed journey
+cases, the frozen SDK boundary tests, and existing consultation/host/identity/
+target/inbox/transport/MCP regressions. Syntax parsing and `git diff --check`
+also passed. JUnit SHA256:
+`bee24300ffb75d17cda7317f94e6d47ca66f4c0528e09fc98d8c58437d7a5e4c`.
 
-The gateway tests execute the real public gateway and private scope adapter, but
-the dispatcher is explicitly a test double. Existing protocol/host tests are
-fixture tests. These results do not prove live model or cross-host delivery.
-No package installation or dependency mutation was needed for this verification.
+Hosted CI for the original candidate failed
+`test_sdk_and_runtime_dependency_boundaries_are_exact`: the runtime integration
+adapter had been placed in the frozen SDK package. It now lives at
+`integrations/fabric_coordination.py`; its implementation bytes are unchanged.
+The SDK package and its exact-boundary assertion were preserved, not relaxed.
+A fresh hosted check is required for the repaired candidate.
+
+`tests/test_fabric_coordination_journey.py` connects the hierarchy gateway to the
+real Runtime consultation dispatcher, temporary Runtime/Wake records, and a real
+local AF_UNIX relay. It verifies a correlated question/answer path after reopening
+the Runtime, reply rejection before fixture consumption, idempotent answer and
+consumption, no new Jobs merely for delivery, rejection before effects for foreign
+or inactive peers, grant revocation at dispatch, and effect-unknown preservation
+with read-only reconciliation after a simulated response loss.
+
+Organizational roles, native-consumption signals, and Slack in that journey are
+explicit fixtures. The existing unit gateway tests still use a fake dispatcher.
+Neither set proves live model consumption, mixed-provider cross-host delivery,
+production authentication/enrollment, or installation. No package installation or
+dependency mutation was needed for verification.
 
 ## Recovery identity
 

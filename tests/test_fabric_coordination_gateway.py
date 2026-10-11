@@ -11,7 +11,7 @@ from control_plane.fabric_coordination_policy import (
 from integrations.mastermind_company_mcp.consultation import (
     COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST,
 )
-from integrations.mastermind_company_mcp.fabric_coordination import (
+from integrations.fabric_coordination import (
     CoordinationConsultationParties as Parties, CoordinationObservation as Observation,
     HierarchyCompanyConsultationGateway as Gateway,
     HierarchyScopedPeerResolver as Resolver,

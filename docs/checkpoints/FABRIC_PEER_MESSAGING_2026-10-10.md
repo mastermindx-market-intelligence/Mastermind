@@ -1,110 +1,114 @@
-# Fabric peer messaging implementation checkpoint
+# Fabric peer messaging cumulative checkpoint
 
 MISSION_COMPLETE: false
 Capability: BUILT_NOT_PROVEN
 Operation: `fabric-peer-messaging-20261010`
-Source repository: `mastermindx-market-intelligence/Mastermind`
+Repository: `mastermindx-market-intelligence/Mastermind`
+PR: #1318, draft; original candidate `7e0d0dff7bd0260376f3bca032d6294cd7aff854`
 Protected procedure/base: `8339b60b867c82807dcdeeddd8d86e37e6e4434f`
 Branch: `sol/web-fabric-peer-messaging-20261010`
 Workspace: `/Volumes/Mastermind/agent-workspaces/web/fabric-peer-messaging-20261010`
+Last source continuation: October 11, 2026; exact publishing head belongs in PR receipts.
 
-## Mission and authority
+## Mission and owners
 
-The current user explicitly requested implementation and hardening of scoped
-CEO/COO/task-operator/worker messaging, not another read-only report. Preserve
-that end-to-end mission. Existing admission, source custody, transport, review
-and release owners remain controlling. A source library or passing test suite
-is not full fleet installation or recipient consumption.
+The current assignment is implementation and hardening of scoped CEO/COO/task-
+operator/worker messaging end to end. The user renewed it with "resume".
+Executive/Runtime admission, Agent OS continuity, GitHub source/evidence, and
+existing consultation/Dialogue/Wake/transport owners remain in place. Source
+implementation and fixture verification do not establish fleet installation.
 
-## Confirmed source effects
+## Confirmed implementation and repair
 
-Added deterministic hierarchy policy and immutable owner-observation types in
-`control_plane/fabric_coordination_policy.py`. Added a scoped consumer of the
-existing Company consultation gateway in
-`integrations/mastermind_company_mcp/fabric_coordination.py`.
+`control_plane/fabric_coordination_policy.py` supplies deterministic relation
+checks over immutable owner observations. `integrations/fabric_coordination.py`
+consumes the existing four-tool Company consultation contract. Direct parent/
+child edges are bidirectional, peer access is scoped by organizational membership,
+and other same-rank dependencies require exact bilateral topic-bound grants.
+Tenant/portfolio isolation, identity generation, active state, expiry, revocation
+and ambiguity are checked. Messages grant no operational or forwarding authority.
 
-The policy allows bidirectional direct parent/child communication, scoped peers,
-and exact bilateral topic-bound dependency grants. Tenant/portfolio boundaries,
-current identity, active state, expiry, revocation and ambiguity are checked.
-It grants no command authority or forwarding right.
+Existing discovery uses the same validation as direct resolution. The private
+pre-dispatch callback is synchronous and void-returning, receives a copy of the
+normalized request, and rechecks current identities/grants. Reply/read access
+requires exact consultation parties. Per-call selection uses ContextVar.
+No new endpoint, store, identity registry, queue, scheduler, credentials or retry
+owner was introduced. Production host composition is still not connected.
 
-Changed existing peer discovery to use the same validation as direct resolution.
-Added a private, synchronous, void-return authorization callback immediately
-before existing dispatch. The callback sees a copied normalized payload and
-cannot silently rewrite it. Asynchronous or non-void callbacks cannot dispatch.
-The new scoped gateway also verifies exact consultation parties before replies
-and reads. ContextVar selection is reset per call.
+Original hosted CI run `38106839302`, job `114374050961`, failed exactly
+`tests/test_mastermind_company_mcp.py::test_sdk_and_runtime_dependency_boundaries_are_exact`.
+The runtime adapter was incorrectly inside the frozen SDK directory. This
+continuation moved it byte-for-byte from
+`integrations/mastermind_company_mcp/fabric_coordination.py` to
+`integrations/fabric_coordination.py` and updated imports/documentation.
+The exact SDK-boundary test was not changed or weakened.
 
-Added policy and gateway regression tests. No public tool/schema change, no new
-store, credentials, endpoint, queue, scheduler or retry owner. No protected source
-was edited directly. No live runtime, worker configuration or provider session
-was modified.
+Added `tests/test_fabric_coordination_journey.py`: seven composed cases use the
+real RuntimeConsultationDispatcher, temporary Runtime/Wake records, and real
+local AF_UNIX relay with in-memory Slack. They cover question/answer continuity
+after reopening Runtime, reply refusal before fixture consumption, idempotent
+answer/consumption, no additional Jobs for delivery, denied foreign/inactive
+peers without effects, revocation at dispatch, and response-loss uncertainty with
+read-only reconciliation and no automatic resend.
 
 ## Verified evidence
 
-Final selected regression suite after callback hardening: **490 tests passed,
-zero failures, zero errors, zero skipped**. Process 29080 completed with exit code
-0. The JUnit receipt was `/tmp/mmx-fabric-coordination-final-20261010.xml` on M2.
-Receipt SHA256: `6e00a34b4dc069ff97d19c4d3e9758dea6136c1e089fa29dc8e88e52663f455b`.
-The suite includes 73 new policy cases and 39 new gateway cases. An existing
-MCP-capable Python 3.12 environment supplied protocol dependencies; no packages,
-configuration or dependency lockfiles were installed or changed.
+Final selected regression: **553 passed, 0 failures, 0 errors, 0 skips**.
+Process `11694` completed with exit code 0. Receipt on M2:
+`/tmp/mmx-fabric-regression-20261011.xml`
+SHA256: `bee24300ffb75d17cda7317f94e6d47ca66f4c0528e09fc98d8c58437d7a5e4c`.
+Includes 73 policy, 39 unit gateway, seven journey cases, the frozen SDK tests,
+and existing consultation/host/identity/target/inbox/transport/MCP regressions.
+The existing MCP-capable Python 3.12 environment was used; no packages installed.
+Syntax parsing, byte-identical adapter relocation and `git diff --check` passed.
 
-An earlier default-interpreter run had 479 passes and one missing-MCP skip;
-a subsequent 237-case MCP/stdio subset passed with zero skips. The final 490-case
-run supersedes those intermediate results and includes the additional guard
-hardening. Do not describe an intermediate skip as an unresolved final failure.
+This supersedes the earlier selected 490-case result. The initial focused CI
+repair subset also passed 168 cases. Do not rerun unchanged accepted tests merely
+to extend a session. Hosted CI for the new source head still requires its own
+result; the failed old run must not be described as green.
 
-The new gateway tests use the real public gateway and scoped policy consumer,
-with an explicitly fake dispatcher. They prove policy/consumer behavior, not
-cross-host model messaging. Existing host/transport/target tests are also fixture
-proof, not production enrollment. Syntax parsing and `git diff --check` passed.
+The journey uses synthetic role/membership facts and native acknowledgment
+signals. The unit gateway tests use a fake dispatcher. None is proof of live
+model consumption, cross-provider cross-host messaging or production enrollment.
 
-## Actual limits and held effects
+## Effects, custody and observed limits
 
-Two specific operations received explicit platform safety blocks before execution:
-a combined workspace/source inspection and a later selection-constructor
-hardening edit. Neither was retried or rerouted. The successful first half of the
-constructor change was reversed, restoring the consistent two-field selection.
-The denied expansion is not included. Existing binding generation must represent
-provider/program changes; this implementation does not independently certify that
-owner invariant. No uncertain modifying effect remains from either block.
+Source changes are confined to this registered workspace. No live message,
+provider run, fleet configuration or installed release was changed. No active
+worker child, watcher, or uncertain modifying effect exists from this operation.
+Do not transfer custody or clean another session's workspace.
 
-A source-inspection block is not a blanket write block: independent scoped edits,
-regression tests and publication preparation succeeded. It also is not permission
-to rephrase or switch carriers to obtain the refused read or edit. Preserve those
-specific boundaries during recovery.
+The prior authoring record reports two explicit platform safety blocks: a combined
+workspace/source inspection needed for production-host wiring, and a selection-
+constructor expansion. They were not retried/rerouted; the dependent partial
+constructor change was rolled back. The two-field selection remains unchanged
+and relies on the incumbent binding-generation invariant for provider/program
+changes. This continuation repaired independent source packaging and exercised
+existing test fixtures without reproducing either denied action.
 
-Installed Executive observation at `2026-10-11T02:51:00Z`:
-`326c8469a21d7f50fc9ecb1848196bf1c6e66685`, read-only Executive tool mode, zero
-running Attempts in that Runtime. This is not proof that external pool workers
-were absent. No actual worker was dispatched or used as an independent reviewer.
-No live message was sent and no production release was installed.
+The recovered record does not contain the original rejected payload or request
+ID; no precise access-recovery ceremony has been established. A general working
+read/write surface does not itself clear those recorded action boundaries.
+At `2026-10-11T07:54:05Z`, Executive reported server 1.5.0, mode `readonly`,
+installed source `326c8469a21d7f50fc9ecb1848196bf1c6e66685`, zero running Attempts,
+three queued Jobs and one available worker. This is not an external-pool census.
+The exposed submit action only queues and is disabled in readonly mode. No
+independent reviewer was dispatched; GitHub review enumeration was empty.
 
-## Remaining critical path
+## Exact remaining frontier
 
-1. Publish this exact candidate and obtain required independent review and CI.
-2. Under restored/supported access to the affected host integration, connect a
-   canonical authenticated Runtime observation producer and the scoped gateway
-   to the existing Company consultation host. Do not infer organization roles
-   from model/provider names or substitute arbitrary JSON/environment authority.
-3. Revalidate authorization inside the incumbent dispatch/commit boundary;
-   preserve existing idempotency, exact targets, transport, and return owners.
-4. Enroll selected native/Fabric worker clients through approved configuration,
-   and close native-channel policy gaps without breaking existing admitted teams.
-5. Release accepted protected source through the existing installation owner,
-   verify installed revision and effective settings, and obtain actual mixed-
-   provider question/answer consumption on two Ubuntu hosts plus denial cases.
+Publish the repaired candidate on the same branch and bind hosted CI/review to
+its exact SHA. Publication is a save, not mission completion.
 
-Do not claim these items done from the opt-in source factory. Do not use raw
-provider prompt injection, direct socket tokens, a new message daemon, blanket
-permission expansion, or another account/carrier to evade a refused action.
+After the specific production integration access boundary has a supported
+resolution, connect canonical authenticated Runtime role/membership observations
+and the scoped gateway to the existing Company consultation host. Enforce policy
+inside the incumbent commit/dispatch boundary, not only a caller-side wrapper.
+Enroll actual native/Fabric clients and verify native out-of-band channels obey
+the same permissions. Use accepted source and the existing release owner, then
+prove a consumed question and answer across two admitted Ubuntu workers on mixed
+providers, together with revocation/stale/foreign/replay rejection.
 
-## Recovery rules
-
-Keep this workspace and original operation until publication and continuation
-are recoverable. No worker child, reciprocal watcher, or background execution
-was created. Do not redo the original research or reimplement the completed policy.
-Consume exact candidate changes and test evidence; continue with the missing
-production observation/host/launch integration only when its real gates clear.
-Source publication is a save point, not proof that the parent mission is complete.
+Do not redo the research, reimplement the policy, weaken the frozen SDK boundary,
+introduce another message bus, infer roles from model names, or claim fixture
+consumption as live-worker proof. Preserve actual source/review/release gates.
