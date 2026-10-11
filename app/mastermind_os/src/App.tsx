@@ -1275,12 +1275,24 @@ export function App() {
       binding: OrchestratorCommandBinding;
       kind: OperationKind;
       selectionSeq: number;
+      sessionKey: string | null;
+      presentationSeq: number;
       complete: (
         outcome: { status: "accepted" } | { status: "refused" },
       ) => void;
     } | null>(null),
     [viewTick, setViewTick] = useState(0),
     [commandStatus, setCommandStatus] = useState<OperationState | null>(null),
+    [commandRefusal, setCommandRefusal] = useState<{
+      binding: OrchestratorCommandBinding;
+      principalScope: string;
+      generation: string;
+      kind: OperationKind;
+      selectionSeq: number;
+      sessionKey: string | null;
+      presentationSeq: number;
+      reason: string;
+    } | null>(null),
     [heldKind, setHeldKind] = useState<OperationKind | null>(null),
     [launchDraftDismissed, setLaunchDraftDismissed] = useState(false),
     // True only while a Check-status recover() is actually in flight. A
@@ -1351,6 +1363,33 @@ export function App() {
   const sessionExact =
     commandReady &&
     sessionMatchesSelection(commandView?.session ?? null, selection);
+  const presentationKey = JSON.stringify([ownerContext?.principalScope,
+    ownerContext?.generation, commandView?.session?.sessionKey,
+    selectionSeq.current, authRevision]);
+  const commandPresentation = useRef({ binding: commandBinding, key: presentationKey, seq: 0 });
+  if (commandPresentation.current.binding !== commandBinding ||
+      commandPresentation.current.key !== presentationKey) {
+    commandPresentation.current = {
+      binding: commandBinding, key: presentationKey,
+      seq: commandPresentation.current.seq + 1,
+    };
+  }
+  // A terminal receipt clears its pointer and held kind. Keep only its safe
+  // local reason with the original presentation identity; never attribute it
+  // to a new session, owner epoch, binding, selection, or command kind.
+  const currentRefusal = commandRefusal &&
+    signedIn && commandRefusal.binding === commandBinding &&
+    commandRefusal.principalScope === ownerContext?.principalScope &&
+    commandRefusal.generation === ownerContext?.generation &&
+    commandRefusal.selectionSeq === selectionSeq.current &&
+    commandRefusal.presentationSeq === commandPresentation.current.seq &&
+    (commandRefusal.kind === "launch" ||
+      (sessionExact && commandRefusal.sessionKey === commandView?.session?.sessionKey))
+    ? commandRefusal : null;
+  useEffect(() => {
+    setCommandRefusal(null);
+  }, [commandBinding, ownerContext?.principalScope, ownerContext?.generation,
+    commandView?.session?.sessionKey, selection?.workRef, selection?.rootJobId]);
   useEffect(() => {
     if (!commandBinding) return;
     return subscribeCommandView(commandBinding, () =>
@@ -1440,6 +1479,7 @@ export function App() {
           pendingCommand.current = null;
         }
         setHeldKind(null);
+        setCommandRefusal(null);
         bumpInvalidation();
         // Invalidate rendered and in-flight source data at the notification,
         // not after replacement reads resolve or a passive effect runs.
@@ -2107,6 +2147,24 @@ export function App() {
       setHeldKind(pending.kind);
       return;
     }
+    const liveSession = readCommandView(bindingAtStart)?.session;
+    if (state.status === "refused" &&
+        pending.selectionSeq === selectionSeq.current &&
+        pending.presentationSeq === commandPresentation.current.seq &&
+        (pending.kind === "launch" ||
+          (sessionMatchesSelection(liveSession ?? null, selection) &&
+            liveSession?.sessionKey === pending.sessionKey))) {
+      setCommandRefusal({
+        binding: pending.binding,
+        principalScope: pending.principalScope,
+        generation: pending.generation,
+        kind: pending.kind,
+        selectionSeq: pending.selectionSeq,
+        sessionKey: pending.sessionKey,
+        presentationSeq: pending.presentationSeq,
+        reason: state.reason,
+      });
+    }
     if (state.status === "accepted" && pending.kind === "launch") {
       if (pending.selectionSeq !== selectionSeq.current) {
         pending.complete({ status: "refused" });
@@ -2130,6 +2188,7 @@ export function App() {
       outcome: { status: "accepted" } | { status: "refused" },
     ) => void,
   ) => {
+    setCommandRefusal(null);
     const binding = completeOrchestratorCommandBinding(
       window.MastermindMissionHost?.commandBinding,
     );
@@ -2173,6 +2232,8 @@ export function App() {
       binding,
       kind,
       selectionSeq: selectionSeq.current,
+      sessionKey: kind === "launch" ? null : readCommandView(binding)?.session?.sessionKey ?? null,
+      presentationSeq: commandPresentation.current.seq,
       complete: onComplete,
     };
     setHeldKind(kind);
@@ -2263,8 +2324,8 @@ export function App() {
           }
           submitting={heldKind === "launch" && commandBusy}
           error={
-            commandStatus?.status === "refused"
-              ? commandStatus.reason
+            currentRefusal?.kind === "launch"
+              ? currentRefusal.reason
               : undefined
           }
           onSubmit={(form: LaunchForm, onComplete) => {
@@ -2339,6 +2400,8 @@ export function App() {
           turnBusy={commandView.session.turnBusy}
           sending={heldKind === "message" && commandBusy}
           unavailableReason={commandView.session.unavailableReason}
+          error={currentRefusal && currentRefusal.kind !== "launch"
+            ? currentRefusal.reason : commandView.session.error}
           stopLabel={commandView.session.stopLabel}
           stopping={heldKind === "stop" && commandBusy}
           onSend={(text, onComplete) => {
