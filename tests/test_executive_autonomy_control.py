@@ -9025,6 +9025,7 @@ def test_native_selection_does_not_skip_any_existing_admission_gate(gate):
     {"company_consultation": None},
     {"company_consultation": {"armed": False}},
     {"company_consultation": {"armed": True, "native_return_armed": True}},
+    {"dialogue_wake_canary_activation": {"unexpired": True}},
     {"coo_operator_model_alias": "coo.operator.native-return"},
     {"coo_operator_quota_class": "x" * 50},
     {"coo_operator_quota_class": "quota.native-return"},
@@ -9093,8 +9094,10 @@ def test_production_native_listener_reads_fixed_root_owned_plist_without_effect(
     host = control.ProductionArmHost()
     config = NativeSelectionHost().load_unarmed_configs(SHA)
     raw = plistlib.dumps({"Sockets": {"CompanyConsultation": company_consultation_launchd_entry(config.control)}})
-    with mock.patch.object(control, "_read_root_file", return_value=(raw, None)) as read:
+    with mock.patch.object(control, "_read_root_file", return_value=(raw, None)) as read, \
+            mock.patch("ops.executive_os.a2_agent_relay_enrollment.w3c_plist_configured", return_value=True) as relay:
         host.require_native_listener(config)
+    relay.assert_called_once_with(release_sha=SHA)
     read.assert_called_once_with(control.CONTROL_PLIST, modes=frozenset({0o644}), gid=0)
 
 
@@ -9155,3 +9158,15 @@ def test_native_quota_boundary_composes_with_incumbent_immutable_registry(tmp_pa
     with pytest.raises(StateConflict, match="different policy"):
         runtime.workers.register_quota_class("boundary-worker", readonly, provider="codex",
             capabilities=["planning"], metadata={"profile": "native"})
+
+
+def test_native_arm_refuses_old_or_disabled_relay_before_selection_effects():
+    import plistlib
+    from scripts.executive_os_phase1c import company_consultation_launchd_entry
+    config = NativeSelectionHost().load_unarmed_configs(SHA)
+    raw = plistlib.dumps({"Sockets": {"CompanyConsultation": company_consultation_launchd_entry(config.control)}})
+    with mock.patch.object(control, "_read_root_file", return_value=(raw, None)), \
+            mock.patch("ops.executive_os.a2_agent_relay_enrollment.w3c_plist_configured", return_value=False) as relay:
+        with pytest.raises(control.ArmAdmissionError, match="native_relay_unavailable"):
+            control.ProductionArmHost().require_native_listener(config)
+    relay.assert_called_once_with(release_sha=SHA)

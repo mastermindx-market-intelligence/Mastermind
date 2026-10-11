@@ -186,6 +186,7 @@ _ARM_ADMISSION_CODES = frozenset(
         "workspace_binding_invalid",
         "native_selection_invalid",
         "native_listener_unavailable",
+        "native_relay_unavailable",
     }
 )
 _MAX_JSON_BYTES = 1024 * 1024
@@ -797,6 +798,7 @@ def _require_native_preselection(control: Mapping[str, Any]) -> None:
     company = control.get("company_consultation")
     quota = control.get("coo_operator_quota_class")
     if (control.get("coo_operator_model_alias") != "coo.operator.readonly"
+            or control.get("dialogue_wake_canary_activation") is not None
             or type(company) is not dict or company.get("armed") is not True
             or company.get("native_return_armed", False) is not False
             or not isinstance(quota, str)
@@ -2680,6 +2682,9 @@ class ProductionArmHost(ProductionStatusHost):
                 raise ArmAdmissionError("native_listener_unavailable")
         except (HostControlError, OSError, ValueError, plistlib.InvalidFileException, ServiceError) as exc:
             raise ArmAdmissionError("native_listener_unavailable") from exc
+        from ops.executive_os.a2_agent_relay_enrollment import w3c_plist_configured
+        if not w3c_plist_configured(release_sha=config.control.get("proof_base_sha")):
+            raise ArmAdmissionError("native_relay_unavailable")
 
     def require_runtime_quiescent(self, config: ConfigEvidence) -> None:
         try:
