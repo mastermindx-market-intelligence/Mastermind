@@ -555,3 +555,25 @@ def test_nested_lineage_refuses_parent_provenance_drift() -> None:
 
     with pytest.raises(ExecutiveDelegationIdentityError):
         module.derive_nested_delegation_identity(child, parent)
+
+
+@pytest.mark.parametrize("role,field", [("review", "reviews_job_id"), ("repair", "supersedes_job_id")])
+@pytest.mark.parametrize("target", ["self", "root", "parent"])
+def test_nested_revision_rejects_known_nonsibling_target(role, field, target):
+    # Runtime requires a sibling target: executive_runtime.py:14532-14539,
+    # and _assert_orchestration_lineage_for_create:10222-10257 at #1263.
+    parent = _job(job_id="JOB-123", role="work")
+    child = _nested_job(parent, role=role)
+    target_id = {"self": child.job_id, "root": child.root_job_id, "parent": parent.job_id}[target]
+    child = dataclasses.replace(child, **{field: target_id})
+    with pytest.raises(ExecutiveDelegationIdentityError):
+        _identity_module().derive_nested_delegation_identity(child, parent)
+
+@pytest.mark.parametrize("role,field", [("review", "reviews_job_id"), ("repair", "supersedes_job_id")])
+def test_nested_revision_keeps_potential_sibling_target_projectable(role, field):
+    parent = _job(job_id="JOB-123", role="work")
+    child = dataclasses.replace(_nested_job(parent, role=role), **{field: "JOB-122"})
+    identity = _identity_module().derive_nested_delegation_identity(child, parent)
+    assert identity.parent_job_id == parent.job_id
+    assert identity.root_job_id == parent.root_job_id
+    # Existence/status/actual sibling scope remain Runtime's responsibility.

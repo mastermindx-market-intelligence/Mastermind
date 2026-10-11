@@ -116,7 +116,7 @@ def _validate_revision_lineage(job: Job) -> None:
             job.repair_round not in {0, 1, 2}
             or not isinstance(job.reviews_job_id, str)
             or _JOB_ID_RE.fullmatch(job.reviews_job_id) is None
-            or job.reviews_job_id in {job.job_id, job.root_job_id}
+            or job.reviews_job_id in {job.job_id, job.parent_job_id, job.root_job_id}
             or job.supersedes_job_id is not None
         ):
             _refuse("review Job revision lineage is incoherent")
@@ -125,7 +125,7 @@ def _validate_revision_lineage(job: Job) -> None:
             job.repair_round not in {1, 2}
             or not isinstance(job.supersedes_job_id, str)
             or _JOB_ID_RE.fullmatch(job.supersedes_job_id) is None
-            or job.supersedes_job_id in {job.job_id, job.root_job_id}
+            or job.supersedes_job_id in {job.job_id, job.parent_job_id, job.root_job_id}
             or job.reviews_job_id is not None
         ):
             _refuse("repair Job revision lineage is incoherent")
