@@ -152,6 +152,16 @@ export function LaunchOrchestrator({
   // it must stay disabled rather than submit a ref nobody can resolve.
   const projectStale = !selectedProjectChoice;
   const profileStale = !selectedProfileChoice;
+  const projectError = projectStale
+    ? selectedProject
+      ? "Your previous project is no longer available. Select an available project to continue."
+      : "No projects are currently available."
+    : selectedProjectChoice.unavailableReason;
+  const profileError = profileStale
+    ? selectedProfile
+      ? "Your previous profile is no longer available. Select an available profile to continue."
+      : "No profiles are currently available."
+    : selectedProfileChoice.unavailableReason;
 
   const goalBytes = utf8ByteLength(draftGoal);
   const goalTooLong = goalBytes > MAX_GOAL_BYTES;
@@ -251,16 +261,23 @@ export function LaunchOrchestrator({
               value={selectedProject}
               onChange={(e) => setDraftProject(e.target.value)}
               disabled={launchPending}
+              aria-invalid={!!projectError}
+              aria-describedby={projectError ? `${projectId}-error` : undefined}
             >
+              {projectStale && (
+                <option value={selectedProject} disabled>
+                  {selectedProject ? "Previous project — unavailable" : "No projects available"}
+                </option>
+              )}
               {projects.map((p) => (
                 <option key={p.ref} value={p.ref} disabled={!!p.unavailableReason}>
                   {p.unavailableReason ? `${p.label} — ${p.unavailableReason}` : p.label}
                 </option>
               ))}
             </select>
-            {selectedProjectChoice?.unavailableReason && (
-              <p className="field-error" role="alert">
-                {selectedProjectChoice.unavailableReason}
+            {projectError && (
+              <p id={`${projectId}-error`} className="field-error" role="alert">
+                {projectError}
               </p>
             )}
           </div>
@@ -273,16 +290,23 @@ export function LaunchOrchestrator({
               value={selectedProfile}
               onChange={(e) => setDraftProfile(e.target.value)}
               disabled={launchPending}
+              aria-invalid={!!profileError}
+              aria-describedby={profileError ? `${profileId}-error` : undefined}
             >
+              {profileStale && (
+                <option value={selectedProfile} disabled>
+                  {selectedProfile ? "Previous profile — unavailable" : "No profiles available"}
+                </option>
+              )}
               {profiles.map((p) => (
                 <option key={p.ref} value={p.ref} disabled={!!p.unavailableReason}>
                   {p.unavailableReason ? `${p.label} — ${p.unavailableReason}` : p.label}
                 </option>
               ))}
             </select>
-            {selectedProfileChoice?.unavailableReason && (
-              <p className="field-error" role="alert">
-                {selectedProfileChoice.unavailableReason}
+            {profileError && (
+              <p id={`${profileId}-error`} className="field-error" role="alert">
+                {profileError}
               </p>
             )}
           </div>
