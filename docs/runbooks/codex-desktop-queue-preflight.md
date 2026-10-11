@@ -35,6 +35,19 @@ attempt compatibility by choosing another transport.
 
 Every error, incomplete inspection, missing observation or ambiguity keeps
 the result `UNQUALIFIED`. This output is **not** an authorization token.
+
+**Protocol qualification is separate.** In Codex CLI `0.159.3`, the native
+`thread/queue/*` methods are experimental App Server API and require the
+client to declare `initialize.capabilities.experimentalApi=true`. A fresh
+isolated no-account probe without that opt-in returned protocol error `-32600`;
+with the documented opt-in it advanced past that gate but still did not reach
+an eligible real thread. Those tests used a disposable empty `CODEX_HOME`,
+never a desktop-owned or account-bound thread. The preflight deliberately
+never opens a protocol connection or opts into experimental capabilities;
+its `queue_api_production_supported` and `experimental_api_enabled_by_preflight`
+fields are always `false`. This experiment is not vendor production-support
+qualification, and no installed owner should silently enable experimental
+features or retry denied live effects to make a canary succeed.
 A candidate cannot assert an eligible thread, supported account, matching
 desktop-bundled protocol, actual queue consumption, output correctness,
 completed provider turn, or original-parent result return. Those proof fields

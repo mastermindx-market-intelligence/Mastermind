@@ -31,6 +31,8 @@ def test_candidate_never_claims_canary_or_target_auth():
     assert result["proof"] == "READ_ONLY_METADATA"
     assert result["provider_effect"] == "NONE"
     assert result["eligible_thread_proven"] is False
+    assert result["queue_api_production_supported"] is False
+    assert result["experimental_api_enabled_by_preflight"] is False
     assert result["native_delivery_proven"] is False
     assert result["shared_state_database_observed"] is True
     assert result["managed_socket_owner_count"] == 1

@@ -142,6 +142,8 @@ def reduce_topology(
         "shared_state_database_observed": overlap,
         "eligible_thread_proven": False,
         "authorization_proven": False,
+        "queue_api_production_supported": False,
+        "experimental_api_enabled_by_preflight": False,
         "native_delivery_proven": False,
         "turn_completion_proven": False,
         "original_parent_return_proven": False,
