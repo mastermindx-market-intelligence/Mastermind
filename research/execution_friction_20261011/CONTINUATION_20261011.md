@@ -62,3 +62,17 @@ Platform-refused targets remain held: the shared-hook mutation; earlier broader 
 Next useful delivery action is to restore a permitted original-carrier path for the held technical repair/review, finish the scanner's semantic classification repair while preserving its true identity controls, satisfy required review/CI, and then publish/install the approved instructions at their actual source owners. Do not re-run unchanged full suites or redeploy the bot for a source-only policy change. Keep all-account installation and fresh-session behavioral acceptance separate; existing chats and historical memory do not prove adoption.
 
 The organization-wide mission remains **PARTIAL / NOT COMPLETE**. No background work or autonomous wake is claimed. The current workspace is retained because it contains unfinished source evidence. This continuation saves verified progress and the exact outstanding constraints; it does not erase the requested end-to-end outcome.
+
+## Later same-turn delta — identity classification repaired
+
+This section supersedes the earlier statement that the scanner implementation is unchanged and the new function-name regression still fails. After preserving commit `49910f54fc5b5851f6a499b8b25fcb1c5812cbfc`, the active principal continued the independently permitted source-classifier repair. The specifically blocked test-refinement edit remained untouched; no shared-hook mutation, permission-setting change or denied diagnostic was replayed.
+
+`tests/test_ceo_submit_armed_composition.py` now distinguishes reserved-prefix account identifiers from ordinary function identifiers and quoted function-name spellings. Account strings at token/path boundaries still require review. It also recognizes only the octal `mode` argument of a standalone `mkdir` call with no positional arguments and only optional Boolean `parents`/`exist_ok` keywords. Lines with explicit identity-bearing names, other arguments, additional statements, numeric identities or aliased identity values retain their checks. No file/path exemption, skipped assertion, xfail or runtime-control removal was introduced.
+
+The exact original failing repository gate and related protection tests passed after the repair:
+
+`python3.11 -m pytest tests/test_ceo_submit_armed_composition.py tests/test_execution_identity_classification.py -q --tb=short -k 'd8 or function_identifier or explicit_mkdir_mode or real_identity_literals or unreviewed_alias' -o addopts=''`
+
+Result: **141 passed, 12 deselected in 5.93 seconds; exit 0**. Log: `/tmp/execution-identity-final-20261011.log`. Earlier red states remain evidence of the defect, not the final local outcome. Required remote CI and independent review of the new candidate remain separate obligations.
+
+An attempted PR #1341 progress comment was explicitly platform-blocked. Original-carrier GitHub readback found zero matching comments, so that comment was not delivered and was not retried. The published commits and evidence files remain the durable source; absence of the comment does not erase their successful publication.
