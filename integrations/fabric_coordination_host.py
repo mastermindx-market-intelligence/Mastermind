@@ -14,14 +14,14 @@ import inspect
 from control_plane.executive_runtime import Runtime
 from control_plane.fabric_coordination_policy import (
     CoordinationActorIdentity, CoordinationIdentity, CoordinationNativeIdentity,
-    CoordinationRefused, CoordinationSnapshot,
+    CoordinationRefused, CoordinationSnapshot, authorize_coordination,
 )
 from integrations.fabric_coordination_composite import CompositeCoordinationObservationSource
 from integrations.fabric_coordination_native import NativeCoordinationObservationSource
 from integrations.fabric_coordination_runtime import RuntimeCoordinationObservationSource
 from integrations.fabric_coordination_single import SingleDomainCoordinationObservationSource
 from integrations.fabric_coordination_targets import (
-    ScopedSessionTarget, ScopedSessionTargetResolver,
+    ScopedSessionTarget, ScopedSessionTargetResolver, _grant_digest,
 )
 from integrations.session_bridge.claude_native import ClaudeNativeTargetProjector
 from integrations.session_bridge.runtime_owner import RuntimeFabricTargetProjector
@@ -149,10 +149,14 @@ class AuthenticatedScopedTargetHost:
         except Exception:
             _refuse()
 
-    def _verify_caller_after_read(self, resolver: ScopedSessionTargetResolver) -> None:
-        # A principal can rotate while the target projectors and owner scope
-        # are being read. Require the authenticated caller to be current again
-        # before returning even an advisory target list.
+    def _verify_caller_after_read(
+        self, resolver: ScopedSessionTargetResolver,
+        targets: tuple[ScopedSessionTarget, ...],
+    ) -> None:
+        # A caller, grant or parent relation can change AFTER the last target
+        # projector read. Revalidate both ends of each selected advisory edge
+        # against the final fresh organizational owner scope, not just the
+        # caller's presence. This is a read-only privacy fence, NOT COMMIT.
         current = self._authenticated_caller()
         scope = self._memberships()
         now = self._now()
@@ -164,13 +168,26 @@ class AuthenticatedScopedTargetHost:
         ):
             _refuse()
         scope.participant(current, now=now)
+        for target in targets:
+            current_recipient = scope.participant(target.recipient, now=now)
+            decision = authorize_coordination(
+                scope, current, target.recipient,
+                topic_ref=self._topic, now=now,
+            )
+            if (
+                current_recipient.role is not target.role
+                or decision.relation != target.relation
+                or decision.grant_ref != target.grant_ref
+                or _grant_digest(scope, decision.grant_ref) != target.grant_digest
+            ):
+                _refuse()
 
     def visible_targets(self) -> tuple[dict[str, str | bool], ...]:
         try:
             resolver = self._resolver()
-            projected = resolver.visible_targets()
-            self._verify_caller_after_read(resolver)
-            return projected
+            selected = resolver._read()
+            self._verify_caller_after_read(resolver, selected)
+            return tuple(target.public_projection() for target in selected)
         except Exception:
             _refuse()
 
@@ -180,7 +197,7 @@ class AuthenticatedScopedTargetHost:
                 _refuse()
             resolver = self._resolver()
             target = resolver.resolve(target_ref)
-            self._verify_caller_after_read(resolver)
+            self._verify_caller_after_read(resolver, (target,))
             return target
         except Exception:
             _refuse()

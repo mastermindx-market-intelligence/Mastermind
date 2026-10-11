@@ -322,10 +322,14 @@ target discovery and exact resolution**. The hostname/role label and earlier
 discovered peer do not authorize subsequent calls.
 
 The host reads organizational actor kinds and chooses exactly one of three
-admitted modes. The authenticated caller and organizational scope are also
-re-read after discovery or resolution, so mid-read principal rotation fails
-closed. Host readers are required to be synchronous; asynchronous credentials
-or coroutine readers are not silently accepted. Mixed scopes require
+admitted modes. After discovery or resolution, it re-reads the authenticated
+caller AND reauthorizes **every selected recipient** against the newest
+organizational scope, checking the original role/relation and exact grant
+document digest. A recipient-side revocation or portfolio reassignment that
+lands after the underlying target-projector read no longer exposes a stale
+permitted peer. This is a read-side disclosure fence, NOT an atomic write
+transaction. Host readers are required to be synchronous; asynchronous
+credentials or coroutine readers are not silently accepted. Mixed scopes require
 **both** Runtime and current native
 Session Bridge owners. Worker-only requires the incumbent Runtime and
 projector; native-only requires the incumbent Session Bridge Claude projector

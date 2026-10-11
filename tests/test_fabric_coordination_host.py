@@ -272,3 +272,60 @@ def test_async_caller_source_cannot_be_misbound_to_sync_host():
             native_principal_reader=lambda *_: FIRST.principal_ref,
         )
     assert not port.send_calls
+
+
+def test_scope_revocation_after_target_projection_cannot_leak_peer():
+    """Old caller-only last-read check missed a revoked recipient portfolio."""
+    host, owner, port, caller = native_host()
+    original = host._authenticated_caller
+    reads = [0]
+
+    def revoke_after_projection():
+        reads[0] += 1
+        if reads[0] == 2:
+            current = owner[0]
+            owner[0] = replace(current, participants=(
+                current.participants[0],
+                replace(current.participants[1], portfolio_ref="foreign"),
+            ))
+        return original()
+
+    host._authenticated_caller = revoke_after_projection
+    with pytest.raises(ScopedHostUnavailable):
+        host.visible_targets()
+    assert reads[0] >= 2
+    assert not port.send_calls and not port.reconcile_calls
+
+
+def test_scope_dependency_grant_revoke_after_resolve_never_exposes_target():
+    """Host must reauthorize the recipient even after resolved exact ref."""
+    from control_plane.fabric_coordination_policy import CoordinationGrant
+    from tests.test_fabric_coordination_single import FIRST, SECOND, NOW
+
+    host, owner, port, caller = native_host()
+    a, b = owner[0].participants
+    grant = CoordinationGrant(
+        "final-read-grant", FIRST, SECOND, "schema",
+        ("project-a", "project-b"), NOW, NOW + 25,
+    )
+    owner[0] = replace(owner[0], participants=(
+        replace(a, role=CoordinationRole.COO),
+        replace(b, role=CoordinationRole.COO),
+    ), grants=(grant,))
+    reference = host.visible_targets()[0]["target_ref"]
+    original = host._authenticated_caller
+    reads = [0]
+
+    def revoke_after_projection():
+        reads[0] += 1
+        if reads[0] == 2:
+            owner[0] = replace(owner[0], grants=(
+                replace(grant, revoked=True),
+            ))
+        return original()
+
+    host._authenticated_caller = revoke_after_projection
+    with pytest.raises(ScopedHostUnavailable):
+        host.resolve(reference)
+    assert reads[0] >= 2
+    assert not port.send_calls and not port.reconcile_calls

@@ -654,3 +654,42 @@ Next: typed Studio Git commit/push on the exact registered operation,
 hosted exact-head CI and independent code review; incumbent production
 host transaction binding and real mixed-provider two-Ubuntu question,
 reply and *consumption* acceptance after legitimate install.
+
+### Final read-side recipient revocation fence (same October 11 phase)
+
+Original typed Studio Git carrier successfully published source head
+`90120dc23ac9bb04668ceffe0d074d50ba16bf04` after the
+effect-owner guard, matching local/remote and clean. Exact hosted CI
+`38133618660` was pending at last read; PR #1318 draft, mergeable
+but behind updated protected master and no independent submitted review.
+This final independent bounded source repair occurs in the SAME registered
+workspace/operation, not an alternate host or release writer.
+
+Security counterexample found in the host read-only layer: after a target
+projector and its internal scope checks approved a recipient, the final
+`AuthenticatedScopedTargetHost._verify_caller_after_read` checked only
+the caller's current membership, not the *recipient's new permission
+status*. A recipient portfolio move or dependency grant revocation between
+the final target read and host return could leak a stale authorized
+peer reference. Updated the host to reauthorize **every exact selected
+recipient** against the final fresh owner snapshot, comparing role,
+relation, grant_ref and the full current grant payload fingerprint.
+Its current caller/domain are still checked. The check does not alter or
+replace the canonical message-effect owner's atomic COMMIT obligations.
+
+New negative tests in `tests/test_fabric_coordination_host.py` simulate
+portfolio migration and a dependency-grant revocation at precisely the
+post-projector/pre-host-return boundary, confirming no peer target is
+returned and no provider-management send occurs. M2 PID `75802`
+exited 0; JUnit
+`/tmp/mmx-fabric-final-owner-reauthorization-20261011.xml`:
+**45 passed, 0 failures, 0 errors, 0 skipped** across host, effect
+guard and target scopes. Previous broader **439 tests** at PID
+`53708` were green before this last focused source change.
+New exact-head CI required upon next Studio Git typed push.
+
+No new native session, worker, installation, host service, policy grant,
+production message or deployment. Earlier action-specific denied
+production host/commit inspection not retried. Release-owner notice
+in existing Slack thread is DELIVERY, not ACK/START. Remain
+SOURCE_BUILT_NOT_INSTALLED; MISSION_COMPLETE=false.
