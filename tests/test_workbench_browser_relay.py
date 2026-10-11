@@ -230,6 +230,63 @@ class _CountingSession(McpStdioSession):
         self._receipt = None
 
 
+@pytest.mark.skipif(not hasattr(socket, "AF_UNIX"), reason="Unix sockets required")
+@pytest.mark.parametrize("phase,error_type", [
+    ("request", ConnectionResetError),
+    ("response", BrokenPipeError),
+    ("response", TimeoutError),
+    ("postdispatch", ConnectionResetError),
+])
+def test_client_disconnect_does_not_stop_relay(tmp_path, monkeypatch, phase, error_type):
+    session = _CountingSession()
+    relay = BrowserRelayServer(
+        resource_id="a" * 32, socket_path=tmp_path / "relay-disconnect.sock",
+        session=session, owner_pid=os.getpid(), parent_pid=os.getppid(),
+    )
+    method = "_read_request" if phase == "request" else "_write_response"
+    original = getattr(relay, method)
+    faulted = False
+    def disconnect_once(*args):
+        nonlocal faulted
+        if not faulted:
+            faulted = True
+            raise error_type("inert client disconnect")
+        return original(*args)
+    monkeypatch.setattr(relay, method, disconnect_once)
+    errors = []
+    def serve():
+        try:
+            relay.serve_forever()
+        except BaseException as error:
+            errors.append(error)
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    relay.wait_ready(timeout=3)
+    request = {
+        "schema": "mastermind.workbench_browser_relay_request.v1",
+        "kind": "status", "request_id": "b" * 32, "resource_id": "a" * 32,
+    }
+    dispatched = 1 if phase == "postdispatch" else 0
+    if dispatched:
+        request.update(kind="tool", tool="browser_click", arguments={"target": "button"})
+    try:
+        with pytest.raises(BrowserRelayError):
+            relay_request(tmp_path / "relay-disconnect.sock", request, timeout=2)
+        assert session.calls == dispatched, "lost replies must not replay effects"
+        assert thread.is_alive(), "a disconnected client stopped the relay"
+        result = relay_request(tmp_path / "relay-disconnect.sock", {
+            **request, "kind": "tool", "request_id": "c" * 32,
+            "tool": "browser_click", "arguments": {"target": "button"},
+        }, timeout=2)
+        assert result["ok"] is True
+        assert session.calls == dispatched + 1
+    finally:
+        relay.stop()
+        thread.join(timeout=3)
+    assert errors == []
+    assert not thread.is_alive()
+
+
 @pytest.mark.skipif(
     not hasattr(socket, "AF_UNIX")
     or (sys.platform != "darwin" and not sys.platform.startswith("linux")),
@@ -267,15 +324,21 @@ request=json.loads(sys.argv[2])
 client=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
 client.settimeout(2)
 client.connect(path)
-client.sendall(json.dumps(request,separators=(",",":")).encode()+b"\n")
 data=b""
-while b"\n" not in data:
-    part=client.recv(65536)
-    if not part:
-        break
-    data += part
+try:
+    client.sendall(json.dumps(request,separators=(",",":")).encode()+b"\n")
+    while b"\n" not in data:
+        part=client.recv(65536)
+        if not part:
+            break
+        data += part
+except ConnectionError:
+    # The server rejects the peer before reading its request. Linux can reset
+    # this socket because unread input remains when the refusal closes it.
+    pass
 client.close()
-print(data.split(b"\n",1)[0].decode())
+line=data.split(b"\n",1)[0]
+print(line.decode() if line else json.dumps({"transport_closed":True}))
 """
     completed = subprocess.run(
         [sys.executable, "-c", child_program, str(socket_path), json.dumps(bypass_request)],
@@ -285,8 +348,11 @@ print(data.split(b"\n",1)[0].decode())
         check=True,
     )
     refused = json.loads(completed.stdout)
-    assert refused["ok"] is False
-    assert refused["error"] == "REQUEST_REFUSED"
+    if "transport_closed" in refused:
+        assert refused == {"transport_closed": True}
+    else:
+        assert refused["ok"] is False
+        assert refused["error"] == "REQUEST_REFUSED"
     assert session.calls == 0
 
     authorized = relay_request(
