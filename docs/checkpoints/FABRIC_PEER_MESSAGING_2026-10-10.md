@@ -4,111 +4,138 @@ MISSION_COMPLETE: false
 Capability: BUILT_NOT_PROVEN
 Operation: `fabric-peer-messaging-20261010`
 Repository: `mastermindx-market-intelligence/Mastermind`
-PR: #1318, draft; original candidate `7e0d0dff7bd0260376f3bca032d6294cd7aff854`
+PR: #1318, draft
 Protected procedure/base: `8339b60b867c82807dcdeeddd8d86e37e6e4434f`
+Incoming published candidate: `91a31231aeb74870e2e64d7afe61a0cf67c65eec`
 Branch: `sol/web-fabric-peer-messaging-20261010`
 Workspace: `/Volumes/Mastermind/agent-workspaces/web/fabric-peer-messaging-20261010`
-Last source continuation: October 11, 2026; exact publishing head belongs in PR receipts.
+Latest continuation: October 11, 2026. Exact outgoing commit belongs in PR receipts.
 
-## Mission and owners
+## Mission and existing owners
 
-The current assignment is implementation and hardening of scoped CEO/COO/task-
-operator/worker messaging end to end. The user renewed it with "resume".
-Executive/Runtime admission, Agent OS continuity, GitHub source/evidence, and
-existing consultation/Dialogue/Wake/transport owners remain in place. Source
-implementation and fixture verification do not establish fleet installation.
+The assignment remains end-to-end scoped CEO/COO/task-operator/worker messaging.
+Executive owns admission/lifecycle, Agent OS organizational continuity, GitHub
+source/evidence, and existing Consultation/Dialogue/Wake owners carry messages.
+No new registry, transport service, queue, credentials or retry plane is allowed.
+The user's latest "resume" continues the same operation; it is not a custody
+transfer, platform-denial clearance, or proof of installed capability.
 
-## Confirmed implementation and repair
+## Accepted source work: do not redo
 
-`control_plane/fabric_coordination_policy.py` supplies deterministic relation
-checks over immutable owner observations. `integrations/fabric_coordination.py`
-consumes the existing four-tool Company consultation contract. Direct parent/
-child edges are bidirectional, peer access is scoped by organizational membership,
-and other same-rank dependencies require exact bilateral topic-bound grants.
-Tenant/portfolio isolation, identity generation, active state, expiry, revocation
-and ambiguity are checked. Messages grant no operational or forwarding authority.
+The deterministic policy in `control_plane/fabric_coordination_policy.py` and
+scoped consumer in `integrations/fabric_coordination.py` enforce direct parent/
+child edges, scoped same-rank peers, and exact bilateral topic-bound grants.
+They validate tenant/portfolio scope, current generations, activity, expiry,
+revocation and ambiguity. Advisory messages convey no operational/forwarding
+right. Discovery/send checks and reply/read party checks share existing owners.
+The synchronous pre-dispatch callback cannot modify the normalized send payload.
 
-Existing discovery uses the same validation as direct resolution. The private
-pre-dispatch callback is synchronous and void-returning, receives a copy of the
-normalized request, and rechecks current identities/grants. Reply/read access
-requires exact consultation parties. Per-call selection uses ContextVar.
-No new endpoint, store, identity registry, queue, scheduler, credentials or retry
-owner was introduced. Production host composition is still not connected.
+Original candidate `7e0d0dff7bd0260376f3bca032d6294cd7aff854` failed hosted CI
+`38106839302` on the exact SDK dependency-boundary test. Candidate `91a31231...`
+relocated the adapter byte-for-byte out of the frozen SDK package and preserved
+the existing assertion. Its seven composed journey tests use a real dispatcher,
+temporary Runtime/Wake records and AF_UNIX relay, with synthetic native signals
+and in-memory Slack. Its 553 selected tests passed. That packaging repair stands.
 
-Original hosted CI run `38106839302`, job `114374050961`, failed exactly
-`tests/test_mastermind_company_mcp.py::test_sdk_and_runtime_dependency_boundaries_are_exact`.
-The runtime adapter was incorrectly inside the frozen SDK directory. This
-continuation moved it byte-for-byte from
-`integrations/mastermind_company_mcp/fabric_coordination.py` to
-`integrations/fabric_coordination.py` and updated imports/documentation.
-The exact SDK-boundary test was not changed or weakened.
+## New Runtime identity join and factory
 
-Added `tests/test_fabric_coordination_journey.py`: seven composed cases use the
-real RuntimeConsultationDispatcher, temporary Runtime/Wake records, and real
-local AF_UNIX relay with in-memory Slack. They cover question/answer continuity
-after reopening Runtime, reply refusal before fixture consumption, idempotent
-answer/consumption, no additional Jobs for delivery, denied foreign/inactive
-peers without effects, revocation at dispatch, and response-loss uncertainty with
-read-only reconciliation and no automatic resend.
+Added `integrations/fabric_coordination_runtime.py` with
+`RuntimeCoordinationObservationSource` and `build_runtime_coordination_gateway`.
+It joins host-owned membership to actual current Executive Job/Attempt and admitted
+harness facts, validates canonical parent/program lineage, derives opaque peers,
+and refuses invented/replaced/inactive/unsupported identities. Native handles and
+account labels are not projected. The identity join and public harness reader
+share a read connection; the immutable Job projection is cross-checked against it.
+No observation writes Runtime events or changes a worker.
 
-## Verified evidence
+Membership is checked again after the Runtime join. Semantic changes refuse;
+fresh timestamps cannot extend the original expiry. The joined digest covers
+full scope/grants, not only a revision label. The factory verifies consultation
+parties against the existing INTENT and requires the host's observed tool-schema
+digest rather than self-attesting its own constant. Existing per-send revalidation
+and dispatcher/transport owners remain unchanged.
 
-Final selected regression: **553 passed, 0 failures, 0 errors, 0 skips**.
-Process `11694` completed with exit code 0. Receipt on M2:
-`/tmp/mmx-fabric-regression-20261011.xml`
-SHA256: `bee24300ffb75d17cda7317f94e6d47ca66f4c0528e09fc98d8c58437d7a5e4c`.
-Includes 73 policy, 39 unit gateway, seven journey cases, the frozen SDK tests,
-and existing consultation/host/identity/target/inbox/transport/MCP regressions.
-The existing MCP-capable Python 3.12 environment was used; no packages installed.
-Syntax parsing, byte-identical adapter relocation and `git diff --check` passed.
+This is a real Runtime identity adapter, NOT an authenticated organizational
+membership issuer. The host must still supply its current authenticated caller,
+canonical membership reader and consultation-party reader. No production host
+has selected this factory. It does not replace the actual commit-boundary fence.
 
-This supersedes the earlier selected 490-case result. The initial focused CI
-repair subset also passed 168 cases. Do not rerun unchanged accepted tests merely
-to extend a session. Hosted CI for the new source head still requires its own
-result; the failed old run must not be described as green.
+`tests/test_fabric_coordination_runtime.py` adds 24 cases. The factory journey
+completes question/reply/requester consumption through real Runtime/dispatcher/
+local-socket code. Negative cases cover incorrect identities, parent/program
+mismatch, expired/refreshed/changing scopes, unsupported provider mapping, forged
+consultation parties, missing schema observation and sanitized Runtime errors.
+Membership and native-consumption signals are still explicit test fixtures.
 
-The journey uses synthetic role/membership facts and native acknowledgment
-signals. The unit gateway tests use a fake dispatcher. None is proof of live
-model consumption, cross-provider cross-host messaging or production enrollment.
+## Verification
 
-## Effects, custody and observed limits
+Latest selected regression: **577 passed, 0 failures, 0 errors, 0 skips**.
+Process `81120` completed with exit code 0, runtime 103.16 seconds. Receipt on M2:
+`/tmp/mmx-fabric-runtime-regression-20261011.xml`
+SHA256: `cf341e062fa10bffbb45e7a3c5404d8dd13547600e0cc4678e7757afe906f45f`.
+Includes 24 new Runtime cases plus the prior 553 selected policy/gateway/journey/
+SDK/consultation/host/identity/target/inbox/transport/MCP cases. The existing
+MCP-capable Python 3.12 environment was used; no packages installed. Syntax and
+`git diff --check` passed. The new source remained outside the frozen SDK.
 
-Source changes are confined to this registered workspace. No live message,
-provider run, fleet configuration or installed release was changed. No active
-worker child, watcher, or uncertain modifying effect exists from this operation.
-Do not transfer custody or clean another session's workspace.
+The initial new-test pass exposed two test monkeypatches against a frozen Runtime
+instance; they were corrected to patch the class within the test fixture. No
+production Runtime mutability rule was changed. The final run supersedes that
+intermediate failure. No source test proves a live model consumed a message.
 
-The prior authoring record reports two explicit platform safety blocks: a combined
-workspace/source inspection needed for production-host wiring, and a selection-
-constructor expansion. They were not retried/rerouted; the dependent partial
-constructor change was rolled back. The two-field selection remains unchanged
-and relies on the incumbent binding-generation invariant for provider/program
-changes. This continuation repaired independent source packaging and exercised
-existing test fixtures without reproducing either denied action.
+CI for incoming head `91a31231...`, run `38123261673`, was still in progress at the
+last bounded observation. A new outgoing head needs its own hosted result/review.
+No independent reviewer or additional agent was launched in this continuation.
 
-The recovered record does not contain the original rejected payload or request
-ID; no precise access-recovery ceremony has been established. A general working
-read/write surface does not itself clear those recorded action boundaries.
-At `2026-10-11T07:54:05Z`, Executive reported server 1.5.0, mode `readonly`,
-installed source `326c8469a21d7f50fc9ecb1848196bf1c6e66685`, zero running Attempts,
-three queued Jobs and one available worker. This is not an external-pool census.
-The exposed submit action only queues and is disabled in readonly mode. No
-independent reviewer was dispatched; GitHub review enumeration was empty.
+## Observed implementation gaps
 
-## Exact remaining frontier
+`control_plane/runtime_binding_projection.py` at the pinned base recognizes
+`chatgpt` and `openai-codex`. The existing consultation/native owners impose
+additional surface constraints. `control_plane/wake_transport.py` marks
+`codex-app-server` implemented but not `claude-code-session`. This is a concrete
+native-delivery implementation gap, not something a role policy can enable.
+No mapping, target-enabled flag or transport-implemented flag was broadened.
 
-Publish the repaired candidate on the same branch and bind hosted CI/review to
-its exact SHA. Publication is a save, not mission completion.
+## Action-specific blocks and effects
 
-After the specific production integration access boundary has a supported
-resolution, connect canonical authenticated Runtime role/membership observations
-and the scoped gateway to the existing Company consultation host. Enforce policy
-inside the incumbent commit/dispatch boundary, not only a caller-side wrapper.
-Enroll actual native/Fabric clients and verify native out-of-band channels obey
-the same permissions. Use accepted source and the existing release owner, then
-prove a consumed question and answer across two admitted Ubuntu workers on mixed
-providers, together with revocation/stale/foreign/replay rejection.
+The earlier authoring record reports a blocked combined host-source inspection
+and blocked selection-constructor expansion. The dependent partial constructor
+change was rolled back. Neither was retried. The existing two-field selection
+still relies on binding-generation ownership for provider/program changes.
+A bounded retained tool-history read in this continuation did not recover the
+original rejected payloads; it is not denial-clearance evidence.
 
-Do not redo the research, reimplement the policy, weaken the frozen SDK boundary,
-introduce another message bus, infer roles from model names, or claim fixture
-consumption as live-worker proof. Preserve actual source/review/release gates.
+This continuation also received an explicit OpenAI block saying the safety
+status of a requested source inspection could not be determined. It was a
+`Studio_Direct_-_C2_Business.start_process` read-only inspection combining:
+- constraint normalization and the Job creation interface in executive_runtime;
+- consultation_runtime.py lines 292-339 (intent transaction);
+- dispatcher construction/intent/commit call sites;
+- orchestration scope fields in the cycle/capability source.
+No request ID or recovery ceremony was supplied. That action was not replayed,
+rephrased or moved to another carrier. The Runtime identity join above used
+independent, already-inspected public Runtime/binding interfaces. Successful
+source edits or get_config do not clear the blocked inspection. Do not turn this
+specific block into a blanket claim that GitHub or all host tools are read-only.
+
+All current source effects are known and confined to the registered workspace.
+No live message, provider run, worker enrollment, installed release or fleet
+setting changed. No worker child, watcher, test process or uncertain write remains.
+
+## Exact next capability steps
+
+Publish the new source on the same branch and record exact-head CI and review.
+Use the existing cumulative checkpoint; do not create another recovery store.
+
+After supported resolution of the affected host/commit integration access,
+connect the factory to the actual authenticated Company consultation host and
+its canonical organizational membership source. Implement authorization inside
+the incumbent commit owner, not merely another pre-dispatch wrapper. Complete
+the accepted native provider/transport path, enroll actual clients through the
+existing owner, release reviewed protected source, and prove a consumed question
+and answer across two admitted Ubuntu workers on different providers. Include
+stale/foreign/revoked/replayed rejection and verify no extra task is spawned.
+
+Do not replay research, relax SDK isolation, infer roles from owner_seat/model
+names, copy synthetic FixtureOwner into production, self-attest capabilities,
+claim a future worker is running, or label source tests as full fleet rollout.

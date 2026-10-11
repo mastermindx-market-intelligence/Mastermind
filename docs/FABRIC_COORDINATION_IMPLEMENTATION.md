@@ -105,15 +105,58 @@ invariant; this implementation does not independently prove that invariant.
 Do not call transport success, a test double, a persisted question, a wake
 request, or a merged PR proof of recipient consumption or work acceptance.
 
+## Runtime-backed identity composition
+
+`integrations/fabric_coordination_runtime.py` now supplies
+`RuntimeCoordinationObservationSource` and `build_runtime_coordination_gateway`.
+The source joins the authenticated host's organizational membership snapshot to
+actual Executive Jobs, current Attempts and admitted harness bindings. It derives
+opaque peer references from those identities instead of trusting a supplied peer
+list. Parent lineage and program identity must match canonical Job facts. Missing,
+replaced, inactive or unsupported Runtime identities cannot become live peers.
+
+Runtime reads persist no events. The public current-harness reader receives the
+same read connection as the identity join. Membership is checked again after the
+join; a semantic change refuses the observation. Refreshing a timestamp cannot
+extend the original snapshot's expiry. The digest covers actual membership and
+grants as well as Runtime identity evidence. Native handles and account labels
+are not projected.
+
+The factory reuses the existing hierarchy gateway and dispatcher. It validates
+caller membership, checks owner-supplied consultation parties against the actual
+consultation INTENT, and retains per-send Runtime revalidation. It requires the
+host's observed tool-schema digest rather than self-attesting a constant.
+
+This is not an organizational assignment issuer or a caller-authentication
+service. The production host must still supply its authenticated caller and
+canonical membership/consultation readers. The factory does not create those
+owners, enable a native transport, or replace commit-boundary authorization.
+No production host has selected this factory yet.
+
+The current canonical Runtime provider mapper at the pinned base recognizes
+`chatgpt` and `openai-codex`; the consultation protocol and native transport must
+also support a mapped surface. The native transport descriptor currently marks
+`codex-app-server` implemented but not `claude-code-session`. Adding a role policy
+or this identity join therefore does not prove mixed-provider delivery. Those
+accepted-source native transport gaps remain explicit and were not switched on.
+
 ## Verification at the current source milestone
 
-The October 11 continuation recorded **553 passed, zero failures/errors,
-zero skipped** in the existing MCP-capable Python 3.12 environment. This includes
-73 hierarchy policy cases, 39 unit gateway cases, seven new composed journey
-cases, the frozen SDK boundary tests, and existing consultation/host/identity/
-target/inbox/transport/MCP regressions. Syntax parsing and `git diff --check`
-also passed. JUnit SHA256:
-`bee24300ffb75d17cda7317f94e6d47ca66f4c0528e09fc98d8c58437d7a5e4c`.
+The latest October 11 Runtime-join continuation recorded **577 passed, zero
+failures/errors, zero skipped** in the existing MCP-capable Python 3.12 environment.
+This includes 24 new Runtime identity/factory cases, 73 hierarchy policy cases,
+39 unit gateway cases, seven earlier composed journey cases, the frozen SDK
+boundary tests, and existing consultation/host/identity/target/inbox/transport/MCP
+regressions. Syntax parsing and `git diff --check` also passed. JUnit SHA256:
+`cf341e062fa10bffbb45e7a3c5404d8dd13547600e0cc4678e7757afe906f45f`.
+
+The new factory journey derives peer identities from actual temporary Runtime
+records, then completes question, correlated reply and requester consumption
+through the real dispatcher and local socket relay. Negative cases cover false
+identities, parent/program mismatches, stale scopes, concurrent scope mutation,
+unsupported provider mapping, unobserved tool schema, and sanitized owner failures.
+Organizational membership and native-consumption signals remain synthetic inputs;
+the production authenticated membership source is not thereby proven.
 
 Hosted CI for the original candidate failed
 `test_sdk_and_runtime_dependency_boundaries_are_exact`: the runtime integration
