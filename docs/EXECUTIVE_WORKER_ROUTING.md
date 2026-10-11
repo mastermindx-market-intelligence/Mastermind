@@ -583,3 +583,21 @@ This interface never accepts a Worker id, numbered account, credential, host,
 native session, executable or provider endpoint. Capacity still chooses the
 concrete receiver, and all existing capability, authority, lease, source,
 readiness, quota and effect-reconciliation gates remain binding.
+
+Native selection uses the existing full autonomy `arm --native-return` transaction
+only after fresh full v5 acceptance at the installed source, Gate B, provider
+readiness, Runtime/service UID quiescence and an unoccupied global transaction.
+Installation must already have qualified the fixed CompanyConsultation listener
+with the readonly alias and `native_return_armed=false`. Native arm observes the
+root-owned Control LaunchDaemon's exact socket identity; it never adds a listener.
+It changes the three normal arm booleans, the fixed native alias/flag, and the
+operator quota selector. The native selector appends `.native-return` to the
+accepted readonly selector, retaining its distinct immutable Capacity class on
+the same Worker. A readonly selector exceeding 49 characters or already using
+that reserved suffix refuses before effects. The existing receipt seals the
+exact resulting Control/Worker hashes; replay must match the requested mode and
+the same installed listener. Disarm restores the readonly alias and quota and
+clears the native flag, so an ordinary later arm cannot revive native selection.
+No Runtime schema change, credential change or personal desktop enrollment is
+implied. The later native grant publication and actual exact-parent consumption
+remain separate required evidence.

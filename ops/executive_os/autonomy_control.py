@@ -184,6 +184,8 @@ _ARM_ADMISSION_CODES = frozenset(
         "transaction_incomplete",
         "uids_gate_failed",
         "workspace_binding_invalid",
+        "native_selection_invalid",
+        "native_listener_unavailable",
     }
 )
 _MAX_JSON_BYTES = 1024 * 1024
@@ -396,6 +398,7 @@ class ArmRequest:
     expected_credential_kind: str
     workspace_binding_class: str
     credential_expires_at: str
+    native_return: bool = False
 
 
 @dataclasses.dataclass(frozen=True)
@@ -521,6 +524,8 @@ class ArmAdmissionHost(Protocol):
     ) -> ReadinessEvidence: ...
 
     def load_unarmed_configs(self, expected_sha: str) -> ConfigEvidence: ...
+
+    def require_native_listener(self, config: ConfigEvidence) -> None: ...
 
     def require_runtime_quiescent(self, config: ConfigEvidence) -> None: ...
 
@@ -685,6 +690,8 @@ def _parser() -> argparse.ArgumentParser:
     )
     arm.add_argument("--workspace-binding-class", action=_StoreOnce, required=True)
     arm.add_argument("--credential-expires-at", action=_StoreOnce, required=True)
+    arm.add_argument("--native-return", action="store_true",
+                     help="Select the bounded native-return profile after full v5 acceptance; requires the installed Company listener.")
 
     arm_quiesce = sub.add_parser(
         "arm-quiesce-control-uid",
@@ -782,8 +789,41 @@ def encode_config(value: Mapping[str, Any]) -> bytes:
         raise ArmTransactionError("arm_rolled_back") from exc
 
 
+_NATIVE_QUOTA_SUFFIX = ".native-return"
+
+
+def _require_native_preselection(control: Mapping[str, Any]) -> None:
+    """Only the accepted readonly composition can enter native arm."""
+    company = control.get("company_consultation")
+    quota = control.get("coo_operator_quota_class")
+    if (control.get("coo_operator_model_alias") != "coo.operator.readonly"
+            or type(company) is not dict or company.get("armed") is not True
+            or company.get("native_return_armed", False) is not False
+            or not isinstance(quota, str)
+            or re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,48}", quota) is None
+            or quota.endswith(_NATIVE_QUOTA_SUFFIX)):
+        raise ArmAdmissionError("native_selection_invalid")
+
+
+def _native_selection_matches(control: Mapping[str, Any], native_return: bool) -> bool:
+    company = control.get("company_consultation", {})
+    if type(company) is not dict:
+        return False
+    selected = control.get("coo_operator_model_alias") == "coo.operator.native-return"
+    flag = company.get("native_return_armed", False)
+    if type(flag) is not bool or selected != flag or selected != native_return:
+        return False
+    if selected:
+        quota = control.get("coo_operator_quota_class")
+        return (isinstance(quota, str) and quota.endswith(_NATIVE_QUOTA_SUFFIX)
+                and re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,48}",
+                                 quota[:-len(_NATIVE_QUOTA_SUFFIX)]) is not None
+                and company.get("armed") is True)
+    return True
+
+
 def derive_candidate_configs(
-    configs: ConfigEvidence, *, armed: bool
+    configs: ConfigEvidence, *, armed: bool, native_return: bool = False
 ) -> CandidateConfigs:
     control_value = copy.deepcopy(dict(configs.control))
     worker_value = copy.deepcopy(dict(configs.worker))
@@ -793,6 +833,23 @@ def derive_candidate_configs(
         or not isinstance(worker_value.get("operator_harness_armed"), bool)
     ):
         raise ArmTransactionError("arm_rolled_back")
+    if type(native_return) is not bool or (native_return and not armed):
+        raise ArmAdmissionError("native_selection_invalid")
+    if native_return:
+        _require_native_preselection(control_value)
+        control_value["coo_operator_model_alias"] = "coo.operator.native-return"
+        # The incumbent registry refuses mutating an existing quota policy.
+        # A reversible, distinct selector preserves the accepted readonly class.
+        control_value["coo_operator_quota_class"] += _NATIVE_QUOTA_SUFFIX
+        control_value["company_consultation"]["native_return_armed"] = True
+    elif control_value.get("coo_operator_model_alias") == "coo.operator.native-return":
+        if not _native_selection_matches(control_value, True):
+            raise ArmAdmissionError("native_selection_invalid")
+        control_value["coo_operator_model_alias"] = "coo.operator.readonly"
+        control_value["coo_operator_quota_class"] = control_value["coo_operator_quota_class"][:-len(_NATIVE_QUOTA_SUFFIX)]
+        control_value["company_consultation"]["native_return_armed"] = False
+    elif not _native_selection_matches(control_value, False):
+        raise ArmAdmissionError("native_selection_invalid")
     control_value["coo_autonomy_armed"] = armed
     control_value["coo_operator_harness_armed"] = armed
     worker_value["operator_harness_armed"] = armed
@@ -1503,6 +1560,8 @@ def evaluate_arm_admission(
 ) -> ArmAdmission:
     """Evaluate all arm gates in fixed order without mutating host state."""
 
+    if type(request.native_return) is not bool:
+        raise ArmAdmissionError("native_selection_invalid")
     _request_expiry(request, now=now)
     host.require_exact_install(request.expected_sha)
     acceptance_digest = host.validate_acceptance(request.expected_sha)
@@ -1515,6 +1574,9 @@ def evaluate_arm_admission(
     host.require_services_stopped()
     host.require_service_uids_quiescent()
     host.require_transaction_absent()
+    if request.native_return:
+        _require_native_preselection(configs.control)
+        host.require_native_listener(configs)
     return ArmAdmission(
         expected_sha=request.expected_sha,
         acceptance_receipt_sha256=acceptance_digest,
@@ -1537,6 +1599,8 @@ def evaluate_arm_admission(
 def execute_arm(
     host: TransactionHost, request: ArmRequest, *, now: datetime
 ) -> TransactionResult:
+    if type(request.native_return) is not bool:
+        raise ArmAdmissionError("native_selection_invalid")
     existing = host.existing_arm(request, now=now)
     if existing is not None:
         return existing
@@ -1545,7 +1609,8 @@ def execute_arm(
         transaction_id=host.new_transaction_id(),
         expected_sha=request.expected_sha,
         prior_configs=admission.configs,
-        candidates=derive_candidate_configs(admission.configs, armed=True),
+        candidates=derive_candidate_configs(admission.configs, armed=True,
+                                            native_return=request.native_return),
         admission=admission,
     )
     try:
@@ -2601,6 +2666,21 @@ class ProductionArmHost(ProductionStatusHost):
             worker_bytes=worker_raw,
         )
 
+    def require_native_listener(self, config: ConfigEvidence) -> None:
+        # Installation owns the listener. Arm only observes its fixed root-owned
+        # launchd binding, after exact install and the full acceptance gates.
+        from scripts.executive_os_phase1c import company_consultation_launchd_entry, ServiceError
+        try:
+            expected = company_consultation_launchd_entry(config.control)
+            raw, _info = _read_root_file(CONTROL_PLIST, modes=frozenset({0o644}), gid=0)
+            value = plistlib.loads(raw)
+            sockets = value.get("Sockets", {})
+            if (expected is None or type(sockets) is not dict
+                    or sockets.get("CompanyConsultation") != expected):
+                raise ArmAdmissionError("native_listener_unavailable")
+        except (HostControlError, OSError, ValueError, plistlib.InvalidFileException, ServiceError) as exc:
+            raise ArmAdmissionError("native_listener_unavailable") from exc
+
     def require_runtime_quiescent(self, config: ConfigEvidence) -> None:
         try:
             from control_plane.executive_runtime import Runtime
@@ -3320,6 +3400,16 @@ class ProductionTransactionHost(ProductionArmHost):
             != request.credential_expires_at
         ):
             raise ArmAdmissionError("changed_arm_evidence")
+        try:
+            control, _worker, control_digest, worker_digest, _cr, _wr = self._configs()
+        except (HostControlError, OSError) as exc:
+            raise ArmAdmissionError("changed_arm_evidence") from exc
+        if (control_digest != snapshot.control_config_sha256
+                or worker_digest != snapshot.worker_config_sha256
+                or not _native_selection_matches(control, request.native_return)):
+            raise ArmAdmissionError("changed_arm_evidence")
+        if request.native_return:
+            self.require_native_listener(ConfigEvidence(control_digest, worker_digest, control, _worker, _cr, _wr))
         return TransactionResult(
             state="ARMED",
             status="ARMED_READY",
@@ -5072,6 +5162,7 @@ def main(
                     expected_credential_kind=args.expected_credential_kind,
                     workspace_binding_class=args.workspace_binding_class,
                     credential_expires_at=args.credential_expires_at,
+                    native_return=args.native_return,
                 ),
                 now=current,
             )
