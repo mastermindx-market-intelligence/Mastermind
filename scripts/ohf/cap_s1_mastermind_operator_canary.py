@@ -1419,6 +1419,7 @@ def run_canary(
     scratch_root: Path,
     operation_id: str,
     protected_join: str,
+    rich_write_candidate: bool = False,
     client_factory=None,
     run_command: Callable[..., Any] = subprocess.run,
 ) -> CanaryEvidence:
@@ -1435,6 +1436,15 @@ def run_canary(
         )
     if backend not in ("fake", "live"):
         raise ValueError(f"unsupported backend: {backend!r}")
+    if type(rich_write_candidate) is not bool:
+        raise ValueError("rich_write_candidate must be a boolean")
+    # A new write-capable source profile is qualified only with the fake
+    # App Server in this stage. Real account/worker/runtime admission is an
+    # independent, currently held capability proof -- never implicit here.
+    if rich_write_candidate and backend != "fake":
+        raise CanaryStop(
+            "PROVIDER_REALM_UNAVAILABLE", "rich write candidate is fake-only"
+        )
 
     repo_root = Path(repo_root)
     scratch_root = Path(scratch_root)
@@ -1591,6 +1601,8 @@ def run_canary(
         cleanup_actions.append(("workspace", lambda: _cleanup_dir_action(workspace)))
         if backend == "fake":
             extra_env["OHF_FAKE_WORKSPACE"] = str(workspace)
+            if rich_write_candidate:
+                extra_env["OHF_FAKE_SANDBOX_MODE"] = "workspace-write"
 
         # --- exact reviewed source package + V4 profile -------------------
         # Residual refusal row (CAP-S1 Sol review item 3): every step here
@@ -1601,9 +1613,15 @@ def run_canary(
         # failure vocabulary, and fires before the provider process ever
         # starts.
         try:
-            fixture_path = repo_root / V4_FIXTURE_RELATIVE_PATH
+            fixture_path = repo_root / (
+                Path("scripts/ohf/fixtures/executive_agent_capabilities_v4_rich_write_operator.json")
+                if rich_write_candidate else V4_FIXTURE_RELATIVE_PATH
+            )
             registry = ExecutionCapabilityRegistry.load(fixture_path, source_root=repo_root)
-            profile = registry.resolve(PROFILE_ID)
+            profile = registry.resolve(
+                "operator.appserver.write.mastermind-operator.v1"
+                if rich_write_candidate else PROFILE_ID
+            )
             raw_document = json.loads(fixture_path.read_text(encoding="utf-8"))
             raw_package = raw_document["capability_packages"][PACKAGE_CAPABILITY_ID]
             generation = build_capability_package_generation(
@@ -1728,7 +1746,7 @@ def run_canary(
             # for Sol -- an honest CONFIG_DRIFT refusal there is the correct
             # outcome, never special-cased away here.
             expected_config_digest=profile.expected_config_digest,
-            network_policy="disabled",
+            network_policy=profile.network_policy,
             base_sha_resolver=lambda _path: workspace_base_sha,
             client_factory=adapter_client_factory,
             extra_env=adapter_extra_env,
@@ -1758,13 +1776,14 @@ def run_canary(
                 ws_stat.st_uid,
                 ws_stat.st_gid,
             ),
-            sandbox_policy="read-only",
-            approval_policy="never",
-            network_policy="disabled",
+            sandbox_policy=profile.sandbox_policy,
+            approval_policy=profile.approval_policy,
+            network_policy=profile.network_policy,
             capabilities=manifest,
-            native_helper_policy=NativeHelperPolicy.DISABLED,
+            native_helper_policy=profile.native_helper_policy,
             expected_config_digest=profile.expected_config_digest,
             authority_policy_hash=_CANARY_AUTHORITY_POLICY_HASH,
+            write_capable=profile.write_capable,
         )
 
         epoch = SessionEpochRef(session_epoch_id, attempt_id, CANARY_WORKER_ID, 1)

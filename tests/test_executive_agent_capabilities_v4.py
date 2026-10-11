@@ -682,6 +682,52 @@ def test_v4_profile_refuses_codex_exec_with_skill_capabilities(tmp_path):
         ExecutionCapabilityRegistry.load(_write(tmp_path, raw), source_root=REPO_ROOT)
 
 
+def test_v4_rich_operator_attests_explicit_workspace_write_network_config():
+    """Fail closed on any missing or wider effective workspace-write settings."""
+    from control_plane.executive_agent_capabilities import (
+        app_server_security_config_digest,
+    )
+    from control_plane.codex_operator_adapter import _observed_network_state
+
+    p = REPO_ROOT / "scripts/ohf/fixtures/executive_agent_capabilities_v4_rich_write_operator.json"
+    profile = ExecutionCapabilityRegistry.load(p, source_root=REPO_ROOT).resolve(
+        "operator.appserver.write.mastermind-operator.v1"
+    )
+    expected = profile.app_server_config_projection()
+    assert expected["sandbox_workspace_write"] == {
+        "network_access": False,
+        "writable_roots": [],
+        "exclude_slash_tmp": True,
+        "exclude_tmpdir_env_var": True,
+    }
+    observed = {**expected, "sandbox_mode": "workspace-write", "approval_policy": "never"}
+    assert app_server_security_config_digest(observed) == profile.expected_config_digest
+    assert _observed_network_state(observed) == "disabled"
+    override_names = profile.app_server_config_overrides()
+    assert 'sandbox_mode="workspace-write"' in override_names
+    assert "sandbox_workspace_write.network_access=false" in override_names
+    for invalid in (None, True, "false"):
+        bad = copy.deepcopy(observed)
+        if invalid is None:
+            del bad["sandbox_workspace_write"]["network_access"]
+        else:
+            bad["sandbox_workspace_write"]["network_access"] = invalid
+        assert app_server_security_config_digest(bad) != profile.expected_config_digest
+        assert _observed_network_state(bad) is None
+    for field, replacement in (
+        ("writable_roots", ["/tmp/unadmitted"]),
+        ("exclude_slash_tmp", False),
+        ("exclude_tmpdir_env_var", False),
+    ):
+        bad = copy.deepcopy(observed)
+        bad["sandbox_workspace_write"][field] = replacement
+        assert app_server_security_config_digest(bad) != profile.expected_config_digest
+    bad = copy.deepcopy(observed)
+    del bad["sandbox_workspace_write"]
+    assert app_server_security_config_digest(bad) != profile.expected_config_digest
+    assert _observed_network_state(bad) is None
+
+
 def test_v4_rich_operator_candidate_is_a_real_but_unarmed_source_profile():
     """Stage a pinned package+write composition without changing the default.
 

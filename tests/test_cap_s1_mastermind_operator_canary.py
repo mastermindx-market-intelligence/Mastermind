@@ -2082,6 +2082,55 @@ def test_build_synthetic_workspace_unexpected_error_rolls_back_workspace(
 # ---------------------------------------------------------------------------
 
 
+def test_rich_write_skill_profile_runs_full_fake_app_server_journey(tmp_path) -> None:
+    """Source-qualified V4 write+Skills must survive real adapter launch and turn.
+
+    The disposable fake App Server executes all four typed Skill turns and the
+    real projection lifecycle.  This is NOT live provider or runtime admission.
+    """
+    from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry
+
+    scratch = tmp_path / "rich-write-cap-s1"
+    scratch.mkdir()
+    evidence = run_canary(
+        backend="fake",
+        binary_path=None, codex_home=None, repo_root=REPO_ROOT,
+        scratch_root=scratch, operation_id="cap-s1-rich-write-fake",
+        protected_join="c" * 40,
+        client_factory=_canary_client_factory(replies=list(_HAPPY_REPLIES)),
+        run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
+        rich_write_candidate=True,
+    )
+    profile = ExecutionCapabilityRegistry.load(
+        REPO_ROOT / "scripts/ohf/fixtures/"
+        "executive_agent_capabilities_v4_rich_write_operator.json",
+        source_root=REPO_ROOT,
+    ).resolve("operator.appserver.write.mastermind-operator.v1")
+    assert profile.write_capable is True
+    assert evidence.launch_decision == "ALLOW"
+    assert evidence.app_server_config_digest == profile.expected_config_digest
+    assert all(ok for _skill, ok in evidence.turn_marker_results)
+    assert len(evidence.skill_closure_digests) == 4
+    assert evidence.after_clear_enabled_names == ()
+    cleanup = _cleanup_map(evidence.cleanup)
+    assert all(cleanup[name] == (True, True) for name in
+               ("schema", "workspace", "origin", "projection", "attempt", "thread"))
+
+
+def test_rich_write_fake_canary_refuses_live_provider_before_effect(tmp_path) -> None:
+    scratch = tmp_path / "rich-write-live-refusal"
+    with pytest.raises(CanaryStop) as exc:
+        run_canary(
+            backend="live", binary_path=None, codex_home=None,
+            repo_root=REPO_ROOT, scratch_root=scratch,
+            operation_id="cap-s1-rich-write-no-live", protected_join="c" * 40,
+            client_factory=_canary_client_factory(replies=list(_HAPPY_REPLIES)),
+            rich_write_candidate=True,
+        )
+    assert exc.value.code == "PROVIDER_REALM_UNAVAILABLE"
+    assert not scratch.exists()
+
+
 def test_run_canary_fake_backend_happy_path_four_turn_journey(tmp_path) -> None:
     scratch = tmp_path / "scratch-happy"
     scratch.mkdir()

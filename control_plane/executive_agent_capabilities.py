@@ -737,7 +737,7 @@ def app_server_security_config_projection(
             "enabled": agents.get("enabled") if isinstance(agents, Mapping) else None
         }
 
-    return {
+    projected: dict[str, object] = {
         "agents": agent_projection,
         "features": {
             key: features.get(key) if isinstance(features, Mapping) else None
@@ -747,6 +747,23 @@ def app_server_security_config_projection(
         "plugins": plugin_projection,
         "skills": skills_block,
     }
+    # Only the opt-in workspace-write profile projects this namespace; old V3
+    # read-only config/digests retain their exact established JSON shape.
+    # Presence matters: omitting this table is not proof that the sandbox has
+    # no network or supplemental writable roots.
+    if "sandbox_workspace_write" in root:
+        raw_write = root.get("sandbox_workspace_write")
+        if isinstance(raw_write, Mapping):
+            roots = raw_write.get("writable_roots")
+            projected["sandbox_workspace_write"] = {
+                "exclude_slash_tmp": raw_write.get("exclude_slash_tmp"),
+                "exclude_tmpdir_env_var": raw_write.get("exclude_tmpdir_env_var"),
+                "network_access": raw_write.get("network_access"),
+                "writable_roots": list(roots) if isinstance(roots, list) else None,
+            }
+        else:
+            projected["sandbox_workspace_write"] = {"invalid": True}
+    return projected
 
 
 def app_server_security_config_digest(config: Mapping[str, Any] | None) -> str:
@@ -876,7 +893,7 @@ class ExecutionCapabilityProfile:
                 ),
                 "non_code_mode_only": False,
             }
-        return {
+        projection = {
             "agents": agents,
             "features": {
                 "apps": False,
@@ -907,6 +924,14 @@ class ExecutionCapabilityProfile:
                 else {"config": None}
             ),
         }
+        if self.execution_surface == "codex-app-server" and self.write_capable:
+            projection["sandbox_workspace_write"] = {
+                "network_access": False,
+                "writable_roots": [],
+                "exclude_slash_tmp": True,
+                "exclude_tmpdir_env_var": True,
+            }
+        return projection
 
     @property
     def expected_config_digest(self) -> str:
@@ -1002,6 +1027,17 @@ class ExecutionCapabilityProfile:
             values.extend(grant.config_overrides())
         if self.skill_grants:
             values.append("skills.bundled.enabled=false")
+        if self.write_capable:
+            # Real Codex App Server configuration (not a task prompt) must
+            # explicitly exclude ambient writable tmp roots and command
+            # networking before the requested workspace-write sandbox runs.
+            values.extend((
+                'sandbox_mode="workspace-write"',
+                "sandbox_workspace_write.network_access=false",
+                "sandbox_workspace_write.writable_roots=[]",
+                "sandbox_workspace_write.exclude_slash_tmp=true",
+                "sandbox_workspace_write.exclude_tmpdir_env_var=true",
+            ))
         return tuple(values)
 
     def capability_manifest(self, *, harness_binary_digest: str) -> CapabilityManifest:

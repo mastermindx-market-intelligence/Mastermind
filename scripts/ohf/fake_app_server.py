@@ -51,6 +51,9 @@ class FakeAppServer:
         self.ambient_skill = os.environ.get("OHF_FAKE_AMBIENT_SKILL") or ""
         self.skills_changed_notify = os.environ.get("OHF_FAKE_SKILLS_CHANGED") == "1"
         self.bundled_disabled = os.environ.get("OHF_FAKE_BUNDLED_DISABLED") == "1"
+        self.sandbox_mode = os.environ.get("OHF_FAKE_SANDBOX_MODE") or "read-only"
+        if self.sandbox_mode not in {"read-only", "workspace-write"}:
+            raise ValueError("fake App Server sandbox mode is invalid")
         self.cap_s1_turn_replies = os.environ.get("OHF_FAKE_CAP_S1_TURN_REPLIES") == "1"
         self.native_helper = os.environ.get("OHF_FAKE_NATIVE_HELPER") == "1"
         self.native_helper_depth = int(
@@ -651,12 +654,21 @@ class FakeAppServer:
             config: dict[str, Any] = {
                 "model": self.model,
                 "approval_policy": "never",
-                "sandbox_mode": "read-only",
+                "sandbox_mode": self.sandbox_mode,
                 "agents": agents,
                 "features": features,
                 "mcp_servers": {name: {"command": "python3"} for name in mcp},
                 "plugins": {},
             }
+            if self.sandbox_mode == "workspace-write":
+                # Fake-only echo of the reviewed CLI config overrides. This
+                # is not kernel network or filesystem enforcement evidence.
+                config["sandbox_workspace_write"] = {
+                    "network_access": False,
+                    "writable_roots": [],
+                    "exclude_slash_tmp": True,
+                    "exclude_tmpdir_env_var": True,
+                }
             if self.bundled_disabled:
                 skills_config = dict(config.get("skills") or {})
                 skills_config["bundled"] = {"enabled": False}
