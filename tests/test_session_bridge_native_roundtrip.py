@@ -72,8 +72,8 @@ def test_real_relay_original_parent_roundtrip(scenario, native_role):
                 replies = await asyncio.gather(make_writer()(arguments()), make_writer()(arguments()))
                 assert len({r["message_key"] for r in replies}) == 1
             elif scenario == "lost_response":
-                async def lose_response(socket_path, payload):
-                    response = await call_service(socket_path, payload)
+                async def lose_response(socket_path, payload, *, before_write=None):
+                    response = await call_service(socket_path, payload, before_write=before_write)
                     if payload["operation"] == "send_message":
                         raise TimeoutError("simulated post-commit client response loss")
                     return response
