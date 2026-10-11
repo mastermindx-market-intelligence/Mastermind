@@ -125,3 +125,19 @@ def test_completion_mode_rejects_false_progress_and_review_churn() -> None:
     )
     for phrase in required:
         assert phrase in plan, f"missing anti-churn rule: {phrase}"
+
+
+def test_native_merge_queue_owns_final_integrated_checks_without_prequeue_circular_gate() -> None:
+    spec = _normalized('docs/superpowers/specs/2026-09-02-autonomy-release-compatibility-review-reuse.md')
+    review = _normalized('docs/sol_skills/REVIEW_RETURN.md')
+    reconcile = _normalized('docs/sol_skills/RECONCILE_STATE.md')
+    delivery = _normalized('docs/DELIVERY_WORKFLOW.md')
+    assert 'absence of prequeue check runs' in spec
+    assert 'after queue entry' in spec
+    assert 'before the actual merge' in spec
+    assert 'merge_group' in review
+    assert 'before queue admission' in reconcile
+    assert 'do not require nonexistent prequeue merge-ref check runs' in reconcile
+    assert 'do not add a manual synthetic PR merge-ref check requirement' in delivery
+    assert 'If final integrated checks fail, the queue must not merge' in delivery
+    assert 'review pass and queue entry is authorized' in delivery

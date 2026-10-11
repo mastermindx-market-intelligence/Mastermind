@@ -57,9 +57,12 @@ worktree and move only the task's deliberate edits there.
    Queued CI is not a failing build, and do not push empty/rebase-only commits to restart CI.
    Without a usable observer, continue useful foreground work and check once at the next real
    integration boundary. Never claim a background Web turn or automatic wake that does not exist.
-6. After required exact-candidate checks and review pass, and merge is authorized, merge
-   through GitHub. A status query is not permission to merge; preserve current head/concurrency
-   checks and never use an admin bypass:
+6. After required PR-head checks and review pass and queue entry is authorized, use the
+   repository's native GitHub merge queue when enabled. The active queue's `merge_group`
+   workflow qualifies the exact integrated candidate after queue entry and **before merge**;
+   do not add a manual synthetic PR merge-ref check requirement or ancestry-only rebase as
+   a precondition to queue entry. If final integrated checks fail, the queue must not merge.
+   Preserve current head/concurrency checks and never use an admin bypass:
 
    ```bash
    gh pr checks --required
