@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -16,6 +17,58 @@ PULSE_KEYS = {"schema", "projection", "snapshot_id", "generated_at", "source_own
 ITEM_KEYS = {"symbol", "price", "change_abs", "change_pct", "currency", "session", "freshness",
              "observed_at", "received_at", "published_at", "regular_session_date", "revision"}
 COVERAGE_KEYS = {"requested", "resolved", "live", "delayed", "stale", "missing"}
+
+
+# Macro owns the live breadth usable decision; file mtime cannot establish
+# producer freshness. Only reviewed, bounded public fields cross MCP.
+_BREADTH_FEED_STATUSES = frozenset({
+    "ok", "not_authorized", "error", "no_response", "offline", "no_key", "no_thresholds",
+})
+_BREADTH_SOURCE_FIELDS = frozenset({"usable", "feed_status", "source_asof", "source_age_min"})
+_BREADTH_OMITTED_FIELDS = frozenset({
+    "schema", "unusable_reason", "session", "delay_min", "producer",
+    "coverage_n", "coverage_pct", "adv", "dec",
+})
+_GENERIC_STATUS_FIELDS = frozenset({"status", "error", "built", "as_of", "commit_time",
+                                    "age_min", "commit"}) | frozenset(COUNTS)
+
+
+def _breadth_semantics(source: dict, now: datetime) -> dict[str, Any]:
+    """Project only closed producer semantics and avoid raw failure strings."""
+    raw_usable = source.get("usable")
+    if raw_usable is None:
+        usable, usable_status = None, "unknown"
+    elif type(raw_usable) is bool:
+        usable, usable_status = raw_usable, "observed"
+    else:
+        usable, usable_status = None, "invalid"
+
+    raw_feed = source.get("feed_status")
+    if raw_feed is None:
+        feed_status = "unknown"
+    elif type(raw_feed) is not str:
+        feed_status = "invalid"
+    else:
+        feed_status = raw_feed if raw_feed in _BREADTH_FEED_STATUSES else "other"
+
+    raw_age = source.get("source_age_min")
+    if raw_age is None:
+        age, age_status = None, "unknown"
+    else:
+        age = finite(raw_age)  # preserve negative producer clock skew
+        age_status = "observed" if age is not None else "invalid"
+
+    known = _GENERIC_STATUS_FIELDS | _BREADTH_SOURCE_FIELDS | _BREADTH_OMITTED_FIELDS
+    return {
+        "usable": usable,
+        "usable_status": usable_status,
+        "feed_status": feed_status,
+        "source_asof": time_observation(source.get("source_asof"), now),
+        "source_age_minutes": age,
+        "source_age_status": age_status,
+        "omitted_known_field_count": len(set(source) & _BREADTH_OMITTED_FIELDS),
+        "unrecognized_field_count": len(set(source) - known),
+    }
 
 
 def _health(value: dict, now: datetime) -> dict:
@@ -48,10 +101,39 @@ def _status(value: dict, now: datetime) -> dict:
         state = "unavailable" if "error" in source else source.get("status", "observed")
         if state not in {"missing", "unavailable", "invalid", "ok", "observed", "stale", "partial"}:
             state = "unknown"
-        checks[name] = {"state": state, "source_time": time_observation(stamp, now),
-                        "file_age_minutes": finite(source.get("age_min"), nonnegative=True),
-                        "commit": revision(source.get("commit")),
-                        "counts": {k: count(source.get(k)) for k in COUNTS}}
+        check = {"state": state, "source_time": time_observation(stamp, now),
+                 "file_age_minutes": finite(source.get("age_min"), nonnegative=True),
+                 "commit": revision(source.get("commit")),
+                 "counts": {k: count(source.get(k)) for k in COUNTS}}
+        if name == "breadth":
+            # The upstream producer owns the usable decision. Source freshness
+            # and semantic status are not equivalent to artifact file age.
+            semantic = _breadth_semantics(source, now)
+            check["producer_semantics"] = semantic
+            if state not in {"missing", "unavailable", "invalid"}:
+                if (semantic["usable_status"] == "invalid"
+                        or semantic["feed_status"] == "invalid"
+                        or semantic["source_age_status"] == "invalid"
+                        or semantic["source_asof"]["status"] == "invalid"
+                        or ("schema" in source and source["schema"] != "live.breadth.v1")):
+                    check["state"] = "invalid"
+                elif semantic["usable"] is False:
+                    # An explicit producer refusal stays unavailable even if
+                    # optional metadata has a new/unknown vocabulary.
+                    check["state"] = "unavailable"
+                elif (semantic["usable_status"] == "unknown"
+                        or semantic["feed_status"] in {"unknown", "other"}
+                        or "schema" not in source):
+                    check["state"] = "unknown"
+                elif (semantic["feed_status"] != "ok"
+                        or source.get("session") == "closed"):
+                    check["state"] = "invalid"
+                elif (semantic["source_age_status"] != "observed"
+                        or semantic["source_asof"]["status"] != "observed"
+                        or type(source.get("session")) is not str
+                        or not source["session"]):
+                    check["state"] = "unknown"
+        checks[name] = check
     return {"reported_status": "ok" if value["status"] == "ok" else "unknown",
             "process_revision": revision(value["commit"]), "checks": checks,
             "omitted_check_count": len(value["checks"]) - len(checks),
@@ -104,7 +186,8 @@ def _pulse(value: dict, now: datetime, symbols: tuple[str, ...]) -> dict:
             raise ValueError("invalid_currency")
         day = row["regular_session_date"]
         if day is not None:
-            if type(day) is not str or len(day) != 10:
+            if (type(day) is not str or len(day) != 10
+                    or re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", day) is None):
                 raise ValueError("invalid_session_date")
             datetime.strptime(day, "%Y-%m-%d")
         fresh_counts[row["freshness"]] += 1

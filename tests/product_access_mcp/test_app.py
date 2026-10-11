@@ -295,7 +295,7 @@ class ProductAppTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_catalog_schema_snapshot_is_pinned(self):
         from integrations.product_access_mcp.schemas import SCHEMA_SNAPSHOT_SHA256, TOOL_SPECS
-        self.assertEqual(SCHEMA_SNAPSHOT_SHA256, "fbf9ae8b688264d0772a3c64ca4327ad4afe4adf2f4be948e5a72f6efc6b8123")
+        self.assertEqual(SCHEMA_SNAPSHOT_SHA256, "62b935d4f89f6b377dc51eb5968e236fdd08ce03c4008be62377b83c168aebc6")
         tools = self.result(await self.rpc("tools/list", token=self.token()))["tools"]
         self.assertEqual(tools, list(TOOL_SPECS))
 

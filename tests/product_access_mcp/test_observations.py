@@ -109,6 +109,27 @@ class ObservationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(observation["access_class"], "public")
         self.assertNotEqual(observation["observed_at"], STAMP)
 
+    async def test_date_only_field_must_match_json_schema_wire_grammar(self):
+        from jsonschema import Draft202012Validator, FormatChecker
+        from integrations.product_access_mcp.schemas import TOOL_SPECS
+        spec = next(x for x in TOOL_SPECS if x["name"] == "product_market_pulse")
+        validator = Draft202012Validator(spec["outputSchema"], format_checker=FormatChecker())
+        for day in ("2026-10- 1", "2026-W41-5", "2026-02-30", "2026/10/09", "2026-10-9"):
+            with self.subTest(invalid_day=day):
+                self.payloads["market_pulse"] = pulse()
+                self.payloads["market_pulse"]["items"][0]["regular_session_date"] = day
+                result = await self.reader.market_pulse(["SPY"])
+                self.assertEqual(result["observations"][0]["state"], "invalid")
+                self.assertIsNone(result["observations"][0]["data"])
+                validator.validate(result)
+        for day in ("2026-10-09", "2024-02-29"):
+            with self.subTest(valid_day=day):
+                self.payloads["market_pulse"] = pulse()
+                self.payloads["market_pulse"]["items"][0]["regular_session_date"] = day
+                result = await self.reader.market_pulse(["SPY"])
+                self.assertEqual(result["observations"][0]["state"], "observed")
+                validator.validate(result)
+
     async def test_missing_quote_timestamp_is_explicitly_unknown(self):
         self.payloads["market_pulse"]["items"][0]["observed_at"] = None
         result = await self.reader.market_pulse(["SPY"])

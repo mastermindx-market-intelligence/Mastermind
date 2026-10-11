@@ -7,7 +7,7 @@ import json
 from .contracts import ENDPOINTS, MAX_SYMBOLS, SCHEMA, SYMBOL_PATTERN
 from .reader import CHECKS, COUNTS
 
-SERVER_VERSION = "1.0.0"
+SERVER_VERSION = "1.1.0"
 SCOPE = "product.observe"
 
 
@@ -26,11 +26,27 @@ STAMP = obj({"value": nullable({"type": "string", "format": "date-time", "maxLen
              "status": {"enum": ["unknown", "invalid", "future", "observed"]}, "age_seconds": NUMBER})
 HEALTH = obj({"reported_status": {"const": "ok"}, "process_revision": REVISION, "checkout_revision": REVISION,
               "checkout_drift": {"type": ["boolean", "null"]}, "exact_deployment_verified": {"const": False}})
+CHECK_COUNTS = obj({k: COUNT for k in COUNTS})
 CHECK = obj({"state": {"enum": ["missing", "unavailable", "invalid", "ok", "observed", "stale", "partial", "unknown"]},
              "source_time": STAMP, "file_age_minutes": nullable({"type": "number", "minimum": 0}),
-             "commit": REVISION, "counts": obj({k: COUNT for k in COUNTS})})
+             "commit": REVISION, "counts": {"$ref": "#/$defs/check_counts"}})
+# Breadth's source usability is an existing producer adjudication, never inferred
+# from a recently copied artifact. All output fields remain closed.
+BREADTH_SEMANTICS = obj({
+    "usable": nullable({"type": "boolean"}),
+    "usable_status": {"enum": ["observed", "unknown", "invalid"]},
+    "feed_status": {"enum": ["ok", "not_authorized", "error", "no_response", "offline",
+                            "no_key", "no_thresholds", "unknown", "invalid", "other"]},
+    "source_asof": STAMP,
+    "source_age_minutes": NUMBER,
+    "source_age_status": {"enum": ["observed", "unknown", "invalid"]},
+    "omitted_known_field_count": {"type": "integer", "minimum": 0, "maximum": 32},
+    "unrecognized_field_count": {"type": "integer", "minimum": 0, "maximum": 2**53 - 1},
+})
+BREADTH_CHECK = obj({**CHECK["properties"], "producer_semantics": BREADTH_SEMANTICS})
+
 STATUS = obj({"reported_status": {"enum": ["ok", "unknown"]}, "process_revision": REVISION,
-              "checks": {"type": "object", "properties": {k: {"$ref": "#/$defs/check"} for k in sorted(CHECKS)}, "additionalProperties": False},
+              "checks": {"type": "object", "properties": {k: {"$ref": "#/$defs/breadth_check" if k == "breadth" else "#/$defs/check"} for k in sorted(CHECKS)}, "additionalProperties": False},
               "omitted_check_count": {"type": "integer", "minimum": 0, "maximum": 64},
               "freshness_policy": {"const": "unknown; source timestamps and file age are observations, not currentness proof"}})
 ITEM = obj({"symbol": {"type": "string", "pattern": "^" + SYMBOL_PATTERN + "$"},
@@ -74,7 +90,7 @@ def output(tool, rows):
                                    "source-reported freshness is not recomputed or guaranteed current",
                                    "exact deployment and preview revisions are not verified"]}})
     if tool == "product_diagnostics":
-        schema["$defs"] = {"check": CHECK}
+        schema["$defs"] = {"check": CHECK, "breadth_check": BREADTH_CHECK, "check_counts": CHECK_COUNTS}
     return schema
 
 
