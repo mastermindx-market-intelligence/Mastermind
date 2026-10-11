@@ -392,3 +392,33 @@ def test_source_custody_rejects_writable_git_admin_and_tracked_parent(tmp_path: 
     with pytest.raises(m.EnrollmentError, match="source_directory_custody"):
         m.verify_root_source_custody(repo, expected_owner_uid=owner)
     scripts.chmod(original_scripts_mode)
+
+def test_source_custody_rejects_writable_checkout_ancestor(tmp_path: Path, monkeypatch) -> None:
+    m = _load()
+    repo, _sha, _tree = _source_repo(tmp_path)
+    owner = os.getuid()
+    # The parent owner can substitute even a root-owned read-only child path.
+    # This must refuse before the first root Git operation.
+    original_mode = stat.S_IMODE(tmp_path.lstat().st_mode)
+    tmp_path.chmod(original_mode | stat.S_IWOTH)
+    monkeypatch.setattr(m, "_git", lambda *_a, **_k: pytest.fail("git before parent custody check"))
+    try:
+        with pytest.raises(m.EnrollmentError, match="source_ancestor_custody_invalid"):
+            m.verify_root_source_custody(repo, expected_owner_uid=owner)
+    finally:
+        tmp_path.chmod(original_mode)
+
+
+def test_source_custody_rejects_symlink_or_traversal_ancestor(tmp_path: Path, monkeypatch) -> None:
+    m = _load()
+    real_parent = tmp_path / "real"
+    real_parent.mkdir()
+    repo, _sha, _tree = _source_repo(real_parent)
+    alias = tmp_path / "alias"
+    alias.symlink_to(real_parent, target_is_directory=True)
+    monkeypatch.setattr(m, "_git", lambda *_a, **_k: pytest.fail("git before parent custody check"))
+    with pytest.raises(m.EnrollmentError, match="source_ancestor_custody_invalid"):
+        m.verify_root_source_custody(alias / "repo", expected_owner_uid=os.getuid())
+    with pytest.raises(m.EnrollmentError, match="source_ancestor_custody_invalid"):
+        m.verify_root_source_custody(repo.parent / ".." / "real" / "repo", expected_owner_uid=os.getuid())
+
