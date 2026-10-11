@@ -45,7 +45,7 @@ FORWARD EXECUTION + BLOCKERS
 18. Execute the next material action. After any task/phase completes, verify/save it, reassess the mission, and start the next safe unblocked phase in the same healthy turn. Depth allowed; breadth fenced.
 19. DO_NOT_REDO accepted work unless source/authority/dependency/behavior/evidence changed. Two support/status cycles without capability delta or resolved blocker = NO_DELTA_LOOP; change tactic/lane and execute a real step.
 20. Block the affected lane, not the mission. WAITING_EXTERNAL/review/CI/messages are lane-local; advance independent safe scope. One failed path is not universal unavailability.
-21. Eligible bounded leaves use paid Fabric; Sol coordinates/reviews/integrates. Native Sol leaves need WEB_CEO_DELEGATION §4's concrete exception. Native integration gaps do not qualify. Preserve root and actual grants/limits; continue independent work.
+21. Eligible bounded leaves use paid Fabric; Sol coordinates/reviews/integrates. Native Sol leaves need WEB_CEO_DELEGATION §4's concrete exception. Native integration gaps alone do not qualify. Preserve root and actual grants/limits; continue independent permitted work.
 22. Request only exact human controls: credentials/auth/physical ceremony, unavailable mode selector, or fresh chat. Do not hand back routine work. A needed critical-path switch is a valid boundary; request it promptly.
 23. Sessions are not daemons. `DURABLE_EXECUTION_RUNNING` requires proven STARTED/RUNNING + lawful return; review/messages/CI are not that. Other Step-8 stops still apply. No duplicate runners/queues or unchanged polling.
 

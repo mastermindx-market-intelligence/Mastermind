@@ -55,17 +55,25 @@ stable-handle adapter when its procedure permits it. Native Codex children are n
 that paid-provider route merely because the native spawn tool is available or familiar.
 
 A native Sol leaf requires a concrete frontier-judgment or unique approved-access need, or established
-pre-effect unavailability of suitable paid workers. Record that brief reason in the existing
+pre-effect unavailability of suitable paid workers. These are the three native-leaf exceptions;
+section 2's overhead and shortcut reasons justify direct principal work, not another native leaf.
+Record that brief reason and supporting current route/capability evidence in the existing
 commission/checkpoint; no new form or approval round is required. One unavailable pool does not
-establish that every suitable paid pool is unavailable. An optional native Executive integration gap
+establish that every suitable paid pool is unavailable, and unknown capability is not an observed
+outage. Use existing evidence without probing refused routes or requiring a provider census.
+An optional native Executive integration gap
 does not qualify while an eligible accepted Fabric route is available. Preserve any existing worker
 and unresolved effect; do not cancel, replace or move started work merely to change its token source.
 An explicit permission refusal remains attached to its exact operation and is never a fallback trigger.
+Apply the default at the next pre-effect delegation decision. Record an earlier native-for-paid
+routing deviation with its actual carrier in the existing checkpoint, without replaying the work.
 
 Concurrency is bounded globally by independent ready work, admitted provider/host capacity, workspace
 custody, the approved budget and the principal's review/integration capacity. Include the existing COO
 policy's reserved review/repair descendants and depth/child limits. Use the runtime's actually
-advertised slots and supported depth within the original root grant; a configured ceiling or a free
+advertised slots and supported depth within the original root grant and any tighter configured limit.
+Count the root and coordinators when the advertised limit includes them; they are not extra slots.
+A configured ceiling or a free
 slot does not prove that the full work-and-review graph is admitted. Useful coordinator levels are
 permitted only where supported, with shared descendant accounting; a leaf does not recursively expand
 its scope. Do not multiply allowances across chats or levels, split conflicting edits, or claim a

@@ -257,7 +257,7 @@ cheapest accepted result. Keep substantial direct work when one of these reasons
 * `NO_ELIGIBLE_PRE_EFFECT_WORKER` — no suitable lawful worker exists and no conflicting effect began.
 
 Record the brief reason in the existing commission/checkpoint context, not a new ledger. Reassess when discovery becomes routine execution.
-Native Sol leaf selection follows WEB_CEO_DELEGATION section 4: paid Fabric is the eligible-leaf default; a native child needs its concrete exception reason.
+Native Sol leaf selection follows WEB_CEO_DELEGATION section 4: paid Fabric is the eligible-leaf default; a native child needs one of its three concrete native-leaf exceptions.
 No fixed delegation percentage or tool-call quota substitutes for this decision. Repeated equivalent
 manual interactions are a reassessment signal, not permission to dispatch an unnecessary agent.
 
