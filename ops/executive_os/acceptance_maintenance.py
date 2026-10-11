@@ -26,6 +26,8 @@ if str(_RELEASE) not in sys.path:
 from control_plane.fs_security import has_macos_acl
 
 SYSTEM_ROOT = Path("/Library/Application Support/MastermindExecutive")
+_MACOS_VAR_ALIAS = Path("/var")
+_MACOS_VAR_PHYSICAL = Path("/private/var")
 SCHEMA = "mastermind.executive_acceptance_maintenance/v1"
 SCHEMA_V2 = "mastermind.executive_acceptance_maintenance/v2"
 # Same-schema supersession is separate from the schema-migration V3 contract.
@@ -696,6 +698,29 @@ def _require_absent(path: Path) -> None:
     raise MaintenanceError("superseded release already has acceptance state")
 
 
+
+def _require_runtime_acceptance_absent(path: Path) -> None:
+    """Admit only the OS /var alias at the trusted Runtime absence-check seam."""
+    expected_parent = _MACOS_VAR_ALIAS / "db/mastermind-executive/control/acceptance"
+    if (sys.platform != "darwin" or path.parent != expected_parent
+            or _SHA.fullmatch(path.name) is None):
+        _require_absent(path)
+        return
+    alias_info = _MACOS_VAR_ALIAS.lstat()
+    if not stat.S_ISLNK(alias_info.st_mode) or alias_info.st_uid != _TRUSTED_UID:
+        raise MaintenanceError("Runtime /var alias is not trusted")
+    target = os.readlink(_MACOS_VAR_ALIAS)
+    if target not in ("private/var", os.fspath(_MACOS_VAR_PHYSICAL)):
+        raise MaintenanceError("Runtime /var alias target is not canonical")
+    physical = _MACOS_VAR_PHYSICAL / path.relative_to(_MACOS_VAR_ALIAS)
+    # Do not resolve arbitrary ancestors into acceptance: the unchanged guard
+    # rejects every further alias and still requires an exact missing leaf.
+    _require_absent(physical)
+    if (_identity(_MACOS_VAR_ALIAS.lstat()) != _identity(alias_info)
+            or os.readlink(_MACOS_VAR_ALIAS) != target):
+        raise MaintenanceError("Runtime /var alias changed during absence check")
+
+
 def legacy_backup_sidecars(path: Path) -> tuple:
     """Observe only the sealed legacy WAL/SHM metadata; read no sidecar bytes."""
     observed = []
@@ -782,7 +807,7 @@ def validate_superseded_binding(descriptor: dict, *, before: dict | None = None,
     if sealed_json(bundle/"preparing.json") != {"schema_version": SCHEMA_V2}:
         raise MaintenanceError("superseded preparation state is invalid")
     from ops.executive_os.autonomy_control import RUNTIME_ROOT
-    _require_absent(RUNTIME_ROOT/"control"/"acceptance"/selected_sha)
+    _require_runtime_acceptance_absent(RUNTIME_ROOT/"control"/"acceptance"/selected_sha)
     baseline = sealed_json(bundle/"baseline.json")
     inventory_value = sealed_json(bundle/"inventory.json")
     canary = sealed_json(bundle/"prior-secret-canary.json")
