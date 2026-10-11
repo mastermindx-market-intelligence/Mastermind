@@ -161,6 +161,13 @@ def validate_subscription_canary_claim(value: Any) -> Mapping[str, Any]:
     return frozen
 
 
+class CleanupPolicy(str, Enum):
+    """Trusted composition chooses evidence; no provider advertises isolation."""
+
+    DEDICATED_UID = "DEDICATED_UID"
+    FABRIC_PROCESS_GROUP = "FABRIC_PROCESS_GROUP"
+
+
 class WorkerRunStatus(str, Enum):
     STARTING = "STARTING"
     RUNNING = "RUNNING"

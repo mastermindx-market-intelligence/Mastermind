@@ -3873,12 +3873,18 @@ class WorkerBrokerClient:
         *,
         timeout_seconds: float = 30.0,
         max_response_bytes: int = 4 * 1024 * 1024,
+        expected_peer_uid: int | None = None,
     ) -> None:
         self.socket_path = Path(socket_path)
         if not self.socket_path.is_absolute():
             raise WorkerBrokerError("worker broker socket path must be absolute")
         self.timeout_seconds = float(timeout_seconds)
         self.max_response_bytes = int(max_response_bytes)
+        if expected_peer_uid is not None and (
+            type(expected_peer_uid) is not int or expected_peer_uid < 0
+        ):
+            raise ValueError("expected broker peer UID must be a nonnegative integer")
+        self.expected_peer_uid = expected_peer_uid
         if not 0.1 <= self.timeout_seconds <= 3600:
             raise WorkerBrokerError("worker broker client timeout is outside the safe range")
         if not 1024 <= self.max_response_bytes <= 16 * 1024 * 1024:
@@ -3913,6 +3919,13 @@ class WorkerBrokerClient:
                 limit=self.max_response_bytes,
             )
             try:
+                # Authenticate the service before sending prompts or grant-bound
+                # requests. The optional check preserves existing clients while
+                # allowing a fixed cross-principal bridge to bind both peers.
+                if self.expected_peer_uid is not None:
+                    peer = writer.get_extra_info("socket")
+                    if peer is None or get_peer_credentials(peer).uid != self.expected_peer_uid:
+                        raise PeerAuthorizationError("broker peer UID differs from trusted binding")
                 writer.write(encoded)
                 await writer.drain()
                 raw = await reader.readline()

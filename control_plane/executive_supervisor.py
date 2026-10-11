@@ -37,6 +37,7 @@ from typing import Any, Callable, Mapping, Protocol, Sequence
 from uuid import uuid4
 
 from control_plane.worker_execution_contract import (
+    CleanupPolicy,
     LAUNCH_ATTESTATION_SCHEMA_VERSION,
     CollectionReceipt,
     OrchestrationLaunchSpec,
@@ -501,10 +502,13 @@ class ReconcileReceipt:
     uid_sweep_receipt_path: str | None = None
     assignment_seal_receipt_path: str | None = None
     error: str | None = None
+    fabric_cleanup_receipt_path: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         value = dataclasses.asdict(self)
         value["status"] = self.status.value
+        if self.fabric_cleanup_receipt_path is None:
+            value.pop("fabric_cleanup_receipt_path")
         return value
 
 
@@ -1175,6 +1179,7 @@ class ExecutiveSupervisor:
         shared_run_gid: int | None = None,
         secret_canary_verdict: Mapping[str, Any] | None = None,
         require_complete_launch_attestation: bool = False,
+        cleanup_policy: CleanupPolicy = CleanupPolicy.DEDICATED_UID,
         heartbeat_interval_seconds: float | None = None,
         inspector: ProcessInspector | None = None,
         process_controller: PersistedProcessController | None = None,
@@ -1187,6 +1192,20 @@ class ExecutiveSupervisor:
         subscription_canary_binding_id: str | None = None,
     ) -> None:
         self.runtime = runtime
+        if type(cleanup_policy) is not CleanupPolicy:
+            raise SupervisorError("cleanup policy requires a typed trusted composition")
+        if cleanup_policy is CleanupPolicy.FABRIC_PROCESS_GROUP:
+            from control_plane.executive_fabric_adapter import AttendedFabricWorkerAdapter
+
+            if (type(adapter) is not AttendedFabricWorkerAdapter
+                    or adapter.runtime is not runtime
+                    or require_complete_launch_attestation is not True
+                    or (process_controller is not None and process_controller is not adapter)):
+                raise SupervisorError(
+                    "Fabric cleanup requires the exact reviewed adapter, Runtime, "
+                    "complete launch attestation and original remote process owner"
+                )
+        self.cleanup_policy = cleanup_policy
         if exact_target_provider is not None and not callable(exact_target_provider):
             raise SupervisorError("exact worker target provider must be callable")
         self._exact_target_provider = exact_target_provider
@@ -1239,8 +1258,9 @@ class ExecutiveSupervisor:
         if self.heartbeat_interval_seconds <= 0:
             raise SupervisorError("heartbeat interval must be positive")
         self.inspector = inspector or adapter.inspector
-        self.process_controller = process_controller or IdentitySafeProcessController(
-            self.inspector
+        self.process_controller = (
+            adapter if cleanup_policy is CleanupPolicy.FABRIC_PROCESS_GROUP
+            else process_controller or IdentitySafeProcessController(self.inspector)
         )
         self.validation_timeout_seconds = float(validation_timeout_seconds)
         if not 0.1 <= self.validation_timeout_seconds <= 3600:
@@ -2127,6 +2147,10 @@ class ExecutiveSupervisor:
                     ) from exc
             unbound_sweep: Mapping[str, Any] | None = None
             if start_invoked and process_ref is None:
+                if self.cleanup_policy is CleanupPolicy.FABRIC_PROCESS_GROUP:
+                    raise SupervisorError(
+                        "Fabric launch identity is unavailable; original Attempt remains quarantined"
+                    ) from exc
                 cleanup = getattr(self.adapter, "cleanup_unbound_run", None)
                 if callable(cleanup):
                     try:
@@ -2220,7 +2244,17 @@ class ExecutiveSupervisor:
         )
         collection = _collection_to_dict(receipt)
         sweep_reader = getattr(self.adapter, "uid_sweep_receipt", None)
-        if callable(sweep_reader):
+        if self.cleanup_policy is CleanupPolicy.FABRIC_PROCESS_GROUP:
+            payload = {
+                "schema_version": "mastermind.executive_collection_evidence/v1",
+                "collection": collection,
+                "fabric_cleanup": self._fabric_cleanup_evidence(
+                    active.process_ref, active.lease.attempt, operation="collection"
+                ),
+            }
+            if active.effective_grant is not None:
+                payload["effective_grant_digest"] = active.lease.attempt.effective_grant_digest
+        elif callable(sweep_reader):
             uid_sweep = _jsonable(sweep_reader(active.process_ref))
             payload: Any = {
                 "schema_version": "mastermind.executive_collection_evidence/v1",
@@ -2378,6 +2412,15 @@ class ExecutiveSupervisor:
             if require_uid_sweep is None
             else bool(require_uid_sweep)
         )
+        if self.cleanup_policy is CleanupPolicy.FABRIC_PROCESS_GROUP:
+            # Group absence is not assignment revocation. The local helper's
+            # 0700 proof depends on a different UID and cannot revoke a shared
+            # principal or attest remote paths. No actual Fabric seal producer
+            # is installed; retain the Attempt rather than synthesize a seal.
+            raise TerminalAssignmentSealError(
+                "FABRIC_ASSIGNMENT_SEAL_UNAVAILABLE: actual authenticated assignment "
+                "revocation evidence is required before terminalization"
+            )
         if sweep_required:
             verified_sweep: Mapping[str, Any] | None = self._validate_terminal_uid_sweep(
                 uid_sweep
@@ -2488,6 +2531,10 @@ class ExecutiveSupervisor:
     def _active_terminal_uid_sweep(
         self, active: ActiveRun
     ) -> Mapping[str, Any] | None:
+        if self.cleanup_policy is CleanupPolicy.FABRIC_PROCESS_GROUP:
+            return self._fabric_cleanup_evidence(
+                active.process_ref, active.lease.attempt, operation="terminal"
+            )
         sweep_reader = getattr(self.adapter, "uid_sweep_receipt", None)
         if not callable(sweep_reader):
             if self.require_complete_launch_attestation:
@@ -2504,6 +2551,103 @@ class ExecutiveSupervisor:
         if self.require_complete_launch_attestation:
             return self._validate_terminal_uid_sweep(value)
         return value if isinstance(value, Mapping) else None
+
+    def _fabric_cleanup_evidence(
+        self, subject: WorkerProcessRef | Attempt, attempt: Attempt, *, operation: str
+    ) -> Mapping[str, Any]:
+        """Adjudicate actual same-owner evidence without inventing a UID sweep.
+
+        Normal evidence arrives in the preceding authenticated async RPC and
+        can predate a cached read. Restart/unbound absence must instead follow
+        this exact observation request. The second read returns the same retained
+        package, not a freshly restamped or newly synthesized absence receipt.
+        """
+        from control_plane.fabric_cleanup_contract import validate_fabric_cleanup_receipt
+
+        if self.cleanup_policy is not CleanupPolicy.FABRIC_PROCESS_GROUP:
+            raise SupervisorError("Fabric evidence requires the explicit cleanup policy")
+        if operation not in {"collection", "validation", "terminal", "restart_absence", "unbound_absence"}:
+            raise SupervisorError("unsupported Fabric cleanup observation")
+        expectation_reader = getattr(self.adapter, "fabric_cleanup_expectation", None)
+        receipt_reader = getattr(self.adapter, "fabric_cleanup_receipt", None)
+        readback_reader = getattr(self.adapter, "fabric_cleanup_receipt_readback", None)
+        if not all(callable(reader) for reader in (expectation_reader, receipt_reader, readback_reader)):
+            raise SupervisorError("FABRIC_CLEANUP_UNAVAILABLE: original owner evidence is missing")
+
+        def canonical(value):
+            return json.dumps(value, sort_keys=True, separators=(",", ":"),
+                              ensure_ascii=False, allow_nan=False).encode("utf-8")
+
+        def observed_time(value):
+            if type(value) is not str:
+                raise ValueError("observation time is missing")
+            stamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if stamp.tzinfo is None:
+                raise ValueError("observation time has no zone")
+            return stamp.timestamp()
+
+        try:
+            expected = expectation_reader(subject)
+            if type(expected) is not dict or set(expected) != {
+                "binding", "physical_binding_sha256", "process_identity", "worker_uid", "worker_gid"
+            }:
+                raise ValueError("incomplete owner expectation")
+            expected_bytes = canonical(expected)
+            job = self._job(attempt.job_id)
+            binding = expected["binding"]
+            if (binding["root_id"] != job.root_job_id or binding["job_id"] != attempt.job_id
+                    or binding["attempt_id"] != attempt.attempt_id
+                    or binding["effective_grant_digest"] != attempt.effective_grant_digest):
+                raise ValueError("owner expectation differs from original Attempt")
+            for field in ("worker_uid", "worker_gid"):
+                if type(expected[field]) is not int or expected[field] <= 0:
+                    raise ValueError("owner principal is incomplete")
+                launch_principal = getattr(subject, "effective_uid" if field == "worker_uid"
+                                           else "effective_gid", None)
+                if launch_principal is not None and launch_principal != expected[field]:
+                    raise ValueError("owner principal differs from immutable launch")
+            # Durable known process facts cannot be overridden by a fresh owner
+            # package. An unbound claim still needs full retained owner identity.
+            for target, source in (("pid", "pid"), ("pgid", "pgid"),
+                                   ("process_start_identity", "process_start_identity"),
+                                   ("boot_session_id", "boot_id")):
+                known = getattr(attempt, source, None)
+                if known is not None and expected["process_identity"][target] != known:
+                    raise ValueError("owner process generation differs from durable Attempt")
+            fresh = operation in {"restart_absence", "unbound_absence"}
+            observed_after = time.time() if fresh else observed_time(subject.started_at)
+            package = receipt_reader(subject, operation=operation, observed_after=observed_after)
+            completed_at = time.time()
+            if type(package) is not dict or set(package) != {
+                "schema_version", "operation", "observed_at", "worker_uid", "worker_gid",
+                "receipt", "lane_receipt_utf8"
+            }:
+                raise ValueError("incomplete authenticated cleanup package")
+            if (package["schema_version"] != "mastermind.executive_fabric_cleanup_evidence/v1"
+                    or package["operation"] != operation
+                    or not observed_after <= observed_time(package["observed_at"]) <= completed_at
+                    or any(type(package[field]) is not int or package[field] != expected[field]
+                           for field in ("worker_uid", "worker_gid"))
+                    or type(package["lane_receipt_utf8"]) is not str):
+                raise ValueError("cleanup observation is stale or foreign")
+            validate_fabric_cleanup_receipt(
+                package["receipt"], expected_binding=binding,
+                expected_physical_binding_sha256=expected["physical_binding_sha256"],
+                expected_process_identity=expected["process_identity"],
+                lane_receipt_bytes=package["lane_receipt_utf8"].encode("utf-8", errors="strict"),
+            )
+            lane_record = json.loads(package["lane_receipt_utf8"])
+            if observed_time(lane_record["ended_at"]) > observed_time(package["observed_at"]):
+                raise ValueError("observation predates its source record")
+            retained_bytes = canonical(package)
+            if (canonical(readback_reader(subject, operation=operation)) != retained_bytes
+                    or canonical(expectation_reader(subject)) != expected_bytes):
+                raise ValueError("retained owner package or expected principal changed")
+            return json.loads(retained_bytes)
+        except Exception as exc:
+            raise TerminalAssignmentSealError(
+                "Fabric same-run cleanup observation is unavailable, incomplete or foreign"
+            ) from exc
 
     async def _collect_validation_with_heartbeats(
         self,
@@ -2579,7 +2723,11 @@ class ExecutiveSupervisor:
                 active.lease.attempt.effective_grant_digest
             )
         sweep_reader = getattr(self.adapter, "uid_sweep_receipt", None)
-        if callable(sweep_reader):
+        if self.cleanup_policy is CleanupPolicy.FABRIC_PROCESS_GROUP:
+            payload["fabric_cleanup"] = self._fabric_cleanup_evidence(
+                active.process_ref, active.lease.attempt, operation="validation"
+            )
+        elif callable(sweep_reader):
             payload["uid_sweep"] = _jsonable(sweep_reader(active.process_ref))
         elif self.require_complete_launch_attestation:
             raise SupervisorError(
@@ -3287,7 +3435,10 @@ class ExecutiveSupervisor:
             )
         try:
             adopted = self._normalise_recovered_lease(adopted)
-            ref = reattach(spec, binding)
+            if getattr(self.adapter, "requires_recovery_lease", False) is True:
+                ref = reattach(spec, binding, lease=adopted)
+            else:
+                ref = reattach(spec, binding)
         except Exception as exc:
             return ReconcileReceipt(
                 attempt_id=attempt.attempt_id,
@@ -3351,6 +3502,8 @@ class ExecutiveSupervisor:
             "outcome": outcome.to_dict(),
             "uid_sweep": _jsonable(uid_sweep),
         }
+        if self.cleanup_policy is CleanupPolicy.FABRIC_PROCESS_GROUP:
+            payload["fabric_cleanup"] = payload.pop("uid_sweep")
         try:
             _write_private_json(path, payload)
         except FileExistsError:
@@ -3359,9 +3512,14 @@ class ExecutiveSupervisor:
             # neither overwrite the earlier receipt nor reuse its stale sweep.
             path = path.with_name(f"{path.stem}-{uuid4().hex}{path.suffix}")
             _write_private_json(path, payload)
-        return dataclasses.replace(outcome, uid_sweep_receipt_path=str(path))
+        return dataclasses.replace(outcome, **{
+            "fabric_cleanup_receipt_path" if self.cleanup_policy is CleanupPolicy.FABRIC_PROCESS_GROUP
+            else "uid_sweep_receipt_path": str(path)
+        })
 
     def _restart_uid_sweep(self, attempt: Attempt) -> Mapping[str, Any] | None:
+        if self.cleanup_policy is CleanupPolicy.FABRIC_PROCESS_GROUP:
+            return self._fabric_cleanup_evidence(attempt, attempt, operation="restart_absence")
         sweep_reader = getattr(self.process_controller, "uid_sweep_receipt", None)
         if not callable(sweep_reader):
             if self.require_complete_launch_attestation:
@@ -3403,6 +3561,8 @@ class ExecutiveSupervisor:
     def _cleanup_unbound_claim(self, attempt: Attempt) -> Mapping[str, Any]:
         """Ask the existing exact-run owner for fresh, worker-bound absence."""
 
+        if self.cleanup_policy is CleanupPolicy.FABRIC_PROCESS_GROUP:
+            return self._fabric_cleanup_evidence(attempt, attempt, operation="unbound_absence")
         cleanup = getattr(self.process_controller, "cleanup_unbound_run", None)
         if not callable(cleanup):
             raise SupervisorError("unbound claim has no exact-run cleanup owner")
@@ -3561,7 +3721,13 @@ class ExecutiveSupervisor:
                     # This must be fresh for an initially absent process too;
                     # otherwise a broker-restart race can rotate the fence on
                     # the strength of an old startup observation.
-                    uid_sweep = self._restart_uid_sweep(attempt)
+                    if self.cleanup_policy is CleanupPolicy.FABRIC_PROCESS_GROUP:
+                        try:
+                            uid_sweep = self._restart_uid_sweep(attempt)
+                        except SupervisorError:
+                            presence = ProcessPresence.UNKNOWN
+                    else:
+                        uid_sweep = self._restart_uid_sweep(attempt)
             if presence is ProcessPresence.UNKNOWN:
                 outcomes.append(
                     ReconcileReceipt(
@@ -3690,6 +3856,7 @@ class ExecutiveSupervisor:
 
 __all__ = [
     "ActiveRun",
+    "CleanupPolicy",
     "ExecutiveSupervisor",
     "IdentitySafeProcessController",
     "PersistedProcessController",
