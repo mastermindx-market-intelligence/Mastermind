@@ -16,6 +16,8 @@ import re
 import stat
 
 PREFIX = b"FABRIC_BOUND_START_V1\t"
+CORRELATION_PREFIX = b"FABRIC_BOUND_START_V2\t"
+CORRELATION_SCHEMA = "mastermind.fabric_launch_correlation/v2"
 LIMIT = 8192
 IDS = frozenset({"root_id", "job_id", "attempt_id"})
 DIGESTS = frozenset({"effective_grant_sha256", "commission_sha256",
@@ -35,6 +37,32 @@ def validate_binding(value, *, run_id, root_id):
             or value["attempt_id"] != run_id or value["root_id"] != root_id):
         raise ReservationRefused("bound_launch_identity_invalid")
     return dict(value)
+
+
+def validate_correlation(value, *, run_id, routing_root_id, routing_parent_run_id):
+    """Keep Fabric lineage separate from Runtime Job identity; neither grants rights."""
+    if (type(value) is not dict or set(value) != {
+            "schema_version", "routing_root_id", "routing_parent_run_id", "runtime_binding"}
+            or value["schema_version"] != CORRELATION_SCHEMA
+            or any(type(value[k]) is not str or not IDENT.fullmatch(value[k])
+                   for k in ("routing_root_id", "routing_parent_run_id"))
+            or value["routing_root_id"] != routing_root_id
+            or value["routing_parent_run_id"] != routing_parent_run_id
+            or type(value["runtime_binding"]) is not dict):
+        raise ReservationRefused("bound_launch_routing_invalid")
+    binding = value["runtime_binding"]
+    # This is correlation only. The authenticated Backend independently compares
+    # this Runtime root with its original Job; it is not the Fabric routing root.
+    binding = validate_binding(binding, run_id=run_id, root_id=binding.get("root_id"))
+    return {**value, "runtime_binding": binding}
+
+
+def backend_binding(correlation):
+    """Lossless schema spelling conversion, never authentication or admission."""
+    fields = correlation["runtime_binding"]
+    return {"root_id": fields["root_id"], "job_id": fields["job_id"],
+            "attempt_id": fields["attempt_id"], "commission_sha256": fields["commission_sha256"],
+            "effective_grant_digest": fields["effective_grant_sha256"]}
 
 
 def _decode(raw):
@@ -61,7 +89,7 @@ def _private_directory(path):
     return info
 
 
-def load_binding(path, *, run_id, root_id):
+def _load_file(path, validate):
     """Read one owner-private input file; it conveys correlation, not authority."""
     path = Path(path)
     _private_directory(path.parent)
@@ -79,9 +107,19 @@ def load_binding(path, *, run_id, root_id):
                 or tuple(getattr(before, f) for f in fields) != tuple(getattr(after, f) for f in fields)
                 or (after.st_dev, after.st_ino) != (visible.st_dev, visible.st_ino)):
             raise ReservationRefused("bound_launch_input_moved")
-        return validate_binding(_decode(raw), run_id=run_id, root_id=root_id)
+        return validate(_decode(raw))
     finally:
         os.close(fd)
+
+
+def load_binding(path, *, run_id, root_id):
+    return _load_file(path, lambda value: validate_binding(value, run_id=run_id, root_id=root_id))
+
+
+def load_correlation(path, *, run_id, routing_root_id, routing_parent_run_id):
+    return _load_file(path, lambda value: validate_correlation(
+        value, run_id=run_id, routing_root_id=routing_root_id,
+        routing_parent_run_id=routing_parent_run_id))
 
 
 def reserve_bound_log(path, binding, *, run_id, root_id):
@@ -91,7 +129,17 @@ def reserve_bound_log(path, binding, *, run_id, root_id):
     even when its bytes match. The existing owner must reconcile that run.
     """
     value = validate_binding(binding, run_id=run_id, root_id=root_id)
-    record = PREFIX + json.dumps(value, sort_keys=True, separators=(",", ":"),
+    return _reserve_log_record(path, value, PREFIX)
+
+
+def reserve_correlation_log(path, correlation, *, run_id, routing_root_id, routing_parent_run_id):
+    value = validate_correlation(correlation, run_id=run_id, routing_root_id=routing_root_id,
+                                 routing_parent_run_id=routing_parent_run_id)
+    return _reserve_log_record(path, value, CORRELATION_PREFIX)
+
+
+def _reserve_log_record(path, value, prefix):
+    record = prefix + json.dumps(value, sort_keys=True, separators=(",", ":"),
                                  ensure_ascii=True, allow_nan=False).encode() + b"\n"
     if len(record) > LIMIT:
         raise ReservationRefused("bound_launch_record_oversize")
@@ -131,6 +179,18 @@ def reserve_bound_log(path, binding, *, run_id, root_id):
 def read_bound_log(path, *, expected, run_id, root_id):
     """Read the retained original header. This never reports safe-to-start."""
     value = validate_binding(expected, run_id=run_id, root_id=root_id)
+    return _read_log_record(path, value, PREFIX,
+                            lambda row: validate_binding(row, run_id=run_id, root_id=root_id))
+
+
+def read_correlation_log(path, *, expected, run_id, routing_root_id, routing_parent_run_id):
+    def validate(row):
+        return validate_correlation(row, run_id=run_id, routing_root_id=routing_root_id,
+                                    routing_parent_run_id=routing_parent_run_id)
+    return _read_log_record(path, validate(expected), CORRELATION_PREFIX, validate)
+
+
+def _read_log_record(path, value, prefix, validate):
     path = Path(path)
     _private_directory(path.parent)
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -141,9 +201,9 @@ def read_bound_log(path, *, expected, run_id, root_id):
             raise ReservationRefused("bound_launch_log_unsafe")
         raw = os.read(fd, LIMIT + 1)
         line, separator, _tail = raw.partition(b"\n")
-        if not separator or not line.startswith(PREFIX) or len(line) + 1 > LIMIT:
+        if not separator or not line.startswith(prefix) or len(line) + 1 > LIMIT:
             raise ReservationRefused("bound_launch_header_unavailable")
-        retained = validate_binding(_decode(line[len(PREFIX):]), run_id=run_id, root_id=root_id)
+        retained = validate(_decode(line[len(prefix):]))
         if os.pread(fd, len(line) + 1, 0) != line + b"\n":
             raise ReservationRefused("bound_launch_header_moved")
         visible = path.lstat()

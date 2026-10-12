@@ -1,19 +1,21 @@
 {
   "classification": "SOURCE_ONLY_UNINSTALLED",
   "base_sha256": "d36860ea8036ed5ec733a47c709a477c851fee95dddbae23c8e2214dc308b77e",
-  "candidate_sha256": "df229997a0625b94bbfc207084ac9fde19526e49bbfe5e04eff97d58c556a7fa",
-  "patch_sha256": "10560ef4f5c72b55e9bfc0afee53716517cd46d4400efea809a00ede94862d8c",
+  "candidate_sha256": "16717ff023d788ea3cc21da6ed6d22bb8e0208d771c80ac1f16bb9141f380c56",
+  "patch_sha256": "bd0f747350b221a4e695b764f1f11bff655bcf5d09d1f5617e5aada218e00894",
   "worker_id": "fabric-bound-launch-port-01a11e90-v1",
   "retained_result_sha256": "efe84085be5f17112d286001535fe201d6368f1d8dbc5f1de7a167918a7649bd",
   "original_symbols": 59,
   "changed_existing_symbols": [
     "run_owned_process"
   ],
-  "validation": "65 passed; only inert local children, identity and cleanup census mocked",
+  "validation": "72 affected inert capture checks PASS; identities and cleanup census mocked; no live kernel/provider probe",
   "limits": [
     "PRE_EXEC_HANDSHAKE only",
     "correlation is not authority",
     "provider execution is not attested",
     "no Backend or installed changes"
-  ]
+  ],
+  "reviewed_port_sha256": "df229997a0625b94bbfc207084ac9fde19526e49bbfe5e04eff97d58c556a7fa",
+  "parent_delta": "Optional snapshot digest preserved in early receipt; exact receipt digest linked from original terminal row; no provider execution claim."
 }

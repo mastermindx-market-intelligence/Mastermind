@@ -29,4 +29,4 @@ def test_pinned_capture_patch_and_owned_child_negatives(tmp_path):
         cwd=tmp_path, capture_output=True, text=True, timeout=60,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "65 passed" in result.stdout, result.stdout
+    assert "72 passed" in result.stdout, result.stdout

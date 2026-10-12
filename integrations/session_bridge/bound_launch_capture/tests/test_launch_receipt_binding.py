@@ -6,6 +6,7 @@ request is made. The new binding keys are receipt-only correlation and never
 authorize or alter the launch.
 """
 import inspect
+import hashlib
 import json
 import os
 import stat
@@ -114,6 +115,35 @@ def test_complete_binding_launch_succeeds_with_exact_receipt_mapping(tmp_path):
     assert record["pid"] == result.pid
     assert record["returncode"] == 0
     assert "correlation" not in record
+
+
+def test_snapshot_digest_and_exact_early_receipt_are_retained_in_terminal(tmp_path):
+    launch, terminal = tmp_path / "launch.json", tmp_path / "terminal.jsonl"
+    result = lr.run_owned_process(command(tmp_path / "marker"), timeout=3,
+        receipt_path=terminal, launch_receipt_path=launch,
+        launch_receipt_metadata=dict(FULL_BINDING), launch_receipt_context_sha256="e" * 64)
+    assert result.returncode == 0
+    receipt = json.loads(launch.read_text())
+    row = json.loads(terminal.read_text().splitlines()[-1])
+    assert receipt["context_sha256"] == "e" * 64
+    assert row["launch_capture"]["receipt_sha256"] == hashlib.sha256(launch.read_bytes()).hexdigest()
+    assert row["launch_capture"]["context_sha256"] == receipt["context_sha256"]
+    assert row["launch_capture"]["provider_execution_attested"] is False
+    assert row["launch_capture"]["phase"] == "PRE_EXEC_HANDSHAKE"
+
+
+@pytest.mark.parametrize("digest", ["", "F" * 64, "g" * 64, "a" * 63, 42])
+def test_invalid_context_digest_refuses_before_spawn(tmp_path, no_spawn, digest):
+    with pytest.raises(lr.LaneRuntimeError, match="launch_context_digest_invalid"):
+        lr.run_owned_process(command(tmp_path / "marker"), timeout=1,
+            launch_receipt_path=tmp_path / "launch.json",
+            launch_receipt_metadata=dict(FULL_BINDING), launch_receipt_context_sha256=digest)
+
+
+def test_context_digest_without_receipt_refuses_before_spawn(tmp_path, no_spawn):
+    with pytest.raises(lr.LaneRuntimeError, match="launch_context_digest_invalid"):
+        lr.run_owned_process(command(tmp_path / "marker"), timeout=1,
+                             launch_receipt_context_sha256="a" * 64)
 
 
 def test_binding_publication_precedes_target_exec(tmp_path, monkeypatch):
@@ -276,7 +306,7 @@ def test_installed_surface_and_signature_preserved():
         "command", "cwd", "timeout", "input_text", "shell", "env", "nice",
         "terminate_grace", "label", "receipt_path", "timeout_returncode",
         "capture_limit_bytes", "receipt_diagnostics", "launch_receipt_path",
-        "launch_receipt_metadata")
+        "launch_receipt_metadata", "launch_receipt_context_sha256")
     assert lr.LAUNCH_RECEIPT_SCHEMA == "mastermind.local_owned_process_launch.v1"
     assert lr._LAUNCH_BINDING_FIELDS == frozenset(BINDING_KEYS)
 

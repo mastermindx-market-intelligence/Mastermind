@@ -9,7 +9,7 @@
  import fcntl
  import hashlib
  import json
-@@ -958,6 +960,219 @@
+@@ -958,6 +960,224 @@
      return None
  
  
@@ -196,7 +196,7 @@
 +        raise LaneRuntimeError("launch_identity_unavailable") from exc
 +
 +
-+def _publish_owned_launch_receipt(path, proc, label, context):
++def _publish_owned_launch_receipt(path, proc, label, context, context_sha256=None):
 +    if proc.poll() is not None:
 +        raise LaneRuntimeError("launch_child_not_live")
 +    observed = _observe_owned_launch_identity(proc.pid)
@@ -207,7 +207,12 @@
 +                   provider_execution_attested=False)
 +    if proc.poll() is not None or _observe_owned_launch_identity(proc.pid) != observed:
 +        raise LaneRuntimeError("launch_process_generation_moved")
++    if context_sha256 is not None:
++        receipt["context_sha256"] = context_sha256
 +    _write_immutable_launch_receipt(path, receipt)
++    raw = (json.dumps(receipt, sort_keys=True, separators=(",", ":"),
++                      ensure_ascii=True, allow_nan=False) + "\n").encode()
++    return hashlib.sha256(raw).hexdigest()
 +
 +
 +def _owned_gate_command(command, shell, fd):
@@ -229,23 +234,28 @@
  def run_owned_process(
      command: str | Sequence[str],
      *,
-@@ -973,6 +1188,8 @@
+@@ -973,6 +1193,9 @@
      timeout_returncode: int = -9,
      capture_limit_bytes: int = DEFAULT_CAPTURE_LIMIT_BYTES,
      receipt_diagnostics=None,
 +    launch_receipt_path: str | os.PathLike[str] | None = None,
 +    launch_receipt_metadata: Mapping[str, str] | None = None,
++    launch_receipt_context_sha256: str | None = None,
  ) -> OwnedProcessResult:
      try:
          timeout = float(timeout)
-@@ -987,63 +1204,93 @@
+@@ -987,63 +1210,98 @@
      if not 64 <= int(capture_limit_bytes) <= MAX_CAPTURE_LIMIT_BYTES:
          raise LaneRuntimeConfigError("capture_limit_out_of_bounds")
      safe_label = _safe_label(label)
--    started_at = _utc_now()
 +    launch_path, launch_context = _launch_receipt_input(
 +        launch_receipt_path, launch_receipt_metadata)
-     input_bytes = input_text.encode("utf-8") if input_text is not None else None
++    if launch_receipt_context_sha256 is not None and (
++            launch_path is None or type(launch_receipt_context_sha256) is not str
++            or re.fullmatch(r"[0-9a-f]{64}", launch_receipt_context_sha256) is None):
++        raise LaneRuntimeError("launch_context_digest_invalid")
++    launch_receipt_sha256 = None
++    input_bytes = input_text.encode("utf-8") if input_text is not None else None
 +    gate_read = gate_write = None
 +    launch_command = command
 +    extra_popen = {}
@@ -258,7 +268,8 @@
 +            os.close(gate_write)
 +            raise
 +        extra_popen["pass_fds"] = (gate_read,)
-+    started_at = _utc_now()
+     started_at = _utc_now()
+-    input_bytes = input_text.encode("utf-8") if input_text is not None else None
      try:
          proc = subprocess.Popen(
 -            command,
@@ -283,6 +294,11 @@
 +            os.close(gate_write)
          raise OwnedProcessStartError(exc.errno) from None
 -    pgid = proc.pid
+-    try:
+-        observed_pgid = os.getpgid(proc.pid)
+-        observed_sid = os.getsid(proc.pid)
+-    except ProcessLookupError:
+-        if proc.poll() is None:
 +    except BaseException:
 +        if gate_write is not None:
 +            os.close(gate_write)
@@ -290,11 +306,7 @@
 +    finally:
 +        if gate_read is not None:
 +            os.close(gate_read)
-     try:
--        observed_pgid = os.getpgid(proc.pid)
--        observed_sid = os.getsid(proc.pid)
--    except ProcessLookupError:
--        if proc.poll() is None:
++    try:
 +        pgid = proc.pid
 +        try:
 +            observed_pgid = os.getpgid(proc.pid)
@@ -306,15 +318,6 @@
 +            observed_pgid = pgid
 +            observed_sid = pgid
 +        except PermissionError as exc:
-+            _kill_exact_leader(proc, grace=2.0)
-+            raise LaneRuntimeError("owned_process_identity_unavailable") from exc
-+        if observed_pgid != pgid:
-+            _kill_exact_leader(proc, grace=2.0)
-+            raise LaneRuntimeError("owned_process_group_identity_failed")
-+        if observed_sid != pgid:
-+            _kill_exact_leader(proc, grace=2.0)
-+            raise LaneRuntimeError("owned_process_session_identity_failed")
-+        if proc.stdout is None or proc.stderr is None:
              _kill_exact_leader(proc, grace=2.0)
 -            raise LaneRuntimeError("owned_process_identity_unavailable")
 -        observed_pgid = pgid
@@ -337,6 +340,23 @@
 -        if not MIN_NICE <= int(nice) <= MAX_NICE:
 -            _terminate_verified_group(proc, pgid, grace=0.2, reason="invalid_nice")
 -            raise LaneRuntimeConfigError("lane_nice_out_of_bounds")
+-        try:
+-            os.setpriority(os.PRIO_PROCESS, proc.pid, int(nice))
+-            applied_nice = True
+-        except (AttributeError, PermissionError, ProcessLookupError):
+-            applied_nice = False
+-
+-    try:
+-        _set_current(proc, pgid, safe_label)
++            raise LaneRuntimeError("owned_process_identity_unavailable") from exc
++        if observed_pgid != pgid:
++            _kill_exact_leader(proc, grace=2.0)
++            raise LaneRuntimeError("owned_process_group_identity_failed")
++        if observed_sid != pgid:
++            _kill_exact_leader(proc, grace=2.0)
++            raise LaneRuntimeError("owned_process_session_identity_failed")
++        if proc.stdout is None or proc.stderr is None:
++            _kill_exact_leader(proc, grace=2.0)
 +            raise LaneRuntimeError("owned_output_stream_missing")
 +
 +        applied_nice = False
@@ -350,18 +370,12 @@
 +            except (AttributeError, PermissionError, ProcessLookupError):
 +                applied_nice = False
 +
-         try:
--            os.setpriority(os.PRIO_PROCESS, proc.pid, int(nice))
--            applied_nice = True
--        except (AttributeError, PermissionError, ProcessLookupError):
--            applied_nice = False
++        try:
 +            _set_current(proc, pgid, safe_label)
 +        except BaseException:
 +            _terminate_verified_group(proc, pgid, grace=0.2, reason="set_current_failed")
 +            raise
- 
--    try:
--        _set_current(proc, pgid, safe_label)
++
      except BaseException:
 -        _terminate_verified_group(proc, pgid, grace=0.2, reason="set_current_failed")
 +        if gate_write is not None:
@@ -369,7 +383,7 @@
          raise
  
      stdout_collector = _BoundedStreamCollector(
-@@ -1056,7 +1303,7 @@
+@@ -1056,7 +1314,7 @@
      stderr_collector.start()
      stdin_thread: threading.Thread | None = None
      stdin_state: dict[str, Any] = {"complete": True, "error_code": None}
@@ -378,12 +392,17 @@
          if proc.stdin is None:
              _terminate_verified_group(proc, pgid, grace=0.2, reason="stdin_missing")
              _clear_current(proc)
-@@ -1084,6 +1331,13 @@
+@@ -1084,6 +1342,18 @@
      runtime_failure_code: str | None = None
      try:
          try:
 +            if launch_path is not None:
-+                _publish_owned_launch_receipt(launch_path, proc, safe_label, launch_context)
++                if launch_receipt_context_sha256 is None:
++                    launch_receipt_sha256 = _publish_owned_launch_receipt(
++                        launch_path, proc, safe_label, launch_context)
++                else:
++                    launch_receipt_sha256 = _publish_owned_launch_receipt(
++                        launch_path, proc, safe_label, launch_context, launch_receipt_context_sha256)
 +                os.write(gate_write, b"1")
 +                os.close(gate_write)
 +                gate_write = None
@@ -392,7 +411,7 @@
              wait_outcome = _wait_owned_process_with_fuse(proc, pgid, timeout)
              if wait_outcome == "completed":
                  returncode = int(proc.returncode or 0)
-@@ -1127,6 +1381,8 @@
+@@ -1127,6 +1397,8 @@
              )
              raise
      finally:
@@ -401,3 +420,16 @@
          _clear_current(proc)
          capture_deadline = time.monotonic() + max(
              0.25, min(2.0, terminate_grace + 0.25)
+@@ -1169,6 +1441,12 @@
+                 {
+                     "schema": PROCESS_RECEIPT_SCHEMA,
+                     **diagnostic_fields,
++                    **({"launch_capture": {
++                        "phase": "PRE_EXEC_HANDSHAKE",
++                        "receipt_sha256": launch_receipt_sha256,
++                        "context_sha256": launch_receipt_context_sha256,
++                        "provider_execution_attested": False,
++                    }} if launch_path is not None else {}),
+                     "label": safe_label,
+                     "pid": proc.pid,
+                     "pgid": pgid,

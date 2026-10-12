@@ -13,7 +13,26 @@ open handles. A failure leaves the original name consumed. Matching bytes do
 not authorize replay; a changed request or route cannot reuse that reservation.
 
 `remote_sub.sh.patch` wires this into the original pre-lease reservation, only
-when the trusted embedding owner supplies `REMOTE_SUB_START_BINDING_FILE`.
+when the embedding owner supplies `REMOTE_SUB_START_BINDING_FILE` (legacy V1)
+or `REMOTE_SUB_START_CORRELATION_FILE` (V2). Providing both refuses. The V1
+flat correlation remains readable only as V1; it is not a complete bridge
+binding. Runtime's root Job ID differs from Fabric's original orchestration
+root, so V2 retains `routing_root_id`, `routing_parent_run_id`, and the nested
+seven-field `runtime_binding` separately. Its run ID must be the deliberately
+assigned new Runtime Attempt ID. It cannot adopt or rename an older manual run.
+
+V2 forwards a canonical snapshot of that exact reserved header through the
+existing per-run upload, into a newly created private directory. Existing names
+refuse. `fabric_launch_transport.py` checks the fixed run-derived path, digest
+and original routing lineage before the executor acquires physical admission.
+The nested Runtime fields are then passed to the actual process-capture call.
+The snapshot digest is recorded in the early receipt; the terminal process
+record retains that digest and the exact early-receipt digest. This remains
+correlation, not evidence that Runtime or Capacity granted the operation.
+The source collection path retains the early receipt even if stdout delivery
+or cleanup remains uncertain; an acquisition failure does not change custody
+or authorize a replay. The retained remote receipt is not deleted.
+
 Unbound calls retain their existing path. Bound calls cannot use the legacy
 pre-lease continuation exception. The input and log directories must already
 satisfy the private-owner checks: this code performs no chmod, chown, directory
@@ -45,13 +64,15 @@ spawn. Legacy callers retain their behavior. `PRE_EXEC_HANDSHAKE`,
 `correlation_is_authority:false` and `provider_execution_attested:false`
 remain explicit. This is source labor, not native mission proof.
 
-The remaining integration is explicit: connect the authenticated original
-owner's reservation context to that actual spawn and settlement; retain its
-launch/result/cleanup bytes in the existing run record; and consume them
-through the original owner to satisfy the bridge's complete physical and
-isolation contracts. A wrapper PID or copied historical log cannot become a
-Worker attestation. Installation, supported provider/profile admission,
-assignment revocation and the real original-parent task proof remain open.
+The source wire connects the proposed original context to that actual spawn
+and settlement. Its remaining integration is the authenticated Backend that
+validates the real current Runtime/Capacity assignment and physical route,
+consumes first-use authority, and produces complete physical/profile/isolation
+and cleanup evidence from the supported harness. A wrapper PID or copied
+historical log cannot become a Worker attestation. The controller still waits
+for ordinary completion; this source does not implement an early authenticated
+Backend start response. Installation, provider/profile admission, assignment
+revocation and the real original-parent task proof remain open.
 
 Source validation: 17 focused reservation checks and six checks against the
 actual patched reservation fragment passed. They cover concurrent callers,
@@ -67,3 +88,10 @@ missing-root/malformed-input fragment checks, and recorded reviewer acceptance
 once with `ACCEPTED/VALIDATED_OUTCOME` readback. Its same-UID hardlink observations
 do not establish tamper-proof evidence: the helper remains correlation-only.
 This accepted source review does not release installation or native admission.
+
+The later V2 wire has 25 reservation, eight transport, six actual patched
+controller/executor-fragment checks, and 72 affected capture checks passing.
+The capture wrapper verifies the pinned base/patch/candidate and replays the
+inert suite in a separate process. No live transport, provider, service or host
+probe is executed by those checks. The independent V2 review is the original
+`fabric-bound-wire-review-01a11e90-v1`; its result must be adjudicated separately.

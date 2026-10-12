@@ -13,6 +13,72 @@ def binding():
                 physical_binding_sha256="c" * 64, start_request_sha256="d" * 64)
 
 
+def correlation():
+    return dict(schema_version=fence.CORRELATION_SCHEMA,
+                routing_root_id="original-codex-parent", routing_parent_run_id="operator-child",
+                runtime_binding=binding())
+
+
+def correlation_args():
+    return dict(run_id="attempt-1", routing_root_id="original-codex-parent",
+                routing_parent_run_id="operator-child")
+
+
+def test_runtime_root_and_fabric_lineage_are_distinct_and_preserved(tmp_path):
+    value = correlation()
+    log = tmp_path / "attempt-1.log"
+    fence.reserve_correlation_log(log, value, **correlation_args())
+    readback = fence.read_correlation_log(log, expected=value, **correlation_args())
+    assert readback["binding"] == value
+    assert readback["start_authorized"] is False
+    assert value["routing_root_id"] != value["runtime_binding"]["root_id"]
+    mapped = fence.backend_binding(value)
+    assert mapped["root_id"] == "root-1"
+    assert mapped["effective_grant_digest"] == binding()["effective_grant_sha256"]
+
+
+@pytest.mark.parametrize("field,wrong", [
+    ("routing_root_id", "root-1"), ("routing_parent_run_id", "foreign-parent"),
+    ("schema_version", "mastermind.fabric_launch_correlation/v1"),
+])
+def test_correlation_refuses_swapped_namespace_wrong_parent_and_version(tmp_path, field, wrong):
+    value = {**correlation(), field: wrong}
+    with pytest.raises(fence.ReservationRefused):
+        fence.reserve_correlation_log(tmp_path / "attempt-1.log", value, **correlation_args())
+    assert not (tmp_path / "attempt-1.log").exists()
+
+
+def test_v2_refuses_wrong_attempt_or_missing_runtime_fields_before_reservation(tmp_path):
+    for change in ({"attempt_id": "old-manual-run"}, {"start_request_sha256": None}):
+        value = correlation()
+        value["runtime_binding"].update(change)
+        with pytest.raises(fence.ReservationRefused):
+            fence.reserve_correlation_log(tmp_path / "attempt-1.log", value, **correlation_args())
+    assert not (tmp_path / "attempt-1.log").exists()
+
+
+def test_v1_and_v2_are_not_reinterpreted_or_replayed(tmp_path):
+    log = tmp_path / "attempt-1.log"
+    reserve(log)
+    with pytest.raises(fence.ReservationRefused, match="header_unavailable"):
+        fence.read_correlation_log(log, expected=correlation(), **correlation_args())
+    with pytest.raises(FileExistsError):
+        fence.reserve_correlation_log(log, correlation(), **correlation_args())
+    assert read(log)["binding"] == binding()
+
+
+@pytest.mark.parametrize("field", ["physical_binding_sha256", "start_request_sha256"])
+def test_v2_changed_request_and_route_preserve_consumed_name(tmp_path, field):
+    log = tmp_path / "attempt-1.log"
+    fence.reserve_correlation_log(log, correlation(), **correlation_args())
+    changed = correlation()
+    changed["runtime_binding"][field] = "f" * 64
+    with pytest.raises(FileExistsError):
+        fence.reserve_correlation_log(log, changed, **correlation_args())
+    with pytest.raises(fence.ReservationRefused, match="request_conflict"):
+        fence.read_correlation_log(log, expected=changed, **correlation_args())
+
+
 def reserve(path, value=None):
     return fence.reserve_bound_log(path, binding() if value is None else value,
                                    run_id="attempt-1", root_id="root-1")
