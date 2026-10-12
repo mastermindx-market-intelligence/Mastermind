@@ -1,5 +1,7 @@
 # Expiring Grok priority through the existing Fabric
 
+**Historical rollout, closed:** the Chairman ended this priority after the October 11, 2026 reset. `routing.grok_expiring_priority.enabled` is now false. New ordinary requests use normal task-aware routing without a Grok-only override. See `NORMAL_ROUTING_RECEIPT.json` for the installed reversion; the original patch below is retained as history, not current installation guidance.
+
 The old Grok reset calculation guessed Sunday 00:00 UTC and reported 142 hours remaining when the Chairman supplied a provider screenshot showing Oct 11 22:54 America/Vancouver (Oct 12 05:54 UTC), with 47% used. Ordinary labor routing also put Grok after other paid pools.
 
 This exact-preimage overlay uses that dated, six-hour-bounded screenshot observation, prioritizes eligible Grok work through the existing router, and temporarily admits named routine classes/economics under the Chairman instruction. It expires at the observed reset; unknown/stale/future/invalid quota cannot establish urgency. The snapshot is not a live usage meter. Exhaustion, broker/host capacity, quality, capabilities, role exclusions and reviewer independence still govern. Top-level orchestration remains seat-only. This adds no queue, credentials, capacity entitlement or retry authority.
