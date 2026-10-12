@@ -1,0 +1,345 @@
+--- a/remote_sub.sh
++++ b/remote_sub.sh
+@@ -115,6 +115,9 @@
+ ORCH_ID=""
+ GLM_CAP_REMOTE=""
+ GLM_CAP_LOCAL=""
++OPERATOR_CAP_REMOTE=""
++OPERATOR_ENV=""
++OPERATOR_CHILD_BUDGET="${POOL_OPERATOR_CHILD_BUDGET:-0}"
+ RC=1
+ WORKER_RC=""
+ RC_OBSERVED=0
+@@ -133,6 +136,14 @@
+     printf '%s\n' "$line" >> "$LOG_FILE" 2>/dev/null || true
+   fi
+ }
++
++if [ "$OPERATOR_CHILD_BUDGET" != "0" ]; then
++  [[ "$OPERATOR_CHILD_BUDGET" =~ ^[1-9][0-9]?$ ]] && [ "$OPERATOR_CHILD_BUDGET" -le 64 ] &&
++    [ "${POOL_TASK_CLASS:-}" = "domain_orchestration" ] &&
++    { { [ "$MODE" = glm ] && [ "$MODEL" = glm-5.3 ]; } || { [ "$MODE" = grok ] && [ "$MODEL" = grok-4.6 ]; }; } || {
++      RC=78; log "OPERATOR_SCOPE_REFUSED"; exit "$RC";
++    }
++fi
+ 
+ normalize_remote_cwd() {
+   case "$1" in
+@@ -308,6 +319,9 @@
+ fi
+ 
+ if [ "$HOST_ARG" = m2 ]; then
++  if [ "$OPERATOR_CHILD_BUDGET" != "0" ] || [ -n "${FABRIC_OPERATOR_CHILD_ID:-}" ]; then
++    RC=78; log "OPERATOR_REQUIRES_ADMITTED_REMOTE_PATH"; exit "$RC";
++  fi
+   log "LOCAL_HOST packet=$PACKET_BASE cwd=$REMOTE_CWD"
+   if [ "$DRY_RUN" -eq 1 ]; then
+     show_args bash "$HERE/sub.sh" "$MODE" "<contents-of-$PACKET_BASE>" "$REMOTE_CWD" $MODEL
+@@ -582,6 +596,11 @@
+     ;;
+ esac
+ 
++OPERATOR_CHILD_ARGS=()
++if [ -n "${FABRIC_OPERATOR_CHILD_ID:-}" ]; then
++  [ "$FABRIC_OPERATOR_CHILD_ID" = "$ID" ] || { RC=78; log "OPERATOR_CHILD_ID_REFUSED"; exit "$RC"; }
++  OPERATOR_CHILD_ARGS=(--operator-child-id "$ID")
++fi
+ if [ -n "$ACQUIRE_POOL" ]; then
+   if [ "$DRY_RUN" -eq 1 ]; then
+     show_args "<broker>" acquire --orchestrator-id "remote-sub-$ID" --pool "$ACQUIRE_POOL" --task-class "remote-$MODE" --model "$MODEL" --pid "$$" --ttl "$PROVIDER_LEASE_TTL" --wait "${REMOTE_SUB_LEASE_WAIT:-3600}"
+@@ -590,13 +609,13 @@
+     log "LEASE_WAIT pool=$ACQUIRE_POOL wait=${REMOTE_SUB_LEASE_WAIT:-3600}"
+     ORCH_ID="${POOL_ORCHESTRATOR_ID:-${CLAUDE_SESSION_ID:-remote-sub-$ID}}"
+     if [ "$NATIVE_MODE" -eq 1 ]; then
+-      broker acquire --host "$HOST_ARG" --orchestrator-id "$ORCH_ID" --pool "$ACQUIRE_POOL" --task-class "remote-$MODE" --model "$MODEL" --pid "$$" --ttl "$PROVIDER_LEASE_TTL" --wait "${REMOTE_SUB_LEASE_WAIT:-3600}" > "$LEASE_OUTPUT_FILE" || {
++      broker acquire "${OPERATOR_CHILD_ARGS[@]}" --host "$HOST_ARG" --orchestrator-id "$ORCH_ID" --pool "$ACQUIRE_POOL" --task-class "remote-$MODE" --model "$MODEL" --pid "$$" --ttl "$PROVIDER_LEASE_TTL" --wait "${REMOTE_SUB_LEASE_WAIT:-3600}" > "$LEASE_OUTPUT_FILE" || {
+         RC=$?
+         log "LEASE_REFUSED rc=$RC"
+         exit "$RC"
+       }
+     else
+-      broker acquire --orchestrator-id "$ORCH_ID" --pool "$ACQUIRE_POOL" --task-class "remote-$MODE" --model "$MODEL" --pid "$$" --ttl "$PROVIDER_LEASE_TTL" --wait "${REMOTE_SUB_LEASE_WAIT:-3600}" > "$LEASE_OUTPUT_FILE" || {
++      broker acquire "${OPERATOR_CHILD_ARGS[@]}" --host "$HOST_ARG" --orchestrator-id "$ORCH_ID" --pool "$ACQUIRE_POOL" --task-class "remote-$MODE" --model "$MODEL" --pid "$$" --ttl "$PROVIDER_LEASE_TTL" --wait "${REMOTE_SUB_LEASE_WAIT:-3600}" > "$LEASE_OUTPUT_FILE" || {
+         RC=$?
+         log "LEASE_REFUSED rc=$RC"
+         exit "$RC"
+@@ -623,7 +642,7 @@
+   'mkdir -p ~/lanes/tmp ~/lanes/ext/active ~/lanes/ext/lanes ~/lanes/orch/fabric' || { RC=$?; log "REMOTE_SETUP_FAILED rc=$RC"; exit "$RC"; }
+ 
+ SUPPORT_FILES=(
+-  remote_sub_exec.py native_remote.py artifact_production.py artifact_reader.py lane_runtime.py sub.sh slot.py pick.py glm_bound_claude.py model_tier.py
++  remote_sub_exec.py native_remote.py fabric_operator_client.py fabric_operator_stop.py artifact_production.py artifact_reader.py lane_runtime.py sub.sh slot.py pick.py glm_bound_claude.py model_tier.py
+   codex_usage.py go_remote_codex.py go_remote_capsule.py
+   mm_codex_exec.sh glm_codex_exec.sh go_codex_exec.sh qwen_exec.sh
+   fabric_client_projection.py studio_mcp_projection.sh
+@@ -668,6 +687,21 @@
+   log "SUPPORT_VERSION_READY digest=$SUPPORT_DIGEST policy=$POLICY_SHA"
+   return 0
+ }
++
++# Explicit local-principal operator opt-in; ordinary leaves stay unchanged.
++if [ "$OPERATOR_CHILD_BUDGET" != "0" ]; then
++  OPERATOR_PACKET=$(mktemp "$LOG_DIR/${ID}.operator-packet.XXXXXX") || exit 78
++  TEMP_FILES+=("$OPERATOR_PACKET")
++  "$REMOTE_SUB_PYTHON" - "$PACKET" "$OPERATOR_PACKET" "$HERE" <<'PY_OPERATOR_PACKET'
++import sys
++from pathlib import Path
++sys.path.insert(0, sys.argv[3])
++from fabric_operator_client import OPERATOR_INSTRUCTIONS
++Path(sys.argv[2]).write_bytes(Path(sys.argv[1]).read_bytes()+OPERATOR_INSTRUCTIONS.encode())
++PY_OPERATOR_PACKET
++  [ "$?" -eq 0 ] || { RC=78; log "OPERATOR_PACKET_REFUSED"; exit "$RC"; }
++  PACKET="$OPERATOR_PACKET"
++fi
+ 
+ log "SCP packet=$PACKET_BASE support=executor-surface"
+ run_scp || { RC=$?; log "SCP_FAILED rc=$RC"; exit "$RC"; }
+@@ -749,8 +783,38 @@
+   fi
+ fi
+ 
++# A separate bounded operator capability travels only through the existing
++# controller transport. It is never the provider credential or the parent lease.
++if [ "$OPERATOR_CHILD_BUDGET" != "0" ]; then
++  OPERATOR_CAP_LOCAL=$(mktemp "${TMPDIR:-/tmp}/fabric_operator_cap.XXXXXX") || exit 78
++  TEMP_FILES+=("$OPERATOR_CAP_LOCAL")
++  chmod 600 "$OPERATOR_CAP_LOCAL" || exit 78
++  "$REMOTE_SUB_PYTHON" "$HERE/fabric_operator_issue.py" issue \
++    --packet "$PACKET" --run-id "$ID" --pool "$ACQUIRE_POOL" --model "$MODEL" \
++    --root "$ORCH_ID" --lease-id "$LEASE_ID" --account "$POOL_ACCOUNT" \
++    --host "$HOST_ARG" --support-sha256 "$SUPPORT_DIGEST" \
++    --child-budget "$OPERATOR_CHILD_BUDGET" --out "$OPERATOR_CAP_LOCAL" || {
++      RC=78; log "OPERATOR_CAPABILITY_ISSUE_REFUSED"; exit "$RC";
++    }
++  OPERATOR_CAP_REMOTE="lanes/tmp/${ID}.operator-cap.json"
++  OPERATOR_CAP_SHA=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" glm-cap-sha "$OPERATOR_CAP_LOCAL") || exit 78
++  OPERATOR_CAP_READBACK=$("$SSH_CMD" -T -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
++    "python3 \"\$HOME/lanes/support-releases/$SUPPORT_DIGEST/ext/fabric_operator_client.py\" receive '$ID'" \
++    < "$OPERATOR_CAP_LOCAL") || { RC=78; log "OPERATOR_CAPABILITY_TRANSFER_UNVERIFIED"; exit "$RC"; }
++  [ "$OPERATOR_CAP_READBACK" = "$OPERATOR_CAP_SHA" ] || { RC=78; log "OPERATOR_CAPABILITY_DIGEST_UNVERIFIED"; exit "$RC"; }
++  OPERATOR_ENV="FABRIC_OPERATOR_CAPSULE='$OPERATOR_CAP_REMOTE'"
++  log "OPERATOR_CAPABILITY_READY child_budget=$OPERATOR_CHILD_BUDGET transport=private-stdin"
++fi
++
+ # MODE/PACKET/CWD/MODEL are quoted for the remote shell; values never expand
+ # on the seat, and the packet is read only inside that remote shell.
++if [ -n "${FABRIC_OPERATOR_CHILD_ID:-}" ]; then
++  "$REMOTE_SUB_PYTHON" "$HERE/fabric_operator_issue.py" child-start --packet "$PACKET" \
++    --run-id "$ID" --root "$ORCH_ID" --lease-id "$LEASE_ID" \
++    --pool "$ACQUIRE_POOL" --model "$MODEL" --account "$POOL_ACCOUNT" --host "$HOST_ARG" || {
++      RC=78; log "OPERATOR_CHILD_START_REFUSED"; exit "$RC";
++    }
++fi
+ ACCOUNT_ARG=${POOL_ACCOUNT:-}
+ # Quote each value for the remote shell; never evaluate metadata locally.
+ # Root/parent/class are correlation; the optional context ceiling is a caller-supplied bound. Neither grants authority.
+@@ -782,7 +846,7 @@
+   REMOTE_INNER='export GLM_REMOTE_CAPABILITY_FILE="$HOME/lanes/tmp/$KEY.glm-cap.json"; '"$REMOTE_INNER"
+ fi
+ log "LAUNCH stdout=$REMOTE_STDOUT rc_file=ext/$REMOTE_RC cwd=$REMOTE_CWD"
+-LAUNCH_REMOTE="$NATIVE_TIMING_PREFIX $RPATH; $HOST_ENV; $NATIVE_TIMING_AFTER_ENV cd ~/lanes/ext || exit; rm -f \"$REMOTE_STDOUT\" \"$REMOTE_RC\" || exit; KEY='$ID' MODE='$MODE' PACKET=\"\$HOME/lanes/tmp/${ID}.txt\" REMOTE_CWD='$REMOTE_CWD' MODEL='$MODEL' RC_FILE=\"\$HOME/lanes/ext/$REMOTE_RC\" nohup env $NATIVE_TIMING_ENV $ROUTING_ENV SUPPORT_DIGEST='$SUPPORT_DIGEST' PYTHONDONTWRITEBYTECODE=1 LANE_LEASED=1 POOL_ACCOUNT='$ACCOUNT_ARG' POOL_LEASE_ID='$LEASE_ID' REMOTE_SUB_RUN_ID='$ID' LANE_REMOTE_HOST='$HOST_ARG' NATIVE_LEASE_ISSUED='$NATIVE_LEASE_ISSUED' NATIVE_LEASE_DEADLINE='$NATIVE_LEASE_DEADLINE' LANE_MAX_ACTIVE='$MAX_ACTIVE' LANE_MAX_LOAD_RATIO='$LANE_HOST_LOAD_RATIO' LANE_NICE=10 REMOTE_SUB_CHILD_TIMEOUT='$CHILD_TIMEOUT' bash -c '$REMOTE_INNER' </dev/null > \"$REMOTE_STDOUT\" 2>&1 &"
++LAUNCH_REMOTE="$NATIVE_TIMING_PREFIX $RPATH; $HOST_ENV; $NATIVE_TIMING_AFTER_ENV cd ~/lanes/ext || exit; rm -f \"$REMOTE_STDOUT\" \"$REMOTE_RC\" || exit; KEY='$ID' MODE='$MODE' PACKET=\"\$HOME/lanes/tmp/${ID}.txt\" REMOTE_CWD='$REMOTE_CWD' MODEL='$MODEL' RC_FILE=\"\$HOME/lanes/ext/$REMOTE_RC\" nohup env $NATIVE_TIMING_ENV $ROUTING_ENV $OPERATOR_ENV SUPPORT_DIGEST='$SUPPORT_DIGEST' PYTHONDONTWRITEBYTECODE=1 LANE_LEASED=1 POOL_ACCOUNT='$ACCOUNT_ARG' POOL_LEASE_ID='$LEASE_ID' REMOTE_SUB_RUN_ID='$ID' LANE_REMOTE_HOST='$HOST_ARG' NATIVE_LEASE_ISSUED='$NATIVE_LEASE_ISSUED' NATIVE_LEASE_DEADLINE='$NATIVE_LEASE_DEADLINE' LANE_MAX_ACTIVE='$MAX_ACTIVE' LANE_MAX_LOAD_RATIO='$LANE_HOST_LOAD_RATIO' LANE_NICE=10 REMOTE_SUB_CHILD_TIMEOUT='$CHILD_TIMEOUT' bash -c '$REMOTE_INNER' </dev/null > \"$REMOTE_STDOUT\" 2>&1 &"
+ ADMISSION_FILE="$HERE/lanes/${ID}.admission"
+ if [ "$DRY_RUN" -ne 1 ]; then SCRATCH_PATHS+=("$ADMISSION_FILE"); fi
+ ADMISSION_WAIT_STARTED_SECONDS=""
+--- a/remote_sub_exec.py
++++ b/remote_sub_exec.py
+@@ -165,7 +165,12 @@
+     if mode in native_remote.MODES:
+         command = native_remote.command(mode, model, prompt, cwd, packet_path=packet_path.resolve())
+     lanes_dir = here / "lanes"
+-    child_env = os.environ.copy()
++    from fabric_operator_client import load_operator_environment
++    try:
++        child_env = load_operator_environment(os.environ, key, mode, model, packet_path.read_bytes())
++    except (OSError, ValueError, TypeError):
++        lease.release()
++        return _fail("OPERATOR_CAPSULE_REFUSED", 78)
+     child_env["POOL_USAGE_FILE"] = str(lanes_dir / f"{key}.usage.json")
+     child_env["POOL_USAGE_RUN_ID"] = key
+     if mode in native_remote.MODES:
+--- a/native_remote.py
++++ b/native_remote.py
+@@ -51,6 +51,7 @@
+         task_class,
+         read_url=STUDIO_MCP_READ_URL,
+         design_url=STUDIO_MCP_DESIGN_URL,
++        operator_delegation=bool(env.get("FABRIC_OPERATOR_CAPABILITY")),
+     )
+ 
+ def scope(key, mode, model, here, env, *, timing=None):
+@@ -142,7 +143,8 @@
+         config = home / "config.toml"
+         fd = os.open(config, os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW, 0o600)
+         with os.fdopen(fd, "w") as stream:
+-            stream.write(projection.config_text)
++            from fabric_operator_client import grok_hook_toml
++            stream.write(projection.config_text + grok_hook_toml(here, env))
+             stream.flush()
+             os.fsync(stream.fileno())
+         auth = Path(env.get("HOME", str(Path.home()))) / ".grok" / "auth.json"
+--- a/fabric_client_projection.py
++++ b/fabric_client_projection.py
+@@ -98,6 +98,7 @@
+     *,
+     read_url: object,
+     design_url: object,
++    operator_delegation: bool = False,
+ ) -> FabricClientProjection:
+     provider_name = str(provider or "").strip().lower()
+     if provider_name not in PROVIDERS:
+@@ -107,6 +108,9 @@
+     read = _endpoint(read_url, READ_PATH)
+     design = _endpoint(design_url, DESIGN_PATH)
+     url = design if route == "design" else read
++    if type(operator_delegation) is not bool or (operator_delegation and (task != "domain_orchestration" or provider_name not in {"claude", "grok"})):
++        raise FabricClientProjectionError("operator projection refused")
++
+ 
+     if provider_name == "claude":
+         config = {
+@@ -117,6 +121,8 @@
+                 }
+             }
+         }
++        if operator_delegation:
++            config["mcpServers"][SERVER_NAME]["headers"] = {"X-Mastermind-Fabric-Operator": "${FABRIC_OPERATOR_CAPABILITY}"}
+         text = json.dumps(config, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+         cli_args = ("--strict-mcp-config", "--mcp-config", text)
+         config_format = "claude-mcp-json"
+@@ -134,6 +140,8 @@
+             "enabled = true\n"
+         )
+         cli_args = ()
++        if operator_delegation:
++            text += 'headers = { "X-Mastermind-Fabric-Operator" = "${FABRIC_OPERATOR_CAPABILITY}" }\n'
+         config_format = "grok-toml"
+     elif provider_name == "cursor":
+         config = {"mcpServers": {SERVER_NAME: {"url": url}}}
+@@ -170,6 +178,7 @@
+     parser.add_argument("--task-class", required=True)
+     parser.add_argument("--read-url", required=True)
+     parser.add_argument("--design-url", required=True)
++    parser.add_argument("--operator-delegation", action="store_true")
+     args = parser.parse_args(argv)
+     try:
+         projection = project_fabric_client(
+@@ -177,6 +186,7 @@
+             args.task_class,
+             read_url=args.read_url,
+             design_url=args.design_url,
++            operator_delegation=args.operator_delegation,
+         )
+     except FabricClientProjectionError:
+         print("STUDIO_FABRIC_PROJECTION_REFUSED")
+--- a/studio_mcp_projection.sh
++++ b/studio_mcp_projection.sh
+@@ -7,7 +7,9 @@
+ [ -n "$TASK" ] || TASK=default
+ READ_URL="${STUDIO_MCP_READ_URL:-https://m2studio.taila6eca1.ts.net/studio-fabric}"
+ DESIGN_URL="${STUDIO_MCP_DESIGN_URL:-https://m2studio.taila6eca1.ts.net/studio-design}"
+-OUT="$(python3 "$HERE/fabric_client_projection.py" --provider "$PROVIDER" --task-class "$TASK" --read-url "$READ_URL" --design-url "$DESIGN_URL")" || exit $?
++OPERATOR_FLAG=""
++[ -z "${FABRIC_OPERATOR_CAPABILITY:-}" ] || OPERATOR_FLAG="--operator-delegation"
++OUT="$(python3 "$HERE/fabric_client_projection.py" --provider "$PROVIDER" --task-class "$TASK" --read-url "$READ_URL" --design-url "$DESIGN_URL" $OPERATOR_FLAG)" || exit $?
+ printf '%s' "$OUT" | python3 -c '''
+ import json,sys
+ field=sys.argv[1]
+--- a/glm_bound_claude.py
++++ b/glm_bound_claude.py
+@@ -105,6 +105,8 @@
+         key=info.get("api_key") if isinstance(info,dict) else None
+         if not isinstance(key,str) or not key or any(x in key for x in "\r\n"):
+             raise BindingRefused("account credential unavailable")
++        from fabric_operator_client import prepare_claude_hook
++        argv.extend(prepare_claude_hook(HERE, environ))
+         scoped=dict(environ)
+         scoped["ANTHROPIC_AUTH_TOKEN"]=key
+         scoped.pop("GLM_SHIM_TOKEN",None)
+@@ -129,8 +131,13 @@
+         return 78
+     try:
+         launch(*args,prompt_file=prompt_file)
+-    except (BindingRefused,OSError,ValueError,TypeError,sqlite3.Error):
+-        print("glm_bound_claude: broker account binding refused",file=sys.stderr)
++    except BindingRefused as exc:
++        allowed = {"binding missing", "lease unavailable", "lease mismatch", "model refused", "workdir refused", "turn bound refused", "prompt file refused", "account credential unavailable"}
++        reason = str(exc) if str(exc) in allowed else "binding refused"
++        print("glm_bound_claude: broker account binding refused reason=" + reason.replace(" ", "_"), file=sys.stderr)
++        return 78
++    except (OSError,ValueError,TypeError,sqlite3.Error):
++        print("glm_bound_claude: broker account binding refused reason=local_contract_error",file=sys.stderr)
+         return 78
+     return 0
+ 
+--- a/lease_broker.py
++++ b/lease_broker.py
+@@ -542,6 +542,7 @@
+         wait: float = 0,
+         poll: float = 1.0,
+         model: str = "",
++        operator_child_id: Optional[str] = None,
+     ) -> AcquireResult:
+         pool = self.provider_name(pool)
+         model = str(model or "").strip()
+@@ -571,8 +572,9 @@
+                     ttl,
+                     waiter_id,
+                     model,
+-                )
+-                if result.ok:
++                    operator_child_id,
++                )
++                if result.ok or last_reason == "operator_authorization_refused":
+                     return result
+             finally:
+                 fcntl.flock(lock, fcntl.LOCK_UN)
+@@ -764,6 +766,7 @@
+         ttl: Optional[int],
+         waiter_id: Optional[str],
+         model: str = "",
++        operator_child_id: Optional[str] = None,
+     ) -> Tuple[AcquireResult, Optional[str], str]:
+         spec = self.provider(pool)
+         if spec.get("enabled") is False:
+@@ -859,6 +862,14 @@
+             use_ttl = int(ttl if ttl is not None else (RENT_TTL if state == "rented" else DEFAULT_TTL))
+             lid = uuid.uuid4().hex[:12]
+             now = self.now()
++            if operator_child_id is not None:
++                try:
++                    from fabric_operator_owner import validate_child_admission
++                    validate_child_admission(conn, operator_child_id, orch, now=now)
++                except (ValueError, KeyError, TypeError, sqlite3.Error):
++                    return (AcquireResult(ok=False, reason="operator_authorization_refused",
++                                          pool=pool, orchestrator_id=orch),
++                            waiter_id, "operator_authorization_refused")
+             conn.execute(
+                 "INSERT INTO leases "
+                 "(id, orchestrator_id, pool, account, task_class, model, host, pid, "
+@@ -866,6 +877,9 @@
+                 "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                 (lid, orch, pool, picked, task_class, model, host, pid, now, use_ttl, now, state, 1),
+             )
++            if operator_child_id is not None:
++                conn.execute("UPDATE operator_child_authorizations SET admitted_lease_id=? WHERE run_id=? AND root=? AND admitted_lease_id IS NULL",
++                             (lid, operator_child_id, orch))
+             conn.execute(
+                 "DELETE FROM waiters WHERE orchestrator_id=? AND pool=?",
+                 (orch, pool),
+@@ -1317,6 +1331,7 @@
+     pa.add_argument("--account", default=None)
+     pa.add_argument("--task-class", default="unknown")
+     pa.add_argument("--model", default="")
++    pa.add_argument("--operator-child-id", default=None)
+     pa.add_argument("--host", default=None)
+     pa.add_argument("--pid", type=int, default=0)
+     pa.add_argument("--ttl", type=int, default=None)
+@@ -1355,6 +1370,7 @@
+             ttl=args.ttl,
+             wait=args.wait,
+             poll=args.poll,
++            operator_child_id=args.operator_child_id,
+         )
+         print(res.line())
+         return 0 if res.ok else 75
