@@ -2066,7 +2066,7 @@ export function App() {
         ? office.projection.mission.source.state
         : active === "Projects"
           ? office.projection.programs.source.state
-          : active === "Today"
+          : active === "Today" || active === "Programs"
             ? index.state === "PENDING"
               ? "SOURCE_READ_PENDING"
               : index.state
@@ -2097,6 +2097,12 @@ export function App() {
               ? "Supplied Mission references retain exact provenance; canonical record content is not reconstructed."
               : active === "Projects"
                 ? "Exact Project identities from the supplied owner collection; company-wide coverage is not established."
+                : active === "Programs"
+                  ? index.state === "PENDING"
+                    ? "Reading the bounded Programs projection; no company-wide queue is inferred."
+                    : index.state === "AVAILABLE"
+                      ? `${index.programs.length} Programs from the bounded source observation.`
+                      : "Program source unavailable; current company movement is not inferred."
                 : active === "Today"
                   ? d && d.read_state.state !== "CURRENT"
                     ? `Selected mission projection is ${label(d.read_state.state)}; source qualification is not current.`
