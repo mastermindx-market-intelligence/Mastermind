@@ -29,7 +29,7 @@ def source(tmp_path):
     (app / "package-lock.json").write_text('{"lockfileVersion":3}')
     (app / "source.txt").write_text("committed app bytes")
     root = Path(__file__).resolve().parents[1]
-    for name in helper().INPUTS:
+    for name in helper().LAUNCH_INPUTS:
         target = repo / name
         if not target.exists():
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -65,6 +65,95 @@ def bundle(tmp_path, source, monkeypatch):
     mod.prepare(source_repo=repo, expected_sha=sha, web_client_id="test-public-client-id", output=out,
                 build_user="test", node=Path("/test/node"), npm_cli=Path("/test/npm-cli.js"))
     return mod, out, sha, tree
+
+
+def canonical(value):
+    return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
+
+
+def launch_manifest(profile="research_only", **extra):
+    manifest = {"v": 1, "workstream": "WS:LAUNCH-FIXTURE", "priority": 5,
+                "projects": [{"ref": "executive-infrastructure", "label": "Fixture department"}],
+                "profiles": [{"ref": profile, "label": "Fixture profile"}]}
+    if profile == "bounded_code_change":
+        manifest.update({"allowedWritePaths": ["src/public-config.ts"], "validation": {"git_diff_check": True}})
+    manifest.update(extra)
+    return manifest
+
+
+def damaged_manifest(damage):
+    valid = launch_manifest()
+    if damage == "duplicate_key":
+        text = canonical(valid).decode()
+        return (text[:-2] + ',"v":1}\n').encode()
+    if damage == "unknown_field": return canonical({**valid, "token": "unaccepted"})
+    if damage == "bool_priority": return canonical({**valid, "priority": True})
+    if damage == "float_priority": return canonical({**valid, "priority": 1.5})
+    if damage == "string_v": return canonical({**valid, "v": "1"})
+    if damage == "string_attempt_limit": return canonical({**valid, "attemptLimit": "1"})
+    if damage == "attempt_limit_four": return canonical({**valid, "attemptLimit": 4})
+    if damage == "int_git_check":
+        return canonical({**valid, "profiles": [{"ref": "bounded_code_change", "label": "Bounded"}],
+                          "allowedWritePaths": ["src/public-config.ts"], "validation": {"git_diff_check": 1}})
+    if damage == "noncanonical": return json.dumps(valid).encode()
+    if damage == "raw_utf8_unicode":
+        return json.dumps({**valid, "projects": [{"ref": "executive-infrastructure", "label": "Département"}]},
+                          ensure_ascii=False).encode("utf-8")
+    if damage == "surrogate":
+        return canonical({**valid, "projects": [{"ref": "executive-infrastructure", "label": "bad \ud800 surrogate"}]})
+    if damage == "oversized":
+        return canonical({**valid, "allowedWritePaths": [f"src/{'a' * 240}" for _ in range(16)]})
+    if damage == "research_with_paths": return canonical({**valid, "allowedWritePaths": ["src/public-config.ts"]})
+    if damage == "research_with_validation": return canonical({**valid, "validation": {"git_diff_check": True}})
+    if damage == "bounded_without_paths":
+        return canonical({**valid, "profiles": [{"ref": "bounded_code_change", "label": "Bounded"}]})
+    if damage == "bounded_empty_validation":
+        return canonical({**valid, "profiles": [{"ref": "bounded_code_change", "label": "Bounded"}],
+                          "allowedWritePaths": ["src/public-config.ts"], "validation": {}})
+    if damage == "duplicate_refs":
+        return canonical({**valid, "projects": [{"ref": "executive-infrastructure", "label": "A"},
+                                                {"ref": "executive-infrastructure", "label": "B"}]})
+    bounded = {**valid, "profiles": [{"ref": "bounded_code_change", "label": "Bounded"}],
+               "validation": {"git_diff_check": True}}
+    if damage == "traversal_path": return canonical({**bounded, "allowedWritePaths": ["../outside"]})
+    if damage == "absolute_path": return canonical({**bounded, "allowedWritePaths": ["/tmp/outside"]})
+    if damage == "backslash_path": return canonical({**bounded, "allowedWritePaths": ["src\\file"]})
+    if damage == "git_segment": return canonical({**bounded, "allowedWritePaths": [".git/config"]})
+    if damage == "empty_projects": return canonical({**valid, "projects": []})
+    if damage == "bad_ref": return canonical({**valid, "projects": [{"ref": "Executive", "label": "No"}]})
+    if damage == "bad_workstream": return canonical({**valid, "workstream": "JOB-013"})
+    if damage == "control_char_label":
+        return canonical({**valid, "profiles": [{"ref": "research_only", "label": "bad\nlabel"}]})
+    raise AssertionError(damage)
+
+
+@pytest.fixture
+def launch_bundle(tmp_path, source, monkeypatch):
+    mod = helper()
+    monkeypatch.setattr(mod, "require_sealed_path", lambda *a, **k: None)
+    monkeypatch.setattr(mod, "_require_root", lambda: None)
+    calls = []
+
+    def build(app, **kwargs):
+        calls.append(kwargs)
+        return built_dist(app)
+    monkeypatch.setattr(mod, "_build", build)
+    repo, sha, tree = source
+    out = tmp_path / "launch-bundle"
+    mod.prepare(source_repo=repo, expected_sha=sha, web_client_id="test-public-client-id", output=out,
+                build_user="test", node=Path("/test/node"), npm_cli=Path("/test/npm-cli.js"),
+                executive_resource=mod.OS_EXECUTIVE_RESOURCE, launch_manifest=canonical(launch_manifest()))
+    return mod, out, sha, tree, calls
+
+
+def rewrite_receipt(out, mod, mutate):
+    path = out / "build-receipt.json"
+    receipt = json.loads(path.read_bytes())
+    mutate(receipt)
+    path.chmod(0o644)
+    path.write_bytes(mod._canonical(receipt))
+    path.chmod(0o444)
+    return receipt
 
 
 def test_prepared_bytes_import_before_seal_and_same_release_is_verify_only(bundle, tmp_path):
@@ -425,3 +514,291 @@ def test_installer_optional_preflight_refuses_before_service_stop(bundle, tmp_pa
     permitted = choice in ("absent", "valid", "sealed_identical")
     assert result.returncode == (0 if permitted else 65), result.stderr
     assert effects.exists() is permitted
+
+
+# --- Explicit public Launch build inputs: closed v2 receipts, default parity. ---
+
+def test_disabled_prepare_keeps_the_historical_v1_receipt_and_input_set(bundle):
+    mod, out, sha, tree = bundle
+    receipt = json.loads((out / "build-receipt.json").read_bytes())
+    assert receipt["schema"] == mod.SCHEMA and receipt["mode"] == "web"
+    assert set(receipt) == {"schema", "source_sha", "source_tree", "source_inputs", "mode", "recipe",
+                            "builder", "web_client_id", "asset_manifest_sha256"}
+    assert set(receipt["source_inputs"]) == set(mod.INPUTS)
+    assert mod.LAUNCH_INPUTS == (*mod.INPUTS, "app/mastermind_os/src/launch-config.ts")
+    assert mod._receipt_launch_inputs(receipt) == (None, None)
+    checked = mod.qualify(out, expected_sha=sha, tree_sha=tree, source_repo=out.parent / "source")
+    assert (out / mod.RECEIPT).read_bytes() == checked.receipt
+
+
+def test_disabled_prepare_ignores_ambient_vite_environment(tmp_path, source, monkeypatch):
+    mod = helper()
+    monkeypatch.setattr(mod, "require_sealed_path", lambda *a, **k: None)
+    monkeypatch.setattr(mod, "_require_root", lambda: None)
+    calls = []
+    monkeypatch.setattr(mod, "_build", lambda app, **kwargs: calls.append(kwargs) or built_dist(app))
+    monkeypatch.setenv("VITE_MM_LAUNCH_CONFIG", "foreign-config")
+    monkeypatch.setenv("VITE_MM_EXECUTIVE_RESOURCE", mod.OS_EXECUTIVE_RESOURCE)
+    monkeypatch.setenv("VITE_MM_WEB_CLIENT_ID", "foreign-client-id")
+    repo, sha, tree = source
+    out = tmp_path / "bundle"
+    mod.prepare(source_repo=repo, expected_sha=sha, web_client_id="test-public-client-id", output=out,
+                build_user="test", node=Path("/test/node"), npm_cli=Path("/test/npm-cli.js"))
+    receipt = json.loads((out / "build-receipt.json").read_bytes())
+    assert receipt["schema"] == mod.SCHEMA and receipt["mode"] == "web"
+    assert mod.LAUNCH_CONFIG_ENV not in json.dumps(receipt)
+    for kwargs in calls:
+        assert kwargs["executive_resource"] is None and kwargs["launch_manifest"] is None
+        assert kwargs["web_client_id"] == "test-public-client-id"
+    mod.qualify(out, expected_sha=sha, tree_sha=tree, source_repo=repo)
+
+
+def test_enabled_inputs_bind_exact_resource_and_canonical_manifest(launch_bundle, tmp_path):
+    mod, out, sha, tree, calls = launch_bundle
+    expected = canonical(launch_manifest())
+    receipt = json.loads((out / "build-receipt.json").read_bytes())
+    assert receipt["schema"] == mod.LAUNCH_SCHEMA and receipt["mode"] == mod.LAUNCH_MODE
+    assert receipt["executive_resource"] == mod.OS_EXECUTIVE_RESOURCE
+    assert receipt["launch_config"] == expected.decode("utf-8")
+    assert receipt["launch_config_sha256"] == hashlib.sha256(expected).hexdigest()
+    assert set(receipt["source_inputs"]) == set(mod.LAUNCH_INPUTS)
+    assert len(calls) == 1
+    assert calls[0]["executive_resource"] == mod.OS_EXECUTIVE_RESOURCE
+    assert calls[0]["launch_manifest"] == expected
+    checked = mod.qualify(out, expected_sha=sha, tree_sha=tree, source_repo=out.parent / "source")
+    assert checked.receipt == (out / mod.RECEIPT).read_bytes()
+
+
+def test_enabled_inputs_roundtrip_import_and_same_release_comparison(launch_bundle, tmp_path):
+    mod, out, sha, tree, _ = launch_bundle
+    checked = mod.qualify(out, expected_sha=sha, tree_sha=tree, source_repo=out.parent / "source")
+    stage = tmp_path / "stage"
+    stage.mkdir()
+    mod.import_assets(checked, stage)
+    assert (stage / "app/mastermind_os/dist/assets/index-a.js").read_text() == "committed app bytes"
+    assert (stage / "app/mastermind_os/web-build-receipt.json").read_bytes() == checked.receipt
+    (stage / ".executive-release-manifest.json").write_text("seal")
+    mod.compare_existing(checked, stage)
+
+
+def test_changed_launch_input_changes_receipt_and_bundle_digest(launch_bundle, tmp_path):
+    mod, out, sha, tree, _ = launch_bundle
+    first = mod.qualify(out, expected_sha=sha, tree_sha=tree, source_repo=out.parent / "source")
+    second_out = tmp_path / "second"
+    mod.prepare(source_repo=out.parent / "source", expected_sha=sha, web_client_id="test-public-client-id",
+                output=second_out, build_user="test", node=Path("/test/node"), npm_cli=Path("/test/npm-cli.js"),
+                executive_resource=mod.OS_EXECUTIVE_RESOURCE, launch_manifest=canonical(launch_manifest(priority=6)))
+    second = mod.qualify(second_out, expected_sha=sha, tree_sha=tree, source_repo=out.parent / "source")
+    assert first.digest != second.digest
+    first_receipt = json.loads(first.receipt)
+    second_receipt = json.loads(second.receipt)
+    assert first_receipt["launch_config"] != second_receipt["launch_config"]
+    assert first_receipt["launch_config_sha256"] != second_receipt["launch_config_sha256"]
+    with pytest.raises(ValueError):
+        mod.qualify(second_out, expected_sha=sha, tree_sha=tree, source_repo=out.parent / "source",
+                    expected_digest=first.digest)
+
+
+def test_v1_receipt_never_carries_and_cannot_be_rested_as_launch_evidence(bundle):
+    mod, out, sha, tree = bundle
+    assert mod._receipt_launch_inputs(json.loads((out / mod.RECEIPT).read_bytes())) == (None, None)
+    def fabricate(receipt):
+        receipt["schema"] = mod.LAUNCH_SCHEMA
+        receipt["mode"] = mod.LAUNCH_MODE
+    rewrite_receipt(out, mod, fabricate)
+    with pytest.raises(ValueError, match="qualified OS resource|provenance"):
+        mod.qualify(out, expected_sha=sha, tree_sha=tree, source_repo=out.parent / "source")
+
+
+@pytest.mark.parametrize("mutate,description", [
+    (lambda r: r.update(launch_config=json.dumps(launch_manifest())), "noncanonical text"),
+    (lambda r: r.update(launch_config_sha256="c" * 64), "digest drift"),
+    (lambda r: r.pop("launch_config_sha256"), "missing binding"),
+    (lambda r: r.update(executive_resource="https://mcp.mastermind-x.com/workspace/read"), "resource drift"),
+    (lambda r: r.update(executive_resource=""), "blank resource"),
+    (lambda r: r.update(mode="web"), "mode drift"),
+    (lambda r: r.update(schema="mastermind.os_web_build.v1"), "historical schema adoption"),
+])
+def test_enabled_receipt_tampers_refuse_qualification(launch_bundle, mutate, description):
+    mod, out, sha, tree, _ = launch_bundle
+    rewrite_receipt(out, mod, mutate)
+    with pytest.raises(ValueError):
+        mod.qualify(out, expected_sha=sha, tree_sha=tree, source_repo=out.parent / "source")
+
+
+def test_consistently_restamped_launch_manifest_is_digest_gated_like_v1(launch_bundle):
+    mod, out, sha, tree, _ = launch_bundle
+    first = mod.qualify(out, expected_sha=sha, tree_sha=tree, source_repo=out.parent / "source")
+    restamped = canonical(launch_manifest(priority=6))
+    def restamp(receipt):
+        receipt["launch_config"] = restamped.decode("utf-8")
+        receipt["launch_config_sha256"] = hashlib.sha256(restamped).hexdigest()
+    rewrite_receipt(out, mod, restamp)
+    with pytest.raises(ValueError):
+        mod.qualify(out, expected_sha=sha, tree_sha=tree, source_repo=out.parent / "source", expected_digest=first.digest)
+
+
+@pytest.mark.parametrize("damage", ["duplicate_key", "unknown_field", "bool_priority", "float_priority",
+                                    "string_v", "string_attempt_limit", "attempt_limit_four", "int_git_check",
+                                    "noncanonical", "raw_utf8_unicode", "surrogate", "oversized",
+                                    "research_with_paths", "research_with_validation", "bounded_without_paths",
+                                    "bounded_empty_validation", "duplicate_refs", "traversal_path",
+                                    "absolute_path", "backslash_path", "git_segment", "empty_projects",
+                                    "bad_ref", "bad_workstream", "control_char_label"])
+def test_manifest_input_refusals_follow_the_incumbent_decoder_law(damage):
+    mod = helper()
+    with pytest.raises(ValueError):
+        mod.decode_launch_manifest(damaged_manifest(damage))
+
+
+def test_valid_manifest_bytes_survive_exactly_including_astral_labels():
+    mod = helper()
+    manifest = {**launch_manifest(), "projects": [{"ref": "executive-infrastructure", "label": "Département 🚀"}]}
+    raw = canonical(manifest)
+    assert mod.decode_launch_manifest(raw) == raw
+    bounded = canonical(launch_manifest(profile="bounded_code_change"))
+    assert mod.decode_launch_manifest(bounded) == bounded
+
+
+def test_decoder_limit_parity_and_documented_byte_cap():
+    mod = helper()
+    assert mod.LAUNCH_MANIFEST_MAX_UTF16 == 16384
+    assert mod.LAUNCH_MANIFEST_MAX_BYTES < 16384
+    assert mod._utf16_length("🚀") == 2 and mod._utf16_length("é") == 1
+    with pytest.raises(ValueError):
+        mod.decode_launch_manifest(b"")
+    with pytest.raises(ValueError):
+        mod.decode_launch_manifest(b" " * 4097)
+    with pytest.raises(ValueError):
+        mod.decode_launch_manifest(b"\xff\xfe not utf-8")
+    with pytest.raises(ValueError):
+        mod.decode_launch_manifest("not bytes")
+
+
+@pytest.mark.parametrize("damage", ["partial_resource", "partial_manifest", "blank_resource", "wrong_resource",
+                                    "duplicate_key", "noncanonical", "oversized", "surrogate",
+                                    "research_with_paths", "unknown_field", "bool_priority"])
+def test_enabled_preparation_refuses_completely_before_any_build_effect(tmp_path, source, monkeypatch, damage):
+    mod = helper()
+    monkeypatch.setattr(mod, "require_sealed_path", lambda *a, **k: None)
+    monkeypatch.setattr(mod, "_require_root", lambda: None)
+    calls = []
+    monkeypatch.setattr(mod, "_build", lambda app, **kwargs: calls.append(kwargs) or built_dist(app))
+    repo, sha, _ = source
+    target = tmp_path / "refused"
+    resource = mod.OS_EXECUTIVE_RESOURCE
+    # A bare None pair is the disabled default; the API partial pair is one
+    # side present without the other. The CLI partial flag pair is covered in
+    # the command-line test.
+    if damage == "partial_resource":
+        raw = None
+    elif damage == "partial_manifest":
+        resource = None
+        raw = canonical(launch_manifest())
+    elif damage == "blank_resource":
+        resource = ""
+        raw = None
+    elif damage == "wrong_resource":
+        resource = "https://mcp.mastermind-x.com/workspace/read"
+        raw = None
+    else:
+        raw = damaged_manifest(damage)
+    kwargs = {"executive_resource": resource}
+    if raw is not None:
+        kwargs["launch_manifest"] = raw
+    with pytest.raises(ValueError):
+        mod.prepare(source_repo=repo, expected_sha=sha, web_client_id="test-public-client-id", output=target,
+                    build_user="test", node=Path("/test/node"), npm_cli=Path("/test/npm-cli.js"), **kwargs)
+    assert not target.exists()
+    assert calls == []
+    assert list(tmp_path.glob(".os-web-build-*")) == []
+
+
+def test_build_env_carries_only_the_explicit_public_pair_ignoring_ambient_vite(source, tmp_path, monkeypatch):
+    import os
+    import pwd
+    mod = helper()
+    app = tmp_path / "work/app/mastermind_os"
+    app.mkdir(parents=True)
+    npm = tmp_path / "npm-cli.js"
+    npm.write_text("// disposable npm entrypoint")
+    npm.chmod(0o644)
+    node = tmp_path / "node"
+    node.write_text("#!/bin/sh\nexit 0\n")
+    node.chmod(0o755)
+    repo, sha, _ = source
+    reserved = mod._reserved_service_uids(repo, sha)
+    calls = []
+    monkeypatch.setattr(mod.os, "chown", lambda *a, **k: None)
+    monkeypatch.setattr(mod.subprocess, "run", lambda args, **kwargs: calls.append(kwargs))
+    monkeypatch.setenv("VITE_MM_LAUNCH_CONFIG", "foreign-config")
+    monkeypatch.setenv("VITE_MM_EXECUTIVE_RESOURCE", "https://foreign.example/invalid")
+    monkeypatch.setenv("VITE_MM_WEB_CLIENT_ID", "foreign-client-id")
+    manifest = canonical(launch_manifest())
+    user = pwd.getpwuid(os.getuid())
+    mod._build(app, build_user=user.pw_name, node=node, npm_cli=npm,
+               web_client_id="test-public-client-id", reserved_service_uids=reserved,
+               executive_resource=mod.OS_EXECUTIVE_RESOURCE, launch_manifest=manifest)
+    assert len(calls) == 2
+    for kwargs in calls:
+        env = kwargs["env"]
+        assert env["VITE_MM_WEB_CLIENT_ID"] == "test-public-client-id"
+        assert env[mod.LAUNCH_RESOURCE_ENV] == mod.OS_EXECUTIVE_RESOURCE
+        assert env[mod.LAUNCH_CONFIG_ENV] == manifest.decode("utf-8")
+        assert sorted(name for name in env if name.startswith("VITE_")) == sorted(
+            ["VITE_MM_WEB_CLIENT_ID", mod.LAUNCH_RESOURCE_ENV, mod.LAUNCH_CONFIG_ENV])
+        assert "NODE_OPTIONS" not in env
+    # A fresh archive workspace per build; the disabled mode forwards no launch input.
+    disabled_app = tmp_path / "work2/app/mastermind_os"
+    disabled_app.mkdir(parents=True)
+    mod._build(disabled_app, build_user=user.pw_name, node=node, npm_cli=npm,
+               web_client_id="test-public-client-id", reserved_service_uids=reserved)
+    for kwargs in calls[2:]:
+        assert mod.LAUNCH_CONFIG_ENV not in kwargs["env"]
+        assert mod.LAUNCH_RESOURCE_ENV not in kwargs["env"]
+        assert kwargs["env"]["VITE_MM_WEB_CLIENT_ID"] == "test-public-client-id"
+
+
+def test_partial_pair_refused_by_the_builder_itself(source, tmp_path, monkeypatch):
+    import os
+    import pwd
+    mod = helper()
+    repo, sha, _ = source
+    reserved = mod._reserved_service_uids(repo, sha)
+    monkeypatch.setattr(mod.subprocess, "run", lambda *a, **k: pytest.fail("build was invoked"))
+    with pytest.raises(ValueError, match="complete qualified input pair"):
+        mod._build(tmp_path, build_user=pwd.getpwuid(os.getuid()).pw_name,
+                   node=tmp_path / "absent-node", npm_cli=tmp_path / "absent-npm",
+                   web_client_id="test-public-client-id", reserved_service_uids=reserved,
+                   executive_resource=mod.OS_EXECUTIVE_RESOURCE)
+
+
+def test_cli_prepare_reads_one_explicit_canonical_manifest_file_and_defaults_to_v1(bundle, tmp_path, monkeypatch, capsys):
+    mod, out, sha, tree = bundle
+    manifest_path = tmp_path / "launch.manifest.json"
+    manifest_path.write_bytes(canonical(launch_manifest()))
+    base = ["os_release_assets.py", "prepare", "--source-repo", str(out.parent / "source"),
+            "--expected-sha", sha, "--web-client-id", "test-public-client-id", "--build-user", "test",
+            "--node", "/test/node", "--npm-cli", "/test/npm-cli.js"]
+    monkeypatch.setattr(mod.sys, "argv", base + ["--output", str(tmp_path / "cli-v1")])
+    mod.main()
+    capsys.readouterr()
+    v1_receipt = json.loads((tmp_path / "cli-v1" / "build-receipt.json").read_bytes())
+    assert v1_receipt["schema"] == mod.SCHEMA and v1_receipt["mode"] == "web"
+    monkeypatch.setattr(mod.sys, "argv", base + ["--output", str(tmp_path / "cli-v2"),
+                                                 "--executive-resource", mod.OS_EXECUTIVE_RESOURCE,
+                                                 "--launch-manifest", str(manifest_path)])
+    mod.main()
+    digest = capsys.readouterr().out.strip().splitlines()[-1]
+    v2_receipt = json.loads((tmp_path / "cli-v2" / "build-receipt.json").read_bytes())
+    assert v2_receipt["schema"] == mod.LAUNCH_SCHEMA and v2_receipt["mode"] == mod.LAUNCH_MODE
+    assert v2_receipt["launch_config"] == canonical(launch_manifest()).decode("utf-8")
+    checked = mod.qualify(tmp_path / "cli-v2", expected_sha=sha, tree_sha=tree,
+                          source_repo=out.parent / "source")
+    assert digest == mod._hash(checked.receipt)
+    assert digest != checked.digest
+    monkeypatch.setattr(mod.sys, "argv", base + ["--output", str(tmp_path / "cli-partial"),
+                                                 "--executive-resource", mod.OS_EXECUTIVE_RESOURCE])
+    with pytest.raises(ValueError):
+        mod.main()
+    assert not (tmp_path / "cli-partial").exists()

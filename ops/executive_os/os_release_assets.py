@@ -4,6 +4,16 @@ Preparation is a root-owned build attestation: source is a clean protected Git
 archive, npm runs as the existing non-root operator, and only captured output
 bytes are published. It proves that build, not Auth0 registration or enrollment.
 Import never builds, changes a sealed release, or owns a service lifecycle.
+
+Two explicitly supplied PUBLIC Launch inputs may enable an immutable operator
+Launch binding: the exact qualified Executive resource (the public
+OS_EXECUTIVE_RESOURCE constant) and one bounded canonical closed Launch
+manifest read from an explicit sealed file. Both absent keeps the historical
+read-only default build and its closed v1 receipt; both present produces a
+separate closed schema v2 receipt that binds the exact resource and canonical
+manifest bytes. An enabled recipe is build-input evidence only: it is never
+user permission, Auth0 authority, or live Launch capability. Caller VITE
+environment is never inherited; only the exact paired inputs enter the build.
 """
 from __future__ import annotations
 
@@ -26,11 +36,24 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from ops.executive_os.executive_mcp_entry import build_os_asset_manifest, require_sealed_path
+from ops.executive_os.executive_mcp_entry import (OS_EXECUTIVE_RESOURCE, build_os_asset_manifest,
+                                                  require_sealed_path)
 from ops.executive_os.install_source_policy import InstallSourcePolicyError, validate_acceptance_source, _git
 from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
 
 SCHEMA = "mastermind.os_web_build.v1"
+LAUNCH_SCHEMA = "mastermind.os_web_build.launch.v2"
+LAUNCH_MODE = "web+launch"
+LAUNCH_RESOURCE_ENV = "VITE_MM_EXECUTIVE_RESOURCE"
+LAUNCH_CONFIG_ENV = "VITE_MM_LAUNCH_CONFIG"
+# The incumbent TS Launch decoder accepts raw strings up to 16384 UTF-16 code
+# units, but this closed receipt is read back through a 16384-byte budget that
+# must also carry source, builder and asset evidence. Canonical manifest inputs
+# are therefore capped below so a fully populated enabled receipt always fits;
+# larger inputs refuse before the build instead of being silently truncated.
+LAUNCH_MANIFEST_MAX_BYTES = 4096
+LAUNCH_MANIFEST_MAX_UTF16 = 16384
+RECEIPT_MAX_BYTES = 16384
 DIST = "app/mastermind_os/dist"
 RECEIPT = "build-receipt.json"
 INSTALLED_RECEIPT = "app/mastermind_os/web-build-receipt.json"
@@ -41,6 +64,9 @@ INPUTS = ("app/mastermind_os/package.json", "app/mastermind_os/package-lock.json
           "control_plane/fs_security.py", CONTROL_TEMPLATE,
           "ops/executive_os/os_release_assets.py", "ops/executive_os/executive_mcp_entry.py",
           "integrations/mastermind_executive_app/os_assets.py")
+# Enabled receipts bind the exact decoder law that qualified their manifest.
+# The historical v1 input set is unchanged for default-viewer compatibility.
+LAUNCH_INPUTS = (*INPUTS, "app/mastermind_os/src/launch-config.ts")
 
 
 def _canonical(value):
@@ -62,8 +88,8 @@ def _client(value):
     return value
 
 
-def _source_inputs(repo, sha):
-    return {name: _hash(_git(repo, "show", f"{sha}:{name}").stdout.encode()) for name in INPUTS}
+def _source_inputs(repo, sha, *, names=INPUTS):
+    return {name: _hash(_git(repo, "show", f"{sha}:{name}").stdout.encode()) for name in names}
 
 
 def _reserved_service_uids(repo, sha):
@@ -190,7 +216,11 @@ def _archive(repo, sha, destination):
         archive.extractall(destination, filter="data")
 
 
-def _build(app, *, build_user, node, npm_cli, web_client_id, reserved_service_uids):
+def _build(app, *, build_user, node, npm_cli, web_client_id, reserved_service_uids,
+           executive_resource=None, launch_manifest=None):
+    if executive_resource is not None or launch_manifest is not None:
+        if executive_resource is None or launch_manifest is None:
+            raise ValueError("enabled Launch build requires the complete qualified input pair")
     operator = pwd.getpwnam(build_user)
     if operator.pw_uid <= 0 or operator.pw_uid in reserved_service_uids:
         raise ValueError("build requires an existing non-service operator")
@@ -219,9 +249,15 @@ def _build(app, *, build_user, node, npm_cli, web_client_id, reserved_service_ui
         config.chmod(0o444)
     for path in [workspace, *workspace.rglob("*")]:
         os.chown(path, operator.pw_uid, operator.pw_gid, follow_symlinks=False)
+    # The build environment is closed by construction: ambient VITE variables
+    # are never inherited, and the only Launch inputs are the exact qualified
+    # pair already validated before the build was allowed to start.
     env = {"PATH": f"{node.parent}:/usr/bin:/bin", "HOME": str(workspace), "LC_ALL": "C",
            "npm_config_cache": str(workspace / ".npm-cache"), "npm_config_userconfig": str(user_config),
            "npm_config_globalconfig": str(global_config), "VITE_MM_WEB_CLIENT_ID": _client(web_client_id)}
+    if executive_resource is not None:
+        env[LAUNCH_RESOURCE_ENV] = executive_resource
+        env[LAUNCH_CONFIG_ENV] = launch_manifest.decode("utf-8")
     for args in (("ci", "--ignore-scripts"), ("run", "build")):
         subprocess.run([str(node), str(npm_cli), *args], cwd=app, env=env, check=True,
                        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -256,12 +292,211 @@ def _publish_file(path, data):
         raise
 
 
-def prepare(*, source_repo, expected_sha, web_client_id, output, build_user, node, npm_cli):
+_LAUNCH_ROOT_KEYS = frozenset(("v", "workstream", "priority", "projects", "profiles",
+                               "attemptLimit", "allowedWritePaths", "validation"))
+_LAUNCH_VALIDATION_KEYS = frozenset(("pytest_targets", "compileall_paths", "git_diff_check"))
+
+
+def _utf16_length(value):
+    # The incumbent decoder measures raw.length in UTF-16 code units; Python
+    # string length counts code points, so astral characters must count twice.
+    return sum(2 if ord(character) > 0xFFFF else 1 for character in value)
+
+
+def _launch_string(value, maximum=256):
+    if type(value) is not str or not 0 < _utf16_length(value) <= maximum:
+        return None
+    if any(ord(character) <= 0x1F or ord(character) == 0x7F for character in value):
+        return None
+    if any(0xD800 <= ord(character) <= 0xDFFF for character in value):
+        return None
+    return value
+
+
+def _launch_list(value):
+    if type(value) is not list or len(value) > 16:
+        return None
+    if any(_launch_string(item) is None for item in value):
+        return None
+    return value
+
+
+def _launch_paths(value):
+    if _launch_list(value) is None:
+        return None
+    for path in value:
+        if path.startswith("/") or "\\" in path:
+            return None
+        if any(segment in ("", ".", "..", ".git") for segment in path.split("/")):
+            return None
+    return value
+
+
+def _launch_choices(value, *, profile):
+    if type(value) is not list or not 0 < len(value) <= 16:
+        return None
+    refs = []
+    for choice in value:
+        if type(choice) is not dict or set(choice) != {"ref", "label"}:
+            return None
+        if _launch_string(choice["label"], 120) is None or _launch_string(choice["ref"], 64) is None:
+            return None
+        if profile:
+            if choice["ref"] not in ("research_only", "bounded_code_change"):
+                return None
+        elif re.fullmatch(r"[a-z][a-z0-9._-]{1,63}", choice["ref"]) is None:
+            return None
+        refs.append(choice["ref"])
+    if len(set(refs)) != len(refs):
+        return None
+    return value
+
+
+def _decode_launch_binding(parsed):
+    """Mirror app/mastermind_os/src/launch-config.ts decodeLaunchBindingConfig.
+
+    Booleans are not integers, unknown fields and duplicate keys refuse, and
+    profile/write-path/validation coherence follows the TS decoder exactly.
+    """
+    if type(parsed) is not dict or any(key not in _LAUNCH_ROOT_KEYS for key in parsed):
+        return None
+    if type(parsed["v"]) is not int or parsed["v"] != 1:
+        return None
+    if (_launch_string(parsed["workstream"], 72) is None
+            or re.fullmatch(r"WS:[A-Z0-9][A-Za-z0-9._-]{1,63}", parsed["workstream"]) is None):
+        return None
+    if type(parsed["priority"]) is not int or not -100 <= parsed["priority"] <= 100:
+        return None
+    if _launch_choices(parsed["projects"], profile=False) is None:
+        return None
+    if _launch_choices(parsed["profiles"], profile=True) is None:
+        return None
+    if "attemptLimit" in parsed:
+        limit = parsed["attemptLimit"]
+        if type(limit) is not int or limit not in (1, 2, 3):
+            return None
+    if "allowedWritePaths" in parsed and _launch_paths(parsed["allowedWritePaths"]) is None:
+        return None
+    if "validation" in parsed:
+        validation = parsed["validation"]
+        if type(validation) is not dict or any(key not in _LAUNCH_VALIDATION_KEYS for key in validation):
+            return None
+        if "pytest_targets" in validation and _launch_list(validation["pytest_targets"]) is None:
+            return None
+        if "compileall_paths" in validation and _launch_paths(validation["compileall_paths"]) is None:
+            return None
+        if "git_diff_check" in validation and type(validation["git_diff_check"]) is not bool:
+            return None
+    write_count = len(parsed["allowedWritePaths"]) if "allowedWritePaths" in parsed else 0
+    validation = parsed.get("validation") or {}
+    has_validation = bool(validation.get("pytest_targets") or validation.get("compileall_paths")
+                          or validation.get("git_diff_check"))
+    for profile in parsed["profiles"]:
+        if profile["ref"] == "research_only" and (write_count or has_validation):
+            return None
+        if profile["ref"] == "bounded_code_change" and (not write_count or not has_validation):
+            return None
+    return parsed
+
+
+def _reject_duplicate_keys(pairs):
+    seen = {}
+    for key, value in pairs:
+        if key in seen:
+            raise ValueError("duplicate JSON key in launch manifest")
+        seen[key] = value
+    return seen
+
+
+def _no_surrogates(value):
+    if type(value) is str:
+        if any(0xD800 <= ord(character) <= 0xDFFF for character in value):
+            raise ValueError("launch manifest contains an unpaired Unicode surrogate")
+    elif type(value) is list:
+        for item in value:
+            _no_surrogates(item)
+    elif type(value) is dict:
+        for key, item in value.items():
+            _no_surrogates(key)
+            _no_surrogates(item)
+
+
+def decode_launch_manifest(raw):
+    """Validate exact canonical public Launch manifest bytes; return those bytes.
+
+    The canonical serialization convention is the incumbent receipt encoding:
+    UTF-8, sorted keys, compact separators, non-ASCII escaped, one trailing
+    newline. Input bytes must already be exactly that encoding; they are never
+    rewritten. Every refusal below happens before any build effect.
+    """
+    if type(raw) is not bytes and type(raw) is not bytearray:
+        raise ValueError("launch manifest input must be exact canonical bytes")
+    raw = bytes(raw)
+    if not 0 < len(raw) <= LAUNCH_MANIFEST_MAX_BYTES:
+        raise ValueError(f"launch manifest must be 1..{LAUNCH_MANIFEST_MAX_BYTES} canonical UTF-8 bytes")
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError("launch manifest must be UTF-8") from exc
+    if _utf16_length(text) > LAUNCH_MANIFEST_MAX_UTF16:
+        raise ValueError("launch manifest exceeds the incumbent decoder UTF-16 code-unit limit")
+    parsed = json.loads(text, object_pairs_hook=_reject_duplicate_keys)
+    _no_surrogates(parsed)
+    if raw != _canonical(parsed):
+        raise ValueError("launch manifest bytes are not the canonical JSON encoding")
+    if _decode_launch_binding(parsed) is None:
+        raise ValueError("launch manifest refused by the incumbent Launch decoder law")
+    return raw
+
+
+def _validate_executive_resource(value):
+    # Only the exact protected public constant is qualified; a blank or
+    # different URL is not a resource swap surface.
+    if type(value) is not str or value != OS_EXECUTIVE_RESOURCE:
+        raise ValueError("executive resource must be the exact qualified OS resource")
+    return value
+
+
+def _public_launch_inputs(executive_resource, launch_manifest):
+    """Return the qualified pair, or (None, None) for the default read-only build."""
+    if executive_resource is None and launch_manifest is None:
+        return None, None
+    if executive_resource is None or launch_manifest is None:
+        raise ValueError("enabled Launch build inputs require both the exact resource and one canonical manifest")
+    return _validate_executive_resource(executive_resource), decode_launch_manifest(launch_manifest)
+
+
+def _receipt_launch_inputs(receipt):
+    """Discriminate the closed receipt version and revalidate its Launch binding."""
+    if type(receipt) is not dict:
+        raise ValueError("build provenance differs from target source")
+    schema = receipt.get("schema")
+    if schema == SCHEMA:
+        # Historical v1 receipts qualify the default read-only view only; they
+        # never carry, and can never be promoted to, Launch evidence.
+        return None, None
+    if schema == LAUNCH_SCHEMA:
+        resource = _validate_executive_resource(receipt.get("executive_resource"))
+        config = receipt.get("launch_config")
+        if type(config) is not str:
+            raise ValueError("closed Launch input binding refused")
+        manifest = decode_launch_manifest(config.encode("utf-8"))
+        if receipt.get("launch_config_sha256") != _hash(manifest):
+            raise ValueError("closed Launch input binding refused")
+        return resource, manifest
+    raise ValueError("build provenance differs from target source")
+
+
+def prepare(*, source_repo, expected_sha, web_client_id, output, build_user, node, npm_cli,
+            executive_resource=None, launch_manifest=None):
     _require_root()
     source_repo, output = Path(source_repo), Path(output)
     _sealed_path(output.parent, directory=True)
     tree = validate_acceptance_source(source_repo=source_repo, expected_sha=expected_sha)
-    inputs = _source_inputs(source_repo, expected_sha)
+    # Validate the complete public input pair before any build effect.
+    executive_resource, launch_manifest = _public_launch_inputs(executive_resource, launch_manifest)
+    inputs = _source_inputs(source_repo, expected_sha,
+                            names=LAUNCH_INPUTS if executive_resource is not None else INPUTS)
     for name in (*INPUTS[-3:], "control_plane/fs_security.py"):
         if inputs[name] != _hash((ROOT / name).read_bytes()):
             raise ValueError("preparer is not the exact source generation")
@@ -273,7 +508,8 @@ def prepare(*, source_repo, expected_sha, web_client_id, output, build_user, nod
         _archive(source_repo, expected_sha, work)
         builder = _build(work / "app/mastermind_os", build_user=build_user, node=node, npm_cli=npm_cli,
                          web_client_id=web_client_id,
-                         reserved_service_uids=_reserved_service_uids(source_repo, expected_sha))
+                         reserved_service_uids=_reserved_service_uids(source_repo, expected_sha),
+                         executive_resource=executive_resource, launch_manifest=launch_manifest)
         actual, files = _capture_dist(work, sealed=False)
         if "asset-manifest.json" in files:
             raise ValueError("build must not supply its own asset manifest")
@@ -285,12 +521,23 @@ def prepare(*, source_repo, expected_sha, web_client_id, output, build_user, nod
                    "source_inputs": inputs, "mode": "web", "recipe": RECIPE,
                    "builder": builder,
                    "web_client_id": web_client_id, "asset_manifest_sha256": _hash(_canonical(actual))}
+        if executive_resource is not None:
+            receipt = {"schema": LAUNCH_SCHEMA, "source_sha": expected_sha, "source_tree": tree,
+                       "source_inputs": inputs, "mode": LAUNCH_MODE, "recipe": RECIPE,
+                       "builder": builder, "web_client_id": web_client_id,
+                       "asset_manifest_sha256": _hash(_canonical(actual)),
+                       "executive_resource": executive_resource,
+                       "launch_config": launch_manifest.decode("utf-8"),
+                       "launch_config_sha256": _hash(launch_manifest)}
+        receipt_bytes = _canonical(receipt)
+        if len(receipt_bytes) > RECEIPT_MAX_BYTES:
+            raise ValueError("closed build receipt exceeds the qualified budget")
         output.mkdir(mode=0o755)
         for name, data in files.items():
             _publish_file(output / DIST / name, data)
         _publish_file(output / DIST / "asset-manifest.json", _canonical(actual))
-        _publish_file(output / RECEIPT, _canonical(receipt))
-    return _hash(_canonical(receipt))
+        _publish_file(output / RECEIPT, receipt_bytes)
+    return _hash(receipt_bytes)
 
 
 @dataclass(frozen=True)
@@ -304,14 +551,22 @@ def qualify(bundle, *, expected_sha, tree_sha, source_repo, expected_digest=None
     bundle = Path(bundle)
     _sealed_path(bundle, directory=True)
     _sealed_path(bundle / RECEIPT)
-    receipt_bytes = _read(bundle / RECEIPT, 16384)
+    receipt_bytes = _read(bundle / RECEIPT, RECEIPT_MAX_BYTES)
     receipt = json.loads(receipt_bytes)
-    required = {"schema", "source_sha", "source_tree", "source_inputs", "mode", "recipe", "builder", "web_client_id", "asset_manifest_sha256"}
-    if (type(receipt) is not dict or set(receipt) != required or receipt["schema"] != SCHEMA
+    launch_resource, _ = _receipt_launch_inputs(receipt)
+    required = {"schema", "source_sha", "source_tree", "source_inputs", "mode", "recipe", "builder",
+                "web_client_id", "asset_manifest_sha256"}
+    if launch_resource is not None:
+        required = required | {"executive_resource", "launch_config", "launch_config_sha256"}
+    if (type(receipt) is not dict or set(receipt) != required
+            or receipt["schema"] not in (SCHEMA, LAUNCH_SCHEMA)
             or receipt["source_sha"] != expected_sha or receipt["source_tree"] != tree_sha
-            or receipt["mode"] != "web" or receipt["recipe"] != RECIPE
+            or receipt["mode"] != (LAUNCH_MODE if launch_resource is not None else "web")
+            or receipt["recipe"] != RECIPE
             or _git(source_repo, "rev-parse", f"{expected_sha}^{{tree}}").stdout.strip() != tree_sha
-            or receipt["source_inputs"] != _source_inputs(source_repo, expected_sha)):
+            or receipt["source_inputs"] != _source_inputs(
+                source_repo, expected_sha,
+                names=LAUNCH_INPUTS if launch_resource is not None else INPUTS)):
         raise ValueError("build provenance differs from target source")
     _client(receipt["web_client_id"])
     builder = receipt["builder"]
@@ -347,7 +602,7 @@ def compare_existing(checked, release):
     _sealed_path(release, directory=True)
     _sealed_path(release / INSTALLED_RECEIPT)
     _, files = _capture_dist(release, sealed=True)
-    if files != checked.files or _read(release / INSTALLED_RECEIPT, 16384) != checked.receipt:
+    if files != checked.files or _read(release / INSTALLED_RECEIPT, RECEIPT_MAX_BYTES) != checked.receipt:
         raise ValueError("existing sealed release assets differ")
 
 
@@ -372,6 +627,8 @@ def main():
     parser.add_argument("--expected-digest")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--web-client-id")
+    parser.add_argument("--executive-resource")
+    parser.add_argument("--launch-manifest", type=Path)
     parser.add_argument("--build-user")
     parser.add_argument("--node", type=Path)
     parser.add_argument("--npm-cli", type=Path)
@@ -380,8 +637,16 @@ def main():
     if args.command == "prepare":
         if None in (args.output, args.web_client_id, args.build_user, args.node, args.npm_cli):
             raise ValueError("preparation inputs required")
+        if (args.executive_resource is None) != (args.launch_manifest is None):
+            raise ValueError("enabled Launch build inputs require both the exact resource and one canonical manifest")
+        launch_manifest = None
+        if args.launch_manifest is not None:
+            _sealed_path(args.launch_manifest)
+            launch_manifest = _read(args.launch_manifest, LAUNCH_MANIFEST_MAX_BYTES)
         print(prepare(source_repo=args.source_repo, expected_sha=args.expected_sha, output=args.output,
-                      web_client_id=args.web_client_id, build_user=args.build_user, node=args.node, npm_cli=args.npm_cli))
+                      web_client_id=args.web_client_id, build_user=args.build_user, node=args.node,
+                      npm_cli=args.npm_cli, executive_resource=args.executive_resource,
+                      launch_manifest=launch_manifest))
     else:
         if args.bundle is None or args.tree_sha is None:
             raise ValueError("qualified artifact inputs required")

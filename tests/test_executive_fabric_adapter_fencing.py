@@ -89,6 +89,19 @@ def adopt(runtime, lease):
         lease_owner="successor-supervisor")
 
 
+def test_assignment_identity_is_exact_original_pin_and_revalidates_fence(tmp_path, monkeypatch):
+    from control_plane.broker_assignment_seal import digest
+    from control_plane.executive_runtime import REMOTE_LAUNCH_IDENTITY_KEY
+    runtime, lease, adapter, spec, ref, client = started(tmp_path, monkeypatch)
+    identity = adapter.assignment_launch_identity(ref)
+    assert digest(identity) == runtime.attempts.get_attempt(spec.run_id).launch_metadata[REMOTE_LAUNCH_IDENTITY_KEY]["sha256"]
+    identity["request"]["binding"]["root_id"] = "foreign"
+    assert adapter.assignment_launch_identity(ref)["request"]["binding"]["root_id"] != "foreign"
+    adopt(runtime, lease)
+    with pytest.raises(Exception, match="stale fence"):
+        adapter.assignment_launch_identity(ref)
+
+
 def invoke(adapter, spec, ref, operation):
     if operation == "validate":
         return adapter.run_validation_argv(spec, ("/usr/bin/true",))
