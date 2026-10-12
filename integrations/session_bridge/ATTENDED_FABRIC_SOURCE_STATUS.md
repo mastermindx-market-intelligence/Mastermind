@@ -159,3 +159,21 @@ and durable Supervisor ACK. The resource handle is not full START: independently
 pinned post-exec image, live original generation, all existing admission and
 isolation evidence, retained collection and native parent acceptance remain
 required. No CLI/RPC, installed service or production profile is activated.
+
+
+### Original-owner executed-image observation (source only)
+
+The original runner can now inspect only its retained live Popen PID, using a
+pinned Linux process directory and a bounded executable-image hash. Boot, exact
+start ticks, process group/session and real/effective UID/GID must match the
+original handle. A changed, dead or foreign process refuses; the original owner
+retains collection and settlement. No argv pathname or controller PID stands in
+for the executed image. File ownership remains distinct from process credentials.
+
+The paid image patch was consumed by the exact original Codex parent and accepted
+once after two independently identified defects reproduced and were repaired.
+80 image/identity cases and32 affected original-owner cases pass. These are
+source and inert/local-child proofs, not Linux production admission. The physical
+owner still needs an independently qualified executable/interpreter chain, realm,
+attendance, isolation, assignment and complete retained launch attestation before
+exposing START. No service, provider credential, profile or installed lane changes.

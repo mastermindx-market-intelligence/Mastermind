@@ -1,8 +1,8 @@
 {
   "classification": "SOURCE_ONLY_UNINSTALLED",
   "base_sha256": "d36860ea8036ed5ec733a47c709a477c851fee95dddbae23c8e2214dc308b77e",
-  "candidate_sha256": "f0d6ef6c721332d6a375d2ec5c7dd2a2b22c5d22234bf76a83237fb253e5257d",
-  "patch_sha256": "92fd0f4a8d42740a89c64b91a9225dda4d5dec24900a0584205aa032b835c0df",
+  "candidate_sha256": "a71871fdf479c773774df5db424b2d414481f6d47ed349daa4f96056f7715395",
+  "patch_sha256": "77769e55e12683c3312dbede839b70e52899f8c3e7fb59d35be54aefd8b0b097",
   "worker_id": "fabric-bound-launch-port-01a11e90-v1",
   "retained_result_sha256": "efe84085be5f17112d286001535fe201d6368f1d8dbc5f1de7a167918a7649bd",
   "original_symbols": 59,
@@ -18,5 +18,5 @@
     "no Backend or installed changes"
   ],
   "reviewed_port_sha256": "df229997a0625b94bbfc207084ac9fde19526e49bbfe5e04eff97d58c556a7fa",
-  "parent_delta": "Original runner begin/wait/settle resource split, one retained async finisher, exact-handle cancellation; no production backend or POST_EXEC claim."
+  "parent_delta": "Original runner begin/wait/settle resource split, one retained async finisher and exact-handle cancellation; fixed Linux kernel image observation joins original Popen identity. No production backend or full POST_EXEC attestation."
 }

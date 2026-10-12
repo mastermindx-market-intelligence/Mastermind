@@ -530,7 +530,7 @@
                      "label": safe_label,
                      "pid": proc.pid,
                      "pgid": pgid,
-@@ -1200,6 +1507,233 @@
+@@ -1200,6 +1507,263 @@
          stdout_truncated=stdout_truncated,
          stderr_truncated=stderr_truncated,
      )
@@ -606,6 +606,36 @@
 +def begin_owned_process(command, **kwargs):
 +    """Begin once on the original main thread. Does not claim native START."""
 +    return _begin_owned_process(command, _main_thread=True, **kwargs)
++
++
++def observe_owned_process_image(owner):
++    """Observe the live image of this exact original handle; not a START seal.
++
++    The physical owner separately matches an independently pinned executable
++    (or qualified interpreter chain), realm/principal and full launch evidence.
++    This function never substitutes argv, a broker PID or a caller pathname.
++    """
++    _require_owned_execution(owner)
++    if not sys.platform.startswith("linux"):
++        raise LaneRuntimeError("owned_image_platform_unqualified")
++    if (owner.result is not None or owner.process is None
++            or owner.process.poll() is not None or owner._identity is None):
++        raise LaneRuntimeError("owned_image_not_live")
++    from control_plane.linux_process_identity import (
++        LinuxProcessIdentityError, inspect_linux_process_image)
++    try:
++        image = inspect_linux_process_image(owner.process.pid)
++    except LinuxProcessIdentityError as exc:
++        raise LaneRuntimeError("owned_image_observation_unqualified") from exc
++    identity = dict(pid=owner.process.pid, pgid=image['pgid'],
++        session_id=image['session_id'], boot_id=image['boot_id'],
++        process_start_identity='linux:' + image['start_identity'],
++        effective_uid=image['effective_uid'], effective_gid=image['effective_gid'],
++        real_uid=image['real_uid'], real_gid=image['real_gid'])
++    if identity != owner._identity or owner.process.poll() is not None:
++        raise LaneRuntimeError("owned_image_generation_changed")
++    _require_owned_execution(owner)
++    return dict(image, pid=owner.process.pid, label=owner.label)
 +
 +
 +def _settle_owned_process(owner, *, outcome=None, failure=None):
