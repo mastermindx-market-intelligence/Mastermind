@@ -1047,7 +1047,13 @@ def _build_profile_mcp_app(
                 return result(payload, challenge=challenge)
             direct_submit = name in direct_submit_names
             try:
-                payload = await direct_handler(principal_or_response, name, validated)
+                if name == "session_summon":
+                    from integrations.session_bridge.http_foreground import bind_request
+                    with bind_request(request, principal_or_response, clock=configured.clock) as source:
+                        payload = await source.run(
+                            lambda: direct_handler(principal_or_response, name, validated))
+                else:
+                    payload = await direct_handler(principal_or_response, name, validated)
                 canonical_json(payload)
             except Exception:
                 payload = direct_error_factory(
@@ -1159,7 +1165,8 @@ def _build_profile_mcp_app(
                 required_scopes=list((configured.policies.submit if release_profile else configured.policies.read).required_scopes),
                 resource_metadata_url=configured.policies.read.resource_metadata_url),
             backend=BearerAuthBackend(verifier),
-        )
+        ),
+        foreground_requests="session_summon" in direct_tool_names,
     )
 
     @asynccontextmanager
