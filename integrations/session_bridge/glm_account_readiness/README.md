@@ -1,7 +1,7 @@
 # GLM exact-account readiness
 
 This patch applies to the exact installed source preimages in SOURCE_MANIFEST.json.
-The fixtures retain those source bytes; they contain no account configuration or
+The test fixtures at `tests/fixtures/glm_account_readiness/` retain those source bytes; they contain no account configuration or
 credentials. Tests apply the patch in an isolated directory with synthetic inputs.
 
 A host's generic GLM availability does not establish that its already leased

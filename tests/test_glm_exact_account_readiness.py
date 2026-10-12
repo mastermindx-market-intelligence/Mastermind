@@ -16,7 +16,7 @@ COMPONENT = Path(__file__).resolve().parents[1] / "integrations/session_bridge/g
 @pytest.fixture
 def candidate(tmp_path, monkeypatch):
     ext = tmp_path / "ext"
-    shutil.copytree(COMPONENT / "fixtures", ext)
+    shutil.copytree(Path(__file__).parent / "fixtures/glm_account_readiness", ext)
     subprocess.run(["git", "apply", str(COMPONENT / "glm-account-readiness.patch")], cwd=ext,
                    check=True, capture_output=True, timeout=5)
     modules = []
