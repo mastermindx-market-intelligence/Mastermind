@@ -52,4 +52,32 @@ The old #633 Auth0 registration remains EFFECT_UNKNOWN. Current V3 READ+SUBMIT
 authentication is a separate ingress; no Auth0 support request or replacement
 registration is required to implement this source path. A queued request is
 not foreground attendance, and GUI Runtime adoption is not a substitute for
-the live authenticated handler that must remain valid through actual START.
+the live authenticated originating operation.
+
+## Finite lifetime and original-parent binding
+
+A guarded START establishes attendance at launch; it does not authorize
+unattended continuation. The current profile retains `interactive_only:true`
+and `unattended_background_allowed:false`. If the request is the only qualified
+attendance source, it must remain live through planner execution, canonical
+sealed-plan admission, the paid child's START and collection. The handler may
+await the existing service finisher outside transition locks. It must not
+create another queue, finisher or lease owner. The finite upstream candidate's
+300-second ceiling is also capped by principal expiry and the actual caller's
+earlier deadline/disconnect; it is not a promise of that much connected time.
+
+On originating-operation loss, request cancellation of the exact original
+paid child through Runtime. Its existing finisher must retain cancellation,
+collection and assignment-revocation ownership. Containment can continue after
+attendance ends, but business execution cannot silently become unattended.
+Closing only the local socket does not prove remote cancellation or cleanup.
+The current Backend/cancellation/revocation prerequisites remain open.
+
+The native fresh-admission observer cannot be replayed for an existing root.
+Later-request reentry needs canonical same-root provenance binding the original
+authenticated principal and actual native-parent target to the current request.
+An operation key, root ID, or caller-supplied Desktop UUID is insufficient;
+authentication of the OAuth subject/client does not authenticate a GUI writer.
+If that provenance is absent, a later caller cannot backfill it as authority.
+The native writer owns qualification of that origin producer and any explicit
+reentry binder. The bounded native-return no-child profile remains unchanged.
