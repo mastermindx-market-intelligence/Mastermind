@@ -78,7 +78,7 @@ def test_actual_sqlite_to_canonical_program_and_partial_mission(tmp_path,actual,
 
 def test_unsupported_root_never_becomes_complete_empty_mapping(actual):
     writer,bound,namespace,job=actual
-    writer.jobs.create_job('unsupported fixture root')
+    writer.jobs.create_job('unsupported fixture root', provenance={'schema': 'unknown-origin'})
     inputs=join._bounded_runtime_inputs(bound())
     assert inputs[0] is None and inputs[1] is None and inputs[4]
     assert namespace.entries==namespace.exits
