@@ -2236,22 +2236,32 @@ def _service_from_config(
                     try:
                         observed = await session_ingress._observe_trusted_grounding(readers)
                         require_summon_admission()
-                        receipt = await session_ingress.handle_frame(
-                            {"schema": session_ingress.SUBMIT_SCHEMA_V2,
-                             "request_ref": request_ref, "observed_grounding": observed,
-                             "request": request},
-                            runtime=runtime, grounding_provider=readers,
-                            workspace_root=config.proof_workspace_root,
-                            service_state=service._service_state,
-                            ceo_ingress_armed=binding.armed,
-                            strict_v2_admission=True,
-                            execution_binding_provider=service._require_current_coo_binding,
-                            dialogue_source_provider=commission_source_provider,
-                            admission_guard=require_summon_admission,
-                            fresh_admission_observer=(
-                                operation._bind_admitted_root if operation is not None else None
-                            ),
-                        )
+                        async with service._foreground_cycle_scope(operation) as drive:
+                            receipt = await service._run_owned_coroutine(session_ingress.handle_frame(
+                                {"schema": session_ingress.SUBMIT_SCHEMA_V2,
+                                 "request_ref": request_ref, "observed_grounding": observed,
+                                 "request": request},
+                                runtime=runtime, grounding_provider=readers,
+                                workspace_root=config.proof_workspace_root,
+                                service_state=service._service_state,
+                                ceo_ingress_armed=binding.armed,
+                                strict_v2_admission=True,
+                                execution_binding_provider=service._require_current_coo_binding,
+                                dialogue_source_provider=commission_source_provider,
+                                admission_guard=require_summon_admission,
+                                fresh_admission_observer=(
+                                    operation._bind_admitted_root if operation is not None else None
+                                ),
+                            ))
+                            if drive and receipt.get("duplicate") is False:
+                                try:
+                                    operation.require_root(receipt["job_id"])
+                                    completion = await service._drive_foreground_cycle(operation, receipt["job_id"])
+                                except Exception:
+                                    raise BridgeError("effect_unknown", "reconcile the original Executive operation") from None
+                                # Preserve the immutable QUEUED admission receipt.
+                                # Result delivery is a distinct current-call fact.
+                                receipt = {**receipt, "foreground_completion": completion}
                     except _FreshAdmissionObserverFailed:
                         raise BridgeError("effect_unknown", "reconcile the original Executive operation") from None
                     except ForegroundOperationRefusal as exc:

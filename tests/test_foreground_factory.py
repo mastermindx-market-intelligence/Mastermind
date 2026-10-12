@@ -1,5 +1,6 @@
 """Production factory joins the real canonical sink, with fixture grounding/host admission."""
 import asyncio
+import dataclasses
 from pathlib import Path
 
 import pytest
@@ -11,7 +12,7 @@ from tests.test_foreground_operation import frame
 from tests import test_foreground_fresh_admission as fresh
 
 
-@pytest.mark.parametrize("edge", ["fresh", "legacy", "before_commit", "after_commit"])
+@pytest.mark.parametrize("edge", ["fresh", "legacy", "before_commit", "after_commit", "drive", "duplicate", "drive_failure"])
 def test_actual_factory_fresh_source_and_committed_error_classification(tmp_path, short_socket_root, monkeypatch, edge):
     async def run():
         state = {"live": True}
@@ -21,6 +22,19 @@ def test_actual_factory_fresh_source_and_committed_error_classification(tmp_path
                 profile=WEB_CEO_SESSIONS_PROFILE) as (service, raw, _):
             await service.start()
             runtime = service._require_runtime()
+            drives = []
+            if edge in {"drive", "duplicate", "drive_failure"}:
+                from control_plane.fabric_attended_routing import AttendedWorkPlacement
+                service.config = dataclasses.replace(service.config,
+                    coo_attended_work_placements=(AttendedWorkPlacement("fixture", "fixture", "fixture"),))
+                async def drive(op, root):
+                    op.require_root(root)
+                    assert service._foreground_cycle_owner == (asyncio.current_task(), op)
+                    assert asyncio.current_task() in service._coo_action_tasks
+                    drives.append(root)
+                    if edge == "drive_failure": raise RuntimeError("private failure")
+                    return {"state": "NO_ACTION", "root_job_id": root, "delivery": "INCOMPLETE"}
+                monkeypatch.setattr(service, "_drive_foreground_cycle", drive)
             fresh.phase1fc._register_placement_union(runtime)
             owner = service._ceo_ingress_app_binding.session_bridge_provider_factory(runtime)
             original_observe, original_submit = ingress._observe_trusted_grounding, ingress.handle_frame
@@ -56,8 +70,16 @@ def test_actual_factory_fresh_source_and_committed_error_classification(tmp_path
             else:
                 async with scope._session_bridge_foreground_dispatch(runtime, f, host) as op:
                     result = await owner.handle_frame(f)
-                    if edge == "fresh": assert op._root == result["data"]["job_id"]
-            if edge in {"fresh", "legacy"}:
+                    if edge in {"fresh", "drive", "duplicate"}: assert op._root == result["data"]["job_id"]
+                if edge == "duplicate":
+                    async with scope._session_bridge_foreground_dispatch(runtime, f, host) as replay_op:
+                        replay = await owner.handle_frame(f)
+                        assert replay["ok"] and replay["data"]["duplicate"]
+                        assert "foreground_completion" not in replay["data"] and replay_op._root is None
+                if edge in {"drive", "duplicate"}:
+                    assert drives == [result["data"]["job_id"]]
+                    assert result["data"]["foreground_completion"]["delivery"] == "INCOMPLETE"
+            if edge in {"fresh", "legacy", "drive", "duplicate"}:
                 assert result["ok"] and result["data"]["dispatched"] is False
                 assert len(runtime.jobs.list_jobs()) == 1
             elif edge == "before_commit":
@@ -67,4 +89,5 @@ def test_actual_factory_fresh_source_and_committed_error_classification(tmp_path
                 assert not result["ok"] and result["error"]["code"] == "effect_unknown"
                 assert len(runtime.jobs.list_jobs()) == 1
             assert runtime.attempts.list_attempts() == []
+            assert service._foreground_cycle_owner is None and not service._coo_action_tasks
     asyncio.run(run())
