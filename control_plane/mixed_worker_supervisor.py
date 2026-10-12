@@ -46,7 +46,7 @@ class _ForegroundCustody:
             self.runtime.jobs.cancel_job(attempt.job_id,
                 expected_attempt_id=attempt.attempt_id,
                 expected_fence_generation=attempt.fence_generation)
-        except RuntimeProofError as exc:
+        except Exception as exc:
             # No alternate signal/lease action. The original owner must still
             # drain; its caller receives this unresolved cancellation after it.
             self.error = self.error or exc
@@ -61,8 +61,10 @@ class _ForegroundCustody:
     async def close(self):
         # This cancels only a liveness observer, never the controller/collector.
         self.monitor.cancel()
-        await _drain_original(asyncio.ensure_future(
+        values = await _drain_original(asyncio.ensure_future(
             asyncio.gather(self.monitor, return_exceptions=True)))
+        if values and isinstance(values[0], Exception):
+            self.error = self.error or values[0]
 
     def require_settled(self):
         if self.error is not None:
@@ -88,6 +90,9 @@ class MixedExecutionOwnerSupervisor:
         # Transient ActiveRun custody, not a second execution lifecycle. Durable
         # restart authority remains the canonical Attempt/recovery binding.
         self._active: dict[str, tuple[ExecutiveSupervisor, ActiveRun, _ForegroundCustody | None]] = {}
+        self._starting: set[str] = set()
+        self._unsettled: dict[str, tuple[ExecutiveSupervisor, ActiveRun]] = {}
+        self._pending_recovery: dict[str, tuple[ExecutiveSupervisor, ActiveRun]] = {}
 
     def _select(self, attempt) -> ExecutiveSupervisor:
         owner = self.owners.get(attempt.worker_id)
@@ -137,6 +142,17 @@ class MixedExecutionOwnerSupervisor:
         return active
 
     async def _start(self, owner, job_id, lease, operation, *, target=None):
+        key = lease.attempt.attempt_id
+        if (lease.attempt.status is not AttemptStatus.CLAIMED
+                or key in self._active or key in self._starting or key in self._unsettled):
+            raise SupervisorError("original Attempt already has a launch or finisher owner")
+        self._starting.add(key)
+        try:
+            return await self._start_owned(owner, job_id, lease, operation, target=target)
+        finally:
+            self._starting.discard(key)
+
+    async def _start_owned(self, owner, job_id, lease, operation, *, target=None):
         if operation is not None:
             operation.require_root(self.runtime.jobs.get_job(job_id).root_job_id)
         custody = (_ForegroundCustody(self.runtime, operation, lease)
@@ -146,8 +162,10 @@ class MixedExecutionOwnerSupervisor:
         if custody is None:
             return self._retain(owner, await start)
         task = asyncio.create_task(start)
+        active = None
         try:
             active = await asyncio.shield(task)
+            return self._retain(owner, active, custody)
         except asyncio.CancelledError:
             # START may already have crossed its effect boundary. Keep its
             # original response/containment owner; never cancel or replace it.
@@ -159,9 +177,16 @@ class MixedExecutionOwnerSupervisor:
                 await custody.close()
             raise
         except BaseException:
-            await custody.close()
+            if type(active) is ActiveRun:
+                self._unsettled[lease.attempt.attempt_id] = (owner, active)
+                custody.request_cancel()
+                try:
+                    await _drain_original(asyncio.create_task(owner.finish_job(active)))
+                finally:
+                    await custody.close()
+            else:
+                await custody.close()
             raise
-        return self._retain(owner, active, custody)
 
     async def start_cycle_job(self, job_id: str, *, command_id: str):
         operation = self._foreground(job_id)  # Before a new claim or any effect.
@@ -202,7 +227,11 @@ class MixedExecutionOwnerSupervisor:
         # failed original finisher keeps its canonical Attempt for recovery.
         owner, _, custody = self._active.pop(key)
         if custody is None:
-            return await owner.finish_job(active)
+            try:
+                return await owner.finish_job(active)
+            except BaseException:
+                self._unsettled[key] = (owner, active)
+                raise
         task = asyncio.create_task(owner.finish_job(active))
         try:
             try:
@@ -211,12 +240,15 @@ class MixedExecutionOwnerSupervisor:
                 custody.request_cancel()
                 await _drain_original(task)
                 raise
-            custody.require_settled()
-            return result
+        except BaseException:
+            self._unsettled[key] = (owner, active)
+            raise
         finally:
             await custody.close()
+        custody.require_settled()
+        return result
 
-    def reconcile_restart(self, *, requeue_lost: bool = False):
+    def reconcile_restart(self, *, requeue_lost: bool = True):
         outcomes = []
         scopes: dict[ExecutiveSupervisor, set[str]] = {}
         for attempt in self.runtime.attempts.list_attempts():
@@ -244,10 +276,18 @@ class MixedExecutionOwnerSupervisor:
         return outcomes
 
     def take_recovered_runs(self):
-        result = []
         for owner in dict.fromkeys(self.owners.values()):
             for active in owner.take_recovered_runs():
-                if self._select(active.lease.attempt) is not owner:
-                    raise SupervisorError("recovered Attempt changed execution owner")
-                result.append(self._retain(owner, active))
+                key = active.lease.attempt.attempt_id
+                # Retain before validation. One bad later row must not discard
+                # earlier drained handles when the caller quarantines startup.
+                existing = self._pending_recovery.get(key)
+                if existing is not None and (existing[0] is not owner or existing[1] is not active):
+                    raise SupervisorError("conflicting recovered Attempt owners")
+                self._pending_recovery[key] = (owner, active)
+        for key, (owner, active) in self._pending_recovery.items():
+            if self._select(active.lease.attempt) is not owner or key in self._active:
+                raise SupervisorError("recovered Attempt changed execution owner")
+        result = [self._retain(owner, active) for owner, active in self._pending_recovery.values()]
+        self._pending_recovery.clear()
         return tuple(result)

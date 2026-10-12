@@ -305,3 +305,65 @@ def test_caller_cancel_during_start_keeps_original_launch_owner(composition, mon
         assert not a.adapter.inspector.live
         assert not mixed._active
     asyncio.run(asyncio.wait_for(run(), timeout=5))
+
+
+def test_database_cancel_failure_cannot_be_swallowed_by_monitor(composition, monkeypatch):
+    import sqlite3
+    runtime, mixed, _a, _b, first, _ = composition
+    async def run():
+        signal = InertOriginSignal()
+        monkeypatch.setattr(mixed, "_foreground", lambda _: signal)
+        active = await mixed.start_job(first)
+        def refused(*args, **kwargs):
+            raise sqlite3.OperationalError("inert storage failure")
+        monkeypatch.setattr(runtime.jobs, "cancel_job", refused)
+        custody = mixed._active[active.lease.attempt.attempt_id][2]
+        signal.closed.set()
+        await custody.monitor
+        with pytest.raises(SupervisorError, match="cancellation remains unresolved"):
+            await mixed.finish_job(active)
+    asyncio.run(run())
+
+
+def test_recovered_batch_drift_retains_every_original_handle(composition, monkeypatch):
+    runtime, mixed, a, b, first, second = composition
+    one, two = asyncio.run(_start_pair(mixed, first, second))
+    recovered = MixedExecutionOwnerSupervisor(a, {"codex-01": a, "codex-02": b})
+    a._recovered_runs[one.lease.attempt.attempt_id] = one
+    b._recovered_runs[two.lease.attempt.attempt_id] = two
+    original = runtime.workers.get_quota_class
+    def drift(worker, quota):
+        value = original(worker, quota)
+        return dataclasses.replace(value, metadata={"execution_profile_id": "changed"}) if worker == "codex-02" else value
+    with monkeypatch.context() as patch:
+        patch.setattr(runtime.workers, "get_quota_class", drift)
+        with pytest.raises(SupervisorError, match="profile drifted"):
+            recovered.take_recovered_runs()
+    assert len(recovered._pending_recovery) == 2 and recovered._active == {}
+    assert recovered.take_recovered_runs() == (one, two)
+    assert recovered.take_recovered_runs() == ()
+
+
+def test_same_lease_cannot_cross_start_twice(composition, monkeypatch):
+    _runtime, mixed, a, _b, first, _ = composition
+    async def run():
+        active = await mixed.start_job(first)
+        async def forbidden(*args, **kwargs): pytest.fail("duplicate START")
+        monkeypatch.setattr(a, "_start_claimed_job", forbidden)
+        with pytest.raises(SupervisorError, match="already has a launch"):
+            await mixed._start(a, first, active.lease, None)
+    asyncio.run(run())
+
+
+def test_failed_finisher_retains_handle_without_authorizing_collection_replay(composition, monkeypatch):
+    _runtime, mixed, a, _b, first, _ = composition
+    async def run():
+        active = await mixed.start_job(first)
+        async def refused(*args): raise RuntimeError("original collection is uncertain")
+        monkeypatch.setattr(a, "finish_job", refused)
+        with pytest.raises(RuntimeError, match="collection is uncertain"):
+            await mixed.finish_job(active)
+        assert mixed._unsettled[active.lease.attempt.attempt_id] == (a, active)
+        with pytest.raises(SupervisorError, match="original owner"):
+            await mixed.finish_job(active)
+    asyncio.run(run())
