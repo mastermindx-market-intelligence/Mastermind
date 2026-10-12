@@ -80,3 +80,36 @@ Expected **patched output SHA256**:
 **Read-only preflight evidence:** healthy source/patch bundle: QUALIFIED_SOURCE_ONLY, 4 source files and 5 patches verified. Four isolated negative cases all returned rc78: altered source (SOURCE_DRIFT), altered patch (PATCH_DRIFT), symlink source (SOURCE_NOT_BOUNDED_REGULAR), wrong patched result SHA (PATCH_RESULT_DRIFT). The installed source SHA values remained unchanged.
 
 **Remaining acceptance:** exact current source writer/install custody; managed installation and separate installed readback; trusted GLM quota-cache producer/claim/usage attestation from a real admitted bounded child; correct original-parent result consumption, Auth0/native gates if applicable, independent code review and exact-head CI. This bundle alone does not prove production use of expiring subscriptions.
+
+
+## Source bundle v4 — session-accessible pool CLI and final source qualification
+
+This is the latest continuation, superseding v3's counts and narrower four-source manifest. **No installed source or active Fabric process was changed.**
+
+The real machine-wide wrapper at ~/.local/bin/pool lacked access to the durable fabric_task selector. Its observed preimage SHA256 is 95dad5ac680d605200252f7152ecc80b77a767016874028288822a98b2b72c78. Source-only patch ops/native_fabric/patches/pool_cli_selector_20261012.patch adds the minimal command-dispatch cases for pool preview and pool request, forwarding all selector flags intact to the same existing fabric_task.py. The patched wrapper target SHA256 is 2331854c1613d588094bcca34e75f9c3dd7de4396272e78cf03efbcfcb4d0f8e. There is no new selection, authentication, lease or retry plane.
+
+The current source bundle is **five exact sources / six patches**, with machine-wide wrapper explicitly required by --pool-wrapper. The current manifest is ops/native_fabric/selector_source_bundle_20261012.json and the read-only verifier is ops/native_fabric/verify_selector_source_bundle.py. Both supersede their four-source/five-patch predecessors on this same source branch. The verifier has **no install mode**; every candidate patch is applied to a private disposable copy, output SHA256s checked and installed source bytes rechecked. Source movement, tampering or output drift returns REFUSED without source mutations.
+
+**Current exact order** after source-owner admission:
+1. fabric_task_expiry_host_select_20261012_v2.patch
+2. pick_exact_model_selection_20261012.patch
+3. pick_glm_paired_window_urgency_20261012.patch
+4. lease_broker_glm_expiry_account_20261012.patch
+5. test_r31_paired_quota_truth_20261012.patch (supersedes narrow older R31 patch)
+6. pool_cli_selector_20261012.patch
+
+All under ops/native_fabric/patches/. Only the exact installed-source preimages in the manifest are admissible. The wrapper itself is a separate source carrier and cannot be overwritten by this draft without its active ownership/install gate.
+
+**Latest integrated tests:** 360 tests and seven subtests passed together in 26.23 seconds on M2; includes real isolated broker/SQLite affinity, provider quota windows, native capability/transport, task/model/host selection, and 16 hermetic source-bundle preflight tests. The wrapper forwarding was separately checked with two provider-free real Bash CLI/stub cases. The read-only live-policy CLI smoke (running the patched wrapper against isolated patched Python files, only rewriting the hardcoded kit root inside that disposable test) accepted an automatic review preview with pool=minimax, model=MiniMax-M3, host=ubuntu3, reserved=false. A Grok request that found the actual pool at cap 0 refused rather than fabricating a slot; an unregistered model grok-99 also refused before dispatch. Request help exposed the new --host and --model switches. No request was STARTed or charged.
+
+The existing provider cache was read-only checked: all three GLM account rows had fresh authoritative, paired quota observations; **zero** qualified as expiring under the current 36-hour/15%-remaining threshold at observation time. This is correct no-urgency behavior, not failure to use an expiring allowance.
+
+**GitHub publication byte proof:** All 12 inspected current release-relevant blobs (six patches, manifest, verifier, hosted preflight tests, and prior account/model/selector regression sources) matched the byte-exact M2 staged Git blob SHA identities. The live M2 kit and ~/.local/bin/pool still match the original preimage SHA256s; a source candidate is not installed or selected.
+
+**Use after installation (NOT an instruction to bypass admission):**
+- pool preview --id <stable-task-id> --class review --pool auto --host auto --model auto
+- pool request --id <stable-task-id> --class review --packet <packet-file> --cwd <workspace> --pool auto --host auto --model auto
+
+The second command **starts real work** only through original Fabric admission, evidence, model/host cap and claim mechanisms. It was not run live in this qualification.
+
+**Release boundary unchanged:** Source owner/current effect reconciliation, authorized managed install with exact independent source and CLI-wrapper readback, accepted code review/hosted exact-head CI, provider-authoritative actual account/host/model usage receipt, same-original-parent accepted return and native/auth gates. Source-owned F04 operation and remote_sub/lane_runtime/support_bundle/remote_sub_exec files remain explicitly outside this selector lane. No F04 replay or lease settlement was performed.
