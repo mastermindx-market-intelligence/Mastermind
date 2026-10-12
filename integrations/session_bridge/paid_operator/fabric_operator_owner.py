@@ -201,8 +201,12 @@ class OperatorOwner:
             grant, launch, lease, root = self._authorized(con, token)
             used = con.execute("SELECT COUNT(*) FROM operator_child_authorizations WHERE operator_run=?", (grant["operator_run"],)).fetchone()[0]
             root_used = con.execute("SELECT COUNT(*) FROM operator_child_authorizations WHERE root=?", (grant["root"],)).fetchone()[0]
-            validate_launch(grant, lease, launch, request, now=self.clock(), used_children=used,
+            now = self.clock()
+            validate_launch(grant, lease, launch, request, now=now, used_children=used,
                             root_children_remaining=root["child_limit"] - root_used)
+            # Same 660s broker start window; refuse before consuming authorization.
+            if root is None or min(root["expires"], grant["expires_at"]) - now < 660:
+                refuse("operator_child_start_window_expired")
             rid = request["run_id"]
             if con.execute("SELECT 1 FROM operator_child_authorizations WHERE run_id=?", (rid,)).fetchone():
                 refuse("RUN_EXISTS")
@@ -368,6 +372,15 @@ def validate_child_admission(con, run_id, root, *, now, admitted_lease_id=None, 
     return grant
 
 
+
+def refusal_payload(error):
+    # Fixed public reason only; never disclose arbitrary exceptions or capability data.
+    value = {"state": "OPERATOR_REQUEST_REFUSED", "retry_authorized": False}
+    if isinstance(error, DelegationRefused) and str(error) == "operator_child_start_window_expired":
+        value["reason"] = "operator_child_start_window_expired"
+    return value
+
+
 def main():
     # Remote callers can reach only these closed operations through the gateway.
     raw = sys.stdin.buffer.read(70001)
@@ -398,6 +411,6 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except (DelegationRefused, ValueError, KeyError, TypeError, OSError, sqlite3.Error):
-        print('{"state":"OPERATOR_REQUEST_REFUSED","retry_authorized":false}')
+    except (DelegationRefused, ValueError, KeyError, TypeError, OSError, sqlite3.Error) as exc:
+        print(canonical(refusal_payload(exc)))
         raise SystemExit(75)

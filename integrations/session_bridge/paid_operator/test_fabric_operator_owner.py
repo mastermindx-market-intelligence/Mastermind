@@ -34,12 +34,50 @@ class OwnerChecks(unittest.TestCase):
         self.launch = dict(root='root', run_id='operator', lease_id='lease-operator', pool='glm-frontier', model='glm-5.3',
                            account='account-1', host='ubuntu1', support_sha256='a'*64,
                            packet_sha256=hashlib.sha256(b'packet').hexdigest(), task_class='domain_orchestration')
-        self.owner.authorize_root('root', 3, 1300.)
+        self.owner.authorize_root('root', 3, 2200.)
         self.cap = self.owner.issue(self.launch, 2)
         self.request = dict(schema='mastermind.fabric_operator_child_request.v1', root='root', parent='operator',
                             run_id='child-1', task_class='mechanical', task_complexity='C0_MECHANICAL', packet='Bounded useful task')
 
     def tearDown(self): self.temp.cleanup()
+
+    def set_headroom(self, seconds, grant_limited=False):
+        with sqlite3.connect(self.owner.db) as con:
+            if grant_limited:
+                grant=json.loads(con.execute("SELECT grant_json FROM operator_grants").fetchone()[0])
+                grant['expires_at']=self.now+seconds
+                con.execute("UPDATE operator_grants SET grant_json=?",(json.dumps(grant),))
+            else:
+                con.execute("UPDATE operator_root_grants SET expires=?",(self.now+seconds,))
+
+    def test_start_window_refuses_without_consuming_authorization(self):
+        for grant_limited in (False, True):
+            with self.subTest(grant_limited=grant_limited):
+                self.set_headroom(615,grant_limited)
+                with self.assertRaisesRegex(DelegationRefused,'^operator_child_start_window_expired$'):
+                    self.owner.reserve(self.cap['token'],self.request)
+                with sqlite3.connect(self.owner.db) as con:
+                    self.assertEqual(con.execute('SELECT count(*) FROM operator_child_authorizations').fetchone()[0],0)
+                self.assertEqual(self.owner.describe(self.cap['token'])['child_budget_remaining'],2)
+                self.set_headroom(1200,grant_limited)
+
+    def test_exact_start_window_and_later_broker_race(self):
+        from fabric_operator_owner import validate_child_admission
+        self.set_headroom(660)
+        self.owner.reserve(self.cap['token'],self.request)
+        with self.owner.transaction() as con:
+            validate_child_admission(con,'child-1','root',now=self.now)
+        with self.owner.transaction() as con:
+            with self.assertRaisesRegex(DelegationRefused,'^operator_child_start_window_expired$'):
+                validate_child_admission(con,'child-1','root',now=self.now+1)
+        self.assertEqual(self.owner.describe(self.cap['token'])['child_budget_remaining'],1)
+
+    def test_refusal_payload_exposes_only_fixed_public_reason(self):
+        from fabric_operator_owner import refusal_payload
+        known=refusal_payload(DelegationRefused('operator_child_start_window_expired'))
+        self.assertEqual(known,dict(state='OPERATOR_REQUEST_REFUSED',retry_authorized=False,reason='operator_child_start_window_expired'))
+        for exc in (DelegationRefused('private-token-path'), OSError('operator_child_start_window_expired')):
+            self.assertEqual(refusal_payload(exc),dict(state='OPERATOR_REQUEST_REFUSED',retry_authorized=False))
 
     def test_declared_pool_alias_binds_actual_broker_pool(self):
         with sqlite3.connect(self.owner.db) as con:
@@ -125,7 +163,7 @@ class OwnerChecks(unittest.TestCase):
 
     def test_released_lease_preserves_child_record(self):
         self.owner.reserve(self.cap['token'],self.request)
-        self.now=1400
+        self.now=2400
         with self.assertRaises(DelegationRefused):self.owner.child_binding(self.cap['token'],'child-1')
         with sqlite3.connect(self.owner.db) as con:self.assertEqual(con.execute('SELECT count(*) FROM operator_child_authorizations').fetchone()[0],1)
 
