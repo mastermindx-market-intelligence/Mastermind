@@ -22,6 +22,7 @@ from typing import Any, Protocol, runtime_checkable
 WORKER_EXECUTION_CONTRACT_VERSION = "mastermind.worker_execution_contract/v1"
 LAUNCH_ATTESTATION_SCHEMA_VERSION = "mastermind.executive_launch_attestation/v1"
 WORKER_RECOVERY_BINDING_VERSION = "mastermind.worker_recovery_binding/v1"
+WORKER_REMOTE_RECOVERY_BINDING_VERSION = "mastermind.worker_recovery_binding/v2"
 DURABLE_COLLECTION_CONTRACT_VERSION = "mastermind.worker_durable_collection/v1"
 _MAX_RECOVERY_PROMPT_BYTES = 1024 * 1024
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -453,6 +454,25 @@ def _process_ref_from_recovery(value: Any) -> WorkerProcessRef:
         ) from exc
 
 
+def _validate_control_recovery_context(value: Any) -> None:
+    if not isinstance(value, Mapping) or set(value) != {"input_root", "source_workspace"}:
+        raise WorkerRecoveryContractError("Control recovery coordinates are invalid")
+    for path in value.values():
+        if (not isinstance(path, str) or not path or "\x00" in path
+                or not Path(path).is_absolute() or ".." in Path(path).parts
+                or str(Path(path)) != path):
+            raise WorkerRecoveryContractError("Control recovery coordinates are invalid")
+
+
+def _control_recovery_digest(spec_digest: str, material: Mapping[str, Any]) -> str:
+    return _canonical_sha256({
+        "launch_spec_sha256": spec_digest,
+        "prompt_path": material["prompt_path"],
+        "prompt_sha256": material["prompt_sha256"],
+        "control_recovery": material["control_recovery"],
+    })
+
+
 @dataclasses.dataclass(frozen=True)
 class WorkerRecoveryBinding:
     """Provider-neutral durable coordinates for one already-started execution."""
@@ -466,7 +486,9 @@ class WorkerRecoveryBinding:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "launch_spec", _freeze(self.launch_spec))
-        if self.schema_version != WORKER_RECOVERY_BINDING_VERSION:
+        if self.schema_version not in {
+            WORKER_RECOVERY_BINDING_VERSION, WORKER_REMOTE_RECOVERY_BINDING_VERSION,
+        }:
             raise WorkerRecoveryContractError(
                 "recovery binding schema is unsupported"
             )
@@ -488,10 +510,15 @@ class WorkerRecoveryBinding:
             raise WorkerRecoveryContractError(
                 "recovery launch digest is invalid"
             )
+        expected_fields = {"fields", "prompt_path", "prompt_sha256"}
+        if self.schema_version == WORKER_REMOTE_RECOVERY_BINDING_VERSION:
+            if self.adapter_id != "attended-fabric":
+                raise WorkerRecoveryContractError("remote recovery requires the Fabric owner")
+            expected_fields |= {"control_recovery", "control_recovery_sha256"}
         fields = self.launch_spec.get("fields")
         if (
             set(self.launch_spec)
-            != {"fields", "prompt_path", "prompt_sha256"}
+            != expected_fields
             or not isinstance(fields, Mapping)
             or fields.get("run_id") != self.process_ref.run_id
         ):
@@ -506,6 +533,18 @@ class WorkerRecoveryBinding:
             raise WorkerRecoveryContractError(
                 "recovery prompt digest is invalid"
             )
+        if self.schema_version == WORKER_REMOTE_RECOVERY_BINDING_VERSION:
+            context = self.launch_spec.get("control_recovery")
+            _validate_control_recovery_context(context)
+            if self.launch_spec.get("control_recovery_sha256") != _control_recovery_digest(
+                self.launch_spec_sha256, self.launch_spec,
+            ):
+                raise WorkerRecoveryContractError("Control recovery context digest has drifted")
+
+    @property
+    def control_recovery(self) -> Mapping[str, str] | None:
+        """Integrity-bound coordinates, not an authentication or filesystem grant."""
+        return self.launch_spec.get("control_recovery")
 
     @classmethod
     def bind(
@@ -515,6 +554,7 @@ class WorkerRecoveryBinding:
         spec: WorkerLaunchSpec,
         process_ref: WorkerProcessRef,
         prompt_path: str | Path,
+        control_recovery: Mapping[str, str] | None = None,
     ) -> "WorkerRecoveryBinding":
         if process_ref.run_id != spec.run_id:
             raise WorkerRecoveryContractError(
@@ -527,7 +567,12 @@ class WorkerRecoveryBinding:
             )
         try:
             resolved = path.resolve(strict=True)
-            input_root = (Path(spec.run_dir) / "input").resolve(strict=True)
+            if control_recovery is not None:
+                _validate_control_recovery_context(control_recovery)
+            input_root = (
+                Path(control_recovery["input_root"]) if control_recovery is not None
+                else Path(spec.run_dir) / "input"
+            ).resolve(strict=True)
             resolved.relative_to(input_root)
         except (OSError, ValueError) as exc:
             raise WorkerRecoveryContractError(
@@ -543,16 +588,22 @@ class WorkerRecoveryBinding:
             for field in dataclasses.fields(spec)
             if field.name != "prompt"
         }
+        material = {
+            "fields": fields,
+            "prompt_path": str(resolved),
+            "prompt_sha256": hashlib.sha256(payload).hexdigest(),
+        }
+        spec_digest = worker_launch_spec_sha256(spec)
+        if control_recovery is not None:
+            material["control_recovery"] = dict(control_recovery)
+            material["control_recovery_sha256"] = _control_recovery_digest(spec_digest, material)
         return cls(
-            schema_version=WORKER_RECOVERY_BINDING_VERSION,
+            schema_version=(WORKER_REMOTE_RECOVERY_BINDING_VERSION
+                            if control_recovery is not None else WORKER_RECOVERY_BINDING_VERSION),
             adapter_id=str(adapter_id),
             collection_contract_version=DURABLE_COLLECTION_CONTRACT_VERSION,
-            launch_spec_sha256=worker_launch_spec_sha256(spec),
-            launch_spec={
-                "fields": fields,
-                "prompt_path": str(resolved),
-                "prompt_sha256": hashlib.sha256(payload).hexdigest(),
-            },
+            launch_spec_sha256=spec_digest,
+            launch_spec=material,
             process_ref=process_ref,
         )
 
@@ -633,7 +684,10 @@ class WorkerRecoveryBinding:
                 raise WorkerRecoveryContractError("recovery prompt path is invalid")
             if ".." in Path(prompt_path).parts or ".." in raw["run_dir"].parts:
                 raise WorkerRecoveryContractError("recovery prompt path escapes run input")
-            Path(prompt_path).relative_to(raw["run_dir"] / "input")
+            prompt_root = (Path(self.control_recovery["input_root"])
+                           if self.control_recovery is not None
+                           else raw["run_dir"] / "input")
+            Path(prompt_path).relative_to(prompt_root)
             raw["result_schema_path"].relative_to(raw["run_dir"] / "input")
             for name in ("stdout_path", "stderr_path", "result_path"):
                 path = getattr(self.process_ref, name)
@@ -662,9 +716,11 @@ class WorkerRecoveryBinding:
         raw = dict(_jsonable(fields))
         prompt_path = Path(str(self.launch_spec["prompt_path"]))
         run_dir = Path(str(raw.get("run_dir", "")))
+        input_root = (Path(self.control_recovery["input_root"])
+                      if self.control_recovery is not None else run_dir / "input")
         try:
             prompt_path.resolve(strict=True).relative_to(
-                (run_dir / "input").resolve(strict=True)
+                input_root.resolve(strict=True)
             )
         except (OSError, ValueError) as exc:
             raise WorkerRecoveryContractError(
@@ -787,6 +843,7 @@ __all__ = [
     "WORKER_EXECUTION_CONTRACT_VERSION",
     "LAUNCH_ATTESTATION_SCHEMA_VERSION",
     "WORKER_RECOVERY_BINDING_VERSION",
+    "WORKER_REMOTE_RECOVERY_BINDING_VERSION",
     "DURABLE_COLLECTION_CONTRACT_VERSION",
     "validate_subscription_canary_claim",
     "MAX_ARTIFACTS",

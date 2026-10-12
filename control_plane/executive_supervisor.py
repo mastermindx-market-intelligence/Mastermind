@@ -1792,6 +1792,9 @@ class ExecutiveSupervisor:
 
         profile_id = str(job.constraints.get("execution_profile_id") or "")
         if not profile_id:
+            worker = self.runtime.workers.get_worker(lease.attempt.worker_id)
+            if worker is not None and str(worker.worker_type).strip().lower() == "attended-fabric":
+                raise SupervisorError("Fabric requires the exact finite attended read-only profile")
             return
         quota = self.runtime.workers.get_quota_class(
             lease.attempt.worker_id, lease.attempt.quota_class
@@ -1853,6 +1856,15 @@ class ExecutiveSupervisor:
             if effective_grant is not None
             else job.requested_authorities
         )
+        if adapter_id == "attended-fabric" and (
+            profile_id != "fabric.attended.claude.bounded.v1"
+            or self.cleanup_policy is not CleanupPolicy.FABRIC_PROCESS_GROUP
+            or effective_grant is None
+            or set(authorities) != {"READ"}
+            or profile.sandbox_policy != "read-only"
+            or profile.write_capable
+        ):
+            raise SupervisorError("Fabric requires the exact finite attended read-only profile")
         if "WRITE_BRANCH" in authorities and not profile.write_capable:
             raise SupervisorError(
                 "read-only execution profile refuses a write-capable Job grant"
@@ -1932,7 +1944,7 @@ class ExecutiveSupervisor:
         receipt_path = self._receipt_path(
             lease.attempt.attempt_id,
             "launch-attestation.json",
-            legacy=spec.run_dir / "input" / "launch-attestation.json",
+            legacy=self._run_dir(lease.attempt.attempt_id) / "input" / "launch-attestation.json",
         )
         _write_private_json(receipt_path, attestation)
         result = {
@@ -1985,6 +1997,8 @@ class ExecutiveSupervisor:
                     spec=spec,
                     process_ref=process_ref,
                     prompt_path=recovery_prompt_path,
+                    **({"control_recovery": self.adapter.control_recovery_context(spec)}
+                       if self.cleanup_policy is CleanupPolicy.FABRIC_PROCESS_GROUP else {}),
                 )
             except WorkerRecoveryContractError as exc:
                 raise SupervisorError(
@@ -3154,6 +3168,22 @@ class ExecutiveSupervisor:
             and ref.result_path == attempt.result_path
         )
 
+    def _validate_control_recovery_coordinates(self, binding, attempt):
+        """Validate durable local coordinates BEFORE opening a V2 prompt file."""
+        context = binding.control_recovery
+        if context is None:
+            return None
+        job = self._job(attempt.job_id)
+        expected = {
+            'input_root': str((self._run_dir(attempt.attempt_id) / 'input').resolve(strict=False)),
+            'source_workspace': str(Path(str(job.worktree)).resolve(strict=False)),
+        }
+        if (self.cleanup_policy is not CleanupPolicy.FABRIC_PROCESS_GROUP
+                or not job.worktree or dict(context) != expected):
+            raise SupervisorError("Control recovery coordinates differ from the durable Job/Attempt")
+        binding.validate_wire()
+        return dict(context)
+
     def _validated_recovery_binding(
         self, attempt: Attempt
     ) -> tuple[
@@ -3168,6 +3198,7 @@ class ExecutiveSupervisor:
             )
         try:
             binding = WorkerRecoveryBinding.from_dict(raw)
+            control_context = self._validate_control_recovery_coordinates(binding, attempt)
             fields = binding.launch_spec.get("fields")
             spec_type = (
                 OrchestrationLaunchSpec
@@ -3187,6 +3218,8 @@ class ExecutiveSupervisor:
                 "worker recovery binding differs from durable Attempt identity"
             )
         job = self._job(attempt.job_id)
+        if control_context is not None:
+            self.adapter.validate_remote_recovery_coordinates(spec, binding)
         effective_grant = self._effective_grant(job, attempt)
         expected_authorities = tuple(
             effective_grant["authorities"]
@@ -3203,16 +3236,15 @@ class ExecutiveSupervisor:
             or spec.job_id != attempt.job_id
             or spec.worker_id != attempt.worker_id
             or not job.worktree
-            or Path(spec.workspace_path).resolve(strict=False)
-            != Path(job.worktree).resolve(strict=False)
-            or Path(spec.run_dir).resolve(strict=False)
-            != self._run_dir(attempt.attempt_id).resolve(strict=False)
-            or Path(spec.result_schema_path).resolve(strict=False)
-            != (
-                self._run_dir(attempt.attempt_id)
-                / "input"
-                / "worker-result.schema.json"
-            ).resolve(strict=False)
+            or (control_context is None and (
+                Path(spec.workspace_path).resolve(strict=False)
+                != Path(job.worktree).resolve(strict=False)
+                or Path(spec.run_dir).resolve(strict=False)
+                != self._run_dir(attempt.attempt_id).resolve(strict=False)
+                or Path(spec.result_schema_path).resolve(strict=False)
+                != (self._run_dir(attempt.attempt_id) / "input"
+                    / "worker-result.schema.json").resolve(strict=False)
+            ))
             or tuple(spec.authorities) != expected_authorities
             or tuple(spec.allowed_artifact_paths) != expected_paths
             or spec.expected_base_sha
@@ -3266,8 +3298,14 @@ class ExecutiveSupervisor:
         """Recheck immutable launch inputs before adopting an existing execution."""
 
         job = self._job(attempt.job_id)
+        raw_binding = attempt.launch_metadata.get("worker_recovery_binding")
+        context = None
+        if isinstance(raw_binding, Mapping):
+            binding = WorkerRecoveryBinding.from_dict(raw_binding)
+            context = self._validate_control_recovery_coordinates(binding, attempt)
         try:
-            workspace = Path(spec.workspace_path).resolve(strict=True)
+            workspace = Path(context['source_workspace'] if context is not None
+                             else spec.workspace_path).resolve(strict=True)
         except (OSError, RuntimeError) as exc:
             raise SupervisorError(
                 "worker recovery workspace is unavailable"

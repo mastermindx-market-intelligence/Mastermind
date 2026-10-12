@@ -17,6 +17,12 @@ class RoutedBackend(Backend):
         self.route = route
         self.effects = []
 
+    async def start_owned(self, payload, *, authority):
+        authority.require(payload)
+        if payload["physical_binding_sha256"] != self.route:
+            raise BridgeProtocolError("EFFECT_UNKNOWN", "actual fixture route moved")
+        return await self.execute("start", payload)
+
     async def execute(self, operation, payload):
         if operation in {"start", "cancel", "validate"}:
             self.effects.append(operation)

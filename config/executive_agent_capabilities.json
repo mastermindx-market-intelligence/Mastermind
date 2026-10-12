@@ -1,6 +1,6 @@
 {
   "schema_version": "mastermind.executive_agent_capabilities/v3",
-  "policy_version": "2026-10-11.native-return-host-source",
+  "policy_version": "2026-10-11.native-return-host-selection",
   "lifecycle_authority": "executive_os",
   "production_armed": false,
   "mcp_servers": {
@@ -316,7 +316,7 @@
       "forbidden": []
     },
     "operator.appserver.interactive.native-return.v1": {
-      "enabled": false,
+      "enabled": true,
       "execution_surface": "codex-app-server",
       "auth_realm": "dedicated-worker-account",
       "sandbox_policy": "read-only",
@@ -329,6 +329,22 @@
       "mcp_servers": [
         "native-return-mcp-v1"
       ],
+      "resources": [],
+      "plugins": [],
+      "forbidden": []
+    },
+    "fabric.attended.claude.bounded.v1": {
+      "enabled": false,
+      "execution_surface": "claude-code",
+      "auth_realm": "dedicated-worker-account",
+      "sandbox_policy": "read-only",
+      "approval_policy": "never",
+      "network_policy": "disabled",
+      "write_capable": false,
+      "native_helper_policy": "disabled",
+      "native_helper": null,
+      "skills": [],
+      "mcp_servers": [],
       "resources": [],
       "plugins": [],
       "forbidden": []

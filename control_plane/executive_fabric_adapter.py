@@ -35,6 +35,7 @@ from control_plane.remote_attempt_transport import _read_claim, RemoteTransportP
 from control_plane.worker_execution_contract import (
     LAUNCH_ATTESTATION_SCHEMA_VERSION, WorkerLaunchSpec, WorkerProcessRef,
     WorkerRecoveryBinding, WorkerRunStatus,
+    _validate_control_recovery_context,
 )
 
 ADAPTER_ID = "attended-fabric"
@@ -218,6 +219,7 @@ class AttendedFabricWorkerAdapter:
         self._leases: dict[str, AttemptLease] = {}
         self._refs: dict[str, WorkerProcessRef] = {}
         self._attestations: dict[str, dict[str, Any]] = {}
+        self._control_recovery: dict[str, dict[str, str]] = {}
         self._cleanup_pairs: dict[tuple[str, str], tuple[dict, dict, dict]] = {}
         self._cleanup_not_before: dict[str, float] = {}
 
@@ -365,7 +367,8 @@ class AttendedFabricWorkerAdapter:
         # evidence to Supervisor's synchronous readers.
         self._cleanup_pairs[key] = (query, first, second)
 
-    def _resolve(self, spec: WorkerLaunchSpec, *, launch: bool):
+    def _resolve(self, spec: WorkerLaunchSpec, *, launch: bool,
+                 control_recovery: Mapping[str, str] | None = None):
         job, attempt, quota, join = _read_claim(self.runtime, job_id=spec.job_id,
             attempt_id=spec.run_id, purpose=(RemoteTransportPurpose.LAUNCH if launch
                                            else RemoteTransportPurpose.RECOVERY))
@@ -395,7 +398,33 @@ class AttendedFabricWorkerAdapter:
         payload = dict(binding=binding, physical_binding_sha256=physical.digest,
                        launch_spec=_launch_spec_to_json(spec),
                        validation_commands=[list(v) for v in job.validation_commands])
+        context = (control_recovery if control_recovery is not None
+                   else self._control_recovery.get(spec.run_id))
+        if context is not None:
+            _validate_control_recovery_context(context)
+            if (Path(context['source_workspace']) != Path(str(job.worktree)).resolve(strict=False)
+                    or Path(context['input_root']).name != 'input'
+                    or Path(context['input_root']).parent.name != spec.run_id):
+                raise BrokerStateError("Fabric Control recovery coordinates differ from Job/Attempt")
+            payload['control_recovery'] = dict(context)
         return attempt, physical, payload
+
+    def control_recovery_context(self, spec):
+        context = self._control_recovery.get(spec.run_id)
+        if context is None:
+            return None
+        attempt, physical, payload = self._resolve(spec, launch=False)
+        self._pin_matches(attempt, physical, payload)
+        return dict(context)
+
+    def validate_remote_recovery_coordinates(self, spec, binding):
+        """Check retained V2 context against the original pin, without transport."""
+        binding.validate_wire()
+        if binding.adapter_id != ADAPTER_ID or binding.control_recovery is None:
+            raise BrokerStateError("Fabric remote recovery context is missing")
+        attempt, physical, payload = self._resolve(
+            spec, launch=False, control_recovery=binding.control_recovery)
+        self._pin_matches(attempt, physical, payload)
 
     @staticmethod
     def _identity(physical, payload):
@@ -405,9 +434,15 @@ class AttendedFabricWorkerAdapter:
         if attempt.launch_metadata.get(REMOTE_LAUNCH_IDENTITY_KEY, {}).get("sha256") != self._identity(physical, payload):
             raise BrokerStateError("Fabric recovery does not match the original launch pin")
 
-    async def start(self, spec: WorkerLaunchSpec, *, lease: AttemptLease | None = None):
+    async def start(self, spec: WorkerLaunchSpec, *, lease: AttemptLease | None = None,
+                    control_recovery: Mapping[str, str] | None = None):
         if not isinstance(lease, AttemptLease) or not isinstance(spec, WorkerLaunchSpec):
             raise BrokerStateError("Fabric start requires the exact Supervisor lease and LaunchSpec")
+        if control_recovery is not None:
+            _validate_control_recovery_context(control_recovery)
+            if spec.run_id in self._control_recovery:
+                raise BrokerStateError("Fabric recovery context was already supplied")
+            self._control_recovery[spec.run_id] = dict(control_recovery)
         attempt, physical, payload = self._resolve(spec, launch=True)
         if lease.attempt != attempt or spec.run_id in self._bound:
             raise BrokerStateError("Fabric claim moved or start already attempted")
@@ -417,10 +452,12 @@ class AttendedFabricWorkerAdapter:
             expected_version=attempt.version, identity_digest=self._identity(physical, payload))
         current, check, check_payload = self._resolve(spec, launch=False)
         self._pin_matches(current, check, check_payload)
-        self.runtime.attempts.validate_pinned_remote_launch(pinned, lease_token=lease.lease_token)
+        validated = self.runtime.attempts.validate_pinned_remote_launch(pinned, lease_token=lease.lease_token)
+        from control_plane.fabric_control_start import command_from_validated_pin
+        command = command_from_validated_pin(validated, payload)
         self._bound[spec.run_id] = (client, payload, physical, spec)
         self._leases[spec.run_id] = lease
-        task = asyncio.create_task(client.request("start", payload,
+        task = asyncio.create_task(client.request("start", {**payload, "control_start": command},
             timeout_seconds=float(spec.timeout_seconds) + 60.0))
         try:
             while not task.done():
@@ -555,10 +592,28 @@ class AttendedFabricWorkerAdapter:
                                if key[0] != spec.run_id}
         self._leases[spec.run_id] = lease
         self._validate_lease(spec.run_id)
-        if binding.adapter_id != ADAPTER_ID or binding.recover_launch_spec(type(spec)) != spec:
+        if binding.adapter_id != ADAPTER_ID:
             raise BrokerStateError("Fabric recovery changed the original adapter/LaunchSpec")
-        attempt, physical, payload = self._resolve(spec, launch=False)
+        if binding.control_recovery is not None:
+            binding.validate_wire()
+            context = dict(binding.control_recovery)
+            existing = self._control_recovery.get(spec.run_id)
+            if existing is not None and existing != context:
+                raise BrokerStateError("Fabric original Control recovery context changed")
+            # Authenticate these coordinates against the original Runtime pin
+            # before the recovery contract opens the Control-local prompt.
+            attempt, physical, payload = self._resolve(
+                spec, launch=False, control_recovery=context)
+        elif spec.run_id in self._control_recovery:
+            raise BrokerStateError("Fabric recovery lost its original Control context")
+        else:
+            context = None
+            attempt, physical, payload = self._resolve(spec, launch=False)
         self._pin_matches(attempt, physical, payload)
+        if binding.recover_launch_spec(type(spec)) != spec:
+            raise BrokerStateError("Fabric recovery changed the original adapter/LaunchSpec")
+        if context is not None:
+            self._control_recovery[spec.run_id] = context
         client = self._client_factory(physical)
         # Recovery is status-only even when the old start response was lost.
         result = client.request_sync("status", dict(binding=payload["binding"],

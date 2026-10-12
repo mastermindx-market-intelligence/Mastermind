@@ -56,6 +56,17 @@ class BridgeProtocolError(RuntimeError):
 
 
 class Backend(Protocol):
+    async def start_owned(self, payload: Mapping[str, Any], *, authority) -> Mapping[str, Any]:
+        """Consume a fresh authenticated Control command at original reservation.
+
+        Require ControlStartAuthority again at the actual effect boundary,
+        revalidate actual profile/attendance/route, then reserve the incumbent
+        O_EXCL run log. Never interpret a missing log as command authority.
+        Keep the original controller alive after the START response; recovery
+        reads its exact retained receipts and never calls this method again.
+        """
+        ...
+
     async def execute(self, operation: str, payload: Mapping[str, Any]) -> Mapping[str, Any]:
         """Use only existing original-id receipts; fence before effects, no replay.
 
@@ -238,7 +249,10 @@ def load_config(path: Path) -> BridgeConfig:
 
 
 def start_request_sha256(payload):
-    material={key:value for key,value in payload.items() if key!='start_request_sha256'}
+    # The authenticated owner command projects the already-pinned request. It
+    # is not a model-selected launch input and never changes recovery identity.
+    material={key:value for key,value in payload.items()
+              if key not in {'start_request_sha256', 'control_start'}}
     return hashlib.sha256(_canonical({'operation':'start','payload':material})).hexdigest()
 
 
@@ -365,6 +379,15 @@ class FabricBridgeBroker:
     def _payload(self,operation,payload):
         extra={'start':{'launch_spec','validation_commands'},'status':{'run_id'},
                'collect':{'run_id'},'cancel':{'run_id','reason'},'validate':{'run_id','argv','timeout_seconds'}}[operation]
+        if operation=='start' and type(payload) is dict and 'control_start' in payload:
+            extra=extra|{'control_start'}
+        if operation=='start' and type(payload) is dict and 'control_recovery' in payload:
+            from control_plane.worker_execution_contract import _validate_control_recovery_context
+            try:
+                _validate_control_recovery_context(payload['control_recovery'])
+            except ValueError as exc:
+                raise BridgeProtocolError('BrokerProtocolError','Invalid Control recovery context') from exc
+            extra=extra|{'control_recovery'}
         if operation=='status' and type(payload) is dict and 'start_request_sha256' in payload:
             extra=extra|{'start_request_sha256'}
             _digest(payload['start_request_sha256'])
@@ -452,7 +475,7 @@ class FabricBridgeBroker:
                         or att.get('schema_version')!=LAUNCH_ATTESTATION_SCHEMA_VERSION
                         or retained['physical_binding_sha256']!=result['physical_binding_sha256']):
                     _refuse('EFFECT_UNKNOWN','Retained start is not complete original-route evidence')
-            elif result.get('start_state')!='UNSTARTED_PROVEN':
+            elif result.get('start_state') not in {'UNSTARTED_PROVEN','NO_RETAINED_START'}:
                 _refuse('EFFECT_UNKNOWN','Original start remains uncertain; no replay')
             _object(result,common|extra)
             return
@@ -515,6 +538,32 @@ class FabricBridgeBroker:
             query={'run_id':binding['attempt_id'],'binding':dict(binding),'start_request_sha256':digest,
                    'physical_binding_sha256':payload['physical_binding_sha256']}
             try:
+                if 'control_start' in payload:
+                    from control_plane.fabric_control_start import authorize_control_command
+                    authority=authorize_control_command(payload,peer=peer)
+                    start_owned=getattr(self.backend,'start_owned',None)
+                    if not callable(start_owned):
+                        _refuse('BackendNotConfiguredError','Concrete original-owner START is not configured')
+                    # Retain the independent route/refusal check. No retained
+                    # START is an observation, never the source of permission.
+                    status=_strict_json(_canonical(await self.backend.execute('status',_strict_json(_canonical(query)))))
+                    _same_backend_binding(status,binding,digest)
+                    self._operation_result('status',status,query)
+                    if status.get('start_state')=='EXISTS':
+                        _refuse('EFFECT_UNKNOWN','Fresh command found an existing effect; use original recovery')
+                    forwarded={key:value for key,value in payload.items() if key!='control_start'}
+                    forwarded['start_request_sha256']=digest
+                    # The positive command comes from the existing Runtime pin,
+                    # not a status/absence inference. Backend owns atomic consume.
+                    result=_strict_json(_canonical(await start_owned(forwarded,authority=authority)))
+                    result=_complete_start_result(result,binding,digest,payload['launch_spec'])
+                    if result['physical_binding_sha256']!=payload['physical_binding_sha256']:
+                        _refuse('EFFECT_UNKNOWN','Physical route changed at original consume boundary')
+                    response=dict(schema_version=BROKER_RESPONSE_SCHEMA_VERSION,
+                        request_id=request['request_id'],operation=operation,ok=True,result=result)
+                    if len(_canonical(response))+1>self.config.max_response_bytes:
+                        _refuse('EFFECT_UNKNOWN','Backend response ceiling exceeded; reconcile original Attempt')
+                    return response
                 status=_strict_json(_canonical(await self.backend.execute('status',_strict_json(_canonical(query)))))
                 _same_backend_binding(status,binding,digest)
                 self._operation_result('status',status,query)
