@@ -13,9 +13,9 @@ from pathlib import Path
 import sys
 import tempfile
 
-BOT_HEAD = '8c91ddb451325cde0dc647a8fa3e974bc4c95149'
-SERVICE_HEAD = '608ab814f6434317a25acf01586bb90d5c32f7f8'
-INTEGRATION_TREE = 'd4a4a38da6240c606d83deb944321523aa183a81'
+BOT_HEAD = '67d7c2a8799ddab24146ab610f22e40af8d1c355'
+SERVICE_HEAD = '09719bb76d19cfd8bccb28a8759540acbafb0c81'
+INTEGRATION_TREE = '3540d69ab01a0a3bae3ffc19f10d7191c95581a9'
 
 
 def main() -> None:
@@ -49,8 +49,9 @@ def main() -> None:
     snapshot.pop('snapshot_id')
     snapshot = contracts.seal_snapshot(snapshot)
     context = research.prepare_context(snapshot, question='Identify reported evidence and uncertainty; do not size a trade.',
-        section_ids=['book_truth', 'risk_truth'], rows_per_section=6, max_request_bytes=32 * 1024)
-    wire = research.inference_request(context)
+        section_ids=['book_truth', 'risk_truth'], purpose='compare', rows_per_section=6, max_request_bytes=32 * 1024)
+    wire = research.inference_request(context, task_aware=True)
+    assert wire['task_kind'] == 'comparative_analysis'
     assert len(wire['input_text']) > 8192
     observations = []
     grounding = {'mastermind_sha': SERVICE_HEAD, 'macro_sha': '2' * 40,
@@ -64,7 +65,7 @@ def main() -> None:
         temporary = Path(directory)
         runtime = Runtime.at(temporary / 'runtime')
         calls = []; grants = []; bindings = []
-        mode = {'drop_reply': False, 'tamper_reply': False, 'armed': True}
+        mode = {'drop_reply': False, 'tamper_reply': False, 'armed': True, 'binding_request': None}
 
         def guard(envelope):
             assert mode['armed'], 'no fresh admission while disarmed'
@@ -74,7 +75,8 @@ def main() -> None:
             assert mode['armed'], 'duplicate/status must not rebind routing'
             bindings.append(identity)
             return build_execution_binding(intent_id=identity, workspace_root=temporary / 'workspaces',
-                base_sha=SERVICE_HEAD, eligible_quota_classes=('fixture-source-only',))
+                base_sha=SERVICE_HEAD, eligible_quota_classes=('fixture-source-only',),
+                inference_request=mode['binding_request'])
 
         async def authenticated_transport_fixture(tool, arguments):
             nonlocal runtime
@@ -84,6 +86,7 @@ def main() -> None:
             common = dict(runtime=runtime, grounding_provider=Grounding(), workspace_root=temporary / 'workspaces',
                           admission_guard=guard, execution_binding_provider=binding)
             if tool == 'submit_service_intent':
+                mode['binding_request'] = arguments['inference_request']
                 try:
                     receipt = await service.handle_frame(dict(schema=service.SUBMIT_SCHEMA,
                         request=arguments, observed_grounding=grounding), **common)
@@ -124,9 +127,9 @@ def main() -> None:
             observations.append({'case': 'exact_duplicate_reconciles_while_disarmed_without_new_route', 'passed': True})
 
             changed = research.prepare_context(snapshot, question='A changed question under the same operation must conflict.',
-                section_ids=['book_truth', 'risk_truth'], max_request_bytes=32 * 1024)
+                section_ids=['book_truth', 'risk_truth'], purpose='compare', max_request_bytes=32 * 1024)
             try:
-                await client.submit('bot-source-canary', job.objective, research.inference_request(changed))
+                await client.submit('bot-source-canary', job.objective, research.inference_request(changed, task_aware=True))
             except FabricConflict:
                 pass
             else:
@@ -188,14 +191,39 @@ def main() -> None:
             assert state['receipt']['fingerprint'] != 'f' * 64 and len(runtime.jobs.list_jobs()) == 3
             observations.append({'case': 'tampered_reply_is_uncertain_and_exact_status_recovers_receipt', 'passed': True})
 
-            # Honest unresolved application-to-host routing boundary: the actual
-            # recovered service host currently fixes every request to routine.
-            comparison = research.prepare_context(snapshot, question='Compare conflicting source observations.',
-                section_ids=['book_truth', 'risk_truth'], purpose='compare')
-            desired = research.work_request(comparison)
-            assert desired.risk == 'elevated' and job.constraints['risk'] == 'routine'
-            observations.append({'case': 'task_aware_routing_gap_is_explicit', 'passed': True,
-                'capability_state': 'NOT_WIRED', 'application_risk': desired.risk, 'service_host_risk': job.constraints['risk']})
+            desired = research.work_request(context)
+            assert desired.risk == job.constraints['risk'] == 'elevated'
+            assert job.constraints['preferred_model_aliases'] == ['standard.research']
+            observations.append({'case': 'comparison_task_survives_client_sink_and_canonical_job_route', 'passed': True,
+                'capability_state': 'SOURCE_ADMISSION_PROVEN_NOT_PROVIDER_EXECUTED',
+                'application_risk': desired.risk, 'service_host_risk': job.constraints['risk'],
+                'qualified_tier': job.constraints['preferred_model_aliases']})
+
+            routine = research.prepare_context(snapshot, question='Extract the reported observations.',
+                section_ids=['book_truth', 'risk_truth'], purpose='extract')
+            mode['armed'] = True
+            routine_receipt = await recovered.submit('bot-routine-v2', job.objective,
+                research.inference_request(routine, task_aware=True))
+            routine_job = runtime.jobs.get_job(routine_receipt['job_id'])
+            assert routine_job.constraints['risk'] == 'routine'
+            assert routine_job.constraints['preferred_model_aliases'] == ['fast.research', 'standard.research']
+            assert not runtime.attempts.list_attempts(job_id=routine_job.job_id)
+            observations.append({'case': 'routine_task_retains_economical_first_lawful_tier', 'passed': True,
+                'qualified_tier': routine_job.constraints['preferred_model_aliases'], 'dispatch': False})
+
+            prior_jobs = len(runtime.jobs.list_jobs())
+            judgment = research.prepare_context(snapshot, question='Adjudicate the conflicting risk observations.',
+                section_ids=['book_truth', 'risk_truth'], purpose='adjudicate')
+            try:
+                await recovered.submit('bot-frontier-refusal', job.objective,
+                    research.inference_request(judgment, task_aware=True))
+            except EffectUnknown:
+                pass
+            else:
+                raise AssertionError('frontier judgment was silently admitted into the ordinary worker lane')
+            assert len(runtime.jobs.list_jobs()) == prior_jobs
+            observations.append({'case': 'frontier_judgment_does_not_downgrade_into_ordinary_job', 'passed': True,
+                'existing_governed_judgment_path': 'REQUIRED_NOT_PROVEN'})
 
         asyncio.run(exercise())
     print(json.dumps({'scope': 'Cross-PR source client-to-canonical-admission proof with real temporary SQLite; fixture transport and host grant; no installed auth, provider, worker or production proof',

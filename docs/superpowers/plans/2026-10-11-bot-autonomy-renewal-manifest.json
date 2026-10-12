@@ -2,7 +2,7 @@
   "operation": "bot-intelligence-renewal-20261011",
   "source_basis": "cbc7503536b6853ec7c35c2192abdfaccb87b561",
   "macro_ci_source": "256c757b3c4f0ec759571c29a30a71387d0a18f8",
-  "test_scope": "WIP/HOLD: prior producer 38 passed / 1 failed and snapshot review 2 passed / 11 failed retained; eight new cross-PR source-admission cases passed; task-aware encoder post-change unit command refused, not claimed",
+  "test_scope": "WIP/HOLD: 10 exact cross-PR task-aware source-admission cases passed; original service257pass/1heldfail; earlier snapshot11fail/2pass and zero-evidence1fail unchanged; no production or full-unit-repair claim",
   "manifest_self_excluded": true,
   "files": [
     {
@@ -52,8 +52,8 @@
     },
     {
       "path": "docs/superpowers/plans/2026-10-11-bot-autonomy-renewal-validation.md",
-      "bytes": 32965,
-      "sha256": "ce810330b1623c1c482da4146e5f4c8ae36abe9be73dc18b5c14254aa9fdfe17"
+      "bytes": 35841,
+      "sha256": "40628537d1865dd3ce6641c243942b1025ab89cdef385141a85cf0af8444422b"
     },
     {
       "path": "docs/superpowers/plans/2026-10-11-bot-autonomy-source-capture.acceptance.py.txt",
@@ -62,8 +62,8 @@
     },
     {
       "path": "docs/superpowers/specs/2026-10-11-bot-autonomy-fabric-renewal.md",
-      "bytes": 36632,
-      "sha256": "f5c2542c1110e57ca7c3cd5032d8086f76507c956c00ae78175011d4a910de1a"
+      "bytes": 41582,
+      "sha256": "53a25c76abe1ad219a3a91904b6bec620be54ea6524802cf85757ff2843955f7"
     },
     {
       "path": "portfolio/china_calendar.py",
@@ -97,8 +97,8 @@
     },
     {
       "path": "tests/bot_research_service_admission_canary.py",
-      "bytes": 11802,
-      "sha256": "ad5a1cd1a37647970ef401cb6c9c744471f3894be0d9dc44b7d3af1fa8fdc408"
+      "bytes": 13738,
+      "sha256": "911358f612f717086b52b980b9a8e5c25f538c9d5d9f3140dfa83a3a6a97db9d"
     },
     {
       "path": "tests/decision_evidence_browser.cjs",
@@ -129,6 +129,16 @@
       "path": "tests/fixtures/bot_service_admission/source_admission_v1.json",
       "bytes": 1630,
       "sha256": "c2c6eadea1978129a222d401ed3345bcf639da850a060420fde59e2e7d2bdc2f"
+    },
+    {
+      "path": "tests/fixtures/bot_service_admission/source_admission_v2.json",
+      "bytes": 2141,
+      "sha256": "6b0e126e14117fd8ad1eee76e8d719f16e84495fd2e8142b5a50bee3dbfcf6e6"
+    },
+    {
+      "path": "tests/fixtures/bot_service_admission/task_aware_source_proof.json",
+      "bytes": 1022,
+      "sha256": "797ff5b7715fa91c73f5ec5b0172ff009829d42658cca1bf67befb2674971859"
     },
     {
       "path": "tests/fixtures/decision_evidence_browser/evidence-1440.png",
