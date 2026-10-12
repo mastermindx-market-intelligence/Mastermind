@@ -1942,7 +1942,8 @@ def _service_from_config(
             return primary
         from control_plane.executive_fabric_adapter import AttendedFabricWorkerAdapter
         from control_plane.mixed_worker_supervisor import MixedExecutionOwnerSupervisor
-        fabric_adapter = AttendedFabricWorkerAdapter(runtime, fabric_worker_binding_source)
+        fabric_adapter = AttendedFabricWorkerAdapter(runtime, fabric_worker_binding_source,
+            request_client_factory=fabric_worker_binding_source.client_for)
         fabric_owner = ExecutiveSupervisor(
             runtime, fabric_adapter,
             runs_root=raw["worker_runs_root"],
