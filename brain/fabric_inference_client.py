@@ -34,8 +34,14 @@ class FabricInferenceClient:
             raise ValueError('existing authenticated tool interface required')
         self._call = authenticated_call
 
-    async def submit(self, operation_key: str, objective: str) -> dict:
-        args = normalize_request(dict(operation_key=operation_key, objective=objective))
+    async def submit(
+        self, operation_key: str, objective: str, inference_request: Mapping[str, Any]
+    ) -> dict:
+        args = normalize_request(dict(
+            operation_key=operation_key,
+            objective=objective,
+            inference_request=inference_request,
+        ))
         try:
             response = await self._call('submit_service_intent', args)
             if (isinstance(response, dict) and response.get('ok') is False

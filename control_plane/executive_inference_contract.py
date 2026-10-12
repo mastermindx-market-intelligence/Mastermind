@@ -3,7 +3,7 @@ import copy
 import re
 from collections.abc import Mapping
 
-from control_plane import ceo_request, executive_service_principal as esp
+from control_plane import ceo_request, executive_inference_io as inference_io, executive_service_principal as esp
 
 PRINCIPAL_ID = "svc-vps-inference"
 TOOLS = ("submit_service_intent", "service_intent_status", "executive_fabric")
@@ -11,18 +11,26 @@ MAX_RESULT_BYTES = 256 * 1024
 
 
 def normalize_request(value):
-    if not isinstance(value, Mapping) or set(value) != {"operation_key", "objective"}:
-        raise ValueError("bounded service request requires operation_key and objective only")
+    if not isinstance(value, Mapping) or set(value) != {
+        "operation_key", "objective", "inference_request"
+    }:
+        raise ValueError(
+            "bounded service request requires operation_key, objective, and inference_request only"
+        )
     normalized = ceo_request.normalize_high_level_request(dict(
-        value, department="executive-infrastructure", priority=3,
+        operation_key=value["operation_key"], objective=value["objective"],
+        department="executive-infrastructure", priority=3,
         execution_profile="research_only", attempt_limit=1,
     ))
-    return {key: normalized[key] for key in ("operation_key", "objective")}
+    return {
+        "operation_key": normalized["operation_key"],
+        "objective": normalized["objective"],
+        "inference_request": inference_io.normalize_request(value["inference_request"]),
+    }
 
 
 def intent_id(operation_key):
-    request = normalize_request(dict(operation_key=operation_key, objective="Identity validation"))
-    return esp.service_intent_id(esp.service_principal(PRINCIPAL_ID), request["operation_key"])
+    return esp.service_intent_id(esp.service_principal(PRINCIPAL_ID), operation_key)
 
 
 def derive(request, grounding):

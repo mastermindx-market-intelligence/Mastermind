@@ -159,7 +159,7 @@ _V2_BUSINESS_IMPACTS = frozenset({"routine", "material", "critical"})
 #: ``execution_contract.requested_authorities`` — this branch adds no authority
 #: carrier, it only pins the class and constrains the contract.
 _SERVICE_REQUIRED_KEYS = _REQUIRED_KEYS | frozenset({"principal_id", "task_kind"})
-_SERVICE_OPTIONAL_KEYS = _OPTIONAL_KEYS
+_SERVICE_OPTIONAL_KEYS = _OPTIONAL_KEYS | frozenset({"inference_request"})
 _SERVICE_TASK_KINDS = frozenset({"research"})
 _SERVICE_PRINCIPAL_RE = re.compile(r"^svc-[a-z0-9-]{3,63}$")
 _SERVICE_INTENT_ID_PREFIX = "svc-"
@@ -316,6 +316,10 @@ MAX_DEPTH = 8
 #: maximal 4-byte-per-character one are wildly different sizes.  This check is
 #: what makes the published bounds honest for both.
 MAX_ENVELOPE_BYTES = 48 * 1024
+# The inference service carries one larger semantic prompt while remaining below
+# the existing 64 KiB public Executive HTTP request fence. Historical CEO and
+# service envelopes retain MAX_ENVELOPE_BYTES unchanged.
+MAX_SERVICE_INFERENCE_ENVELOPE_BYTES = 60 * 1024
 
 
 class CeoIntentError(ValueError):
@@ -834,6 +838,24 @@ def validate_intent(payload: Any) -> dict[str, Any]:
                 f"service intent.actor {intent['actor']!r} does not match the "
                 f"reviewed principal {principal_id!r}"
             )
+        if principal_id == "svc-vps-inference":
+            if "inference_request" not in raw:
+                raise CeoIntentError(
+                    "svc-vps-inference requires the closed inference_request"
+                )
+            from control_plane import executive_inference_io as inference_io
+            try:
+                intent["inference_request"] = inference_io.normalize_request(
+                    raw["inference_request"]
+                )
+            except inference_io.InferenceIOError as exc:
+                raise CeoIntentError(
+                    "service inference_request is invalid"
+                ) from exc
+        elif "inference_request" in raw:
+            raise CeoIntentError(
+                "inference_request is admitted only for svc-vps-inference"
+            )
         _require_service_ceiling(intent["execution_contract"])
         intent["principal_id"] = principal_id
         intent["task_kind"] = task_kind
@@ -848,9 +870,17 @@ def validate_intent(payload: Any) -> dict[str, Any]:
             raw["workstream"], "intent.workstream", pattern=_WORKSTREAM_RE, max_chars=72
         )
     size = len(canonical_bytes(intent))
-    if size > MAX_ENVELOPE_BYTES:
+    ceiling = (
+        MAX_SERVICE_INFERENCE_ENVELOPE_BYTES
+        if (
+            schema == INTENT_SCHEMA_SERVICE
+            and intent.get("principal_id") == "svc-vps-inference"
+        )
+        else MAX_ENVELOPE_BYTES
+    )
+    if size > ceiling:
         raise CeoIntentError(
-            f"intent is {size} canonical bytes, over the {MAX_ENVELOPE_BYTES}-byte "
+            f"intent is {size} canonical bytes, over the {ceiling}-byte "
             "envelope ceiling"
         )
     return intent
@@ -1004,6 +1034,8 @@ def _provenance(intent: Mapping[str, Any], fingerprint: str, *, principal_reques
         value["requested_authorities"] = requested
         value["effective_authorities"] = list(requested)
         value["write_authorities"] = []
+        if intent["principal_id"] == "svc-vps-inference":
+            value["inference_request"] = copy.deepcopy(intent["inference_request"])
     if intent["schema"] == INTENT_SCHEMA_PRINCIPAL:
         value.update({key: intent[key] for key in _PRINCIPAL_IDENTITY_KEYS})
         value["request_ref"] = _require_principal_request_ref(principal_request_ref, intent["intent_id"])
@@ -1465,6 +1497,7 @@ __all__ = [
     "INTENT_SCHEMA_PRINCIPAL",
     "INTENT_SCHEMA_V2",
     "MAX_ENVELOPE_BYTES",
+    "MAX_SERVICE_INFERENCE_ENVELOPE_BYTES",
     "RECEIPT_SCHEMA",
     "RECEIPT_SCHEMA_SERVICE",
     "RECEIPT_SCHEMA_PRINCIPAL",

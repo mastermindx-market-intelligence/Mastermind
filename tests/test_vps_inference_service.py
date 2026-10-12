@@ -23,6 +23,27 @@ def host_execution_binding(root, identity):
     )
 
 
+def inference_request(*, system_prompt="system", input_text="Read supplied data",
+                      max_output_chars=4096):
+    from control_plane import executive_inference_io as inference_io
+    return {
+        "schema": inference_io.REQUEST_SCHEMA,
+        "system_prompt": system_prompt,
+        "input_text": input_text,
+        "max_output_chars": max_output_chars,
+    }
+
+
+def service_request(operation_key="inference-test",
+                    objective="Summarize the supplied research.",
+                    *, request=None):
+    return {
+        "operation_key": operation_key,
+        "objective": objective,
+        "inference_request": inference_request() if request is None else request,
+    }
+
+
 def test_closed_inference_principal_and_sink(tmp_path):
     principal = esp.service_principal('svc-vps-inference')
     assert set(esp.REGISTRY) == {'svc-site-maintenance', 'svc-vps-inference'}
@@ -41,7 +62,7 @@ def test_ingress_replay_conflict_and_status(tmp_path):
     ground = GROUND
     class Ground:
         def observe(self): return ground
-    request = {'operation_key': 'inference-test', 'objective': 'Summarize the supplied research.'}
+    request = service_request()
     frame = dict(schema=service.SUBMIT_SCHEMA, request=request, observed_grounding=ground)
     async def run():
         kw = dict(
@@ -77,6 +98,164 @@ def test_ingress_replay_conflict_and_status(tmp_path):
         assert job.constraints['preferred_model_aliases']
         assert len(rt.jobs.list_jobs()) == 1
     asyncio.run(run())
+
+
+def test_same_operation_changed_inference_payload_conflicts_without_second_job(tmp_path):
+    from control_plane import executive_inference_ingress as service
+    from control_plane.executive_ceo_ingress import CeoIngressError
+
+    rt = Runtime.at(tmp_path / "runtime")
+
+    class Ground:
+        def observe(self):
+            return GROUND
+
+    base = service_request(
+        "prompt-conflict",
+        "Perform one bounded inference.",
+        request=inference_request(input_text="first prompt"),
+    )
+    changed = service_request(
+        "prompt-conflict",
+        "Perform one bounded inference.",
+        request=inference_request(input_text="different prompt"),
+    )
+    kwargs = dict(
+        runtime=rt,
+        grounding_provider=Ground(),
+        workspace_root=tmp_path,
+        admission_guard=lambda _: None,
+        execution_binding_provider=lambda identity: host_execution_binding(
+            tmp_path, identity
+        ),
+    )
+    first = asyncio.run(service.handle_frame(
+        {
+            "schema": service.SUBMIT_SCHEMA,
+            "request": base,
+            "observed_grounding": GROUND,
+        },
+        **kwargs,
+    ))
+    with pytest.raises(CeoIngressError) as conflict:
+        asyncio.run(service.handle_frame(
+            {
+                "schema": service.SUBMIT_SCHEMA,
+                "request": changed,
+                "observed_grounding": GROUND,
+            },
+            **kwargs,
+        ))
+    assert conflict.value.code == "operation_conflict"
+    assert len(rt.jobs.list_jobs()) == 1
+    assert rt.jobs.list_jobs()[0].job_id == first["job_id"]
+
+
+def test_long_prompt_uses_closed_payload_and_durable_creation_provenance(tmp_path):
+    from control_plane import executive_inference_ingress as service
+
+    rt = Runtime.at(tmp_path / "runtime")
+    long_input = "market-data:" + ("x" * 20_000)
+    request = service_request(
+        "long-prompt",
+        "Perform bounded market inference.",
+        request=inference_request(
+            system_prompt="Return only the requested bounded analysis.",
+            input_text=long_input,
+            max_output_chars=8192,
+        ),
+    )
+
+    class Ground:
+        def observe(self):
+            return GROUND
+
+    receipt = asyncio.run(service.handle_frame(
+        {
+            "schema": service.SUBMIT_SCHEMA,
+            "request": request,
+            "observed_grounding": GROUND,
+        },
+        runtime=rt,
+        grounding_provider=Ground(),
+        workspace_root=tmp_path,
+        admission_guard=lambda _: None,
+        execution_binding_provider=lambda identity: host_execution_binding(
+            tmp_path, identity
+        ),
+    ))
+    job = rt.jobs.get_job(receipt["job_id"])
+    assert job is not None
+    assert job.objective == "Perform bounded market inference."
+    assert len(job.objective) < 4000
+
+    stamp = esp.durable_provenance(rt, job.job_id)["provenance"]
+    assert stamp["principal_id"] == "svc-vps-inference"
+    assert stamp["inference_request"] == request["inference_request"]
+    assert stamp["inference_request"]["input_text"] == long_input
+    assert len(stamp["inference_request"]["input_text"]) > 4000
+
+
+def test_inference_gateway_uses_dedicated_frame_ceiling(tmp_path):
+    from control_plane import executive_ceo_ingress as ceo_ingress
+    from control_plane import executive_inference_ingress as service
+    from integrations.mastermind_executive_app import gateway
+
+    async def exercise():
+        seen = []
+        handlers = set()
+
+        async def peer(reader, writer):
+            task = asyncio.current_task()
+            handlers.add(task)
+            try:
+                seen.append(await reader.readline())
+                writer.write(b'{"ok":true,"result":{}}\n')
+                await writer.drain()
+            finally:
+                writer.close()
+                await writer.wait_closed()
+                handlers.discard(task)
+
+        socket = tmp_path / "service-inference.sock"
+        server = await asyncio.start_unix_server(peer, path=str(socket))
+        try:
+            client = gateway.CeoIngressClient(connect_timeout=.2, read_timeout=.2)
+            large_service = {
+                "schema": service.SUBMIT_SCHEMA,
+                "padding": "x" * (ceo_ingress.MAX_REQUEST_BYTES + 1024),
+            }
+            accepted = await client.send_frame(socket, large_service)
+            assert accepted.transport == gateway.TRANSPORT_SENT_OK
+            assert accepted.ok is True
+            assert len(seen) == 1
+            assert len(seen[0]) > ceo_ingress.MAX_REQUEST_BYTES
+            assert len(seen[0]) <= service.MAX_FRAME_BYTES
+
+            legacy = {
+                "schema": ceo_ingress.SUBMIT_SCHEMA,
+                "padding": "x" * (ceo_ingress.MAX_REQUEST_BYTES + 1024),
+            }
+            legacy_result = await client.send_frame(socket, legacy)
+            assert legacy_result.transport == gateway.TRANSPORT_NOT_SENT
+            assert len(seen) == 1
+
+            oversized_service = {
+                "schema": service.SUBMIT_SCHEMA,
+                "padding": "x" * service.MAX_FRAME_BYTES,
+            }
+            oversized = await client.send_frame(socket, oversized_service)
+            assert oversized.transport == gateway.TRANSPORT_NOT_SENT
+            assert len(seen) == 1
+        finally:
+            server.close()
+            await server.wait_closed()
+            if handlers:
+                await asyncio.wait_for(
+                    asyncio.gather(*handlers, return_exceptions=True), .5
+                )
+
+    asyncio.run(exercise())
 
 
 def test_execution_binding_is_host_derived_and_route_closed(tmp_path):
@@ -192,10 +371,9 @@ def test_service_binding_drives_runtime_capacity_without_provider_override(tmp_p
     receipt = asyncio.run(service.handle_frame(
         {
             "schema": service.SUBMIT_SCHEMA,
-            "request": {
-                "operation_key": "capacity-selection",
-                "objective": "Research the bounded question.",
-            },
+            "request": service_request(
+                "capacity-selection", "Research the bounded question."
+            ),
             "observed_grounding": GROUND,
         },
         runtime=rt,
@@ -237,7 +415,7 @@ def test_fresh_ingress_refuses_untrusted_execution_binding(tmp_path, fault):
         asyncio.run(service.handle_frame(
             dict(
                 schema=service.SUBMIT_SCHEMA,
-                request={"operation_key":"binding-refusal", "objective":"Research"},
+                request=service_request("binding-refusal", "Research"),
                 observed_grounding=GROUND,
             ),
             runtime=rt,
@@ -257,7 +435,7 @@ def test_fresh_ingress_refuses_untrusted_execution_binding(tmp_path, fault):
      "observed_grounding": {"mastermind_sha":"1"*40, "macro_sha":"2"*40,
                             "boot_packet_schema":"mastermind.ceo_boot_packet.v1"}},
     {"schema": "mastermind.ceo_ingress.service_inference_submit.v1",
-     "request": {"operation_key": "inference-test", "objective": "x" * 4001},
+     "request": service_request("inference-test", "x" * 4001),
      "observed_grounding": {"mastermind_sha":"1"*40, "macro_sha":"2"*40,
                             "boot_packet_schema":"mastermind.ceo_boot_packet.v1"}},
 ])
@@ -328,7 +506,10 @@ def test_profile_auth_closure(rsa_key, tmp_path, fault):
 def test_request_closed(field):
     from control_plane.executive_inference_contract import normalize_request
     with pytest.raises(ValueError):
-        normalize_request(dict(operation_key='inference-test', objective='Research', **{field:'untrusted'}))
+        normalize_request(dict(
+            service_request("inference-test", "Research"),
+            **{field:'untrusted'},
+        ))
 
 
 @pytest.mark.parametrize('outcome', ['lost', 'raised', 'cancelled', 'backend-error', 'malformed', 'not-sent'])
@@ -346,7 +527,7 @@ def test_submit_transport_uncertainty_never_replays(rsa_key, tmp_path, outcome):
         if outcome == 'malformed': return CeoIngressResponse('sent_ok', ok=True, result={'accepted':True})
         return CeoIngressResponse('not_sent' if outcome == 'not-sent' else 'sent_effect_unknown')
     app._client.send_frame = send
-    result = asyncio.run(call(app, token, 'submit_service_intent', REQUEST))
+    result = asyncio.run(call(app, token, 'submit_service_intent', VALID_REQUEST))
     assert result.status_code == (503 if outcome == 'not-sent' else 202)
     assert result.json()['status'] == ('ingress_unavailable' if outcome == 'not-sent' else 'effect_unknown')
     assert 'PRIVATE_SECRET' not in result.text and len(sent) == 2
@@ -354,6 +535,7 @@ def test_submit_transport_uncertainty_never_replays(rsa_key, tmp_path, outcome):
 
 GROUND = {'mastermind_sha':'1'*40, 'macro_sha':'2'*40, 'boot_packet_schema':'mastermind.ceo_boot_packet.v1'}
 REQUEST = {'operation_key':'inference-test', 'objective':'Summarize the supplied research.'}
+VALID_REQUEST = service_request()
 
 
 def test_service_profile_contract_is_closed_without_shared_server_mount():
@@ -370,7 +552,8 @@ def test_status_refuses_foreign_service_under_same_intent_id(tmp_path):
     from control_plane.executive_inference_ingress import handle_frame, STATUS_SCHEMA
     from control_plane.executive_ceo_ingress import CeoIngressError
     rt = Runtime.at(tmp_path/'runtime')
-    envelope = derive(REQUEST, GROUND)['envelope']
+    envelope = derive(VALID_REQUEST, GROUND)['envelope']
+    envelope.pop('inference_request')
     envelope.update(actor='svc-site-maintenance', principal_id='svc-site-maintenance')
     ceo_intent.submit_intent(rt, envelope)
     with pytest.raises(CeoIngressError):
@@ -384,7 +567,7 @@ def test_app_result_is_bound_to_service_receipt_and_rechecks_auth(rsa_key, tmp_p
     from tests.test_fabric_inference_client import result
     app, token, current = setup_app(rsa_key, tmp_path)
     rt = Runtime.at(tmp_path/'runtime')
-    envelope = derive(REQUEST, GROUND)['envelope']
+    envelope = derive(VALID_REQUEST, GROUND)['envelope']
     receipt = ceo_intent.submit_intent(
         rt, envelope, workspace_root=tmp_path,
         service_admission_guard=lambda _: None,
@@ -442,7 +625,7 @@ def test_app_handler_fixture_loss_reconciliation_and_honest_null(rsa_key, tmp_pa
     async def no_reader(*args): pytest.fail('ordinary service Job has no Fabric reference')
     app._reader.call = no_reader
     async def run():
-        lost = await call(app, token, 'submit_service_intent', REQUEST)
+        lost = await call(app, token, 'submit_service_intent', VALID_REQUEST)
         assert lost.status_code == 202
         recovered = await call(app, token, 'service_intent_status', {'operation_key':REQUEST['operation_key']})
         assert recovered.status_code == 200
@@ -464,14 +647,14 @@ def test_fresh_sink_requires_synchronous_host_guard(tmp_path, guard):
     from control_plane.executive_inference_contract import derive
     rt = Runtime.at(tmp_path/'runtime')
     with pytest.raises(ceo_intent.CeoIntentError, match='trusted service admission refused'):
-        ceo_intent.submit_intent(rt, derive(REQUEST, GROUND)['envelope'], service_admission_guard=guard)
+        ceo_intent.submit_intent(rt, derive(VALID_REQUEST, GROUND)['envelope'], service_admission_guard=guard)
     assert rt.jobs.list_jobs() == []
 
 
 def test_sink_guard_is_last_synchronous_check_and_duplicate_skips_it(tmp_path, monkeypatch):
     from control_plane.executive_inference_contract import derive
     rt = Runtime.at(tmp_path/'runtime')
-    envelope = derive(REQUEST, GROUND)['envelope']
+    envelope = derive(VALID_REQUEST, GROUND)['envelope']
     calls = []
     create = rt.jobs.create_job
     def guard(candidate):
@@ -523,7 +706,7 @@ def test_late_revocation_at_final_grounding_read_refuses_creation(tmp_path):
         if not armed: raise ValueError('revoked')
     with pytest.raises(CeoIngressError):
         asyncio.run(service.handle_frame(dict(schema=service.SUBMIT_SCHEMA,
-            request=REQUEST, observed_grounding=GROUND), runtime=rt,
+            request=VALID_REQUEST, observed_grounding=GROUND), runtime=rt,
             grounding_provider=Ground(), workspace_root=tmp_path, admission_guard=guard,
             execution_binding_provider=lambda identity: host_execution_binding(tmp_path, identity)))
     assert calls == ['ground', 'ground', 'guard']
@@ -537,5 +720,5 @@ def test_async_and_raised_guards_refuse_without_job(tmp_path):
     def raised(_): raise RuntimeError('private guard failure')
     for guard in (async_guard, raised):
         with pytest.raises(ceo_intent.CeoIntentError):
-            ceo_intent.submit_intent(rt, derive(REQUEST, GROUND)['envelope'], service_admission_guard=guard)
+            ceo_intent.submit_intent(rt, derive(VALID_REQUEST, GROUND)['envelope'], service_admission_guard=guard)
     assert rt.jobs.list_jobs() == []

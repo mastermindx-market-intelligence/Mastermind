@@ -80,7 +80,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Mapping
 
-from control_plane import ceo_intent, ceo_request
+from control_plane import ceo_intent, ceo_request, executive_inference_io as inference_io
 
 __all__ = [
     "ADMITTED",
@@ -640,7 +640,20 @@ def derive_intent(principal: ServicePrincipal, request: Mapping[str, Any], *, no
     if "grounding" not in request:
         raise _refuse("request must carry the trusted 'grounding' block")
     grounding = request["grounding"]
-    payload = {key: value for key, value in request.items() if key != "grounding"}
+    inference_request = None
+    if registered.principal_id == _INFERENCE_BINDING[0]:
+        if "inference_request" not in request:
+            raise _refuse("VPS inference requests require the closed inference_request")
+        try:
+            inference_request = inference_io.normalize_request(request["inference_request"])
+        except inference_io.InferenceIOError as exc:
+            raise _refuse("VPS inference request payload is invalid") from exc
+    elif "inference_request" in request:
+        raise _refuse("inference_request is admitted only for svc-vps-inference")
+    payload = {
+        key: value for key, value in request.items()
+        if key not in {"grounding", "inference_request"}
+    }
 
     # Reuse, do not re-implement: the sink's own normalizer refuses unknown and
     # privileged keys and applies the reviewed coherence rules.
@@ -701,6 +714,8 @@ def derive_intent(principal: ServicePrincipal, request: Mapping[str, Any], *, no
         "task_kind": TASK_KIND,
         "execution_contract": contract,
     }
+    if inference_request is not None:
+        envelope["inference_request"] = inference_request
     if normalized.get("workstream"):
         envelope["workstream"] = str(normalized["workstream"])
 
@@ -846,7 +861,7 @@ def admission_status() -> dict[str, Any]:
         "predicates": (
             {
                 "file": "control_plane/ceo_intent.py",
-                "line": "L746",
+                "line": "L750",
                 "what": (
                     "validate_intent admits the third, strict service schema through "
                     "the same exact-key-set fence: _SERVICE_REQUIRED_KEYS = the v1 keys "
@@ -855,7 +870,7 @@ def admission_status() -> dict[str, Any]:
             },
             {
                 "file": "control_plane/ceo_intent.py",
-                "line": "L594",
+                "line": "L598",
                 "what": (
                     "_require_service_ceiling refuses any requested authority outside "
                     "{READ, RESEARCH}, any allowed_write_paths, and any authority_level "
@@ -865,7 +880,7 @@ def admission_status() -> dict[str, Any]:
             },
             {
                 "file": "control_plane/ceo_intent.py",
-                "line": "L1002",
+                "line": "L1032",
                 "what": (
                     "_provenance() stamps the typed service evidence (principal_id, "
                     "task_kind, requested_authorities, effective_authorities, "
@@ -875,7 +890,7 @@ def admission_status() -> dict[str, Any]:
             },
             {
                 "file": "control_plane/ceo_intent.py",
-                "line": "L1386",
+                "line": "L1418",
                 "what": (
                     "the service branch of submit_intent passes EXPLICIT "
                     "owner_seat='coo' / escalation_target='coo' and no orchestration "
@@ -893,7 +908,7 @@ def admission_status() -> dict[str, Any]:
             "conflict_predicates": (
                 {
                     "file": "control_plane/ceo_intent.py",
-                    "line": "L1295",
+                    "line": "L1327",
                     "what": (
                         "submit_intent looks the derived command id up in the durable "
                         "event log first, so a reused intent id reconciles instead of "
@@ -902,7 +917,7 @@ def admission_status() -> dict[str, Any]:
                 },
                 {
                     "file": "control_plane/ceo_intent.py",
-                    "line": "L1057",
+                    "line": "L1089",
                     "what": (
                         "_receipt_from_event raises CeoIntentConflict when the reused "
                         "intent id was already accepted under a DIFFERENT whole-envelope "
@@ -912,7 +927,7 @@ def admission_status() -> dict[str, Any]:
                 },
                 {
                     "file": "control_plane/ceo_intent.py",
-                    "line": "L895",
+                    "line": "L925",
                     "what": "command_id_for() derives the durable command id from the intent id",
                 },
             ),

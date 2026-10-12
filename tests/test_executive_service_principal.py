@@ -413,16 +413,16 @@ def test_a1_intent_id_depends_only_on_principal_and_operation_key():
 
     # The quoted sink predicates this law relies on are still where we cite them.
     assert "find_event_by_command_id(command_id)" in _source_window(
-        "control_plane/ceo_intent.py", 1293, 1299
+        "control_plane/ceo_intent.py", 1325, 1331
     )
     assert "if fingerprint is not None and recorded != fingerprint:" in _source_window(
-        "control_plane/ceo_intent.py", 1055, 1061
+        "control_plane/ceo_intent.py", 1087, 1093
     )
     assert 'return f"{COMMAND_ID_PREFIX}{intent_id}"' in _source_window(
-        "control_plane/ceo_intent.py", 893, 899
+        "control_plane/ceo_intent.py", 923, 929
     )
     pins = admission_status()["identity"]["conflict_predicates"]
-    assert {pin["line"] for pin in pins} == {"L1295", "L1057", "L895"}
+    assert {pin["line"] for pin in pins} == {"L1327", "L1089", "L925"}
     for pin in pins:
         assert pin["file"] == "control_plane/ceo_intent.py"
 
@@ -711,15 +711,15 @@ def test_service_schema_is_durably_carried_with_typed_evidence(tmp_path: Path):
     #     in added production source, and a source-line citation is not an
     #     identity.
     windows = {
-        "L746": _source_window("control_plane/ceo_intent.py", 744, 750),
-        "L594": _source_window("control_plane/ceo_intent.py", 592, 598),
-        "L1002": _source_window("control_plane/ceo_intent.py", 1000, 1006),
-        "L1386": _source_window("control_plane/ceo_intent.py", 1384, 1390),
+        "L750": _source_window("control_plane/ceo_intent.py", 748, 754),
+        "L598": _source_window("control_plane/ceo_intent.py", 596, 602),
+        "L1032": _source_window("control_plane/ceo_intent.py", 1030, 1036),
+        "L1418": _source_window("control_plane/ceo_intent.py", 1416, 1422),
     }
-    assert "_SERVICE_REQUIRED_KEYS" in windows["L746"]
-    assert "def _require_service_ceiling" in windows["L594"]
-    assert 'value["principal_id"] = intent["principal_id"]' in windows["L1002"]
-    assert 'owner_seat="coo"' in windows["L1386"]
+    assert "_SERVICE_REQUIRED_KEYS" in windows["L750"]
+    assert "def _require_service_ceiling" in windows["L598"]
+    assert 'value["principal_id"] = intent["principal_id"]' in windows["L1032"]
+    assert 'owner_seat="coo"' in windows["L1418"]
     for predicate in status["predicates"]:
         assert predicate["line"] in windows, predicate
         assert predicate["file"] == "control_plane/ceo_intent.py"

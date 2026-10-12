@@ -2,7 +2,7 @@
 import copy
 from collections.abc import Mapping
 
-from control_plane import ceo_request
+from control_plane import ceo_request, executive_inference_io as inference_io
 from control_plane.executive_inference_contract import TOOLS, intent_id, normalize_request, validate_result
 from integrations.executive_mcp.schemas import ToolSpec
 from integrations.executive_mcp.web_ceo import FABRIC_V2_TOOL_SPEC
@@ -16,9 +16,17 @@ def _object(properties):
 _RESULT_PROPERTIES = {key: copy.deepcopy(FABRIC_V2_TOOL_SPEC.input_schema["properties"][key])
                       for key in ("view", "root_job_id", "job_id", "attempt_id", "result_envelope_digest")}
 _RESULT_PROPERTIES["view"] = {"const":"result"}
+_INFERENCE_REQUEST = _object({
+    "schema": {"const": inference_io.REQUEST_SCHEMA},
+    "system_prompt": {"type":"string", "maxLength": inference_io.MAX_REQUEST_BYTES},
+    "input_text": {"type":"string", "minLength":1, "maxLength": inference_io.MAX_REQUEST_BYTES},
+    "max_output_chars": {"type":"integer", "minimum":1, "maximum": inference_io.MAX_OUTPUT_CHARS},
+})
 TOOL_SPECS = (
     ToolSpec(TOOLS[0], "Submit one bounded READ/RESEARCH service intent; acceptance is not execution. Reconcile uncertainty without resubmitting.",
-        _object({"operation_key":_KEY, "objective":{"type":"string", "minLength":1, "maxLength":ceo_request.MAX_OBJECTIVE_CHARS}}), "Service admission or uncertainty", False),
+        _object({"operation_key":_KEY,
+                 "objective":{"type":"string", "minLength":1, "maxLength":ceo_request.MAX_OBJECTIVE_CHARS},
+                 "inference_request": _INFERENCE_REQUEST}), "Service admission or uncertainty", False),
     ToolSpec(TOOLS[1], "Reconcile the original operation key without submission or retry.",
         _object({"operation_key":_KEY}), "Original service receipt or refusal", True),
     ToolSpec(TOOLS[2], "Read only an exact canonical Fabric terminal result belonging to this service operation.",

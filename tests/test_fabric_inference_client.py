@@ -6,15 +6,19 @@ from pathlib import Path
 import pytest
 
 
+def fixture_inference_request():
+    from tests.test_vps_inference_service import inference_request
+    return inference_request()
+
+
 def service_receipt(tmp_path, operation_key, objective):
     from control_plane.executive_inference_contract import derive
     from control_plane.ceo_intent import submit_intent
     from control_plane.executive_runtime import Runtime
-    from tests.test_vps_inference_service import GROUND, host_execution_binding
-    envelope = derive(
-        {"operation_key": operation_key, "objective": objective},
-        GROUND,
-    )["envelope"]
+    from tests.test_vps_inference_service import (
+        GROUND, host_execution_binding, service_request,
+    )
+    envelope = derive(service_request(operation_key, objective), GROUND)["envelope"]
     return submit_intent(
         Runtime.at(tmp_path / "runtime"),
         envelope,
@@ -36,7 +40,9 @@ def test_submit_loss_reconcile_reads_only():
     async def run():
         client = FabricInferenceClient(tool)
         with pytest.raises(EffectUnknown) as error:
-            await client.submit('stable-operation', 'Read supplied data')
+            await client.submit(
+                'stable-operation', 'Read supplied data', fixture_inference_request()
+            )
         assert error.value.operation_key == 'stable-operation'
         assert 'private' not in str(error.value)
         with pytest.raises(FabricUnavailable):
@@ -55,7 +61,9 @@ def test_submit_cancellation_is_effect_unknown_not_replayable():
     async def run():
         with pytest.raises(EffectUnknown) as error:
             await FabricInferenceClient(tool).submit(
-                'cancelled-operation', 'Read supplied data')
+                'cancelled-operation', 'Read supplied data',
+                fixture_inference_request(),
+            )
         assert error.value.operation_key == 'cancelled-operation'
     asyncio.run(run())
     assert [name for name, _ in calls] == ['submit_service_intent']
@@ -176,7 +184,10 @@ def test_explicit_conflict_is_not_transport_uncertainty():
         return {'ok':False, 'status':'conflict', 'request_ref':intent_id(args['operation_key']),
                 'error':{'code':'operation_conflict'}}
     with pytest.raises(FabricConflict):
-        asyncio.run(FabricInferenceClient(tool).submit('stable-operation', 'Different research'))
+        asyncio.run(FabricInferenceClient(tool).submit(
+            'stable-operation', 'Different research',
+            fixture_inference_request(),
+        ))
 
 
 def test_receipt_must_match_submitted_semantics(tmp_path):
@@ -186,7 +197,10 @@ def test_receipt_must_match_submitted_semantics(tmp_path):
     async def tool(name, args):
         return {'ok':True, 'status':'accepted', 'request_ref':intent_id(args['operation_key']), 'receipt':receipt}
     with pytest.raises(EffectUnknown):
-        asyncio.run(FabricInferenceClient(tool).submit('stable-operation', 'Different research'))
+        asyncio.run(FabricInferenceClient(tool).submit(
+            'stable-operation', 'Different research',
+            fixture_inference_request(),
+        ))
 
 
 @pytest.mark.parametrize('fault', ['none', 'null', 'child-only', 'duplicate', 'wrong-root',
