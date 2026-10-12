@@ -223,3 +223,21 @@ Adversarial acceptance must include both returned and interrupted tool-capable t
 7. Accept only after installed exact-version proof, authenticated consumer journeys and real decision-to-result-to-paper-outcome evidence. Neither #1147 nor #1357 alone completes this commission.
 
 Current #1357 implementation status: snapshot contracts/store/inspector and calendar source repairs are built and locally tested; source capture, authenticated web integration, Fabric cutover and production acceptance remain incomplete. This amendment and the validation record are the current navigation points; the earlier census remains an explicitly dated source baseline.
+
+## 14. Actual M2 Fabric discovery and browser/API capability delta
+
+The earlier Executive-only runtime census was incomplete. A bounded process-path observation found three processes referencing the standing `ext/host_queue.sh` below:
+
+```text
+/Users/chriswong/.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08
+```
+
+Observed PIDs at discovery: 2084, 2092, 93121. The current host reported `Mac14,14`. The existing `ext/state/glm_flash_routing_repair_20261003.json` is present at this root and its SHA-256 exactly matches the prior recorded `5ff2a5d604cfaba28146c1ff8c9fc9eb2b134d1b0345c9ff188e97b968c3e5f8`. These are concrete runtime-location and historical-receipt findings, not proof of fresh provider eligibility or Bot service admission.
+
+The inspected standing queue script describes per-host `REMOTE_QUEUE_<host>.txt` consumption through `remote_lane_v8.sh <host> <label>`, host load/free-space/AC/concurrency gates, and existing duplicate/active-lane checks. The inspected v8 entrypoint resolves its host from the existing `hosts.json`. This is a separate existing operational path; one AVAILABLE worker in Executive is not a census of this whole estate. The target remains convergence with existing owners, not replacing or adding to this queue. Do not route a Bot request into a label queue, pick credentials/hosts, or claim a current worker capacity merely because these scripts exist.
+
+A subsequent combined read of other selected Fabric script/receipt fields was refused. That exact operation remains held and was not replayed. The source-capture write, original #1147 wiring/fixture boundary and #633 enrollment uncertainty also remain unchanged. A future accepted service composition must verify this actual Fabric's current grant, route, result and return contracts in addition to Executive's service boundary. No worker was launched and no queue/host/provider state was changed.
+
+The independent evidence consumer has advanced beyond the earlier CLI-only status: the real application now mounts an operator-protected GET `/api/decision-snapshot` and a responsive `/decision-evidence` shell. This consumes existing immutable records; source capture remains absent. The focused router avoids editing the overlapping main dashboard SPA or #1293's `app/web.py`. Existing auth is reused, not replaced. The new JSON route is explicitly excluded from the shared response cache, with a causal authorized-then-unauthorized read test. A separate causal test caught the full-envelope size overrun and now enforces the 64 KiB section response limit including metadata.
+
+Verification categories remain separate: real FastAPI/application/cache/authorization tests with temporary evidence; browser rendering tests with intercepted synthetic responses; source-only mounted capability; and still-unproven production/operator-session/source-capture/Fabric/market acceptance. The browser has no credential entry, credential storage, source mutation, model call or order control. It shows blocked, missing and corrected evidence honestly instead of inventing live intelligence.

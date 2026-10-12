@@ -1,0 +1,274 @@
+{
+  "scope": "browser rendering and request identity with intercepted responses; not server/production proof",
+  "browser": "154.0.8037.98",
+  "cases": [
+    {
+      "width": 1440,
+      "theme": "dark",
+      "scenario": "absent",
+      "passed": true
+    },
+    {
+      "width": 1440,
+      "theme": "dark",
+      "scenario": "partial",
+      "passed": true
+    },
+    {
+      "width": 1440,
+      "theme": "dark",
+      "scenario": "complete",
+      "passed": true
+    },
+    {
+      "width": 1440,
+      "theme": "dark",
+      "scenario": "corrected",
+      "passed": true
+    },
+    {
+      "width": 1440,
+      "theme": "dark",
+      "scenario": "locked",
+      "passed": true
+    },
+    {
+      "width": 1440,
+      "theme": "dark",
+      "scenario": "corrupt",
+      "passed": true
+    },
+    {
+      "width": 1440,
+      "theme": "dark",
+      "scenario": "unavailable",
+      "passed": true
+    },
+    {
+      "width": 1440,
+      "theme": "light",
+      "scenario": "absent",
+      "passed": true
+    },
+    {
+      "width": 1440,
+      "theme": "light",
+      "scenario": "partial",
+      "passed": true
+    },
+    {
+      "width": 1440,
+      "theme": "light",
+      "scenario": "complete",
+      "passed": true
+    },
+    {
+      "width": 1440,
+      "theme": "light",
+      "scenario": "corrected",
+      "passed": true
+    },
+    {
+      "width": 1440,
+      "theme": "light",
+      "scenario": "locked",
+      "passed": true
+    },
+    {
+      "width": 1440,
+      "theme": "light",
+      "scenario": "corrupt",
+      "passed": true
+    },
+    {
+      "width": 1440,
+      "theme": "light",
+      "scenario": "unavailable",
+      "passed": true
+    },
+    {
+      "width": 768,
+      "theme": "dark",
+      "scenario": "absent",
+      "passed": true
+    },
+    {
+      "width": 768,
+      "theme": "dark",
+      "scenario": "partial",
+      "passed": true
+    },
+    {
+      "width": 768,
+      "theme": "dark",
+      "scenario": "complete",
+      "passed": true
+    },
+    {
+      "width": 768,
+      "theme": "dark",
+      "scenario": "corrected",
+      "passed": true
+    },
+    {
+      "width": 768,
+      "theme": "dark",
+      "scenario": "locked",
+      "passed": true
+    },
+    {
+      "width": 768,
+      "theme": "dark",
+      "scenario": "corrupt",
+      "passed": true
+    },
+    {
+      "width": 768,
+      "theme": "dark",
+      "scenario": "unavailable",
+      "passed": true
+    },
+    {
+      "width": 768,
+      "theme": "light",
+      "scenario": "absent",
+      "passed": true
+    },
+    {
+      "width": 768,
+      "theme": "light",
+      "scenario": "partial",
+      "passed": true
+    },
+    {
+      "width": 768,
+      "theme": "light",
+      "scenario": "complete",
+      "passed": true
+    },
+    {
+      "width": 768,
+      "theme": "light",
+      "scenario": "corrected",
+      "passed": true
+    },
+    {
+      "width": 768,
+      "theme": "light",
+      "scenario": "locked",
+      "passed": true
+    },
+    {
+      "width": 768,
+      "theme": "light",
+      "scenario": "corrupt",
+      "passed": true
+    },
+    {
+      "width": 768,
+      "theme": "light",
+      "scenario": "unavailable",
+      "passed": true
+    },
+    {
+      "width": 390,
+      "theme": "dark",
+      "scenario": "absent",
+      "passed": true
+    },
+    {
+      "width": 390,
+      "theme": "dark",
+      "scenario": "partial",
+      "passed": true
+    },
+    {
+      "width": 390,
+      "theme": "dark",
+      "scenario": "complete",
+      "passed": true
+    },
+    {
+      "width": 390,
+      "theme": "dark",
+      "scenario": "corrected",
+      "passed": true
+    },
+    {
+      "width": 390,
+      "theme": "dark",
+      "scenario": "locked",
+      "passed": true
+    },
+    {
+      "width": 390,
+      "theme": "dark",
+      "scenario": "corrupt",
+      "passed": true
+    },
+    {
+      "width": 390,
+      "theme": "dark",
+      "scenario": "unavailable",
+      "passed": true
+    },
+    {
+      "width": 390,
+      "theme": "light",
+      "scenario": "absent",
+      "passed": true
+    },
+    {
+      "width": 390,
+      "theme": "light",
+      "scenario": "partial",
+      "passed": true
+    },
+    {
+      "width": 390,
+      "theme": "light",
+      "scenario": "complete",
+      "passed": true
+    },
+    {
+      "width": 390,
+      "theme": "light",
+      "scenario": "corrected",
+      "passed": true
+    },
+    {
+      "width": 390,
+      "theme": "light",
+      "scenario": "locked",
+      "passed": true
+    },
+    {
+      "width": 390,
+      "theme": "light",
+      "scenario": "corrupt",
+      "passed": true
+    },
+    {
+      "width": 390,
+      "theme": "light",
+      "scenario": "unavailable",
+      "passed": true
+    },
+    {
+      "scenario": "paged",
+      "passed": true
+    },
+    {
+      "scenario": "xss",
+      "passed": true
+    },
+    {
+      "scenario": "wrong_identity",
+      "passed": true
+    },
+    {
+      "scenario": "stale_response",
+      "passed": true
+    }
+  ]
+}
