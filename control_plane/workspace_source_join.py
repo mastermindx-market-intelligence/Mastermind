@@ -127,6 +127,13 @@ def _bounded_runtime_inputs(runtime: Any) -> tuple[
             if (type(discovery.truncated) is not bool or discovery.truncated
                     or len(discovery.roots) > DISCOVERY_MAX_ROOTS):
                 raise ValueError("root discovery truncated or invalid")
+            if len(discovery.roots) > MAX_SELECTED_ROOTS:
+                # The workstream view must join every root or remain unavailable.
+                # Report the bounded count before fetching any creation Events,
+                # without dropping legacy roots or guessing their workstreams.
+                raise ValueError(
+                    f"incomplete mapping: {len(discovery.roots)} roots exceed "
+                    f"the {MAX_SELECTED_ROOTS}-root complete workstream budget")
             commands = _eligible_commands(runtime, discovery.roots)
             if len(commands) > MAX_ELIGIBLE_COMMANDS:
                 raise ValueError("eligible creation Event point budget exceeded")
