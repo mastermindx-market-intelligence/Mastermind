@@ -194,3 +194,36 @@ def test_corrupt_source_generation_is_not_accepted_as_a_research_packet():
     # not merely the self-hash, must reject this forged object.
     unsigned={k:v for k,v in p.items() if k!='snapshot_id'};p['snapshot_id']=c.content_digest(unsigned)
     with pytest.raises(research().ResearchContextError):prepare(p)
+
+
+@pytest.mark.parametrize('purpose,task',[('extract','evidence_extraction'),('compare','comparative_analysis'),('adjudicate','contradiction_adjudication')])
+def test_explicit_task_aware_wire_uses_existing_service_v2_without_changing_context(purpose,task):
+    context=prepare(purpose=purpose);before=deepcopy(context);r=research()
+    try:wire=r.inference_request(context,task_aware=True)
+    except TypeError:pytest.fail('Bot wire producer does not yet emit the task-aware service version')
+    assert wire['schema']=='mastermind.executive_service_inference_request.v2'
+    assert wire['task_kind']==task
+    assert set(wire)=={'schema','system_prompt','input_text','max_output_chars','task_kind'}
+    assert json.loads(wire['input_text'])==context and context==before
+    old=r.inference_request(context)
+    assert old['schema']=='mastermind.executive_service_inference_request.v1'
+    assert 'task_kind' not in old and old['input_text']==wire['input_text']
+
+
+@pytest.mark.parametrize('flag',[1,0,'true',None,[]])
+def test_task_aware_wire_flag_is_explicit_boolean(flag):
+    r=research()
+    try:
+        with pytest.raises(r.ResearchContextError):r.inference_request(prepare(),task_aware=flag)
+    except TypeError:pytest.fail('task-aware flag validation is not implemented')
+
+
+def test_task_aware_wire_accounts_for_its_additional_envelope_bytes():
+    r=research();context=prepare()
+    context['max_request_bytes']=len(canonical_json_bytes(r._wire(context,r.MAX_OUTPUT_CHARS)))
+    context['context_id']=c.content_digest({k:v for k,v in context.items() if k!='context_id'})
+    assert len(canonical_json_bytes(r.inference_request(context)))<=context['max_request_bytes']
+    try:
+        with pytest.raises(r.ResearchContextError,match='budget'):
+            r.inference_request(context,task_aware=True)
+    except TypeError:pytest.fail('task-aware envelope budgeting is not implemented')

@@ -2,7 +2,7 @@
   "operation": "bot-intelligence-renewal-20261011",
   "source_basis": "cbc7503536b6853ec7c35c2192abdfaccb87b561",
   "macro_ci_source": "256c757b3c4f0ec759571c29a30a71387d0a18f8",
-  "test_scope": "WIP/HOLD: research producer 38 passed / 1 failed; independent-review regressions 2 passed / 11 failed; prior 806c65c29 full CI green is not release acceptance",
+  "test_scope": "WIP/HOLD: prior producer 38 passed / 1 failed and snapshot review 2 passed / 11 failed retained; eight new cross-PR source-admission cases passed; task-aware encoder post-change unit command refused, not claimed",
   "manifest_self_excluded": true,
   "files": [
     {
@@ -37,8 +37,8 @@
     },
     {
       "path": "brain/decision_research.py",
-      "bytes": 11448,
-      "sha256": "b63d53114a3de9e00294549d64f267989023a0b508dec8e4d6df0854b27c6927"
+      "bytes": 12161,
+      "sha256": "6d63ef4c3b422c0821649916b723ae53241ef0978f1fb93966f63fab46b7e6e9"
     },
     {
       "path": "docs/runbooks/portfolio-v3-decision-snapshot.md",
@@ -52,8 +52,8 @@
     },
     {
       "path": "docs/superpowers/plans/2026-10-11-bot-autonomy-renewal-validation.md",
-      "bytes": 22716,
-      "sha256": "4cb504b740f85f661361fc7655419055b1fb208be54b15b97322df5883d74477"
+      "bytes": 32965,
+      "sha256": "ce810330b1623c1c482da4146e5f4c8ae36abe9be73dc18b5c14254aa9fdfe17"
     },
     {
       "path": "docs/superpowers/plans/2026-10-11-bot-autonomy-source-capture.acceptance.py.txt",
@@ -96,6 +96,11 @@
       "sha256": "27b3f487d7cfd10adc0412ed7e910db21f386a2fa650a997afe69477a52c70ee"
     },
     {
+      "path": "tests/bot_research_service_admission_canary.py",
+      "bytes": 11802,
+      "sha256": "ad5a1cd1a37647970ef401cb6c9c744471f3894be0d9dc44b7d3af1fa8fdc408"
+    },
+    {
       "path": "tests/decision_evidence_browser.cjs",
       "bytes": 9124,
       "sha256": "b1f52a780eb2c1cb59887f10f1f23e4aa74e6f9e13716d1d82078ff3b047bd5d"
@@ -114,6 +119,16 @@
       "path": "tests/fixtures/bot_renewal_adversarial_review/verification.json",
       "bytes": 1743,
       "sha256": "efb63a707e0dba519826c8790a40868faf3f3c69fe797d278c7e7e522f550882"
+    },
+    {
+      "path": "tests/fixtures/bot_service_admission/recovery_and_source_proof.json",
+      "bytes": 1557,
+      "sha256": "e98b23a0db56326d666e0e33046d6c8694c91dec4a93c2485eb9b8e431e2ca52"
+    },
+    {
+      "path": "tests/fixtures/bot_service_admission/source_admission_v1.json",
+      "bytes": 1630,
+      "sha256": "c2c6eadea1978129a222d401ed3345bcf639da850a060420fde59e2e7d2bdc2f"
     },
     {
       "path": "tests/fixtures/decision_evidence_browser/evidence-1440.png",
@@ -142,8 +157,8 @@
     },
     {
       "path": "tests/test_decision_research.py",
-      "bytes": 10420,
-      "sha256": "bdee36c42a990aad24f4ba8068871c373c7a9ca2ef81aacfe5ab5d6040e21f56"
+      "bytes": 12316,
+      "sha256": "c5f279dd70d549e677f01bd8aa8e37ec4f369f8c977df16a5a6d144dbd40620f"
     },
     {
       "path": "tests/test_decision_snapshot.py",

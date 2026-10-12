@@ -171,15 +171,25 @@ def _verified_context(context: Mapping[str, Any]) -> dict[str, Any]:
     return d
 
 
-def inference_request(context: Mapping[str, Any], *, max_output_chars: int = 16_384) -> dict[str, Any]:
+def inference_request(context: Mapping[str, Any], *, max_output_chars: int = 16_384,
+                      task_aware: bool = False) -> dict[str, Any]:
     """Build only the existing wire shape; this function does not send it.
 
     A caller must pass this result through the service I/O owner's normalizer
     and its accepted request-binding path. No lifecycle or admission is implied.
+    Explicit task-aware mode uses the owner's v2 high-level task intent; default
+    v1 bytes stay unchanged. Added envelope bytes must fit without truncation.
     """
+    _require(type(task_aware) is bool, 'task_aware must be an explicit boolean')
     d = _verified_context(context)
     _require(type(max_output_chars) is int and 1 <= max_output_chars <= MAX_OUTPUT_CHARS, 'invalid output-character limit')
-    return _wire(d, max_output_chars)
+    wire = _wire(d, max_output_chars)
+    if task_aware:
+        wire['schema'] = 'mastermind.executive_service_inference_request.v2'
+        wire['task_kind'] = {'extract': 'evidence_extraction', 'compare': 'comparative_analysis',
+                             'adjudicate': 'contradiction_adjudication'}[d['purpose']]
+    _require(len(canonical_json_bytes(wire)) <= d['max_request_bytes'], 'task-aware request exceeds its prepared byte budget')
+    return wire
 
 
 def work_request(context: Mapping[str, Any], *, frontier_witness: Mapping[str, Any] | None = None) -> WorkRequest:
