@@ -98,3 +98,44 @@ authentication of the OAuth subject/client does not authenticate a GUI writer.
 If that provenance is absent, a later caller cannot backfill it as authority.
 The native writer owns qualification of that origin producer and any explicit
 reentry binder. The bounded native-return no-child profile remains unchanged.
+
+## Same-call cycle continuation
+
+The installed-factory candidate now reserves the service's existing serial
+cycle for the actual request task before the canonical sink can commit. The
+fresh-admission observer still runs at the sink; it creates no asyncio owner or
+caller-supplied root binding. The request-local exclusion is checked inside the
+existing cycle lock, so a background tick cannot adopt the newly committed root
+or advance it under a different foreground context.
+
+For a fresh summon with explicitly configured attended Work placements, the
+handler now drives the ordinary CooCycle: planner, sealed plan admission, Work,
+required independent review, and aggregation. It awaits only the existing
+Job/Attempt finisher outside transition locks. Each step rechecks the actual
+foreground operation and retains the existing service, autonomy, policy and
+host gates. A repeated transition, no action, finite cutoff or unresolved
+finisher stops progression; there is no polling or separate retry scheduler.
+The existing native-return no-child profile is explicitly excluded.
+
+Caller cancellation closes attendance immediately while the original physical
+transition drains. The original request slot is not released while that action
+can still cross START. Collection remains with the existing finisher; exact
+Runtime compare-and-cancel prevents cancellation of a successor Attempt.
+
+The original immutable QUEUED admission receipt is retained. A separate
+`foreground_completion` reports the current call's outcome. Whole-root success
+requires `Runtime.validated_role_completion` for the exact aggregation Attempt;
+completed Work/repair envelopes and their canonical digests are returned with
+it. An oversized result is explicitly `RESULT_TOO_LARGE`, with retained result
+identities rather than truncated content represented as successful delivery.
+Result inclusion is not the original Codex parent's review or acceptance.
+Duplicates and legacy queued requests do not acquire a fresh execution scope.
+
+The real-source fixture runs the canonical plan, Work, independent review and
+aggregation with inert role finishers. It does not attest a provider or host.
+The current active registry remains unchanged and the attended adapter remains
+unimplemented for production admission. A host-qualified preparation, START,
+collection and assignment-revocation producer, the existing provider-policy
+and C1 boundaries, protected release/installation, and an actual same-Desktop
+paid return remain required. This finite same-call source does not establish
+durable GUI enrollment, later-request reentry or idle Wake.
