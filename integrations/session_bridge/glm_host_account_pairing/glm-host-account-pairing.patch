@@ -569,7 +569,7 @@
 +        return [], 'glm_host_account_source_unavailable'
 --- /dev/null
 +++ b/glm_host_account_probe.py
-@@ -0,0 +1,71 @@
+@@ -0,0 +1,70 @@
 +"""Build nonsecret code for the incumbent host_pull transport, never probe here."""
 +from __future__ import annotations
 +import base64
@@ -600,7 +600,6 @@
 + 'validator_sha256':p['validator_sha256'],'observed_at':time.time(),'status':'unknown',
 + 'accounts':{}}
 +try:
-+ if sys.argv[2] != '0': raise ValueError()
 + source=base64.b64decode(p['validator'],validate=True)
 + if hashlib.sha256(source).hexdigest()!=p['validator_sha256']: raise ValueError()
 + module=types.ModuleType('glm_probe_validator')
@@ -619,10 +618,10 @@
 +print('glm_local_account_readiness='+json.dumps(r,separators=(',',':'),allow_nan=False))
 +'''
 +    encoded = base64.b64encode(json.dumps(envelope, separators=(',', ':')).encode()).decode()
-+    # Same HOST_ENV as remote_sub's original launcher; failures are unknown.
++    # Match the original launcher sequence; HOST_ENV status is not an admission gate.
 +    inner = ('export PATH=$HOME/lanes/venv/bin:$HOME/.local/bin:/opt/homebrew/bin:$PATH; '
-+             'source ~/lanes/ext/HOST_ENV.sh >/dev/null 2>&1; glm_scope_rc=$?; '
-+             'python3 -c '+shlex.quote(program)+' '+shlex.quote(encoded)+' "$glm_scope_rc"')
++             'source ~/lanes/ext/HOST_ENV.sh >/dev/null 2>&1; '
++             'python3 -c '+shlex.quote(program)+' '+shlex.quote(encoded))
 +    return 'PATH="${GLM_LAUNCH_BASE_PATH:-$PATH}" /bin/bash -c '+shlex.quote(inner)
 +
 +

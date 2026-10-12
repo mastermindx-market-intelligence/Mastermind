@@ -28,15 +28,16 @@ def load(name, ext):
     return module
 
 
-def probe_fixture(ext,tmp_path, *, source=True, raw=None):
+def probe_fixture(ext,tmp_path, *, source=True, raw=None, source_tail='', remove_default=False):
     module=load('glm_host_account_probe',ext)
     home=tmp_path/'home';(home/'lanes/ext').mkdir(parents=True)
     selected=tmp_path/'launch config.json'
     selected.write_text(raw if raw is not None else json.dumps({'accounts':{'ready':{'api_key':'DO_NOT_EMIT_THIS_SECRET'},'broken':{'api_key':'bad\nsecret'}}}))
     if source:
         import shlex
-        (home/'lanes/ext/HOST_ENV.sh').write_text('export GLM_CONFIG='+shlex.quote(str(selected))+'\n')
+        (home/'lanes/ext/HOST_ENV.sh').write_text('export GLM_CONFIG='+shlex.quote(str(selected))+'\n'+source_tail)
     (home/'.glm').mkdir();(home/'.glm/config.json').write_text(json.dumps({'accounts':{'wrong-default':{'api_key':'default-secret'}}}))
+    if remove_default: (home/'.glm/config.json').unlink()
     command=module.build_probe('h','h-route',['ready','broken','wrong-default','absent'],(ext/'glm_keys.py').read_bytes())
     r=subprocess.run(['sh','-c',command],env=dict(os.environ,HOME=str(home)),capture_output=True,text=True,timeout=10)
     assert r.returncode==0 and r.stderr==''
@@ -51,7 +52,7 @@ def test_probe_uses_actual_host_env_config_only_and_no_secret(ext,tmp_path):
 
 @pytest.mark.parametrize('source,raw',[(False,None),(True,'no json'),(True,'[]'),(True,'{}')])
 def test_failed_config_scope_or_invalid_source_is_unknown(ext,tmp_path,source,raw):
-    doc,_=probe_fixture(ext,tmp_path,source=source,raw=raw)
+    doc,_=probe_fixture(ext,tmp_path,source=source,raw=raw,remove_default=not source)
     assert doc['status']=='unknown' and doc['accounts']=={}
 
 @pytest.mark.parametrize('mutation',['symlink','mode','parent_mode','oversize','changed'])
@@ -267,3 +268,13 @@ def test_old_collector_retains_original_four_field_contract(ext,tmp_path):
     registry.write_text(json.dumps({'h':{'roles':['lanes'],'allowed_modes':['glm'],'ssh_alias':'h','worktree_root':'/home'}}))
     r=subprocess.run([sys.executable,str(ext/'host_pull_backend.py'),'read-hosts',str(registry),'','1'],capture_output=True,text=True,timeout=5)
     assert r.returncode==0 and r.stdout=='h|0|h|/home\n'
+
+
+@pytest.mark.parametrize('source,tail,expected',[(True,'return 1\n','ready'),(False,'','wrong-default')])
+def test_readiness_matches_launcher_when_host_env_returns_nonzero(ext,tmp_path,source,tail,expected):
+    doc,_=probe_fixture(ext,tmp_path,source=source,source_tail=tail)
+    import shlex
+    command='export PATH=$HOME/lanes/venv/bin:$HOME/.local/bin:/opt/homebrew/bin:$PATH; source ~/lanes/ext/HOST_ENV.sh 2>/dev/null; '+shlex.quote(sys.executable)+' '+shlex.quote(str(ext/'glm_keys.py'))+' account-ready '+shlex.quote(expected)
+    actual=subprocess.run(['/bin/bash','-c',command],env=dict(os.environ,HOME=str(tmp_path/'home')),capture_output=True,text=True,timeout=10)
+    assert actual.returncode==0 and actual.stdout=='1\n'
+    assert doc['status']=='known' and doc['accounts'][expected] is True
