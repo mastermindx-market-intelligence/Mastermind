@@ -3451,15 +3451,18 @@ def test_claude_broker_refuses_non_codex_validation_adapter(tmp_path: Path) -> N
     assert "claude-compatible-subscription" not in str(refused.value)
 
 
-def test_remote_claude_worker_adapter_has_immutable_claude_identity() -> None:
+def test_remote_provider_worker_adapters_have_immutable_identities() -> None:
     from control_plane.executive_worker_broker import (
         RemoteClaudeWorkerAdapter,
         RemoteCodexWorkerAdapter,
+        RemoteDot2ApiWorkerAdapter,
     )
 
     assert RemoteClaudeWorkerAdapter.adapter_id == "claude-code"
     assert RemoteCodexWorkerAdapter.adapter_id == "codex-cli"
+    assert RemoteDot2ApiWorkerAdapter.adapter_id == "dot2api"
     assert issubclass(RemoteClaudeWorkerAdapter, RemoteCodexWorkerAdapter)
+    assert issubclass(RemoteDot2ApiWorkerAdapter, RemoteCodexWorkerAdapter)
 
 
 def test_codex_validation_byte_semantics_preserved(tmp_path: Path) -> None:
@@ -3493,7 +3496,7 @@ def test_codex_validation_byte_semantics_preserved(tmp_path: Path) -> None:
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("facade_name", ["codex", "claude"])
+@pytest.mark.parametrize("facade_name", ["codex", "claude", "dot2api"])
 @pytest.mark.parametrize("field", ["job_id", "run_id", "worker_id"])
 def test_remote_collection_refuses_foreign_result_identity(
     tmp_path: Path, facade_name: str, field: str
@@ -3503,6 +3506,7 @@ def test_remote_collection_refuses_foreign_result_identity(
         from control_plane.executive_worker_broker import (
             RemoteClaudeWorkerAdapter,
             RemoteCodexWorkerAdapter,
+            RemoteDot2ApiWorkerAdapter,
             _jsonable,
             _launch_spec_from_wire,
         )
@@ -3530,11 +3534,11 @@ def test_remote_collection_refuses_foreign_result_identity(
                     "uid_sweep": _jsonable(FakeSweeper().sweep("remote-test")),
                 }
 
-        facade_type = (
-            RemoteCodexWorkerAdapter
-            if facade_name == "codex"
-            else RemoteClaudeWorkerAdapter
-        )
+        facade_type = {
+            "codex": RemoteCodexWorkerAdapter,
+            "claude": RemoteClaudeWorkerAdapter,
+            "dot2api": RemoteDot2ApiWorkerAdapter,
+        }[facade_name]
         remote = facade_type(Client())  # type: ignore[arg-type]
         remote._refs[spec.run_id] = ref
         remote._specs[spec.run_id] = spec

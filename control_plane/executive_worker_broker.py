@@ -4377,6 +4377,12 @@ class RemoteClaudeWorkerAdapter(RemoteCodexWorkerAdapter):
     adapter_id = "claude-code"
 
 
+class RemoteDot2ApiWorkerAdapter(RemoteCodexWorkerAdapter):
+    """Control-side Dot2API facade with immutable broker identity."""
+
+    adapter_id = "dot2api"
+
+
 class RemoteWorkerProcessController:
     """Synchronous restart-reconciliation facade over broker status/cancel."""
 
@@ -4389,7 +4395,7 @@ class RemoteWorkerProcessController:
         ):
             raise ValueError("expected worker UID must be a positive integer")
         if type(expected_adapter_id) is not str or expected_adapter_id not in {
-            "codex-cli", "claude-code",
+            "codex-cli", "claude-code", "dot2api",
         }:
             raise ValueError("expected worker adapter must be a supported identity")
         self.client = client
@@ -4628,7 +4634,7 @@ class RemoteWorkerBrokerEndpoint:
 
     def __post_init__(self) -> None:
         if type(self.adapter_id) is not str or self.adapter_id not in (
-            "codex-cli", "claude-code"
+            "codex-cli", "claude-code", "dot2api"
         ):
             raise WorkerBrokerError("remote worker endpoint has unsupported adapter_id")
         worker_id = str(self.worker_id or "").strip()
@@ -4792,6 +4798,8 @@ class RemoteWorkerBrokerFleet:
                     facade = RemoteCodexWorkerAdapter
                 elif row.adapter_id == "claude-code":
                     facade = RemoteClaudeWorkerAdapter
+                elif row.adapter_id == "dot2api":
+                    facade = RemoteDot2ApiWorkerAdapter
                 else:
                     raise WorkerBrokerError("remote worker endpoint has unsupported adapter_id")
                 return facade(
@@ -4799,7 +4807,9 @@ class RemoteWorkerBrokerFleet:
                     validation_commands_for_spec=validation_resolver,
                 )
         if controller_factory is None:
-            controller_factory = lambda row: RemoteWorkerProcessController(row.client)
+            controller_factory = lambda row: RemoteWorkerProcessController(
+                row.client, expected_adapter_id=row.adapter_id
+            )
         self._endpoints = {row.worker_id: row for row in rows}
         self._adapters = {row.worker_id: adapter_factory(row) for row in rows}
         self._controllers = {row.worker_id: controller_factory(row) for row in rows}
@@ -5025,6 +5035,7 @@ __all__ = [
     "RemoteBrokerError",
     "RemoteClaudeWorkerAdapter",
     "RemoteCodexWorkerAdapter",
+    "RemoteDot2ApiWorkerAdapter",
     "RemoteWorkerBrokerEndpoint",
     "RemoteWorkerBrokerFleet",
     "RemoteWorkerProcessController",

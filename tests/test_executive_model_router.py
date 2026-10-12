@@ -93,7 +93,7 @@ def test_economical_workers_handle_bounded_work_and_frontier_keeps_judgment():
     assert implementation.required_capabilities == ("code",)
     assert implementation.execution_profile_id == "sealed.worker.write.no-extensions.v1"
     assert len(implementation.execution_profile_digest) == 64
-    assert implementation.capability_policy_version == "2026-10-11.native-return-host-source"
+    assert implementation.capability_policy_version == "2026-10-11.dot2api-built-not-proven"
     assert len(implementation.capability_policy_digest) == 64
 
     elevated = router.route(WorkRequest("implementation", risk="elevated"))
@@ -783,3 +783,35 @@ def test_v2_review_exclusions_survive_structured_tiers_and_claim_projection():
     assert review.excluded_worker_ids == ("builder-01",)
     assert review.to_dict()["excluded_worker_ids"] == ["builder-01"]
     assert review.job_constraints()["excluded_worker_ids"] == ["builder-01"]
+
+
+def test_dot2api_adapter_is_built_but_routing_remains_dormant() -> None:
+    router = ModelRouter.load()
+    descriptor = adapter_descriptor("dot2api")
+    provider = router.providers["dot"]
+    alias = router.model_aliases["dot.research"]
+    profile = router.capability_registry.resolve(alias.execution_profile_id)
+
+    assert descriptor.implemented is False
+    assert descriptor.implementation == "control_plane.dot2api_worker.Dot2ApiWorkerAdapter"
+    assert provider.adapter_id == "dot2api"
+    assert provider.enabled is False
+    assert provider.autonomous_allowed is False
+    assert alias.adapter_id == "dot2api"
+    assert alias.worker_eligible is False
+    assert alias.capabilities == ("research",)
+    assert profile.execution_surface == "dot2api"
+    assert profile.write_capable is False
+    assert profile.network_policy == "loopback-provider-only"
+    assert profile.skills == ()
+    assert profile.mcp_servers == ()
+    assert profile.plugins == ()
+
+    with pytest.raises(RoutingPolicyError, match="not worker eligible"):
+        router.resolve_model_alias("dot.research")
+    for task_kind in ("implementation", "mechanical", "tests", "research", "review"):
+        decision = router.route(WorkRequest(task_kind))
+        assert all(
+            "dot.research" not in tier.model_aliases
+            for tier in decision.suitability_tiers
+        )
