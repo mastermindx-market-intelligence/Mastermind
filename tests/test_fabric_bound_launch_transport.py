@@ -69,3 +69,25 @@ def test_unbound_calls_remain_unbound_without_creating_paths(tmp_path):
     before = set(tmp_path.iterdir())
     assert wire.remote_launch_arguments(tmp_path, "ordinary-run", {}) == {}
     assert set(tmp_path.iterdir()) == before
+
+
+def test_upload_digest_is_checked_against_original_reservation(tmp_path):
+    args, _, _, log, target, env = fixture(tmp_path)
+    assert wire.reserved_snapshot_digest(target, log, **args) == env["FABRIC_LAUNCH_SNAPSHOT_SHA256"]
+    value = json.loads(target.read_text())
+    value["correlation"]["runtime_binding"]["effective_grant_sha256"] = "f" * 64
+    value["reservation_sha256"] = hashlib.sha256(
+        fence.CORRELATION_PREFIX + wire.canonical(value["correlation"])).hexdigest()
+    target.write_bytes(wire.canonical(value))
+    with pytest.raises(fence.ReservationRefused, match="request_conflict"):
+        wire.reserved_snapshot_digest(target, log, **args)
+
+
+def test_backend_conversion_keeps_every_runtime_binding_field(tmp_path):
+    _, context, _, _, _, _ = fixture(tmp_path)
+    expected = dict(context["runtime_binding"])
+    expected["effective_grant_digest"] = expected.pop("effective_grant_sha256")
+    mapped = fence.backend_start_context(context)
+    assert {**mapped["binding"], **{k: v for k, v in mapped.items() if k != "binding"}} == expected
+    from control_plane.executive_fabric_bridge_broker import _binding
+    assert _binding(mapped["binding"]) == mapped["binding"]

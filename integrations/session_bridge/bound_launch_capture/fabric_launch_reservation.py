@@ -51,18 +51,31 @@ def validate_correlation(value, *, run_id, routing_root_id, routing_parent_run_i
             or type(value["runtime_binding"]) is not dict):
         raise ReservationRefused("bound_launch_routing_invalid")
     binding = value["runtime_binding"]
-    # This is correlation only. The authenticated Backend independently compares
-    # this Runtime root with its original Job; it is not the Fabric routing root.
+    # Here Runtime root is syntax-checked only. Supplying it as its own expected
+    # value does not authenticate it. The Backend must independently compare it
+    # with the original Runtime Job; the Fabric routing root is a different ID.
     binding = validate_binding(binding, run_id=run_id, root_id=binding.get("root_id"))
     return {**value, "runtime_binding": binding}
 
 
 def backend_binding(correlation):
-    """Lossless schema spelling conversion, never authentication or admission."""
+    """Project Runtime identity into the bridge's exact five-field binding.
+
+    Physical route and start hash are separate enclosing bridge fields, not
+    permitted keys inside binding. Use backend_start_context for all seven.
+    """
     fields = correlation["runtime_binding"]
     return {"root_id": fields["root_id"], "job_id": fields["job_id"],
             "attempt_id": fields["attempt_id"], "commission_sha256": fields["commission_sha256"],
             "effective_grant_digest": fields["effective_grant_sha256"]}
+
+
+def backend_start_context(correlation):
+    """Lossless bridge spelling/placement conversion; conveys no authority."""
+    fields = correlation["runtime_binding"]
+    return {"binding": backend_binding(correlation),
+            "physical_binding_sha256": fields["physical_binding_sha256"],
+            "start_request_sha256": fields["start_request_sha256"]}
 
 
 def _decode(raw):

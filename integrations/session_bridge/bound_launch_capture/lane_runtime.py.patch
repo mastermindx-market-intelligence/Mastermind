@@ -1,18 +1,9 @@
 --- a/lane_runtime.py
 +++ b/lane_runtime.py
-@@ -9,6 +9,8 @@
- from __future__ import annotations
- 
- import atexit
+@@ -11,0 +12,2 @@
 +import ctypes
 +import sys
- import fcntl
- import hashlib
- import json
-@@ -958,6 +960,224 @@
-     return None
- 
- 
+@@ -960,0 +963,218 @@
 +
 +LAUNCH_RECEIPT_SCHEMA = "mastermind.local_owned_process_launch.v1"
 +_LAUNCH_ID_FIELDS = frozenset({"root_id", "job_id", "attempt_id"})
@@ -231,23 +222,11 @@
 +            *(os.fspath(v) for v in target)]
 +
 +
- def run_owned_process(
-     command: str | Sequence[str],
-     *,
-@@ -973,6 +1193,9 @@
-     timeout_returncode: int = -9,
-     capture_limit_bytes: int = DEFAULT_CAPTURE_LIMIT_BYTES,
-     receipt_diagnostics=None,
+@@ -975,0 +1196,3 @@
 +    launch_receipt_path: str | os.PathLike[str] | None = None,
 +    launch_receipt_metadata: Mapping[str, str] | None = None,
 +    launch_receipt_context_sha256: str | None = None,
- ) -> OwnedProcessResult:
-     try:
-         timeout = float(timeout)
-@@ -987,63 +1210,98 @@
-     if not 64 <= int(capture_limit_bytes) <= MAX_CAPTURE_LIMIT_BYTES:
-         raise LaneRuntimeConfigError("capture_limit_out_of_bounds")
-     safe_label = _safe_label(label)
+@@ -989,0 +1213,20 @@
 +    launch_path, launch_context = _launch_receipt_input(
 +        launch_receipt_path, launch_receipt_metadata)
 +    if launch_receipt_context_sha256 is not None and (
@@ -268,31 +247,22 @@
 +            os.close(gate_write)
 +            raise
 +        extra_popen["pass_fds"] = (gate_read,)
-     started_at = _utc_now()
+@@ -991 +1233,0 @@
 -    input_bytes = input_text.encode("utf-8") if input_text is not None else None
-     try:
-         proc = subprocess.Popen(
+@@ -994 +1236 @@
 -            command,
 +            launch_command,
-             cwd=cwd,
-             stdin=subprocess.PIPE if input_bytes is not None else subprocess.DEVNULL,
-             stdout=subprocess.PIPE,
-             stderr=subprocess.PIPE,
+@@ -999,2 +1241,2 @@
 -            shell=shell,
 -            executable=_owned_shell() if shell else None,
 +            shell=shell if launch_path is None else False,
 +            executable=_owned_shell() if shell and launch_path is None else None,
-             env=dict(env) if env is not None else None,
-             close_fds=True,
-             start_new_session=True,
+@@ -1003,0 +1246 @@
 +            **extra_popen,
-         )
-     except OSError as exc:
-         # Popen's exec-error pipe confirms failed exec. Exceptions after this
-         # boundary remain uncertain and must preserve the reconciliation hold.
+@@ -1007,0 +1251,2 @@
 +        if gate_write is not None:
 +            os.close(gate_write)
-         raise OwnedProcessStartError(exc.errno) from None
+@@ -1009,6 +1254,19 @@
 -    pgid = proc.pid
 -    try:
 -        observed_pgid = os.getpgid(proc.pid)
@@ -318,7 +288,7 @@
 +            observed_pgid = pgid
 +            observed_sid = pgid
 +        except PermissionError as exc:
-             _kill_exact_leader(proc, grace=2.0)
+@@ -1016,29 +1274,28 @@
 -            raise LaneRuntimeError("owned_process_identity_unavailable")
 -        observed_pgid = pgid
 -        observed_sid = pgid
@@ -376,26 +346,41 @@
 +            _terminate_verified_group(proc, pgid, grace=0.2, reason="set_current_failed")
 +            raise
 +
-     except BaseException:
+@@ -1046 +1303,2 @@
 -        _terminate_verified_group(proc, pgid, grace=0.2, reason="set_current_failed")
 +        if gate_write is not None:
 +            os.close(gate_write)
-         raise
- 
-     stdout_collector = _BoundedStreamCollector(
-@@ -1056,7 +1314,7 @@
-     stderr_collector.start()
-     stdin_thread: threading.Thread | None = None
-     stdin_state: dict[str, Any] = {"complete": True, "error_code": None}
+@@ -1049,8 +1307,2 @@
+-    stdout_collector = _BoundedStreamCollector(
+-        proc.stdout, int(capture_limit_bytes), "stdout"
+-    )
+-    stderr_collector = _BoundedStreamCollector(
+-        proc.stderr, int(capture_limit_bytes), "stderr"
+-    )
+-    stdout_collector.start()
+-    stderr_collector.start()
++    stdout_collector = stderr_collector = None
++    stdout_started = stderr_started = False
+@@ -1059,6 +1310,0 @@
 -    if input_bytes is not None:
-+    if input_bytes is not None and launch_path is None:
-         if proc.stdin is None:
-             _terminate_verified_group(proc, pgid, grace=0.2, reason="stdin_missing")
-             _clear_current(proc)
-@@ -1084,6 +1342,18 @@
-     runtime_failure_code: str | None = None
-     try:
-         try:
+-        if proc.stdin is None:
+-            _terminate_verified_group(proc, pgid, grace=0.2, reason="stdin_missing")
+-            _clear_current(proc)
+-            raise LaneRuntimeError("owned_stdin_stream_missing")
+-        stdin_thread, stdin_state = _start_input_writer(proc.stdin, input_bytes)
+@@ -1086,0 +1333,24 @@
++            # Collector setup is post-spawn and must share the same settlement
++            # and gate-fd finally path as publication, exec and input delivery.
++            stdout_collector = _BoundedStreamCollector(proc.stdout, int(capture_limit_bytes), "stdout")
++            stderr_collector = _BoundedStreamCollector(proc.stderr, int(capture_limit_bytes), "stderr")
++            stdout_collector.start()
++            stdout_started = True
++            stderr_collector.start()
++            stderr_started = True
++            if input_bytes is not None and launch_path is None:
++                if proc.stdin is None:
++                    raise LaneRuntimeError("owned_stdin_stream_missing")
++                stdin_thread, stdin_state = _start_input_writer(proc.stdin, input_bytes)
 +            if launch_path is not None:
 +                if launch_receipt_context_sha256 is None:
 +                    launch_receipt_sha256 = _publish_owned_launch_receipt(
@@ -408,28 +393,22 @@
 +                gate_write = None
 +                if input_bytes is not None:
 +                    stdin_thread, stdin_state = _start_input_writer(proc.stdin, input_bytes)
-             wait_outcome = _wait_owned_process_with_fuse(proc, pgid, timeout)
-             if wait_outcome == "completed":
-                 returncode = int(proc.returncode or 0)
-@@ -1127,6 +1397,8 @@
-             )
-             raise
-     finally:
+@@ -1129,0 +1400,2 @@
 +        if gate_write is not None:
 +            os.close(gate_write)
-         _clear_current(proc)
-         capture_deadline = time.monotonic() + max(
-             0.25, min(2.0, terminate_grace + 0.25)
-@@ -1169,6 +1441,12 @@
-                 {
-                     "schema": PROCESS_RECEIPT_SCHEMA,
-                     **diagnostic_fields,
+@@ -1138,0 +1411,4 @@
++        if not stdout_started:
++            proc.stdout.close()
++        if not stderr_started:
++            proc.stderr.close()
+@@ -1140,0 +1417 @@
++            if stdout_started else ("", 0, False, False, "collector_unavailable")
+@@ -1143,0 +1421 @@
++            if stderr_started else ("", 0, False, False, "collector_unavailable")
+@@ -1171,0 +1450,6 @@
 +                    **({"launch_capture": {
 +                        "phase": "PRE_EXEC_HANDSHAKE",
 +                        "receipt_sha256": launch_receipt_sha256,
 +                        "context_sha256": launch_receipt_context_sha256,
 +                        "provider_execution_attested": False,
 +                    }} if launch_path is not None else {}),
-                     "label": safe_label,
-                     "pid": proc.pid,
-                     "pgid": pgid,

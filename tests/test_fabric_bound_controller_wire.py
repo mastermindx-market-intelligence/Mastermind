@@ -113,3 +113,29 @@ def test_bound_receipt_collection_failure_does_not_settle_or_retry(tmp_path):
     assert result.returncode == 0
     assert "retry_authorized=0" in result.stdout
     assert "remote_artifact_preserved=1" in result.stdout
+
+
+def test_actual_launch_fragment_refuses_consistent_sidecar_drift(tmp_path):
+    result = reserve_fragment(tmp_path)
+    assert result.returncode == 0
+    source = patched(tmp_path, "remote_sub.sh", "RESERVATION_SOURCE.json")
+    fragment = source.split("<<'PY_BOUND_SHA'\n", 1)[1].split("\nPY_BOUND_SHA", 1)[0]
+    snapshot = tmp_path / "attempt-1.launch-correlation.json"
+    environment = {**os.environ, "POOL_ORCHESTRATOR_ID": "native-root",
+                   "POOL_PARENT_RUN_ID": "native-parent"}
+    def read():
+        return subprocess.run([sys.executable, "-", str(snapshot), str(tmp_path / "attempt-1.log"),
+                               str(BUNDLE), "attempt-1"], input=fragment,
+                              env=environment, capture_output=True, text=True, timeout=10)
+    good = read()
+    assert good.returncode == 0
+    assert good.stdout.strip() == hashlib.sha256(snapshot.read_bytes()).hexdigest()
+    changed = json.loads(snapshot.read_text())
+    changed["correlation"]["runtime_binding"]["job_id"] = "foreign-job"
+    changed["reservation_sha256"] = hashlib.sha256(
+        fence.CORRELATION_PREFIX + wire.canonical(changed["correlation"])).hexdigest()
+    snapshot.write_bytes(wire.canonical(changed))
+    refused = read()
+    assert refused.returncode == 78
+    assert "BOUND_SNAPSHOT_RESERVATION_MISMATCH" in refused.stderr
+    assert refused.stdout == ""

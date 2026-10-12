@@ -47,29 +47,36 @@
 +    # no chmod/chown or reuse of shared/foreign output directories.
 +    "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
 +      "mkdir -m 700 \"\$HOME/lanes/tmp/${ID}.launch-bound\"" || return $?
-+    "$SCP_CMD" -q "$LOG_DIR/${ID}.launch-correlation.json" \
++    "$SCP_CMD" -p -q "$LOG_DIR/${ID}.launch-correlation.json" \
 +      "$SSH_ALIAS:~/lanes/tmp/${ID}.launch-bound/correlation.json" || return $?
 +  fi
-@@ -921,0 +966,15 @@
+@@ -921,0 +966,22 @@
 +BOUND_LAUNCH_ENV=""
 +if [ -n "${REMOTE_SUB_START_CORRELATION_FILE:-}" ]; then
 +  if [ "$DRY_RUN" -eq 1 ]; then
 +    BOUND_LAUNCH_SHA="<source-only-snapshot-digest>"
 +  else
-+    BOUND_LAUNCH_SHA=$("$REMOTE_SUB_PYTHON" - "$LOG_DIR/${ID}.launch-correlation.json" <<'PY_BOUND_SHA'
-+import hashlib,sys
-+from pathlib import Path
-+print(hashlib.sha256(Path(sys.argv[1]).read_bytes()).hexdigest())
++    BOUND_LAUNCH_SHA=$("$REMOTE_SUB_PYTHON" - "$LOG_DIR/${ID}.launch-correlation.json" "$LOG_FILE" "$HERE" "$ID" <<'PY_BOUND_SHA'
++import os,sys
++sys.path.insert(0, sys.argv[3])
++from fabric_launch_transport import reserved_snapshot_digest
++try:
++    print(reserved_snapshot_digest(sys.argv[1], sys.argv[2], run_id=sys.argv[4],
++        routing_root_id=os.environ.get('POOL_ORCHESTRATOR_ID'),
++        routing_parent_run_id=os.environ.get('POOL_PARENT_RUN_ID')))
++except Exception:
++    print('BOUND_SNAPSHOT_RESERVATION_MISMATCH', file=sys.stderr)
++    raise SystemExit(78)
 +PY_BOUND_SHA
 +    ) || { RC=78; log "BOUND_SNAPSHOT_UNAVAILABLE"; exit "$RC"; }
 +    [[ "$BOUND_LAUNCH_SHA" =~ ^[a-f0-9]{64}$ ]] || { RC=78; exit "$RC"; }
 +  fi
 +  BOUND_LAUNCH_ENV="FABRIC_LAUNCH_SNAPSHOT_SHA256='$BOUND_LAUNCH_SHA'"
 +fi
-@@ -923 +982 @@
+@@ -923 +989 @@
 -LAUNCH_REMOTE="$NATIVE_TIMING_PREFIX $RPATH; $HOST_ENV; $NATIVE_TIMING_AFTER_ENV cd ~/lanes/ext || exit; rm -f \"$REMOTE_STDOUT\" \"$REMOTE_RC\" || exit; KEY='$ID' MODE='$MODE' PACKET=\"\$HOME/lanes/tmp/${ID}.txt\" REMOTE_CWD='$REMOTE_CWD' MODEL='$MODEL' RC_FILE=\"\$HOME/lanes/ext/$REMOTE_RC\" nohup env $NATIVE_TIMING_ENV $ROUTING_ENV $OPERATOR_ENV SUPPORT_DIGEST='$SUPPORT_DIGEST' PYTHONDONTWRITEBYTECODE=1 LANE_LEASED=1 POOL_ACCOUNT='$ACCOUNT_ARG' POOL_LEASE_ID='$LEASE_ID' REMOTE_SUB_RUN_ID='$ID' LANE_REMOTE_HOST='$HOST_ARG' NATIVE_LEASE_ISSUED='$NATIVE_LEASE_ISSUED' NATIVE_LEASE_DEADLINE='$NATIVE_LEASE_DEADLINE' LANE_MAX_ACTIVE='$MAX_ACTIVE' LANE_MIN_FREE_MEM_GB='$MIN_FREE_MEM_GB' LANE_MAX_CPU_TCTL_C='$MAX_CPU_TCTL_C' LANE_MAX_LOAD_RATIO='$LANE_HOST_LOAD_RATIO' LANE_NICE=10 REMOTE_SUB_CHILD_TIMEOUT='$CHILD_TIMEOUT' bash -c '$REMOTE_INNER' </dev/null > \"$REMOTE_STDOUT\" 2>&1 &"
 +LAUNCH_REMOTE="$NATIVE_TIMING_PREFIX $RPATH; $HOST_ENV; $NATIVE_TIMING_AFTER_ENV cd ~/lanes/ext || exit; rm -f \"$REMOTE_STDOUT\" \"$REMOTE_RC\" || exit; KEY='$ID' MODE='$MODE' PACKET=\"\$HOME/lanes/tmp/${ID}.txt\" REMOTE_CWD='$REMOTE_CWD' MODEL='$MODEL' RC_FILE=\"\$HOME/lanes/ext/$REMOTE_RC\" nohup env $NATIVE_TIMING_ENV $BOUND_LAUNCH_ENV $ROUTING_ENV $OPERATOR_ENV SUPPORT_DIGEST='$SUPPORT_DIGEST' PYTHONDONTWRITEBYTECODE=1 LANE_LEASED=1 POOL_ACCOUNT='$ACCOUNT_ARG' POOL_LEASE_ID='$LEASE_ID' REMOTE_SUB_RUN_ID='$ID' LANE_REMOTE_HOST='$HOST_ARG' NATIVE_LEASE_ISSUED='$NATIVE_LEASE_ISSUED' NATIVE_LEASE_DEADLINE='$NATIVE_LEASE_DEADLINE' LANE_MAX_ACTIVE='$MAX_ACTIVE' LANE_MIN_FREE_MEM_GB='$MIN_FREE_MEM_GB' LANE_MAX_CPU_TCTL_C='$MAX_CPU_TCTL_C' LANE_MAX_LOAD_RATIO='$LANE_HOST_LOAD_RATIO' LANE_NICE=10 REMOTE_SUB_CHILD_TIMEOUT='$CHILD_TIMEOUT' bash -c '$REMOTE_INNER' </dev/null > \"$REMOTE_STDOUT\" 2>&1 &"
-@@ -1046,0 +1106,9 @@
+@@ -1046,0 +1113,9 @@
 +  fi
 +fi
 +

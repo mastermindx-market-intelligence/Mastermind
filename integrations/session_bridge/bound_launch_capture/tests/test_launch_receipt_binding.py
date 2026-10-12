@@ -128,6 +128,39 @@ def test_snapshot_digest_and_exact_early_receipt_are_retained_in_terminal(tmp_pa
     assert receipt["context_sha256"] == "e" * 64
     assert row["launch_capture"]["receipt_sha256"] == hashlib.sha256(launch.read_bytes()).hexdigest()
     assert row["launch_capture"]["context_sha256"] == receipt["context_sha256"]
+
+
+@pytest.mark.parametrize("stage", ["construct_stdout", "construct_stderr", "start_stdout", "start_stderr"])
+def test_collector_startup_failure_closes_gate_and_preserves_failed_capture(tmp_path, monkeypatch, stage):
+    original = lr._BoundedStreamCollector
+    processes = []
+    popen = lr.subprocess.Popen
+    def capture(*args, **kwargs):
+        process = popen(*args, **kwargs)
+        processes.append(process)
+        return process
+    def collector(stream, limit, name):
+        if stage == "construct_" + name:
+            raise RuntimeError("inert collector constructor failure")
+        result = original(stream, limit, name)
+        if stage == "start_" + name:
+            def fail():
+                raise RuntimeError("inert collector start failure")
+            result.start = fail
+        return result
+    monkeypatch.setattr(lr.subprocess, "Popen", capture)
+    monkeypatch.setattr(lr, "_BoundedStreamCollector", collector)
+    marker, launch, terminal = tmp_path / "marker", tmp_path / "launch.json", tmp_path / "terminal.jsonl"
+    with pytest.raises(RuntimeError, match="inert collector"):
+        lr.run_owned_process(command(marker), timeout=3, receipt_path=terminal,
+            launch_receipt_path=launch, launch_receipt_metadata=dict(FULL_BINDING))
+    assert len(processes) == 1 and processes[0].poll() is not None
+    assert not marker.exists() and not launch.exists()
+    row = json.loads(terminal.read_text().splitlines()[-1])
+    assert row["returncode"] != 0
+    assert not lr.cleanup_receipt_is_proven(row["cleanup"])
+    assert row["cleanup"]["stderr_capture_complete"] is False
+    assert lr._CURRENT_PROCESS is None
     assert row["launch_capture"]["provider_execution_attested"] is False
     assert row["launch_capture"]["phase"] == "PRE_EXEC_HANDSHAKE"
 

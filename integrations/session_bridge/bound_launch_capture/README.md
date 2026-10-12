@@ -95,3 +95,18 @@ The capture wrapper verifies the pinned base/patch/candidate and replays the
 inert suite in a separate process. No live transport, provider, service or host
 probe is executed by those checks. The independent V2 review is the original
 `fabric-bound-wire-review-01a11e90-v1`; its result must be adjudicated separately.
+
+Independent V2 review returned 34,354 retained bytes, SHA256
+`986cc9a55e7971d200f8b3adfb558d8e2d5278e0645bc2800bd10439b195e571`.
+Its final findings were useful, but the raw response exceeded the hard 3,500-byte
+contract, so the child remains NOT_ACCEPTED. Parent reproduced and repaired the
+unanchored sidecar digest: launch now compares it with the original O_EXCL
+reservation before sending its literal digest. The actual controller fragment
+rejects a self-consistent changed sidecar. Upload explicitly preserves private
+mode; the remote file guard is unchanged. Full context conversion keeps physical
+and request digests outside the bridge's closed five-field Runtime binding.
+Collector construction/start now shares the original gate-close and cleanup
+finally path; four injected failures cannot execute the target or claim complete
+capture. Final validation is 25 reservation, 10 transport, 7 controller-fragment
+and 76 inert capture checks, with exact patch replay. These remain uninstalled
+source changes, not authenticated admission or native completion.

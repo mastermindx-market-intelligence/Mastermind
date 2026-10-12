@@ -50,6 +50,23 @@ def load_snapshot(path, *, expected_sha256, **identity):
     return reservation._load_file(path, validate)
 
 
+def reserved_snapshot_digest(path, log, **identity):
+    """Re-anchor the upload to the original O_EXCL log, not its own new hash.
+
+    The log is the existing consumed-name fence. No extra launch/retry record
+    is introduced. Remote validation still uses the literal digest returned
+    here, so changes after this check also refuse at the remote boundary.
+    """
+    value = reservation._load_file(path, lambda value: value)
+    digest = hashlib.sha256(canonical(value)).hexdigest()
+    value = load_snapshot(path, expected_sha256=digest, **identity)
+    retained = reservation.read_correlation_log(
+        log, expected=value["correlation"], **identity)
+    if retained["reservation_sha256"] != value["reservation_sha256"]:
+        raise reservation.ReservationRefused("bound_launch_snapshot_reservation_mismatch")
+    return digest
+
+
 def remote_launch_arguments(home, run_id, environment):
     """Derive paths from the original run, never from prompt text or a caller path."""
     digest = environment.get("FABRIC_LAUNCH_SNAPSHOT_SHA256")
