@@ -1,0 +1,439 @@
+"""Bounded source observations with independent transport and representation truth.
+
+Only owner-configured public endpoints are read. An HTTP 200 is never itself
+proof of valid JSON or qualified market intelligence. This module creates no
+transport listener, bearer forwarding, scheduler, browser or persistence.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import math
+import re
+from datetime import date, datetime, timezone
+from dataclasses import dataclass
+from typing import Any, Callable, Mapping
+from urllib.error import HTTPError, URLError
+from urllib.request import HTTPRedirectHandler, Request, build_opener
+from zoneinfo import ZoneInfo
+
+from .contracts import (
+    BODY_CAP, MAX_BODY_CAP, OVERLAY_BODY_CAP, PROFILE, RESULT_SCHEMA, SOURCES,
+    ProductCaller, ProductRefused, canonical_result,
+)
+
+UTC = timezone.utc
+MARKET_TZ = ZoneInfo("America/New_York")
+HEADERS = ("content-type", "content-length", "etag", "last-modified",
+           "date", "age", "cache-control")
+BANNED_REQUEST_HEADERS = ("authorization", "cookie", "proxy-authorization")
+MAX_COMPONENTS = 12
+MAX_COMPONENT_KEYS = 14
+
+
+@dataclass(frozen=True)
+class HttpPayload:
+    """Exact observed transport status and retained bytes, not parsed success."""
+    status: int
+    body: bytes
+    headers: Mapping[str, str]
+    truncated: bool = False
+
+    def __post_init__(self) -> None:
+        if type(self.status) is not int or not 100 <= self.status <= 599:
+            raise ValueError("bad HTTP status")
+        if not isinstance(self.body, bytes) or len(self.body) > MAX_BODY_CAP + 1:
+            raise ValueError("bad body bounds")
+
+
+HttpGetter = Callable[[str, int], HttpPayload]
+
+
+class _NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def fetch_public_source(url: str, cap: int = BODY_CAP) -> HttpPayload:
+    """Reference fetch only; the admitting host owns executor/time budget.
+
+    This function accepts ONLY the exact public product owner URLs. It
+    follows no redirect and sends no product-user/OAuth/website credentials.
+    It does not let the MCP request supply URL, headers, or redirects.
+    """
+    if type(url) is not str or url not in {x[1] for x in SOURCES.values()}:
+        raise ProductRefused("INVALID_REQUEST")
+    limit = (OVERLAY_BODY_CAP if url == SOURCES[("macro", "overlay")][1]
+             else BODY_CAP)
+    if type(cap) is not int or not 1 <= cap <= limit:
+        raise ProductRefused("INVALID_REQUEST")
+    opener = build_opener(_NoRedirect)
+    req = Request(url, method="GET", headers={
+        "Accept": "application/json",
+        "User-Agent": "mastermind-product-read/0.1",
+        "Cache-Control": "no-cache",
+    })
+    assert not any(k.lower() in BANNED_REQUEST_HEADERS for k in req.headers)
+    try:
+        try:
+            response = opener.open(req, timeout=6)
+        except HTTPError as err:
+            response = err
+        with response:
+            headers = {k: response.headers.get(k) for k in HEADERS
+                       if response.headers.get(k) is not None}
+            data = response.read(cap + 1)
+            return HttpPayload(
+                status=response.status, body=data, headers=headers,
+                truncated=len(data) > cap,
+            )
+    except (URLError, TimeoutError, OSError) as exc:
+        # Never return exception detail, destination IP, or proxy environment.
+        raise ProductRefused("READ_UNAVAILABLE") from None
+
+
+def _clock(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        text = value.replace(" UTC", "+00:00").replace("Z", "+00:00")
+        result = datetime.fromisoformat(text)
+        return result.astimezone(UTC) if result.tzinfo is not None else None
+    except (ValueError, OverflowError):
+        return None
+
+
+def _day(value: object) -> date | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        return date.fromisoformat(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _scalar(value: object) -> bool | int | float | str | None:
+    if isinstance(value, bool):
+        return value
+    if type(value) in (int, float) and math.isfinite(value):
+        return value
+    if type(value) is str:
+        return value[:180]
+    return None
+
+
+def _select_fields(raw: Mapping[str, Any], keys: tuple[str, ...]) -> dict[str, Any]:
+    return {k: _scalar(raw[k]) for k in keys if k in raw and _scalar(raw[k]) is not None}
+
+
+def _macro(raw: Any, now: datetime) -> tuple[str, dict[str, Any], dict[str, Any]]:
+    if not isinstance(raw, dict) or type(raw.get("status")) is not str:
+        return "INVALID", {}, {"qualified": False, "reasons": ["invalid_status_contract"]}
+    checks = raw.get("checks")
+    if not isinstance(checks, dict):
+        return "PARTIAL", {"reported_status": raw["status"][:50]}, {
+            "qualified": False, "reasons": ["missing_checks"]}
+    names = ("site", "overlay", "risk_state", "china_risk_state",
+             "breadth", "prophet_live", "terminal_data", "flow_pulse",
+             "basket_pulse", "orchestrator", "release_publications", "quotes")
+    selected = {}
+    ages = {}
+    for name in names[:MAX_COMPONENTS]:
+        entry = checks.get(name)
+        if not isinstance(entry, dict):
+            continue
+        fields = _select_fields(entry, (
+            "schema", "built", "as_of", "asof", "age_min", "stale",
+            "fresh", "freshness", "commit", "source_asof", "pack_as_of",
+            "pack_ok", "expected_now", "session_et", "status",
+            "usable", "n", "coverage_pct",
+        )[:MAX_COMPONENT_KEYS])
+        selected[name] = fields
+        if type(entry.get("age_min")) in (int, float) and math.isfinite(entry["age_min"]):
+            ages[name] = entry["age_min"]
+    data = {
+        "reported_status": raw["status"][:50],
+        "reported_service_commit": _scalar(raw.get("commit")),
+        "reported_site_commit": _scalar(checks.get("site", {}).get("commit"))
+        if isinstance(checks.get("site"), dict) else None,
+        "checks": selected,
+    }
+    reasons = ["per_component_cadence_unqualified"]
+    if not selected:
+        reasons.append("empty_checks")
+    # Age is observed but requires producer and market-session-specific policy.
+    return "PARTIAL", data, {
+        "qualified": False, "reasons": reasons,
+        "reported_age_minutes": ages,
+        "clock_basis": "producer_reported; no inferred whole-product freshness",
+    }
+
+
+def _overlay(raw: Any, now: datetime) -> tuple[str, dict[str, Any], dict[str, Any]]:
+    """Project existing Macro live.overlay.v2 without republishing quotes.
+
+    Fast overlay is not the settled regime/GTAA decision spine and quote delay
+    cannot be inferred from the timestamp alone. Data and calendar freshness
+    remain owned by the original market/session producers.
+    """
+    if type(raw) is not dict or raw.get("schema") != "live.overlay.v2":
+        return "INVALID", {}, {"qualified": False, "reasons": ["invalid_overlay_schema"]}
+    built_raw = raw.get("built")
+    built = _clock(built_raw)
+    if built is None:
+        return "INVALID", {}, {"qualified": False, "reasons": ["invalid_overlay_build"]}
+    if built > now:
+        return "INVALID", {}, {"qualified": False, "reasons": ["future_overlay_build"]}
+    for field in ("n", "n_fresh", "n_quotes"):
+        value = raw.get(field)
+        if type(value) is not int or not 0 <= value <= 500:
+            return "INVALID", {}, {"qualified": False, "reasons": ["invalid_overlay_counts"]}
+    if raw["n_fresh"] > raw["n"]:
+        return "INVALID", {}, {"qualified": False, "reasons": ["invalid_overlay_counts"]}
+    delay = raw.get("delayed_min")
+    realtime = raw.get("realtime")
+    if (type(delay) is not int or not 0 <= delay <= 1440
+        or type(realtime) is not bool):
+        return "INVALID", {}, {"qualified": False, "reasons": ["invalid_overlay_delay"]}
+    market = raw.get("market")
+    sessions = raw.get("sessions")
+    if type(market) is not dict or type(sessions) is not dict:
+        return "INVALID", {}, {"qualified": False, "reasons": ["missing_overlay_context"]}
+    # Exact assets and venues only. Never forward underlying raw price, options
+    # contracts, licensed tape rows, credentials or vendor-specific feeds.
+    market_fields = ("stale", "band", "data_state", "data_frozen",
+                     "data_through", "session_state")
+    session_fields = ("state", "calendar_verified", "data_frozen",
+                      "expected_session")
+    selected_market = {
+        k: _select_fields(market[k], market_fields)
+        for k in ("SPY", "QQQ", "VIX")
+        if type(market.get(k)) is dict
+    }
+    selected_sessions = {
+        k: _select_fields(sessions[k], session_fields)
+        for k in ("us", "cn", "hk", "ca")
+        if type(sessions.get(k)) is dict
+    }
+    elapsed_minutes = round((now - built).total_seconds() / 60.0, 2)
+    reasons = ["intraday_cadence_unqualified", "producer_build_not_regime_state"]
+    if raw["n_fresh"] == 0:
+        reasons.append("no_fresh_quote_claim")
+    if delay > 0:
+        reasons.append("reported_delayed_feed")
+    elif realtime:
+        reasons.append("claimed_realtime_not_independently_verified")
+    if delay > 0 and realtime:
+        reasons.append("reported_delay_realtime_conflict")
+    data = {
+        "schema": "live.overlay.v2",
+        "built": built_raw,
+        "n": raw["n"],
+        "n_fresh": raw["n_fresh"],
+        "n_quotes": raw["n_quotes"],
+        "delayed_min": delay,
+        "reported_realtime": realtime,
+        "market": selected_market,
+        "sessions": selected_sessions,
+    }
+    observed_quote = _scalar(raw.get("quote_ts_max"))
+    if observed_quote is not None:
+        data["quote_ts_max"] = observed_quote
+    return "PARTIAL", data, {
+        "qualified": False,
+        "reasons": reasons,
+        "clock_basis": "producer_build_only; individual markets may be closed",
+        "reported_age_minutes": {"overlay": elapsed_minutes},
+    }
+
+
+def _risk(raw: Any, now: datetime) -> tuple[str, dict[str, Any], dict[str, Any]]:
+    if not isinstance(raw, dict) or raw.get("schema") != "market_risk/v1":
+        return "INVALID", {}, {"qualified": False, "reasons": ["invalid_risk_schema"]}
+    verdict = raw.get("verdict")
+    if verdict not in ("RISK_ON", "MIXED", "RISK_OFF"):
+        return "INVALID", {}, {"qualified": False, "reasons": ["invalid_verdict"]}
+    score = raw.get("score")
+    if score is not None and (
+        type(score) not in (int, float) or not math.isfinite(score) or not 0 <= score <= 100
+    ):
+        return "INVALID", {}, {"qualified": False, "reasons": ["invalid_score"]}
+    asof = _day(raw.get("asof"))
+    if asof is None or asof > now.astimezone(MARKET_TZ).date():
+        return "INVALID", {}, {"qualified": False, "reasons": ["invalid_or_future_session"]}
+    if raw.get("is_display_only") is not True:
+        return "INVALID", {}, {"qualified": False, "reasons": ["unqualified_display_authority"]}
+    if type(raw.get("stale")) is not bool:
+        return "PARTIAL", {}, {"qualified": False, "reasons": ["unknown_owner_freshness"]}
+    observed_expiry = _clock(raw.get("stale_after"))
+    built = _clock(raw.get("built"))
+    event = _clock(raw.get("source_event_time"))
+    reasons = []
+    # Terminal's canonical producer carries the separately qualified
+    # freshness verdict; never promote an unqualified owner result to OK.
+    source_fresh = raw.get("freshness")
+    if not isinstance(source_fresh, dict):
+        reasons.append("owner_freshness_missing")
+    else:
+        source_qualified = source_fresh.get("qualified")
+        if type(source_qualified) is not bool or source_qualified is False:
+            reasons.append("owner_freshness_unqualified")
+        owner_fresh_reasons = source_fresh.get("reasons")
+        if not isinstance(owner_fresh_reasons, list):
+            reasons.append("owner_reasons_unavailable")
+        else:
+            if owner_fresh_reasons and source_qualified is True:
+                reasons.append("owner_freshness_incoherent")
+            for reason in owner_fresh_reasons[:8]:
+                if (type(reason) is str and
+                    re.fullmatch(r"[A-Za-z0-9._:-]{1,100}", reason)):
+                    reasons.append(reason)
+                else:
+                    reasons.append("untrusted_owner_reason")
+    if raw.get("built") is not None and built is None:
+        reasons.append("invalid_build")
+    if raw.get("source_event_time") is not None and event is None:
+        reasons.append("invalid_source_event_time")
+    if raw.get("stale_after") is not None and observed_expiry is None:
+        reasons.append("invalid_stale_after")
+    if score is None:
+        reasons.append("score_unavailable")
+    if built is not None and built > now:
+        reasons.append("future_build")
+    if event is not None and event > now:
+        reasons.append("future_source_event")
+    if observed_expiry is not None and observed_expiry <= now:
+        reasons.append("elapsed_expiry")
+    if observed_expiry is None:
+        reasons.append("unqualified_intraday_expiry")
+    owner_reasons = raw.get("stale_reasons")
+    if isinstance(owner_reasons, list):
+        for reason in owner_reasons[:8]:
+            if type(reason) is str and re.fullmatch(r"[A-Za-z0-9._:-]{1,100}", reason):
+                reasons.append(reason)
+            else:
+                reasons.append("untrusted_owner_reason")
+    if raw["stale"]:
+        reasons.append("owner_stale")
+    out = _select_fields(raw, ("schema", "verdict", "score", "asof", "built",
+                               "source_event_time", "stale_after",
+                               "source_basis", "cause_basis", "stale"))
+    out["stale_reasons"] = sorted(set(reasons))
+    out["display_only"] = True
+    has_hard_reason = any(r in reasons for r in (
+        "future_build", "future_source_event", "elapsed_expiry", "owner_stale",
+    ))
+    status = "STALE" if has_hard_reason else "PARTIAL" if reasons else "OK"
+    return status, out, {
+        "qualified": not reasons, "reasons": sorted(set(reasons)),
+        "source_session": asof.isoformat(),
+        "market_timezone": "America/New_York",
+        "owner_stale": raw["stale"],
+    }
+
+
+def _base(*, tool: str, caller: ProductCaller, now: datetime,
+          status: str, source: dict[str, Any] | None,
+          freshness: dict[str, Any], data: dict[str, Any],
+          error: str | None = None) -> dict[str, Any]:
+    return canonical_result({
+        "schema": RESULT_SCHEMA, "profile": PROFILE, "tool": tool,
+        "status": status, "observed_at": now.isoformat().replace("+00:00", "Z"),
+        "caller": caller.public_identity(), "source": source,
+        "freshness": freshness, "data": data, "error": error,
+    })
+
+
+def product_manifest(caller: ProductCaller, now: datetime) -> dict[str, Any]:
+    if now.tzinfo is None:
+        raise ProductRefused("RESULT_UNVERIFIED")
+    now = now.astimezone(UTC)
+    return _base(
+        tool="product_manifest", caller=caller, now=now,
+        status="OK", source=None,
+        freshness={"qualified": False, "reasons": ["discovery_not_observation"]},
+        data={"views": [
+            {"product": p, "view": v, "source_id": src,
+             "evidence_class": "public_upstream"}
+            for (p, v), (src, _) in SOURCES.items()
+        ], "mode": "readonly", "private_product_user_grant_proven": False},
+    )
+
+
+def product_observe(caller: ProductCaller, request: Mapping[str, str],
+                    now: datetime, getter: HttpGetter) -> dict[str, Any]:
+    if now.tzinfo is None or not callable(getter):
+        raise ProductRefused("RESULT_UNVERIFIED")
+    now = now.astimezone(UTC)
+    if set(request) != {"product", "view"} or (request["product"], request["view"]) not in SOURCES:
+        raise ProductRefused("INVALID_REQUEST")
+    source_id, url = SOURCES[request["product"], request["view"]]
+    cap = OVERLAY_BODY_CAP if (request["product"], request["view"]) == ("macro", "overlay") else BODY_CAP
+    # The configured target is never supplied by a model or derived from an ID.
+    try:
+        payload = getter(url, cap)
+    except ProductRefused:
+        return _base(tool="product_observe", caller=caller, now=now,
+                     status="DEPENDENCY_UNAVAILABLE",
+                     source={"source_id": source_id, "evidence_class": "public_upstream",
+                             "representation": "not_observed"},
+                     freshness={"qualified": False, "reasons": ["read_unavailable"]},
+                     data={}, error="READ_UNAVAILABLE")
+    if not isinstance(payload, HttpPayload):
+        raise ProductRefused("RESULT_UNVERIFIED")
+    meta = {
+        "source_id": source_id, "evidence_class": "public_upstream",
+        "http_status": payload.status,
+        "body_bytes": len(payload.body),
+        "body_sha256": hashlib.sha256(payload.body).hexdigest(),
+        "content_type": str(payload.headers.get("content-type", ""))[:110],
+        "etag": str(payload.headers.get("etag", ""))[:140] or None,
+        "last_modified": str(payload.headers.get("last-modified", ""))[:140] or None,
+        "cache_age_seconds": _scalar(payload.headers.get("age")),
+        "representation": "retained_prefix" if payload.truncated or len(payload.body) > cap else "complete",
+    }
+    if 300 <= payload.status <= 399:
+        return _base(tool="product_observe", caller=caller, now=now, status="INVALID",
+                     source=meta, freshness={"qualified": False, "reasons": ["redirect_refused"]},
+                     data={}, error="REDIRECT_REFUSED")
+    if payload.status in (401, 403):
+        return _base(tool="product_observe", caller=caller, now=now,
+                     status="UNAUTHORIZED" if payload.status == 401 else "FORBIDDEN",
+                     source=meta, freshness={"qualified": False, "reasons": ["upstream_access_refused"]},
+                     data={}, error="UPSTREAM_ACCESS_REFUSED")
+    if payload.status == 404 or payload.status == 204:
+        return _base(tool="product_observe", caller=caller, now=now,
+                     status="MISSING", source=meta,
+                     freshness={"qualified": False, "reasons": ["missing_publication"]},
+                     data={}, error=None)
+    if payload.status != 200:
+        return _base(tool="product_observe", caller=caller, now=now,
+                     status="DEPENDENCY_UNAVAILABLE", source=meta,
+                     freshness={"qualified": False, "reasons": ["bad_upstream_status"]},
+                     data={}, error="UPSTREAM_UNAVAILABLE")
+    content_type = payload.headers.get("content-type", "").lower().split(";", 1)[0].strip()
+    content_len = payload.headers.get("content-length")
+    if (payload.truncated or len(payload.body) > cap or not payload.body
+        or content_type != "application/json"
+        or (content_len is not None and (
+            not content_len.isdecimal() or int(content_len) != len(payload.body)
+        ))):
+        return _base(tool="product_observe", caller=caller, now=now,
+                     status="INVALID", source=meta,
+                     freshness={"qualified": False, "reasons": ["invalid_json_representation"]},
+                     data={}, error="INVALID_REPRESENTATION")
+    try:
+        decoded = json.loads(payload.body)
+    except (ValueError, UnicodeError):
+        return _base(tool="product_observe", caller=caller, now=now,
+                     status="INVALID", source=meta,
+                     freshness={"qualified": False, "reasons": ["invalid_json_representation"]},
+                     data={}, error="INVALID_REPRESENTATION")
+    if (request["product"], request["view"]) == ("macro", "status"):
+        status, data, freshness = _macro(decoded, now)
+    elif (request["product"], request["view"]) == ("macro", "overlay"):
+        status, data, freshness = _overlay(decoded, now)
+    else:
+        status, data, freshness = _risk(decoded, now)
+    return _base(tool="product_observe", caller=caller, now=now,
+                 status=status, source=meta, freshness=freshness, data=data)
