@@ -188,3 +188,41 @@ The remote client preserves the optional exactly-once Runtime generation binding
 A synchronous call inside a running loop reports the existing no-effect transport
 error. A cancelled modifying transport await retains `EFFECT_UNKNOWN`, because
 cancellation does not establish whether the original command was already sent.
+
+## Original owner lifetime split
+
+The original lane runner now exposes begin, finish and exact-handle cancellation
+mechanics while its one generator retains Popen, bounded collectors, stdin,
+cleanup and terminal receipt. The original main-thread controller can keep one
+shielded asynchronous finisher after a START handler returns. Cancelling a
+waiting RPC does not transfer settlement; cancellation before the finisher first
+executes aborts the same yielded stack. A second begin refuses before Popen,
+and an unknown spawn, missing receipt or unproven cleanup retains exclusion.
+Legacy synchronous callers retain their existing reconciliation behavior.
+
+The private executor seam retains the original lease object and applies the
+existing cleanup hold after terminal settlement. It does not release that
+lease or prove assignment revocation. The eventual concrete Backend must keep
+the original lease and admission exclusion through Control seal, worker denial
+and durable Supervisor ACK. The resource handle is not full START: independently
+pinned post-exec image, live original generation, all existing admission and
+isolation evidence, retained collection and native parent acceptance remain
+required. No CLI/RPC, installed service or production profile is activated.
+
+
+### Original-owner executed-image observation (source only)
+
+The original runner can now inspect only its retained live Popen PID, using a
+pinned Linux process directory and a bounded executable-image hash. Boot, exact
+start ticks, process group/session and real/effective UID/GID must match the
+original handle. A changed, dead or foreign process refuses; the original owner
+retains collection and settlement. No argv pathname or controller PID stands in
+for the executed image. File ownership remains distinct from process credentials.
+
+The paid image patch was consumed by the exact original Codex parent and accepted
+once after two independently identified defects reproduced and were repaired.
+80 image/identity cases and32 affected original-owner cases pass. These are
+source and inert/local-child proofs, not Linux production admission. The physical
+owner still needs an independently qualified executable/interpreter chain, realm,
+attendance, isolation, assignment and complete retained launch attestation before
+exposing START. No service, provider credential, profile or installed lane changes.
