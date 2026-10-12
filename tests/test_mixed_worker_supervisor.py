@@ -367,3 +367,58 @@ def test_failed_finisher_retains_handle_without_authorizing_collection_replay(co
         with pytest.raises(SupervisorError, match="original owner"):
             await mixed.finish_job(active)
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("order", ["service-first", "custody-first", "terminal-first"])
+def test_foreground_review_cancel_race_uses_one_idempotent_runtime_transition(composition, tmp_path, monkeypatch, order):
+    """Falsify review D1 against the actual cancel, Supervisor and service finisher."""
+    from control_plane.executive_service import ExecutiveControlService
+    from tests.test_executive_service import _config
+    runtime, mixed, a, _b, first, _ = composition
+    async def run():
+        service = ExecutiveControlService(_config(tmp_path / "service"),
+            supervisor_factory=lambda _: mixed)
+        service.runtime, service.supervisor = runtime, mixed
+        signal = InertOriginSignal()
+        monkeypatch.setattr(mixed, "_foreground", lambda _: signal)
+        gate, collecting = asyncio.Event(), asyncio.Event()
+        collect, cancel = a.adapter.collect_result, a.adapter.cancel
+        async def held_collect(ref):
+            collecting.set()
+            await gate.wait()
+            return await collect(ref)
+        async def observed_cancel(ref, reason):
+            await cancel(ref, reason)
+            gate.set()
+        monkeypatch.setattr(a.adapter, "collect_result", held_collect)
+        monkeypatch.setattr(a.adapter, "cancel", observed_cancel)
+        active = await mixed.start_job(first)
+        attempt = active.lease.attempt
+        custody = mixed._active[attempt.attempt_id][2]
+        exact = dict(expected_attempt_id=attempt.attempt_id,
+                     expected_fence_generation=attempt.fence_generation)
+        finishing = asyncio.create_task(service._finish_dispatched(first, active))
+        service._dispatch_tasks[first] = finishing
+        await collecting.wait()
+        if order == "terminal-first":
+            gate.set()
+            await finishing
+            before = runtime.events.list_events(job_id=first)
+            signal.closed.set()
+            runtime.jobs.cancel_job(first, **exact)
+            custody.request_cancel()
+            assert runtime.events.list_events(job_id=first) == before
+        else:
+            if order == "service-first": runtime.jobs.cancel_job(first, **exact)
+            signal.closed.set()
+            await custody.monitor
+            if order == "custody-first": runtime.jobs.cancel_job(first, **exact)
+            await finishing
+        assert custody.error is None
+        assert runtime.attempts.get_attempt(attempt.attempt_id).fence_generation == attempt.fence_generation
+        assert service.service_state == "READY" and not service._dispatch_errors
+        assert not mixed._active and first not in service._dispatch_tasks
+        events = [e for e in runtime.events.list_events(job_id=first) if e.event_type == "JOB_CANCEL_REQUESTED"]
+        assert len(events) == (0 if order == "terminal-first" else 1)
+        assert runtime.jobs.get_job(first).status is (JobStatus.COMPLETED if order == "terminal-first" else JobStatus.CANCELLED)
+    asyncio.run(asyncio.wait_for(run(), 5))

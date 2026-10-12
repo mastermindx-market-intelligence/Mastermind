@@ -145,7 +145,8 @@ def test_cancel_keeps_physical_transition_and_slot_until_original_return(tmp_pat
     asyncio.run(run())
 
 
-def test_actual_cycle_plan_work_review_aggregation_is_delivered_on_same_call(tmp_path, monkeypatch):
+@pytest.mark.parametrize("closes_at_terminal", [False, True])
+def test_actual_cycle_plan_work_review_aggregation_is_delivered_on_same_call(tmp_path, monkeypatch, closes_at_terminal):
     async def run():
         s, f = service_at(tmp_path), frame()
         async with scope._session_bridge_foreground_dispatch(s.runtime, f, lambda: None) as op:
@@ -201,6 +202,8 @@ def test_actual_cycle_plan_work_review_aggregation_is_delivered_on_same_call(tmp
                     if job.orchestration_role == "work": data["work_seal"] = seal
                     finishes.append(job.orchestration_role)
                     s._dispatch_tasks.pop(job.job_id)
+                    if closes_at_terminal and job.job_id == root:
+                        op._mark_source_closed()
                 def dispatch(job_id, command):
                     job = s.runtime.jobs.get_job(job_id)
                     worker = "worker-review" if job.orchestration_role == "review" else "worker-a"
@@ -210,11 +213,23 @@ def test_actual_cycle_plan_work_review_aggregation_is_delivered_on_same_call(tmp
                 cycle = CooCycle(s.runtime, dispatcher=dispatch)
                 async def once(root_id): return cycle.run_once(root_id)
                 monkeypatch.setattr(s, "_run_coo_cycle", once)
-                result = await s._drive_foreground_cycle(op, root)
-                assert result["state"] == "ROOT_COMPLETED", (result, finishes, [(j.orchestration_role, j.status.value, j.constraints.get("execution_profile_id")) for j in s.runtime.jobs.list_jobs()])
-                assert result["delivery"] == "COMPLETE"
+                if closes_at_terminal:
+                    # Both the original finisher and origin-end are ready. The
+                    # dead caller cannot receive more work, but exact terminal
+                    # material is retained and no false quarantine/cancel occurs.
+                    with pytest.raises(scope.ForegroundOperationClosed):
+                        await s._drive_foreground_cycle(op, root)
+                    job = s.runtime.jobs.get_job(root)
+                    final = s.runtime.validated_role_completion(root, expected_attempt_id=job.current_attempt_id)
+                    assert final.result_envelope["role_result"]["aggregate_summary"] == "The requested bounded result"
+                    assert s.service_state == "READY" and not s._dispatch_errors
+                    assert not [e for e in s.runtime.events.list_events(job_id=root) if e.event_type == "JOB_CANCEL_REQUESTED"]
+                else:
+                    result = await s._drive_foreground_cycle(op, root)
+                    assert result["state"] == "ROOT_COMPLETED", result
+                    assert result["delivery"] == "COMPLETE"
+                    assert result["results"][-1]["result_envelope"]["role_result"]["aggregate_summary"] == "The requested bounded result"
                 assert finishes == ["plan", "work", "review", "aggregation"]
-                assert result["results"][-1]["result_envelope"]["role_result"]["aggregate_summary"] == "The requested bounded result"
                 assert receipt["dispatched"] is False and receipt["duplicate"] is False
                 assert len(s.runtime.attempts.list_attempts()) == 4
     asyncio.run(run())
