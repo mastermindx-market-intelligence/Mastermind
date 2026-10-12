@@ -36,7 +36,10 @@ def positional_indices(args):
     i = 0
     while i < len(args):
         item = args[i]
-        if item in ("--out", "--max-age"):
+        if item in ("--out", "--max-age", "--run-id", "--expect-output-token"):
+            # These are already supported and validated by the incumbent
+            # remote_sub.sh transport. Preserve values verbatim; this thin
+            # bootstrap must locate only the positional source packet.
             if i + 1 >= len(args):
                 raise LaunchInputError("REMOTE_OPTION_VALUE_MISSING")
             i += 2

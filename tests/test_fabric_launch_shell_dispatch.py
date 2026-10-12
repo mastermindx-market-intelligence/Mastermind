@@ -62,3 +62,37 @@ def test_remote_dispatch_preserves_original_arguments_and_cleans_owned_files(tmp
     assert entry.invoke(kit, "remote", argv, task_class="review", call=receiver) == 0
     assert len(calls) == 1
     assert not list((kit / "ext/state/remote_sub").glob("boot-*"))
+
+
+def test_remote_run_identity_and_verdict_token_passthrough(tmp_path, monkeypatch):
+    """Bootstrap must not reject valid native dispatcher continuity options."""
+    kit = _kit(tmp_path, monkeypatch)
+    packet = tmp_path / "review.txt"
+    packet.write_text("read only")
+    calls = []
+    args = [
+        "auto", "glm", str(packet), "~/lanes", "glm-5.3",
+        "--run-id", "fabric-review-001", "--expect-output-token", "APPROVE_SCOPED",
+        "--dry-run",
+    ]
+    assert entry.invoke(
+        kit, "remote", args, task_class="review",
+        call=lambda argv: calls.append(argv) or 0,
+    ) == 0
+    assert calls == [["/bin/bash", str(kit / "ext/remote_sub.sh"), *args]]
+    assert not (kit / "ext/state").exists()
+
+
+def test_native_remote_option_missing_value_refuses_before_launch(tmp_path, monkeypatch):
+    import pytest
+    from ops.fabric_launch.context import LaunchInputError
+
+    kit = _kit(tmp_path, monkeypatch)
+    packet = tmp_path / "review.txt"
+    packet.write_text("read only")
+    for key in ("--run-id", "--expect-output-token"):
+        with pytest.raises(LaunchInputError, match="REMOTE_OPTION_VALUE_MISSING"):
+            entry.invoke(
+                kit, "remote", ["auto", "glm", str(packet), "~/lanes", "glm-5.3", key],
+                task_class="review", call=lambda _: pytest.fail("must not dispatch"),
+            )
