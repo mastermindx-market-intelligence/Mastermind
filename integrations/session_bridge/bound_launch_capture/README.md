@@ -28,12 +28,22 @@ current Runtime/Capacity assignment and consume its original first-use
 authority at the actual launch boundary; this helper cannot manufacture that
 authority from an environment variable or file.
 
-The existing independently qualified early-launch candidate captures the real
-owned gate process's boot/start generation before releasing target exec. Its
-port onto the current `lane_runtime.py` is pending as
-`fabric-bound-launch-port-01a11e90-v1`. That run is source labor, not the native
-mission proof. It must retain `PRE_EXEC_HANDSHAKE`,
-`correlation_is_authority:false` and `provider_execution_attested:false`.
+The qualified early-launch candidate is now ported onto the current
+`lane_runtime.py` in `lane_runtime.py.patch`. `CAPTURE_SOURCE.json` pins the
+installed base and candidate; the `fixtures/` snapshot exists only for
+reproducible patch validation and is never an installed runtime. The original
+parent consumed `fabric-bound-launch-port-01a11e90-v1` and retrieved its exact
+manifest artifacts. All 59 existing functions/classes are preserved except
+the intended `run_owned_process` extension. The 65 affected checks pass with
+inert child programs and mocked kernel identity/census. The patch preserves
+the newer operator diagnostic, capture, cleanup and recovery behavior.
+
+The receipt captures the owned gate process's boot/start generation before
+releasing target exec. When either new physical-route or request digest is
+present, both and all five Runtime correlation fields are required before
+spawn. Legacy callers retain their behavior. `PRE_EXEC_HANDSHAKE`,
+`correlation_is_authority:false` and `provider_execution_attested:false`
+remain explicit. This is source labor, not native mission proof.
 
 The remaining integration is explicit: connect the authenticated original
 owner's reservation context to that actual spawn and settlement; retain its

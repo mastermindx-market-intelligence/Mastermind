@@ -1,0 +1,19 @@
+{
+  "classification": "SOURCE_ONLY_UNINSTALLED",
+  "base_sha256": "d36860ea8036ed5ec733a47c709a477c851fee95dddbae23c8e2214dc308b77e",
+  "candidate_sha256": "df229997a0625b94bbfc207084ac9fde19526e49bbfe5e04eff97d58c556a7fa",
+  "patch_sha256": "10560ef4f5c72b55e9bfc0afee53716517cd46d4400efea809a00ede94862d8c",
+  "worker_id": "fabric-bound-launch-port-01a11e90-v1",
+  "retained_result_sha256": "efe84085be5f17112d286001535fe201d6368f1d8dbc5f1de7a167918a7649bd",
+  "original_symbols": 59,
+  "changed_existing_symbols": [
+    "run_owned_process"
+  ],
+  "validation": "65 passed; only inert local children, identity and cleanup census mocked",
+  "limits": [
+    "PRE_EXEC_HANDSHAKE only",
+    "correlation is not authority",
+    "provider execution is not attested",
+    "no Backend or installed changes"
+  ]
+}
