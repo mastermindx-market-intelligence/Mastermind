@@ -138,13 +138,15 @@ def _handler(state: _State):
                 return
             if self.path == "/v1/tasks/" + _TASK_ID:
                 state.gets += 1
-                if state.mode == "read-unavailable":
+                if state.mode == "read-unavailable" or (
+                    state.mode == "read-flaky" and state.gets == 1
+                ):
                     self._json(
                         503,
                         {"error": {"code": "backend_unavailable", "message": "later"}},
                     )
                     return
-                if state.mode in {"complete", "complete-before-cancel"}:
+                if state.mode in {"complete", "complete-before-cancel", "read-flaky"}:
                     status = "completed"
                 elif state.mode == "cancelled":
                     status = "cancelled"
@@ -372,10 +374,10 @@ class _StaticOpener:
         return self.response
 
 
-def _task_wire(*, queue="dot", max_attempts=1, result=None) -> dict:
+def _task_wire(*, task_id=_TASK_ID, queue="dot", max_attempts=1, result=None) -> dict:
     return {
         "task": {
-            "id": _TASK_ID,
+            "id": task_id,
             "sequence": 1,
             "queue": queue,
             "instructions": "fixture",
@@ -457,6 +459,64 @@ def test_dot2api_submit_binds_queue_and_single_attempt(queue, max_attempts):
             ttl_seconds=60,
             max_attempts=1,
         )
+
+
+@pytest.mark.parametrize(
+    "wire",
+    [
+        _task_wire(task_id="task_foreign"),
+        _task_wire(queue="other"),
+        _task_wire(max_attempts=2),
+    ],
+)
+def test_dot2api_get_rebinds_exact_task_queue_and_attempt_ceiling(wire):
+    client = Dot2ApiClient(
+        "http://127.0.0.1:8788",
+        token_loader=lambda: _SECRET,
+        opener=_StaticOpener(_StaticResponse(json.dumps(wire).encode())),
+    )
+    with pytest.raises(Dot2ApiProtocolError):
+        client.get_task(
+            _TASK_ID, expected_queue="dot", expected_max_attempts=1
+        )
+
+
+def test_dot2api_cancel_rebinds_exact_returned_task_identity():
+    client = Dot2ApiClient(
+        "http://127.0.0.1:8788",
+        token_loader=lambda: _SECRET,
+        opener=_StaticOpener(
+            _StaticResponse(json.dumps(_task_wire(task_id="task_foreign")).encode())
+        ),
+    )
+    with pytest.raises(Dot2ApiProtocolError):
+        client.cancel_task(
+            _TASK_ID,
+            reason="stop",
+            expected_queue="dot",
+            expected_max_attempts=1,
+        )
+
+
+def test_dot2api_worker_retries_transient_status_read_without_resubmission(
+    tmp_path: Path,
+):
+    async def scenario():
+        spec = _spec(tmp_path)
+        with _Server("read-flaky") as server:
+            adapter = Dot2ApiWorkerAdapter(
+                server.base_url,
+                credential_loader=lambda: _SECRET,
+                poll_seconds=0.2,
+                submission_timeout_seconds=5,
+            )
+            ref = await adapter.start(spec)
+            receipt = await adapter.collect_result(ref)
+            assert receipt.result.status is WorkerRunStatus.SUCCEEDED
+            assert server.state.submissions == 1
+            assert server.state.gets >= 2
+
+    asyncio.run(scenario())
 
 
 def test_dot2api_worker_accepts_read_research_authority(tmp_path: Path):

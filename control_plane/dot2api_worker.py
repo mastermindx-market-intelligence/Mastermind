@@ -716,7 +716,8 @@ class Dot2ApiWorkerAdapter:
             return run.receipt.result.status
         try:
             task = await asyncio.to_thread(
-                self._client().get_task, str(ref.provider_session_id)
+                self._client().get_task, str(ref.provider_session_id),
+                expected_queue=self.queue, expected_max_attempts=1,
             )
         except Dot2ApiClientError as exc:
             raise Dot2ApiWorkerError(exc.code) from exc
@@ -748,6 +749,8 @@ class Dot2ApiWorkerAdapter:
                 self._client().cancel_task,
                 str(ref.provider_session_id),
                 reason=requested_reason,
+                expected_queue=self.queue,
+                expected_max_attempts=1,
             )
         except Dot2ApiEffectUnknown as exc:
             raise Dot2ApiWorkerEffectUnknown(exc.code) from exc
@@ -755,7 +758,8 @@ class Dot2ApiWorkerAdapter:
             if exc.status != 409:
                 raise Dot2ApiWorkerError(exc.code) from exc
             task = await asyncio.to_thread(
-                self._client().get_task, str(ref.provider_session_id)
+                self._client().get_task, str(ref.provider_session_id),
+                expected_queue=self.queue, expected_max_attempts=1,
             )
             if not task.terminal:
                 raise Dot2ApiWorkerError(exc.code) from exc
@@ -803,16 +807,29 @@ class Dot2ApiWorkerAdapter:
         while True:
             try:
                 task = await asyncio.to_thread(
-                    self._client().get_task, str(ref.provider_session_id)
+                    self._client().get_task,
+                    str(ref.provider_session_id),
+                    expected_queue=self.queue,
+                    expected_max_attempts=1,
                 )
-            except Dot2ApiClientError as exc:
+            except Dot2ApiProtocolError as exc:
                 raise Dot2ApiWorkerError(exc.code) from exc
+            except Dot2ApiClientError as exc:
+                if asyncio.get_running_loop().time() >= deadline:
+                    raise Dot2ApiWorkerError(
+                        "DOT2API_STATUS_UNAVAILABLE"
+                    ) from exc
+                await asyncio.sleep(self.poll_seconds)
+                continue
             if task.terminal:
                 return task
             if asyncio.get_running_loop().time() >= deadline:
                 await self.cancel(ref, "Executive worker timeout")
                 return await asyncio.to_thread(
-                    self._client().get_task, str(ref.provider_session_id)
+                    self._client().get_task,
+                    str(ref.provider_session_id),
+                    expected_queue=self.queue,
+                    expected_max_attempts=1,
                 )
             await asyncio.sleep(self.poll_seconds)
 

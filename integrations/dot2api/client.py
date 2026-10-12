@@ -198,7 +198,8 @@ class Dot2ApiClient:
 
     @staticmethod
     def _task(
-        value: Any, *, expected_queue: str | None = None,
+        value: Any, *, expected_task_id: str | None = None,
+        expected_queue: str | None = None,
         expected_max_attempts: int | None = None,
     ) -> Dot2ApiTask:
         if not isinstance(value, Mapping) or not isinstance(value.get("task"), Mapping):
@@ -209,6 +210,8 @@ class Dot2ApiClient:
         status = row.get("status")
         if type(task_id) is not str or _TASK_ID.fullmatch(task_id) is None:
             raise Dot2ApiProtocolError("DOT2API_TASK_ID_INVALID")
+        if expected_task_id is not None and task_id != expected_task_id:
+            raise Dot2ApiProtocolError("DOT2API_TASK_ID_MISMATCH")
         if type(queue) is not str or _TASK_ID.fullmatch(queue) is None:
             raise Dot2ApiProtocolError("DOT2API_TASK_QUEUE_INVALID")
         if expected_queue is not None and queue != expected_queue:
@@ -286,22 +289,38 @@ class Dot2ApiClient:
             mutating=True,
         ), expected_queue=queue, expected_max_attempts=max_attempts)
 
-    def get_task(self, task_id: str) -> Dot2ApiTask:
+    def get_task(
+        self, task_id: str, *, expected_queue: str | None = None,
+        expected_max_attempts: int | None = None,
+    ) -> Dot2ApiTask:
         if type(task_id) is not str or _TASK_ID.fullmatch(task_id) is None:
             raise ValueError("Dot2API task id is invalid")
         quoted = urllib.parse.quote(task_id, safe="._:-")
-        return self._task(self._request("GET", f"/v1/tasks/{quoted}"))
+        return self._task(
+            self._request("GET", f"/v1/tasks/{quoted}"),
+            expected_task_id=task_id,
+            expected_queue=expected_queue,
+            expected_max_attempts=expected_max_attempts,
+        )
 
-    def cancel_task(self, task_id: str, *, reason: str) -> Dot2ApiTask:
+    def cancel_task(
+        self, task_id: str, *, reason: str, expected_queue: str | None = None,
+        expected_max_attempts: int | None = None,
+    ) -> Dot2ApiTask:
         if type(task_id) is not str or _TASK_ID.fullmatch(task_id) is None:
             raise ValueError("Dot2API task id is invalid")
         if type(reason) is not str or not reason.strip() or len(reason) > 1000:
             raise ValueError("Dot2API cancellation reason is invalid")
-        return self._task(self._request(
-            "POST", "/v1/tools/cancel_task",
-            body={"task_id": task_id, "reason": reason.strip()},
-            mutating=True,
-        ))
+        return self._task(
+            self._request(
+                "POST", "/v1/tools/cancel_task",
+                body={"task_id": task_id, "reason": reason.strip()},
+                mutating=True,
+            ),
+            expected_task_id=task_id,
+            expected_queue=expected_queue,
+            expected_max_attempts=expected_max_attempts,
+        )
 
 
 __all__ = [

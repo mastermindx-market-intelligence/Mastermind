@@ -166,7 +166,11 @@ def main() -> int:
             return 74
         time.sleep(min(float(poll_seconds), remaining))
         try:
-            task = client.get_task(task.id)
+            task = client.get_task(
+                task.id,
+                expected_queue=config["queue"],
+                expected_max_attempts=config["max_attempts"],
+            )
         except Dot2ApiClientError as exc:
             print(
                 json.dumps(
