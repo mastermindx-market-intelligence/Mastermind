@@ -139,3 +139,23 @@ collection and assignment-revocation producer, the existing provider-policy
 and C1 boundaries, protected release/installation, and an actual same-Desktop
 paid return remain required. This finite same-call source does not establish
 durable GUI enrollment, later-request reentry or idle Wake.
+
+## Original owner lifetime split
+
+The original lane runner now exposes begin, finish and exact-handle cancellation
+mechanics while its one generator retains Popen, bounded collectors, stdin,
+cleanup and terminal receipt. The original main-thread controller can keep one
+shielded asynchronous finisher after a START handler returns. Cancelling a
+waiting RPC does not transfer settlement; cancellation before the finisher first
+executes aborts the same yielded stack. A second begin refuses before Popen,
+and an unknown spawn, missing receipt or unproven cleanup retains exclusion.
+Legacy synchronous callers retain their existing reconciliation behavior.
+
+The private executor seam retains the original lease object and applies the
+existing cleanup hold after terminal settlement. It does not release that
+lease or prove assignment revocation. The eventual concrete Backend must keep
+the original lease and admission exclusion through Control seal, worker denial
+and durable Supervisor ACK. The resource handle is not full START: independently
+pinned post-exec image, live original generation, all existing admission and
+isolation evidence, retained collection and native parent acceptance remain
+required. No CLI/RPC, installed service or production profile is activated.

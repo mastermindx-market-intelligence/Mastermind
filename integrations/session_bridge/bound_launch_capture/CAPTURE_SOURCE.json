@@ -1,15 +1,16 @@
 {
   "classification": "SOURCE_ONLY_UNINSTALLED",
   "base_sha256": "d36860ea8036ed5ec733a47c709a477c851fee95dddbae23c8e2214dc308b77e",
-  "candidate_sha256": "836cfee635fdaaf215ac8fd40e69138f1a77df0f4306c58a27889a78e05f280d",
-  "patch_sha256": "2ecdb7a54832e2e979c9e1bbbe055c49835d1f425f163526ad0bff21d1114238",
+  "candidate_sha256": "f0d6ef6c721332d6a375d2ec5c7dd2a2b22c5d22234bf76a83237fb253e5257d",
+  "patch_sha256": "92fd0f4a8d42740a89c64b91a9225dda4d5dec24900a0584205aa032b835c0df",
   "worker_id": "fabric-bound-launch-port-01a11e90-v1",
   "retained_result_sha256": "efe84085be5f17112d286001535fe201d6368f1d8dbc5f1de7a167918a7649bd",
   "original_symbols": 59,
   "changed_existing_symbols": [
+    "_wait_owned_process_with_fuse",
     "run_owned_process"
   ],
-  "validation": "76 affected inert capture checks PASS; identity/census mocked; no live kernel/provider probe",
+  "validation": "19 affected checks PASS; prior 76 capture checks and 9 executor parity checks PASS; narrow ownership review approved; source only.",
   "limits": [
     "PRE_EXEC_HANDSHAKE only",
     "correlation is not authority",
@@ -17,5 +18,5 @@
     "no Backend or installed changes"
   ],
   "reviewed_port_sha256": "df229997a0625b94bbfc207084ac9fde19526e49bbfe5e04eff97d58c556a7fa",
-  "parent_delta": "Snapshot digest and exact early receipt linked to terminal; collector startup is inside original post-spawn cleanup and gate closure boundary. No provider execution claim."
+  "parent_delta": "Original runner begin/wait/settle resource split, one retained async finisher, exact-handle cancellation; no production backend or POST_EXEC claim."
 }
