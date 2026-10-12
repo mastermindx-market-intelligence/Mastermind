@@ -2353,13 +2353,28 @@ def _ceo_admission_guard(raw: Mapping[str, Any], config_path: Path,
         except Exception as exc:
             raise CeoAdmissionPhaseRefusal("attestation_refused") from exc
         try:
+            current_config_bytes = config_path.read_bytes()
             if (attestation["config_sha256"] != own_config_sha256
-                    or _sha256_file(config_path) != own_config_sha256):
+                    or hashlib.sha256(current_config_bytes).hexdigest() != own_config_sha256):
                 raise ServiceError("CEO admission config changed")
+            receipt_config = raw
+            for field in ("ceo_ingress_socket_path", "ceo_ingress_app_macro_root"):
+                if isinstance(raw.get(field), Path):
+                    if receipt_config is raw:
+                        receipt_config = dict(raw)
+                        encoded_config = json.loads(current_config_bytes)
+                    # The loader resolves aliases for service I/O. Receipts bind
+                    # the exact JSON strings, not that resolved spelling. Parse
+                    # only the same bytes whose hash matched the attestation,
+                    # and refuse if they no longer describe the loaded route.
+                    encoded_path = encoded_config[field]
+                    if _path(encoded_path, field) != raw[field]:
+                        raise ServiceError("CEO admission loaded path changed")
+                    receipt_config[field] = encoded_path
         except Exception as exc:
             raise CeoAdmissionPhaseRefusal("config_binding_refused") from exc
         try:
-            require_ceo_submit_runtime_admission(raw, own_config_sha256=own_config_sha256)
+            require_ceo_submit_runtime_admission(receipt_config, own_config_sha256=own_config_sha256)
         except Exception as exc:
             raise CeoAdmissionPhaseRefusal("receipt_refused") from exc
 
