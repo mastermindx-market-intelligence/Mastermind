@@ -35,9 +35,10 @@ DIST = "app/mastermind_os/dist"
 RECEIPT = "build-receipt.json"
 INSTALLED_RECEIPT = "app/mastermind_os/web-build-receipt.json"
 RECIPE = ["npm ci --ignore-scripts", "npm run build"]
+CONTROL_TEMPLATE = "ops/executive_os/control.json.template"
 INPUTS = ("app/mastermind_os/package.json", "app/mastermind_os/package-lock.json",
           "app/mastermind_os/vite.config.ts", "app/mastermind_os/src/public-config.ts",
-          "control_plane/fs_security.py",
+          "control_plane/fs_security.py", CONTROL_TEMPLATE,
           "ops/executive_os/os_release_assets.py", "ops/executive_os/executive_mcp_entry.py",
           "integrations/mastermind_executive_app/os_assets.py")
 
@@ -63,6 +64,17 @@ def _client(value):
 
 def _source_inputs(repo, sha):
     return {name: _hash(_git(repo, "show", f"{sha}:{name}").stdout.encode()) for name in INPUTS}
+
+
+def _reserved_service_uids(repo, sha):
+    # Preserve the closed Control-to-ingress reservation, including the gaps,
+    # from the same source generation as the build. The protected template
+    # owns those topology identities; the asset preparer does not assign them.
+    template = json.loads(_git(repo, "show", f"{sha}:{CONTROL_TEMPLATE}").stdout)
+    first, last = template["control_uid"], template["ceo_ingress_app_peer_uid"]
+    if type(first) is not int or type(last) is not int or first <= 0 or last < first:
+        raise ValueError("source service identity reservation refused")
+    return range(first, last + 1)
 
 
 def _no_acl(path, before, *, descriptor=None):
@@ -178,9 +190,9 @@ def _archive(repo, sha, destination):
         archive.extractall(destination, filter="data")
 
 
-def _build(app, *, build_user, node, npm_cli, web_client_id):
+def _build(app, *, build_user, node, npm_cli, web_client_id, reserved_service_uids):
     operator = pwd.getpwnam(build_user)
-    if operator.pw_uid == 0 or 450 <= operator.pw_uid <= 458:
+    if operator.pw_uid <= 0 or operator.pw_uid in reserved_service_uids:
         raise ValueError("build requires an existing non-service operator")
     # These tools execute only after dropping to the trusted existing operator.
     # Homebrew's operator-owned runtime is valid; do not require new root Node
@@ -260,7 +272,8 @@ def prepare(*, source_repo, expected_sha, web_client_id, output, build_user, nod
         work = Path(temp)
         _archive(source_repo, expected_sha, work)
         builder = _build(work / "app/mastermind_os", build_user=build_user, node=node, npm_cli=npm_cli,
-                         web_client_id=web_client_id)
+                         web_client_id=web_client_id,
+                         reserved_service_uids=_reserved_service_uids(source_repo, expected_sha))
         actual, files = _capture_dist(work, sealed=False)
         if "asset-manifest.json" in files:
             raise ValueError("build must not supply its own asset manifest")
@@ -304,7 +317,8 @@ def qualify(bundle, *, expected_sha, tree_sha, source_repo, expected_digest=None
     builder = receipt["builder"]
     if (type(builder) is not dict or set(builder) != {"operator_uid", "tools"}
             or type(builder["operator_uid"]) is not int or builder["operator_uid"] <= 0
-            or 450 <= builder["operator_uid"] <= 458 or type(builder["tools"]) is not dict
+            or builder["operator_uid"] in _reserved_service_uids(source_repo, expected_sha)
+            or type(builder["tools"]) is not dict
             or len(builder["tools"]) != 2
             or any(type(path) is not str or type(digest) is not str or not Path(path).is_absolute()
                    or re.fullmatch(r"[0-9a-f]{64}", digest) is None

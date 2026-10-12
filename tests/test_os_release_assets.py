@@ -255,21 +255,28 @@ def test_actual_darwin_write_acl_refuses_receipt_and_directory_without_posix_mod
         subprocess.run(["/bin/chmod", "-N", str(path)], check=True)
 
 
-def test_nonroot_operator_build_accepts_existing_user_owned_node_without_root_provisioning(tmp_path, monkeypatch):
+def test_nonroot_operator_build_accepts_existing_user_owned_node_without_root_provisioning(tmp_path, monkeypatch, source):
     import os
     import pwd
-    import sys
     mod = helper()
     app = tmp_path / "work/app/mastermind_os"
     app.mkdir(parents=True)
     npm = tmp_path / "npm-cli.js"
     npm.write_text("// disposable npm entrypoint")
+    npm.chmod(0o644)
+    # subprocess is mocked. Use owned, single-link tools with explicit modes;
+    # the CI runner's Python install is not a qualified Node fixture.
+    node = tmp_path / "node"
+    node.write_text("#!/bin/sh\nexit 0\n")
+    node.chmod(0o755)
+    repo, sha, _ = source
+    reserved = mod._reserved_service_uids(repo, sha)
     calls = []
     monkeypatch.setattr(mod.os, "chown", lambda *a, **k: None)
     monkeypatch.setattr(mod.subprocess, "run", lambda args, **kwargs: calls.append((args, kwargs)))
     user = pwd.getpwuid(os.getuid())
-    mod._build(app, build_user=user.pw_name, node=Path(sys.executable).resolve(), npm_cli=npm,
-               web_client_id="test-public-client-id")
+    mod._build(app, build_user=user.pw_name, node=node, npm_cli=npm,
+               web_client_id="test-public-client-id", reserved_service_uids=reserved)
     assert len(calls) == 2
     for _, kwargs in calls:
         assert kwargs["user"] == user.pw_uid != 0
@@ -282,6 +289,57 @@ def test_nonroot_operator_build_accepts_existing_user_owned_node_without_root_pr
         assert user_config != global_config
         assert user_config.read_bytes() == global_config.read_bytes() == b""
         assert user_config.parent == global_config.parent == app.parents[1]
+
+
+@pytest.mark.parametrize("uid", [0, *range(450, 459)])
+def test_build_refuses_root_and_entire_source_service_reservation_before_effects(source, tmp_path, monkeypatch, uid):
+    from types import SimpleNamespace
+    mod = helper()
+    repo, sha, _ = source
+    reserved = mod._reserved_service_uids(repo, sha)
+    assert list(reserved) == list(range(450, 459))
+    monkeypatch.setattr(mod.pwd, "getpwnam", lambda _: SimpleNamespace(pw_uid=uid))
+    monkeypatch.setattr(mod.subprocess, "run", lambda *a, **k: pytest.fail("build was invoked"))
+    monkeypatch.setattr(mod.os, "chown", lambda *a, **k: pytest.fail("ownership was changed"))
+    with pytest.raises(ValueError, match="non-service operator"):
+        mod._build(tmp_path, build_user="fixture", node=tmp_path / "absent-node",
+                   npm_cli=tmp_path / "absent-npm", web_client_id="test-public-client-id",
+                   reserved_service_uids=reserved)
+
+
+@pytest.mark.parametrize("uid", [0, *range(450, 459)])
+def test_qualification_refuses_attestation_by_root_or_reserved_service(bundle, uid):
+    mod, out, sha, tree = bundle
+    path = out / mod.RECEIPT
+    receipt = json.loads(path.read_bytes())
+    receipt["builder"]["operator_uid"] = uid
+    path.chmod(0o644)
+    path.write_bytes(mod._canonical(receipt))
+    path.chmod(0o444)
+    with pytest.raises(ValueError, match="trusted non-root build attestation"):
+        mod.qualify(out, expected_sha=sha, tree_sha=tree, source_repo=out.parent / "source")
+
+
+@pytest.mark.parametrize("damage", ["group_write", "other_write", "hardlink", "not_executable"])
+def test_build_rejects_unqualified_node_before_subprocess(source, tmp_path, monkeypatch, damage):
+    import os
+    import pwd
+    mod = helper()
+    repo, sha, _ = source
+    reserved = mod._reserved_service_uids(repo, sha)
+    node, npm = tmp_path / "node", tmp_path / "npm-cli.js"
+    node.write_text("#!/bin/sh\nexit 0\n")
+    node.chmod(0o755)
+    npm.write_text("// fixture")
+    npm.chmod(0o644)
+    if damage == "group_write": node.chmod(0o775)
+    elif damage == "other_write": node.chmod(0o757)
+    elif damage == "hardlink": os.link(node, tmp_path / "node-link")
+    else: node.chmod(0o644)
+    monkeypatch.setattr(mod.subprocess, "run", lambda *a, **k: pytest.fail("build was invoked"))
+    with pytest.raises(ValueError, match="custody refused|Node executable refused"):
+        mod._build(tmp_path, build_user=pwd.getpwuid(os.getuid()).pw_name, node=node,
+                   npm_cli=npm, web_client_id="test-public-client-id", reserved_service_uids=reserved)
 
 
 def test_import_uses_captured_bytes_even_if_input_changes(bundle, tmp_path):
