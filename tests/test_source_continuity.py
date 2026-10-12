@@ -923,6 +923,7 @@ class _ProbeRunner:
             "merge-base",
             "rev-list",
             "config",
+            "check-attr",
             "diff",
             "ls-files",
             "ls-tree",
@@ -978,6 +979,14 @@ class _ProbeRunner:
             r"^filter\..*\.(clean|process)$",
         ):
             return self._done(returncode=1)
+        if call == (
+            "check-attr", "-z", "filter", "--", *FINAL_OWNED_PATHS,
+        ):
+            return self._done(
+                stdout="".join(
+                    f"{path}\0filter\0unspecified\0" for path in FINAL_OWNED_PATHS
+                )
+            )
         if call == (
             "diff", "--no-renames", "--no-ext-diff", "--no-textconv",
             "--ignore-submodules=none", "--name-only", "-z", "HEAD", "--",

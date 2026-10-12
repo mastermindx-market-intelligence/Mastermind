@@ -376,6 +376,12 @@ class CaptureRunner:
             return SimpleNamespace(returncode=0, stdout="0\n")
         if tail[0] == "config":
             return SimpleNamespace(returncode=1, stdout="")
+        if tail[0] == "check-attr":
+            paths = tail[4:]
+            return SimpleNamespace(
+                returncode=0,
+                stdout="".join(f"{path}\0filter\0unspecified\0" for path in paths),
+            )
         if tail[0] == "diff":
             return SimpleNamespace(
                 returncode=0,
@@ -391,7 +397,7 @@ class CaptureRunner:
 
 
 def git_tail(command: tuple[str, ...]) -> tuple[str, ...]:
-    commands = {"rev-parse", "symbolic-ref", "cat-file", "merge-base", "rev-list", "config", "diff", "ls-files", "ls-tree", "status"}
+    commands = {"rev-parse", "symbolic-ref", "cat-file", "merge-base", "rev-list", "config", "check-attr", "diff", "ls-files", "ls-tree", "status"}
     return command[next(i for i, value in enumerate(command) if i and value in commands):]
 
 
@@ -1066,3 +1072,46 @@ def test_real_no_rename_diff_reports_old_and_new_for_range_staged_and_unstaged(t
     git(repo, "add", "-N", "again.txt")
     unstaged = module._invoke_git(subprocess.run, str(repo), "diff", *common, "HEAD", "--")
     assert unstaged is not None and set(filter(None, unstaged.stdout.split("\0"))) == {"renamed.txt", "again.txt"}
+
+
+def test_real_probe_allows_configured_filter_when_owned_path_is_unfiltered(tmp_path) -> None:
+    repo = tmp_path / "unrelated-filter"
+    init_repo(repo, "base")
+    (repo / ".gitattributes").write_text("*.bin filter=evil\n", encoding="utf-8")
+    git(repo, "add", ".gitattributes")
+    git(repo, "commit", "-q", "-m", "unrelated filter attribute")
+    base = git(repo, "rev-parse", "HEAD^{commit}")
+
+    (repo / "value.txt").write_text("candidate\n", encoding="utf-8")
+    git(repo, "add", "value.txt")
+    git(repo, "commit", "-q", "-m", "candidate")
+    head = git(repo, "rev-parse", "HEAD^{commit}")
+
+    marker = tmp_path / "unrelated-filter-executed"
+    script = tmp_path / "unrelated-filter.sh"
+    script.write_text(
+        "#!/bin/sh\n"
+        f"printf hit > {marker}\n"
+        "cat\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    git(repo, "config", "filter.evil.clean", str(script))
+    git(repo, "config", "filter.evil.process", str(script))
+    marker.unlink(missing_ok=True)
+
+    module = _module()
+    result = module._probe_local_and_entries(
+        subprocess.run,
+        str(repo),
+        repo_request(module, repo, head),
+        head,
+        base,
+        ("value.txt",),
+    )
+
+    assert not isinstance(result, module.SourceContinuityRefusal), result
+    local, entries = result
+    assert local.head_sha == head
+    assert tuple(entry.path for entry in entries) == ("value.txt",)
+    assert not marker.exists()

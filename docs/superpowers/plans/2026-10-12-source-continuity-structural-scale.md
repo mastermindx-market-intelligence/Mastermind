@@ -39,6 +39,8 @@ The local verifier independently derives the exact tree delta from the observed 
 
 The historical merge-base→head local delta remains an anti-omission guard for the PR roster. Historical subject rows already equal to current base may drop from current materiality. A rename edge that crosses the caller-owned boundary remains an immediate remote refusal. If the target base safely fast-forwards under the protected predecessor law, the verifier must revalidate that movement and repeat the local effective-delta proof against the accepted new base before emitting a receipt; unsafe movement still fails closed.
 
+Local Git filter safety is path-scoped. Configured clean/process drivers may exist in the repository, but every caller-owned path must resolve the `filter` attribute to `unspecified` or `unset` before any diff/tree proof. Any applicable filter refuses before a helper can execute.
+
 ## Foreign collision materiality
 
 For an ordinary foreign PR with a complete changed-file roster:
@@ -67,6 +69,7 @@ Before production edits, add discriminators proving protected source fails these
 8. subject historical PR rows already equal to current base do not force `PATH_OUTSIDE_OWNERSHIP`;
 9. a currently material subject path from the complete PR roster outside caller ownership still refuses, while base-only paths do not become subject changes;
 10. safe target-base fast-forward recomputes the effective subject set, while unsafe base movement, foreign-head movement, missing tree entries, malformed tree payloads and resource exhaustion remain fail-closed.
+11. repository-global filter configuration that is inapplicable to caller-owned paths is allowed, while an applicable clean/process filter still refuses before its helper executes.
 
 ## Current consumer proof
 

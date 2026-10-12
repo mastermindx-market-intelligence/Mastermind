@@ -2329,22 +2329,34 @@ def _probe_local_and_entries(
         "--name-only",
         "-z",
     )
-    filter_config = _invoke_git(
+    filter_attrs = _invoke_git(
         runner,
         workspace,
-        "config",
-        "--null",
-        "--name-only",
-        "--get-regexp",
-        r"^filter\..*\.(clean|process)$",
+        "check-attr",
+        "-z",
+        "filter",
+        "--",
+        *request.owned_paths,
     )
-    if filter_config is None or filter_config.returncode not in {0, 1}:
+    if filter_attrs is None or filter_attrs.returncode != 0:
         return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
-    if (
-        len(filter_config.stdout.encode("utf-8")) > _MAX_GIT_CONFIG_CENSUS_BYTES
-        or filter_config.returncode == 0
-        or filter_config.stdout
-    ):
+    filter_tokens = filter_attrs.stdout.split("\0")
+    if filter_tokens and filter_tokens[-1] == "":
+        filter_tokens.pop()
+    if len(filter_tokens) != 3 * len(request.owned_paths):
+        return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
+    observed_filter_paths: list[str] = []
+    for index in range(0, len(filter_tokens), 3):
+        path, attribute, value = filter_tokens[index:index + 3]
+        if (
+            attribute != "filter"
+            or path not in request.owned_paths
+            or path in observed_filter_paths
+            or value not in {"unspecified", "unset"}
+        ):
+            return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
+        observed_filter_paths.append(path)
+    if tuple(observed_filter_paths) != request.owned_paths:
         return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
 
     protected_paths = set(request.owned_paths)
