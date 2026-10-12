@@ -804,6 +804,7 @@ def _build_profile_mcp_app(
     os_executive_resource: str | None = None,
     os_commission_preparer: Any | None = None,
     reconcile_tool_name: str | None = None,
+    reply_event_rpc: Any | None = None,
 ) -> Any:
     """Compose one compile-time selected MCP profile over the existing App.
 
@@ -860,6 +861,14 @@ def _build_profile_mcp_app(
                 or reconcile_tool_name in direct_tool_names + release_tool_names
                 or release_profile):
             raise ValueError("request reconciliation requires the fixed App route composition")
+    if reply_event_rpc is not None:
+        from integrations.session_bridge.web_reply_event_rpc import WebReplyEventRpc
+        if (type(reply_event_rpc) is not WebReplyEventRpc or release_profile
+                or reconcile_tool_name is None
+                or "session_reply_read" not in names
+                or profile_server_name != "mastermind-executive"
+                or not getattr(settings, "read_from_ceo_ingress", False)):
+            raise ValueError("MCP Events requires exact authenticated v3 reply-read composition")
     if (type(direct_tool_names) is not tuple or type(direct_submit_names) is not tuple
             or any(type(name) is not str for name in direct_tool_names + direct_submit_names)
             or len(direct_tool_names) != len(set(direct_tool_names))
@@ -1008,9 +1017,10 @@ def _build_profile_mcp_app(
         payload["server_version"] = profile_server_version
         return payload
 
-    @server.call_tool(validate_input=False)
-    async def call_tool(name: str, arguments: dict[str, Any] | None) -> mcp_types.CallToolResult:
-        request = server.request_context.request
+    async def dispatch_tool_for_request(
+        request: Request, name: str, arguments: dict[str, Any] | None
+    ) -> mcp_types.CallToolResult:
+        """One original policy/dispatch implementation for legacy and opt-in MCP 2."""
         if not isinstance(request, Request) or len(request.headers.getlist("authorization")) != 1:
             raise ValueError("current unambiguous MCP authorization is unavailable")
         try:
@@ -1148,14 +1158,47 @@ def _build_profile_mcp_app(
                 name, "output_too_large", "Executive response exceeds the transport budget"))
         return reply
 
+    @server.call_tool(validate_input=False)
+    async def call_tool(name: str, arguments: dict[str, Any] | None) -> mcp_types.CallToolResult:
+        return await dispatch_tool_for_request(server.request_context.request, name, arguments)
+
     manager = StreamableHTTPSessionManager(server, stateless=True, json_response=True,
         security_settings=TransportSecuritySettings(
             allowed_hosts=["127.0.0.1", "127.0.0.1:*", "localhost", "localhost:*", "::1", "[::1]", "[::1]:*"],
             allowed_origins=[],
         ))
+    mcp_handler = manager.handle_request
+    if reply_event_rpc is not None:
+        from integrations.business_mcp_auth.principal_projection import principal_projection
+        from integrations.session_bridge.web_reply_event_asgi import WebReplyEventASGI
+
+        async def authorized_event_principal(scope):
+            # Reuse the current exact JWT/resource owner, never parse caller
+            # supplied claims from the RPC body or create another auth plane.
+            verified = await _authenticate(
+                Request(scope), read_authenticators, clock=configured.clock,
+                submit_fallback=(
+                    submit_authenticators if configured.allow_submit_authorized_reads
+                    else None
+                ),
+            )
+            if isinstance(verified, JSONResponse):
+                return None
+            return principal_projection(verified)
+
+        async def modern_tool_dispatch(scope, name, arguments):
+            # Reuse the same guarded validator/ingress that the SDK calls.
+            # Never create a parallel tool implementation or weaker submit path.
+            result = await dispatch_tool_for_request(Request(scope), name, arguments)
+            return result.model_dump(by_alias=True, mode="json", exclude_none=True)
+
+        mcp_handler = WebReplyEventASGI(
+            mcp_handler, rpc=reply_event_rpc, authenticate=authorized_event_principal,
+            tools=tools, tool_dispatch=modern_tool_dispatch,
+        )
     authenticated = PreAuthMcpBodyApp(
         AuthenticationMiddleware(
-            RequireAuthMiddleware(BoundedRequestApp(manager.handle_request),
+            RequireAuthMiddleware(BoundedRequestApp(mcp_handler),
                 required_scopes=list((configured.policies.submit if release_profile else configured.policies.read).required_scopes),
                 resource_metadata_url=configured.policies.read.resource_metadata_url),
             backend=BearerAuthBackend(verifier),
@@ -1472,6 +1515,7 @@ def build_web_ceo_v3_mcp_app(
     session_reply_handler: Any,
     session_summon_handler: Any,
     session_reply_read_tool=None,
+    reply_event_rpc=None,
     workspace_app=None,
     content_app=None,
     os_app=None,
@@ -1523,6 +1567,12 @@ def build_web_ceo_v3_mcp_app(
         if type(session_reply_read_tool) is not NativeReplyReadTool:
             raise TypeError("the canonical reply-read tool is required")
         configuration = session_reply_read_tool.extend_host_configuration(configuration)
+    if reply_event_rpc is not None:
+        # Callback notifications must point to the same authenticated
+        # canonical read tool, never a second full-result endpoint.
+        if session_reply_read_tool is None:
+            raise ValueError("MCP Events requires the installed original-reply reader")
+        configuration["reply_event_rpc"] = reply_event_rpc
     return _build_profile_mcp_app(settings, **configuration)
 
 
