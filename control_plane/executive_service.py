@@ -30,7 +30,7 @@ import stat
 import struct
 import subprocess
 import sys
-from contextlib import nullcontext
+from contextlib import AsyncExitStack, nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Mapping, Protocol
@@ -4916,15 +4916,28 @@ class ExecutiveControlService:
                 return
             from common.session_bridge_private_contract import (
                 PRIVATE_SCHEMA as SESSION_BRIDGE_PRIVATE_SCHEMA,
+                FOREGROUND_PRIVATE_SCHEMA as SESSION_BRIDGE_FOREGROUND_SCHEMA,
                 SessionBridgeIngressOwner, BridgeError, MODIFYING_TOOLS,
                 private_result as session_bridge_result,
             )
-            if isinstance(parsed, Mapping) and parsed.get("schema") == SESSION_BRIDGE_PRIVATE_SCHEMA:
+            if isinstance(parsed, Mapping) and parsed.get("schema") in {
+                SESSION_BRIDGE_PRIVATE_SCHEMA, SESSION_BRIDGE_FOREGROUND_SCHEMA,
+            }:
                 if not app_peer:
                     await self._send_ceo_ingress_error(
                         writer, "peer_denied", "Session Bridge requires the installed App peer"
                     )
                     return
+                foreground_transport = parsed["schema"] == SESSION_BRIDGE_FOREGROUND_SCHEMA
+                if foreground_transport:
+                    if parsed.get("tool") != "session_summon":
+                        await self._send_ceo_ingress_error(
+                            writer, "invalid_input", "foreground framing requires a private summon"
+                        )
+                        return
+                    # Normalize transport framing before the existing semantic
+                    # validator. No public tool argument or grant is added.
+                    parsed = {**parsed, "schema": SESSION_BRIDGE_PRIVATE_SCHEMA}
                 factory = app_binding.session_bridge_provider_factory
                 if (
                     not app_binding.armed
@@ -4966,8 +4979,44 @@ class ExecutiveControlService:
                     )
                     return
                 modifying = tool in MODIFYING_TOOLS
+                attendance_stack = AsyncExitStack()
+                if foreground_transport:
+                    from control_plane.foreground_operation import (
+                        ForegroundOperationRefusal, _session_bridge_foreground_dispatch,
+                        _observe_private_request_end,
+                    )
+                    runtime = self._require_runtime()
+
+                    def require_foreground_host_current():
+                        if (self._closing or not self._ceo_ingress_ready
+                                or self._service_state not in {"READY", "AWAITING_CANARY"}
+                                or self._ceo_ingress_app_binding is not app_binding
+                                or not app_binding.armed
+                                or self._require_runtime() is not runtime
+                                or writer.get_extra_info("socket") is not connection
+                                or _peer_uid(connection) != app_binding.peer_uid
+                                or reader.at_eof() or writer.is_closing()
+                                or writer.transport.is_closing()):
+                            raise ForegroundOperationRefusal(
+                                "host_not_current", "originating App connection is no longer current"
+                            )
+
+                    try:
+                        operation = await attendance_stack.enter_async_context(
+                            _session_bridge_foreground_dispatch(
+                                runtime, parsed, require_foreground_host_current
+                            )
+                        )
+                        await attendance_stack.enter_async_context(
+                            _observe_private_request_end(operation, reader)
+                        )
+                    except ForegroundOperationRefusal as exc:
+                        await attendance_stack.aclose()
+                        await self._send_ceo_ingress_error(writer, exc.code, exc.message)
+                        return
                 try:
-                    result = await provider.handle_frame(parsed)
+                    async with attendance_stack:
+                        result = await provider.handle_frame(parsed)
                     if (
                         self._closing
                         or self._service_state not in {"READY", "AWAITING_CANARY"}

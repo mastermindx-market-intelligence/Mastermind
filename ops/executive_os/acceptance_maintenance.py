@@ -44,6 +44,9 @@ _MAX_INVENTORY_BYTES = 64 * 1024 * 1024
 # Maximum release nodes on one predecessor path, including a prospective
 # successor. Keep recursion finite without rejecting ordinary release history.
 _MAX_CARRY_DEPTH = 64
+# Selected unstarted releases form a separate sealed lineage; include the
+# prospective successor in its finite budget as well.
+_MAX_SUPERSEDE_DEPTH = 64
 _SHA = re.compile(r"[0-9a-f]{40}")
 _DIGEST = re.compile(r"[0-9a-f]{64}")
 _TERMINAL = {"COMPLETED", "FAILED", "LOST", "CANCELLED", "RATE_LIMITED"}
@@ -879,16 +882,37 @@ def prejob_evidence(sha: str) -> str:
 def validate_superseded_binding(descriptor: dict, *, before: dict | None = None,
                                  artifacts: dict | None = None,
                                  prior_canary: dict | None = None) -> None:
-    """Keep the selected unstarted V2 bundle separate from the accepted ancestor.
+    """Validate the entire selected unstarted lineage against one accepted ancestor.
 
     No provider recovery, schema translation, or partial-acceptance replay is
     granted. Future carry validation retains this immutable selected binding,
     but compares live prestate only before this successor starts acceptance.
     """
+    if descriptor["schema_version"] not in {SCHEMA_SUPERSEDE, SCHEMA_PREJOB}:
+        raise MaintenanceError("invalid supersession schema")
+    seen = {descriptor["successor_sha"]}
+    while True:
+        prejob = descriptor["schema_version"] == SCHEMA_PREJOB
+        selected_sha = descriptor["interrupted_prejob_sha" if prejob else "superseded_unstarted_sha"]
+        if selected_sha in seen:
+            raise MaintenanceError("unstarted supersession chain is cyclic")
+        if len(seen) >= _MAX_SUPERSEDE_DEPTH:
+            raise MaintenanceError("unstarted supersession chain is too deep")
+        seen.add(selected_sha)
+        selected = _validate_superseded_link(
+            descriptor, before=before, artifacts=artifacts, prior_canary=prior_canary)
+        if selected["schema_version"] == SCHEMA_V2:
+            return
+        descriptor = selected
+
+
+def _validate_superseded_link(descriptor: dict, *, before: dict | None,
+                              artifacts: dict | None, prior_canary: dict | None) -> dict:
     prejob = descriptor["schema_version"] == SCHEMA_PREJOB
     selected_sha = descriptor["interrupted_prejob_sha" if prejob else "superseded_unstarted_sha"]
     selected = descriptor_for(selected_sha)
-    if (selected is None or selected["schema_version"] != SCHEMA_V2
+    allowed = {SCHEMA_V2} if prejob else {SCHEMA_V2, SCHEMA_SUPERSEDE}
+    if (selected is None or selected["schema_version"] not in allowed
             or digest(selected) != descriptor["superseded_descriptor_sha256"]
             or selected["predecessor_sha"] != descriptor["predecessor_sha"]):
         raise MaintenanceError("superseded descriptor or accepted ancestor mismatch")
@@ -906,7 +930,7 @@ def validate_superseded_binding(descriptor: dict, *, before: dict | None = None,
     legacy_pair = {"prestate.sqlite3-wal", "prestate.sqlite3-shm"}
     if entries not in (expected, expected | legacy_pair):
         raise MaintenanceError("superseded bundle contains acceptance or partial state")
-    if sealed_json(bundle/"preparing.json") != {"schema_version": SCHEMA_V2}:
+    if sealed_json(bundle/"preparing.json") != {"schema_version": selected["schema_version"]}:
         raise MaintenanceError("superseded preparation state is invalid")
     from ops.executive_os.autonomy_control import RUNTIME_ROOT
     if prejob:
@@ -930,6 +954,7 @@ def validate_superseded_binding(descriptor: dict, *, before: dict | None = None,
     versions = [row.get("version") for row in baseline["tables"].get("schema_migrations", [])]
     if not versions or any(type(version) is not int for version in versions) or max(versions) != 5:
         raise MaintenanceError("supersession requires unchanged schema v5")
+    return selected
 
 
 def prepare(args: argparse.Namespace) -> Path:
