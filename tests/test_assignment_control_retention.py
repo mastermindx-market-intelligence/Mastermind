@@ -152,3 +152,26 @@ def test_existing_visible_receipt_is_not_durable_until_file_and_parent_sync(
     with pytest.raises(OSError, match="durability failure"):
         seal.verify_control_readback(path, record)
     assert len(calls) == fail_at
+
+
+def test_retained_file_after_readback_failure_cannot_bypass_changed_runtime_fence(
+    tmp_path, monkeypatch,
+):
+    async def run():
+        runtime, supervisor, active, observation = await retained_fixture(tmp_path)
+        original = seal.verify_control_readback
+        def fail(*args):
+            raise OSError(errno.EIO, "inert readback failure after write")
+        monkeypatch.setattr(seal, "verify_control_readback", fail)
+        with pytest.raises(OSError, match="after write"):
+            supervisor._retain_remote_assignment_observation(active, observation)
+        path = supervisor.receipts_root / active.lease.attempt.attempt_id / "remote-assignment-observation.json"
+        retained = path.read_bytes()
+        assert json.loads(retained) == seal.control_retention_record(observation)
+        runtime.attempts.adopt_attempt(active.lease.attempt.attempt_id,
+            expected_fence_generation=active.lease.attempt.fence_generation, lease_owner="successor")
+        monkeypatch.setattr(seal, "verify_control_readback", original)
+        with pytest.raises(Exception, match="stale fence"):
+            supervisor._retain_remote_assignment_observation(active, observation)
+        assert path.read_bytes() == retained
+    asyncio.run(run())
