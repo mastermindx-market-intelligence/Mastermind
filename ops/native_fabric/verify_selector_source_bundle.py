@@ -90,23 +90,30 @@ def _manifest(path: Path) -> dict[str, Any]:
         raise PreflightRefusal("INVALID_MANIFEST_SCHEMA")
     sources = doc.get("sources")
     patches = doc.get("patches")
-    if not isinstance(sources, list) or len(sources) != 4 or not isinstance(patches, list) or len(patches) != 5:
+    if not isinstance(sources, list) or len(sources) != 5 or not isinstance(patches, list) or len(patches) != 6:
         raise PreflightRefusal("BUNDLE_COMPLETENESS_REFUSED")
     return doc
 
 
-def verify(ext_root: Path, bundle_root: Path, manifest: Path) -> dict[str, Any]:
+def verify(ext_root: Path, bundle_root: Path, manifest: Path,
+           pool_wrapper: Path) -> dict[str, Any]:
     doc = _manifest(manifest)
     by_path: dict[str, bytes] = {}
     for item in doc["sources"]:
         if not isinstance(item, dict):
             raise PreflightRefusal("INVALID_SOURCE_ENTRY")
-        rel = _relative(item.get("path"), "ext/")
+        requested = item.get("path")
+        if requested == "bin/pool":
+            rel = Path("bin/pool")
+            installed = pool_wrapper
+        else:
+            rel = _relative(requested, "ext/")
+            installed = ext_root / rel.relative_to("ext")
         if str(rel) in by_path:
             raise PreflightRefusal("DUPLICATE_SOURCE")
         expected = _hash(item.get("sha256"))
-        # The caller provides the installed ext directory; never write there.
-        raw = _source_file(ext_root / rel.relative_to("ext"))
+        # The caller provides explicit installed paths; never write there.
+        raw = _source_file(installed)
         actual = hashlib.sha256(raw).hexdigest()
         if actual != expected:
             raise PreflightRefusal("SOURCE_DRIFT:" + str(rel))
@@ -164,7 +171,8 @@ def verify(ext_root: Path, bundle_root: Path, manifest: Path) -> dict[str, Any]:
     # A concurrent source edit after the input snapshot is not installation
     # authority. Preserve source-collision evidence and return a refusal.
     for relative, original in by_path.items():
-        installed = ext_root / Path(relative).relative_to("ext")
+        installed = (pool_wrapper if relative == "bin/pool"
+                     else ext_root / Path(relative).relative_to("ext"))
         if hashlib.sha256(_source_file(installed)).digest() != hashlib.sha256(original).digest():
             raise PreflightRefusal("SOURCE_MOVED_DURING_PREFLIGHT:" + relative)
 
@@ -185,9 +193,11 @@ def main() -> int:
     parser.add_argument("--ext-root", required=True, type=Path)
     parser.add_argument("--bundle-root", required=True, type=Path)
     parser.add_argument("--manifest", required=True, type=Path)
+    parser.add_argument("--pool-wrapper", required=True, type=Path)
     args = parser.parse_args()
     try:
-        outcome = verify(args.ext_root, args.bundle_root, args.manifest)
+        outcome = verify(args.ext_root, args.bundle_root,
+                         args.manifest, args.pool_wrapper)
         print(json.dumps(outcome, separators=(",", ":"), sort_keys=True))
         return 0
     except (PreflightRefusal, OSError, ValueError) as exc:
