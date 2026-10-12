@@ -49,5 +49,11 @@ changed request/route, failure during durability, missing/truncated/legacy
 records, wrong root/Attempt, shared directories, symlinks, duplicate JSON keys,
 short writes, moved directories and preservation of the unbound controller.
 No provider calls, installed-file changes or host probes were part of these
-checks. Independent paid source review is pending as
-`fabric-bound-reservation-review-01a11e90-v1`.
+checks. Independent MiniMax review `fabric-bound-reservation-review-01a11e90-v1`
+returned 2954 bytes, SHA256
+`52c6ddfc7e8f6761a812544c3df72db1409a70d344515cb2748f896100e8fdc7`.
+The original parent adjudicated its scoped PASS, exercised two additional
+missing-root/malformed-input fragment checks, and recorded reviewer acceptance
+once with `ACCEPTED/VALIDATED_OUTCOME` readback. Its same-UID hardlink observations
+do not establish tamper-proof evidence: the helper remains correlation-only.
+This accepted source review does not release installation or native admission.
