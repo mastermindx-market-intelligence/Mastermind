@@ -738,6 +738,7 @@ def test_v4_rich_operator_attests_explicit_workspace_write_network_config():
     assert app_server_security_config_digest(observed) == profile.expected_config_digest
     assert _observed_network_state(observed) == "disabled"
     override_names = profile.app_server_config_overrides()
+    assert 'approval_policy="never"' in override_names
     assert 'sandbox_mode="workspace-write"' in override_names
     assert "sandbox_workspace_write.network_access=false" in override_names
     for invalid in (None, True, "false"):

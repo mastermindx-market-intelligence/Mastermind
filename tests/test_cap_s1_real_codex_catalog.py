@@ -16,9 +16,11 @@ from types import SimpleNamespace
 import pytest
 
 from control_plane.codex_operator_adapter import (
-    CodexOperatorAdapter, _CLIENT_INFO,
+    CodexOperatorAdapter, _CLIENT_INFO, parse_config_read, _observed_network_state,
 )
-from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry
+from control_plane.executive_agent_capabilities import (
+    ExecutionCapabilityRegistry, app_server_security_config_digest,
+)
 from scripts.ohf.capability_skill_projection import (
     ORIGIN_VERIFIED_EPHEMERAL_GIT_ARCHIVE,
     cleanup_skill_projection, create_ephemeral_archive_origin,
@@ -69,14 +71,11 @@ def test_credential_free_real_codex_namespaced_skill_catalog(tmp_path, capsys):
         owning_operation_id="real-codex-catalog-noauth-optin",
         owning_process_generation="gen1", origin_receipt=origin,
     )
-    args = [
-        binary, "app-server", "--strict-config",
-        "-c", 'sandbox_mode="read-only"',
-        "-c", "skills.bundled.enabled=false",
-        "-c", "features.apps=false",
-        "-c", "features.plugins=false",
-        "-c", "agents.enabled=false",
-    ]
+    # Render the exact V4 write+Skills profile into the actual App Server.
+    # The filesystem sandbox config is observed, never exercised with a turn.
+    args = [binary, "app-server", "--strict-config"]
+    for override in profile.app_server_config_overrides():
+        args.extend(("-c", override))
     # Only a disposable credential-free CODEX_HOME; no ambient token inherited.
     environment = {
         "PATH": os.environ.get("PATH", "/opt/homebrew/bin:/usr/bin:/bin"),
@@ -96,6 +95,13 @@ def test_credential_free_real_codex_namespaced_skill_catalog(tmp_path, capsys):
             timeout=10,
         )
         client.notify("initialized", {})
+        config = parse_config_read(client.request(
+            "config/read", {"includeLayers": False}, timeout=10,
+        ))
+        assert config.get("sandbox_mode") == "workspace-write"
+        assert config.get("approval_policy") == "never"
+        assert _observed_network_state(config) == "disabled"
+        assert app_server_security_config_digest(config) == profile.expected_config_digest
         client.request("skills/extraRoots/set", extra_roots_set_params([]), timeout=10)
         before = parse_skills_list_strict(
             client.request("skills/list", skills_list_params(str(workspace)), timeout=10),
@@ -146,6 +152,8 @@ def test_credential_free_real_codex_namespaced_skill_catalog(tmp_path, capsys):
         print(json.dumps({
             "schema": "mastermind.real_codex_skill_catalog_preflight/v1",
             "candidate_armed": False, "model_turns": 0,
+            "profile_sandbox": "workspace-write",
+            "effective_config_digest": profile.expected_config_digest,
             "provider_names": names,
             "canonical_names": sorted(profile.skills),
             "after_clear": cleared,

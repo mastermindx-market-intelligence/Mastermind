@@ -1037,10 +1037,13 @@ class ExecutionCapabilityProfile:
         if self.skill_grants:
             values.append("skills.bundled.enabled=false")
         if self.write_capable:
-            # Real Codex App Server configuration (not a task prompt) must
-            # explicitly exclude ambient writable tmp roots and command
-            # networking before the requested workspace-write sandbox runs.
+            # Real Codex App Server config/read otherwise reports an unknown
+            # approval policy.  The V4 write profile requires exact observed
+            # `never` before a provider thread is admissible. Preserve the
+            # legacy V3 override bytes and their existing config digests.
+            # Explicitly exclude ambient writable tmp roots and networking.
             values.extend((
+                'approval_policy="never"',
                 'sandbox_mode="workspace-write"',
                 "sandbox_workspace_write.network_access=false",
                 "sandbox_workspace_write.writable_roots=[]",
