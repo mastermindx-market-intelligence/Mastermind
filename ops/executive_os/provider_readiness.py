@@ -973,6 +973,184 @@ def _explicit_requalification_preimage(
     return document, first
 
 
+def _current_pin_recovery_context(
+    args: argparse.Namespace,
+    *,
+    auth_identity: Mapping[str, Any],
+    binary_identity: Mapping[str, Any],
+    observation_path: Path | None = None,
+    qualification: Any = None,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], str, str, Any]:
+    """Return (document, receipt identity, grant, grant digest, preimage, identity).
+
+    Every check here runs BEFORE any claim, archive, reservation or inference.
+    The production qualification table is empty, so a production submission
+    always stops at ``recovery_failure_cause_unproven``.  Recovery refusals are
+    surfaced as ordinary readiness refusals so every entry point fails closed
+    through one channel.
+    """
+
+    from ops.executive_os import provider_recovery as recovery
+
+    try:
+        return _current_pin_recovery_context_checked(
+            args, auth_identity=auth_identity, binary_identity=binary_identity,
+            observation_path=observation_path, qualification=qualification,
+            recovery=recovery,
+        )
+    except recovery.RecoveryError as exc:
+        raise ReadinessError(exc.code) from exc
+
+
+def _current_pin_recovery_context_checked(
+    args: argparse.Namespace,
+    *,
+    auth_identity: Mapping[str, Any],
+    binary_identity: Mapping[str, Any],
+    observation_path: Path | None,
+    qualification: Any,
+    recovery: Any,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], str, str, Any]:
+    digest = args.recover_current_pin_grant_sha256
+    if not isinstance(digest, str) or SHA256_RE.fullmatch(digest) is None:
+        raise ReadinessError("recovery_grant_digest_malformed")
+    request_id = getattr(args, "successor_request_id", None)
+    if not isinstance(request_id, str) or re.fullmatch(
+        r"^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$", request_id
+    ) is None:
+        raise ReadinessError("recovery_successor_request_malformed")
+    if (args.expected_kind != "device-auth"
+            or args.workspace_binding_class != COMPANY_WORKSPACE_BINDING_CLASS
+            or (args.worker_uid, args.worker_gid) != (WORKER_UID, WORKER_GID)
+            or args.receipt != RECEIPT_PATH or args.auth != AUTH_PATH
+            or args.binary != CODEX_BINARY):
+        raise ReadinessError("recovery_unreviewed_company_preimage")
+    expected_uid, expected_gid, expected_mode = receipt_storage_contract(
+        workspace_binding_class=args.workspace_binding_class, worker_gid=args.worker_gid,
+    )
+    receipt_identity = lstat_identity(
+        args.receipt, expected_uid=expected_uid, expected_gid=expected_gid,
+        expected_mode=expected_mode,
+    )
+    document = _read_protected_receipt(
+        args.receipt, workspace_binding_class=args.workspace_binding_class,
+        worker_gid=args.worker_gid,
+    )
+    raw = args.receipt.read_bytes()
+    predecessor_digest = hashlib.sha256(raw).hexdigest()
+    try:
+        raw_document = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ReadinessError("recovery_predecessor_changed") from exc
+    if raw_document != document or lstat_identity(
+        args.receipt, expected_uid=expected_uid, expected_gid=expected_gid,
+        expected_mode=expected_mode,
+    ) != receipt_identity:
+        raise ReadinessError("recovery_predecessor_changed")
+    grant = recovery.read_grant(expected_digest=digest)
+    if grant["successor_request_id"] != request_id:
+        raise ReadinessError("recovery_successor_request_mismatch")
+    cause = recovery.evaluate_cause(
+        grant["cause_evidence"],
+        **({} if qualification is None else {"qualification": qualification}),
+    )
+    if grant["executive_source"] != recovery.current_executive_source():
+        raise ReadinessError("recovery_executive_source_mismatch")
+    recovery.validate_original_terminal(cause)
+    if cause["original_receipt_sha256"] != predecessor_digest:
+        raise ReadinessError("recovery_predecessor_preimage_mismatch")
+    recovery.validate_current_pin_recovery_predecessor_document(
+        document, grant=grant, auth_identity=auth_identity,
+        binary_identity=binary_identity, expected_kind=args.expected_kind,
+        workspace_binding_class=args.workspace_binding_class,
+        worker_uid=args.worker_uid, worker_gid=args.worker_gid,
+    )
+    current = datetime.now(UTC)
+    deadline = _timestamp(args.credential_expires_at, code="credential_expiry_malformed")
+    if not current + MIN_ACCEPTANCE_MARGIN < deadline <= current + MAX_REQUALIFICATION_HORIZON:
+        raise ReadinessError("recovery_deadline_out_of_bounds")
+    if observation_path is not None:
+        observation = recovery.validate_observation_document(
+            _read_json(observation_path),
+            successor_request_id=request_id,
+            expected_kind=args.expected_kind,
+            workspace_binding_class=args.workspace_binding_class,
+            auth_identity=auth_identity,
+            binary_identity=binary_identity,
+        )
+        fresh = _safe_identity(observation["provider_identity"])
+        observed = _timestamp(fresh["observed_at"], code="identity_timestamp_malformed")
+        if abs(current - observed) > MAX_CLOCK_SKEW:
+            raise ReadinessError("requalification_fresh_identity_required")
+        prior_identity = {
+            **document["provider_identity"], "credential_lstat": auth_identity,
+        }
+        if _identity_stability_tuple(fresh) != _identity_stability_tuple(prior_identity):
+            raise ReadinessError("requalification_provider_identity_changed")
+    else:
+        fresh = None
+    return document, receipt_identity, grant, digest, predecessor_digest, fresh
+
+
+def _current_pin_recovery_preimage(
+    args: argparse.Namespace, *, auth_identity: Mapping[str, Any],
+    binary_identity: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Read-only recovery eligibility check; never claims or archives."""
+
+    document, receipt_identity, _grant, _digest, _preimage, _fresh = (
+        _current_pin_recovery_context(
+            args, auth_identity=auth_identity, binary_identity=binary_identity,
+        )
+    )
+    return document, receipt_identity
+
+
+def _reserve_current_pin_recovery(
+    args: argparse.Namespace, *, auth_identity: Mapping[str, Any],
+    binary_identity: Mapping[str, Any], qualification: Any = None,
+) -> None:
+    """Claim the one-use allocation, then CAS the reservation into place.
+
+    The claim is durable and keyed by the original predecessor receipt digest
+    and scope.  If the archive or CAS below fails, the budget stays consumed;
+    only same-request status and reconciliation remain possible.
+    """
+
+    from ops.executive_os import provider_recovery as recovery
+
+    if args.identity_json is not None or args.recovery_observation_json is None:
+        raise ReadinessError("recovery_requires_bound_observation")
+    try:
+        (_document, receipt_identity, grant, digest, predecessor_digest, fresh) = (
+            _current_pin_recovery_context(
+                args, auth_identity=auth_identity, binary_identity=binary_identity,
+                observation_path=args.recovery_observation_json,
+                qualification=qualification,
+            )
+        )
+        assert fresh is not None
+        recovery.claim_or_refuse_allocation(
+            recovery.RECOVERY_ALLOCATION_PATH,
+            grant=grant,
+            grant_sha256=digest,
+            predecessor_receipt_sha256=predecessor_digest,
+        )
+    except recovery.RecoveryError as exc:
+        raise ReadinessError(exc.code) from exc
+    receipt = compose_reservation(
+        identity=fresh, auth_identity=auth_identity, binary_identity=binary_identity,
+        expected_kind=args.expected_kind, workspace_binding_class=args.workspace_binding_class,
+        credential_expires_at=args.credential_expires_at,
+        worker_uid=args.worker_uid, worker_gid=args.worker_gid,
+    )
+    refresh_expired_receipt(
+        args.receipt, receipt, expected_identity=receipt_identity,
+        workspace_binding_class=args.workspace_binding_class, worker_gid=args.worker_gid,
+        expected_receipt_sha256=predecessor_digest,
+    )
+
+
 def receipt_storage_contract(
     *, workspace_binding_class: str | None, worker_gid: int
 ) -> tuple[int, int, int]:
@@ -1525,11 +1703,13 @@ def _parser() -> argparse.ArgumentParser:
     reuse_replacement.add_argument("--requalify-terminal-adverse-sha256")
     reuse_replacement.add_argument("--renew-device-revalidation-sha256")
     reuse_replacement.add_argument("--requalify-company-device-drift-sha256")
+    reuse_replacement.add_argument("--recover-current-pin-grant-sha256")
+    reuse.add_argument("--successor-request-id")
     reserve = sub.add_parser("reserve")
     reserve.add_argument("--receipt", type=Path, default=RECEIPT_PATH)
     reserve.add_argument("--auth", type=Path, default=AUTH_PATH)
     reserve.add_argument("--binary", type=Path, default=CODEX_BINARY)
-    reserve.add_argument("--identity-json", type=Path, required=True)
+    reserve.add_argument("--identity-json", type=Path)
     reserve.add_argument("--expected-kind", choices=sorted(EXPECTED_KINDS), required=True)
     reserve.add_argument("--workspace-binding-class", required=True)
     reserve.add_argument("--credential-expires-at", required=True)
@@ -1539,11 +1719,14 @@ def _parser() -> argparse.ArgumentParser:
     replacement.add_argument("--requalify-terminal-adverse-sha256")
     replacement.add_argument("--renew-device-revalidation-sha256")
     replacement.add_argument("--requalify-company-device-drift-sha256")
+    replacement.add_argument("--recover-current-pin-grant-sha256")
     replacement.add_argument(
         "--refresh-expired",
         action="store_true",
         help="Replace an expired passing device-auth receipt (must already exist).",
     )
+    reserve.add_argument("--successor-request-id")
+    reserve.add_argument("--recovery-observation-json", type=Path)
     invalidate = sub.add_parser("invalidate")
     invalidate.add_argument("--receipt", type=Path, default=RECEIPT_PATH)
     invalidate.add_argument("--workspace-binding-class")
@@ -1689,6 +1872,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                     ), binary_identity=current_binary_identity(args.binary),
                 )
                 return 5
+            if args.recover_current_pin_grant_sha256 is not None:
+                _current_pin_recovery_preimage(
+                    args, auth_identity=current_auth_identity(
+                        args.auth, worker_uid=args.worker_uid, worker_gid=args.worker_gid,
+                    ), binary_identity=current_binary_identity(args.binary),
+                )
+                return 8
             if not args.receipt.exists() and not args.receipt.is_symlink():
                 return 3
             try:
@@ -1736,13 +1926,28 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             return 0
         if args.command == "reserve":
-            identity_payload = _read_json(args.identity_json)
             auth_identity = current_auth_identity(
                 args.auth,
                 worker_uid=args.worker_uid,
                 worker_gid=args.worker_gid,
             )
             binary_identity = current_binary_identity(args.binary)
+            if args.recover_current_pin_grant_sha256 is not None:
+                if (args.successor_request_id is None
+                        or args.recovery_observation_json is None
+                        or args.identity_json is not None
+                        or args.refresh_expired):
+                    raise ReadinessError("recovery_requires_bound_observation")
+                _reserve_current_pin_recovery(
+                    args, auth_identity=auth_identity, binary_identity=binary_identity,
+                )
+                return 0
+            if (args.successor_request_id is not None
+                    or args.recovery_observation_json is not None):
+                raise ReadinessError("recovery_arguments_are_recovery_only")
+            if args.identity_json is None:
+                raise ReadinessError("identity_json_required")
+            identity_payload = _read_json(args.identity_json)
             if (args.requalify_company_device_drift_sha256 is not None
                     or args.requalify_terminal_adverse_sha256 is not None
                     or args.renew_device_revalidation_sha256 is not None):

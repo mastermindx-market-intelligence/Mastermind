@@ -52,6 +52,8 @@ _EFFECT_ONLY_FLAGS = (
     ("--requalify-terminal-adverse-sha256", "requalify_terminal_adverse_sha256"),
     ("--renew-device-revalidation-sha256", "renew_device_revalidation_sha256"),
     ("--requalify-company-device-drift-sha256", "requalify_company_device_drift_sha256"),
+    ("--recover-current-pin-grant-sha256", "recover_current_pin_grant_sha256"),
+    ("--successor-request-id", "successor_request_id"),
 )
 
 
@@ -66,6 +68,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--requalify-terminal-adverse-sha256")
     parser.add_argument("--renew-device-revalidation-sha256")
     parser.add_argument("--requalify-company-device-drift-sha256")
+    parser.add_argument("--recover-current-pin-grant-sha256")
+    parser.add_argument("--successor-request-id")
     return parser
 
 
@@ -86,6 +90,10 @@ def build_request(argv: Sequence[str]) -> dict[str, object]:
         values["renew_device_revalidation_sha256"] = args.renew_device_revalidation_sha256
     if args.requalify_company_device_drift_sha256 is not None:
         values["requalify_company_device_drift_sha256"] = args.requalify_company_device_drift_sha256
+    if args.recover_current_pin_grant_sha256 is not None:
+        values["recover_current_pin_grant_sha256"] = args.recover_current_pin_grant_sha256
+    if args.successor_request_id is not None:
+        values["successor_request_id"] = args.successor_request_id
     raw = {
         "schema": REQUEST_SCHEMA,
         "request_id": args.request_id or f"req-{uuid.uuid4().hex}",

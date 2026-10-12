@@ -188,6 +188,8 @@ class ReconcileNotAppliedRequest:
     requalify_terminal_adverse_sha256: str | None = None
     renew_device_revalidation_sha256: str | None = None
     requalify_company_device_drift_sha256: str | None = None
+    recover_current_pin_grant_sha256: str | None = None
+    successor_request_id: str | None = None
 
     def to_dict(self) -> dict[str, str]:
         return {
@@ -225,6 +227,30 @@ def _reconciliation_target(raw: Mapping[str, Any]):
         variants.append({
             **args, "requalify_company_device_drift_sha256": raw.get("readiness_receipt_sha256"),
         })
+        # The bounded current-pin recovery route carries the grant digest, not
+        # the predecessor digest, so its only reconstructable source is the
+        # custody-checked grant itself.  A grant that does not designate exactly
+        # this request contributes no variant at all.
+        try:
+            from ops.executive_os import provider_recovery
+
+            grant_digest = provider_recovery.read_grant_digest()
+        except Exception:  # noqa: BLE001 - absence is simply not a variant
+            grant_digest = None
+        if isinstance(grant_digest, str):
+            try:
+                from ops.executive_os import provider_recovery as _recovery
+
+                if _recovery.read_grant(
+                    expected_digest=grant_digest,
+                ).get("successor_request_id") == raw.get("target_request_id"):
+                    variants.append({
+                        **args,
+                        "recover_current_pin_grant_sha256": grant_digest,
+                        "successor_request_id": raw.get("target_request_id"),
+                    })
+            except Exception:  # noqa: BLE001 - absence is simply not a variant
+                grant_digest = None
     matches = []
     for candidate in variants:
         try:
@@ -283,6 +309,8 @@ def validate_reconcile_not_applied_request(
         requalify_terminal_adverse_sha256=args.get("requalify_terminal_adverse_sha256"),
         renew_device_revalidation_sha256=args.get("renew_device_revalidation_sha256"),
         requalify_company_device_drift_sha256=args.get("requalify_company_device_drift_sha256"),
+        recover_current_pin_grant_sha256=args.get("recover_current_pin_grant_sha256"),
+        successor_request_id=args.get("successor_request_id"),
     )
 
 
@@ -1306,30 +1334,92 @@ class PrivilegedActionBroker:
         document = evidence["readiness_document"]
         if (request.requalify_company_device_drift_sha256 is not None
                 or request.requalify_terminal_adverse_sha256 is not None
-                or request.renew_device_revalidation_sha256 is not None):
+                or request.renew_device_revalidation_sha256 is not None
+                or request.recover_current_pin_grant_sha256 is not None):
+            from ops.executive_os import provider_recovery
             from ops.executive_os.provider_readiness import (
                 ReadinessError, validate_terminal_predecessor_document,
                 validate_revalidation_predecessor_document,
                 validate_company_device_drift_predecessor_document,
             )
-            predecessor_validator = (validate_company_device_drift_predecessor_document
-                                     if request.requalify_company_device_drift_sha256 is not None
-                                     else validate_revalidation_predecessor_document
-                                     if request.renew_device_revalidation_sha256 is not None
-                                     else validate_terminal_predecessor_document)
             if (not isinstance(document, Mapping)
                     or not isinstance(evidence["current_auth_identity"], Mapping)
                     or not isinstance(evidence["current_binary_identity"], Mapping)):
                 raise BrokerTrustError("terminal predecessor evidence is incomplete")
-            try:
-                predecessor_validator(
-                    document, auth_identity=evidence["current_auth_identity"],
-                    binary_identity=evidence["current_binary_identity"],
-                    expected_kind=request.expected_credential_kind,
-                    workspace_binding_class=request.workspace_binding_class,
+            if request.recover_current_pin_grant_sha256 is not None:
+                # Reconciliation never re-derives ordinary cause and never
+                # refunds.  It proves the request installed no reservation while
+                # the grant, its designated successor binding and the consumed
+                # allocation all still hold exactly.
+                try:
+                    grant = provider_recovery.read_grant(
+                        expected_digest=request.recover_current_pin_grant_sha256,
+                    )
+                except provider_recovery.RecoveryError as exc:
+                    raise BrokerTrustError(
+                        f"current-pin recovery grant custody failed: {exc.code}"
+                    ) from exc
+                if grant["successor_request_id"] != request.target_request_id:
+                    raise BrokerTrustError(
+                        "current-pin recovery grant does not designate this request"
+                    )
+                if (grant["executive_source"]["release_sha"] != self.config.release_root.name
+                        or grant["executive_source"] != provider_recovery.current_executive_source()):
+                    raise BrokerTrustError("current-pin recovery Executive source changed")
+                provider_recovery.validate_original_terminal(grant["cause_evidence"])
+                if grant["cause_evidence"]["original_receipt_sha256"] != request.readiness_receipt_sha256:
+                    raise BrokerTrustError(
+                        "current-pin recovery grant does not bind the retained predecessor"
+                    )
+                try:
+                    provider_recovery.validate_current_pin_recovery_predecessor_document(
+                        document, grant=grant,
+                        auth_identity=evidence["current_auth_identity"],
+                        binary_identity=evidence["current_binary_identity"],
+                        expected_kind=request.expected_credential_kind,
+                        workspace_binding_class=request.workspace_binding_class,
+                    )
+                except (ReadinessError, provider_recovery.RecoveryError, OSError) as exc:
+                    raise BrokerTrustError(
+                        "current-pin recovery predecessor continuity is unproven"
+                    ) from exc
+                try:
+                    allocation = provider_recovery.read_allocation()
+                except provider_recovery.RecoveryError as exc:
+                    raise BrokerTrustError(
+                        f"current-pin recovery allocation is unreadable: {exc.code}"
+                    ) from exc
+                if allocation is not None:
+                    if allocation["executive_source"] != grant["executive_source"]:
+                        raise BrokerTrustError("current-pin recovery allocation source changed")
+                    if allocation["predecessor_receipt_sha256"] != request.readiness_receipt_sha256:
+                        raise BrokerTrustError(
+                            "current-pin recovery allocation is bound to a different predecessor"
+                        )
+                    if allocation["successor_request_id"] != request.target_request_id:
+                        raise BrokerTrustError(
+                            "current-pin recovery allocation is bound to a different successor"
+                        )
+                # A request that claimed its budget stays consumed whether or not
+                # it installed a reservation; same-id status and this read-only
+                # reconciliation are the only remaining operations.
+            else:
+                predecessor_validator = (
+                    validate_company_device_drift_predecessor_document
+                    if request.requalify_company_device_drift_sha256 is not None
+                    else validate_revalidation_predecessor_document
+                    if request.renew_device_revalidation_sha256 is not None
+                    else validate_terminal_predecessor_document
                 )
-            except (ReadinessError, OSError) as exc:
-                raise BrokerTrustError("terminal predecessor identity continuity is unproven") from exc
+                try:
+                    predecessor_validator(
+                        document, auth_identity=evidence["current_auth_identity"],
+                        binary_identity=evidence["current_binary_identity"],
+                        expected_kind=request.expected_credential_kind,
+                        workspace_binding_class=request.workspace_binding_class,
+                    )
+                except (ReadinessError, OSError) as exc:
+                    raise BrokerTrustError("terminal predecessor identity continuity is unproven") from exc
             # Exact unchanged pre-marker predecessor bytes prove this request never
             # installed its reservation, even if deadlines happen to coincide.
         else:
