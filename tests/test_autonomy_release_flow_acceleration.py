@@ -141,3 +141,14 @@ def test_native_merge_queue_owns_final_integrated_checks_without_prequeue_circul
     assert 'do not add a manual synthetic PR merge-ref check requirement' in delivery
     assert 'If final integrated checks fail, the queue must not merge' in delivery
     assert 'review pass and queue entry is authorized' in delivery
+
+
+def test_workspace_and_recovery_rules_never_demand_ancestry_only_branch_joins() -> None:
+    delivery_source = _read('docs/DELIVERY_WORKFLOW.md')
+    delivery = _normalized('docs/DELIVERY_WORKFLOW.md')
+    assert 'git merge-base HEAD origin/master' in delivery_source
+    assert 'git merge-base --is-ancestor origin/master HEAD' not in delivery_source
+    assert 'do not block ordinary edits solely because the worktree is behind' in delivery
+    assert 'material overlap or changed source law' in delivery
+    assert 'Do not join/rebase merely to reset GitHub\'s `behind` count' in delivery
+    assert 'actual path/semantic/dependency collisions require composition' in delivery
