@@ -3,11 +3,36 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
-from fabric_operator_stop import decide,read_summaries
+from fabric_operator_stop import decide,read_summaries,persist_attention
 from fabric_operator_client import prepare_claude_hook,grok_hook_toml
 from test_operator_admission_boundary import AdmissionBoundary
 
 class Attention(unittest.TestCase):
+ def test_receipt_directory_synced_before_attention_is_allowed(self):
+  with tempfile.TemporaryDirectory() as temp:
+   import os,stat
+   calls=[];real=os.fsync
+   def sync(fd):calls.append(stat.S_ISDIR(os.fstat(fd).st_mode));real(fd)
+   with patch('fabric_operator_stop.os.fsync',side_effect=sync):
+    self.assertTrue(persist_attention(Path(temp),'op','a'*64,{'root':'root'}))
+   self.assertEqual(calls,[False,True])
+   self.assertFalse(persist_attention(Path(temp),'op','a'*64,{'root':'root'}))
+ def test_directory_sync_failure_keeps_receipt_and_does_not_allow_attention(self):
+  with tempfile.TemporaryDirectory() as temp:
+   import os,stat
+   real=os.fsync
+   def sync(fd):
+    if stat.S_ISDIR(os.fstat(fd).st_mode):raise OSError('injected directory sync failure')
+    real(fd)
+   with patch('fabric_operator_stop.os.fsync',side_effect=sync):
+    with self.assertRaises(OSError):persist_attention(Path(temp),'op','a'*64,{'root':'root'})
+   self.assertEqual(len(list(Path(temp).glob('*.json'))),1)
+   self.assertFalse(persist_attention(Path(temp),'op','a'*64,{'root':'root'}))
+ def test_fixed_stable_lanes_symlink_remains_usable(self):
+  with tempfile.TemporaryDirectory() as temp:
+   path=Path(temp);(path/'stable').mkdir();(path/'lanes').symlink_to(path/'stable')
+   self.assertTrue(persist_attention(path/'lanes','op','a'*64,{'root':'root'}))
+
  def test_ready_exact_ids_and_digest_only(self):
   signature,result=decide({'root':'root','parent':'op','children':[{'run_id':'leaf','result_available':True,'sha256':'a'*64,'bytes':10}]},'root','op')
   self.assertEqual(len(signature),64);self.assertEqual(result['decision'],'block');self.assertIn('leaf',result['reason']);self.assertNotIn('token',result['reason'])

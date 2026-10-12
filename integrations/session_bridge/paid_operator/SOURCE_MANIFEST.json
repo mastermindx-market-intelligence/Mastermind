@@ -7,20 +7,20 @@
     "fabric_operator_owner.py": "99a5a466b14c8c6c89ac43ea1f7db572f7dc2e9a344d1a1872c720e8cce8210c",
     "fabric_operator_issue.py": "bca96a78976b111303050ef3ca61c77d4a3e69f53f9e29a961eb1a70396a0b9d",
     "fabric_operator_client.py": "cf0eb5b628e0c7ae39a184d3488e64c7867bce91381e6c4765222d3373ce4a46",
-    "fabric_operator_stop.py": "a97d799510d1de20c16f817aa5f953563118e330c93084dc6b9bb7c8c6f6129f"
+    "fabric_operator_stop.py": "5ad090e703468503ec5466a83c61e1de9b93320e432d71963e9ba1d33e301ec5"
   },
   "overlays": {
     "remote_sub.sh": {
       "before": "f4333d88e547dc2a2c06a4d6919793cbd62adc1cad5c8ccdee792ff1daba5bf8",
-      "after": "4b6f683b426d9865c49d3c651ee0598dd1fdf281e311f52cd2f430057ac5b347"
+      "after": "b1f38a46172d4c6850c089a64777e64ff1a3ea4bc4eacaae07af7ec37505a689"
     },
     "remote_sub_exec.py": {
       "before": "88f3db214cdb6258865961ccb6e201288778df7d38e26fba310598021f078e8f",
-      "after": "a95aa6730cc9fc2595ead7a159f5861bb993b5f14948f100a8fdb11e846e5a43"
+      "after": "edb9780fdd71e462d5187176740ceb402f5f0e98368290a3fb2eb95c275e313f"
     },
     "native_remote.py": {
       "before": "054dc77cafdd46e9e8837ecebada4afa28ae78a42bd5958b84b509cf36bf1d24",
-      "after": "355ef1eb89dd976c137e6969ef90b1b4a6bc5921ebdbba6149f07c6a22fd8c68"
+      "after": "18bf26c27e496f43deaedfbf8f89af4e7d93831f379d23e0207311b58f61448d"
     },
     "fabric_client_projection.py": {
       "before": "96017f511fbf2e3f70c2d87787fc12f4043e7e95d95fbfc17d28b5d60c63292c",
@@ -32,11 +32,15 @@
     },
     "glm_bound_claude.py": {
       "before": "21ad1f14717b7f2d4ebd4f9c150b998200cf5281e3d9479f2a0d129d0e66cd95",
-      "after": "5f02da3822072d26b92c922ad89455b79b50b8264f32dfc7425314a5abaa6509"
+      "after": "b7d67e1f96149192f8ad9bd135d8337ac4286ecc1a5dd137abf079b2d56c8a1a"
     },
     "lease_broker.py": {
       "before": "56eac1575eeea501f38be03eacfaefad5c5db9ab1e449996738d277619b4dfd6",
       "after": "6b836cb353e1bce6c3fb017b4ec16eddc4f30df625aef09fceffa31dae721bb4"
+    },
+    "support_bundle.py": {
+      "before": "808e77bef551746f5eb33baf80168345c49bf13742f7de2de6af6c62796f2c94",
+      "after": "a19d24c72788ca7b8b69e45ffd0d3f74c8bd5270ed441c6f2325227d95800952"
     },
     "gateway/gateway.mjs": {
       "before": "970b47f1c6a15bc3f1175f1043c5dd4a59ad748c2374b586e384bbd6ba40ce5e",

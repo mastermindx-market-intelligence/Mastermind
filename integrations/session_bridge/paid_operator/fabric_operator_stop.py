@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import re
 import sys
+import stat
 import urllib.request
 
 ENDPOINT = 'https://m2studio.taila6eca1.ts.net/studio-fabric'
@@ -73,6 +74,24 @@ def decide(summary, root, parent):
     return signature,{'decision':'block','reason':reason}
 
 
+def persist_attention(directory, parent, signature, receipt):
+    # Immutable support releases deliberately link lanes to the stable directory.
+    # Resolve that fixed link, then bind creation and fsync to one opened directory.
+    directory_fd=os.open(directory.resolve(strict=True),os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+    try:
+        metadata=os.fstat(directory_fd)
+        if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid!=os.getuid():
+            raise ValueError('operator_attention_directory_owner')
+        name=parent+'.operator-attention.'+signature+'.json'
+        try:fd=os.open(name,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600,dir_fd=directory_fd)
+        except FileExistsError:return False
+        with os.fdopen(fd,'w') as stream:
+            json.dump(receipt,stream,sort_keys=True);stream.flush();os.fsync(stream.fileno())
+        os.fsync(directory_fd)
+        return True
+    finally:os.close(directory_fd)
+
+
 def main():
     event=json.loads(sys.stdin.buffer.read(65537))
     name=event.get('hook_event_name',event.get('hookEventName'))
@@ -86,12 +105,7 @@ def main():
     # Metadata-only attention receipt, not worker/lease state. O_EXCL makes
     # repeated unchanged Stop events quiet, including an interrupted continuation.
     directory=Path(__file__).resolve().parent/'lanes'
-    target=directory/(parent+'.operator-attention.'+signature+'.json')
-    try:fd=os.open(target,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
-    except FileExistsError:return
-    with os.fdopen(fd,'w') as stream:
-        json.dump({'root':root,'parent':parent,'summary_sha256':signature,'decision':'block','attention_only':True},stream,sort_keys=True)
-        stream.flush();os.fsync(stream.fileno())
+    if not persist_attention(directory,parent,signature,{'root':root,'parent':parent,'summary_sha256':signature,'decision':'block','attention_only':True}):return
     print(json.dumps(result))
 
 if __name__=='__main__':

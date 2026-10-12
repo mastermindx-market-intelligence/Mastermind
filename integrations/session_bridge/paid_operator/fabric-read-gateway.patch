@@ -1,85 +1,33 @@
 --- a/gateway.mjs
 +++ b/gateway.mjs
-@@ -70,6 +70,7 @@
- 
- import { TextOutputPager, OUTPUT_PAGE_TOOL, projectOutputSafely } from './output-budget.mjs';
- import { randomUUID } from 'node:crypto';
+@@ -72,0 +73 @@
 +import { FABRIC_OPERATOR_TOOLS, FABRIC_OPERATOR_NAMES, createOperatorHandler } from './fabric-operator.mjs';
- import os from 'node:os';
- import path from 'node:path';
- import { fileURLToPath } from 'node:url';
-@@ -492,7 +493,7 @@
- export function principalKeyOf(auth) {
-   if (auth == null || typeof auth !== 'object') return 'anon';
-   const p = auth.principal;
+@@ -495 +496 @@
 -  if (typeof p === 'string' && p.length > 0) return 'p:' + p;
 +  if (typeof p === 'string' && p.length > 0) return 'p:' + p + (auth.fabricOperator ? ':operator:' + auth.fabricOperator.digest : '');
-   const c = auth.clientId;
-   if (typeof c === 'string' && c.length > 0) return 'c:' + c;
-   if (p != null) return 'p:' + stableStringify(p);
-@@ -867,7 +868,7 @@
-  * ------------------------------------------------------------------ */
- 
- class GatewaySession {
+@@ -870 +871 @@
 -  constructor({ id, principalKey, principalTag, cfg, lists, stats, onDestroyed, owner }) {
 +  constructor({ id, principalKey, principalTag, cfg, lists, stats, onDestroyed, owner, operatorDelegation = false }) {
-     this.id = id;
-     this.principalKey = principalKey;
-     this.tag = id.slice(0, 8); // log-safe session tag
-@@ -917,15 +918,18 @@
-       ? createFleetStatus({ enabled: true, ...cfg.fleetStatus })
-       : null;
-     this.toolAllowlist = cfg.toolAllowlist ? new Set(cfg.toolAllowlist) : null;
+@@ -919,0 +921 @@
 +    this.fabricOperator = cfg.fabricOperatorInvoke && operatorDelegation ? createOperatorHandler(cfg.fabricOperatorInvoke) : null;
-     this.owner?.sessions.add(this);
-   }
- 
-   toolIsExposed(name) {
+@@ -923,0 +926 @@
 +    if (FABRIC_OPERATOR_NAMES.has(name) && !this.fabricOperator) return false;
-     return this.toolAllowlist === null || this.toolAllowlist.has(name);
-   }
- 
-   localTools() {
-     const tools = [{ ...STUDIO_PING_TOOL }, { ...OUTPUT_PAGE_TOOL }];
+@@ -928,0 +932 @@
 +    if (this.fabricOperator) tools.push(...FABRIC_OPERATOR_TOOLS);
-     if (this.fleetStatus) tools.push({ ...STUDIO_FLEET_STATUS_TOOL });
-     if (this.gitPublisher) {
-       tools.push(...STUDIO_GIT_PUBLISH_TOOLS.map((tool) => ({ ...tool })));
-@@ -1146,6 +1150,12 @@
-         ErrorCode.MethodNotFound,
-         'Tool is not exposed on this Studio gateway.',
-       );
+@@ -1148,0 +1153,6 @@
 +    }
 +
 +    if (this.fabricOperator && FABRIC_OPERATOR_NAMES.has(name)) {
 +      this.bumpTool(name);
 +      try { return await this.fabricOperator(name, request?.params?.arguments, extra?.authInfo); }
 +      catch { return { isError: true, content: [{ type: 'text', text: '{"state":"OPERATOR_TRANSPORT_UNVERIFIED","retry_authorized":false}' }] }; }
-     }
- 
-     if (name === OUTPUT_PAGE_TOOL.name) {
-@@ -2010,6 +2020,7 @@
-         stats,
-         onDestroyed(destroyed) { sessions.delete(destroyed.id); },
-         owner, // null in per-session mode
+@@ -2012,0 +2023 @@
 +        operatorDelegation: Boolean(req.auth?.fabricOperator),
-       });
-       const transport = session.buildTransport();
-       session.buildServer();
 --- a/tailnet-gateway.mjs
 +++ b/tailnet-gateway.mjs
-@@ -18,6 +18,7 @@
- import { resolve as resolvePath } from 'node:path';
- 
- import { startGateway } from './gateway.mjs';
+@@ -20,0 +21 @@
 +import { FABRIC_OPERATOR_TOOLS, makeControllerInvoker, operatorAuth } from './fabric-operator.mjs';
- import { createTunnelAuth, TUNNEL_CLIENT_ID, TUNNEL_SCOPE } from './private-tunnel-auth.mjs';
- import { installSignalHandlers, loadPrivateTunnelConfig } from './private-tunnel-gateway.mjs';
- 
-@@ -93,6 +94,19 @@
-       'tailnet gateway toolAllowlist is profile-owned and cannot be supplied');
-   }
-   config.toolAllowlist = TAILNET_PROFILES[accountLabel];
+@@ -95,0 +97,13 @@
 +  let operatorInvoke = null;
 +  if (config.fabricOperator !== undefined) {
 +    const settings = config.fabricOperator;
@@ -93,57 +41,24 @@
 +    delete config.fabricOperator;
 +  }
 +
- 
-   if (!absent(config.host) && config.host !== REQUIRED_HOST) {
-     throw new TailnetGatewayConfigError(
-@@ -123,7 +137,8 @@
-   config.backendMode = 'shared-account';
-   config.reclaimIdleCatalogSessions = true;
- 
+@@ -126 +140,2 @@
 -  const auth = createTunnelAuth({ accountLabel });
 +  const baseAuth = createTunnelAuth({ accountLabel });
 +  const auth = operatorInvoke ? operatorAuth(baseAuth, operatorInvoke) : baseAuth;
-   delete config.accountLabel;
-   return { config, auth, accountLabel };
- }
 --- a/private_service.py
 +++ b/private_service.py
-@@ -80,6 +80,7 @@
- 
- # Files staged from source directory. gateway.mjs is the engine library.
- STAGE_FILES = (
+@@ -82,0 +83 @@
 +    "fabric-operator.mjs",
-     "gateway.mjs",
-     "output-budget.mjs",
-     "git-publish.mjs",
-@@ -96,7 +97,8 @@
- # immediately preceding current generation lacks only the tailnet fabric
- # adapter; earlier generations also predate fleet status, Paper, output paging,
- # and typed Git.
+@@ -99 +100,2 @@
 -LEGACY_STAGE_FILES_V5 = tuple(name for name in STAGE_FILES if name != TAILNET_GATEWAY_NAME)
 +LEGACY_STAGE_FILES_V6 = tuple(name for name in STAGE_FILES if name != "fabric-operator.mjs")
 +LEGACY_STAGE_FILES_V5 = tuple(name for name in LEGACY_STAGE_FILES_V6 if name != TAILNET_GATEWAY_NAME)
- LEGACY_STAGE_FILES_V4 = tuple(name for name in LEGACY_STAGE_FILES_V5 if name != "fleet-status.mjs")
- LEGACY_STAGE_FILES_V3 = tuple(name for name in LEGACY_STAGE_FILES_V4 if name != "paper-design.mjs")
- LEGACY_STAGE_FILES_V2 = tuple(name for name in LEGACY_STAGE_FILES_V3 if name != "output-budget.mjs")
-@@ -104,6 +106,7 @@
- KNOWN_MANIFEST_FILESETS = frozenset(
-     (
-         frozenset(STAGE_FILES),
+@@ -106,0 +109 @@
 +        frozenset(LEGACY_STAGE_FILES_V6),
-         frozenset(LEGACY_STAGE_FILES_V5),
-         frozenset(LEGACY_STAGE_FILES_V4),
-         frozenset(LEGACY_STAGE_FILES_V3),
-@@ -613,6 +616,12 @@
-     }
-     if public_url is not None:
-         config["publicUrl"] = public_url
+@@ -615,0 +619,6 @@
 +    if account == "fabric-read":
 +        owner_path = user_root / ".claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext/fabric_operator_owner.py"
 +        if owner_path.is_symlink() or not owner_path.is_file():
 +            raise SystemExit("operator owner must be installed and qualified before gateway activation")
 +        config["fabricOperator"] = {"python": str(Path(sys.executable).resolve()), "ownerPath": str(owner_path)}
 +
-     fleet_status = _fleet_status_config(user_root)
-     if fleet_status is not None:
-         config["fleetStatus"] = fleet_status
