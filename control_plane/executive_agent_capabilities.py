@@ -737,7 +737,7 @@ def app_server_security_config_projection(
             "enabled": agents.get("enabled") if isinstance(agents, Mapping) else None
         }
 
-    return {
+    projected: dict[str, object] = {
         "agents": agent_projection,
         "features": {
             key: features.get(key) if isinstance(features, Mapping) else None
@@ -747,6 +747,44 @@ def app_server_security_config_projection(
         "plugins": plugin_projection,
         "skills": skills_block,
     }
+    # Only the opt-in workspace-write profile projects this namespace; old V3
+    # read-only config/digests retain their exact established JSON shape.
+    # Presence matters: omitting this table is not proof that the sandbox has
+    # no network or supplemental writable roots.
+    raw_write = root.get("sandbox_workspace_write")
+    active_write_sandbox = str(
+        root.get("sandbox_mode") or root.get("sandboxMode") or ""
+    ).strip() == "workspace-write"
+    # Real Codex 0.159.3 includes `sandbox_workspace_write: null` in config/read
+    # even while a read-only sandbox is active.  That null is not an active
+    # writable policy and must not break the established V3 read-only digest.
+    # A writable sandbox with null/missing settings remains unattestable.
+    if "sandbox_workspace_write" in root and (
+        raw_write is not None or active_write_sandbox
+    ):
+        if isinstance(raw_write, Mapping):
+            reviewed_fields = frozenset({
+                "exclude_slash_tmp", "exclude_tmpdir_env_var",
+                "network_access", "writable_roots",
+            })
+            # Writable-sandbox fields are security-sensitive. A future Codex
+            # release may add a new permission or network field: dropping it
+            # would incorrectly attest a broader effective policy as approved.
+            # Unknown keys fail the expected config digest, rather than being
+            # silently ignored while the write-capable profile starts.
+            if set(raw_write) - reviewed_fields:
+                projected["sandbox_workspace_write"] = {"invalid": True}
+            else:
+                roots = raw_write.get("writable_roots")
+                projected["sandbox_workspace_write"] = {
+                    "exclude_slash_tmp": raw_write.get("exclude_slash_tmp"),
+                    "exclude_tmpdir_env_var": raw_write.get("exclude_tmpdir_env_var"),
+                    "network_access": raw_write.get("network_access"),
+                    "writable_roots": list(roots) if isinstance(roots, list) else None,
+                }
+        else:
+            projected["sandbox_workspace_write"] = {"invalid": True}
+    return projected
 
 
 def app_server_security_config_digest(config: Mapping[str, Any] | None) -> str:
@@ -876,7 +914,7 @@ class ExecutionCapabilityProfile:
                 ),
                 "non_code_mode_only": False,
             }
-        return {
+        projection = {
             "agents": agents,
             "features": {
                 "apps": False,
@@ -907,6 +945,14 @@ class ExecutionCapabilityProfile:
                 else {"config": None}
             ),
         }
+        if self.execution_surface == "codex-app-server" and self.write_capable:
+            projection["sandbox_workspace_write"] = {
+                "network_access": False,
+                "writable_roots": [],
+                "exclude_slash_tmp": True,
+                "exclude_tmpdir_env_var": True,
+            }
+        return projection
 
     @property
     def expected_config_digest(self) -> str:
@@ -1002,6 +1048,20 @@ class ExecutionCapabilityProfile:
             values.extend(grant.config_overrides())
         if self.skill_grants:
             values.append("skills.bundled.enabled=false")
+        if self.write_capable:
+            # Real Codex App Server config/read otherwise reports an unknown
+            # approval policy.  The V4 write profile requires exact observed
+            # `never` before a provider thread is admissible. Preserve the
+            # legacy V3 override bytes and their existing config digests.
+            # Explicitly exclude ambient writable tmp roots and networking.
+            values.extend((
+                'approval_policy="never"',
+                'sandbox_mode="workspace-write"',
+                "sandbox_workspace_write.network_access=false",
+                "sandbox_workspace_write.writable_roots=[]",
+                "sandbox_workspace_write.exclude_slash_tmp=true",
+                "sandbox_workspace_write.exclude_tmpdir_env_var=true",
+            ))
         return tuple(values)
 
     def capability_manifest(self, *, harness_binary_digest: str) -> CapabilityManifest:

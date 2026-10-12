@@ -682,6 +682,99 @@ def test_v4_profile_refuses_codex_exec_with_skill_capabilities(tmp_path):
         ExecutionCapabilityRegistry.load(_write(tmp_path, raw), source_root=REPO_ROOT)
 
 
+def test_real_codex_readonly_write_table_null_preserves_legacy_config_digest():
+    """Read-only config/read may expose inactive sandbox_workspace_write:null.
+
+    The observed model-provided table is inactive in read-only mode and must
+    not change legacy read-only config attestation; a non-null table remains
+    visible to drift checks, and an active writable sandbox with null refuses.
+    """
+    from control_plane.executive_agent_capabilities import (
+        app_server_security_config_digest, app_server_security_config_projection,
+    )
+
+    profile = ExecutionCapabilityRegistry.load(
+        V4_FIXTURE, source_root=REPO_ROOT
+    ).resolve(FIXTURE_PROFILE_ID)
+    expected = profile.app_server_config_projection()
+    # Exact observed property on the installed Codex 0.159.3 config/read.
+    readonly_observed = {
+        **expected, "sandbox_mode": "read-only",
+        "approval_policy": "never", "sandbox_workspace_write": None,
+    }
+    assert app_server_security_config_digest(readonly_observed) == profile.expected_config_digest
+    assert "sandbox_workspace_write" not in app_server_security_config_projection(readonly_observed)
+    malformed_active = {
+        **expected, "sandbox_mode": "workspace-write",
+        "approval_policy": "never", "sandbox_workspace_write": None,
+    }
+    assert app_server_security_config_digest(malformed_active) != profile.expected_config_digest
+    nonnull_readonly = {
+        **readonly_observed,
+        "sandbox_workspace_write": {"network_access": True, "writable_roots": ["/tmp"]},
+    }
+    assert app_server_security_config_digest(nonnull_readonly) != profile.expected_config_digest
+
+
+def test_v4_rich_operator_attests_explicit_workspace_write_network_config():
+    """Fail closed on any missing or wider effective workspace-write settings."""
+    from control_plane.executive_agent_capabilities import (
+        app_server_security_config_digest,
+    )
+    from control_plane.codex_operator_adapter import _observed_network_state
+
+    p = REPO_ROOT / "scripts/ohf/fixtures/executive_agent_capabilities_v4_rich_write_operator.json"
+    profile = ExecutionCapabilityRegistry.load(p, source_root=REPO_ROOT).resolve(
+        "operator.appserver.write.mastermind-operator.v1"
+    )
+    expected = profile.app_server_config_projection()
+    assert expected["sandbox_workspace_write"] == {
+        "network_access": False,
+        "writable_roots": [],
+        "exclude_slash_tmp": True,
+        "exclude_tmpdir_env_var": True,
+    }
+    observed = {**expected, "sandbox_mode": "workspace-write", "approval_policy": "never"}
+    assert app_server_security_config_digest(observed) == profile.expected_config_digest
+    assert _observed_network_state(observed) == "disabled"
+    override_names = profile.app_server_config_overrides()
+    assert 'approval_policy="never"' in override_names
+    assert 'sandbox_mode="workspace-write"' in override_names
+    assert "sandbox_workspace_write.network_access=false" in override_names
+    for invalid in (None, True, "false"):
+        bad = copy.deepcopy(observed)
+        if invalid is None:
+            del bad["sandbox_workspace_write"]["network_access"]
+        else:
+            bad["sandbox_workspace_write"]["network_access"] = invalid
+        assert app_server_security_config_digest(bad) != profile.expected_config_digest
+        assert _observed_network_state(bad) is None
+    for field, replacement in (
+        ("writable_roots", ["/tmp/unadmitted"]),
+        ("exclude_slash_tmp", False),
+        ("exclude_tmpdir_env_var", False),
+    ):
+        bad = copy.deepcopy(observed)
+        bad["sandbox_workspace_write"][field] = replacement
+        assert app_server_security_config_digest(bad) != profile.expected_config_digest
+    bad = copy.deepcopy(observed)
+    del bad["sandbox_workspace_write"]
+    assert app_server_security_config_digest(bad) != profile.expected_config_digest
+    assert _observed_network_state(bad) is None
+    # An unknown future Codex field in the write sandbox must not disappear
+    # during projection: even a tool introduced after this reviewed policy
+    # could widen host filesystem or networking capabilities.
+    for future_key, future_value in (
+        ("allow_host_fs", True),
+        ("new_network_proxy", "unrestricted"),
+        ("extra_sandbox_permissions", ["full-disk-write"]),
+    ):
+        future = copy.deepcopy(observed)
+        future["sandbox_workspace_write"][future_key] = future_value
+        assert app_server_security_config_digest(future) != profile.expected_config_digest
+
+
+
 def test_v4_rich_operator_candidate_is_a_real_but_unarmed_source_profile():
     """Stage a pinned package+write composition without changing the default.
 
