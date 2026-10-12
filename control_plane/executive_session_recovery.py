@@ -95,8 +95,9 @@ def project_root_recovery(runtime, root_job_id: str, *, limit: int = 100,
     point. No raw transcript, credentials, queue position, capacity ETA or liveness
     is invented. Counts describe the bounded returned set, not an unseen whole fleet.
     """
-    from .executive_runtime import _retry_safety_material
+    from .executive_runtime import _retry_safety_material, _json_loads
     from .executive_retry_safety import classify_retry_safety, RetrySafetyDecision
+    from .executive_registered_supply import registered_supply_projection
 
     if not isinstance(root_job_id, str) or not root_job_id or root_job_id.strip() != root_job_id:
         raise ValueError("an exact existing root_job_id is required")
@@ -188,6 +189,12 @@ def project_root_recovery(runtime, root_job_id: str, *, limit: int = 100,
                     reasons.append("modifying_or_unknown_grant_requires_existing_continuation_gate")
                 if evidence.candidate_present or evidence.result_present or evidence.seal_present:
                     reasons.append("existing_work_or_result_must_be_reconciled_not_replayed")
+            # Registered supply is a diagnostic only. It never establishes
+            # model equivalence, shared-budget independence, or an admitted slot.
+            supply = (
+                registered_supply_projection(con, _json_loads(row["constraints_json"], fallback=None))
+                if status == "QUEUED" and attempt_id is None else None
+            )
             items.append({
                 "job_id": row["job_id"], "attempt_id": attempt_id,
                 "source_status": status, "next_action": action,
@@ -203,6 +210,7 @@ def project_root_recovery(runtime, root_job_id: str, *, limit: int = 100,
                 "current_model": current["model"] if current is not None else None,
                 "route_observation_scope": "REGISTERED_QUOTA_NOT_SERVED_MODEL",
                 "capacity_assessment": "NOT_EVALUATED",
+                "registered_supply": supply,
                 "parent_job_id": row["parent_job_id"],
                 "orchestration_role": row["orchestration_role"],
                 "attempts_remaining": max(0, row["attempt_limit"] - row["attempt_count"]),
@@ -215,6 +223,9 @@ def project_root_recovery(runtime, root_job_id: str, *, limit: int = 100,
             "jobs": items, "included_count": len(items), "has_more": len(rows) > limit,
             "next_after_job_id": items[-1]["job_id"] if len(rows) > limit else None,
             "page_consistency": "LIVE_KEYSET", "returned_counts_only": True,
+            "registered_free_slots_not_additive_across_jobs": True,
+            "read_only_supply_scope": "REGISTRY_NOT_GLOBAL_CAPACITY_ADMISSION",
+            "recovery_queue_count": sum(item["source_status"] == "QUEUED" for item in items),
             "total_jobs": total_jobs, "observed_event_id": observed_event_id,
             "root_status": root["status"], "root_attempt_id": root["current_attempt_id"],
             "count_by_action": dict(sorted(Counter(item["next_action"] for item in items).items()))}

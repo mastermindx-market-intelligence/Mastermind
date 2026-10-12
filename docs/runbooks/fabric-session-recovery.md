@@ -120,3 +120,16 @@ The later source increment supersedes the earlier statement that the numeric hel
 The installed `codex-cli 0.159.3` also exported its actual protocol schema using an isolated credential-free home. Its native arm64 executable SHA256 is `4d210f7c5a18fd0386434df23b5bdbb8c0e7257d3e8a2b30b0769c8bbe99a878`; the usage schema digest is `aba4f6c7e4a19b2b842c08ee793b57000c07dafd57b922ad0d8e7c76609108c2`. Selected export evidence is recorded in `research/evidence/fabric-context-native-schema-20261012.json`, and the exact usage schema is retained under `tests/fixtures/codex_context/`. No login, model turn, live compaction, credential installation or production mutation was requested. **73 focused schema/telemetry/consumer checks passed** before the adapter hook; counts overlap and are not additive.
 
 This narrows the remaining uncertainty from documented API feasibility to tested local protocol compatibility plus source-level event handling. It does not prove actual provider-event delivery, successor model equivalence, automatic compaction actuation or full production failover. Compose the source hook with the incumbent rich-worker branch and obtain normal review/release and real-path evidence before adoption.
+
+## Registered capacity — observation, not admission (October 12 increment)
+
+A queued logical worker now has a `registered_supply` view derived within the same existing Executive SQLite read transaction. It counts the statuses of quota registrations only inside that Job's existing `eligible_quota_classes` allowlist. It reports `registered_free_count`, `state_counts`, and a diagnostic next action:
+
+- `WAIT_FOR_EXISTING_CAPACITY_OWNER`: no free *registered* slot was observed (e.g., BUSY and RATE_LIMITED classes). The Job stays queued; no ETA is inferred.
+- `REQUEST_EXISTING_PLACEMENT_REVALIDATION`: a free registration was observed. Model Router, quota/budget, provider admission, host capacity and lease allocation are **still unproven**; no worker is dispatched by this read.
+- `REQUIRE_CANONICAL_CAPACITY_SCOPE`: allowlist missing or malformed; never invent usable capacity.
+- `REQUIRE_CAPACITY_STATE_RECONCILIATION`: an unexpected registry status was observed; no selection permission follows.
+
+`route_qualified=false`, `independent_budget_proven=false`, `shared_quota_verified=false`, `telemetry_freshness_verified=false`, and `can_reserve=false` are intentional guards. `reset_eta` remains null. Counts omit account labels and authentication material. The parent-level `registered_free_slots_not_additive_across_jobs=true` prevents mistaking one free registration viewed by 30 workers for 30 independent execution slots. `recovery_queue_count` is scoped only to the returned page, not the entire root.
+
+This is **not** an alternative to #1253's shared-budget accounting, #1365's model/host qualification or the existing atomic capacity owner. It adds no reservation, scheduler, retry or wakeup. Its currently verified source tests are not evidence of installed or live quota availability.
