@@ -1398,6 +1398,7 @@ class CooRetryMutationOutcome:
 class _RetrySafetyMaterial:
     projection: RetrySafetyProjection
     tx9_material: tuple[sqlite3.Row, dict[str, Any], str, dict[str, Any], str] | None
+    quota_material: dict[str, Any] | None = None
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -6685,7 +6686,16 @@ def _retry_safety_material(
         except StateConflict:
             pass
     tx9_evidence_digest = tx9_material[2] if tx9_material is not None else None
-    if tx9_evidence_digest is not None:
+    quota_material = None
+    if (job_row is not None and attempt_row is not None
+            and terminal_status == JobStatus.RATE_LIMITED.value):
+        from .executive_quota_rollover import quota_rollover_material
+        quota_material = quota_rollover_material(
+            connection, job=dict(job_row), attempt=dict(attempt_row))
+    if quota_material is not None:
+        retry_safety = RetrySafety.SAFE_NON_MODIFYING_QUOTA_ROLLOVER
+        requeue_kind = "NON_MODIFYING_QUOTA"
+    elif tx9_evidence_digest is not None:
         retry_safety = RetrySafety.SAFE_PRE_EFFECT_INFRASTRUCTURE
         requeue_kind = "TX9_DETACHED"
     elif terminal_status == JobStatus.FAILED.value:
@@ -6697,7 +6707,8 @@ def _retry_safety_material(
     else:
         retry_safety = RetrySafety.UNKNOWN
         requeue_kind = None
-    provenance_digest = tx9_evidence_digest
+    provenance_digest = (quota_material["evidence_digest"]
+                         if quota_material is not None else tx9_evidence_digest)
     if provenance_digest is None and job_row is not None:
         raw = job_row["orchestration_provenance_digest"]
         provenance_digest = str(raw) if raw is not None else None
@@ -6716,6 +6727,7 @@ def _retry_safety_material(
             operation_effect_unknown_present
             or (
                 tx9_evidence_digest is None
+                and quota_material is None
                 and terminal_status
                 in {JobStatus.RATE_LIMITED.value, JobStatus.LOST.value}
             )
@@ -6735,6 +6747,7 @@ def _retry_safety_material(
             evidence=evidence,
         ),
         tx9_material=tx9_material,
+        quota_material=quota_material,
     )
 
 
@@ -7252,6 +7265,29 @@ def _requeue_outcome_from_event(
             expected_job_id=expected_job_id,
             require_current_quota=False,
         )
+    elif kind == "NON_MODIFYING_QUOTA":
+        from .executive_quota_rollover import validate_saved_quota_proof
+        keys = {"previous_status", "requeue_kind", "invalidated_attempt_id",
+                "invalidated_worker_id", "invalidated_quota_class",
+                "quota_rollover_proof", "retry_safety"}
+        proof = payload.get("quota_rollover_proof")
+        _, evidence, _ = _validated_retry_safety_receipt(
+            payload.get("retry_safety"), require_safe=True)
+        if (set(payload) != keys
+                or payload["previous_status"] != JobStatus.RATE_LIMITED.value
+                or payload["invalidated_attempt_id"] != event_row["attempt_id"]
+                or payload["invalidated_worker_id"] != event_row["worker_id"]
+                or payload["invalidated_quota_class"] != event_row["quota_class"]
+                or not validate_saved_quota_proof(connection, proof)
+                or proof["job_id"] != expected_job_id
+                or proof["attempt_id"] != event_row["attempt_id"]
+                or proof["worker_id"] != event_row["worker_id"]
+                or proof["quota_class"] != event_row["quota_class"]
+                or evidence.retry_safety is not RetrySafety.SAFE_NON_MODIFYING_QUOTA_ROLLOVER
+                or evidence.job_id != expected_job_id
+                or evidence.attempt_id != event_row["attempt_id"]
+                or evidence.provenance_digest != proof["evidence_digest"]):
+            raise StateConflict("quota rollover receipt or immutable source proof drifted")
     elif (
         kind != "ORDINARY"
         or set(payload) != {"previous_status", "requeue_kind", "previous_attempt_id"}
@@ -13721,6 +13757,51 @@ class JobRegistry:
                 )
 
             if decision is RetrySafetyDecision.SAFE_REQUEUE:
+                if observed.requeue_kind == "NON_MODIFYING_QUOTA":
+                    proof = material.quota_material
+                    if proof is None:
+                        raise StateConflict("quota release proof disappeared")
+                    _assert_orchestration_requeue_eligible(connection, selected)
+                    timestamp = _finite_fresh_effect(self.store, connection, selected_token)
+                    released = connection.execute(
+                        """UPDATE worker_quota_classes SET held_attempt_id=NULL,
+                             updated_at_ms=?,version=version+1
+                           WHERE worker_id=? AND quota_class=? AND held_attempt_id=?
+                             AND status='RATE_LIMITED' AND fence_counter=?""",
+                        (timestamp, proof["worker_id"], proof["quota_class"],
+                         attempt_token, proof["fence_generation"]))
+                    if released.rowcount != 1:
+                        raise StateConflict("quota hold changed before rollover")
+                    # Release the settled Attempt, NOT the exhausted pool. Existing
+                    # Capacity/Scheduler selects the next eligible worker later.
+                    connection.execute(
+                        """UPDATE jobs SET status='QUEUED',assigned_worker_id=NULL,
+                             assigned_quota_class=NULL,current_attempt_id=NULL,
+                             updated_at_ms=?,version=version+1 WHERE job_id=?""",
+                        (timestamp, selected_token))
+                    event_payload = {
+                        "previous_status": JobStatus.RATE_LIMITED.value,
+                        "requeue_kind": "NON_MODIFYING_QUOTA",
+                        "invalidated_attempt_id": attempt_token,
+                        "invalidated_worker_id": proof["worker_id"],
+                        "invalidated_quota_class": proof["quota_class"],
+                        "quota_rollover_proof": proof,
+                        "retry_safety": retry_receipt,
+                    }
+                    self.store.append_event(
+                        connection, aggregate_type="job", aggregate_id=selected_token,
+                        event_type="JOB_REQUEUED", command_id=requeue_command,
+                        actor="operator", job_id=selected_token, attempt_id=attempt_token,
+                        worker_id=proof["worker_id"], quota_class=proof["quota_class"],
+                        payload=event_payload, timestamp_ms=timestamp)
+                    written = connection.execute(
+                        "SELECT * FROM events WHERE command_id=?", (requeue_command,)).fetchone()
+                    outcome = _requeue_outcome_from_event(
+                        connection, written, expected_job_id=selected_token)
+                    receipt = outcome.to_dict()
+                    receipt["retry_safety"] = retry_receipt
+                    return CooRetryMutationOutcome(
+                        action="REQUEUED", command_id=requeue_command, receipt=receipt)
                 if (
                     observed.requeue_kind != "TX9_DETACHED"
                     or material.tx9_material is None

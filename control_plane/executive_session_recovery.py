@@ -1,0 +1,178 @@
+"""Bounded session-recovery/context diagnostics over existing Executive state.
+
+These are projections, not another scheduler, memory store, provider router or
+execution grant. The admitted owner must revalidate before every real operation.
+"""
+from __future__ import annotations
+
+from collections import Counter
+from typing import Any
+
+
+def _count(name: str, value: Any, *, optional: bool = False, positive: bool = False):
+    if optional and value is None:
+        return
+    if type(value) is not int or value < (1 if positive else 0):
+        raise ValueError(f"{name} must be a {'positive' if positive else 'non-negative'} integer")
+
+
+def _projection(action: str, **values) -> dict[str, Any]:
+    return {"schema_version": "mastermind.session_recovery_diagnostic/v1",
+            "authority_effect": "NONE", "operation_performed": False,
+            "next_action": action, **values}
+
+
+def context_plan(*, context_limit: int | None, used_tokens: int | None,
+                 next_input_tokens: int, response_reserve: int, tool_reserve: int,
+                 compaction_reserve: int, native_compaction_supported: bool | None,
+                 durable_checkpoint_available: bool) -> dict[str, Any]:
+    """Plan from adapter-observed token counts, never a universal model limit.
+
+    Use the existing checkpoint INTENT/APPLIED owner for any compaction operation.
+    An overflow does not authorize another overfull provider request. A usable
+    durable frontier is a prerequisite to claiming state-preserving rotation.
+    """
+    _count("context_limit", context_limit, optional=True, positive=True)
+    _count("used_tokens", used_tokens, optional=True)
+    for name, value in (("next_input_tokens", next_input_tokens), ("response_reserve", response_reserve),
+                        ("tool_reserve", tool_reserve), ("compaction_reserve", compaction_reserve)):
+        _count(name, value)
+    if native_compaction_supported is not None and type(native_compaction_supported) is not bool:
+        raise TypeError("native_compaction_supported must be bool or None")
+    if type(durable_checkpoint_available) is not bool:
+        raise TypeError("durable_checkpoint_available must be bool")
+    if context_limit is None or used_tokens is None:
+        return _projection("OBSERVE_CONTEXT", reason="context_measurement_unknown")
+    required = used_tokens + next_input_tokens + response_reserve + tool_reserve
+    remaining = context_limit - used_tokens
+    if required <= context_limit:
+        return _projection("CONTINUE", remaining_tokens=remaining)
+    can_compact = used_tokens + compaction_reserve <= context_limit
+    if not durable_checkpoint_available:
+        return _projection("SAVE_DURABLE_FRONTIER" if can_compact else "RECONCILE_DURABLE_FRONTIER",
+                           remaining_tokens=remaining, reason="portable_checkpoint_missing")
+    if native_compaction_supported is True and can_compact:
+        return _projection("COMPACT_SAME_SESSION", remaining_tokens=remaining,
+                           owner="existing_generation_bound_checkpoint_operation")
+    return _projection("RESUME_FROM_DURABLE_CHECKPOINT", remaining_tokens=remaining,
+                       owner="existing_retry_and_continuation_owners")
+
+
+def portable_context_fit(*, target_context_limit: int, mandatory_tokens: int,
+                         optional_tokens: int, response_reserve: int,
+                         tool_reserve: int) -> dict[str, Any]:
+    """Assess the source-owned capsule budget without truncating its contents."""
+    _count("target_context_limit", target_context_limit, positive=True)
+    for name, value in (("mandatory_tokens", mandatory_tokens), ("optional_tokens", optional_tokens),
+                        ("response_reserve", response_reserve), ("tool_reserve", tool_reserve)):
+        _count(name, value)
+    budget = target_context_limit - response_reserve - tool_reserve
+    optional_budget = max(0, budget - mandatory_tokens)
+    if mandatory_tokens > budget:
+        action = "TARGET_CONTEXT_TOO_SMALL"
+    elif optional_tokens > optional_budget:
+        action = "REBUILD_OPTIONAL_CONTEXT_FROM_REFS"
+    else:
+        action = "CONTEXT_FITS"
+    return _projection(action, mandatory_tokens_dropped=0,
+                       max_optional_tokens=optional_budget, available_input_tokens=max(0, budget))
+
+
+def project_root_recovery(runtime, root_job_id: str, *, limit: int = 100) -> dict[str, Any]:
+    """One read snapshot for an already-authorized original root's worker triage.
+
+    Caller authentication/root access remains with the existing Executive entry
+    point. No raw transcript, credentials, queue position, capacity ETA or liveness
+    is invented. Counts describe the bounded returned set, not an unseen whole fleet.
+    """
+    from .executive_runtime import _retry_safety_material
+    from .executive_retry_safety import classify_retry_safety, RetrySafetyDecision
+
+    if not isinstance(root_job_id, str) or not root_job_id or root_job_id.strip() != root_job_id:
+        raise ValueError("an exact existing root_job_id is required")
+    if type(limit) is not int or not 1 <= limit <= 500:
+        raise ValueError("limit must be between 1 and 500")
+    items = []
+    with runtime.store.read() as con:
+        root = con.execute("SELECT job_id,root_job_id FROM jobs WHERE job_id=?", (root_job_id,)).fetchone()
+        if root is None or root["root_job_id"] != root_job_id:
+            raise ValueError("root Job is absent or is not an original root")
+        rows = list(con.execute(
+            "SELECT * FROM jobs WHERE root_job_id=? AND job_id!=? ORDER BY job_id LIMIT ?",
+            (root_job_id, root_job_id, limit + 1)))
+        for row in rows[:limit]:
+            status = row["status"]
+            attempt_id = row["current_attempt_id"]
+            action = "INSPECT_CURRENT_ATTEMPT"
+            reasons = []
+            retry = None
+            if status == "QUEUED" and attempt_id is None:
+                action = "WAIT_FOR_EXISTING_SCHEDULER"
+                reasons.append("canonical_job_queued_capacity_not_resolved_by_this_view")
+            elif status in {"COMPLETED", "CANCELLED"}:
+                action = "INSPECT_TERMINAL_RESULT"
+            elif status in {"RATE_LIMITED", "FAILED", "LOST"} and attempt_id:
+                material = _retry_safety_material(con, job_id=row["job_id"], expected_attempt_id=attempt_id)
+                evidence = material.projection.evidence
+                decision = classify_retry_safety(evidence)
+                retry = decision.value
+                if decision is RetrySafetyDecision.SAFE_REQUEUE:
+                    action = "REQUEUE_WITH_EXISTING_COO"
+                elif decision is RetrySafetyDecision.TERMINAL_NO_RETRY:
+                    action = "ATTEMPT_ALLOWANCE_DECISION_REQUIRED"
+                elif decision is RetrySafetyDecision.NEEDS_RECONCILIATION:
+                    action = "RECONCILE_ORIGINAL_ATTEMPT"
+                else:
+                    action = "OWNER_DIAGNOSIS_REQUIRED"
+                if evidence.writer_or_provider_generation_live:
+                    reasons.append("predecessor_writer_not_released")
+                if evidence.effect_unknown:
+                    reasons.append("unresolved_effect_or_missing_positive_release_proof")
+                if not evidence.effective_grant_non_modifying:
+                    reasons.append("modifying_or_unknown_grant_requires_existing_continuation_gate")
+                if evidence.candidate_present or evidence.result_present or evidence.seal_present:
+                    reasons.append("existing_work_or_result_must_be_reconciled_not_replayed")
+            items.append({
+                "job_id": row["job_id"], "attempt_id": attempt_id,
+                "source_status": status, "next_action": action,
+                "stop_reason": "QUOTA_OR_RATE_LIMIT" if status == "RATE_LIMITED" else None,
+                "retry_decision": retry, "reason_codes": reasons,
+                "checkpoint_available": row["checkpoint_json"] is not None,
+                "queue_position": None, "capacity_eta": None,
+            })
+    return {"schema_version": "mastermind.root_session_recovery/v1",
+            "root_job_id": root_job_id, "authority_effect": "NONE", "operation_performed": False,
+            "jobs": items, "included_count": len(items), "has_more": len(rows) > limit,
+            "count_by_action": dict(sorted(Counter(item["next_action"] for item in items).items()))}
+
+
+def adapter_stop_diagnostic(failure, *, guard_refusal: str | None = None) -> dict[str, Any]:
+    """Explain a typed adapter stop; routing reassessment is never retry authority.
+
+    Guard refusals come from the existing policy/auth owner and dominate provider
+    labels. Raw log strings are deliberately not classified as quota exhaustion.
+    """
+    from .operator_harness_contract import AdapterFailureClass
+
+    if failure is not None and not isinstance(failure, AdapterFailureClass):
+        raise TypeError("failure must be AdapterFailureClass or None")
+    guards = {"permission", "safety", "authentication", "human_approval"}
+    if guard_refusal is not None and guard_refusal not in guards:
+        raise ValueError("guard_refusal is not a closed policy-owner cause")
+    if guard_refusal is not None:
+        action, reassess, reason = "RETURN_TO_EXISTING_GUARD_OWNER", False, guard_refusal
+    elif failure in {AdapterFailureClass.QUOTA_OR_RATE_LIMIT, AdapterFailureClass.PROVIDER_CONCURRENCY}:
+        action, reassess, reason = "REASSESS_EXISTING_CAPACITY", True, failure.value
+    elif failure is AdapterFailureClass.AUTH_FAILURE:
+        action, reassess, reason = "REPAIR_AUTHENTICATION", False, failure.value
+    elif failure is AdapterFailureClass.HUMAN_APPROVAL_REQUIRED:
+        action, reassess, reason = "WAIT_FOR_HUMAN_APPROVAL", False, failure.value
+    elif failure in {AdapterFailureClass.PROCESS_CRASH, AdapterFailureClass.SESSION_MISSING,
+                     AdapterFailureClass.ACTIVE_WRITER_CONFLICT,
+                     AdapterFailureClass.MCP_OR_TOOL_TRANSPORT_FAILURE}:
+        action, reassess, reason = "RECONCILE_ORIGINAL_GENERATION", False, failure.value
+    elif failure is None:
+        action, reassess, reason = "OWNER_DIAGNOSIS_REQUIRED", False, "UNKNOWN_STOP_CAUSE"
+    else:
+        action, reassess, reason = "OWNER_DIAGNOSIS_REQUIRED", False, failure.value
+    return _projection(action, reason=reason, reassess_capacity=reassess, retry_authorized=False)
