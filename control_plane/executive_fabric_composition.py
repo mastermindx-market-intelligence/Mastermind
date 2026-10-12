@@ -19,6 +19,7 @@ from control_plane.executive_fabric_adapter import FabricHostBinding
 from control_plane.executive_worker_broker import BrokerStateError
 
 CONFIG_SCHEMA_VERSION = "mastermind.executive_fabric_bindings/v1"
+REMOTE_CONFIG_SCHEMA_VERSION = "mastermind.executive_fabric_bindings/v2"
 MAX_CONFIG_BYTES = 64 * 1024
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _BINDING_FIELDS = frozenset(field.name for field in dataclasses.fields(FabricHostBinding))
@@ -96,7 +97,7 @@ def _nonfinite(value):
     raise FabricCompositionError("Nonfinite Fabric composition JSON values are forbidden")
 
 
-def _bindings(raw: bytes) -> tuple[FabricHostBinding, ...]:
+def _document(raw: bytes):
     try:
         document = json.loads(raw.decode("utf-8", errors="strict"),
                               object_pairs_hook=_pairs, parse_constant=_nonfinite)
@@ -104,6 +105,11 @@ def _bindings(raw: bytes) -> tuple[FabricHostBinding, ...]:
         json.dumps(document, ensure_ascii=False, allow_nan=False).encode("utf-8")
     except (ValueError, UnicodeError, RecursionError) as exc:
         raise FabricCompositionError("Fabric composition is not bounded strict UTF-8 JSON") from exc
+    return document
+
+
+def _bindings(raw: bytes) -> tuple[FabricHostBinding, ...]:
+    document = _document(raw)
     if (type(document) is not dict or set(document) != {"schema_version", "bindings"}
             or document["schema_version"] != CONFIG_SCHEMA_VERSION
             or type(document["bindings"]) is not list or not document["bindings"]):
@@ -131,6 +137,29 @@ def _bindings(raw: bytes) -> tuple[FabricHostBinding, ...]:
     return tuple(bindings)
 
 
+def _composition(raw):
+    document = _document(raw)
+    if type(document) is dict and document.get('schema_version') == REMOTE_CONFIG_SCHEMA_VERSION:
+        if (set(document) != {'schema_version', 'bindings', 'remote_transports'}
+                or type(document['remote_transports']) is not list
+                or not document['remote_transports']):
+            raise FabricCompositionError('Remote Fabric composition differs from its closed schema')
+        legacy = dict(schema_version=CONFIG_SCHEMA_VERSION, bindings=document['bindings'])
+        bindings = _bindings(json.dumps(legacy, ensure_ascii=False, allow_nan=False).encode())
+        index = {(b.host_ref, b.worker_id): b for b in bindings}
+        from control_plane.fabric_remote_transport import FabricRemoteTransport
+        transports = {}
+        for value in document['remote_transports']:
+            if type(value) is not dict:
+                raise FabricCompositionError('Remote Fabric transport is invalid')
+            key = (value.get('host_ref'), value.get('worker_id'))
+            if any(type(part) is not str for part in key) or key not in index or key in transports:
+                raise FabricCompositionError('Remote Fabric transport requires one exact physical binding')
+            transports[key] = FabricRemoteTransport.from_document(value, index[key])
+        return bindings, MappingProxyType(transports)
+    return _bindings(raw), MappingProxyType({})
+
+
 @dataclasses.dataclass(frozen=True)
 class FabricBindingSource:
     """Callable exact-key lookup over one immutable approved composition file."""
@@ -139,6 +168,7 @@ class FabricBindingSource:
     bindings: tuple[FabricHostBinding, ...]
     _file_identity: tuple[int, ...] = dataclasses.field(repr=False)
     _index: Mapping[tuple[str, str], FabricHostBinding] = dataclasses.field(repr=False, compare=False)
+    _remote_index: Mapping = dataclasses.field(repr=False, compare=False)
 
     @classmethod
     def from_path(cls, path: str | Path, expected_sha256: str) -> "FabricBindingSource":
@@ -148,9 +178,9 @@ class FabricBindingSource:
             raise FabricCompositionError("Fabric composition requires a filesystem path")
         fixed_path = _absolute_path(str(path))
         raw, identity = _read_pinned(fixed_path, expected_sha256)
-        bindings = _bindings(raw)
+        bindings, remote_index = _composition(raw)
         return cls(fixed_path, expected_sha256, bindings, identity,
-                   MappingProxyType({(b.host_ref, b.worker_id): b for b in bindings}))
+                   MappingProxyType({(b.host_ref, b.worker_id): b for b in bindings}), remote_index)
 
     def __call__(self, host_ref: str, worker_id: str) -> FabricHostBinding:
         _, identity = _read_pinned(self.path, self.expected_sha256)
@@ -162,3 +192,13 @@ class FabricBindingSource:
             return self._index[(host_ref, worker_id)]
         except KeyError as exc:
             raise FabricCompositionError("Exact Fabric host/worker binding is not installed") from exc
+
+    def client_for(self, physical: FabricHostBinding, payload):
+        if self(physical.host_ref, physical.worker_id) != physical:
+            raise FabricCompositionError('Fabric client cannot change its installed physical route')
+        remote = self._remote_index.get((physical.host_ref, physical.worker_id))
+        if remote is None:
+            from control_plane.executive_fabric_adapter import _fixed_client
+            return _fixed_client(physical)
+        from control_plane.fabric_remote_transport import PinnedFabricRemoteClient
+        return PinnedFabricRemoteClient(self, physical, payload, remote)
