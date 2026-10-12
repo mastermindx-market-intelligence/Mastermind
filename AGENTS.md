@@ -20,8 +20,9 @@ session spawned with no context beyond this file.
 **Hierarchy.**
 - **Chairman — Chris.** Sets and amends company strategy; the only source of a
   standing mandate.
-- **AI CEO — GPT-5.6 Sol** (`config/agents.yml` → `codex.model`). Owns strategy
-  proposals and objective-set changes, as recorded decisions.
+- **Assigned principal / AI CEO.** The currently assigned, authorized leadership role
+  owns the mission and its decisions. A model name, account or archived chat does not
+  permanently occupy that role; provider configuration remains a separate runtime concern.
 - **COO / orchestration — Fable.** Leads delegated programmes when assigned;
   is not the default owner of every worker action.
 - **Workers — Claude / Codex / routed specialist models.** Execute assigned objectives.
@@ -84,6 +85,19 @@ Use `docs/sol_skills/ACTIVE_EXECUTION.md` for the shared recovery procedure; thi
 runtime authority, required form, new watcher or extra human approval. Existing exact grants,
 source custody, effect reconciliation, review and release controls remain in force.
 
+### Session lifetime and acceptance scope
+
+A role is not a persistent conversation. ChatGPT Web sessions are ephemeral and may be
+archived; a Meta-CEO title does not make an old chat available to receive work. A new session
+requires actual creation and current assignment. Recover from the durable mission frontier;
+do not wait for a historical chat to reply. Preserve real active writers, exact-session proof
+obligations and unresolved effects; a new conversation does not clear or transfer them.
+
+Acceptance follows the assigned effect. A source-only or instruction change does not require
+an unrelated application deployment. An instruction rollout needs installation and fresh-load
+proof; a product/runtime change retains its required real-path proof. After each verified phase,
+save the material delta and continue the next safe ready phase in the same healthy turn.
+
 ### Reciprocal dialogue and watcher invariant
 
 For any watcher-enabled Sol↔worker/COO loop, `docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md` is the
@@ -125,9 +139,9 @@ crosses sessions, accounts, or models — account-local chat memory is not compa
 memory. Rules of the store: Macro `agentos/README.md`; handoff protocol: Macro
 `research/MASTERMIND_AGENT_HANDOFF_PROTOCOL.md`.
 
-- **Read at task start.** A job belonging to an existing Mastermind workstream starts
-  by reading its `WS-*` record, its latest handoff, and the decisions/discoveries they
-  cite. `do_not_redo` entries are binding unless refuted with new evidence. Records are
+- **Recover once at task start.** Read the existing workstream's current `WS-*` record
+  and latest cumulative handoff. Follow cited decisions/discoveries only when they can
+  change the next action; do not recursively reload the historical handoff chain. `do_not_redo` entries are binding unless refuted with new evidence. Records are
   context, not permission — the source-of-truth order above is unchanged, and Agent OS
   enters it at layer 6 (evidence), not above it.
 - **Write on real events, in the Macro repo.** A durable decision (`DEC-*`: question,
@@ -199,11 +213,12 @@ memory. Rules of the store: Macro `agentos/README.md`; handoff protocol: Macro
 - Reuse the assigned workspace for its existing source operation. Independent unstarted work in another repository or conflicting source area may acquire a normal isolated workspace under the current assignment; no pre-created operation is required. Never displace a live writer or replay an uncertain operation.
 - Follow higher-priority host/developer instructions when they require the approved external-SSD creation helper instead of this repository launcher. Retain its truthful receipt; a missing optional registration is not itself a permission denial. Otherwise, attended ChatGPT Web/host sessions acquire or reuse their workspace through the installed `mmx-workspace` launcher; raw `git clone`, raw `git worktree add`, or direct invocation of the repository Python payload is not a production session-isolation API. The installed launcher pins the canonical source checkout and host-selected workspace root (including the external-volume mount guard) before dispatching the payload, while branch/path identity is derived from the operation and lane. Proof/review turns therefore reuse the same operation workspace instead of minting new checkouts.
 - Linked worktrees are only for the trusted same-OS-principal attended path. Untrusted Executive workers retain the existing private credentialless-clone path and its distinct `.git` security boundary. At terminal close, call the canonical release route; dirty or local-only work is preserved fail-closed rather than deleted.
-- Completion means: run the relevant tests; commit only scoped source/config/test
-  changes; push the branch; open a PR. Required checks and review are the release gate,
-  not a reason to stop useful work. After that gate clears and release is authorized, merge,
-  then deploy the exact merged `origin/master` commit with
-  `scripts/deploy_from_git.sh <merge-sha>` and verify `/health` returns HTTP 200.
+- Completion follows the assigned outcome: run relevant tests, publish the scoped change,
+  and satisfy the required checks/review release gate before an authorized merge. A source-only change does
+  not trigger an unrelated runtime deployment. When this mission requires a runtime release,
+  deploy this operation's exact merged commit using `scripts/deploy_from_git.sh <merge-sha>`
+  and obtain the required real-path proof (including `/health` HTTP 200). Do not substitute
+  whichever unrelated commit happens to be the newest `origin/master`.
 - A failing or incomplete build is pushed only to a clearly marked draft PR. It
   is not merged and is not deployed.
 - The VPS is the canonical runtime-state writer. Never commit or deploy generated

@@ -1,0 +1,355 @@
+{
+  "scope": "Supplementary acceptance questions; not replacement of original C5 forty-case or C9 Q01-Q20 catalogues",
+  "cases": [
+    {
+      "id": "A01",
+      "family": "Temporal",
+      "scenario": "Real native original and later correction",
+      "package": "WP03",
+      "required_observation": "Exact dual cutoffs select expected version; source inventory and reader receipt retained."
+    },
+    {
+      "id": "A02",
+      "family": "Temporal",
+      "scenario": "Date-only interval crosses an intraday cutoff",
+      "package": "WP03",
+      "required_observation": "Unknown/refused for that view, never invented midnight precision."
+    },
+    {
+      "id": "A03",
+      "family": "Temporal",
+      "scenario": "Naive or invalid timestamp",
+      "package": "WP16",
+      "required_observation": "Source-specific timezone/precision evidence or typed failure; invalid calendar date not normalized."
+    },
+    {
+      "id": "A04",
+      "family": "Temporal",
+      "scenario": "Uniformly old source legs",
+      "package": "WP16",
+      "required_observation": "Source-specific freshness against request/reference time, not newest old leg."
+    },
+    {
+      "id": "A05",
+      "family": "Temporal",
+      "scenario": "Future source clock",
+      "package": "WP16",
+      "required_observation": "No future eligibility or promotion of page cutoff; preserve diagnostic."
+    },
+    {
+      "id": "A06",
+      "family": "Temporal",
+      "scenario": "Missing event source clock but fresh serving stamp",
+      "package": "WP16",
+      "required_observation": "Serving time separate, source clock unknown; no silent ok."
+    },
+    {
+      "id": "A07",
+      "family": "Temporal",
+      "scenario": "Corrected history after sealed answer",
+      "package": "WP20",
+      "required_observation": "Original recorded view immutable; later revised view explicitly different."
+    },
+    {
+      "id": "A08",
+      "family": "Identity",
+      "scenario": "Same ticker with different historical issuer/listing",
+      "package": "WP04",
+      "required_observation": "Use effective-dated native bridge or refuse join."
+    },
+    {
+      "id": "A09",
+      "family": "Identity",
+      "scenario": "Same-native financial subject without K1 security bridge",
+      "package": "WP03",
+      "required_observation": "Allow qualified native-only use without implying cross-type acceptance."
+    },
+    {
+      "id": "A10",
+      "family": "Evidence",
+      "scenario": "Two syndications of one origin",
+      "package": "WP05",
+      "required_observation": "Preserve source refs and shared origin without doubling independence."
+    },
+    {
+      "id": "A11",
+      "family": "Evidence",
+      "scenario": "Missing dependence edge or correction new ID",
+      "package": "WP05",
+      "required_observation": "No empirical independence claim; correction ancestry retained."
+    },
+    {
+      "id": "A12",
+      "family": "Financial",
+      "scenario": "Later ineligible filing hides earlier eligible filing",
+      "package": "WP13",
+      "required_observation": "Select eligible retained source before winner extraction."
+    },
+    {
+      "id": "A13",
+      "family": "Financial",
+      "scenario": "Wrong unit, fiscal period or economic perimeter",
+      "package": "WP13",
+      "required_observation": "Typed mismatch; no scalar computed from incompatible input."
+    },
+    {
+      "id": "A14",
+      "family": "Financial",
+      "scenario": "Public float value vs count and weighted-average vs outstanding shares",
+      "package": "WP14",
+      "required_observation": "Metric and denominator meaning preserved; no convenient substitution."
+    },
+    {
+      "id": "A15",
+      "family": "Financial",
+      "scenario": "Authorization vs execution, split and warrant double count",
+      "package": "WP14",
+      "required_observation": "Actual state and basis retained; no invented dilution or cash effect."
+    },
+    {
+      "id": "A16",
+      "family": "Financial",
+      "scenario": "Direct issuer scenario with disclosed driver and explicit assumption",
+      "package": "WP15",
+      "required_observation": "Reproducible nontrivial numerical consequence, units, horizon and sensitivity."
+    },
+    {
+      "id": "A17",
+      "family": "Financial",
+      "scenario": "No measured supply-chain exposure",
+      "package": "WP15",
+      "required_observation": "Qualitative mechanism or refuse numeric consequence; no arbitrary economic_share."
+    },
+    {
+      "id": "A18",
+      "family": "Expectations",
+      "scenario": "Real comparable estimate pair",
+      "package": "WP09",
+      "required_observation": "Identical target/unit/basis/issuer, known clocks and permitted use; real reader proof."
+    },
+    {
+      "id": "A19",
+      "family": "Expectations",
+      "scenario": "Relative horizon roll or missing target anchor",
+      "package": "WP09",
+      "required_observation": "No unsupported same-target subtraction."
+    },
+    {
+      "id": "A20",
+      "family": "Expectations",
+      "scenario": "Changed contributors but no contributor identity",
+      "package": "WP09",
+      "required_observation": "No same-analyst revision attribution."
+    },
+    {
+      "id": "A21",
+      "family": "Expectations",
+      "scenario": "Guidance vs prior guidance, no consensus",
+      "package": "WP10",
+      "required_observation": "Named guidance delta only; no consensus surprise."
+    },
+    {
+      "id": "A22",
+      "family": "Macro",
+      "scenario": "Producer path fixed but envelope still wrong",
+      "package": "WP11",
+      "required_observation": "Full intended producer-to-reader fixture test catches both failures."
+    },
+    {
+      "id": "A23",
+      "family": "Macro",
+      "scenario": "Model/market median or current consensus supplied after event",
+      "package": "WP11",
+      "required_observation": "Not an eligible pre-event economist baseline."
+    },
+    {
+      "id": "A24",
+      "family": "Macro",
+      "scenario": "Original print and later revision",
+      "package": "WP11",
+      "required_observation": "Both replayable; revision delta separate from expected revision surprise."
+    },
+    {
+      "id": "A25",
+      "family": "Health",
+      "scenario": "Fresh producer, stale actual consumer bytes",
+      "package": "WP08",
+      "required_observation": "Actual consumed generation and content watermark govern displayed freshness."
+    },
+    {
+      "id": "A26",
+      "family": "Health",
+      "scenario": "Missing receipt, unreadable, absent, malformed or denied source",
+      "package": "WP08",
+      "required_observation": "Distinguish where evidenced; inspection blindness remains unknown."
+    },
+    {
+      "id": "A27",
+      "family": "Health",
+      "scenario": "Changing universe denominator",
+      "package": "WP08",
+      "required_observation": "Versioned applicable universe; coverage cannot improve through silent exclusions."
+    },
+    {
+      "id": "A28",
+      "family": "Security",
+      "scenario": "Private evidence for public/other account view",
+      "package": "WP18",
+      "required_observation": "Denied content and metadata withheld according to incumbent policy; no cross-user cache leak."
+    },
+    {
+      "id": "A29",
+      "family": "Security",
+      "scenario": "Global attestation receipt for another subject",
+      "package": "WP17",
+      "required_observation": "No subject-specific permission inferred without correct binding."
+    },
+    {
+      "id": "A30",
+      "family": "UX",
+      "scenario": "Switch ticker while old request is in flight",
+      "package": "WP19",
+      "required_observation": "Old response cannot replace the new company answer."
+    },
+    {
+      "id": "A31",
+      "family": "UX",
+      "scenario": "Evidence link and correction drill-down",
+      "package": "WP18",
+      "required_observation": "Open exact revision/span used by displayed claim; generation visible."
+    },
+    {
+      "id": "A32",
+      "family": "UX",
+      "scenario": "Partial essential evidence vs optional enrichment",
+      "package": "WP17",
+      "required_observation": "Core conclusion bounded; optional absence not zero/neutral confidence."
+    },
+    {
+      "id": "A33",
+      "family": "Evaluation",
+      "scenario": "Append error followed by same-instance retry",
+      "package": "WP06",
+      "required_observation": "No false durable state; permitted retry persists exactly once."
+    },
+    {
+      "id": "A34",
+      "family": "Evaluation",
+      "scenario": "Corrupt/torn/unreadable ledger and concurrent writers",
+      "package": "WP06",
+      "required_observation": "Declared durable accounting contract tested; no silent evaluation admission."
+    },
+    {
+      "id": "A35",
+      "family": "Evaluation",
+      "scenario": "Future-dependent cost warmup, initial loss, rank deficiency",
+      "package": "WP07",
+      "required_observation": "Original C9 questions preserved; valid positive and negative controls."
+    },
+    {
+      "id": "A36",
+      "family": "Evaluation",
+      "scenario": "Same exposed holdout under renamed family or another agent",
+      "package": "WP31",
+      "required_observation": "Exposure persists; no fresh-study fiction."
+    },
+    {
+      "id": "A37",
+      "family": "Evaluation",
+      "scenario": "Source-family ablation leaves descendants",
+      "package": "WP31",
+      "required_observation": "Remove information descendants or bound interpretation; use common keyed support."
+    },
+    {
+      "id": "A38",
+      "family": "Ownership",
+      "scenario": "Missing filing row or mixed ownership planes",
+      "package": "WP23",
+      "required_observation": "No inferred sale/current flow; legal perimeter and partialness retained."
+    },
+    {
+      "id": "A39",
+      "family": "Borrow",
+      "scenario": "Observed zero, no message and censored availability",
+      "package": "WP24",
+      "required_observation": "Distinct outputs; no market-wide supply claim."
+    },
+    {
+      "id": "A40",
+      "family": "Microstructure",
+      "scenario": "Sparse trade BBO used for continuous book or participant labels",
+      "package": "WP25",
+      "required_observation": "Unsupported grain/identity refused; late quotes and unavailable OI excluded."
+    },
+    {
+      "id": "A41",
+      "family": "Telemetry",
+      "scenario": "Old source edition, aggregate metric and issuer bridge",
+      "package": "WP26",
+      "required_observation": "Edition versus collection clocks separate; no unsupported issuer effect."
+    },
+    {
+      "id": "A42",
+      "family": "Telemetry",
+      "scenario": "Queue capacity called load or revenue",
+      "package": "WP27",
+      "required_observation": "Correct quantity meaning and actual issuer KPI evidence or refusal."
+    },
+    {
+      "id": "A43",
+      "family": "Regional",
+      "scenario": "A/H, CCASS/13F, reversal/revision non-equivalence",
+      "package": "WP29",
+      "required_observation": "Region-native identities and semantics preserved; missing is not zero."
+    },
+    {
+      "id": "A44",
+      "family": "Generality",
+      "scenario": "Second issuer or contradicting event",
+      "package": "WP22",
+      "required_observation": "Same reusable contracts; selection not based on realized winner."
+    },
+    {
+      "id": "A45",
+      "family": "Production",
+      "scenario": "Merged dark route or flag without real source consumer",
+      "package": "WP32",
+      "required_observation": "No production completion claim; exact served code/config/use verified separately."
+    },
+    {
+      "id": "A46",
+      "family": "Production",
+      "scenario": "Rollback and source correction during partial outage",
+      "package": "WP32",
+      "required_observation": "Known previous release recoverable, old snapshots intact, no duplicate effect."
+    },
+    {
+      "id": "A47",
+      "family": "Orchestration",
+      "scenario": "Native child lacks Fabric action; operator lacks worker spawn",
+      "package": "WP00",
+      "required_observation": "Transparent permitted relay or operator direct execution; no invented capability."
+    },
+    {
+      "id": "A48",
+      "family": "Orchestration",
+      "scenario": "Interrupted modify, denied action or original C19 not_found",
+      "package": "WP00",
+      "required_observation": "Freeze affected effect and reconcile; no alternate-key/carrier retry."
+    },
+    {
+      "id": "A49",
+      "family": "Orchestration",
+      "scenario": "Eight coordinators inherit separate budgets",
+      "package": "WP00",
+      "required_observation": "Reject multiplying root/grant/capacity; observe existing shared accounting."
+    },
+    {
+      "id": "A50",
+      "family": "Closure",
+      "scenario": "One demo finished but P1/evaluation/source obligations remain",
+      "package": "WP33",
+      "required_observation": "Mission incomplete or explicit evidenced disposition; no orphaned work."
+    }
+  ]
+}

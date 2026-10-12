@@ -56,6 +56,8 @@
 .conversation-companion dl { display: grid; gap: 4px; margin: 0; }
 .conversation-companion dt { color: #949494; font-size: 12px; }
 .conversation-companion dd { margin: 0 0 10px; }
+.conversation-source-excerpt { white-space: pre-wrap; margin: 0; padding: 14px 16px; border-left: 2px solid var(--conversation-accent); background: #181818; }
+.conversation-result-reader details summary { min-height: 44px; padding-block: 10px; cursor: pointer; }
 @media (max-width: 1050px) { .conversation-layout[data-companion="true"] { grid-template-columns: minmax(0,1fr); } .conversation-companion { width: min(100%,880px); margin-inline: auto; } }
 @media (max-width: 600px) {
   .atelier-conversation { padding: 24px; font-size: 15px; }

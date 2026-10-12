@@ -44,6 +44,7 @@ from control_plane.executive_service import (
     CEO_WEB_CEO_V2_READ_SCHEMA,
     ServiceConfig,
     ServiceError,
+    CeoAdmissionPhaseRefusal,
     activate_launchd_socket,
     send_control_request,
 )
@@ -426,6 +427,11 @@ def _parser() -> argparse.ArgumentParser:
         ("backup", "Create an online DB backup in the configured backup root."),
     ):
         cmd_parser = sub.add_parser(name, help=help_text)
+        if name == "status":
+            cmd_parser.add_argument(
+                "--ceo-admission", action="store_true",
+                help="As Control UID, observe current CEO guard only; never submit work.",
+            )
         if name.startswith("content-observer-"):
             cmd_parser.add_argument(
                 "--profile-key",
@@ -852,7 +858,9 @@ def company_consultation_launchd_entry(config: Mapping[str, Any]) -> dict[str, A
     if "company_consultation" not in config:
         return None
     if (type(value) is not dict
-            or set(value) != {"armed", "socket_path", "launchd_socket_name"}
+            or set(value) not in ({"armed", "socket_path", "launchd_socket_name"},
+                                  {"armed", "socket_path", "launchd_socket_name", "native_return_armed"})
+            or type(value.get("native_return_armed", False)) is not bool
             or type(value["armed"]) is not bool
             or value["socket_path"] != _CANONICAL_COMPANY_CONSULTATION_SOCKET
             or value["launchd_socket_name"] != _COMPANY_CONSULTATION_SOCKET_NAME):
@@ -2307,7 +2315,8 @@ def _service_from_config(
                 runtime=runtime, repository_root=company_repository,
                 worker_uid=company_worker_uid, relay_socket_path=_CANONICAL_AGENT_RELAY_SOCKET,
                 workspace_id=SLACK_WORKSPACE_ID, channel_id=SLACK_CHANNEL_ID,
-                requester_answer_wake_dispatch=dispatch_answer)
+                requester_answer_wake_dispatch=dispatch_answer,
+                native_return_armed=raw["company_consultation"].get("native_return_armed", False))
         company_listener = activate_launchd_socket(_COMPANY_CONSULTATION_SOCKET_NAME)
         activated_listeners.append(company_listener)
         company_binding = CompanyConsultationBinding(
@@ -2400,6 +2409,46 @@ async def _request_boot_autonomy_canary(
     return validated
 
 
+def _ceo_admission_guard(raw: Mapping[str, Any], config_path: Path,
+                         attestation_loader: Callable[[], Mapping[str, Any]]) -> Callable[[], None]:
+    """One production callback shared by submission and private current observation."""
+    own_config_sha256 = _sha256_file(config_path)
+
+    def require_ceo_admission() -> None:
+        from ops.executive_os.autonomy_control import require_ceo_submit_runtime_admission
+        try:
+            attestation = attestation_loader()
+        except Exception as exc:
+            raise CeoAdmissionPhaseRefusal("attestation_refused") from exc
+        try:
+            current_config_bytes = config_path.read_bytes()
+            if (attestation["config_sha256"] != own_config_sha256
+                    or hashlib.sha256(current_config_bytes).hexdigest() != own_config_sha256):
+                raise ServiceError("CEO admission config changed")
+            receipt_config = raw
+            for field in ("ceo_ingress_socket_path", "ceo_ingress_app_macro_root"):
+                if isinstance(raw.get(field), Path):
+                    if receipt_config is raw:
+                        receipt_config = dict(raw)
+                        encoded_config = json.loads(current_config_bytes)
+                    # The loader resolves aliases for service I/O. Receipts bind
+                    # the exact JSON strings, not that resolved spelling. Parse
+                    # only the same bytes whose hash matched the attestation,
+                    # and refuse if they no longer describe the loaded route.
+                    encoded_path = encoded_config[field]
+                    if _path(encoded_path, field) != raw[field]:
+                        raise ServiceError("CEO admission loaded path changed")
+                    receipt_config[field] = encoded_path
+        except Exception as exc:
+            raise CeoAdmissionPhaseRefusal("config_binding_refused") from exc
+        try:
+            require_ceo_submit_runtime_admission(receipt_config, own_config_sha256=own_config_sha256)
+        except Exception as exc:
+            raise CeoAdmissionPhaseRefusal("receipt_refused") from exc
+
+    return require_ceo_admission
+
+
 async def _serve_from_config(config_path: Path) -> None:
     raw = load_control_config(config_path)
     # Staging is a source read only. Production retains its existing broker;
@@ -2488,15 +2537,7 @@ async def _serve_from_config(config_path: Path) -> None:
     )
     # Bind fresh public CEO admission to the exact running config and the
     # existing root-owned receipt pair. Never read worker-codex.json as Control.
-    own_ceo_config_sha256 = _sha256_file(config_path)
-
-    def require_ceo_admission() -> None:
-        from ops.executive_os.autonomy_control import require_ceo_submit_runtime_admission
-        attestation = content_attestation_loader()
-        if (attestation["config_sha256"] != own_ceo_config_sha256
-                or _sha256_file(config_path) != own_ceo_config_sha256):
-            raise ServiceError("CEO admission config changed")
-        require_ceo_submit_runtime_admission(raw, own_config_sha256=own_ceo_config_sha256)
+    require_ceo_admission = _ceo_admission_guard(raw, config_path, content_attestation_loader)
 
     service = _service_from_config(
         raw,
@@ -2514,6 +2555,8 @@ async def _serve_from_config(config_path: Path) -> None:
 
 
 def _client_request(args: argparse.Namespace) -> tuple[str, dict[str, Any]]:
+    if args.command == "status" and getattr(args, "ceo_admission", False):
+        return "status", {"ceo_admission": True}
     if args.command in {
         "content-observer-enroll", "content-observer-status", "content-observer-revoke",
         "status",
