@@ -861,11 +861,13 @@ def _normalise_constraints(
         except ValueError as exc:
             raise StateConflict(str(exc)) from exc
         for key in ("execution_profile_id", "execution_profile_digest", "capability_policy_version",
-                    "capability_policy_digest", "routing_policy_version", "model", "effort"):
+                    "capability_policy_digest", "routing_policy_version", "model", "effort", "cost_class"):
             if result.get(key) != route[key].lower():
                 raise StateConflict(f"attended route constraint drifted at {key}")
         if result.get("preferred_model_aliases") != [route["model_alias"]]:
             raise StateConflict("attended route alias drifted")
+        if result.get("provider") != route["provider_alias"]:
+            raise StateConflict("attended route provider drifted")
         result["attended_route"] = route
     if host_admitted_placement_union and "work_placement_union" in raw:
         result["work_placement_union"] = _normalise_work_placement_union(
@@ -913,6 +915,8 @@ def _normalise_work_placement_union(
                 normalized_member["attended_route"] = normalize_attended_route(member["attended_route"])
             except ValueError as exc:
                 raise StateConflict(str(exc)) from exc
+            if normalized_member["provider_realm"] != normalized_member["attended_route"]["provider_alias"]:
+                raise StateConflict("attended host member provider differs from its route")
         identity = (
             normalized_member["provider_realm"],
             normalized_member["quota_class"],
@@ -1036,10 +1040,12 @@ def _project_work_placement(
             route = normalize_attended_route(member["attended_route"])
         except ValueError as exc:
             raise StateConflict(str(exc)) from exc
+        if provider_realm != route["provider_alias"]:
+            raise StateConflict("attended placement provider differs from its route")
         projected["attended_route"] = route
         projected["preferred_model_aliases"] = [route["model_alias"]]
         for key in ("execution_profile_id", "execution_profile_digest", "capability_policy_version",
-                    "capability_policy_digest", "routing_policy_version", "model", "effort"):
+                    "capability_policy_digest", "routing_policy_version", "model", "effort", "cost_class"):
             projected[key] = route[key].lower()
         if "model" in placement and str(placement["model"]).lower() != route["model"].lower():
             raise StateConflict("attended placement cannot change its exact catalogue model")

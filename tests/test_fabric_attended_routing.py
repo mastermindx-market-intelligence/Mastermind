@@ -157,3 +157,26 @@ def test_host_configuration_refuses_untyped_json_placement(tmp_path):
     from tests.test_executive_service import _config
     with pytest.raises(ValueError, match="bounded host configuration"):
         _config(tmp_path, coo_attended_work_placements=({"model_alias": "minimax.attended"},))
+
+
+def test_attended_cost_replaces_inherited_cost_and_refuses_later_drift(router):
+    root = {"work_placement_union": [member(router)]}
+    projected = _project_work_placement({"cost_class": "default"}, root,
+        {"provider_realm": "minimax", "quota_class": "minimax-read"}, raw_root_constraints=root)
+    assert projected["cost_class"] == "small"
+    projected["cost_class"] = "default"
+    with pytest.raises(StateConflict, match="cost_class"):
+        _normalise_constraints(projected)
+
+
+@pytest.mark.parametrize("stage", ["member", "projection"])
+def test_foreign_provider_cannot_relabel_an_attended_route(router, stage):
+    selected = member(router)
+    selected["provider_realm"] = "codex"
+    with pytest.raises(StateConflict, match="provider"):
+        if stage == "member":
+            _normalise_work_placement_union([selected])
+        else:
+            root = {"work_placement_union": [selected]}
+            _project_work_placement({}, root, {"provider_realm": "codex", "quota_class": "minimax-read"},
+                                    raw_root_constraints=root)

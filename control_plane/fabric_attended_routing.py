@@ -24,7 +24,7 @@ SCHEMA = "mastermind.fabric_attended_route/v1"
 _IDENTIFIER = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 _DIGEST = re.compile(r"^[a-f0-9]{64}$")
 _KEYS = frozenset({
-    "schema", "model_alias", "adapter_id", "harness_binding_id",
+    "schema", "model_alias", "provider_alias", "adapter_id", "harness_binding_id",
     "subscription_catalog_digest", "model", "effort", "cost_class",
     "routing_policy_version", "execution_profile_id", "execution_profile_digest",
     "capability_policy_version", "capability_policy_digest",
@@ -116,7 +116,7 @@ def resolve_attended_alias(router: ModelRouter, alias_name: str,
                 or alias.capability_policy_digest != router.capability_registry.policy_digest):
             raise ValueError("attended alias execution policy drifted")
         route = {key: getattr(alias, key) for key in (
-            "model_alias", "adapter_id", "model", "effort", "cost_class", "execution_profile_id",
+            "model_alias", "provider_alias", "adapter_id", "model", "effort", "cost_class", "execution_profile_id",
             "execution_profile_digest", "capability_policy_version", "capability_policy_digest")}
         route.update(schema=SCHEMA, routing_policy_version=router.policy_version,
                      harness_binding_id=binding_id, subscription_catalog_digest=compose_catalog_digest(
