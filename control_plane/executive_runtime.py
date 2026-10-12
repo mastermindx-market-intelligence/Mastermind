@@ -23810,6 +23810,160 @@ class BoundedRuntimeReadObservation:
             self._failed = True
             raise
 
+    def read_service_inference_bounded(
+        self,
+        operation_key: str,
+        *,
+        reference: Mapping[str, Any] | None = None,
+        include_receipt: bool = False,
+    ) -> dict[str, Any] | None:
+        """Select one service terminal result using this Runtime-owned observation.
+
+        A status read returns a reference only; an answer read requires the
+        exact content-bound reference and returns the full closed document.
+        This does not manufacture completion, attest raw provider files, or
+        bypass the existing Supervisor's absent direct-completion producer.
+        """
+        self._select()
+        loader = _BoundedRoleResultLoader(self._connection)
+        try:
+            from control_plane import (
+                executive_inference_contract as service_contract,
+                executive_inference_io as service_io,
+                executive_service_principal as service_principal,
+                ceo_intent as service_intent_owner,
+            )
+            if type(include_receipt) is not bool:
+                raise StateConflict("receipt selection flag must be a host Boolean")
+            intent = service_contract.intent_id(operation_key)
+            if reference is not None:
+                if not isinstance(reference, Mapping):
+                    raise StateConflict("direct reference must be a closed mapping")
+                expected_ref = service_io.validate_result_reference(
+                    reference, job_id=reference.get("job_id")
+                )
+                if expected_ref["schema"] != service_io.CONTENT_RESULT_REF_SCHEMA:
+                    raise StateConflict("direct result requires a content-bound reference")
+            else:
+                expected_ref = None
+            self._vm_progress.activate()
+            command = "ceo-intent:" + intent
+            event = loader.execute(
+                "SELECT aggregate_type,aggregate_id,event_type,actor,job_id,"
+                "payload_json,created_at_ms FROM events WHERE command_id=? LIMIT 2",
+                (command,),
+            ).fetchone()
+            if event is None:
+                if expected_ref is not None:
+                    raise StateConflict("original service operation has no result")
+                return None
+            if (event["aggregate_type"] != "job"
+                    or event["event_type"] != "JOB_CREATED"
+                    or not isinstance(event["job_id"], str)
+                    or event["aggregate_id"] != event["job_id"]
+                    or event["actor"] != "operator"):
+                raise StateConflict("service creation event is not canonical")
+            job = loader.execute(
+                "SELECT * FROM jobs WHERE job_id=? LIMIT 2",
+                (event["job_id"],),
+            ).fetchone()
+            if job is None:
+                raise StateConflict("service creation event lost its Job")
+            body = json.loads(event["payload_json"])
+            provenance = body.get("provenance") if isinstance(body, Mapping) else None
+            if not (isinstance(provenance, Mapping)
+                    and provenance.get("schema") == "mastermind.executive_service_intent.v1"
+                    and provenance.get("actor") == "svc-vps-inference"
+                    and provenance.get("principal_id") == "svc-vps-inference"
+                    and provenance.get("intent_id") == intent
+                    and provenance.get("task_kind") == "research"
+                    and provenance.get("requested_authorities") == ["READ", "RESEARCH"]
+                    and provenance.get("effective_authorities") == ["READ", "RESEARCH"]
+                    and provenance.get("write_authorities") == []
+                    and job["job_id"] == job["root_job_id"]
+                    and job["parent_job_id"] is None
+                    and job["orchestration_role"] is None
+                    and job["authority_level"] == "A0"
+                    and json.loads(job["requested_authorities_json"]) == ["READ", "RESEARCH"]
+                    and json.loads(job["allowed_write_paths_json"]) == []
+                    and json.loads(job["validation_commands_json"]) == []):
+                raise StateConflict("service Job/provenance identity or authority disagrees")
+            original = {
+                "operation_key": operation_key,
+                "objective": job["objective"],
+                "inference_request": provenance.get("inference_request"),
+            }
+            grounding = provenance.get("grounding")
+            derived = service_contract.derive(original, grounding)
+            if (derived["intent_id"] != intent
+                    or service_principal.fingerprint(derived) != provenance.get("fingerprint")):
+                raise StateConflict("service creation fingerprint disagrees with request")
+            canonical_receipt = None
+            if include_receipt:
+                canonical_receipt = service_contract.validate_receipt(
+                    service_intent_owner.build_receipt(
+                        _job_from_row(job), intent=derived["envelope"],
+                        fingerprint=provenance["fingerprint"], duplicate=False,
+                        created_at_ms=int(event["created_at_ms"]),
+                    ), operation_key,
+                )
+            if job["status"] != "COMPLETED":
+                if expected_ref is not None:
+                    raise StateConflict("service Job has not completed")
+                return ({"receipt": canonical_receipt, "reference": None,
+                         "observation_source_identity": self._identity}
+                        if include_receipt else None)
+            if (not isinstance(job["current_attempt_id"], str)
+                    or not isinstance(job["assigned_worker_id"], str)
+                    or not isinstance(job["result_json"], str)):
+                raise StateConflict("service completion lacks a current result identity")
+            attempt = loader.execute(
+                "SELECT attempt_id,job_id,worker_id,status,exit_code,"
+                "result_json,finished_at_ms FROM attempts WHERE attempt_id=? LIMIT 2",
+                (job["current_attempt_id"],),
+            ).fetchone()
+            if (attempt is None or attempt["job_id"] != job["job_id"]
+                    or attempt["attempt_id"] != job["current_attempt_id"]
+                    or attempt["worker_id"] != job["assigned_worker_id"]
+                    or attempt["status"] != "COMPLETED"
+                    or attempt["exit_code"] != 0
+                    or attempt["finished_at_ms"] is None
+                    or attempt["result_json"] != job["result_json"]):
+                raise StateConflict("service terminal Job/Attempt/worker binding disagrees")
+            value = json.loads(job["result_json"])
+            document = service_io.validate_result_document(
+                value, job_id=job["job_id"],
+                max_output_chars=original["inference_request"]["max_output_chars"],
+            )
+            actual_ref = document["reference"]
+            if actual_ref["schema"] != service_io.CONTENT_RESULT_REF_SCHEMA:
+                raise StateConflict("service result is missing the canonical content identity")
+            if (actual_ref["job_id"] != job["job_id"]
+                    or actual_ref["attempt_id"] != attempt["attempt_id"]
+                    or actual_ref["worker_id"] != attempt["worker_id"]):
+                raise StateConflict("service terminal reference differs from current Attempt")
+            if expected_ref is not None and expected_ref != actual_ref:
+                raise StateConflict("requested service result is not the canonical terminal ref")
+            result = {
+                "intent_id": intent,
+                "request_fingerprint": provenance["fingerprint"],
+                "reference": actual_ref,
+                "observation_source_identity": self._identity,
+            }
+            if include_receipt:
+                result["receipt"] = canonical_receipt
+            if expected_ref is not None:
+                result["document"] = document
+            return result
+        except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+            self._failed = True
+            raise StateConflict("direct service result is invalid or unavailable") from exc
+        except BaseException:
+            self._failed = True
+            raise
+        finally:
+            self._vm_progress.deactivate()
+
     def read_role_result_bounded(
         self,
         root_job_id: str,
