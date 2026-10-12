@@ -2892,7 +2892,7 @@ export function App() {
                 <b>{p.title || p.workRef}</b>
                 <span>
                   {label(p.state)} ·{" "}
-                  {display(p.nextAction, "No next action projected")}
+                  {p.nextActionWithheld ? "Next action withheld" : display(p.nextAction, "No next action projected")}
                 </span>
                 <small>
                   {p.rootJobId

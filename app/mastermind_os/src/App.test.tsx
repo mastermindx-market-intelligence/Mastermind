@@ -84,6 +84,21 @@ afterEach(() => {
 });
 
 describe("React read lifecycle fences", () => {
+  it("keeps Programs and exact Mission navigation available with a withheld next action", async () => {
+    const raw = controlRoomFixture(), unsafe = "token=synthetic-fixture";
+    raw.work[1].agent_os.next_action = unsafe;
+    const readMission = vi.fn(async ({ workRef, rootJobId }) => missionFixture(workRef, rootJobId));
+    window.MastermindMissionHost = { readPrograms: async () => raw, readMission };
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Open Programs" }));
+    expect(await screen.findByText(/Next action withheld/)).toBeTruthy();
+    expect(document.body.innerHTML).not.toContain(unsafe);
+    await user.click(screen.getByRole("button", { name: /Beta program/ }));
+    expect(await screen.findByText("Exact project context · JOB-B")).toBeTruthy();
+    expect(readMission).toHaveBeenLastCalledWith(expect.objectContaining({ workRef: "WS:BETA", rootJobId: "JOB-B" }));
+    expect(window.location.search).toBe("?work_ref=WS%3ABETA&root_job_id=JOB-B");
+  });
   it("hides displayed A synchronously while B is pending and after B rejects", async () => {
     const b = deferred<unknown>(), collectionB = deferred<unknown>(),
       read = vi.fn(({ workRef }: { workRef: string }) =>
