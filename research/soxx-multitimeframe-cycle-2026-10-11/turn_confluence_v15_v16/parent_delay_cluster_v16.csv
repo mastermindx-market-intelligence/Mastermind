@@ -1,0 +1,7 @@
+policy,pair_n,weeks,mean_lift,benefited,harmed,winner_harmed,loser_helped,week_block95
+turn_pivot_15,12,8,0.5902,4,2,1,4,"[-0.0753, 1.5039]"
+turn_pivot_30,16,6,-0.433,4,5,4,4,"[-4.1089, 2.4851]"
+parent_delay_1,34,14,-0.8553,10,11,10,7,"[-3.8535, 1.6373]"
+parent_delay_2,34,14,-0.297,8,14,9,4,"[-3.1162, 1.7729]"
+parent_delay_4,34,14,-2.6503,5,17,12,4,"[-6.2804, 0.3174]"
+parent_delay_8,34,14,-3.2796,9,15,11,7,"[-8.4477, 0.6509]"
