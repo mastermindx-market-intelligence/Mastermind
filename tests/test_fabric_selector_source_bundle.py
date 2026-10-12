@@ -22,6 +22,7 @@ PAIRS = {
     "ext/pick.py": (b"old picker\n", b"final picker\n"),
     "ext/lease_broker.py": (b"old broker\n", b"new broker\n"),
     "ext/tests/test_r31_glm_burn_down.py": (b"old policy test\n", b"new policy test\n"),
+    "bin/pool": (b"old wrapper\n", b"new wrapper\n"),
 }
 PATCH_NAMES = (
     "fabric_task_expiry_host_select_20261012_v2.patch",
@@ -29,6 +30,7 @@ PATCH_NAMES = (
     "pick_glm_paired_window_urgency_20261012.patch",
     "lease_broker_glm_expiry_account_20261012.patch",
     "test_r31_paired_quota_truth_20261012.patch",
+    "pool_cli_selector_20261012.patch",
 )
 
 
@@ -53,8 +55,10 @@ def kit(tmp_path):
     patch_dir.mkdir(parents=True)
     originals = {}
     sources = []
+    wrapper = tmp_path / "installed-pool"
     for name,(before,after) in PAIRS.items():
-        target = ext / Path(name).relative_to("ext")
+        target = (wrapper if name == "bin/pool"
+                  else ext / Path(name).relative_to("ext"))
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(before)
         originals[name]=before
@@ -65,6 +69,7 @@ def kit(tmp_path):
         _patch("ext/pick.py",b"mid picker\n",b"final picker\n"),
         _patch("ext/lease_broker.py",b"old broker\n",b"new broker\n"),
         _patch("ext/tests/test_r31_glm_burn_down.py",b"old policy test\n",b"new policy test\n"),
+        _patch("bin/pool",b"old wrapper\n",b"new wrapper\n"),
     ]
     manifests=[]
     for name,source in zip(PATCH_NAMES,script_patches):
@@ -83,20 +88,21 @@ def kit(tmp_path):
     }
     manifest = bundle / "ops/native_fabric/selector_source_bundle_20261012.json"
     manifest.write_text(json.dumps(data,sort_keys=True))
-    return ext,bundle,manifest,originals
+    return ext,bundle,manifest,originals,wrapper
 
 
 def test_complete_replay_verifies_and_leaves_original_source_unchanged(kit):
-    ext,bundle,manifest,originals=kit
-    result=module.verify(ext,bundle,manifest)
+    ext,bundle,manifest,originals,wrapper=kit
+    result=module.verify(ext,bundle,manifest,wrapper)
     assert result["result"]=="QUALIFIED_SOURCE_ONLY"
-    assert result["patches_verified"]==5
-    assert result["sources_verified"]==4
+    assert result["patches_verified"]==6
+    assert result["sources_verified"]==5
     assert result["live_source_modified"] is False
     assert result["account_or_lease_modified"] is False
     assert result["production_installed"] is False
     for name,raw in originals.items():
-        assert (ext/Path(name).relative_to("ext")).read_bytes()==raw
+        file = wrapper if name == "bin/pool" else ext/Path(name).relative_to("ext")
+        assert file.read_bytes()==raw
         assert result["targets"][name]==_sha(PAIRS[name][1])
 
 
@@ -106,9 +112,11 @@ def test_complete_replay_verifies_and_leaves_original_source_unchanged(kit):
     ("source_symlink","SOURCE_NOT_BOUNDED_REGULAR"),
     ("wrong_patched_digest","PATCH_RESULT_DRIFT"),
     ("missing_patch","FileNotFoundError"),
+    ("wrapper_drift","SOURCE_DRIFT:bin/pool"),
+    ("wrapper_symlink","SOURCE_NOT_BOUNDED_REGULAR:installed-pool"),
 ])
 def test_error_prevents_installation_and_does_not_modify_inputs(kit,case,expected):
-    ext,bundle,manifest,originals=kit
+    ext,bundle,manifest,originals,wrapper=kit
     data=json.loads(manifest.read_text())
     if case=="source_drift":
         (ext/"fabric_task.py").write_text("altered source\n")
@@ -124,26 +132,34 @@ def test_error_prevents_installation_and_does_not_modify_inputs(kit,case,expecte
         manifest.write_text(json.dumps(data))
     elif case=="missing_patch":
         (bundle/data["patches"][0]["path"]).unlink()
+    elif case=="wrapper_drift":
+        wrapper.write_text("modified wrapper\n")
+    elif case=="wrapper_symlink":
+        target=ext.parent/"existing-wrapper-target"
+        target.write_text("safe test data")
+        wrapper.unlink();wrapper.symlink_to(target)
     with pytest.raises((module.PreflightRefusal,OSError)) as error:
-        module.verify(ext,bundle,manifest)
+        module.verify(ext,bundle,manifest,wrapper)
     message=str(error.value)
     assert expected in message or (case=="missing_patch" and isinstance(error.value,FileNotFoundError))
     # The other untouched source inputs remain untouched.
     for name,raw in originals.items():
-        if (case=="source_drift" and name=="ext/fabric_task.py") or (
-            case=="source_symlink" and name=="ext/fabric_task.py"
+        if (case in ("source_drift", "source_symlink")
+                and name=="ext/fabric_task.py") or (
+                case in ("wrapper_drift", "wrapper_symlink") and name=="bin/pool"
         ):
             continue
-        assert (ext/Path(name).relative_to("ext")).read_bytes()==raw
+        file = wrapper if name == "bin/pool" else ext/Path(name).relative_to("ext")
+        assert file.read_bytes()==raw
 
 
 def test_manifest_refuses_install_mode(kit):
-    ext,bundle,manifest,_=kit
+    ext,bundle,manifest,_,wrapper=kit
     data=json.loads(manifest.read_text())
     data["live_install_supported"]=True
     manifest.write_text(json.dumps(data))
     with pytest.raises(module.PreflightRefusal,match="INVALID_MANIFEST_SCHEMA"):
-        module.verify(ext,bundle,manifest)
+        module.verify(ext,bundle,manifest,wrapper)
 
 
 @pytest.mark.parametrize("bad", [
@@ -156,7 +172,7 @@ def test_relative_path_validation_cannot_escape_working_copy(bad):
 
 
 def test_input_source_move_during_replay_is_detected(kit,monkeypatch):
-    ext,bundle,manifest,_=kit
+    ext,bundle,manifest,_,wrapper=kit
     real_run=subprocess.run
     altered=[False]
     def wrapped_run(args,*a,**kw):
@@ -168,12 +184,12 @@ def test_input_source_move_during_replay_is_detected(kit,monkeypatch):
         return result
     monkeypatch.setattr(module.subprocess,"run",wrapped_run)
     with pytest.raises(module.PreflightRefusal,match="SOURCE_MOVED_DURING_PREFLIGHT"):
-        module.verify(ext,bundle,manifest)
+        module.verify(ext,bundle,manifest,wrapper)
     assert altered[0]
 
 
 def test_replay_never_executes_shell_or_installer(kit,monkeypatch):
-    ext,bundle,manifest,_=kit
+    ext,bundle,manifest,_,wrapper=kit
     real_run=subprocess.run
     seen=[]
     def wrapped_run(args,*a,**kw):
@@ -184,5 +200,5 @@ def test_replay_never_executes_shell_or_installer(kit,monkeypatch):
         assert kw.get("timeout") == 15
         return real_run(args,*a,**kw)
     monkeypatch.setattr(module.subprocess,"run",wrapped_run)
-    assert module.verify(ext,bundle,manifest)["result"]=="QUALIFIED_SOURCE_ONLY"
-    assert len(seen)==10  # five check+apply pairs
+    assert module.verify(ext,bundle,manifest,wrapper)["result"]=="QUALIFIED_SOURCE_ONLY"
+    assert len(seen)==12  # six check+apply pairs
