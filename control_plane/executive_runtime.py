@@ -7928,6 +7928,21 @@ def _sealed_worker_result_payload(
     }
     is_fabric = isinstance(evidence, dict) and evidence.get("schema_version") == (
         "mastermind.fabric_sealed_worker_result_evidence/v1")
+    # The candidate cannot choose its own validation regime. Fabric recovery
+    # requires its pin; ordinary MH1 also uses that pin with the existing v1.
+    metadata = _strict_canonical_json_loads(
+        str(attempt_row["launch_metadata_json"]), name="terminal launch metadata")
+    if not isinstance(metadata, dict):
+        raise StateConflict("sealed-worker terminal launch metadata is invalid")
+    recovery_metadata = metadata.get("worker_recovery_binding")
+    recovery_adapter = (recovery_metadata.get("adapter_id")
+                        if isinstance(recovery_metadata, dict) else None)
+    fabric_recovery = recovery_adapter == "attended-fabric"
+    remote_pinned = REMOTE_LAUNCH_IDENTITY_KEY in metadata
+    if (is_fabric != fabric_recovery or (fabric_recovery and not remote_pinned)
+            or (remote_pinned and recovery_adapter not in {
+                "attended-fabric", "attempt-bound-remote-worker"})):
+        raise StateConflict("sealed-worker terminal regime differs from durable launch")
     if is_fabric:
         evidence_keys |= {"remote_assignment_observation", "remote_assignment_observation_digest",
                           "launch_identity", "physical_binding"}
@@ -8130,8 +8145,6 @@ def _sealed_worker_result_payload(
         from control_plane.fabric_terminal_evidence import validate_fabric_terminal_evidence
         from control_plane.worker_execution_contract import WorkerRecoveryBinding
         try:
-            metadata = _strict_canonical_json_loads(
-                str(attempt_row["launch_metadata_json"]), name="Fabric terminal launch metadata")
             recovery = WorkerRecoveryBinding.from_dict(metadata["worker_recovery_binding"])
             if recovery.adapter_id != "attended-fabric":
                 raise ValueError("Fabric result requires original Fabric adapter")

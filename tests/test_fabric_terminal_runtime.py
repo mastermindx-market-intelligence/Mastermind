@@ -119,6 +119,66 @@ def test_real_runtime_accepts_truthful_finite_fabric_variant(tmp_path):
         assert _sealed_worker_result_payload(con, row, expected_role="plan", terminal_payload=terminal)
 
 
+@pytest.mark.parametrize("remove_pin", [False, True])
+def test_remote_launch_cannot_select_local_terminal_validation(tmp_path, remove_pin):
+    runtime, row, terminal = fabric_fixture(tmp_path)
+    evidence = terminal["result_evidence"]
+    evidence["schema_version"] = "mastermind.sealed_worker_result_evidence/v1"
+    for key in ("remote_assignment_observation", "remote_assignment_observation_digest",
+                "launch_identity", "physical_binding"):
+        evidence.pop(key)
+    for name in ("collection_receipt", "validation_receipts"):
+        evidence[name].pop("fabric_cleanup")
+        evidence[name]["uid_sweep"] = copy.deepcopy(evidence["assignment_seal_receipt"]["uid_sweep"])
+        evidence[name + "_digest"] = digest(evidence[name])
+    terminal["validation_receipt_digest"] = evidence["validation_receipts_digest"]
+    terminal["terminal_evidence_digest"] = digest({
+        k: v for k, v in terminal.items() if k != "terminal_evidence_digest"})
+    if remove_pin:
+        metadata = json.loads(row["launch_metadata_json"])
+        metadata.pop(REMOTE_LAUNCH_IDENTITY_KEY)
+        row["launch_metadata_json"] = json.dumps(metadata, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    with runtime.store.transaction() as con:
+        con.execute("UPDATE jobs SET result_json=? WHERE job_id=?", (
+            json.dumps(terminal, sort_keys=True, separators=(",", ":"), ensure_ascii=False), row["job_id"]))
+    with runtime.store.read() as con:
+        with pytest.raises(StateConflict):
+            _sealed_worker_result_payload(con, row, expected_role="plan", terminal_payload=terminal)
+
+
+def test_fabric_pin_cannot_bind_a_local_recovery_adapter(tmp_path):
+    runtime, row, terminal = fabric_fixture(tmp_path)
+    metadata = json.loads(row["launch_metadata_json"])
+    metadata["worker_recovery_binding"]["adapter_id"] = "local"
+    row["launch_metadata_json"] = json.dumps(metadata, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    with runtime.store.read() as con:
+        with pytest.raises(StateConflict):
+            _sealed_worker_result_payload(con, row, expected_role="plan", terminal_payload=terminal)
+
+
+@pytest.mark.parametrize("adapter_id", ["attempt-bound-remote-worker", "local", None])
+def test_ordinary_mh1_remote_pin_requires_compatible_recovery(tmp_path, adapter_id):
+    from tests.test_executive_terminal_return import completed_sealed_worker_fixture
+    from control_plane.worker_execution_contract import WorkerRecoveryBinding
+    runtime, row, terminal, spec, ref = completed_sealed_worker_fixture(tmp_path, include_launch=True)
+    metadata = json.loads(row["launch_metadata_json"])
+    if adapter_id is not None:
+        metadata["worker_recovery_binding"] = WorkerRecoveryBinding.bind(
+            adapter_id=adapter_id, spec=spec, process_ref=ref,
+            prompt_path=spec.run_dir / "input" / "worker-prompt.txt").to_dict()
+    else:
+        metadata.pop("worker_recovery_binding", None)
+    metadata[REMOTE_LAUNCH_IDENTITY_KEY] = {
+        "schema_version": REMOTE_LAUNCH_IDENTITY_SCHEMA, "sha256": "1" * 64}
+    row["launch_metadata_json"] = json.dumps(metadata, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    with runtime.store.read() as con:
+        if adapter_id == "attempt-bound-remote-worker":
+            assert _sealed_worker_result_payload(con, row, expected_role="plan", terminal_payload=terminal)
+        else:
+            with pytest.raises(StateConflict, match="terminal regime differs from durable launch"):
+                _sealed_worker_result_payload(con, row, expected_role="plan", terminal_payload=terminal)
+
+
 @pytest.mark.parametrize("mutation", ["pin", "physical", "denial", "phase", "sweep", "ref_boolean_alias"])
 def test_real_runtime_rejects_fabric_identity_or_evidence_mutation(tmp_path, mutation):
     runtime, row, terminal = fabric_fixture(tmp_path)
