@@ -1172,6 +1172,12 @@ class ProcessInspector:
     """OS process identity source, injectable in model-free tests."""
 
     def boot_session_id(self) -> str:
+        if platform.system() == "Linux":
+            from control_plane.linux_process_identity import LinuxProcessIdentityError, read_linux_boot_id
+            try:
+                return read_linux_boot_id()
+            except LinuxProcessIdentityError as exc:
+                raise ProcessIdentityError("cannot qualify Linux boot identity") from exc
         if platform.system() == "Darwin":
             result = _run_checked(["/usr/sbin/sysctl", "-n", "kern.bootsessionuuid"])
             if result.returncode == 0 and result.stdout.strip():
@@ -1181,6 +1187,12 @@ class ProcessInspector:
         return f"adapter-{os.getpid()}"
 
     def inspect(self, pid: int) -> ProcessIdentity:
+        if platform.system() == "Linux":
+            from control_plane.linux_process_identity import LinuxProcessIdentityError, inspect_linux_process
+            try:
+                return ProcessIdentity(**inspect_linux_process(pid))
+            except LinuxProcessIdentityError as exc:
+                raise ProcessIdentityError("cannot qualify Linux process identity") from exc
         if platform.system() == "Darwin":
             libproc = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
             proc_pidinfo = libproc.proc_pidinfo

@@ -2450,6 +2450,85 @@ class ExecutiveSupervisor:
             ),
         )
 
+    def _retain_remote_assignment_observation(
+        self, active: ActiveRun, observation: Mapping[str, Any]
+    ) -> tuple[Path, dict[str, str]]:
+        """Retain one authenticated broker observation under the original fence.
+
+        This source seam does not launch, seal remote files, finalize a broker,
+        terminalize an Attempt, or remove FABRIC_ASSIGNMENT_SEAL_UNAVAILABLE.
+        Its ACK may be sent only by the existing bound Control caller; a future
+        qualified producer must supply that actual authenticated observation.
+        """
+        from control_plane.broker_assignment_seal import (
+            canonical, control_retention_record, digest, verify_control_readback,
+            validate_control_seal,
+        )
+        from control_plane.worker_execution_contract import worker_launch_spec_sha256
+
+        material = json.loads(canonical(observation))
+        if (set(material) != {"schema_version", "snapshot", "snapshot_sha256",
+                              "control_seal", "worker_denial"}
+                or material["schema_version"] != "mastermind.worker_assignment_seal_commit/v1"):
+            raise TerminalAssignmentSealError("remote assignment observation shape differs")
+        snapshot = material["snapshot"]
+        if (type(snapshot) is not dict or set(snapshot) != {
+                "schema_version", "run_id", "job_id", "worker_id", "effective_grant_digest",
+                "process_ref", "paths", "uid_sweep"}
+                or snapshot["schema_version"] != "mastermind.worker_assignment_seal_prepare/v1"
+                or digest(snapshot) != material["snapshot_sha256"]
+                or material["worker_denial"] != {
+                    label: {"open": "EACCES", "traverse": "EACCES", "list": "EACCES"}
+                    for label in ("workspace", "run")}):
+            raise TerminalAssignmentSealError("remote assignment observation is incomplete")
+        attempt = active.lease.attempt
+        with self.runtime.store.transaction() as connection:
+            # Reuse the existing lease owner, including cancellation states.
+            # The transaction prevents adoption while retaining this receipt.
+            self.runtime.attempts._leased_row(
+                connection, attempt_id=attempt.attempt_id,
+                fence_generation=attempt.fence_generation, lease_token=active.lease.lease_token,
+                timestamp=self.runtime.store.now_ms(), statuses=_ACTIVE_ATTEMPT_STATUSES,
+            )
+            current = self.runtime.attempts.get_attempt(attempt.attempt_id)
+            assert current is not None
+            binding, spec, _ = self._validated_recovery_binding(current)
+            if (binding.process_ref != active.process_ref
+                    or worker_launch_spec_sha256(spec) != worker_launch_spec_sha256(active.launch_spec)
+                    or snapshot["run_id"] != current.attempt_id
+                    or snapshot["job_id"] != current.job_id
+                    or snapshot["worker_id"] != current.worker_id
+                    or snapshot["effective_grant_digest"] != getattr(spec, "effective_grant_digest", None)
+                    or snapshot["process_ref"] != _jsonable(binding.process_ref)):
+                raise TerminalAssignmentSealError("remote observation differs from original launch pin")
+            self._validate_terminal_uid_sweep(snapshot["uid_sweep"])
+            entries = {item["disposition"]: item["identity"]
+                       for item in spec.isolation_manifest["entries"]}
+            seal = material["control_seal"]
+            if (type(snapshot["paths"]) is not dict
+                    or set(snapshot["paths"]) != {"workspace", "run"}):
+                raise TerminalAssignmentSealError("remote Control seal is incomplete")
+            owners = {entries["CURRENT_" + label.upper()]["uid"] for label in ("workspace", "run")}
+            if len(owners) != 1:
+                raise TerminalAssignmentSealError("remote Control roots have different owners")
+            validate_control_seal(snapshot, seal, next(iter(owners)))
+            for label, identity in snapshot["paths"].items():
+                admitted = entries["CURRENT_" + label.upper()]
+                if (set(identity) != set(admitted)
+                        or any(identity[key] != admitted[key] for key in identity if key != "mtime_ns")):
+                    raise TerminalAssignmentSealError("remote seal differs from admitted assignment")
+            record = control_retention_record(material)
+            path = self._receipt_path(
+                current.attempt_id, "remote-assignment-observation.json",
+                legacy=self._terminal_assignment_receipt_path(current.attempt_id).with_name(
+                    "remote-assignment-observation.json"),
+            )
+            _write_or_verify_private_json(path, record, name="remote assignment observation")
+            verify_control_readback(path, record)
+            ack = {"run_id": current.attempt_id, "observation_sha256": digest(material),
+                   "retention_sha256": digest(record)}
+        return path, ack
+
     @staticmethod
     def _validate_terminal_uid_sweep(value: Any) -> Mapping[str, Any]:
         from control_plane.executive_worker_broker import uid_sweep_receipt_is_passing

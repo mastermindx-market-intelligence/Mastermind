@@ -124,3 +124,47 @@ retained readback, and refuse conflicting admission or owner drift. It must
 govern the actual launcher, including `remote_sub`/`lane_runtime`; an unrelated
 broker's lock is insufficient. The acceptance-only `sudo -u` probe does not
 install this production remote operation.
+
+
+## Source components for the original owner interval
+
+The Linux `ProcessInspector` branch now uses the fixed proc filesystem, a
+pinned original PID directory, exact field-22 start ticks and a canonical boot
+UUID. Stat/status observations must preserve the process generation and all
+real, effective, saved and filesystem principal values. It reads no environment
+or command-line contents and cannot redirect inspection to a caller's proc
+fixture. Inert tests qualify parsing and failure handling; they do not qualify
+a host, proc visibility or the dedicated-UID census.
+
+`BrokerPolicy.require_assignment_seal` is an opt-in source branch, defaulting
+to false. No installed entrypoint enables it. When true, startup explicitly
+refuses until an authenticated original-assignment reconciliation producer is
+composed: empty roots and a startup UID sweep cannot settle a previous effect.
+The branch rejects extra supplementary groups and validation effects. It extends
+the incumbent broker's existing active-run exclusion, rather than adding a
+second admission or lease owner.
+
+After original collection, cancellation and terminal UID sweep have settled:
+
+| Existing broker operation | Required evidence | Admission outcome |
+| --- | --- | --- |
+| `assignment-seal-prepare` | Original process/grant/Attempt, passing sweep, exact admitted directory identities and protected Control-owned parents | Retain the original active run |
+| `assignment-seal-commit` | Matching prepared digest, Control seal, current exact directory identities, raw worker open/traverse/list `EACCES` | Cache the original shielded observation and retain the active run |
+| `assignment-seal-finalize` | Authenticated Control's exact observation and durable-retention digests | Release only that original run |
+
+The Supervisor's `_retain_remote_assignment_observation` source seam checks the
+original Runtime lease/fence and persisted launch pin, writes the existing
+private per-Attempt receipt, and independently reads back its bounded exact
+bytes before producing the finalize acknowledgment. The gateway retains no
+state. A worker-owned receipt is not durable Control authority. Changed digests
+refuse; replay of an old finalized observation cannot release a successor run.
+Shutdown drains original owned cancellation, collection, sweep and observation
+tasks; disconnecting their caller does not manufacture physical completion.
+
+These source components are not yet a remote seal producer or a production
+Backend. The authenticated remote Control operation that prepares and seals the
+actual Ubuntu assignment, the worker-principal launch/denial mechanism, restart
+reconciliation, enrolled supported-harness profile, Linux census/host binding,
+and full real-path acceptance remain separate requirements. The existing
+`FABRIC_ASSIGNMENT_SEAL_UNAVAILABLE` refusal remains in force. No source flag,
+fixture receipt or Mac Control observation supplies those remote capabilities.
