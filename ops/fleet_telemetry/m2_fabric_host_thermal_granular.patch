@@ -1,0 +1,428 @@
+--- a/ext/host_pull_backend.py
++++ b/ext/host_pull_backend.py
+@@ -38,7 +38,7 @@
+         print("|".join([name, "1" if e.get("local") else "0", alias, wr]))
+ 
+ def write_state():
+-    import json, os, sys, time, tempfile, stat
++    import json, os, sys, time, tempfile, stat, math, re
+     state_dir, host, rc, out = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
+     doc = {"host": host, "ts": int(time.time()), "reachable": False, "error": None}
+ 
+@@ -87,6 +87,83 @@
+             "reason": kv.get("lease_reason", "census_unavailable"),
+         }
+         doc["tools"] = [t for t in (kv.get("tools") or "").split(",") if t]
++        # Read-only optional thermal addition. Unknown/malformed never becomes 0.
++        if kv.get("therm_reader") == "hwmon_v1":
++            def _milli(name):
++                raw = kv.get("therm_" + name)
++                if not isinstance(raw, str) or len(raw) > 10:
++                    return None
++                if not raw.isascii() or not raw.lstrip("-").isdigit():
++                    return None
++                value = int(raw)
++                return round(value / 1000, 3) if -50000 <= value <= 150000 else None
++            cpu_tctl = _milli("cpu_tctl_mc")
++            nvme_count = kv.get("therm_nvme_drive_count")
++            doc["thermal"] = {
++                "schema": "mastermind.fabric_host_thermal.v1",
++                "source": "linux_hwmon",
++                "observed_at": doc["ts"],
++                "status": "OBSERVED" if cpu_tctl is not None else "CPU_TEMP_MISSING",
++                "admission_authoritative": False,
++                "cpu_tctl_c": cpu_tctl,
++                "cpu_ccd1_c": _milli("cpu_ccd1_mc"),
++                "cpu_ccd2_c": _milli("cpu_ccd2_mc"),
++                "nvme_hottest_c": _milli("nvme_hottest_mc"),
++                "nvme_margin_max_c": _milli("nvme_margin_max_mc"),
++                "nvme_margin_crit_c": _milli("nvme_margin_crit_mc"),
++                "nvme_drive_count": (int(nvme_count) if isinstance(nvme_count, str)
++                    and nvme_count.isascii() and nvme_count.isdigit()
++                    and len(nvme_count) <= 3 else None),
++            }
++        # Procfs detail supplements existing host load/memory readings; it is
++        # never a second permission, routing or admission authority.
++        if kv.get("therm_reader") == "hwmon_v1":
++            def safe_float(name, low=0.0, high=100.0):
++                raw=kv.get("therm_"+name,"")
++                if not isinstance(raw,str) or len(raw)>30:
++                    return None
++                try:
++                    n=float(raw)
++                except (ValueError,TypeError,OverflowError):
++                    return None
++                return round(n,2) if math.isfinite(n) and low<=n<=high else None
++            def core_map(name, upper):
++                raw=kv.get("therm_"+name,"")
++                if not isinstance(raw,str) or len(raw)>3072:
++                    return {}
++                out={}
++                for field in raw.split(","):
++                    if not field:continue
++                    pieces=field.split(":",1)
++                    if len(pieces)!=2 or not re.fullmatch(r"cpu[0-9]{1,3}",pieces[0]):
++                        return {}
++                    if pieces[0] in out or len(out)>=128:
++                        return {}
++                    try:
++                        x=float(pieces[1])
++                    except (TypeError,ValueError,OverflowError):
++                        return {}
++                    if not math.isfinite(x) or not 0<=x<=upper:
++                        return {}
++                    out[pieces[0]]=round(x,1)
++                return out
++            mem_free=kv.get("therm_mem_available_bytes")
++            swap_used=kv.get("therm_swap_used_bytes")
++            def uint(raw):
++                return (int(raw) if isinstance(raw,str) and 0<len(raw)<=20
++                    and raw.isascii() and raw.isdigit() else None)
++            doc["granular"]={
++                "schema":"mastermind.fabric_host_granular.v1",
++                "source":"linux_procfs",
++                "observed_at":doc["ts"],
++                "admission_authoritative":False,
++                "cpu_busy_pct":safe_float("cpu_total_busy_pct"),
++                "per_core_busy_pct":core_map("cpu_core_busy_csv",100),
++                "per_core_freq_mhz":core_map("cpu_core_freq_csv",10000),
++                "psi_some_avg10":{k:safe_float("psi_"+k+"_some10") for k in ("cpu","memory","io")},
++                "mem_available_bytes":uint(mem_free),
++                "swap_used_bytes":uint(swap_used),
++            }
+         summary = "reachable=true"
+     elif rc == 255:
+         doc["error"] = "ssh_unreachable"
+--- a/ext/host_pull_probe.template
++++ b/ext/host_pull_probe.template
+@@ -1,6 +1,6 @@
+ PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"   # R34: claude/codex are installed under ~/.local/bin on mb/m1; non-login ssh does not source .zprofile
+ ts=$(date +%s)
+-load1=""; load5=""; ncpu=""; mem=""; disk=""; on_ac="unknown"; active="0"; tools=""
++load1=""; load5=""; ncpu=""; mem=""; disk=""; on_ac="unknown"; active="0"; tools=""; thermals=""
+ case "$(uname -s)" in
+   Darwin)
+     load1=$(sysctl -n vm.loadavg | awk '{print $2}')
+@@ -30,6 +30,108 @@
+     fi
+     ;;
+   Linux)
++    # Additive Linux hwmon observation. No guest agent, listener or host mutation.
++    thermals=$(python3 -c '
++import pathlib
++r=pathlib.Path("/sys/class/hwmon")
++def value(d,n):
++    try:
++        return (d/n).read_text(encoding="ascii").strip()
++    except (OSError,UnicodeError):
++        return None
++def mc(d,n):
++    s=value(d,n)
++    try:
++        x=int(s)
++        return x if -50000 <= x <= 150000 else None
++    except (TypeError,ValueError):
++        return None
++cpu={}
++nvme=[]
++for d in sorted(r.glob("hwmon*")):
++    chip=value(d,"name")
++    if chip=="k10temp":
++        for label,name in (("cpu_tctl_mc","temp1_input"),("cpu_ccd1_mc","temp3_input"),("cpu_ccd2_mc","temp4_input")):
++            v=mc(d,name)
++            if v is not None:
++                cpu[label]=v
++    elif chip=="nvme":
++        t=mc(d,"temp1_input")
++        if t is None:
++            continue
++        max_c=mc(d,"temp1_max")
++        crit_c=mc(d,"temp1_crit")
++        nvme.append((t,max_c,crit_c))
++# Linux procfs counters: bounded 150ms sample, observational only.
++import time
++def ticks():
++    result={}
++    for line in (value(pathlib.Path("/proc"),"stat") or "").splitlines():
++        parts=line.split()
++        if not parts:
++            continue
++        name=parts[0]
++        if name!="cpu" and not (name.startswith("cpu") and name[3:].isdigit()):
++            continue
++        try:
++            nums=[int(v) for v in parts[1:9]]
++            if len(nums)==8:
++                result[name]=(sum(nums),nums[3]+nums[4])
++        except ValueError:
++            continue
++    return result
++first=ticks()
++time.sleep(0.15)
++last=ticks()
++usages={}
++for k,(total,idle) in last.items():
++    if k not in first: continue
++    bt,bi=first[k]
++    dt=total-bt
++    if dt>0:
++        usages[k]=round(max(0,min(100,100*(dt-(idle-bi))/dt)),1)
++if "cpu" in usages:
++    print("therm_cpu_total_busy_pct="+str(usages["cpu"]))
++print("therm_cpu_core_busy_csv="+",".join(f"{k}:{v:g}" for k,v in sorted(usages.items()) if k!="cpu"))
++freq={}
++for name in usages:
++    if name=="cpu":continue
++    raw=value(pathlib.Path("/sys/devices/system/cpu")/name/"cpufreq","scaling_cur_freq")
++    try:
++        x=int(raw)
++        if 100000 <= x <= 10000000:freq[name]=round(x/1000,1)
++    except (TypeError,ValueError):pass
++print("therm_cpu_core_freq_csv="+",".join(f"{k}:{v:g}" for k,v in sorted(freq.items())))
++for kind in ("cpu","memory","io"):
++    for line in (value(pathlib.Path("/proc/pressure"),kind) or "").splitlines():
++        fields=line.split()
++        if not fields or fields[0]!="some":continue
++        for item in fields[1:]:
++            if item.startswith("avg10="):
++                print(f"therm_psi_{kind}_some10={item[6:]}")
++                break
++mem={}
++for line in (value(pathlib.Path("/proc"),"meminfo") or "").splitlines():
++    if ":" not in line:continue
++    k,rest=line.split(":",1)
++    vals=rest.split()
++    if vals and vals[0].isdigit():
++        mem[k]=int(vals[0])*1024
++if "MemAvailable" in mem:
++    print("therm_mem_available_bytes="+str(mem["MemAvailable"]))
++if "SwapTotal" in mem and "SwapFree" in mem:
++    print("therm_swap_used_bytes="+str(max(0,mem["SwapTotal"]-mem["SwapFree"])))
++print("therm_reader=hwmon_v1")
++for k,v in sorted(cpu.items()):
++    print(f"therm_{k}={v}")
++print(f"therm_nvme_drive_count={len(nvme)}")
++if nvme:
++    print(f"therm_nvme_hottest_mc={max(v[0] for v in nvme)}")
++    for label,idx in (("max",1),("crit",2)):
++        vals=[v[idx]-v[0] for v in nvme if v[idx] is not None]
++        if vals:
++            print(f"therm_nvme_margin_{label}_mc={min(vals)}")
++' 2>/dev/null) || thermals=""
+     load1=$(awk '{print $1}' /proc/loadavg 2>/dev/null)
+     load5=$(awk '{print $2}' /proc/loadavg 2>/dev/null)
+     ncpu=$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || grep -c '^processor' /proc/cpuinfo 2>/dev/null)
+@@ -112,4 +214,5 @@
+ echo "on_ac=$on_ac"
+ echo "process_active_lanes=$active"
+ printf '%s\n' "$occupancy"
++printf "%s\n" "$thermals"
+ echo "tools=$tools"
+--- a/ext/host_pick.py
++++ b/ext/host_pick.py
+@@ -335,6 +335,51 @@
+                 "all" if not missing else "missing=" + ",".join(missing),
+             )
+         )
++
++        # Optional thermal admission guard applies only to explicitly enrolled
++        # hosts. All unknown/malformed/stale readings HOLD new AUTO placement.
++        # Existing worker processes are never killed or suspended here.
++        if "require_thermal" in entry:
++            thermal_required = entry["require_thermal"]
++            therm = (state or {}).get("thermal")
++            therm = therm if isinstance(therm, dict) else {}
++            limit = _finite_nonnegative(entry.get("cpu_tctl_limit_c"))
++            nvme_floor = _finite_nonnegative(entry.get("nvme_min_crit_headroom_c"))
++            cpu = _finite_nonnegative(therm.get("cpu_tctl_c"))
++            nvme = _as_float(therm.get("nvme_margin_crit_c"))
++            therm_ts = _valid_timestamp(therm.get("observed_at"), now)
++            therm_valid = (
++                therm.get("schema") == "mastermind.fabric_host_thermal.v1"
++                and therm.get("source") == "linux_hwmon"
++                and therm.get("status") == "OBSERVED"
++                and therm.get("admission_authoritative") is False
++                and therm_ts is not None
++                and state_ts is not None
++                and abs(therm_ts - state_ts) <= 5
++                and now.timestamp() - therm_ts <= max_age
++                and cpu is not None and cpu >= 10
++                and nvme is not None and math.isfinite(nvme)
++                and _strict_nonnegative_int(therm.get("nvme_drive_count")) is not None
++                and therm.get("nvme_drive_count") >= 1
++            )
++            policy_valid = (
++                type(thermal_required) is bool
++                and limit is not None and 50 <= limit <= 100
++                and nvme_floor is not None and 3 <= nvme_floor <= 30
++            )
++            if thermal_required is False and policy_valid:
++                gate_ok, detail = True, "policy-disabled"
++            elif not policy_valid:
++                gate_ok, detail = False, "invalid-thermal-policy"
++            elif not therm_valid:
++                gate_ok, detail = False, "thermal-unavailable-or-stale"
++            elif cpu >= limit:
++                gate_ok, detail = False, f"cpu_tctl={cpu:g}>={limit:g}C"
++            elif nvme < nvme_floor:
++                gate_ok, detail = False, f"nvme_crit_margin={nvme:g}<{nvme_floor:g}C"
++            else:
++                gate_ok, detail = True, f"cpu_tctl={cpu:g}<{limit:g}C,nvme_margin={nvme:g}>={nvme_floor:g}C"
++            gates.append(_gate(name, gate_ok, "thermal", detail))
+ 
+         ncpu = _positive_int((state or {}).get("ncpu"))
+         gates.append(
+--- a/ext/hosts.json
++++ b/ext/hosts.json
+@@ -8,6 +8,7 @@
+       "local": "v2: true when this entry is the machine the seat runs on. host_pull.sh probes it in-process (no ssh); ssh_alias must be null for it.",
+       "max_active": "Upper concurrent host lane limit 1..32, never above physical CPU count; provider quota, lease, load and resource admission still apply.",
+       "min_free_gb": "host_queue.sh launches only while free space on the remote Data volume is strictly above this many GB.",
++      "min_free_mem_gb": "Optional Linux MemAvailable floor in GiB; enforced by host selection and under the remote lane-admission lock for new workers.",
+       "notes": "v2: free-form operational notes (why a window is empty, what lives on the Windows side, pending Chairman rulings).",
+       "platform": "v2: darwin|linux. Selects the probe branch (sysctl/vm_stat/pmset vs /proc/loadavg/free). WSL2 hosts are linux.",
+       "qualification_only_modes": "Optional list of allowed modes held out of automatic host ranking while the Fleet owner performs explicit-host qualification through normal provider/host admission. Removal requires accepted actual canary, cleanup and settled lease; this flag itself grants no provider or Executive authority.",
+@@ -17,8 +18,7 @@
+       "ssh_alias": "ssh config alias used for every remote call (BatchMode). Never a secret; no credentials live here. null for the local seat host (probed in-process, never ssh'd).",
+       "tools": "v2: name -> null placeholders; host_pull.sh's probe fills the resolved tool list into ext/state/hosts/<host>.json (gh,codex,claude,node,python3,cursor-agent).",
+       "windows": "v2: availability windows in UTC, list of {days: Mon-Fri|Sat-Sun|All, open_utc: HH:MM, close_utc: HH:MM}. Empty list = always open. pool_status.py prints OPEN/CLOSED; a window may wrap midnight (close_utc <= open_utc).",
+-      "worktree_root": "v2: directory remote worktrees live under (SSD-pinned, see ~/.config/mastermind/worktree-storage.json). null = not assigned yet (P4).",
+-      "min_free_mem_gb": "Optional Linux MemAvailable floor in GiB; enforced by host selection and under the remote lane-admission lock for new workers."
++      "worktree_root": "v2: directory remote worktrees live under (SSD-pinned, see ~/.config/mastermind/worktree-storage.json). null = not assigned yet (P4)."
+     },
+     "files_per_host": {
+       "daemon_log": "host_queue_<host>.log",
+@@ -121,7 +121,7 @@
+     "load_gate": 8,
+     "max_active": 3,
+     "min_free_gb": 30,
+-    "notes": "idle Mac; P3 bootstrap adds gh/codex/claude, P4 assigns an SSD worktree_root | 2026-09-19T07:45Z Meta-CEO B seat: ceiling 2→3 (12 cores / 36 GB, load 1.7 with 2 MiniMax lanes; Chairman: consume the MiniMax pool, prioritise the MacBook). host_queue.sh re-reads this file per poll; lane2 admission receives max_active per launch. Reverse = set both back to 2 (backup hosts.json.bak-mb3-20260919T0745Z).",
++    "notes": "idle Mac; P3 bootstrap adds gh/codex/claude, P4 assigns an SSD worktree_root | 2026-09-19T07:45Z Meta-CEO B seat: ceiling 2\u21923 (12 cores / 36 GB, load 1.7 with 2 MiniMax lanes; Chairman: consume the MiniMax pool, prioritise the MacBook). host_queue.sh re-reads this file per poll; lane2 admission receives max_active per launch. Reverse = set both back to 2 (backup hosts.json.bak-mb3-20260919T0745Z).",
+     "platform": "darwin",
+     "ram_gb": 36,
+     "repos": [
+@@ -199,7 +199,7 @@
+   "m2": {
+     "_ocfree_note_20260922": "Chairman 2026-09-22: narrow amendment to the 2026-09-18 R34 remote-first ruling. Engine family `ocfree` (OpenCode Zen free tier via the native opencode harness, ext/oc_free_exec.sh) is admitted to the seat because neither lanes host has the opencode binary or the account keys, and the family is zero-cost and consumes no Go quota. This admits ONE family and changes no other pool's placement; `go`, `minimax`, `glm` and `bailian` remain remote-only on this seat.",
+     "_seat_note_20260919T0945Z": "seat 026851bd: load_gate 16->40 (24 cores; Studio load1 sat 25-90 for an hour from other seats' python + browsers while the Grok executor lanes g_7133_r2/g_7110_r4/g_w6_b_r3 were refused since 09:13Z; Grok lanes are network-bound). Chairman may reverse: restore 16. roles keep lanes (direct seat launch admitted, ceiling 2).",
+-    "_seat_note_20260919T0950Z": "seat 026851bd: load_gate raised to the registry maximum 36 (= cores 24 x MAX_LOAD_RATIO 1.5; 60 was refused as local_host_policy_invalid) — load1 from other sessions sat 25-90 while the Grok executor lanes were refused since 09:13Z; Grok lanes are network-bound; ceiling stays 2. Reverse: restore 16.",
++    "_seat_note_20260919T0950Z": "seat 026851bd: load_gate raised to the registry maximum 36 (= cores 24 x MAX_LOAD_RATIO 1.5; 60 was refused as local_host_policy_invalid) \u2014 load1 from other sessions sat 25-90 while the Grok executor lanes were refused since 09:13Z; Grok lanes are network-bound; ceiling stays 2. Reverse: restore 16.",
+     "_seat_policy_current_20260919T1052Z": "Corrected executable policy mismatch: removed broad lanes role, which admitted every engine despite Grok-only notes. Grok remains admitted through local_only_engines. Restored conservative load_gate=16; high-load quota consumption never outranks seat health.",
+     "cores": 24,
+     "hostnames": [
+@@ -328,7 +328,7 @@
+     "load_gate": 8,
+     "max_active": 3,
+     "min_free_gb": 30,
+-    "notes": "idle Mac; P3 bootstrap adds gh/codex/claude, P4 assigns an SSD worktree_root | 2026-09-19T07:45Z Meta-CEO B seat: ceiling 2→3 (12 cores / 36 GB, load 1.7 with 2 MiniMax lanes; Chairman: consume the MiniMax pool, prioritise the MacBook). host_queue.sh re-reads this file per poll; lane2 admission receives max_active per launch. Reverse = set both back to 2 (backup hosts.json.bak-mb3-20260919T0745Z).",
++    "notes": "idle Mac; P3 bootstrap adds gh/codex/claude, P4 assigns an SSD worktree_root | 2026-09-19T07:45Z Meta-CEO B seat: ceiling 2\u21923 (12 cores / 36 GB, load 1.7 with 2 MiniMax lanes; Chairman: consume the MiniMax pool, prioritise the MacBook). host_queue.sh re-reads this file per poll; lane2 admission receives max_active per launch. Reverse = set both back to 2 (backup hosts.json.bak-mb3-20260919T0745Z).",
+     "platform": "darwin",
+     "qualification_only_modes": [
+       "grok",
+@@ -697,6 +697,7 @@
+       "qwen"
+     ],
+     "cores": 32,
++    "cpu_tctl_limit_c": 90.0,
+     "hostnames": [
+       "ubuntu0-MS-A2"
+     ],
+@@ -704,7 +705,9 @@
+     "load_gate": 16,
+     "max_active": 32,
+     "min_free_gb": 150,
++    "min_free_mem_gb": 4,
+     "notes": "Fleet enrollment began telemetry-only on 2026-09-30; the recorded Go remote acceptance later admitted only the bounded go-codex route reflected by allowed_modes.",
++    "nvme_min_crit_headroom_c": 8.0,
+     "platform": "linux",
+     "qualification_only_modes": [
+       "glm-codex",
+@@ -713,6 +716,7 @@
+     "ram_gb": 32,
+     "repos": [],
+     "require_ac": false,
++    "require_thermal": true,
+     "roles": [
+       "lanes"
+     ],
+@@ -728,8 +732,7 @@
+       "python3": null
+     },
+     "windows": [],
+-    "worktree_root": "/home/ubuntu0/.mastermind/worktrees",
+-    "min_free_mem_gb": 4
++    "worktree_root": "/home/ubuntu0/.mastermind/worktrees"
+   },
+   "ubuntu1": {
+     "_cursor_native_qual_20261008": {
+@@ -832,6 +835,7 @@
+     "load_gate": 12,
+     "max_active": 18,
+     "min_free_gb": 150,
++    "min_free_mem_gb": 8,
+     "notes": "Fleet 2026-09-27: Go remote route accepted by exact model artifact, input hashes, worker/transport cleanup and broker lease release; automatic placement admitted. Machine identity hash e992243827d2f30ff7604469225485e02aa9fd283a3d5912d2dc4d003abef855. Two lightweight physical lanes accepted by overlapping Go workers and live third-slot refusal; no CPU benchmark, heavy-build or Executive qualification.",
+     "platform": "linux",
+     "qualification_only_modes": [],
+@@ -853,8 +857,7 @@
+       "python3": null
+     },
+     "windows": [],
+-    "worktree_root": null,
+-    "min_free_mem_gb": 8
++    "worktree_root": null
+   },
+   "ubuntu2": {
+     "_cursor_native_qual_20261008": {
+@@ -905,6 +908,7 @@
+     "load_gate": 16,
+     "max_active": 32,
+     "min_free_gb": 150,
++    "min_free_mem_gb": 4,
+     "notes": "Fleet 2026-09-27: Go remote route accepted by exact model artifact, input hashes, worker/transport cleanup and broker lease release; automatic placement admitted. Machine identity hash d243c0e1e516672f17076a82f637a9b9489301eb219f39738c1fe0ac0e63d33b. Two lightweight physical lanes accepted by overlapping Go workers and separate actual-host third-slot refusal; no CPU benchmark, heavy-build or Executive qualification.",
+     "platform": "linux",
+     "qualification_only_modes": [
+@@ -929,8 +933,7 @@
+       "python3": null
+     },
+     "windows": [],
+-    "worktree_root": null,
+-    "min_free_mem_gb": 4
++    "worktree_root": null
+   },
+   "ubuntu3": {
+     "_enrollment_note_20261005": "Telemetry-only candidate for universal Studio/fabric fleet visibility; dispatch held pending route qualification.",
+@@ -1027,6 +1030,7 @@
+       "qwen"
+     ],
+     "cores": 32,
++    "cpu_tctl_limit_c": 90.0,
+     "hostnames": [
+       "ubuntu3-MS-7E61"
+     ],
+@@ -1034,7 +1038,9 @@
+     "load_gate": 16,
+     "max_active": 32,
+     "min_free_gb": 150,
++    "min_free_mem_gb": 4,
+     "notes": "2026-10-05: enrolled as telemetry-only candidate after strict SSH identity and Studio MCP reachability proofs; no automatic placement until an admitted route canary and settled lease prove a mode.",
++    "nvme_min_crit_headroom_c": 8.0,
+     "platform": "linux",
+     "qualification_only_modes": [
+       "oc-free"
+@@ -1042,6 +1048,7 @@
+     "ram_gb": 32,
+     "repos": [],
+     "require_ac": false,
++    "require_thermal": true,
+     "roles": [
+       "lanes"
+     ],
+@@ -1057,7 +1064,6 @@
+       "python3": null
+     },
+     "windows": [],
+-    "worktree_root": null,
+-    "min_free_mem_gb": 4
++    "worktree_root": null
+   }
+ }
