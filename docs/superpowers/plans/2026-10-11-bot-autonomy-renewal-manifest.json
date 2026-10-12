@@ -2,7 +2,7 @@
   "operation": "bot-intelligence-renewal-20261011",
   "source_basis": "cbc7503536b6853ec7c35c2192abdfaccb87b561",
   "macro_ci_source": "256c757b3c4f0ec759571c29a30a71387d0a18f8",
-  "test_scope": "WIP/HOLD: exact serviceb14d1c0e consumer/profile scope319pass/9heldfail (41direct-answer+19profile pass); separate Bot12known failures unchanged; no Supervisor/Runtime result production or provider proof",
+  "test_scope": "WIP/HOLD: candidate claim 50 pass, full Bot producer+claim 97 pass/1 existing denied zero-evidence failure; 7 synthetic source-consumer canary pass; independent final read-only review scoped clear, no live-provider proof",
   "manifest_self_excluded": true,
   "files": [
     {
@@ -41,6 +41,11 @@
       "sha256": "6d63ef4c3b422c0821649916b723ae53241ef0978f1fb93966f63fab46b7e6e9"
     },
     {
+      "path": "brain/decision_research_result.py",
+      "bytes": 17862,
+      "sha256": "43f95efd22d1308d36f2f93bd97b028e009f35dce8459c27396934567ad63552"
+    },
+    {
       "path": "docs/runbooks/portfolio-v3-decision-snapshot.md",
       "bytes": 9010,
       "sha256": "515fa21cb138319ca903a33a66425f0336f0c87c00a7dacc3c4f99cac30b88bc"
@@ -52,8 +57,8 @@
     },
     {
       "path": "docs/superpowers/plans/2026-10-11-bot-autonomy-renewal-validation.md",
-      "bytes": 44306,
-      "sha256": "770697f221a8a66a80c4f2fedb7f83b68e9572b8f929a4a64ee95cbbc780adf8"
+      "bytes": 48951,
+      "sha256": "8e723f759ee12afe1f8f6de1d92d2ece81f996eafabe10e7f618701073887519"
     },
     {
       "path": "docs/superpowers/plans/2026-10-11-bot-autonomy-source-capture.acceptance.py.txt",
@@ -62,8 +67,8 @@
     },
     {
       "path": "docs/superpowers/specs/2026-10-11-bot-autonomy-fabric-renewal.md",
-      "bytes": 45125,
-      "sha256": "288134f4d0ce36b4c4414e4f379274ae4c53f02dd1bd6674f2ae1e6db1e0c1c9"
+      "bytes": 46373,
+      "sha256": "efa98a714148edf716d033a1c0bbed9fa6a195cfae7da5395d745a71d6993d30"
     },
     {
       "path": "portfolio/china_calendar.py",
@@ -96,6 +101,11 @@
       "sha256": "27b3f487d7cfd10adc0412ed7e910db21f386a2fa650a997afe69477a52c70ee"
     },
     {
+      "path": "tests/bot_research_claim_consumption_canary.py",
+      "bytes": 11483,
+      "sha256": "acef46adde572e5a49d570a760e4d9f99f46a0154cc5645bd2af7ec168acf0da"
+    },
+    {
       "path": "tests/bot_research_service_admission_canary.py",
       "bytes": 13738,
       "sha256": "911358f612f717086b52b980b9a8e5c25f538c9d5d9f3140dfa83a3a6a97db9d"
@@ -119,6 +129,31 @@
       "path": "tests/fixtures/bot_renewal_adversarial_review/verification.json",
       "bytes": 1743,
       "sha256": "efb63a707e0dba519826c8790a40868faf3f3c69fe797d278c7e7e522f550882"
+    },
+    {
+      "path": "tests/fixtures/bot_research_claims/final_review.md",
+      "bytes": 2734,
+      "sha256": "43766fa151bf80e65e135ec8acd840b8fb7ffd22bbc97b0efac8c2c669856844"
+    },
+    {
+      "path": "tests/fixtures/bot_research_claims/initial_review.md",
+      "bytes": 3286,
+      "sha256": "18d21f711eaaed1d9a69b4e2afc9d6d92712aaa397994852fbe9b0f2200a2aa8"
+    },
+    {
+      "path": "tests/fixtures/bot_research_claims/intermediate_review.md",
+      "bytes": 3036,
+      "sha256": "fd7198a947fcd7a47167bffab7a06b130270d110f8e26836bfb8f0e9bef156c5"
+    },
+    {
+      "path": "tests/fixtures/bot_research_claims/source_only_canary.json",
+      "bytes": 1331,
+      "sha256": "cc82edf7b2c419e227e8b2d129d6b6dd7b21df3883ab02a886408a6e1e8af2da"
+    },
+    {
+      "path": "tests/fixtures/bot_research_claims/verification.json",
+      "bytes": 3287,
+      "sha256": "55c009956b30bd33e0ef92efe1a1509001b4cafc0fe6f5f188dc5ba7ea7ed5d9"
     },
     {
       "path": "tests/fixtures/bot_service_admission/recovery_and_source_proof.json",
@@ -169,6 +204,11 @@
       "path": "tests/test_decision_research.py",
       "bytes": 12316,
       "sha256": "c5f279dd70d549e677f01bd8aa8e37ec4f369f8c977df16a5a6d144dbd40620f"
+    },
+    {
+      "path": "tests/test_decision_research_result.py",
+      "bytes": 15382,
+      "sha256": "795a00c8ebdc0d4b9758f78c4d06a2536199955cf0c313f66b04184bd32c766f"
     },
     {
       "path": "tests/test_decision_snapshot.py",
