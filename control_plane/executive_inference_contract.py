@@ -8,6 +8,8 @@ from control_plane import ceo_request, executive_inference_io as inference_io, e
 PRINCIPAL_ID = "svc-vps-inference"
 TOOLS = ("submit_service_intent", "service_intent_status", "executive_fabric")
 MAX_RESULT_BYTES = 256 * 1024
+DIRECT_RESULT_VIEW_SCHEMA = "mastermind.fabric_service_inference_result_view.v1"
+DIRECT_RESULT_REF_SCHEMA = inference_io.CONTENT_RESULT_REF_SCHEMA
 
 
 def normalize_request(value):
@@ -122,8 +124,50 @@ def validate_result(value, selection):
     return copy.deepcopy(data)
 
 
+def validate_direct_result(value, *, operation_key, receipt, reference, max_output_chars):
+    """Consume only a complete, content-bound answer to the original operation.
+
+    The enclosing authenticated read owner must establish Runtime provenance.
+    These pure checks prove internal/exact-reference integrity, not that a
+    caller-created dictionary is an authenticated execution receipt.
+    """
+    receipt = validate_receipt(receipt, operation_key)
+    expected = inference_io.validate_result_reference(reference, job_id=receipt["job_id"])
+    if expected["schema"] != inference_io.CONTENT_RESULT_REF_SCHEMA:
+        raise ValueError("direct answers require canonical-content-bound references")
+    outer = {"schema", "tool", "ok", "server_version", "mode", "generated_at",
+             "grounding", "data", "degraded", "bounded", "error"}
+    if (not isinstance(value, dict) or set(value) != outer
+            or value["schema"] != "mastermind.executive_mcp_result.v1"
+            or value["tool"] != "executive_fabric" or value["ok"] is not True
+            or value["mode"] not in ("readonly", "read_only")
+            or value["error"] is not None or value["degraded"] != [] or value["bounded"] != []):
+        raise ValueError("direct Fabric answer unavailable")
+    data = value["data"]
+    keys = {"schema", "operation_ref", "reference", "request_fingerprint", "generation",
+            "availability", "execution_status", "content_complete", "acceptance", "document"}
+    if (not isinstance(data, dict) or set(data) != keys
+            or data["schema"] != DIRECT_RESULT_VIEW_SCHEMA
+            or data["operation_ref"] != intent_id(operation_key)
+            or data["reference"] != expected
+            or data["request_fingerprint"] != receipt["fingerprint"]
+            or not _same_generation(data["generation"])
+            or data["availability"] != "AVAILABLE" or data["execution_status"] != "COMPLETED"
+            or data["content_complete"] is not True or data["acceptance"] != "NOT_PROJECTED"):
+        raise ValueError("direct Fabric answer binding or completeness disagrees")
+    document = inference_io.validate_result_document(data["document"], job_id=receipt["job_id"],
+                                                    max_output_chars=max_output_chars)
+    if document["reference"] != expected:
+        raise ValueError("direct answer differs from the status-selected reference")
+    if len(inference_io.canonical_bytes(value)) > MAX_RESULT_BYTES:
+        raise ValueError("direct answer exceeds the complete read-plane byte ceiling")
+    return copy.deepcopy(data)
+
+
 def validate_submission_receipt(receipt, request):
-    receipt = validate_receipt(receipt, request["operation_key"])
+    # Keep the original request binding independent of callback-owned response
+    # dictionaries before any later await/result read can mutate those objects.
+    receipt = validate_receipt(copy.deepcopy(receipt), request["operation_key"])
     if receipt["fingerprint"] != esp.fingerprint(derive(request, receipt["grounding"])):
         raise ValueError("service receipt does not match submitted request")
     return receipt
@@ -146,6 +190,8 @@ def validate_terminal_result_ref(value, receipt, operation_key):
     receipt = validate_receipt(receipt, operation_key)
     if value is None:
         return None
+    if isinstance(value, dict) and value.get("schema") == inference_io.CONTENT_RESULT_REF_SCHEMA:
+        return inference_io.validate_result_reference(value, job_id=receipt["job_id"])
     if (not isinstance(value, dict)
             or set(value) != {"root_job_id", "job_id", "attempt_id", "result_envelope_digest",
                               "orchestration_role", "validation"}

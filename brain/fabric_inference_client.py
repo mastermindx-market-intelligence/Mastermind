@@ -71,6 +71,35 @@ class FabricInferenceClient:
             # not_found after uncertainty is not permission to start another job.
             raise FabricUnavailable('Original service operation unresolved; no resubmission performed.') from None
 
+    async def answer(self, operation_key: str, objective: str,
+                     inference_request: Mapping[str, Any]) -> dict:
+        """Read a direct answer bound to the caller-retained original request.
+
+        This is a read-only consumer, not a completion producer or a retry. The
+        configured service must implement the dedicated read view; an absent or
+        older backend fails closed. Generic aggregation result() is unchanged.
+        """
+        from control_plane.executive_inference_contract import (
+            DIRECT_RESULT_REF_SCHEMA, validate_direct_result,
+        )
+        request = normalize_request(dict(operation_key=operation_key, objective=objective,
+                                         inference_request=inference_request))
+        try:
+            status = await self.reconcile(operation_key)
+            receipt = validate_submission_receipt(status["receipt"], request)
+            reference = status["terminal_result_ref"]
+            if not isinstance(reference, Mapping) or reference.get("schema") != DIRECT_RESULT_REF_SCHEMA:
+                raise FabricUnavailable("content-bound direct answer reference unavailable")
+            response = await self._call("executive_fabric", {
+                "view": "service_inference", "operation_key": operation_key,
+                "reference": dict(reference),
+            })
+            return validate_direct_result(response, operation_key=operation_key,
+                receipt=receipt, reference=reference,
+                max_output_chars=request["inference_request"]["max_output_chars"])
+        except Exception:
+            raise FabricUnavailable("Exact original direct inference answer unavailable; no submission performed.") from None
+
     async def result(self, operation_key: str) -> dict:
         """Discover only the original operation's terminal reference through status."""
         try:

@@ -15,8 +15,10 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from control_plane import executive_inference_ingress as ingress
+from control_plane import executive_inference_io as inference_io
 from control_plane.executive_inference_contract import (
     PRINCIPAL_ID, TOOLS, intent_id, validate_receipt, validate_submission_receipt, validate_status,
+    validate_direct_result,
 )
 from integrations.business_mcp_auth.contracts import (
     AUTH_AUDIT_SCHEMA, AuthAuditEvent, ResourcePolicy, validate_resource_policy,
@@ -191,11 +193,26 @@ class InferenceApp:
                     "terminal_result_ref": status.get("terminal_result_ref")}, operation)["terminal_result_ref"]
                 if ref is None:
                     return refused('backend_unavailable', 503)
-                if {k: v for k, v in selection.items() if k != 'view'} != {
-                        k: ref[k] for k in ('root_job_id', 'job_id', 'attempt_id', 'result_envelope_digest')}:
+                if await self._auth(request) != authenticated:
                     return refused()
-                value = await self._reader.call(name, selection)
-                validate_result(value, {k: v for k, v in selection.items() if k != 'view'})
+                if args['view'] == 'service_inference':
+                    if ref.get('schema') != inference_io.CONTENT_RESULT_REF_SCHEMA or args['reference'] != ref:
+                        return refused()
+                    # The existing backend reader must implement this narrow
+                    # view. Its current absence is an unavailable result, not
+                    # permission for this App to read files/Runtime directly.
+                    value = await self._reader.call(name, {
+                        'operation_key': operation, 'view': 'service_inference',
+                        'reference': dict(ref),
+                    })
+                    validate_direct_result(value, operation_key=operation, receipt=receipt,
+                        reference=ref, max_output_chars=inference_io.MAX_OUTPUT_CHARS)
+                else:
+                    if {k: v for k, v in selection.items() if k != 'view'} != {
+                            k: ref[k] for k in ('root_job_id', 'job_id', 'attempt_id', 'result_envelope_digest')}:
+                        return refused()
+                    value = await self._reader.call(name, selection)
+                    validate_result(value, {k: v for k, v in selection.items() if k != 'view'})
                 result = JSONResponse(value)
             except Exception:
                 return refused('backend_unavailable', 503)

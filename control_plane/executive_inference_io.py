@@ -7,6 +7,7 @@ closed contracts when the direct service lane is composed.
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import re
 from collections.abc import Mapping
@@ -18,6 +19,8 @@ TASK_REQUEST_SCHEMA = "mastermind.executive_service_inference_request.v2"
 TASK_KINDS = ("evidence_extraction", "comparative_analysis", "contradiction_adjudication")
 WORKER_RESULT_SCHEMA = "mastermind.executive_service_inference_worker_result.v1"
 RESULT_REF_SCHEMA = "mastermind.executive_service_inference_result_ref.v1"
+CONTENT_RESULT_REF_SCHEMA = "mastermind.executive_service_inference_result_ref.v2"
+_NO_CONTENT_DIGEST = object()
 RESULT_DOCUMENT_SCHEMA = "mastermind.executive_service_inference_result_document.v1"
 CONSTRAINT_KEY = "service_inference_request"
 
@@ -152,30 +155,49 @@ def validate_worker_result(value: Mapping, *, job_id: str, run_id: str,
         raise InferenceIOError("worker inference result exceeds the byte ceiling")
     return copy.deepcopy(normalized)
 def result_reference(*, job_id: str, attempt_id: str, worker_id: str,
-                     result_sha256: str) -> dict:
+                     result_sha256: str, content_sha256=_NO_CONTENT_DIGEST) -> dict:
+    """Keep raw-byte provenance separate from optional canonical-content identity.
+
+    Omitting content_sha256 preserves the exact v1 reference. Supplying it emits
+    v2 and lets a consumer verify the returned structured result without access
+    to private raw provider bytes. Neither hash authenticates its producer.
+    """
     _identity(job_id, attempt_id, worker_id)
     if not isinstance(result_sha256, str) or _SHA256_RE.fullmatch(result_sha256) is None:
         raise InferenceIOError("result_sha256 is invalid")
-    return {
-        "schema": RESULT_REF_SCHEMA,
-        "job_id": job_id,
-        "attempt_id": attempt_id,
-        "worker_id": worker_id,
-        "result_sha256": result_sha256,
-    }
+    result = {"schema": RESULT_REF_SCHEMA, "job_id": job_id,
+              "attempt_id": attempt_id, "worker_id": worker_id,
+              "result_sha256": result_sha256}
+    if content_sha256 is not _NO_CONTENT_DIGEST:
+        if not isinstance(content_sha256, str) or _SHA256_RE.fullmatch(content_sha256) is None:
+            raise InferenceIOError("content_sha256 is invalid")
+        result.update(schema=CONTENT_RESULT_REF_SCHEMA, content_sha256=content_sha256)
+    return result
 
 
 def validate_result_reference(value: Mapping, *, job_id: str) -> dict:
-    if not isinstance(value, Mapping) or set(value) != {
-        "schema", "job_id", "attempt_id", "worker_id", "result_sha256"
-    }:
+    if not isinstance(value, Mapping):
         raise InferenceIOError("direct inference result reference shape is invalid")
-    if value["schema"] != RESULT_REF_SCHEMA or value["job_id"] != job_id:
-        raise InferenceIOError("direct inference result reference belongs to another job")
+    schema = value.get("schema")
+    if not isinstance(schema, str) or schema not in (RESULT_REF_SCHEMA, CONTENT_RESULT_REF_SCHEMA):
+        raise InferenceIOError("direct inference result reference schema is invalid")
+    keys = {"schema", "job_id", "attempt_id", "worker_id", "result_sha256"}
+    if schema == CONTENT_RESULT_REF_SCHEMA:
+        keys.add("content_sha256")
+    if set(value) != keys or value["job_id"] != job_id:
+        raise InferenceIOError("direct inference result reference shape or Job is invalid")
     return result_reference(
         job_id=value["job_id"], attempt_id=value["attempt_id"],
         worker_id=value["worker_id"], result_sha256=value["result_sha256"],
+        **({"content_sha256": value["content_sha256"]} if schema == CONTENT_RESULT_REF_SCHEMA else {}),
     )
+
+
+def _verify_content_identity(reference: Mapping, output: Mapping) -> None:
+    if reference["schema"] == CONTENT_RESULT_REF_SCHEMA:
+        digest = hashlib.sha256(canonical_bytes(output)).hexdigest()
+        if digest != reference["content_sha256"]:
+            raise InferenceIOError("returned inference content disagrees with its reference")
 
 
 def result_document(*, reference: Mapping, result: Mapping,
@@ -189,6 +211,7 @@ def result_document(*, reference: Mapping, result: Mapping,
         result, job_id=ref["job_id"], run_id=ref["attempt_id"],
         worker_id=ref["worker_id"], max_output_chars=max_output_chars,
     )
+    _verify_content_identity(ref, output)
     document = {"schema": RESULT_DOCUMENT_SCHEMA, "reference": ref, "result": output}
     if len(canonical_bytes(document)) > MAX_RESULT_BYTES:
         raise InferenceIOError("result document exceeds the byte ceiling")
@@ -206,6 +229,7 @@ def validate_result_document(value: Mapping, *, job_id: str,
         value["result"], job_id=job_id, run_id=ref["attempt_id"],
         worker_id=ref["worker_id"], max_output_chars=max_output_chars,
     )
+    _verify_content_identity(ref, output)
     document = {"schema": RESULT_DOCUMENT_SCHEMA, "reference": ref, "result": output}
     if len(canonical_bytes(document)) > MAX_RESULT_BYTES:
         raise InferenceIOError("result document exceeds the byte ceiling")
@@ -213,7 +237,8 @@ def validate_result_document(value: Mapping, *, job_id: str,
 
 
 __all__ = [
-    "REQUEST_SCHEMA", "WORKER_RESULT_SCHEMA", "RESULT_REF_SCHEMA",
+    "REQUEST_SCHEMA", "TASK_REQUEST_SCHEMA", "TASK_KINDS", "request_schema",
+    "WORKER_RESULT_SCHEMA", "RESULT_REF_SCHEMA", "CONTENT_RESULT_REF_SCHEMA",
     "RESULT_DOCUMENT_SCHEMA", "CONSTRAINT_KEY", "MAX_REQUEST_BYTES",
     "MAX_OUTPUT_CHARS", "MAX_RESULT_BYTES", "InferenceIOError",
     "canonical_bytes", "normalize_request", "worker_result_schema",
