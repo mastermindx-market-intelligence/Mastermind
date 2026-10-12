@@ -205,14 +205,20 @@ class AttendedFabricWorkerAdapter:
 
     def __init__(self, runtime: Runtime, binding_source: Callable[[str, str], FabricHostBinding],
                  *, client_factory: Callable[[FabricHostBinding], Any] | None = None,
+                 request_client_factory: Callable[[FabricHostBinding, Mapping[str, Any]], Any] | None = None,
                  heartbeat_interval_seconds: float = 5.0):
         if not isinstance(runtime, Runtime) or not callable(binding_source):
             raise BrokerStateError("Fabric adapter requires trusted Runtime composition")
         if not 0.01 <= heartbeat_interval_seconds <= 30:
             raise BrokerStateError("Fabric heartbeat interval is outside its bound")
+        if client_factory is not None and request_client_factory is not None:
+            raise BrokerStateError("Fabric requires one exact transport factory")
+        if request_client_factory is not None and not callable(request_client_factory):
+            raise BrokerStateError("Fabric request transport factory must be callable")
         self.runtime = runtime
         self.binding_source = binding_source
-        self._client_factory = client_factory or _fixed_client
+        legacy_client = client_factory or _fixed_client
+        self._client_factory = request_client_factory or (lambda physical, payload: legacy_client(physical))
         self._heartbeat_interval = heartbeat_interval_seconds
         self.inspector = _RemoteOnlyInspector()
         self._bound: dict[str, tuple[Any, dict[str, Any], FabricHostBinding, WorkerLaunchSpec]] = {}
@@ -446,7 +452,7 @@ class AttendedFabricWorkerAdapter:
         attempt, physical, payload = self._resolve(spec, launch=True)
         if lease.attempt != attempt or spec.run_id in self._bound:
             raise BrokerStateError("Fabric claim moved or start already attempted")
-        client = self._client_factory(physical)
+        client = self._client_factory(physical, payload)
         pinned = self.runtime.attempts.pin_remote_launch_identity(spec.run_id,
             fence_generation=attempt.fence_generation, lease_token=lease.lease_token,
             expected_version=attempt.version, identity_digest=self._identity(physical, payload))
@@ -657,7 +663,7 @@ class AttendedFabricWorkerAdapter:
             raise BrokerStateError("Fabric recovery changed the original adapter/LaunchSpec")
         if context is not None:
             self._control_recovery[spec.run_id] = context
-        client = self._client_factory(physical)
+        client = self._client_factory(physical, payload)
         # Recovery is status-only even when the old start response was lost.
         result = client.request_sync("status", dict(binding=payload["binding"],
                     physical_binding_sha256=physical.digest, run_id=spec.run_id,
