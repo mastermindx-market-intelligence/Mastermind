@@ -165,6 +165,11 @@ def test_actual_adapter_rejects_stale_fence_before_sending_ack(tmp_path, monkeyp
     adapter._leases[spec.run_id] = lease
     adapter._refs[spec.run_id] = ref
     adapter._bound[spec.run_id] = (client, wire, physical(), spec)
+    # Adoption needs the original durable process identity. This stays inside
+    # the fixture SQLite store; no host process or transport is involved.
+    runtime.attempts.record_process(spec.run_id,
+        fence_generation=lease.attempt.fence_generation, lease_token=lease.lease_token,
+        provider_session_id=ref.provider_session_id)
     runtime.attempts.adopt_attempt(spec.run_id,
         expected_fence_generation=lease.attempt.fence_generation, lease_owner="successor")
     with pytest.raises(Exception, match="stale fence"):
