@@ -1,9 +1,9 @@
 """Optional attended-Fabric transport; existing Runtime/Fabric own every effect.
 
 The injected reviewed Backend MUST atomically fence original Attempt + canonical
-start hash in its existing durable receipts before provider I/O. A status saying
-UNSTARTED_PROVEN is not a reusable authorization: execute('start') must recheck
-and consume that same fence. This module owns no execution ledger, retry, account
+start hash in its existing durable receipts before provider I/O. Fresh START
+requires the authenticated Runtime command and start_owned consume boundary;
+UNSTARTED_PROVEN cannot replace that command. This module owns no execution ledger, retry, account
 selection, UID sweep or scheduler. Reopened/lost-response starts query status;
 existing or uncertain effects are never sent to start again.
 """
@@ -72,10 +72,10 @@ class Backend(Protocol):
     async def execute(self, operation: str, payload: Mapping[str, Any]) -> Mapping[str, Any]:
         """Use only existing original-id receipts; fence before effects, no replay.
 
-        start/status preflight returns adapter_id, binding, request_sha256,
+        Status preflight returns adapter_id, binding, request_sha256,
         start_state UNSTARTED_PROVEN/EXISTS/EFFECT_UNKNOWN. EXISTS additionally
-        returns the retained start_result. start gets broker-computed
-        start_request_sha256, which must be compared in the durable fence.
+        returns the retained start_result. This interface never receives fresh
+        start; only start_owned can consume its authenticated command.
         Every payload carries the Runtime-pinned physical_binding_sha256.
         The backend must compare that route atomically at its effect boundary;
         broker status preflight is not permission to reroute between calls.
@@ -627,14 +627,11 @@ class FabricBridgeBroker:
                     result=_complete_start_result(status.get('start_result'),binding,digest,payload['launch_spec'])
                     if result['physical_binding_sha256']!=status['physical_binding_sha256']:
                         _refuse('EFFECT_UNKNOWN','Retained receipt route differs from original observation')
-                elif status.get('start_state')=='UNSTARTED_PROVEN':
-                    forwarded={**payload,'start_request_sha256':digest}
-                    result=_strict_json(_canonical(await self.backend.execute('start',_strict_json(_canonical(forwarded)))))
-                    result=_complete_start_result(result,binding,digest,payload['launch_spec'])
-                    if result['physical_binding_sha256']!=status['physical_binding_sha256']:
-                        _refuse('EFFECT_UNKNOWN','Physical route changed after original first-use observation')
                 else:
-                    _refuse('EFFECT_UNKNOWN','Existing receipt does not prove original Attempt first use')
+                    # Compatibility without a positive Runtime command is
+                    # recovery-only. Even UNSTARTED_PROVEN is an observation,
+                    # not permission to manufacture or downgrade a fresh START.
+                    _refuse('EFFECT_UNKNOWN','Fresh START requires the original authenticated Runtime command')
             except asyncio.CancelledError:
                 raise
             except Exception as exc:

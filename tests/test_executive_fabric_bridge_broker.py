@@ -60,6 +60,17 @@ def envelope(operation="start", payload=None):
                 payload=start_payload() if payload is None else payload)
 
 
+def command_envelope():
+    """Inert authenticated-command fixture; never a production pin producer."""
+    from control_plane.fabric_control_start import SCHEMA, launch_identity
+    value = envelope()
+    payload = value['payload']
+    payload['control_start'] = dict(schema_version=SCHEMA,
+        attempt_id=payload['binding']['attempt_id'], fence_generation=1, pin_version=2,
+        pin_identity_sha256=launch_identity(payload), lease_expires_at='2099-01-01T00:00:00Z')
+    return value
+
+
 def start_result(payload):
     binary=dict(path="/usr/bin/provider",real_path="/usr/bin/provider",version="1",sha256="e"*64,
                 team_identifier=None,size=123,device=1,inode=2,mode=0o755,uid=0,gid=0,mtime_ns=123)
@@ -84,6 +95,11 @@ def start_result(payload):
 
 class Backend:
     def __init__(self):self.calls=[];self.retained=None;self.failure=None;self.start_state="UNSTARTED_PROVEN"
+    async def start_owned(self,payload,*,authority):
+        authority.require(payload)
+        # Reuse the inert legacy recorder only inside this authenticated test
+        # owner. Production broker must never invoke generic execute('start').
+        return await self.execute('start',payload)
     async def execute(self,operation,payload):
         self.calls.append((operation,copy.deepcopy(payload)))
         if operation=='status' and 'start_request_sha256' in payload:
@@ -128,7 +144,7 @@ def test_unauthorized_peer_never_reaches_backend(tmp_path,monkeypatch,uid):
 
 def test_successful_start_uses_same_attempt_and_full_attestation(tmp_path,monkeypatch):
     backend=Backend();service=broker(tmp_path,monkeypatch,backend)
-    response=execute(service,envelope())
+    response=execute(service,command_envelope())
     assert response['schema_version']==BROKER_RESPONSE_SCHEMA_VERSION and response['ok'] is True
     assert response['request_id']=='request-1' and response['operation']=='start'
     assert [op for op,p in backend.calls]==['status','start']
@@ -138,7 +154,7 @@ def test_successful_start_uses_same_attempt_and_full_attestation(tmp_path,monkey
 
 def test_lost_ack_and_reopened_service_use_status_only_retained_attempt(tmp_path,monkeypatch):
     backend=Backend();first=broker(tmp_path,monkeypatch,backend)
-    expected=execute(first,envelope())['result']
+    expected=execute(first,command_envelope())['result']
     reopened=api().FabricBridgeBroker(first.config,backend)
     observed=execute(reopened,envelope())['result']
     assert observed==expected
@@ -171,7 +187,7 @@ def test_unproven_first_use_does_not_infer_absence_or_start(tmp_path,monkeypatch
 
 def test_backend_start_exception_is_sticky_unknown_and_never_retried(tmp_path,monkeypatch):
     backend=Backend();backend.failure=RuntimeError('private diagnostic');service=broker(tmp_path,monkeypatch,backend)
-    with pytest.raises(api().BridgeProtocolError,match='EFFECT_UNKNOWN'):execute(service,envelope())
+    with pytest.raises(api().BridgeProtocolError,match='EFFECT_UNKNOWN'):execute(service,command_envelope())
     assert [op for op,p in backend.calls]==['status','start']
     backend.start_state='EFFECT_UNKNOWN'
     with pytest.raises(api().BridgeProtocolError,match='EFFECT_UNKNOWN'):execute(service,envelope())
@@ -243,7 +259,7 @@ def test_backend_cannot_mutate_request_to_replace_root_binding(tmp_path,monkeypa
             if operation=='start':payload['binding']['root_id']='other-root'
             return await super().execute(operation,payload)
     backend=Mutating();service=broker(tmp_path,monkeypatch,backend)
-    with pytest.raises(api().BridgeProtocolError,match='EFFECT_UNKNOWN'):execute(service,envelope())
+    with pytest.raises(api().BridgeProtocolError,match='EFFECT_UNKNOWN'):execute(service,command_envelope())
 
 
 class Reader:
@@ -272,7 +288,7 @@ def test_socket_handler_authenticates_before_reading_request_bytes(tmp_path,monk
 def test_handler_errors_preserve_valid_request_identity_and_do_not_leak_backend_text(tmp_path,monkeypatch):
     backend=Backend();backend.failure=RuntimeError('private text never transmitted');service=broker(tmp_path,monkeypatch,backend)
     service.peer_resolver=lambda sock:PeerCredentials(uid=450,gid=450)
-    reader=Reader(json.dumps(envelope()).encode()+b'\n');writer=Writer()
+    reader=Reader(json.dumps(command_envelope()).encode()+b'\n');writer=Writer()
     asyncio.run(service.handle_connection(reader,writer))
     reply=json.loads(writer.written)
     assert reply['request_id']=='request-1' and reply['operation']=='start'
@@ -317,7 +333,7 @@ def test_trusted_config_cannot_be_constructed_from_unverified_document():
 
 def test_changed_start_hash_or_root_on_reopen_is_not_replayed(tmp_path,monkeypatch):
     backend=Backend();service=broker(tmp_path,monkeypatch,backend)
-    execute(service,envelope())
+    execute(service,command_envelope())
     changed=envelope();changed['payload']['binding']['root_id']='another-root'
     with pytest.raises(api().BridgeProtocolError,match='EFFECT_UNKNOWN'):execute(service,changed)
     assert [op for op,p in backend.calls].count('start')==1
@@ -337,7 +353,7 @@ def test_readonly_reopened_status_never_requires_broker_memory(tmp_path,monkeypa
             if operation=='start':path.write_text(json.dumps(result))
             return result
     first=OwnerReceiptBackend();service=broker(tmp_path,monkeypatch,first)
-    expected=execute(service,envelope())['result']
+    expected=execute(service,command_envelope())['result']
     second=OwnerReceiptBackend();reopened=api().FabricBridgeBroker(service.config,second)
     assert execute(reopened,envelope())['result']==expected
     assert [op for op,p in second.calls]==['status']
@@ -360,7 +376,7 @@ def test_cancelled_start_requires_same_backend_status_after_reopen(tmp_path,monk
                 raise asyncio.CancelledError()
             return await super().execute(operation,payload)
     backend=Interrupted();service=broker(tmp_path,monkeypatch,backend)
-    with pytest.raises(asyncio.CancelledError):execute(service,envelope())
+    with pytest.raises(asyncio.CancelledError):execute(service,command_envelope())
     reopened=api().FabricBridgeBroker(service.config,backend)
     with pytest.raises(api().BridgeProtocolError,match='EFFECT_UNKNOWN'):execute(reopened,envelope())
     assert [op for op,p in backend.calls].count('start')==1
@@ -380,7 +396,7 @@ def test_physical_route_hash_missing_invalid_or_moved_is_not_success(tmp_path,mo
 
 def test_status_recovery_hash_uses_same_id_without_launch(tmp_path,monkeypatch):
     backend=Backend();service=broker(tmp_path,monkeypatch,backend)
-    expected=execute(service,envelope())['result']
+    expected=execute(service,command_envelope())['result']
     result=execute(service,envelope('status',dict(binding=binding(),run_id='attempt-1',
                          start_request_sha256=api().start_request_sha256(start_payload()))))['result']
     assert result['start_result']==expected
@@ -443,7 +459,7 @@ def test_worker_broker_client_framing_interoperates_without_real_socket(tmp_path
         writer=ExchangeWriter();return ExchangeReader(writer),writer
     monkeypatch.setattr(asyncio,'open_unix_connection',connect)
     client=WorkerBrokerClient(service.config.socket_path)
-    response=asyncio.run(client.request('start',start_payload()))
+    response=asyncio.run(client.request('start',command_envelope()['payload']))
     assert response['adapter_id']=='attended-fabric'
     assert response['process_ref']['run_id']=='attempt-1'
 
