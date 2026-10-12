@@ -1301,7 +1301,7 @@ class CodexOperatorAdapter:
     ) -> None:
         """Permit startup exec, not PID reuse or an unobservable identity.
 
-        On macOS, libproc's pidversion can increase during a legitimate exec
+        On macOS, libproc's pidversion can change during a legitimate exec
         (including the fake App Server's shebang interpreter transition).
         The kernel uniqueid is the process incarnation and must remain equal.
         After a successful initialize response, the full pair is sealed and
@@ -1830,7 +1830,14 @@ class CodexOperatorAdapter:
                         "skill_path_mismatch",
                         effect_unknown=True,
                     )
-        elif not binding.protocol_receipt.supports_skill_input_path:
+        elif (
+            not binding.protocol_receipt.supports_skill_input_path
+            or binding.profile.write_capable
+        ):
+            # Pathless catalog compatibility stays available to legacy
+            # read-only Skill observers only. A write-capable profile cannot
+            # prove which physical Skill supplied an observed name, even if
+            # the protocol advertises a structured Skill input path.
             raise CodexAdapterError(
                 AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
                 "skill_path_attestation_unavailable",

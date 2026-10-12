@@ -761,6 +761,18 @@ def test_v4_rich_operator_attests_explicit_workspace_write_network_config():
     del bad["sandbox_workspace_write"]
     assert app_server_security_config_digest(bad) != profile.expected_config_digest
     assert _observed_network_state(bad) is None
+    # An unknown future Codex field in the write sandbox must not disappear
+    # during projection: even a tool introduced after this reviewed policy
+    # could widen host filesystem or networking capabilities.
+    for future_key, future_value in (
+        ("allow_host_fs", True),
+        ("new_network_proxy", "unrestricted"),
+        ("extra_sandbox_permissions", ["full-disk-write"]),
+    ):
+        future = copy.deepcopy(observed)
+        future["sandbox_workspace_write"][future_key] = future_value
+        assert app_server_security_config_digest(future) != profile.expected_config_digest
+
 
 
 def test_v4_rich_operator_candidate_is_a_real_but_unarmed_source_profile():

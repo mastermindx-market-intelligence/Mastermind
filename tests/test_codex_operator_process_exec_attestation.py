@@ -60,10 +60,13 @@ def _exact_skill_binding_for_name_projection():
 
     return SimpleNamespace(
         generation=SimpleNamespace(package_root="plugins/mastermind-operator"),
-        profile=SimpleNamespace(skill_grants=(
-            SimpleNamespace(runtime_name="receive-commission",
-                            skill_content_digest="a" * 64),
-        )),
+        profile=SimpleNamespace(
+            write_capable=False,
+            skill_grants=(
+                SimpleNamespace(runtime_name="receive-commission",
+                                skill_content_digest="a" * 64),
+            ),
+        ),
         protocol_receipt=SimpleNamespace(supports_skill_input_path=True),
     )
 
@@ -116,3 +119,24 @@ def test_qualified_codex_skill_observation_refuses_path_spoofing():
               "enabled": True, "path": "/trusted/skills/evil/SKILL.md"}],
             skills_root="/trusted/skills", binding=binding,
         )
+
+
+def test_writable_skill_profile_refuses_pathless_provider_catalog():
+    """Write-capable agents need observed path proof, not only a Skill name."""
+    binding = _exact_skill_binding_for_name_projection()
+    binding.profile.write_capable = True
+    with pytest.raises(CodexAdapterError, match="skill_path_attestation_unavailable"):
+        CodexOperatorAdapter._reduce_skill_observation(
+            [{"name": "mastermind-operator:receive-commission", "enabled": True}],
+            skills_root="/trusted/skills", binding=binding,
+        )
+
+
+def test_readonly_skill_profile_retains_pathless_protocol_compatibility():
+    binding = _exact_skill_binding_for_name_projection()
+    observed, mode = CodexOperatorAdapter._reduce_skill_observation(
+        [{"name": "mastermind-operator:receive-commission", "enabled": True}],
+        skills_root="/trusted/skills", binding=binding,
+    )
+    assert mode == "pathless"
+    assert observed == (("receive-commission", "pathless", None, "a" * 64),)

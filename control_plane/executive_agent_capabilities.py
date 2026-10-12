@@ -763,13 +763,25 @@ def app_server_security_config_projection(
         raw_write is not None or active_write_sandbox
     ):
         if isinstance(raw_write, Mapping):
-            roots = raw_write.get("writable_roots")
-            projected["sandbox_workspace_write"] = {
-                "exclude_slash_tmp": raw_write.get("exclude_slash_tmp"),
-                "exclude_tmpdir_env_var": raw_write.get("exclude_tmpdir_env_var"),
-                "network_access": raw_write.get("network_access"),
-                "writable_roots": list(roots) if isinstance(roots, list) else None,
-            }
+            reviewed_fields = frozenset({
+                "exclude_slash_tmp", "exclude_tmpdir_env_var",
+                "network_access", "writable_roots",
+            })
+            # Writable-sandbox fields are security-sensitive. A future Codex
+            # release may add a new permission or network field: dropping it
+            # would incorrectly attest a broader effective policy as approved.
+            # Unknown keys fail the expected config digest, rather than being
+            # silently ignored while the write-capable profile starts.
+            if set(raw_write) - reviewed_fields:
+                projected["sandbox_workspace_write"] = {"invalid": True}
+            else:
+                roots = raw_write.get("writable_roots")
+                projected["sandbox_workspace_write"] = {
+                    "exclude_slash_tmp": raw_write.get("exclude_slash_tmp"),
+                    "exclude_tmpdir_env_var": raw_write.get("exclude_tmpdir_env_var"),
+                    "network_access": raw_write.get("network_access"),
+                    "writable_roots": list(roots) if isinstance(roots, list) else None,
+                }
         else:
             projected["sandbox_workspace_write"] = {"invalid": True}
     return projected
