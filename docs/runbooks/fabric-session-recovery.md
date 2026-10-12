@@ -133,3 +133,21 @@ A queued logical worker now has a `registered_supply` view derived within the sa
 `route_qualified=false`, `independent_budget_proven=false`, `shared_quota_verified=false`, `telemetry_freshness_verified=false`, and `can_reserve=false` are intentional guards. `reset_eta` remains null. Counts omit account labels and authentication material. The parent-level `registered_free_slots_not_additive_across_jobs=true` prevents mistaking one free registration viewed by 30 workers for 30 independent execution slots. `recovery_queue_count` is scoped only to the returned page, not the entire root.
 
 This is **not** an alternative to #1253's shared-budget accounting, #1365's model/host qualification or the existing atomic capacity owner. It adds no reservation, scheduler, retry or wakeup. Its currently verified source tests are not evidence of installed or live quota availability.
+
+## Legacy native Fabric batch triage (source-only candidate)
+
+Some existing Grok/GLM/Cursor runs are identified by the account-local native `fabric_task.py` RUN_ID, not by an Executive Job. **Do not invent Executive Jobs or deduce a native run's root/custody from its run ID alone.** Once this source is reviewed and available on the authorized host, a caller with exact original run IDs can use a one-shot, read-only summary:
+
+```sh
+python3 scripts/fabric_legacy_triage.py \
+  --fabric-task "/ABSOLUTE/INSTALLED/ext/fabric_task.py" \
+  --expected-sha256 "<EXACT_INSTALLED_SOURCE_SHA256>" \
+  --run-id "RUN_ID_1" --run-id "RUN_ID_2" \
+  --timeout-seconds 5 --total-seconds 30
+```
+
+The caller supplies the authorized absolute installed file and its verified SHA, plus 1–100 exact previously commissioned run IDs. The CLI invokes only the incumbent `status RUN_ID` action, without a shell, request, wait-loop, result acceptance, cancel, retry, or provider call. A changed installed script fails its digest check. A whole-batch deadline caps stalls; a missing/timeout/unreadable result becomes `RECONCILE_ORIGINAL_STATUS` without suppressing other workers.
+
+State meanings are deliberately conservative: `ACTIVE_OR_WAITING` is *not* proof of running, `EFFECT_UNKNOWN` requires original-carrier reconciliation, `TERMINAL_FAILURE` does not imply exhausted tokens, and even successful `TERMINAL` requires delivered result and accepted outcome before reporting `CONSUME_ACCEPTED_RETURN`. Native `QUEUED` and cross-model retry cannot be inferred from `fabric_task.py status` and are always reported unconfirmed. Full stdout, provider session IDs, raw payloads, quota/account values, and potential secrets are not returned in the batch summary. It adds no state store or daemon.
+
+**Verification boundary:** 29 unit/runner tests passed, including 30 mixed original run IDs, duplicate/malformed-run rejection, fake pinned status invocation, timeout isolation and total-batch deadlines. JUnit `research/evidence/fabric-native-batch-triage-20261012.junit.xml`, SHA256 `bdc09cc5b793030ddf7c80b82d128f3b24e51a09bfd617bad183b157c7c9f40d`. One isolated end-to-end subprocess test `test_actual_entrypoint_runs_from_unrelated_working_directory` was safety-blocked before dispatch and has **not** been verified; do not rerun through another carrier to bypass that denial. No installed native kit code or live worker was changed. This CLI is a source candidate and is not claimed deployed.
