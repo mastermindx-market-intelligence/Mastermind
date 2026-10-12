@@ -47,10 +47,12 @@ def _module_scope_imports(source: Path, name: str) -> set[str]:
     imported: set[str] = set()
     package = name if source.name == "__init__.py" else name.rpartition(".")[0]
 
-    def collect(statements: list[ast.stmt]) -> None:
+    def collect(statements: list[ast.AST]) -> None:
         for statement in statements:
-            if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                # Class bodies do execute on import. Functions do not.
+            if isinstance(statement, (
+                ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef,
+            )):
+                # Class bodies execute at import; function/lambda bodies do not.
                 if isinstance(statement, ast.ClassDef):
                     collect(statement.body)
                 continue
@@ -68,15 +70,17 @@ def _module_scope_imports(source: Path, name: str) -> set[str]:
                 for alias in statement.names:
                     if alias.name != "*":
                         imported.add(f"{module}.{alias.name}" if module else alias.name)
-            elif isinstance(statement, (ast.If, ast.Try, ast.TryStar, ast.With,
-                                        ast.For, ast.While, ast.AsyncWith,
-                                        ast.AsyncFor, ast.Match)):
-                # Follow every syntactically reachable branch: conservative.
+            else:
+                # Recurse through AST nodes, not just `ast.stmt`. A module-
+                # level Try.handlers contains `ast.ExceptHandler` and a Match
+                # contains `ast.match_case`; skipping those silently misses
+                # imports that would execute during source bootstrap.
                 for _field, value in ast.iter_fields(statement):
                     if isinstance(value, list):
-                        collect([item for item in value if isinstance(item, ast.stmt)])
-            # Expressions such as importlib.import_module() are deliberately
-            # not considered a static import and need an explicit owner review.
+                        collect([item for item in value if isinstance(item, ast.AST)])
+                    elif isinstance(value, ast.AST):
+                        collect([value])
+            # Dynamic importlib.import_module() remains a separate owner gate.
 
     collect(tree.body)
     return imported
@@ -135,3 +139,33 @@ def test_new_transitive_import_is_detected_without_importing_it(tmp_path):
     assert "localpkg.new_dependency" in closure
     old_seal = {"localpkg", "localpkg.entry", "localpkg.helper"}
     assert "localpkg.new_dependency" in closure - old_seal
+
+
+def test_module_scope_except_handler_import_must_join_sealed_closure(tmp_path):
+    package = tmp_path / "localpkg"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "entry.py").write_text(
+        "try:\n    import json\nexcept ImportError:\n    from localpkg import fallback\n",
+        encoding="utf-8",
+    )
+    (package / "fallback.py").write_text(
+        "raise RuntimeError('static check must never import me')\n", encoding="utf-8",
+    )
+    discovered = _static_import_closure(tmp_path, ("localpkg.entry",))
+    assert "localpkg.fallback" in discovered
+
+
+def test_module_scope_match_case_import_must_join_sealed_closure(tmp_path):
+    package = tmp_path / "localpkg"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "entry.py").write_text(
+        "match 1:\n    case 1:\n        from localpkg import conditional\n",
+        encoding="utf-8",
+    )
+    (package / "conditional.py").write_text(
+        "raise RuntimeError('static check must never import me')\n", encoding="utf-8",
+    )
+    discovered = _static_import_closure(tmp_path, ("localpkg.entry",))
+    assert "localpkg.conditional" in discovered
