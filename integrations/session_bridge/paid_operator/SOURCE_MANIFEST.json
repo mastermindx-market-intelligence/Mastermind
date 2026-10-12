@@ -7,12 +7,13 @@
     "fabric_operator_owner.py": "99a5a466b14c8c6c89ac43ea1f7db572f7dc2e9a344d1a1872c720e8cce8210c",
     "fabric_operator_issue.py": "bca96a78976b111303050ef3ca61c77d4a3e69f53f9e29a961eb1a70396a0b9d",
     "fabric_operator_client.py": "cf0eb5b628e0c7ae39a184d3488e64c7867bce91381e6c4765222d3373ce4a46",
-    "fabric_operator_stop.py": "5ad090e703468503ec5466a83c61e1de9b93320e432d71963e9ba1d33e301ec5"
+    "fabric_operator_stop.py": "5ad090e703468503ec5466a83c61e1de9b93320e432d71963e9ba1d33e301ec5",
+    "fabric_operator_recovery.py": "cbd872c94cc3bfce16c53e4f1631573e1a1728835c0f8379b350695a53e76823"
   },
   "overlays": {
     "remote_sub.sh": {
       "before": "f4333d88e547dc2a2c06a4d6919793cbd62adc1cad5c8ccdee792ff1daba5bf8",
-      "after": "b1f38a46172d4c6850c089a64777e64ff1a3ea4bc4eacaae07af7ec37505a689"
+      "after": "6fb1bcd6ff4894a1909013a1dac65426a00e80d62d31faae21ce55d6887672a5"
     },
     "remote_sub_exec.py": {
       "before": "88f3db214cdb6258865961ccb6e201288778df7d38e26fba310598021f078e8f",

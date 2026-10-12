@@ -16,26 +16,38 @@
 +    RC=78; log "OPERATOR_ARTIFACT_COMBINATION_UNSUPPORTED"; exit "$RC";
 +  fi
 +fi
-@@ -310,0 +325,3 @@
+@@ -278 +292 @@
+-  if "$REMOTE_SUB_PYTHON" - "$LOG_FILE" "$ID" <<'PY_RESERVE'
++  if "$REMOTE_SUB_PYTHON" - "$LOG_FILE" "$ID" "$HOST_ARG" "$MODE" "$MODEL" "$PACKET" "$REMOTE_CWD" "$HERE" <<'PY_RESERVE'
+@@ -284,0 +299,8 @@
++    if os.environ.get('FABRIC_OPERATOR_PRELEASE_CONTINUATION') == sys.argv[2]:
++        sys.path.insert(0,sys.argv[8])
++        from fabric_operator_recovery import reserve
++        try:reserve(*sys.argv[1:8])
++        except Exception:
++            print("ORIGINAL_PRELEASE_CONTINUATION_REFUSED",file=sys.stderr)
++            raise SystemExit(75)
++        raise SystemExit(0)
+@@ -310,0 +333,3 @@
 +  if [ "$OPERATOR_CHILD_BUDGET" != "0" ] || [ -n "${FABRIC_OPERATOR_CHILD_ID:-}" ]; then
 +    RC=78; log "OPERATOR_REQUIRES_ADMITTED_REMOTE_PATH"; exit "$RC";
 +  fi
-@@ -584,0 +602,5 @@
+@@ -584,0 +610,5 @@
 +OPERATOR_CHILD_ARGS=()
 +if [ -n "${FABRIC_OPERATOR_CHILD_ID:-}" ]; then
 +  [ "$FABRIC_OPERATOR_CHILD_ID" = "$ID" ] || { RC=78; log "OPERATOR_CHILD_ID_REFUSED"; exit "$RC"; }
 +  OPERATOR_CHILD_ARGS=(--operator-child-id "$ID")
 +fi
-@@ -593 +615 @@
+@@ -593 +623 @@
 -      broker acquire --host "$HOST_ARG" --orchestrator-id "$ORCH_ID" --pool "$ACQUIRE_POOL" --task-class "remote-$MODE" --model "$MODEL" --pid "$$" --ttl "$PROVIDER_LEASE_TTL" --wait "${REMOTE_SUB_LEASE_WAIT:-3600}" > "$LEASE_OUTPUT_FILE" || {
-+      broker acquire "${OPERATOR_CHILD_ARGS[@]}" --host "$HOST_ARG" --orchestrator-id "$ORCH_ID" --pool "$ACQUIRE_POOL" --task-class "remote-$MODE" --model "$MODEL" --pid "$$" --ttl "$PROVIDER_LEASE_TTL" --wait "${REMOTE_SUB_LEASE_WAIT:-3600}" > "$LEASE_OUTPUT_FILE" || {
-@@ -599 +621 @@
++      broker acquire ${OPERATOR_CHILD_ARGS[@]+"${OPERATOR_CHILD_ARGS[@]}"} --host "$HOST_ARG" --orchestrator-id "$ORCH_ID" --pool "$ACQUIRE_POOL" --task-class "remote-$MODE" --model "$MODEL" --pid "$$" --ttl "$PROVIDER_LEASE_TTL" --wait "${REMOTE_SUB_LEASE_WAIT:-3600}" > "$LEASE_OUTPUT_FILE" || {
+@@ -599 +629 @@
 -      broker acquire --orchestrator-id "$ORCH_ID" --pool "$ACQUIRE_POOL" --task-class "remote-$MODE" --model "$MODEL" --pid "$$" --ttl "$PROVIDER_LEASE_TTL" --wait "${REMOTE_SUB_LEASE_WAIT:-3600}" > "$LEASE_OUTPUT_FILE" || {
-+      broker acquire "${OPERATOR_CHILD_ARGS[@]}" --host "$HOST_ARG" --orchestrator-id "$ORCH_ID" --pool "$ACQUIRE_POOL" --task-class "remote-$MODE" --model "$MODEL" --pid "$$" --ttl "$PROVIDER_LEASE_TTL" --wait "${REMOTE_SUB_LEASE_WAIT:-3600}" > "$LEASE_OUTPUT_FILE" || {
-@@ -626 +648 @@
++      broker acquire ${OPERATOR_CHILD_ARGS[@]+"${OPERATOR_CHILD_ARGS[@]}"} --host "$HOST_ARG" --orchestrator-id "$ORCH_ID" --pool "$ACQUIRE_POOL" --task-class "remote-$MODE" --model "$MODEL" --pid "$$" --ttl "$PROVIDER_LEASE_TTL" --wait "${REMOTE_SUB_LEASE_WAIT:-3600}" > "$LEASE_OUTPUT_FILE" || {
+@@ -626 +656 @@
 -  remote_sub_exec.py native_remote.py artifact_production.py artifact_reader.py lane_runtime.py sub.sh slot.py pick.py glm_bound_claude.py model_tier.py
 +  remote_sub_exec.py native_remote.py fabric_operator_client.py fabric_operator_stop.py artifact_production.py artifact_reader.py lane_runtime.py sub.sh slot.py pick.py glm_bound_claude.py model_tier.py
-@@ -670,0 +693,15 @@
+@@ -670,0 +701,15 @@
 +
 +# Explicit local-principal operator opt-in; ordinary leaves stay unchanged.
 +if [ "$OPERATOR_CHILD_BUDGET" != "0" ]; then
@@ -51,7 +63,7 @@
 +  [ "$?" -eq 0 ] || { RC=78; log "OPERATOR_PACKET_REFUSED"; exit "$RC"; }
 +  PACKET="$OPERATOR_PACKET"
 +fi
-@@ -751,0 +789,23 @@
+@@ -751,0 +797,23 @@
 +# A separate bounded operator capability travels only through the existing
 +# controller transport. It is never the provider credential or the parent lease.
 +if [ "$OPERATOR_CHILD_BUDGET" != "0" ]; then
@@ -75,7 +87,7 @@
 +  log "OPERATOR_CAPABILITY_READY child_budget=$OPERATOR_CHILD_BUDGET transport=private-stdin"
 +fi
 +
-@@ -753,0 +814,7 @@
+@@ -753,0 +822,7 @@
 +if [ -n "${FABRIC_OPERATOR_CHILD_ID:-}" ]; then
 +  "$REMOTE_SUB_PYTHON" "$HERE/fabric_operator_issue.py" child-start --packet "$PACKET" \
 +    --run-id "$ID" --root "$ORCH_ID" --lease-id "$LEASE_ID" \
@@ -83,7 +95,7 @@
 +      RC=78; log "OPERATOR_CHILD_START_REFUSED"; exit "$RC";
 +    }
 +fi
-@@ -785 +852 @@
+@@ -785 +860 @@
 -LAUNCH_REMOTE="$NATIVE_TIMING_PREFIX $RPATH; $HOST_ENV; $NATIVE_TIMING_AFTER_ENV cd ~/lanes/ext || exit; rm -f \"$REMOTE_STDOUT\" \"$REMOTE_RC\" || exit; KEY='$ID' MODE='$MODE' PACKET=\"\$HOME/lanes/tmp/${ID}.txt\" REMOTE_CWD='$REMOTE_CWD' MODEL='$MODEL' RC_FILE=\"\$HOME/lanes/ext/$REMOTE_RC\" nohup env $NATIVE_TIMING_ENV $ROUTING_ENV SUPPORT_DIGEST='$SUPPORT_DIGEST' PYTHONDONTWRITEBYTECODE=1 LANE_LEASED=1 POOL_ACCOUNT='$ACCOUNT_ARG' POOL_LEASE_ID='$LEASE_ID' REMOTE_SUB_RUN_ID='$ID' LANE_REMOTE_HOST='$HOST_ARG' NATIVE_LEASE_ISSUED='$NATIVE_LEASE_ISSUED' NATIVE_LEASE_DEADLINE='$NATIVE_LEASE_DEADLINE' LANE_MAX_ACTIVE='$MAX_ACTIVE' LANE_MAX_LOAD_RATIO='$LANE_HOST_LOAD_RATIO' LANE_NICE=10 REMOTE_SUB_CHILD_TIMEOUT='$CHILD_TIMEOUT' bash -c '$REMOTE_INNER' </dev/null > \"$REMOTE_STDOUT\" 2>&1 &"
 +LAUNCH_REMOTE="$NATIVE_TIMING_PREFIX $RPATH; $HOST_ENV; $NATIVE_TIMING_AFTER_ENV cd ~/lanes/ext || exit; rm -f \"$REMOTE_STDOUT\" \"$REMOTE_RC\" || exit; KEY='$ID' MODE='$MODE' PACKET=\"\$HOME/lanes/tmp/${ID}.txt\" REMOTE_CWD='$REMOTE_CWD' MODEL='$MODEL' RC_FILE=\"\$HOME/lanes/ext/$REMOTE_RC\" nohup env $NATIVE_TIMING_ENV $ROUTING_ENV $OPERATOR_ENV SUPPORT_DIGEST='$SUPPORT_DIGEST' PYTHONDONTWRITEBYTECODE=1 LANE_LEASED=1 POOL_ACCOUNT='$ACCOUNT_ARG' POOL_LEASE_ID='$LEASE_ID' REMOTE_SUB_RUN_ID='$ID' LANE_REMOTE_HOST='$HOST_ARG' NATIVE_LEASE_ISSUED='$NATIVE_LEASE_ISSUED' NATIVE_LEASE_DEADLINE='$NATIVE_LEASE_DEADLINE' LANE_MAX_ACTIVE='$MAX_ACTIVE' LANE_MAX_LOAD_RATIO='$LANE_HOST_LOAD_RATIO' LANE_NICE=10 REMOTE_SUB_CHILD_TIMEOUT='$CHILD_TIMEOUT' bash -c '$REMOTE_INNER' </dev/null > \"$REMOTE_STDOUT\" 2>&1 &"
 --- a/remote_sub_exec.py
