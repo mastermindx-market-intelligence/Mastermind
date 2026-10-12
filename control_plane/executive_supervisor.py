@@ -3726,7 +3726,10 @@ class ExecutiveSupervisor:
                 raise SupervisorError("unbound cleanup worker UID changed during observation")
         return sweep
 
-    def reconcile_restart(self, *, requeue_lost: bool = True) -> list[ReconcileReceipt]:
+    def reconcile_restart(
+        self, *, requeue_lost: bool = True,
+        attempt_ids: frozenset[str] | None = None,
+    ) -> list[ReconcileReceipt]:
         """Recover exact sealed workers or quarantine uncertainty after restart.
 
         A durable recovery binding adopts the original Job/Attempt and existing
@@ -3735,8 +3738,17 @@ class ExecutiveSupervisor:
         only path that may identity-safely terminate one during reconciliation.
         """
 
+        if attempt_ids is not None and (
+            type(attempt_ids) is not frozenset
+            or any(type(value) is not str or not value for value in attempt_ids)
+        ):
+            raise SupervisorError("restart scope requires exact Attempt identifiers")
         outcomes: list[ReconcileReceipt] = []
         for attempt in self.runtime.attempts.list_attempts():
+            # Composition selects the original execution owner before any
+            # presence probe, lease recovery, cleanup or terminal mutation.
+            if attempt_ids is not None and attempt.attempt_id not in attempt_ids:
+                continue
             if attempt.status not in _ACTIVE_ATTEMPT_STATUSES:
                 continue
             if attempt.execution_mode == "OPERATOR_HARNESS":

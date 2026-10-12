@@ -12,6 +12,7 @@ from control_plane.executive_fabric_adapter import AttendedFabricWorkerAdapter
 from control_plane.executive_fabric_composition import FabricBindingSource
 from control_plane.executive_runtime import Runtime
 from control_plane.executive_supervisor import CleanupPolicy
+from control_plane.mixed_worker_supervisor import MixedExecutionOwnerSupervisor
 from control_plane.worker_execution_contract import CleanupPolicy as ContractCleanupPolicy
 from control_plane.remote_attempt_transport import AttemptBoundRemoteWorkerAdapter
 from scripts import executive_os_phase1c as cli
@@ -86,13 +87,32 @@ def test_trusted_in_process_factory_uses_exact_fabric_contract(tmp_path, monkeyp
     settings = staged(tmp_path, raw)
     source = FabricBindingSource.from_path(settings["fabric_bindings_path"], settings["fabric_bindings_sha256"])
     loaded = cli.load_control_config(_write(tmp_path, raw))
-    _, supervisor, _ = compose(tmp_path, monkeypatch, loaded, fabric_worker_binding_source=source)
-    assert type(supervisor.adapter) is AttendedFabricWorkerAdapter
-    assert supervisor.adapter.runtime is supervisor.runtime
-    assert supervisor.adapter.binding_source is source
-    assert supervisor.process_controller is supervisor.adapter
-    assert supervisor.cleanup_policy is CleanupPolicy.FABRIC_PROCESS_GROUP
-    assert supervisor.require_complete_launch_attestation is True
+    service, mixed, client = compose(tmp_path, monkeypatch, loaded, fabric_worker_binding_source=source)
+    assert type(mixed) is MixedExecutionOwnerSupervisor
+    primary = mixed.primary
+    assert type(primary.adapter) is broker.RemoteCodexWorkerAdapter
+    assert primary.adapter.client is client
+    assert primary.cleanup_policy is CleanupPolicy.DEDICATED_UID
+    assert mixed.owners[service.config.worker_id] is primary
+    for binding in source.bindings:
+        owner = mixed.owners[binding.worker_id]
+        assert type(owner.adapter) is AttendedFabricWorkerAdapter
+        assert owner.adapter.runtime is mixed.runtime
+        assert owner.adapter.binding_source is source
+        assert owner.process_controller is owner.adapter
+        assert owner.cleanup_policy is CleanupPolicy.FABRIC_PROCESS_GROUP
+        assert owner.require_complete_launch_attestation is True
+        assert owner.instance_id == primary.instance_id
+
+
+def test_fabric_binding_cannot_replace_primary_worker(tmp_path, monkeypatch, root_stats):
+    raw = _raw(tmp_path)
+    settings = staged(tmp_path, raw)
+    source = cli._staged_fabric_binding_source({**raw, **settings})
+    raw["worker_id"] = source.bindings[0].worker_id
+    monkeypatch.setattr(broker, "WorkerBrokerClient", lambda *args, **kwargs: pytest.fail("collision reached client"))
+    with pytest.raises(cli.ServiceError, match="primary worker"):
+        cli._service_from_config(raw, fabric_worker_binding_source=source)
 
 
 @pytest.mark.parametrize("change", [

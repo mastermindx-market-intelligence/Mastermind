@@ -1704,6 +1704,9 @@ def _service_from_config(
                (raw.get("worker_uid"), raw.get("worker_gid"))
                for binding in fabric_worker_binding_source.bindings):
             raise ServiceError("Fabric bindings differ from the fixed Supervisor worker principal")
+        if any(binding.worker_id == str(raw.get("worker_id") or "codex-01")
+               for binding in fabric_worker_binding_source.bindings):
+            raise ServiceError("Fabric binding cannot replace the primary worker")
     if (remote_worker_binding_source is not None
             and not callable(remote_worker_binding_source)):
         raise ServiceError("remote worker binding source must be callable")
@@ -1836,14 +1839,23 @@ def _service_from_config(
 
     recovery_controller = {}
 
+    def recovery_controller_for(attempt):
+        owners = recovery_controller.get("owners")
+        if owners is not None:
+            owner = owners.get(attempt.worker_id)
+            if owner is None:
+                raise ServiceError("proof recovery has no exact execution owner")
+            return owner.process_controller
+        return recovery_controller.get("current")
+
     def proof_capacity_recovery_observer(attempt):
-        controller = recovery_controller.get("current")
+        controller = recovery_controller_for(attempt)
         if controller is None or not controller.absence_verified(attempt):
             raise ServiceError("proof capacity has no fresh broker absence")
         return dict(controller.uid_sweep_receipt(attempt))
 
     def proof_capacity_recovery_worker_uid(attempt):
-        controller = recovery_controller.get("current")
+        controller = recovery_controller_for(attempt)
         if controller is None:
             raise ServiceError("proof capacity has no recovery controller")
         return controller.expected_worker_uid(attempt)
@@ -1857,14 +1869,7 @@ def _service_from_config(
 
         from control_plane.worker_execution_contract import CleanupPolicy
 
-        cleanup_policy = CleanupPolicy.DEDICATED_UID
-        if fabric_worker_binding_source is not None:
-            from control_plane.executive_fabric_adapter import AttendedFabricWorkerAdapter
-
-            adapter = AttendedFabricWorkerAdapter(runtime, fabric_worker_binding_source)
-            process_controller = adapter
-            cleanup_policy = CleanupPolicy.FABRIC_PROCESS_GROUP
-        elif remote_worker_binding_source is None:
+        if remote_worker_binding_source is None:
             adapter = RemoteCodexWorkerAdapter(
                 client,
                 validation_commands_for_spec=validations,
@@ -1909,7 +1914,7 @@ def _service_from_config(
 
             claim_binding_id = str(realm["binding_id"])
         recovery_controller["current"] = process_controller
-        return ExecutiveSupervisor(
+        primary = ExecutiveSupervisor(
             runtime,
             adapter,
             runs_root=raw["worker_runs_root"],
@@ -1923,10 +1928,8 @@ def _service_from_config(
             worker_gid=raw["worker_gid"],
             shared_run_gid=raw["shared_run_gid"],
             secret_canary_verdict=canary,
-            require_complete_launch_attestation=(
-                True if fabric_worker_binding_source is not None else initially_ready
-            ),
-            cleanup_policy=cleanup_policy,
+            require_complete_launch_attestation=initially_ready,
+            cleanup_policy=CleanupPolicy.DEDICATED_UID,
             process_controller=process_controller,
             exact_target_provider=(
                 (lambda job_id: exact_target_source.for_job(job_id, now_ms=runtime.store.now_ms()))
@@ -1935,8 +1938,32 @@ def _service_from_config(
             subscription_canary_claim_provider=claim_provider,
             subscription_canary_binding_id=claim_binding_id,
         )
+        if fabric_worker_binding_source is None:
+            return primary
+        from control_plane.executive_fabric_adapter import AttendedFabricWorkerAdapter
+        from control_plane.mixed_worker_supervisor import MixedExecutionOwnerSupervisor
+        fabric_adapter = AttendedFabricWorkerAdapter(runtime, fabric_worker_binding_source)
+        fabric_owner = ExecutiveSupervisor(
+            runtime, fabric_adapter,
+            runs_root=raw["worker_runs_root"],
+            isolation_roots=(raw["proof_workspace_root"], raw["worker_runs_root"]),
+            receipts_root=raw["receipts_root"],
+            worker_user=raw["worker_user"], worker_uid=raw["worker_uid"],
+            worker_gid=raw["worker_gid"], shared_run_gid=raw["shared_run_gid"],
+            secret_canary_verdict=canary, require_complete_launch_attestation=True,
+            cleanup_policy=CleanupPolicy.FABRIC_PROCESS_GROUP,
+            process_controller=fabric_adapter, instance_id=primary.instance_id,
+        )
+        mixed = MixedExecutionOwnerSupervisor(primary, {
+            config.worker_id: primary,
+            **{binding.worker_id: fabric_owner
+               for binding in fabric_worker_binding_source.bindings},
+        })
+        recovery_controller["owners"] = mixed.owners
+        return mixed
 
     def operator_supervisor_factory(runtime, sealed_supervisor):
+        from control_plane.mixed_worker_supervisor import MixedExecutionOwnerSupervisor
         def primary_factory(attempt, requested, turn_input_loader, *, recovery):
             # A fixed primary client must never carry another claimed worker.
             # Multi-worker composition supplies its current owner-bound factory.
@@ -1965,7 +1992,9 @@ def _service_from_config(
             runtime,
             claimed_adapter_factory=(factory if factory is not None else primary_factory),
             workspace_identity_source=workspace_source,
-            prompt_source=sealed_supervisor,
+            prompt_source=(sealed_supervisor.primary
+                           if type(sealed_supervisor) is MixedExecutionOwnerSupervisor
+                           else sealed_supervisor),
         )
 
     async def verify_operator_identity() -> None:

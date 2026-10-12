@@ -15324,7 +15324,16 @@ class JobRegistry:
         assert job is not None
         return job
 
-    def cancel_job(self, job_id: str) -> Job:
+    def cancel_job(
+        self, job_id: str, *, expected_attempt_id: str | None = None,
+        expected_fence_generation: int | None = None,
+    ) -> Job:
+        exact = expected_attempt_id is not None or expected_fence_generation is not None
+        if exact and (
+            type(expected_attempt_id) is not str or not expected_attempt_id
+            or type(expected_fence_generation) is not int or expected_fence_generation < 1
+        ):
+            raise StateConflict("exact cancellation requires Attempt and fence generation")
         timestamp = self.store.now_ms()
         with self.store.transaction() as connection:
             job_row = connection.execute(
@@ -15332,6 +15341,21 @@ class JobRegistry:
             ).fetchone()
             if job_row is None:
                 raise StateConflict(f"job {job_id!r} does not exist")
+            if exact:
+                # Match under the same transaction that requests cancellation;
+                # a pre-read followed by ordinary cancel_job could cancel a
+                # successor Attempt instead of the originating operation.
+                _finite_existing_effect(self.store, connection, job_id)
+                original = connection.execute(
+                    "SELECT * FROM attempts WHERE attempt_id=? AND job_id=?",
+                    (expected_attempt_id, job_id),
+                ).fetchone()
+                if (job_row["current_attempt_id"] != expected_attempt_id
+                        or original is None
+                        or original["fence_generation"] != expected_fence_generation):
+                    raise StateConflict("exact cancellation Attempt or fence changed")
+                if AttemptStatus(original["status"]) in _TERMINAL_ATTEMPT_STATUSES:
+                    return _job_from_row(job_row)  # Terminal wins; no new event/effect.
             status = JobStatus(job_row["status"])
             if status == JobStatus.CANCEL_REQUESTED:
                 return _job_from_row(job_row)

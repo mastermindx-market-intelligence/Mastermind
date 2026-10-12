@@ -73,6 +73,23 @@ attendance ends, but business execution cannot silently become unattended.
 Closing only the local socket does not prove remote cancellation or cleanup.
 The current Backend/cancellation/revocation prerequisites remain open.
 
+The mixed execution-owner composition now keeps the original Codex planner
+Supervisor and selects the paid Supervisor only for an exact pinned Worker.
+It performs one canonical claim, refuses every already-claimed replay, retains
+the original ActiveRun for finishing, and partitions restart before process
+probes or mutations. The factory keeps the operator prompt source on the
+original planner. Its existing disabled arm and dedicated-canary refusal remain.
+
+For an attended Attempt, the composition observes the actual originating
+`ForegroundOperation.wait_closed()` across START and collection. Loss requests
+Runtime cancellation using the original Attempt ID and fence generation in one
+transaction. A terminal Attempt wins without mutation; a successor refuses.
+Caller cancellation keeps the original launch/collector draining instead of
+dropping its response or manufacturing cleanup. On restart, missing original
+attendance allows only the incumbent cancellation/recovery path. These are
+source consumer semantics, not proof that a remote host can cancel or revoke an
+assignment. Synthetic origin-signal tests do not establish authenticated ingress.
+
 The native fresh-admission observer cannot be replayed for an existing root.
 Later-request reentry needs canonical same-root provenance binding the original
 authenticated principal and actual native-parent target to the current request.
