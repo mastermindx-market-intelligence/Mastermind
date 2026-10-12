@@ -1543,6 +1543,9 @@ class ServiceConfig:
     coo_default_quota_class: str = "codex-coo-default"
     coo_operator_model_alias: str = "coo.operator.readonly"
     coo_operator_quota_class: str = "codex-coo-operator"
+    # Exact host-reviewed attended members; empty in every installed profile.
+    # No caller payload may supply these or turn them into Worker admission.
+    coo_attended_work_placements: tuple = ()
     terminal_return_armed: bool = False
     terminal_return_socket_path: Path | None = None
     operator_harness_binary_digest: str = "0" * 64
@@ -1634,6 +1637,12 @@ class ServiceConfig:
             if _ID_RE.fullmatch(alias) is None:
                 raise ValueError(f"invalid {field_name}")
             object.__setattr__(self, field_name, alias)
+        from control_plane.fabric_attended_routing import AttendedWorkPlacement
+        if (not isinstance(self.coo_attended_work_placements, tuple)
+                or len(self.coo_attended_work_placements) > 6
+                or any(type(item) is not AttendedWorkPlacement
+                       for item in self.coo_attended_work_placements)):
+            raise ValueError("attended work placements require bounded host configuration")
         quota_names = {
             self.quota_class,
             self.coo_quota_class,
@@ -2633,6 +2642,15 @@ class ExecutiveControlService:
             {"provider_realm": binding["provider"], "quota_class": quota}
             for quota in binding["eligible_quota_classes"]
         ]
+        if self.config.coo_attended_work_placements:
+            from control_plane.fabric_attended_routing import placement_member
+            binding["work_placement_union"].extend(
+                placement_member(router, member)
+                for member in self.config.coo_attended_work_placements
+            )
+            binding["work_placement_union"] = _normalise_work_placement_union(
+                binding["work_placement_union"]
+            )
         if set(binding) != set(V3_HOST_EXECUTION_BINDING_KEYS):
             raise ValueError("configured COO host binding fields drifted")
         binding[HOST_EXECUTION_BINDING_VERSION_KEY] = HOST_EXECUTION_BINDING_V3
