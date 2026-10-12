@@ -29,7 +29,7 @@ def test_remote_delivery_keeps_dispatch_arguments_and_original_prompt(kit, tmp_p
     calls = []
     def receive(argv):
         calls.append(argv)
-        assert argv[:4] == ['bash', str(kit/'ext/remote_sub.sh'), 'mini2', 'codex-native']
+        assert argv[:4] == ['/bin/bash', str(kit/'ext/remote_sub.sh'), 'mini2', 'codex-native']
         assert Path(argv[4]).read_text().endswith('ORIGINAL TASK\n')
         assert argv[5:] == ['/workspace', 'gpt-6.1-sol', '--out', 'result.txt']
         return 0
@@ -44,7 +44,7 @@ def test_dry_run_does_not_create_staging_files(kit, tmp_path):
     args = ['--dry-run','auto','grok',str(source),'/workspace','grok-4.6']
     calls=[]
     rc=pe.invoke(kit,'remote',args,task_class='review',call=lambda v:calls.append(v) or 0)
-    assert rc==0 and calls==[['bash',str(kit/'ext/remote_sub.sh'),*args]]
+    assert rc==0 and calls==[['/bin/bash',str(kit/'ext/remote_sub.sh'),*args]]
     assert not (kit/'ext/state').exists()
 
 

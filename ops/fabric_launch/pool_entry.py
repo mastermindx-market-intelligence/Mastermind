@@ -23,6 +23,12 @@ from ops.fabric_launch.context import (PACKET_SCHEMA, MAX_PACKET_BYTES, BOOT_KER
     LaunchInputError, canonical, digest, parse, verify_packet, augment_plain_prompt)
 from ops.fabric_launch.cli import read_regular, write_exclusive
 
+# Do not resolve a launcher interpreter from ambient PATH. M2's Homebrew Bash
+# 5.3 has been observed blocking on large here-doc writes; the reviewed
+# macOS/Linux OS Bash at /bin/bash completes the same bounded source canary.
+# A missing system Bash refuses at the original dispatcher: no second route.
+NATIVE_DISPATCH_BASH = "/bin/bash"
+
 
 def positional_indices(args):
     """Locate the existing remote packet argument without selecting a route."""
@@ -109,9 +115,9 @@ def invoke(kit, kind, args, *, task_class, call=subprocess.call):
     if kind == "run":
         args[1] = prompt
         # sub.sh remains the provider/project/host admission owner.
-        return call(["bash", str(kit / "ext/sub.sh"), *args])
+        return call([NATIVE_DISPATCH_BASH, str(kit / "ext/sub.sh"), *args])
     if "--dry-run" in args:
-        return call(["bash", str(kit / "ext/remote_sub.sh"), *args])
+        return call([NATIVE_DISPATCH_BASH, str(kit / "ext/remote_sub.sh"), *args])
     # Keep compiled task artifacts alongside the original dispatcher's evidence,
     # never in a new registry. Only this invocation's two exclusive files exist.
     parent = kit / "ext/state/remote_sub"
@@ -125,7 +131,7 @@ def invoke(kit, kind, args, *, task_class, call=subprocess.call):
     rc = 78
     try:
         # No loop, alternative model, host, account or fallback is introduced.
-        rc = call(["bash", str(kit / "ext/remote_sub.sh"), *args])
+        rc = call([NATIVE_DISPATCH_BASH, str(kit / "ext/remote_sub.sh"), *args])
         return rc
     finally:
         if rc == 0:
