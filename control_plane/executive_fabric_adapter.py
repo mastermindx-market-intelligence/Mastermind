@@ -551,7 +551,8 @@ class AttendedFabricWorkerAdapter:
 
     async def seal_assignment(self, ref):
         """Request the original owner's actual seal; never perform local chmod."""
-        result = await self._request(ref, "assignment-seal", process_ref=dataclasses.asdict(ref))
+        result = await self._request(ref, "assignment-seal", process_ref=dataclasses.asdict(ref),
+                                     worker_id=self._known(ref)[3].worker_id)
         observation = result.get("observation")
         if (not isinstance(observation, dict)
                 or observation.get("snapshot", {}).get("process_ref") != dataclasses.asdict(ref)):
@@ -568,6 +569,7 @@ class AttendedFabricWorkerAdapter:
         _digest(acknowledgement["retention_sha256"])
         result = await self._request(ref, "assignment-seal-finalize",
             process_ref=dataclasses.asdict(ref),
+            worker_id=self._known(ref)[3].worker_id,
             observation_sha256=acknowledgement["observation_sha256"],
             retention_sha256=acknowledgement["retention_sha256"])
         if result.get("acknowledgement") != acknowledgement:

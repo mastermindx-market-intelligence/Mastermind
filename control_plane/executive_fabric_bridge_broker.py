@@ -381,8 +381,8 @@ class FabricBridgeBroker:
     def _payload(self,operation,payload):
         extra={'start':{'launch_spec','validation_commands'},'status':{'run_id'},
                'collect':{'run_id'},'cancel':{'run_id','reason'},'validate':{'run_id','argv','timeout_seconds'},
-               'assignment-seal': {'run_id', 'process_ref'},
-               'assignment-seal-finalize': {'run_id', 'process_ref', 'observation_sha256', 'retention_sha256'}}[operation]
+               'assignment-seal': {'run_id', 'worker_id', 'process_ref'},
+               'assignment-seal-finalize': {'run_id', 'worker_id', 'process_ref', 'observation_sha256', 'retention_sha256'}}[operation]
         if operation=='start' and type(payload) is dict and 'control_start' in payload:
             extra=extra|{'control_start'}
         if operation=='start' and type(payload) is dict and 'control_recovery' in payload:
@@ -405,6 +405,7 @@ class FabricBridgeBroker:
             if payload['run_id']!=binding['attempt_id']:_refuse()
             _identifier(payload['run_id'])
         if operation in _ASSIGNMENT_OPERATIONS:
+            _identifier(payload['worker_id'])
             ref = _object(payload['process_ref'], {f.name for f in dataclasses.fields(WorkerProcessRef)})
             if ref['run_id'] != payload['run_id']:
                 _refuse(message='Assignment process differs from original Attempt')
@@ -476,6 +477,7 @@ class FabricBridgeBroker:
                 or observation['snapshot_sha256'] != digest(snapshot)
                 or snapshot['run_id'] != payload['run_id']
                 or snapshot['job_id'] != payload['binding']['job_id']
+                or snapshot['worker_id'] != payload['worker_id']
                 or snapshot['effective_grant_digest'] != payload['binding']['effective_grant_digest']
                 or snapshot['process_ref'] != payload['process_ref']
                 or not uid_sweep_receipt_is_passing(snapshot['uid_sweep'])

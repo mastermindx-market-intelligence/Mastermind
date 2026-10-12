@@ -56,6 +56,7 @@ class Backend(fixtures.Backend):
 
 def payload(value):
     return {"binding": fixtures.binding(), "run_id": "attempt-1",
+            "worker_id": "worker-1",
             "process_ref": value["snapshot"]["process_ref"]}
 
 
@@ -72,7 +73,7 @@ def test_bridge_roundtrip_preserves_original_process_and_retention_ack(tmp_path,
     assert [op for op, _ in backend.calls] == ["status", "assignment-seal", "status", "assignment-seal-finalize"]
 
 
-@pytest.mark.parametrize("damage", ["process", "grant", "same_uid", "denial", "loss"])
+@pytest.mark.parametrize("damage", ["process", "worker", "grant", "same_uid", "denial", "loss"])
 def test_assignment_transport_rejects_foreign_or_uncertain_return(tmp_path, monkeypatch, damage):
     backend = Backend()
     request = fixtures.envelope("assignment-seal", copy.deepcopy(payload(backend.value)))
@@ -80,6 +81,8 @@ def test_assignment_transport_rejects_foreign_or_uncertain_return(tmp_path, monk
         backend.value["snapshot"]["process_ref"]["pid"] += 1
     elif damage == "grant":
         backend.value["snapshot"]["effective_grant_digest"] = "f" * 64
+    elif damage == "worker":
+        backend.value["snapshot"]["worker_id"] = "worker-other"
     elif damage == "same_uid":
         backend.value["snapshot"]["paths"]["workspace"]["uid"] = 1001
     elif damage == "denial":
@@ -134,3 +137,37 @@ def test_supervisor_retains_and_reads_before_ack_and_rechecks_fence(tmp_path, mo
             await supervisor.retain_and_acknowledge_remote_assignment(active)
         assert events == ["seal"]
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("operation", ["assignment-seal-prepare", "assignment-seal-commit", "assignment-seal-finalize"])
+def test_real_client_already_admits_original_broker_operations(monkeypatch, operation):
+    from control_plane.executive_worker_broker import WorkerBrokerClient
+    async def no_transport(*args, **kwargs):
+        raise RuntimeError("inert stop at transport boundary")
+    monkeypatch.setattr(asyncio, "open_unix_connection", no_transport)
+    with pytest.raises(RuntimeError, match="inert stop"):
+        asyncio.run(WorkerBrokerClient("/inert/never-opened.sock").request(operation, {}))
+
+
+def test_actual_adapter_rejects_stale_fence_before_sending_ack(tmp_path, monkeypatch):
+    from tests.test_executive_fabric_adapter import _fixture, physical, result
+    from control_plane.executive_worker_broker import _process_ref_from_json
+    class Client:
+        calls = []
+        async def request(self, op, payload, **options):
+            self.calls.append(op)
+            raise AssertionError("stale owner must not transmit")
+    client = Client()
+    runtime, job, lease, adapter, spec, wire = _fixture(tmp_path, monkeypatch, client)
+    raw = result(wire)["process_ref"]
+    raw["run_id"] = spec.run_id
+    ref = _process_ref_from_json(raw)
+    adapter._leases[spec.run_id] = lease
+    adapter._refs[spec.run_id] = ref
+    adapter._bound[spec.run_id] = (client, wire, physical(), spec)
+    runtime.attempts.adopt_attempt(spec.run_id,
+        expected_fence_generation=lease.attempt.fence_generation, lease_owner="successor")
+    with pytest.raises(Exception, match="stale fence"):
+        asyncio.run(adapter.finalize_assignment(ref, {"run_id": spec.run_id,
+            "observation_sha256": "a" * 64, "retention_sha256": "b" * 64}))
+    assert client.calls == []

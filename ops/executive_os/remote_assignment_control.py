@@ -98,13 +98,14 @@ async def seal_original_assignment(
     this operation is modifying and is never automatically retried.
     """
     payload = request["broker_request"]
-    if (type(payload) is not dict or set(payload) != {"run_id"}
+    if (type(payload) is not dict or set(payload) != {"run_id", "process_ref"}
+            or type(payload["process_ref"]) is not dict
             or payload["run_id"] != request["attempt_id"]
             or request["worker_id"] != binding.worker_id):
         raise RemoteAssignmentError("assignment request differs from original identity")
     paths = binding.paths_for(request["attempt_id"])
     stores = binding.observe_stores()
-    prepared = await broker_call("assignment-seal-prepare", payload)
+    prepared = await broker_call("assignment-seal-prepare", {"run_id": payload["run_id"]})
     if type(prepared) is not dict or set(prepared) != {"snapshot", "snapshot_sha256"}:
         raise RemoteAssignmentError("original broker preparation is unavailable")
     snapshot = prepared["snapshot"]
@@ -116,6 +117,7 @@ async def seal_original_assignment(
             or snapshot["run_id"] != request["attempt_id"]
             or snapshot["job_id"] != request["job_id"]
             or snapshot["worker_id"] != binding.worker_id
+            or snapshot["process_ref"] != payload["process_ref"]
             or type(snapshot["paths"]) is not dict or set(snapshot["paths"]) != set(paths)):
         raise RemoteAssignmentError("original broker preparation differs from envelope")
     from control_plane.executive_worker_broker import uid_sweep_receipt_is_passing

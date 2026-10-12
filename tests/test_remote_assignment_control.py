@@ -42,7 +42,8 @@ def fixture(tmp_path):
             "ambient_pids": [], "ambient_identities": [], "ambient_attribution": "absent",
             "worker_uid": binding.worker_uid, "broker_pid": 9999}}
     request = {"attempt_id": "ATT-001", "job_id": "JOB-001", "worker_id": "WORKER-001",
-               "broker_operation": "assignment-seal", "broker_request": {"run_id": "ATT-001"}}
+               "broker_operation": "assignment-seal", "broker_request": {
+                   "run_id": "ATT-001", "process_ref": copy.deepcopy(snapshot["process_ref"])}}
     calls = []
     async def broker(operation, payload):
         calls.append((operation, copy.deepcopy(payload)))
@@ -76,7 +77,7 @@ def test_control_seals_original_paths_but_never_finalizes_broker(tmp_path, monke
     assert [op for op, _ in calls].count("assignment-seal-commit") == 1
 
 
-@pytest.mark.parametrize("mutation", ["attempt", "job", "worker", "path", "inode", "cleanup", "extra"])
+@pytest.mark.parametrize("mutation", ["attempt", "job", "worker", "process", "path", "inode", "cleanup", "extra"])
 def test_wrong_original_identity_never_seals(tmp_path, monkeypatch, mutation):
     binding, paths, snapshot, request, calls, broker = fixture(tmp_path)
     mock_principal(monkeypatch, binding)
@@ -84,6 +85,8 @@ def test_wrong_original_identity_never_seals(tmp_path, monkeypatch, mutation):
         snapshot[{"attempt": "run_id", "job": "job_id", "worker": "worker_id"}[mutation]] = "other"
     elif mutation == "path":
         snapshot["paths"]["run"]["path"] = str(paths["run"].parent / "ATT-other")
+    elif mutation == "process":
+        snapshot["process_ref"]["run_id"] = "ATT-different"
     elif mutation == "inode":
         snapshot["paths"]["run"]["inode"] += 1
     elif mutation == "cleanup":
@@ -171,7 +174,7 @@ def test_real_mtls_gateway_selects_control_producer_and_rejects_retarget(tmp_pat
         _gateway_fixture, _client_context, _exchange, _close_gateway, IDENTITY,
     )
     async def run():
-        binding, paths, _, _, calls, broker = fixture(tmp_path)
+        binding, paths, _, original_request, calls, broker = fixture(tmp_path)
         mock_principal(monkeypatch, binding)
         gateway = await _gateway_fixture(tmp_path)
         gateway.gateway.config = dataclasses.replace(gateway.config,
@@ -184,7 +187,7 @@ def test_real_mtls_gateway_selects_control_producer_and_rejects_retarget(tmp_pat
             refused = await _exchange(gateway.endpoint, context, wrong)
             assert refused["outcome"] == "refused" and calls == []
             response = await _exchange(gateway.endpoint, context,
-                build_request(IDENTITY, "assignment-seal", {"run_id": "ATT-001"}))
+                build_request(IDENTITY, "assignment-seal", original_request["broker_request"]))
             assert response["outcome"] == "ok"
             assert response["broker_response"]["snapshot"]["run_id"] == "ATT-001"
             assert all(stat.S_IMODE(path.stat().st_mode) == 0o700 for path in paths.values())
