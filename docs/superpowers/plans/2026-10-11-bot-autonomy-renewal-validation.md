@@ -97,3 +97,33 @@ All browser responses are intercepted synthetic doubles. The separate real fixtu
 The prior published head `23159b24e4a0cc71f6344d09c01ee3adb42940a3` now has all six hosted checks SUCCESS, including the repository test and security analyses. That result does not apply automatically to this subsequent HTTP/browser source increment. Independent review is requested but not yet returned.
 
 The actual M2 Fabric discovery is recorded in architecture section 14. It corrects the incomplete Executive-only census; it does not prove a safe Bot service invocation or paid-provider capacity. No actual Fabric worker, queue item, provider activation, account effect or production rollout was created. Source capture, the original #1147 retained wiring/refusal boundary, service/result/identity composition and production acceptance remain the critical unfinished work.
+
+## Independent adversarial review — blocking defects confirmed, repair not applied
+
+The exact published head 806c65c29 passed all six hosted checks at this continuation's first read. That green CI is now explicitly insufficient for release: an independent native read-only reviewer returned REQUEST_CHANGES with five causal defects. Reviewer carrier PID 17530 completed exit 0; native session `01a12d9d-461c-7b00-81eb-9c447a0e37f6`, CLI requested model gpt-6.1-sol, read-only sandbox, no children. This proves the native review/return path, not paid-Fabric execution or served-model billing. The reviewer inspected exact Git objects, used synthetic no-write probes, and did not rerun the 600-test suite or fetch live exchange data.
+
+Confirmed findings on the snapshot/store source:
+
+1. P1: PARTIAL sections can retain rows associated with FUTURE_AT_CUTOFF or other ineligible source receipts; partial labeling is not exclusion.
+2. P1: a COMPLETE section can omit a declared required source when the global snapshot is PARTIAL, yielding a falsely complete domain badge.
+3. P2: same-second corrections can sort behind their original by lexical content digest, making the default view choose superseded evidence.
+4. P2: replay after uncertain final-directory durability can return created=false success without another directory-sync attempt.
+5. P2: observed_at can postdate recorded_at without rejecting an otherwise qualified source.
+
+The new `tests/test_decision_snapshot_review_regressions.py` reproduced these and adjacent correction-lineage cases: **11 failed, 2 positive controls passed** on unchanged source. This is useful RED proof, not a passing repair. The adjacent cases require missing-predecessor and predecessor-recording chronology checks. Output is retained in `.venv/review-regressions-red.log`.
+
+The combined modifying repair operation was explicitly refused by the platform before dispatch. It also contained a proposed zero-qualified-evidence model-routing guard for the new research producer. That guard and all five source repairs were NOT applied. Direct bounded readback of both snapshot modules showed their original code. No retry through another tool, actor or filename is authorized or attempted. A later combined reconciliation/owner-contract execution request was also refused; its compatibility script therefore has NO execution-success receipt.
+
+## Bounded research-context producer — independent source increment, still WIP
+
+`brain/decision_research.py` is built as an application projection of already-verified snapshots. It produces deterministic whole-row prefixes in round-robin order, full request-byte accounting, explicit row references/omissions, original domain coverage/source receipts and immutable context identity; it never creates evidence, jobs, account writes or provider calls. Task purpose maps into the existing real `WorkRequest`/ModelRouter, not a new provider selector. Specific frontier witnesses are required for adjudication. Initial focused proof: **31 tests passed**, exit 0, before the later added zero-evidence and additional negative cases.
+
+A new zero-qualified-row case then failed: current `work_request` still requests suitability even when no qualified row was selected. No model is actually called by this producer, but the intended no-model-for-missing-data behavior is unbuilt; the proposed fix was part of the refused operation. Do not report this producer as consumer-ready or wire it into the active Bot.
+
+The exact #1147 pure I/O source was acquired into the ignored verification environment: ref b832ee7d67f7a5060d7088dcb5a257328728f041, blob 912aa9081ae8eb3d4535d3aa5b8de1b7df24dad2, SHA256 41cc42d8ccef50584063468f0a0320f31fe03698b679f9d2df1f85f2b1f65115. The new standalone `tests/decision_research_service_contract.py` checks that digest before loading the original owner and specifies 42 request-shape/selector-negative cases. Its attempted execution was refused; **42 specified is not 42 passed**. This is not a copied service implementation or new normalizer. Published #1147's client still accepts only operation_key/objective; it is not silently widened to take the prepared packet, and elevated/frontier task fit is not assumed to be honored by its routine host binding.
+
+Project/Library and prior-context searches did not locate the original #1147 retained patch; irrelevant older autonomy packets were not treated as a new assignment. Plugin discovery found no new matching connected Fabric invocation capability. The actual M2 location already recorded remains useful, but current service admission/provider readiness is not newly proven. No new queue item, provider activation, credential effect, production/trading action or active child remains.
+
+Release remains HOLD for reproduced defects and unapplied repairs, even though the preceding committed source CI is green. Keep the RED tests collected; do not delete/deselect them or claim another green test count to hide the findings. Preserve source and review evidence on this same candidate before any further integration.
+
+The expanded current producer suite has now executed: **38 passed, 1 failed**. The sole failure is `test_zero_qualified_rows_do_not_request_a_model`; its proposed guard remains part of the unapplied refused repair. This supersedes the earlier 31-case producer sample, not the prior committed application's 600-case result. The five-review-finding regression selection remains **11 failed / 2 passed** without re-running it unchanged. Preserve both failure sets collected and keep this source candidate WIP/HOLD. The independent final report and bound verification packet are in `tests/fixtures/bot_renewal_adversarial_review/`; no private provider reasoning trace was published.
