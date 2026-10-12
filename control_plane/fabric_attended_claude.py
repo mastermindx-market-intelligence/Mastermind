@@ -129,7 +129,7 @@ _SECRET_NAME_RE = re.compile(
 )
 _FILE_TOOLS = frozenset({"Edit", "Glob", "Grep", "Read", "Write"})
 _MCP_CLOSED_CONFIG = '{"mcpServers":{}}'
-_MAX_ENDPOINT_CHARS = 512
+_MAX_URL_CHARS = 512
 _FORBIDDEN_ARGV_FLAGS = (
     "--dangerously-skip-permissions",
     "bypassPermissions",
@@ -307,7 +307,7 @@ def _reviewed_binding_and_profile(
     if type(profile.autonomous_allowed) is not bool:
         raise AttendedClaudePreparationError("profile autonomy flag must be a bool")
     endpoint = binding.effective_base_url
-    if not isinstance(endpoint, str) or not endpoint or len(endpoint) > _MAX_ENDPOINT_CHARS:
+    if not isinstance(endpoint, str) or not endpoint or len(endpoint) > _MAX_URL_CHARS:
         raise AttendedClaudePreparationError("binding endpoint is invalid")
     # Exact endpoint match: an attended preparation never relocates the
     # reviewed profile endpoint; reviewed overrides belong to binding review.

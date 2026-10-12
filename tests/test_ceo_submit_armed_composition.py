@@ -797,6 +797,14 @@ def _is_known_non_identity_numeric(line: str, token_text: str, value: int) -> bo
         return True
     if _line_mentions_identity_name(line):
         return False
+    # Recognize only the mode slot of this closed shell statement shape.
+    # Additional commands, substitutions and unquoted operands stay guarded.
+    chmod = re.fullmatch(
+        r'\s*chmod\s+([0-7]{3,4})\s+"[A-Za-z0-9_$\{\}./-]+"'
+        r'(?:\s+2>/dev/null\s+\|\|\s+true)?\s*', line,
+    )
+    if chmod is not None and token_text == chmod.group(1):
+        return True
     lowered = line.lower()
     if (
         token_text.lower().startswith("0o")
@@ -946,6 +954,15 @@ def _scan_added_identity_diff(
         path: lines for path, lines in additions_by_path.items()
         if _is_production_identity_scan_path(path)
     }
+
+    # A patch file remains source: scan its added code, including real UID/GID
+    # constants. Only nested unified-diff range coordinates are metadata.
+    for path, lines in production.items():
+        if path.endswith((".patch", ".diff")):
+            production[path] = [re.sub(
+                r'^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@',
+                '', line,
+            ) for line in lines]
 
     string_accounts: dict[str, list[list[str]]] = {}
     for path, lines in production.items():
@@ -1976,6 +1993,31 @@ def test_d8_identity_context_normalizes_camelcase_and_unicode_names():
         ("integrations/service/runtime.ts", "const endpointPort = 684;"),
     ])
     assert _scan_added_identity_diff(diff) == ["459", "501", "684"]
+
+
+def test_d8_patch_ranges_are_metadata_but_patch_identity_body_is_guarded():
+    path = "integrations/session_bridge/owner-recovery.patch"
+    ranges = "@@ -575,6 +575,11 @@\n@@ -664,6 +669,11 @@\n@@ -748,6 +748,11 @@"
+    assert _scan_added_identity_diff(_d8_frozen_added_diff([(path, ranges)])) == []
+    for source in (ranges + "\n+worker_uid = 451", "@@ -1 +2 @@ worker_uid = 451",
+                   "+@@ -575,6 +575,11 @@"):
+        assert _scan_added_identity_diff(_d8_frozen_added_diff([(path, source)]))
+
+
+@pytest.mark.parametrize("line,allowed", [
+    ('chmod 700 "$HERE/lanes" 2>/dev/null || true', True),
+    ('chmod 750 "$HERE/lanes"', True),
+    ('chown 700 "$HERE/lanes"', False),
+    ('worker_uid=700; chmod 700 "$HERE/lanes"', False),
+    ('chmod 700 "$HERE/lanes"; launch_worker 700', False),
+    ('chmod 700 "$(launch_worker 700)"', False),
+    ('chmod 700 "$WORKER_UID/lanes"', False),
+])
+def test_d8_shell_mode_exemption_is_one_closed_operand(line, allowed):
+    findings = _scan_added_identity_diff(_d8_frozen_added_diff([
+        ("integrations/owner/base.sh", line),
+    ]))
+    assert (findings == []) is allowed
 
 def test_d8_template_topology_and_protected_defaults():
     value = json.loads(TEMPLATE.read_text(encoding="utf-8"))
