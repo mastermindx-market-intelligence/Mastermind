@@ -41,6 +41,19 @@ class OwnerChecks(unittest.TestCase):
 
     def tearDown(self): self.temp.cleanup()
 
+    def test_declared_pool_alias_binds_actual_broker_pool(self):
+        with sqlite3.connect(self.owner.db) as con:
+            con.execute("UPDATE leases SET pool='glm'")
+        with patch('lease_broker._load_yaml',return_value={'providers':{'glm':{'pool_aliases':['glm-frontier']}}}):
+            cap=self.owner.issue(dict(self.launch,run_id='alias-operator'),1)
+        self.assertEqual(cap['pool'],'glm')
+        self.assertEqual(self.owner.describe(cap['token'])['operator_run'],'alias-operator')
+
+    def test_undeclared_pool_alias_refuses(self):
+        with sqlite3.connect(self.owner.db) as con:con.execute("UPDATE leases SET pool='glm'")
+        with patch('lease_broker._load_yaml',return_value={'providers':{'glm':{'pool_aliases':[]}}}):
+            with self.assertRaises(DelegationRefused):self.owner.issue(dict(self.launch,run_id='alias-operator'),1)
+
     def test_private_token_is_not_stored_in_broker(self):
         with sqlite3.connect(self.owner.db) as con:
             row=con.execute('SELECT * FROM operator_grants').fetchone()

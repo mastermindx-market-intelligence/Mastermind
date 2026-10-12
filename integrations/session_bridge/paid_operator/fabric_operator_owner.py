@@ -137,11 +137,21 @@ class OperatorOwner:
                 refuse("root_grant_unavailable")
             if con.execute("SELECT 1 FROM operator_grants WHERE operator_run=?", (run,)).fetchone():
                 refuse("operator_grant_exists")
+            lease = self.lease(con, launch.get("lease_id"))
+            launch = dict(launch)
+            if launch.get("pool") != lease["pool"]:
+                # Same declared provider, not another account/provider retry.
+                # The broker's canonical persisted name owns capability binding.
+                from lease_broker import _load_yaml, DEFAULT_ACCOUNTS
+                providers = _load_yaml(DEFAULT_ACCOUNTS).get("providers", {})
+                aliases = providers.get(lease["pool"], {}).get("pool_aliases", [])
+                if launch.get("pool") not in aliases:
+                    refuse("operator_pool_alias_unbound")
+                launch["pool"] = lease["pool"]
             grant = {k: v for k, v in launch.items() if k not in ("run_id", "task_class")}
             grant.update(schema="mastermind.fabric_operator_grant.v1", operator_run=run,
                          issued_at=now, expires_at=root_grant["expires"],
                          child_budget=child_budget, allowed_classes=CLASSES)
-            lease = self.lease(con, launch.get("lease_id"))
             root_used = con.execute("SELECT COUNT(*) FROM operator_child_authorizations WHERE root=?", (root,)).fetchone()[0]
             # Exercise the complete contract with an inert prospective request.
             probe = dict(schema="mastermind.fabric_operator_child_request.v1", root=root,
