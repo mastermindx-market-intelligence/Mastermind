@@ -7,6 +7,7 @@ surfaced as EFFECT_UNKNOWN instead of retried here.
 """
 from __future__ import annotations
 
+import http.client
 import json
 import math
 import re
@@ -99,8 +100,8 @@ class Dot2ApiClient:
         if parsed.path not in ("", "/"):
             raise ValueError("Dot2API base URL must be the service origin")
         port = parsed.port
-        if not loopback and port not in (None, 443):
-            raise ValueError("Dot2API public endpoint must use HTTPS port 443")
+        if not loopback and port not in (None, http.client.HTTPS_PORT):
+            raise ValueError("Dot2API public endpoint must use the default HTTPS port")
         return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, "", "", "")).rstrip("/")
 
     def _token(self) -> str:

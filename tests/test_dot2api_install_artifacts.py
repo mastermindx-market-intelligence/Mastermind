@@ -22,6 +22,10 @@ def test_dot2api_config_template_matches_closed_service_schema() -> None:
     assert value["queue"] == "dot"
     assert value["require_secret_canary"] is True
     assert value["operator_harness_armed"] is False
+    assert value["control_uid"] == "__CONTROL_UID__"
+    assert value["worker_uid"] == "__WORKER_UID__"
+    assert value["worker_gid"] == "__WORKER_GID__"
+    assert value["worker_user"] == "__WORKER_USER__"
     assert value["python_binary_sha256"] == "__PYTHON_SHA256_64_HEX__"
     assert value["transport_script_sha256"] == "__DOT2API_TRANSPORT_SHA256_64_HEX__"
     serialized = json.dumps(value, sort_keys=True)
@@ -78,6 +82,9 @@ def test_dot2api_control_binding_template_is_exact_and_secret_free() -> None:
     row = value["bindings"][0]
     assert row["adapter_id"] == "dot2api"
     assert row["worker_id"] == "dot2api-01"
+    assert row["worker_user"] == "__WORKER_USER__"
+    assert row["worker_uid"] == "__WORKER_UID__"
+    assert row["worker_gid"] == "__WORKER_GID__"
     assert row["secret_canary_verdict"]["passed"] is True
     assert row["secret_canary_verdict"]["worker_id"] == row["worker_id"]
     assert "token" not in json.dumps(value).lower()
