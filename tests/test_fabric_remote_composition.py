@@ -38,6 +38,41 @@ def source(tmp_path):
     return module.FabricBindingSource.from_path(path, digest), d
 
 
+def test_running_event_loop_is_classified_no_effect(tmp_path, root_stats):
+    from control_plane.remote_worker_transport import TransportError, TransportEffect
+    selected, _ = source(tmp_path); physical = selected.bindings[0]
+    p = payload(physical); client = selected.client_for(physical, p)
+    async def scenario():
+        with pytest.raises(TransportError) as failed: client.request_sync('status', p)
+        assert failed.value.classification is TransportEffect.NO_EFFECT
+        assert failed.value.code == 'sync_context_invalid'
+    asyncio.run(scenario())
+
+
+def test_optional_runtime_generation_binding_remains_exactly_once(tmp_path, root_stats, monkeypatch):
+    from control_plane.remote_worker_transport import TransportValidationError
+    selected, _ = source(tmp_path); physical = selected.bindings[0]
+    p = payload(physical); client = selected.client_for(physical, p)
+    client.bind_payload_identity(session_epoch_id='epoch-1', process_generation_id='generation-1')
+    with pytest.raises(TransportValidationError):
+        client.bind_payload_identity(session_epoch_id='epoch-1', process_generation_id='generation-2')
+    async def forbidden(*a, **kw): pytest.fail('retargeted generation reached transport')
+    monkeypatch.setattr(client._client, 'request', forbidden)
+    with pytest.raises(module.FabricCompositionError):
+        asyncio.run(client.request('status', {**p, 'process_generation_id': 'generation-2'}))
+
+
+def test_cancelled_modifying_transport_retains_unknown_effect(tmp_path, root_stats, monkeypatch):
+    from control_plane.remote_worker_transport import TransportError, TransportEffect
+    selected, _ = source(tmp_path); physical = selected.bindings[0]
+    p = payload(physical); client = selected.client_for(physical, p)
+    async def cancellation(*a, **kw): raise asyncio.CancelledError()
+    monkeypatch.setattr(client._client, 'request', cancellation)
+    with pytest.raises(TransportError) as failed: asyncio.run(client.request('start', p))
+    assert failed.value.classification is TransportEffect.EFFECT_UNKNOWN
+    with pytest.raises(asyncio.CancelledError): asyncio.run(client.request('status', p))
+
+
 def test_v2_remote_transport_can_be_selected_without_touching_local_socket(tmp_path, root_stats, monkeypatch):
     selected, _ = source(tmp_path)
     physical = selected.bindings[0]

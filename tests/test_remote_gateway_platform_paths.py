@@ -63,3 +63,23 @@ def test_cross_platform_config_is_not_a_fallback(monkeypatch, platform, path):
     with pytest.raises(service.RemoteWorkerGatewayServiceError, match="GATEWAY_PATH_ESCAPE"):
         service.load_remote_worker_gateway_config(path, expected_group_gid=450)
     assert reads == []
+
+
+@pytest.mark.parametrize('socket,accepted', [
+    ('/private/var/run/mastermind-executive/fabric.sock', True),
+    ('/var/run/mastermind-executive/fabric.sock', False),
+])
+def test_darwin_fabric_requires_canonical_namespace_without_relaxing_symlink_guard(monkeypatch, socket, accepted):
+    root = Path('/Library/Application Support/MastermindExecutive/remote-worker-gateway')
+    raw = document(root, Path(socket))
+    raw.update(broker_target='attended-fabric', expected_broker_peer_uid=451)
+    monkeypatch.setattr(service.sys, 'platform', 'darwin')
+    monkeypatch.setattr(service, '_secure_regular_file',
+                        lambda path, **kw: json.dumps(raw).encode() if kw['read_bytes'] else b'')
+    monkeypatch.setattr(Path, 'is_file', lambda path: True)
+    if accepted:
+        result = service.load_remote_worker_gateway_config(root/'config.json', expected_group_gid=450)
+        assert result.broker_socket_path == Path(socket)
+    else:
+        with pytest.raises(service.RemoteWorkerGatewayServiceError, match='GATEWAY_BROKER_SOCKET_INVALID'):
+            service.load_remote_worker_gateway_config(root/'config.json', expected_group_gid=450)

@@ -113,6 +113,11 @@ class PinnedFabricRemoteClient:
         self._client = RemoteWorkerBrokerClient(transport.binding, identity,
                                                 allowed_operations=FABRIC_OPERATIONS)
 
+    def bind_payload_identity(self, *, session_epoch_id, process_generation_id):
+        """Retain the incumbent optional, exactly-once Runtime generation fence."""
+        self._client.bind_payload_identity(session_epoch_id=session_epoch_id,
+                                           process_generation_id=process_generation_id)
+
     def _require(self, operation, payload):
         if (operation not in FABRIC_OPERATIONS or type(payload) is not dict
                 or payload.get('binding') != dict(self._binding)
@@ -123,12 +128,22 @@ class PinnedFabricRemoteClient:
         # Retain the existing recursive MH1 host/worker/Job/Attempt/run check,
         # even before a client or test seam is invoked.
         from control_plane.remote_worker_transport import payload_retargets_authority
-        if payload_retargets_authority(operation, payload, self.identity):
+        if payload_retargets_authority(operation, payload, self.identity,
+                                       bound_payload_identity=self._client.bound_payload_identity):
             _refuse()
 
     async def request(self, operation, payload, *, timeout_seconds=None):
         self._require(operation, payload)
-        result = await self._client.request(operation, payload, timeout_seconds=timeout_seconds)
+        try:
+            result = await self._client.request(operation, payload, timeout_seconds=timeout_seconds)
+        except asyncio.CancelledError as exc:
+            # The inner await may already have written the original command.
+            # Without its classified no-effect response, cancellation cannot
+            # authorize another start. Read-only cancellation stays ordinary.
+            if not RemoteWorkerBrokerClient._operation_is_observational(operation, payload):
+                from control_plane.remote_worker_transport import TransportError, TransportEffect
+                raise TransportError('fabric_request_cancelled', TransportEffect.EFFECT_UNKNOWN) from exc
+            raise
         try:
             self._require(operation, payload)
         except Exception as exc:
@@ -145,4 +160,5 @@ class PinnedFabricRemoteClient:
             asyncio.get_running_loop()
         except RuntimeError:
             return asyncio.run(self.request(operation, payload, timeout_seconds=timeout_seconds))
-        _refuse()
+        from control_plane.remote_worker_transport import TransportError, TransportEffect
+        raise TransportError('sync_context_invalid', TransportEffect.NO_EFFECT)

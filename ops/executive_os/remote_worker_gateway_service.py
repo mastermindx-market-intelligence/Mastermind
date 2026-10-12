@@ -31,6 +31,7 @@ SERVICE_LABEL = "com.mastermind.executive.remote-worker-gateway"
 SERVICE_CHECK_SCHEMA = "mastermind.remote_worker_gateway_service_check/v1"
 DEFAULT_GATEWAY_ROOT = Path("/Library/Application Support/MastermindExecutive/remote-worker-gateway")
 DEFAULT_BROKER_SOCKET_ROOT = Path("/var/run/mastermind-executive")
+DARWIN_FABRIC_SOCKET_ROOT = Path("/private/var/run/mastermind-executive")
 LINUX_GATEWAY_ROOT = Path("/etc/mastermind-executive")
 LINUX_BROKER_SOCKET_ROOT = Path("/run")
 MAX_CONFIG_BYTES = 64 * 1024
@@ -295,7 +296,8 @@ def load_remote_worker_gateway_config(
     # the platform namespace is not a fallback to a caller-selected root.
     if allowed_root is None:
         allowed_root = LINUX_GATEWAY_ROOT if sys.platform == "linux" else DEFAULT_GATEWAY_ROOT
-    if broker_socket_root is None:
+    default_socket_root = broker_socket_root is None
+    if default_socket_root:
         broker_socket_root = (LINUX_BROKER_SOCKET_ROOT if sys.platform == "linux"
                               else DEFAULT_BROKER_SOCKET_ROOT)
     if type(expected_owner_uid) is not int or expected_owner_uid < 0:
@@ -319,6 +321,12 @@ def load_remote_worker_gateway_config(
         read_bytes=True,
     )
     document = _closed_json(raw)
+    if (default_socket_root and sys.platform == 'darwin'
+            and document.get('broker_target') == FABRIC_BROKER_TARGET):
+        # This new target requires a canonical root-installed endpoint. Keep
+        # the legacy worker-broker default/digest unchanged; never resolve an
+        # arbitrary symlink to make the strict Fabric parent guard pass.
+        socket_root = DARWIN_FABRIC_SOCKET_ROOT
     for key in (
         "schema",
         "host_ref",

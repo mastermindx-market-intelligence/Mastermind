@@ -169,7 +169,10 @@ Actual calls authenticate the fixed Unix peer before sending their payload.
 Existing Worker Broker documents, startup probing and sealing stay unchanged.
 
 The loader selects the existing Linux installer namespace `/etc/mastermind-executive`
-and `/run` on Linux; macOS retains its existing defaults. It never searches the
+and `/run` on Linux. The new macOS Fabric target requires the canonical
+`/private/var/run/mastermind-executive` namespace; the existing worker-broker
+keeps its `/var/run` default and digest. Symlink/ownership guards are unchanged.
+It never searches the
 other platform namespace after refusal. The transport preserves EFFECT_UNKNOWN
 if its pinned trust source changes after a modifying request has been sent.
 
@@ -180,3 +183,8 @@ profile and `fabric_bridge_armed` remain disabled. The real Backend composition,
 post-exec START, collection and assignment revocation must qualify before an
 existing installation owner selects these inputs and before a live native
 same-parent acceptance can be claimed.
+
+The remote client preserves the optional exactly-once Runtime generation binding.
+A synchronous call inside a running loop reports the existing no-effect transport
+error. A cancelled modifying transport await retains `EFFECT_UNKNOWN`, because
+cancellation does not establish whether the original command was already sent.
