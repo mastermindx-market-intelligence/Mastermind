@@ -22,6 +22,10 @@
     {
       "path": "ops/native_fabric/patches/test_r31_paired_quota_truth_20261012.patch",
       "sha256": "1cce3943581ffaac74071de7120d1dfc3edc296fdd0ae6a43dc013459c9d61ff"
+    },
+    {
+      "path": "ops/native_fabric/patches/pool_cli_selector_20261012.patch",
+      "sha256": "1da60bc01a0dece687907e238c0ee267582e329977ef3dbd77790543f73577a0"
     }
   ],
   "schema": "mastermind.fabric_selector_source_bundle.v1",
@@ -46,6 +50,11 @@
       "patched_sha256": "30da09d2964c0e3a7be5840bfa5ac0f6c68fe255f28b8fb6c526db03cf5c3203",
       "path": "ext/tests/test_r31_glm_burn_down.py",
       "sha256": "23cf5a9269c553f9e09cf82ec326878a492b712b73fcae5b3ad32777f4a85d5e"
+    },
+    {
+      "patched_sha256": "2331854c1613d588094bcca34e75f9c3dd7de4396272e78cf03efbcfcb4d0f8e",
+      "path": "bin/pool",
+      "sha256": "95dad5ac680d605200252f7152ecc80b77a767016874028288822a98b2b72c78"
     }
   ],
   "supersedes_test_patch": "ops/native_fabric/patches/test_r31_quota_truth_20261012.patch",
@@ -56,6 +65,7 @@
     "native_transport_tests_passed": 59,
     "original_live_source_unchanged": true,
     "production_install_proven": false,
-    "provider_account_consumption_proven": false
+    "provider_account_consumption_proven": false,
+    "wrapper_forward_cases": 2
   }
 }
