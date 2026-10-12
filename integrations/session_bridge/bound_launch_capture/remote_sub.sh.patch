@@ -1,0 +1,28 @@
+--- a/remote_sub.sh
++++ b/remote_sub.sh
+@@ -300,6 +300,25 @@
+   if "$REMOTE_SUB_PYTHON" - "$LOG_FILE" "$ID" "$HOST_ARG" "$MODE" "$MODEL" "$PACKET" "$REMOTE_CWD" "$HERE" <<'PY_RESERVE'
+ import os
+ import sys
++
++# Only the trusted embedding owner supplies this optional correlation file.
++# It is not Runtime admission, a credential, or safe-to-retry evidence.
++bound_input = os.environ.get('REMOTE_SUB_START_BINDING_FILE')
++if bound_input:
++    sys.path.insert(0, sys.argv[8])
++    try:
++        from fabric_launch_reservation import load_binding, reserve_bound_log
++        binding = load_binding(bound_input, run_id=sys.argv[2],
++                               root_id=os.environ.get('POOL_ORCHESTRATOR_ID'))
++        reserve_bound_log(sys.argv[1], binding, run_id=sys.argv[2],
++                          root_id=os.environ.get('POOL_ORCHESTRATOR_ID'))
++    except FileExistsError:
++        print(f"RUN_EXISTS id={sys.argv[2]}", file=sys.stderr)
++        raise SystemExit(75)
++    except Exception:
++        print("BOUND_LOG_RESERVATION_REFUSED before_lease=1 before_launch=1", file=sys.stderr)
++        raise SystemExit(73)
++    raise SystemExit(0)
+ 
+ try:
+     fd = os.open(sys.argv[1], os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)

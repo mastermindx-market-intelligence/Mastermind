@@ -1,0 +1,53 @@
+# Original-owner launch evidence — source integration
+
+This is an uninstalled extension of the existing Fabric controller reservation
+and process-capture boundaries. It does not supply a production Backend or arm
+Executive submission. Existing accepted runs and their records are unchanged.
+
+`fabric_launch_reservation.py` reserves the incumbent `remote_sub.sh` run log
+with its existing `O_EXCL` ownership rule. The optional first line binds the
+Runtime root/Job/Attempt, grant/commission digests, physical-route digest and
+canonical start-request digest. It flushes the file and containing directory
+before returning, and checks that the visible reservation still matches its
+open handles. A failure leaves the original name consumed. Matching bytes do
+not authorize replay; a changed request or route cannot reuse that reservation.
+
+`remote_sub.sh.patch` wires this into the original pre-lease reservation, only
+when the trusted embedding owner supplies `REMOTE_SUB_START_BINDING_FILE`.
+Unbound calls retain their existing path. Bound calls cannot use the legacy
+pre-lease continuation exception. The input and log directories must already
+satisfy the private-owner checks: this code performs no chmod, chown, directory
+repair, lease release or provider operation. `RESERVATION_SOURCE.json` pins the
+exact installed preimage; installation must preserve any newer source changes.
+
+The file and its fields are **correlation, not authentication or a grant**.
+Reading a reservation always reports `start_authorized:false` and
+`UNRESOLVED_BY_RESERVATION`. A missing, empty, partial or legacy log is not an
+unused-Attempt proof. The future authenticated Backend must validate the
+current Runtime/Capacity assignment and consume its original first-use
+authority at the actual launch boundary; this helper cannot manufacture that
+authority from an environment variable or file.
+
+The existing independently qualified early-launch candidate captures the real
+owned gate process's boot/start generation before releasing target exec. Its
+port onto the current `lane_runtime.py` is pending as
+`fabric-bound-launch-port-01a11e90-v1`. That run is source labor, not the native
+mission proof. It must retain `PRE_EXEC_HANDSHAKE`,
+`correlation_is_authority:false` and `provider_execution_attested:false`.
+
+The remaining integration is explicit: connect the authenticated original
+owner's reservation context to that actual spawn and settlement; retain its
+launch/result/cleanup bytes in the existing run record; and consume them
+through the original owner to satisfy the bridge's complete physical and
+isolation contracts. A wrapper PID or copied historical log cannot become a
+Worker attestation. Installation, supported provider/profile admission,
+assignment revocation and the real original-parent task proof remain open.
+
+Source validation: 17 focused reservation checks and six checks against the
+actual patched reservation fragment passed. They cover concurrent callers,
+changed request/route, failure during durability, missing/truncated/legacy
+records, wrong root/Attempt, shared directories, symlinks, duplicate JSON keys,
+short writes, moved directories and preservation of the unbound controller.
+No provider calls, installed-file changes or host probes were part of these
+checks. Independent paid source review is pending as
+`fabric-bound-reservation-review-01a11e90-v1`.
