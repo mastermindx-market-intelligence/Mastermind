@@ -79,7 +79,15 @@ def run_cli(module, capsys, http, *, kind="checkpoint", runner=None):
     return exit_code, json.loads(captured.out)
 
 
-@pytest.mark.parametrize("count", [1, 100, 143, 200, 256, 409, 419, 450, 451, 457, 458, 465, 470, 475, 476, 477, 478, 479, 480, 481, 482, 483, 484, 485, 486, 487, 488, 489, 490])
+@pytest.mark.parametrize(
+    "count",
+    [
+        1, 100, 143, 200, 256, 409, 419, 450, 451, 457,
+        458, 465, 470, 475, 476, 477, 478, 479, 480, 481,
+        482, 483, 484, 485, 486, 487, 488, 489, 490, 600,
+        704, 720, 750, 799, 800,
+    ],
+)
 @pytest.mark.parametrize("kind", ["checkpoint", "remote-complete"])
 def test_real_main_completes_bounded_estate(count, kind, capsys, monkeypatch):
     module = fx._cli_module()
@@ -94,7 +102,7 @@ def test_real_main_completes_bounded_estate(count, kind, capsys, monkeypatch):
     assert payload["collision_state"] == ("NONE" if count == 1 else "DISJOINT")
 
 
-@pytest.mark.parametrize("count", [491, 1000])
+@pytest.mark.parametrize("count", [801, 1000])
 def test_over_ceiling_refuses_before_foreign_files(count, capsys, monkeypatch):
     module = fx._cli_module()
     monkeypatch.setattr(module, "monotonic", Clock(), raising=False)
@@ -192,7 +200,7 @@ def test_large_foreign_file_fanout_remains_bounded(files, capsys, monkeypatch):
     http = EstateHTTP(90, files_per_pr=files)
     rc, payload = run_cli(module, capsys, http)
     assert rc == 2 and payload["code"] == "REMOTE_CENSUS_INCOMPLETE"
-    assert len(http.calls) <= 1152
+    assert len(http.calls) <= 1920
 
 
 def test_accounting_preserves_unconsumed_unicode_metadata(capsys, monkeypatch):
@@ -307,7 +315,7 @@ def test_exact_call_and_byte_limit_remains_successful(capsys, monkeypatch):
 
 def test_budget_constants_are_closed_and_raw_response_cap_is_unchanged():
     module = fx._cli_module()
-    assert (module._MAX_COLLISION_PRS, module._MAX_HTTP_CALLS) == (490, 1152)
+    assert (module._MAX_COLLISION_PRS, module._MAX_HTTP_CALLS) == (800, 1920)
     assert module._MAX_HTTP_NORMALIZED_BYTES == 128 * 1024 * 1024
     assert module._HTTP_READ_BUDGET_SECONDS == 300.0
     assert module._MAX_HTTP_BODY_BYTES == 5_000_000

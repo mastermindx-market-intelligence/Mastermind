@@ -74,9 +74,9 @@ _PAGE_SIZE = 100
 _MAX_PAGES = 10
 _MAX_FOREIGN_FILE_PAGES = 30
 _FOREIGN_PR_WORKERS = 4
-_MAX_COLLISION_PRS = 490
+_MAX_COLLISION_PRS = 800
 # One invocation-local cooperative budget spans both observations, not hard preemption.
-_MAX_HTTP_CALLS = 1152
+_MAX_HTTP_CALLS = 1920
 _HTTP_READ_BUDGET_SECONDS = 300.0
 _MAX_HTTP_NORMALIZED_BYTES = 128 * 1024 * 1024
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
