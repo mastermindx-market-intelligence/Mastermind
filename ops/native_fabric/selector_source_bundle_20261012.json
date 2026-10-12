@@ -1,0 +1,61 @@
+{
+  "live_install_supported": false,
+  "mode": "SOURCE_ONLY_PREFLIGHT",
+  "operation": "fabric-expiry-selector-20261011-sol-001",
+  "patches": [
+    {
+      "path": "ops/native_fabric/patches/fabric_task_expiry_host_select_20261012_v2.patch",
+      "sha256": "14e6597db641dfdbc5be61d4c8b0044ff7215c8bb4f7cc02e306843b996d3aab"
+    },
+    {
+      "path": "ops/native_fabric/patches/pick_exact_model_selection_20261012.patch",
+      "sha256": "1c704b0fa460a0970945f037cfb4a6f3c869951363aa7bade4ca03cc09855ec0"
+    },
+    {
+      "path": "ops/native_fabric/patches/pick_glm_paired_window_urgency_20261012.patch",
+      "sha256": "3a0777974c7c52c6e8f9831495fecb6eb78e218e5c17f05a039d6a8ee580c1d0"
+    },
+    {
+      "path": "ops/native_fabric/patches/lease_broker_glm_expiry_account_20261012.patch",
+      "sha256": "bf63eda2e3cca61ee460f5ae58cdc3e4f8db0d6d7c770946a1690160aa4daafa"
+    },
+    {
+      "path": "ops/native_fabric/patches/test_r31_paired_quota_truth_20261012.patch",
+      "sha256": "1cce3943581ffaac74071de7120d1dfc3edc296fdd0ae6a43dc013459c9d61ff"
+    }
+  ],
+  "schema": "mastermind.fabric_selector_source_bundle.v1",
+  "source_pin": "25c4b7923734392b1013afae179966985819d847",
+  "sources": [
+    {
+      "patched_sha256": "69e18648e8a1243be23c6d84b1c944c6f98e5804b1281182fa380a9af4b6eed9",
+      "path": "ext/fabric_task.py",
+      "sha256": "5596de46d2e8ca88178152fcd540db0ce50b3d96250aabe34bacf8a7a47727da"
+    },
+    {
+      "patched_sha256": "0037a72065ae6efe1e780e1e962aa6434a386e2fdccdb7954acb15b54990cd15",
+      "path": "ext/pick.py",
+      "sha256": "43fe863bd2207e55ca6d619aa92a55750f9468e05dd6b3567811eca96c288b4c"
+    },
+    {
+      "patched_sha256": "1ecabe7b1fb776987d9b8d0663b8e97f18897a0e8968b64690fa3e1968b975b3",
+      "path": "ext/lease_broker.py",
+      "sha256": "c17558441d408ed743ef3e282b50db1f4cf8926aad9cca3977ceb867c0d8eb4f"
+    },
+    {
+      "patched_sha256": "30da09d2964c0e3a7be5840bfa5ac0f6c68fe255f28b8fb6c526db03cf5c3203",
+      "path": "ext/tests/test_r31_glm_burn_down.py",
+      "sha256": "23cf5a9269c553f9e09cf82ec326878a492b712b73fcae5b3ad32777f4a85d5e"
+    }
+  ],
+  "supersedes_test_patch": "ops/native_fabric/patches/test_r31_quota_truth_20261012.patch",
+  "test_proof": {
+    "integrated_tests_passed": 285,
+    "m2_source_compatible_isolated": true,
+    "native_transport_subtests_passed": 7,
+    "native_transport_tests_passed": 59,
+    "original_live_source_unchanged": true,
+    "production_install_proven": false,
+    "provider_account_consumption_proven": false
+  }
+}
