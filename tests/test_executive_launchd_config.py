@@ -775,6 +775,10 @@ def test_control_config_template_tracks_strict_service_schema() -> None:
         "subscription_canary_realm",
         "privileged_readiness_armed",
         "privileged_broker_socket_path",
+        # Remote physical bindings are rendered only after Capacity/host
+        # enrollment; the unconfigured Control template must not point at a
+        # nonexistent or guessed worker-binding projection.
+        "remote_worker_bindings_path",
         # Provenance is injected only after the installer validates the live
         # receipt; the static template intentionally has no host digest.
         "python_runtime_provenance_digest",
