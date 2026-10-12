@@ -86,7 +86,7 @@ def test_backend_binds_actual_transport_and_refuses_duplicate_envelope(ext,tmp_p
 def test_collector_reads_configs_only_for_existing_glm_lane_hosts(ext,tmp_path):
     registry=tmp_path/'hosts.json'
     registry.write_text(json.dumps({'eligible':{'roles':['lanes'],'allowed_modes':['glm'],'ssh_alias':'h','worktree_root':'/home'},'seat':{'roles':['seat'],'local':True,'allowed_modes':['glm']},'other':{'roles':['lanes'],'allowed_modes':['minimax'],'ssh_alias':'m'}}))
-    r=subprocess.run([sys.executable,str(ext/'host_pull_backend.py'),'read-hosts',str(registry),'','1'],capture_output=True,text=True,timeout=5)
+    r=subprocess.run([sys.executable,str(ext/'host_pull_backend.py'),'read-hosts',str(registry),'','1','--glm-readiness'],capture_output=True,text=True,timeout=5)
     assert r.returncode==0
     assert {s.split('|')[0]:s.split('|')[-1] for s in r.stdout.splitlines()}=={'eligible':'1','other':'0','seat':'0'}
 
@@ -160,7 +160,7 @@ def test_changed_shell_syntax(ext):
 def test_held_or_invalid_mode_policy_never_reads_config(ext,tmp_path,extra):
     registry=tmp_path/'hosts.json'
     registry.write_text(json.dumps({'h':dict(roles=['lanes'],allowed_modes=['glm'],ssh_alias='h',**{k:v for k,v in extra.items() if k!='allowed_modes'}) | ({'allowed_modes':extra['allowed_modes']} if 'allowed_modes' in extra else {})}))
-    r=subprocess.run([sys.executable,str(ext/'host_pull_backend.py'),'read-hosts',str(registry),'','1'],capture_output=True,text=True,timeout=5)
+    r=subprocess.run([sys.executable,str(ext/'host_pull_backend.py'),'read-hosts',str(registry),'','1','--glm-readiness'],capture_output=True,text=True,timeout=5)
     assert r.returncode==0,r.stderr
     assert r.stdout.rstrip().endswith('|0')
 
@@ -260,3 +260,10 @@ def test_paid_predicate_contract_suite(ext):
     r=subprocess.run([sys.executable,str(script)],cwd=ext,capture_output=True,text=True,timeout=10)
     assert r.returncode==0,r.stdout+r.stderr
     assert 'Ran 33 tests' in r.stderr
+
+
+def test_old_collector_retains_original_four_field_contract(ext,tmp_path):
+    registry=tmp_path/'hosts.json'
+    registry.write_text(json.dumps({'h':{'roles':['lanes'],'allowed_modes':['glm'],'ssh_alias':'h','worktree_root':'/home'}}))
+    r=subprocess.run([sys.executable,str(ext/'host_pull_backend.py'),'read-hosts',str(registry),'','1'],capture_output=True,text=True,timeout=5)
+    assert r.returncode==0 and r.stdout=='h|0|h|/home\n'

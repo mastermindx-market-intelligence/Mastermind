@@ -9,7 +9,12 @@
  # These are code/data for the existing collector, never credential stores.
  # Missing/symlinked dependencies fail closed before any fleet probe.
  if [ ! -f "$PROBE_FILE" ] || [ -L "$PROBE_FILE" ] ||
-@@ -65,21 +67,29 @@
+@@ -61,25 +63,33 @@
+ 
+ # host|is_local|ssh_alias|worktree_root — one line per probeable host.
+ read_hosts() {
+-  python3 -B "$BACKEND_FILE" read-hosts "$HOSTS_JSON" "$SELECTED" "$ONCE"
++  python3 -B "$BACKEND_FILE" read-hosts "$HOSTS_JSON" "$SELECTED" "$ONCE" --glm-readiness
  }
  
  write_state() { # $1 host, $2 probe rc, $3 probe stdout
@@ -60,7 +65,7 @@
  load1=""; load5=""; ncpu=""; mem=""; disk=""; on_ac="unknown"; active="0"; tools=""; thermals=""
 --- a/host_pull_backend.py
 +++ b/host_pull_backend.py
-@@ -35,11 +35,25 @@
+@@ -35,11 +35,28 @@
          alias = e.get("ssh_alias")
          if not isinstance(alias, str):
              alias = ""
@@ -78,7 +83,10 @@
 +        glm = ("lanes" in e.get("roles", []) and modes_valid
 +            and (modes is None or "glm" in modes)
 +            and qualification_valid and "glm" not in qualification)
-+        print("|".join([name, "1" if e.get("local") else "0", alias, wr, "1" if glm else "0"]))
++        fields = [name, "1" if e.get("local") else "0", alias, wr]
++        if len(sys.argv) > 4 and sys.argv[4] == "--glm-readiness":
++            fields.append("1" if glm else "0")
++        print("|".join(fields))
  
  def write_state():
      import json, os, sys, time, tempfile, stat, math, re
@@ -87,7 +95,7 @@
      doc = {"host": host, "ts": int(time.time()), "reachable": False, "error": None}
  
      def num(s):
-@@ -49,6 +63,7 @@
+@@ -49,6 +66,7 @@
              return None
  
      kv = {}
@@ -95,7 +103,7 @@
      if rc == 0:
          for line in out.splitlines():
              line = line.strip()
-@@ -57,12 +72,36 @@
+@@ -57,12 +75,36 @@
              k, v = line.split("=", 1)
              k = k.strip()
              if k and all(c.isalnum() or c == "_" for c in k):
@@ -132,7 +140,7 @@
          doc["load1"] = num(kv.get("load1"))
          doc["load5"] = num(kv.get("load5"))
          doc["ncpu"] = int(num(kv.get("ncpu")) or 0)
-@@ -189,14 +228,28 @@
+@@ -189,14 +231,28 @@
          doc["error"] = "probe_exit_%d" % rc
          summary = "reachable=false error=probe_exit_%d" % rc
      path = os.path.join(state_dir, host + ".json")

@@ -13,9 +13,9 @@
     "pool_status.py": "ec1c15f8090aafd509db8b6943513ae33f5f6013b5c8dbb78f2827e50e6aceb0"
   },
   "installed_postimages": {
-    "host_pull.sh": "61a206a80c375fb7c56a5b8cc42d5ab48477220637751396dcf0c450e2b2fa75",
+    "host_pull.sh": "22c68f40ef4bb2e7157c29979141aa867d53a97e9ab0572a8280c27a51a47f1c",
     "host_pull_probe.template": "2db9af35d7ae0262c94e49b21d318e11e0d58fd4a62e5601453c3403874ced8a",
-    "host_pull_backend.py": "eaa747f6fcb96ffbcf8f086997d1fe4e1fc41d47516b2e8b6fcd834b4d5baefe",
+    "host_pull_backend.py": "6c10385be89c32627bbb87a5f088e36e849de84b0635f02d460138d8e6884ad5",
     "pick.py": "c2d5420bbaf5b06b47788fecd999b7f920f60fe5f25154f2ab8a22afa2d58b29",
     "lease_broker.py": "a72bc031ddb81e559e0cf48fcbf824a959edfcf445c1d3d2d89348c3c66c6f0c",
     "glm_host_account_readiness.py": "738792f6d4a22e51befb71496b831715c9ab038218063c3802fd4540736c96ed",
@@ -27,7 +27,7 @@
     "glm_host_account_source.py",
     "glm_host_account_probe.py"
   ],
-  "patch_sha256": "7f4f2d3a04bd828ec5794397cf61815d0bb3e40615df3db659337c10fe5fb8e6",
+  "patch_sha256": "2731ab760b3fe683c8c4317ed5918380579e6d93be0474f9c6956ed1064f8659",
   "worker": {
     "run_id": "fabric-glm-host-account-predicate-01a11e90-v1",
     "root": "01a11e90-4b5d-7f53-b966-8aaaad38701f",
