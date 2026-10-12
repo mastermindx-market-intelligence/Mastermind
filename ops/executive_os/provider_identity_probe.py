@@ -612,8 +612,8 @@ class _Client:
     def notify(self, method: str) -> None:
         self._send({"method": method})
 
-    def request(self, request_id: int, method: str, params: Mapping[str, Any]) -> dict[str, Any]:
-        self._send({"id": request_id, "method": method, "params": dict(params)})
+    def request(self, request_id: int, method: str, params: Mapping[str, Any] | None) -> dict[str, Any]:
+        self._send({"id": request_id, "method": method, "params": None if params is None else dict(params)})
         deadline = time.monotonic() + 15.0
         while True:
             remaining = deadline - time.monotonic()
@@ -640,6 +640,135 @@ class _Client:
                 self._proc.wait(timeout=3.0)
 
 
+MODEL_CAPACITY_FLAG = "--model-capacity-diagnostic"
+MODEL_CAPACITY_SCHEMA = "mastermind.executive_provider_model_capacity_diagnostic/v1"
+_DIAGNOSTIC_REFUSALS = frozenset({
+    "diagnostic_arguments_invalid", "diagnostic_payload_invalid", "diagnostic_probe_failed",
+})
+
+
+def _diagnostic_code(value: Any) -> str:
+    if type(value) is str and value in IDENTITY_REFUSAL_CODES | _DIAGNOSTIC_REFUSALS:
+        return value
+    return "diagnostic_probe_failed"
+
+
+def _diagnostic_window(value: Any) -> dict[str, int | None] | None:
+    if value is None:
+        return None
+    if type(value) is not dict:
+        raise IdentityProbeError("diagnostic_payload_invalid")
+    result = {}
+    for source, target, maximum, minimum in (
+        ("usedPercent", "used_percent", 100, 0),
+        ("windowDurationMins", "window_duration_mins", 2**31 - 1, 1),
+        ("resetsAt", "resets_at", 2**53 - 1, 0),
+    ):
+        item = value.get(source)
+        if item is None and source != "usedPercent":
+            result[target] = None
+        elif type(item) is int and minimum <= item <= maximum:
+            result[target] = item
+        else:
+            raise IdentityProbeError("diagnostic_payload_invalid")
+    return result
+
+
+def normalize_model_capacity(models: Any, limits: Any) -> dict[str, Any]:
+    """Project two bounded read results; never infer execution or recovery authority."""
+    from ops.executive_os.provider_readiness import PRODUCTION_MODEL
+
+    if type(models) is not dict or type(limits) is not dict:
+        raise IdentityProbeError("diagnostic_payload_invalid")
+    rows, cursor = models.get("data"), models.get("nextCursor")
+    if (type(rows) is not list or len(rows) > 100
+            or (cursor is not None and (type(cursor) is not str or not 0 < len(cursor) <= 4096))):
+        raise IdentityProbeError("diagnostic_payload_invalid")
+    matches = 0
+    for row in rows:
+        if (type(row) is not dict or type(row.get("model")) is not str
+                or not 0 < len(row["model"]) <= 256):
+            raise IdentityProbeError("diagnostic_payload_invalid")
+        matches += row["model"] == PRODUCTION_MODEL
+    if matches > 1:
+        raise IdentityProbeError("diagnostic_payload_invalid")
+    permission = limits.get("ordinaryUsageAllowed")
+    if permission is not None and type(permission) is not bool:
+        raise IdentityProbeError("diagnostic_payload_invalid")
+    buckets = limits.get("rateLimitsByLimitId")
+    if buckets is not None and type(buckets) is not dict:
+        raise IdentityProbeError("diagnostic_payload_invalid")
+    if buckets is not None and "codex" in buckets:
+        snapshot, source = buckets["codex"], "codex"
+        if type(snapshot) is not dict:
+            raise IdentityProbeError("diagnostic_payload_invalid")
+    else:
+        snapshot = limits.get("rateLimits")
+        source = "legacy" if snapshot is not None else "unknown"
+    if snapshot is not None and type(snapshot) is not dict:
+        raise IdentityProbeError("diagnostic_payload_invalid")
+    snapshot = {} if snapshot is None else snapshot
+    return {
+        "model_catalog": {"listed_in_returned_page": matches == 1, "complete": cursor is None},
+        "capacity": {"ordinary_usage_allowed": permission, "source_bucket": source,
+                     "primary": _diagnostic_window(snapshot.get("primary")),
+                     "secondary": _diagnostic_window(snapshot.get("secondary"))},
+    }
+
+
+def diagnostic_document(slot_id: str | None, observation: dict[str, Any] | None = None,
+                        *, refusal: str | None = None) -> dict[str, Any]:
+    from ops.executive_os.provider_readiness import PRODUCTION_MODEL
+
+    return {
+        "schema_version": MODEL_CAPACITY_SCHEMA, "diagnostic_only": True, "readiness_issued": False,
+        "observation_status": "observed" if observation is not None else "refused",
+        "refusal": None if observation is not None else _diagnostic_code(refusal),
+        "slot_id": slot_id, "configured_model": PRODUCTION_MODEL,
+        "model_catalog": ({"listed_in_returned_page": None, "complete": None}
+                          if observation is None else observation["model_catalog"]),
+        "capacity": ({"ordinary_usage_allowed": None, "source_bucket": "unknown",
+                      "primary": None, "secondary": None}
+                     if observation is None else observation["capacity"]),
+    }
+
+
+def _model_capacity_main(tokens: Sequence[str]) -> int:
+    slot_id = None
+    try:
+        from ops.executive_os.provider_worker_slots import get_slot
+
+        if (list(tokens).count(MODEL_CAPACITY_FLAG) != 1
+                or any(sum(t.split("=", 1)[0] == flag for t in tokens) != 1
+                       for flag in ("--slot-id", "--expected-kind"))):
+            raise IdentityProbeError("diagnostic_arguments_invalid")
+        parser = _SeatArgumentParser(allow_abbrev=False, add_help=False)
+        parser.add_argument(MODEL_CAPACITY_FLAG, action="store_true")
+        parser.add_argument("--slot-id", required=True)
+        parser.add_argument("--expected-kind", required=True, choices=sorted(EXPECTED_AUTH_MODE))
+        args = parser.parse_args(list(tokens))
+        slot = get_slot(args.slot_id)
+        if slot.provider_family != "openai" or args.expected_kind not in slot.allowed_credential_kinds:
+            raise IdentityProbeError("diagnostic_arguments_invalid")
+        slot_id = slot.slot_id
+        if sys.platform != "darwin" or os.geteuid() != 0:
+            raise IdentityProbeError("live_probe_requires_darwin_root")
+        result = live_probe(binary=INSTALLED_CODEX_BINARY, provider_home=slot.provider_home,
+            expected_kind=args.expected_kind, workspace_binding_class=slot.workspace_binding_class,
+            worker_user=slot.worker_user, worker_group=slot.worker_group,
+            worker_uid=slot.worker_uid, worker_gid=slot.worker_gid, diagnostic_slot_id=slot_id)
+    except _SeatArgumentRefusal:
+        result = diagnostic_document(None, refusal="diagnostic_arguments_invalid")
+    except (Exception, SystemExit, KeyboardInterrupt) as exc:
+        code = (exc.args[0] if isinstance(exc, IdentityProbeError) and len(exc.args) == 1
+                else "diagnostic_arguments_invalid" if isinstance(exc, ValueError)
+                else "diagnostic_probe_failed")
+        result = diagnostic_document(slot_id, refusal=_diagnostic_code(code))
+    json.dump(result, sys.stdout, sort_keys=True, separators=(",", ":"))
+    sys.stdout.write("\n")
+    return 0 if result["observation_status"] == "observed" else 2
+
+
 def live_probe(
     *,
     binary: Path,
@@ -651,7 +780,20 @@ def live_probe(
     worker_uid: int = WORKER_UID,
     worker_gid: int = WORKER_GID,
     expected_seat_email: str | None = None,
+    diagnostic_slot_id: str | None = None,
 ) -> dict[str, Any] | str:
+    if diagnostic_slot_id is not None:
+        from ops.executive_os.provider_worker_slots import get_slot
+
+        try:
+            slot = get_slot(diagnostic_slot_id)
+        except ValueError as exc:
+            raise IdentityProbeError("diagnostic_arguments_invalid") from exc
+        if (slot.provider_family != "openai" or binary != INSTALLED_CODEX_BINARY or provider_home != slot.provider_home
+                or (worker_user, worker_group, worker_uid, worker_gid, workspace_binding_class)
+                != (slot.worker_user, slot.worker_group, slot.worker_uid, slot.worker_gid, slot.workspace_binding_class)
+                or expected_kind not in slot.allowed_credential_kinds or expected_seat_email is not None):
+            raise IdentityProbeError("diagnostic_arguments_invalid")
     before_binary = binary_identity(binary)
     auth_path = provider_home / "auth.json"
     if (
@@ -720,6 +862,15 @@ def live_probe(
         if not config_has_no_forced_auth_policy(config_read):
             raise IdentityProbeError("forced_auth_configuration_present")
         account = client.request(3, "account/read", {"refreshToken": False})
+        diagnostic_observation = None
+        if diagnostic_slot_id is not None:
+            admitted = evaluate_identity(account_read=account, auth_mode=auth_mode_before,
+                expected_kind=expected_kind, workspace_binding_class=workspace_binding_class)
+            if admitted.get("passed") is True:
+                diagnostic_observation = normalize_model_capacity(
+                    client.request(4, "model/list", {"limit": 100, "includeHidden": False}),
+                    client.request(5, "account/rateLimits/read", None),
+                )
         status_after = subprocess.run(
             [*worker_prefix, "login", "status", "-c", 'cli_auth_credentials_store="file"'],
             cwd=os.fspath(provider_home),
@@ -755,6 +906,10 @@ def live_probe(
                 "forced_chatgpt_workspace_id_applied": False,
             }
         )
+        if diagnostic_slot_id is not None:
+            return diagnostic_document(diagnostic_slot_id,
+                diagnostic_observation if result.get("passed") is True else None,
+                refusal=result.get("refusal"))
         if expected_seat_email is not None:
             # Return only the bounded enum after every existing policy,
             # config, login, binary, and credential guard has completed, and it
@@ -836,6 +991,10 @@ def _seat_compare_main(tokens: Sequence[str]) -> int:
 
 def main(argv: Sequence[str] | None = None) -> int:
     tokens = list(sys.argv[1:] if argv is None else argv)
+    if any(token.startswith("--") and (
+            MODEL_CAPACITY_FLAG.startswith(token.split("=", 1)[0])
+            or token.split("=", 1)[0].startswith(MODEL_CAPACITY_FLAG)) for token in tokens):
+        return _model_capacity_main(tokens)
     if any(
         token.startswith("--")
         and (
