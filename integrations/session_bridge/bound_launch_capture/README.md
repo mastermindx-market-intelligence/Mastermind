@@ -181,3 +181,24 @@ realm/attendance/Capacity/workspace/HOME/TMP/isolation/canary/assignment inputs.
 The runner still has no retained stdout/stderr/result file producer for the
 shared START contract. A caller cannot fill those paths with invented names.
 No factory, public bound CLI, profile, installed service or provider is enabled.
+
+### Assembler integration from the original paid return
+
+`fabric_owned_start.publish_owned_start` uses the actual `lane_runtime` module,
+original retained descriptor and invocation, owner nonce/start timestamp and
+the kernel observer's `parent_pid` field. It matches the full executed-image
+metadata to the independent binary pin and runs both shared complete START
+validators. After validation it re-observes the same original generation and
+rechecks the authenticated Control command before calling the fixed
+`retain_owned_start_bytes` function. There is no injected retention callback.
+Repeated publication refuses before observation, and cancellation keeps its
+exception semantics, original finisher and reconciliation hold.
+
+The shared original launch codec requires a 40-hex Git base; this is distinct
+from the 64-hex evidence digests. Capture filenames supplied by a caller cannot
+unlock this assembler: they must already be bound on the original handle by
+its actual file producer. The current runner has no such producer, so this
+requirement is deliberately unresolved in production. Named qualification
+records are structural inputs, never authenticated grants. Actual issuer,
+realm, credential, attendance, Capacity and isolation qualification still belong
+to the existing owners; this source supplies none of them and enables no factory.

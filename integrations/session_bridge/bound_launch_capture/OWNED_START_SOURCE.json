@@ -1,0 +1,32 @@
+{
+  "schema": "mastermind.fabric_owned_start_source.v1",
+  "classification": "SOURCE_ONLY_UNINSTALLED",
+  "original_worker_id": "fabric-complete-start-build-01a11e90-v1",
+  "original_result_sha256": "73d7de2d8b72a202a333443c1f30883d569c45c7ace2d7acbb9c45c319f3d5f3",
+  "original_candidate_sha256": "ea9552eb128372fc47563ac4f23fc6dfa79e014bf687f7f0eac2125cd6071e51",
+  "integrated_candidate_sha256": "2f90d7ebf35946382b80e99a39b74217b13df268b5a42656b2d5e2f03a6adc41",
+  "w4_dependency": "5d5293aeebc91976031155350d9c5235983f5f2a",
+  "original_handle_delta": "1596c53ee29076994dd7bc4671508b32331319f4",
+  "validation": {
+    "outer_pytest_nodes": 117,
+    "errors": 0,
+    "failures": 0,
+    "skipped": 0,
+    "nested_early_receipt_nodes": 76,
+    "counting": "One of117 outer nodes runs76 nested nodes; these are not an additional outer-test count."
+  },
+  "limits": [
+    "No factory, public bound CLI, profile, credential, enrollment, service or host activation",
+    "Original capture file producer absent: caller filenames cannot unlock START",
+    "Named qualification records are structural inputs, not grants",
+    "Existing original lease/exclusion must remain through Control seal, worker denial and Supervisor ACK"
+  ],
+  "coordinator_repairs": [
+    "Actual lane_runtime and parent_pid",
+    "Original descriptor, invocation, nonce and Popen timestamp",
+    "Exact40-hex Git base rather than64-hex evidence digest",
+    "Fresh original image and unexpired command at publication",
+    "Fixed actual original retainer and once-only boundary",
+    "Failure/cancellation retains original lease and finisher"
+  ]
+}
