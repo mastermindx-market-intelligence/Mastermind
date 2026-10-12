@@ -209,3 +209,31 @@ def test_installed_factory_is_inert_and_uses_late_service_custody(tmp_path, monk
     service._namespace_custody = SimpleNamespace(bound_runtime=lambda actual: calls.append(actual) or facade)
     assert calls == []
     assert captured['bounded_runtime']() is facade and calls == [actual_runtime]
+
+
+
+def test_many_historical_roots_explain_finite_join_limit_before_event_access(actual, monkeypatch):
+    """A complete workstream join cannot silently claim 24 roots under 17 cap."""
+    writer, bound, namespace, first = actual
+    for index in range(2, 25):
+        submit_intent(writer, intent(index, workstream=f'WS:ROOT-{index:03}'))
+    monkeypatch.setattr(
+        er.BoundedRuntimeReadObservation,
+        'get_creation_event_by_command_id',
+        lambda *_a, **_k: pytest.fail('root limit must be diagnosed before Event reads'),
+    )
+    rows, jobs, attempts, provenance, notes, observed = join._bounded_runtime_inputs(bound())
+    assert rows is None and jobs is None and attempts is None
+    assert provenance == {}
+    assert any('24 roots' in note and '17' in note and 'incomplete' in note for note in notes)
+    assert namespace.entries == namespace.exits and not namespace.active
+
+
+def test_one_legacy_unattributed_root_still_blocks_complete_join(actual):
+    """Better bounded diagnostics must never attribute a legacy Job by guess."""
+    writer, bound, namespace, first = actual
+    writer.jobs.create_job('legacy root, no durable creation-provenance')
+    rows, jobs, attempts, _, notes, _ = join._bounded_runtime_inputs(bound())
+    assert rows is jobs is attempts is None
+    assert notes
+    assert namespace.entries == namespace.exits
