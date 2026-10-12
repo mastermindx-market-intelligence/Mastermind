@@ -2,7 +2,7 @@
   "operation": "bot-intelligence-renewal-20261011",
   "source_basis": "cbc7503536b6853ec7c35c2192abdfaccb87b561",
   "macro_ci_source": "256c757b3c4f0ec759571c29a30a71387d0a18f8",
-  "test_scope": "WIP/HOLD: 10 exact cross-PR task-aware source-admission cases passed; original service257pass/1heldfail; earlier snapshot11fail/2pass and zero-evidence1fail unchanged; no production or full-unit-repair claim",
+  "test_scope": "WIP/HOLD: exact serviceb14d1c0e consumer/profile scope319pass/9heldfail (41direct-answer+19profile pass); separate Bot12known failures unchanged; no Supervisor/Runtime result production or provider proof",
   "manifest_self_excluded": true,
   "files": [
     {
@@ -52,8 +52,8 @@
     },
     {
       "path": "docs/superpowers/plans/2026-10-11-bot-autonomy-renewal-validation.md",
-      "bytes": 35841,
-      "sha256": "40628537d1865dd3ce6641c243942b1025ab89cdef385141a85cf0af8444422b"
+      "bytes": 44306,
+      "sha256": "770697f221a8a66a80c4f2fedb7f83b68e9572b8f929a4a64ee95cbbc780adf8"
     },
     {
       "path": "docs/superpowers/plans/2026-10-11-bot-autonomy-source-capture.acceptance.py.txt",
@@ -62,8 +62,8 @@
     },
     {
       "path": "docs/superpowers/specs/2026-10-11-bot-autonomy-fabric-renewal.md",
-      "bytes": 41582,
-      "sha256": "53a25c76abe1ad219a3a91904b6bec620be54ea6524802cf85757ff2843955f7"
+      "bytes": 45125,
+      "sha256": "288134f4d0ce36b4c4414e4f379274ae4c53f02dd1bd6674f2ae1e6db1e0c1c9"
     },
     {
       "path": "portfolio/china_calendar.py",
@@ -205,5 +205,6 @@
       "bytes": 5356,
       "sha256": "005cb223d506392c603101e67135c88d7f8c57db38e22bf47dda7531f2951570"
     }
-  ]
+  ],
+  "related_service_head": "b14d1c0e515778c71af291df7f7a93408a01cfbd"
 }
