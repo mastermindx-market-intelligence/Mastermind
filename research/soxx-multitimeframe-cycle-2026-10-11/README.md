@@ -1,5 +1,17 @@
 # SOXX multi-timeframe pivots, momentum exits and cycle-failure research
 
+## October 11 evening Tiingo source advance (supersedes older unverified-access notes)
+
+Macro Data OS **PR #8698 was merged**, and the actual signed-in Tiingo BOATS add-on is ACTIVE. Two owner-captured historic REST BOATS datasets are available on M2: **AMD 720 one-minute bars** and **AAPL 687 one-minute bars**. The canonical `read_research_view` verified both original raw receipts and their existing L1 projections. The read-only v13 consumer strictly normalized all records: AMD had **one complete 480/480-minute overnight session** (Oct 8 evening–Oct 9 morning), whereas AAPL had **462/480** that same night. Missing AAPL minutes were never forward-filled. These data do **not** constitute historical SOXX observations or complete 24-hour days.
+
+The current native BOATS firehose archive holds an opening event burst, including seven SOXX trade messages and zero SOXX quote messages in the inspected 20 receipts; this is not historical/continuous SOXX quote depth. **Historical Tiingo REST bars cannot retroactively provide order book quotes.** Rights/PIT metadata remain unapproved for reuse beyond bounded retrospective inspection.
+
+The v12/v13 research importer and exact existing Macro L0→L1 reader CLI are under `fullsession_v12/`. **45 distinct unit tests passed** across the original parser, strict v13 adapter, and canonical CLI containment. Actual archive read tests additionally passed on M2 for both AMD and AAPL. See [TIINGO_CANONICAL_READER_REAL_PROOF_2026-10-11.md](TIINGO_CANONICAL_READER_REAL_PROOF_2026-10-11.md) and [SOXX_BOATS_ACQUISITION_CONTRACT_2026-10-11.md](SOXX_BOATS_ACQUISITION_CONTRACT_2026-10-11.md).
+
+**SOXX four-arm backtest remains pending the lawful existing Macro collector's actual SOXX historical bars and separately historical marketable BOATS quotes.** No second producer, vendor authentication, credentials, source permission bypass or trading is enabled by this repository.
+
+
+
 **Research status: retrospective / not accepted for live trading.** Last source review 2026-10-11.
 
 This directory preserves the chronological SOXX research commission from 2026-10-09 through 2026-10-11. Reports and tables are included without rewriting successful or failed experiments as hindsight winners. Each report's sample definition controls its own numbers; they **must not** be pooled without checking overlapping entry episodes, transaction costs, exit horizon and OHLC gaps.
@@ -23,7 +35,7 @@ This directory preserves the chronological SOXX research commission from 2026-10
 - Historical mid/last/aggregate OHLC are not executable market quotes. A price-limited buy touched on an OHLC candle cannot be assumed filled; adverse gap fills may exceed the stop. The historical trial included missing session-edge bars.
 - Historical figures reflect hypothetical, mostly unlevered one-position/notional comparisons, not personalized trade sizing, a live algorithm, or evidence of future accuracy.
 
-## BOATS is **not yet acquired or activated for this research**
+## Complete historical **SOXX** BOATS is not yet acquired for this research
 
 The precise available paths are:
 - **Tiingo BOATS** historic venue overnight OHLC: `GET https://api.tiingo.com/boats/{ticker}/prices`, with BOATS entitlement; realtime websocket is **not a historical quote archive**. Source: https://www.tiingo.com/documentation/boats .
