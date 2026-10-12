@@ -50,3 +50,33 @@ The existing owner must:
 5. **Rollback:** de-select `reply_event_rpc` in the original host; retained legacy SDK tools remain operational. Do not delete accepted runtime events or clear uncertain external deliveries.
 
 No generic Chrome extension, alternate callback database, parallel Job lifecycle, new provider queue, or unverified model-wake mechanism is authorized or required by this plan.
+
+
+## Inert original-request owner adapter (same PR, no new state plane)
+
+`integrations/session_bridge/web_reply_subscription_owner.py` is an optional adapter implementing the existing `OriginalReplySubscriptionOwner` protocol **only when** an incumbent authenticated host explicitly injects all three capabilities:
+
+- A trusted current original-request resolver yielding `OriginalReplyGrant` (account principal digest, exact request/read reference, generation, expiration, current permission).
+- The incumbent durable + encrypted subscription store with atomic `commit`, `read`, and `remove` operations. The store's `StoredReplySubscription` receipt exposes only keyed metadata and SHA-256 digests. **There is no implementation of this store in this source slice.**
+- A host-owned, bounded HTTPS challenge sender that returns an observed response. The adapter creates a fresh single-use challenge and checks exact signed echo; it does not own transport retries or credentials.
+
+The opt-in flag defaults to **disabled**. The subscription identifier is deterministic by owner principal, event name, original request and callback URL, without becoming an authorization token. A successful callback is followed by a second current-grant check, a single atomic existing-store commit, readback, and a final current-grant check. A missing/changed result or lost post-commit acknowledgment is `EFFECT_UNKNOWN`, not a green subscription or permission to dispatch another attempt.
+
+A recently verified callback can be reused for a short, fixed window **only from the incumbent store's readback** when owner, original request, URL, signing-key digest, current revision, and grant expiry all still agree. Reusing cached verification does not refresh its original verification timestamp. A new/rotated secret, changed generation, expired proof or changed callback URL requires a new verification, not an implicit trust upgrade.
+
+Tests use an in-memory **fake** store; no new file, secret database, HTTP endpoint, production grant, Worker, Runtime migration, or service setting was added. Production stays gated on a reviewed current-store implementation, exact-installed host selection and a real Work/dot callback receipt.
+
+
+## Inert original-request owner adapter (same PR, no new state plane)
+
+`integrations/session_bridge/web_reply_subscription_owner.py` is an optional adapter implementing the existing `OriginalReplySubscriptionOwner` protocol **only when** an incumbent authenticated host explicitly injects all three capabilities:
+
+- A trusted current original-request resolver yielding `OriginalReplyGrant` (account principal digest, exact request/read reference, generation, expiration, current permission).
+- The incumbent durable + encrypted subscription store with atomic `commit`, `read`, and `remove` operations. The store's `StoredReplySubscription` receipt exposes only keyed metadata and SHA-256 digests. **There is no implementation of this store in this source slice.**
+- A host-owned, bounded HTTPS challenge sender that returns an observed response. The adapter creates a fresh single-use challenge and checks exact signed echo; it does not own transport retries or credentials.
+
+The opt-in flag defaults to **disabled**. The subscription identifier is deterministic by owner principal, event name, original request and callback URL, without becoming an authorization token. A successful callback is followed by a second current-grant check, a single atomic existing-store commit, readback, and a final current-grant check. A missing/changed result or lost post-commit acknowledgment is `EFFECT_UNKNOWN`, not a green subscription or permission to dispatch another attempt.
+
+A recently verified callback can be reused for a short, fixed window **only from the incumbent store's readback** when owner, original request, URL, signing-key digest, current revision, and grant expiry all still agree. Reusing cached verification does not refresh its original verification timestamp. A new/rotated secret, changed generation, expired proof or changed callback URL requires a new verification, not an implicit trust upgrade.
+
+Tests use an in-memory **fake** store; no new file, secret database, HTTP endpoint, production grant, Worker, Runtime migration, or service setting was added. Production stays gated on a reviewed current-store implementation, exact-installed host selection and a real Work/dot callback receipt.

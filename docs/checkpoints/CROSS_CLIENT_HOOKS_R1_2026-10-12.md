@@ -104,3 +104,27 @@ A discriminating regression caught a real SSRF bypass candidate: Python's `ipadd
 Proof: Python 3.11: 216 focused native-reply/event/signing/RPC/ASGI/HTTPS tests PASS. Python 3.14: 108 focused callback/signing/event tests PASS. Python 3.11 compileall and diff whitespace PASS. Both are source/fixture observations, not installed webhook TLS/connectivity, Work/dot receiver, same-chat consumption or production authorization.
 
 **Remaining release gate**: the incumbent Executive owner needs admitted durable subscription/nonce storage and credential custody, callback URL verification and authenticated owner installation; generic Runtime schema v5 live migrations are protected. Do not create an ad-hoc second SQLite state or callback service. Draft review/CI, actual plugin selection and original-chat proof must remain separate.
+
+
+## Continued phase — original-request subscription-owner adapter (October 12, 2026 UTC)
+
+Previous remote PR #1362 head `bbe40d8714e5b71cfc33f2e366caaae46c3076ea` is GREEN for required hosted test/CodeQL at that exact head. New source `integrations/session_bridge/web_reply_subscription_owner.py` and `tests/test_session_bridge_web_reply_subscription_owner.py` are an opt-in, source-only composition over the existing authenticated original-request resolver and its **required** durable encrypted-subscription store. No persistence implementation was created; the fake store in tests is not a production store. No host configuration, Runtime schema, installed hooks, provider credentials, or worker state was modified.
+
+TDD observed a missing-module RED. The adapter implemented request binding, callback signed challenge with exact response, secret rotation, principal/URL deterministic subscriber identity, store atomic commit+readback, idempotent unsubscribe, access and generation rechecks, unknown-effect preservation, and a bounded cached verification read from the incumbent store only. Regressions caught and repaired malformed original request/grant references, expiry during callback, and revocation/expiry after a commit. The callback cache never extends its original verification timestamp. Latest focused owner/RPC source tests passed 81 at the previous phase and further expanded owner tests passed 29 then 31 source cases before wider regression.
+
+**Not proven:** real Executive resolver/store bindings, credentials at rest, callback HTTPS against real ChatGPT Work/dot, subscription/service installation and original-parent receipt. Store interface is an owner contract, not an alternate queue/registry. The global CI-hook mutation remains platform-held and the independent #1337 code is untouched. All new source is to be reviewed and tested under the original #1362 carrier before claiming publication.
+
+
+## Verified continued source phase — authenticated owner composition (2026-10-12)
+
+A new inert `OriginalReplySubscriptionAdapter` was developed in the **same** operation/branch/PR. Its default remains disabled, and it has no installed secret/durable store or independently owned callback HTTP client. It consumes the existing original-request resolver plus an injected incumbent store with `commit`/`read`/`remove` and a host-owned signed-challenge sender. The production store must seal secrets and persist atomic, original-identity-bound receipts; **only simulated stores were supplied in tests**.
+
+Behavior tested: exact original principal/key + request + read-ref + generation authorization, TTL bounded by current principal and original grant, deterministic IDs, callback challenge and constant-time echo, JWT and original-generation revocation before and after commit, readback and lost-ACK uncertainty, idempotent unsubscribe, a bounded existing-store callback verification cache that cannot extend its age indefinitely, secret rotation, and wrong-owner rejection. A real authenticated Executive MCP HTTP in-process fixture exercised event discovery, subscribe, re-subscribe, original-request revocation and unsubscribe against the injected fake owner.
+
+RED-first tests reproduced absent implementation, malformed original IDs, expired access during callback, post-commit revoked/expired owner, and repeated callback verification. The source was repaired with fail-closed pre/post-effect checks. Verification on this candidate prior to source commit:
+`python3.11 -m pytest tests/test_session_bridge*.py tests/test_executive_mcp_app_composition.py tests/test_executive_mcp_web_ceo_app.py tests/test_executive_mcp_web_ceo_sessions.py tests/test_executive_mcp_request_reconcile.py tests/test_mastermind_os_executive_transport.py -q --tb=short -o addopts=''`
+=> **796 passed, 0 failed, exit 0 (65.44 seconds)**.
+
+The existing PR #1362 at published head `bbe40d8714e5b71cfc33f2e366caaae46c3076ea` had all required GitHub test/CodeQL checks SUCCESS before this addition. Protected master advanced to `a858ac249296ffaa7bf523863dea5917bbbc1f24`, with no unrelated edits found to the existing reply event/native-read sources; the observed Executive MCP host delta compared to that master consists of this PR's opt-in methods.
+
+**Unproven / held:** no production Executive subscription persistence implementation, credential vault binding, real outbound ChatGPT callback, account plugin rescan/selection, original conversation consumption, release or deployment. Existing forbidden global CI-hook mutation still held; retained test `tests/test_fabric_routing_guard_receipts.py` left uncommitted and untouched. Existing #1337 owner and settled Codex active-Stop proof are not replayed.
