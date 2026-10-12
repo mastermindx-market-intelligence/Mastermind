@@ -4,7 +4,8 @@ import dataclasses
 import pytest
 
 from control_plane.executive_supervisor import ProcessPresence
-from control_plane.executive_worker_broker import BrokerStateError
+from control_plane.executive_worker_broker import BrokerProtocolError, BrokerStateError
+from control_plane.fabric_cleanup_transport import stamp
 from test_executive_fabric_adapter_fencing import started, adopt
 
 
@@ -55,11 +56,34 @@ def test_cleanup_expectation_binds_original_principal_and_remote_generation(tmp_
 
 def test_unavailable_owner_cleanup_and_containment_are_never_synthesized(tmp_path, monkeypatch):
     runtime, lease, adapter, spec, ref, client = started(tmp_path, monkeypatch)
-    with pytest.raises(BrokerStateError, match="FABRIC_CLEANUP_UNAVAILABLE"):
+    observed_after = stamp(ref.started_at)
+    assert observed_after > 0
+    def unavailable(operation, payload):
+        assert operation == "status"
+        assert payload["cleanup_query"]["observed_after"] == observed_after
+        client.calls.append(operation)
+        raise BrokerStateError("FABRIC_CLEANUP_UNAVAILABLE")
+    monkeypatch.setattr(client, "response", unavailable)
+    with pytest.raises(ValueError, match="invalid cleanup observation floor"):
         adapter.fabric_cleanup_receipt(ref, operation="terminal", observed_after=0)
+    assert client.calls == ["start"]
+    with pytest.raises(BrokerStateError, match="FABRIC_CLEANUP_UNAVAILABLE"):
+        adapter.fabric_cleanup_receipt(ref, operation="terminal", observed_after=observed_after)
     with pytest.raises(BrokerStateError, match="FABRIC_CLEANUP_UNAVAILABLE"):
         adapter.fabric_cleanup_receipt_readback(ref, operation="terminal")
     with pytest.raises(BrokerStateError, match="FABRIC_CONTAINMENT_UNAVAILABLE"):
         adapter.terminate(lease.attempt)
     assert adapter.absence_verified(lease.attempt) is False
-    assert client.calls == ["start"]
+    assert client.calls == ["start", "status"]
+
+
+def test_plain_run_status_is_not_cleanup_evidence(tmp_path, monkeypatch):
+    runtime, lease, adapter, spec, ref, client = started(tmp_path, monkeypatch)
+    with pytest.raises(BrokerProtocolError, match="cleanup response query changed"):
+        adapter.fabric_cleanup_receipt(
+            ref, operation="terminal", observed_after=stamp(ref.started_at),
+        )
+    with pytest.raises(BrokerStateError, match="FABRIC_CLEANUP_UNAVAILABLE"):
+        adapter.fabric_cleanup_receipt_readback(ref, operation="terminal")
+    assert adapter.absence_verified(lease.attempt) is False
+    assert client.calls == ["start", "status"]

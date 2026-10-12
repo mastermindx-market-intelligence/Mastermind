@@ -31,6 +31,8 @@ TOKEN = re.compile(r"^[a-f0-9]{64}$")
 IDENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 CHILD_SUFFIX = "\n\nReturn a bounded final response of at most 12000 characters. Do not delegate further.\n"
 CLASSES = ["mechanical", "extract", "fix_build", "census", "audit", "build"]
+# Broker start window: ten minutes of child work plus one minute of admission.
+CHILD_START_WINDOW_SECONDS = 11 * 60
 
 
 def canonical(value):
@@ -204,8 +206,8 @@ class OperatorOwner:
             now = self.clock()
             validate_launch(grant, lease, launch, request, now=now, used_children=used,
                             root_children_remaining=root["child_limit"] - root_used)
-            # Same 660s broker start window; refuse before consuming authorization.
-            if root is None or min(root["expires"], grant["expires_at"]) - now < 660:
+            # Same broker child start window; refuse before consuming authorization.
+            if root is None or min(root["expires"], grant["expires_at"]) - now < CHILD_START_WINDOW_SECONDS:
                 refuse("operator_child_start_window_expired")
             rid = request["run_id"]
             if con.execute("SELECT 1 FROM operator_child_authorizations WHERE run_id=?", (rid,)).fetchone():
@@ -352,7 +354,7 @@ def validate_child_admission(con, run_id, root, *, now, admitted_lease_id=None, 
         refuse("operator_parent_grant_missing")
     grant, launch = json.loads(issued['grant_json']), json.loads(issued['launch_json'])
     root_grant = con.execute("SELECT * FROM operator_root_grants WHERE root=?", (root,)).fetchone()
-    if root_grant is None or min(root_grant['expires'], grant['expires_at']) - now < 660:
+    if root_grant is None or min(root_grant['expires'], grant['expires_at']) - now < CHILD_START_WINDOW_SECONDS:
         refuse("operator_child_start_window_expired")
     lease = OperatorOwner.lease(con, grant['lease_id'])
     request = json.loads(row['request_json'])
