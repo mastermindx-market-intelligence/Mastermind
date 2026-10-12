@@ -41,6 +41,9 @@ _TRUSTED_GID = 0
 # the same finite limit before either publishing or parsing a document.
 _MAX_DOCUMENT_BYTES = 16 * 1024 * 1024
 _MAX_INVENTORY_BYTES = 64 * 1024 * 1024
+# Maximum release nodes on one predecessor path, including a prospective
+# successor. Keep recursion finite without rejecting ordinary release history.
+_MAX_CARRY_DEPTH = 64
 _SHA = re.compile(r"[0-9a-f]{40}")
 _DIGEST = re.compile(r"[0-9a-f]{64}")
 _TERMINAL = {"COMPLETED", "FAILED", "LOST", "CANCELLED", "RATE_LIMITED"}
@@ -242,8 +245,10 @@ def summary_document(sha: str) -> tuple[dict, bytes]:
 def validate_carry_receipt(
     sha: str, summary_sha256: str, *, _seen: frozenset[str] = frozenset()
 ) -> None:
-    if sha in _seen or len(_seen) >= 8:
-        raise MaintenanceError("maintenance carry chain is cyclic or too deep")
+    if sha in _seen:
+        raise MaintenanceError("maintenance carry chain is cyclic")
+    if len(_seen) >= _MAX_CARRY_DEPTH:
+        raise MaintenanceError("maintenance carry chain is too deep")
     descriptor = descriptor_for(sha)
     if descriptor is None:
         return
@@ -597,10 +602,19 @@ def terminal_assignment(config: dict, job: Any, attempt: Any) -> dict:
     return {"assignment_seal_sha256": hashlib.sha256(raw).hexdigest()}
 
 
-def terminal_carry_fields(runtime: Any, root: Any, config: dict, before: dict, predecessor: str) -> tuple[Any, dict]:
+def terminal_carry_fields(
+    runtime: Any, root: Any, config: dict, before: dict, predecessor: str,
+    successor: str | None = None,
+) -> tuple[Any, dict]:
     """Qualify one inert failed planner using existing Runtime evidence owners."""
     from control_plane.executive_runtime import RuntimeProofError
-    prior, summary, material = prior_carry_material(predecessor)
+    # Preparation must validate the same path that acceptance will traverse,
+    # before publishing a bundle that could only fail the depth/cycle guard.
+    if successor is None:
+        prior, summary, material = prior_carry_material(predecessor)
+    else:
+        prior, summary, material = prior_carry_material(
+            predecessor, _seen=frozenset({successor}))
     if (
         prior["root_job_id"] != root.job_id
         or prior["root_identity_sha256"] != root_identity(root)
@@ -968,7 +982,8 @@ def prepare(args: argparse.Namespace) -> Path:
         raise MaintenanceError("maintenance runtime is not quiescent")
     extra = {}
     if terminal_carry:
-        proof, extra = terminal_carry_fields(runtime, root, config, before, args.predecessor_sha)
+        proof, extra = terminal_carry_fields(
+            runtime, root, config, before, args.predecessor_sha, args.successor_sha)
     else:
         runtime.workers.proof_capacity_recovery_snapshot(
             proof.job_id,args.recovery_attempt_id,worker_id=config["worker_id"],quota_class=config["quota_class"])
