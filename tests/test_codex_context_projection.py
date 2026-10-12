@@ -112,10 +112,10 @@ def test_observation_can_feed_existing_context_planner_without_new_threshold_pol
     from control_plane.executive_session_recovery import context_plan
     observed = project(notification())
     result = context_plan(context_limit=observed["context_window_tokens"],
-        used_tokens=observed["last_request_tokens"], next_input_tokens=100,
+        used_tokens=observed["context_occupancy_tokens"], next_input_tokens=100,
         response_reserve=100, tool_reserve=100, compaction_reserve=100,
         native_compaction_supported=True, durable_checkpoint_available=True)
-    assert result["next_action"] == "COMPACT_SAME_SESSION"
+    assert result["next_action"] == "OBSERVE_CONTEXT"
     assert result["operation_performed"] is False
 
 
@@ -169,3 +169,42 @@ def test_native_schema_receipt_does_not_claim_provider_or_installation_acceptanc
     assert receipt["isolated_codex_home"] is True
     for flag in ("credential_files_present", "model_turn_requested", "compaction_requested", "production_runtime_mutated", "adapter_integrated"):
         assert receipt[flag] is False
+
+def test_request_local_usage_must_not_impersonate_exact_context_occupancy():
+    from control_plane.executive_session_recovery import context_plan
+    observed = project(notification())
+    assert observed["last_request_tokens"] == 640
+    assert observed["context_occupancy_tokens"] is None
+    assert observed["usable_as_context_plan_used_tokens"] is False
+    # Until a provider adapter proves exact occupancy, we observe rather than
+    # authorize compaction/switching based on a last-request usage counter.
+    plan = context_plan(context_limit=observed["context_window_tokens"],
+        used_tokens=observed["context_occupancy_tokens"], next_input_tokens=100,
+        response_reserve=100, tool_reserve=100, compaction_reserve=100,
+        native_compaction_supported=True, durable_checkpoint_available=True)
+    assert plan["next_action"] == "OBSERVE_CONTEXT"
+
+def test_async_compaction_notification_is_observation_not_state_change():
+    from control_plane.codex_context_projection import project_codex_compaction_notification
+    params={"threadId":"thread-a","turnId":"turn-a","providerText":"secret"}
+    result=project_codex_compaction_notification(
+        params, expected_thread_id="thread-a", expected_turn_id="turn-a")
+    assert result["state"] == "NATIVE_COMPACTION_NOTIFIED"
+    assert result["checkpoint_committed"] is False
+    assert result["requires_remeasurement"] is True
+    assert result["authority_effect"] == "NONE"
+    assert result["auto_resume_permitted"] is False
+    assert "secret" not in json.dumps(result)
+    assert "thread-a" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("key,bad", [
+    ("threadId","other"),("turnId","other"),("turnId",None),
+    ("turnId",True),("threadId",None),("threadId",[])
+])
+def test_compaction_notification_cannot_bind_foreign_or_malformed_identity(key,bad):
+    from control_plane.codex_context_projection import project_codex_compaction_notification
+    params={"threadId":"thread-a","turnId":"turn-a"}
+    params[key]=bad
+    assert project_codex_compaction_notification(
+        params, expected_thread_id="thread-a", expected_turn_id="turn-a") is None

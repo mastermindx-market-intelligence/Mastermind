@@ -110,3 +110,34 @@ def test_malformed_current_counts_are_unknown_without_failing_the_worker(active)
     assert event.turn_id == turn.turn_id
     assert event.payload_redacted["context_usage"]["state"] == "UNKNOWN"
     assert event.payload_redacted["context_usage"]["last_request_tokens"] is None
+
+def compacted(state,native):
+    return {"method":"thread/compacted","params":{
+        "threadId":state.provider_session_id,"turnId":native,
+        "nativeSecrets":"not for ledger"}}
+
+
+def test_current_async_compaction_signal_stays_with_original_turn(active):
+    _, state, turn, native=active
+    event=ingest(active,compacted(state,native))
+    assert event.turn_id==turn.turn_id
+    assert event.payload_redacted["context_compaction"]["requires_remeasurement"] is True
+    assert event.payload_redacted["context_compaction"]["checkpoint_committed"] is False
+    assert "not for ledger" not in json.dumps(event.payload_redacted)
+
+
+def test_foreign_compaction_turn_does_not_claim_current_completion(active):
+    _,state,turn,native=active
+    params=compacted(state,native)
+    params["params"]["turnId"]="foreign-turn"
+    event=ingest(active,params)
+    assert "context_compaction" not in event.payload_redacted
+
+
+def test_compaction_signal_after_terminal_turn_is_generation_only(active):
+    _,state,turn,native=active
+    ingest(active,{"method":"turn/completed","params":{
+        "threadId":state.provider_session_id,"turn":{"id":native,"status":"completed"}}})
+    event=ingest(active,compacted(state,native))
+    assert event.turn_id is None
+    assert "context_compaction" not in event.payload_redacted

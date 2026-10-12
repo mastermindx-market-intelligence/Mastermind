@@ -43,6 +43,10 @@ def _observation(state: str, *, window: int | None = None,
         "basis": "LAST_REQUEST_NOT_CUMULATIVE",
         "context_window_tokens": window,
         "last_request_tokens": tokens,
+        # Last request usage is not attested current thread/context occupancy.
+        # Do not silently supply it as context_plan.used_tokens.
+        "context_occupancy_tokens": None,
+        "usable_as_context_plan_used_tokens": False,
         "auto_compaction_threshold_tokens": None,
         "remeasure_after_context_change": True,
     }
@@ -82,3 +86,32 @@ def project_codex_context_usage(
     if not _count(window, positive=True):
         return _observation("UNKNOWN")
     return _observation("OBSERVED", window=window, tokens=last["totalTokens"])
+
+
+def project_codex_compaction_notification(
+    params: object, *, expected_thread_id: str, expected_turn_id: str,
+) -> dict[str, Any] | None:
+    """Observe one exact native completion notice; never attest saved state.
+
+    The provider's asynchronous notification cannot substitute for the
+    Executive generation-bound checkpoint INTENT/APPLIED transaction or an
+    updated context measurement. It authorizes no replay or provider switch.
+    """
+    _binding(expected_thread_id)
+    _binding(expected_turn_id)
+    if (not isinstance(params, Mapping)
+            or type(params.get("threadId")) is not str
+            or type(params.get("turnId")) is not str
+            or params["threadId"] != expected_thread_id
+            or params["turnId"] != expected_turn_id):
+        return None
+    return {
+        "schema_version": "mastermind.codex_compaction_observation/v1",
+        "source_method": "thread/compacted",
+        "state": "NATIVE_COMPACTION_NOTIFIED",
+        "authority_effect": "NONE",
+        "checkpoint_committed": False,
+        "requires_remeasurement": True,
+        "auto_resume_permitted": False,
+        "retry_authorized": False,
+    }

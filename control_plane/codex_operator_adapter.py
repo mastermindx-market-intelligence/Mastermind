@@ -2480,6 +2480,19 @@ class CodexOperatorAdapter:
                     if context_usage is not None:
                         safe_payload["context_usage"] = context_usage
 
+            if method == "thread/compacted" and not completed and native_subordinate_id is None:
+                # The asynchronous native completion is NOT an Executive
+                # checkpoint ACK or authority to resume another writer.
+                from .codex_context_projection import project_codex_compaction_notification
+                native_turn = state.turns.get(turn.turn_id)
+                if native_turn:
+                    completion = project_codex_compaction_notification(
+                        params, expected_thread_id=state.provider_session_id,
+                        expected_turn_id=native_turn,
+                    )
+                    if completion is not None:
+                        safe_payload["context_compaction"] = completion
+
             if method == "item/completed" and not completed and native_subordinate_id is None:
                 server = self._company_read_server(state)
                 if server is not None:
