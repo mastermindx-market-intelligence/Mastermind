@@ -346,7 +346,14 @@ class InstalledSessionBridgeClient:
             "principal": principal_frame(principal),
             "arguments": args,
         }
-        response = await self._client.send_frame(self._socket_path, frame)
+        send = self._client.send_frame
+        # Actual installed source opts summons into the same socket's duplex
+        # lifetime. Incumbent injected clients keep their one-shot contract;
+        # no such fallback may be treated as qualified foreground attendance.
+        foreground = getattr(self._client, "send_foreground_frame", None)
+        if tool == "session_summon" and callable(foreground):
+            send = foreground
+        response = await send(self._socket_path, frame)
         transport = getattr(response, "transport", None)
         if transport == TRANSPORT_NOT_SENT:
             raise BridgeError(

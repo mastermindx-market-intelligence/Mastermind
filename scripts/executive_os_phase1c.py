@@ -2116,11 +2116,27 @@ def _service_from_config(
 
                 async def submit_summon(payload):
                     require_session_admission()
+                    from control_plane.foreground_operation import (
+                        ForegroundOperationRefusal, _current_foreground_operation_or_none,
+                    )
+                    from control_plane.ceo_intent import _FreshAdmissionObserverFailed
+                    try:
+                        operation = _current_foreground_operation_or_none()
+                        if operation is not None:
+                            operation.require_arguments(payload)
+                    except ForegroundOperationRefusal as exc:
+                        raise BridgeError(exc.code, exc.message) from None
+
+                    def require_summon_admission(_envelope=None):
+                        require_session_admission(_envelope)
+                        if operation is not None:
+                            operation.require_arguments(payload)
+
                     request = dict(payload)
                     request_ref = ceo_request.app_request_ref(request.pop("operation_key"))
                     try:
                         observed = await session_ingress._observe_trusted_grounding(readers)
-                        require_session_admission()
+                        require_summon_admission()
                         receipt = await session_ingress.handle_frame(
                             {"schema": session_ingress.SUBMIT_SCHEMA_V2,
                              "request_ref": request_ref, "observed_grounding": observed,
@@ -2132,16 +2148,25 @@ def _service_from_config(
                             strict_v2_admission=True,
                             execution_binding_provider=service._require_current_coo_binding,
                             dialogue_source_provider=commission_source_provider,
-                            admission_guard=require_session_admission,
+                            admission_guard=require_summon_admission,
+                            fresh_admission_observer=(
+                                operation._bind_admitted_root if operation is not None else None
+                            ),
                         )
+                    except _FreshAdmissionObserverFailed:
+                        raise BridgeError("effect_unknown", "reconcile the original Executive operation") from None
+                    except ForegroundOperationRefusal as exc:
+                        # This occurs before the canonical sink's guarded
+                        # commit. Post-commit observer failures are above.
+                        raise BridgeError(exc.code, exc.message) from None
                     except session_ingress.CeoIngressError as exc:
                         # Canonical owner classifies its durable effect/refusal.
                         raise BridgeError(exc.code, exc.message) from None
                     # After the mutation owner returns, drift cannot be described
                     # as a zero-effect refusal. The private transport preserves it.
                     try:
-                        require_session_admission()
-                    except BridgeError:
+                        require_summon_admission()
+                    except (BridgeError, ForegroundOperationRefusal):
                         raise BridgeError("effect_unknown", "reconcile the original Executive operation") from None
                     return receipt
 
