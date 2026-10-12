@@ -28,6 +28,7 @@ from control_plane.executive_runtime import (
     FiniteControlContext,
     FiniteReservationDecision,
     INTERACTIVE_TX5_EXECUTION_PROFILE,
+    NATIVE_RETURN_TX5_EXECUTION_PROFILE,
     Job,
     JobStatus,
     OrchestrationDispatchOutcome,
@@ -878,9 +879,15 @@ class CooCycle:
             planner = children[0]
             planner_provenance = planner.orchestration_provenance
             interactive_profile_id = planner.constraints.get("execution_profile_id")
+            retained_native = (
+                interactive_profile_id == NATIVE_RETURN_TX5_EXECUTION_PROFILE
+                and isinstance(planner_provenance, dict)
+                and planner_provenance.get("command_id")
+                == f"coo-cycle:{root_id}:create-interactive:0"
+            )
             expected_create_command = (
                 f"coo-cycle:{root_id}:create-interactive:0"
-                if interactive_profile_id == INTERACTIVE_TX5_EXECUTION_PROFILE
+                if interactive_profile_id == INTERACTIVE_TX5_EXECUTION_PROFILE or retained_native
                 else f"coo-cycle:{root_id}:create-planner:0"
             )
             if (
@@ -906,7 +913,7 @@ class CooCycle:
                 != root.orchestration_provenance_digest
             ):
                 return self._block(root_id, planner.job_id, "lineage_invalid")
-            if interactive_profile_id == INTERACTIVE_TX5_EXECUTION_PROFILE:
+            if interactive_profile_id == INTERACTIVE_TX5_EXECUTION_PROFILE or retained_native:
                 return self._outcome(
                     root_id,
                     "NO_ACTION",

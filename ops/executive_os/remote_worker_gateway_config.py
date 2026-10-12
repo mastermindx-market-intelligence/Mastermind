@@ -11,6 +11,8 @@ import ipaddress
 import re
 from pathlib import Path
 
+from ops.executive_os.remote_assignment_control import AssignmentControlBinding
+
 from control_plane.remote_worker_transport import (
     MAX_FRAME_BYTES,
     TransportValidationError,
@@ -40,6 +42,7 @@ class RemoteWorkerGatewayConfig:
     allowed_operations: set[str] | frozenset[str]
     request_timeout_seconds: float = 30.0
     max_frame_bytes: int = MAX_FRAME_BYTES
+    assignment_control: AssignmentControlBinding | None = None
 
     def __post_init__(self) -> None:
         if self.schema != REMOTE_WORKER_GATEWAY_CONFIG_SCHEMA:
@@ -89,6 +92,12 @@ class RemoteWorkerGatewayConfig:
             raise ValueError("remote worker gateway operation allowlist is invalid") from exc
         object.__setattr__(self, "allowed_worker_ids", workers)
         object.__setattr__(self, "allowed_operations", operations)
+        if self.assignment_control is not None:
+            if (not isinstance(self.assignment_control, AssignmentControlBinding)
+                    or workers != frozenset({self.assignment_control.worker_id})):
+                raise ValueError("gateway assignment Control binding differs from worker")
+        if "assignment-seal" in operations and self.assignment_control is None:
+            raise ValueError("gateway assignment seal requires explicit Control binding")
 
         if not 0.1 <= float(self.request_timeout_seconds) <= 3600:
             raise ValueError("remote worker gateway request timeout is invalid")

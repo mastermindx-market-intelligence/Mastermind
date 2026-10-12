@@ -183,6 +183,22 @@ class CompanyConsultationHost:
             runtime, workspace_id=workspace_id, channel_id=channel_id,
         )
 
+    def native_continuation_source(self):
+        """Compose the existing return owner for the trusted private service.
+
+        This is an internal composition port, not a tool or additional endpoint.
+        The service retains installed admission and current-writer checks.
+        """
+        if self.native_return_armed is not True:
+            raise StateConflict("native return composition is unarmed")
+        from integrations.session_bridge.runtime_owner import RuntimeCodexTargetProjector
+        from integrations.session_bridge.runtime_return import RuntimeSessionReturn
+        fabric = RuntimeFabricTargetProjector(self.runtime)
+        return RuntimeSessionReturn(self.runtime, fabric=fabric,
+            codex=RuntimeCodexTargetProjector(fabric,
+                owner_configured=lambda: self.native_return_armed),
+            socket_path=self.relay_socket_path)
+
     def _projector(self, *, root_job_id=None, job_id=None) -> RuntimeFabricTargetProjector:
         def jobs():
             with self.runtime.bounded_acquisition() as acquired:

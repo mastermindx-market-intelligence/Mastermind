@@ -1,6 +1,6 @@
 {
   "schema_version": "mastermind.executive_worker_routes/v2",
-  "policy_version": "2026-08-24.stage4",
+  "policy_version": "2026-10-11.native-return-host-selection",
   "lifecycle_authority": "executive_os",
   "production_armed": false,
   "providers": {
@@ -52,6 +52,15 @@
     "coo.operator.readonly": {
       "provider_alias": "codex",
       "execution_profile_id": "operator.appserver.readonly.docs-mcp.native-helper.v1",
+      "model": "gpt-5.6-sol",
+      "effort": "xhigh",
+      "cost_class": "small",
+      "capabilities": ["planning", "judgment", "escalation"],
+      "worker_eligible": true
+    },
+    "coo.operator.native-return": {
+      "provider_alias": "codex",
+      "execution_profile_id": "operator.appserver.interactive.native-return.v1",
       "model": "gpt-5.6-sol",
       "effort": "xhigh",
       "cost_class": "small",

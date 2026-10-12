@@ -1,0 +1,21 @@
+{
+  "classification": "SOURCE_ONLY_UNINSTALLED",
+  "base_sha256": "d36860ea8036ed5ec733a47c709a477c851fee95dddbae23c8e2214dc308b77e",
+  "candidate_sha256": "836cfee635fdaaf215ac8fd40e69138f1a77df0f4306c58a27889a78e05f280d",
+  "patch_sha256": "2ecdb7a54832e2e979c9e1bbbe055c49835d1f425f163526ad0bff21d1114238",
+  "worker_id": "fabric-bound-launch-port-01a11e90-v1",
+  "retained_result_sha256": "efe84085be5f17112d286001535fe201d6368f1d8dbc5f1de7a167918a7649bd",
+  "original_symbols": 59,
+  "changed_existing_symbols": [
+    "run_owned_process"
+  ],
+  "validation": "76 affected inert capture checks PASS; identity/census mocked; no live kernel/provider probe",
+  "limits": [
+    "PRE_EXEC_HANDSHAKE only",
+    "correlation is not authority",
+    "provider execution is not attested",
+    "no Backend or installed changes"
+  ],
+  "reviewed_port_sha256": "df229997a0625b94bbfc207084ac9fde19526e49bbfe5e04eff97d58c556a7fa",
+  "parent_delta": "Snapshot digest and exact early receipt linked to terminal; collector startup is inside original post-spawn cleanup and gate closure boundary. No provider execution claim."
+}
