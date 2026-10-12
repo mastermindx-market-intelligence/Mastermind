@@ -190,3 +190,66 @@ def test_malformed_historical_proof_identity_is_refused_without_database_error(s
 def test_boolean_checkpoint_sequence_is_not_integer_provenance(source):
     source.execute("UPDATE events SET payload_json='{\"checkpoint_sequence\":true}' WHERE event_id=2")
     assert material(source) is None
+
+
+# Independent review regressions: current authorization and historical receipts differ.
+def test_existing_operator_quota_owner_is_a_valid_typed_stop_producer(source):
+    source.execute("UPDATE events SET actor='operator' WHERE event_id=2")
+    assert material(source) is not None
+
+
+@pytest.mark.parametrize("actor", ["provider", "model", "unknown", "supervisor"])
+def test_unrecognized_quota_stop_actors_do_not_gain_retry_authority(source, actor):
+    source.execute("UPDATE events SET actor=? WHERE event_id=2", (actor,))
+    assert material(source) is None
+
+
+def test_saved_receipt_does_not_reread_mutable_generation_state(source):
+    proof = material(source)
+    source.execute("UPDATE process_generations SET provider_writer_state='UNKNOWN',executive_writer_held=1")
+    assert material(source) is None  # Fresh retry is still blocked.
+    assert _module().validate_saved_quota_proof(source, proof) is True  # Historical read only.
+
+
+def test_late_unknown_effect_does_not_erase_a_previously_committed_receipt(source):
+    proof = material(source)
+    source.execute("INSERT INTO events VALUES(3,'job','job','OPERATOR_OPERATION_EFFECT_UNKNOWN',"
+                   "'supervisor','job','attempt','worker','pool','{}',400)")
+    assert material(source) is None
+    assert _module().validate_saved_quota_proof(source, proof) is True
+
+
+def test_additive_event_column_does_not_invalidate_historical_proof(source):
+    proof = material(source)
+    source.execute("ALTER TABLE events ADD COLUMN harmless_projection TEXT")
+    source.execute("UPDATE events SET harmless_projection='new schema metadata'")
+    assert material(source) == proof
+    assert _module().validate_saved_quota_proof(source, proof) is True
+
+
+def test_saved_receipt_still_rejects_referenced_event_corruption(source):
+    proof = material(source)
+    source.execute("UPDATE events SET actor='foreign' WHERE event_id=1")
+    assert _module().validate_saved_quota_proof(source, proof) is False
+
+
+@pytest.mark.parametrize("field", ["event_digest", "epoch_state", "provider_writer_state", "executive_writer_held"])
+def test_closed_frozen_release_snapshot_cannot_be_tampered(source, field):
+    proof = material(source)
+    proof["releases"][0][field] = "tampered"
+    assert _module().validate_saved_quota_proof(source, proof) is False
+
+
+def test_proof_json_uses_the_same_canonical_wire_as_runtime(source):
+    source.execute("UPDATE events SET payload_json='{\"writer_released\": true}' WHERE event_id=1")
+    assert material(source) is None
+
+
+def test_canonical_unicode_checkpoint_roundtrips_without_ascii_reencoding(source):
+    checkpoint = json.dumps({"next_actions": ["Review café evidence"]}, sort_keys=True,
+                            separators=(",", ":"), ensure_ascii=False)
+    source.execute("UPDATE jobs SET checkpoint_json=?", (checkpoint,))
+    source.execute("UPDATE attempts SET checkpoint_json=?", (checkpoint,))
+    proof = material(source)
+    assert proof is not None
+    assert _module().validate_saved_quota_proof(source, proof) is True

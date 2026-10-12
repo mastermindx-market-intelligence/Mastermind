@@ -52,9 +52,31 @@ def test_invalid_context_counts_are_rejected(field, bad):
         plan(**{field: bad})
 
 
-def test_exact_boundary_keeps_response_and_tool_reserves():
-    assert plan(used_tokens=700)["next_action"] == "CONTINUE"
-    assert plan(used_tokens=701)["next_action"] == "COMPACT_SAME_SESSION"
+def test_exact_boundary_keeps_response_tool_and_recovery_reserves():
+    assert plan(used_tokens=600)["next_action"] == "CONTINUE"
+    assert plan(used_tokens=601)["next_action"] == "COMPACT_SAME_SESSION"
+
+
+def test_next_turn_does_not_spend_the_last_compaction_headroom():
+    result = plan(used_tokens=700)
+    assert result["next_action"] == "COMPACT_SAME_SESSION"
+    assert result["remeasure_before_next_turn"] is True
+
+
+def test_oversized_next_turn_does_not_start_an_endless_compaction_loop():
+    result = plan(used_tokens=0, next_input_tokens=901)
+    assert result["next_action"] == "REBUILD_NEXT_TURN_CONTEXT"
+    assert result["operation_performed"] is False
+
+
+def test_impossible_next_turn_is_not_solved_by_forgetting_mandatory_reserves():
+    result = plan(used_tokens=10, next_input_tokens=750)
+    assert result["next_action"] == "REBUILD_NEXT_TURN_CONTEXT"
+    assert result["max_next_input_tokens"] == 700
+
+
+def test_healthy_plan_reports_its_retained_recovery_reserve():
+    assert plan()["recovery_reserve_tokens"] == 100
 
 
 def test_target_mandatory_state_never_silently_truncates():

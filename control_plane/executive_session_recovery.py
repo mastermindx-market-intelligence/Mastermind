@@ -43,16 +43,25 @@ def context_plan(*, context_limit: int | None, used_tokens: int | None,
         raise TypeError("durable_checkpoint_available must be bool")
     if context_limit is None or used_tokens is None:
         return _projection("OBSERVE_CONTEXT", reason="context_measurement_unknown")
-    required = used_tokens + next_input_tokens + response_reserve + tool_reserve
+    # Reserve recovery headroom before admitting the next turn, not only after
+    # that turn has already filled the provider's context window.
+    reserves = response_reserve + tool_reserve + compaction_reserve
     remaining = context_limit - used_tokens
+    if next_input_tokens + reserves > context_limit:
+        return _projection("REBUILD_NEXT_TURN_CONTEXT", remaining_tokens=remaining,
+                           max_next_input_tokens=max(0, context_limit - reserves),
+                           reason="next_turn_cannot_fit_even_after_compaction")
+    required = used_tokens + next_input_tokens + reserves
     if required <= context_limit:
-        return _projection("CONTINUE", remaining_tokens=remaining)
+        return _projection("CONTINUE", remaining_tokens=remaining,
+                           recovery_reserve_tokens=compaction_reserve)
     can_compact = used_tokens + compaction_reserve <= context_limit
     if not durable_checkpoint_available:
         return _projection("SAVE_DURABLE_FRONTIER" if can_compact else "RECONCILE_DURABLE_FRONTIER",
                            remaining_tokens=remaining, reason="portable_checkpoint_missing")
     if native_compaction_supported is True and can_compact:
         return _projection("COMPACT_SAME_SESSION", remaining_tokens=remaining,
+                           remeasure_before_next_turn=True,
                            owner="existing_generation_bound_checkpoint_operation")
     return _projection("RESUME_FROM_DURABLE_CHECKPOINT", remaining_tokens=remaining,
                        owner="existing_retry_and_continuation_owners")
@@ -103,12 +112,31 @@ def project_root_recovery(runtime, root_job_id: str, *, limit: int = 100) -> dic
         for row in rows[:limit]:
             status = row["status"]
             attempt_id = row["current_attempt_id"]
+            previous = None
+            stop_reason = "QUOTA_OR_RATE_LIMIT" if status == "RATE_LIMITED" else None
+            stop_reason_scope = "current_attempt" if stop_reason else None
             action = "INSPECT_CURRENT_ATTEMPT"
             reasons = []
             retry = None
             if status == "QUEUED" and attempt_id is None:
                 action = "WAIT_FOR_EXISTING_SCHEDULER"
                 reasons.append("canonical_job_queued_capacity_not_resolved_by_this_view")
+                # Preserve the last observed stop through the existing Event /
+                # Attempt join. This is history, not a new retry authorization.
+                previous = con.execute(
+                    "SELECT a.attempt_id,a.worker_id,a.quota_class,a.status "
+                    "FROM events e JOIN attempts a "
+                    "ON a.attempt_id=e.attempt_id AND a.job_id=e.job_id "
+                    "WHERE e.job_id=? AND e.event_type='JOB_REQUEUED' "
+                    "AND e.aggregate_type='job' AND e.aggregate_id=e.job_id "
+                    "AND e.actor='operator' AND e.worker_id=a.worker_id "
+                    "AND e.quota_class=a.quota_class "
+                    "ORDER BY e.event_id DESC LIMIT 1", (row["job_id"],),
+                ).fetchone()
+                if previous is not None and previous["status"] == "RATE_LIMITED":
+                    stop_reason = "QUOTA_OR_RATE_LIMIT"
+                    stop_reason_scope = "previous_attempt"
+                    reasons.append("requeued_after_quota_limit")
             elif status in {"COMPLETED", "CANCELLED"}:
                 action = "INSPECT_TERMINAL_RESULT"
             elif status in {"RATE_LIMITED", "FAILED", "LOST"} and attempt_id:
@@ -135,7 +163,9 @@ def project_root_recovery(runtime, root_job_id: str, *, limit: int = 100) -> dic
             items.append({
                 "job_id": row["job_id"], "attempt_id": attempt_id,
                 "source_status": status, "next_action": action,
-                "stop_reason": "QUOTA_OR_RATE_LIMIT" if status == "RATE_LIMITED" else None,
+                "stop_reason": stop_reason, "stop_reason_scope": stop_reason_scope,
+                "previous_attempt_id": previous["attempt_id"] if previous is not None else None,
+                "previous_worker_id": previous["worker_id"] if previous is not None else None,
                 "retry_decision": retry, "reason_codes": reasons,
                 "checkpoint_available": row["checkpoint_json"] is not None,
                 "queue_position": None, "capacity_eta": None,

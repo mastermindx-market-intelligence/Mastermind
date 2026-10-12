@@ -196,3 +196,20 @@ def test_late_unknown_effect_blocks_an_already_projected_quota_retry(tmp_path):
     outcome = runtime.jobs.commit_coo_retry_decision(root.job_id, selected_job_id=job.job_id,
                                                     expectation=expected)
     assert outcome.action != "REQUEUED"
+
+
+def test_queued_triage_retains_why_the_original_worker_stopped(tmp_path):
+    from control_plane.executive_session_recovery import project_root_recovery
+    runtime, root, job, attempt = _fixture(tmp_path)
+    assert _commit(runtime, root, job, attempt).action == "REQUEUED"
+    before = len(runtime.events.list_events())
+    view = project_root_recovery(runtime, root.job_id)["jobs"][0]
+    assert view["next_action"] == "WAIT_FOR_EXISTING_SCHEDULER"
+    assert view["attempt_id"] is None
+    assert view["previous_attempt_id"] == attempt.attempt_id
+    assert view["previous_worker_id"] == "pool-a"
+    assert view["stop_reason"] == "QUOTA_OR_RATE_LIMIT"
+    assert view["stop_reason_scope"] == "previous_attempt"
+    assert view["queue_position"] is None
+    assert "requeued_after_quota_limit" in view["reason_codes"]
+    assert len(runtime.events.list_events()) == before
