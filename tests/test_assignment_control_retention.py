@@ -69,6 +69,7 @@ def test_control_private_readback_rejects_changed_or_shared_receipt(tmp_path):
 
 async def retained_fixture(tmp_path):
     runtime, job_id, _ = _runtime_and_job(tmp_path)
+    (tmp_path / "control-receipts").mkdir(mode=0o700)
     supervisor = _supervisor(runtime, tmp_path, RestartCapableFakeAdapter(FakeInspector()),
                              receipts_root=tmp_path / "control-receipts")
     active = await supervisor.start_job(job_id)

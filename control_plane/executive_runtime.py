@@ -7652,8 +7652,15 @@ def _validated_sealed_worker_launch_material(
     }
     if not isinstance(metadata, dict) or set(metadata) not in (
         metadata_keys, metadata_keys | {"worker_recovery_binding"},
+        metadata_keys | {"worker_recovery_binding", REMOTE_LAUNCH_IDENTITY_KEY},
     ):
         raise StateConflict("sealed-worker launch metadata is not the closed wire")
+    if REMOTE_LAUNCH_IDENTITY_KEY in metadata:
+        pin = metadata[REMOTE_LAUNCH_IDENTITY_KEY]
+        if (type(pin) is not dict or set(pin) != {"schema_version", "sha256"}
+                or pin["schema_version"] != REMOTE_LAUNCH_IDENTITY_SCHEMA
+                or re.fullmatch(r"[0-9a-f]{64}", str(pin["sha256"])) is None):
+            raise StateConflict("sealed-worker remote launch pin is invalid")
     attestation = metadata.get("launch_attestation")
     worker = (
         attestation.get("worker_identity") if isinstance(attestation, dict) else None
@@ -7919,19 +7926,25 @@ def _sealed_worker_result_payload(
         "assignment_seal_receipt",
         "assignment_seal_receipt_digest",
     }
+    is_fabric = isinstance(evidence, dict) and evidence.get("schema_version") == (
+        "mastermind.fabric_sealed_worker_result_evidence/v1")
+    if is_fabric:
+        evidence_keys |= {"remote_assignment_observation", "remote_assignment_observation_digest",
+                          "launch_identity", "physical_binding"}
+    cleanup_field = "fabric_cleanup" if is_fabric else "uid_sweep"
     if not isinstance(evidence, dict) or set(evidence) != evidence_keys:
         raise StateConflict("sealed-worker result evidence is not the closed wire")
     collection_receipt = evidence.get("collection_receipt")
     validation_receipt = evidence.get("validation_receipts")
     assignment = evidence.get("assignment_seal_receipt")
     if (
-        evidence.get("schema_version") != "mastermind.sealed_worker_result_evidence/v1"
+        (not is_fabric and evidence.get("schema_version") != "mastermind.sealed_worker_result_evidence/v1")
         or not isinstance(collection_receipt, dict)
         or set(collection_receipt)
         != {
             "schema_version",
             "collection",
-            "uid_sweep",
+            cleanup_field,
             "effective_grant_digest",
         }
         or collection_receipt.get("schema_version")
@@ -7944,7 +7957,7 @@ def _sealed_worker_result_payload(
             "attempt_id",
             "job_id",
             "commands",
-            "uid_sweep",
+            cleanup_field,
             "effective_grant_digest",
         }
         or validation_receipt.get("effective_grant_digest")
@@ -7988,8 +8001,9 @@ def _sealed_worker_result_payload(
         )
 
     if (
-        not uid_sweep_receipt_is_passing(collection_receipt["uid_sweep"])
-        or not uid_sweep_receipt_is_passing(validation_receipt["uid_sweep"])
+        (not is_fabric and (
+            not uid_sweep_receipt_is_passing(collection_receipt["uid_sweep"])
+            or not uid_sweep_receipt_is_passing(validation_receipt["uid_sweep"])))
         or not uid_sweep_receipt_is_passing(assignment.get("uid_sweep"))
     ):
         raise StateConflict("sealed-worker terminal UID cleanup is not proven")
@@ -8106,11 +8120,60 @@ def _sealed_worker_result_payload(
         _validated_sealed_worker_launch_material(attempt_row)
     )
     job_row = connection.execute(
-        "SELECT validation_commands_json,result_json FROM jobs WHERE job_id=?",
+        "SELECT root_job_id,validation_commands_json,result_json FROM jobs WHERE job_id=?",
         (attempt_row["job_id"],),
     ).fetchone()
     if job_row is None:
         raise StateConflict("sealed-worker result lost its Job")
+    if is_fabric:
+        from control_plane.executive_fabric_adapter import FabricHostBinding
+        from control_plane.fabric_terminal_evidence import validate_fabric_terminal_evidence
+        from control_plane.worker_execution_contract import WorkerRecoveryBinding
+        try:
+            metadata = _strict_canonical_json_loads(
+                str(attempt_row["launch_metadata_json"]), name="Fabric terminal launch metadata")
+            recovery = WorkerRecoveryBinding.from_dict(metadata["worker_recovery_binding"])
+            if recovery.adapter_id != "attended-fabric":
+                raise ValueError("Fabric result requires original Fabric adapter")
+            launch = evidence["launch_identity"]
+            if orchestration_digest(launch) != metadata[REMOTE_LAUNCH_IDENTITY_KEY]["sha256"]:
+                raise ValueError("Fabric terminal launch differs from original pin")
+            physical = FabricHostBinding(**evidence["physical_binding"])
+            if physical.digest != launch["physical_binding_sha256"]:
+                raise ValueError("Fabric terminal physical route differs")
+            original = recovery.to_dict()["launch_spec"]
+            expected_fields = dict(original["fields"])
+            if not expected_fields.get("subscription_canary_claim"):
+                expected_fields.pop("subscription_canary_claim", None)
+            request = launch["request"]
+            requested_spec = request["launch_spec"]
+            if (type(requested_spec) is not dict or type(requested_spec.get("prompt")) is not str
+                    or {key: value for key, value in requested_spec.items() if key != "prompt"} != expected_fields
+                    or hashlib.sha256(requested_spec["prompt"].encode()).hexdigest() != original["prompt_sha256"]
+                    or request.get("control_recovery") != original.get("control_recovery")
+                    or request["validation_commands"] != json.loads(job_row["validation_commands_json"])
+                    or physical.worker_id != attempt_row["worker_id"]
+                    or physical.worker_uid != process_ref["effective_uid"]
+                    or physical.worker_gid != process_ref["effective_gid"]):
+                raise ValueError("Fabric terminal request differs from original recovery")
+            source = _dialogue_source_from_root_creation(connection, root_job_id=job_row["root_job_id"])
+            if source is None:
+                raise ValueError("Fabric result lost canonical commission")
+            expected_binding = {
+                "root_id": job_row["root_job_id"], "job_id": attempt_row["job_id"],
+                "attempt_id": attempt_row["attempt_id"],
+                "effective_grant_digest": attempt_row["effective_grant_digest"],
+                "commission_sha256": source.commission_ref.content_sha256,
+            }
+            validate_fabric_terminal_evidence(
+                evidence, expected_binding=expected_binding,
+                expected_process_ref=recovery.to_dict()["process_ref"],
+                expected_worker_id=attempt_row["worker_id"], expected_host_ref=physical.host_ref,
+                expected_launch_identity_sha256=metadata[REMOTE_LAUNCH_IDENTITY_KEY]["sha256"],
+                expected_manifest=original["fields"]["isolation_manifest"],
+            )
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            raise StateConflict("Fabric terminal evidence failed original-owner validation") from exc
     expected_validations = grant.get("validation_argv")
     commands = validation_receipt.get("commands")
     validation_keys = {

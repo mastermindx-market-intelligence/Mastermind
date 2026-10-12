@@ -549,6 +549,22 @@ class AttendedFabricWorkerAdapter:
         except (KeyError, ValueError) as exc:
             raise BrokerProtocolError("Fabric status is not a proven worker state") from exc
 
+    def assignment_launch_identity(self, ref):
+        """Return the exact pre-START pin material without issuing any RPC."""
+        _, _, _, spec = self._known(ref)
+        self._validate_lease(ref.run_id)
+        attempt, physical, payload = self._resolve(spec, launch=False)
+        self._pin_matches(attempt, physical, payload)
+        return json.loads(json.dumps({"physical_binding_sha256": physical.digest,
+                                     "request": payload}, allow_nan=False))
+
+    def assignment_physical_binding(self, ref):
+        identity = self.assignment_launch_identity(ref)
+        physical = self._known(ref)[2]
+        if physical.digest != identity["physical_binding_sha256"]:
+            raise BrokerStateError("Fabric terminal route changed")
+        return dataclasses.asdict(physical)
+
     async def seal_assignment(self, ref):
         """Request the original owner's actual seal; never perform local chmod."""
         result = await self._request(ref, "assignment-seal", process_ref=dataclasses.asdict(ref),

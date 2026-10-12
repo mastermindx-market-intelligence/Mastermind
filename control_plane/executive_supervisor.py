@@ -2418,6 +2418,24 @@ class ExecutiveSupervisor:
             "assignment_seal_receipt": assignment,
             "assignment_seal_receipt_digest": canonical_digest(assignment),
         }
+        if self.cleanup_policy is CleanupPolicy.FABRIC_PROCESS_GROUP:
+            retained = self._read_private_receipt(
+                assignment_path.with_name("remote-assignment-observation.json"),
+                name="original remote assignment observation",
+            )
+            from control_plane.broker_assignment_seal import digest
+            observation = retained.get("observation")
+            if (set(retained) != {"schema_version", "observation", "observation_sha256"}
+                    or retained["schema_version"] != "mastermind.control_assignment_observation/v1"
+                    or retained["observation_sha256"] != digest(observation)):
+                raise TerminalAssignmentSealError("remote assignment retention changed")
+            evidence.update(
+                schema_version="mastermind.fabric_sealed_worker_result_evidence/v1",
+                remote_assignment_observation=observation,
+                remote_assignment_observation_digest=canonical_digest(observation),
+                launch_identity=self.adapter.assignment_launch_identity(active.process_ref),
+                physical_binding=self.adapter.assignment_physical_binding(active.process_ref),
+            )
         payload: dict[str, Any] = {
             "schema_version": "mastermind.orchestration_terminal_receipt/v1",
             "status": JobStatus.COMPLETED.value,
@@ -2449,6 +2467,36 @@ class ExecutiveSupervisor:
                 / "assignment-seal-receipt.json"
             ),
         )
+
+    def _validated_remote_assignment_recovery(self, active: ActiveRun, current: Attempt):
+        """Keep START identity while proving a provider session learned at collect.
+
+        The Fabric collection contract permits only None -> observed session.
+        Restart identity remains strict. This terminal-only join requires the
+        existing private collection and the already recorded OS exit.
+        """
+        ref = active.process_ref
+        if ref.provider_session_id != current.provider_session_id:
+            if (ref.provider_session_id is not None or current.exit_code is None
+                    or not isinstance(current.provider_session_id, str)
+                    or not current.provider_session_id):
+                raise TerminalAssignmentSealError("remote provider session changed after launch")
+            from control_plane.executive_worker_broker import _collection_from_json
+            path = self._receipt_path(current.attempt_id, "collection-receipt.json",
+                legacy=active.launch_spec.run_dir / "output" / "collection-receipt.json")
+            retained = self._read_private_receipt(path, name="original remote collection")
+            receipt = _collection_from_json(retained.get("collection"))
+            if (retained.get("schema_version") != "mastermind.executive_collection_evidence/v1"
+                    or receipt.process_ref != dataclasses.replace(
+                        ref, provider_session_id=current.provider_session_id)
+                    or receipt.result.provider_session_id != current.provider_session_id
+                    or receipt.result.exit_code != current.exit_code
+                    or receipt.result.run_id != current.attempt_id
+                    or receipt.result.job_id != current.job_id
+                    or receipt.result.worker_id != current.worker_id):
+                raise TerminalAssignmentSealError("remote collection cannot bind learned provider session")
+            current = dataclasses.replace(current, provider_session_id=None)
+        return self._validated_recovery_binding(current)
 
     def _retain_remote_assignment_observation(
         self, active: ActiveRun, observation: Mapping[str, Any]
@@ -2492,7 +2540,7 @@ class ExecutiveSupervisor:
             )
             current = self.runtime.attempts.get_attempt(attempt.attempt_id)
             assert current is not None
-            binding, spec, _ = self._validated_recovery_binding(current)
+            binding, spec, _ = self._validated_remote_assignment_recovery(active, current)
             if (binding.process_ref != active.process_ref
                     or worker_launch_spec_sha256(spec) != worker_launch_spec_sha256(active.launch_spec)
                     or snapshot["run_id"] != current.attempt_id
@@ -2538,22 +2586,115 @@ class ExecutiveSupervisor:
         exchange must be reconciled by that original owner, never retried here.
         """
         from control_plane.executive_fabric_adapter import AttendedFabricWorkerAdapter
+        from control_plane.broker_assignment_seal import digest, verify_control_readback
         if (type(self.adapter) is not AttendedFabricWorkerAdapter
                 or self.adapter.runtime is not self.runtime
                 or not self.require_complete_launch_attestation):
             raise TerminalAssignmentSealError("remote assignment requires the original complete adapter")
+        from control_plane.worker_execution_contract import worker_launch_spec_sha256
+        # An interrupted exchange may have sealed remote paths or released
+        # admission without delivering its reply. Record before transmission,
+        # under the existing Runtime fence. Presence (even partial bytes) means
+        # original-owner reconciliation, never permission to repeat the effect.
+        attempt = active.lease.attempt
+        launch_identity = self.adapter.assignment_launch_identity(active.process_ref)
+        if self.receipts_root is None:
+            raise TerminalAssignmentSealError("remote assignment requires private Control receipts")
+        root_info = self.receipts_root.lstat()
+        if (not stat.S_ISDIR(root_info.st_mode) or root_info.st_uid != os.geteuid()
+                or stat.S_IMODE(root_info.st_mode) != 0o700):
+            raise TerminalAssignmentSealError("remote assignment receipt root is not private")
+        request_path = self._receipt_path(
+            attempt.attempt_id, "remote-assignment-request.json",
+            legacy=self._terminal_assignment_receipt_path(attempt.attempt_id).with_name(
+                "remote-assignment-request.json"),
+        )
+        try:
+            with self.runtime.store.transaction() as connection:
+                self.runtime.attempts._leased_row(
+                    connection, attempt_id=attempt.attempt_id,
+                    fence_generation=attempt.fence_generation, lease_token=active.lease.lease_token,
+                    timestamp=self.runtime.store.now_ms(), statuses=_ACTIVE_ATTEMPT_STATUSES,
+                )
+                current = self.runtime.attempts.get_attempt(attempt.attempt_id)
+                binding, spec, _ = self._validated_remote_assignment_recovery(active, current)
+                if (binding.process_ref != active.process_ref
+                        or worker_launch_spec_sha256(spec) != worker_launch_spec_sha256(active.launch_spec)):
+                    raise TerminalAssignmentSealError("remote assignment differs from original launch")
+                for previous in (request_path.with_name("remote-assignment-observation.json"),
+                                 self._terminal_assignment_receipt_path(attempt.attempt_id)):
+                    try:
+                        previous.lstat()
+                    except FileNotFoundError:
+                        continue
+                    raise TerminalAssignmentSealError(
+                        "remote assignment has retained settlement evidence; original-owner reconciliation required")
+                record = {
+                    "schema_version": "mastermind.remote_assignment_request/v1",
+                    "attempt_id": attempt.attempt_id, "job_id": attempt.job_id,
+                    "worker_id": attempt.worker_id, "fence_generation": attempt.fence_generation,
+                    "process_ref": _jsonable(active.process_ref),
+                    "launch_spec_sha256": worker_launch_spec_sha256(spec),
+                    "effective_grant_digest": attempt.effective_grant_digest,
+                    "launch_identity": launch_identity,
+                    "launch_identity_sha256": digest(launch_identity),
+                }
+                _write_private_json(request_path, record)
+                # Persist the Attempt directory entry and the configured root
+                # entry before an RPC. Failed namespace durability never sends.
+                for directory in (self.receipts_root, self.receipts_root.parent):
+                    fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                    try:
+                        os.fsync(fd)
+                    finally:
+                        os.close(fd)
+                verify_control_readback(request_path, record)
+        except FileExistsError as exc:
+            raise TerminalAssignmentSealError(
+                "remote assignment exchange already requested; original-owner reconciliation required"
+            ) from exc
+        async def exchange(operation, *args):
+            # One task per modifying RPC. A cancelled local await does not
+            # undo a remote effect, and never advances to the next exchange.
+            self.runtime.attempts.heartbeat_attempt(attempt.attempt_id,
+                fence_generation=attempt.fence_generation, lease_token=active.lease.lease_token)
+            task = asyncio.create_task(operation(active.process_ref, *args))
+            try:
+                while True:
+                    done, _ = await asyncio.wait({task}, timeout=self.heartbeat_interval_seconds)
+                    if task in done:
+                        return task.result()
+                    self.runtime.attempts.heartbeat_attempt(attempt.attempt_id,
+                        fence_generation=attempt.fence_generation, lease_token=active.lease.lease_token)
+            finally:
+                if not task.done():
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+
         # The adapter revalidates the exact Runtime lease, launch pin, process
         # and physical route immediately before/after each authenticated call.
-        observation = await self.adapter.seal_assignment(active.process_ref)
+        observation = await exchange(self.adapter.seal_assignment)
         path, ack = self._retain_remote_assignment_observation(active, observation)
-        acknowledged = await self.adapter.finalize_assignment(active.process_ref, ack)
+        acknowledged = await exchange(self.adapter.finalize_assignment, ack)
         if acknowledged != ack:
             raise TerminalAssignmentSealError("original assignment retention acknowledgement differs")
         # A changed fence after remote release cannot authorize terminalization.
         verified_path, verified_ack = self._retain_remote_assignment_observation(active, observation)
         if verified_path != path or verified_ack != ack:
             raise TerminalAssignmentSealError("original assignment retention changed")
-        return path
+        # Preserve the raw authenticated observation separately. Only after a
+        # positive ACK and current-fence readback project its actual final seal
+        # into the existing terminal assignment contract.
+        snapshot = observation["snapshot"]
+        terminal_seal = {
+            **observation["control_seal"], "attempt_id": attempt.attempt_id,
+            "job_id": attempt.job_id, "effective_grant_digest": attempt.effective_grant_digest,
+            "uid_sweep": snapshot["uid_sweep"],
+        }
+        terminal_path = self._terminal_assignment_receipt_path(attempt.attempt_id)
+        _write_or_verify_private_json(terminal_path, terminal_seal, name="remote terminal assignment seal")
+        verify_control_readback(terminal_path, terminal_seal)
+        return terminal_path
 
     @staticmethod
     def _validate_terminal_uid_sweep(value: Any) -> Mapping[str, Any]:
@@ -2996,8 +3137,19 @@ class ExecutiveSupervisor:
         token = active.lease.lease_token
         seal_path: Path | None = None
 
-        def ensure_sealed() -> Path:
+        async def ensure_sealed() -> Path:
             nonlocal seal_path
+            if seal_path is None and self.cleanup_policy is CleanupPolicy.FABRIC_PROCESS_GROUP:
+                try:
+                    seal_path = await self.retain_and_acknowledge_remote_assignment(active)
+                except TerminalAssignmentSealError:
+                    raise
+                except Exception as exc:
+                    # Ambiguity, stale lease and durability errors must never
+                    # fall into generic fail/cancel handlers and send again.
+                    raise TerminalAssignmentSealError(
+                        "FABRIC_ASSIGNMENT_SEAL_UNAVAILABLE: original remote settlement remains unproven"
+                    ) from exc
             if seal_path is None:
                 seal_path = self._seal_terminal_assignment(
                     attempt_id=attempt.attempt_id,
@@ -3043,11 +3195,11 @@ class ExecutiveSupervisor:
         job = self._job(attempt.job_id)
         if job.status == JobStatus.CANCEL_REQUESTED:
             await self._settle_recovered_terminal_owner(active)
-            ensure_sealed()
+            await ensure_sealed()
             cancelled = self.runtime.attempts.acknowledge_cancel(
                 attempt.attempt_id, fence_generation=fence, lease_token=token
             )
-            return cancelled, (), None, ensure_sealed()
+            return cancelled, (), None, await ensure_sealed()
         output = receipt.result.structured_output
         if receipt.result.status == WorkerRunStatus.SUCCEEDED and isinstance(output, Mapping):
             validation_receipts: tuple[ValidationReceipt, ...] = ()
@@ -3075,7 +3227,7 @@ class ExecutiveSupervisor:
                     # exiting; honour it before checkpoint/completion.
                     job = self._job(attempt.job_id)
                     if job.status == JobStatus.CANCEL_REQUESTED:
-                        ensure_sealed()
+                        await ensure_sealed()
                         cancelled = self.runtime.attempts.acknowledge_cancel(
                             attempt.attempt_id,
                             fence_generation=fence,
@@ -3085,7 +3237,7 @@ class ExecutiveSupervisor:
                             cancelled,
                             validation_receipts,
                             validation_path,
-                            ensure_sealed(),
+                            await ensure_sealed(),
                         )
                 if job.orchestration_role is None:
                     self.runtime.attempts.checkpoint_attempt(
@@ -3095,7 +3247,7 @@ class ExecutiveSupervisor:
                         payload=payload,
                     )
                 if str(output.get("status")) == "COMPLETED":
-                    assignment_path = ensure_sealed()
+                    assignment_path = await ensure_sealed()
                     if job.orchestration_role is not None:
                         if validation_path is None:  # pragma: no cover - helper invariant
                             raise SupervisorError(
@@ -3115,23 +3267,23 @@ class ExecutiveSupervisor:
                         lease_token=token,
                         payload=payload,
                     )
-                    return completed, validation_receipts, validation_path, ensure_sealed()
-                ensure_sealed()
+                    return completed, validation_receipts, validation_path, await ensure_sealed()
+                await ensure_sealed()
                 failed = self.runtime.attempts.fail_attempt(
                     attempt.attempt_id,
                     fence_generation=fence,
                     lease_token=token,
                     payload=payload,
                 )
-                return failed, validation_receipts, validation_path, ensure_sealed()
+                return failed, validation_receipts, validation_path, await ensure_sealed()
             except _ValidationCancelled:
-                ensure_sealed()
+                await ensure_sealed()
                 cancelled = self.runtime.attempts.acknowledge_cancel(
                     attempt.attempt_id,
                     fence_generation=fence,
                     lease_token=token,
                 )
-                return cancelled, validation_receipts, validation_path, ensure_sealed()
+                return cancelled, validation_receipts, validation_path, await ensure_sealed()
             except TerminalAssignmentSealError:
                 raise
             except StateConflict:
@@ -3140,7 +3292,7 @@ class ExecutiveSupervisor:
                 # propagate instead of being converted with a stale token.
                 current = self._job(attempt.job_id)
                 if current.status == JobStatus.CANCEL_REQUESTED:
-                    ensure_sealed()
+                    await ensure_sealed()
                     cancelled = self.runtime.attempts.acknowledge_cancel(
                         attempt.attempt_id,
                         fence_generation=fence,
@@ -3150,13 +3302,13 @@ class ExecutiveSupervisor:
                         cancelled,
                         validation_receipts,
                         validation_path,
-                        ensure_sealed(),
+                        await ensure_sealed(),
                     )
                 raise
             except SupervisorError as exc:
                 current = self._job(attempt.job_id)
                 if current.status == JobStatus.CANCEL_REQUESTED:
-                    ensure_sealed()
+                    await ensure_sealed()
                     cancelled = self.runtime.attempts.acknowledge_cancel(
                         attempt.attempt_id,
                         fence_generation=fence,
@@ -3166,10 +3318,10 @@ class ExecutiveSupervisor:
                         cancelled,
                         validation_receipts,
                         validation_path,
-                        ensure_sealed(),
+                        await ensure_sealed(),
                     )
                 try:
-                    ensure_sealed()
+                    await ensure_sealed()
                     failed = self.runtime.attempts.fail_attempt(
                         attempt.attempt_id,
                         fence_generation=fence,
@@ -3184,14 +3336,14 @@ class ExecutiveSupervisor:
                     current = self._job(attempt.job_id)
                     if current.status != JobStatus.CANCEL_REQUESTED:
                         raise
-                    ensure_sealed()
+                    await ensure_sealed()
                     failed = self.runtime.attempts.acknowledge_cancel(
                         attempt.attempt_id,
                         fence_generation=fence,
                         lease_token=token,
                     )
-                return failed, validation_receipts, validation_path, ensure_sealed()
-        ensure_sealed()
+                return failed, validation_receipts, validation_path, await ensure_sealed()
+        await ensure_sealed()
         failed = self.runtime.attempts.fail_attempt(
             attempt.attempt_id,
             fence_generation=fence,
@@ -3202,7 +3354,7 @@ class ExecutiveSupervisor:
                 errors=[receipt.result.error or receipt.result.status.value],
             ),
         )
-        return failed, (), None, ensure_sealed()
+        return failed, (), None, await ensure_sealed()
 
     async def finish_job(self, active: ActiveRun) -> SupervisorReceipt:
         receipt = await self._collect_with_heartbeats(active)
