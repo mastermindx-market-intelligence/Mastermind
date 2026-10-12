@@ -1637,6 +1637,7 @@ def _service_from_config(
     claimed_operator_adapter_factory: Callable[..., Any] | None = None,
     remote_operator_binding_source: Callable[..., Any] | None = None,
     dialogue_canary_profile: Any | None = None,
+    native_dialogue_canary_profile_loader: Callable[[], Any] | None = None,
     remote_worker_binding_source: Callable[..., Any] | None = None,
 ) -> ExecutiveControlService:
     from control_plane.dialogue_wake_canary_activation import DialogueWakeCanaryProfile
@@ -2174,7 +2175,8 @@ def _service_from_config(
     if (
         _DIALOGUE_BRIDGE_CONFIG_KEYS <= set(raw)
         and (raw["dialogue_bridge_armed"] is True
-             or dialogue_canary_profile.grant is not None)
+             or dialogue_canary_profile.grant is not None
+             or native_dialogue_canary_profile_loader is not None)
     ):
         from control_plane.dialogue_wake_canary_activation import DialogueWakeCanaryProfile
 
@@ -2206,6 +2208,7 @@ def _service_from_config(
                 # An absent grant stays an explicit disarmed profile; it must
                 # never select the generic carrier path after grant removal.
                 canary_profile=dialogue_canary_profile,
+                native_canary_profile_loader=native_dialogue_canary_profile_loader,
                 installed_release_sha=config.proof_base_sha,
                 canary_now_epoch_seconds=lambda: int(time.time()),
             ),
@@ -2461,6 +2464,22 @@ async def _serve_from_config(config_path: Path) -> None:
         release_sha=raw["proof_base_sha"],
         grant=raw.get("dialogue_wake_canary_activation"),
     )
+    native_dialogue_canary_profile_loader = None
+    if (raw.get("coo_operator_model_alias") == "coo.operator.native-return"
+            and raw.get("company_consultation", {}).get("native_return_armed") is True):
+        from ops.executive_os.dialogue_wake_canary_control import require_native_selection, load_native_verified_profile
+        require_native_selection(raw)
+        bound_native_control_sha256 = control_attestation["config_sha256"]
+        def native_dialogue_canary_profile_loader():
+            # This changes only the bound grant. Ambient config/attestation,
+            # admission flags, Runtime and current writer retain their owners.
+            service._require_company_answer_attention()
+            current = content_attestation_loader()
+            if (current["config_sha256"] != bound_native_control_sha256
+                    or _sha256_file(config_path) != bound_native_control_sha256):
+                raise ServiceError("native grant cannot rebind Control configuration")
+            return load_native_verified_profile(service._require_runtime(),
+                control_sha256=bound_native_control_sha256, release_sha=raw["proof_base_sha"])
     # Bind fresh public CEO admission to the exact running config and the
     # existing root-owned receipt pair. Never read worker-codex.json as Control.
     require_ceo_admission = _ceo_admission_guard(raw, config_path, content_attestation_loader)
@@ -2468,6 +2487,7 @@ async def _serve_from_config(config_path: Path) -> None:
     service = _service_from_config(
         raw,
         dialogue_canary_profile=dialogue_canary_profile,
+        native_dialogue_canary_profile_loader=native_dialogue_canary_profile_loader,
         canary_loader=load_canary,
         autonomy_guard=autonomy_guard,
         ceo_submit_admission_guard=require_ceo_admission,

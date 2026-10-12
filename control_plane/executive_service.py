@@ -51,6 +51,7 @@ from control_plane.executive_runtime import (
     EXECUTIVE_DIALOGUE_SOURCE_SCHEMA,
     Job,
     JobStatus,
+    NATIVE_RETURN_TX5_EXECUTION_PROFILE,
     OrchestrationDispatchOutcome,
     PersistenceError,
     Runtime,
@@ -216,6 +217,26 @@ class OperatorSupervisorProtocol(Protocol):
     ) -> OrchestrationDispatchOutcome: ...
 
     def reconcile_restart(self, *, requeue_lost: bool = False) -> list[Any]: ...
+
+    async def start_retained_native_job(self, job_id: str, *, command_id: str) -> Any: ...
+    async def run_native_continuation(self, retained: Any, *, source: Any, read_ref: str) -> Any: ...
+    async def finish_retained_native_job(self, retained: Any) -> None: ...
+    async def abort_retained_native_job(self, retained: Any, *, reason: str) -> bool: ...
+    def retain_native_wait_window(self, retained: Any) -> None: ...
+
+
+@dataclasses.dataclass
+class _NativeOperatorDispatch:
+    """One transient service-owned dispatch, never a durable session registry."""
+    job_id: str
+    command_id: str
+    started: asyncio.Future
+    continuation: asyncio.Future
+    retained: Any = None
+    source: Any = None
+
+
+_NATIVE_CONTINUATION_WAIT_SECONDS = 300.0
 
 
 class BackupBackendProtocol(Protocol):
@@ -569,6 +590,7 @@ class ExecutiveDialogueWakeBridge:
         operator_adapter: Any = None,
         carrier_factory: Callable[..., Any] | None = None,
         canary_profile: Any = None,
+        native_canary_profile_loader: Callable[[], Any] | None = None,
         canary_current_facts_for: Callable[..., Any] | None = None,
         canary_now_epoch_seconds: Callable[[], int] | None = None,
         historical_target_for: Callable[..., Any] | None = None,
@@ -591,6 +613,9 @@ class ExecutiveDialogueWakeBridge:
 
         if canary_profile is not None and type(canary_profile) is not DialogueWakeCanaryProfile:
             raise TypeError("canary_profile must be a closed DialogueWakeCanaryProfile")
+        if native_canary_profile_loader is not None and (
+                not callable(native_canary_profile_loader) or canary_profile is None):
+            raise TypeError("native grant reads require the existing closed canary composition")
         if canary_profile is not None and not callable(canary_current_facts_for) and (
             not isinstance(installed_release_sha, str)
             or not installed_release_sha
@@ -607,6 +632,7 @@ class ExecutiveDialogueWakeBridge:
         self._operator_adapter = operator_adapter
         self._carrier_factory = carrier_factory
         self._canary_profile = canary_profile
+        self._native_canary_profile_loader = native_canary_profile_loader
         self._canary_current_facts_for = canary_current_facts_for
         self._canary_now_epoch_seconds = canary_now_epoch_seconds
         self._historical_target_for = historical_target_for
@@ -628,7 +654,7 @@ class ExecutiveDialogueWakeBridge:
 
         if (not isinstance(runtime, Runtime)
                 or not isinstance(projection, RequesterAnswerAttentionProjection)
-                or self._canary_profile is not None):
+                or self.canary_profile is not None):
             raise StateConflict("requester answer Wake composition is unavailable")
         owner = ConsultationRuntime(runtime, repository_root=runtime.store.root)
         def current_source():
@@ -707,7 +733,16 @@ class ExecutiveDialogueWakeBridge:
 
     @property
     def canary_profile(self) -> Any:
-        return self._canary_profile
+        if self._native_canary_profile_loader is None:
+            return self._canary_profile
+        from control_plane.dialogue_wake_canary_activation import DialogueWakeCanaryProfile
+        try:
+            profile = self._native_canary_profile_loader()
+            if type(profile) is not DialogueWakeCanaryProfile:
+                raise ValueError("invalid native grant profile")
+            return profile
+        except Exception:
+            return DialogueWakeCanaryProfile(None)
 
     def reconcile_dialogue_sources(
         self, runtime: Runtime, request: DialogueSourceReconcileRequest
@@ -735,7 +770,7 @@ class ExecutiveDialogueWakeBridge:
             TurnAction, TurnRoutingFacts, classify_turn,
         )
 
-        profile = self._canary_profile
+        profile = self.canary_profile
         if profile is None:
             return {"state": "NOT_APPLICABLE", "reason": "NONCANARY_PROFILE"}
         grant = profile.grant
@@ -1026,7 +1061,7 @@ class ExecutiveDialogueWakeBridge:
         from control_plane.wake_ledger import LedgerPhase, assert_causal
         from control_plane.wake_persist import WakeLedgerRepository
 
-        profile = self._canary_profile
+        profile = self.canary_profile
         if profile is None:
             return {"state": "NOT_APPLICABLE", "reason": "NONCANARY_PROFILE"}
         grant = profile.grant
@@ -1118,7 +1153,7 @@ class ExecutiveDialogueWakeBridge:
         return {"state": "HOLD", "reason": "ACK_NOT_RECORDED"}
 
     def _historical_carrier(self, runtime: Runtime, request: DialogueWakeRequest) -> Any:
-        profile = self._canary_profile
+        profile = self.canary_profile
         if profile is None:
             raise TypeError("historical carrier requires the closed canary profile")
 
@@ -1148,7 +1183,7 @@ class ExecutiveDialogueWakeBridge:
         from control_plane.operator_harness_contract import runtime_binding_id_for
         from control_plane.session_targets import RuntimeBinding
 
-        profile = self._canary_profile
+        profile = self.canary_profile
         grant = None if profile is None else profile.grant
         if grant is None or attempt.attempt_n != 1:
             raise StateConflict("historical canary identity is unavailable")
@@ -1214,7 +1249,7 @@ class ExecutiveDialogueWakeBridge:
         from control_plane.dialogue_wake_canary_activation import DialogueWakeCanaryCurrentFacts
         from control_plane.runtime_binding_projection import project_runtime_binding
 
-        profile = self._canary_profile
+        profile = self.canary_profile
         grant = None if profile is None else profile.grant
         if grant is None:
             raise StateConflict("current canary grant is unavailable")
@@ -1246,11 +1281,11 @@ class ExecutiveDialogueWakeBridge:
         from control_plane.dialogue_wake_canary_activation import DialogueWakeCanaryActivationError
         from control_plane.wake_dispatcher import WakeEffectUnknownError
 
-        if self._canary_profile is None or not isinstance(runtime, Runtime):
+        if self.canary_profile is None or not isinstance(runtime, Runtime):
             return DialogueWakeResult("MISSING", "CANDIDATE_BINDING_REQUIRED")
         if request.operation not in {SUBMIT_WAKE, RECONCILE_WAKE}:
             return DialogueWakeResult("MISSING", "WAKE_REQUEST_REFUSED")
-        grant = self._canary_profile.grant
+        grant = self.canary_profile.grant
         request_mismatch = (
             request.obligation.root_job_id != request.candidate.root_job_id
             or request.obligation.job_id != request.candidate.job_id
@@ -1339,7 +1374,7 @@ class ExecutiveDialogueWakeBridge:
             or request.obligation.source_workstream != request.parent["work_ref"]
         ):
             return DialogueWakeResult("MISSING", "WAKE_REQUEST_REFUSED")
-        profile = self._canary_profile
+        profile = self.canary_profile
         if profile is not None:
             historical = await self.historical_only(runtime, request)
             if (
@@ -2156,6 +2191,7 @@ class ExecutiveControlService:
         self._coo_cycle_lock = asyncio.Lock()
         self._dispatch_tasks: dict[str, asyncio.Task[Any]] = {}
         self._dispatch_errors: dict[str, str] = {}
+        self._native_operator_dispatch: _NativeOperatorDispatch | None = None
         # Default-off composition.  Agent Dialogue owns the concrete Relay
         # projector and injects its factory at the host composition edge; the
         # Executive control plane never reaches back into an integration.
@@ -2517,6 +2553,23 @@ class ExecutiveControlService:
             raise ValueError(
                 "configured COO alias must be a sealed, extension-free, write-capable worker"
             )
+        reviewed_docs_operator = (
+            operator_profile.profile_id
+            == "operator.appserver.readonly.docs-mcp.native-helper.v1"
+            and operator_profile.native_helper_policy.value
+            == "PARENT_READ_ONLY_CEILING"
+            and operator_profile.native_helper is not None
+            and operator_profile.mcp_servers == ("openai-developer-docs-v1",)
+        )
+        reviewed_native_return_operator = (
+            operator_profile.profile_id
+            == "operator.appserver.interactive.native-return.v1"
+            and operator_profile.native_helper_policy.value == "DISABLED"
+            and operator_profile.native_helper is None
+            and operator_profile.mcp_servers == ("native-return-mcp-v1",)
+            and not operator_profile.skill_grants
+            and not operator_profile.resource_grants
+        )
         if (
             not operator_alias.worker_eligible
             or operator_alias.adapter_id != "codex-cli"
@@ -2526,18 +2579,14 @@ class ExecutiveControlService:
             or operator_profile.sandbox_policy != "read-only"
             or operator_profile.approval_policy != "never"
             or operator_profile.network_policy != "disabled"
-            or operator_profile.native_helper_policy.value
-            != "PARENT_READ_ONLY_CEILING"
-            or operator_profile.native_helper is None
             or operator_profile.skills
-            or operator_profile.profile_id
-            != "operator.appserver.readonly.docs-mcp.native-helper.v1"
-            or operator_profile.mcp_servers != ("openai-developer-docs-v1",)
             or operator_profile.plugins
+            or not (reviewed_docs_operator or reviewed_native_return_operator)
         ):
             raise ValueError(
                 "configured COO operator alias must be read-only and use the "
-                "reviewed depth-one docs-MCP native-helper App Server profile"
+                "reviewed docs-MCP native-helper or closed native-return "
+                "App Server profile"
             )
         binding = {
             "eligible_quota_classes": sorted(
@@ -4439,6 +4488,8 @@ class ExecutiveControlService:
                         "state": "NOT_APPLICABLE",
                         "reason": "NONCANARY_PROFILE",
                     }
+                if delayed_result.get("state") == "RECORDED":
+                    await self._signal_native_continuation()
                 await self._send_dialogue_observation(
                     writer,
                     {
@@ -4572,6 +4623,8 @@ class ExecutiveControlService:
                             "state": "UNKNOWN",
                             "reason": "ACTIVE_RUNTIME_UNAVAILABLE",
                         }
+            if response.get("schema") == DIALOGUE_WAKE_RESPONSE_SCHEMA and response.get("state") == "RECORDED":
+                await self._signal_native_continuation()
             await self._send_dialogue_observation(writer, response)
         finally:
             writer.close()
@@ -6348,11 +6401,7 @@ class ExecutiveControlService:
                     return terminal
                 if job.status is JobStatus.QUEUED:
                     self._require_coo_workspace(job)
-                if (
-                    job.orchestration_role == "plan"
-                    and job.constraints.get("execution_profile_id")
-                    == "operator.appserver.interactive.v1"
-                ):
+                if runtime.operator_harness.is_interactive_job(job.job_id):
                     raise StateConflict(
                         "interactive plan Jobs are not routed to the planner supervisor"
                     )
@@ -6406,6 +6455,135 @@ class ExecutiveControlService:
                     lease_token=token,
                 )
 
+    def _native_return_source(self, root: Job):
+        """Reuse the existing authenticated Company/Dialogue composition."""
+        from control_plane.native_continuation import NativeContinuationSource
+        self._require_company_answer_attention()
+        host = self._company_consultation_host
+        app = self._ceo_ingress_app_binding
+        binding = self._coo_binding_for_root(root)
+        if (host is None or host.runtime is not self._require_runtime()
+                or host.native_return_armed is not True
+                or app is None or app.armed is not True
+                or not callable(app.session_bridge_provider_factory)
+                or not callable(getattr(host, "native_continuation_source", None))
+                or binding["operator_harness_armed"] is not True
+                or binding["operator_execution_profile_id"] != NATIVE_RETURN_TX5_EXECUTION_PROFILE):
+            raise StateConflict("exact native return composition is not armed")
+        source = host.native_continuation_source()
+        if not isinstance(source, NativeContinuationSource) or source.runtime is not host.runtime:
+            raise StateConflict("native source differs from installed Runtime composition")
+        return source
+
+    async def _native_cycle_once(self, root: Job, children: list[Job]) -> CooCycleOutcome | None:
+        """Start only the selected private native profile within COO custody."""
+        binding = self._coo_binding_for_root(root)
+        if binding["operator_execution_profile_id"] != NATIVE_RETURN_TX5_EXECUTION_PROFILE:
+            return None
+        # Existing ordinary native G2 planners retain their original lifecycle.
+        if children and (len(children) != 1 or not isinstance(children[0].orchestration_provenance, dict)
+                or children[0].orchestration_provenance.get("command_id")
+                != f"coo-cycle:{root.job_id}:create-interactive:0"):
+            return None
+        source = self._native_return_source(root)
+        runtime = self._require_runtime()
+        async with self._dispatch_lock:
+            async with self._workspace_lock:
+                if not children:
+                    command = f"coo-cycle:{root.job_id}:create-interactive:0"
+                    job = runtime.jobs.create_interactive_operator(root.job_id, command_id=command)
+                    return CooCycleOutcome(root.job_id, "PLANNER_CREATED", job.job_id, command, job.to_dict())
+                job = children[0]
+                if job.status is not JobStatus.QUEUED or job.attempt_count != 0:
+                    return None  # Existing COO NO_ACTION; no adoption or replay.
+                if self._native_operator_dispatch is not None or any(
+                        not task.done() for task in self._dispatch_tasks.values()):
+                    raise StateConflict("the serialized native operator already has an owner")
+                self._require_coo_workspace(job)
+                loop = asyncio.get_running_loop()
+                command = f"coo-cycle:{root.job_id}:dispatch:{job.job_id}:attempt:1"
+                dispatch = _NativeOperatorDispatch(job.job_id, command, loop.create_future(), loop.create_future(), source=source)
+                self._native_operator_dispatch = dispatch
+                task = asyncio.create_task(self._run_native_operator_dispatch(dispatch),
+                    name=f"executive-native-finish-{job.job_id}")
+                self._dispatch_tasks[job.job_id] = task
+                outcome = await asyncio.shield(dispatch.started)
+                return CooCycleOutcome(root.job_id, "DISPATCHED", job.job_id, command, outcome.to_dict())
+
+    async def _run_native_operator_dispatch(self, dispatch: _NativeOperatorDispatch) -> None:
+        supervisor = self._require_operator_supervisor()
+        try:
+            dispatch.retained = await self._run_owned_coroutine(supervisor.start_retained_native_job(
+                dispatch.job_id, command_id=dispatch.command_id))
+            supervisor.retain_native_wait_window(dispatch.retained)
+            lease = dispatch.retained.lease
+            current_attempt = self._require_runtime().attempts.get_attempt(lease.attempt.attempt_id)
+            if current_attempt is None:
+                raise StateConflict("native dispatch lost its exact Attempt")
+            dispatch.started.set_result(OrchestrationDispatchOutcome(
+                command_id=dispatch.command_id, job_id=dispatch.job_id,
+                attempt=current_attempt, outcome="ACTIVE", lease_token=lease.lease_token))
+            # The initial seal exposes this writer before the thread returns
+            # its retained handle. Re-read a persisted ACK once at attachment;
+            # an ingress edge in that interval must not need redelivery.
+            await self._signal_native_continuation()
+            # Wake owns delivery and persisted ACK; no polling or provider retry.
+            read_ref = await asyncio.wait_for(dispatch.continuation, timeout=_NATIVE_CONTINUATION_WAIT_SECONDS)
+            root = self._require_runtime().jobs.get_job(dispatch.retained.job.root_job_id)
+            if root is None:
+                raise StateConflict("native continuation lost its exact root")
+            self._native_return_source(root)  # Fresh installed read/execute admission.
+            await self._run_owned_coroutine(supervisor.run_native_continuation(
+                dispatch.retained, source=dispatch.source, read_ref=read_ref))
+            await dispatch.source.require_committed_native_reply(read_ref=read_ref)
+            await self._run_owned_coroutine(supervisor.finish_retained_native_job(dispatch.retained))
+            await self._project_terminal_return(dispatch.job_id,
+                expected_attempt_id=lease.attempt.attempt_id)
+        except (Exception, asyncio.CancelledError) as exc:
+            if not dispatch.started.done():
+                dispatch.started.set_exception(exc)
+            self._dispatch_errors[dispatch.job_id] = f"{type(exc).__name__}: bounded native dispatch requires reconciliation"
+            self._service_state = "QUARANTINED"
+            if dispatch.retained is not None:
+                try:
+                    await self._run_owned_coroutine(supervisor.abort_retained_native_job(
+                        dispatch.retained, reason=type(exc).__name__))
+                except Exception:
+                    pass  # Preserve the original Attempt and any unknown effect.
+            if isinstance(exc, asyncio.CancelledError):
+                raise
+        finally:
+            if self._native_operator_dispatch is dispatch:
+                self._native_operator_dispatch = None
+            if self._dispatch_tasks.get(dispatch.job_id) is asyncio.current_task():
+                self._dispatch_tasks.pop(dispatch.job_id, None)
+
+    async def _signal_native_continuation(self) -> None:
+        """Observe exact persisted ACK on an existing Wake ingress edge only."""
+        from control_plane.native_continuation import _EVENT
+        dispatch = self._native_operator_dispatch
+        if (dispatch is None or dispatch.retained is None or dispatch.continuation.done()
+                or self._closing or self._service_state != "READY"):
+            return
+        retained, source = dispatch.retained, dispatch.source
+        events = self._require_runtime().events.list_events(
+            job_id=dispatch.job_id, attempt_id=retained.session.attempt_id)
+        requests = [item for item in events if item.event_type == _EVENT]
+        if len(requests) != 1:
+            return
+        try:
+            value = requests[0].payload
+            binding = source.resolve(native_session_id=retained.session.observation.provider_session_id,
+                operation_key=value["operation_key"], in_reply_to=value["request_message_key"])
+            source.require_native_ack(binding, workspace_id=value["carrier"]["workspace_id"],
+                channel_id=value["carrier"]["channel_id"])
+        except Exception:
+            return  # A Wake receipt alone is never authenticated consumption.
+        try:
+            dispatch.continuation.set_result(value["read_ref"])
+        except asyncio.InvalidStateError:
+            return  # A settled waiter never grants another provider turn.
+
     async def _run_coo_cycle_once(self, root_job_id: str) -> CooCycleOutcome:
         if self._closing:
             raise StateConflict("Executive control service is closing")
@@ -6440,6 +6618,10 @@ class ExecutiveControlService:
             ):
                 raise StateConflict("another COO root owns the serialized worker")
             await self._reconcile_unowned_cycle_attempts()
+            native = await self._native_cycle_once(root, children)
+            if native is not None:
+                self._coo_last_outcome = native.to_dict()
+                return native
             loop = asyncio.get_running_loop()
 
             def dispatch(job_id: str, command_id: str) -> OrchestrationDispatchOutcome:
