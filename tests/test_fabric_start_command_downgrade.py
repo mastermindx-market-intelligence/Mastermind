@@ -44,6 +44,23 @@ def test_exact_unsealed_existing_result_is_read_only_recovery(tmp_path, monkeypa
     assert [operation for operation, _ in owner.calls] == ["status"]
 
 
+def test_owned_authority_refusal_never_falls_back_to_generic_start(tmp_path, monkeypatch):
+    class RefusingOwner(Backend):
+        attempted = 0
+
+        async def start_owned(self, payload, *, authority):
+            self.attempted += 1
+            # An owner can discover expiry at its actual effect boundary.
+            authority.require(payload, now=authority.expires_at)
+
+    owner = RefusingOwner()
+    with pytest.raises(api().BridgeProtocolError, match="EFFECT_UNKNOWN"):
+        execute(broker(tmp_path, monkeypatch, owner), request())
+    assert owner.attempted == 1
+    assert [operation for operation, _ in owner.calls] == ["status"]
+    assert owner.retained is None
+
+
 @pytest.mark.parametrize("field", ["binding", "physical_binding_sha256"])
 def test_changed_retained_identity_does_not_create_a_fresh_start(tmp_path, monkeypatch, field):
     owner = Backend()
