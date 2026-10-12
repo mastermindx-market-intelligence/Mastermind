@@ -86,3 +86,27 @@ Keep #1367 draft. Resolve the open review failures on a permitted surface, compl
 - Cursor SDK: https://cursor.com/docs/sdk/typescript — per-run model override and stored-agent resume exist. A documented SDK capability does not prove that this organization's installed adapter implements it.
 
 These sources establish native feasibility, not installed Fabric qualification, model equivalence, pool independence or release authority.
+
+## October 12 continuation: tested delivery and expanded triage
+
+The new tests go beyond retaining checkpoint columns. `tests/test_executive_session_recovery_consumption.py` uses the real generation-bound checkpoint operation, Runtime, supervisor prompt producer and successor adapter callback. After Runtime reopen, a second registered pool receives the exact frontier; the model substitute derives a result from the saved next action and the original owner records its result seal. The same logical Job, root and READ-only grant survive. The exhausted predecessor pool remains RATE_LIMITED. The three tests pass; process/provider observations are fake, so this is not real provider migration or original-parent wake acceptance.
+
+This also exposes a default-path integration gap: the modern orchestrator stop emits `OPERATOR_OPERATION_APPLIED`, but the quota proof recognizes legacy `OHF_GRACEFUL_STOP`. The actual modern-path test safely stays held, with its checkpoint intact. The passing continuation test uses the existing typed legacy release API rather than fabricated database release rows. Do not claim the modern path is wired, manufacture a legacy receipt, or change production stop routing to sidestep missing proof integration.
+
+### Richer first-page operator response
+
+The unchanged private control-socket command above now returns current registered worker/provider/model/quota status, previous pool's current status, historical stop reason, remaining attempt allowance, parent/role, root status and total child count. These are observations: registration is not served-model proof or eligibility. A quota reset followed by BUSY can be distinguished from the original quota stop, without restarting the waiting Job. A real disposable socket test returns all 30 distinct fixture Job records with the richer fields; this is not 30 launched paid agents.
+
+`project_root_recovery` additionally accepts `after_job_id` in the **pure read library**. It validates cursor membership in the same original root and returns a next cursor for keyset traversal. Every page is its own read snapshot, labeled LIVE_KEYSET; concurrent inserts before a cursor can require a fresh scan. `observed_event_id` is an observation watermark, not an immutable snapshot or authority token. Returned action counts apply only to the page; `total_jobs` is the root's observed total.
+
+**CLI/socket pagination remains unimplemented.** Its source edit was safety-blocked before dispatch and exact readback showed no change. No alternative endpoint or retry was used. The CLI does not expose `--after-job-id`. Two ordinary failing tests preserve this integration requirement. The existing first-page limit can still return up to 500 children; never imply a cursor field in a library response is an installed transport feature.
+
+### Numeric context dependency for the incumbent Codex adapter
+
+`control_plane/codex_context_projection.py` is a side-effect-free adapter dependency, not a new adapter. Its intended consumer is #1340's existing `_ingest_turn_notifications` path after current thread/turn/completion/helper checks. It preserves only selected numeric usage and provenance fields. It ignores foreign identities, returns unknown for malformed/absent observations, rejects booleans/non-integers/out-of-int64 values, and uses request-local `tokenUsage.last.totalTokens` rather than cumulative `total`. Cached/reasoning components are not counted twice. `modelContextWindow` can be unknown; no auto-compaction threshold is guessed. After compaction/context mutation, the current generation must be remeasured before planning another turn.
+
+Reference contract: official OpenAI `codex-rs/app-server-protocol/schema/json/v2/ThreadTokenUsageUpdatedNotification.json` in https://github.com/openai/codex and the App Server event reference at https://developers.openai.com/codex/app-server/. Public current schema is not installed-binary attestation. The dependency's tests use the documented shape but do not prove the native adapter emits/consumes it. No live adapter file was changed; #1340's active source remains with its incumbent.
+
+### Updated evidence and hold
+
+Expanded campaign: **270 tests, 263 passed, 7 failed, no errors/skips**. It includes the whole existing operator-supervisor test module plus affected quota/triage/context/client/service/consumer/telemetry tests. Seven failures are the five original quota proof cases and two unimplemented cursor-transport cases, not suppressed with skip/xfail. The modern-stop mismatch is a separately documented held behavior with a passing safety test. See `research/evidence/fabric-session-recovery-expanded-20261012.junit.xml` and the cumulative plan for exact hashes and source custody. Source-only, draft/hold, not installed or release-approved.

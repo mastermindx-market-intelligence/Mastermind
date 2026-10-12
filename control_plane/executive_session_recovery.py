@@ -87,7 +87,8 @@ def portable_context_fit(*, target_context_limit: int, mandatory_tokens: int,
                        max_optional_tokens=optional_budget, available_input_tokens=max(0, budget))
 
 
-def project_root_recovery(runtime, root_job_id: str, *, limit: int = 100) -> dict[str, Any]:
+def project_root_recovery(runtime, root_job_id: str, *, limit: int = 100,
+                          after_job_id: str | None = None) -> dict[str, Any]:
     """One read snapshot for an already-authorized original root's worker triage.
 
     Caller authentication/root access remains with the existing Executive entry
@@ -101,17 +102,42 @@ def project_root_recovery(runtime, root_job_id: str, *, limit: int = 100) -> dic
         raise ValueError("an exact existing root_job_id is required")
     if type(limit) is not int or not 1 <= limit <= 500:
         raise ValueError("limit must be between 1 and 500")
+    if after_job_id is not None and (
+        not isinstance(after_job_id, str) or not after_job_id
+        or len(after_job_id) > 256 or after_job_id.strip() != after_job_id
+    ):
+        raise ValueError("cursor must be an exact worker Job ID")
     items = []
     with runtime.store.read() as con:
-        root = con.execute("SELECT job_id,root_job_id FROM jobs WHERE job_id=?", (root_job_id,)).fetchone()
+        root = con.execute("SELECT job_id,root_job_id,status,current_attempt_id FROM jobs WHERE job_id=?", (root_job_id,)).fetchone()
         if root is None or root["root_job_id"] != root_job_id:
             raise ValueError("root Job is absent or is not an original root")
+        if after_job_id is not None and con.execute(
+            "SELECT 1 FROM jobs WHERE job_id=? AND root_job_id=? AND job_id!=?",
+            (after_job_id, root_job_id, root_job_id),
+        ).fetchone() is None:
+            raise ValueError("cursor is not a worker of this original root")
+        total_jobs = con.execute(
+            "SELECT COUNT(*) FROM jobs WHERE root_job_id=? AND job_id!=?",
+            (root_job_id, root_job_id),
+        ).fetchone()[0]
+        observed_event_id = con.execute(
+            "SELECT COALESCE(MAX(e.event_id),0) FROM events e JOIN jobs j ON j.job_id=e.job_id "
+            "WHERE j.root_job_id=?", (root_job_id,),
+        ).fetchone()[0]
         rows = list(con.execute(
-            "SELECT * FROM jobs WHERE root_job_id=? AND job_id!=? ORDER BY job_id LIMIT ?",
-            (root_job_id, root_job_id, limit + 1)))
+            "SELECT * FROM jobs WHERE root_job_id=? AND job_id!=? "
+            "AND (? IS NULL OR job_id>?) ORDER BY job_id LIMIT ?",
+            (root_job_id, root_job_id, after_job_id, after_job_id, limit + 1)))
         for row in rows[:limit]:
             status = row["status"]
             attempt_id = row["current_attempt_id"]
+            current = con.execute(
+                "SELECT a.worker_id,a.quota_class,q.status AS pool_status,q.provider,q.model "
+                "FROM attempts a LEFT JOIN worker_quota_classes q "
+                "ON q.worker_id=a.worker_id AND q.quota_class=a.quota_class "
+                "WHERE a.attempt_id=? AND a.job_id=?", (attempt_id, row["job_id"]),
+            ).fetchone() if attempt_id else None
             previous = None
             stop_reason = "QUOTA_OR_RATE_LIMIT" if status == "RATE_LIMITED" else None
             stop_reason_scope = "current_attempt" if stop_reason else None
@@ -124,9 +150,11 @@ def project_root_recovery(runtime, root_job_id: str, *, limit: int = 100) -> dic
                 # Preserve the last observed stop through the existing Event /
                 # Attempt join. This is history, not a new retry authorization.
                 previous = con.execute(
-                    "SELECT a.attempt_id,a.worker_id,a.quota_class,a.status "
+                    "SELECT a.attempt_id,a.worker_id,a.quota_class,a.status,q.status AS pool_status "
                     "FROM events e JOIN attempts a "
                     "ON a.attempt_id=e.attempt_id AND a.job_id=e.job_id "
+                    "LEFT JOIN worker_quota_classes q ON q.worker_id=a.worker_id "
+                    "AND q.quota_class=a.quota_class "
                     "WHERE e.job_id=? AND e.event_type='JOB_REQUEUED' "
                     "AND e.aggregate_type='job' AND e.aggregate_id=e.job_id "
                     "AND e.actor='operator' AND e.worker_id=a.worker_id "
@@ -166,6 +194,18 @@ def project_root_recovery(runtime, root_job_id: str, *, limit: int = 100) -> dic
                 "stop_reason": stop_reason, "stop_reason_scope": stop_reason_scope,
                 "previous_attempt_id": previous["attempt_id"] if previous is not None else None,
                 "previous_worker_id": previous["worker_id"] if previous is not None else None,
+                "previous_quota_class": previous["quota_class"] if previous is not None else None,
+                "previous_pool_status": previous["pool_status"] if previous is not None else None,
+                "current_worker_id": current["worker_id"] if current is not None else None,
+                "current_quota_class": current["quota_class"] if current is not None else None,
+                "current_pool_status": current["pool_status"] if current is not None else None,
+                "current_provider": current["provider"] if current is not None else None,
+                "current_model": current["model"] if current is not None else None,
+                "route_observation_scope": "REGISTERED_QUOTA_NOT_SERVED_MODEL",
+                "capacity_assessment": "NOT_EVALUATED",
+                "parent_job_id": row["parent_job_id"],
+                "orchestration_role": row["orchestration_role"],
+                "attempts_remaining": max(0, row["attempt_limit"] - row["attempt_count"]),
                 "retry_decision": retry, "reason_codes": reasons,
                 "checkpoint_available": row["checkpoint_json"] is not None,
                 "queue_position": None, "capacity_eta": None,
@@ -173,6 +213,10 @@ def project_root_recovery(runtime, root_job_id: str, *, limit: int = 100) -> dic
     return {"schema_version": "mastermind.root_session_recovery/v1",
             "root_job_id": root_job_id, "authority_effect": "NONE", "operation_performed": False,
             "jobs": items, "included_count": len(items), "has_more": len(rows) > limit,
+            "next_after_job_id": items[-1]["job_id"] if len(rows) > limit else None,
+            "page_consistency": "LIVE_KEYSET", "returned_counts_only": True,
+            "total_jobs": total_jobs, "observed_event_id": observed_event_id,
+            "root_status": root["status"], "root_attempt_id": root["current_attempt_id"],
             "count_by_action": dict(sorted(Counter(item["next_action"] for item in items).items()))}
 
 
