@@ -30,8 +30,11 @@ Adapter-direct recovery checks that pin before its own prompt read. Recovery
 uses status only; changed self-consistent public context cannot authorize a
 replacement launch. V1 remains the default with its existing contract shape.
 
-The new `fabric.attended.claude.bounded.v1` profile remains disabled. The exact
-native-return profile and policy version from #1344 `ab129c2c` are preserved.
+The proposed `fabric.attended.claude.bounded.v1` profile is disabled and retained
+only in `proposals/attended_claude_profile.json`; it is absent from the installed
+default registry. The exact native-return policy, version and digest from the
+protected #1344 landing `8ba9838b` are preserved. Qualification and a separately
+versioned registry release are required before this proposal can be selected.
 The attended adapter permits only the Claude Code surface and requires a finite
 READ grant with Fabric process-group cleanup; generic or missing profiles do
 not grant this surface.

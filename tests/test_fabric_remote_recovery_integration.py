@@ -2,6 +2,7 @@
 import asyncio
 import copy
 import dataclasses
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -118,10 +119,20 @@ def test_supervisor_rejects_foreign_control_coordinates_before_prompt_read(tmp_p
         supervisor._validated_recovery_binding(attempt)
 
 
-def test_finite_profile_is_not_runtime_admission_and_native_profile_is_preserved():
+def test_finite_profile_is_not_runtime_admission_and_native_profile_is_preserved(tmp_path):
     registry = ExecutionCapabilityRegistry.load()
-    with pytest.raises(CapabilityPolicyError, match='disabled'):
+    with pytest.raises(CapabilityPolicyError, match='unknown execution capability profile'):
         registry.resolve('fabric.attended.claude.bounded.v1')
+    proposal = json.loads(Path(
+        'integrations/session_bridge/proposals/attended_claude_profile.json').read_text())
+    assert proposal['status'] == 'UNINSTALLED_PROPOSAL'
+    assert proposal['profile']['enabled'] is False
+    candidate = json.loads(Path('config/executive_agent_capabilities.json').read_text())
+    candidate['profiles'][proposal['profile_id']] = proposal['profile']
+    candidate_path = tmp_path / 'capabilities.json'
+    candidate_path.write_text(json.dumps(candidate))
+    with pytest.raises(CapabilityPolicyError, match='disabled'):
+        ExecutionCapabilityRegistry.load(candidate_path).resolve(proposal['profile_id'])
     assert registry.policy_version == '2026-10-11.native-return-host-selection'
     assert registry.resolve('operator.appserver.interactive.native-return.v1').enabled
     assert adapter_supports_execution_surface('attended-fabric', 'claude-code')

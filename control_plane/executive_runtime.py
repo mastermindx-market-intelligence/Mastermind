@@ -174,6 +174,7 @@ BOUNDED_ROLE_RESULT_MAX_CELL_BYTES = 8_388_608
 BOUNDED_ROLE_RESULT_MAX_TOTAL_BYTES = 33_554_432
 BOUNDED_ROLE_RESULT_MAX_VM_STEPS = 200_000
 INTERACTIVE_TX5_EXECUTION_PROFILE = "operator.appserver.interactive.v1"
+NATIVE_RETURN_TX5_EXECUTION_PROFILE = "operator.appserver.interactive.native-return.v1"
 INTERACTIVE_TX5_MAX_TURNS_PER_GENERATION = 8
 _BOUNDED_FETCH_BATCH = 32
 _ROOT = Path(__file__).resolve().parent.parent
@@ -1892,9 +1893,16 @@ def _interactive_tx5_admitted(row: sqlite3.Row) -> bool:
     )
     if not isinstance(constraints, dict):
         raise StateConflict("interactive parent constraints are malformed")
-    if constraints.get("execution_profile_id") != INTERACTIVE_TX5_EXECUTION_PROFILE:
+    profile_id = constraints.get("execution_profile_id")
+    if profile_id not in {INTERACTIVE_TX5_EXECUTION_PROFILE, NATIVE_RETURN_TX5_EXECUTION_PROFILE}:
         return False
     _role, provenance, _digest = _decode_orchestration_job_fields(row)
+    # The ordinary native planner stays one-shot. Only the existing explicit,
+    # deterministic interactive creator can admit retained native turns.
+    if (profile_id == NATIVE_RETURN_TX5_EXECUTION_PROFILE
+            and (provenance is None or provenance.get("command_id")
+                 != f"coo-cycle:{row['root_job_id']}:create-interactive:0")):
+        return False
     if (
         row["parent_job_id"] != row["root_job_id"]
         or int(row["depth"]) != 1
@@ -1910,7 +1918,7 @@ def _interactive_tx5_admitted(row: sqlite3.Row) -> bool:
     ):
         raise StateConflict("interactive child provenance is not deterministic")
     identity = {
-        "execution_profile_id": INTERACTIVE_TX5_EXECUTION_PROFILE,
+        "execution_profile_id": profile_id,
         "execution_profile_digest": None,
         "capability_policy_version": None,
         "capability_policy_digest": None,
@@ -1922,7 +1930,7 @@ def _interactive_tx5_admitted(row: sqlite3.Row) -> bool:
         raise StateConflict("interactive stored capability identity is malformed")
     try:
         registry = ExecutionCapabilityRegistry.load()
-        profile = registry.resolve(INTERACTIVE_TX5_EXECUTION_PROFILE)
+        profile = registry.resolve(profile_id)
     except CapabilityPolicyError as exc:
         raise StateConflict(f"interactive capability policy is invalid: {exc}") from exc
     closed = (
@@ -1936,7 +1944,11 @@ def _interactive_tx5_admitted(row: sqlite3.Row) -> bool:
         and profile.native_helper is None
         and not profile.skills
         and not profile.skill_grants
-        and not profile.mcp_server_grants
+        and ((not profile.mcp_server_grants)
+             if profile_id == INTERACTIVE_TX5_EXECUTION_PROFILE else
+             (profile.mcp_server_grants == (registry.mcp_servers.get("native-return-mcp-v1"),)
+              and profile.mcp_servers == ("native-return-mcp-v1",)
+              and constraints.get("provider") == "codex"))
         and not profile.resource_grants
         and not profile.plugins
         and not profile.forbidden
@@ -12450,16 +12462,27 @@ class JobRegistry:
                 "interactive creation requires a strict v2 aggregation root"
             )
         constraints = self._operator_child_constraints(root)
-        constraints["execution_profile_id"] = INTERACTIVE_TX5_EXECUTION_PROFILE
-        profile = ExecutionCapabilityRegistry.load().resolve(
-            INTERACTIVE_TX5_EXECUTION_PROFILE
-        )
+        native = (root.constraints.get("operator_harness_armed") is True
+                  and root.constraints.get("operator_execution_profile_id")
+                  == NATIVE_RETURN_TX5_EXECUTION_PROFILE)
+        profile_id = NATIVE_RETURN_TX5_EXECUTION_PROFILE if native else INTERACTIVE_TX5_EXECUTION_PROFILE
+        registry = ExecutionCapabilityRegistry.load()
+        profile = registry.resolve(profile_id)
+        if native and any(constraints.get(key) != value for key, value in {
+            "execution_profile_id": profile_id,
+            "execution_profile_digest": profile.profile_digest,
+            "capability_policy_version": registry.policy_version,
+            "capability_policy_digest": registry.policy_digest,
+            "provider": "codex",
+        }.items()):
+            raise StateConflict("native interactive root capability identity is stale or incomplete")
+        constraints["execution_profile_id"] = profile_id
         constraints["execution_profile_digest"] = profile.profile_digest
         constraints["capability_policy_version"] = (
-            ExecutionCapabilityRegistry.load().policy_version
+            registry.policy_version
         )
         constraints["capability_policy_digest"] = (
-            ExecutionCapabilityRegistry.load().policy_digest
+            registry.policy_digest
         )
         if not constraints.get("routing_policy_version"):
             constraints["routing_policy_version"] = "interactive-routing"
@@ -12572,6 +12595,9 @@ class JobRegistry:
                     "plan admission requires exactly one planner and no other child"
                 )
             planner = children[0]
+            if _strict_canonical_json_loads(str(planner["constraints_json"]),
+                    name="native planner constraints").get("execution_profile_id") == NATIVE_RETURN_TX5_EXECUTION_PROFILE:
+                raise StateConflict("bounded native return cannot admit a child plan")
             interactive = False
             if _interactive_tx5_admitted(planner):
                 expected_command = (
@@ -17815,6 +17841,12 @@ def _ohf_process(process: ProcessIdentityObservation) -> tuple[int, int, str, st
 
 class OperatorHarnessRegistry:
     """The sole durable OHF state-plane; it owns no provider or process calls."""
+
+    def is_interactive_job(self, job_id: str) -> bool:
+        """Read existing deterministic retained-turn admission; grant nothing."""
+        with self.store.read() as connection:
+            row = connection.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+            return row is not None and _interactive_tx5_admitted(row)
 
     def __init__(self, store: RuntimeStore) -> None:
         self.store = store
@@ -23726,6 +23758,23 @@ def _read_role_result_bounded(
         vm_guard.deactivate()
 
 
+# Origin classification is a separate finite read, not an expansion of the
+# existing 17 strict-v2 command points or the typed role-result reader.
+BOUNDED_ROOT_ORIGIN_MAX_STATEMENTS = 128
+BOUNDED_ROOT_ORIGIN_MAX_ROWS = 128
+BOUNDED_ROOT_ORIGIN_MAX_CELL_BYTES = 262_144
+BOUNDED_ROOT_ORIGIN_MAX_TOTAL_BYTES = 2_097_152
+BOUNDED_ROOT_ORIGIN_MAX_VM_STEPS = 200_000
+
+
+@dataclasses.dataclass(frozen=True)
+class BoundedRootOrigin:
+    job_id: str
+    kind: str
+    provenance: dict[str, Any] | None
+    creation_event_digest: str
+
+
 class BoundedRuntimeReadObservation:
     """Runtime-created fixed facade; no connection, SQL or pagination surface."""
     def __init__(self, store: RuntimeStore, *, _capability: object) -> None:
@@ -23739,6 +23788,8 @@ class BoundedRuntimeReadObservation:
         self._receipt: RuntimeReadObservationReceipt | None = None
         self._commands: dict[str, tuple[str, str, str]] = {}
         self._events: dict[str, Event | None] = {}
+        self._origin_roots: tuple[Job, ...] | None = None
+        self._origin_cache: tuple[BoundedRootOrigin, ...] | None = None
         # Fixed VM budget handed to the fresh private connection this
         # observation's owner opens; it is never a caller-facing callback.
         self._vm_progress = _RuntimeReadProgressGuard()
@@ -23795,6 +23846,7 @@ class BoundedRuntimeReadObservation:
         try:
             result = _read_job_root_bounded(self._acquisition, root_job_id)
             self._remember(result.jobs)
+            self._origin_roots = tuple(result.jobs[:1])
             return result
         except BaseException:
             self._failed = True
@@ -23805,7 +23857,118 @@ class BoundedRuntimeReadObservation:
         try:
             result = _discover_job_roots_bounded(self._acquisition)
             self._remember(result.roots)
+            if type(result.truncated) is bool and not result.truncated:
+                self._origin_roots = tuple(result.roots)
             return result
+        except BaseException:
+            self._failed = True
+            raise
+
+    def classify_root_origins_bounded(self) -> tuple[BoundedRootOrigin, ...]:
+        """Classify exact acquired roots from unique, bounded creation evidence.
+
+        Only a prior complete discovery or one exact root acquisition supplies
+        the ID set. No caller-selected IDs, SQL, cursors or private handles are
+        exposed. The full classification shares one VM budget and retained
+        observation connection. Consumers must still require the finalized
+        SAME receipt after close; this result never mints one.
+        """
+        self._require_active()
+        if self._origin_cache is not None:
+            return tuple(dataclasses.replace(row, provenance=(None if row.provenance is None
+                else json.loads(_json_dumps(row.provenance)))) for row in self._origin_cache)
+        try:
+            roots = self._origin_roots
+            if (roots is None or len(roots) > BOUNDED_RUNTIME_ROOT_DISCOVERY_MAX_ROOTS
+                    or len({job.job_id for job in roots}) != len(roots)
+                    or any(job.parent_job_id is not None or job.root_job_id != job.job_id
+                           for job in roots)):
+                raise RuntimeReadUnavailable("root origin acquisition is incomplete or invalid")
+            if len(self._commands) > 17:
+                raise RuntimeReadUnavailable("root origin strict-v2 command budget exceeded")
+            # The already installed owner progress guard has this fixed ceiling;
+            # never replace a handler or silently weaken the role-result bound.
+            if BOUNDED_ROOT_ORIGIN_MAX_VM_STEPS != BOUNDED_ROLE_RESULT_MAX_VM_STEPS:
+                raise RuntimeReadUnavailable("root origin VM budget requires owner compatibility")
+            self._vm_progress.activate()
+            try:
+                origins: list[BoundedRootOrigin] = []
+                statements = returned_rows = total_bytes = 0
+                columns = ("event_id", "aggregate_type", "aggregate_id", "sequence", "event_type",
+                           "command_id", "actor", "job_id", "attempt_id", "worker_id", "quota_class",
+                           "payload_json", "created_at_ms")
+                sizes = ",".join(f"COALESCE(length(CAST({column} AS BLOB)),0)" for column in columns)
+                # LIMIT 2 detects duplicate creation rather than selecting newest.
+                # Include both identity directions so a conflicting envelope is
+                # detected, never omitted by filtering to only the good envelope.
+                metadata_sql = ("SELECT event_id," + sizes + " FROM events "
+                    "WHERE event_type='JOB_CREATED' AND "
+                    "(job_id=? OR (aggregate_type='job' AND aggregate_id=?)) "
+                    "ORDER BY event_id LIMIT 2")
+                for job in roots:
+                    statements += 1
+                    if statements > BOUNDED_ROOT_ORIGIN_MAX_STATEMENTS:
+                        raise RuntimeReadUnavailable("root origin statement budget exceeded")
+                    metadata = self._connection.execute(metadata_sql, (job.job_id, job.job_id)).fetchall()
+                    returned_rows += len(metadata)
+                    if returned_rows > BOUNDED_ROOT_ORIGIN_MAX_ROWS:
+                        raise RuntimeReadUnavailable("root origin row budget exceeded")
+                    if len(metadata) != 1:
+                        raise RuntimeReadUnavailable("root origin creation cardinality is not exact")
+                    lengths = tuple(int(size) for size in metadata[0][1:])
+                    if any(size > BOUNDED_ROOT_ORIGIN_MAX_CELL_BYTES for size in lengths):
+                        raise RuntimeReadUnavailable("root origin cell byte budget exceeded")
+                    total_bytes += sum(lengths)
+                    if total_bytes > BOUNDED_ROOT_ORIGIN_MAX_TOTAL_BYTES:
+                        raise RuntimeReadUnavailable("root origin total byte budget exceeded")
+                    statements += 1
+                    if statements > BOUNDED_ROOT_ORIGIN_MAX_STATEMENTS:
+                        raise RuntimeReadUnavailable("root origin statement budget exceeded")
+                    row = self._connection.execute("SELECT * FROM events WHERE event_id=?",
+                                                   (metadata[0][0],)).fetchone()
+                    returned_rows += int(row is not None)
+                    if returned_rows > BOUNDED_ROOT_ORIGIN_MAX_ROWS:
+                        raise RuntimeReadUnavailable("root origin row budget exceeded")
+                    if row is None:
+                        raise RuntimeReadUnavailable("root origin creation disappeared")
+                    payload = _strict_canonical_json_loads(
+                        row["payload_json"], name="root origin creation payload")
+                    if not isinstance(payload, dict):
+                        raise RuntimeReadUnavailable("root origin creation payload is not an object")
+                    event = dataclasses.replace(_event_from_row(row), payload=payload)
+                    if (event.event_type != "JOB_CREATED" or event.job_id != job.job_id
+                            or event.aggregate_type != "job" or event.aggregate_id != job.job_id
+                            or event.attempt_id is not None or event.worker_id is not None
+                            or event.quota_class is not None
+                            or type(job.depth) is not int or job.depth != 0
+                            or payload.get("root_job_id") != job.job_id
+                            or "parent_job_id" not in payload or payload["parent_job_id"] is not None
+                            or type(payload.get("depth")) is not int or payload["depth"] != 0
+                            or payload.get("status") != "QUEUED"):
+                        raise RuntimeReadUnavailable("root origin creation identity conflicts")
+                    if job.orchestration_role == "aggregation":
+                        from control_plane.fabric_job_view import _bounded_provenance
+                        provenance, warning = _bounded_provenance(
+                            None, job, creation_event_reader=lambda _command, _event=event: _event)
+                        if warning is not None or not isinstance(provenance, Mapping):
+                            raise RuntimeReadUnavailable("root origin strict-v2 provenance unavailable")
+                        kind = "STRICT_V2_CEO"
+                    else:
+                        from control_plane.runtime_root_origin import classify_legacy_root_creation
+                        classified = classify_legacy_root_creation(job, event)
+                        kind, provenance = classified["kind"], classified["provenance"]
+                    origins.append(BoundedRootOrigin(job.job_id, kind,
+                        None if provenance is None else dict(provenance),
+                        _bounded_runtime_snapshot_digest(event.to_dict())))
+                self._origin_cache = tuple(origins)
+            except sqlite3.OperationalError as exc:
+                if self._vm_progress.tripped:
+                    raise RuntimeReadUnavailable("root origin VM budget exceeded") from exc
+                raise
+            finally:
+                self._vm_progress.deactivate()
+            return tuple(dataclasses.replace(row, provenance=(None if row.provenance is None
+                else json.loads(_json_dumps(row.provenance)))) for row in self._origin_cache)
         except BaseException:
             self._failed = True
             raise
@@ -25043,7 +25206,23 @@ class Runtime:
                WHERE event_type='ORCHESTRATION_ROLE_RESULT_SEALED' AND attempt_id=?""",
             (token,),
         ).fetchall()
-        if len(admissions) != 1 or len(decisions) != 1 or seals:
+        if seals:
+            retained_job = connection.execute(
+                "SELECT * FROM main.jobs WHERE job_id=?", (row["job_id"],)
+            ).fetchone()
+            retained_attempt = connection.execute(
+                "SELECT * FROM main.attempts WHERE attempt_id=?", (token,)
+            ).fetchone()
+            if (len(seals) != 1 or retained_job is None or retained_attempt is None
+                    or not _interactive_tx5_admitted(retained_job)
+                    or _json_loads(retained_job["constraints_json"], fallback={}).get("execution_profile_id")
+                    != NATIVE_RETURN_TX5_EXECUTION_PROFILE):
+                raise StateConflict("runtime binding source is not a retained native writer")
+            retained_seal = _validated_interactive_active_plan_seal(
+                connection, attempt_row=retained_attempt, job_row=retained_job)
+            if retained_seal["process_generation_id"] != row["process_generation_id"]:
+                raise StateConflict("runtime binding retained native generation changed")
+        if len(admissions) != 1 or len(decisions) != 1:
             raise StateConflict(
                 "runtime binding source lacks one active work admission"
             )
