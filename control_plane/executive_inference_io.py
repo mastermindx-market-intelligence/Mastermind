@@ -14,6 +14,8 @@ from collections.abc import Mapping
 from common.executive_workspace_contract import _check_attempt_id, _check_job_id
 
 REQUEST_SCHEMA = "mastermind.executive_service_inference_request.v1"
+TASK_REQUEST_SCHEMA = "mastermind.executive_service_inference_request.v2"
+TASK_KINDS = ("evidence_extraction", "comparative_analysis", "contradiction_adjudication")
 WORKER_RESULT_SCHEMA = "mastermind.executive_service_inference_worker_result.v1"
 RESULT_REF_SCHEMA = "mastermind.executive_service_inference_result_ref.v1"
 RESULT_DOCUMENT_SCHEMA = "mastermind.executive_service_inference_result_document.v1"
@@ -54,24 +56,52 @@ def _text(value, field: str, *, empty: bool = False) -> str:
 
 
 def normalize_request(value: Mapping) -> dict:
-    if not isinstance(value, Mapping) or set(value) != {
-        "schema", "system_prompt", "input_text", "max_output_chars"
-    }:
+    if not isinstance(value, Mapping):
         raise InferenceIOError("inference request shape is invalid")
-    if value["schema"] != REQUEST_SCHEMA:
+    schema = value.get("schema")
+    if not isinstance(schema, str) or schema not in (REQUEST_SCHEMA, TASK_REQUEST_SCHEMA):
         raise InferenceIOError("inference request schema is invalid")
+    keys = {"schema", "system_prompt", "input_text", "max_output_chars"}
+    if schema == TASK_REQUEST_SCHEMA:
+        keys.add("task_kind")
+    if set(value) != keys:
+        raise InferenceIOError("inference request shape is invalid")
+    if schema == TASK_REQUEST_SCHEMA and (
+        not isinstance(value["task_kind"], str) or value["task_kind"] not in TASK_KINDS
+    ):
+        raise InferenceIOError("inference task kind is invalid")
     maximum = value["max_output_chars"]
     if type(maximum) is not int or not 1 <= maximum <= MAX_OUTPUT_CHARS:
         raise InferenceIOError("max_output_chars is outside the bounded range")
     normalized = {
-        "schema": REQUEST_SCHEMA,
+        "schema": schema,
         "system_prompt": _text(value["system_prompt"], "system_prompt", empty=True),
         "input_text": _text(value["input_text"], "input_text"),
         "max_output_chars": maximum,
     }
+    if schema == TASK_REQUEST_SCHEMA:
+        normalized["task_kind"] = value["task_kind"]
     if len(canonical_bytes(normalized)) > MAX_REQUEST_BYTES:
         raise InferenceIOError("inference request exceeds the canonical byte ceiling")
     return normalized
+
+
+def request_schema() -> dict:
+    """Advertise the same closed versions accepted by this I/O owner."""
+    common = {
+        "system_prompt": {"type": "string", "maxLength": MAX_REQUEST_BYTES},
+        "input_text": {"type": "string", "minLength": 1, "maxLength": MAX_REQUEST_BYTES},
+        "max_output_chars": {"type": "integer", "minimum": 1, "maximum": MAX_OUTPUT_CHARS},
+    }
+    variants = []
+    for schema in (REQUEST_SCHEMA, TASK_REQUEST_SCHEMA):
+        properties = {"schema": {"const": schema}, **copy.deepcopy(common)}
+        if schema == TASK_REQUEST_SCHEMA:
+            properties["task_kind"] = {"type": "string", "enum": list(TASK_KINDS)}
+        variants.append({"type": "object", "additionalProperties": False,
+                         "required": list(properties), "properties": properties})
+    return {"oneOf": variants}
+
 def worker_result_schema(*, job_id: str, run_id: str, worker_id: str,
                          max_output_chars: int) -> dict:
     _identity(job_id, run_id, worker_id)

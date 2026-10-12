@@ -12,7 +12,7 @@ import re
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from control_plane import ceo_request
+from control_plane import ceo_request, executive_inference_io as inference_io
 from control_plane.model_router import ModelRouter, RoutingPolicyError, WorkRequest
 
 SCHEMA = "mastermind.executive_service_inference_binding.v1"
@@ -67,8 +67,14 @@ def build_execution_binding(
     base_sha: str,
     eligible_quota_classes: Sequence[str],
     router: ModelRouter | None = None,
+    inference_request: Mapping | None = None,
 ) -> dict:
-    """Derive one read-only research placement contract from existing owners."""
+    """Derive read-only task fit through the existing ModelRouter.
+
+    Named v2 task intent is not a model/host selector. The canonical sink must
+    rebuild this binding from the exact normalized request in its envelope.
+    V1 and omitted host request inputs retain the prior routine route.
+    """
 
     identity = _intent(intent_id)
     root = Path(workspace_root).expanduser().resolve(strict=False)
@@ -77,18 +83,26 @@ def build_execution_binding(
     base = _base_sha(base_sha)
     quotas = _quota_classes(eligible_quota_classes)
     try:
+        normalized = inference_io.normalize_request(inference_request) if inference_request is not None else None
+        task = normalized.get("task_kind", "evidence_extraction") if normalized is not None else "evidence_extraction"
+        comparison = task == "comparative_analysis"
+        judgment = task == "contradiction_adjudication"
         active_router = router or ModelRouter.load()
         decision = active_router.route(
             WorkRequest(
-                "research",
-                risk="routine",
-                ambiguity="low",
+                "judgment" if judgment else "research",
+                risk="elevated" if comparison or judgment else "routine",
+                ambiguity="high" if judgment else "medium" if comparison else "low",
                 required_capabilities=("research",),
             )
         )
+        if not decision.worker_eligible:
+            raise InferenceExecutionBindingError(
+                "this task requires the existing governed judgment lane, not an ordinary service Job"
+            )
         constraints = decision.job_constraints()
-    except RoutingPolicyError as exc:
-        raise InferenceExecutionBindingError("research routing policy is unavailable") from exc
+    except (RoutingPolicyError, inference_io.InferenceIOError) as exc:
+        raise InferenceExecutionBindingError("research routing policy or task intent is unavailable") from exc
     constraints = dict(constraints)
     constraints["base_sha"] = base
     constraints["eligible_quota_classes"] = list(quotas)
@@ -107,6 +121,7 @@ def validate_execution_binding(
     intent_id: str,
     workspace_root: str | Path,
     router: ModelRouter | None = None,
+    inference_request: Mapping | None = None,
 ) -> dict:
     """Require exact current-policy binding; never accept caller-selected route fields."""
 
@@ -125,6 +140,7 @@ def validate_execution_binding(
         base_sha=base,
         eligible_quota_classes=quotas,
         router=router,
+        inference_request=inference_request,
     )
     if dict(value) != expected:
         raise InferenceExecutionBindingError("service execution binding differs from current host policy")

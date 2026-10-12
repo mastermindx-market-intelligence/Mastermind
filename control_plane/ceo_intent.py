@@ -1397,6 +1397,7 @@ def submit_intent(
                                 service_execution_binding,
                                 intent_id=intent["intent_id"],
                                 workspace_root=workspace_root,
+                                inference_request=intent["inference_request"],
                             )
                         except InferenceExecutionBindingError as exc:
                             raise CeoIntentError(

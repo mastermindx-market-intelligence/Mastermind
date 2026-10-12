@@ -714,12 +714,12 @@ def test_service_schema_is_durably_carried_with_typed_evidence(tmp_path: Path):
         "L750": _source_window("control_plane/ceo_intent.py", 748, 754),
         "L598": _source_window("control_plane/ceo_intent.py", 596, 602),
         "L1038": _source_window("control_plane/ceo_intent.py", 1036, 1042),
-        "L1436": _source_window("control_plane/ceo_intent.py", 1434, 1440),
+        "L1437": _source_window("control_plane/ceo_intent.py", 1435, 1441),
     }
     assert "_SERVICE_REQUIRED_KEYS" in windows["L750"]
     assert "def _require_service_ceiling" in windows["L598"]
     assert 'value["principal_id"] = intent["principal_id"]' in windows["L1038"]
-    assert 'owner_seat="coo"' in windows["L1436"]
+    assert 'owner_seat="coo"' in windows["L1437"]
     for predicate in status["predicates"]:
         assert predicate["line"] in windows, predicate
         assert predicate["file"] == "control_plane/ceo_intent.py"

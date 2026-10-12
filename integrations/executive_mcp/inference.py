@@ -16,12 +16,7 @@ def _object(properties):
 _RESULT_PROPERTIES = {key: copy.deepcopy(FABRIC_V2_TOOL_SPEC.input_schema["properties"][key])
                       for key in ("view", "root_job_id", "job_id", "attempt_id", "result_envelope_digest")}
 _RESULT_PROPERTIES["view"] = {"const":"result"}
-_INFERENCE_REQUEST = _object({
-    "schema": {"const": inference_io.REQUEST_SCHEMA},
-    "system_prompt": {"type":"string", "maxLength": inference_io.MAX_REQUEST_BYTES},
-    "input_text": {"type":"string", "minLength":1, "maxLength": inference_io.MAX_REQUEST_BYTES},
-    "max_output_chars": {"type":"integer", "minimum":1, "maximum": inference_io.MAX_OUTPUT_CHARS},
-})
+_INFERENCE_REQUEST = inference_io.request_schema()
 TOOL_SPECS = (
     ToolSpec(TOOLS[0], "Submit one bounded READ/RESEARCH service intent; acceptance is not execution. Reconcile uncertainty without resubmitting.",
         _object({"operation_key":_KEY,
