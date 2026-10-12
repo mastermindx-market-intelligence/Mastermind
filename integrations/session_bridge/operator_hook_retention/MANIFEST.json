@@ -1,0 +1,32 @@
+{
+  "files": {
+    "fabric_operator_diagnostics.py": {
+      "preimage": null,
+      "postimage": "c0a5219a29d49f616df19fdb1e1686c78926179911d0e9c923d6c2bcae518641"
+    },
+    "fabric_operator_stop.py": {
+      "preimage": "5ad090e703468503ec5466a83c61e1de9b93320e432d71963e9ba1d33e301ec5",
+      "postimage": "d3024c7bf0aadc64ad29577a9e8e0829462744704170fa399dcffe37d5b01e77"
+    },
+    "lane_runtime.py": {
+      "preimage": "17409b8459ff3576e557490a2402f5c6df86738f9a3a81151db9f054773c6216",
+      "postimage": "ecb7960b8726df2366f5ab2da5abc6d8973fb547760e73b2baf47f93061d32f1"
+    },
+    "remote_sub.sh": {
+      "preimage": "2d397810014a3006c490a4c3e016bc3247876f3b5f771eb8b82d22111675792d",
+      "postimage": "cc3c4fe35e7b75709ea20bb85ff8fcc0f4a2f2265e5177e6511beaed0c7fae60"
+    },
+    "remote_sub_exec.py": {
+      "preimage": "bf7722c0dc14c9790ab22aa05b3fb3054a367883e36162463c38a680396b8b1a",
+      "postimage": "d991000d9a5577dcbe3c91e9b1eb052c5b74222f94cb0acd6e294c7a1fbbeac0"
+    },
+    "support_bundle.py": {
+      "preimage": "bcc103185211ecfe9cb0461e2081a6f37a0c0fa27fdd6dfc77af2c0dc472dc7a",
+      "postimage": "3023c5679c52b7cc6dcfa3d03089a7fc07b8e24fc53c394474c90f89b9a6864f"
+    }
+  },
+  "tests": "23 focused PASS on exact candidates",
+  "review": "APPROVE_SCOPED combined",
+  "live_hook_proof": false,
+  "diagnostics_authority": false
+}

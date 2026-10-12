@@ -1,0 +1,25 @@
+--- a/remote_sub_exec.py
++++ b/remote_sub_exec.py
+@@ -135,6 +135,14 @@
+             return _fail("ARTIFACT_DELIVERY_CONTRACT_REFUSED", 65)
+     artifact_failure = False
+ 
++    # Optional correlation is read outside the prompt, before physical admission.
++    # It does not change Runtime, provider or host admission requirements.
++    try:
++        from fabric_launch_transport import remote_launch_arguments
++        launch_arguments = remote_launch_arguments(Path.home(), key, os.environ)
++    except (OSError, ValueError, TypeError):
++        return _fail("BOUND_LAUNCH_CONTEXT_REFUSED before_spawn=1", 78)
++
+     # Tilde belongs to this host, not to the controller that selected it.
+     if cwd.startswith("~") and cwd != "~" and not cwd.startswith("~/"):
+         return _fail("REMOTE_SUB_CWD_REFUSED", 2)
+@@ -243,6 +251,7 @@
+                     receipt_path=receipt,
+                     timeout_returncode=124,
+                     receipt_diagnostics=diagnostic_reader,
++                    **launch_arguments,
+                 )
+             except OwnedProcessStartError as exc:
+                 state["started"] = False

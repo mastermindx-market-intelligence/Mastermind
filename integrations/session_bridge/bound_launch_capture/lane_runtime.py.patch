@@ -1,0 +1,414 @@
+--- a/lane_runtime.py
++++ b/lane_runtime.py
+@@ -11,0 +12,2 @@
++import ctypes
++import sys
+@@ -960,0 +963,218 @@
++
++LAUNCH_RECEIPT_SCHEMA = "mastermind.local_owned_process_launch.v1"
++_LAUNCH_ID_FIELDS = frozenset({"root_id", "job_id", "attempt_id"})
++_LAUNCH_DIGEST_FIELDS = frozenset({"effective_grant_sha256", "commission_sha256"})
++_LAUNCH_BINDING_FIELDS = frozenset({"physical_binding_sha256", "start_request_sha256"})
++
++
++def _launch_receipt_input(path, metadata):
++    # Correlation comes from the embedding adapter, never prompt/environment.
++    # It is receipt-only data and cannot authorize or alter the launch.
++    if path is None:
++        if metadata is not None:
++            raise LaneRuntimeError("launch_metadata_without_receipt")
++        return None, {}
++    destination = Path(path)
++    if not destination.is_absolute():
++        raise LaneRuntimeError("launch_receipt_path_invalid")
++    if metadata is not None and not isinstance(metadata, Mapping):
++        raise LaneRuntimeError("launch_correlation_invalid")
++    context = {} if metadata is None else dict(metadata)
++    if set(context) - (
++        _LAUNCH_ID_FIELDS | _LAUNCH_DIGEST_FIELDS | _LAUNCH_BINDING_FIELDS
++    ):
++        raise LaneRuntimeError("launch_correlation_invalid")
++    for key, value in context.items():
++        if type(value) is not str or not (
++            _LABEL_RE.fullmatch(value) if key in _LAUNCH_ID_FIELDS
++            else re.fullmatch(r"[0-9a-f]{64}", value)
++        ):
++            raise LaneRuntimeError("launch_correlation_invalid")
++    if _LAUNCH_BINDING_FIELDS & set(context) and not (
++        _LAUNCH_ID_FIELDS | _LAUNCH_DIGEST_FIELDS | _LAUNCH_BINDING_FIELDS
++    ) <= set(context):
++        # Optional new binding is atomic: both new digests plus every
++        # legacy correlation key, or the new keys are refused entirely.
++        raise LaneRuntimeError("launch_binding_incomplete")
++    _launch_receipt_directory(destination)
++    if os.path.lexists(destination):
++        raise LaneRuntimeError("launch_receipt_already_exists")
++    return destination, context
++
++
++def _launch_receipt_directory(path):
++    # Require an existing owner-private directory; no permission repairs.
++    try:
++        visible = path.parent.lstat()
++        if (not stat.S_ISDIR(visible.st_mode) or visible.st_uid != os.geteuid()
++                or stat.S_IMODE(visible.st_mode) & 0o077):
++            raise LaneRuntimeError("launch_receipt_directory_unsafe")
++    except OSError as exc:
++        raise LaneRuntimeError("launch_receipt_directory_unavailable") from exc
++    return visible
++
++
++def _write_immutable_launch_receipt(path, record):
++    payload = (json.dumps(record, sort_keys=True, separators=(",", ":"),
++                          ensure_ascii=True, allow_nan=False) + "\n").encode()
++    if len(payload) > 8192:
++        raise LaneRuntimeError("launch_receipt_too_large")
++    parent = _launch_receipt_directory(path)
++    directory_fd = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
++                           | getattr(os, "O_NOFOLLOW", 0))
++    temporary = ".launch-" + os.urandom(16).hex()
++    fd = None
++    try:
++        actual = os.fstat(directory_fd)
++        if (actual.st_dev, actual.st_ino) != (parent.st_dev, parent.st_ino):
++            raise LaneRuntimeError("launch_receipt_directory_moved")
++        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL
++                     | getattr(os, "O_NOFOLLOW", 0), 0o600, dir_fd=directory_fd)
++        _write_all(fd, payload)
++        os.fsync(fd)
++        os.fchmod(fd, 0o400)
++        os.fsync(fd)
++        # The complete immutable inode becomes visible atomically, without replace.
++        os.link(temporary, path.name, src_dir_fd=directory_fd,
++                dst_dir_fd=directory_fd, follow_symlinks=False)
++        os.fsync(directory_fd)
++        visible = _launch_receipt_directory(path)
++        if (visible.st_dev, visible.st_ino) != (actual.st_dev, actual.st_ino):
++            raise LaneRuntimeError("launch_receipt_directory_moved")
++        published = os.stat(path.name, dir_fd=directory_fd, follow_symlinks=False)
++        written = os.fstat(fd)
++        if (published.st_dev, published.st_ino) != (written.st_dev, written.st_ino):
++            raise LaneRuntimeError("launch_receipt_inode_moved")
++    except OSError as exc:
++        raise LaneRuntimeError("launch_receipt_publication_failed") from exc
++    finally:
++        try:
++            if fd is not None:
++                os.close(fd)
++            try:
++                os.unlink(temporary, dir_fd=directory_fd)
++            except FileNotFoundError:
++                pass
++        finally:
++            os.close(directory_fd)
++
++
++class _LaunchProcBSDInfo(ctypes.Structure):
++    # Same PROC_PIDTBSDINFO layout as the reviewed Executive ProcessInspector.
++    _fields_ = [(n, ctypes.c_uint32) for n in (
++        "flags", "status", "xstatus", "pid", "ppid", "uid", "gid", "ruid",
++        "rgid", "svuid", "svgid", "reserved")]
++    _fields_ += [("comm", ctypes.c_char * 16), ("name", ctypes.c_char * 32)]
++    _fields_ += [(n, ctypes.c_uint32) for n in (
++        "nfiles", "pgid", "pjobc", "e_tdev", "e_tpgid")]
++    _fields_ += [("nice", ctypes.c_int32), ("start_sec", ctypes.c_uint64),
++                 ("start_usec", ctypes.c_uint64)]
++
++
++def _launch_kernel_text(path):
++    # Only fixed boot/stat/status paths of this owned child, never environ.
++    with Path(path).open("rb") as stream:
++        data = stream.read(65537)
++    if len(data) > 65536:
++        raise LaneRuntimeError("launch_identity_unavailable")
++    return data.decode("ascii")
++
++
++def _observe_owned_launch_identity(pid):
++    if type(pid) is not int or pid <= 0:
++        raise LaneRuntimeError("launch_identity_unavailable")
++    try:
++        if sys.platform == "darwin":
++            boot = _run_ps_lines(
++                ["/usr/sbin/sysctl", "-n", "kern.bootsessionuuid"], timeout=2)
++            if len(boot) != 1:
++                raise LaneRuntimeError("launch_identity_unavailable")
++            libproc = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
++            read = libproc.proc_pidinfo
++            read.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_uint64,
++                             ctypes.c_void_p, ctypes.c_int]
++            read.restype = ctypes.c_int
++            info = _LaunchProcBSDInfo()
++            size = ctypes.sizeof(info)
++            if read(pid, 3, 0, ctypes.byref(info), size) != size or info.pid != pid:
++                raise LaneRuntimeError("launch_identity_unavailable")
++            if info.start_sec <= 0 or info.start_usec >= 1000000:
++                raise LaneRuntimeError("launch_identity_unavailable")
++            generation = f"darwin:{info.start_sec}.{info.start_usec:06d}"
++            pgid = int(info.pgid)
++            uid, gid, ruid, rgid = info.uid, info.gid, info.ruid, info.rgid
++            boot_id = boot[0]
++        elif sys.platform.startswith("linux"):
++            boot_id = _launch_kernel_text("/proc/sys/kernel/random/boot_id").strip()
++            raw = _launch_kernel_text(f"/proc/{pid}/stat")
++            close = raw.rfind(") ")
++            if close < 0 or int(raw.split("(", 1)[0]) != pid:
++                raise LaneRuntimeError("launch_identity_unavailable")
++            fields = raw[close + 2:].split()
++            if len(fields) < 20 or fields[0] in {"Z", "X"}:
++                raise LaneRuntimeError("launch_identity_unavailable")
++            start_ticks = int(fields[19])
++            if start_ticks < 0:
++                raise LaneRuntimeError("launch_identity_unavailable")
++            generation = "linux:" + str(start_ticks)
++            pgid = int(fields[2])
++            status = _launch_kernel_text(f"/proc/{pid}/status")
++            ids = {}
++            for line in status.splitlines():
++                key, _, values = line.partition(":")
++                if key in {"Uid", "Gid"}:
++                    if key in ids:
++                        raise LaneRuntimeError("launch_identity_unavailable")
++                    ids[key] = [int(v) for v in values.split()]
++            if set(ids) != {"Uid", "Gid"} or any(len(v) != 4 for v in ids.values()):
++                raise LaneRuntimeError("launch_identity_unavailable")
++            ruid, uid = ids["Uid"][:2]
++            rgid, gid = ids["Gid"][:2]
++        else:
++            raise LaneRuntimeError("launch_identity_platform_unavailable")
++        if (not re.fullmatch(r"[A-Za-z0-9-]{8,128}", boot_id) or pgid != pid
++                or os.getpgid(pid) != pid or os.getsid(pid) != pid
++                or any(type(v) is not int or v < 0 for v in (uid, gid, ruid, rgid))):
++            raise LaneRuntimeError("launch_identity_unavailable")
++        return dict(pid=pid, pgid=pgid, session_id=pid, boot_id=boot_id,
++                    process_start_identity=generation, effective_uid=int(uid),
++                    effective_gid=int(gid), real_uid=int(ruid), real_gid=int(rgid))
++    except (OSError, ValueError, UnicodeError, ProcessCensusError) as exc:
++        raise LaneRuntimeError("launch_identity_unavailable") from exc
++
++
++def _publish_owned_launch_receipt(path, proc, label, context, context_sha256=None):
++    if proc.poll() is not None:
++        raise LaneRuntimeError("launch_child_not_live")
++    observed = _observe_owned_launch_identity(proc.pid)
++    receipt = dict(schema=LAUNCH_RECEIPT_SCHEMA, label=label, observed_at=_utc_now(),
++                   phase="PRE_EXEC_HANDSHAKE", process_identity=observed,
++                   correlation=context, correlation_is_authority=False,
++                   executable_kind="isolated-python-exec-gate",
++                   provider_execution_attested=False)
++    if proc.poll() is not None or _observe_owned_launch_identity(proc.pid) != observed:
++        raise LaneRuntimeError("launch_process_generation_moved")
++    if context_sha256 is not None:
++        receipt["context_sha256"] = context_sha256
++    _write_immutable_launch_receipt(path, receipt)
++    raw = (json.dumps(receipt, sort_keys=True, separators=(",", ":"),
++                      ensure_ascii=True, allow_nan=False) + "\n").encode()
++    return hashlib.sha256(raw).hexdigest()
++
++
++def _owned_gate_command(command, shell, fd):
++    if shell:
++        values = [command] if isinstance(command, str) else list(command)
++        target = [_owned_shell() or "/bin/sh", "-c", *values]
++    else:
++        target = [command] if isinstance(command, str) else list(command)
++    if not target or any(not isinstance(v, (str, os.PathLike)) for v in target):
++        raise LaneRuntimeError("launch_command_invalid")
++    # -I -B excludes Python user startup code. exec preserves the actual PID,
++    # generation, UID/GID and session. EOF/failure never executes the target.
++    code = ("import os,sys; fd=int(sys.argv[1]); token=os.read(fd,1); os.close(fd); "
++            "token==b'1' or sys.exit(78); os.execvp(sys.argv[2],sys.argv[2:])")
++    return [sys.executable, "-I", "-B", "-c", code, str(fd),
++            *(os.fspath(v) for v in target)]
++
++
+@@ -975,0 +1196,3 @@
++    launch_receipt_path: str | os.PathLike[str] | None = None,
++    launch_receipt_metadata: Mapping[str, str] | None = None,
++    launch_receipt_context_sha256: str | None = None,
+@@ -989,0 +1213,20 @@
++    launch_path, launch_context = _launch_receipt_input(
++        launch_receipt_path, launch_receipt_metadata)
++    if launch_receipt_context_sha256 is not None and (
++            launch_path is None or type(launch_receipt_context_sha256) is not str
++            or re.fullmatch(r"[0-9a-f]{64}", launch_receipt_context_sha256) is None):
++        raise LaneRuntimeError("launch_context_digest_invalid")
++    launch_receipt_sha256 = None
++    input_bytes = input_text.encode("utf-8") if input_text is not None else None
++    gate_read = gate_write = None
++    launch_command = command
++    extra_popen = {}
++    if launch_path is not None:
++        gate_read, gate_write = os.pipe()
++        try:
++            launch_command = _owned_gate_command(command, shell, gate_read)
++        except BaseException:
++            os.close(gate_read)
++            os.close(gate_write)
++            raise
++        extra_popen["pass_fds"] = (gate_read,)
+@@ -991 +1233,0 @@
+-    input_bytes = input_text.encode("utf-8") if input_text is not None else None
+@@ -994 +1236 @@
+-            command,
++            launch_command,
+@@ -999,2 +1241,2 @@
+-            shell=shell,
+-            executable=_owned_shell() if shell else None,
++            shell=shell if launch_path is None else False,
++            executable=_owned_shell() if shell and launch_path is None else None,
+@@ -1003,0 +1246 @@
++            **extra_popen,
+@@ -1007,0 +1251,2 @@
++        if gate_write is not None:
++            os.close(gate_write)
+@@ -1009,6 +1254,19 @@
+-    pgid = proc.pid
+-    try:
+-        observed_pgid = os.getpgid(proc.pid)
+-        observed_sid = os.getsid(proc.pid)
+-    except ProcessLookupError:
+-        if proc.poll() is None:
++    except BaseException:
++        if gate_write is not None:
++            os.close(gate_write)
++        raise
++    finally:
++        if gate_read is not None:
++            os.close(gate_read)
++    try:
++        pgid = proc.pid
++        try:
++            observed_pgid = os.getpgid(proc.pid)
++            observed_sid = os.getsid(proc.pid)
++        except ProcessLookupError:
++            if proc.poll() is None:
++                _kill_exact_leader(proc, grace=2.0)
++                raise LaneRuntimeError("owned_process_identity_unavailable")
++            observed_pgid = pgid
++            observed_sid = pgid
++        except PermissionError as exc:
+@@ -1016,29 +1274,28 @@
+-            raise LaneRuntimeError("owned_process_identity_unavailable")
+-        observed_pgid = pgid
+-        observed_sid = pgid
+-    except PermissionError as exc:
+-        _kill_exact_leader(proc, grace=2.0)
+-        raise LaneRuntimeError("owned_process_identity_unavailable") from exc
+-    if observed_pgid != pgid:
+-        _kill_exact_leader(proc, grace=2.0)
+-        raise LaneRuntimeError("owned_process_group_identity_failed")
+-    if observed_sid != pgid:
+-        _kill_exact_leader(proc, grace=2.0)
+-        raise LaneRuntimeError("owned_process_session_identity_failed")
+-    if proc.stdout is None or proc.stderr is None:
+-        _kill_exact_leader(proc, grace=2.0)
+-        raise LaneRuntimeError("owned_output_stream_missing")
+-
+-    applied_nice = False
+-    if nice is not None:
+-        if not MIN_NICE <= int(nice) <= MAX_NICE:
+-            _terminate_verified_group(proc, pgid, grace=0.2, reason="invalid_nice")
+-            raise LaneRuntimeConfigError("lane_nice_out_of_bounds")
+-        try:
+-            os.setpriority(os.PRIO_PROCESS, proc.pid, int(nice))
+-            applied_nice = True
+-        except (AttributeError, PermissionError, ProcessLookupError):
+-            applied_nice = False
+-
+-    try:
+-        _set_current(proc, pgid, safe_label)
++            raise LaneRuntimeError("owned_process_identity_unavailable") from exc
++        if observed_pgid != pgid:
++            _kill_exact_leader(proc, grace=2.0)
++            raise LaneRuntimeError("owned_process_group_identity_failed")
++        if observed_sid != pgid:
++            _kill_exact_leader(proc, grace=2.0)
++            raise LaneRuntimeError("owned_process_session_identity_failed")
++        if proc.stdout is None or proc.stderr is None:
++            _kill_exact_leader(proc, grace=2.0)
++            raise LaneRuntimeError("owned_output_stream_missing")
++
++        applied_nice = False
++        if nice is not None:
++            if not MIN_NICE <= int(nice) <= MAX_NICE:
++                _terminate_verified_group(proc, pgid, grace=0.2, reason="invalid_nice")
++                raise LaneRuntimeConfigError("lane_nice_out_of_bounds")
++            try:
++                os.setpriority(os.PRIO_PROCESS, proc.pid, int(nice))
++                applied_nice = True
++            except (AttributeError, PermissionError, ProcessLookupError):
++                applied_nice = False
++
++        try:
++            _set_current(proc, pgid, safe_label)
++        except BaseException:
++            _terminate_verified_group(proc, pgid, grace=0.2, reason="set_current_failed")
++            raise
++
+@@ -1046 +1303,2 @@
+-        _terminate_verified_group(proc, pgid, grace=0.2, reason="set_current_failed")
++        if gate_write is not None:
++            os.close(gate_write)
+@@ -1049,8 +1307,2 @@
+-    stdout_collector = _BoundedStreamCollector(
+-        proc.stdout, int(capture_limit_bytes), "stdout"
+-    )
+-    stderr_collector = _BoundedStreamCollector(
+-        proc.stderr, int(capture_limit_bytes), "stderr"
+-    )
+-    stdout_collector.start()
+-    stderr_collector.start()
++    stdout_collector = stderr_collector = None
++    stdout_started = stderr_started = False
+@@ -1059,6 +1310,0 @@
+-    if input_bytes is not None:
+-        if proc.stdin is None:
+-            _terminate_verified_group(proc, pgid, grace=0.2, reason="stdin_missing")
+-            _clear_current(proc)
+-            raise LaneRuntimeError("owned_stdin_stream_missing")
+-        stdin_thread, stdin_state = _start_input_writer(proc.stdin, input_bytes)
+@@ -1086,0 +1333,24 @@
++            # Collector setup is post-spawn and must share the same settlement
++            # and gate-fd finally path as publication, exec and input delivery.
++            stdout_collector = _BoundedStreamCollector(proc.stdout, int(capture_limit_bytes), "stdout")
++            stderr_collector = _BoundedStreamCollector(proc.stderr, int(capture_limit_bytes), "stderr")
++            stdout_collector.start()
++            stdout_started = True
++            stderr_collector.start()
++            stderr_started = True
++            if input_bytes is not None and launch_path is None:
++                if proc.stdin is None:
++                    raise LaneRuntimeError("owned_stdin_stream_missing")
++                stdin_thread, stdin_state = _start_input_writer(proc.stdin, input_bytes)
++            if launch_path is not None:
++                if launch_receipt_context_sha256 is None:
++                    launch_receipt_sha256 = _publish_owned_launch_receipt(
++                        launch_path, proc, safe_label, launch_context)
++                else:
++                    launch_receipt_sha256 = _publish_owned_launch_receipt(
++                        launch_path, proc, safe_label, launch_context, launch_receipt_context_sha256)
++                os.write(gate_write, b"1")
++                os.close(gate_write)
++                gate_write = None
++                if input_bytes is not None:
++                    stdin_thread, stdin_state = _start_input_writer(proc.stdin, input_bytes)
+@@ -1129,0 +1400,2 @@
++        if gate_write is not None:
++            os.close(gate_write)
+@@ -1138,0 +1411,4 @@
++        if not stdout_started:
++            proc.stdout.close()
++        if not stderr_started:
++            proc.stderr.close()
+@@ -1140,0 +1417 @@
++            if stdout_started else ("", 0, False, False, "collector_unavailable")
+@@ -1143,0 +1421 @@
++            if stderr_started else ("", 0, False, False, "collector_unavailable")
+@@ -1171,0 +1450,6 @@
++                    **({"launch_capture": {
++                        "phase": "PRE_EXEC_HANDSHAKE",
++                        "receipt_sha256": launch_receipt_sha256,
++                        "context_sha256": launch_receipt_context_sha256,
++                        "provider_execution_attested": False,
++                    }} if launch_path is not None else {}),

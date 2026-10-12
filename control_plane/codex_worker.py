@@ -548,6 +548,60 @@ def validate_secret_canary_verdict(
 ) -> dict[str, Any]:
     """Validate a hash/status-only canary receipt; raw sentinel values are forbidden."""
 
+    return _validate_secret_canary_verdict(value, require_passed=require_passed)
+
+
+def validate_attended_claude_secret_canary(
+    value: Mapping[str, Any] | None,
+    *,
+    spec: WorkerLaunchSpec,
+    execution_profile_id: str,
+    harness_binding_id: str,
+    physical_binding_sha256: str,
+    provider_home: str,
+) -> dict[str, Any]:
+    """Validate the exact finite supported-harness exception, never issue it.
+
+    A remote owner's actual canary and authenticated assignment transport must
+    supply this receipt. This validation does not establish their provenance,
+    enroll a provider realm, admit execution or change catalog readiness.
+    Default Codex callers continue to accept only their original V1 receipt.
+    """
+    from control_plane.subscription_harness_bindings import get_binding
+
+    if (execution_profile_id != "fabric.attended.claude.bounded.v1"
+            or harness_binding_id != "minimax-token-plan.claude-code-anthropic"
+            or not isinstance(spec, WorkerLaunchSpec)
+            or spec.require_secret_canary is not True
+            or not isinstance(physical_binding_sha256, str)
+            or re.fullmatch(r"[0-9a-f]{64}", physical_binding_sha256) is None
+            or not isinstance(provider_home, str)
+            or not Path(provider_home).is_absolute()
+            or str(Path(provider_home)) != provider_home
+            or ".." in Path(provider_home).parts):
+        raise LaunchValidationError("unsupported attended secret canary binding")
+    binding = get_binding(harness_binding_id)
+    if (binding.provider != "minimax" or binding.harness_id != "claude-code"
+            or binding.adapter_id != "claude-compatible-subscription"
+            or binding.protocol != "anthropic"):
+        raise LaunchValidationError("attended secret canary catalog binding changed")
+    expected = dict(
+        execution_profile_id=execution_profile_id,
+        harness_binding_id=harness_binding_id,
+        run_id=spec.run_id, job_id=spec.job_id, worker_id=spec.worker_id,
+        physical_binding_sha256=physical_binding_sha256,
+        provider_home=provider_home,
+    )
+    return _validate_secret_canary_verdict(
+        value, require_passed=True, attended_realm=expected,
+    )
+
+
+def _validate_secret_canary_verdict(
+    value: Mapping[str, Any] | None, *, require_passed: bool,
+    attended_realm: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+
     if not value:
         if require_passed:
             raise LaunchValidationError("a passing distinct-principal secret canary is required")
@@ -579,10 +633,16 @@ def validate_secret_canary_verdict(
         "observed_at",
         "worker_auth_exception",
     }
+    if attended_realm is not None:
+        allowed_top.add("realm_binding")
     if set(document) != allowed_top:
         raise LaunchValidationError("secret canary verdict fields are incomplete or unknown")
-    if document.get("schema_version") != SECRET_CANARY_SCHEMA_VERSION:
+    schema = ("mastermind.executive_secret_canary/v2" if attended_realm is not None
+              else SECRET_CANARY_SCHEMA_VERSION)
+    if document.get("schema_version") != schema:
         raise LaunchValidationError("secret canary verdict schema is unsupported")
+    if attended_realm is not None and document.get("realm_binding") != attended_realm:
+        raise LaunchValidationError("secret canary belongs to another assigned realm")
     checks = document.get("checks")
     if not isinstance(checks, dict) or set(checks) != _SECRET_CANARY_CHECKS:
         raise LaunchValidationError("secret canary verdict is missing required checks")
@@ -599,7 +659,9 @@ def validate_secret_canary_verdict(
         raise LaunchValidationError(
             "secret canary verdict requires a control-environment probe SHA-256"
         )
-    if document.get("worker_auth_exception") != "DEDICATED_CODEX_HOME_ONLY":
+    exception = ("ASSIGNED_CLAUDE_PROVIDER_REALM_ONLY" if attended_realm is not None
+                 else "DEDICATED_CODEX_HOME_ONLY")
+    if document.get("worker_auth_exception") != exception:
         raise LaunchValidationError("worker authentication exception is not explicit")
     if document.get("passed") is not True:
         raise LaunchValidationError("secret canary verdict did not pass")

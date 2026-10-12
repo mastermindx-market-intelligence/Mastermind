@@ -30,7 +30,7 @@ import stat
 import struct
 import subprocess
 import sys
-from contextlib import AsyncExitStack, nullcontext
+from contextlib import AsyncExitStack, asynccontextmanager, nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Mapping, Protocol
@@ -1543,6 +1543,9 @@ class ServiceConfig:
     coo_default_quota_class: str = "codex-coo-default"
     coo_operator_model_alias: str = "coo.operator.readonly"
     coo_operator_quota_class: str = "codex-coo-operator"
+    # Exact host-reviewed attended members; empty in every installed profile.
+    # No caller payload may supply these or turn them into Worker admission.
+    coo_attended_work_placements: tuple = ()
     terminal_return_armed: bool = False
     terminal_return_socket_path: Path | None = None
     operator_harness_binary_digest: str = "0" * 64
@@ -1634,6 +1637,12 @@ class ServiceConfig:
             if _ID_RE.fullmatch(alias) is None:
                 raise ValueError(f"invalid {field_name}")
             object.__setattr__(self, field_name, alias)
+        from control_plane.fabric_attended_routing import AttendedWorkPlacement
+        if (not isinstance(self.coo_attended_work_placements, tuple)
+                or len(self.coo_attended_work_placements) > 6
+                or any(type(item) is not AttendedWorkPlacement
+                       for item in self.coo_attended_work_placements)):
+            raise ValueError("attended work placements require bounded host configuration")
         quota_names = {
             self.quota_class,
             self.coo_quota_class,
@@ -2244,6 +2253,8 @@ class ExecutiveControlService:
         self._coo_tick_task: asyncio.Task[Any] | None = None
         self._coo_shutdown_event: asyncio.Event | None = None
         self._coo_action_tasks: set[asyncio.Task[Any]] = set()
+        # Request-local exclusion, not another queue or durable authority.
+        self._foreground_cycle_owner: tuple[asyncio.Task[Any], Any] | None = None
         self._coo_last_outcome: dict[str, Any] | None = None
         self._coo_last_error: str | None = None
         self._coo_last_tick_at: str | None = None
@@ -2633,6 +2644,15 @@ class ExecutiveControlService:
             {"provider_realm": binding["provider"], "quota_class": quota}
             for quota in binding["eligible_quota_classes"]
         ]
+        if self.config.coo_attended_work_placements:
+            from control_plane.fabric_attended_routing import placement_member
+            binding["work_placement_union"].extend(
+                placement_member(router, member)
+                for member in self.config.coo_attended_work_placements
+            )
+            binding["work_placement_union"] = _normalise_work_placement_union(
+                binding["work_placement_union"]
+            )
         if set(binding) != set(V3_HOST_EXECUTION_BINDING_KEYS):
             raise ValueError("configured COO host binding fields drifted")
         binding[HOST_EXECUTION_BINDING_VERSION_KEY] = HOST_EXECUTION_BINDING_V3
@@ -3813,7 +3833,23 @@ class ExecutiveControlService:
                 completed.exception()
 
         task.add_done_callback(finished)
-        return await asyncio.shield(task)
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            owner = self._foreground_cycle_owner
+            if owner is not None and owner[0] is asyncio.current_task():
+                # Attendance ends promptly, but this request's original physical
+                # transition still owns its return. Do not free the cycle slot
+                # while its to_thread dispatcher may be crossing START.
+                owner[1]._mark_source_closed()
+                while not task.done():
+                    try:
+                        await asyncio.shield(task)
+                    except asyncio.CancelledError:
+                        continue
+                    except Exception:
+                        break  # Original task/canonical Attempt retains failure.
+            raise
 
     async def _drain_service_tasks(self, tasks) -> None:
         pending = {task for task in tasks
@@ -6633,6 +6669,161 @@ class ExecutiveControlService:
         except asyncio.InvalidStateError:
             return  # A settled waiter never grants another provider turn.
 
+    @asynccontextmanager
+    async def _foreground_cycle_scope(self, operation):
+        """Reserve the existing serial cycle before fresh admission can commit.
+
+        The canonical admission observer executes on its own thread. It binds
+        the actual operation there; only this request task owns cycle driving.
+        """
+        if operation is None or not self.config.coo_attended_work_placements:
+            yield False
+            return
+        from control_plane.foreground_operation import current_foreground_operation
+        if current_foreground_operation() is not operation:
+            raise StateConflict("foreground cycle requires the original request source")
+        task = asyncio.current_task()
+        assert task is not None
+        async with self._coo_cycle_lock:
+            if self._foreground_cycle_owner is not None:
+                raise StateConflict("another original request owns the finite cycle")
+            self._foreground_cycle_owner = (task, operation)
+            self._coo_action_tasks.add(task)
+        try:
+            yield True
+        finally:
+            if self._foreground_cycle_owner == (task, operation):
+                self._foreground_cycle_owner = None
+            self._coo_action_tasks.discard(task)
+
+    async def _await_foreground_dispatch(self, operation, root_id, outcome):
+        """Await the already-owned exact finisher, never collect a second time."""
+        runtime = self._require_runtime()
+        receipt = outcome.receipt
+        attempt_id = (receipt.get("attempt", {}).get("attempt_id")
+                      if isinstance(receipt, dict) else None)
+        job = runtime.jobs.get_job(outcome.selected_job_id)
+        if (job is None or job.root_job_id != root_id or not attempt_id
+                or job.current_attempt_id != attempt_id):
+            raise StateConflict("foreground dispatch has no exact current Attempt")
+        attempt = runtime.attempts.get_attempt(attempt_id)
+        if attempt is None:
+            raise StateConflict("foreground dispatch Attempt is unavailable")
+        finisher = self._dispatch_tasks.get(job.job_id)
+        if finisher is None and attempt.status in _COO_ACTIVE_ATTEMPT_STATUSES:
+            raise StateConflict("original foreground finisher requires reconciliation")
+        if finisher is not None:
+            closed = asyncio.create_task(operation.wait_closed())
+            try:
+                await asyncio.wait((finisher, closed), return_when=asyncio.FIRST_COMPLETED)
+                if closed.done():
+                    # This original request owns only the returned exact claim.
+                    # Runtime compare-and-cancel refuses a successor; the
+                    # original finisher owns physical containment and collection.
+                    runtime.jobs.cancel_job(job.job_id,
+                        expected_attempt_id=attempt_id,
+                        expected_fence_generation=attempt.fence_generation)
+                    operation.require_root(root_id)  # Closed source must refuse.
+                    raise StateConflict("originating request closed")
+                await asyncio.shield(finisher)
+            except asyncio.CancelledError:
+                operation._mark_source_closed()
+                runtime.jobs.cancel_job(job.job_id,
+                    expected_attempt_id=attempt_id,
+                    expected_fence_generation=attempt.fence_generation)
+                raise
+            finally:
+                closed.cancel()
+                await asyncio.gather(closed, return_exceptions=True)
+        operation.require_root(root_id)
+        if self._service_state != "READY" or job.job_id in self._dispatch_errors:
+            raise StateConflict("original foreground finisher did not settle")
+        current = runtime.jobs.get_job(job.job_id)
+        current_attempt = runtime.attempts.get_attempt(attempt_id)
+        if (current is None or current.current_attempt_id != attempt_id
+                or current_attempt is None
+                or current_attempt.status in _COO_ACTIVE_ATTEMPT_STATUSES):
+            raise StateConflict("foreground Attempt has not settled exactly")
+        if current.status is JobStatus.COMPLETED:
+            return runtime.validated_role_completion(job.job_id,
+                expected_attempt_id=attempt_id)
+        return None
+
+    async def _drive_foreground_cycle(self, operation, root_job_id):
+        """Finite continuation of one fresh summon on the same authenticated call.
+
+        Each step remains the existing CooCycle under its current arm, profile,
+        custody and policy checks. A no-progress outcome ends this call; it is
+        never a polling loop, retry scheduler or alternative collection owner.
+        """
+        if self._foreground_cycle_owner != (asyncio.current_task(), operation):
+            raise StateConflict("foreground cycle is not owned by this request")
+        root_id = self._id(root_job_id, "root_job_id")
+        operation.require_root(root_id)
+        runtime = self._require_runtime()
+        root = runtime.jobs.get_job(root_id)
+        if root is None:
+            raise StateConflict("foreground root is unavailable")
+        if self._coo_binding_for_root(root)["operator_execution_profile_id"] == NATIVE_RETURN_TX5_EXECUTION_PROFILE:
+            raise StateConflict("native no-child return profile is not a paid work cycle")
+        results = {}
+        seen = set()
+        progress = {"PLANNER_CREATED", "WORK_CREATED", "PLAN_ADMITTED", "REVIEW_CREATED",
+                    "REPAIR_CREATED", "HANDOFF_CREATED", "REQUEUED", "DISPATCHED"}
+        for _ in range(128):
+            operation.require_root(root_id)
+            outcome = await self._run_coo_cycle(root_id)
+            if outcome.root_job_id != root_id:
+                raise StateConflict("foreground cycle returned a foreign root")
+            key = (outcome.action, outcome.selected_job_id, outcome.command_id)
+            if key in seen:
+                raise StateConflict("foreground cycle repeated an unchanged transition")
+            seen.add(key)
+            if outcome.action == "DISPATCHED":
+                material = await self._await_foreground_dispatch(operation, root_id, outcome)
+                if material is not None and (material.job.job_id == root_id
+                        or material.job.orchestration_role in {"work", "repair"}):
+                    results[material.job.job_id] = {
+                        "job_id": material.job.job_id, "attempt_id": material.attempt.attempt_id,
+                        "role": material.job.orchestration_role,
+                        "result_digest": material.result_digest,
+                        "role_result_digest": material.role_result_digest,
+                        "result_envelope": material.result_envelope,
+                    }
+            operation.require_root(root_id)
+            root = runtime.jobs.get_job(root_id)
+            if root is None:
+                raise StateConflict("foreground root disappeared")
+            if root.status is JobStatus.COMPLETED:
+                # Root completion must validate independently of any child exit.
+                final = runtime.validated_role_completion(root_id,
+                    expected_attempt_id=root.current_attempt_id)
+                results[root_id] = {
+                    "job_id": root_id, "attempt_id": final.attempt.attempt_id,
+                    "role": final.job.orchestration_role,
+                    "result_digest": final.result_digest,
+                    "role_result_digest": final.role_result_digest,
+                    "result_envelope": final.result_envelope,
+                }
+                value = {"state": "ROOT_COMPLETED", "root_job_id": root_id,
+                         "results": list(results.values()), "delivery": "COMPLETE"}
+                if len(_canonical_json(value)) > 16384:
+                    # Keep exact retained identities; never truncate bytes and
+                    # misrepresent that as complete result delivery/consumption.
+                    value["delivery"] = "RESULT_TOO_LARGE"
+                    value["results"] = [{k: v for k, v in r.items() if k != "result_envelope"}
+                                        for r in results.values()]
+                    if len(_canonical_json(value)) > 16384:
+                        value["retained_result_count"] = len(results)
+                        value["results"] = [value["results"][-1]]
+                return value
+            if outcome.action not in progress:
+                return {"state": outcome.action, "root_job_id": root_id,
+                        "last_action": {k: v for k, v in outcome.to_dict().items() if k != "receipt"},
+                        "delivery": "INCOMPLETE"}
+        return {"state": "STEP_BOUND_REACHED", "root_job_id": root_id,
+                "delivery": "INCOMPLETE"}
+
     async def _run_coo_cycle_once(self, root_job_id: str) -> CooCycleOutcome:
         if self._closing:
             raise StateConflict("Executive control service is closing")
@@ -6643,6 +6834,11 @@ class ExecutiveControlService:
             raise StateConflict(f"Executive control service is {self._service_state}")
         root_id = self._id(root_job_id, "root_job_id")
         async with self._coo_cycle_lock:
+            owner = self._foreground_cycle_owner
+            if owner is not None:
+                if owner[0] is not asyncio.current_task():
+                    raise StateConflict("original foreground request owns the finite cycle")
+                owner[1].require_root(root_id)
             self._require_coo_worker_composed()
             root = self._require_runtime().jobs.get_job(root_id)
             if root is None or not self._is_bound_coo_root(root):
@@ -6694,11 +6890,13 @@ class ExecutiveControlService:
         task = asyncio.current_task()
         if task is None:  # pragma: no cover - asyncio always owns service calls
             return await self._run_coo_cycle_once(root_job_id)
+        already_owned = task in self._coo_action_tasks
         self._coo_action_tasks.add(task)
         try:
             return await self._run_coo_cycle_once(root_job_id)
         finally:
-            self._coo_action_tasks.discard(task)
+            if not already_owned:
+                self._coo_action_tasks.discard(task)
 
     def _next_bound_coo_root(
         self, *, prestart_refusals: dict[str, Exception] | None = None
@@ -6840,7 +7038,7 @@ class ExecutiveControlService:
                 pass
             if self._coo_shutdown_event.is_set():
                 return
-            if self._service_state != "READY":
+            if self._service_state != "READY" or self._foreground_cycle_owner is not None:
                 continue
             has_live_dispatch = any(
                 not task.done() for task in self._dispatch_tasks.values()

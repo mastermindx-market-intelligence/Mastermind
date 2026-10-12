@@ -854,6 +854,21 @@ def _normalise_constraints(
         result["operator_harness_binary_digest"] = harness_digest
         result["operator_harness_version"] = harness_version
         result["operator_harness_armed"] = raw["operator_harness_armed"]
+    if "attended_route" in raw:
+        from control_plane.fabric_attended_routing import normalize_attended_route
+        try:
+            route = normalize_attended_route(raw["attended_route"])
+        except ValueError as exc:
+            raise StateConflict(str(exc)) from exc
+        for key in ("execution_profile_id", "execution_profile_digest", "capability_policy_version",
+                    "capability_policy_digest", "routing_policy_version", "model", "effort", "cost_class"):
+            if result.get(key) != route[key].lower():
+                raise StateConflict(f"attended route constraint drifted at {key}")
+        if result.get("preferred_model_aliases") != [route["model_alias"]]:
+            raise StateConflict("attended route alias drifted")
+        if result.get("provider") != route["provider_alias"]:
+            raise StateConflict("attended route provider drifted")
+        result["attended_route"] = route
     if host_admitted_placement_union and "work_placement_union" in raw:
         result["work_placement_union"] = _normalise_work_placement_union(
             raw["work_placement_union"]
@@ -863,7 +878,7 @@ def _normalise_constraints(
 
 def _normalise_work_placement_union(
     value: Any,
-) -> list[dict[str, str]]:
+) -> list[dict[str, Any]]:
     if not isinstance(value, (list, tuple)) or len(value) > (
         WORK_PLACEMENT_UNION_MAX_MEMBERS
     ):
@@ -872,13 +887,13 @@ def _normalise_work_placement_union(
         raise StateConflict(
             "host work-placement union must admit at least one placement"
         )
-    members: list[dict[str, str]] = []
+    members: list[dict[str, Any]] = []
     identities: set[tuple[str, str]] = set()
     for member in value:
-        if not isinstance(member, Mapping) or set(member) != {
-            "provider_realm",
-            "quota_class",
-        }:
+        if not isinstance(member, Mapping) or set(member) not in (
+            {"provider_realm", "quota_class"},
+            {"provider_realm", "quota_class", "attended_route"},
+        ):
             raise StateConflict(
                 "host work-placement union member must name exactly "
                 "a provider realm and quota class"
@@ -894,6 +909,14 @@ def _normalise_work_placement_union(
             raise StateConflict(
                 "host work-placement union member values are invalid"
             )
+        if "attended_route" in member:
+            from control_plane.fabric_attended_routing import normalize_attended_route
+            try:
+                normalized_member["attended_route"] = normalize_attended_route(member["attended_route"])
+            except ValueError as exc:
+                raise StateConflict(str(exc)) from exc
+            if normalized_member["provider_realm"] != normalized_member["attended_route"]["provider_alias"]:
+                raise StateConflict("attended host member provider differs from its route")
         identity = (
             normalized_member["provider_realm"],
             normalized_member["quota_class"],
@@ -1011,6 +1034,21 @@ def _project_work_placement(
     projected = dict(constraints)
     projected["provider"] = provider_realm
     projected["eligible_quota_classes"] = [quota_class]
+    if "attended_route" in member:
+        from control_plane.fabric_attended_routing import normalize_attended_route
+        try:
+            route = normalize_attended_route(member["attended_route"])
+        except ValueError as exc:
+            raise StateConflict(str(exc)) from exc
+        if provider_realm != route["provider_alias"]:
+            raise StateConflict("attended placement provider differs from its route")
+        projected["attended_route"] = route
+        projected["preferred_model_aliases"] = [route["model_alias"]]
+        for key in ("execution_profile_id", "execution_profile_digest", "capability_policy_version",
+                    "capability_policy_digest", "routing_policy_version", "model", "effort", "cost_class"):
+            projected[key] = route[key].lower()
+        if "model" in placement and str(placement["model"]).lower() != route["model"].lower():
+            raise StateConflict("attended placement cannot change its exact catalogue model")
     if plan_schema_version == "mastermind.execution_plan/v4":
         reasons = list(projected.get("routing_reason_codes") or [])
         if "manual_pool_override" not in reasons:
@@ -1077,6 +1115,8 @@ def _capacity_matches_route(row: sqlite3.Row, constraints: dict[str, Any]) -> bo
     if not aliases and not profile_id:
         return True
     metadata = _capacity_route_metadata(row)
+    if "attended_route" in constraints and metadata.get("attended_route") != constraints["attended_route"]:
+        return False
     if aliases:
         worker_policy_version = (
             str(metadata.get("routing_policy_version") or "").strip().lower()
@@ -15284,7 +15324,16 @@ class JobRegistry:
         assert job is not None
         return job
 
-    def cancel_job(self, job_id: str) -> Job:
+    def cancel_job(
+        self, job_id: str, *, expected_attempt_id: str | None = None,
+        expected_fence_generation: int | None = None,
+    ) -> Job:
+        exact = expected_attempt_id is not None or expected_fence_generation is not None
+        if exact and (
+            type(expected_attempt_id) is not str or not expected_attempt_id
+            or type(expected_fence_generation) is not int or expected_fence_generation < 1
+        ):
+            raise StateConflict("exact cancellation requires Attempt and fence generation")
         timestamp = self.store.now_ms()
         with self.store.transaction() as connection:
             job_row = connection.execute(
@@ -15292,6 +15341,21 @@ class JobRegistry:
             ).fetchone()
             if job_row is None:
                 raise StateConflict(f"job {job_id!r} does not exist")
+            if exact:
+                # Match under the same transaction that requests cancellation;
+                # a pre-read followed by ordinary cancel_job could cancel a
+                # successor Attempt instead of the originating operation.
+                _finite_existing_effect(self.store, connection, job_id)
+                original = connection.execute(
+                    "SELECT * FROM attempts WHERE attempt_id=? AND job_id=?",
+                    (expected_attempt_id, job_id),
+                ).fetchone()
+                if (job_row["current_attempt_id"] != expected_attempt_id
+                        or original is None
+                        or original["fence_generation"] != expected_fence_generation):
+                    raise StateConflict("exact cancellation Attempt or fence changed")
+                if AttemptStatus(original["status"]) in _TERMINAL_ATTEMPT_STATUSES:
+                    return _job_from_row(job_row)  # Terminal wins; no new event/effect.
             status = JobStatus(job_row["status"])
             if status == JobStatus.CANCEL_REQUESTED:
                 return _job_from_row(job_row)

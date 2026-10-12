@@ -320,6 +320,9 @@ _CONFIG_OPTIONAL = frozenset(
         "privileged_readiness_armed",
         "privileged_broker_socket_path",
         "python_runtime_provenance_digest",
+        "fabric_bindings_path",
+        "fabric_bindings_sha256",
+        "fabric_bridge_armed",
     }
 )
 _CEO_INGRESS_CONFIG_KEYS = frozenset(
@@ -348,6 +351,44 @@ _DIALOGUE_BRIDGE_CONFIG_KEYS = frozenset(
     }
 )
 _CONFIG_DISABLED_EXTENSIONS = frozenset()
+
+
+class FabricActivationRefused(ServiceError):
+    """Shared Fabric execution has no admitted backend and isolation profile."""
+
+
+def _validate_fabric_bridge_config(raw: Mapping[str, Any]) -> bool:
+    armed = raw.get("fabric_bridge_armed", False)
+    if type(armed) is not bool:
+        raise ServiceError("fabric_bridge_armed must be boolean")
+    if armed:
+        raise FabricActivationRefused(
+            "Fabric activation is disabled until an actual backend and isolation profile are admitted"
+        )
+    pair = {"fabric_bindings_path", "fabric_bindings_sha256"}
+    present = set(raw) & pair
+    if present and present != pair:
+        raise ServiceError("Fabric bindings path and approved hash must be supplied together")
+    if present:
+        value, digest = raw["fabric_bindings_path"], raw["fabric_bindings_sha256"]
+        if (type(value) is not str or not value or not Path(value).is_absolute()
+                or ".." in Path(value).parts or str(Path(value)) != value or "\x00" in value
+                or type(digest) is not str or re.fullmatch(r"[0-9a-f]{64}", digest) is None):
+            raise ServiceError("Fabric bindings require a canonical absolute path and exact SHA-256")
+    return bool(present)
+
+
+def _staged_fabric_binding_source(raw: Mapping[str, Any]):
+    """Validate optional root-installed data without enabling its execution route."""
+    if not _validate_fabric_bridge_config(raw):
+        return None
+    from control_plane.executive_fabric_composition import (
+        FabricBindingSource, FabricCompositionError,
+    )
+    try:
+        return FabricBindingSource.from_path(raw["fabric_bindings_path"], raw["fabric_bindings_sha256"])
+    except FabricCompositionError as exc:
+        raise ServiceError("Staged Fabric binding source refused") from exc
 
 
 def _absolute_path(value: str) -> Path:
@@ -873,6 +914,7 @@ def load_control_config(
         raise ServiceError(
             f"Executive control config fields drifted; missing={missing}, unknown={unknown}"
         )
+    _staged_fabric_binding_source(config)
     company_consultation_launchd_entry(config)
     arm = config.get("privileged_readiness_armed", False)
     broker_socket = config.get("privileged_broker_socket_path")
@@ -1639,6 +1681,7 @@ def _service_from_config(
     dialogue_canary_profile: Any | None = None,
     native_dialogue_canary_profile_loader: Callable[[], Any] | None = None,
     remote_worker_binding_source: Callable[..., Any] | None = None,
+    fabric_worker_binding_source: Any | None = None,
 ) -> ExecutiveControlService:
     from control_plane.dialogue_wake_canary_activation import DialogueWakeCanaryProfile
     if dialogue_canary_profile is None:
@@ -1646,6 +1689,24 @@ def _service_from_config(
     if type(dialogue_canary_profile) is not DialogueWakeCanaryProfile:
         raise ServiceError("dialogue canary profile requires trusted composition")
     # This is trusted host composition, never a JSON/model-selected factory.
+    _validate_fabric_bridge_config(raw)
+    if fabric_worker_binding_source is not None:
+        from control_plane.executive_fabric_composition import FabricBindingSource
+        if type(fabric_worker_binding_source) is not FabricBindingSource:
+            raise ServiceError("Fabric worker composition requires the exact root-installed binding source")
+        if remote_worker_binding_source is not None:
+            raise ServiceError("Fabric and remote worker binding sources conflict")
+        if initial_canary is not None:
+            raise FabricActivationRefused(
+                "A dedicated-worker canary does not qualify shared Fabric execution"
+            )
+        if any((binding.worker_uid, binding.worker_gid) !=
+               (raw.get("worker_uid"), raw.get("worker_gid"))
+               for binding in fabric_worker_binding_source.bindings):
+            raise ServiceError("Fabric bindings differ from the fixed Supervisor worker principal")
+        if any(binding.worker_id == str(raw.get("worker_id") or "codex-01")
+               for binding in fabric_worker_binding_source.bindings):
+            raise ServiceError("Fabric binding cannot replace the primary worker")
     if (remote_worker_binding_source is not None
             and not callable(remote_worker_binding_source)):
         raise ServiceError("remote worker binding source must be callable")
@@ -1778,14 +1839,23 @@ def _service_from_config(
 
     recovery_controller = {}
 
+    def recovery_controller_for(attempt):
+        owners = recovery_controller.get("owners")
+        if owners is not None:
+            owner = owners.get(attempt.worker_id)
+            if owner is None:
+                raise ServiceError("proof recovery has no exact execution owner")
+            return owner.process_controller
+        return recovery_controller.get("current")
+
     def proof_capacity_recovery_observer(attempt):
-        controller = recovery_controller.get("current")
+        controller = recovery_controller_for(attempt)
         if controller is None or not controller.absence_verified(attempt):
             raise ServiceError("proof capacity has no fresh broker absence")
         return dict(controller.uid_sweep_receipt(attempt))
 
     def proof_capacity_recovery_worker_uid(attempt):
-        controller = recovery_controller.get("current")
+        controller = recovery_controller_for(attempt)
         if controller is None:
             raise ServiceError("proof capacity has no recovery controller")
         return controller.expected_worker_uid(attempt)
@@ -1796,6 +1866,8 @@ def _service_from_config(
             if job is None or job.current_attempt_id != spec.run_id:
                 raise ServiceError("remote validation lookup lost Job/Attempt identity")
             return tuple(tuple(command) for command in job.validation_commands)
+
+        from control_plane.worker_execution_contract import CleanupPolicy
 
         if remote_worker_binding_source is None:
             adapter = RemoteCodexWorkerAdapter(
@@ -1842,7 +1914,7 @@ def _service_from_config(
 
             claim_binding_id = str(realm["binding_id"])
         recovery_controller["current"] = process_controller
-        return ExecutiveSupervisor(
+        primary = ExecutiveSupervisor(
             runtime,
             adapter,
             runs_root=raw["worker_runs_root"],
@@ -1857,6 +1929,7 @@ def _service_from_config(
             shared_run_gid=raw["shared_run_gid"],
             secret_canary_verdict=canary,
             require_complete_launch_attestation=initially_ready,
+            cleanup_policy=CleanupPolicy.DEDICATED_UID,
             process_controller=process_controller,
             exact_target_provider=(
                 (lambda job_id: exact_target_source.for_job(job_id, now_ms=runtime.store.now_ms()))
@@ -1865,8 +1938,32 @@ def _service_from_config(
             subscription_canary_claim_provider=claim_provider,
             subscription_canary_binding_id=claim_binding_id,
         )
+        if fabric_worker_binding_source is None:
+            return primary
+        from control_plane.executive_fabric_adapter import AttendedFabricWorkerAdapter
+        from control_plane.mixed_worker_supervisor import MixedExecutionOwnerSupervisor
+        fabric_adapter = AttendedFabricWorkerAdapter(runtime, fabric_worker_binding_source)
+        fabric_owner = ExecutiveSupervisor(
+            runtime, fabric_adapter,
+            runs_root=raw["worker_runs_root"],
+            isolation_roots=(raw["proof_workspace_root"], raw["worker_runs_root"]),
+            receipts_root=raw["receipts_root"],
+            worker_user=raw["worker_user"], worker_uid=raw["worker_uid"],
+            worker_gid=raw["worker_gid"], shared_run_gid=raw["shared_run_gid"],
+            secret_canary_verdict=canary, require_complete_launch_attestation=True,
+            cleanup_policy=CleanupPolicy.FABRIC_PROCESS_GROUP,
+            process_controller=fabric_adapter, instance_id=primary.instance_id,
+        )
+        mixed = MixedExecutionOwnerSupervisor(primary, {
+            config.worker_id: primary,
+            **{binding.worker_id: fabric_owner
+               for binding in fabric_worker_binding_source.bindings},
+        })
+        recovery_controller["owners"] = mixed.owners
+        return mixed
 
     def operator_supervisor_factory(runtime, sealed_supervisor):
+        from control_plane.mixed_worker_supervisor import MixedExecutionOwnerSupervisor
         def primary_factory(attempt, requested, turn_input_loader, *, recovery):
             # A fixed primary client must never carry another claimed worker.
             # Multi-worker composition supplies its current owner-bound factory.
@@ -1895,7 +1992,9 @@ def _service_from_config(
             runtime,
             claimed_adapter_factory=(factory if factory is not None else primary_factory),
             workspace_identity_source=workspace_source,
-            prompt_source=sealed_supervisor,
+            prompt_source=(sealed_supervisor.primary
+                           if type(sealed_supervisor) is MixedExecutionOwnerSupervisor
+                           else sealed_supervisor),
         )
 
     async def verify_operator_identity() -> None:
@@ -2137,22 +2236,32 @@ def _service_from_config(
                     try:
                         observed = await session_ingress._observe_trusted_grounding(readers)
                         require_summon_admission()
-                        receipt = await session_ingress.handle_frame(
-                            {"schema": session_ingress.SUBMIT_SCHEMA_V2,
-                             "request_ref": request_ref, "observed_grounding": observed,
-                             "request": request},
-                            runtime=runtime, grounding_provider=readers,
-                            workspace_root=config.proof_workspace_root,
-                            service_state=service._service_state,
-                            ceo_ingress_armed=binding.armed,
-                            strict_v2_admission=True,
-                            execution_binding_provider=service._require_current_coo_binding,
-                            dialogue_source_provider=commission_source_provider,
-                            admission_guard=require_summon_admission,
-                            fresh_admission_observer=(
-                                operation._bind_admitted_root if operation is not None else None
-                            ),
-                        )
+                        async with service._foreground_cycle_scope(operation) as drive:
+                            receipt = await service._run_owned_coroutine(session_ingress.handle_frame(
+                                {"schema": session_ingress.SUBMIT_SCHEMA_V2,
+                                 "request_ref": request_ref, "observed_grounding": observed,
+                                 "request": request},
+                                runtime=runtime, grounding_provider=readers,
+                                workspace_root=config.proof_workspace_root,
+                                service_state=service._service_state,
+                                ceo_ingress_armed=binding.armed,
+                                strict_v2_admission=True,
+                                execution_binding_provider=service._require_current_coo_binding,
+                                dialogue_source_provider=commission_source_provider,
+                                admission_guard=require_summon_admission,
+                                fresh_admission_observer=(
+                                    operation._bind_admitted_root if operation is not None else None
+                                ),
+                            ))
+                            if drive and receipt.get("duplicate") is False:
+                                try:
+                                    operation.require_root(receipt["job_id"])
+                                    completion = await service._drive_foreground_cycle(operation, receipt["job_id"])
+                                except Exception:
+                                    raise BridgeError("effect_unknown", "reconcile the original Executive operation") from None
+                                # Preserve the immutable QUEUED admission receipt.
+                                # Result delivery is a distinct current-call fact.
+                                receipt = {**receipt, "foreground_completion": completion}
                     except _FreshAdmissionObserverFailed:
                         raise BridgeError("effect_unknown", "reconcile the original Executive operation") from None
                     except ForegroundOperationRefusal as exc:
@@ -2311,7 +2420,8 @@ def _service_from_config(
         privileged_readiness_controller_factory=readiness_factory,
         proof_capacity_recovery_observer=proof_capacity_recovery_observer,
         proof_capacity_recovery_worker_uid=(
-            int(raw["worker_uid"]) if remote_worker_binding_source is None
+            int(raw["worker_uid"]) if (remote_worker_binding_source is None
+                                       and fabric_worker_binding_source is None)
             else proof_capacity_recovery_worker_uid
         ),
         operator_supervisor_factory=operator_supervisor_factory,
@@ -2408,6 +2518,9 @@ def _ceo_admission_guard(raw: Mapping[str, Any], config_path: Path,
 
 async def _serve_from_config(config_path: Path) -> None:
     raw = load_control_config(config_path)
+    # Staging is a source read only. Production retains its existing broker;
+    # no JSON flag or dedicated-worker canary can qualify shared Fabric.
+    _staged_fabric_binding_source(raw)
     control_attestation = _load_control_environment_attestation(
         Path(raw["control_environment_attestation_path"]),
         config_path=config_path,
