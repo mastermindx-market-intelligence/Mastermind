@@ -147,3 +147,37 @@ continues to identify the credential realm and is checked separately through
 the original exact v2 MiniMax canary. The exception cannot be selected by a
 bare `passed:true`, a different realm/profile or an unbound home path. Legacy
 fixed-home contracts retain their prior semantics.
+
+### Original-handle invocation and once-only START retention
+
+The original runner retains its actual argv, cwd, shell setting, environment
+key set, prompt digest, non-secret environment projection digest, original
+Popen timestamp and one owner-minted nonce. Credential values are neither
+retained nor hashed. The private reserved begin seam binds the exact prepared
+descriptor, original request/physical digests and a fixed START filename beside
+the original terminal carrier before returning its same live handle. Existing
+START bytes refuse before spawn; they do not establish positive first use.
+
+`retain_owned_start_bytes` is a publication mechanic for an already validated
+complete result. It checks the live original handle, generation, nonce, start
+time and actual invocation against the supplied record. It also checks the
+prepared non-secret environment controls, so unchanged key names cannot hide
+a changed endpoint, model, HOME or TMP. It uses the existing owner-private
+directory check and no-replace immutable inode publication, then fsyncs and
+reads back the exact bytes. The early PRE_EXEC receipt keeps its schema and
+8 KiB bound; complete retention has a separate 64 KiB bound and filename.
+
+The first attempt consumes the live handle's publication opportunity, including
+on failure. A failure holds the original lease for reconciliation, leaves the
+same process/collector/finisher untouched and never resends. A successful
+publication does not release that lease or assignment exclusion; the concrete
+Backend must retain both through Control seal, actual worker denial and durable
+Supervisor ACK. A worker-owned file is observation, not restart authority.
+
+This delta does not assemble an attestation or authenticate evidence. The
+actual producer must still invoke both complete START validators using a fresh
+original-handle image, an independently pinned binary and actual qualified
+realm/attendance/Capacity/workspace/HOME/TMP/isolation/canary/assignment inputs.
+The runner still has no retained stdout/stderr/result file producer for the
+shared START contract. A caller cannot fill those paths with invented names.
+No factory, public bound CLI, profile, installed service or provider is enabled.

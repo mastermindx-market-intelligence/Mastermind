@@ -1,7 +1,8 @@
 {
   "source_sha256": "c6b4292cdb7d106d5b376587f29276da1550e5eee02268f479abd7ad2ea61189",
-  "candidate_sha256": "0055ccc7b98df0fd5948a38fac43a3ffe7a7fc2462e355cc6ce52feb0273c0cd",
+  "candidate_sha256": "1384dcb7ddf06f388c05342f5328b624edbd0220bbfb8b447fec826340c626f8",
   "classification": "SOURCE_ONLY_UNINSTALLED",
-  "patch_sha256": "f42f1211619097b36714f120c5768b03e297ae62a3f775a861c1dafcbd40e7f4",
-  "validation": "19 affected ownership/async checks PASS; 9 executor parity checks PASS; narrow source review approved; original lease through assignment ACK remains required."
+  "patch_sha256": "a82bb3b26c36be65dc611c8ac47fe8ee4d4e0bafc3e388febaf925879ab3dcf0",
+  "validation": "79 affected source checks PASS, including nested 76 early receipt/identity checks; inert/local-child mechanics only, SOURCE_ONLY_UNINSTALLED",
+  "parent_delta": "Original invocation/start time/nonce retained on live handle, prepared descriptor and original request/carrier prebound; once-only private START retention mechanics. Full attestation and host issuer remain outside this delta."
 }

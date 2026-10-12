@@ -45,7 +45,7 @@
  
  
  def cleanup_receipt_is_proven(value: Mapping[str, Any]) -> bool:
-@@ -958,8 +967,227 @@
+@@ -958,8 +967,236 @@
      return None
  
  
@@ -107,7 +107,13 @@
 +def _write_immutable_launch_receipt(path, record):
 +    payload = (json.dumps(record, sort_keys=True, separators=(",", ":"),
 +                          ensure_ascii=True, allow_nan=False) + "\n").encode()
-+    if len(payload) > 8192:
++    _write_immutable_owned_bytes(path, payload, maximum=8192)
++
++
++def _write_immutable_owned_bytes(path, payload, *, maximum):
++    # Same no-replace carrier for early receipts and complete START retention.
++    # A retained inode is observation, never restart admission or Control authority.
++    if type(payload) is not bytes or not payload or len(payload) > maximum:
 +        raise LaneRuntimeError("launch_receipt_too_large")
 +    parent = _launch_receipt_directory(path)
 +    directory_fd = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
@@ -118,7 +124,7 @@
 +        actual = os.fstat(directory_fd)
 +        if (actual.st_dev, actual.st_ino) != (parent.st_dev, parent.st_ino):
 +            raise LaneRuntimeError("launch_receipt_directory_moved")
-+        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL
++        fd = os.open(temporary, os.O_RDWR | os.O_CREAT | os.O_EXCL
 +                     | getattr(os, "O_NOFOLLOW", 0), 0o600, dir_fd=directory_fd)
 +        _write_all(fd, payload)
 +        os.fsync(fd)
@@ -135,6 +141,9 @@
 +        written = os.fstat(fd)
 +        if (published.st_dev, published.st_ino) != (written.st_dev, written.st_ino):
 +            raise LaneRuntimeError("launch_receipt_inode_moved")
++        os.lseek(fd, 0, os.SEEK_SET)
++        if os.read(fd, len(payload) + 1) != payload:
++            raise LaneRuntimeError("launch_receipt_readback_changed")
 +    except OSError as exc:
 +        raise LaneRuntimeError("launch_receipt_publication_failed") from exc
 +    finally:
@@ -274,7 +283,7 @@
      *,
      cwd: str | os.PathLike[str] | None = None,
      timeout: float,
-@@ -973,6 +1201,9 @@
+@@ -973,6 +1210,9 @@
      timeout_returncode: int = -9,
      capture_limit_bytes: int = DEFAULT_CAPTURE_LIMIT_BYTES,
      receipt_diagnostics=None,
@@ -284,7 +293,7 @@
  ) -> OwnedProcessResult:
      try:
          timeout = float(timeout)
-@@ -987,81 +1218,107 @@
+@@ -987,81 +1227,117 @@
      if not 64 <= int(capture_limit_bytes) <= MAX_CAPTURE_LIMIT_BYTES:
          raise LaneRuntimeConfigError("capture_limit_out_of_bounds")
      safe_label = _safe_label(label)
@@ -296,6 +305,15 @@
 +        raise LaneRuntimeError("launch_context_digest_invalid")
 +    launch_receipt_sha256 = None
 +    input_bytes = input_text.encode("utf-8") if input_text is not None else None
++    # Retain provenance before opening the exec gate or attempting Popen.
++    # Never retain secret values; the nonce is minted once by this owner.
++    _owner.launch_nonce = os.urandom(16).hex()
++    _owner._invocation = dict(
++        command=command if isinstance(command, str) else list(command),
++        cwd=os.fspath(cwd) if cwd is not None else None, shell=shell,
++        environment_keys=sorted(env) if env is not None else None,
++        environment_projection_sha256=_nonsecret_environment_sha256(env),
++        prompt_sha256=hashlib.sha256(input_bytes).hexdigest() if input_bytes is not None else None)
 +    gate_read = gate_write = None
 +    launch_command = command
 +    extra_popen = {}
@@ -310,6 +328,7 @@
 +        extra_popen["pass_fds"] = (gate_read,)
      started_at = _utc_now()
 -    input_bytes = input_text.encode("utf-8") if input_text is not None else None
++    _owner.started_at = started_at
 +    _owner.spawn_attempted = True
      try:
          proc = subprocess.Popen(
@@ -445,7 +464,7 @@
  
      timed_out = False
      cleanup: dict[str, Any] = {
-@@ -1084,7 +1341,43 @@
+@@ -1084,7 +1360,43 @@
      runtime_failure_code: str | None = None
      try:
          try:
@@ -490,7 +509,7 @@
              if wait_outcome == "completed":
                  returncode = int(proc.returncode or 0)
                  try:
-@@ -1127,6 +1420,8 @@
+@@ -1127,6 +1439,8 @@
              )
              raise
      finally:
@@ -499,7 +518,7 @@
          _clear_current(proc)
          capture_deadline = time.monotonic() + max(
              0.25, min(2.0, terminate_grace + 0.25)
-@@ -1136,11 +1431,17 @@
+@@ -1136,11 +1450,17 @@
          stdin_complete = stdin_thread is None or (
              not stdin_thread.is_alive() and bool(stdin_state.get("complete"))
          )
@@ -517,7 +536,7 @@
          )
          cleanup = _mark_stream_state_unproven(
              cleanup,
-@@ -1169,6 +1470,12 @@
+@@ -1169,6 +1489,12 @@
                  {
                      "schema": PROCESS_RECEIPT_SCHEMA,
                      **diagnostic_fields,
@@ -530,13 +549,24 @@
                      "label": safe_label,
                      "pid": proc.pid,
                      "pgid": pgid,
-@@ -1200,6 +1507,263 @@
+@@ -1200,6 +1526,354 @@
          stdout_truncated=stdout_truncated,
          stderr_truncated=stderr_truncated,
      )
 +
 +
 +_EXECUTION_OWNER = None
++
++
++def _nonsecret_environment_sha256(environment):
++    if environment is None:
++        return None
++    # Credential values are never retained or hashed. This digest binds only
++    # the existing preparer's non-secret model/endpoint/HOME/TMP controls.
++    projection = {k: v for k, v in environment.items() if not re.search(
++        r'api.?key|authorization|credential|secret|token|password', k, re.I)}
++    return hashlib.sha256(json.dumps(projection, sort_keys=True,
++        separators=(',', ':'), ensure_ascii=False, allow_nan=False).encode()).hexdigest()
 +
 +
 +class OwnedExecution:
@@ -562,10 +592,19 @@
 +        self.result = None
 +        self.failure = None
 +        self._settling = False
++        self.started_at = None
++        self.launch_nonce = None
++        self._invocation = None
++        self._start_publication_attempted = False
++        self._start_record_sha256 = None
 +
 +    @property
 +    def process_identity(self):
 +        return dict(self._identity) if self._identity is not None else None
++
++    @property
++    def invocation(self):
++        return json.loads(json.dumps(self._invocation)) if self._invocation is not None else None
 +
 +
 +def _require_owned_execution(owner):
@@ -577,6 +616,77 @@
 +        return
 +    if _EXECUTION_OWNER is not owner:
 +        raise LaneRuntimeError("owned_process_handle_stale")
++
++
++def retain_owned_start_bytes(owner, payload):
++    """Retain once on THIS live handle's prebound original carrier.
++
++    This is a publication mechanic, not an attestation or admission producer.
++    The embedding original owner must first run both full START validators with
++    independently qualified inputs. No receipt can recreate this live handle.
++    Failure keeps the original finisher and puts its existing lease in hold.
++    """
++    _require_owned_execution(owner)
++    if owner._start_publication_attempted:
++        raise LaneRuntimeError("owned_start_publication_already_attempted")
++    owner._start_publication_attempted = True
++    try:
++        if owner.process is None or owner.process.poll() is not None or owner.result is not None:
++            raise LaneRuntimeError("owned_start_process_not_live")
++        context = getattr(owner, '_original_start_context', None)
++        path = getattr(owner, '_original_start_receipt_path', None)
++        if type(context) is not dict or not isinstance(path, Path):
++            raise LaneRuntimeError("owned_start_original_carrier_required")
++        if type(payload) is not bytes or not 0 < len(payload) <= 65536:
++            raise LaneRuntimeError("owned_start_record_invalid")
++        record = json.loads(payload)
++        if (type(record) is not dict or set(record) != {'schema', 'contract_name',
++                'run_id', 'adapter_id', 'request_sha256', 'physical_binding_sha256',
++                'start_result', 'retained_at'}
++                or record['schema'] != 'mastermind.fabric_owned_complete_start/v1'
++                or record['adapter_id'] != 'attended-fabric'
++                or json.dumps(record, sort_keys=True, separators=(',', ':'),
++                    ensure_ascii=False, allow_nan=False).encode() != payload):
++            raise LaneRuntimeError('owned_start_record_invalid')
++        result = record['start_result']
++        ref, att = result['process_ref'], result['launch_attestation']
++        identity = owner.process_identity
++        invocation = owner.invocation
++        preparation = getattr(owner, '_original_preparation', None)
++        if (preparation is None or invocation['environment_projection_sha256'] !=
++                _nonsecret_environment_sha256(preparation.environment)):
++            raise LaneRuntimeError('owned_start_prepared_environment_changed')
++        expected_ref = dict(run_id=owner.label, pid=identity['pid'], pgid=identity['pgid'],
++            session_id=identity['session_id'], boot_session_id=identity['boot_id'],
++            process_start_identity=identity['process_start_identity'],
++            launch_nonce=owner.launch_nonce, started_at=owner.started_at,
++            **{k: identity[k] for k in ('effective_uid', 'effective_gid', 'real_uid', 'real_gid')})
++        expected_identity = {k: identity[k] for k in ('pid', 'pgid', 'session_id',
++            'boot_id', 'effective_uid', 'effective_gid', 'real_uid', 'real_gid')}
++        expected_identity['start_identity'] = identity['process_start_identity']
++        if (record['run_id'] != owner.label
++                or record['request_sha256'] != context['request_sha256']
++                or record['physical_binding_sha256'] != context['physical_binding_sha256']
++                or result['adapter_id'] != 'attended-fabric'
++                or result['binding'] != context['binding']
++                or result['physical_binding_sha256'] != context['physical_binding_sha256']
++                or result['request_sha256'] != context['request_sha256']
++                or any(ref.get(k) != v for k, v in expected_ref.items())
++                or att['launch_nonce'] != owner.launch_nonce or att['process_identity'] != expected_identity
++                or invocation['shell'] is not False
++                or att['rendered_argv'] != invocation['command']
++                or att['environment_keys'] != invocation['environment_keys']
++                or att['prompt_sha256'] != invocation['prompt_sha256']
++                or att['workspace_identity']['path'] != invocation['cwd']):
++            raise LaneRuntimeError("owned_start_original_invocation_changed")
++        _write_immutable_owned_bytes(path, payload, maximum=65536)
++        owner._start_record_sha256 = hashlib.sha256(payload).hexdigest()
++        return owner._start_record_sha256
++    except BaseException:
++        lease = getattr(owner, '_original_lease', None)
++        if lease is not None:
++            lease.hold_for_reconciliation('owned_start_publication_unconfirmed')
++        raise
 +
 +
 +def _begin_owned_process(command, *, _main_thread, **kwargs):

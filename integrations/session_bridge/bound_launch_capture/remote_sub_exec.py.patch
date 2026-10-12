@@ -8,17 +8,19 @@
  import hashlib
  from contextlib import ExitStack
  import os
-@@ -27,6 +28,9 @@
+@@ -27,6 +28,11 @@
      load_runtime_config,
      parse_bounded_seconds,
      run_owned_process,
 +    begin_owned_process,
 +    abort_owned_process,
 +    start_owned_process_finisher,
++    retain_owned_start_bytes,
++    _launch_receipt_directory,
  )
  
  
-@@ -110,6 +114,137 @@
+@@ -110,6 +116,154 @@
          contract=contract,manifest=manifest)
  
  
@@ -145,9 +147,26 @@
 +    must separately observe the independently pinned executed image and retain
 +    complete launch/assignment evidence before exposing native START.
 +    """
++    from control_plane.executive_fabric_bridge_broker import start_request_sha256
++    original = json.loads(json.dumps(kwargs['payload'], ensure_ascii=False, allow_nan=False))
 +    prepared, arguments, at_boundary = _prepare_reserved_attended_under_lease(**kwargs)
++    if start_request_sha256(original) != prepared.request_sha256:
++        raise LaneRuntimeError('owned_start_original_request_changed')
++    # The original controller selects the carrier before any spawn. Existing
++    # bytes are unknown prior publication, never positive first-use proof.
++    start_path = Path(kwargs['receipt']).with_suffix('.start.json')
++    if not start_path.is_absolute():
++        raise LaneRuntimeError('owned_start_original_carrier_required')
++    _launch_receipt_directory(start_path)
++    if os.path.lexists(start_path):
++        raise LaneRuntimeError('owned_start_original_carrier_exists')
 +    owner = _begin_lease_process(lease=kwargs['lease'], state=kwargs['state'],
 +        key=kwargs['key'], receipt=kwargs['receipt'], arguments=arguments, at_boundary=at_boundary)
++    owner._original_preparation = prepared.descriptor
++    owner._original_start_receipt_path = start_path
++    owner._original_start_context = dict(binding=original['binding'],
++        physical_binding_sha256=original['physical_binding_sha256'],
++        request_sha256=prepared.request_sha256)
 +    return owner, prepared.validation_commands
 +
 +
@@ -156,7 +175,7 @@
  def _execute(argv: list[str], state: dict) -> int:
      if len(argv) != 6:
          return _fail(
-@@ -134,6 +269,21 @@
+@@ -134,6 +288,21 @@
          except (ImportError, ValueError, TypeError, KeyError, RecursionError):
              return _fail("ARTIFACT_DELIVERY_CONTRACT_REFUSED", 65)
      artifact_failure = False
@@ -178,7 +197,7 @@
  
      # Tilde belongs to this host, not to the controller that selected it.
      if cwd.startswith("~") and cwd != "~" and not cwd.startswith("~/"):
-@@ -230,34 +380,12 @@
+@@ -230,34 +399,12 @@
                          or not os.access(guard, os.X_OK)):
                      return _fail("FABRIC_CPU_STRESS_GUARD_UNAVAILABLE", 78)
                  child_env["PATH"] = str(here) + os.pathsep + child_env.get("PATH", "/usr/bin:/bin")
@@ -219,7 +238,7 @@
  
              display_stdout = result.stdout
              if mode == "grok":
-@@ -294,6 +422,9 @@
+@@ -294,6 +441,9 @@
                  except (OSError, ValueError, TypeError, KeyError, RecursionError):
                      artifact_failure = True
  
