@@ -95,6 +95,7 @@ def test_json_command_alone_is_not_internal_authority():
 
 def test_owner_without_concrete_start_cannot_fall_back_to_status_or_generic_execute(tmp_path, monkeypatch):
     owner = Backend()
+    owner.start_owned = None
     with pytest.raises(Exception, match="EFFECT_UNKNOWN"):
         execute(broker(tmp_path, monkeypatch, owner), request())
     assert owner.calls == []
