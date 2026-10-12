@@ -1785,6 +1785,7 @@ def run_canary(
             expected_config_digest=profile.expected_config_digest,
             authority_policy_hash=_CANARY_AUTHORITY_POLICY_HASH,
             write_capable=profile.write_capable,
+            allowed_write_paths=(str(adapter.workspace_root),) if profile.write_capable else (),
         )
 
         epoch = SessionEpochRef(session_epoch_id, attempt_id, CANARY_WORKER_ID, 1)

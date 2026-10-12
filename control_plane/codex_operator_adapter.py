@@ -1225,11 +1225,11 @@ class CodexOperatorAdapter:
             and requested.capabilities == bound_profile.capability_manifest(
                 harness_binary_digest=self.binary_digest
             )
-            # App Server workspace-write itself is the only writable scope.
-            # Extra arbitrary paths are not projected or widened here.
-            and requested.allowed_write_paths in (
-                (), (str(self.workspace_root),)
-            )
+            # A workspace-write sandbox covers the ENTIRE workspace root.
+            # Require an explicit full-root grant; empty or narrower Job path
+            # grants cannot silently become workspace-wide write authority.
+            # More granular writable Jobs need a separately qualified executor.
+            and requested.allowed_write_paths == (str(self.workspace_root),)
         )
         if requested.sandbox_policy != "read-only" and not rich_workspace_write:
             reasons.append("sandbox_not_read_only")
