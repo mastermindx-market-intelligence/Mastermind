@@ -55,3 +55,28 @@ The isolated test \`test_urgency_selects_matching_account_in_actual_atomic_claim
 5. The F04 incident \`mo-a-f04-preinvocation-census-grok-v1\` remains a distinct **started terminal error with census timeout and proven cleanup**, not quota evidence. No replay, lease settlement, runtime file modifications or delegated new ownership is part of this change.
 
 **Capability state:** old pool-level R31 preference PARTIAL/proven for read-only Grok; **new GLM account-level broker source BUILT_NOT_PROVEN** (offline SQLite integration passed); live installation/actual provider quota burn-down NOT_PROVEN.
+
+
+## Source bundle v3 — paired windows and fail-closed preflight
+
+This **newer source-only candidate** supersedes the earlier 271-pass verification. It does not alter or claim installation authority over the actual M2 runtime.
+
+**Pool/claim consistency repaired in source:** The extra patch at ops/native_fabric/patches/pick_glm_paired_window_urgency_20261012.patch adds same-account, provider-authoritative, fresh 5-hour allowance validation before a GLM weekly reset can make that *pool* urgent. This matches the already-published broker claim-time per-account guard. Exhausted, stale, invalid, mismatched, duplicate or unknown windows confer no urgency. Normal task suitability remains unchanged.
+
+**Consolidated test patch:** ops/native_fabric/patches/test_r31_paired_quota_truth_20261012.patch repairs and expands the incumbent test fixture (43 R31 tests passing). It supersedes the earlier, narrower test_r31_quota_truth_20261012.patch. Do not apply both.
+
+**Exact five-patch application order**, after the actual live source/install owner reconciles custody: fabric_task_expiry_host_select_20261012_v2.patch; pick_exact_model_selection_20261012.patch; pick_glm_paired_window_urgency_20261012.patch; lease_broker_glm_expiry_account_20261012.patch; test_r31_paired_quota_truth_20261012.patch. All reside under ops/native_fabric/patches/.
+
+**Read-only source qualification tool:** ops/native_fabric/verify_selector_source_bundle.py, with manifest ops/native_fabric/selector_source_bundle_20261012.json. It accepts explicit --ext-root, --bundle-root and --manifest. It verifies source and patch hashes, replays every patch ONLY in a private temporary directory, checks resulting SHA256s, rechecks unchanged source files, then returns QUALIFIED_SOURCE_ONLY. There is no live install, provider call, lease, secret, launch or claim capability. A source moving during preflight refuses.
+
+Expected **patched output SHA256**:
+- ext/fabric_task.py: 69e18648e8a1243be23c6d84b1c944c6f98e5804b1281182fa380a9af4b6eed9
+- ext/pick.py (both combined patches): 0037a72065ae6efe1e780e1e962aa6434a386e2fdccdb7954acb15b54990cd15
+- ext/lease_broker.py: 1ecabe7b1fb776987d9b8d0663b8e97f18897a0e8968b64690fa3e1968b975b3
+- ext/tests/test_r31_glm_burn_down.py: 30da09d2964c0e3a7be5840bfa5ac0f6c68fe255f28b8fb6c526db03cf5c3203
+
+**Latest offline acceptance:** 285 integrated tests passed in 13.84s on M2 against all five patches applied to exact installed-source snapshots. Separately, 59 native transport/capability/quota tests and seven subtests passed. The old original Broker was RED on the two-account real SQLite claimant falsifier; the patched candidate was GREEN. No live worker, provider, original F04 operation or installed broker changed.
+
+**Read-only preflight evidence:** healthy source/patch bundle: QUALIFIED_SOURCE_ONLY, 4 source files and 5 patches verified. Four isolated negative cases all returned rc78: altered source (SOURCE_DRIFT), altered patch (PATCH_DRIFT), symlink source (SOURCE_NOT_BOUNDED_REGULAR), wrong patched result SHA (PATCH_RESULT_DRIFT). The installed source SHA values remained unchanged.
+
+**Remaining acceptance:** exact current source writer/install custody; managed installation and separate installed readback; trusted GLM quota-cache producer/claim/usage attestation from a real admitted bounded child; correct original-parent result consumption, Auth0/native gates if applicable, independent code review and exact-head CI. This bundle alone does not prove production use of expiring subscriptions.
