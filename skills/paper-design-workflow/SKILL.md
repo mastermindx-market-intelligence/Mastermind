@@ -16,6 +16,20 @@ the generic file/process tools that happened to be visible first.
 For an attended ChatGPT Paper task, discover the **exact Paper action family** on the current tool
 surface before making a capability claim.
 
+**Do not confuse default active-file context with exact-target serviceability.** A `paper_inspect`
+result of `DOCUMENT_UNAVAILABLE` means only that the adapter could not resolve its default/foreground
+context. When the intended exact `fileId` is already known, this is **not** a Paper outage and is not
+an edit blocker by itself. On a direct Business route, make one read-only
+`paper_read(tool="get_basic_info", arguments={"fileId": exact_id})`; a successful explicit read
+bootstraps the guarded target snapshot (and current schema receipt) used by `paper_prepare`/`paper_edit`
+even while another file is user-active or no default active context exists. On a legacy Studio route,
+a successful explicit-file read proves that target is readable even if `paper_inspect` failed, but do
+not invent a target snapshot or claim write readiness unless that carrier actually returns the required
+guard. Report the narrow state (`DEFAULT_CONTEXT_UNAVAILABLE`, `EXACT_TARGET_READABLE`, etc.) instead
+of the blanket claim “Paper is broken.” A transport error such as an MCP 404/timeout is likewise a
+transport observation, not evidence that Paper Desktop, login, the document, or the write schema is
+broken.
+
 **Business direct route.** After explicit enrollment and accepted scratch-file proof, use the private
 Mastermind Paper app as this workspace's normal Paper carrier. Read
 `docs/PAPER_DIRECT_CHATGPT.md` for its exact staged/accepted tool set. Never infer enrollment from
@@ -96,11 +110,12 @@ than acquiring a file-wide or page-wide lease.
 
 ## Inspect, design and verify
 
-1. Inspect the active file and existing artboards. Confirm the intended document.
-   If there is no stable ID or artboard anchor, stop at the typed binding refusal;
-   do not guess a file. Keep the user from switching the active document mid-task.
-   Re-inspect immediately before the first mutation because another UI/client may have changed the
-   active page or file after an earlier capability probe.
+1. Resolve the intended exact document and existing artboards. If there is no stable ID or artboard
+   anchor, stop at the typed binding refusal; do not guess a file. For explicit-file direct routes,
+   user-active focus is not an ownership or availability requirement and may change concurrently;
+   bootstrap/re-read the exact target by `fileId`. For legacy current-context operations, re-inspect
+   immediately before the first mutation because another UI/client may have changed the active page
+   or file after an earlier capability probe.
 2. Read the live catalog once for exact upstream schemas. Never guess Paper tool
    argument names. Prefer existing tokens and components over arbitrary styles.
 3. Plan small, useful visual changes. Get a fresh snapshot guard immediately before each bounded

@@ -90,8 +90,10 @@ class CooInstalledSource:
 def validate_control_coo(raw):
     """Explicit opt-in on the incumbent Control configuration; no new service."""
     from integrations.executive_mcp.web_ceo import WEB_CEO_V2_PROFILE
+    from integrations.executive_mcp.web_ceo_v3 import WEB_CEO_V3_PROFILE
     arm = raw.get("coo_principal_armed", False)
-    if type(arm) is not bool or (arm and (raw.get("executive_mcp_profile") != WEB_CEO_V2_PROFILE
+    supported_profiles = {WEB_CEO_V2_PROFILE, WEB_CEO_V3_PROFILE}
+    if type(arm) is not bool or (arm and (raw.get("executive_mcp_profile") not in supported_profiles
             or not {"workspace_acquisition", "workspace_resource_policy", "workspace_control_room", "ceo_ingress_app_peer_uid"} <= set(raw))):
         _refuse()
     return arm

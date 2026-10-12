@@ -1583,41 +1583,136 @@ def test_fresh_status_uid_sweep_proves_idle_absence(tmp_path: Path) -> None:
     asyncio.run(scenario())
 
 
-def test_remote_controller_absent_unknown_run_captures_fresh_status_sweep() -> None:
-    sweep = FakeSweeper().sweep("status_absence").to_dict()
+def _missing_owner_fixture():
+    from types import SimpleNamespace
+    from copy import deepcopy
+
+    startup = FakeSweeper().sweep("broker_startup").to_dict()
+    startup.update(worker_uid=451, broker_pid=42419,
+                   observed_at="2026-08-11T00:00:01+00:00")
+    fresh = FakeSweeper().sweep("status_absence").to_dict()
+    fresh.update(worker_uid=451, broker_pid=42419,
+                 observed_at="2026-08-11T00:00:02+00:00")
+    status = dict(adapter_id="codex-cli", worker_uid=451, broker_pid=42419,
+                  active_run_id=None, active_operator_attempt_id=None,
+                  active_operator_generation_id=None, starting=False,
+                  validation_busy=False, status_sweep_busy=False,
+                  quarantined_reason=None, startup_sweep=startup, status_sweep=fresh)
 
     class Client:
-        def __init__(self) -> None:
-            self.calls: list[tuple[str, dict]] = []
+        error_code = "BrokerRunNotFound"
+        def __init__(self):
+            self.calls = []
+            self.status = status
 
         def request_sync(self, operation, payload):
-            self.calls.append((operation, payload))
-            if payload.get("run_id"):
-                from control_plane.executive_worker_broker import RemoteBrokerError
-
-                raise RemoteBrokerError("BrokerStateError", "unknown run")
+            self.calls.append((operation, dict(payload)))
+            assert operation == "status"
+            if "run_id" in payload:
+                raise RemoteBrokerError(self.error_code, "run unavailable")
             assert payload == {"fresh_uid_sweep": True}
-            return {
-                "active_run_id": None,
-                "starting": False,
-                "validation_busy": False,
-                "status_sweep_busy": False,
-                "quarantined_reason": None,
-                "status_sweep": sweep,
-            }
+            return deepcopy(self.status)
 
-    attempt = type("Attempt", (), {"attempt_id": "run-absent"})()
+    attempt = SimpleNamespace(attempt_id="run-missing",
+                              started_at="2026-08-11T00:00:00+00:00")
     client = Client()
-    controller = RemoteWorkerProcessController(client)  # type: ignore[arg-type]
+    return client, attempt, RemoteWorkerProcessController(client, expected_worker_uid=451)
 
+
+def test_remote_controller_missing_owner_requires_fresh_startup_and_absence():
     from control_plane.executive_supervisor import ProcessPresence
 
-    assert controller.presence(attempt) is ProcessPresence.ABSENT
-    assert controller.uid_sweep_receipt(attempt)["reason"] == "status_absence"
+    client, attempt, controller = _missing_owner_fixture()
+    assert controller.presence(attempt) is ProcessPresence.MISSING
+    assert controller.absence_verified(attempt) is True
+    controller.terminate(attempt)  # no cancel or signal for proven owner loss
+    receipt = controller.uid_sweep_receipt(attempt)
+    assert receipt == {
+        **client.status["status_sweep"],
+        "preceding_broker_startup_sweep": client.status["startup_sweep"],
+    }
     assert client.calls == [
-        ("status", {"run_id": "run-absent"}),
+        ("status", {"run_id": "run-missing"}),
         ("status", {"fresh_uid_sweep": True}),
-    ]
+    ] * 3
+    # Repeat absence must read the new observation, not its passing cache.
+    client.status["status_sweep"]["passed"] = False
+    assert controller.absence_verified(attempt) is False
+
+
+@pytest.mark.parametrize("path,value", [
+    ("adapter_id", "claude-code"), ("worker_uid", 452), ("worker_uid", True),
+    ("broker_pid", 0), ("broker_pid", True),
+    ("active_run_id", "other"), ("active_operator_attempt_id", "other"),
+    ("active_operator_generation_id", "other"), ("starting", True),
+    ("validation_busy", True), ("status_sweep_busy", True),
+    ("quarantined_reason", "uncertain"),
+    ("status_sweep.worker_uid", 452), ("status_sweep.broker_pid", 42418),
+    ("status_sweep.reason", "run_terminal"), ("status_sweep.passed", False),
+    ("status_sweep.observed_at", "invalid"),
+    ("status_sweep.observed_at", "2026-08-11T00:00:00+00:00"),
+    ("status_sweep.observed_at", "2026-08-11T00:00:02"),
+    ("startup_sweep.worker_uid", 452), ("startup_sweep.broker_pid", 42418),
+    ("startup_sweep.reason", "status_absence"), ("startup_sweep.passed", False),
+    ("startup_sweep.observed_at", "invalid"),
+    ("startup_sweep.observed_at", "2026-08-11T00:00:00+00:00"),
+    ("startup_sweep.observed_at", "2026-08-11T00:00:03+00:00"),
+    ("startup_sweep.observed_at", "2026-08-11T00:00:01"),
+    ("startup_sweep", None), ("status_sweep", None),
+])
+def test_remote_controller_missing_owner_rejects_foreign_stale_or_busy_proof(path, value):
+    from control_plane.executive_supervisor import ProcessPresence
+
+    client, attempt, controller = _missing_owner_fixture()
+    target = client.status
+    keys = path.split(".")
+    for key in keys[:-1]:
+        target = target[key]
+    target[keys[-1]] = value
+    assert controller.presence(attempt) is ProcessPresence.UNKNOWN
+    with pytest.raises(BrokerStateError, match="no restart-cancellation"):
+        controller.uid_sweep_receipt(attempt)
+
+
+@pytest.mark.parametrize("code", ["BrokerStateError", "BrokerProtocolError",
+                                   "PeerAuthorizationError", "InternalBrokerError"])
+def test_remote_controller_generic_error_cannot_prove_missing(code):
+    from control_plane.executive_supervisor import ProcessPresence
+
+    client, attempt, controller = _missing_owner_fixture()
+    client.error_code = code
+    assert controller.presence(attempt) is ProcessPresence.UNKNOWN
+    assert client.calls == [("status", {"run_id": attempt.attempt_id})]
+
+
+def test_remote_controller_missing_owner_requires_uid_pin():
+    from control_plane.executive_supervisor import ProcessPresence
+
+    client, attempt, _controller = _missing_owner_fixture()
+    assert RemoteWorkerProcessController(client).presence(attempt) is ProcessPresence.UNKNOWN
+    assert client.calls == [("status", {"run_id": attempt.attempt_id})]
+
+
+def test_unknown_exact_run_has_distinct_broker_error(tmp_path):
+    from control_plane.executive_worker_broker import BrokerRunNotFound
+
+    async def scenario():
+        broker, _adapter, _sweeper, peer, _spec = _fixture(tmp_path)
+        broker.peer_resolver = lambda _socket: peer
+        with pytest.raises(BrokerRunNotFound):
+            await broker.execute(_request("status", {"run_id": "run-absent"}), peer=peer)
+        socket_path = _socket_path()
+        server = await asyncio.start_unix_server(broker.handle_connection,
+                                                path=str(socket_path))
+        try:
+            with pytest.raises(RemoteBrokerError) as caught:
+                await WorkerBrokerClient(socket_path).request("status", {"run_id": "run-absent"})
+            assert caught.value.code == "BrokerRunNotFound"
+        finally:
+            server.close()
+            await server.wait_closed()
+            socket_path.unlink(missing_ok=True)
+    asyncio.run(scenario())
 
 
 def test_remote_controller_retains_terminal_and_fresh_absence_sweeps(
@@ -3453,3 +3548,116 @@ def test_remote_collection_refuses_foreign_result_identity(
         assert spec.run_id not in remote._uid_sweeps
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("field", [
+    "adapter_id", "broker_pid", "worker_uid", "active_run_id",
+    "active_operator_attempt_id", "active_operator_generation_id",
+    "starting", "validation_busy", "status_sweep_busy", "quarantined_reason",
+])
+def test_missing_owner_requires_complete_status(field):
+    from control_plane.executive_supervisor import ProcessPresence
+
+    client, attempt, controller = _missing_owner_fixture()
+    del client.status[field]
+    assert controller.presence(attempt) is ProcessPresence.UNKNOWN
+
+
+@pytest.mark.parametrize("status", [None, {}, {"run": {}}, {"run": {"run_id": "other"}}])
+def test_unbound_cleanup_malformed_exact_status_never_cancels(status):
+    calls = []
+    class Client:
+        def request_sync(self, operation, payload):
+            calls.append((operation, dict(payload)))
+            return status
+    controller = RemoteWorkerProcessController(Client())
+    with pytest.raises(BrokerProtocolError, match="exact run status is malformed"):
+        controller.cleanup_unbound_run("run-unbound")
+    assert calls == [("status", {"run_id": "run-unbound"})]
+
+
+@pytest.mark.parametrize("orchestration", [False, True])
+def test_remote_start_preserves_shared_launch_contract(tmp_path, orchestration):
+    from control_plane.executive_supervisor import OrchestrationLaunchSpec
+    from control_plane.worker_execution_contract import worker_launch_spec_sha256
+
+    broker, adapter, sweeper, peer, value = _fixture(tmp_path)
+    base = _launch_spec_from_wire(value, broker.policy)
+    legacy_wire = _launch_spec_to_json(base)
+    legacy_hash = worker_launch_spec_sha256(base)
+    assert "effective_grant_digest" not in legacy_wire
+    assert "subscription_canary_claim" not in legacy_wire
+    spec = (
+        OrchestrationLaunchSpec(
+            **{field.name: getattr(base, field.name) for field in dataclasses.fields(base)},
+            effective_grant_digest="a" * 64,
+        )
+        if orchestration else base
+    )
+    wire = _launch_spec_to_json(spec)
+    restored = _launch_spec_from_wire(wire, broker.policy)
+    assert type(restored) is type(spec)
+    assert restored == spec
+    assert worker_launch_spec_sha256(restored) == worker_launch_spec_sha256(spec)
+    if orchestration:
+        assert worker_launch_spec_sha256(restored) != legacy_hash
+    else:
+        assert wire == legacy_wire
+
+    class Client:
+        async def request(self, operation, payload):
+            response = await broker.execute(_request(operation, payload), peer=peer)
+            return response["result"]
+
+    async def scenario():
+        broker.initialize()
+        remote = RemoteCodexWorkerAdapter(Client())
+        ref = await remote.start(spec)
+        assert adapter.spec == spec
+        assert type(adapter.spec) is type(spec)
+        assert "effective_grant_digest" not in remote.launch_attestation(ref)
+        assert sweeper.calls == ["broker_startup"]
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("digest", [None, "", True, 7, [], "A" * 64, "g" * 64, "a" * 63, "a" * 65])
+def test_broker_rejects_invalid_grant_digest_before_start(tmp_path, digest):
+    broker, adapter, _sweeper, peer, value = _fixture(tmp_path)
+    value["effective_grant_digest"] = digest
+    with pytest.raises(BrokerProtocolError, match="exact lowercase SHA-256"):
+        asyncio.run(broker.execute(
+            _request("start", {"launch_spec": value, "validation_commands": []}),
+            peer=peer,
+        ))
+    assert adapter.spec is None
+    assert broker._starting is False
+    assert broker._active_run_id is None
+    assert broker._runs == {}
+
+
+def test_orchestration_spec_still_rejects_unknown_fields_before_start(tmp_path):
+    broker, adapter, _sweeper, peer, value = _fixture(tmp_path)
+    value.update(effective_grant_digest="a" * 64, effective_grant={"authorities": ["SERVICE_CONTROL"]})
+    with pytest.raises(BrokerProtocolError, match="unknown fields"):
+        asyncio.run(broker.execute(
+            _request("start", {"launch_spec": value, "validation_commands": []}),
+            peer=peer,
+        ))
+    assert adapter.spec is None
+    assert broker._runs == {}
+
+
+@pytest.mark.parametrize("digest", ["", "A" * 64, "a" * 63, "a" * 65, None])
+def test_local_orchestration_launch_spec_rejects_invalid_digest(tmp_path, digest):
+    from control_plane.worker_execution_contract import (
+        OrchestrationLaunchSpec, WorkerRecoveryContractError,
+    )
+
+    broker, _adapter, _sweeper, _peer, value = _fixture(tmp_path)
+    base = _launch_spec_from_wire(value, broker.policy)
+    with pytest.raises(WorkerRecoveryContractError, match="exact lowercase SHA-256"):
+        OrchestrationLaunchSpec(
+            **{field.name: getattr(base, field.name) for field in dataclasses.fields(base)},
+            effective_grant_digest=digest,
+        )

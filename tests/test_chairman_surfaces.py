@@ -62,6 +62,25 @@ class FakeRunner:
         return dict(self._default)
 
 
+class FakePTYRunner:
+    """Records PTY calls, including cwd, and returns a native-style receipt."""
+
+    def __init__(self, responses=None):
+        self.calls: list[tuple[list[str], float, str | None]] = []
+        self._responses = list(responses or [])
+
+    def __call__(self, argv, *, timeout: float = 20.0, cwd=None):
+        self.calls.append((list(argv), timeout, cwd))
+        if self._responses:
+            return self._responses.pop(0)
+        return {
+            "code": 0,
+            "stdout": f"Opening session {argv[-1]} in Claude Desktop\r\n",
+            "stderr": "",
+            "timed_out": False,
+        }
+
+
 def never_called_runner():
     def _boom(argv, *, timeout=20.0):  # pragma: no cover - only reached on regression
         raise AssertionError(f"runner must not be invoked; got argv={argv!r}")
@@ -239,6 +258,114 @@ def test_falsifier_claude_code_session_id_unsafe_token_refused(bad, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Claude Code -> Claude Desktop native exact-session handoff
+# ---------------------------------------------------------------------------
+
+
+def _bridge_cli(tmp_path: Path) -> Path:
+    path = tmp_path / "claude-desktop-bridge"
+    path.write_text("fixture", encoding="utf-8")
+    path.chmod(0o700)
+    return path
+
+
+def test_claude_code_desktop_handoff_verified_and_private(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    store = tmp_path / "claude-projects"
+    binding = _claude_code_binding(project_dir=str(project))
+    session_id = binding["locator"]["session_id"]
+    _write_claude_transcript(store, str(project), session_id)
+    cli = _bridge_cli(tmp_path)
+    normal = FakeRunner(default={
+        "code": 0, "stdout": "2.1.285 (Claude Code)\n", "stderr": "", "timed_out": False,
+    })
+    pty_runner = FakePTYRunner()
+
+    outcome = contract.open_binding(
+        binding,
+        normal,
+        claude_projects_dir=str(store),
+        target_surface="desktop",
+        claude_desktop_cli=str(cli),
+        claude_desktop_handoff_runner=pty_runner,
+    )
+
+    assert outcome["ok"] is True
+    assert outcome["action"] == "opened_desktop"
+    assert outcome["verified"] is True
+    assert normal.calls == [([str(cli), "--version"], 5.0)]
+    assert pty_runner.calls == [
+        ([str(cli), "--desktop", "--resume", session_id], 20.0, str(project))
+    ]
+    assert session_id not in outcome["detail"]
+    assert str(project) not in outcome["detail"]
+    assert str(cli) not in outcome["detail"]
+
+
+def test_claude_code_desktop_handoff_refuses_old_cli_before_pty(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    store = tmp_path / "claude-projects"
+    binding = _claude_code_binding(project_dir=str(project))
+    _write_claude_transcript(store, str(project), binding["locator"]["session_id"])
+    cli = _bridge_cli(tmp_path)
+    normal = FakeRunner(default={
+        "code": 0, "stdout": "2.1.284 (Claude Code)\n", "stderr": "", "timed_out": False,
+    })
+    pty_runner = FakePTYRunner()
+
+    outcome = contract.open_binding(
+        binding,
+        normal,
+        claude_projects_dir=str(store),
+        target_surface="desktop",
+        claude_desktop_cli=str(cli),
+        claude_desktop_handoff_runner=pty_runner,
+    )
+
+    assert outcome["ok"] is False
+    assert outcome["failure_kind"] == "not_installed"
+    assert pty_runner.calls == []
+
+
+def test_claude_code_desktop_handoff_requires_exact_native_receipt(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    store = tmp_path / "claude-projects"
+    binding = _claude_code_binding(project_dir=str(project))
+    _write_claude_transcript(store, str(project), binding["locator"]["session_id"])
+    cli = _bridge_cli(tmp_path)
+    normal = FakeRunner(default={
+        "code": 0, "stdout": "2.1.285 (Claude Code)\n", "stderr": "", "timed_out": False,
+    })
+    pty_runner = FakePTYRunner(responses=[{
+        "code": 0, "stdout": "Desktop requested\n", "stderr": "", "timed_out": False,
+    }])
+
+    outcome = contract.open_binding(
+        binding,
+        normal,
+        claude_projects_dir=str(store),
+        target_surface="desktop",
+        claude_desktop_cli=str(cli),
+        claude_desktop_handoff_runner=pty_runner,
+    )
+
+    assert outcome["ok"] is False
+    assert outcome["failure_kind"] == "effect_unknown"
+    assert outcome["verified"] is False
+
+
+def test_desktop_handoff_target_refused_for_non_claude_code_binding():
+    fake = FakeRunner()
+    outcome = contract.open_binding(_cursor_binding(), fake, target_surface="desktop")
+    assert outcome["ok"] is False
+    assert outcome["failure_kind"] == "unsupported_surface"
+    assert fake.calls == []
+
+
+# ---------------------------------------------------------------------------
 # falsifier 2: chatgpt binding URL host not in the allowlist -> invalid_binding
 # ---------------------------------------------------------------------------
 
@@ -378,6 +505,20 @@ def test_falsifier_run_argv_rejects_newline():
 def test_falsifier_run_argv_rejects_non_str_element():
     with pytest.raises(ValueError):
         runner_module.run_argv(["osascript", 5])
+
+
+def test_run_argv_pty_supplies_real_tty():
+    result = runner_module.run_argv_pty(
+        [sys.executable, "-c", "import os; print(os.isatty(0), os.isatty(1), os.isatty(2))"]
+    )
+    assert result["code"] == 0
+    assert "True True True" in result["stdout"]
+    assert result["timed_out"] is False
+
+
+def test_run_argv_pty_rejects_relative_cwd(tmp_path):
+    with pytest.raises(ValueError):
+        runner_module.run_argv_pty([sys.executable, "-c", "pass"], cwd="relative/path")
 
 
 # ---------------------------------------------------------------------------

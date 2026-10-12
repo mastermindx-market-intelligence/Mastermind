@@ -758,6 +758,39 @@ def _masked_identity_call_arguments(line: str, masked: str) -> list[str]:
     return arguments
 
 
+def _is_mkdir_mode_literal(line: str, token_text: str) -> bool:
+    """Recognize only the octal mode argument of a standalone mkdir expression.
+
+    Do not exempt a whole line containing arbitrary identity arguments, additional
+    statements or another numeric argument that merely shares the same spelling.
+    The caller still rejects every line with an explicit identity-bearing name.
+    """
+    source = line.strip()
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError, TypeError):
+        return False
+    if len(tree.body) != 1 or not isinstance(tree.body[0], ast.Expr):
+        return False
+    call = tree.body[0].value
+    if (not isinstance(call, ast.Call) or call.args
+            or not isinstance(call.func, ast.Attribute) or call.func.attr != "mkdir"):
+        return False
+    modes = 0
+    for keyword in call.keywords:
+        if keyword.arg == "mode":
+            if (not isinstance(keyword.value, ast.Constant)
+                    or type(keyword.value.value) is not int
+                    or ast.get_source_segment(source, keyword.value) != token_text):
+                return False
+            modes += 1
+        elif (keyword.arg not in {"parents", "exist_ok"}
+              or not isinstance(keyword.value, ast.Constant)
+              or type(keyword.value.value) is not bool):
+            return False
+    return modes == 1
+
+
 def _is_known_non_identity_numeric(line: str, token_text: str, value: int) -> bool:
     stripped = line.lstrip()
     if stripped.startswith(_COMMENT_PREFIXES):
@@ -767,7 +800,8 @@ def _is_known_non_identity_numeric(line: str, token_text: str, value: int) -> bo
     lowered = line.lower()
     if (
         token_text.lower().startswith("0o")
-        and any(marker in lowered for marker in _PERMISSION_MODE_MARKERS)
+        and (any(marker in lowered for marker in _PERMISSION_MODE_MARKERS)
+             or _is_mkdir_mode_literal(line, token_text))
     ):
         return True
     if 400 <= value <= 600 and any(marker in lowered for marker in _HTTP_STATUS_MARKERS):
@@ -798,12 +832,17 @@ def _scan_identity_source_lines(
                         normalized, token.string, value
                     )):
                         flagged.append(token.string)
-                elif token.type in {tokenize.NAME, tokenize.STRING} and "_mastermind_" in token.string:
-                    start = token.string.find("_mastermind_")
-                    end = start + len("_mastermind_")
-                    while end < len(token.string) and (token.string[end].isalnum() or token.string[end] == "_"):
-                        end += 1
-                    flagged.append(token.string[start:end])
+                elif token.type in {tokenize.NAME, tokenize.STRING}:
+                    # A function name, including its quoted attribute spelling,
+                    # is not an OS account. Keep reserved-prefix identifiers and
+                    # account strings at real token/path boundaries protected.
+                    account = (
+                        re.match(r"_mastermind_\w*", token.string)
+                        if token.type == tokenize.NAME
+                        else re.search(r"(?<!\w)_mastermind_\w*", token.string)
+                    )
+                    if account:
+                        flagged.append(account.group(0))
         except (IndentationError, tokenize.TokenError):
             continue
     return flagged

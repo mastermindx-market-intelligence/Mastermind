@@ -211,6 +211,7 @@ class LaunchAttestation:
     subscription_canary_observation_digest: str | None = None
     subscription_canary_binding_id: str | None = None
     subscription_canary_model: str | None = None
+    isolation_manifest_sha256: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -230,6 +231,11 @@ class LaunchAttestation:
             "secret_canary_verdict": _jsonable(self.secret_canary_verdict),
             "launch_nonce": self.launch_nonce,
             "process_identity": dict(self.process_identity),
+            **(
+                {"isolation_manifest_sha256": self.isolation_manifest_sha256}
+                if self.isolation_manifest_sha256 is not None
+                else {}
+            ),
             **(
                 {
                     "subscription_canary_observation_digest": (
@@ -301,6 +307,26 @@ class WorkerLaunchSpec:
             "subscription_canary_claim",
             validate_subscription_canary_claim(self.subscription_canary_claim),
         )
+
+
+def validate_orchestration_grant_digest(value: Any) -> str:
+    """Validate provenance representation; Runtime owns the grant binding."""
+    if not isinstance(value, str) or _SHA256_RE.fullmatch(value) is None:
+        raise WorkerRecoveryContractError(
+            "effective_grant_digest must be an exact lowercase SHA-256 digest"
+        )
+    return value
+
+
+@dataclasses.dataclass(frozen=True)
+class OrchestrationLaunchSpec(WorkerLaunchSpec):
+    """LaunchSpec carrying the immutable v4 grant without widening legacy bytes."""
+
+    effective_grant_digest: str = ""
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        validate_orchestration_grant_digest(self.effective_grant_digest)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -561,6 +587,55 @@ class WorkerRecoveryBinding:
             launch_spec=dict(launch_spec),
             process_ref=_process_ref_from_recovery(value.get("process_ref")),
         )
+
+    def validate_wire(self) -> "WorkerRecoveryBinding":
+        """Validate retained launch material without opening its private prompt.
+
+        This proves the wire digest and closed launch shape only. Recovery still
+        verifies the actual prompt file before reattaching an execution.
+        """
+        fields = self.launch_spec["fields"]
+        spec_type = (
+            OrchestrationLaunchSpec
+            if "effective_grant_digest" in fields else WorkerLaunchSpec
+        )
+        expected_keys = {
+            field.name for field in dataclasses.fields(spec_type) if field.name != "prompt"
+        }
+        if set(fields) != expected_keys:
+            raise WorkerRecoveryContractError("recovery launch fields are invalid")
+        if _canonical_sha256({
+            **fields, "prompt_sha256": self.launch_spec["prompt_sha256"],
+        }) != self.launch_spec_sha256:
+            raise WorkerRecoveryContractError("recovery launch digest has drifted")
+        try:
+            raw = dict(_jsonable(fields))
+            for name in ("workspace_path", "run_dir", "result_schema_path"):
+                if (
+                    not isinstance(raw[name], str)
+                    or not Path(raw[name]).is_absolute()
+                    or ".." in Path(raw[name]).parts
+                ):
+                    raise WorkerRecoveryContractError("recovery launch path is invalid")
+                raw[name] = Path(raw[name])
+            # Instantiation reuses the canonical value owner, including grant
+            # and subscription-claim validation; the prompt never leaves disk.
+            spec_type(prompt="", **raw)
+            prompt_path = self.launch_spec["prompt_path"]
+            if not isinstance(prompt_path, str) or not Path(prompt_path).is_absolute():
+                raise WorkerRecoveryContractError("recovery prompt path is invalid")
+            if ".." in Path(prompt_path).parts or ".." in raw["run_dir"].parts:
+                raise WorkerRecoveryContractError("recovery prompt path escapes run input")
+            Path(prompt_path).relative_to(raw["run_dir"] / "input")
+            raw["result_schema_path"].relative_to(raw["run_dir"] / "input")
+            for name in ("stdout_path", "stderr_path", "result_path"):
+                path = getattr(self.process_ref, name)
+                if not isinstance(path, str) or ".." in Path(path).parts:
+                    raise WorkerRecoveryContractError("recovery process path is invalid")
+                Path(path).relative_to(raw["run_dir"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise WorkerRecoveryContractError("recovery launch wire is invalid") from exc
+        return self
 
     def recover_launch_spec(
         self,

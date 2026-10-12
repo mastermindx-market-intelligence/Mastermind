@@ -13,12 +13,13 @@ import hashlib
 import json
 import math
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from importlib.metadata import version
 from types import MappingProxyType
 from typing import Any
 
 from control_plane.worker_execution_contract import WorkerLaunchSpec
+from integrations.acp_worker.tool_admission import AcpToolAdmission
 
 SDK_VERSION = "0.12.1"
 _TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+\-]{0,127}\Z")
@@ -36,6 +37,9 @@ class AcpProfile:
     model_option_id: str = "model"
     auth_method: str | None = None
     required_mode: str | None = None
+    # Concrete ACP servers may use an opaque provider+model selector while
+    # WorkerLaunchSpec.model remains the provider-neutral requested model id.
+    model_option_provider: str | None = None
 
     def __post_init__(self) -> None:
         for value in dataclasses.astuple(self):
@@ -44,6 +48,14 @@ class AcpProfile:
         # No interactive enrollment or environment-token injection in this port.
         if self.auth_method not in (None, "cached_token"):
             raise ValueError("ACP authentication method is not admitted")
+
+    def model_option_value(self, model: str) -> str:
+        """Render the reviewed server-private selector for one requested model."""
+        if not _TOKEN.fullmatch(model):
+            raise ValueError("invalid ACP model identifier")
+        if self.model_option_provider is None:
+            return model
+        return json.dumps([self.model_option_provider, model], separators=(",", ":"))
 
 
 @dataclasses.dataclass(frozen=True)
@@ -133,6 +145,7 @@ class AcpReadOnlyTurn:
         self._session: str | None = None
         self._early_sessions: set[str] = set()
         self._model: str | None = None
+        self._model_option_value: str | None = None
         self._phase = "setup"
         self._chunks: list[str] = []
         self._bytes = 0
@@ -142,6 +155,15 @@ class AcpReadOnlyTurn:
         self._tasks: set[asyncio.Task[Any]] = set()
         self._rpc_uncertain = False
         self.last_candidate: AcpCandidate | None = None
+        self.tool_admission: AcpToolAdmission | None = None
+        self._tool_calls: dict[str, str] = {}
+        self._tool_done: set[str] = set()
+        self._tool_bytes = 0
+        self._tool_digest = hashlib.sha256()
+        self._tool_wire_updates = 0
+        self._tool_committed_updates = 0
+        self._prompt_rpc_id: int | str | None = None
+        self._prompt_wire_terminal = False
 
     @property
     def unsettled_tasks(self) -> tuple[asyncio.Task[Any], ...]:
@@ -189,7 +211,7 @@ class AcpReadOnlyTurn:
             return
         self.validate_update(update)
 
-    def validate_update(self, update: Any, *, commit: bool = True) -> None:
+    def validate_update(self, update: Any, *, commit: bool = True) -> str | None:
         try:
             data = _document(update)
             kind = data.get("sessionUpdate")
@@ -206,9 +228,14 @@ class AcpReadOnlyTurn:
                 if commit:
                     self._bytes += size
                     self._chunks.append(text)
+            elif kind in {"tool_call", "tool_call_update"}:
+                self._observe_tool(data, commit=commit)
             elif kind == "config_option_update":
                 option = _model_option(data.get("configOptions"), self.profile.model_option_id)
-                if self._phase == "prompt" and option.get("currentValue") != self._model:
+                if (
+                    self._phase == "prompt"
+                    and option.get("currentValue") != self._model_option_value
+                ):
                     raise _Refused("ACP_MODEL_DRIFT")
             elif kind == "current_mode_update":
                 if self.profile.required_mode is None or data.get("currentModeId") != self.profile.required_mode:
@@ -222,8 +249,90 @@ class AcpReadOnlyTurn:
                 if (self._phase != "prompt" or content.get("type") != "text"
                         or not isinstance(content.get("text"), str)):
                     raise _Refused("ACP_UNEXPECTED_CONTENT")
+            return None
         except (_Refused, UnicodeError, AttributeError) as exc:
-            self._refuse(str(exc) if isinstance(exc, _Refused) else "ACP_SCHEMA_DRIFT")
+            reason = str(exc) if isinstance(exc, _Refused) else "ACP_SCHEMA_DRIFT"
+            self._refuse(reason)
+            return reason
+
+    def _observe_tool(self, data: dict[str, Any], *, commit: bool) -> None:
+        # Observation is enabled only by native owner evidence after discovery.
+        # The incumbent tool runtime still owns authorization and execution.
+        admission = self.tool_admission
+        if admission is None or self._phase != "prompt":
+            raise _Refused("ACP_UNADMITTED_UPDATE")
+        call_id = data.get("toolCallId")
+        if not isinstance(call_id, str) or not _SESSION.fullmatch(call_id):
+            raise _Refused("ACP_TOOL_ID_REFUSED")
+        start = data["sessionUpdate"] == "tool_call"
+        if start:
+            if set(data) != {"sessionUpdate", "toolCallId", "title", "kind", "status", "rawInput"}:
+                raise _Refused("ACP_TOOL_CALL_REFUSED")
+            if (data.get("title") not in {tool.name for tool in admission.tools}
+                    or data.get("kind") != "other" or data.get("status") != "in_progress"
+                    or not isinstance(data.get("rawInput"), dict)
+                    or data.get("content") or data.get("locations")):
+                raise _Refused("ACP_TOOL_CALL_REFUSED")
+        else:
+            if set(data) != {"sessionUpdate", "toolCallId", "status", "content"}:
+                raise _Refused("ACP_TOOL_RESULT_REFUSED")
+            if data.get("status") not in {"completed", "failed"}:
+                raise _Refused("ACP_TOOL_RESULT_REFUSED")
+            if any(key in data for key in ("title", "kind", "rawInput", "rawOutput", "locations")):
+                raise _Refused("ACP_TOOL_RESULT_REFUSED")
+            content = data.get("content")
+            if not isinstance(content, list) or len(content) > 64:
+                raise _Refused("ACP_TOOL_RESULT_REFUSED")
+            for item in content:
+                block = item.get("content") if isinstance(item, dict) else None
+                if (not isinstance(item, dict) or item.get("type") != "content"
+                        or not isinstance(block, dict) or block.get("type") != "text"
+                        or not isinstance(block.get("text"), str)):
+                    raise _Refused("ACP_TOOL_RESULT_REFUSED")
+        try:
+            encoded = json.dumps(data, sort_keys=True, separators=(",", ":"),
+                                 ensure_ascii=False, allow_nan=False).encode()
+        except (TypeError, ValueError, UnicodeError):
+            raise _Refused("ACP_TOOL_CONTENT_REFUSED") from None
+        if len(encoded) > 65536 or self._tool_bytes + len(encoded) > _MAX_OUTPUT:
+            raise _Refused("ACP_TOOL_OUTPUT_LIMIT")
+        # Framing can read ahead of SDK callback consumption. Only callbacks
+        # commit ordering/count/hash state; both passes enforce structural bounds.
+        if not commit:
+            return
+        if start:
+            if call_id in self._tool_calls or len(self._tool_calls) >= 64:
+                raise _Refused("ACP_TOOL_CALL_ORDER_REFUSED")
+            self._tool_calls[call_id] = data["title"]
+        elif call_id not in self._tool_calls or call_id in self._tool_done:
+            raise _Refused("ACP_TOOL_RESULT_ORDER_REFUSED")
+        else:
+            self._tool_done.add(call_id)
+        self._tool_committed_updates += 1
+        self._tool_bytes += len(encoded)
+        self._tool_digest.update(encoded + b"\n")
+
+    def _observe_wire(self, event: Any) -> None:
+        # SDK 0.12.1 synchronous observer runs before callback tasks/response
+        # futures are scheduled. No second JSON-RPC parser or timing sleep.
+        data = event.message
+        if event.direction == "outgoing" and data.get("method") == "session/prompt":
+            self._prompt_rpc_id = data.get("id")
+        elif event.direction == "incoming":
+            if (self._prompt_rpc_id is not None and data.get("id") == self._prompt_rpc_id
+                    and "method" not in data):
+                self._prompt_wire_terminal = True
+            if data.get("method") == "session/update":
+                update = data.get("params", {}).get("update", {})
+                if update.get("sessionUpdate") in {"tool_call", "tool_call_update"}:
+                    self._tool_wire_updates += 1
+                    if self._prompt_wire_terminal:
+                        self._refuse("ACP_TOOL_AFTER_TERMINAL")
+
+    @property
+    def tool_observations(self) -> Mapping[str, Any]:
+        return MappingProxyType({"calls": len(self._tool_calls), "terminal": len(self._tool_done),
+                                 "sha256": self._tool_digest.hexdigest()})
 
     def _task(self, awaitable: Any) -> asyncio.Task[Any]:
         task = asyncio.create_task(awaitable)
@@ -270,7 +379,8 @@ class AcpReadOnlyTurn:
     async def run(self, spec: WorkerLaunchSpec, writer: asyncio.StreamWriter,
                   reader: asyncio.StreamReader, *, cancelled: asyncio.Event,
                   validate_output: Callable[[dict[str, Any]], None],
-                  frame_guard: Any | None = None) -> AcpCandidate:
+                  frame_guard: Any | None = None,
+                  prepare_prompt: Callable[[str, str], Awaitable[AcpToolAdmission]] | None = None) -> AcpCandidate:
         """Consume only caller-owned streams; return an unaccepted candidate.
 
         The caller must fence one actual process/Attempt and call its existing
@@ -298,7 +408,8 @@ class AcpReadOnlyTurn:
             if cancelled.is_set():
                 raise _Refused("ACP_CANCELLED_BEFORE_START")
             if frame_guard is None:
-                conn = connect_to_agent(self, writer, reader)
+                conn = connect_to_agent(self, writer, reader,
+                    observers=[self._observe_wire] if prepare_prompt is not None else [])
             else:
                 # Reuse the existing ACP framing owner, not a second decoder.
                 from scripts.ohf.acp_probe_boundary import ProbeClient, StrictFrameReader
@@ -309,7 +420,8 @@ class AcpReadOnlyTurn:
                 sender_tasks = TaskSupervisor(source="mastermind-acp-worker")
                 transport = NdjsonTransport(StrictFrameReader(reader, frame_guard),
                     MessageSender(writer, sender_tasks), receive_timeout=spec.timeout_seconds)
-                conn = connect_to_agent(self, transport)
+                conn = connect_to_agent(self, transport,
+                    observers=[self._observe_wire] if prepare_prompt is not None else [])
             init = _document(await self._bounded(conn.initialize(
                 protocol_version=PROTOCOL_VERSION,
                 client_capabilities=ClientCapabilities(),
@@ -332,16 +444,27 @@ class AcpReadOnlyTurn:
             if self.profile.required_mode is not None and session.get("modes", {}).get("currentModeId") != self.profile.required_mode:
                 raise _Refused("ACP_MODE_MISMATCH")
             option = _model_option(session.get("configOptions"), self.profile.model_option_id)
-            if spec.model not in _option_values(option):
+            model_option_value = self.profile.model_option_value(spec.model)
+            if model_option_value not in _option_values(option):
                 raise _Refused("ACP_MODEL_UNAVAILABLE")
-            if option.get("currentValue") != spec.model:
+            self._model_option_value = model_option_value
+            if option.get("currentValue") != model_option_value:
                 changed = _document(await self._bounded(conn.set_config_option(
                     session_id=self._session, config_id=self.profile.model_option_id,
-                    value=spec.model), deadline))
+                    value=model_option_value), deadline))
                 option = _model_option(changed.get("configOptions"), self.profile.model_option_id)
-            if option.get("currentValue") != spec.model:
+            if option.get("currentValue") != model_option_value:
                 raise _Refused("ACP_MODEL_MISMATCH")
             self._model = spec.model
+            if prepare_prompt is not None:
+                admission = await self._bounded(prepare_prompt(self._session, self._model), deadline)
+                if (not isinstance(admission, AcpToolAdmission)
+                        or admission.session_id != self._session or admission.model != spec.model
+                        or admission.job_id != spec.job_id or admission.worker_id != spec.worker_id
+                        or admission.process_ref.run_id != spec.run_id
+                        or admission.process_ref.base_sha != spec.expected_base_sha):
+                    raise _Refused("ACP_TOOL_ADMISSION_REFUSED")
+                self.tool_admission = admission
             if self._error or cancelled.is_set():
                 raise _Refused(self._error or "ACP_CANCELLED_BEFORE_PROMPT")
             if loop.time() >= deadline:
@@ -376,6 +499,9 @@ class AcpReadOnlyTurn:
                 raise _Refused("ACP_NON_SUCCESS_TERMINAL")
             if loop.time() > deadline or cancelled.is_set():
                 raise _Refused("ACP_LATE_TERMINAL")
+            if set(self._tool_calls) != self._tool_done:
+                unknown = True
+                raise _Refused("ACP_TOOL_TERMINAL_UNOBSERVED")
             text = "".join(self._chunks)
             value = json.loads(text, object_pairs_hook=_object_pairs, parse_constant=_nonfinite)
             if not isinstance(value, dict):
@@ -423,6 +549,11 @@ class AcpReadOnlyTurn:
                 except (Exception, asyncio.CancelledError):
                     self._refuse("ACP_CONNECTION_CLOSE_UNCERTAIN")
                     unknown = True
+            if self.tool_admission is not None and self._tool_wire_updates != self._tool_committed_updates:
+                self._refuse("ACP_TOOL_CALLBACK_UNSETTLED")
+                unknown = True
+            if self._error == "ACP_TOOL_AFTER_TERMINAL":
+                unknown = True
             if sender_tasks is not None:
                 try:
                     await self._bounded(sender_tasks.shutdown(), loop.time() + spec.cancel_grace_seconds)

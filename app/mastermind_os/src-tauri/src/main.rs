@@ -74,10 +74,15 @@ fn main() {
             auth::sign_in,
             auth::sign_out,
             auth::read_programs,
+            auth::read_work,
             auth::read_mission,
             auth::read_mission_v3,
             auth::read_result,
-            auth::read_current_window
+            auth::read_current_window,
+            auth::executive_auth_status,
+            auth::executive_context,
+            auth::executive_submit,
+            auth::executive_status
         ])
         .run(tauri::generate_context!())
         .expect("tauri runtime error");

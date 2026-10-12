@@ -65,7 +65,86 @@ class FakeIngressClient:
             tool,
             mode=legacy.ServerMode.READONLY,
             generated_at="2026-09-23T06:00:00Z",
-            data={"preserved": True},
+            data={
+                "mastermind": {
+                    "branch": "HEAD",
+                    "root": "/mastermind",
+                    "sha": "a" * 40,
+                },
+                "macro": {"root": "/macro", "sha": "b" * 40, "resolved_via": "flag"},
+                "boot_packet_schema": "mastermind.ceo_boot_packet.v1",
+                "inbox_schema": "mastermind.executive_inbox.v2",
+                "strategic_state": {
+            "schema": "mastermind.strategic_state.v1",
+            "company_phase": "PRE_REVENUE_MVP_CONVERGENCE",
+            "north_star": ["Build a trustworthy product."],
+            "p0": [{
+                "id": "EXECUTIVE_OS",
+                "department": "executive",
+                "objective": "Establish durable execution.",
+                "status": "active",
+            }],
+            "constraints": {
+                "new_feature_expansion": "constrained",
+                "autonomous_production_deploy": "prohibited",
+                "autonomous_live_capital_execution": "prohibited",
+                "duplicate_control_planes": "prohibited",
+                "marketing_org_expansion_before_distribution_proof": "prohibited",
+                "unbounded_autonomous_strategic_modification": "prohibited",
+            },
+        },
+                "next_recommended_act": "Review current attention.",
+                "runtime_db": {
+                    "path": "/runtime/executive.sqlite3",
+                    "present": True,
+                },
+                "runtime_counts": {
+            "jobs": {
+                "total": 1,
+                "by_status": {
+                    "QUEUED": 1, "RUNNING": 0, "CHECKPOINTED": 0,
+                    "COMPLETED": 0, "FAILED": 0, "CANCEL_REQUESTED": 0,
+                    "CANCELLED": 0, "LOST": 0, "RATE_LIMITED": 0,
+                },
+            },
+            "attempts": {
+                "total": 0,
+                "by_status": {
+                    "CLAIMED": 0, "RUNNING": 0, "CHECKPOINTED": 0,
+                    "COMPLETED": 0, "FAILED": 0, "CANCEL_REQUESTED": 0,
+                    "CANCELLED": 0, "LOST": 0, "RATE_LIMITED": 0,
+                },
+            },
+            "workers": {
+                "total": 0,
+                "by_status": {
+                    "AVAILABLE": 0, "BUSY": 0, "DRAINING": 0,
+                    "OFFLINE": 0, "ERROR": 0, "RATE_LIMITED": 0,
+                },
+            },
+        },
+                "attention_counts": {
+                    "total": 0,
+                    "chairman": 0,
+                    "ceo": 0,
+                    "coo": 0,
+                },
+                "handoffs": [],
+            },
+            grounding={
+                "boot_packet_schema": "mastermind.ceo_boot_packet.v1",
+                "macro": {"root": "/macro", "sha": "b" * 40},
+                "mastermind": {
+                    "branch": "HEAD",
+                    "root": "/mastermind",
+                    "sha": "a" * 40,
+                },
+                "runtime": "readonly:installed-executive-runtime",
+                "runtime_db": {
+                    "path": "/runtime/executive.sqlite3",
+                    "present": True,
+                },
+            },
         )
         result["server_version"] = v2.WEB_CEO_V2_SERVER_VERSION
         return CeoIngressResponse(
@@ -98,29 +177,93 @@ def test_v3_is_additive_and_prior_snapshot_hashes_remain_frozen():
         v3.web_ceo_v3_schema_snapshot_sha256()
         == v3.WEB_CEO_V3_SCHEMA_SNAPSHOT_SHA256
     )
-    assert v3.WEB_CEO_V3_SERVER_VERSION == "1.3.0"
-    assert v3.web_ceo_v3_tool_names()[:-2] == v2.web_ceo_v2_tool_names()[:-1]
-    assert v3.web_ceo_v3_tool_names()[-2:] == (
+    from integrations.executive_mcp import web_ceo_sessions as sessions
+
+    assert v3.WEB_CEO_V3_SERVER_VERSION == "1.5.0"
+    assert sessions.WEB_CEO_SESSIONS_SERVER_VERSION == "1.4.0"
+    assert v3.web_ceo_v3_tool_names()[:-3] == sessions.web_ceo_sessions_tool_names()[:-1]
+    assert v3.web_ceo_v3_tool_names()[-3:] == (
         "executive_mdm",
+        "reconcile_ceo_request",
         "submit_ceo_intent",
     )
 
 
-@pytest.mark.parametrize(
-    "bad",
-    [
-        {},
+def test_v3_promotes_existing_session_bridge_tools_without_changing_session_profile():
+    from integrations.executive_mcp import web_ceo_sessions as sessions
+
+    assert v3.web_ceo_v3_tool_names() == (
+        *sessions.web_ceo_sessions_tool_names()[:-1],
+        "executive_mdm",
+        "reconcile_ceo_request",
+        "submit_ceo_intent",
+    )
+    assert sessions.web_ceo_sessions_tool_names()[-4:] == (
+        "session_targets", "session_send", "session_summon", "submit_ceo_intent"
+    )
+    request = {
+        "objective": "Delegate one bounded research task.",
+        "execution_profile": "research_only",
+        "operation_key": "v3-session-summon-1",
+        "department": "executive-infrastructure",
+        "priority": 0,
+        "workstream": "WS:SESSION-BRIDGE",
+    }
+    assert v3.validate_web_ceo_v3_tool_arguments("session_summon", request) == (
+        sessions.validate_web_ceo_sessions_tool_arguments("session_summon", request)
+    )
+
+
+def test_v3_fabric_transport_schema_is_flat_but_validator_remains_closed():
+    schema = v3.FABRIC_V3_TOOL_SPEC.input_schema
+    assert set(schema) == {"type", "properties", "required", "additionalProperties"}
+    assert schema["properties"] == v2.FABRIC_V2_TOOL_SPEC.input_schema["properties"]
+    assert schema["required"] == ["view"]
+    assert schema["additionalProperties"] is False
+    assert "oneOf" in v2.FABRIC_V2_TOOL_SPEC.input_schema
+
+    valid = (
+        {"view": "roots", "limit": 1},
+        {"view": "root", "root_job_id": "JOB-001"},
+        {
+            "view": "result",
+            "root_job_id": "JOB-001",
+            "job_id": "JOB-004",
+            "attempt_id": "ATT-" + "a" * 32,
+            "result_envelope_digest": "b" * 64,
+        },
+    )
+    for value in valid:
+        jsonschema.validate(value, schema)
+        assert v3.validate_web_ceo_v3_tool_arguments("executive_fabric", value) == value
+
+    branch_invalid = {"view": "root", "root_job_id": "JOB-001", "limit": 1}
+    jsonschema.validate(branch_invalid, schema)
+    with pytest.raises(legacy.GatewayError, match="limit is valid only when view=roots"):
+        v3.validate_web_ceo_v3_tool_arguments("executive_fabric", branch_invalid)
+
+
+def test_v3_mdm_transport_schema_is_flat_but_validator_remains_closed():
+    schema = v3.MDM_TOOL_SPEC.input_schema
+    assert set(schema) == {"type", "properties", "required", "additionalProperties"}
+    assert schema["required"] == ["view"]
+    assert schema["additionalProperties"] is False
+
+    conditionally_invalid = (
         {"view": "fleet", "hostname": "mini-01"},
         {"view": "device"},
         {"view": "device", "hostname": "mini", "serial_number": "S1"},
-        {"view": "other"},
-    ],
-)
-def test_mdm_schema_and_validator_refuse_same_bad_shapes(bad):
-    with pytest.raises(legacy.GatewayError):
-        v3.validate_web_ceo_v3_tool_arguments("executive_mdm", bad)
-    with pytest.raises(jsonschema.ValidationError):
-        jsonschema.validate(bad, v3.MDM_TOOL_SPEC.input_schema)
+    )
+    for value in conditionally_invalid:
+        jsonschema.validate(value, schema)
+        with pytest.raises(legacy.GatewayError):
+            v3.validate_web_ceo_v3_tool_arguments("executive_mdm", value)
+
+    for value in ({}, {"view": "other"}):
+        with pytest.raises(legacy.GatewayError):
+            v3.validate_web_ceo_v3_tool_arguments("executive_mdm", value)
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(value, schema)
 
 
 def test_valid_mdm_shapes():
@@ -144,7 +287,7 @@ def test_mdm_fleet_is_direct_sensor_read_not_ingress():
     )
     out = run(g.call("executive_mdm", {"view": "fleet"}))
     assert out["ok"] is True
-    assert out["server_version"] == "1.3.0"
+    assert out["server_version"] == "1.5.0"
     assert out["data"]["schema"] == "mastermind.mosyle_fleet_snapshot.v1"
     assert out["grounding"] == {
         "mdm": "mosyle_business",
@@ -190,8 +333,9 @@ def test_existing_executive_read_still_uses_ceo_ingress_and_is_v3_stamped():
     )
     out = run(g.call("executive_state", {}))
     assert out["ok"] is True
-    assert out["data"] == {"preserved": True}
-    assert out["server_version"] == "1.3.0"
+    assert out["data"]["mastermind"]["sha"] == "a" * 40
+    assert out["data"]["runtime_counts"]["jobs"]["total"] == 1
+    assert out["server_version"] == v3.WEB_CEO_V3_SERVER_VERSION
     assert client.frames[0]["tool"] == "executive_state"
 
 
@@ -227,6 +371,10 @@ def test_service_owned_session_credential_resolves_without_secret_repr(
         )
     )
     path.chmod(0o600)
+    # Some macOS temp roots inherit group wheel even when the test process runs
+    # as staff. Model the service-owned contract explicitly instead of relying
+    # on filesystem inheritance so the positive case is portable.
+    os.chown(path, -1, os.getegid())
     monkeypatch.setattr(credential_file, "_validate_parent", lambda _path: None)
     monkeypatch.setattr(
         credential_file, "_has_acl", lambda _path, _identity, _descriptor: False
@@ -246,10 +394,32 @@ def test_service_owned_session_credential_resolves_without_secret_repr(
     assert "secret123" not in shown
 
 
+@pytest.mark.parametrize("axis", ["uid", "gid"])
+def test_service_owned_credential_file_refuses_identity_mismatch(
+    tmp_path, monkeypatch, axis
+):
+    path = tmp_path / "mosyle-readonly.json"
+    path.write_text(json.dumps({"auth_mode": "jwt", "access_token": "a" * 32}))
+    path.chmod(0o600)
+    os.chown(path, -1, os.getegid())
+    monkeypatch.setattr(credential_file, "_validate_parent", lambda _path: None)
+    monkeypatch.setattr(
+        credential_file, "_has_acl", lambda _path, _identity, _descriptor: False
+    )
+    expected_uid = os.geteuid() + (1 if axis == "uid" else 0)
+    expected_gid = os.getegid() + (1 if axis == "gid" else 0)
+    source = FileMosyleCredentialSource(
+        path=path, expected_uid=expected_uid, expected_gid=expected_gid
+    )
+    with pytest.raises(MosyleCredentialFileError):
+        run(source.resolve())
+
+
 def test_service_owned_credential_file_refuses_unsafe_mode(tmp_path, monkeypatch):
     path = tmp_path / "mosyle-readonly.json"
     path.write_text(json.dumps({"auth_mode": "jwt", "access_token": "a" * 32}))
     path.chmod(0o644)
+    os.chown(path, -1, os.getegid())
     monkeypatch.setattr(credential_file, "_validate_parent", lambda _path: None)
     monkeypatch.setattr(
         credential_file, "_has_acl", lambda _path, _identity, _descriptor: False

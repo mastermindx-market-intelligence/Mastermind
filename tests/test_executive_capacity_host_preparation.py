@@ -115,8 +115,8 @@ def test_capacity_preparer_pins_exact_source_runtime_and_entrypoint_inputs() -> 
         'PYYAML_WHEEL_SHA256="fc09d0aa354569bc501d4e787133afc08552722d3ab34836a80547331bb5d4a0"',
         'PYYAML_RECORD_SHA256="715146d21711444bc73c3137d18cffb6e38ace40e8998c5a9dfa69bd7dc46e3e"',
         'RUNTIME_TREE_SHA256="79e1e4dc67c0fbefc266fcf2c27b98a7e0aeff5048e015fae11b20115ee864ee"',
-        'CODEX_VERSION="0.147.0"',
-        'CODEX_SHA256="19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37"',
+        'CODEX_VERSION="0.159.2"',
+        'CODEX_SHA256="16593cc2f422d5f398a8e40f550ebbaf1245392528957be342c295920a300704"',
     ):
         assert exact in source
     assert "MACRO_ORIGIN" not in source

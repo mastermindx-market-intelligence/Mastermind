@@ -39,15 +39,19 @@ discovery. Current fleet truth is narrower: Ryan Business has the accepted live 
 prepare/edit journey; C1/C2/C3/C4/Chris Admin host tunnel services are live/ready but each still
 requires its own attended ChatGPT app enrollment before that seat's direct app is accepted.
 
-## Paper release compatibility — 2026-09-30
+## Paper release compatibility — 2026-10-01
 
-Write qualification must not lock to a Paper release number. The bridge records the observed
+Write qualification does not lock to a Paper release number. The bridge records the observed
 `server_version` for diagnostics, requires the `paper-desktop` server identity, and gates writes on
-the exact reviewed full catalog digest. Paper 0.5.14 was observed with the same reviewed
-`8cd27488a3adfc19c6c36d4349b75feebc71c159253c47f8a0f8d50c27043deb` catalog previously
-qualified on 0.5.12, so runtime v9 / bridge 0.1.3 admits it without weakening schema checks.
-A changed catalog remains read-only until separately reviewed. Deploying v9 to an existing seat is
-still a distinct immutable-runtime effect; source merge alone does not update a running tunnel.
+the exact reviewed full catalog digest. Paper 0.5.14 now reports catalog
+`ac18857df0aa6323646333368e5798e7c28de7b4d5f5dc3cb320276e3535daa9`. Exact canonical
+reconstruction from the previously accepted `ca90...` and `8cd...` catalogs proves the only delta
+from accepted `8cd...` is removal of read tool `list_files` and addition of blocked tools
+`list_resources` and `rename_resource`; all surviving tool descriptors, including blocked
+`rename_pages`, are byte-equivalent under the bridge encoding. Bridge 0.1.4 therefore removes
+`list_files` from the read allowlist without exposing either replacement resource tool. Runtime v10
+owns these new bridge bytes; v9 remains immutable historical evidence. A future catalog change still
+returns read-only until separately reviewed, and source merge alone never updates a running seat.
 
 ## Implementation
 

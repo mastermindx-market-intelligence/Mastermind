@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2023", "DOM"],
+    "strict": true,
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "types": ["node"],
+    "paths": {
+      "@deepseek-ai/dsh-tools": ["./.cache/donor/index.ts"]
+    }
+  },
+  "include": [".cache/donor/index.ts"]
+}

@@ -1,7 +1,7 @@
 {
   "name": "mastermind-executive",
-  "version": "0.1.0",
-  "description": "Mastermind Executive OS context and COO orchestration workflow for Claude/Fable using the existing authenticated Executive connector.",
+  "version": "0.2.0",
+  "description": "Mastermind Executive OS context and role-correct COO orchestration workflow for Claude/Fable using the existing authenticated Executive COO edge.",
   "author": {
     "name": "MastermindX"
   },

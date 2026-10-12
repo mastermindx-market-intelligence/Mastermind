@@ -263,6 +263,16 @@ def test_exact_pinned_login_status_is_the_auth_mode_source(
 ) -> None:
     assert identity.classify_login_status(returncode=0, stderr=stderr) == expected
     assert identity.classify_login_status(returncode=1, stderr=stderr) is None
+    reviewed_warning = identity._ARG0_CLEANUP_WARNING
+    assert (
+        identity.classify_login_status(
+            returncode=0, stderr=reviewed_warning + stderr
+        )
+        == expected
+    )
+    assert identity.classify_login_status(
+        returncode=0, stderr=reviewed_warning + reviewed_warning + stderr
+    ) is None
     assert identity.classify_login_status(returncode=0, stderr=b"warning\n" + stderr) is None
     assert identity.classify_login_status(
         returncode=0, stderr=b"Logged in using an API key - redacted\n"

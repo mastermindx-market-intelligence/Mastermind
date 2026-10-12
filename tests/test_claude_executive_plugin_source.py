@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+from integrations.executive_mcp.coo import COO_SERVER_VERSION, COO_TOOL_NAMES
+
 
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "integrations" / "claude_executive_plugin"
@@ -8,6 +10,16 @@ MANIFEST = PLUGIN / ".claude-plugin" / "plugin.json"
 SKILL = PLUGIN / "skills" / "executive-orchestration" / "SKILL.md"
 COMMAND = PLUGIN / "commands" / "executive-context.md"
 README = PLUGIN / "README.md"
+
+
+EXPECTED_COO_TOOLS = (
+    "executive_mandate",
+    "executive_state",
+    "executive_inbox",
+    "executive_fabric",
+    "submit_principal_intent",
+    "principal_intent_status",
+)
 
 
 def test_manifest_is_minimal_private_executive_plugin():
@@ -21,7 +33,7 @@ def test_manifest_is_minimal_private_executive_plugin():
         "keywords",
     }
     assert manifest["name"] == "mastermind-executive"
-    assert manifest["version"] == "0.1.0"
+    assert manifest["version"] == "0.2.0"
     assert manifest["author"] == {"name": "MastermindX"}
     assert manifest["repository"] == (
         "https://github.com/mastermindx-market-intelligence/Mastermind"
@@ -30,45 +42,65 @@ def test_manifest_is_minimal_private_executive_plugin():
     assert "hooks" not in manifest
 
 
-def test_p1_does_not_create_a_second_mcp_or_hook_carrier():
+def test_p2_does_not_create_second_mcp_or_hook_carrier():
     assert not (PLUGIN / ".mcp.json").exists()
     assert not (PLUGIN / "hooks").exists()
     readme = README.read_text(encoding="utf-8")
-    assert "existing user-scope MCP registration: mastermind-executive" in readme
-    assert "plugin-owned" in readme and ".mcp.json" in readme
-    assert "without hooks in P1" in readme
+    assert "without** a plugin-owned `.mcp.json`" in readme
     assert "#955" in readme
+    assert "DRAFT/HOLD" in readme
+    assert "cannot install, authenticate or select" in readme
 
 
-def test_skill_preserves_broad_coo_autonomy_without_claiming_technical_authority():
+def test_package_tracks_exact_current_role_correct_coo_contract():
+    assert COO_SERVER_VERSION == "1.0.0"
+    assert COO_TOOL_NAMES == EXPECTED_COO_TOOLS
+    readme = README.read_text(encoding="utf-8")
+    skill = SKILL.read_text(encoding="utf-8")
+    command = COMMAND.read_text(encoding="utf-8")
+    assert "server version `1.0.0`" in readme
+    for tool in EXPECTED_COO_TOOLS:
+        assert f"`{tool}`" in readme
+        assert f"`{tool}`" in skill or f"`{tool}`" in command
+    assert "This package never uses `submit_ceo_intent`." in readme
+    assert "Never call `submit_ceo_intent` from the COO seat." in skill
+    assert "fall back to CEO mutation" in command
+
+
+def test_skill_preserves_broad_coo_judgment_without_ambient_authority():
     text = SKILL.read_text(encoding="utf-8")
     assert "broad delegated COO principal" in text
-    assert "ordinary reversible judgment belongs to the COO principal" in text
+    assert "Organizational\njudgment and technical authority remain separate" in text
     assert "Do not ask Sol/Chairman to choose among ordinary reversible" in text
-    assert "Do not confuse broad organizational judgment with ambient technical authority." in text
-    assert "When the canonical mission says the COO owes the turn, decide and continue" in text
-    assert "When CEO or Chairman owes the turn, do not answer that seat." in text
-    assert "do not micromanage it" in text
     assert "A blocker freezes its lane first, not the entire mission." in text
+    assert "source release, merge or deployment" in text
 
 
-def test_skill_refuses_legacy_ceo_mutation_from_coo_seat():
+def test_skill_has_exact_bounded_action_and_reconciliation_sequence():
     text = SKILL.read_text(encoding="utf-8")
-    assert "legacy Executive profile exposes a CEO-specific modifying tool" in text
-    assert "do not use it from the COO seat" in text
-    assert "role-correct COO action surface is a later gated capability" in text
-    assert "submit_ceo_intent" not in text
+    assert "`executive_mandate` permits a new COO effect" in text
+    assert "the COO owns the applicable turn" in text
+    assert "stable operation key" in text
+    assert "contains no provider/account/host/Worker/session selection" in text
+    assert "accepted receipt proves request admission, not Worker START" in text
+    assert "do not\n  submit again" in text
+    assert "`principal_intent_status` with the original `request_ref`" in text
+    assert "does not create an H4 governed orchestration root" in text
 
 
 def test_context_command_is_read_only_and_effect_honest():
     text = COMMAND.read_text(encoding="utf-8")
     assert "mastermind-executive" in text
-    assert "read-only Executive/Workspace/Fabric operations" in text
-    assert "Do not invoke any CEO-specific modifying operation" in text
+    assert "`executive_mandate`" in text
+    assert "`executive_state`" in text
+    assert "`executive_inbox`" in text
+    assert "`executive_fabric`" in text
+    assert "`principal_intent_status` only when reconciling" in text
+    assert "must not call `submit_principal_intent`" in text
     assert "admission is not START" in text
     assert "delivery is not ACK" in text
     assert "CI is not acceptance" in text
-    assert "Do not ask for credentials" in text
+    assert "fall back to CEO mutation" in text
 
 
 def test_plugin_contains_no_secret_or_client_registration_material():
@@ -89,34 +121,31 @@ def test_plugin_contains_no_secret_or_client_registration_material():
     assert "8774" not in texts
 
 
-def test_readme_freezes_future_bundle_gates_and_source_dependencies():
+def test_readme_keeps_install_auth_and_surface_proofs_separate():
     text = README.read_text(encoding="utf-8")
-    assert "static COO Executive MCP profile exists" in text
-    assert "COO action scope rather than the CEO submit scope" in text
-    assert "bundled-plugin OAuth works on the exact deployed Claude Code CLI" in text
-    assert "no CEO or ambient modifying surface leaked into the plugin" in text
-    for dependency in ("#957", "#960", "#961", "#955", "#676", "#804"):
-        assert dependency in text
-
-
-def test_no_executable_component_claims_current_coo_mutation():
-    executable_instructions = (
-        SKILL.read_text(encoding="utf-8")
-        + "\n"
-        + COMMAND.read_text(encoding="utf-8")
-    )
-    for forbidden in (
-        "submit_principal_intent",
-        "mastermind.executive.coo.act",
-        "AUTONOMOUS_SOURCE_RELEASE_WITH_GATES",
-    ):
-        assert forbidden not in executable_instructions
-
-
-def test_desktop_connector_parity_remains_an_explicit_unproven_gate():
-    text = README.read_text(encoding="utf-8")
-    assert "Surface parity boundary" in text
-    assert "Claude Code user-scope registration path" in text
+    assert "source package\ntherefore cannot install, authenticate or select" in text
     assert "Claude Desktop Executive connector availability remains **UNPROVEN**" in text
-    assert "do not add an ad-hoc second connector" in text
-    assert "one surface's success is not inherited by the other" in text
+    assert "one surface's success is not inherited by another" in text
+    assert "plugin installation on any Claude surface" in text
+    assert "OAuth/client enrollment" in text
+    assert "exact native principal/profile admission" in text
+    assert "H4 governed fan-out" in text
+
+
+def test_readme_tracks_current_carriers_without_claiming_their_runtime_acceptance():
+    text = README.read_text(encoding="utf-8")
+    for dependency in ("#962", "#955", "#676", "#600", "#919", "#992", "#660", "#1236", "#1240"):
+        assert dependency in text
+    assert "#955" in text and "DRAFT/HOLD" in text
+    assert "Historical issue/PR text is evidence, not current runtime authority" in text
+
+
+def test_plugin_files_never_claim_role_correct_source_as_live_native_authority():
+    text = "\n".join(
+        path.read_text(encoding="utf-8") for path in (README, SKILL, COMMAND)
+    )
+    assert "P2 source does **not** prove:" in text
+    assert "This source package does not prove:" in text
+    assert "cannot install, authenticate or select" in text
+    assert "If it is\nmissing, unauthenticated or exposes the wrong schema" in text
+    assert "PRODUCTION INERT" in text

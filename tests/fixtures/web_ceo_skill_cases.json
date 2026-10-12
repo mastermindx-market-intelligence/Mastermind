@@ -412,6 +412,156 @@
         "Treat a prior-turn pin as automatically current",
         "Mix a new INDEX with old companion procedures"
       ]
+    },
+    {
+      "id": "research-admission-github-missing",
+      "prompt": "Deep research current Mastermind Terminal capability versus the previous plan. GitHub is not connected or the exact Mastermind repository cannot be read.",
+      "expected_skills": [
+        "mastermind-deep-research"
+      ],
+      "must_observe": [
+        "Classify the exact Mastermind GitHub repository as required",
+        "Stop source admission before substantive research with SOURCE_ADMISSION_INCOMPLETE"
+      ],
+      "must_not_observe": [
+        "Use public web to guess which Mastermind company or product is meant",
+        "Treat connection metadata as repository proof"
+      ]
+    },
+    {
+      "id": "research-admission-github-wrong-repo",
+      "prompt": "Research Mastermind implementation history. GitHub is connected, but only another repository is authorized.",
+      "expected_skills": [
+        "mastermind-deep-research"
+      ],
+      "must_observe": [
+        "Require a bounded read from mastermindx-market-intelligence/Mastermind",
+        "Mark the required GitHub source missing or unproven when only the wrong repository is readable"
+      ],
+      "must_not_observe": [
+        "Treat generic GitHub connectivity as SOURCE_PROVEN",
+        "Continue as though the exact repository were authorized"
+      ]
+    },
+    {
+      "id": "research-admission-steward-missing",
+      "prompt": "Deep research what Mastermind is currently executing and which runtime surfaces are capable. The exact GitHub repo is readable, but Mastermind Steward is unavailable.",
+      "expected_skills": [
+        "mastermind-deep-research"
+      ],
+      "must_observe": [
+        "Require Steward for current execution runtime responsibility attention surface or capability claims",
+        "Fail or degrade source admission before substantive current-state research"
+      ],
+      "must_not_observe": [
+        "Infer current runtime state from repository history alone",
+        "Promote plugin metadata to Steward evidence"
+      ]
+    },
+    {
+      "id": "research-admission-public-web-no-internal",
+      "prompt": "Deep research Mastermind Terminal versus its plan. Public web works, but neither the exact Mastermind GitHub repository nor Steward can be proven.",
+      "expected_skills": [
+        "mastermind-deep-research"
+      ],
+      "must_observe": [
+        "Stop before public-web entity discovery because required internal identity sources are absent",
+        "Name the missing internal sources explicitly"
+      ],
+      "must_not_observe": [
+        "Search the public web to decide what Mastermind means",
+        "Accept a polished public-web-only report"
+      ]
+    },
+    {
+      "id": "research-admission-historical-github-only",
+      "prompt": "Using repository history only, compare the historical Mastermind Terminal plan with what the codebase documented at that time. Do not assess live runtime state.",
+      "expected_skills": [
+        "mastermind-deep-research"
+      ],
+      "must_observe": [
+        "Require and prove the exact Mastermind GitHub repository",
+        "Allow the historical repository question to proceed without gratuitously requiring Steward"
+      ],
+      "must_not_observe": [
+        "Invent a live-current requirement that the prompt excluded",
+        "Use public web as a substitute for repository history"
+      ]
+    },
+    {
+      "id": "research-admission-external-only",
+      "prompt": "Deep research the current public API and pricing of an external platform. Make no Mastermind-specific claims.",
+      "expected_skills": [
+        "mastermind-deep-research"
+      ],
+      "must_observe": [
+        "Use current external primary sources appropriate to the question",
+        "Keep Mastermind internal sources optional because no internal claim is requested"
+      ],
+      "must_not_observe": [
+        "Artificially require Steward or the Mastermind repository",
+        "Bootstrap an internal identity claim that the question does not need"
+      ]
+    },
+    {
+      "id": "research-admission-steward-degraded",
+      "prompt": "Research current Mastermind capability. Steward responds, but marks its evidence stale and degraded.",
+      "expected_skills": [
+        "mastermind-deep-research"
+      ],
+      "must_observe": [
+        "Preserve SOURCE_DEGRADED and the stale status",
+        "Do not promote degraded Steward evidence to current truth"
+      ],
+      "must_not_observe": [
+        "Relabel stale evidence SOURCE_PROVEN for current-state claims",
+        "Erase the degradation because GitHub is healthy"
+      ]
+    },
+    {
+      "id": "research-admission-owner-conflict",
+      "prompt": "The Mastermind repository says a capability is implemented, while Steward says the current runtime surface does not expose it. Research the discrepancy.",
+      "expected_skills": [
+        "mastermind-deep-research"
+      ],
+      "must_observe": [
+        "Preserve GitHub as code PR CI evidence owner and Steward as current company runtime read evidence",
+        "Report the disagreement without averaging incompatible owner claims"
+      ],
+      "must_not_observe": [
+        "Collapse the two sources into one synthetic truth",
+        "Rewrite one owner because the other differs"
+      ]
+    },
+    {
+      "id": "research-admission-short-prompt",
+      "prompt": "Deep research current Mastermind Terminal capability versus the previous plan. Tell me what is still missing.",
+      "expected_skills": [
+        "mastermind-deep-research"
+      ],
+      "must_observe": [
+        "Expand the short request into required-source manifest source preflight research contract and post-run verification",
+        "Establish internal Mastermind identity before optional public-web research"
+      ],
+      "must_not_observe": [
+        "Require the Chairman to paste the long bootstrap prompt",
+        "Start substantive research before required internal source admission"
+      ]
+    },
+    {
+      "id": "research-admission-postrun-source-omission",
+      "prompt": "A Deep Research report is fluent and well cited, but the host activity evidence shows it never used one internal source that admission marked required.",
+      "expected_skills": [
+        "mastermind-deep-research"
+      ],
+      "must_observe": [
+        "Verify source usage when the host exposes activity evidence",
+        "Classify the report SOURCE_INCOMPLETE because a required internal source was omitted"
+      ],
+      "must_not_observe": [
+        "Accept the report because its prose is strong",
+        "Treat successful preflight as proof the research run actually used the source"
+      ]
     }
   ]
 }

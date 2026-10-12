@@ -880,7 +880,7 @@ def admission_status() -> dict[str, Any]:
             },
             {
                 "file": "control_plane/ceo_intent.py",
-                "line": "L1032",
+                "line": "L1038",
                 "what": (
                     "_provenance() stamps the typed service evidence (principal_id, "
                     "task_kind, requested_authorities, effective_authorities, "
@@ -890,7 +890,7 @@ def admission_status() -> dict[str, Any]:
             },
             {
                 "file": "control_plane/ceo_intent.py",
-                "line": "L1418",
+                "line": "L1436",
                 "what": (
                     "the service branch of submit_intent passes EXPLICIT "
                     "owner_seat='coo' / escalation_target='coo' and no orchestration "
@@ -908,7 +908,7 @@ def admission_status() -> dict[str, Any]:
             "conflict_predicates": (
                 {
                     "file": "control_plane/ceo_intent.py",
-                    "line": "L1327",
+                    "line": "L1345",
                     "what": (
                         "submit_intent looks the derived command id up in the durable "
                         "event log first, so a reused intent id reconciles instead of "
@@ -917,7 +917,7 @@ def admission_status() -> dict[str, Any]:
                 },
                 {
                     "file": "control_plane/ceo_intent.py",
-                    "line": "L1089",
+                    "line": "L1095",
                     "what": (
                         "_receipt_from_event raises CeoIntentConflict when the reused "
                         "intent id was already accepted under a DIFFERENT whole-envelope "

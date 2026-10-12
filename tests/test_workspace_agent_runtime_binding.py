@@ -232,7 +232,7 @@ def test_current_target_consumes_canonical_harness_generation(monkeypatch) -> No
             calls.append(attempt_id) or harness
         ),
     )
-    import integrations.workspace_agent_runtime_binding as module
+    import control_plane.executive_current_target as module
     monkeypatch.setattr(module, "derive_delegation_identity", lambda value: identity)
 
     observed = _read_current_target(runtime, OPERATION)

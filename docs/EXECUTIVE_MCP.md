@@ -158,6 +158,55 @@ bounded returns `output_too_large` rather than something misleading. Errors and
 | `validation` | no | `{pytest_targets?, compileall_paths?, git_diff_check?}` |
 | `attempt_limit` | no | 1–3, default 2 |
 
+### Large worker handoffs stay out of the CEO-intent payload
+
+`submit_ceo_intent` is the compact semantic/authority envelope, not a transport for a
+second agent prompt. The 4,000-character `objective` ceiling remains unchanged. For
+strict-v2 Executive work, the existing trusted dialogue-source owner supplies the
+immutable `commission_ref` separately from caller input:
+
+```text
+repository + exact 40-hex commit + repository-relative path + content SHA-256
+```
+
+That reference is canonical context/provenance, **not authority**. The effective Job
+grant, allowed paths, validation and provider/lifecycle controls remain authoritative.
+Before either the sealed worker or read-only Operator planner consumes the commission,
+the supervisor requires the persisted repository identity to equal the canonical Mastermind
+repository **exactly** and binds byte resolution to the durable Job-assigned Git root.
+Mutable local remote labels are not repository authority and are not consulted. Local Git
+inspection is network-inert: all Git protocols are denied, replacement objects and lazy promisor
+fetching are disabled, global/system configuration is disabled, and interactive prompting is
+disabled. The resolver distinguishes three states. If the exact commit and fixed path/tree prove
+an exact blob whose bytes are already local, the blob is read by its verified object ID. If an
+available exact commit proves the fixed path semantically absent, verification refuses with no
+network fallback. If the exact immutable object graph or referenced blob bytes are merely
+unavailable locally, one bounded fallback may read only
+`https://raw.githubusercontent.com/mastermindx-market-intelligence/Mastermind/<40-hex>/<fixed-path>`.
+That request is credential-free, proxy-free, redirect-free, one-attempt/no-retry, and revalidates
+the final HTTPS destination; it never acquires a mutable branch/ref and never mutates the local
+Git object store.
+
+Local and fallback bytes are bounded to 512 KiB before acceptance, then checked for exact
+persisted SHA-256, strict UTF-8 and NUL exclusion before any provider construction/start or
+resumed model turn. Sealed
+workers receive an owner-only `0400` immutable run-input artifact even when the enclosing
+run-input directory uses the already-existing shared worker group for schema traversal.
+The supervisor also injects those already-verified bytes through the existing sealed-worker
+prompt mechanism, so provider visibility does not require widening file readability or
+grant/write/test/provider authority. The Operator planner receives the same verified bytes
+through its existing internal provider prompt because that lane has no separate local
+run-input file argument. Same-Attempt Operator recovery re-verifies before any new/resumed
+model turn. Cancellation/containment of an already-live Operator remains available even if
+a later commission verification fails; containment never authorizes another model turn.
+
+This keeps the Web CEO call small and typed while preserving a complete worker brief.
+Do not add `handoff_ref`, raw prompt text, Drive URLs, or another caller-authored context
+field to this public schema merely to move large instructions; that would duplicate the
+existing `commission_ref` owner and blur context with execution authority. External
+documents may be evidence referenced by the commission, but they do not become a second
+commission/lifecycle plane.
+
 ### Structurally absent from every input schema
 
 `actor`, `requested_authorities`, `validation_commands`, `mastermind_sha`,

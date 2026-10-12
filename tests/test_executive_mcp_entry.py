@@ -194,16 +194,18 @@ def test_app_acl_respects_bootstrap_root_owned_socket_directory(
         listener.close()
 
 
-@pytest.mark.parametrize('profile,builder_name,mounted', [
-    ('legacy', 'build_executive_mcp_app', True),
-    ('web_ceo_v2', 'build_web_ceo_v2_mcp_app', True),
-    ('web_ceo_v3', 'build_web_ceo_v3_mcp_app', True),
-    ('release_control_v1', 'build_release_control_mcp_app', False),
-    ('personal_read', 'build_personal_read_mcp_app', False),
-    ('web_ceo_release_v1', 'build_web_ceo_release_mcp_app', True),
+@pytest.mark.parametrize('profile,builder_name,mounted,os_enabled', [
+    ('legacy', 'build_executive_mcp_app', True, False),
+    ('web_ceo_v2', 'build_web_ceo_v2_mcp_app', True, False),
+    ('web_ceo_v3', 'build_web_ceo_v3_mcp_app', True, False),
+    ('web_ceo_v3', 'build_web_ceo_v3_mcp_app', True, True),
+    ('web_ceo_sessions_v1', 'build_web_ceo_sessions_mcp_app', True, False),
+    ('release_control_v1', 'build_release_control_mcp_app', False, False),
+    ('personal_read', 'build_personal_read_mcp_app', False, False),
+    ('web_ceo_release_v1', 'build_web_ceo_release_mcp_app', True, False),
 ])
 def test_launcher_selects_one_existing_listener_and_preserves_optional_mounts(
-    tmp_path, monkeypatch, profile, builder_name, mounted,
+    tmp_path, monkeypatch, profile, builder_name, mounted, os_enabled,
 ):
     from types import SimpleNamespace
     from integrations.executive_mcp import server
@@ -226,6 +228,10 @@ def test_launcher_selects_one_existing_listener_and_preserves_optional_mounts(
         'audit_root': '/var/log/mastermind-executive/mcp-auth',
         'executive_mcp_profile': profile,
     }
+    if os_enabled:
+        raw['os_executive_transport'] = True
+        raw['os_executive_resource'] = module.OS_EXECUTIVE_RESOURCE
+        raw['os_commission_port'] = 45025
     config = tmp_path / 'installed.json'
     config.write_text(json.dumps(raw))
     from tests.test_executive_mcp_app_composition import fixture
@@ -248,7 +254,7 @@ def test_launcher_selects_one_existing_listener_and_preserves_optional_mounts(
     def wrong(*a, **k):
         pytest.fail('wrong MCP builder selected')
     for name in ('build_executive_mcp_app', 'build_web_ceo_v2_mcp_app',
-                 'build_web_ceo_v3_mcp_app', 'build_personal_read_mcp_app',
+                 'build_web_ceo_v3_mcp_app', 'build_web_ceo_sessions_mcp_app', 'build_personal_read_mcp_app',
                  'build_release_control_mcp_app', 'build_web_ceo_release_mcp_app'):
         monkeypatch.setattr(server, name, selected if name == builder_name else wrong)
     launches = []
@@ -262,8 +268,20 @@ def test_launcher_selects_one_existing_listener_and_preserves_optional_mounts(
     assert settings.read_from_ceo_ingress is True
     assert settings.ceo_ingress_socket_path == raw['ceo_ingress_socket_path']
     if profile == 'web_ceo_v3':
+        from integrations.mastermind_executive_app.os_commission_client import StudioCommissionClient
+        preparer = kwargs.pop('os_commission_preparer')
+        assert (type(preparer) is StudioCommissionClient) if os_enabled else preparer is None
+        assert kwargs.pop('enable_os_executive_transport') is os_enabled
+        assert kwargs.pop('os_executive_resource') == (module.OS_EXECUTIVE_RESOURCE if os_enabled else None)
+        assert tuple(pair.submit.resource for pair in settings.additional_policies) == ((module.OS_EXECUTIVE_RESOURCE,) if os_enabled else ())
         from integrations.mosyle_mdm.client import MosyleInventoryClient
         assert isinstance(kwargs.pop('mdm_reader'), MosyleInventoryClient)
+    if profile in {'web_ceo_v3', 'web_ceo_sessions_v1'}:
+        from integrations.session_bridge.return_tools import NativeReplyReadTool
+        assert type(kwargs.pop('session_reply_read_tool')) is NativeReplyReadTool
+        assert callable(kwargs.pop('session_target_projector'))
+        assert callable(kwargs.pop('session_reply_handler'))
+        assert callable(kwargs.pop('session_summon_handler'))
     assert kwargs == {'audit_sink': sink, **(mounts if mounted else {})}
     assert len(mount_calls) == int(mounted)
     assert launches == [((app,), dict(host='127.0.0.1', port=8443, access_log=False,
@@ -285,3 +303,74 @@ def test_combined_profile_does_not_expand_frozen_v2_selector():
     assert validate_installed_mcp_profile_current('web_ceo_release_v1') == 'web_ceo_release_v1'
     with pytest.raises(ValueError):
         validate_installed_mcp_profile('web_ceo_release_v1')
+
+
+def test_os_commission_owner_is_closed_to_disabled_or_missing_transport():
+    module = _module()
+    assert module.build_os_commission_client({}) is None
+    with pytest.raises(ValueError, match='disabled OS transport refuses commission owner'):
+        module.build_os_commission_client({'os_commission_port': 45025})
+    with pytest.raises(ValueError, match='OS transport requires installed commission owner'):
+        module.build_os_commission_client({'os_executive_transport': True})
+
+
+@pytest.mark.parametrize('value', [None, 0, 1, 'true', {}, []])
+def test_os_transport_opt_in_requires_real_boolean(value):
+    from tests.test_executive_workspace_mount import document
+    raw = document(); raw['executive_mcp_profile'] = 'web_ceo_v3'; raw['os_executive_transport'] = value
+    with pytest.raises(ValueError, match='boolean opt-in'): _module().validate_document(raw)
+
+
+@pytest.mark.parametrize('profile', ['legacy', 'web_ceo_v2', 'web_ceo_sessions_v1', 'release_control_v1', 'personal_read', 'web_ceo_release_v1'])
+def test_os_transport_cannot_enable_other_profiles(profile):
+    from tests.test_executive_workspace_mount import document
+    raw = document(); raw['executive_mcp_profile'] = profile; raw['os_executive_transport'] = True
+    with pytest.raises(ValueError, match='boolean opt-in'): _module().validate_document(raw)
+
+
+@pytest.mark.parametrize('resource', [None, '', False, [], {},
+    'https://mcp.mastermind-x.com', 'https://mcp.mastermind-x.com/os/executive/',
+    'https://mcp.mastermind-x.com/os/executive?x=1',
+    'https://mcp.mastermind-x.com/os/executive#fragment',
+    'https://mcp.mastermind-x.com:443/os/executive',
+    'https://user@mcp.mastermind-x.com/os/executive',
+    'http://mcp.mastermind-x.com/os/executive',
+    'https://foreign.test/os/executive',
+    'https://tunnel-service.gateway.unified-0.internal.api.openai.org/v1/mcp/tunnel_' + '1' * 32])
+def test_os_audience_is_exact_and_not_a_connector_tunnel(resource):
+    from tests.test_executive_workspace_mount import document
+    raw = document()
+    raw.update(executive_mcp_profile='web_ceo_v3', os_executive_transport=True,
+               os_executive_resource=resource)
+    with pytest.raises(ValueError, match='exact installed OS audience'):
+        _module().validate_document(raw)
+
+
+def test_os_audience_requires_explicit_opt_in_and_rejects_missing_value():
+    module = _module()
+    assert module.validate_os_executive_resource({}) is None
+    for raw in ({'os_executive_resource': module.OS_EXECUTIVE_RESOURCE},
+                {'os_executive_transport': False, 'os_executive_resource': module.OS_EXECUTIVE_RESOURCE},
+                {'os_executive_transport': True, 'executive_mcp_profile': 'web_ceo_v3'}):
+        with pytest.raises(ValueError, match='OS Executive resource'):
+            module.validate_os_executive_resource(raw)
+
+
+def test_os_audience_preserves_existing_tunnels_and_all_policy_grants():
+    from tests.test_executive_mcp_app_composition import fixture
+    from integrations.mastermind_executive_app.gateway import AppPolicies
+    module = _module()
+    policies = AppPolicies(read=fixture._read_policy(), submit=fixture._submit_policy())
+    tunnel = 'https://tunnel-service.gateway.unified-0.internal.api.openai.org/v1/mcp/tunnel_' + '2' * 32
+    raw = dict(executive_mcp_profile='web_ceo_v3', os_executive_transport=True,
+               os_executive_resource=module.OS_EXECUTIVE_RESOURCE,
+               executive_additional_resources=[tunnel])
+    variants = module.build_additional_policies(raw, policies)
+    assert [pair.submit.resource for pair in variants] == [tunnel, module.OS_EXECUTIVE_RESOURCE]
+    for pair in variants:
+        assert dataclasses.replace(pair.read, resource=policies.read.resource) == policies.read
+        assert dataclasses.replace(pair.submit, resource=policies.submit.resource) == policies.submit
+    assert policies.read.resource == fixture._read_policy().resource
+    duplicate = AppPolicies(read=variants[1].read, submit=variants[1].submit)
+    with pytest.raises(ValueError, match='cannot be duplicated'):
+        module.build_additional_policies(raw, duplicate)

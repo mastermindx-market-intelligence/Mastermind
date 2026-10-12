@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import hashlib
 import json
 import re
 import subprocess
@@ -44,6 +45,8 @@ from control_plane.executive_supervisor import (
     ExecutiveSupervisor,
     ReconcileReceipt,
     ReconcileStatus,
+    VerifiedCommission,
+    verify_commission_for_job,
     worker_result_schema,
 )
 from control_plane.operator_harness_contract import (
@@ -461,7 +464,12 @@ class ExecutiveOperatorSupervisor:
             write_capable=False,
         )
 
-    def _prompt(self, job: Job, lease: AttemptLease) -> str:
+    def _prompt(
+        self,
+        job: Job,
+        lease: AttemptLease,
+        commission: VerifiedCommission | None = None,
+    ) -> str:
         grant = ExecutiveSupervisor._effective_grant(job, lease.attempt)
         schema = worker_result_schema(
             job_id=job.job_id,
@@ -471,14 +479,57 @@ class ExecutiveOperatorSupervisor:
             orchestration_role="plan",
             root_job_id=job.root_job_id,
         )
-        return (
+        base_prompt = (
             self.prompt_source._prompt(job, lease.attempt, grant)
+            if commission is None
+            else self.prompt_source._prompt(
+                job,
+                lease.attempt,
+                grant,
+                commission=commission.ref_dict(),
+                inline_commission=commission.content.decode("utf-8"),
+            )
+        )
+        return (
+            base_prompt
             + "\n\nThe output schema is embedded below because this App Server lane "
             "has no separate schema-file argument. Return exactly one minified, "
             "UTF-8 JSON object with keys recursively sorted lexicographically, no "
             "markdown fence, no leading BOM, no trailing newline, and no commentary.\n"
             + json.dumps(schema, sort_keys=True, ensure_ascii=False, indent=2)
         )
+
+    @staticmethod
+    def _turn_operation_id(
+        attempt_id: str,
+        commission: VerifiedCommission | None,
+    ) -> OperationId:
+        """Bind commission-bearing TX-5 to stable immutable input identity.
+
+        The model-visible prompt may include observational routing capacity that
+        legitimately changes between the original turn and restart. Recovery
+        identity therefore binds the durable Attempt to the exact immutable
+        commission reference/content digest rather than re-hashing ambient
+        routing observations. Source-free jobs retain their historical identity.
+        """
+
+        if commission is None:
+            return OperationId(f"ohf-op:turn:{attempt_id}")
+        binding = {
+            "schema_version": "mastermind.operator_turn_commission_binding/v1",
+            "attempt_id": attempt_id,
+            "commission_ref": commission.ref_dict(),
+        }
+        binding_digest = hashlib.sha256(
+            json.dumps(
+                binding,
+                sort_keys=True,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8", errors="strict")
+        ).hexdigest()
+        return OperationId(f"ohf-op:turn-commission:{binding_digest}")
 
     @staticmethod
     def _terminal_payload(
@@ -667,7 +718,7 @@ class ExecutiveOperatorSupervisor:
         lease: AttemptLease,
         *,
         require_turn: bool = True,
-    ) -> tuple[OperatorSessionReceipt, TurnRef | None]:
+    ) -> tuple[OperatorSessionReceipt, TurnRef | None, OperationId | None]:
         """Reconstruct exact CURRENT G1, optionally before its first turn."""
 
         profile_raw = lease.attempt.requested_execution_profile
@@ -780,7 +831,7 @@ class ExecutiveOperatorSupervisor:
                 "operator recovery has invalid begin-turn INTENT cardinality"
             )
         if not turn_matches:
-            return session, None
+            return session, None, None
         turn_event, turn_payload = turn_matches[0]
         operation = OperationId(str(turn_event["command_id"]))
         applied = self.runtime.events.get_event_by_command_id(
@@ -825,7 +876,7 @@ class ExecutiveOperatorSupervisor:
             process_generation_id=generation.process_generation_id,
             attempt_id=lease.attempt.attempt_id,
         )
-        return session, turn
+        return session, turn, operation
 
     def _cleanup_failed_session(
         self,
@@ -898,7 +949,25 @@ class ExecutiveOperatorSupervisor:
         self, job: Job, lease: AttemptLease
     ) -> OrchestrationDispatchOutcome:
         requested = self._requested_profile(job, lease)
-        prompt_by_turn: dict[str, str] = {}
+        if not job.worktree:
+            raise ExecutiveOperatorSupervisorError(
+                "operator planner has no assigned workspace"
+            )
+        # Remote physical identity is not a local Git source. Source-free Jobs
+        # need no local read; strict commissions still require a qualified source.
+        try:
+            verified_commission = verify_commission_for_job(
+                self.runtime, job,
+                (None if self._workspace_identity_source is not None
+                 else Path(job.worktree).resolve(strict=True))
+            )
+        except Exception as exc:
+            raise ExecutiveOperatorSupervisorError(
+                f"operator immutable commission verification failed: {exc}"
+            ) from exc
+        prompt_by_turn: dict[str, str] = {
+            "pending": self._prompt(job, lease, verified_commission)
+        }
 
         def load_turn(turn: Any) -> str:
             try:
@@ -912,7 +981,10 @@ class ExecutiveOperatorSupervisor:
         orchestrator = self._orchestrator(lease, adapter)
         attempt_id = lease.attempt.attempt_id
         start_operation = OperationId(f"ohf-op:start:{attempt_id}")
-        turn_operation = OperationId(f"ohf-op:turn:{attempt_id}")
+        turn_operation = self._turn_operation_id(
+            attempt_id,
+            verified_commission,
+        )
         stop_operation = OperationId(f"ohf-op:stop:{attempt_id}")
         session: OperatorSessionReceipt | None = None
         try:
@@ -921,7 +993,6 @@ class ExecutiveOperatorSupervisor:
                 requested=requested,
                 operation_id=start_operation,
             )
-            prompt_by_turn["pending"] = self._prompt(job, lease)
 
             def bound_prompt(turn: Any) -> str:
                 value = prompt_by_turn.pop("pending")
@@ -1112,11 +1183,46 @@ class ExecutiveOperatorSupervisor:
                 )
         process_was_live = False
         try:
-            session, existing_turn = self._recovery_session(
+            session, existing_turn, existing_turn_operation = self._recovery_session(
                 lease,
                 require_turn=False,
             )
-            prompt = self._prompt(job, lease)
+            verified_commission = None
+            if lease.attempt.status is not AttemptStatus.CANCEL_REQUESTED:
+                try:
+                    verified_commission = verify_commission_for_job(
+                        self.runtime,
+                        job,
+                        (Path(job.worktree).resolve(strict=True)
+                         if job.worktree and self._workspace_identity_source is None
+                         else None),
+                    )
+                except Exception as exc:
+                    raise ExecutiveOperatorSupervisorError(
+                        f"operator immutable commission verification failed: {exc}"
+                    ) from exc
+            # Cancellation/containment of an already-live writer must never depend
+            # on later availability of the immutable commission. No new/resumed
+            # turn is permitted without verification; this source-free prompt is
+            # only a loader placeholder for reconcile/cancel mechanics.
+            prompt = self._prompt(job, lease, verified_commission)
+            expected_turn_operation = (
+                self._turn_operation_id(attempt_id, verified_commission)
+                if verified_commission is not None
+                else None
+            )
+            if (
+                expected_turn_operation is not None
+                and existing_turn is not None
+                and (
+                    existing_turn_operation is None
+                    or existing_turn_operation.command_id
+                    != expected_turn_operation.command_id
+                )
+            ):
+                raise ExecutiveOperatorSupervisorError(
+                    "operator recovery turn input is not bound to the verified commission"
+                )
             adapter = self._adapter_for_attempt(
                 lease, session.launch.requested, lambda _turn: prompt, recovery=True
             )
@@ -1241,8 +1347,12 @@ class ExecutiveOperatorSupervisor:
                 if existing_turn is None:
                     turn = orchestrator.run_turn(
                         session,
-                        operation_id=OperationId(
-                            f"ohf-op:recover-first-turn:{attempt_id}"
+                        operation_id=(
+                            expected_turn_operation
+                            if expected_turn_operation is not None
+                            else OperationId(
+                                f"ohf-op:recover-first-turn:{attempt_id}"
+                            )
                         ),
                         timeout_seconds=300.0,
                     )
@@ -1301,8 +1411,12 @@ class ExecutiveOperatorSupervisor:
                 )
                 turn = orchestrator.run_turn(
                     resumed,
-                    operation_id=OperationId(
-                        f"ohf-op:recover-turn:{attempt_id}"
+                    operation_id=(
+                        expected_turn_operation
+                        if expected_turn_operation is not None
+                        else OperationId(
+                            f"ohf-op:recover-turn:{attempt_id}"
+                        )
                     ),
                     timeout_seconds=300.0,
                 )

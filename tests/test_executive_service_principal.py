@@ -413,16 +413,16 @@ def test_a1_intent_id_depends_only_on_principal_and_operation_key():
 
     # The quoted sink predicates this law relies on are still where we cite them.
     assert "find_event_by_command_id(command_id)" in _source_window(
-        "control_plane/ceo_intent.py", 1325, 1331
+        "control_plane/ceo_intent.py", 1343, 1349
     )
     assert "if fingerprint is not None and recorded != fingerprint:" in _source_window(
-        "control_plane/ceo_intent.py", 1087, 1093
+        "control_plane/ceo_intent.py", 1093, 1099
     )
     assert 'return f"{COMMAND_ID_PREFIX}{intent_id}"' in _source_window(
         "control_plane/ceo_intent.py", 923, 929
     )
     pins = admission_status()["identity"]["conflict_predicates"]
-    assert {pin["line"] for pin in pins} == {"L1327", "L1089", "L925"}
+    assert {pin["line"] for pin in pins} == {"L1345", "L1095", "L925"}
     for pin in pins:
         assert pin["file"] == "control_plane/ceo_intent.py"
 
@@ -713,13 +713,13 @@ def test_service_schema_is_durably_carried_with_typed_evidence(tmp_path: Path):
     windows = {
         "L750": _source_window("control_plane/ceo_intent.py", 748, 754),
         "L598": _source_window("control_plane/ceo_intent.py", 596, 602),
-        "L1032": _source_window("control_plane/ceo_intent.py", 1030, 1036),
-        "L1418": _source_window("control_plane/ceo_intent.py", 1416, 1422),
+        "L1038": _source_window("control_plane/ceo_intent.py", 1036, 1042),
+        "L1436": _source_window("control_plane/ceo_intent.py", 1434, 1440),
     }
     assert "_SERVICE_REQUIRED_KEYS" in windows["L750"]
     assert "def _require_service_ceiling" in windows["L598"]
-    assert 'value["principal_id"] = intent["principal_id"]' in windows["L1032"]
-    assert 'owner_seat="coo"' in windows["L1418"]
+    assert 'value["principal_id"] = intent["principal_id"]' in windows["L1038"]
+    assert 'owner_seat="coo"' in windows["L1436"]
     for predicate in status["predicates"]:
         assert predicate["line"] in windows, predicate
         assert predicate["file"] == "control_plane/ceo_intent.py"

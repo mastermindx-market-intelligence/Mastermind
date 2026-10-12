@@ -364,6 +364,13 @@ def test_waited_completion_preserves_actual_queue_order(tmp_path):
         turn = _turn(harness, "turn-ordered-wait")
         started = _begin(harness, launch, turn)
         state = harness.adapter._generations[turn.process_generation_id]
+        # The serial fixture replies to turn/start before emitting turn/started.
+        # A subsequent RPC settles that real notification before queue injection,
+        # whether begin_turn already ingested it or the reader delivered it later.
+        settled = state.client.request(
+            "thread/turns/list", {"threadId": state.provider_session_id}, timeout=5.0)
+        assert any(row.get("id") == started.provider_native_turn_id
+                   for row in settled["data"])
         state.client.drain_notifications()
         before = {"method": "item/completed", "params": {
             "threadId": state.provider_session_id,

@@ -249,3 +249,48 @@ def test_control_admits_its_own_proof_authority_and_refuses_terminal_window(
                 await service.close()
 
         asyncio.run(asyncio.wait_for(exercise(), 30))
+
+
+def test_proof_capacity_observer_reuses_supervisor_controller(tmp_path, monkeypatch):
+    from control_plane import executive_worker_broker as broker_module
+    from control_plane import executive_supervisor as supervisor_module
+    raw = _raw(tmp_path)
+    captured = {}
+    controllers = []
+    seen = []
+    class Capture:
+        def __init__(self, config, **kwargs):
+            captured.update(config=config, **kwargs)
+    class Controller:
+        def __init__(self, client, *, expected_worker_uid):
+            self.client = client
+            self.expected_uid = expected_worker_uid
+            self.passing = True
+            controllers.append(self)
+        def absence_verified(self, attempt):
+            seen.append(("absence", attempt))
+            return self.passing
+        def uid_sweep_receipt(self, attempt):
+            seen.append(("receipt", attempt))
+            return {"owned": True}
+    monkeypatch.setattr(cli, "ExecutiveControlService", Capture)
+    monkeypatch.setattr(cli, "activate_launchd_socket", lambda name: object())
+    monkeypatch.setattr(broker_module, "RemoteWorkerProcessController", Controller)
+    monkeypatch.setattr(supervisor_module, "ExecutiveSupervisor",
+                        lambda *args, **kw: SimpleNamespace(**kw))
+    cli._service_from_config(raw)
+    observer = captured["proof_capacity_recovery_observer"]
+    attempt = object()
+    with pytest.raises(cli.ServiceError, match="fresh broker absence"):
+        observer(attempt)
+    supervisor = captured["supervisor_factory"](object())
+    assert len(controllers) == 1
+    assert supervisor.process_controller is controllers[0]
+    assert controllers[0].expected_uid == raw["worker_uid"]
+    assert captured["proof_capacity_recovery_worker_uid"] == raw["worker_uid"]
+    assert observer(attempt) == {"owned": True}
+    assert seen == [("absence", attempt), ("receipt", attempt)]
+    controllers[0].passing = False
+    with pytest.raises(cli.ServiceError, match="fresh broker absence"):
+        observer(attempt)
+    assert seen[-1] == ("absence", attempt)

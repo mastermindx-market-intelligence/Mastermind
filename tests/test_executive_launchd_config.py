@@ -328,7 +328,7 @@ def test_root_scripts_are_syntax_valid_and_service_control_is_fixed_scope() -> N
         assert completed.returncode == 0, f"{script.name}: {completed.stderr}"
 
     lifecycle = (OPS / "service-control.sh").read_text(encoding="utf-8")
-    assert "{start|stop|restart|start-readside|stop-readside|status}" in lifecycle
+    assert "{start|stop|restart|restart-gateway|start-readside|stop-readside|start-agent-relay|stop-agent-relay|status-agent-relay|status}" in lifecycle
     assert "com.mastermind.executive.control" in lifecycle
     assert "com.mastermind.executive.worker.codex" in lifecycle
     assert "--label" not in lifecycle and "eval " not in lifecycle
@@ -353,10 +353,15 @@ def test_host_scripts_use_tools_available_at_absolute_macos_paths() -> None:
     assert "/usr/bin/realpath" not in install
     assert 'runtime_target="$(/usr/bin/readlink -f "$runtime_link")"' in install
 
-    for name in ("acceptance.sh", "service-control.sh"):
-        source = (OPS / name).read_text(encoding="utf-8")
-        assert '$(/usr/bin/dirname "$0")' in source
-        assert '$(dirname "$0")' not in source
+    acceptance = (OPS / "acceptance.sh").read_text(encoding="utf-8")
+    assert '$(/usr/bin/dirname "$0")' in acceptance
+    assert '$(dirname "$0")' not in acceptance
+
+    lifecycle = (OPS / "service-control.sh").read_text(encoding="utf-8")
+    assert 'SCRIPT_SOURCE="${BASH_SOURCE[0]}"' in lifecycle
+    assert 'builtin cd -P "$(/usr/bin/dirname "$SCRIPT_SOURCE")"' in lifecycle
+    assert '$(/usr/bin/basename "$SCRIPT_SOURCE")' in lifecycle
+    assert '$(/usr/bin/dirname "$0")' not in lifecycle
 
 
 def test_control_canary_uses_post_drop_wrapper_not_launchd_environment() -> None:
@@ -760,6 +765,7 @@ def test_control_config_template_tracks_strict_service_schema() -> None:
     # Null groups fail validation; an omitted executive_mcp_profile preserves
     # the legacy generation and an omitted realm preserves the v4 worker.
     installed_product_keys = {
+        "company_consultation",
         "executive_mcp_profile",
         "content_observer",
         "content_observer_profile_path",
@@ -1004,16 +1010,22 @@ def test_privileged_source_cleanliness_checks_do_not_refresh_worktree_index() ->
     source_policy = (OPS / "install_source_policy.py").read_text(encoding="utf-8")
     acceptance = (OPS / "acceptance.py").read_text(encoding="utf-8")
 
-    assert '["/usr/bin/git", "--no-optional-locks", "-C", str(repo), *args]' in source_policy
-    assert '"status",\n        "--porcelain=v1",\n        "--untracked-files=normal",' in source_policy
-    assert "--refresh" not in source_policy
     assert (
         '"/usr/bin/git",\n'
         '                "--no-optional-locks",\n'
+        '                "-c",\n'
+        '                f"safe.directory={trust_value}",\n'
         '                "-C",\n'
-        '                self.source_repository,\n'
-        '                "status",'
-    ) in acceptance
+        '                trust_value,\n'
+        '                *args,'
+    ) in source_policy
+    assert '"status",\n        "--porcelain=v1",\n        "--untracked-files=normal",' in source_policy
+    assert "--refresh" not in source_policy
+    assert "return validate_acceptance_source(" in acceptance
+    assert "source_repo=self.source_repository," in acceptance
+    assert "expected_sha=self.expected_sha," in acceptance
+    assert "tree_sha = self._source_tree_sha()" in acceptance
+    assert '"/usr/bin/git"' not in acceptance
 
 
 def test_canary_activation_uses_bounded_control_command_not_signal() -> None:
@@ -1473,13 +1485,18 @@ def test_acceptance_requires_exact_reviewed_macos_directory_group_sets() -> None
         )
 
 
-def test_acceptance_derives_assignment_roots_from_durable_job_and_attempt() -> None:
+def test_acceptance_derives_assignment_roots_from_durable_job_and_attempt(tmp_path: Path) -> None:
     import pytest
 
     from ops.executive_os.acceptance import AcceptanceError, _durable_assignment_paths
 
-    workspace_root = Path("/var/db/mastermind-executive/jobs/workspaces")
-    run_root = Path("/var/db/mastermind-executive/jobs/runs")
+    workspace_root = tmp_path.resolve() / "workspaces"
+    run_root = tmp_path.resolve() / "runs"
+    workspace_root.mkdir()
+    run_root.mkdir()
+    (workspace_root / "proof-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").mkdir()
+    (run_root / "attempt-1" / "output").mkdir(parents=True)
+    (run_root / "attempt-1" / "output" / "result.json").write_text("{}")
     job = {
         "job_id": "job-1",
         "current_attempt_id": "attempt-1",
@@ -1489,6 +1506,7 @@ def test_acceptance_derives_assignment_roots_from_durable_job_and_attempt() -> N
         "attempt_id": "attempt-1",
         "job_id": "job-1",
         "result_path": str(run_root / "attempt-1" / "output" / "result.json"),
+        "status": "COMPLETED",
     }
     assert _durable_assignment_paths(
         job, attempt, workspace_root=workspace_root, run_root=run_root
@@ -1733,7 +1751,7 @@ def test_installer_stops_old_daemons_before_first_release_or_policy_mutation() -
     worker_absent = source.index(
         'wait_for_launchd_absent "$WORKER_LABEL" worker', control_absent
     )
-    archive = source.index('/usr/bin/git -C "$SOURCE_REPO" archive')
+    archive = source.index('/usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" -C "$SOURCE_REPO" archive')
     config_write = source.index('temporary.write_text(', archive)
     plist_install = source.index('/usr/bin/install -o root -g wheel -m 0644')
     assert stop < control_absent < worker_absent < archive < config_write < plist_install
@@ -1763,7 +1781,7 @@ def test_installer_waits_boundedly_for_asynchronous_launchd_bootout() -> None:
     assert "return 1" in helper
 
     mutation_start = source.index("trap leave_installed_services_stopped EXIT")
-    archive = source.index('/usr/bin/git -C "$SOURCE_REPO" archive', mutation_start)
+    archive = source.index('/usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" -C "$SOURCE_REPO" archive', mutation_start)
     mutation = source[mutation_start:archive]
     for label, description in (
         ("RELAY_LABEL", "relay"),
