@@ -4127,10 +4127,19 @@ class CodexWorkerAdapter:
             for name, value in expected.items()
         ):
             return _RecoveredPresence.IDENTITY_CHANGED
-        if (
-            self._group_presence_for_recovery(ref.pgid)
-            is not _RecoveredPresence.LIVE
-        ):
+        group = self._group_presence_for_recovery(ref.pgid)
+        if group is _RecoveredPresence.ABSENT:
+            # The exact leader may have exited after its identity was read.
+            # Require independent leader absence as well: a live/reused PID
+            # or a refused observation must not become a cleanup receipt.
+            try:
+                os.kill(ref.pid, 0)
+            except ProcessLookupError:
+                return _RecoveredPresence.ABSENT
+            except (PermissionError, OSError):
+                return _RecoveredPresence.UNKNOWN
+            return _RecoveredPresence.UNKNOWN
+        if group is not _RecoveredPresence.LIVE:
             return _RecoveredPresence.UNKNOWN
         return _RecoveredPresence.LIVE
 
