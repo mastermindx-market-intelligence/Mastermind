@@ -55,6 +55,7 @@ class FakeAppServer:
         if self.sandbox_mode not in {"read-only", "workspace-write"}:
             raise ValueError("fake App Server sandbox mode is invalid")
         self.cap_s1_turn_replies = os.environ.get("OHF_FAKE_CAP_S1_TURN_REPLIES") == "1"
+        self.qualified_skill_names = os.environ.get("OHF_FAKE_QUALIFIED_SKILLS") == "1"
         self.native_helper = os.environ.get("OHF_FAKE_NATIVE_HELPER") == "1"
         self.native_helper_depth = int(
             os.environ.get("OHF_FAKE_NATIVE_HELPER_DEPTH") or "1"
@@ -173,7 +174,13 @@ class FakeAppServer:
             if not root.exists():
                 continue
             for skill_md in sorted(root.glob("*/SKILL.md"), key=lambda p: p.parent.name):
-                rows.append(self._skill_row(skill_md.parent.name, str(skill_md.parent)))
+                name = skill_md.parent.name
+                # Real Codex App Server 0.159.3 namespaces extra-root Skills
+                # under their signed package-directory name, while the path
+                # still points to the unqualified directory on disk.
+                if self.qualified_skill_names and root in self.extra_roots:
+                    name = f"{root.parent.name}:{name}"
+                rows.append(self._skill_row(name, str(skill_md.parent)))
         if self.ambient_skill:
             rows.append(
                 self._skill_row(

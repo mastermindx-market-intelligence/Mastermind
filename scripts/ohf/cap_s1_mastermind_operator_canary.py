@@ -1603,6 +1603,7 @@ def run_canary(
             extra_env["OHF_FAKE_WORKSPACE"] = str(workspace)
             if rich_write_candidate:
                 extra_env["OHF_FAKE_SANDBOX_MODE"] = "workspace-write"
+                extra_env["OHF_FAKE_QUALIFIED_SKILLS"] = "1"
 
         # --- exact reviewed source package + V4 profile -------------------
         # Residual refusal row (CAP-S1 Sol review item 3): every step here

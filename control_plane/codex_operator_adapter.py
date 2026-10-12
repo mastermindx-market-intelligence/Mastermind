@@ -1791,6 +1791,24 @@ class CodexOperatorAdapter:
         wave-3 review finding B2).
         """
 
+        # Codex App Server 0.159.3 reports externally loaded Skills as
+        # `<verified-package-directory>:<runtime-name>` even though their
+        # immutable path still contains the unqualified runtime directory.
+        # Project that exact provider spelling onto the reviewed identity;
+        # never strip an arbitrary namespace or accept an unknown Skill.
+        granted_names = frozenset(
+            grant.runtime_name for grant in binding.profile.skill_grants
+        )
+        package_namespace = Path(binding.generation.package_root).name
+        qualified_prefix = f"{package_namespace}:"
+
+        def runtime_name(provider_name: str) -> str:
+            if provider_name.startswith(qualified_prefix):
+                candidate = provider_name[len(qualified_prefix):]
+                if candidate in granted_names:
+                    return candidate
+            return provider_name
+
         path_flags = {("path" in row) for row in rows}
         if len(path_flags) > 1:
             raise CodexAdapterError(
@@ -1802,7 +1820,7 @@ class CodexOperatorAdapter:
         schema_support_mode = "path_precise" if mode_a else "pathless"
         if mode_a:
             for row in rows:
-                name = str(row.get("name") or "")
+                name = runtime_name(str(row.get("name") or ""))
                 path = str(row.get("path") or "")
                 expected_md = f"{skills_root}/{name}/SKILL.md"
                 expected_dir = f"{skills_root}/{name}"
@@ -1819,7 +1837,7 @@ class CodexOperatorAdapter:
                 effect_unknown=True,
             )
         enabled_rows = [row for row in rows if row.get("enabled") is True]
-        names = [str(row.get("name") or "") for row in enabled_rows]
+        names = [runtime_name(str(row.get("name") or "")) for row in enabled_rows]
         if len(names) != len(set(names)):
             raise CodexAdapterError(
                 AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
