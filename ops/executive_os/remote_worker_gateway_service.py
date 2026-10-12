@@ -21,6 +21,7 @@ from typing import Any, Awaitable, Callable, Mapping
 
 from ops.executive_os.remote_worker_gateway import RemoteWorkerGateway
 from ops.executive_os.remote_worker_gateway_config import RemoteWorkerGatewayConfig
+from ops.executive_os.remote_assignment_control import AssignmentControlBinding
 
 SERVICE_LABEL = "com.mastermind.executive.remote-worker-gateway"
 SERVICE_CHECK_SCHEMA = "mastermind.remote_worker_gateway_service_check/v1"
@@ -225,7 +226,9 @@ def _closed_json(raw: bytes) -> dict[str, Any]:
         value = json.loads(raw.decode("utf-8", errors="strict"), object_pairs_hook=pairs)
     except (UnicodeDecodeError, json.JSONDecodeError):
         raise RemoteWorkerGatewayServiceError("GATEWAY_CONFIG_INVALID") from None
-    if type(value) is not dict or set(value) != CONFIG_FIELDS:
+    if type(value) is not dict or set(value) not in (
+        CONFIG_FIELDS, CONFIG_FIELDS | {"assignment_control"}
+    ):
         _refuse("GATEWAY_CONFIG_INVALID")
     return value
 
@@ -257,6 +260,8 @@ def _canonical_config(config: RemoteWorkerGatewayConfig) -> bytes:
         "request_timeout_seconds": float(config.request_timeout_seconds),
         "max_frame_bytes": config.max_frame_bytes,
     }
+    if config.assignment_control is not None:
+        value["assignment_control"] = config.assignment_control.to_wire()
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
 
 
@@ -357,6 +362,8 @@ def load_remote_worker_gateway_config(
             allowed_operations=frozenset(operations),
             request_timeout_seconds=float(timeout),
             max_frame_bytes=frame_bytes,
+            assignment_control=(AssignmentControlBinding.from_wire(document["assignment_control"])
+                                if "assignment_control" in document else None),
         )
     except (TypeError, ValueError):
         raise RemoteWorkerGatewayServiceError("GATEWAY_CONFIG_INVALID") from None

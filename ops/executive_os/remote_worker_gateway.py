@@ -23,6 +23,7 @@ from control_plane.remote_worker_transport import (
     validate_request,
 )
 from ops.executive_os.remote_worker_gateway_config import RemoteWorkerGatewayConfig
+from ops.executive_os.remote_assignment_control import seal_original_assignment
 
 
 class RemoteWorkerGateway:
@@ -73,6 +74,15 @@ class RemoteWorkerGateway:
             timeout_seconds=self.config.request_timeout_seconds,
         )
 
+    async def _dispatch_authenticated(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        if request["broker_operation"] == "assignment-seal":
+            binding = self.config.assignment_control
+            if binding is None:
+                raise ValueError("gateway assignment Control is not configured")
+            return await seal_original_assignment(binding, request, self.broker_call)
+        return await self.broker_call(str(request["broker_operation"]),
+                                      dict(request["broker_request"]))
+
     async def _handle_connection(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
@@ -108,10 +118,7 @@ class RemoteWorkerGateway:
 
             try:
                 result = await asyncio.wait_for(
-                    self.broker_call(
-                        str(request["broker_operation"]),
-                        dict(request["broker_request"]),
-                    ),
+                    self._dispatch_authenticated(request),
                     timeout=self.config.request_timeout_seconds,
                 )
                 response = self._bound_response(

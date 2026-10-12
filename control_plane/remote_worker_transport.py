@@ -41,7 +41,7 @@ _BOUND_AUTHORITY_KEYS = frozenset({"host_ref", "job_id", "attempt_id", "worker_i
 _BOUND_PAYLOAD_IDENTITY_KEYS = frozenset({"session_epoch_id", "process_generation_id"})
 _ATTEMPT_RUN_OPERATIONS = frozenset({
     "start", "status", "collect", "cancel", "validate",
-    "assignment-seal-prepare", "assignment-seal-commit", "assignment-seal-finalize",
+    "assignment-seal", "assignment-seal-prepare", "assignment-seal-commit", "assignment-seal-finalize",
 })
 
 

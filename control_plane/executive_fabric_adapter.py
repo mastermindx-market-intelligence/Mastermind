@@ -549,6 +549,31 @@ class AttendedFabricWorkerAdapter:
         except (KeyError, ValueError) as exc:
             raise BrokerProtocolError("Fabric status is not a proven worker state") from exc
 
+    async def seal_assignment(self, ref):
+        """Request the original owner's actual seal; never perform local chmod."""
+        result = await self._request(ref, "assignment-seal", process_ref=dataclasses.asdict(ref))
+        observation = result.get("observation")
+        if (not isinstance(observation, dict)
+                or observation.get("snapshot", {}).get("process_ref") != dataclasses.asdict(ref)):
+            raise BrokerProtocolError("Fabric assignment observation changed original process")
+        return observation
+
+    async def finalize_assignment(self, ref, acknowledgement):
+        """Forward only the exact original Supervisor's durable retention ACK."""
+        if (type(acknowledgement) is not dict or set(acknowledgement) != {
+                "run_id", "observation_sha256", "retention_sha256"}
+                or acknowledgement["run_id"] != ref.run_id):
+            raise BrokerProtocolError("Fabric assignment acknowledgement differs")
+        _digest(acknowledgement["observation_sha256"])
+        _digest(acknowledgement["retention_sha256"])
+        result = await self._request(ref, "assignment-seal-finalize",
+            process_ref=dataclasses.asdict(ref),
+            observation_sha256=acknowledgement["observation_sha256"],
+            retention_sha256=acknowledgement["retention_sha256"])
+        if result.get("acknowledgement") != acknowledgement:
+            raise BrokerProtocolError("Fabric retained assignment acknowledgement differs")
+        return dict(acknowledgement)
+
     async def collect_result(self, ref):
         spec = self._known(ref)[3]
         receipt = _collection_from_json((await self._request(ref, "collect",

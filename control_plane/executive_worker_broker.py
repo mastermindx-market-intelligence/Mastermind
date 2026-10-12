@@ -4079,7 +4079,7 @@ class WorkerBrokerClient:
         *,
         timeout_seconds: float | None = None,
     ) -> dict[str, Any]:
-        if operation not in _ALLOWED_OPERATIONS:
+        if operation not in _ALLOWED_OPERATIONS | {"assignment-seal"}:
             raise BrokerProtocolError("client operation is not allowed")
         request_id = f"req-{uuid.uuid4().hex}"
         document = {

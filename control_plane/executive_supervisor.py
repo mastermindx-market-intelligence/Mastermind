@@ -2529,6 +2529,32 @@ class ExecutiveSupervisor:
                    "retention_sha256": digest(record)}
         return path, ack
 
+    async def retain_and_acknowledge_remote_assignment(self, active: ActiveRun) -> Path:
+        """Use the existing original adapter, fence, retention and ACK path.
+
+        This bounded source operation does not replace terminalization/restart
+        policy. The installed shared-principal composition stays closed until
+        its actual original Backend and dedicated realm are qualified. A lost
+        exchange must be reconciled by that original owner, never retried here.
+        """
+        from control_plane.executive_fabric_adapter import AttendedFabricWorkerAdapter
+        if (type(self.adapter) is not AttendedFabricWorkerAdapter
+                or self.adapter.runtime is not self.runtime
+                or not self.require_complete_launch_attestation):
+            raise TerminalAssignmentSealError("remote assignment requires the original complete adapter")
+        # The adapter revalidates the exact Runtime lease, launch pin, process
+        # and physical route immediately before/after each authenticated call.
+        observation = await self.adapter.seal_assignment(active.process_ref)
+        path, ack = self._retain_remote_assignment_observation(active, observation)
+        acknowledged = await self.adapter.finalize_assignment(active.process_ref, ack)
+        if acknowledged != ack:
+            raise TerminalAssignmentSealError("original assignment retention acknowledgement differs")
+        # A changed fence after remote release cannot authorize terminalization.
+        verified_path, verified_ack = self._retain_remote_assignment_observation(active, observation)
+        if verified_path != path or verified_ack != ack:
+            raise TerminalAssignmentSealError("original assignment retention changed")
+        return path
+
     @staticmethod
     def _validate_terminal_uid_sweep(value: Any) -> Mapping[str, Any]:
         from control_plane.executive_worker_broker import uid_sweep_receipt_is_passing

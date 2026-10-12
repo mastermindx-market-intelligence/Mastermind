@@ -40,7 +40,9 @@ _ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9._:-]{0,127}')
 _DIGEST = re.compile(r'[0-9a-f]{64}')
 _COMMIT = re.compile(r'[0-9a-f]{40}')
 _BINDING_FIELDS = frozenset({'root_id','job_id','attempt_id','effective_grant_digest','commission_sha256'})
-_OPERATIONS = frozenset({'start','status','collect','cancel','validate'})
+_ASSIGNMENT_OPERATIONS = frozenset({'assignment-seal', 'assignment-seal-finalize'})
+_MODIFYING_OPERATIONS = frozenset({'start', 'cancel', 'validate'}) | _ASSIGNMENT_OPERATIONS
+_OPERATIONS = frozenset({'start','status','collect','cancel','validate'}) | _ASSIGNMENT_OPERATIONS
 _TRUSTED_CONFIG = object()
 _ERROR_CODES = frozenset({'BrokerProtocolError','PeerAuthorizationError','ConfigTrustError',
     'EFFECT_UNKNOWN','BridgeIdentityError','SocketBindingError','BackendNotConfiguredError',
@@ -378,7 +380,9 @@ class FabricBridgeBroker:
 
     def _payload(self,operation,payload):
         extra={'start':{'launch_spec','validation_commands'},'status':{'run_id'},
-               'collect':{'run_id'},'cancel':{'run_id','reason'},'validate':{'run_id','argv','timeout_seconds'}}[operation]
+               'collect':{'run_id'},'cancel':{'run_id','reason'},'validate':{'run_id','argv','timeout_seconds'},
+               'assignment-seal': {'run_id', 'process_ref'},
+               'assignment-seal-finalize': {'run_id', 'process_ref', 'observation_sha256', 'retention_sha256'}}[operation]
         if operation=='start' and type(payload) is dict and 'control_start' in payload:
             extra=extra|{'control_start'}
         if operation=='start' and type(payload) is dict and 'control_recovery' in payload:
@@ -400,6 +404,12 @@ class FabricBridgeBroker:
         if operation!='start':
             if payload['run_id']!=binding['attempt_id']:_refuse()
             _identifier(payload['run_id'])
+        if operation in _ASSIGNMENT_OPERATIONS:
+            ref = _object(payload['process_ref'], {f.name for f in dataclasses.fields(WorkerProcessRef)})
+            if ref['run_id'] != payload['run_id']:
+                _refuse(message='Assignment process differs from original Attempt')
+            if operation == 'assignment-seal-finalize':
+                _digest(payload['observation_sha256']); _digest(payload['retention_sha256'])
         if operation=='status' and 'cleanup_query' in payload:
             try:
                 cleanup_transport.validate_query(payload['cleanup_query'],run_id=payload['run_id'])
@@ -444,10 +454,54 @@ class FabricBridgeBroker:
         if type(argv) is not list or any(type(v) is not str for v in argv) or tuple(argv) not in self.config.validation_commands:
             _refuse(message='Validation argv is not in the root-installed allowlist')
 
+    def _assignment_result(self, operation, result, payload, common):
+        from control_plane.broker_assignment_seal import digest, validate_control_seal
+        from control_plane.executive_worker_broker import uid_sweep_receipt_is_passing
+
+        if operation == 'assignment-seal-finalize':
+            _object(result, common | {'acknowledgement'})
+            expected = {key: payload[key] for key in (
+                'run_id', 'observation_sha256', 'retention_sha256')}
+            if result['acknowledgement'] != expected:
+                _refuse('EFFECT_UNKNOWN', 'Original assignment acknowledgement differs')
+            return
+        _object(result, common | {'observation'})
+        observation = _object(result['observation'], {
+            'schema_version', 'snapshot', 'snapshot_sha256', 'control_seal', 'worker_denial'})
+        snapshot = _object(observation['snapshot'], {
+            'schema_version', 'run_id', 'job_id', 'worker_id', 'effective_grant_digest',
+            'process_ref', 'paths', 'uid_sweep'})
+        if (observation['schema_version'] != 'mastermind.worker_assignment_seal_commit/v1'
+                or snapshot['schema_version'] != 'mastermind.worker_assignment_seal_prepare/v1'
+                or observation['snapshot_sha256'] != digest(snapshot)
+                or snapshot['run_id'] != payload['run_id']
+                or snapshot['job_id'] != payload['binding']['job_id']
+                or snapshot['effective_grant_digest'] != payload['binding']['effective_grant_digest']
+                or snapshot['process_ref'] != payload['process_ref']
+                or not uid_sweep_receipt_is_passing(snapshot['uid_sweep'])
+                or snapshot['uid_sweep']['worker_uid'] != payload['process_ref']['effective_uid']
+                or observation['worker_denial'] != {
+                    label: {'open': 'EACCES', 'traverse': 'EACCES', 'list': 'EACCES'}
+                    for label in ('workspace', 'run')}):
+            _refuse('EFFECT_UNKNOWN', 'Original assignment observation differs')
+        _identifier(snapshot['worker_id'])
+        _object(snapshot['paths'], {'workspace', 'run'})
+        roots = snapshot['paths']
+        for label in ('workspace', 'run'):
+            _object(roots[label], {'path', 'device', 'inode', 'mode', 'uid', 'gid', 'mtime_ns'})
+        owner = roots['workspace']['uid']
+        if (type(owner) is not int or owner <= 0 or roots['run']['uid'] != owner
+                or owner == payload['process_ref']['effective_uid']):
+            _refuse('EFFECT_UNKNOWN', 'Assignment does not use distinct Control custody')
+        validate_control_seal(snapshot, observation['control_seal'], owner)
+
     def _operation_result(self,operation,result,payload):
         common={'adapter_id','binding','physical_binding_sha256'}
         if result.get('physical_binding_sha256')!=payload['physical_binding_sha256']:
             _refuse('EFFECT_UNKNOWN','Backend route differs from the Runtime-pinned physical binding')
+        if operation in _ASSIGNMENT_OPERATIONS:
+            self._assignment_result(operation, result, payload, common)
+            return
         if operation=='status' and 'cleanup_query' in payload:
             _object(result,common|{'cleanup','cleanup_query_sha256'})
             if result['cleanup_query_sha256']!=cleanup_transport.digest(payload['cleanup_query']):
@@ -585,7 +639,7 @@ class FabricBridgeBroker:
                 raise BridgeProtocolError('EFFECT_UNKNOWN','Original Attempt requires status-only reconciliation') from exc
         else:
             try:
-                if operation in {'cancel','validate'} or 'cleanup_query' in payload:
+                if operation in (_MODIFYING_OPERATIONS - {'start'}) or 'cleanup_query' in payload:
                     query={key:payload[key] for key in ('binding','run_id','physical_binding_sha256')}
                     observed=_strict_json(_canonical(await self.backend.execute('status',_strict_json(_canonical(query)))))
                     _same_backend_binding(observed,binding)
@@ -594,20 +648,25 @@ class FabricBridgeBroker:
                             observed['run']['process_ref']!=payload['cleanup_query']['process_ref']
                             or observed['run']['status'] in {'STARTING','RUNNING','CANCELLING'}):
                         _refuse('BackendRefusedError','Cleanup does not match an original terminal process')
+                    if operation in _ASSIGNMENT_OPERATIONS and (
+                            observed['run']['process_ref'] != payload['process_ref']
+                            or observed['run']['status'] in {'STARTING', 'RUNNING', 'CANCELLING'}):
+                        _refuse('BackendRefusedError', 'Original terminal process is not settled')
                 result=_strict_json(_canonical(await self.backend.execute(operation,_strict_json(_canonical(payload)))))
                 _same_backend_binding(result,binding)
                 self._operation_result(operation,result,payload)
             except asyncio.CancelledError:
                 raise
             except BridgeProtocolError as exc:
-                raise BridgeProtocolError(exc.code,'Backend refused the bound operation; no automatic retry') from exc
+                raise BridgeProtocolError('EFFECT_UNKNOWN' if operation in _ASSIGNMENT_OPERATIONS else exc.code,
+                                          'Backend refused the bound operation; no automatic retry') from exc
             except Exception as exc:
-                code='EFFECT_UNKNOWN' if operation in {'cancel','validate'} else 'BackendUnavailableError'
+                code='EFFECT_UNKNOWN' if operation in (_MODIFYING_OPERATIONS - {'start'}) else 'BackendUnavailableError'
                 raise BridgeProtocolError(code,'Backend operation unavailable; no automatic retry') from exc
         response=dict(schema_version=BROKER_RESPONSE_SCHEMA_VERSION,request_id=request['request_id'],
                       operation=operation,ok=True,result=result)
         if len(_canonical(response))+1>self.config.max_response_bytes:
-            _refuse('EFFECT_UNKNOWN' if operation in {'start','cancel','validate'} else 'BrokerProtocolError',
+            _refuse('EFFECT_UNKNOWN' if operation in _MODIFYING_OPERATIONS else 'BrokerProtocolError',
                     'Backend response ceiling exceeded; reconcile the original Attempt')
         return response
 
@@ -628,7 +687,7 @@ class FabricBridgeBroker:
             if type(request.get('request_id')) is str and _ID.fullmatch(request['request_id']):
                 request_id=request['request_id']
             if type(request.get('operation')) is str and request['operation'] in _OPERATIONS:operation=request['operation']
-            effect_possible=operation in {'start','cancel','validate'}
+            effect_possible=operation in _MODIFYING_OPERATIONS
             response=await asyncio.wait_for(self.execute(request,peer=peer),timeout=self.config.request_timeout_seconds)
         except asyncio.CancelledError:
             raise

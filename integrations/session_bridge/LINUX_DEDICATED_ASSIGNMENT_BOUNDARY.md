@@ -168,3 +168,31 @@ reconciliation, enrolled supported-harness profile, Linux census/host binding,
 and full real-path acceptance remain separate requirements. The existing
 `FABRIC_ASSIGNMENT_SEAL_UNAVAILABLE` refusal remains in force. No source flag,
 fixture receipt or Mac Control observation supplies those remote capabilities.
+
+### Authenticated original-owner source connection (2026-10-12)
+
+The optional root-managed gateway `assignment_control` binding now fixes exactly
+one worker principal and two Control-owned stores. `assignment-seal` accepts only
+the original Attempt ID, obtains the incumbent broker's terminal snapshot, seals
+its exact derived roots, and returns the broker's actual worker-denial observation.
+It never finalizes the broker. No arbitrary path, executable, account, credential,
+root directory, synthetic absence or cleanup claim is accepted from the request.
+The source tests use real temporary-directory chmod and loopback mTLS, with
+explicitly synthetic worker principals and denial observations. They do not prove
+Linux host qualification or a real cross-UID denial.
+
+The existing attended Fabric adapter and bridge now carry closed `assignment-seal`
+and `assignment-seal-finalize` messages with original Runtime binding, physical
+route digest and exact ProcessRef. `Supervisor.retain_and_acknowledge_remote_assignment`
+retains and rereads the observation under the original lease before sending the
+exact acknowledgement, then checks the lease and retained bytes again. Modifying
+transport loss remains EFFECT_UNKNOWN. None of these paths converts status or a
+cleanup read into authority for a filesystem effect.
+
+This is source plumbing, not the admitted production Backend. The current local
+bridge is non-Control and must not receive the MH1 Control private key. The concrete
+original-owner Backend/transport grant, actual remote preparation and launch,
+qualified Linux UID census/namespace and restart reconciliation remain required.
+The new Supervisor method does not remove FABRIC_ASSIGNMENT_SEAL_UNAVAILABLE or
+change the installed terminalization policy. Gateway binding defaults to absent;
+no service config, host principal, profile, provider realm, Worker or arm is enabled.
