@@ -1,0 +1,118 @@
+{
+  "sample": "historical 2025-10-09 to2026-10-08",
+  "source": "Terminal's public existing intraday consumer; privately cached price bars not republished",
+  "predeclared_cohort": [
+    "SMH",
+    "QQQ",
+    "AMD"
+  ],
+  "data_checks": [
+    {
+      "symbol": "SMH",
+      "source_15m_sha256": "5e2e7c98b9ffad22ef800dec82c060241a3f5d4f7f2316f670c0d6547f505652",
+      "source_30m_sha256": "b8b5132a11979e3f35735d0cf8f9ffe88f5ed6fd700c19223ec5436f3567816c",
+      "source_15m_bars": 8596,
+      "rth_days": 332,
+      "observed_calendar_gaps": 0,
+      "source_warmup_first_day_head_gaps": [],
+      "source_rth_year_missing_days": 0,
+      "source_price_basis": "not_verified",
+      "point_in_time_admission": false
+    },
+    {
+      "symbol": "QQQ",
+      "source_15m_sha256": "5bafcbc03fe94a944b25b0adb2583f3f12cbfa1c7beb624e46a4fc0686defed9",
+      "source_30m_sha256": "978946d041c3ac029f0f45486108d803e27882e0f7e4d37d1d65d7b4a6d70530",
+      "source_15m_bars": 8138,
+      "rth_days": 314,
+      "observed_calendar_gaps": 1,
+      "source_warmup_first_day_head_gaps": [
+        "2025-07-14"
+      ],
+      "source_rth_year_missing_days": 0,
+      "source_price_basis": "not_verified",
+      "point_in_time_admission": false
+    },
+    {
+      "symbol": "AMD",
+      "source_15m_sha256": "ce19c53b2199bc4a7ffe650c1f047e7e7e1b656ab0229bbb06570fe6023dc26c",
+      "source_30m_sha256": "8109960dfd4f7455e2409ad46bded45876fc945b64aee20d5a10fa0613e67747",
+      "source_15m_bars": 8270,
+      "rth_days": 319,
+      "observed_calendar_gaps": 0,
+      "source_warmup_first_day_head_gaps": [],
+      "source_rth_year_missing_days": 0,
+      "source_price_basis": "not_verified",
+      "point_in_time_admission": false
+    }
+  ],
+  "inference": "Retrospective, models originated from inspected SOXX. Correlated peer stocks not pristine SOXX holdout.",
+  "model_results": [
+    {
+      "model": "3h_60fast",
+      "policy": "structural_cycle",
+      "n": 21,
+      "weeks": 10,
+      "assets": 3,
+      "mean_delta": 0.0068,
+      "saved_losers": 1,
+      "harmed_winners": 1,
+      "positive_deltas": 1,
+      "negative_deltas": 1,
+      "interval95": [
+        0.0,
+        0.0204
+      ]
+    },
+    {
+      "model": "3h_60fast",
+      "policy": "finite_guard",
+      "n": 21,
+      "weeks": 10,
+      "assets": 3,
+      "mean_delta": -0.0319,
+      "saved_losers": 1,
+      "harmed_winners": 3,
+      "positive_deltas": 1,
+      "negative_deltas": 3,
+      "interval95": [
+        -0.2607,
+        0.1723
+      ]
+    },
+    {
+      "model": "3h_15fast",
+      "policy": "structural_cycle",
+      "n": 23,
+      "weeks": 14,
+      "assets": 3,
+      "mean_delta": -1.2604,
+      "saved_losers": 4,
+      "harmed_winners": 5,
+      "positive_deltas": 4,
+      "negative_deltas": 5,
+      "interval95": [
+        -3.111,
+        0.0754
+      ]
+    },
+    {
+      "model": "3h_15fast",
+      "policy": "finite_guard",
+      "n": 23,
+      "weeks": 14,
+      "assets": 3,
+      "mean_delta": -1.8688,
+      "saved_losers": 0,
+      "harmed_winners": 5,
+      "positive_deltas": 0,
+      "negative_deltas": 5,
+      "interval95": [
+        -4.6945,
+        -0.1769
+      ]
+    }
+  ],
+  "source_24h_BOATS": false,
+  "proven_quoted_market_prices": false
+}

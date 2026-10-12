@@ -1,0 +1,122 @@
+{
+  "schema": "mastermind.soxx.terminal_finepivot_study.v14",
+  "timestamp_basis": "ET wall displayed as UTC; restored to aware America/New_York",
+  "source_consistency": {
+    "source_15m": 8596,
+    "source_30m": 4298,
+    "halfdays": [
+      "2025-07-03",
+      "2025-11-28",
+      "2025-12-24"
+    ],
+    "all_30m_consistent": true,
+    "day_count": 332,
+    "source_evidence": {
+      "schema": "terminal.intraday_source_evidence.v1",
+      "authority": "descriptive_only",
+      "symbol": "SOXX",
+      "requested_timeframe": "15m",
+      "session": "regular",
+      "timestamp_basis": "market_local_display_epoch",
+      "response_scope": {
+        "requested_date": null,
+        "returned_bars": 8596,
+        "first_bar_time": 1750066200,
+        "last_bar_time": 1791560700
+      },
+      "construction": "mixed",
+      "source_counts": {
+        "stored_5m": 8154,
+        "stored_1h": 0,
+        "live_tail": 442,
+        "unattributed": 0
+      },
+      "assembly_store_reads": [
+        {
+          "base": "5m",
+          "status": "available",
+          "content_sha256": "823ad0c9c0b0e4c67234a8bd417a075b648043ed416a51caa46b26d50c9abbe1"
+        }
+      ],
+      "store_read_scope": "whole_assembly_not_requested_date",
+      "assembly_clock": {
+        "assembled_at": "2026-10-12T01:26:40.766Z",
+        "served_at": "2026-10-12T01:26:40.766Z",
+        "cache_state": "new_assembly",
+        "cache_age_ms": 0,
+        "meaning": "server_assembly_not_market_data_freshness"
+      },
+      "instrument_identity": "not_verified",
+      "price_adjustment": "not_verified",
+      "volume_adjustment": "not_verified",
+      "completeness": "not_assessed",
+      "point_in_time_availability": "not_verified",
+      "research_admission": "not_assessed",
+      "warnings": [
+        "live_tail_construction_not_receipted"
+      ]
+    },
+    "gaps_on_observed_dates": 0
+  },
+  "model_spec_count": 9,
+  "entry_counts": {
+    "3h_60fast": 10,
+    "3h_30fast": 8,
+    "3h_15fast": 10,
+    "3h_30duration": 9,
+    "3h_15duration": 10,
+    "2h_30fast": 6,
+    "2h_15fast": 8,
+    "4h_30fast": 8,
+    "4h_15fast": 11
+  },
+  "nested_match": [
+    {
+      "model": "3h_30fast",
+      "pair_n": 8,
+      "earlier": 5,
+      "cheaper": 4,
+      "average_hours_earlier": 1.1875,
+      "average_price_advantage": 0.4617
+    },
+    {
+      "model": "3h_15fast",
+      "pair_n": 9,
+      "earlier": 6,
+      "cheaper": 5,
+      "average_hours_earlier": -0.0556,
+      "average_price_advantage": 1.4879
+    },
+    {
+      "model": "3h_30duration",
+      "pair_n": 8,
+      "earlier": 6,
+      "cheaper": 3,
+      "average_hours_earlier": 1.0625,
+      "average_price_advantage": 0.3114
+    },
+    {
+      "model": "3h_15duration",
+      "pair_n": 9,
+      "earlier": 7,
+      "cheaper": 5,
+      "average_hours_earlier": 0.0833,
+      "average_price_advantage": 0.4455
+    }
+  ],
+  "earlier_yahoo_entry_compare": {
+    "n": 10,
+    "matches": 10,
+    "worst_abs_open_price_deviation": 0.0335
+  },
+  "original_full_session_BOATS_proven": false,
+  "point_in_time_source_qualified": false,
+  "executable_quote_fills_proven": false,
+  "honest_limitations": [
+    "15m and 30m derive from same stored-5m input and live-tail quotes, not independent replications",
+    "Provider adjustment and historical availability not verified",
+    "Regular-session source weeks reused after extensive tuning; no untouched holdout",
+    "No actual bid-ask or overnight print execution",
+    "Calendar completeness only verified for source-observed dates, not exchange-calendar missing whole days"
+  ]
+}
