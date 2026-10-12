@@ -3250,12 +3250,26 @@ class ExecutiveWorkerBroker:
             attestation_reader = getattr(self.adapter, "launch_attestation", None)
             attestation = attestation_reader(process_ref) if callable(attestation_reader) else None
             started = True
-        except Exception:
+        except Exception as exc:
             try:
-                self.last_sweep = await asyncio.to_thread(self.sweeper.sweep, "start_failed")
+                self.last_sweep = await asyncio.to_thread(
+                    self.sweeper.sweep, "start_failed"
+                )
             except Exception as sweep_exc:
                 async with self._state_lock:
-                    self._quarantined_reason = f"start cleanup failed: {type(sweep_exc).__name__}"
+                    self._quarantined_reason = (
+                        f"start cleanup failed: {type(sweep_exc).__name__}"
+                    )
+            else:
+                # Local process absence cannot prove provider absence.  An
+                # adapter that explicitly reports an unknown provider effect
+                # must retain a broker-level fence so a later control-side
+                # "run not found" observation cannot authorize replay.
+                if getattr(exc, "effect_unknown", None) is True:
+                    async with self._state_lock:
+                        self._quarantined_reason = (
+                            f"start effect unknown: {type(exc).__name__}"
+                        )
             raise
         finally:
             async with self._state_lock:

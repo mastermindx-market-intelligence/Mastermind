@@ -1561,6 +1561,36 @@ def test_remote_adapter_cleans_unbound_start_and_returns_fresh_absence_sweep() -
     asyncio.run(scenario())
 
 
+def test_remote_unbound_cleanup_refuses_worker_side_effect_unknown_quarantine() -> None:
+    fresh = FakeSweeper().sweep("status_absence").to_dict()
+
+    class Client:
+        async def request(self, operation, payload, *, timeout_seconds=None):
+            if operation == "cancel":
+                assert payload["run_id"] == "ATT-unbound-unknown"
+                raise RemoteBrokerError("BrokerRunNotFound", "run unavailable")
+            assert operation == "status"
+            assert payload == {"fresh_uid_sweep": True}
+            return {
+                "active_run_id": None,
+                "starting": False,
+                "validation_busy": False,
+                "status_sweep_busy": False,
+                "quarantined_reason": "start effect unknown: EffectUnknown",
+                "status_sweep": fresh,
+            }
+
+    async def scenario() -> None:
+        remote = RemoteCodexWorkerAdapter(Client())  # type: ignore[arg-type]
+        with pytest.raises(
+            BrokerStateError, match="ambiguous start cleanup did not prove broker absence"
+        ):
+            await remote.cleanup_unbound_run("ATT-unbound-unknown")
+        assert "ATT-unbound-unknown" not in remote._uid_sweeps
+
+    asyncio.run(scenario())
+
+
 def test_fresh_status_uid_sweep_proves_idle_absence(tmp_path: Path) -> None:
     async def scenario() -> None:
         broker, _adapter, sweeper, peer, _spec = _fixture(tmp_path)
@@ -3257,6 +3287,40 @@ def test_broker_failed_start_never_publishes_success(
             assert broker.last_sweep.reason == "start_failed"
             broker.adapter = FakeAdapter()
             assert (await broker.execute(_request("start", payload, suffix="after-error"), peer=peer))["ok"] is True
+
+    asyncio.run(scenario())
+
+
+def test_broker_effect_unknown_start_quarantines_after_clean_local_sweep(
+    tmp_path: Path,
+) -> None:
+    async def scenario():
+        broker, _adapter, sweeper, peer, spec = _fixture(tmp_path)
+
+        class EffectUnknown(RuntimeError):
+            effect_unknown = True
+
+        class UncertainAdapter(FakeAdapter):
+            async def start(self, launch_spec):
+                raise EffectUnknown("provider submission may have begun")
+
+        broker.adapter = UncertainAdapter()
+        payload = {"launch_spec": spec, "validation_commands": []}
+        with pytest.raises(EffectUnknown):
+            await broker.execute(_request("start", payload), peer=peer)
+
+        assert sweeper.calls == ["start_failed"]
+        assert broker.last_sweep.reason == "start_failed"
+        assert broker._active_run_id is None and not broker._runs
+        assert broker._starting is False
+        assert broker._quarantined_reason == "start effect unknown: EffectUnknown"
+
+        broker.adapter = FakeAdapter()
+        with pytest.raises(BrokerStateError, match="quarantined"):
+            await broker.execute(
+                _request("start", payload, suffix="after-effect-unknown"),
+                peer=peer,
+            )
 
     asyncio.run(scenario())
 
