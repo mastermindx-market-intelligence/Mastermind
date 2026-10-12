@@ -25,9 +25,12 @@ V2 forwards a canonical snapshot of that exact reserved header through the
 existing per-run upload, into a newly created private directory. Existing names
 refuse. `fabric_launch_transport.py` checks the fixed run-derived path, digest
 and original routing lineage before the executor acquires physical admission.
-The nested Runtime fields are then passed to the actual process-capture call.
-The snapshot digest is recorded in the early receipt; the terminal process
-record retains that digest and the exact early-receipt digest. This remains
+The nested Runtime fields can be retained by the process-capture contract, but
+the public executor now refuses a bound snapshot before physical admission:
+correlation alone cannot select the legacy `sub.sh` command as an Executive
+worker. Unbound attended shell use keeps its existing behavior. The capture
+contract records the snapshot digest in the early receipt and retains that
+digest plus the early-receipt digest in the terminal record. These fields remain
 correlation, not evidence that Runtime or Capacity granted the operation.
 The source collection path retains the early receipt even if stdout delivery
 or cleanup remains uncertain; an acquisition failure does not change custody
@@ -110,3 +113,37 @@ finally path; four injected failures cannot execute the target or claim complete
 capture. Final validation is 25 reservation, 10 transport, 7 controller-fragment
 and 76 inert capture checks, with exact patch replay. These remain uninstalled
 source changes, not authenticated admission or native completion.
+
+## Original controller invocation component
+
+`fabric_reserved_attended_launch.py` checks the complete original request against
+its reserved Runtime/Fabric identities and canonical digest. It uses the existing
+broker decoder and finite Claude preparer, preserves exact stdin and a closed
+environment, and retains immutable validation commands only from the owner's
+fixed allowlist. Its output remains preparation, not admission.
+
+The executor patch factors the existing process/capture/cleanup block into one
+shared function. The private `_run_reserved_attended_under_lease` component uses
+that same function under the original controller's existing lease. It does not
+acquire a second lease, add a registry, retry an operation or release custody.
+It rechecks the existing in-process `ControlStartAuthority` after preparation
+and owner checks, immediately before entering the process runner. Uncertain
+cleanup retains the original reconciliation hold; proven exec failure keeps
+the original errno/return-code behavior. Finite commands bypass the legacy
+inherited environment and PATH augmentation.
+
+The private owner-check callback is a composition/test seam, **not an admission
+producer**. A callable or boolean establishes no realm, attendance, canary,
+binary, schema or isolation evidence. No production factory or public CLI/RPC
+selects this function. Real realm credential insertion, authenticated remote
+owner composition, current assignment checks and full post-exec START remain
+necessary. The public bound path stays refused until those obligations have
+an actual qualified implementation. Control authority is not serialized to an
+ordinary SSH principal.
+
+Finite Claude uses `run_dir/home` as its execution HOME. Its actual home
+attestation must name that path. The fixed physical route's `provider_home`
+continues to identify the credential realm and is checked separately through
+the original exact v2 MiniMax canary. The exception cannot be selected by a
+bare `passed:true`, a different realm/profile or an unbound home path. Legacy
+fixed-home contracts retain their prior semantics.
