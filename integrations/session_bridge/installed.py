@@ -352,7 +352,16 @@ class InstalledSessionBridgeClient:
         # no such fallback may be treated as qualified foreground attendance.
         foreground = getattr(self._client, "send_foreground_frame", None)
         if tool == "session_summon" and callable(foreground):
-            send = foreground
+            from integrations.session_bridge.http_foreground import (
+                HttpForegroundClosed, _current_request_or_none,
+            )
+            try:
+                source = _current_request_or_none()
+            except HttpForegroundClosed:
+                raise BridgeError("effect_unknown",
+                    "originating request ended; reconcile the original operation") from None
+            if source is not None:
+                send = foreground
         response = await send(self._socket_path, frame)
         transport = getattr(response, "transport", None)
         if transport == TRANSPORT_NOT_SENT:

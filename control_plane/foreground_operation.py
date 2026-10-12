@@ -5,6 +5,7 @@ controller's START fence remain authority; exported receipt data grants nothing.
 """
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import contextvars
 import dataclasses
@@ -84,6 +85,15 @@ class ForegroundOperation:
         # Presence at entry is never fresh admission, including equal timestamps.
         self._preexisting = runtime.store.find_event_by_command_id(self._command)
         self._root, self._root_event_sha256, self._closed = None, None, False
+        self._closed_event = asyncio.Event()
+
+    def _mark_source_closed(self):
+        self._closed = True
+        self._closed_event.set()
+
+    async def wait_closed(self):
+        """Liveness observation only; cancellation still belongs to the exact owner."""
+        await self._closed_event.wait()
 
     def _require_live(self):
         if self._closed or _ACTIVE.get() is not self:
@@ -236,5 +246,30 @@ async def _session_bridge_foreground_dispatch(runtime, frame, require_host_curre
         operation._require_live()
         yield operation
     finally:
-        operation._closed, operation._root, operation._host_current = True, None, None
+        operation._mark_source_closed()
+        operation._root, operation._host_current = None, None
         _ACTIVE.reset(token)
+
+
+@contextlib.asynccontextmanager
+async def _observe_private_request_end(operation, reader):
+    """One already-framed request's EOF/expiry; no worker/lifecycle control."""
+    if type(operation) is not ForegroundOperation or _ACTIVE.get() is not operation:
+        raise ForegroundOperationClosed("private request observer belongs to another invocation")
+    operation._require_live()
+    async def observe():
+        try:
+            remaining = max(0.0, operation._principal.expires_at - time.time())
+            # The one allowed frame is already consumed. EOF or extra bytes
+            # end this invocation; no second request is accepted on this socket.
+            await asyncio.wait_for(reader.read(1), timeout=remaining)
+        except asyncio.TimeoutError:
+            pass
+        finally:
+            operation._mark_source_closed()
+    task = asyncio.create_task(observe(), name="executive-foreground-request-end")
+    try:
+        yield
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)

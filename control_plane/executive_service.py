@@ -4965,6 +4965,7 @@ class ExecutiveControlService:
                 if foreground_transport:
                     from control_plane.foreground_operation import (
                         ForegroundOperationRefusal, _session_bridge_foreground_dispatch,
+                        _observe_private_request_end,
                     )
                     runtime = self._require_runtime()
 
@@ -4983,10 +4984,13 @@ class ExecutiveControlService:
                             )
 
                     try:
-                        await attendance_stack.enter_async_context(
+                        operation = await attendance_stack.enter_async_context(
                             _session_bridge_foreground_dispatch(
                                 runtime, parsed, require_foreground_host_current
                             )
+                        )
+                        await attendance_stack.enter_async_context(
+                            _observe_private_request_end(operation, reader)
                         )
                     except ForegroundOperationRefusal as exc:
                         await attendance_stack.aclose()

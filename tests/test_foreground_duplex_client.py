@@ -2,6 +2,10 @@
 import asyncio
 import json
 import tempfile
+import contextlib
+import time
+from types import SimpleNamespace
+from starlette.requests import Request
 from pathlib import Path
 
 import pytest
@@ -13,6 +17,18 @@ from tests import test_session_bridge_installed as incumbent
 
 FRAME = {"schema": installed.PRIVATE_SCHEMA, "tool": "session_summon",
          "principal": {}, "arguments": {}}
+
+@contextlib.asynccontextmanager
+async def _transport_source(deadline=.2):
+    # Lifetime fixture only; the actual authenticated ASGI producer is tested
+    # separately. This cannot grant Runtime or provider execution.
+    from integrations.session_bridge.http_foreground import owned_request, bind_request
+    async def receive():
+        await asyncio.Event().wait()
+    async with owned_request({"type":"http"}, receive, deadline_seconds=deadline) as scope:
+        now=int(time.time())
+        with bind_request(Request(scope),SimpleNamespace(issued_at=now-1,expires_at=now+10)):
+            yield
 
 
 def test_incumbent_half_close_and_duplex_reply_are_distinct_on_real_stream():
@@ -36,8 +52,11 @@ def test_incumbent_half_close_and_duplex_reply_are_distinct_on_real_stream():
             server = await asyncio.start_unix_server(peer, path=path)
             async with server:
                 c = gateway.CeoIngressClient(connect_timeout=.2, read_timeout=.2)
-                send = c.send_frame if mode == "incumbent" else c.send_foreground_frame
-                response = await send(path, FRAME)
+                if mode == "incumbent":
+                    response = await c.send_frame(path, FRAME)
+                else:
+                    async with _transport_source():
+                        response = await c.send_foreground_frame(path, FRAME)
                 assert response.ok and response.transport == gateway.TRANSPORT_SENT_OK
                 return await asyncio.wait_for(result, .5)
     assert asyncio.run(run("incumbent")) == (True, False)
@@ -64,16 +83,17 @@ def test_duplex_cancel_or_timeout_closes_the_same_call_without_retry(edge):
             server = await asyncio.start_unix_server(peer, path=path)
             async with server:
                 c = gateway.CeoIngressClient(connect_timeout=.2, read_timeout=.05)
-                task = asyncio.create_task(c.send_foreground_frame(path, FRAME))
-                await asyncio.wait_for(received.wait(), .5)
-                if edge == "cancel":
-                    task.cancel()
-                    with pytest.raises(asyncio.CancelledError):
-                        await task
-                else:
-                    assert (await task).transport == gateway.TRANSPORT_SENT_UNKNOWN
-                await asyncio.wait_for(disconnected.wait(), .5)
-                assert len(calls) == 1
+                async with _transport_source(deadline=.05):
+                    task = asyncio.create_task(c.send_foreground_frame(path, FRAME))
+                    await asyncio.wait_for(received.wait(), .5)
+                    if edge == "cancel":
+                        task.cancel()
+                        with pytest.raises(asyncio.CancelledError):
+                            await task
+                    else:
+                        assert (await task).transport == gateway.TRANSPORT_SENT_UNKNOWN
+                    await asyncio.wait_for(disconnected.wait(), .5)
+                    assert len(calls) == 1
     asyncio.run(run())
 
 
@@ -107,7 +127,10 @@ def test_installed_summon_uses_actual_foreground_method_and_read_stays_incumbent
         "operation_key": "duplex-source-only", "department": "executive-infrastructure",
         "priority": 0, "workstream": "WS:DOT-SESSION-BRIDGE", "attempt_limit": 2,
         "allowed_write_paths": [], "validation": {}}
-    result = asyncio.run(c.summon(incumbent.PRINCIPAL, args))
+    async def summon_from_source():
+        async with _transport_source():
+            return await c.summon(incumbent.PRINCIPAL, args)
+    result = asyncio.run(summon_from_source())
     assert result == {"status": "QUEUED", "dispatched": False}
     assert set(t.calls[0][1]) == {"schema", "tool", "principal", "arguments"}
     asyncio.run(c.targets(incumbent.PRINCIPAL))

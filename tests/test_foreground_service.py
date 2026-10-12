@@ -13,6 +13,7 @@ from integrations.mastermind_executive_app.gateway import CeoIngressClient
 from integrations.session_bridge.installed import InstalledSessionBridgeProvider, private_ingress_owner
 from tests.test_executive_mcp_installed_fabric_composition import factory_service
 from tests.test_foreground_operation import frame
+from tests.test_foreground_duplex_client import _transport_source
 
 
 @pytest.mark.parametrize("edge", ["duplex", "legacy", "disconnect", "binding", "readonly"])
@@ -34,7 +35,7 @@ def test_actual_private_handler_lifetime_and_legacy_queue(tmp_path, short_socket
                         await proceed.wait()
                         with pytest.raises(scope.ForegroundOperationRefusal) as error:
                             scope.current_foreground_operation()
-                        assert error.value.code == "host_not_current"
+                        assert error.value.code == ("foreground_unavailable" if edge == "disconnect" else "host_not_current")
                 return {"status": "QUEUED", "dispatched": False}
             async def project(principal, kind):
                 assert scope._current_foreground_operation_or_none() is None
@@ -62,13 +63,17 @@ def test_actual_private_handler_lifetime_and_legacy_queue(tmp_path, short_socket
                 await asyncio.wait_for(entered.wait(), 1)
                 writer.close()
                 await writer.wait_closed()
-                assert await asyncio.wait_for(readers[0].read(1), 1) == b""
+                await asyncio.wait_for(held[0].wait_closed(), 1)
                 proceed.set()
                 # The actual registered handler owns completion after client loss.
                 await asyncio.wait_for(service._ceo_ingress_tasks.copy().pop(), 1)
             else:
-                method = c.send_frame if edge == "legacy" else c.send_foreground_frame
-                task = asyncio.create_task(method(path, f))
+                async def send():
+                    if edge == "legacy":
+                        return await c.send_frame(path, f)
+                    async with _transport_source(deadline=1):
+                        return await c.send_foreground_frame(path, f)
+                task = asyncio.create_task(send())
                 if edge == "binding":
                     await asyncio.wait_for(entered.wait(), 1)
                     service._ceo_ingress_app_binding = dataclasses.replace(service._ceo_ingress_app_binding)
@@ -80,6 +85,8 @@ def test_actual_private_handler_lifetime_and_legacy_queue(tmp_path, short_socket
                 else:
                     assert result.result["data"] == {"status": "QUEUED", "dispatched": False}
             assert all(op._closed for op in held)
+            for op in held:
+                await asyncio.wait_for(op.wait_closed(), .2)
             assert scope._current_foreground_operation_or_none() is None
     asyncio.run(run())
 
@@ -98,4 +105,21 @@ def test_framing_cannot_grant_foreground_to_another_tool(tmp_path, short_socket_
             f = {**frame(), "schema": FOREGROUND_PRIVATE_SCHEMA, "tool": "session_targets", "arguments": {}}
             result = await CeoIngressClient().send_frame(Path(raw["ceo_ingress_socket_path"]), f)
             assert not result.ok and result.error["code"] == "invalid_input" and calls == []
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("edge",["expiry","extra_frame"])
+def test_private_source_end_observation_does_not_create_or_cancel_work(tmp_path,edge):
+    from control_plane.executive_runtime import Runtime
+    import time
+    async def run():
+        runtime=Runtime.at(tmp_path)
+        f=frame(expires_at=int(time.time())+2)
+        reader=asyncio.StreamReader()
+        if edge=="extra_frame":reader.feed_data(b"unexpected-second-frame")
+        async with scope._session_bridge_foreground_dispatch(runtime,f,lambda:None) as operation:
+            async with scope._observe_private_request_end(operation,reader):
+                await asyncio.wait_for(operation.wait_closed(),2.5)
+                with pytest.raises(scope.ForegroundOperationClosed):scope.current_foreground_operation()
+        assert runtime.jobs.list_jobs()==[]
     asyncio.run(run())
