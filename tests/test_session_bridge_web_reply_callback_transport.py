@@ -264,3 +264,61 @@ def test_canonical_native_reply_projection_reaches_one_signed_original_request_t
     assert projection["data"]["parent_consumed"] is False
     assert projection["eventId"]==packet.headers["webhook-id"]
     assert projection["data"]["read_ref"]=="native-return-read-001"
+
+
+@pytest.mark.parametrize("changed", [
+    {"webhook-id":"evt-"+"b"*64},
+    {"webhook-timestamp":"soon"},
+    {"webhook-signature":"v1,not-a-canonical-256-bit-signature"},
+    {"X-MCP-Subscription-Id":"wrong-subscription"},
+])
+def test_tampered_signed_headers_are_refused_before_dns_or_send(changed):
+    from dataclasses import replace
+    source=packet()
+    headers={**source.headers,**changed}
+    fake=replace(source,headers=headers)
+    consulted=[]
+    with pytest.raises(api().CallbackDestinationRefused):
+        api().send_once(URL,fake,
+            resolver=lambda *a,**kw:consulted.append(("dns",a)),
+            connector=lambda *a:consulted.append(("socket",a)))
+    assert consulted==[]
+
+
+@pytest.mark.parametrize("malformed", [
+    b"not json",
+    b'{"type":"terminated"}',
+    b'{"type":"verification","challenge":"too-short"}',
+    b'{"type":"verification","challenge":"challenge_0123456789abcdef","type":"verification"}',
+])
+def test_unrecognized_duplicate_key_or_incomplete_control_body_never_reaches_dns(malformed):
+    from dataclasses import replace
+    source=packet()
+    fake=replace(source,body=malformed)
+    consulted=[]
+    with pytest.raises(api().CallbackDestinationRefused):
+        api().send_once(URL,fake,
+            resolver=lambda *a,**kw:consulted.append("dns"),
+            connector=lambda *a:consulted.append("socket"))
+    assert consulted==[]
+
+
+def test_canonical_signed_event_is_accepted_without_altering_exact_payload_bytes():
+    from test_session_bridge_web_reply_events import Resolver, project
+    from integrations.session_bridge.web_reply_delivery import (
+        VerifiedReplySubscription,prepare_reply_webhook,
+    )
+    event=project(Resolver())
+    subscriber=VerifiedReplySubscription(
+        subscription_id="sub_original001",principal_ref="principal-001",
+        request_ref=event["data"]["request_ref"],event_name=event["name"],
+        access_current=True,active=True,expires_at=NOW+300,
+        signing_secrets=(SECRET,),
+    )
+    signed=prepare_reply_webhook(subscription=subscriber,event=event,signed_at=NOW)
+    conn=FakeConnection(status=202,body=b"")
+    receipt=api().send_once(URL,signed,resolver=resolver,
+                            connector=lambda *a:conn)
+    assert receipt.status_code==202
+    assert conn.calls[0][2]==signed.body
+    assert conn.closed

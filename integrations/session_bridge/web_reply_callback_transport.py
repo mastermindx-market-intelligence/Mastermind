@@ -16,8 +16,11 @@ owner MUST control the resolver, connector, signed packet and transaction.
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import dataclasses
 import http.client
+import json
 import ipaddress
 import socket
 import ssl
@@ -25,7 +28,10 @@ from collections.abc import Callable, Sequence
 from typing import Any
 from urllib.parse import urlsplit
 
-from .web_reply_delivery import PreparedReplyWebhook, classify_reply_webhook_response
+from .web_reply_delivery import (
+    PreparedReplyWebhook, _EVENT, _SUB, _NONCE,
+    _VERIFICATION_ID, _validated_event, classify_reply_webhook_response,
+)
 from .web_reply_event_rpc import _callback_url
 
 
@@ -123,8 +129,56 @@ def _signed_request_headers(packet: PreparedReplyWebhook, host: str,
     if (not hasattr(source,"items") or set(source)!=fixed
             or any(type(k) is not str or type(v) is not str
                    or any(ord(c) < 32 or ord(c)==127 for c in v)
-                   or not v or len(v)>2048 for k,v in source.items())):
+                   or not v or len(v)>2048 for k,v in source.items())
+            or source["Content-Type"] != "application/json"
+            or _SUB.fullmatch(source["X-MCP-Subscription-Id"]) is None):
         raise CallbackDestinationRefused("invalid signed callback header")
+    try:
+        stamp=source["webhook-timestamp"]
+        if (not stamp.isascii() or not stamp.isdecimal()
+                or str(int(stamp)) != stamp or not 0 < int(stamp) <= 4102444800):
+            raise ValueError
+        signatures=source["webhook-signature"].split(" ")
+        if not 1 <= len(signatures) <= 2 or len(set(signatures)) != len(signatures):
+            raise ValueError
+        for signature in signatures:
+            version,separator,raw=signature.partition(",")
+            if version != "v1" or separator != ",":
+                raise ValueError
+            digest=base64.b64decode(raw,validate=True)
+            if len(digest) != 32 or base64.b64encode(digest).decode("ascii") != raw:
+                raise ValueError
+        def unique_object(pairs):
+            result={}
+            for key,value in pairs:
+                if key in result:
+                    raise ValueError("duplicate webhook field")
+                result[key]=value
+            return result
+        parsed=json.loads(packet.body,object_pairs_hook=unique_object)
+        if type(parsed) is not dict:
+            raise ValueError
+        if parsed.get("type") == "verification":
+            if (set(parsed) != {"type","challenge"}
+                    or type(parsed["challenge"]) is not str
+                    or _NONCE.fullmatch(parsed["challenge"]) is None
+                    or _VERIFICATION_ID.fullmatch(source["webhook-id"]) is None):
+                raise ValueError
+            expected=json.dumps(parsed,sort_keys=True,separators=(",",":"),
+                                ensure_ascii=True).encode("ascii")
+        else:
+            data=parsed.get("data")
+            if (type(data) is not dict or type(data.get("request_ref")) is not str
+                    or _EVENT.fullmatch(source["webhook-id"]) is None
+                    or parsed.get("eventId") != source["webhook-id"]):
+                raise ValueError
+            expected=_validated_event(parsed,data["request_ref"])
+        if expected != packet.body:
+            raise ValueError
+    except (ValueError,TypeError,UnicodeError,binascii.Error):
+        # Structural integrity is NOT cryptographic HMAC verification. The
+        # trusted existing signer still owns key authorization and signing.
+        raise CallbackDestinationRefused("inconsistent signed webhook packet") from None
     return {**dict(source),"Host":host if port==http.client.HTTPS_PORT else f"{host}:{port}"}
 
 

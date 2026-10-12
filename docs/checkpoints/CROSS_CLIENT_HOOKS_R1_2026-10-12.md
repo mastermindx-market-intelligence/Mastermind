@@ -133,3 +133,8 @@ The existing PR #1362 at published head `bbe40d8714e5b71cfc33f2e366caaae46c3076e
 ## Same-subscription lost-ACK reconciliation refinement
 
 A new focused RED showed a duplicate `commit` after the original store had actually persisted a subscription but its ACK was lost. The adapter now rechecks exact original principal, request, callback URL, signing key digest, generation and granted expiry, rereads the canonical stored record and returns without creating a second modifying write or callback when the desired record already exists. The original store remains the only persistence owner. The affected owner + authenticated OAuth/MCP end-to-end fixture suites passed 34/34 after this change (Python 3.11). The older broad 796-test run predates this narrow no-op refinement; source publication/CI must be verified separately. No denied hook write, active #1337 writer or production subscription was touched.
+
+
+## Independent signed-packet transport hardening
+
+Additional discriminating RED tests identified that forged/mismatched `webhook-id`, timestamp, signature syntax, duplicate-key or arbitrary verification control bodies could trigger DNS resolution in the current one-shot callback transport. `_signed_request_headers` now checks exact canonical event/verification body-to-header consistency and Standard Webhooks header format *before* DNS/socket. This is not cryptographic HMAC validation; that remains with the original signer and credential owner. Source test set for callback/Standard Webhooks delivery passed **100/100**, Python 3.11. No live webhook, callback, account enrollment, signer secret read or production effect.
