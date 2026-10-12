@@ -1,6 +1,5 @@
 """Production factory joins the real canonical sink, with fixture grounding/host admission."""
 import asyncio
-import dataclasses
 from pathlib import Path
 
 import pytest
@@ -23,10 +22,10 @@ def test_actual_factory_fresh_source_and_committed_error_classification(tmp_path
             await service.start()
             runtime = service._require_runtime()
             drives = []
-            if edge in {"drive", "duplicate", "drive_failure"}:
-                from control_plane.fabric_attended_routing import AttendedWorkPlacement
-                service.config = dataclasses.replace(service.config,
-                    coo_attended_work_placements=(AttendedWorkPlacement("fixture", "fixture", "fixture"),))
+            if edge in {"fresh", "drive", "duplicate", "drive_failure"}:
+                # The serial foreground scope no longer depends on attended
+                # placements: an ordinary Operator drives with none configured.
+                assert service.config.coo_attended_work_placements == ()
                 async def drive(op, root):
                     op.require_root(root)
                     assert service._foreground_cycle_owner == (asyncio.current_task(), op)
@@ -76,7 +75,7 @@ def test_actual_factory_fresh_source_and_committed_error_classification(tmp_path
                         replay = await owner.handle_frame(f)
                         assert replay["ok"] and replay["data"]["duplicate"]
                         assert "foreground_completion" not in replay["data"] and replay_op._root is None
-                if edge in {"drive", "duplicate"}:
+                if edge in {"fresh", "drive", "duplicate"}:
                     assert drives == [result["data"]["job_id"]]
                     assert result["data"]["foreground_completion"]["delivery"] == "INCOMPLETE"
             if edge in {"fresh", "legacy", "drive", "duplicate"}:

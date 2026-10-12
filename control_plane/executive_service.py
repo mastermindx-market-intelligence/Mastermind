@@ -6675,8 +6675,11 @@ class ExecutiveControlService:
 
         The canonical admission observer executes on its own thread. It binds
         the actual operation there; only this request task owns cycle driving.
+        Attendance placements never gate this reservation: an ordinary native
+        Operator owns its independent existing broker/OHF path, while an
+        absent operation keeps the legacy queued, un-driven admission path.
         """
-        if operation is None or not self.config.coo_attended_work_placements:
+        if operation is None:
             yield False
             return
         from control_plane.foreground_operation import current_foreground_operation
@@ -6790,6 +6793,15 @@ class ExecutiveControlService:
                         "role_result_digest": material.role_result_digest,
                         "result_envelope": material.result_envelope,
                     }
+                if (material is not None and material.job.job_id != root_id
+                        and material.job.orchestration_role == "plan"
+                        and not self.config.coo_attended_work_placements):
+                    # Ordinary Operator bound: the exact validated plan
+                    # completion is this call's finite result. No plan
+                    # admission, work creation or dispatch may follow here.
+                    settled = self._operator_plan_completion(root_id, material)
+                    if settled is not None:
+                        return settled
             operation.require_root(root_id)
             root = runtime.jobs.get_job(root_id)
             if root is None:
@@ -6823,6 +6835,46 @@ class ExecutiveControlService:
                         "delivery": "INCOMPLETE"}
         return {"state": "STEP_BOUND_REACHED", "root_job_id": root_id,
                 "delivery": "INCOMPLETE"}
+
+    def _operator_plan_completion(self, root_id, material):
+        """Shape the ordinary Operator's finite plan-only result for this call.
+
+        The exact validated plan completion stays retained at its Runtime
+        owner; this response only carries it, or its identities, on the same
+        call. The root stays open: this is never a root completion, external
+        Worker proof, native-return delivery or new admission authority.
+        """
+        root = self._require_runtime().jobs.get_job(root_id)
+        if root is None or root.status is JobStatus.COMPLETED:
+            # Only the independently validated ROOT_COMPLETED path reports a
+            # completed root; anything else keeps driving toward that branch.
+            return None
+        value = {
+            "state": "OPERATOR_COMPLETED",
+            "root_job_id": root_id,
+            "root_status": root.status.value,
+            "delivery": "INCOMPLETE",
+            "operator_delivery": "COMPLETE",
+            "operator_completion": {
+                "job_id": material.job.job_id,
+                "attempt_id": material.attempt.attempt_id,
+                "role": material.job.orchestration_role,
+                "result_digest": material.result_digest,
+                "role_result_digest": material.role_result_digest,
+                "result_envelope": material.result_envelope,
+            },
+        }
+        if len(_canonical_json(value)) > 16384:
+            # Retain exact identities/digests; omit only the envelope and
+            # never truncate it into a claimed complete delivery. The exact
+            # result stays readable later through its existing owner read.
+            value["operator_delivery"] = "RESULT_TOO_LARGE"
+            value["operator_completion"] = {
+                key: item
+                for key, item in value["operator_completion"].items()
+                if key != "result_envelope"
+            }
+        return value
 
     async def _run_coo_cycle_once(self, root_job_id: str) -> CooCycleOutcome:
         if self._closing:
