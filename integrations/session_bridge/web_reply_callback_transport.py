@@ -125,7 +125,7 @@ def _signed_request_headers(packet: PreparedReplyWebhook, host: str,
                    or any(ord(c) < 32 or ord(c)==127 for c in v)
                    or not v or len(v)>2048 for k,v in source.items())):
         raise CallbackDestinationRefused("invalid signed callback header")
-    return {**dict(source),"Host":host if port==443 else f"{host}:{port}"}
+    return {**dict(source),"Host":host if port==http.client.HTTPS_PORT else f"{host}:{port}"}
 
 
 def send_once(callback_url: str, packet: PreparedReplyWebhook, *,
@@ -147,7 +147,7 @@ def send_once(callback_url: str, packet: PreparedReplyWebhook, *,
         safe=_callback_url(callback_url)
         parsed=urlsplit(safe)
         host=parsed.hostname
-        port=parsed.port or 443
+        port=parsed.port or http.client.HTTPS_PORT
         path=parsed.path or "/"
         if parsed.query:
             path+="?"+parsed.query

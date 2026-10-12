@@ -264,7 +264,7 @@ class WebReplyEventRpc:
                         or not _validated_principal(principal, self._clock())
                         or type(receipt.expires_at) is not int
                         or not self._clock() < receipt.expires_at
-                        or receipt.expires_at > self._clock() + (ttl + 999) // 1000
+                        or receipt.expires_at > self._clock() + (ttl - 1) // 1000 + 1
                         or type(receipt.subscription_id) is not str
                         or _SUB.fullmatch(receipt.subscription_id) is None):
                     raise RuntimeError("unverified owner subscription effect")
