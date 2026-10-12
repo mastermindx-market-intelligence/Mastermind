@@ -14,6 +14,7 @@ import copy
 import hashlib
 import json
 import os
+import stat
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -191,7 +192,8 @@ def cause_document(s, predecessor_digest, *, producer=None):
         "original_release_sha": s.terminal["release_sha"],
         "original_receipt_sha256": predecessor_digest,
         "original_result_completed": True,
-        "original_exit_code": 1,
+        "original_canary_exit_code": 1,
+        "original_broker_exit_code": 65,
         "original_timed_out": False,
         "original_signalled": False,
         "original_cancelled": False,
@@ -334,11 +336,12 @@ def test_legacy_and_capacity_text_is_diagnostic_only(closed_state, words):
     """Message vocabulary never promotes an unqualified producer to cause."""
     cause = cause_document(
         closed_state, closed_state.digest,
-        producer=producer_document(event_types_seen=["turn.failed"], events_total=3),
+        producer=producer_document(event_types_seen=["turn.failed"], events_total=3,
+                                   structured_error_code=" ".join(words)),
     )
     with pytest.raises(rec.RecoveryError, match="recovery_failure_cause_unproven"):
         rec.evaluate_cause(cause)
-    assert words  # the classes above are exactly the diagnostic vocabulary
+    assert cause["producer"]["structured_error_code"] == " ".join(words)
     assert no_evidence_written(closed_state)
 
 
@@ -359,7 +362,9 @@ def test_caller_asserted_ordinary_class_is_not_cause(closed_state):
 ])
 def test_unclosed_or_reserved_effect_attestations_are_refused(closed_state, field):
     value = copy.deepcopy(closed_state.cause)
-    value[field] = True
+    value[field] = False if field == "original_result_completed" else True
+    with pytest.raises(rec.RecoveryError, match="recovery_cause_outcome_malformed"):
+        rec.validate_cause_document(value)
     write_json(closed_state.grant_path, grant_document(closed_state, value))
     closed_state.grant_digest = receipt_digest(closed_state.grant_path)
     assert cli(closed_state, "reuse") == 2
@@ -435,7 +440,7 @@ def test_malformed_cause_documents_are_refused(closed_state, change):
     if change == "extra_field":
         value["ordinary"] = True
     elif change == "missing_field":
-        del value["original_exit_code"]
+        del value["original_canary_exit_code"]
     elif change == "bad_schema":
         value["schema_version"] = "mastermind.executive_provider_recovery_cause/v2"
     elif change == "bad_authority":
@@ -445,9 +450,9 @@ def test_malformed_cause_documents_are_refused(closed_state, change):
     elif change == "bad_digest":
         value["original_receipt_sha256"] = "z" * 64
     elif change == "exit_zero":
-        value["original_exit_code"] = 0
+        value["original_canary_exit_code"] = 0
     elif change == "exit_bool":
-        value["original_exit_code"] = True
+        value["original_canary_exit_code"] = True
     elif change == "bad_timestamp":
         value["observed_at"] = "not-a-time"
     elif change == "producer_extra":
@@ -556,7 +561,7 @@ def test_grant_bindings_and_bounds_are_closed(recovery, change):
     elif change == "successor":
         grant["successor_request_id"] = "req-someone-else"
     elif change == "window_short":
-        grant["granted_at"] = iso(datetime.now(UTC) - timedelta(minutes=40))
+        grant["granted_at"] = iso(datetime.now(UTC))
         grant["expires_at"] = iso(datetime.now(UTC) + timedelta(minutes=29))
     elif change == "window_long":
         grant["granted_at"] = iso(datetime.now(UTC) - timedelta(minutes=1))
@@ -566,7 +571,7 @@ def test_grant_bindings_and_bounds_are_closed(recovery, change):
         grant["expires_at"] = iso(datetime.now(UTC) - timedelta(minutes=31))
     elif change == "cause_mismatch":
         cause = copy.deepcopy(grant["cause_evidence"])
-        cause["original_exit_code"] = 0
+        cause["original_canary_exit_code"] = 0
         grant["cause_evidence"] = cause
     elif change == "schema":
         grant["schema_version"] = "mastermind.executive_provider_recovery_grant/v2"
@@ -574,11 +579,11 @@ def test_grant_bindings_and_bounds_are_closed(recovery, change):
         grant["ordinary"] = True
     write_json(s.grant_path, grant)
     digest = receipt_digest(s.grant_path)
-    expected = "recovery_grant_expired" if change == "expired" else None
-    if expected is None:
-        assert cli(s, "reuse", grant=digest) == 2
-    else:
-        assert cli(s, "reuse", grant=digest) == 2
+    if change in {"expired", "window_short", "window_long"}:
+        code = "recovery_grant_expired" if change == "expired" else "recovery_grant_window_invalid"
+        with pytest.raises(rec.RecoveryError, match=code):
+            rec.read_grant(expected_digest=digest)
+    assert cli(s, "reuse", grant=digest) == 2
     assert allocation_absent(s)
 
 
@@ -692,8 +697,8 @@ def test_recovery_deadline_window_is_thirty_to_sixty_minutes(closed_state, minut
     "catalog_incomplete", "catalog_missing_model", "refused", "not_diagnostic",
     "readiness_issued", "identity_refused", "extra_field",
 ])
-def test_observation_is_transaction_bound_and_closed(closed_state, change):
-    s = closed_state
+def test_observation_is_transaction_bound_and_closed(qualified_state, monkeypatch, change):
+    s = qualified_state
     if change == "wrong_request":
         write_observation(s, successor_request_id="req-someone-else")
     elif change == "stale":
@@ -723,12 +728,22 @@ def test_observation_is_transaction_bound_and_closed(closed_state, change):
         observation = write_observation(s)
         observation["readiness_issued_receipt"] = True
         write_json(s.observation_path, observation)
-    if change in ("identity_refused", "refused"):
-        # The recovery path would refuse on the observation, but the production
-        # cause gate still fires first and no write of any kind occurs.
-        pass
-    assert cli(s, "reuse") == 2
-    assert cli(s, "reserve") == 2
+    codes = {
+        "wrong_request": "recovery_observation_request_mismatch",
+        "stale": "recovery_observation_stale",
+        "source": "recovery_observation_source_mismatch",
+        "credential": "recovery_observation_credential_mismatch",
+        "ordinary_false": "recovery_ordinary_usage_not_permitted",
+        "catalog_incomplete": "recovery_model_catalog_incomplete",
+        "catalog_missing_model": "recovery_model_catalog_incomplete",
+        "refused": "recovery_observation_refused",
+        "not_diagnostic": "recovery_observation_schema_malformed",
+        "readiness_issued": "recovery_observation_schema_malformed",
+        "identity_refused": "identity_not_passing",
+        "extra_field": "recovery_observation_fields_malformed",
+    }
+    with pytest.raises(r.ReadinessError, match=codes[change]):
+        reserve_qualified(s, monkeypatch)
     assert no_evidence_written(s)
 
 
@@ -1311,3 +1326,121 @@ def test_root_recovery_observation_source_drift_refuses(capacity_live, monkeypat
     with pytest.raises(probe.IdentityProbeError, match="recovery_observation_source_mismatch"):
         probe.live_probe(**live.kwargs, recovery_request_id=SUCCESSOR_REQUEST_ID)
     assert live.closed == 1
+
+
+@pytest.mark.parametrize("failure", ["source", "terminal", "allocation"])
+@pytest.mark.parametrize("error_type", [rec.RecoveryError, r.ReadinessError, OSError])
+def test_review_reconciliation_reader_errors_become_bounded_refusal(qualified_state, monkeypatch, failure, error_type):
+    from control_plane import executive_privileged_broker as b
+    def broken(*args, **kwargs):
+        raise error_type("private_fixture_failure")
+    name = {"source": "current_executive_source", "terminal": "validate_original_terminal",
+            "allocation": "read_allocation"}[failure]
+    monkeypatch.setattr(rec, name, broken)
+    with pytest.raises(b.BrokerTrustError):
+        test_broker_reconciliation_binds_grant_successor_and_allocation(qualified_state, monkeypatch)
+
+
+def test_review_allocation_exact_mode_is_independent_of_umask(qualified_state):
+    s = qualified_state
+    prior = os.umask(0o777)
+    try:
+        rec.claim_or_refuse_allocation(rec.RECOVERY_ALLOCATION_PATH,
+            grant=s.grant_document_for_qualified, grant_sha256=s.grant_digest,
+            predecessor_receipt_sha256=s.digest)
+    finally:
+        os.umask(prior)
+    assert stat.S_IMODE(rec.RECOVERY_ALLOCATION_PATH.stat().st_mode) == 0o400
+    assert rec.read_allocation()["consumed"] is True
+
+
+def test_review_successor_flag_cannot_be_ignored_on_reuse(recovery, capsys):
+    s = recovery
+    assert r.main(["reuse", "--receipt", str(s.tmp / "missing-readiness.json"),
+        "--expected-kind", "device-auth", "--workspace-binding-class", r.COMPANY_WORKSPACE_BINDING_CLASS,
+        "--credential-expires-at", s.deadline, "--successor-request-id", SUCCESSOR_REQUEST_ID]) == 2
+    assert "recovery_arguments_are_recovery_only" in capsys.readouterr().err
+
+
+def test_review_expired_grant_does_not_destroy_target_reconstruction(qualified_state, monkeypatch):
+    from control_plane import executive_privileged_broker as b
+    from control_plane.executive_privileged_action import validate_request, canonical_request_bytes, REQUEST_SCHEMA
+    s = qualified_state
+    args = {"expected_credential_kind": "device-auth", "workspace_binding_class": r.COMPANY_WORKSPACE_BINDING_CLASS,
+        "credential_expires_at": s.deadline, "recover_current_pin_grant_sha256": s.grant_digest,
+        "successor_request_id": SUCCESSOR_REQUEST_ID}
+    target = validate_request({"schema": REQUEST_SCHEMA, "request_id": SUCCESSOR_REQUEST_ID,
+        "action": "executive.worker_auth.verify_ready", "args": args})
+    original_read = rec.read_grant
+    later = datetime.now(UTC) + timedelta(hours=2)
+    def advanced(*args, **kwargs):
+        kwargs.setdefault("now", later)
+        return original_read(*args, **kwargs)
+    monkeypatch.setattr(rec, "read_grant", advanced)
+    raw = {**args, "target_request_id": SUCCESSOR_REQUEST_ID,
+        "target_request_sha256": hashlib.sha256(canonical_request_bytes(target)).hexdigest(),
+        "readiness_receipt_sha256": s.digest,
+        "target_started_at": iso(datetime.now(UTC) - timedelta(minutes=1))}
+    assert b._reconciliation_target(raw).to_dict() == target.to_dict()
+    with pytest.raises(rec.RecoveryError, match="recovery_grant_expired"):
+        rec.read_grant(expected_digest=s.grant_digest)
+
+
+def test_review_expired_grant_reconciliation_remains_readable_without_refund(qualified_state, monkeypatch):
+    original_read = rec.read_grant
+    later = datetime.now(UTC) + timedelta(hours=2)
+    def advanced(*args, **kwargs):
+        kwargs.setdefault("now", later)
+        return original_read(*args, **kwargs)
+    monkeypatch.setattr(rec, "read_grant", advanced)
+    # Exercises initial NOT_APPLIED, durable replay and replay after allocation.
+    test_broker_reconciliation_binds_grant_successor_and_allocation(qualified_state, monkeypatch)
+    with pytest.raises(rec.RecoveryError, match="recovery_grant_expired"):
+        rec.read_grant(expected_digest=qualified_state.grant_digest)
+
+
+@pytest.mark.parametrize("change", ["digest", "mode", "window", "extra", "duplicate"])
+def test_review_historical_grant_still_requires_exact_immutable_evidence(qualified_state, change):
+    s = qualified_state
+    digest = s.grant_digest
+    if change == "digest":
+        digest = "f" * 64
+    elif change == "mode":
+        s.grant_path.chmod(0o600)
+    elif change == "duplicate":
+        raw = s.grant_path.read_text().rstrip()
+        s.grant_path.chmod(0o600)
+        s.grant_path.write_text(raw[:-1] + ', "budget": 1}')
+        s.grant_path.chmod(0o400)
+        digest = receipt_digest(s.grant_path)
+    else:
+        grant = copy.deepcopy(s.grant_document_for_qualified)
+        if change == "window":
+            grant["expires_at"] = grant["granted_at"]
+        else:
+            grant["allow_expired"] = True
+        write_json(s.grant_path, grant)
+        digest = receipt_digest(s.grant_path)
+    with pytest.raises(rec.RecoveryError):
+        rec._read_historical_grant(expected_digest=digest)
+
+
+@pytest.mark.parametrize("value", [65, 0, True])
+def test_review_canary_exit_is_not_broker_or_client_exit(recovery, value):
+    cause = dict(recovery.cause, original_canary_exit_code=value)
+    with pytest.raises(rec.RecoveryError, match="recovery_cause_outcome_malformed"):
+        rec.validate_cause_document(cause)
+
+
+@pytest.mark.parametrize("value", [1, 2, 64])
+def test_review_broker_exit_joins_exact_canonical_terminal(recovery, value):
+    cause = dict(recovery.cause, original_broker_exit_code=value)
+    rec.validate_cause_document(cause)
+    with pytest.raises(rec.RecoveryError, match="recovery_original_request_exit_mismatch"):
+        rec.validate_original_terminal(cause)
+
+
+@pytest.mark.parametrize("value", [0, -1, True])
+def test_review_broker_exit_is_positive_strict_integer(recovery, value):
+    with pytest.raises(rec.RecoveryError, match="recovery_cause_outcome_malformed"):
+        rec.validate_cause_document(dict(recovery.cause, original_broker_exit_code=value))

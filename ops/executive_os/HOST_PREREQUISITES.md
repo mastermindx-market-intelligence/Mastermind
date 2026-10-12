@@ -1078,7 +1078,10 @@ selector. Reservation, its observation and its durable allocation bind that
 same identity. The original failed broker request must be read from its fixed
 root-owned terminal store with the exact request, release and byte digest,
 without contradictory inflight or reconciliation records. Its wrapper exit
-code is distinct from the canary's exit code. A terminal record plus nearby
+code is distinct from the canary's exit code: the closed cause fields
+`original_broker_exit_code` and `original_canary_exit_code` each join their own
+canonical record. The outer CLI exit status is neither of those records.
+A terminal record plus nearby
 timestamps still does not establish causation: the separately reviewed producer
 must verify the exact terminal-request/readiness/canary linkage. No production
 link verifier ships; a vocabulary or an asserted ordinary flag cannot replace it.
@@ -1096,6 +1099,12 @@ into another allocation, and the original request and its bytes are preserved.
 Only then does the existing fixed inert canary and unchanged finalization run;
 a real provider result plus exact post-call identity is still required for
 `READY`, and unknown effects stay unknown.
+
+Historical request reconstruction and `NOT_APPLIED` reconciliation retain the
+immutable grant's custody, digest, strict fields and finite window structure
+after its window expires. Those read paths do not admit a new qualification or
+refund its allocation. Live reuse and reservation still require the grant to
+be within its actual current window; there is no caller-selectable expiry bypass.
 
 **Because the producer table is empty, no current Due10 or same-generation
 failure is recoverable today.** This section documents a capability whose

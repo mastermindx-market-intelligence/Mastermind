@@ -1851,6 +1851,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             return 0
         if args.command == "reuse":
+            if (args.successor_request_id is not None
+                    and args.recover_current_pin_grant_sha256 is None):
+                raise ReadinessError("recovery_arguments_are_recovery_only")
             if args.requalify_company_device_drift_sha256 is not None:
                 _company_device_drift_preimage(
                     args, auth_identity=current_auth_identity(

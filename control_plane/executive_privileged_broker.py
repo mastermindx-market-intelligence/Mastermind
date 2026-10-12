@@ -241,7 +241,7 @@ def _reconciliation_target(raw: Mapping[str, Any]):
             try:
                 from ops.executive_os import provider_recovery as _recovery
 
-                if _recovery.read_grant(
+                if _recovery._read_historical_grant(
                     expected_digest=grant_digest,
                 ).get("successor_request_id") == raw.get("target_request_id"):
                     variants.append({
@@ -1352,21 +1352,27 @@ class PrivilegedActionBroker:
                 # the grant, its designated successor binding and the consumed
                 # allocation all still hold exactly.
                 try:
-                    grant = provider_recovery.read_grant(
+                    grant = provider_recovery._read_historical_grant(
                         expected_digest=request.recover_current_pin_grant_sha256,
                     )
-                except provider_recovery.RecoveryError as exc:
+                except (provider_recovery.RecoveryError, ReadinessError, OSError) as exc:
                     raise BrokerTrustError(
-                        f"current-pin recovery grant custody failed: {exc.code}"
+                        "current-pin recovery grant custody failed"
                     ) from exc
                 if grant["successor_request_id"] != request.target_request_id:
                     raise BrokerTrustError(
                         "current-pin recovery grant does not designate this request"
                     )
+                try:
+                    current_source = provider_recovery.current_executive_source()
+                    provider_recovery.validate_original_terminal(grant["cause_evidence"])
+                except (provider_recovery.RecoveryError, ReadinessError, OSError) as exc:
+                    raise BrokerTrustError(
+                        "current-pin recovery source or original terminal is unverified"
+                    ) from exc
                 if (grant["executive_source"]["release_sha"] != self.config.release_root.name
-                        or grant["executive_source"] != provider_recovery.current_executive_source()):
+                        or grant["executive_source"] != current_source):
                     raise BrokerTrustError("current-pin recovery Executive source changed")
-                provider_recovery.validate_original_terminal(grant["cause_evidence"])
                 if grant["cause_evidence"]["original_receipt_sha256"] != request.readiness_receipt_sha256:
                     raise BrokerTrustError(
                         "current-pin recovery grant does not bind the retained predecessor"
@@ -1385,9 +1391,9 @@ class PrivilegedActionBroker:
                     ) from exc
                 try:
                     allocation = provider_recovery.read_allocation()
-                except provider_recovery.RecoveryError as exc:
+                except (provider_recovery.RecoveryError, ReadinessError, OSError) as exc:
                     raise BrokerTrustError(
-                        f"current-pin recovery allocation is unreadable: {exc.code}"
+                        "current-pin recovery allocation is unreadable"
                     ) from exc
                 if allocation is not None:
                     if allocation["executive_source"] != grant["executive_source"]:

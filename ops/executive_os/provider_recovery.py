@@ -110,7 +110,8 @@ _EVIDENCE_FIELDS = frozenset(
         "original_release_sha",
         "original_receipt_sha256",
         "original_result_completed",
-        "original_exit_code",
+        "original_canary_exit_code",
+        "original_broker_exit_code",
         "original_timed_out",
         "original_signalled",
         "original_cancelled",
@@ -372,8 +373,12 @@ def validate_cause_document(value: Any) -> dict[str, Any]:
     _hex_digest(document["original_receipt_sha256"], "recovery_cause_identity_malformed")
     _exact_bool(document["original_result_completed"], True, "recovery_cause_outcome_malformed")
     if _strict_int(
-        document["original_exit_code"], "recovery_cause_outcome_malformed"
+        document["original_canary_exit_code"], "recovery_cause_outcome_malformed"
     ) != RECOVERY_REFUSAL_EXIT_CODE:
+        raise RecoveryError("recovery_cause_outcome_malformed")
+    if _strict_int(
+        document["original_broker_exit_code"], "recovery_cause_outcome_malformed"
+    ) <= 0:
         raise RecoveryError("recovery_cause_outcome_malformed")
     for field in (
         "original_timed_out",
@@ -511,6 +516,8 @@ def validate_original_terminal(cause: Mapping[str, Any]) -> dict[str, Any]:
             expected_action="executive.worker_auth.verify_ready")
         if result["outcome"] != "FAILED" or result["exit_code"] <= 0:
             raise RecoveryError("recovery_original_request_not_adverse")
+        if result["exit_code"] != cause["original_broker_exit_code"]:
+            raise RecoveryError("recovery_original_request_exit_mismatch")
         observed = _readiness._timestamp(cause["observed_at"], code="recovery_cause_identity_malformed")
         started = _readiness._timestamp(result["started_at"], code="recovery_cause_identity_malformed")
         finished = _readiness._timestamp(result["finished_at"], code="recovery_cause_identity_malformed")
@@ -562,10 +569,8 @@ def _grant_worker(value: Any) -> dict[str, Any]:
     return worker
 
 
-def validate_grant_document(
-    value: Any, *, now: datetime | None = None
-) -> dict[str, Any]:
-    """Return the normalized grant, or raise a bounded custody refusal."""
+def _validate_historical_grant_document(value: Any) -> dict[str, Any]:
+    """Validate immutable evidence structure, without granting admission now."""
 
     grant = _require_exact_fields(value, _GRANT_FIELDS, "recovery_grant_fields_malformed")
     if grant["schema_version"] != RECOVERY_GRANT_SCHEMA:
@@ -600,12 +605,22 @@ def validate_grant_document(
     lifetime = expires_at - granted_at
     if not MIN_GRANT_LIFETIME <= lifetime <= MAX_GRANT_LIFETIME:
         raise RecoveryError("recovery_grant_window_invalid")
+    return {**grant, "cause_evidence": cause}
+
+
+def validate_grant_document(
+    value: Any, *, now: datetime | None = None
+) -> dict[str, Any]:
+    """Validate immutable evidence and the current live admission window."""
+    grant = _validate_historical_grant_document(value)
+    granted_at = _readiness._timestamp(grant["granted_at"], code="recovery_grant_window_invalid")
+    expires_at = _readiness._timestamp(grant["expires_at"], code="recovery_grant_window_invalid")
     current = datetime.now(UTC) if now is None else now
     if granted_at > current:
         raise RecoveryError("recovery_grant_window_invalid")
     if expires_at <= current:
         raise RecoveryError("recovery_grant_expired")
-    return {**grant, "cause_evidence": cause}
+    return grant
 
 
 def _validate_state_directory(path: Path) -> None:
@@ -720,15 +735,28 @@ def read_grant(
     type checks all run regardless.
     """
 
+    return validate_grant_document(_read_grant_document(path, expected_digest=expected_digest), now=now)
+
+
+def _read_historical_grant(*, expected_digest: str) -> dict[str, Any]:
+    """Read fixed immutable grant evidence for reconstruction/reconciliation only.
+
+    No current-window admission is granted. Live qualification and reservation
+    must continue to use read_grant; there is no caller-selected expiry bypass.
+    """
+    return _validate_historical_grant_document(
+        _read_grant_document(None, expected_digest=expected_digest)
+    )
+
+
+def _read_grant_document(path: Path | None, *, expected_digest: str) -> dict[str, Any]:
     if path is None:
         path = RECOVERY_GRANT_PATH
     _hex_digest(expected_digest, "recovery_grant_digest_malformed")
     raw = _read_custody_bytes(path, maximum=_GRANT_MAX_BYTES)
     if hashlib.sha256(raw).hexdigest() != expected_digest:
         raise RecoveryError("recovery_grant_digest_mismatch")
-    return validate_grant_document(
-        _read_custody_document(raw, schema=RECOVERY_GRANT_SCHEMA), now=now
-    )
+    return _read_custody_document(raw, schema=RECOVERY_GRANT_SCHEMA)
 
 
 def read_grant_digest(path: Path | None = None) -> str:
@@ -838,6 +866,7 @@ def claim_allocation(
         raise RecoveryError("recovery_allocation_unwritable") from exc
     try:
         os.fchown(descriptor, CUSTODY_UID, CUSTODY_GID)
+        os.fchmod(descriptor, 0o400)
         view = memoryview(payload)
         while view:
             written = os.write(descriptor, view)
@@ -1015,6 +1044,7 @@ def validate_current_pin_recovery_predecessor_document(
     if (safe_canary["passed"] is not False
             or type(safe_canary["exit_code"]) is not int
             or safe_canary["exit_code"] != RECOVERY_REFUSAL_EXIT_CODE
+            or safe_canary["exit_code"] != cause["original_canary_exit_code"]
             or safe_canary["timed_out"] is not False
             or safe_canary["terminal_event_class"] != RECOVERY_TERMINAL_EVENT_CLASS
             or safe_canary["result_valid"] is not False
