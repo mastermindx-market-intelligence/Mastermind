@@ -1638,6 +1638,7 @@ def _service_from_config(
     remote_operator_binding_source: Callable[..., Any] | None = None,
     dialogue_canary_profile: Any | None = None,
     remote_worker_binding_source: Callable[..., Any] | None = None,
+    plan_schema_version: str = "mastermind.execution_plan/v1",
 ) -> ExecutiveControlService:
     from control_plane.dialogue_wake_canary_activation import DialogueWakeCanaryProfile
     if dialogue_canary_profile is None:
@@ -1645,6 +1646,18 @@ def _service_from_config(
     if type(dialogue_canary_profile) is not DialogueWakeCanaryProfile:
         raise ServiceError("dialogue canary profile requires trusted composition")
     # This is trusted host composition, never a JSON/model-selected factory.
+    from control_plane.executive_orchestration_result import (
+        PLAN_SCHEMA_V1, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4,
+    )
+    if type(plan_schema_version) is not str or plan_schema_version not in {
+        PLAN_SCHEMA_V1, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4,
+    }:
+        raise ServiceError("trusted planner plan schema is unsupported")
+    if plan_schema_version != PLAN_SCHEMA_V1 and (
+        claimed_operator_adapter_factory is None
+        or remote_operator_binding_source is not None
+    ):
+        raise ServiceError("versioned producer needs a trusted claim-bound adapter")
     if (remote_worker_binding_source is not None
             and not callable(remote_worker_binding_source)):
         raise ServiceError("remote worker binding source must be callable")
@@ -1895,6 +1908,7 @@ def _service_from_config(
             claimed_adapter_factory=(factory if factory is not None else primary_factory),
             workspace_identity_source=workspace_source,
             prompt_source=sealed_supervisor,
+            plan_schema_version=plan_schema_version,
         )
 
     async def verify_operator_identity() -> None:

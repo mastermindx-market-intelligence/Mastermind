@@ -516,6 +516,7 @@ def worker_result_schema(
     effective_grant_digest: str | None = None,
     orchestration_role: str | None = None,
     root_job_id: str | None = None,
+    plan_schema_version: str = "mastermind.execution_plan/v1",
 ) -> dict[str, Any]:
     """Return the strict final-output contract for one immutable attempt."""
 
@@ -532,10 +533,13 @@ def worker_result_schema(
             run_id=run_id,
             worker_id=worker_id,
             root_job_id=root_job_id,
+            plan_schema_version=plan_schema_version,
         )
         result["x-mastermind-effective-grant-digest"] = effective_grant_digest
         return result
 
+    if plan_schema_version != "mastermind.execution_plan/v1":
+        raise SupervisorError("versioned plan schema requires the planner role")
     string_list = {"type": "array", "items": {"type": "string"}}
     result = {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
