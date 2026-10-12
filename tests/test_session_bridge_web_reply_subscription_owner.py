@@ -170,7 +170,7 @@ def test_idempotent_refresh_uses_exact_same_subscription_id_across_adapter_resta
     r2=run(a2.subscribe(principal(),subscribe()))
     assert r1.subscription_id==r2.subscription_id
     assert len(store.rows)==1
-    assert [x[0] for x in store.calls].count("commit")==2
+    assert [x[0] for x in store.calls].count("commit")==1
     assert r2.expires_at==NOW+900
 
 
@@ -373,7 +373,7 @@ def test_fresh_verified_callback_is_reused_on_idempotent_refresh_without_new_net
     assert len(callback.calls)==1
     assert len(store.rows)==1
     assert store.rows[later.subscription_id].verified_at==NOW
-    assert [x[0] for x in store.calls].count("commit")==2
+    assert [x[0] for x in store.calls].count("commit")==1
 
 
 def test_callback_cache_does_not_renew_itself_forever_after_expiration():
@@ -451,3 +451,20 @@ def test_revoked_request_after_commit_cannot_be_promoted_to_completed_grant():
     with pytest.raises(api().SubscriptionEffectUnknown):
         run(adapter.subscribe(principal(),subscribe()))
     assert len(cb.calls)==1 and len(store.rows)==1
+
+
+def test_lost_commit_ack_reconciles_existing_exact_record_without_replay():
+    store=ExistingStore()
+    store.after_write=ConnectionError("ACK lost AFTER durable write")
+    callback=Callback()
+    adapter,_,_,_=owner(store=store,callback=callback)
+    with pytest.raises(api().SubscriptionEffectUnknown):
+        run(adapter.subscribe(principal(),subscribe()))
+    assert len(store.rows)==1
+    assert [x[0] for x in store.calls].count("commit")==1
+    store.after_write=None
+    receipt=run(adapter.subscribe(principal(),subscribe()))
+    assert receipt.persisted is True and receipt.callback_verified is True
+    assert len(store.rows)==1
+    assert [x[0] for x in store.calls].count("commit")==1
+    assert len(callback.calls)==1

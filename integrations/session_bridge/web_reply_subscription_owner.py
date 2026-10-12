@@ -297,6 +297,17 @@ class OriginalReplySubscriptionAdapter:
             read_ref=grant.read_ref,revision=grant.revision,
             expires_at=expires,verified_at=prior.verified_at if cached else now,
         )
+        if cached and _current_store_readback(prior,record):
+            # A prior attempt may have committed before losing its ACK.
+            # Reconcile the SAME exact durable fact twice and return without
+            # issuing a duplicate mutation, challenge or new operation.
+            try:
+                current_again=await self._store.read(subscription_id)
+            except Exception:
+                raise SubscriptionEffectUnknown("original committed subscription readback unknown") from None
+            if not _current_store_readback(current_again,record):
+                raise SubscriptionEffectUnknown("original committed subscription changed")
+            return EventSubscriptionReceipt(subscription_id,expires,True,True,True)
         try:
             written=await self._store.commit(record,requested.signing_secret)
             current=await self._store.read(subscription_id)

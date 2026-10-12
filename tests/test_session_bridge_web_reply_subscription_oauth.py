@@ -131,7 +131,7 @@ def test_verified_bearer_original_request_end_to_end_subscription_refresh_unsubs
                                          json=wire_fixture.request("events/subscribe",params))
                 assert repeat.json()["result"]["id"]==first_id
                 assert len(callback.calls)==1 and len(store.rows)==1
-                assert [x[0] for x in store.calls].count("commit")==2
+                assert [x[0] for x in store.calls].count("commit")==1
                 original.allowed=False
                 denied=await client.post("/mcp",headers=header,
                                          json=wire_fixture.request("events/subscribe",params))
