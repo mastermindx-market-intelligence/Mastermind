@@ -285,9 +285,9 @@ def test_final_fence_rechecks_target_file_census(monkeypatch, second_paths, comp
     def reread(*_args, **_kwargs):
         nonlocal calls
         calls += 1
-        return second_paths, complete
+        return second_paths, complete, True
 
-    monkeypatch.setattr(module, "_changed_paths", reread)
+    monkeypatch.setattr(module, "_subject_changed_paths", reread)
     result = module._remote_still_matches(
         FenceHTTP(), TOKEN, request(module), module._pr_identity(pr_payload()),
         HEAD, BASE, OWNED, True, module.CollisionState.NONE, (), True, ((448, ()),),
