@@ -139,3 +139,33 @@ def test_optional_cache_write_counter_is_not_double_counted():
     assert project(params)["last_request_tokens"] == 640
     params["tokenUsage"]["last"]["cacheWriteInputTokens"] = -1
     assert project(params)["state"] == "UNKNOWN"
+
+
+def test_installed_codex_01593_usage_schema_matches_the_projection_contract():
+    """Frozen export from the observed native binary, not a hand-written schema."""
+    import hashlib
+    from pathlib import Path
+    source = Path(__file__).parent / "fixtures/codex_context/ThreadTokenUsageUpdatedNotification-0.159.3.json"
+    assert hashlib.sha256(source.read_bytes()).hexdigest() == "aba4f6c7e4a19b2b842c08ee793b57000c07dafd57b922ad0d8e7c76609108c2"
+    schema = json.loads(source.read_text())
+    assert set(schema["required"]) == {"threadId", "turnId", "tokenUsage"}
+    usage = schema["definitions"]["ThreadTokenUsage"]
+    assert set(usage["required"]) == {"last", "total"}
+    assert usage["properties"]["modelContextWindow"]["type"] == ["integer", "null"]
+    breakdown = schema["definitions"]["TokenUsageBreakdown"]
+    fields = {"inputTokens", "outputTokens", "totalTokens", "cachedInputTokens", "reasoningOutputTokens"}
+    assert set(breakdown["required"]) == fields
+    assert all(breakdown["properties"][field] == {"format": "int64", "type": "integer"} for field in fields)
+    assert project(notification())["state"] == "OBSERVED"
+
+
+def test_native_schema_receipt_does_not_claim_provider_or_installation_acceptance():
+    from pathlib import Path
+    path = Path(__file__).parents[1] / "research/evidence/fabric-context-native-schema-20261012.json"
+    receipt = json.loads(path.read_text())
+    assert receipt["codex_version"] == "0.159.3"
+    assert receipt["native_package_version"] == "0.159.3-darwin-arm64"
+    assert receipt["native_binary_sha256"] == "4d210f7c5a18fd0386434df23b5bdbb8c0e7257d3e8a2b30b0769c8bbe99a878"
+    assert receipt["isolated_codex_home"] is True
+    for flag in ("credential_files_present", "model_turn_requested", "compaction_requested", "production_runtime_mutated", "adapter_integrated"):
+        assert receipt[flag] is False
