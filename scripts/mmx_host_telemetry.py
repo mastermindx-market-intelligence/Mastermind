@@ -49,7 +49,7 @@ def sensors(hwmon: Path = Path("/sys/class/hwmon")) -> list[dict]:
                     "celsius": value}
             for attr in ("max", "crit"):
                 limit = number(folder / f"{stem}_{attr}", 1000)
-                if limit is not None:
+                if limit is not None and 0 <= limit <= 150:
                     item[f"{attr}_celsius"] = limit
             readings.append(item)
     return readings
@@ -182,9 +182,18 @@ def advisory(readings: list[dict], free_memory: int | None,
         if row["chip"] != "nvme":
             continue
         if row["label"].lower() == "composite":
-            severity = "critical" if row["celsius"] >= 80 else "warning" if row["celsius"] >= 70 else None
+            # Hardware limits differ materially across NVMe drives. Prefer
+            # measured sysfs max/critical thresholds to generic fallbacks;
+            # leave headroom before controller throttling / critical temp.
+            max_c, crit_c = row.get("max_celsius"), row.get("crit_celsius")
+            warning_at = max(0, max_c - 5) if max_c is not None else 70
+            critical_at = max(0, crit_c - 2) if crit_c is not None else (
+                min(80, max_c + 1) if max_c is not None else 80)
+            warning_at = min(warning_at, critical_at - 2)
         else:
-            severity = "critical" if row["celsius"] >= 90 else "warning" if row["celsius"] >= 85 else None
+            warning_at, critical_at = 85, 90
+        severity = "critical" if row["celsius"] >= critical_at else (
+            "warning" if row["celsius"] >= warning_at else None)
         if severity:
             alerts.append({"severity": severity, "reason": "nvme_temperature", "label": row["label"]})
     if free_memory is not None and free_memory < 4 * GIB:
