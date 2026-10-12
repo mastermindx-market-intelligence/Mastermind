@@ -1,4 +1,12 @@
 import { useId, useRef, useState } from "react";
+import {
+  SESSION_TEXT_MAX_CODEPOINTS as MAX_CONDITION_CODEPOINTS,
+  codePointLength,
+} from "../session-text-contract";
+export {
+  SESSION_TEXT_MAX_CODEPOINTS as MAX_CONDITION_CODEPOINTS,
+  codePointLength,
+} from "../session-text-contract";
 import type {
   OperationPointer,
   OperationState,
@@ -16,9 +24,6 @@ import type {
  * and it offers no Stop control: stop_condition is content, not cancel.
  * Recovery is status-only and always uses the original operation key.
  */
-
-/** Exact accepted Unicode/blank bounds: 1..700 code points, matching the port. */
-export const MAX_CONDITION_CODEPOINTS = 700;
 
 export type SessionContinuationOutcome =
   | { status: "accepted" }
@@ -46,10 +51,6 @@ export interface SelectedSessionContinuationProps {
   onRecover: () => void;
   /** Explicit context qualification; separate from original-key recovery. */
   onRequalify?: () => void;
-}
-
-export function codePointLength(value: string): number {
-  return [...value].length;
 }
 
 function isTerminal(outcome: unknown): outcome is SessionContinuationOutcome {

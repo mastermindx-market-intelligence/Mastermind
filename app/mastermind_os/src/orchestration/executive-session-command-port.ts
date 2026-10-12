@@ -46,6 +46,11 @@ import type {
 } from "./operation-controller";
 import type { OrchestratorCommandBinding } from "./host-command-bindings";
 import type { MissionSelection } from "../mission";
+import {
+  SESSION_TEXT_MAX_CODEPOINTS as MAX_TEXT_CODEPOINTS,
+  codePointLength,
+} from "./session-text-contract";
+export { codePointLength } from "./session-text-contract";
 
 // ── Frozen wire vocabulary ────────────────────────────────────────────────────
 
@@ -107,8 +112,6 @@ const CONTINUE_MESSAGE_KEY_RE = /^asd-dot-continue-[0-9a-f]{40}$/;
 const WORK_REF_RE = /^WS:[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const ROOT_JOB_RE = /^JOB-[A-Za-z0-9][A-Za-z0-9._:-]{0,250}$/;
 
-/** Python `len` semantics: Unicode code points, never UTF-16 units. */
-const MAX_TEXT_CODEPOINTS = 700;
 const REPLY_TEXT_BOUND = 8192;
 
 const PAYLOAD_KEYS = new Set([
@@ -129,11 +132,6 @@ function exactKeys(v: Record<string, unknown>, keys: readonly string[]): boolean
 
 function isString(v: unknown): v is string {
   return typeof v === "string";
-}
-
-/** Code point length — matches Python `len` for astral plane text. */
-export function codePointLength(value: string): number {
-  return [...value].length;
 }
 
 function boundedText(v: unknown, max: number): v is string {
