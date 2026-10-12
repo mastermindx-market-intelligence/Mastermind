@@ -93,6 +93,16 @@ def test_return_packet_is_immutable_and_attempt_timestamp_is_fresh():
     assert second.headers["webhook-timestamp"] == "1791766801"
 
 
+def test_real_canonical_projector_output_is_signed_without_rewriting_event_identity():
+    from test_session_bridge_web_reply_events import Resolver, project
+    projected = project(Resolver())
+    result = sign(payload=projected)
+    assert json.loads(result.body) == projected
+    assert result.headers["webhook-id"] == projected["eventId"]
+    assert projected["data"]["parent_consumed"] is False
+    assert projected["cursor"] is None
+
+
 def test_validated_rotating_secrets_sign_identical_body_with_two_keys():
     result = sign(target=binding(signing_secrets=(SECRET, OLD_SECRET)))
     signatures = result.headers["webhook-signature"].split(" ")
@@ -184,3 +194,76 @@ def test_no_network_or_store_and_no_implicit_retry():
     assert not hasattr(module, "send_webhook")
     assert not hasattr(module, "create_subscription")
     assert "secret" not in repr(binding())
+
+
+def pending(**changes):
+    return api().PendingReplyCallback(
+        subscription_id=changes.pop("subscription_id", "sub-001"),
+        principal_ref=changes.pop("principal_ref", "principal-001"),
+        request_ref=changes.pop("request_ref", "request-001"),
+        access_current=changes.pop("access_current", True),
+        expires_at=changes.pop("expires_at", 1_800_000_000),
+        signing_secret=changes.pop("signing_secret", SECRET),
+        **changes,
+    )
+
+
+def test_callback_verification_uses_signed_one_time_challenge_bytes():
+    nonce = "challenge_0123456789abcdef"
+    message_id = "msg_verification_0123456789"
+    result = api().prepare_reply_webhook_verification(
+        callback=pending(), challenge=nonce,
+        message_id=message_id, signed_at=1791766800,
+    )
+    assert json.loads(result.body) == {"type": "verification", "challenge": nonce}
+    assert result.headers["webhook-id"] == message_id
+    assert result.headers["X-MCP-Subscription-Id"] == "sub-001"
+    expected = hmac.new(b"z" * 32, (
+        message_id + ".1791766800.").encode() + result.body, hashlib.sha256).digest()
+    assert result.headers["webhook-signature"] == "v1," + base64.b64encode(expected).decode()
+    assert "whsec_" not in repr(result) and "whsec_" not in repr(pending())
+
+
+def test_callback_challenge_echo_requires_2xx_exact_reply_and_original_nonce():
+    f = api().verify_reply_webhook_challenge_response
+    nonce = "challenge_0123456789abcdef"
+    reply = json.dumps({"challenge": nonce}).encode()
+    assert f(challenge=nonce, response_body=reply, status=200) is True
+    assert f(challenge=nonce, response_body=reply, status=204) is True
+    assert f(challenge=nonce, response_body=reply, status=302) is False
+    assert f(challenge=nonce, response_body=reply, status=None) is False
+    for bad in [
+        b"", b"not-json", json.dumps({"challenge": "wrong"}).encode(),
+        json.dumps({"challenge": nonce, "unexpected": True}).encode(),
+        json.dumps([nonce]).encode(),
+        json.dumps({"challenge": nonce + "1"}).encode(),
+    ]:
+        assert f(challenge=nonce, response_body=bad, status=200) is False
+
+
+@pytest.mark.parametrize("changes", [
+    {"access_current": False}, {"access_current": 1},
+    {"expires_at": 1}, {"expires_at": True},
+    {"signing_secret": "wrong"}, {"subscription_id": "wrong\nheader"},
+])
+def test_inactive_pending_callback_cannot_be_signed(changes):
+    with pytest.raises(ValueError):
+        api().prepare_reply_webhook_verification(
+            callback=pending(**changes), challenge="challenge_0123456789abcdef",
+            message_id="msg_verification_0123456789", signed_at=1791766800,
+        )
+
+
+@pytest.mark.parametrize("challenge,message_id", [
+    ("", "msg_verification_0123456789"),
+    ("test", "msg_verification_0123456789"),
+    ("x" * 512, "msg_verification_0123456789"),
+    ("challenge_0123456789abcdef", "msg.evil"),
+    ("challenge_0123456789abcdef", "other_123"),
+])
+def test_invalid_nonce_or_message_identity_is_rejected(challenge, message_id):
+    with pytest.raises(ValueError):
+        api().prepare_reply_webhook_verification(
+            callback=pending(), challenge=challenge,
+            message_id=message_id, signed_at=1791766800,
+        )

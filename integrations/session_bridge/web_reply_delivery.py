@@ -56,6 +56,22 @@ class VerifiedReplySubscription:
 
 
 @dataclasses.dataclass(frozen=True)
+class PendingReplyCallback:
+    """Pre-verification callback projection from the existing authenticated owner.
+
+    This is not a subscription, callback grant or persistence record.
+    The owner must have validated destination and principal and generated a
+    fresh single-use challenge before preparing a verification request.
+    """
+    subscription_id: str
+    principal_ref: str
+    request_ref: str
+    access_current: bool
+    expires_at: int
+    signing_secret: str = dataclasses.field(repr=False)
+
+
+@dataclasses.dataclass(frozen=True)
 class PreparedReplyWebhook:
     """Exact signed body/headers. Transport, status and acceptance unobserved."""
     body: bytes = dataclasses.field(repr=False)
@@ -117,6 +133,23 @@ def _validated_event(event: Mapping[str, Any], request_ref: str) -> bytes:
     return body
 
 
+def _signed_packet(*, body: bytes, message_id: str, subscription_id: str,
+                   signed_at: int, keys: tuple[bytes, ...]) -> PreparedReplyWebhook:
+    timestamp = str(signed_at)
+    signed = (message_id + "." + timestamp + ".").encode("ascii") + body
+    signatures = [
+        "v1," + base64.b64encode(hmac.new(key, signed, hashlib.sha256).digest()).decode("ascii")
+        for key in keys
+    ]
+    return PreparedReplyWebhook(body=body, headers=MappingProxyType({
+        "Content-Type": "application/json",
+        "webhook-id": message_id,
+        "webhook-timestamp": timestamp,
+        "webhook-signature": " ".join(signatures),
+        "X-MCP-Subscription-Id": subscription_id,
+    }))
+
+
 def prepare_reply_webhook(*, subscription: VerifiedReplySubscription,
                           event: Mapping[str, Any], signed_at: int) -> PreparedReplyWebhook:
     """Purely encode/sign one retained event. Every attempt uses a fresh owner read.
@@ -144,20 +177,68 @@ def prepare_reply_webhook(*, subscription: VerifiedReplySubscription,
     if len(set(keys)) != len(keys):
         raise ValueError("duplicate signing key")
     body = _validated_event(event, subscription.request_ref)
-    event_id = event["eventId"]
-    timestamp = str(signed_at)
-    to_sign = (event_id + "." + timestamp + ".").encode("ascii") + body
-    signatures = [
-        "v1," + base64.b64encode(hmac.new(key, to_sign, hashlib.sha256).digest()).decode("ascii")
-        for key in keys
-    ]
-    return PreparedReplyWebhook(body=body, headers=MappingProxyType({
-        "Content-Type": "application/json",
-        "webhook-id": event_id,
-        "webhook-timestamp": timestamp,
-        "webhook-signature": " ".join(signatures),
-        "X-MCP-Subscription-Id": subscription.subscription_id,
-    }))
+    return _signed_packet(body=body, message_id=event["eventId"],
+                          subscription_id=subscription.subscription_id,
+                          signed_at=signed_at, keys=keys)
+
+
+_NONCE = re.compile(r"^[A-Za-z0-9_-]{16,128}$")
+_VERIFICATION_ID = re.compile(r"^msg_verification_[A-Za-z0-9_-]{10,80}$")
+
+
+def prepare_reply_webhook_verification(*, callback: PendingReplyCallback,
+                                       challenge: str, message_id: str,
+                                       signed_at: int) -> PreparedReplyWebhook:
+    """Sign a supplied fresh one-time challenge, but never perform verification.
+
+    The authenticated owner must persist/consume nonce freshness and compare the
+    exact callback response; this function cannot enroll or arm a subscription.
+    """
+    if (type(callback) is not PendingReplyCallback
+            or callback.access_current is not True
+            or type(signed_at) is not int or not 0 < signed_at <= _MAX_UNIX
+            or type(callback.expires_at) is not int or signed_at >= callback.expires_at):
+        raise ValueError("pending original-request callback not current")
+    _identifier(callback.subscription_id, _SUB)
+    _identifier(callback.principal_ref)
+    _identifier(callback.request_ref)
+    _identifier(challenge, _NONCE)
+    _identifier(message_id, _VERIFICATION_ID)
+    key = _secret(callback.signing_secret)
+    body = json.dumps({"type": "verification", "challenge": challenge},
+                      sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
+    return _signed_packet(body=body, message_id=message_id,
+                          subscription_id=callback.subscription_id,
+                          signed_at=signed_at, keys=(key,))
+
+
+def verify_reply_webhook_challenge_response(*, challenge: str,
+                                             response_body: Any,
+                                             status: Any) -> bool:
+    """Inspect one response with no side effects or subscription-state transition.
+
+    Success proves only challenge echo from this response, not current account
+    access, callback origin, subscription storage or future event consumption.
+    """
+    if (type(challenge) is not str or _NONCE.fullmatch(challenge) is None
+            or type(status) is not int or not 200 <= status < 300
+            or type(response_body) is not bytes or len(response_body) > 512):
+        return False
+
+    def unique_object(pairs):
+        out = {}
+        for key, value in pairs:
+            if key in out:
+                raise ValueError("duplicate callback key")
+            out[key] = value
+        return out
+    try:
+        data = json.loads(response_body, object_pairs_hook=unique_object)
+    except (UnicodeDecodeError, ValueError):
+        return False
+    return (type(data) is dict and set(data) == {"challenge"}
+            and type(data["challenge"]) is str
+            and hmac.compare_digest(data["challenge"], challenge))
 
 
 def classify_reply_webhook_response(status: Any) -> str:
@@ -179,5 +260,8 @@ def classify_reply_webhook_response(status: Any) -> str:
     return "DELIVERY_REFUSED"
 
 
-__all__ = ["VerifiedReplySubscription", "PreparedReplyWebhook",
-           "prepare_reply_webhook", "classify_reply_webhook_response"]
+__all__ = ["VerifiedReplySubscription", "PendingReplyCallback",
+           "PreparedReplyWebhook", "prepare_reply_webhook",
+           "prepare_reply_webhook_verification",
+           "verify_reply_webhook_challenge_response",
+           "classify_reply_webhook_response"]
