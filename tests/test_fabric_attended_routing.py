@@ -180,3 +180,64 @@ def test_foreign_provider_cannot_relabel_an_attended_route(router, stage):
             root = {"work_placement_union": [selected]}
             _project_work_placement({}, root, {"provider_realm": "codex", "quota_class": "minimax-read"},
                                     raw_root_constraints=root)
+
+
+@pytest.fixture
+def attended_launch(router, tmp_path):
+    """Real local Runtime claim and Supervisor compiler, with no adapter START."""
+    from control_plane.executive_runtime import Runtime
+    from tests.test_executive_supervisor import _supervisor, FakeAdapter, FakeInspector
+
+    selected = member(router)
+    route = selected["attended_route"]
+    runtime = Runtime.at(tmp_path)
+    runtime.workers.register_worker("minimax-fixture", provider="minimax",
+        account_label="inert-fixture", worker_type="attended-fabric", capabilities=["research"],
+        quota_classes={"minimax-read": dict(provider="minimax", model=route["model"],
+            effort=route["effort"], cost_class=route["cost_class"], capabilities=["research"],
+            metadata=dict(route, attended_route=route))})
+    workspace = tmp_path / "workspaces" / "assigned"
+    workspace.mkdir(parents=True, mode=0o700)
+    root = {"work_placement_union": [selected]}
+    constraints = _project_work_placement({}, root,
+        {"provider_realm": "minimax", "quota_class": "minimax-read"}, raw_root_constraints=root)
+    job = runtime.jobs.create_job("Inspect the assigned source", worktree=str(workspace),
+        requested_authorities=["READ"], constraints=constraints)
+    supervisor = _supervisor(runtime, tmp_path, FakeAdapter(FakeInspector()))
+    lease = runtime.attempts.claim_job(job.job_id, lease_owner=supervisor.instance_id)
+    assert lease is not None
+    job = runtime.jobs.get_job(job.job_id)
+    quota = runtime.workers.get_quota_class(lease.attempt.worker_id, lease.attempt.quota_class)
+    assert quota.model == job.constraints["model"] == "minimax-m3"
+    run_dir = supervisor._run_dir(lease.attempt.attempt_id)
+    schema = run_dir / "input" / "result.schema.json"
+    schema.parent.mkdir(parents=True, mode=0o700)
+    schema.write_text("{}")
+    return supervisor, job, lease, schema, quota
+
+
+def test_exact_catalogue_model_survives_runtime_normalization_into_harness(attended_launch):
+    from control_plane.fabric_attended_claude import prepare_attended_claude_launch
+    from tests.test_fabric_attended_claude import _binary
+    supervisor, job, lease, schema, _quota = attended_launch
+    spec = supervisor._launch_spec(job, lease, schema)
+    assert spec.model == "MiniMax-M3"
+    prepared = prepare_attended_claude_launch(spec=spec, binary=_binary(),
+        binding=attended.get_binding(BINDING), profile=attended.get_profile("minimax-token-plan"),
+        model_class="routine", max_turns=2, result_schema={"type": "object"})
+    assert prepared.environment["ANTHROPIC_MODEL"] == "MiniMax-M3"
+
+
+@pytest.mark.parametrize("drift", ["model", "catalogue", "provider"])
+def test_attended_launch_refuses_claimed_quota_drift(attended_launch, monkeypatch, drift):
+    from control_plane.executive_supervisor import SupervisorError
+    supervisor, job, lease, schema, quota = attended_launch
+    if drift == "catalogue":
+        metadata = copy.deepcopy(quota.metadata)
+        metadata["attended_route"]["subscription_catalog_digest"] = "f" * 64
+        quota = dataclasses.replace(quota, metadata=metadata)
+    else:
+        quota = dataclasses.replace(quota, **{drift: "foreign"})
+    monkeypatch.setattr(supervisor.runtime.workers, "get_quota_class", lambda *args: quota)
+    with pytest.raises(SupervisorError, match="attended launch"):
+        supervisor._launch_spec(job, lease, schema)

@@ -19,6 +19,7 @@ from control_plane.worker_adapter import adapter_descriptor
 
 if TYPE_CHECKING:
     from control_plane.model_router import ModelAlias, ModelRouter
+    from control_plane.executive_runtime import WorkerQuotaClass
 
 SCHEMA = "mastermind.fabric_attended_route/v1"
 _IDENTIFIER = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
@@ -132,3 +133,23 @@ def placement_member(router: ModelRouter, placement: AttendedWorkPlacement) -> d
     alias, route = resolve_attended_alias(router, placement.model_alias, placement.harness_binding_id)
     return {"provider_realm": alias.provider_alias, "quota_class": placement.quota_class,
             "attended_route": route}
+
+
+def attended_launch_model(constraints: Mapping[str, Any], quota: WorkerQuotaClass) -> str:
+    """Restore exact catalogue case only after matching the claimed route.
+
+    Runtime intentionally canonicalizes its scalar selectors to lowercase.
+    The retained closed route preserves the provider's exact launch spelling;
+    neither that spelling nor this compiler grants permission to START.
+    """
+    route = normalize_attended_route(constraints.get("attended_route"))
+    claimed = normalize_attended_route(quota.metadata.get("attended_route"))
+    if route != claimed:
+        raise ValueError("claimed quota catalogue differs from the Job")
+    if quota.provider != route["provider_alias"] or constraints.get("provider") != quota.provider:
+        raise ValueError("claimed quota provider differs from the attended route")
+    for key in ("model", "effort", "cost_class"):
+        expected = route[key].lower()
+        if getattr(quota, key) != expected or constraints.get(key) != expected:
+            raise ValueError(f"claimed quota {key} differs from the attended route")
+    return route["model"]

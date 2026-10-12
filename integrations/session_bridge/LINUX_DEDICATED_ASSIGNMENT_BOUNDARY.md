@@ -111,9 +111,16 @@ cannot establish the required host authority, regardless of its test count.
 The real existing broker exclusion is its owned start/active/sweep state under
 `WorkerBroker._state_lock`. Current collection clears `_active_run_id` after
 terminal sweep, before Control seals the assignment. A receipt from that ended
-interval cannot protect a subsequent seal. The required owner integration must
-retain exclusion across seal, fixed raw-worker probe, and retained readback,
-and reject a competing launch or changed owner generation throughout. It must
+interval is not itself a live owner scope. This alone does **not** prove an
+admitted START race: Runtime holds the claimed `(worker_id, quota_class)` until
+after sealing, and the fixed-proof service path serializes its entire finisher.
+No competing admitted START has been demonstrated for the current one-leaf
+composition. A same-UID, multi-quota READ overlap would require two fully
+matching admitted quota rows; that installed composition has not been proven.
+
+The required owner integration must bind its scope to the actual canonical
+claim and launch-owner interval through seal, fixed raw-worker probe and
+retained readback, and refuse conflicting admission or owner drift. It must
 govern the actual launcher, including `remote_sub`/`lane_runtime`; an unrelated
 broker's lock is insufficient. The acceptance-only `sudo -u` probe does not
 install this production remote operation.

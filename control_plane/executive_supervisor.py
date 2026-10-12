@@ -1660,6 +1660,13 @@ class ExecutiveSupervisor:
         if not job.worktree:
             raise SupervisorError("real worker job requires an assigned isolated worktree")
         model = quota.model or str(job.constraints.get("model") or "gpt-5.6-sol")
+        if "attended_route" in job.constraints:
+            from control_plane.fabric_attended_routing import attended_launch_model
+
+            try:
+                model = attended_launch_model(job.constraints, quota)
+            except ValueError as exc:
+                raise SupervisorError(f"attended launch refused: {exc}") from exc
         effort = quota.effort or str(job.constraints.get("effort") or "xhigh")
         workspace = Path(job.worktree).resolve(strict=True)
         run_dir = self._run_dir(attempt.attempt_id).resolve(strict=True)
