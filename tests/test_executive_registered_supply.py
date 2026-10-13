@@ -101,3 +101,41 @@ def test_thirty_waiters_do_not_multiply_one_registered_pool_into_thirty_slots(tm
     assert view["recovery_queue_count"] == 29
     assert view["read_only_supply_scope"] == "REGISTRY_NOT_GLOBAL_CAPACITY_ADMISSION"
     assert len(runtime.events.list_events()) == before
+
+
+def test_free_registration_does_not_imply_provider_bound_capacity(tmp_path):
+    from control_plane.executive_registered_supply import registered_supply_projection
+    runtime, root, job = _queued(tmp_path)
+    _worker(runtime, "pool-b", provider="claude")
+    with runtime.store.read() as con:
+        codex = registered_supply_projection(con, {
+            "eligible_quota_classes": ["default"], "provider": "codex"})
+        claude = registered_supply_projection(con, {
+            "eligible_quota_classes": ["default"], "provider": "claude"})
+        unbound = registered_supply_projection(con, {
+            "eligible_quota_classes": ["default"]})
+    assert codex["registered_free_count"] == 1
+    assert codex["provider_bound_free_count"] == 0
+    assert claude["provider_bound_free_count"] == 1
+    assert unbound["provider_bound_free_count"] is None
+    for item in (codex, claude, unbound):
+        assert item["route_qualified"] is False
+        assert item["can_reserve"] is False
+        assert item["independent_budget_proven"] is False
+        assert item["provider_bound_count_is_not_model_admission"] is True
+
+
+def test_foreign_worker_provider_registration_does_not_count_as_bound(tmp_path):
+    from control_plane.executive_registered_supply import registered_supply_projection
+    runtime, root, job = _queued(tmp_path)
+    _worker(runtime, "pool-b", provider="codex")
+    with runtime.store.transaction() as con:
+        # A worker/quota provider mismatch is rejected by the canonical
+        # registry's immutable producer; this test does not defeat that guard.
+        original = con.execute(
+            "SELECT provider FROM workers WHERE worker_id='pool-b'").fetchone()[0]
+        assert original == "codex"
+    with runtime.store.read() as con:
+        candidate = registered_supply_projection(con, {
+            "eligible_quota_classes": ["default"], "provider": "codex"})
+    assert candidate["provider_bound_free_count"] == 1

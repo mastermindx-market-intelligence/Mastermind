@@ -28,6 +28,8 @@ def _unbound() -> dict[str, Any]:
         "reset_eta": None,
         "registered_total": None,
         "registered_free_count": None,
+        "provider_bound_free_count": None,
+        "provider_bound_count_is_not_model_admission": True,
         "state_counts": {},
         "next_action": "REQUIRE_CANONICAL_CAPACITY_SCOPE",
     }
@@ -54,8 +56,9 @@ def registered_supply_projection(
 
     marks = ",".join("?" for _ in candidates)
     observed = connection.execute(
-        "SELECT q.status,q.held_attempt_id,w.identity_status "
-        "FROM worker_quota_classes q JOIN workers w ON w.worker_id=q.worker_id "
+        "SELECT q.status,q.held_attempt_id,q.provider,w.provider AS worker_provider,"
+        "w.identity_status FROM worker_quota_classes q "
+        "JOIN workers w ON w.worker_id=q.worker_id "
         f"WHERE q.quota_class IN ({marks}) ORDER BY q.worker_id,q.quota_class",
         tuple(candidates),
     ).fetchall()
@@ -66,11 +69,30 @@ def registered_supply_projection(
         and row["identity_status"] == "ONLINE"
         for row in observed
     )
+    # A matching provider is only one static eligibility attribute. Do not
+    # implement a second model/profile/cost router or treat registry as admitted
+    # host, budget or provider-session capacity.
+    required_provider = constraints.get("provider")
+    provider_bound = (
+        sum(
+            row["status"] == "AVAILABLE"
+            and row["held_attempt_id"] is None
+            and row["identity_status"] == "ONLINE"
+            and row["provider"] == required_provider
+            and row["worker_provider"] == required_provider
+            for row in observed
+        )
+        if type(required_provider) is str
+        and bool(required_provider)
+        and required_provider == required_provider.strip()
+        else None
+    )
     # No guessed routing entitlement or wake/ETA: only reflect local registry.
     result = _unbound()
     result.update(
         registered_total=len(observed),
         registered_free_count=int(free),
+        provider_bound_free_count=provider_bound,
         state_counts=dict(sorted(states.items())),
         next_action=(
             "REQUIRE_CAPACITY_STATE_RECONCILIATION" if unknown else

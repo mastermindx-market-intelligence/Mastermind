@@ -9,6 +9,8 @@ import asyncio
 import dataclasses
 import json
 
+import pytest
+
 from control_plane.executive_operator_supervisor import ExecutiveOperatorSupervisor
 from control_plane.executive_retry_safety import classify_retry_safety, RetrySafetyDecision
 from control_plane.executive_runtime import AttemptLease, Runtime
@@ -227,3 +229,57 @@ def test_nonrelease_modern_operation_is_not_labeled_as_stop_gap(tmp_path):
             con, job_id=planner.job_id, attempt_id=attempt.attempt_id,
             worker_id=attempt.worker_id, quota_class=attempt.quota_class,
         )
+
+
+@pytest.mark.parametrize("replacement_provider", ["claude", "glm"])
+def test_unqualified_cross_provider_registration_cannot_steal_original_checkpoint(
+    tmp_path, replacement_provider,
+):
+    """A free different provider is not an admitted replacement for a Codex Job."""
+    from control_plane.executive_session_recovery import project_root_recovery
+    runtime, root, planner, predecessor = _checkpointed_predecessor(
+        tmp_path, operation_stop=False,
+    )
+    expected = runtime.jobs.project_retry_safety(
+        planner.job_id, expected_attempt_id=predecessor.attempt_id,
+    )
+    assert runtime.jobs.commit_coo_retry_decision(
+        root.job_id, selected_job_id=planner.job_id,
+        expectation=expected,
+    ).action == "REQUEUED"
+    quota = runtime.workers.get_quota_class(
+        "worker-a", predecessor.quota_class,
+    )
+    runtime.workers.register_worker(
+        "worker-b", provider=replacement_provider,
+        account_label="alternate-provider-fixture", worker_type="fixture",
+        capabilities=quota.capabilities,
+        quota_classes={
+            quota.quota_class: {
+                "provider": replacement_provider,
+                "model": quota.model, "effort": quota.effort,
+                "cost_class": quota.cost_class,
+                "capabilities": quota.capabilities,
+                "metadata": quota.metadata,
+            }
+        },
+    )
+    runtime = Runtime.at(tmp_path / "runtime")
+    before = len(runtime.events.list_events(job_id=planner.job_id))
+    result = runtime.attempts.dispatch_cycle_job(
+        planner.job_id,
+        command_id=f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:2",
+        worker_id="worker-b",
+    )
+    assert result is None
+    pending = runtime.jobs.get_job(planner.job_id)
+    assert pending.current_attempt_id is None
+    assert pending.status.value == "QUEUED"
+    assert pending.checkpoint == FRONTIER
+    assert pending.attempt_count == 1
+    view = project_root_recovery(runtime, root.job_id)["jobs"][0]
+    assert view["registered_supply"]["registered_free_count"] == 1
+    assert view["registered_supply"]["provider_bound_free_count"] == 0
+    assert view["registered_supply"]["route_qualified"] is False
+    assert view["next_action"] == "WAIT_FOR_EXISTING_SCHEDULER"
+    assert len(runtime.events.list_events(job_id=planner.job_id)) == before
