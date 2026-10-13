@@ -282,9 +282,13 @@ class AttendedFabricWorkerAdapter:
             attempt, physical, start = self._resolve(spec, launch=True)
             if attempt != lease.attempt:
                 raise BrokerStateError('Finite Fabric claim changed before START')
+            snap = self._attended_probe_source.snapshot(physical, spec)
+            bound_spec = snap[3].spec
+            bound_attempt, bound_physical, start = self._resolve(bound_spec, launch=True)
+            if bound_attempt != attempt or bound_physical != physical:
+                raise BrokerStateError('Finite Fabric principal binding changed its original claim')
             foreground = current_foreground_operation()
             foreground._current_claim(start['binding'], physical.digest, digest(start))
-            snap = self._attended_probe_source.snapshot(physical, spec)
             payload = dict(binding=start['binding'], physical_binding_sha256=physical.digest,
                 run_id=spec.run_id, launch_spec=start['launch_spec'],
                 control_environment_attestation=snap[2])
@@ -303,7 +307,7 @@ class AttendedFabricWorkerAdapter:
                 or result['probe_request_sha256'] != digest(payload)):
             raise BrokerStateError('Finite Fabric probe returned a changed owner or request')
         verdict = self._attended_probe_source.validate(snapshot, result)
-        return dataclasses.replace(spec, secret_canary_verdict=verdict)
+        return dataclasses.replace(snapshot[3].spec, secret_canary_verdict=verdict)
 
     @property
     def process_controller(self):

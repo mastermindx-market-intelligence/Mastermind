@@ -155,7 +155,14 @@ class AttendedControlProbeSource:
         if (attestation.get('config_sha256') != self.config_sha256
                 or digest(attestation) != self.control_attestation_sha256):
             _refuse()
-        assigned = binding(spec, physical)
+        # Control's local schema/commission group is not the remote broker's
+        # execution principal. Derive only these two fields from the protected
+        # worker definition before the probe, launch pin or recovery seal.
+        username = worker.get('worker_user')
+        if type(username) is not str or not username or any(c.isspace() for c in username):
+            _refuse()
+        assigned = binding(dataclasses.replace(spec, worker_user=username,
+            shared_run_gid=physical.worker_gid), physical)
         return raw, worker, attestation, assigned
 
     def validate(self, snapshot, result):

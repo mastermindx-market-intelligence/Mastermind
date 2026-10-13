@@ -120,8 +120,8 @@ def adapter_case(tmp_path,monkeypatch,during=None):
     monkeypatch.setattr(rt.jobs,'get_job',lambda ident:dataclasses.replace(original_get(ident),
         constraints={**job.constraints,'attended_route':{'fixture':'canonical route validated separately'}}))
     a._attended_probe_source=probe.AttendedControlProbeSource.from_startup(Path('/fixture/control'), {}, {'config_sha256':'a'*64})
-    snapshot=({}, {}, {'fixture':'current attestation'}, 'fixture-binding')
-    monkeypatch.setattr(probe.AttendedControlProbeSource,'snapshot',lambda self,physical,spec:snapshot)
+    monkeypatch.setattr(probe.AttendedControlProbeSource,'snapshot',lambda self,physical,spec:
+        ({}, {}, {'fixture':'current attestation'}, SimpleNamespace(spec=spec)))
     verdict={'fixture':'new-v2-verdict'}
     monkeypatch.setattr(probe.AttendedControlProbeSource,'validate',lambda self,snap,result:verdict)
     foreground=SimpleNamespace(_current_claim=lambda *args:None)
@@ -151,7 +151,7 @@ def test_drift_during_probe_refuses_before_pin(tmp_path,monkeypatch,fault):
                 foreground_operation.ForegroundOperationClosed())
         if fault=='definition':
             monkeypatch.setattr(probe.AttendedControlProbeSource,'snapshot',
-                lambda *args:({}, {}, {'fixture':'changed'}, 'fixture-binding'))
+                lambda *args:({}, {}, {'fixture':'changed'}, SimpleNamespace(spec=args[-1])))
     c,rt,job,lease,a,s,p,_=adapter_case(tmp_path,monkeypatch,during)
     with pytest.raises(Exception):asyncio.run(a.prepare_attended_launch_spec(s,lease=lease))
     assert c.calls==[probe.OPERATION] and not a._bound and not a._leases
@@ -320,7 +320,10 @@ def test_supervisor_retains_final_probe_in_start_pin_and_recovery(tmp_path,monke
     source=probe.AttendedControlProbeSource.from_startup(tmp_path/'fixture-control',{}, {'config_sha256':'a'*64})
     verdict={}
     def snapshot(self,host,spec):
-        return {},{}, {'fixture':'environment'},spec
+        # Fixture definition issuer supplies the actual remote principal. The
+        # adapter must carry this same spec through START and durable recovery.
+        bound=dataclasses.replace(spec,worker_user=username,shared_run_gid=gid)
+        return {},{}, {'fixture':'environment'},probe.binding(bound,host)
     def validate(self,snap,response):
         return response['envelope']['secret_canary']
     monkeypatch.setattr(probe.AttendedControlProbeSource,'snapshot',snapshot)
@@ -366,7 +369,7 @@ def test_supervisor_retains_final_probe_in_start_pin_and_recovery(tmp_path,monke
         return attempt,physical,payload
     monkeypatch.setattr(adapter,'_resolve',resolve)
     supervisor=ExecutiveSupervisor(rt,adapter,runs_root=tmp_path/'runs',
-        isolation_roots=(tmp_path/'workspaces',tmp_path/'runs'),worker_uid=uid,worker_gid=gid,worker_user=username,
+        isolation_roots=(tmp_path/'workspaces',tmp_path/'runs'),worker_uid=uid,worker_gid=gid,worker_user='control-only',
         require_complete_launch_attestation=True,cleanup_policy=CleanupPolicy.FABRIC_PROCESS_GROUP,
         process_controller=adapter,instance_id='fixture-supervisor')
     # Profile admission and source provenance are separate fixture issuers.
@@ -382,6 +385,9 @@ def test_supervisor_retains_final_probe_in_start_pin_and_recovery(tmp_path,monke
     active=asyncio.run(supervisor.start_cycle_job(job.job_id,command_id=f'coo-cycle:{root.job_id}:dispatch:{job.job_id}:attempt:1'))
     assert calls==[probe.OPERATION,'start']
     assert type(active.launch_spec) is OrchestrationLaunchSpec
+    assert active.launch_spec.worker_user==username and active.launch_spec.shared_run_gid==gid
+    assert captured['launch_spec']['worker_user']==username and captured['launch_spec']['shared_run_gid']==gid
+    assert supervisor.worker_user=='control-only' and supervisor.shared_run_gid is None
     attempt=rt.attempts.get_attempt(active.launch_spec.run_id);metadata=attempt.launch_metadata
     assert active.launch_spec.effective_grant_digest==attempt.effective_grant_digest
     assert active.launch_spec.secret_canary_verdict==captured['launch_spec']['secret_canary_verdict']==verdict
@@ -404,7 +410,9 @@ def test_actual_loaded_control_paths_pin_and_snapshot(tmp_path,monkeypatch,root_
     source=probe.AttendedControlProbeSource.from_startup(path,loaded,att)
     source.require_definition(control.load_control_config(path))
     monkeypatch.setattr(probe.sys,'platform','darwin')
-    monkeypatch.setattr(probe,'definition',lambda *a:{'fixture':'worker-definition'})
+    fixture_worker={'fixture':'worker-definition','worker_user':'finite'}
+    monkeypatch.setattr(probe,'definition',lambda *a:fixture_worker)
     monkeypatch.setattr(probe,'binding',lambda *a:'fixture-binding')
     monkeypatch.setattr(control,'_load_control_environment_attestation',lambda *a,**kw:att)
-    assert source.snapshot(None,None)==(loaded,{'fixture':'worker-definition'},att,'fixture-binding')
+    spec=dataclasses.make_dataclass('FixtureSpec',[('worker_user',str),('shared_run_gid',int)])('control',450)
+    assert source.snapshot(SimpleNamespace(worker_gid=460),spec)==(loaded,fixture_worker,att,'fixture-binding')
