@@ -76,3 +76,10 @@ installed custody. Required release and live proof remain: independently reviewe
 source, exact-head CI, protected landing, approved host key and sealed configuration
 enrollment, installed selection, real Work/dot callback and canonical read, then
 original-parent adjudication. Ordinary Project Chat is a distinct route.
+
+
+## Post-COMMIT notification is not a native completion prerequisite
+
+The Executive native finisher schedules the already-committed reply's notification as one separate **existing-service-owned** task and continues native Job finalization and terminal projection without awaiting external HTTP. The task is retained in the Executive service's existing physical-work set; normal service shutdown drains it before closing the Runtime/Dialogue owner. The actual current-account, policy, sealed-subscription and one-shot delivery checks still run in the original consumer. Notification failures cannot relabel or replay the native result.
+
+This is an in-process service task, **not** a durable new queue or a guarantee of exactly-once emission after power failure. A crash before the notification task starts does not constitute a delivered event; existing delivery reservations protect against replay only once the real store has admitted that send. No idle chat wake/response is claimed absent a real Work/dot callback.

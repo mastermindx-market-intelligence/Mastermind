@@ -7003,7 +7003,10 @@ class ExecutiveControlService:
             await self._run_owned_coroutine(supervisor.run_native_continuation(
                 dispatch.retained, source=dispatch.source, read_ref=read_ref))
             committed_reply = await dispatch.source.require_committed_native_reply(read_ref=read_ref)
-            await self._notify_native_reply_events(read_ref,committed_reply)
+            # Notification is a separate post-COMMIT effect, not a native-Job
+            # terminalization prerequisite. Retain it under existing service
+            # physical-task custody; its Runtime reservation survives restart.
+            self._schedule_native_reply_events(read_ref, committed_reply)
             await self._run_owned_coroutine(supervisor.finish_retained_native_job(dispatch.retained))
             await self._project_terminal_return(dispatch.job_id,
                 expected_attempt_id=lease.attempt.attempt_id)
@@ -7025,6 +7028,46 @@ class ExecutiveControlService:
                 self._native_operator_dispatch = None
             if self._dispatch_tasks.get(dispatch.job_id) is asyncio.current_task():
                 self._dispatch_tasks.pop(dispatch.job_id, None)
+
+    def _schedule_native_reply_events(self, read_ref, committed_reply) -> None:
+        """Retain post-COMMIT notification under existing Executive service custody.
+
+        An external callback cannot delay Job completion or terminal projection.
+        This is one invocation on the already-committed native result, not a
+        new queue, subscriber loop, timer, watcher or retry carrier. Shutdown
+        drains _physical_workers before closing the canonical Runtime owner.
+        """
+        from common.reply_subscription_private_contract import ReplyEventCommitConsumer
+        host, app = self._company_consultation_host, self._ceo_ingress_app_binding
+        consumer = getattr(host, "reply_event_consumer", None)
+        if (self._closing or self._service_state not in {"READY", "AWAITING_CANARY"}
+                or app is None or not app.armed or app.reply_event_provider_factory is None
+                or type(consumer) is not ReplyEventCommitConsumer
+                or type(read_ref) is not str or not read_ref
+                or type(committed_reply) is not dict
+                or committed_reply.get("reply_committed") is not True):
+            return
+        try:
+            if consumer.runtime is not self._require_runtime():
+                return
+        except Exception:
+            return  # An optional notifier cannot change native Job completion.
+        coroutine = self._notify_native_reply_events(read_ref, committed_reply)
+        try:
+            task = asyncio.create_task(
+                coroutine, name="executive-native-reply-notification",
+            )
+        except Exception:
+            coroutine.close()
+            return
+        self._physical_workers.add(task)
+
+        def finished(done):
+            self._physical_workers.discard(done)
+            if not done.cancelled():
+                done.exception()
+
+        task.add_done_callback(finished)
 
     async def _notify_native_reply_events(self, read_ref, committed_reply):
         """Independent post-COMMIT effect; no writer replay or receipt relabel."""
