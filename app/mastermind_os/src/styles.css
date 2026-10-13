@@ -1014,3 +1014,10 @@ main .form-actions button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
+
+/* The compact shell keeps its rail: stack the observed-window header so the
+   independent context control cannot squeeze a title to one-word fragments. */
+@media (max-width: 600px) {
+  .shell .conversation-header { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; }
+  .shell .conversation-header button { justify-self: start; margin-inline-start: 0; }
+}
