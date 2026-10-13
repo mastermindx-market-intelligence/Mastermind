@@ -119,3 +119,26 @@ def test_parent_replacement_after_unlink_is_not_release_proof(lr, tmp_path, monk
     os.close(owner._assignment_release_lock_fd)
     os.close(owner._assignment_release_parent_fd)
     owner._assignment_release_lock_fd = owner._assignment_release_parent_fd = None
+
+
+def test_release_unknown_hold_does_not_relock_or_rewrite_original_custody(lr, tmp_path, monkeypatch):
+    owner = lease(lr, tmp_path)
+    old_fsync = lr.os.fsync
+    parent_inode = owner.path.parent.stat().st_ino
+    def fsync(fd):
+        if os.fstat(fd).st_ino == parent_inode:
+            raise OSError('inert interrupted parent durability')
+        return old_fsync(fd)
+    monkeypatch.setattr(lr.os, 'fsync', fsync)
+    with pytest.raises(lr.LaneRuntimeError): owner.release_after_assignment_ack()
+    assert not owner.path.exists()
+    original_failure = owner._assignment_release_failure
+    def no_second_lock_or_marker(*args, **kwargs):
+        pytest.fail('reconciliation hold would reacquire its already-held admission lock')
+    monkeypatch.setattr(lr.os, 'open', no_second_lock_or_marker)
+    owner.hold_for_reconciliation('actual_backend_release_failed')
+    assert owner._assignment_release_failure == original_failure
+    assert owner._preserve and not owner.path.exists()
+    os.close(owner._assignment_release_lock_fd)
+    os.close(owner._assignment_release_parent_fd)
+    owner._assignment_release_lock_fd = owner._assignment_release_parent_fd = None

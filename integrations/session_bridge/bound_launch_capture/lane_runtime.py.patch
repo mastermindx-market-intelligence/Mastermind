@@ -2106,7 +2106,19 @@
          atexit.register(self.release)
  
      @classmethod
-@@ -1930,6 +3712,110 @@
+@@ -1769,6 +3551,11 @@
+     def hold_for_reconciliation(self, reason: str) -> None:
+         if self._released or self.fd is None:
+             raise LaneRuntimeError("lane_lease_not_live")
++        if getattr(self, "_assignment_release_attempted", False) and self._preserve:
++            # A finite release interruption already holds the SAME admission
++            # lock/FDs. Reacquiring it on another FD deadlocks this owner; a
++            # partial unlink must not be rewritten into fabricated hold history.
++            return
+         # Retention is sticky even if writing/syncing the hold fails. Otherwise
+         # explicit release or atexit would erase custody with cleanup unproven.
+         self._preserve = True
+@@ -1930,6 +3717,110 @@
              if marker_fd is not None: os.close(marker_fd)
              fcntl.flock(lock_fd, fcntl.LOCK_UN);os.close(lock_fd)
  

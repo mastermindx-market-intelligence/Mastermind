@@ -40,7 +40,7 @@ _ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9._:-]{0,127}')
 _DIGEST = re.compile(r'[0-9a-f]{64}')
 _COMMIT = re.compile(r'[0-9a-f]{40}')
 _BINDING_FIELDS = frozenset({'root_id','job_id','attempt_id','effective_grant_digest','commission_sha256'})
-_ASSIGNMENT_OPERATIONS = frozenset({'assignment-seal', 'assignment-seal-finalize'})
+_ASSIGNMENT_OPERATIONS = frozenset({'assignment-seal', 'assignment-seal-prepare', 'assignment-seal-commit', 'assignment-seal-finalize'})
 _MODIFYING_OPERATIONS = frozenset({'start', 'cancel', 'validate'}) | _ASSIGNMENT_OPERATIONS
 _OPERATIONS = frozenset({'start','status','collect','cancel','validate'}) | _ASSIGNMENT_OPERATIONS
 _TRUSTED_CONFIG = object()
@@ -371,7 +371,8 @@ class FabricBridgeBroker:
     def require_service_identity(self):
         if os.geteuid()!=self.config.bridge_uid:
             _refuse('BridgeIdentityError','Bridge must run as its configured principal')
-        # The bridge principal is shared: NEVER enumerated, swept or claimed dedicated.
+        # The configured bridge UID alone never qualifies a dedicated realm or
+        # grants sweep authority. Actual Backend qualification owns that boundary.
 
     def _authorize_peer(self,peer):
         if (not isinstance(peer,PeerCredentials) or type(peer.uid) is not int
@@ -382,6 +383,8 @@ class FabricBridgeBroker:
         extra={'start':{'launch_spec','validation_commands'},'status':{'run_id'},
                'collect':{'run_id'},'cancel':{'run_id','reason'},'validate':{'run_id','argv','timeout_seconds'},
                'assignment-seal': {'run_id', 'worker_id', 'process_ref'},
+               'assignment-seal-prepare': {'run_id', 'worker_id', 'process_ref'},
+               'assignment-seal-commit': {'run_id', 'worker_id', 'process_ref', 'snapshot_sha256', 'seal'},
                'assignment-seal-finalize': {'run_id', 'worker_id', 'process_ref', 'observation_sha256', 'retention_sha256'}}[operation]
         if operation=='start' and type(payload) is dict and 'control_start' in payload:
             extra=extra|{'control_start'}
@@ -409,6 +412,9 @@ class FabricBridgeBroker:
             ref = _object(payload['process_ref'], {f.name for f in dataclasses.fields(WorkerProcessRef)})
             if ref['run_id'] != payload['run_id']:
                 _refuse(message='Assignment process differs from original Attempt')
+            if operation == 'assignment-seal-commit':
+                _digest(payload['snapshot_sha256'])
+                _object(payload['seal'], {'schema_version','control_uid','sealed_at','passed','paths'})
             if operation == 'assignment-seal-finalize':
                 _digest(payload['observation_sha256']); _digest(payload['retention_sha256'])
         if operation=='status' and 'cleanup_query' in payload:
@@ -455,10 +461,37 @@ class FabricBridgeBroker:
         if type(argv) is not list or any(type(v) is not str for v in argv) or tuple(argv) not in self.config.validation_commands:
             _refuse(message='Validation argv is not in the root-installed allowlist')
 
-    def _assignment_result(self, operation, result, payload, common):
-        from control_plane.broker_assignment_seal import digest, validate_control_seal
+    def _assignment_snapshot(self, snapshot, snapshot_sha256, payload):
+        from control_plane.broker_assignment_seal import digest
         from control_plane.executive_worker_broker import uid_sweep_receipt_is_passing
+        _object(snapshot, {'schema_version', 'run_id', 'job_id', 'worker_id',
+            'effective_grant_digest', 'process_ref', 'paths', 'uid_sweep'})
+        if (snapshot['schema_version'] != 'mastermind.worker_assignment_seal_prepare/v1'
+                or snapshot_sha256 != digest(snapshot)
+                or snapshot['run_id'] != payload['run_id']
+                or snapshot['job_id'] != payload['binding']['job_id']
+                or snapshot['worker_id'] != payload['worker_id']
+                or snapshot['effective_grant_digest'] != payload['binding']['effective_grant_digest']
+                or snapshot['process_ref'] != payload['process_ref']
+                or not uid_sweep_receipt_is_passing(snapshot['uid_sweep'])
+                or snapshot['uid_sweep']['worker_uid'] != payload['process_ref']['effective_uid']):
+            _refuse('EFFECT_UNKNOWN', 'Original assignment preparation differs')
+        _object(snapshot['paths'], {'workspace', 'run'})
+        for item in snapshot['paths'].values():
+            _object(item, {'path', 'device', 'inode', 'mode', 'uid', 'gid', 'mtime_ns'})
+            _absolute(item['path'])
+            if any(type(item[k]) is not int or item[k] < 0 for k in
+                   ('device', 'inode', 'mode', 'uid', 'gid', 'mtime_ns')):
+                _refuse('EFFECT_UNKNOWN', 'Assignment root identity is malformed')
+        roots = snapshot['paths']
+        owner = roots['workspace']['uid']
+        if (owner <= 0 or roots['run']['uid'] != owner
+                or owner == payload['process_ref']['effective_uid']):
+            _refuse('EFFECT_UNKNOWN', 'Assignment does not use distinct Control custody')
+        return owner
 
+    def _assignment_result(self, operation, result, payload, common):
+        from control_plane.broker_assignment_seal import validate_control_seal
         if operation == 'assignment-seal-finalize':
             _object(result, common | {'acknowledgement'})
             expected = {key: payload[key] for key in (
@@ -466,36 +499,27 @@ class FabricBridgeBroker:
             if result['acknowledgement'] != expected:
                 _refuse('EFFECT_UNKNOWN', 'Original assignment acknowledgement differs')
             return
+        if operation == 'assignment-seal-prepare':
+            _object(result, common | {'snapshot', 'snapshot_sha256'})
+            owner = self._assignment_snapshot(result['snapshot'], result['snapshot_sha256'], payload)
+            if owner != self.config.control_uid:
+                _refuse('EFFECT_UNKNOWN', 'Prepared assignment is outside authenticated Control custody')
+            return
         _object(result, common | {'observation'})
         observation = _object(result['observation'], {
             'schema_version', 'snapshot', 'snapshot_sha256', 'control_seal', 'worker_denial'})
-        snapshot = _object(observation['snapshot'], {
-            'schema_version', 'run_id', 'job_id', 'worker_id', 'effective_grant_digest',
-            'process_ref', 'paths', 'uid_sweep'})
+        owner = self._assignment_snapshot(observation['snapshot'], observation['snapshot_sha256'], payload)
         if (observation['schema_version'] != 'mastermind.worker_assignment_seal_commit/v1'
-                or snapshot['schema_version'] != 'mastermind.worker_assignment_seal_prepare/v1'
-                or observation['snapshot_sha256'] != digest(snapshot)
-                or snapshot['run_id'] != payload['run_id']
-                or snapshot['job_id'] != payload['binding']['job_id']
-                or snapshot['worker_id'] != payload['worker_id']
-                or snapshot['effective_grant_digest'] != payload['binding']['effective_grant_digest']
-                or snapshot['process_ref'] != payload['process_ref']
-                or not uid_sweep_receipt_is_passing(snapshot['uid_sweep'])
-                or snapshot['uid_sweep']['worker_uid'] != payload['process_ref']['effective_uid']
                 or observation['worker_denial'] != {
                     label: {'open': 'EACCES', 'traverse': 'EACCES', 'list': 'EACCES'}
                     for label in ('workspace', 'run')}):
             _refuse('EFFECT_UNKNOWN', 'Original assignment observation differs')
-        _identifier(snapshot['worker_id'])
-        _object(snapshot['paths'], {'workspace', 'run'})
-        roots = snapshot['paths']
-        for label in ('workspace', 'run'):
-            _object(roots[label], {'path', 'device', 'inode', 'mode', 'uid', 'gid', 'mtime_ns'})
-        owner = roots['workspace']['uid']
-        if (type(owner) is not int or owner <= 0 or roots['run']['uid'] != owner
-                or owner == payload['process_ref']['effective_uid']):
-            _refuse('EFFECT_UNKNOWN', 'Assignment does not use distinct Control custody')
-        validate_control_seal(snapshot, observation['control_seal'], owner)
+        if operation == 'assignment-seal-commit' and (
+                owner != self.config.control_uid
+                or observation['snapshot_sha256'] != payload['snapshot_sha256']
+                or observation['control_seal'] != payload['seal']):
+            _refuse('EFFECT_UNKNOWN', 'Original prepared snapshot or submitted seal differs')
+        validate_control_seal(observation['snapshot'], observation['control_seal'], owner)
 
     def _operation_result(self,operation,result,payload):
         common={'adapter_id','binding','physical_binding_sha256'}

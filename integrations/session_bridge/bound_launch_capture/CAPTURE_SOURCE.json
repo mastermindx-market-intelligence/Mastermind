@@ -1,8 +1,8 @@
 {
   "classification": "SOURCE_ONLY_UNINSTALLED",
   "base_sha256": "d36860ea8036ed5ec733a47c709a477c851fee95dddbae23c8e2214dc308b77e",
-  "candidate_sha256": "e2bc4025efe2e720b365ffa81e9a1d633f6d8c149c0e3b962363087c1fbcba47",
-  "patch_sha256": "bdb9ff43c1853cf6b86572740fbe78f7992548bdd315d3135bbdedaa2ef94adb",
+  "candidate_sha256": "54d7ba3e6164cf05ef90ff1e169b0fef716655e759d4076b6d218e1e4d9bf096",
+  "patch_sha256": "664002d7309779e69cd5f1b3e6a260215f1247526c813824e7e8f5897c8457be",
   "worker_id": "fabric-bound-launch-port-01a11e90-v1",
   "retained_result_sha256": "efe84085be5f17112d286001535fe201d6368f1d8dbc5f1de7a167918a7649bd",
   "original_symbols": 59,
@@ -88,6 +88,16 @@
       "failures": 0,
       "errors": 0,
       "sha256": "14bcb391748882b2f46a154a28016647be2aa30ac477fc1dd57c4235dfd64565"
+    },
+    "finite_hold_guard": "An already-preserved finite release interruption retains its existing lock/FDs; no second lock or marker write. Legacy hold unchanged outside that new state.",
+    "finite_hold_validation": {
+      "source_only": true,
+      "tests": 15,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0,
+      "sha256": "97fd2c457e7206c1acab357847eb95258870c03826a3ed67df67473fcc6fb928",
+      "red_sha256": "f585f586a63567ca59a0c213ef315a21dea44e4bd59aefac8e502f3119198fc5"
     }
   }
 }
