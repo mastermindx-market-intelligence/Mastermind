@@ -1,17 +1,8 @@
 --- a/remote_sub_exec.py
 +++ b/remote_sub_exec.py
-@@ -8,6 +8,7 @@
- from __future__ import annotations
-
- import json
+@@ -10,0 +11 @@
 +import asyncio
- import hashlib
- from contextlib import ExitStack
- import os
-@@ -27,6 +28,13 @@
-     load_runtime_config,
-     parse_bounded_seconds,
-     run_owned_process,
+@@ -29,0 +31,7 @@
 +    begin_owned_process,
 +    abort_owned_process,
 +    start_owned_process_finisher,
@@ -19,13 +10,7 @@
 +    validate_owned_capture_live,
 +    owned_capture_paths,
 +    _launch_receipt_directory,
- )
-
-
-@@ -110,6 +118,310 @@
-         contract=contract,manifest=manifest)
-
-
+@@ -112,0 +121,306 @@
 +def _run_lease_process(*, lease, state, key, receipt, arguments, at_boundary=None):
 +    """Shared incumbent process/capture/cleanup path. Never acquire a new lease.
 +
@@ -174,7 +159,9 @@
 +            # as __context__ even when an outer owner records the refusal.
 +            raise ControlStartRefused('realm_credential_unavailable') from None
 +        try:
-+            # Loading can be slow; neither expiry nor current catalog may drift.
++            # Loading can be slow; re-read original filesystem/binary owners too.
++            if check_original_owner(prepared) is not None:
++                raise ControlStartRefused('owner_check_must_not_issue_authority')
 +            authority.require(original)
 +            if _verify_reserved_realm_observation(**credential_inputs) != original_realm:
 +                raise ControlStartRefused('realm_observation_changed')
@@ -330,13 +317,7 @@
 +
 +
 +
- def _execute(argv: list[str], state: dict) -> int:
-     if len(argv) != 6:
-         return _fail(
-@@ -134,6 +446,21 @@
-         except (ImportError, ValueError, TypeError, KeyError, RecursionError):
-             return _fail("ARTIFACT_DELIVERY_CONTRACT_REFUSED", 65)
-     artifact_failure = False
+@@ -136,0 +451,15 @@
 +
 +    # Optional correlation is read outside the prompt, before physical admission.
 +    # It does not change Runtime, provider or host admission requirements.
@@ -352,13 +333,7 @@
 +    # an early gate receipt must never make that legacy path a native START.
 +    if launch_arguments or "FABRIC_LAUNCH_SNAPSHOT_SHA256" in os.environ:
 +        return _fail("BOUND_ATTENDED_EXECUTOR_UNAVAILABLE before_admission=1 before_spawn=1", 78)
-
-     # Tilde belongs to this host, not to the controller that selected it.
-     if cwd.startswith("~") and cwd != "~" and not cwd.startswith("~/"):
-@@ -230,34 +557,12 @@
-                         or not os.access(guard, os.X_OK)):
-                     return _fail("FABRIC_CPU_STRESS_GUARD_UNAVAILABLE", 78)
-                 child_env["PATH"] = str(here) + os.pathsep + child_env.get("PATH", "/usr/bin:/bin")
+@@ -233,28 +562,6 @@
 -            install_signal_cleanup(on_unproven=lease.hold_for_reconciliation)
 -            try:
 -                state["started"] = True
@@ -393,16 +368,7 @@
 +                               env=child_env, nice=config.nice,
 +                               receipt_diagnostics=diagnostic_reader,
 +                               **launch_arguments))
-
-             display_stdout = result.stdout
-             if mode == "grok":
-@@ -294,6 +599,9 @@
-                 except (OSError, ValueError, TypeError, KeyError, RecursionError):
-                     artifact_failure = True
-
+@@ -296,0 +604,3 @@
 +    except OwnedProcessStartError as exc:
 +        number = str(exc.error_number) if exc.error_number is not None else "unknown"
 +        return _fail("REMOTE_SUB_EXEC_NOT_STARTED errno=" + number, 78)
-     except (LaneRuntimeError, OSError, ValueError) as exc:
-         if state.get("started"):
-             return _fail("REMOTE_CLEANUP_UNPROVEN " + type(exc).__name__, 76)

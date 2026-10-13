@@ -486,11 +486,25 @@ class AttendedFabricWorkerAdapter:
         self._pin_matches(current, check, check_payload)
         validated = self.runtime.attempts.validate_pinned_remote_launch(pinned, lease_token=lease.lease_token)
         from control_plane.fabric_control_start import command_from_validated_pin
-        command = command_from_validated_pin(validated, payload)
+        from control_plane.foreground_operation import _current_foreground_operation_or_none, require_start
+        from control_plane.executive_fabric_bridge_broker import start_request_sha256
+        foreground = _current_foreground_operation_or_none()
+        receipt = (foreground.start_receipt(payload["binding"], physical.digest,
+            start_request_sha256(payload)) if foreground is not None else None)
+        command = command_from_validated_pin(validated, payload,
+            runtime=self.runtime, foreground_receipt=receipt)
+        # Only a present live invocation adds attended evidence. Legacy queued
+        # commands stay unchanged; an expired present scope cannot fall back.
+        if receipt is not None:
+            require_start(receipt, payload["binding"], physical.digest, start_request_sha256(payload))
+            current, check, check_payload = self._resolve(spec, launch=False)
+            self._pin_matches(current, check, check_payload)
+            self.runtime.attempts.validate_pinned_remote_launch(pinned, lease_token=lease.lease_token)
         self._bound[spec.run_id] = (client, payload, physical, spec)
         self._leases[spec.run_id] = lease
+        options = {} if receipt is None else dict(foreground_start_receipt=receipt)
         task = asyncio.create_task(client.request("start", {**payload, "control_start": command},
-            timeout_seconds=float(spec.timeout_seconds) + 60.0))
+            timeout_seconds=float(spec.timeout_seconds) + 60.0, **options))
         try:
             while not task.done():
                 done, _ = await asyncio.wait({task}, timeout=self._heartbeat_interval)

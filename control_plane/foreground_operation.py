@@ -72,6 +72,10 @@ class StartReceipt:
         return {f.name: getattr(self, f.name) for f in dataclasses.fields(self)
                 if not f.name.startswith("_")}
 
+    def principal_deadline(self):
+        self._source._require_live()
+        return self._source._principal.expires_at
+
 
 class ForegroundOperation:
     def __init__(self, *, mint, runtime, host_current, principal, arguments):
@@ -222,6 +226,26 @@ def require_start(receipt, binding, physical_binding_sha256, start_request_sha25
             or receipt.operation_key != operation._operation_key
             or receipt.arguments_sha256 != operation._arguments_sha256):
         raise ForegroundOperationRefusal("receipt_stale", "receipt differs from the current invocation")
+
+
+def require_start_transmission(operation, payload, receipt):
+    """Recheck the original source at the final pre-write boundary.
+
+    Call on the decoded immutable transmission bytes, after connection/peer
+    authentication, with no await before writing. No new authority is issued.
+    """
+    command = payload.get("control_start")
+    projected = isinstance(command, Mapping) and "owner_projection" in command
+    if receipt is None and not projected:
+        return  # Existing legacy transport behavior.
+    if operation != "start" or not projected or type(receipt) is not StartReceipt:
+        raise ForegroundOperationRefusal("receipt_refused", "attended transport requires its original source")
+    from control_plane.executive_fabric_bridge_broker import start_request_sha256
+    require_start(receipt, payload["binding"], payload["physical_binding_sha256"],
+                  start_request_sha256(payload))
+    if (command.get("foreground_expires_at") != receipt.principal_deadline()
+            or _digest(command["owner_projection"].get("attendance")) != _digest(receipt.as_dict())):
+        raise ForegroundOperationRefusal("receipt_stale", "transmitted attendance differs from its source")
 
 
 @contextlib.asynccontextmanager

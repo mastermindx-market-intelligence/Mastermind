@@ -4078,6 +4078,7 @@ class WorkerBrokerClient:
         payload: Mapping[str, Any],
         *,
         timeout_seconds: float | None = None,
+        foreground_start_receipt=None,
     ) -> dict[str, Any]:
         if operation not in _ALLOWED_OPERATIONS | {"assignment-seal"}:
             raise BrokerProtocolError("client operation is not allowed")
@@ -4108,6 +4109,13 @@ class WorkerBrokerClient:
                     peer = writer.get_extra_info("socket")
                     if peer is None or get_peer_credentials(peer).uid != self.expected_peer_uid:
                         raise PeerAuthorizationError("broker peer UID differs from trusted binding")
+                from control_plane.foreground_operation import require_start_transmission, ForegroundOperationRefusal
+                try:
+                    require_start_transmission(operation, json.loads(encoded)["payload"],
+                                               foreground_start_receipt)
+                except (ForegroundOperationRefusal, KeyError, TypeError, ValueError):
+                    from control_plane.remote_worker_transport import TransportError, TransportEffect
+                    raise TransportError("foreground_start_refused", TransportEffect.NO_EFFECT) from None
                 writer.write(encoded)
                 await writer.drain()
                 raw = await reader.readline()

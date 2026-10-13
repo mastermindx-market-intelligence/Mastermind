@@ -44,6 +44,9 @@ def harness(world, lr, tmp_path, monkeypatch, request):
     from control_plane import codex_worker, executive_worker_broker
     baseline = SimpleNamespace(head=world.spec['expected_base_sha'], status='')
     monkeypatch.setattr(codex_worker, '_git_snapshot', lambda *a, **k: baseline)
+    # This existing inert publisher fixture has no real Control-owned roots.
+    # Fresh filesystem checks are exercised independently below on real paths.
+    monkeypatch.setattr(backend, '_require_current_assignment', lambda *args: None)
     world.with_spec(effective_grant_digest=world.binding['effective_grant_digest'])
     credential_source, credential_args, _expires, credential_calls = credential_fixture(tmp_path, monkeypatch)
     credentials={key:credential_args[key] for key in (
@@ -624,28 +627,39 @@ def test_actual_pending_guard_precedes_original_atexit_release(harness, tmp_path
 
 
 def fixed_resources(h):
-    return backend._FixedOwnerResources(preparation=h.inputs.preparation,
+    return backend._FixedOwnerResources(preparation={k:v for k,v in h.inputs.preparation.items() if k!='result_schema'},
         physical=h.inputs.physical,binary_pin=h.inputs.binary_pin,
         routing_root_id=h.inputs.correlation['routing_root_id'],
         routing_parent_run_id=h.inputs.correlation['routing_parent_run_id'],
-        log_path=h.inputs.log_path,active_dir=h.inputs.active_dir,receipt_path=h.inputs.receipt_path,
-        qualified_evidence=h.inputs.qualified_evidence,workspace_identity=h.inputs.workspace_identity,
-        provider_home_identity=h.inputs.provider_home_identity,
+        active_dir=h.inputs.active_dir,
         credential_loader=h.inputs.credential_loader,credential_realm_owner=h.inputs.credential_realm_owner,
         credential_bindings_document=h.inputs.credential_bindings_document,
         credential_profiles_document=h.inputs.credential_profiles_document)
 
 
-def test_single_assignment_constructor_waits_for_actual_control_command(harness):
+def test_single_assignment_constructor_waits_for_actual_control_command(harness,monkeypatch):
     h=harness
     composition=backend._SingleAssignmentComposition(fixed_resources(h))
     h.service.backend=composition
+    observations=[]
+    # Constructor timing fixture only. Wire validation and actual filesystem
+    # preparation have separate tests; no production source proof is minted.
+    projection={'capacity':{'registered_join':{'worker_id':h.inputs.physical.worker_id,
+        'provider':h.inputs.physical.provider,'capacity_join':{'host_ref':h.inputs.physical.host_ref,
+            'worker_source_config_digest':h.inputs.physical.worker_source_config_digest}}}}
+    monkeypatch.setattr(backend.ControlStartAuthority,'owner_projection',lambda self,p:projection)
+    def assigned(*args):
+        observations.append(args)
+        return (h.inputs.preparation,h.inputs.qualified_evidence,h.inputs.workspace_identity,
+            h.inputs.provider_home_identity,h.inputs.log_path,h.inputs.receipt_path)
+    monkeypatch.setattr(backend,'_observe_assigned_resources',assigned)
     async def scenario():
         assert composition._backend is None and not composition._attempted
         unissued=dataclasses.replace(authorize_control_command(h.command,peer=PeerCredentials(uid=450,gid=450)),_peer_verified=None)
         with pytest.raises(ValueError,match='control_start_authority_unavailable'):
             await composition.start_owned(h.world.original,authority=unissued)
         assert composition._backend is None and not h.inputs.log_path.exists() and not composition._attempted
+        assert observations==[]
         response=await h.start()
         value=composition._backend
         assert response['result']['process_ref']['run_id']==h.spec.run_id
@@ -654,6 +668,7 @@ def test_single_assignment_constructor_waits_for_actual_control_command(harness)
         assert value._correlation['routing_parent_run_id']==h.inputs.correlation['routing_parent_run_id']
         assert value._preparation['run_id']==h.spec.run_id
         assert value._inputs.physical is h.inputs.physical
+        assert len(observations)==1
         assert len(h.calls)==1 and len(list(h.inputs.log_path.parent.glob('*.log')))==1
         with pytest.raises(bridge.BridgeProtocolError,match='EFFECT_UNKNOWN'):
             await h.start()
@@ -678,6 +693,10 @@ def test_fixed_factory_requires_trusted_static_service_join(harness):
     for changed in ({'credential_loader':None},{'credential_realm_owner':None}):
         with pytest.raises(backend.BackendNotConfiguredError):
             backend.create_attended_backend(config,owner_resources=dataclasses.replace(resources,**changed))
+    unsealed = dataclasses.replace(resources, preparation={**resources.preparation,
+        'policy':dataclasses.replace(policy,require_assignment_seal=False)})
+    with pytest.raises(backend.AttendedBackendRefused,match='fixed_service_resource_mismatch'):
+        backend.create_attended_backend(config,owner_resources=unsealed)
 
 
 @pytest.mark.parametrize('damage',['unsealed','worker'])
@@ -837,7 +856,7 @@ def test_nonempty_validation_profile_refuses_before_original_effects(harness):
         with pytest.raises(backend.AttendedBackendRefused,match='finite_profile_requires_empty_validations'):
             await composition.start_owned(forwarded,authority=authority)
     run(scenario())
-    assert not h.inputs.log_path.exists() and not composition._backend._slot.claimed
+    assert not h.inputs.log_path.exists() and composition._backend is None
     assert h.calls==h.acquisitions==[]
 
 
@@ -906,3 +925,23 @@ def test_supervisor_empty_validation_joins_real_broker_backend_terminal_reads(
     assert [q['scope'] for q in queries]==['terminal','terminal']
     assert queries[0]['readback_sha256'] is None and queries[1]['readback_sha256'] is not None
     assert h.holds==[]
+
+
+@pytest.mark.parametrize('field',['realm_config_sha256','source_config_sha256'])
+def test_assignment_observer_uses_actual_current_realm_contract(harness,monkeypatch,field):
+    from control_plane import broker_assignment_seal, claude_subscription_worker
+    h=harness
+    resources=fixed_resources(h)
+    monkeypatch.setattr(broker_assignment_seal,'require_worker_principal',lambda policy:None)
+    monkeypatch.setattr(backend.SubscriptionRealmOwner,'observe',lambda self:{
+        'worker_id':resources.physical.worker_id,field:resources.physical.worker_source_config_digest})
+    calls=[]
+    class ReachedActualAssignment(Exception):pass
+    def assigned(*args,**kwargs):
+        calls.append(True)
+        raise ReachedActualAssignment()
+    monkeypatch.setattr(claude_subscription_worker,'prepare_assigned_subscription_files',assigned)
+    expected=ReachedActualAssignment if field=='realm_config_sha256' else backend.AttendedBackendRefused
+    with pytest.raises(expected):
+        backend._observe_assigned_resources(resources,h.world.original,{})
+    assert calls==([True] if field=='realm_config_sha256' else [])

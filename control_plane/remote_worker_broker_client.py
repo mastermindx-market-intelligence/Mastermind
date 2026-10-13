@@ -154,6 +154,7 @@ class RemoteWorkerBrokerClient:
         payload: Mapping[str, Any],
         *,
         timeout_seconds: float | None = None,
+        foreground_start_receipt=None,
     ) -> dict[str, Any]:
         if operation not in self.allowed_operations:
             raise TransportError("operation_not_allowed", TransportEffect.NO_EFFECT)
@@ -197,7 +198,12 @@ class RemoteWorkerBrokerClient:
         try:
             if not self._server_pin_matches(writer):
                 raise TransportError("server_identity_mismatch", TransportEffect.NO_EFFECT)
-
+            from control_plane.foreground_operation import require_start_transmission, ForegroundOperationRefusal
+            try:
+                require_start_transmission(operation, json.loads(encoded)["broker_request"],
+                                           foreground_start_receipt)
+            except (ForegroundOperationRefusal, KeyError, TypeError, ValueError):
+                raise TransportError("foreground_start_refused", TransportEffect.NO_EFFECT) from None
             write_started = True
             writer.write(frame)
             await asyncio.wait_for(writer.drain(), timeout=effective_timeout)

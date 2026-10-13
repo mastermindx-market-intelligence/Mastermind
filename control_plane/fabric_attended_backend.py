@@ -84,7 +84,7 @@ class _OriginalOwnerInputs:
 
 @dataclasses.dataclass(frozen=True)
 class _FixedOwnerResources:
-    """Independent original assignment resources supplied by fixed composition.
+    """Independent static service resources supplied by fixed composition.
 
     This is not an enrollment loader or authentication token. The actual owner
     must qualify these resources before service setup. The original command
@@ -95,12 +95,7 @@ class _FixedOwnerResources:
     binary_pin: BinaryAttestation
     routing_root_id: str
     routing_parent_run_id: str
-    log_path: Path
     active_dir: Path
-    receipt_path: Path
-    qualified_evidence: dict
-    workspace_identity: dict
-    provider_home_identity: dict
     nice: int = 0
     credential_loader: CredentialLoader | None = None
     credential_realm_owner: SubscriptionRealmOwner | None = None
@@ -350,6 +345,7 @@ class FabricAttendedBackend:
                 or json.loads(self._home_identity)['path'] != expected_home
                 or evidence['finite_home_tmp']['home_path'] != expected_home):
             _refuse('original_assignment_resource_changed')
+        _require_current_assignment(self._inputs, spec, evidence)
 
     def _pending_assignment_shutdown(self):
         if self._slot.backend is self and not self._slot.resource_released:
@@ -723,16 +719,12 @@ class _SingleAssignmentComposition:
             _refuse('fixed_owner_resources_required')
         self._resources = dataclasses.replace(resources,
             preparation=dict(resources.preparation),
-            qualified_evidence=_copy(resources.qualified_evidence),
-            workspace_identity=_copy(resources.workspace_identity),
-            provider_home_identity=_copy(resources.provider_home_identity),
             credential_bindings_document=(_copy(resources.credential_bindings_document)
                 if resources.credential_bindings_document is not None else None),
             credential_profiles_document=(_copy(resources.credential_profiles_document)
                 if resources.credential_profiles_document is not None else None))
-        if 'result_schema' in self._resources.preparation:
-            self._resources.preparation['result_schema'] = _copy(resources.preparation['result_schema'])
-        if {'correlation', 'run_id', 'routing_root_id', 'routing_parent_run_id'} & set(resources.preparation):
+        if {'correlation', 'run_id', 'routing_root_id', 'routing_parent_run_id',
+                'result_schema'} & set(resources.preparation):
             _refuse('fixed_preparation_contains_command_coordinates')
         self._backend = None
         self._attempted = False
@@ -754,6 +746,20 @@ class _SingleAssignmentComposition:
         request_sha = start_request_sha256(original)
         if payload.get('start_request_sha256') != request_sha:
             _refuse('original_request_changed')
+        if original['validation_commands']:
+            _refuse('finite_profile_requires_empty_validations')
+        projection = authority.owner_projection(payload)
+        registered = projection['capacity']['registered_join']
+        physical_join = registered['capacity_join']
+        if (registered['worker_id'] != r.physical.worker_id
+                or registered['provider'] != r.physical.provider
+                or physical_join['host_ref'] != r.physical.host_ref
+                or physical_join['worker_source_config_digest'] != r.physical.worker_source_config_digest):
+            _refuse('foreground_physical_capacity_mismatch')
+        # All mutable per-Attempt data comes from this authenticated assignment,
+        # not a caller packet supplied before Runtime has claimed the Attempt.
+        preparation, evidence, workspace_identity, home_identity, log_path, receipt_path = (
+            _observe_assigned_resources(r, payload, projection))
         binding = payload['binding']
         correlation = dict(schema_version=reservation.CORRELATION_SCHEMA,
             routing_root_id=r.routing_root_id, routing_parent_run_id=r.routing_parent_run_id,
@@ -761,13 +767,13 @@ class _SingleAssignmentComposition:
                 attempt_id=binding['attempt_id'], effective_grant_sha256=binding['effective_grant_digest'],
                 commission_sha256=binding['commission_sha256'],
                 physical_binding_sha256=r.physical.digest, start_request_sha256=request_sha))
-        preparation = dict(r.preparation, run_id=binding['attempt_id'],
+        preparation = dict(preparation, run_id=binding['attempt_id'],
             routing_root_id=r.routing_root_id, routing_parent_run_id=r.routing_parent_run_id)
         inputs = _OriginalOwnerInputs(original=original, correlation=correlation,
             preparation=preparation, physical=r.physical, binary_pin=r.binary_pin,
-            log_path=r.log_path, active_dir=r.active_dir, receipt_path=r.receipt_path,
-            qualified_evidence=r.qualified_evidence, workspace_identity=r.workspace_identity,
-            provider_home_identity=r.provider_home_identity, nice=r.nice,
+            log_path=log_path, active_dir=r.active_dir, receipt_path=receipt_path,
+            qualified_evidence=evidence, workspace_identity=workspace_identity,
+            provider_home_identity=home_identity, nice=r.nice,
             credential_loader=r.credential_loader, credential_realm_owner=r.credential_realm_owner,
             credential_bindings_document=r.credential_bindings_document,
             credential_profiles_document=r.credential_profiles_document)
@@ -790,6 +796,85 @@ class _SingleAssignmentComposition:
             start_state='NO_RETAINED_START', request_sha256=payload['start_request_sha256'])
 
 
+def _observe_assigned_resources(resources, payload, projection):
+    """Observe the actual original assignment using its existing file owners.
+
+    Invoked only after the Control command and its live-source projection are
+    checked. No new credential reader, filesystem grant, process or lifecycle.
+    """
+    from control_plane.executive_worker_broker import _launch_spec_from_wire
+    from control_plane.claude_subscription_worker import prepare_assigned_subscription_files
+    from control_plane.broker_assignment_seal import observe_roots, require_worker_principal
+    from control_plane.codex_worker import _path_identity
+    r = resources
+    policy = r.preparation['policy']
+    if not policy.require_assignment_seal:
+        _refuse('assignment_seal_required')
+    require_worker_principal(policy)
+    spec = _launch_spec_from_wire(payload['launch_spec'], policy)
+    realm = r.credential_realm_owner.observe()
+    if (realm.get('worker_id') != r.physical.worker_id
+            or realm.get('realm_config_sha256') != r.physical.worker_source_config_digest):
+        _refuse('original_realm_config_changed')
+    workspace, run_dir, home, tmp, baseline, schema = prepare_assigned_subscription_files(
+        spec, worker_id=r.physical.worker_id, selected_model=r.physical.model)
+    roots = observe_roots({'workspace': str(workspace), 'run': str(run_dir)},
+                          policy, spec.isolation_manifest)
+    identities = {name: _path_identity(path) for name, path in (('home', home), ('tmp', tmp))}
+    if any(item['uid'] != policy.worker_uid or item['gid'] != policy.worker_gid
+           or item['mode'] != 0o700 for item in identities.values()):
+        _refuse('finite_assignment_directory_identity')
+    def evidence(source, value):
+        return dict(source=source, evidence_sha256=hashlib.sha256(_bytes(value)).hexdigest())
+    qualified = {
+        'realm_enrollment': evidence('SubscriptionRealmOwner.observe', realm),
+        'attendance': evidence('ForegroundOperation.start_receipt', projection['attendance']),
+        'capacity': evidence('Runtime._read_claim', projection['capacity']),
+        'assignment': evidence('Supervisor.LaunchSpec/observe_roots',
+            dict(spec=payload['launch_spec'], roots=roots, schema=schema)),
+        'isolation': {'isolation_manifest_sha256': spec.isolation_manifest_sha256},
+        'finite_home_tmp': {**evidence('prepare_assigned_subscription_files', identities),
+                            'home_path': str(home), 'tmp_path': str(tmp)},
+    }
+    return (dict(r.preparation, result_schema=schema), qualified,
+            {**roots['workspace'], 'git_head': baseline.head}, identities['home'],
+            run_dir/'logs'/f'{spec.run_id}.controller.log',
+            run_dir/'logs'/f'{spec.run_id}.process.jsonl')
+
+
+def _require_current_assignment(inputs, spec, evidence):
+    """Read current original boundaries immediately before secret and spawn.
+
+    No filesystem preparation occurs here. A replaced path, dirty checkout or
+    changed binary leaves the original reservation and lease with their owner.
+    """
+    from control_plane.broker_assignment_seal import observe_roots
+    from control_plane.codex_worker import _path_identity, _git_snapshot, _assert_binary_unchanged
+    policy = inputs.preparation['policy']
+    if not policy.require_assignment_seal:
+        _refuse('assignment_seal_required')
+    roots = observe_roots({'workspace': spec['workspace_path'], 'run': spec['run_dir']},
+                          policy, spec['isolation_manifest'])
+    baseline = _git_snapshot(Path(spec['workspace_path']), require_clean=True)
+    if baseline.head != spec['expected_base_sha']:
+        _refuse('original_workspace_changed')
+    expected = inputs.workspace_identity
+    if any(roots['workspace'].get(key) != value for key, value in expected.items()
+           if key not in {'mtime_ns', 'git_head'}):
+        _refuse('original_assignment_resource_changed')
+    identities = {}
+    for name in ('home', 'tmp'):
+        path = Path(evidence['finite_home_tmp'][name + '_path'])
+        if path.resolve(strict=True) != path or not stat.S_ISDIR(path.lstat().st_mode):
+            _refuse('original_assignment_resource_changed')
+        identities[name] = _path_identity(path)
+    if (identities['home'] != inputs.provider_home_identity
+            or hashlib.sha256(_bytes(identities)).hexdigest() !=
+                evidence['finite_home_tmp']['evidence_sha256']):
+        _refuse('original_assignment_resource_changed')
+    _assert_binary_unchanged(inputs.binary_pin)
+
+
 def create_attended_backend(config=None, *, owner_resources=None):
     """Fixed owner injection at existing main/serve seam; no JSON enrollment.
 
@@ -806,6 +891,7 @@ def create_attended_backend(config=None, *, owner_resources=None):
     physical = owner_resources.physical
     policy = owner_resources.preparation['policy']
     if (type(physical) is not FabricHostBinding or type(policy) is not BrokerPolicy
+            or not policy.require_assignment_seal
             or config.adapter_id != 'attended-fabric'
             or config.bridge_uid != physical.bridge_uid or str(config.socket_path) != physical.socket_path
             or config.bridge_uid != physical.worker_uid

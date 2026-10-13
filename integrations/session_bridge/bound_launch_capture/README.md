@@ -305,3 +305,34 @@ different bridge/worker principal topology is refused before reservation.
 After verified physical lease release, a later unavailable cleanup carrier still
 fails its readback, but cannot re-hold the released lease or mask the original
 read error. The original ACK and release receipt remain unchanged.
+
+
+### Current Control source and assignment preparation
+
+The actual foreground invocation now projects its sealed StartReceipt and the
+current Runtime Capacity claim only after the original launch pin is validated.
+Control keeps its lease token private. An absent foreground preserves the legacy
+queued path; a present expired or changed foreground cannot fall back. The
+worker receives a defensive immutable projection from its authenticated Control
+peer, never caller-supplied callbacks or public JSON authority.
+
+Both Unix and pinned remote clients carry the existing typed StartReceipt to the
+actual pre-write boundary. After connection and peer verification they check the
+immutable encoded payload against the current invocation, original root/claim
+and exact attendance projection, with no await before write. Refusal writes no
+START and preserves the original pin. Post-write uncertainty remains with the
+original owner. The separately named foreground_expires_at is derived from the
+actual principal and bounds the command without rewriting Runtime lease expiry.
+
+The service composition stores only fixed service/profile/binary/realm facts.
+Per-Attempt schema, private output paths and workspace/HOME/TMP evidence are
+observed after its authenticated original assignment arrives. It reuses the
+subscription worker's canonical preparation and Control-owned isolation roots;
+assignment sealing must be required before any preparation or provider effect.
+The original owner rechecks actual filesystem/Git/binary identities before and
+after credential loading. Same-path replacements, mode drift and dirty or moved
+source refuse before spawn, preserving the original reservation/lease.
+
+These changes remain source-only. Production fixed-caller loading, finite actual
+realm/V2 canary, host selection/admission, protected installation and observed
+original-parent consumption are not proved by these inert source checks.

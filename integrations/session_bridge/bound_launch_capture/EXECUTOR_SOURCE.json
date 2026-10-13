@@ -1,8 +1,8 @@
 {
   "source_sha256": "c6b4292cdb7d106d5b376587f29276da1550e5eee02268f479abd7ad2ea61189",
-  "candidate_sha256": "ea882fada494f7b55677dcf357d748422499cab30e0d226306357a9a385bbf92",
+  "candidate_sha256": "eee7012f78277a07fa07e1636d9df457c21e9ee1b8be81ba57462adcf14d9c36",
   "classification": "SOURCE_ONLY_UNINSTALLED",
-  "patch_sha256": "3d63bd669af92caa64f05e7ec1e4fdd7d1d64f1e8cd845df71736c87391fd87b",
+  "patch_sha256": "e63dd33a6dee126315267804381c711d0c58760b085866bc0dfe2c38b1a9864d",
   "validation": "Final combined fixture/materialized checks retained in CAPTURE_ASSEMBLY_FINAL_v3.xml; source-only local-child FD/pipe mechanics and inert identity/issuer fixtures. Nested early-receipt checks are included in one outer node, never added to the outer count.",
   "parent_delta": "Original prepared descriptor/private FD capture and canonical parser; Control-manifest run/store coordinates; entry-once publication; exact reason/real cancellation telemetry; sole-finisher immutable terminal bytes; uncertainty retains original lease and no replay.",
   "original_symbols": 5,

@@ -132,10 +132,11 @@ class PinnedFabricRemoteClient:
                                        bound_payload_identity=self._client.bound_payload_identity):
             _refuse()
 
-    async def request(self, operation, payload, *, timeout_seconds=None):
+    async def request(self, operation, payload, *, timeout_seconds=None, foreground_start_receipt=None):
         self._require(operation, payload)
         try:
-            result = await self._client.request(operation, payload, timeout_seconds=timeout_seconds)
+            options = {} if foreground_start_receipt is None else dict(foreground_start_receipt=foreground_start_receipt)
+            result = await self._client.request(operation, payload, timeout_seconds=timeout_seconds, **options)
         except asyncio.CancelledError as exc:
             # The inner await may already have written the original command.
             # Without its classified no-effect response, cancellation cannot

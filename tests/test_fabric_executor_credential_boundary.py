@@ -252,3 +252,30 @@ def test_original_controller_cannot_claim_a_different_launch_principal(tmp_path,
     with pytest.raises(control.ControlStartRefused,match='realm_observation_unqualified'):
         ns['_prepare_reserved_attended_under_lease'](**args)
     assert calls==[] and not args['receipt'].exists()
+
+
+@pytest.mark.parametrize('damage', ['inode', 'mode', 'dirty_git'])
+def test_assignment_drift_during_credential_load_never_spawns(tmp_path, monkeypatch, damage):
+    ns, args, _, calls = credential_fixture(tmp_path, monkeypatch)
+    root = tmp_path / 'original-assignment'; root.mkdir(mode=0o700)
+    original = root.stat()
+    dirty = [False]
+    def check(_prepared):
+        current = root.stat()
+        if (current.st_ino != original.st_ino or current.st_mode != original.st_mode or dirty[0]):
+            raise control.ControlStartRefused('original_assignment_resource_changed')
+    args['check_original_owner'] = check
+    def loader():
+        calls.append('load')
+        if damage == 'inode':
+            root.rename(tmp_path/'retained-original'); root.mkdir(mode=0o700)
+        elif damage == 'mode': root.chmod(0o750)
+        else: dirty[0] = True
+        return 'inert-owner-token'
+    args['credential_loader'] = loader
+    ns['run_owned_process'] = lambda **kw: pytest.fail('changed assignment spawned')
+    prepared, arguments, boundary = ns['_prepare_reserved_attended_under_lease'](**args)
+    with pytest.raises(control.ControlStartRefused, match='original_assignment_resource_changed'):
+        boundary()
+    assert calls == ['load'] and 'ANTHROPIC_AUTH_TOKEN' not in arguments['env']
+    assert not args['receipt'].exists() and not args['state']['started']
