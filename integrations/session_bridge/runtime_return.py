@@ -498,6 +498,52 @@ class RuntimeSessionReturn:
             raise BridgeError("source_unavailable",
                               "authorized canonical continuation is unavailable") from None
 
+    async def resolve_original_reply_grant(self, *, principal, request_ref):
+        """Fresh READ admission for the original CONTINUE before its reply.
+
+        Request text is only a lookup key. The immutable original caller and
+        current Runtime/Dialogue/physical-source owners authorize this read.
+        Committed reply recovery remains separate in resolve_read; this method
+        cannot grant fresh subscriptions using a retired writer's provenance.
+        """
+        from .web_reply_subscription_owner import OriginalReplyGrant, owner_key
+
+        try:
+            identity = _principal(principal)
+            if (type(request_ref) is not str or re.fullmatch(
+                    re.escape(_PREFIX) + r"[0-9a-f]{64}", request_ref) is None):
+                raise ValueError("invalid original request reference")
+            indexed = self.runtime.events.get_event_by_command_id(request_ref)
+            if indexed is None or indexed.command_id != request_ref:
+                raise ValueError("original request unavailable")
+            event, value = self._stored_request(indexed.payload["read_ref"])
+            if (event.to_dict() != indexed.to_dict()
+                    or event.command_id != request_ref or value["principal"] != identity):
+                raise ValueError("original request ownership changed")
+            source = await self.read_continuation_source(read_ref=value["read_ref"])
+            after, current, _ = self._request(value["read_ref"])
+            indexed_after = self.runtime.events.get_event_by_command_id(request_ref)
+            if (indexed_after is None or after.to_dict() != event.to_dict()
+                    or indexed_after.to_dict() != event.to_dict()
+                    or current != value or source["event"] != event.to_dict()
+                    or source["request"] != value or _principal(principal) != identity):
+                raise ValueError("original request changed during read")
+            revision = _digest({
+                "request_event_sha256": _digest(event.to_dict()),
+                "generation": current["generation"], "epoch": current["epoch"],
+                "parent_fingerprint": source["parent"]["fingerprint"],
+            })
+            # The canonical request schema has no independent authority expiry.
+            # Bound this fresh admission to the current verified READ token only.
+            return OriginalReplyGrant(
+                owner_key=owner_key(principal), request_ref=event.command_id,
+                read_ref=value["read_ref"], revision=revision,
+                access_current=True, expires_at=principal.expires_at,
+            )
+        except Exception:
+            raise BridgeError("reply_unavailable",
+                              "authorized original request is unavailable") from None
+
     def resolve_operation_read_ref(self, *, principal, operation_key):
         """Recover an original caller's reference using immutable provenance only."""
         try:
@@ -791,3 +837,18 @@ class RuntimeSessionReturn:
                 request_message_key=in_reply_to, reply_operation_key=operation_key)
         except Exception:
             raise BridgeError("binding_unavailable", "exact native return binding unavailable") from None
+
+
+class RuntimeOriginalRequestResolver:
+    """Opt-in projection of the concrete Runtime return owner for subscriptions."""
+
+    __slots__ = ("_owner",)
+
+    def __init__(self, owner: RuntimeSessionReturn):
+        if type(owner) is not RuntimeSessionReturn:
+            raise TypeError("canonical Runtime return owner required")
+        self._owner = owner
+
+    async def resolve(self, principal, request_ref):
+        return await self._owner.resolve_original_reply_grant(
+            principal=principal, request_ref=request_ref)
