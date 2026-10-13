@@ -1,0 +1,57 @@
+{
+  "schema": "soxx.extended_execution_delay_slippage_v24",
+  "created": "2026-10-12",
+  "predeclared_before_outcome_test": true,
+  "cohort": [
+    "SOXX",
+    "SMH",
+    "QQQ",
+    "AMD",
+    "NVDA",
+    "MU",
+    "INTC",
+    "AMAT",
+    "LRCX",
+    "KLAC",
+    "XLV",
+    "XLE"
+  ],
+  "original_period": [
+    "2025-10-09",
+    "2026-10-08"
+  ],
+  "entry": "Existing frozen first completed 3H parent turn at next 15m RTH opening",
+  "signal": "Exactly one check at completed 0.5 or 3.0 observed RTH hours; sell remainder if completed five-minute close is below actual entry price",
+  "checkpoints": [
+    0.5,
+    3.0
+  ],
+  "signal_to_market_order_open_delay_in_five_minute_bars": [
+    1,
+    2,
+    4
+  ],
+  "additional_adverse_market_sell_slippage_bps": [
+    0,
+    10,
+    25,
+    50,
+    100
+  ],
+  "additional_slippage_formula": "Applied only to an actual check-triggered discretionary sale, exactly its filled remaining-share quantity q * observed early-sale opening price / entry price * (bps/100) as net percentage points. Does not affect unrelated risk-stop exits.",
+  "transaction_assumptions": "Base engine 5bp/side already included, 25% sold at+2% when modeled, 1.5% stop always first, maximum 52 observed RTH hours; slippage stress additional.",
+  "source_gaps": "Read baseline and tested original source, no fill through KLAC missing 5m spans. Retain unknown separately, never count as zero.",
+  "metrics": [
+    "same-91-episode average net lift",
+    "winners harmed",
+    "losers helped",
+    "number of candidate exits",
+    "group-by-cohort",
+    "week-block uncertainty",
+    "additional adverse execution cost when quote unknown"
+  ],
+  "controls": "one 5m next-open matches v21 original exactly, independently within .000002 pp; no threshold/timing selection after outcome",
+  "no_vendor_calls": true,
+  "raw_market_rows_private": true,
+  "NO_LIVE_TRADING": true
+}

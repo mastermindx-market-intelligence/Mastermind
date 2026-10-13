@@ -1,0 +1,117 @@
+{
+  "schema": "mastermind.soxx.next_session_checkpoint.v1",
+  "authored_local_date": "2026-10-12",
+  "mission": "SOXX 2H/3H/4H extreme MACD/Stoch RSI nested pivots, cycle failure economic exits, authentic full-session BOATS and quant validation; no production accept yet",
+  "DONE_WHEN": "Genuine licensed, source-authentic overnight SOXX bars and quote marketability with temporal/PIT evidence; full-session/no-lookahead/consistent-horizon four-arm comparisons, untouched holdout showing useful exits with risk and fill stress; separate permitted deployment proof if commissioned",
+  "state": "CHECKPOINTED_CONTINUATION_RESEARCH_INCOMPLETE",
+  "protected_law_sha": "ee081ad5f20caec26deb1fdd198a42f620c516e1",
+  "protected_skillpack": {
+    "version": "1.0.1",
+    "bootstrap_major": 1,
+    "required": [
+      "INDEX",
+      "COLD_START",
+      "ACTIVE_EXECUTION",
+      "SESSION_RELIABILITY",
+      "CLOSEOUT"
+    ],
+    "same_commit": true
+  },
+  "repository": "mastermindx-market-intelligence/Mastermind",
+  "PR": 1338,
+  "branch": "sol/research-soxx-cycle-boats-20261011",
+  "inspected_precheckpoint_head": "154864726435d970cecebc43bc04776137270192",
+  "publication_effect": "The handoff must be retrieved from the exact live branch after GitHub update; do not assume merge or deployment.",
+  "source_refs": {
+    "repo_research_root": "research/soxx-multitimeframe-cycle-2026-10-11",
+    "handoff": "research/soxx-multitimeframe-cycle-2026-10-11/NEXT_SESSION_HANDOFF_2026-10-12.md",
+    "code_missing_v21_v24_before_save": "research/soxx-multitimeframe-cycle-2026-10-11/early_failure_v21_v24",
+    "original_private_rth": "mini4:/private/tmp/soxx_terminal_finepivot_20261011_v14",
+    "early_failure_private": "mini4:/private/tmp/soxx_early_failure_frontier_v21_20261012",
+    "archived_vendor_owner": "m2studio:/Volumes/Mastermind/market-data/tiingo",
+    "macro_source_pr": "https://github.com/mastermindx-market-intelligence/macro/pull/8698",
+    "terminal_boats_pr": "https://github.com/mastermindx-market-intelligence/mastermind-terminal/pull/955",
+    "failed_ci": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/38223110593"
+  },
+  "source_integrity": {
+    "SOXX_15m_terminal": "9b475e94fae6a92bb4bddfa0987097ea08dbdb60ec943fafcb100326440cdf71",
+    "SOXX_30m_terminal": "4b5ed22c98cad592d0b09da4d17aff7d8898912bc1d848a9666a57cd9876c481",
+    "SOXX_5m_terminal": "96c230426f6be2900011d861d4596b3b5857045f8a3f4aa7b3d2342db9a4a7f6",
+    "v21_aggregate_sha": "09154bc94d685cf11b9a7bd37570c2a5d7f517663f808da857f01db231b492d9",
+    "v22_aggregate_sha": "0349831747d5cc1c382618ce207f5cf17834dfffe2d0af39ff4c8e2e80601f60",
+    "v23_aggregate_sha": "d0213d92453003418e05b460b8984566ea7b59537f68d80eb49333909320f62a",
+    "v24_aggregate_sha": "070be15b276b052029c5d6dbb86029899ddab0c4b65138c91bc6f4b759ad5030",
+    "v21_v22_proof_sha": "767668358e704c1a0146c46f714f369a5d77da7fdbbfe127fa14f9228ed04ac3",
+    "v23_v24_proof_sha": "bc378c200e9cdea74eb43031738b7b5c93d8a09b4496b1d1d4ee74921a54db94"
+  },
+  "current_mainstream_findings": {
+    "total_parent_episodes": 91,
+    "source_instruments": 12,
+    "early_stopped_by_3RTHh": 35,
+    "max_hindsight_3h_increment_pp_per_episode": 0.542694,
+    "naive_exit_3h_lift_pp": -0.015013,
+    "naive_exit_30m_lift_pp": 0.141368,
+    "walkforward_ridge_30m_lift_pp": -0.151245,
+    "walkforward_ridge_3h_lift_pp": -0.198,
+    "average_harm_to_benefit_ratio_30m": 6.662,
+    "mean_false_exit_cost_pp_30m": 10.28901,
+    "mean_correct_exit_savings_pp_30m": 1.54447,
+    "needed_correct_decision_share_30m": 0.86948,
+    "naive_30m_lift_with_extra_50bp_sell_slippage_pp": -0.014226,
+    "all_statistical_results": "RETROSPECTIVE_DEVELOPMENT_COHORT_NOT_INDEPENDENT_VALIDATION"
+  },
+  "testing_evidence": {
+    "importer_45_unit_tests_passed_prior": true,
+    "v14_independent_ohlc_replays": 84,
+    "v16_parent_route_replays": 34,
+    "v21_rule_accounting_checks": 1092,
+    "v22_eligible_model_cases": 90,
+    "v22_hypothetical_model_actions": 23,
+    "v23_cost_rows": 24,
+    "v24_stress_rows": 120,
+    "v24_private_per_episode_stress_rows": 2730,
+    "PIT_and_true_quote_execution_admitted": false
+  },
+  "source_gates": {
+    "BOATS_account_active": true,
+    "macro_PR_8698_merged": true,
+    "terminal_945_merged": true,
+    "terminal_955_open": true,
+    "terminal_814_NOT_BOATS_history": true,
+    "genuine_Historical_BOATS_SOXx_at_M2": false,
+    "actual_old_BOATS_bidask_coverage_proven": false,
+    "new_firehose_receipts_oct13_utc": 2000,
+    "original_SOXX_BOATS_history_offline_plan_chunks_one_year": 53,
+    "no_licensed_data_export_to_Github": true
+  },
+  "release": {
+    "pr_open": true,
+    "pr_merged": false,
+    "previous_CI_head": "154864726435d970cecebc43bc04776137270192",
+    "previous_CI_status": "FAILED",
+    "previous_CI_run": 38223110593,
+    "previous_CI_job": 114723929073,
+    "exact_failed_test": "tests/test_ceo_submit_armed_composition.py::test_d8_template_topology_and_protected_defaults",
+    "failure_observation": "D8 identity-like numeric literals in changed source/evidence; 261 literals; precise offending paths not isolated",
+    "no_CI_waiver": true
+  },
+  "DO_NOT_REDO": [
+    "Do not retune or call 2025-10-09..2026-10-08 an untouched holdout",
+    "Do not duplicate Tiingo Data OS or Terminal Quote Hub source/writer",
+    "Do not bypass refused provider authentication or producer rewrites",
+    "Do not publish raw licensed OHLCV, quotes or credentials",
+    "Do not replay a remote modification without reconciling original carrier",
+    "Do not invent fillability, observed overnight prices or better trade returns",
+    "Do not infer CI, merge, deployment, activation or source licensing from a published PR"
+  ],
+  "current_effect_state": {
+    "pending_unknown_modifying_effects": [],
+    "active_research_worker_known": false,
+    "last_mini4_research_process_census_matches": 0,
+    "branch_update_must_be_verified_before_claiming_save": true
+  },
+  "exact_next_action": "Read NEXT_SESSION_HANDOFF_2026-10-12.md and current GitHub PR/head, verify no active writer, inspect newly published v21-v24 frozen sources, diagnose CI D8 identity guard without waiver; only then pursue genuinely independent early-failure sample and authorized source-owner BOATS SOXX history/quote admission.",
+  "next_source_rights_question": "Licensed actual SOXX BOATS history and historical quote availability must be resolved by the incumbent Macro Data OS owner; never treat account ACTIVE as a blanket read/write grant.",
+  "capability_state": "RESEARCH_PRESERVED_AND_CENSORED_NO_TRADING_ACCEPTANCE",
+  "no_unattended_continuation_promised": true
+}
