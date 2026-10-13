@@ -12,12 +12,11 @@ from dataclasses import dataclass
 import inspect
 import json
 
-from mcp.types import CallToolResult, JSONRPCResponse, TextContent, Tool, ToolAnnotations
 from .bounded_item_v1 import (
     COMPLETE_ITEM_SCHEMA, ITEM_ID_SCHEMA_PATTERN, ITEM_REFERENCE_SCHEMA,
     EvidenceResponseRefused, canonical_item_url, evidence_wire, item_reference,
 )
-from .contracts import ContractViolation, TOOL_ANNOTATIONS
+from .contracts import ContractViolation
 
 COMPATIBILITY_CONTRACT = 'research.read.mcp.search_fetch.v1'
 COMPATIBILITY_TOOL_NAMES = ('search', 'fetch')
@@ -40,17 +39,6 @@ OUTPUT_SCHEMAS = {
 
 def _refuse(code='INTERNAL_ERROR'):
     raise ContractViolation(code) from None
-
-
-def tool_models() -> list[Tool]:
-    descriptions = {
-        'search': 'Search qualified complete bounded evidence items in the admitted research scope. Results are item citations, not complete reports.',
-        'fetch': 'Retrieve one complete literal bounded evidence item. COMPLETE_BOUNDED_ITEM describes this item only, never report completeness.',
-    }
-    return [Tool(name=name, description=descriptions[name],
-                 inputSchema=deepcopy(INPUT_SCHEMAS[name]), outputSchema=deepcopy(OUTPUT_SCHEMAS[name]),
-                 annotations=ToolAnnotations(**TOOL_ANNOTATIONS))
-            for name in COMPATIBILITY_TOOL_NAMES]
 
 
 def validate_arguments(name, arguments):
@@ -118,23 +106,6 @@ def validate_output(name, data, *, quote_limit_chars):
         return json.loads(raw)
     except EvidenceResponseRefused:
         _refuse()
-
-
-def wire_bytes(result: CallToolResult, request_id) -> int:
-    """Count actual SDK JSON-RPC envelope, including both copies of JSON data."""
-    envelope = JSONRPCResponse(jsonrpc='2.0', id=request_id,
-                              result=result.model_dump(mode='json', by_alias=True, exclude_none=True))
-    return len(envelope.model_dump_json(by_alias=True, exclude_none=True).encode('utf-8'))
-
-
-def build_result(name, data, *, quote_limit_chars, request_id) -> CallToolResult:
-    data = validate_output(name, data, quote_limit_chars=quote_limit_chars)
-    rendered = json.dumps(data, ensure_ascii=False, allow_nan=False, separators=(',', ':'))
-    result = CallToolResult(content=[TextContent(type='text', text=rendered)],
-                            structuredContent=data, isError=False)
-    if wire_bytes(result, request_id) > MAX_COMPATIBILITY_WIRE_BYTES:
-        _refuse()
-    return result
 
 
 @dataclass(frozen=True)

@@ -12,6 +12,7 @@ import inspect
 import json
 import logging
 import time
+from copy import deepcopy
 from collections.abc import Mapping
 from contextlib import asynccontextmanager
 from typing import Any
@@ -20,7 +21,7 @@ from urllib.parse import urlsplit
 from mcp.server.lowlevel import Server
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.server.transport_security import TransportSecuritySettings
-from mcp.types import CallToolResult, TextContent, Tool, ToolAnnotations
+from mcp.types import CallToolResult, JSONRPCResponse, TextContent, Tool, ToolAnnotations
 from starlette.applications import Starlette
 from starlette.responses import JSONResponse
 from starlette.routing import Route
@@ -43,6 +44,7 @@ from integrations.business_mcp_auth.metadata import (
 from integrations.business_mcp_auth.principal_projection import principal_projection
 from integrations.research_read_mcp.contracts import (
     MAX_RESULT_BYTES,
+    TOOL_ANNOTATIONS,
     TOOL_NAMES,
     ContractViolation,
     error_payload,
@@ -53,10 +55,41 @@ from integrations.research_read_mcp.contracts import (
 )
 
 from .compatibility_v1 import (
-    COMPATIBILITY_TOOL_NAMES, CompatibilityPortV1,
-    build_result as compatibility_result, grant_is_current as compatibility_grant_is_current,
-    tool_models as compatibility_tool_models, validate_arguments as compatibility_arguments,
+    COMPATIBILITY_TOOL_NAMES, CompatibilityPortV1, MAX_COMPATIBILITY_WIRE_BYTES,
+    INPUT_SCHEMAS as COMPATIBILITY_INPUT_SCHEMAS, OUTPUT_SCHEMAS as COMPATIBILITY_OUTPUT_SCHEMAS,
+    _refuse as compatibility_refuse, validate_output as compatibility_output,
+    grant_is_current as compatibility_grant_is_current, validate_arguments as compatibility_arguments,
 )
+
+# MCP SDK construction and JSON-RPC accounting stay at this existing edge.
+def compatibility_tool_models() -> list[Tool]:
+    descriptions = {
+        'search': 'Search qualified complete bounded evidence items in the admitted research scope. Results are item citations, not complete reports.',
+        'fetch': 'Retrieve one complete literal bounded evidence item. COMPLETE_BOUNDED_ITEM describes this item only, never report completeness.',
+    }
+    return [Tool(name=name, description=descriptions[name],
+                 inputSchema=deepcopy(COMPATIBILITY_INPUT_SCHEMAS[name]), outputSchema=deepcopy(COMPATIBILITY_OUTPUT_SCHEMAS[name]),
+                 annotations=ToolAnnotations(**TOOL_ANNOTATIONS))
+            for name in COMPATIBILITY_TOOL_NAMES]
+
+
+def compatibility_wire_bytes(result: CallToolResult, request_id) -> int:
+    """Count actual SDK JSON-RPC envelope, including both copies of JSON data."""
+    envelope = JSONRPCResponse(jsonrpc='2.0', id=request_id,
+                              result=result.model_dump(mode='json', by_alias=True, exclude_none=True))
+    return len(envelope.model_dump_json(by_alias=True, exclude_none=True).encode('utf-8'))
+
+
+def compatibility_result(name, data, *, quote_limit_chars, request_id) -> CallToolResult:
+    data = compatibility_output(name, data, quote_limit_chars=quote_limit_chars)
+    rendered = json.dumps(data, ensure_ascii=False, allow_nan=False, separators=(',', ':'))
+    result = CallToolResult(content=[TextContent(type='text', text=rendered)],
+                            structuredContent=data, isError=False)
+    if compatibility_wire_bytes(result, request_id) > MAX_COMPATIBILITY_WIRE_BYTES:
+        compatibility_refuse()
+    return result
+
+
 
 _LOG = logging.getLogger("integrations.research_read_mcp.app")
 _REQUIRED_SCOPE = ("mastermind.research.read",)
