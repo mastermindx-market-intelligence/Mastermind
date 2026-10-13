@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+"""Pinned Research HTTP launcher candidate. Import and --describe are inert.
+
+--qualify verifies source/configuration/dependencies without building a store,
+opening audit, starting a listener or contacting OAuth/tunnel providers.
+Only the explicit serving invocation owns those actual startup effects.
+"""
+from __future__ import annotations
+
+import argparse
+import importlib.metadata
+import json
+from pathlib import Path
+import sys
+
+REQUIRED_DISTRIBUTIONS = ('mcp','uvicorn','starlette','httpx','PyJWT','cryptography','PyYAML','boto3','botocore')
+
+
+def describe():
+    versions = {}
+    for name in REQUIRED_DISTRIBUTIONS:
+        try:
+            versions[name] = importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            versions[name] = None
+    return {"state":"BUILT_NOT_PROVEN", "transport":"authenticated_loopback_http",
+            "required_distributions":versions, "source_config_runtime_client_acceptance":False}
+
+
+def qualify(config_path, archive_owner_path):
+    import os
+    from integrations.research_read_mcp.runtime import load_deployment,read_secure_json,RuntimeRefused,_json
+    from integrations.research_read_mcp.release_identity import load_archive_verifier
+    from integrations.business_mcp_auth.contracts import load_resource_policy
+    uid = os.geteuid()
+    deployment = load_deployment(config_path, expected_owner_uid=uid)
+    verifier = load_archive_verifier(archive_owner_path, deployment, owner_uid=uid)
+    for project in ('mastermind','macro'):
+        verifier(getattr(deployment,project+'_release'),getattr(deployment,project+'_commit'),getattr(deployment,project+'_tree'))
+    root = Path(__file__).resolve().parents[1]
+    if root != Path(deployment.mastermind_release):
+        raise RuntimeRefused('LAUNCHER_IDENTITY_REFUSED')
+    policy = load_resource_policy(_json(read_secure_json(deployment.policy_path,expected_owner_uid=uid),65536))
+    if policy.policy_id != deployment.policy_id:
+        raise RuntimeRefused('POLICY_REFUSED')
+    # Examples are never enrollment evidence or a serving authorization.
+    from urllib.parse import urlsplit
+    if any(urlsplit(url).hostname.endswith('.invalid') for url in (policy.resource,policy.issuer,policy.jwks_uri)):
+        raise RuntimeRefused('POLICY_REFUSED')
+    if any(version is None for version in describe()['required_distributions'].values()):
+        raise RuntimeRefused('RUNTIME_DEPENDENCIES_UNAVAILABLE')
+    return deployment,verifier,policy
+
+
+def create_runtime(deployment, verifier, policy, *, audit_sink):
+    """Actual factories; callable alone does not start HTTP or tunnel."""
+    import os
+    import time
+    from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
+    from integrations.business_mcp_auth.jwks import BoundedJwksCache,HttpxJwksFetcher
+    from integrations.research_read_mcp.runtime import compose_runtime
+    from integrations.research_read_mcp.port_adapter import compose_macro_service,ResearchPortAdapter
+    from starlette.responses import JSONResponse
+    from starlette.routing import Route
+    owned = {}
+    def read_factory(_deployment):
+        service,context_type,receipt = compose_macro_service(deployment.macro_release,deployment.macro_commit,
+                                                            deployment.macro_tree,release_verifier=verifier)
+        owned.update(context_type=context_type,factory_receipt=receipt)
+        return service
+    def adapter_factory(service,quote_limit,_deployment):
+        adapter = ResearchPortAdapter(service,quote_limit,deployment.mastermind_commit,context_type=owned['context_type'])
+        owned['adapter'] = adapter
+        return adapter
+    def authenticator_factory(selected):
+        return JwtAuthenticator(policy=selected,jwks_cache=BoundedJwksCache(
+            policy=selected,fetcher=HttpxJwksFetcher(selected),monotonic=time.monotonic))
+    def readiness(service):
+        # F10 status ratios do not bind inventory to a canonical source generation.
+        # No qualified same-generation production census owner is wired yet.
+        # Keep the candidate unavailable until the actual producer proof exists.
+        return False
+    def mount_health(app,health,ready):
+        import asyncio
+        async def live(request):
+            body,status = health()
+            return JSONResponse(body,status_code=status,headers={'Cache-Control':'no-store'})
+        async def ready_route(request):
+            body,status = await asyncio.to_thread(ready)
+            return JSONResponse(body,status_code=status,headers={'Cache-Control':'no-store'})
+        app.routes.extend([Route('/healthz',live),Route('/readyz',ready_route)])
+    app = compose_runtime(deployment,release_verifier=verifier,policy_loader=lambda _:policy,
+                          authenticator_factory=authenticator_factory,read_service_factory=read_factory,
+                          adapter_factory=adapter_factory,context_factory=lambda ent:owned['adapter'].context_builder(ent),
+                          readiness=readiness,mount_health_routes=mount_health,audit_sink=audit_sink,
+                          clock=lambda:int(time.time()),owner_uid=os.geteuid())
+    owned['app'] = app
+    app.state.research_factory_receipt = owned['factory_receipt']
+    app.state.research_release_receipts = verifier.receipts
+    return app
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--describe',action='store_true')
+    parser.add_argument('--qualify',action='store_true')
+    parser.add_argument('--config')
+    parser.add_argument('--archive-owner',default='/etc/mastermind/research-read-archive-owner.json')
+    parser.add_argument('--audit-directory',default='/var/lib/mastermind-research/audit')
+    args = parser.parse_args(argv)
+    if args.describe:
+        print(json.dumps(describe(),sort_keys=True));return 0
+    if not args.config:
+        parser.error('--config is required')
+    # The protected entry point's own release is the sole Mastermind import root.
+    sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+    from integrations.research_read_mcp.runtime import RuntimeRefused
+    try:
+        deployment,verifier,policy = qualify(args.config,args.archive_owner)
+        if args.qualify:
+            print(json.dumps({'state':'SOURCE_CONFIG_DEPENDENCIES_QUALIFIED','receipts':verifier.receipts,
+                              'production_readiness':False,'client_acceptance':False}));return 0
+        import os
+        import stat
+        from integrations.business_mcp_auth.audit import DurableAuthAuditSink
+        target = Path(args.audit_directory)
+        if (not target.is_absolute() or any(p.is_symlink() for p in (target,*target.parents))):
+            raise RuntimeRefused('AUDIT_DIRECTORY_REFUSED')
+        info = target.stat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o022:
+            raise RuntimeRefused('AUDIT_DIRECTORY_REFUSED')
+        descriptor = os.open(target,os.O_RDONLY|os.O_NOFOLLOW|os.O_DIRECTORY)
+        try:
+            audit = DurableAuthAuditSink.open(descriptor,policy_id=policy.policy_id)
+        finally:
+            os.close(descriptor)
+        try:
+            app = create_runtime(deployment,verifier,policy,audit_sink=audit)
+            import uvicorn
+            uvicorn.run(app,host=deployment.bind_host,port=deployment.bind_port,access_log=False,
+                        log_level='warning',proxy_headers=False)
+        finally:
+            audit.close()
+        return 0
+    except Exception:
+        # Provider/configuration/source values never enter launcher diagnostics.
+        print('RESEARCH_RUNTIME_REFUSED',file=sys.stderr);return 1
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
