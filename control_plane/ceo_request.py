@@ -48,6 +48,10 @@ from collections.abc import Mapping
 from typing import Any
 
 from control_plane import ceo_intent
+from control_plane.mission_acceptance_criteria import (
+    AcceptanceCriteriaError,
+    parse_acceptance_criteria_candidate,
+)
 
 __all__ = [
     "ACTOR",
@@ -485,6 +489,14 @@ def normalize_automated_request(payload: Any) -> dict[str, Any]:
     compatible = dict(payload)
     compatible["operation_key"] = "automated-request-placeholder"
     normalized = normalize_high_level_request(compatible)
+    # The authenticated OS app may encode a versioned *requirements* section
+    # inside the existing objective. Refuse a broken section before automated
+    # submission; never derive an acceptance verdict or add a new input field.
+    # Frozen v1 CEO_REQUEST normalization remains unchanged for legacy paths.
+    try:
+        parse_acceptance_criteria_candidate(normalized["objective"])
+    except AcceptanceCriteriaError as exc:
+        raise CeoRequestInvalid("objective has a malformed acceptance-criteria section") from exc
     del normalized["operation_key"]
     return normalized
 

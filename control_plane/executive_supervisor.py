@@ -1190,8 +1190,16 @@ class ExecutiveSupervisor:
             [str, str], Mapping[str, Any]
         ] | None = None,
         subscription_canary_binding_id: str | None = None,
+        product_acceptance_macro_root: str | Path | None = None,
     ) -> None:
         self.runtime = runtime
+        self._product_acceptance_review_owner = None
+        if product_acceptance_macro_root is not None:
+            from integrations.agentos_product_acceptance_basis import AgentOsProductAcceptanceBasisReader
+            from integrations.product_acceptance_review_owner import ProductAcceptanceReviewBasisOwner
+            self._product_acceptance_review_owner = ProductAcceptanceReviewBasisOwner(
+                runtime, AgentOsProductAcceptanceBasisReader(macro_root=Path(product_acceptance_macro_root))
+            )
         if type(cleanup_policy) is not CleanupPolicy:
             raise SupervisorError("cleanup policy requires a typed trusted composition")
         if cleanup_policy is CleanupPolicy.FABRIC_PROCESS_GROUP:
@@ -1468,6 +1476,26 @@ class ExecutiveSupervisor:
         input_dir = run_dir / "input"
         input_dir.mkdir(mode=0o750 if self.shared_run_gid is not None else 0o700)
         schema_path = input_dir / "worker-result.schema.json"
+        if job.orchestration_role == "review":
+            from integrations.product_acceptance_review_owner import read_retained_product_review_input
+            selected = read_retained_product_review_input(self.runtime, job=job, attempt=attempt)
+            if selected is not None:
+                if effective_grant is None:
+                    raise SupervisorError("product review schema requires the current effective grant")
+                from control_plane.executive_orchestration_result import product_acceptance_review_result_schema
+                schema = product_acceptance_review_result_schema(
+                    job_id=job.job_id, run_id=attempt.attempt_id, worker_id=attempt.worker_id,
+                    root_job_id=job.root_job_id, expected_basis_digest=selected.expected.basis_digest,
+                    expected_criterion_digests=selected.expected.criterion_digests,
+                    expected_obligation_digests=selected.expected.obligation_digests,
+                )
+                schema["x-mastermind-effective-grant-digest"] = attempt.effective_grant_digest
+                _write_private_json(schema_path, schema)
+                if self.shared_run_gid is not None:
+                    for path, mode in ((run_dir, 0o770), (input_dir, 0o750), (schema_path, 0o640)):
+                        os.chown(path, -1, self.shared_run_gid)
+                        os.chmod(path, mode)
+                return schema_path
         _write_private_json(
             schema_path,
             worker_result_schema(
@@ -1515,6 +1543,13 @@ class ExecutiveSupervisor:
                 else ""
             )
         )
+
+    def _product_acceptance_review_suffix(self, job: Job, attempt: Attempt) -> str:
+        if job.orchestration_role != "review":
+            return ""
+        from integrations.product_acceptance_review_owner import read_retained_product_review_input
+        selected = read_retained_product_review_input(self.runtime, job=job, attempt=attempt)
+        return "" if selected is None else selected.prompt_suffix()
 
     def _prompt(
         self,
@@ -1642,6 +1677,7 @@ class ExecutiveSupervisor:
             )
             + json.dumps(packet, sort_keys=True, ensure_ascii=False, indent=2)
             + self._commission_prompt_suffix(commission, inline_commission)
+            + self._product_acceptance_review_suffix(job, attempt)
         )
 
     def _launch_spec(
@@ -2082,6 +2118,10 @@ class ExecutiveSupervisor:
                 raise SupervisorError("real worker job requires an assigned isolated worktree")
             workspace = Path(job.worktree).resolve(strict=True)
             verified_commission = self.verified_commission(job, workspace)
+            if self._product_acceptance_review_owner is not None:
+                self._product_acceptance_review_owner.select_and_retain(
+                    job=job, attempt=lease.attempt, commission=verified_commission
+                )
             schema_path = self._write_schema(
                 self._run_dir(lease.attempt.attempt_id),
                 job=job,
@@ -3597,9 +3637,9 @@ class ExecutiveSupervisor:
                     or packet.get("commission_local_path") != str(
                         Path(spec.result_schema_path).parent / "commission-context.md"
                     )
-                    or body[end:] != self._commission_prompt_suffix(
+                    or body[end:] != (self._commission_prompt_suffix(
                         commission.ref_dict(), commission.content.decode("utf-8")
-                    )
+                    ) + self._product_acceptance_review_suffix(job, attempt))
                     or not isinstance(attestation, Mapping)
                     or attestation.get("prompt_sha256") != hashlib.sha256(
                         spec.prompt.encode("utf-8")
