@@ -1,0 +1,75 @@
+--- a/artifact_delivery.py
++++ b/artifact_delivery.py
+@@ -616,6 +616,32 @@
+     return result
+ 
+ 
++def validate_ordinary_producer(request, stdout, process_raw):
++    """Pure producer proof; no controller terminal flag or lease settlement."""
++    import artifact_production
++    rid = request['run_id']
++    validate_capsule_process(process_raw, stdout, rid)
++    completion = reader.strict_json(process_raw)['artifact_production']
++    if (type(completion) is not dict or set(completion) != {
++            'schema', 'mode', 'contract', 'manifest', 'stdout_sha256'}
++            or completion['schema'] != 'mastermind.fabric_artifact_completion.v1'
++            or completion['mode'] not in artifact_production.ORDINARY_MODES
++            or completion['stdout_sha256'] != digest(stdout)
++            or request.get('stdout_sha256', digest(stdout)) != digest(stdout)):
++        raise ValueError('glm_producer_completion_unqualified')
++    contract = artifact_production.validate_contract(completion['contract'])
++    if any(contract[k] != request[k] for k in ('run_id', 'root', 'parent')):
++        raise ValueError('glm_producer_contract_scope')
++    manifest = artifact_production.manifest_from_stdout(stdout.decode('utf-8'),
++        root=request['root'], parent=request['parent'], run_id=rid, host=request['host'])
++    if (manifest != completion['manifest']
++            or manifest['request_sha256'] != digest(reader.canonical(contract))
++            or [item['path'] for item in manifest['files']] != artifact_production.paths(contract)
++            or any(path not in artifact_production.paths(contract) for path in request.get('paths', artifact_production.paths(contract)))):
++        raise ValueError('glm_producer_manifest_mismatch')
++    return manifest
++
++
+ def qualify_glm_producer(request, raw, paths, process_path, process_raw):
+     import fabric_task
+     import artifact_production
+@@ -623,25 +649,8 @@
+     assert_capsule_family(rid)
+     raw = dict(raw, process=process_raw)
+     paths = dict(paths, process=process_path)
+-    validate_capsule_process(process_raw, raw['stdout'], rid)
++    manifest = validate_ordinary_producer(request, raw['stdout'], process_raw)
+     completion = reader.strict_json(process_raw)['artifact_production']
+-    if (type(completion) is not dict or set(completion) != {
+-            'schema', 'mode', 'contract', 'manifest', 'stdout_sha256'}
+-            or completion['schema'] != 'mastermind.fabric_artifact_completion.v1'
+-            or completion['mode'] not in artifact_production.ORDINARY_MODES
+-            or completion['stdout_sha256'] != digest(raw['stdout'])
+-            or request['stdout_sha256'] != digest(raw['stdout'])):
+-        raise ValueError('glm_producer_completion_unqualified')
+-    contract = artifact_production.validate_contract(completion['contract'])
+-    if any(contract[k] != request[k] for k in ('run_id', 'root', 'parent')):
+-        raise ValueError('glm_producer_contract_scope')
+-    manifest = artifact_production.manifest_from_stdout(raw['stdout'].decode('utf-8'),
+-        root=request['root'], parent=request['parent'], run_id=rid, host=request['host'])
+-    if (manifest != completion['manifest']
+-            or manifest['request_sha256'] != digest(reader.canonical(contract))
+-            or [item['path'] for item in manifest['files']] != artifact_production.paths(contract)
+-            or any(path not in artifact_production.paths(contract) for path in request['paths'])):
+-        raise ValueError('glm_producer_manifest_mismatch')
+     prefix = (r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z \[remote_sub id=' + re.escape(rid)
+               + ' host=' + re.escape(request['host']) + r'\] (.*)')
+     events = [m.group(1) for line in raw['log'].decode('utf-8').splitlines()
+@@ -748,7 +757,11 @@
+ def transport(alias, request, *, observer_source_hash=None, current_sources_sha256=None):
+     # Fixed code, fixed interpreter, validated registry alias; paths travel in stdin.
+     response_limit = reader.MAX_RESPONSE
+-    if type(request) is dict and request.get("schema") == "mastermind.mac_policy_original_return.v1":
++    if type(request) is dict and request.get("schema") == "mastermind.original_delivery_read.v1":
++        import original_delivery_collector
++        code = original_delivery_collector.code_for_request(request)
++        response_limit = original_delivery_collector.MAX_RESPONSE
++    elif type(request) is dict and request.get("schema") == "mastermind.mac_policy_original_return.v1":
+         import mac_policy_return
+         code = mac_policy_return.code_for_request(request, expected_hashes=current_sources_sha256)
+         response_limit = mac_policy_return.MAX_RESPONSE
