@@ -32,6 +32,28 @@ IDENT = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z')
 HEX = re.compile(r'[a-f0-9]{64}\Z')
 
 
+class OriginalDeliveryRefused(ValueError):
+    """Sanitized original read refusal; never an invitation to retry."""
+    def __init__(self, reason):
+        super().__init__(reason)
+        self.reason = reason
+
+
+def reject_failure_envelope(row, request, schema):
+    if type(row) is not dict or row.get('state') != 'UNAVAILABLE':
+        return
+    allowed = {'read_request_invalid','read_contract_invalid','directory_owner_or_mode',
+        'directory_chain_changed','original_file_owner_mode_type_or_size',
+        'original_file_changed','original_rc_invalid','original_artifact_unavailable',
+        'filesystem_refused'}
+    if (set(row) != {'schema','request_sha256','state','files','artifacts','reason'}
+            or row['schema'] != schema or row['request_sha256'] != sha(canonical(request))
+            or row['files'] != {} or row['artifacts'] != []
+            or type(row['reason']) is not str or row['reason'] not in allowed):
+        raise ValueError('collection_failure_envelope_invalid')
+    raise OriginalDeliveryRefused(row['reason'])
+
+
 def canonical(value):
     return reader.canonical(value)
 
@@ -216,6 +238,7 @@ def code_for_request(request):
 def validate_response(raw,request,mode):
     if len(raw)>MAX_RESPONSE:raise ValueError('collection_response_limit')
     row=reader.strict_json(raw)
+    reject_failure_envelope(row, request, SCHEMA)
     if (type(row) is not dict or set(row)!={'schema','request_sha256','state','files','artifacts'}
             or row['schema']!=SCHEMA or row['request_sha256']!=sha(canonical(request))
             or type(row['files']) is not dict or type(row['artifacts']) is not list):
@@ -337,6 +360,11 @@ def main(argv=None):
         if not args.binding or not args.destination or args.receipt_sha256:raise ValueError('collection_arguments')
         receipt=collect(args.binding,run_id=args.run_id,root=args.root,parent=args.parent,destination=args.destination)
         print(canonical(receipt).decode());return 0 if receipt['state']=='COMPLETE' else 76
+    except OriginalDeliveryRefused as error:
+        print(canonical({'state':'REFUSED','reason':error.reason,
+            'failure_phase':'original_remote_read','retry_authorized':False,
+            'worker_terminal_proof':False,'delivery_verified':False}).decode())
+        return 75
     except (OSError,ValueError,TypeError,KeyError,RecursionError):
         print('{"state":"REFUSED","reason":"original_delivery_unconfirmed","retry_authorized":false}')
         return 75
