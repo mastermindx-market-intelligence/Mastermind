@@ -51,8 +51,10 @@ from typing import Any, Callable, Mapping
 
 try:
     from ops.executive_os import provider_readiness as _readiness
+    from ops.executive_os.provider_worker_slots import get_slot
 except ModuleNotFoundError:  # pragma: no cover - installed direct-script mode
     import provider_readiness as _readiness  # type: ignore[no-redef]
+    from provider_worker_slots import get_slot  # type: ignore[no-redef]
 
 
 RECOVERY_EVIDENCE_SCHEMA = "mastermind.executive_provider_recovery_cause/v1"
@@ -558,7 +560,7 @@ def _grant_worker(value: Any) -> dict[str, Any]:
     worker = _require_exact_fields(value, _GRANT_WORKER_FIELDS, "recovery_grant_worker_mismatch")
     expected_home = os.fspath(_readiness.AUTH_PATH.parent)
     if (
-        worker["worker_user"] != "_mastermind_worker"
+        worker["worker_user"] != get_slot("codex-01").worker_user
         or worker["worker_uid"] != _readiness.WORKER_UID
         or worker["worker_gid"] != _readiness.WORKER_GID
         or worker["provider_home"] != expected_home

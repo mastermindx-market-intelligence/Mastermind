@@ -530,7 +530,7 @@ def test_grant_custody_refuses_unsafe_files(recovery, change):
 
 
 @pytest.mark.parametrize("change", [
-    "source_path", "source_sha", "worker_uid", "worker_binding", "worker_kind",
+    "source_path", "source_sha", "worker_user", "worker_uid", "worker_binding", "worker_kind",
     "provider_home", "credential_inode", "credential_mode", "model", "budget",
     "successor", "window_short", "window_long", "expired", "cause_mismatch",
     "schema", "extra_field",
@@ -542,6 +542,8 @@ def test_grant_bindings_and_bounds_are_closed(recovery, change):
         grant["installed_source"]["path"] = "/opt/homebrew/bin/codex"
     elif change == "source_sha":
         grant["installed_source"]["sha256"] = "a" * 64
+    elif change == "worker_user":
+        grant["worker"]["worker_user"] = "_another_worker"
     elif change == "worker_uid":
         grant["worker"]["worker_uid"] = 452
     elif change == "worker_binding":
