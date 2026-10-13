@@ -731,3 +731,70 @@ def test_nonempty_validation_profile_refuses_before_original_effects(harness):
     run(scenario())
     assert not h.inputs.log_path.exists() and not composition._backend._slot.claimed
     assert h.calls==h.acquisitions==[]
+
+
+def test_supervisor_empty_validation_joins_real_broker_backend_terminal_reads(
+        cleanup_owner, tmp_path, monkeypatch):
+    """Actual consumer/transport/file semantics; Runtime enrollment is inert."""
+    from control_plane.executive_fabric_adapter import AttendedFabricWorkerAdapter
+    from control_plane.executive_supervisor import ExecutiveSupervisor, CleanupPolicy
+    from tests.test_executive_supervisor import _runtime_and_job
+    h=cleanup_owner
+    instance=h.instance
+    ref=instance._slot.start[0].process_ref
+    binding=instance._context['binding']
+    runtime, _job_id, _workspace=_runtime_and_job(tmp_path/'runtime')
+    adapter=AttendedFabricWorkerAdapter(runtime,lambda *_args:None)
+    physical=SimpleNamespace(digest=instance._context['physical_binding_sha256'],
+        host_ref=instance._inputs.physical.host_ref,worker_uid=ref.effective_uid,
+        worker_gid=ref.effective_gid)
+    attempt=SimpleNamespace(attempt_id=ref.run_id,job_id=binding['job_id'],
+        effective_grant_digest=binding['effective_grant_digest'],pid=ref.pid,pgid=ref.pgid,
+        process_start_identity=ref.process_start_identity,boot_id=ref.boot_session_id)
+    # This test supplies an inert original claim; it does not attest enrollment.
+    monkeypatch.setattr(adapter,'_validate_lease',lambda _run_id:attempt)
+    monkeypatch.setattr(adapter,'_resolve',lambda *_a,**_k:(attempt,physical,{'binding':binding}))
+    monkeypatch.setattr(adapter,'_pin_matches',lambda *_a:None)
+    config=bridge.BridgeConfig(schema_version=bridge.CONFIG_SCHEMA_VERSION,
+        adapter_id='attended-fabric',bridge_uid=os.geteuid(),control_uid=450,
+        launchd_socket_name='FabricBridge',socket_path=Path('/var/run/inert.sock'),
+        workspace_root=tmp_path,run_root=tmp_path,max_request_bytes=65536,
+        max_response_bytes=262144,request_timeout_seconds=10,validation_commands=(),
+        _trust=bridge._TRUSTED_CONFIG)
+    service=bridge.FabricBridgeBroker(config,instance)
+    queries=[]
+    async def request(operation,payload,**_options):
+        queries.append(copy.deepcopy(payload['cleanup_query']))
+        response=await service.execute(dict(schema_version=bridge.BROKER_REQUEST_SCHEMA_VERSION,
+            request_id='inert-cleanup',operation=operation,payload=payload),
+            peer=PeerCredentials(uid=450,gid=450))
+        return response['result']
+    adapter._refs[ref.run_id]=ref
+    adapter._bound[ref.run_id]=(SimpleNamespace(request=request),{'binding':binding},physical,object())
+    supervisor=ExecutiveSupervisor(runtime,adapter,cleanup_policy=CleanupPolicy.FABRIC_PROCESS_GROUP,
+        require_complete_launch_attestation=True,runs_root=tmp_path/'consumer-runs')
+    job=SimpleNamespace(root_job_id=binding['root_id'],validation_commands=[])
+    monkeypatch.setattr(supervisor,'_job',lambda _job_id:job)
+    active=SimpleNamespace(lease=SimpleNamespace(attempt=attempt),process_ref=ref,
+        launch_spec=SimpleNamespace(run_dir=tmp_path/'consumer-run'),
+        effective_grant={'validation_argv':[]})
+    reads=[]
+    original_read=backend._read_original_file
+    def read(*args,**kwargs):
+        reads.append((args,kwargs))
+        return original_read(*args,**kwargs)
+    monkeypatch.setattr(backend,'_read_original_file',read)
+    async def scenario():
+        receipts,path,error=await supervisor._run_supervisor_validations(active,job)
+        persisted=json.loads(path.read_text())
+        assert receipts==() and error is None and persisted['commands']==[]
+        assert 'fabric_cleanup' not in persisted and 'uid_sweep' not in persisted
+        package=supervisor._active_terminal_uid_sweep(active)
+        assert package['operation']=='terminal'
+        assert package['observed_at']==h.row['ended_at']
+        assert package['lane_receipt_utf8'].encode()==h.terminal.read_bytes()
+    run(scenario())
+    assert len(reads)==2 and all(item[1]['identity'] is not None for item in reads)
+    assert [q['scope'] for q in queries]==['terminal','terminal']
+    assert queries[0]['readback_sha256'] is None and queries[1]['readback_sha256'] is not None
+    assert h.holds==[]
