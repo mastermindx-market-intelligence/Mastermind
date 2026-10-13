@@ -187,9 +187,17 @@ def require_complete_product_acceptance_review_proof(
                 (digest for digest in expected if digest not in actual), None
             )
             extra = next((digest for digest in actual if digest not in expected), None)
+            out_of_order = next(
+                (
+                    wanted
+                    for observed, wanted in zip(actual, expected)
+                    if observed != wanted
+                ),
+                None,
+            )
             raise ProductAcceptanceContractError(
                 "product acceptance must-have proof is incomplete",
-                repair_identity=missing or extra,
+                repair_identity=missing or extra or out_of_order,
                 repair_kind=(
                     "MISSING_REQUIRED_PROOF"
                     if missing

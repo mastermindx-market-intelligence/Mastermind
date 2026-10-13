@@ -32,8 +32,16 @@ from tests.test_mastermind_company_mcp import _StaticResolver, _RecordingService
 from tests import test_executive_os_phase1fc as phase
 
 
-def programme(tmp_path, monkeypatch, *, state="SATISFIED", retain=True):
-    basis = acquired_basis()
+def programme(
+    tmp_path,
+    monkeypatch,
+    *,
+    state="SATISFIED",
+    retain=True,
+    proof_transform=None,
+    basis_value=None,
+):
+    basis = acquired_basis() if basis_value is None else copy.deepcopy(basis_value)
     content = b"# Exact dependency-consumer fixture commission\n"
     ref = copy.deepcopy(basis.entry["execution_commission_refs"][0])
     ref["content_sha256"] = hashlib.sha256(content).hexdigest()
@@ -130,6 +138,8 @@ def programme(tmp_path, monkeypatch, *, state="SATISFIED", retain=True):
                 for d in selected.expected.obligation_digests
             ],
         }
+        if proof_transform is not None:
+            proof_transform(body["product_acceptance_proof"])
     phase._complete_ohf_role(runtime, dispatch, body, identity_seed=3355)
     manifest = runtime.jobs.project_cycle_work_dependency_manifest(
         root.job_id, "step-2"
@@ -228,6 +238,61 @@ def test_missing_must_have_proof_returns_exact_repair_identity_without_send_star
         prepare(owner, binding, target)
     assert error.value.repair_kind == state
     assert error.value.repair_identity == basis.entry["proof_obligation_digests"][0]
+    assert runtime.events.list_events(aggregate_type=AGGREGATE) == []
+
+
+@pytest.mark.parametrize(
+    "kind", ["MISSING_REQUIRED_PROOF", "UNEXPECTED_PROOF", "PROOF_ORDER_CHANGED"]
+)
+def test_gateway_preserves_canonical_missing_extra_and_order_repair_identity(
+    tmp_path, monkeypatch, kind
+):
+    from integrations.agentos_product_acceptance_basis import _canonical_digest
+
+    basis = acquired_basis()
+    second = {**basis.entry["proof_obligations"][0], "label": "Original parent return"}
+    basis.entry["proof_obligations"].append(second)
+    basis.entry["proof_obligation_digests"].append(_canonical_digest(second))
+    restamp(basis.entry)
+
+    def transform(proof):
+        rows = proof["obligations"]
+        if kind == "MISSING_REQUIRED_PROOF":
+            rows.pop()
+        elif kind == "UNEXPECTED_PROOF":
+            rows.append({**rows[0], "obligation_digest": "0" * 64})
+        else:
+            rows.reverse()
+
+    runtime, owner, binding, target, retained = programme(
+        tmp_path, monkeypatch, proof_transform=transform, basis_value=basis
+    )
+    service = _RecordingService()
+    gateway = CompanyDialogueGateway(
+        _StaticResolver(binding),
+        socket_path=Path("/private/tmp/product-fixture.sock"),
+        service_call=service,
+        product_acceptance_owner=owner,
+    )
+    result = asyncio.run(
+        gateway.call(
+            "request_decision",
+            {"purpose": "PRODUCT_ACCEPTANCE", "subject_job_id": target.job_id},
+        )
+    )
+    expected_identity = (
+        retained.entry["proof_obligation_digests"][1]
+        if kind == "MISSING_REQUIRED_PROOF"
+        else (
+            "0" * 64
+            if kind == "UNEXPECTED_PROOF"
+            else retained.entry["proof_obligation_digests"][0]
+        )
+    )
+    assert result["ok"] is False
+    assert result["error"]["detail_code"] == "PRODUCT_PROOF_INCOMPLETE"
+    assert result["data"] == {"repair_identity": expected_identity, "repair_kind": kind}
+    assert service.calls == []
     assert runtime.events.list_events(aggregate_type=AGGREGATE) == []
 
 
