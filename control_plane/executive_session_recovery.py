@@ -100,9 +100,13 @@ def _modern_stop_without_legacy_quota_proof(con, *, job_id: str,
     from .executive_runtime import (
         OHF_INTERNAL_GENERATION_OPERATION_SCHEMA_VERSION, _json_loads,
     )
+    from .operator_harness_contract import (
+        OperationId, OperationReceiptKind, operation_receipt_command_id,
+    )
 
     modern = con.execute(
-        "SELECT payload_json FROM events WHERE event_type='OPERATOR_OPERATION_APPLIED' "
+        "SELECT aggregate_id,command_id,payload_json FROM events "
+        "WHERE event_type='OPERATOR_OPERATION_APPLIED' "
         "AND aggregate_type='operator_operation' AND actor='supervisor' "
         "AND job_id=? AND attempt_id=? AND worker_id=? AND quota_class=? "
         "ORDER BY event_id",
@@ -126,7 +130,8 @@ def _modern_stop_without_legacy_quota_proof(con, *, job_id: str,
                 or not payload["process_generation_id"]):
             continue
         bound_generation = con.execute(
-            "SELECT 1 FROM process_generations g JOIN harness_session_epochs h "
+            "SELECT g.session_epoch_id,h.provider_session_id "
+            "FROM process_generations g JOIN harness_session_epochs h "
             "ON h.session_epoch_id=g.session_epoch_id "
             "WHERE g.process_generation_id=? AND g.worker_id=? "
             "AND h.attempt_id=? AND h.worker_id=? "
@@ -135,6 +140,42 @@ def _modern_stop_without_legacy_quota_proof(con, *, job_id: str,
             (payload["process_generation_id"], worker_id, attempt_id, worker_id),
         ).fetchone()
         if bound_generation is None:
+            continue
+        # An APPLIED-looking row is not proof of the existing supervisor
+        # operation unless it has the exact deterministic receipt identity and
+        # its own source-bound INTENT. This remains a diagnostic, not a new
+        # quota stop/requeue proof.
+        try:
+            operation = OperationId(str(event["aggregate_id"] or ""))
+            applied_id = operation_receipt_command_id(
+                operation, OperationReceiptKind.APPLIED,
+            )
+        except (TypeError, ValueError):
+            continue
+        if event["command_id"] != applied_id:
+            continue
+        intent = con.execute(
+            "SELECT payload_json FROM events "
+            "WHERE event_type='OPERATOR_OPERATION_INTENT' "
+            "AND aggregate_type='operator_operation' AND actor='supervisor' "
+            "AND aggregate_id=? AND command_id=? "
+            "AND job_id=? AND attempt_id=? AND worker_id=? AND quota_class=? "
+            "LIMIT 1",
+            (operation.command_id, operation.command_id, job_id,
+             attempt_id, worker_id, quota_class),
+        ).fetchone()
+        if intent is None:
+            continue
+        expected_intent = {
+            "schema_version": OHF_INTERNAL_GENERATION_OPERATION_SCHEMA_VERSION,
+            "operation_kind": "graceful_stop",
+            "attempt_id": attempt_id,
+            "session_epoch_id": bound_generation["session_epoch_id"],
+            "process_generation_id": payload["process_generation_id"],
+            "worker_id": worker_id,
+            "provider_session_id": bound_generation["provider_session_id"],
+        }
+        if _json_loads(intent["payload_json"], fallback=None) != expected_intent:
             continue
         legacy = con.execute(
             "SELECT 1 FROM events WHERE event_type='OHF_GRACEFUL_STOP' "
