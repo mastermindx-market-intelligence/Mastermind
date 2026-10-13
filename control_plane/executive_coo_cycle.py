@@ -287,6 +287,85 @@ class CooCycle:
                 return False
         return True
 
+    def _drain_current_reviews(
+        self,
+        root_id: str,
+        children: list[Job],
+        current_by_step: Mapping[str, Mapping[str, Any]],
+        ordinals: Mapping[str, int],
+        plan_body: Mapping[str, Any] | None,
+        policy_sha: str,
+    ) -> CooCycleOutcome | None:
+        """Prefer existing repair/current review demand without a new queue.
+
+        Incumbent and uncertain settlement remains with the existing cycle.
+        A proven pre-claim review capacity miss permits only an already admitted
+        disjoint READ revision; Runtime still validates its claim/dependencies.
+        """
+        if any(job.status in {JobStatus.RUNNING, JobStatus.CHECKPOINTED} for job in children):
+            return None
+        queued = sorted(
+            [job for job in children if job.status == JobStatus.QUEUED],
+            key=lambda job: _job_sort_key(job, ordinals),
+        )
+        repairs = [job for job in queued if job.orchestration_role == "repair"]
+        targets = {
+            job.job_id: job for job in children
+            if job.status == JobStatus.COMPLETED
+            and current_by_step.get(str(job.plan_step_id), {}).get("current_job_id") == job.job_id
+            and current_by_step.get(str(job.plan_step_id), {}).get("review_required") is True
+        }
+        reviews = [job for job in queued if job.orchestration_role == "review"
+                   and job.reviews_job_id in targets]
+        # Recovery is never demoted by quality-loop priority.
+        if repairs:
+            selected = repairs[0]
+        elif reviews:
+            selected = reviews[0]
+        else:
+            missing = [target for target in targets.values()
+                       if not any(job.reviews_job_id == target.job_id for job in children)]
+            if not missing:
+                return None
+            target = min(missing, key=lambda job: _job_sort_key(job, ordinals))
+            command = f"coo-cycle:{root_id}:create-review:{target.job_id}:1"
+            try:
+                review = self.runtime.jobs.create_cycle_review(
+                    root_id, target.job_id, command_id=command
+                )
+            except StateConflict as exc:
+                return self._block(root_id, target.job_id, _classify_invalid(exc))
+            return self._outcome(root_id, "REVIEW_CREATED", review.job_id, command, review)
+
+        outcome = self._dispatch_queued(root_id, selected)
+        if outcome is not None:
+            return outcome
+        unavailable = [selected.job_id]
+        if not repairs and plan_body is not None and plan_body.get("schema_version") in {
+            "mastermind.execution_plan/v3", "mastermind.execution_plan/v4",
+            "mastermind.execution_plan/v5",
+        }:
+            target = targets[str(selected.reviews_job_id)]
+            for candidate in queued:
+                if not (
+                    self._is_read_only_frontier_work(candidate)
+                    and candidate.plan_attempt_id == target.plan_attempt_id
+                    and candidate.plan_digest == target.plan_digest
+                    and candidate.plan_step_id != target.plan_step_id
+                    and current_by_step.get(str(candidate.plan_step_id), {}).get("current_job_id") == candidate.job_id
+                ):
+                    continue
+                outcome = self._dispatch_queued(root_id, candidate)
+                if outcome is not None:
+                    return outcome
+                unavailable.append(candidate.job_id)
+        # Do not retry the unavailable review in the ordinary queued loop.
+        return self._outcome(root_id, "NO_ACTION", None, None, {
+            "reason": "exact_dispatch_unavailable",
+            "unavailable_job_ids": unavailable,
+            "policy_sha": policy_sha,
+        })
+
     def _dispatch_queued(
         self, root_id: str, selected: Job
     ) -> CooCycleOutcome | None:
@@ -1146,6 +1225,15 @@ class CooCycle:
                 except StateConflict as exc:
                     return self._block(root_id, selected.job_id, _classify_invalid(exc))
                 return self._outcome(root_id, "REPAIR_CREATED", receipt.job_id, command, receipt)
+
+        # Drain current quality obligations before fresh discretionary work.
+        if admission is not None:
+            review_outcome = self._drain_current_reviews(
+                root_id, children, current_by_step, ordinals, plan_body,
+                policy.policy_sha256,
+            )
+            if review_outcome is not None:
+                return review_outcome
 
         # 4. Materialize one lowest-ordinal missing dependency-ready V3/V4 work Job.
         if (
