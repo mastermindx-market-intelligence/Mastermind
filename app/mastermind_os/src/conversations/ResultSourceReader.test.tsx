@@ -42,7 +42,7 @@ async function fixture() {
     conversation: { context, source: { ...source, owner: "CURRENT_WINDOW", ref: "private:window", revision: "w1", coverage: "OBSERVED_WINDOW" }, value: window } };
   return { result, selection, context, reads, projection: projectOffice(reads, context) };
 }
-function Harness({ projection, readResult }: { projection: OfficeProjection; readResult: MissionResultRead }) {
+function Harness({ projection, readResult, locale }: { projection: OfficeProjection; readResult: MissionResultRead; locale?: "en" | "zh-CN" }) {
   const [drafts, setDrafts] = useState(() => emptyDrafts(projection.context.authGeneration));
   const latest = useRef(drafts); latest.current = drafts;
   const context = projection.context;
@@ -50,7 +50,7 @@ function Harness({ projection, readResult }: { projection: OfficeProjection; rea
     if (next === latest.current) return false;
     latest.current = next; setDrafts(next); return true;
   };
-  return <ConversationWindow projection={projection} readResult={readResult}
+  return <ConversationWindow projection={projection} readResult={readResult} locale={locale}
     draft={readDraft(drafts, context)} draftRevision={readDraftRevision(drafts, context)} draftInsertion={readDraftInsertion(drafts, context)}
     onDraftChange={text => publish(writeDraft(latest.current, context, text))}
     onAppendSource={(source, revision) => publish(appendDraftSource(latest.current, context, revision, source))}
@@ -182,5 +182,89 @@ describe("exact result source to original unsent draft", () => {
       draftRevision={0} draftInsertion={null} appendAvailable={false} onAppend={() => false} onUndo={() => false} onClose={() => {}} onEditDraft={() => {}} />);
     await screen.findByText("Result content is unavailable. No excerpt can be added.");
     expect(read).not.toHaveBeenCalled();
+  });
+});
+
+const readerLocales = [
+  { locale: undefined, evidence: "Review evidence", open: "Read exact result source", reader: "Result source reader",
+    loading: "Reading the exact result…", add: "Add result summary to draft", undo: "Undo source insertion",
+    back: "Back to evidence", close: "Close evidence", recheck: "Recheck exact result", added: "Added to draft · Not sent",
+    removed: "Source insertion removed. Your original draft is preserved.", unavailable: "Result content is unavailable. No excerpt can be added.",
+    excerpt: "Exact summary excerpt", freshness: "Freshness unverified", acceptance: "Acceptance not projected" },
+  { locale: "zh-CN" as const, evidence: "审阅证据", open: "阅读精确结果来源", reader: "结果来源阅读器",
+    loading: "正在读取精确结果…", add: "将结果摘要加入草稿", undo: "撤销来源插入",
+    back: "返回证据", close: "关闭证据", recheck: "重新核对精确结果", added: "已加入草稿 · 未发送",
+    removed: "已移除来源插入。原始草稿已保留。", unavailable: "结果内容不可用。无法加入摘要。",
+    excerpt: "精确摘要片段", freshness: "新鲜度未经核验", acceptance: "未提供验收状态" },
+];
+
+describe("result reader presentation follows the conversation locale", () => {
+  it.each(readerLocales)("keeps exact source and draft bytes through $locale add, Undo and nested focus", async labels => {
+    const f = await fixture(), before = JSON.stringify(f.result);
+    let resolve!: (value: unknown) => void;
+    const read = vi.fn().mockImplementation(() => new Promise(yes => { resolve = yes; }));
+    render(<Harness projection={f.projection} readResult={read} locale={labels.locale} />);
+    const original = "Keep my exact question.\n原始问题";
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: original } });
+    fireEvent.click(screen.getByRole("button", { name: labels.evidence }));
+    fireEvent.click(screen.getByRole("button", { name: labels.open }));
+    expect(screen.getByText(labels.loading)).toBeTruthy();
+    await act(async () => resolve(f.result));
+    const reader = screen.getByRole("region", { name: labels.reader });
+    expect(document.activeElement).toBe(reader);
+    expect(screen.getByRole("heading", { name: labels.excerpt })).toBeTruthy();
+    expect(reader.textContent).toContain(labels.freshness);
+    expect(reader.textContent).toContain(labels.acceptance);
+    expect(reader.querySelector("blockquote")!.textContent).toBe(f.result.result.content.summary);
+    expect(read).toHaveBeenCalledExactlyOnceWith({ ...f.selection, signal: expect.any(AbortSignal) });
+    const add = screen.getByRole("button", { name: labels.add });
+    fireEvent.click(add); fireEvent.click(add);
+    const sourceLabel = `Executive review result · ${f.selection.workRef} · ${f.selection.jobId} · Revision ${f.selection.resultEnvelopeDigest} · CURRENT observation · Freshness unverified · Acceptance not projected`;
+    expect(screen.getByRole<HTMLTextAreaElement>("textbox").value).toBe(`${original}\n\n“${f.result.result.content.summary}”\nSource: ${sourceLabel}`);
+    expect(document.activeElement).toBe(screen.getByText(labels.added));
+    fireEvent.click(screen.getByRole("button", { name: labels.undo }));
+    expect(screen.getByRole<HTMLTextAreaElement>("textbox").value).toBe(original);
+    expect(document.activeElement).toBe(screen.getByText(labels.removed));
+    fireEvent.click(screen.getByRole("button", { name: labels.back }));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: labels.open }));
+    fireEvent.click(screen.getByRole("button", { name: labels.close }));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: labels.evidence }));
+    expect(JSON.stringify(f.result)).toBe(before);
+  });
+
+  it.each(readerLocales)("localizes $locale read failures and explicit recheck without duplicate reads", async labels => {
+    const f = await fixture(); let resolve!: (value: unknown) => void;
+    const read = vi.fn().mockRejectedValueOnce(new Error("synthetic unavailable"))
+      .mockImplementationOnce(() => new Promise(yes => { resolve = yes; }));
+    render(<Harness projection={f.projection} readResult={read} locale={labels.locale} />);
+    fireEvent.click(screen.getByRole("button", { name: labels.evidence }));
+    fireEvent.click(screen.getByRole("button", { name: labels.open }));
+    await screen.findByText(labels.unavailable);
+    const recheck = screen.getByRole("button", { name: labels.recheck });
+    fireEvent.click(recheck); fireEvent.click(recheck);
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(screen.getByText(labels.loading)).toBeTruthy();
+    expect(read.mock.calls[1][0]).toEqual({ ...f.selection, signal: expect.any(AbortSignal) });
+    await act(async () => resolve(f.result));
+    expect(screen.getByRole("heading", { name: labels.excerpt })).toBeTruthy();
+    expect(screen.getByRole("region", { name: labels.reader }).querySelector("blockquote")!.textContent).toBe(f.result.result.content.summary);
+  });
+
+  it("updates an open reader and notice on locale switch without another read or insertion identity", async () => {
+    const f = await fixture(), read = vi.fn().mockResolvedValue(f.result);
+    const view = render(<Harness projection={f.projection} readResult={read} />);
+    await openReader();
+    fireEvent.click(screen.getByRole("button", { name: "Add result summary to draft" }));
+    const inserted = screen.getByRole<HTMLTextAreaElement>("textbox").value;
+    const status = screen.getByText("Added to draft · Not sent");
+    view.rerender(<Harness projection={f.projection} readResult={read} locale="zh-CN" />);
+    expect(screen.getByRole("region", { name: "结果来源阅读器" })).toBeTruthy();
+    expect(screen.getByText("已加入草稿 · 未发送")).toBe(status);
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "将结果摘要加入草稿" }).disabled).toBe(true);
+    expect(screen.getByRole<HTMLTextAreaElement>("textbox").value).toBe(inserted);
+    expect(read).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "撤销来源插入" }));
+    expect(screen.getByRole<HTMLTextAreaElement>("textbox").value).toBe("");
+    expect(document.activeElement).toBe(screen.getByText("已移除来源插入。原始草稿已保留。"));
   });
 });
