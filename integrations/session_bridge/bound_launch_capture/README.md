@@ -178,8 +178,9 @@ This delta does not assemble an attestation or authenticate evidence. The
 actual producer must still invoke both complete START validators using a fresh
 original-handle image, an independently pinned binary and actual qualified
 realm/attendance/Capacity/workspace/HOME/TMP/isolation/canary/assignment inputs.
-The runner still has no retained stdout/stderr/result file producer for the
-shared START contract. A caller cannot fill those paths with invented names.
+The runner reserves fixed private stdout/stderr/result files on the original
+handle before spawn. START requires their live FD, path, inode, principal,
+mode and single-link identity; caller filenames alone cannot satisfy it.
 No factory, public bound CLI, profile, installed service or provider is enabled.
 
 ### Assembler integration from the original paid return
@@ -197,8 +198,53 @@ exception semantics, original finisher and reconciliation hold.
 The shared original launch codec requires a 40-hex Git base; this is distinct
 from the 64-hex evidence digests. Capture filenames supplied by a caller cannot
 unlock this assembler: they must already be bound on the original handle by
-its actual file producer. The current runner has no such producer, so this
-requirement is deliberately unresolved in production. Named qualification
+its actual file producer. The integrated opt-in producer supplies those live
+files; actual owner and realm qualification remain required in production. Named qualification
 records are structural inputs, never authenticated grants. Actual issuer,
 realm, credential, attendance, Capacity and isolation qualification still belong
 to the existing owners; this source supplies none of them and enables no factory.
+
+
+### Fixed original-owner capture and cancellation
+
+`_begin_reserved_attended_under_lease(owned_capture=True, **kwargs)` takes the
+run directory and result schema from the exact prepared descriptor. Its
+assignment observation comes from the original request's isolation manifest
+and fixed BrokerPolicy: Control-owned run/store roots, actual WorkerGID and
+pinned device/inode/mode/principal. This mapping is correlation and filesystem
+observation; it cannot serialize or replace ControlStartAuthority. The public
+CLI remains closed for bound legacy fallback; capture-off behavior is unchanged.
+
+The same collector threads tee to exclusive 0600, nofollow, single-link files
+under pinned private logs/output directories. The original finisher proves
+EOF and joins, full-stream byte count/digest, file fsync/readback, parent fsync
+and FD closure. It calls the existing supported-Claude `_parse_cli_result`
+and canonical schema validator by lazy import. Missing canonical code refuses
+before spawn when capture is enabled. Invalid output stays invalid; failed
+result bytes are preserved. Live writers, overflow, changed identity, close or
+durability uncertainty remain unqualified and retain the original lease.
+
+`owned_capture_collection(owner)` returns defensive mappings plus immutable
+`stdout` and `stderr` bytes from that one finisher. Its fields are `run_id`,
+`stdout`, `stderr`, `capture`, `returncode`, `timed_out`, `finished_at`,
+`cleanup`, and `cancel_receipt`. `capture.stdout`/`capture.stderr` retain
+`stream_bytes`, `stream_sha256`, `file_bytes`, `file_sha256`, completeness and
+error facts; `capture.files` retains the original file and parent identities.
+This is an observation for a canonical result projection, not WorkerResult,
+Git/artifact validation, UID sweep or assignment ACK.
+
+`cancel_exact_owned_process` returns the unchanged raw group cleanup fields
+and separate `cancel_receipt` with exact `run_id`, original `reason`, actual
+`signal_sent`, `escalated_to_sigkill`, `already_exited` and `finished_at`.
+Reason validation matches the real bridge and preserves whitespace exactly;
+only the log label is normalized. One original cancellation entry is consumed
+before signaling. The same successful request returns its retained observation
+without signaling again; a changed reason or uncertain attempt refuses.
+Completed-owner cleanup comes from its retained private record.
+
+Assembly entry and durable publication have separate once-only fences. A
+failed or cancelled assembly cannot be reopened by repairing caller inputs.
+Successful capture/group settlement does not authorize the Backend to release
+its original assignment slot or lease before real Control seal, worker denial
+and durable Supervisor ACK. No installer, profile, issuer, credential, host
+probe or production activation is included in this source change.

@@ -74,7 +74,7 @@ def OwnerFixture(world):
 class World:
     """One inert, fully qualified fixture world; nothing here is production."""
 
-    def __init__(self):
+    def __init__(self, run_dir=RUN_DIR):
         self.euid = os.geteuid()
         self.egid = os.getegid()
         self.worker_user = pwd.getpwuid(self.euid).pw_name
@@ -121,14 +121,15 @@ class World:
                   "--json-schema", "{}"),
             stdin_text=PROMPT,
             environment=MappingProxyType({
-                "HOME": RUN_DIR + "/home", "TMPDIR": RUN_DIR + "/tmp",
+                "HOME": run_dir + "/home", "TMPDIR": run_dir + "/tmp",
                 "PATH": "/usr/bin:/bin", "LANG": "C.UTF-8",
                 "ANTHROPIC_MODEL": "inert-model-1",
                 "ANTHROPIC_BASE_URL": "https://inert.example.invalid",
             }),
-            workspace_path=WORKSPACE, run_dir=RUN_DIR,
-            provider_home=RUN_DIR + "/home", provider_tmp=RUN_DIR + "/tmp",
+            workspace_path=WORKSPACE, run_dir=run_dir,
+            provider_home=run_dir + "/home", provider_tmp=run_dir + "/tmp",
             model="inert-model-1", settings_sha256=D("settings"),
+            result_schema_json='{"type":"object"}',
             preparation_only=True, start_authorized=False)
         self.owner = OwnerFixture(self)
         self.owner.inert_image = dict(self.image)
@@ -157,8 +158,8 @@ class World:
         }
         self.spec = {
             "run_id": self.run_id, "job_id": JOB_ID, "worker_id": WORKER_ID,
-            "prompt": PROMPT, "workspace_path": WORKSPACE, "run_dir": RUN_DIR,
-            "result_schema_path": RUN_DIR + "/input/schema.json",
+            "prompt": PROMPT, "workspace_path": WORKSPACE, "run_dir": run_dir,
+            "result_schema_path": run_dir + "/input/schema.json",
             "authorities": ["READ"], "authority": None,
             "model": "inert-model-1", "reasoning_effort": "xhigh",
             "timeout_seconds": 1800.0, "cancel_grace_seconds": 10.0,
@@ -199,13 +200,13 @@ class World:
                            "source": "inert:assignment-owner"},
             "finite_home_tmp": {"evidence_sha256": D("home-tmp"),
                                 "source": "inert:filesystem-owner",
-                                "home_path": RUN_DIR + "/home",
-                                "tmp_path": RUN_DIR + "/tmp"},
+                                "home_path": run_dir + "/home",
+                                "tmp_path": run_dir + "/tmp"},
         }
         self.capture = {
-            "stdout_path": RUN_DIR + "/output/stdout",
-            "stderr_path": RUN_DIR + "/output/stderr",
-            "result_path": RUN_DIR + "/output/result.json",
+            "stdout_path": run_dir + "/logs/stdout.json",
+            "stderr_path": run_dir + "/logs/stderr.log",
+            "result_path": run_dir + "/output/result.json",
         }
         self.workspace_identity = {
             "path": WORKSPACE, "device": 7, "inode": 99, "uid": self.euid,
@@ -213,7 +214,7 @@ class World:
             "mtime_ns": 1700000000000000000, "git_head": D("base")[:40],
         }
         self.provider_home_identity = {
-            "path": RUN_DIR + "/home", "device": 7, "inode": 100,
+            "path": run_dir + "/home", "device": 7, "inode": 100,
             "uid": self.euid, "gid": self.egid, "mode": 0o40700,
             "mtime_ns": 1700000000000000000,
         }
@@ -248,7 +249,9 @@ class World:
 def world(lr, tmp_path, monkeypatch):
     global LANE
     LANE = lr
-    value = World()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(mode=0o700)
+    value = World(str(run_dir))
     owner = value.owner
     owner._invocation = dict(command=list(value.descriptor.argv),
         cwd=value.descriptor.workspace_path, shell=False,
@@ -259,7 +262,11 @@ def world(lr, tmp_path, monkeypatch):
         request_sha256=BRIDGE.start_request_sha256(value.material),
         physical_binding_sha256=value.physical.digest)
     owner._original_start_receipt_path = tmp_path / 'original.start.json'
-    owner._original_capture_paths = dict(value.capture)  # INERT missing producer fixture only
+    monkeypatch.setattr(lr, '_EXECUTION_OWNER', owner)
+    owner._capture_reservation = lr._OwnedCaptureReservation.create(str(run_dir),
+        result_schema_json=value.descriptor.result_schema_json, limit_bytes=1024 * 1024)
+    owner._original_capture_paths = lr.owned_capture_paths(owner)
+    assert owner._original_capture_paths == value.capture
     value.holds = []
     owner._original_lease = SimpleNamespace(hold_for_reconciliation=value.holds.append)
     value.finisher = object()
@@ -278,7 +285,10 @@ def world(lr, tmp_path, monkeypatch):
         value.authority_checks.append(material)
     monkeypatch.setattr(producer, '_require_control_authority', inert_authority)
     yield value
-    # This owner was never launched, so the shared fixture must not signal it.
+    # Actual private FD reservation is tested; kernel/issuer remain inert.
+    reservation = owner._capture_reservation
+    if reservation is not None and not reservation._closed:
+        reservation.close_fds_only()
     monkeypatch.setattr(lr, '_EXECUTION_OWNER', None)
 
 
@@ -425,18 +435,32 @@ def test_git_base_is_not_a_generic_sha256_evidence_digest(world, base):
         producer.publish_owned_start(**world.kwargs())
 
 
-def test_unretained_preparation_and_dead_child_never_publish(world):
-    world.owner._original_preparation = None
-    with pytest.raises(producer.OwnedStartRefused, match='prepared_descriptor_invalid'):
-        producer.publish_owned_start(**world.kwargs())
-    world.owner._original_preparation = world.descriptor
-    world.owner.process._returncode = 0
-    with pytest.raises(producer.OwnedStartRefused, match='owned_image_unqualified'):
+@pytest.mark.parametrize('condition', ['missing_preparation', 'dead_child'])
+def test_unretained_preparation_and_dead_child_never_publish(world, condition):
+    if condition == 'missing_preparation':
+        world.owner._original_preparation = None
+        reason = 'prepared_descriptor_invalid'
+    else:
+        world.owner.process._returncode = 0
+        reason = 'owned_image_unqualified'
+    with pytest.raises(producer.OwnedStartRefused, match=reason):
         producer.publish_owned_start(**world.kwargs())
 
 
 def test_default_public_path_stays_closed():
     assert producer.main() != 0
+
+
+def test_plausible_paths_without_original_pinned_capture_files_refuse(world):
+    world.owner._capture_reservation.close_fds_only()
+    # The inert issuer/image fixture is intentionally otherwise valid. A dict
+    # attached to the live owner is still not the original file producer.
+    assert world.owner._original_capture_paths == world.capture
+    with pytest.raises(producer.OwnedStartRefused, match='capture'):
+        producer.publish_owned_start(**world.kwargs())
+    assert not world.owner._original_start_receipt_path.exists()
+    assert world.owner._finisher is world.finisher
+    assert world.owner.process.poll() is None
 
 
 ORIGINAL_AUTHORITY_GUARD = producer._require_control_authority

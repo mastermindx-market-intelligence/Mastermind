@@ -198,3 +198,19 @@ def test_reserved_seam_binds_real_descriptor_request_and_carrier_before_spawn(tm
         assert owner._original_start_context['request_sha256'] == prepared.request_sha256
         assert owner._original_start_context['binding'] == payload['binding']
         assert commands == prepared.validation_commands and len(effects) == 1
+
+
+def test_capture_option_does_not_escape_actual_strict_preparation_signature(tmp_path,monkeypatch):
+    """Actual source functions reject inert authority before any preparation/effect."""
+    from control_plane.fabric_control_start import ControlStartRefused
+    from integrations.session_bridge.bound_launch_capture import fabric_reserved_attended_launch
+    monkeypatch.setitem(__import__('sys').modules,'fabric_reserved_attended_launch',fabric_reserved_attended_launch)
+    source=patched(tmp_path,'remote_sub_exec.py','EXECUTOR_SOURCE.json')
+    names={'_prepare_reserved_attended_under_lease','_begin_reserved_attended_under_lease'}
+    nodes=[node for node in ast.parse(source).body if isinstance(node,ast.FunctionDef) and node.name in names]
+    ns=dict(json=json,Path=Path,os=os,LaneRuntimeError=RuntimeError)
+    exec(compile(ast.Module(body=nodes,type_ignores=[]),'<actual-capture-option-composition>','exec'),ns)
+    with pytest.raises(ControlStartRefused,match='authenticated_original_owner_required'):
+        ns['_begin_reserved_attended_under_lease'](owned_capture=True,payload={},authority=object(),
+            preparation={},lease=object(),state={},key='original',receipt=tmp_path/'receipt',
+            nice=0,check_original_owner=lambda _: None)

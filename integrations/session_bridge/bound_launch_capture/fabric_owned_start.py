@@ -429,11 +429,9 @@ def _require_canary(spec: Mapping[str, Any]) -> dict[str, Any]:
 def _capture_paths(capture_paths: Any, run_dir: str) -> dict[str, str]:
     """Require the existing capture/result ownership paths; never mint names.
 
-    The installed lane owner retains bounded capture in memory and writes the
-    terminal process receipt; no established stdout/stderr/result file
-    producer exists in the provided sources.  This module therefore never
-    invents paths under run_dir: the owner must supply the exact existing
-    paths from its own capture ownership, or publication stays refused.
+    The opt-in original owner reserves fixed private stdout/stderr/result
+    files before spawn. Names supplied here must match that live reservation;
+    the pinned FD validator at publication supplies the file observation.
     """
     paths = _require_mapping(capture_paths, "capture_paths")
     if set(paths) != _CAPABILITY_PATH_KEYS or any(paths[key] is None for key in _CAPABILITY_PATH_KEYS):
@@ -686,11 +684,16 @@ def _publish_owned_start(
     if tuple(descriptor.argv)[0] != binary_pin.real_path:
         _refuse("descriptor_executable_mismatch")
     capture = _capture_paths(capture_paths, spec["run_dir"])
-    # The current runner has only memory capture and no such producer. The
-    # future original file producer must bind its own paths on this handle;
-    # plausible caller filenames alone cannot unlock complete START.
+    # Caller filenames are correlation only; the live original reservation
+    # proves the fixed files and retained FDs at this boundary.
     if getattr(owner, '_original_capture_paths', None) != capture:
         _refuse('original_capture_binding_required')
+    try:
+        live_capture = lane_runtime.validate_owned_capture_live(owner)
+        if {k: v['path'] for k, v in live_capture['files'].items()} != capture:
+            _refuse('original_capture_binding_required')
+    except lane_runtime.LaneRuntimeError as exc:
+        _refuse('original_capture_binding_required', str(exc))
 
     process_ref, attestation, result = _build_receipt(
         spec=spec, binding=binding, descriptor=descriptor, image=image,
@@ -723,6 +726,14 @@ def _publish_owned_start(
     if final_image != image:
         _refuse('owned_image_changed_before_publication')
     _require_control_authority(authority, material)
+    try:
+        if {k: {f: v[f] for f in ('path', 'device', 'inode')} for k, v in
+                lane_runtime.validate_owned_capture_live(owner)['files'].items()} != {
+                    k: {f: v[f] for f in ('path', 'device', 'inode')}
+                    for k, v in live_capture['files'].items()}:
+            _refuse('original_capture_changed_before_publication')
+    except lane_runtime.LaneRuntimeError as exc:
+        _refuse('original_capture_changed_before_publication', str(exc))
 
     record = {
         "schema": RECORD_SCHEMA,
@@ -765,8 +776,12 @@ def publish_owned_start(*, original: Mapping[str, Any], owner: Any,
     """
     lane = _import('lane_runtime')
     lane._require_owned_execution(owner)
-    if owner._start_publication_attempted:
+    if owner._start_assembly_attempted or owner._start_publication_attempted:
         _refuse('start_publication_already_attempted')
+    # The original begun handle has exactly one assembly/publication entry.
+    # Repairing caller inputs cannot reopen a refused or cancelled attempt.
+    # The separate retention flag still fences the actual durable write.
+    owner._start_assembly_attempted = True
     try:
         return _publish_owned_start(original=original, owner=owner,
             authority=authority, physical=physical, binary_pin=binary_pin,

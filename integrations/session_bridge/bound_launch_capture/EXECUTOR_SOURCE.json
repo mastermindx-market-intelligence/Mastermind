@@ -1,8 +1,34 @@
 {
   "source_sha256": "c6b4292cdb7d106d5b376587f29276da1550e5eee02268f479abd7ad2ea61189",
-  "candidate_sha256": "1384dcb7ddf06f388c05342f5328b624edbd0220bbfb8b447fec826340c626f8",
+  "candidate_sha256": "4bef963ba4f4ec32230b9d932d4b9f23485b565368b3211eb6da562563d44ba5",
   "classification": "SOURCE_ONLY_UNINSTALLED",
-  "patch_sha256": "a82bb3b26c36be65dc611c8ac47fe8ee4d4e0bafc3e388febaf925879ab3dcf0",
-  "validation": "79 affected source checks PASS, including nested 76 early receipt/identity checks; inert/local-child mechanics only, SOURCE_ONLY_UNINSTALLED",
-  "parent_delta": "Original invocation/start time/nonce retained on live handle, prepared descriptor and original request/carrier prebound; once-only private START retention mechanics. Full attestation and host issuer remain outside this delta."
+  "patch_sha256": "21f8a4d753ef100d3e407f5c947b464ed2d11af02ba0a7e2829c66a0b63c74ee",
+  "validation": "Final combined fixture/materialized checks retained in CAPTURE_ASSEMBLY_FINAL_v3.xml; source-only local-child FD/pipe mechanics and inert identity/issuer fixtures. Nested early-receipt checks are included in one outer node, never added to the outer count.",
+  "parent_delta": "Original prepared descriptor/private FD capture and canonical parser; Control-manifest run/store coordinates; entry-once publication; exact reason/real cancellation telemetry; sole-finisher immutable terminal bytes; uncertainty retains original lease and no replay.",
+  "original_symbols": 5,
+  "changed_existing_symbols": [
+    "_execute"
+  ],
+  "added_symbols": [
+    "_run_lease_process",
+    "_prepare_reserved_attended_under_lease",
+    "_run_reserved_attended_under_lease",
+    "_retain_original_cleanup_hold",
+    "_begin_lease_process",
+    "_begin_reserved_attended_under_lease"
+  ],
+  "capture_worker": {
+    "id": "fabric-owned-capture-build-01a11e90-v1",
+    "result_bytes": 4134,
+    "result_sha256": "d938fd841d9838d33b45b7e1fbd7cd9456162ce790f9c6e64b799e18f9f82a56",
+    "exported_patch_sha256": "9a3417da4c1b8cdc7e87cbf2e192d5623f9d371cd1fad760ecba471aa5a1fd88",
+    "classification": "NOT_ACCEPTED_AS_PRODUCED; coordinator corrections integrated"
+  },
+  "limits": [
+    "SOURCE_ONLY_UNINSTALLED",
+    "PRE_EXEC remains immutable and does not prove exec",
+    "Capture and group cleanup are not authenticated realm, dedicated UID sweep, assignment seal or Supervisor ACK",
+    "No production factory, public bound CLI, profile, credential, enrollment, service or host activation",
+    "Original lease/exclusion must remain through actual assignment seal/worker denial/durable Supervisor ACK"
+  ]
 }
