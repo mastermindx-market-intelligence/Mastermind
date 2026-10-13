@@ -1390,6 +1390,7 @@ class PrivilegedActionBroker:
             commitment_bytes = (
                 json.dumps(commitment, sort_keys=True, separators=(",", ":")) + "\n"
             ).encode("utf-8")
+            recovery.preflight_recovery_custody()
         except (recovery.RecoveryError, recovery._readiness.ReadinessError) as exc:
             # Every derivation refusal leaves this exact bounded broker refusal;
             # no readiness, custody or trust error escapes untyped.
