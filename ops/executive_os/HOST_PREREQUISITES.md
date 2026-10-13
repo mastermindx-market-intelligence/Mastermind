@@ -1058,7 +1058,8 @@ ordinary class — refuses with `recovery_failure_cause_unproven` before any
 claim, archive, reservation or provider call. No flag, config key, environment
 value, receipt field or raw JSON attribute can extend that table, and this
 release ships **no ordinary grant creator**, so qualified ordinary evidence
-cannot be minted on the host. The separate incident issuer below is dormant.
+cannot be minted on the host. The separate exact-incident policy below does not
+extend ordinary admission.
 
 The grant is a separate root-owned document at the fixed internal path
 `/var/db/mastermind-executive/provider-recovery/current-pin/grant.json`,
@@ -1112,17 +1113,23 @@ admission is closed, not an available procedure. Enabling it requires a new
 source review that adds a qualified producer to the table plus an
 authority-installed grant; both are out of scope for this runbook.
 
-### Dormant incident exception is distinct from ordinary recovery
+### Source-authorized exact incident exception is distinct from ordinary recovery
 
 The internal broker action `executive.worker_auth.issue_due10_incident_grant`
 accepts only a designated successor ID and an explicit original issuer request
-ID. It has no shell executor or policy override. Production
-`PRODUCTION_INCIDENT_POLICY` is **None**: no grant, commitment, window or
-allocation can be created by this action today. Ordinary-only authorization
-cannot enable it. A future source change would have to bind the actual separate
-human question, answer and retained provenance in a reviewed immutable policy,
-then pass protected release, installation and all current host gates. Hashes
-reference those records; they are not cryptographic proof of a chat decision.
+ID. It has no shell executor or policy override. `PRODUCTION_INCIDENT_POLICY`
+now binds the actual separate human authorization for exactly the designated
+Due10 terminal/readiness pair despite both historical unknowns. It carries the
+reviewed question, answer and retained provenance digests; hashes reference
+those private retained records and are not cryptographic proof of a chat decision.
+
+This source binding creates no grant, commitment, successor, time window or
+allocation. Protected landing, installation of this exact policy and all fresh
+host gates remain necessary before invoking the existing authenticated issuer.
+Ordinary-only authorization remains insufficient for other unknown incidents;
+there is no caller flag, environment, JSON policy or general retry permission.
+The one non-refundable attempt has no retry after failure or uncertainty. The
+separately refused C1 Mission remains frozen.
 
 This schema preserves the designated incident's cause as `UNKNOWN` and its
 request-to-readiness attribution as `NOT_ESTABLISHED`. It records that raw
@@ -1130,10 +1137,11 @@ provider messages were not retained, without asserting absence of a denial.
 Known relevant denial evidence excludes use; the separately refused C1 Mission
 remains frozen. No incident record enters the ordinary producer/cause table.
 
-If a future installed policy were qualified, the authenticated existing broker
-would derive current source and identity, verify the exact designated historical
+After this exact reviewed policy is protected and installed, the authenticated
+existing broker derives current source and identity, verifies the exact
+designated historical
 terminal/readiness evidence, current markers, lock and process guards, then
-create an immutable grant and commitment. The commitment binds grant, policy,
+creates an immutable grant and commitment. The commitment binds grant, policy,
 issuer and successor; the successful broker terminal's stdout digest binds the
 actual commitment bytes. Consumption requires that join, absent issuer inflight
 markers, the same installed policy and current revalidation of the designated
@@ -1144,9 +1152,10 @@ Both recovery classes share the fixed exclusive allocation and one nonrefundable
 budget. Partial issuance preserves the original operation and evidence as
 uncertain; it has no replacement, refund or issuer `NOT_APPLIED` route. Historical
 successor status and reconciliation can read the immutable issued records after
-expiry or policy deactivation, without opening a new readiness effect. The
-test-only positive fixture exercises issuance through finalization; it is not a
-production activation, grant, permission or recovered readiness result.
+expiry or policy deactivation, without opening a new readiness effect. The issuer
+derives its finite window at actual issuance, not source activation.
+The test-only positive fixture exercises issuance through finalization; it is
+not a production grant, permission, allocation or recovered readiness result.
 
 This install-before-readiness order is deliberate, not circular: `install.sh`
 requires strong structural auth metadata (exact worker UID/GID, mode `0600`,
