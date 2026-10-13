@@ -69,8 +69,13 @@ requires source reconciliation; no hand-restamped digest repairs it.
 ## Qualification boundary
 
 Tests exercise actual Runtime admission, independent review, terminal receipts,
-COMMIT fencing and the MCP SDK. Their provider and Relay messages are explicit
-fixtures. They do not establish authenticated delivery, principal judgment,
+COMMIT fencing and the MCP SDK. The Relay composition tests also run the actual
+V2 engine, service dispatcher and serializer with an in-memory Slack transport
+and an injected authority-policy fixture. They reject an unauthorized physical
+sender, a reply preceding its request, duplicate replies, edited or incomplete
+history, and a ruling below the required authority floor, without sending a
+message. Their provider results and message contents remain explicit fixtures.
+They do not establish authenticated delivery, principal judgment,
 installed provider schema support, Office presentation or the seven-day R2
 campaign. Qualified source/CI, protected merge, installation and observed original
 parent consumption remain separate delivery facts.
