@@ -51,6 +51,14 @@ The script delta is in [host_pick_collector.patch](host_pick_collector.patch). T
 
 **Capability state:** `PROVEN_LIVE` for installed collector cadence and new-job admission/ranking at M2, `NOT_PROVEN` for sustained temperature reduction / throughput performance under representative load. This branch is a source/evidence record; creating this PR does **not** install anything across all accounts or hosts.
 
+## Continuous thermal trend in the original Fabric log
+
+The existing `host_pull_backend.py` now prints **only validated numeric fields** (`tctl_c`, `load1`, `cpu_busy_pct`, `active_lanes`) alongside its existing per-host `reachable` response. These lines are captured by the same supervised `state/host_pull.log`, at the 60-second collector cadence. The canonical host snapshot `state/hosts/<host>.json` remains the sole host picker input; this log adds no scheduler, history authority, remote agent, listening socket or admission condition. Its text diff is in [collector_trend_logging.patch](collector_trend_logging.patch).
+
+The backend's installed SHA-256 changed from `6c10385be89c32627bbb87a5f088e36e849de84b0635f02d460138d8e6884ad5` to `fb68aa42f8b06c7a8929f68b066953e12dc42efa219ae30d1c674b0e346bf87b`; original backup `host_pull_backend.py.bak-thermal-trend-20261013` is retained on M2. Validated candidate code in an isolated temporary telemetry state, then ran the original host collector against Ubuntu 2/3 using a second **isolated temporary state directory** (without touching their Fabric state or workers). Result: `reachable=true`, observed Tctl/load/CPU busy/active lanes with matching generated JSON. Later, the **already-running original LaunchAgent** wrote real lines for all four Ubuntu nodes at 08:57Z on October 13, 2026. LaunchAgent PID 87840 stayed unchanged; no restart or extra collector was needed.
+
+This retains periodic snapshots sufficient to inspect future under-load trends, not high-resolution millisecond thermal telemetry, a persistent remote streaming connection or proof of active CPU heat control. The existing log's long-term rotation/retention should be checked by its owner before interpreting it as unlimited historical storage.
+
 ## Remaining in-scope work and honest boundary
 
 The 9950X is a 170W TDP desktop CPU with a 95°C Tjmax. Boosting toward 95°C under sustained CPU workloads can be normal, but offers little reserved headroom. New-job gating does not reduce the power consumed by incumbents. To improve **physical thermal headroom** on Ubuntu 2/3, inspect each host's real BIOS/PBO/Eco Mode, cooler and case airflow, and actual available Linux `amd-pstate` governor/EPP support through an authorized host administrator. Favor a reversible BIOS **105W Eco Mode** (if supported) with baseline settings recorded before any change; avoid unverified undervolting, custom firmware writes, or untested OS-side power caps. Ubuntu 0 has a different CPU/thermal envelope: do not apply desktop 9950X settings to it.
