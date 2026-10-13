@@ -511,6 +511,87 @@ describe("closed mission decoder", () => {
 });
 
 describe("actual Control Room shape", () => {
+  it.each([
+    ["overlong", "x".repeat(1025)],
+    ["private URL", "Inspect https://example.invalid/private-note"],
+    ["private path", "Inspect /private/fixture-note"],
+    ["credential-shaped", "token=synthetic-fixture"],
+    ["control byte", "Inspect\u0000fixture"],
+    ["private suffix beyond budget", "x".repeat(1024) + " token=synthetic-fixture"],
+  ])("withholds only the %s next action without losing projects or identities", (_, unsafe) => {
+    const raw: any = controlRoomFixture();
+    raw.work[0].agent_os.next_action = unsafe;
+    const before = clone(raw), result = programsFromControlRoom(raw);
+    expect(result.state).toBe("AVAILABLE");
+    expect(result.programs).toHaveLength(2);
+    expect(result.programs[0]).toMatchObject({
+      workRef: "WS:ALPHA", title: "Alpha program", nextAction: null,
+      nextActionWithheld: true, rootJobId: "JOB-A", rootState: "RESOLVED",
+      rootCandidates: ["JOB-A"],
+    });
+    expect(result.programs[1]).toMatchObject({
+      workRef: "WS:BETA", nextAction: "Open Beta program", nextActionWithheld: false,
+      rootJobId: "JOB-B", rootState: "RESOLVED",
+    });
+    expect(JSON.stringify(result)).not.toContain(JSON.stringify(unsafe).slice(1, -1));
+    expect(raw).toEqual(before);
+  });
+  it.each([null, "", "Read the returned evidence", "x".repeat(1024)])(
+    "keeps a missing, empty or qualified next action distinct from withheld (%#)", (value) => {
+      const raw: any = realControlRoomFixture();
+      raw.work[0].agent_os.next_action = value;
+      expect(programsFromControlRoom(raw).programs[0]).toMatchObject({
+        nextAction: value, nextActionWithheld: false,
+      });
+    },
+  );
+  it.each([undefined, 42, false, [], { description: "invented" }])(
+    "rejects malformed next-action types instead of treating them as withheld (%#)", (value) => {
+      const raw: any = realControlRoomFixture();
+      raw.work[0].agent_os.next_action = value;
+      expect(programsFromControlRoom(raw)).toMatchObject({
+        programs: [], state: "UNAVAILABLE", reason: "AGENT_OS_ORIENTATION_INVALID",
+      });
+    },
+  );
+  it.each(["title", "state", "status"])("preserves the existing %s privacy guard", (field) => {
+    const raw: any = realControlRoomFixture();
+    raw.work[0].agent_os.next_action = "x".repeat(1025);
+    raw.work[0].agent_os[field] = "token=synthetic-fixture";
+    expect(programsFromControlRoom(raw)).toMatchObject({
+      programs: [], state: "UNAVAILABLE", reason: "AGENT_OS_ORIENTATION_INVALID",
+    });
+  });
+  it("keeps an absent Agent OS projection distinct from withheld text", () => {
+    const raw: any = realControlRoomFixture();
+    raw.work[0].agent_os = null;
+    expect(programsFromControlRoom(raw).programs[0]).toMatchObject({
+      title: null, state: null, nextAction: null, nextActionWithheld: false,
+      rootJobId: "JOB-B5", rootState: "RESOLVED",
+    });
+  });
+  it.each(["extra key", "generation", "duplicate work", "ambiguous root", "missing root"])(
+    "retains the %s fence when next-action text is withheld", (defect) => {
+      const raw: any = realControlRoomFixture();
+      raw.work[0].agent_os.next_action = "token=synthetic-fixture";
+      if (defect === "extra key") raw.work[0].agent_os.unexpected = null;
+      if (defect === "generation") raw.autonomy.generated_at = "2026-01-01T00:00:00Z";
+      if (defect === "duplicate work") raw.work.push(clone(raw.work[0]));
+      if (defect === "ambiguous root") raw.autonomy.responsibilities.push(clone(raw.autonomy.responsibilities[0]));
+      if (defect === "missing root") raw.autonomy.responsibilities = [];
+      const result = programsFromControlRoom(raw);
+      if (defect === "ambiguous root" || defect === "missing root") {
+        expect(result.state).toBe("AVAILABLE");
+        expect(result.programs[0]).toMatchObject({
+          nextAction: null, nextActionWithheld: true, rootJobId: null,
+          rootState: defect === "ambiguous root" ? "CONFLICT" : "UNKNOWN",
+        });
+      } else {
+        expect(result.state).toBe("UNAVAILABLE");
+        expect(result.programs).toEqual([]);
+      }
+    },
+  );
   it("decodes the frozen real compose_control_room fixture", () => {
     const result = programsFromControlRoom(realControlRoomFixture());
     expect(result).toMatchObject({

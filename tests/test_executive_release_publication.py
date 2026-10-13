@@ -19,12 +19,27 @@ ROOT = Path(__file__).resolve().parents[1]
 INSTALL = ROOT / "ops/executive_os/install.sh"
 
 WRAPPER = r'''#!/usr/bin/env python3
-import importlib.util, json, os, shutil, stat, sys
+import importlib.util, json, os, shutil, stat, subprocess, sys
 from pathlib import Path
 args = sys.argv[1:]
 mode = args.pop(0)
 fault = os.environ.get("FAULT", "")
 canonical = Path(os.environ["RELEASE_ROOT"])
+if mode == "git":
+    if fault not in {"archive-padding", "archive-producer-failure", "archive-corrupt"}:
+        os.execv("/usr/bin/git", ["/usr/bin/git", *args])
+    result = subprocess.run(["/usr/bin/git", *args], capture_output=True)
+    if result.returncode:
+        sys.exit(result.returncode)
+    payload = b"invalid tar data" if fault == "archive-corrupt" else result.stdout
+    if fault == "archive-padding":
+        payload += b"\0" * (2 * 1024 * 1024)
+    try:
+        sys.stdout.buffer.write(payload)
+        sys.stdout.buffer.flush()
+    except BrokenPipeError:
+        os._exit(141)
+    os._exit(79 if fault == "archive-producer-failure" else 0)
 if mode == "chown":
     sys.exit(0)  # Explicit root-ownership substitute only.
 if mode == "python":
@@ -104,9 +119,11 @@ def harness(tmp_path):
     block = 'if [ ! -d "$RELEASE_ROOT" ]; then' + block
     fake = shlex.quote(sys.executable) + " " + shlex.quote(str(wrapper))
     block = block.replace("/usr/sbin/chown", fake + " chown").replace("/bin/mv", fake + " mv")
+    block = block.replace("/usr/bin/git", fake + " git")
     env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "PYTHON_BINARY": str(python_wrapper),
            "REPO_ROOT": str(ROOT), "SYSTEM_ROOT": str(system), "SOURCE_REPO": str(source),
-           "EXPECTED_SHA": sha, "TREE_SHA": tree, "RELEASE_ROOT": str(canonical)}
+           "EXPECTED_SHA": sha, "TREE_SHA": tree, "RELEASE_ROOT": str(canonical),
+           "OS_WEB_ASSETS": ""}  # Backend-only installer default; optional path has its own harness.
     # The installer's cleanup only removes its still-owned staging pathname.
     cleanup = """trap 'if [ -n "$STAGING" ] && [ -d "$STAGING" ]; then /bin/rm -rf -- "$STAGING"; fi' EXIT\n"""
     script = 'set -euo pipefail\nSTAGING=""\n' + helper + "\n" + cleanup + block
@@ -118,6 +135,24 @@ def harness(tmp_path):
                                "--root", str(canonical), "--commit-sha", sha, "--tree-sha", tree],
                               env=env, capture_output=True, text=True)
     return canonical, system / "releases", run, verify
+
+
+def test_archive_padding_is_fully_consumed_before_publication(harness):
+    canonical, releases, run, verify = harness
+    result = run("archive-padding")
+    assert result.returncode == 0, result.stderr
+    assert (canonical / "payload.txt").read_text() == "reviewed release payload\n"
+    assert verify().returncode == 0
+    assert list(releases.iterdir()) == [canonical]
+
+
+@pytest.mark.parametrize("fault", ["archive-producer-failure", "archive-corrupt"])
+def test_archive_producer_or_extractor_failure_never_publishes(harness, fault):
+    canonical, releases, run, _ = harness
+    result = run(fault)
+    assert result.returncode != 0
+    assert not canonical.exists()
+    assert list(releases.iterdir()) == []
 
 
 @pytest.mark.parametrize("fault", ["create-before", "create-after", "verify-before", "verify-after", "publish-before"])

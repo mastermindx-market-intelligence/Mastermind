@@ -17,7 +17,7 @@ import uuid
 
 from common.agent_dialogue_consultation_contract import canonical_consultation_json
 from common.company_consultation_host_contract import (
-    HostFrameError, MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES, decode_request, encode_json_frame,
+    HostFrameError, MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES, decode_request, decode_json_frame, encode_json_frame,
 )
 from control_plane.consultation_runtime import (
     consultation_recipient_binding, consultation_requester_binding,
@@ -158,7 +158,7 @@ class CompanyConsultationHost:
     def __init__(
         self, *, runtime: Runtime, repository_root: Path, worker_uid: int,
         relay_socket_path: Path, workspace_id: str, channel_id: str,
-        inspector=None, requester_answer_wake_dispatch=None,
+        inspector=None, requester_answer_wake_dispatch=None, native_return_armed=False,
     ) -> None:
         if not isinstance(runtime, Runtime):
             raise TypeError("Company host requires canonical Runtime")
@@ -167,6 +167,9 @@ class CompanyConsultationHost:
         path = Path(relay_socket_path)
         if not path.is_absolute() or os.path.normpath(str(path)) != str(path):
             raise ValueError("Company host requires an absolute Relay socket")
+        if type(native_return_armed) is not bool:
+            raise TypeError("native return arm must be boolean")
+        self.native_return_armed = native_return_armed
         self.runtime = runtime
         self.repository_root = Path(repository_root).resolve(strict=True)
         self.worker_uid, self.relay_socket_path = worker_uid, path
@@ -179,6 +182,22 @@ class CompanyConsultationHost:
         ExecutiveConsultationPacketTargetResolver(
             runtime, workspace_id=workspace_id, channel_id=channel_id,
         )
+
+    def native_continuation_source(self):
+        """Compose the existing return owner for the trusted private service.
+
+        This is an internal composition port, not a tool or additional endpoint.
+        The service retains installed admission and current-writer checks.
+        """
+        if self.native_return_armed is not True:
+            raise StateConflict("native return composition is unarmed")
+        from integrations.session_bridge.runtime_owner import RuntimeCodexTargetProjector
+        from integrations.session_bridge.runtime_return import RuntimeSessionReturn
+        fabric = RuntimeFabricTargetProjector(self.runtime)
+        return RuntimeSessionReturn(self.runtime, fabric=fabric,
+            codex=RuntimeCodexTargetProjector(fabric,
+                owner_configured=lambda: self.native_return_armed),
+            socket_path=self.relay_socket_path)
 
     def _projector(self, *, root_job_id=None, job_id=None) -> RuntimeFabricTargetProjector:
         def jobs():
@@ -318,6 +337,14 @@ class CompanyConsultationHost:
         )
 
     async def call(self, peer: PeerIdentity, frame: bytes) -> bytes:
+        from integrations.mastermind_company_mcp.native_return import REQUEST_SCHEMA
+        try:
+            value = decode_json_frame(frame, limit=MAX_REQUEST_BYTES)
+        except HostFrameError:
+            value = {}
+        if value.get("schema") == REQUEST_SCHEMA:
+            from integrations.native_reply_host import call_native_reply
+            return await call_native_reply(self, peer, frame)
         tool, authority, dispatch_started = "unknown", None, False
         try:
             tool, arguments = decode_request(frame)

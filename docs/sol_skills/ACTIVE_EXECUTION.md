@@ -257,6 +257,7 @@ cheapest accepted result. Keep substantial direct work when one of these reasons
 * `NO_ELIGIBLE_PRE_EFFECT_WORKER` — no suitable lawful worker exists and no conflicting effect began.
 
 Record the brief reason in the existing commission/checkpoint context, not a new ledger. Reassess when discovery becomes routine execution.
+Native children follow WEB_CEO_DELEGATION section 4: paid Fabric is the eligible-labor default; native Sol is for needed reasoning/coordinator roles, not routine labor or a silent response to a Fabric blocker.
 No fixed delegation percentage or tool-call quota substitutes for this decision. Repeated equivalent
 manual interactions are a reassessment signal, not permission to dispatch an unnecessary agent.
 
@@ -435,8 +436,11 @@ work in the present turn and report that limitation truthfully at the eventual s
 
 ## Step 7A — Preserve operational continuity before interruption
 
-Checkpoint after a material accepted result and before a long or effectful operation through the
-existing Runtime, Agent OS, and artifact owners as applicable. Keep the exact source/operation,
+Keep one recoverable frontier through the existing Runtime, Agent OS, and artifact owners as
+applicable. Save material decisions and accepted capability changes at coherent milestones, before
+genuine interruption/handoff, or before a long/risky action could lose the last known effect.
+Ordinary reads, reversible edits and focused tests do not need separate checkpoints, digest reports
+or approval recaps. Reuse accepted artifacts. Keep the exact source/operation,
 accepted and rejected work, pending decisions, active children, effect uncertainty, and next action
 recoverable. Use cumulative compact checkpoints, not another parallel store or repeated full history.
 A checkpoint never transfers a lease, source writer, or STARTed operation. On interruption, admitted
@@ -444,9 +448,8 @@ execution may continue only inside its existing grant; unresolved judgment stays
 owner or successor. Exact parent consumption must be proven, not inferred from delivery or a tab name.
 No supported continuation means an honest held result, not a fabricated wake.
 
-Maintain one cumulative working checkpoint, not a chain of historical handoffs. In addition to
-material results, update it before long/effectful/high-output operations. Do not defer all persistence
-to the final response. Preserve mission/scope and authority refs; exact operation/carrier/source
+Maintain one cumulative working checkpoint, not a chain of historical handoffs. Do not defer all
+persistence to the final response. Preserve mission/scope and authority refs; exact operation/carrier/source
 identities; last verified effect; accepted work and DO_NOT_REDO; rejected approaches and why;
 research hypotheses and falsifiers; active children/returns; unresolved effects; evidence refs;
 and the exact next action. A missing field stays explicitly unknown rather than being invented.

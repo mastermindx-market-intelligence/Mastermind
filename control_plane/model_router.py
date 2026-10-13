@@ -26,6 +26,9 @@ from control_plane.executive_agent_capabilities import (
     adapter_supports_execution_surface,
 )
 from control_plane.worker_adapter import adapter_descriptor
+from control_plane.executive_responsibility import (
+    ResponsibilityIntent, ResponsibilityIntentError, normalize_responsibility_intent,
+)
 
 
 ROUTER_SCHEMA_VERSION = "mastermind.executive_worker_routes/v2"
@@ -452,8 +455,18 @@ class WorkRequest:
     ambiguity: str = "low"
     required_capabilities: tuple[str, ...] = ()
     excluded_worker_ids: tuple[str, ...] = ()
+    responsibility_intent: ResponsibilityIntent | dict[str, str] | None = None
 
     def __post_init__(self) -> None:
+        raw_role = self.responsibility_intent
+        if raw_role is not None:
+            try:
+                role = normalize_responsibility_intent(
+                    raw_role.to_dict() if type(raw_role) is ResponsibilityIntent else raw_role
+                )
+            except ResponsibilityIntentError as exc:
+                raise RoutingPolicyError(str(exc)) from exc
+            object.__setattr__(self, "responsibility_intent", role)
         task_kind = str(self.task_kind).strip().lower()
         risk = str(self.risk).strip().lower()
         ambiguity = str(self.ambiguity).strip().lower()
@@ -513,6 +526,7 @@ class RoutingDecision(_RoutingDecisionCompatibility):
     chat_reasoning_mode: ChatReasoningMode | None = None
     metered_cognition_receipt: MeteredCognitionReceipt | None = None
     pro_mode_receipt: ProModeReceipt | None = None
+    responsibility_intent: ResponsibilityIntent | None = None
 
     @property
     def worker_eligible(self) -> bool:
@@ -530,6 +544,11 @@ class RoutingDecision(_RoutingDecisionCompatibility):
         value = dataclasses.asdict(self)
         value["mode"] = self.mode.value
         value["worker_eligible"] = self.worker_eligible
+        if self.responsibility_intent is None:
+            value.pop("responsibility_intent", None)
+        else:
+            value["responsibility_intent"] = self.responsibility_intent.to_dict()
+            value["responsibility_intent_digest"] = self.responsibility_intent.digest
         value["suitability_tiers"] = [
             tier.to_dict() for tier in self.suitability_tiers
         ]
@@ -567,7 +586,18 @@ class RoutingDecision(_RoutingDecisionCompatibility):
             raise RoutingPolicyError(
                 "frontier-lead work must be decomposed or adjudicated before worker dispatch"
             )
+        role_fields: dict[str, Any] = {}
+        if self.responsibility_intent is not None:
+            try:
+                self.responsibility_intent.require_phase("work")
+            except ResponsibilityIntentError as exc:
+                raise RoutingPolicyError("coordinate intent requires Executive coordinator admission") from exc
+            role_fields = {
+                "responsibility_intent": self.responsibility_intent.to_dict(),
+                "responsibility_intent_digest": self.responsibility_intent.digest,
+            }
         return {
+            **role_fields,
             "task_kind": self.task_kind,
             "risk": self.risk,
             "ambiguity": self.ambiguity,
@@ -781,6 +811,12 @@ class ModelRouter:
             raise RoutingPolicyError(f"model alias {alias!r} is not worker eligible")
         return profile
 
+    def resolve_attended_model_alias(self, model_alias: str, binding_id: str) -> ModelAlias:
+        """Resolve finite attended catalogue eligibility, never claim authority."""
+        from control_plane.fabric_attended_routing import resolve_attended_alias
+
+        return resolve_attended_alias(self, model_alias, binding_id)[0]
+
     def route(
         self,
         request: WorkRequest,
@@ -871,6 +907,7 @@ class ModelRouter:
                 mode=RouteMode.FRONTIER_LEAD,
                 policy_version=self.policy_version,
                 task_kind=request.task_kind,
+                responsibility_intent=request.responsibility_intent,
                 risk=request.risk,
                 ambiguity=request.ambiguity,
                 execution_profile_id=lead_profile.execution_profile_id,
@@ -944,6 +981,7 @@ class ModelRouter:
             mode=RouteMode.WORKER,
             policy_version=self.policy_version,
             task_kind=request.task_kind,
+            responsibility_intent=request.responsibility_intent,
             risk=request.risk,
             ambiguity=request.ambiguity,
             execution_profile_id=first_profile.execution_profile_id,
@@ -970,6 +1008,7 @@ def route_work(
     pro_mode_receipt: ProModeReceipt | None = None,
     policy_path: str | Path | None = None,
     capability_policy_path: str | Path | None = None,
+    responsibility_intent: ResponsibilityIntent | dict[str, str] | None = None,
 ) -> RoutingDecision:
     """Convenience entry point used by CLI and future 1F child-job creation."""
 
@@ -978,6 +1017,7 @@ def route_work(
     ).route(
         WorkRequest(
             task_kind=task_kind,
+            responsibility_intent=responsibility_intent,
             risk=risk,
             ambiguity=ambiguity,
             required_capabilities=tuple(required_capabilities),

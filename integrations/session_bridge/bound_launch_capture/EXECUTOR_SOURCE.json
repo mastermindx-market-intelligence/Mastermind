@@ -1,0 +1,7 @@
+{
+  "source_sha256": "c6b4292cdb7d106d5b376587f29276da1550e5eee02268f479abd7ad2ea61189",
+  "candidate_sha256": "0055ccc7b98df0fd5948a38fac43a3ffe7a7fc2462e355cc6ce52feb0273c0cd",
+  "classification": "SOURCE_ONLY_UNINSTALLED",
+  "patch_sha256": "f42f1211619097b36714f120c5768b03e297ae62a3f775a861c1dafcbd40e7f4",
+  "validation": "19 affected ownership/async checks PASS; 9 executor parity checks PASS; narrow source review approved; original lease through assignment ACK remains required."
+}

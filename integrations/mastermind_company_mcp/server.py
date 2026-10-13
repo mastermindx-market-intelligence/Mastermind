@@ -14,6 +14,15 @@ from mcp.server.models import InitializationOptions
 from mcp.server.stdio import stdio_server
 
 from integrations.mastermind_company_mcp.adapter import CompanyDialogueGateway
+from integrations.mastermind_company_mcp.principal_adapter import (
+    PrincipalCompanyDialogueGateway,
+)
+from integrations.mastermind_company_mcp.principal_schemas import (
+    PRINCIPAL_SERVER_NAME,
+    PRINCIPAL_SERVER_VERSION,
+    PRINCIPAL_TOOL_SPECS,
+    canonical_principal_json,
+)
 from integrations.mastermind_company_mcp.consultation import (
     COMPANY_CONSULTATION_SERVER_IDENTITY,
     COMPANY_CONSULTATION_SERVER_VERSION,
@@ -65,6 +74,48 @@ def build_mcp_server(gateway: CompanyDialogueGateway) -> Server:
     return server
 
 
+def build_principal_tools() -> list[mcp_types.Tool]:
+    """Build the static four-tool COO-principal dialogue generation."""
+
+    return [
+        mcp_types.Tool(
+            name=spec.name,
+            description=spec.description,
+            inputSchema=spec.input_schema,
+            annotations=mcp_types.ToolAnnotations(**spec.annotations),
+        )
+        for spec in PRINCIPAL_TOOL_SPECS
+    ]
+
+
+def build_principal_mcp_server(gateway: PrincipalCompanyDialogueGateway) -> Server:
+    """Register only the distinct principal list/call facet."""
+
+    server: Server = Server(
+        PRINCIPAL_SERVER_NAME,
+        version=PRINCIPAL_SERVER_VERSION,
+    )
+    tools = build_principal_tools()
+
+    @server.list_tools()
+    async def list_principal_tools() -> list[mcp_types.Tool]:
+        return list(tools)
+
+    @server.call_tool()
+    async def call_principal_tool(
+        name: str, arguments: dict[str, Any] | None
+    ) -> list[Any]:
+        envelope = await gateway.call(name, arguments or {})
+        return [
+            mcp_types.TextContent(
+                type="text",
+                text=canonical_principal_json(envelope).decode("utf-8"),
+            )
+        ]
+
+    return server
+
+
 def build_company_consultation_tools() -> list[mcp_types.Tool]:
     """Build the static four-tool distinct consultation generation."""
 
@@ -108,6 +159,16 @@ def build_company_consultation_mcp_server(gateway: Any) -> Server:
 
 
 
+async def run_principal_stdio(
+    gateway: PrincipalCompanyDialogueGateway,
+) -> None:
+    """Run the principal facet only after its host composed a durable fence."""
+
+    server = build_principal_mcp_server(gateway)
+    async with stdio_server() as (reader, writer):
+        await server.run(reader, writer, initialization_options(server))
+
+
 async def run_company_consultation_stdio(gateway: Any) -> None:
     """Run the four-tool SDK frontend using its externally composed gateway."""
     server = build_company_consultation_mcp_server(gateway)
@@ -128,7 +189,38 @@ __all__ = [
     "build_company_consultation_mcp_server",
     "build_company_consultation_tools",
     "build_mcp_server",
+    "build_principal_mcp_server",
+    "build_principal_tools",
     "build_tools",
     "initialization_options",
     "run_company_consultation_stdio",
+    "run_principal_stdio",
+    "build_native_return_mcp_server",
+    "run_native_return_stdio",
 ]
+
+
+def build_native_return_mcp_server(gateway: Any) -> Server:
+    """One static, separately versioned native tool; registration grants nothing."""
+    import copy
+    from integrations.mastermind_company_mcp import native_return as contract
+    server = Server(contract.SERVER_IDENTITY, version=contract.SERVER_VERSION)
+
+    @server.list_tools()
+    async def list_native_tools():
+        return [mcp_types.Tool(name=contract.TOOL_NAME, description=contract.TOOL_DESCRIPTION,
+            inputSchema=copy.deepcopy(contract.INPUT_SCHEMA),
+            annotations=mcp_types.ToolAnnotations(**contract.ANNOTATIONS))]
+
+    @server.call_tool()
+    async def call_native_tool(name, arguments):
+        result = await gateway.call(name, arguments or {})
+        return [mcp_types.TextContent(type="text", text=canonical_company_consultation_json(result).decode("utf-8"))]
+
+    return server
+
+
+async def run_native_return_stdio(gateway: Any) -> None:
+    server = build_native_return_mcp_server(gateway)
+    async with stdio_server() as (reader, writer):
+        await server.run(reader, writer, initialization_options(server))

@@ -14,6 +14,7 @@ from enum import Enum
 from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 
+from common.agent_dialogue_contract_v2 import normalize_context_v2
 from common.agent_dialogue_consultation_contract import (
     CONSULTATION_PACKET_DISCRIMINATOR,
     parse_consultation_packet,
@@ -84,39 +85,14 @@ class DialogueContextV2:
         """Normalize through the accepted V2 contracts without transport state."""
 
         try:
-            parent = build_parent_v2(
-                {
-                    "schema": "mastermind.agent_dialogue_parent.v2",
-                    "work_ref": self.work_ref,
-                    "commission_ref": dict(self.commission_ref),
-                    "session_ref": self.session_ref,
-                    "operation_key": self.operation_key,
-                    "watch_mode": self.watch_mode,
-                    "allowed_sol_user_ids": [_CONTEXT_PROBE_SOL],
-                    "created_at": "2000-01-01T00:00:00Z",
-                }
+            return normalize_context_v2(
+                work_ref=self.work_ref, commission_ref=self.commission_ref,
+                session_ref=self.session_ref, operation_key=self.operation_key,
+                watch_mode=self.watch_mode, actor_ref=self.actor_ref,
+                applies_to=self.applies_to,
             )
-            actor = validate_actor_ref(dict(self.actor_ref))
-            applies_to = validate_applies_to_v2(dict(self.applies_to))
         except (DialogueContractError, TypeError, ValueError):
             raise DialogueEngineError("THREAD_CONTEXT_MISMATCH") from None
-
-        if actor["kind"] == "worker_attempt":
-            if applies_to["kind"] != "executive_attempt" or any(
-                actor[key] != applies_to[key]
-                for key in ("job_id", "attempt_id", "worker_id")
-            ):
-                raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
-
-        return {
-            "work_ref": parent["work_ref"],
-            "commission_ref": parent["commission_ref"],
-            "session_ref": parent["session_ref"],
-            "operation_key": parent["operation_key"],
-            "watch_mode": parent["watch_mode"],
-            "actor_ref": actor,
-            "applies_to": applies_to,
-        }
 
 
 @dataclass
@@ -350,6 +326,11 @@ def _reply_direction_is_valid(
 
     request_actor = request["actor_ref"]
     reply_actor = reply["actor_ref"]
+    if reply_actor["kind"] == "executive_principal":
+        return (
+            reply_actor["seat"] == "coo"
+            and request_actor["kind"] == "worker_attempt"
+        )
     if (
         reply_actor["kind"] != "executive_surface"
         or reply_actor["seat"] not in {"ceo", "chairman"}

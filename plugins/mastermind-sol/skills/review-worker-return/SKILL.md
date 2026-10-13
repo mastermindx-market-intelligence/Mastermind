@@ -9,7 +9,14 @@ Use when a worker or COO returns `BLOCKED`, `DECISION_REQUEST`, `RESULT`, resear
 
 ## Mandatory current-source gate
 
-Read protected Mastermind `master`, record its exact commit, load `docs/sol_skills/INDEX.md`, `REVIEW_RETURN.md`, `RECONCILE_STATE.md`, `CLOSEOUT.md`, and the dialogue close law from that same exact commit, and verify compatibility. Run `bootstrap-mastermind` first. If compatibility cannot be established, modifying workflow is unavailable.
+Reuse the verified compatible mission pin. Read protected Mastermind `master` and bootstrap only
+at unfamiliar entry/recovery without a usable pin, or a material governing-procedure change. Load
+`docs/sol_skills/INDEX.md` and the needed companions from that same exact commit; never mix revisions.
+Action-specific references: `REVIEW_RETURN.md`, `RECONCILE_STATE.md`, `CLOSEOUT.md`.
+A worker return, tool call, new turn or phase completion alone does not restart bootstrap. If no
+verified compatible pin can be established, modifying workflow is unavailable for actions depending
+on that procedure. A failed refresh does not erase a usable pin for independent work whose governing
+constraints are unaffected. Apply gates only to the actual action under INDEX modification scoping.
 
 ## Required package reference
 

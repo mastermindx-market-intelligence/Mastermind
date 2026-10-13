@@ -195,7 +195,8 @@ def test_parallelism_respects_global_admission_and_review_capacity():
 
 def test_checkpoint_does_not_transfer_authority_or_invent_continuation():
     text = _section("Step 7A — Preserve operational continuity before interruption")
-    assert "Checkpoint after a material accepted result and before a long or effectful operation" in text
+    assert "Save material decisions and accepted capability changes at coherent milestones" in text
+    assert "Ordinary reads, reversible edits and focused tests do not need separate checkpoints" in text
     assert "A checkpoint never transfers a lease, source writer, or STARTed operation" in text
     assert "Exact parent consumption must be proven" in text
     assert "No supported continuation means an honest held result, not a fabricated wake" in text

@@ -21,6 +21,9 @@ from typing import Any
 
 from common.executive_workspace_contract import (
     FABRIC_VIEW_SCHEMA_V3,
+    FRAME_SCHEMA_V3, PLAN_BODY_SCHEMA, PLAN_OBSERVATION_SCHEMA,
+    MAX_PLAN_RESPONSE_BYTES,
+    validate_v3_frame, plan_unavailable,
     MAX_RESPONSE_BYTES,
     MAX_RESULT_RESPONSE_BYTES,
     OBSERVATION_SCHEMA,
@@ -231,6 +234,61 @@ def _admitted_row(row, *, doc_generated_at, validity):
     return budget is None and remaining is None and state == "unqualified"
 
 
+def _program_membership(autonomy, work_refs, rows, validity):
+    """Mapped cards and explicit unmapped receipts partition the Work list.
+
+    The canonical mapper emits no card/validity receipt for an unmapped row.
+    Reading that explicit absence must neither invent a seat nor hide a work
+    reference. Only mapped rows participate in the paired card-validity join;
+    their currentness is still checked by ``_admitted_row``.
+    """
+    unmapped = autonomy.get("unmapped_responsibilities", [])
+    if type(unmapped) is not list:
+        return False
+    unmapped_refs = []
+    for row in unmapped:
+        if (type(row) is not dict
+                or not {"responsibility_ref", "reason"} <= row.keys()
+                or not row.keys() <= {"responsibility_ref", "reason", "declared_blocker"}
+                or type(row["responsibility_ref"]) is not str or not row["responsibility_ref"]
+                or row["reason"] not in ("owner_not_a_recognized_seat", "row_unreadable")):
+            return False
+        if "declared_blocker" in row:
+            blocker = row["declared_blocker"]
+            if (row["reason"] != "owner_not_a_recognized_seat"
+                    or type(blocker) is not dict
+                    or blocker.keys() != {"code", "explanation", "target_seat"}
+                    or blocker["code"] != "blocked_by"
+                    or type(blocker["explanation"]) is not str or not blocker["explanation"].strip()
+                    or blocker["target_seat"] not in (None, "ceo")):
+                return False
+        unmapped_refs.append(row["responsibility_ref"])
+    mapped_refs = {row["responsibility_ref"] for row in rows}
+    if (len(set(unmapped_refs)) != len(unmapped_refs)
+            or mapped_refs.intersection(unmapped_refs)
+            or set(work_refs) != mapped_refs.union(unmapped_refs)):
+        return False
+    if unmapped:
+        counts = autonomy.get("counts")
+        if (type(counts) is not dict or type(counts.get("total")) is not int
+                or counts["total"] != len(rows) or counts.get("empty") is not False):
+            return False
+    # Reject missing, duplicate, orphan or unmapped validity entries. This
+    # is the same publication's complete mapped-card identity set, not a
+    # new receipt for the unmapped rows or an all([]) currentness claim.
+    pairs = []
+    for entry in validity["cards"]:
+        if (type(entry) is not dict
+                or type(entry.get("responsibility_ref")) is not str
+                or not entry["responsibility_ref"]
+                or (entry.get("root_job_id") is not None
+                    and (type(entry["root_job_id"]) is not str or not entry["root_job_id"]))):
+            return False
+        pairs.append((entry["responsibility_ref"], entry.get("root_job_id")))
+    return (len(set(pairs)) == len(pairs)
+            and set(pairs) == {(row["responsibility_ref"], row.get("root_job_id")) for row in rows})
+
+
 def _qualified(snapshot, selected=None):
     from control_plane.mission_workspace import (
         SOURCE_VALIDITY_PROFILE, SOURCE_VALIDITY_SCHEMA,
@@ -264,7 +322,7 @@ def _qualified(snapshot, selected=None):
             or type(snapshot.currentness.get("publication_seq")) is not int
             or snapshot.currentness.get("publication_seq") != publication_seq):
         return False
-    if selected is None and not rows and not _qualified_empty_programs(doc, validity):
+    if selected is None and not work and not _qualified_empty_programs(doc, validity):
         return False
     if not all(type(row) is dict for row in rows) or not all(
             type(item) is dict and isinstance(item.get("work_ref"), str) and item["work_ref"]
@@ -272,16 +330,17 @@ def _qualified(snapshot, selected=None):
         return False
     work_refs = [item["work_ref"] for item in work]
     refs = [row.get("responsibility_ref") for row in rows]
-    if len(set(work_refs)) != len(work_refs) or len(set(refs)) != len(refs):
+    if (any(type(ref) is not str or not ref for ref in refs)
+            or len(set(work_refs)) != len(work_refs) or len(set(refs)) != len(refs)):
         return False
     # Every responsibility must cite exactly one genuine work row. Orphan or
     # duplicated identities never read as a healthy absence of Programs.
     if any(refs.count(ref) != 1 or work_refs.count(ref) != 1 for ref in refs):
         return False
-    if selected is None and set(work_refs) != set(refs):
+    if not all(_admitted_row(row, doc_generated_at=doc.get("generated_at"),
+                             validity=validity) for row in rows):
         return False
-    return all(_admitted_row(row, doc_generated_at=doc.get("generated_at"),
-                             validity=validity) for row in rows)
+    return selected is not None or _program_membership(autonomy, work_refs, rows, validity)
 
 
 def _observation(before, after, selected, runtime):
@@ -308,6 +367,21 @@ def _observation(before, after, selected, runtime):
         },
         "runtime": runtime,
     }
+
+
+def _plan_validity_identity(value):
+    """Compare proof identities without treating elapsed time as republication.
+
+    Canonical remaining_ms/state age on every owner clock sample. Preserve
+    every other field; the unchanged _qualified check separately refuses an
+    expired or unqualified selected card after the read.
+    """
+    identity = copy.deepcopy(value)
+    for card in identity["cards"]:
+        for component in card["components"].values():
+            component.pop("remaining_ms", None)
+            component.pop("state", None)
+    return identity
 
 
 class WorkspaceReadService:
@@ -529,6 +603,97 @@ class WorkspaceReadService:
         response = {"ok": True, "result": result}
         bounded_canonical(response, limit=MAX_RESPONSE_BYTES - 1)
         return response
+
+    def _read_admitted_plan(self, frame):
+        """One owner read, physical close, policy/CCR bracket, then pure display."""
+        from control_plane.executive_runtime import (
+            BoundedAdmittedPlanSnapshot, BoundedRoleResultRootMetadata,
+            CooCyclePolicy, RuntimePlanAdmissionNotEstablished,
+            RuntimePlanAdmissionConflict, RuntimeRoleResultOverBudget,
+        )
+        from control_plane.fabric_plan_projection import (
+            project_admitted_plan, FabricPlanProjectionError,
+        )
+        selected = frame["selection"]
+        try:
+            before = self.cache.snapshot()
+        except Exception:
+            return plan_unavailable(selected, "SOURCE_UNAVAILABLE")
+        # Preserve the existing selection 404 before any Runtime acquisition.
+        _join(before.document, selected)
+        try:
+            if not _qualified(before, selected):
+                return plan_unavailable(selected, "SOURCE_UNAVAILABLE")
+            policy_before = CooCyclePolicy.load().policy_sha256
+            bounded = self._bounded_runtime(self.runtime) if self._bounded_runtime else self.runtime
+            with bounded.observe_bounded_read() as observation:
+                snapshot = observation.read_admitted_plan_bounded(selected["root_job_id"])
+            receipt = observation.receipt  # finalized only after physical close
+            policy_after = CooCyclePolicy.load().policy_sha256
+            if (not isinstance(snapshot, BoundedAdmittedPlanSnapshot)
+                    or not isinstance(snapshot.root_metadata, BoundedRoleResultRootMetadata)
+                    or snapshot.root_job_id != selected["root_job_id"]
+                    or snapshot.root_metadata.work_ref not in (None, selected["work_ref"])
+                    or type(policy_before) is not str or re.fullmatch(r"[0-9a-f]{64}", policy_before) is None
+                    or policy_before != policy_after
+                    or snapshot.admission.get("policy_sha") != policy_before):
+                return plan_unavailable(selected, "SOURCE_UNAVAILABLE")
+            after = self.cache.snapshot()
+            if (before.owner is not after.owner or before.instance != after.instance
+                    or before.publication != after.publication
+                    or digest(before.document) != digest(after.document)
+                    or digest(_plan_validity_identity(before.validity)) != digest(_plan_validity_identity(after.validity))
+                    or digest(before.currentness) != digest(after.currentness)):
+                return plan_unavailable(selected, "SOURCE_CHANGED")
+            if not _qualified(after, selected):
+                return plan_unavailable(selected, "SOURCE_UNAVAILABLE")
+            plan = project_admitted_plan(snapshot, receipt)
+            source = self._result_observation(before, after, selected, receipt)
+            source["schema"] = PLAN_OBSERVATION_SCHEMA
+            body = {"schema": PLAN_BODY_SCHEMA, "selection": dict(selected),
+                    "availability": "AVAILABLE", "reason_codes": [],
+                    "source_observation": source, "plan": plan}
+            try:
+                bounded_canonical({"ok": True, "result": body}, limit=MAX_PLAN_RESPONSE_BYTES - 1)
+            except (TypeError, ValueError):
+                return plan_unavailable(selected, "RESPONSE_OVER_BUDGET")
+            return {"ok": True, "result": body}
+        except RuntimePlanAdmissionNotEstablished:
+            return plan_unavailable(selected, "ADMISSION_NOT_ESTABLISHED")
+        except RuntimePlanAdmissionConflict:
+            return plan_unavailable(selected, "ADMISSION_CONFLICT")
+        except RuntimeRoleResultOverBudget:
+            return plan_unavailable(selected, "OVER_BUDGET")
+        except FabricPlanProjectionError as exc:
+            return plan_unavailable(selected, exc.code)
+        except Exception:
+            return plan_unavailable(selected, "SOURCE_UNAVAILABLE")
+
+    async def _handle_v3_frame(self, frame):
+        try:
+            validate_v3_frame(frame)
+        except (TypeError, ValueError):
+            return error("invalid_input", 400)
+        try:
+            if self.authorize(frame["principal"]) is not True:
+                return error("access_denied", 403)
+            before = permission_stamp(self.authorize, frame["principal"])
+        except Exception:
+            return error("access_denied", 403)
+        task = asyncio.create_task(asyncio.to_thread(self._read_admitted_plan, frame))
+        try:
+            result = await await_owned(task)
+        except LookupError:
+            result = error("selection_not_found", 404)
+        except Exception:
+            result = plan_unavailable(frame["selection"], "SOURCE_UNAVAILABLE")
+        try:
+            if (self.authorize(frame["principal"]) is not True
+                    or permission_stamp(self.authorize, frame["principal"]) != before):
+                return error("access_denied", 403)
+        except Exception:
+            return error("access_denied", 403)
+        return result
 
     def _read_result(self, frame):
         """Read one bounded role result through the actual Fabric seam.
@@ -829,6 +994,8 @@ class WorkspaceReadService:
         return self._read_mission_v3({"selection": selection})["result"]
 
     async def handle_frame(self, frame):
+        if isinstance(frame, dict) and frame.get("schema") == FRAME_SCHEMA_V3:
+            return await self._handle_v3_frame(frame)
         # v2 frames take the closed v2 validation path; v1 frames keep their
         # existing envelope.  The two are mutually exclusive — never both.
         if isinstance(frame, dict) and frame.get("schema") == "mastermind.executive_workspace_read.v2":

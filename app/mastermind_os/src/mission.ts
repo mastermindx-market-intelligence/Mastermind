@@ -287,6 +287,8 @@ export interface ProgramCard {
   title: string | null;
   state: string | null;
   nextAction: string | null;
+  /** Presentation-only withholding; never carries rejected source text. */
+  nextActionWithheld: boolean;
   rootJobId: string | null;
   rootState: "RESOLVED" | "CONFLICT" | "UNKNOWN";
   rootCandidates: string[];
@@ -1577,19 +1579,24 @@ export function programsFromControlRoom(value: unknown): {
         !ntext(a.title, 256) ||
         !ntext(a.state, 64) ||
         !ntext(a.status, 64) ||
-        !ntext(a.next_action))
+        !(a.next_action === null || typeof a.next_action === "string"))
     )
       return {
         programs: [],
         state: "UNAVAILABLE",
         reason: "AGENT_OS_ORIENTATION_INVALID",
       };
-    const matches = rows.filter((x) => x.responsibility_ref === card.work_ref),
+    // Authored next actions are optional display prose, not root identity.
+    // Preserve the shared text/privacy guard and withhold the whole field;
+    // truncation could retain private content or hide an unsafe suffix.
+    const nextActionWithheld = a !== null && a.next_action !== null && !text(a.next_action),
+      matches = rows.filter((x) => x.responsibility_ref === card.work_ref),
       base = {
         workRef: card.work_ref,
         title: (a?.title as string | null) ?? null,
         state: (a?.state ?? a?.status ?? null) as string | null,
-        nextAction: (a?.next_action as string | null) ?? null,
+        nextAction: nextActionWithheld ? null : (a?.next_action as string | null) ?? null,
+        nextActionWithheld,
       };
     if (matches.length !== 1) {
       out.push({

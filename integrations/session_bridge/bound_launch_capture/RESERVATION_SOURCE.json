@@ -1,0 +1,8 @@
+{
+  "source_path": "/Users/chriswong/.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext/remote_sub.sh",
+  "source_sha256": "78b3d386e82b273bbb828671fb011ee8188df30fbe82e30b2817ccd5a8c7320d",
+  "candidate_sha256": "e69768d429ee60d857713c34471448fa563e647cdcd457b5c59da68e1ab79fc0",
+  "classification": "SOURCE_ONLY_UNINSTALLED_V2_CORRELATION_WIRE",
+  "effects": "Existing run-log O_EXCL only; no new lifecycle or launch authority",
+  "patch_sha256": "30f121a6ad7bda9e3ff466fbaeb897050f0e9c1ef5cc8625673c0f32cee8c61c"
+}

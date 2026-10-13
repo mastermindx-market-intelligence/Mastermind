@@ -139,6 +139,36 @@ class AcceptanceError(RuntimeError):
     pass
 
 
+def _validate_operator_harness_policy(
+    config: Mapping[str, Any], worker_config: Mapping[str, Any]
+) -> None:
+    # Match ServiceConfig's quota identifier/distinctness contract. Historical
+    # names are defaults, not permission to rewrite an old Runtime policy row.
+    # Current binding/metadata admission remains with Control and Runtime.
+    quota_names = (
+        config.get("quota_class", "codex-native"),
+        config.get("coo_quota_class", "codex-coo"),
+        config.get("coo_default_quota_class", "codex-coo-default"),
+        config.get("coo_operator_quota_class"),
+    )
+    if (
+        any(type(name) is not str or _ID_RE.fullmatch(name) is None for name in quota_names)
+        or len(set(quota_names)) != 4
+    ):
+        raise AcceptanceError("installed proof and COO quota selectors are invalid or collide")
+    if (
+        not isinstance(config.get("coo_operator_harness_armed"), bool)
+        or config.get("coo_operator_model_alias") != "coo.operator.readonly"
+        or worker_config.get("schema_version")
+        != "mastermind.executive_worker_broker_config/v4"
+        or worker_config.get("operator_harness_armed")
+        is not config.get("coo_operator_harness_armed")
+    ):
+        raise AcceptanceError(
+            "installed Operator Harness policy differs across control and worker"
+        )
+
+
 def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
@@ -1781,18 +1811,7 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
         }
         if any(self.config.get(key) != value for key, value in expected_config.items()):
             raise AcceptanceError("installed control config differs from exact host policy")
-        if (
-            not isinstance(self.config.get("coo_operator_harness_armed"), bool)
-            or self.config.get("coo_operator_model_alias") != "coo.operator.readonly"
-            or self.config.get("coo_operator_quota_class") != "codex-coo-operator"
-            or self.worker_config.get("schema_version")
-            != "mastermind.executive_worker_broker_config/v4"
-            or self.worker_config.get("operator_harness_armed")
-            is not self.config.get("coo_operator_harness_armed")
-        ):
-            raise AcceptanceError(
-                "installed Operator Harness policy differs across control and worker"
-            )
+        _validate_operator_harness_policy(self.config, self.worker_config)
         if self.operator_identity.pw_uid not in self.config.get("allowed_peer_uids", []):
             raise AcceptanceError("operator UID is not allowed by the control service")
         if (
