@@ -15,12 +15,12 @@ import httpx
 import test_executive_mcp_web_ceo_sessions as host
 import test_mastermind_executive_app_asgi as auth
 import test_session_bridge_web_reply_event_asgi as wire_fixture
+from test_session_bridge_web_reply_subscription_owner import ExistingStore
 from integrations.executive_mcp import server as executive
 from integrations.session_bridge.web_reply_event_rpc import WebReplyEventRpc
 from integrations.session_bridge.web_reply_subscription_owner import (
     OriginalReplyGrant,
     OriginalReplySubscriptionAdapter,
-    StoredReplySubscription,
     VerifiedChallengeHTTP,
     owner_key,
 )
@@ -46,29 +46,6 @@ class CurrentOriginal:
         )
 
 
-class FakeExistingWriter:
-    """No database, no keys or credentials; proof of contract only."""
-    def __init__(self):
-        self.rows={}
-        self.calls=[]
-    async def commit(self,record,secret):
-        assert type(record) is StoredReplySubscription
-        assert secret.startswith("whsec_")
-        assert secret not in repr(record)
-        self.calls.append(("commit",record.subscription_id))
-        self.rows[record.subscription_id]=record
-        return record
-    async def read(self,ref):
-        self.calls.append(("read",ref))
-        return self.rows.get(ref)
-    async def remove(self,ref,owner):
-        self.calls.append(("remove",ref))
-        row=self.rows.get(ref)
-        if row is not None and row.owner_key!=owner:
-            raise AssertionError("foreign owner attempted removal")
-        self.rows.pop(ref,None)
-
-
 class SignedChallengeFixture:
     def __init__(self):
         self.calls=[]
@@ -84,7 +61,7 @@ class SignedChallengeFixture:
 def build(settings):
     installed=dataclasses.replace(settings,read_from_ceo_ingress=True)
     original=CurrentOriginal()
-    store=FakeExistingWriter()
+    store=ExistingStore()
     callback=SignedChallengeFixture()
     owner=OriginalReplySubscriptionAdapter(
         resolver=original,storage=store,challenge_sender=callback,
