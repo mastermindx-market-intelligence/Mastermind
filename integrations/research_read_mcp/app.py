@@ -12,6 +12,7 @@ import inspect
 import json
 import logging
 import time
+from copy import deepcopy
 from collections.abc import Mapping
 from contextlib import asynccontextmanager
 from typing import Any
@@ -20,7 +21,7 @@ from urllib.parse import urlsplit
 from mcp.server.lowlevel import Server
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.server.transport_security import TransportSecuritySettings
-from mcp.types import CallToolResult, TextContent, Tool, ToolAnnotations
+from mcp.types import CallToolResult, JSONRPCResponse, TextContent, Tool, ToolAnnotations
 from starlette.applications import Starlette
 from starlette.responses import JSONResponse
 from starlette.routing import Route
@@ -43,6 +44,7 @@ from integrations.business_mcp_auth.metadata import (
 from integrations.business_mcp_auth.principal_projection import principal_projection
 from integrations.research_read_mcp.contracts import (
     MAX_RESULT_BYTES,
+    TOOL_ANNOTATIONS,
     TOOL_NAMES,
     ContractViolation,
     error_payload,
@@ -51,6 +53,43 @@ from integrations.research_read_mcp.contracts import (
     validate_arguments,
     validate_output,
 )
+
+from .compatibility_v1 import (
+    COMPATIBILITY_TOOL_NAMES, CompatibilityPortV1, MAX_COMPATIBILITY_WIRE_BYTES,
+    INPUT_SCHEMAS as COMPATIBILITY_INPUT_SCHEMAS, OUTPUT_SCHEMAS as COMPATIBILITY_OUTPUT_SCHEMAS,
+    _refuse as compatibility_refuse, validate_output as compatibility_output,
+    grant_is_current as compatibility_grant_is_current, validate_arguments as compatibility_arguments,
+)
+
+# MCP SDK construction and JSON-RPC accounting stay at this existing edge.
+def compatibility_tool_models() -> list[Tool]:
+    descriptions = {
+        'search': 'Search qualified complete bounded evidence items in the admitted research scope. Results are item citations, not complete reports.',
+        'fetch': 'Retrieve one complete literal bounded evidence item. COMPLETE_BOUNDED_ITEM describes this item only, never report completeness.',
+    }
+    return [Tool(name=name, description=descriptions[name],
+                 inputSchema=deepcopy(COMPATIBILITY_INPUT_SCHEMAS[name]), outputSchema=deepcopy(COMPATIBILITY_OUTPUT_SCHEMAS[name]),
+                 annotations=ToolAnnotations(**TOOL_ANNOTATIONS))
+            for name in COMPATIBILITY_TOOL_NAMES]
+
+
+def compatibility_wire_bytes(result: CallToolResult, request_id) -> int:
+    """Count actual SDK JSON-RPC envelope, including both copies of JSON data."""
+    envelope = JSONRPCResponse(jsonrpc='2.0', id=request_id,
+                              result=result.model_dump(mode='json', by_alias=True, exclude_none=True))
+    return len(envelope.model_dump_json(by_alias=True, exclude_none=True).encode('utf-8'))
+
+
+def compatibility_result(name, data, *, quote_limit_chars, request_id) -> CallToolResult:
+    data = compatibility_output(name, data, quote_limit_chars=quote_limit_chars)
+    rendered = json.dumps(data, ensure_ascii=False, allow_nan=False, separators=(',', ':'))
+    result = CallToolResult(content=[TextContent(type='text', text=rendered)],
+                            structuredContent=data, isError=False)
+    if compatibility_wire_bytes(result, request_id) > MAX_COMPATIBILITY_WIRE_BYTES:
+        compatibility_refuse()
+    return result
+
+
 
 _LOG = logging.getLogger("integrations.research_read_mcp.app")
 _REQUIRED_SCOPE = ("mastermind.research.read",)
@@ -79,7 +118,7 @@ def _url_path(url: str) -> str:
     return path or "/"
 
 
-def _tool_models() -> list[Tool]:
+def _tool_models(compatibility_port=None) -> list[Tool]:
     tools: list[Tool] = []
     for definition in tool_definitions():
         annotations = definition["annotations"]
@@ -95,6 +134,8 @@ def _tool_models() -> list[Tool]:
                 openWorldHint=annotations["openWorldHint"],
             ),
         ))
+    if compatibility_port is not None:
+        tools.extend(compatibility_tool_models())
     return tools
 
 
@@ -234,6 +275,7 @@ def create_authenticated_research_server(
     context_builder,
     allowed_hosts,
     allowed_origins=(),
+    compatibility_port=None,
 ) -> Starlette:
     """Return the inert Starlette app. The caller owns the HTTP lifecycle."""
 
@@ -251,6 +293,8 @@ def create_authenticated_research_server(
         raise TypeError("audit_sink must provide emit")
     if not allowed_hosts:
         raise ValueError("allowed_hosts is required")
+    if compatibility_port is not None and type(compatibility_port) is not CompatibilityPortV1:
+        raise ValueError('COMPATIBILITY_COMPOSITION_REFUSED')
     selected = validate_resource_policy(policy)
     hosts = [str(host) for host in allowed_hosts]
     origins = [str(origin) for origin in allowed_origins]
@@ -284,7 +328,7 @@ def create_authenticated_research_server(
 
     @server.list_tools()
     async def _list_tools() -> list[Tool]:
-        return _tool_models()
+        return _tool_models(compatibility_port)
 
     def _peek_subject() -> str:
         try:
@@ -301,10 +345,13 @@ def create_authenticated_research_server(
     ) -> tuple[str, str, tuple[str, ...], CallToolResult]:
         subject = _peek_subject()
         report_ids: tuple[str, ...] = ()
-        if not isinstance(name, str) or name not in TOOL_NAMES:
+        is_compatibility = (compatibility_port is not None and isinstance(name, str)
+                            and name in COMPATIBILITY_TOOL_NAMES)
+        if not isinstance(name, str) or (name not in TOOL_NAMES and not is_compatibility):
             return "TOOL_NOT_AVAILABLE", subject, report_ids, _tool_error("TOOL_NOT_AVAILABLE")
         try:
-            validated = validate_arguments(name, arguments)
+            validated = (compatibility_arguments(name, arguments) if is_compatibility
+                         else validate_arguments(name, arguments))
         except ContractViolation as exc:
             code = exc.code if exc.code in {"INVALID_REQUEST", "TOOL_NOT_AVAILABLE"} else "INTERNAL_ERROR"
             return code, subject, report_ids, _tool_error(code)
@@ -339,8 +386,12 @@ def create_authenticated_research_server(
             return "NOT_ENTITLED", subject, report_ids, _tool_error("NOT_ENTITLED")
 
         # Step 7. Content-class gate. The port is not called on this path.
-        if _REQUIRED_CLASS[name] not in entitlement.content_classes:
+        required_class = 'evidence_passage' if is_compatibility else _REQUIRED_CLASS[name]
+        if required_class not in entitlement.content_classes:
             return "NOT_ENTITLED", subject, report_ids, _tool_error("NOT_ENTITLED")
+
+        if is_compatibility and not compatibility_grant_is_current(entitlement, _clock()):
+            return 'NOT_ENTITLED', subject, report_ids, _tool_error('NOT_ENTITLED')
 
         try:
             caller_context = context_builder(entitlement)
@@ -352,8 +403,23 @@ def create_authenticated_research_server(
         if not isinstance(caller_context, Mapping) or isinstance(caller_context, (str, bytes)):
             return "INTERNAL_ERROR", subject, report_ids, _tool_error("INTERNAL_ERROR")
 
+        if is_compatibility and getattr(caller_context, 'principal_id', None) != projection.subject_digest:
+            return 'NOT_ENTITLED', subject, report_ids, _tool_error('NOT_ENTITLED')
+
+        if is_compatibility:
+            # Context construction may perform synchronous owner I/O. Recheck
+            # known token/current-grant deadlines immediately before body lookup.
+            admission_time = _clock()
+            if principal.expires_at <= admission_time:
+                return ('AUTHENTICATION_REQUIRED', subject, report_ids,
+                        _auth_tool_error(selected, AuthError(AuthErrorCode.TOKEN_EXPIRED)))
+            if not compatibility_grant_is_current(entitlement, admission_time):
+                return 'NOT_ENTITLED', subject, report_ids, _tool_error('NOT_ENTITLED')
+
         try:
-            pending = port(name, validated, caller_context)
+            pending = (compatibility_port(name, validated, caller_context,
+                                          quote_limit_chars=entitlement.quote_limit_chars)
+                       if is_compatibility else port(name, validated, caller_context))
         except ContractViolation as exc:
             code = exc.code if exc.code in _PORT_REFUSAL else "INTERNAL_ERROR"
             return code, subject, report_ids, _tool_error(code)
@@ -403,6 +469,26 @@ def create_authenticated_research_server(
             refreshed_entitlement = None
         if refreshed_entitlement != entitlement:
             return "NOT_ENTITLED", subject, report_ids, _tool_error("NOT_ENTITLED")
+
+        if is_compatibility:
+            try:
+                result = compatibility_result(name, observed,
+                    quote_limit_chars=refreshed_entitlement.quote_limit_chars,
+                    request_id=server.request_context.request_id)
+                # Last decision after synchronous owner I/O AND serialization.
+                # No await follows; this does not assert validity after ASGI send.
+                decision_time = _clock()
+                if refreshed.expires_at <= decision_time:
+                    return ('AUTHENTICATION_REQUIRED', subject, report_ids,
+                            _auth_tool_error(selected, AuthError(AuthErrorCode.TOKEN_EXPIRED)))
+                if not compatibility_grant_is_current(refreshed_entitlement, decision_time):
+                    return 'NOT_ENTITLED', subject, report_ids, _tool_error('NOT_ENTITLED')
+            except ContractViolation as exc:
+                code = exc.code if exc.code in _PORT_REFUSAL else 'INTERNAL_ERROR'
+                return code, subject, report_ids, _tool_error(code)
+            except Exception:
+                return 'INTERNAL_ERROR', subject, report_ids, _tool_error('INTERNAL_ERROR')
+            return 'OK', subject, report_ids, result
 
         try:
             if not isinstance(observed, Mapping) or isinstance(observed, (str, bytes)):

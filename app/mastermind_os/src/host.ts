@@ -1,3 +1,4 @@
+import { attendedSelection, decodeAttendedStatus, type AttendedSelection, type AttendedStatus } from "./fabric/attended-status";
 import { createNativeExecutiveTransport } from "./native-executive-transport";
 import type { ExecutiveSessionTransport } from "./orchestration/executive-session-command-port";
 import type { OsExecutiveTransport } from "./orchestration/os-executive-host";
@@ -37,7 +38,11 @@ export interface AuthState {
   acquisition: boolean;
   content: boolean;
 }
+import type { ResearchEvidenceTransport } from "./research/evidence-contract";
+
 export interface RawClient {
+  /** Optional fixed Research capability; private Auth0 token stays with its owner. */
+  readonly research?: ResearchEvidenceTransport;
   readonly executive?: OsExecutiveTransport;
   /** Optional fixed selected-session continuation transport; same private bearer custody. */
   readonly executiveSession?: ExecutiveSessionTransport;
@@ -47,6 +52,8 @@ export interface RawClient {
   subscribe(listener: (state: AuthState) => void): () => void;
   signIn(): Promise<unknown>;
   signOut(): Promise<unknown>;
+  /** Optional owner-authorized status-only Fabric port. No default browser/machine credential bridge. */
+  readAttendedFabric?(request: AttendedSelection & { signal: AbortSignal }): Promise<unknown>;
   readPrograms(request: { signal: AbortSignal }): Promise<unknown>;
   readWork(request: { signal: AbortSignal }): Promise<unknown>;
   readMission(request: {
@@ -87,6 +94,7 @@ export interface MissionHost {
   readMissionV3?: (
     request: MissionSelection & { signal: AbortSignal },
   ) => Promise<unknown>;
+  readAttendedFabric?: (request: AttendedSelection & { signal: AbortSignal }) => Promise<AttendedStatus>;
   readPrograms?: ProgramRead;
   /** Same fixed Programs acquisition, retaining its collection owner receipt. */
   readProgramsObservation?: (request: { signal: AbortSignal }) => Promise<ProgramsObservation>;
@@ -150,6 +158,21 @@ export function bindMissionHost(
         return client.signOut();
       },
     },
+    ...(client.readAttendedFabric && client.invalidationGeneration ? {
+      async readAttendedFabric(request: AttendedSelection & { signal: AbortSignal }) {
+        const selected = attendedSelection(request);
+        if (!selected) throw new Error("FABRIC_SELECTION_INVALID");
+        const started = epoch;
+        check(request.signal, started);
+        const state = client.getState();
+        if (state.status !== "signed_in" || !state.acquisition) throw new Error("FABRIC_READ_UNAUTHORIZED");
+        const raw = await client.readAttendedFabric!({ ...selected, signal: request.signal });
+        check(request.signal, started);
+        const current = client.getState();
+        if (current.status !== "signed_in" || !current.acquisition) throw new Error("FABRIC_READ_UNAUTHORIZED");
+        return decodeAttendedStatus(raw, selected);
+      },
+    } : {}),
     async readPrograms({ signal }) {
       const started = epoch;
       check(signal, started);
