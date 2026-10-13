@@ -3166,6 +3166,24 @@ class RuntimeRoleResultOverBudget(RuntimeReadUnavailable):
         )
 
 
+class RuntimePlanAdmissionNotEstablished(RuntimeReadUnavailable):
+    """The exact qualified root has no immutable plan admission."""
+
+    code = "ADMISSION_NOT_ESTABLISHED"
+
+    def __init__(self) -> None:
+        super().__init__("bounded plan read found no admission for the exact root")
+
+
+class RuntimePlanAdmissionConflict(RuntimeReadUnavailable):
+    """The exact qualified root has conflicting admission records."""
+
+    code = "ADMISSION_CONFLICT"
+
+    def __init__(self) -> None:
+        super().__init__("bounded plan read found more than one admission")
+
+
 class RuntimeNamespaceCapability(ABC):
     """Server-owned contract; there is deliberately no installed implementation.
 
@@ -23560,6 +23578,21 @@ class BoundedRoleResultSnapshot:
     observation_source_identity: str | None = None
 
 
+@dataclasses.dataclass(frozen=True)
+class BoundedAdmittedPlanSnapshot:
+    """Detached canonical admission and typed plan, independent of completion.
+
+    The owner finalizes currentness only after the observation physically
+    closes. Nested dictionaries are detached values, not immutable objects.
+    """
+
+    root_job_id: str
+    root_metadata: BoundedRoleResultRootMetadata
+    admission: dict[str, Any]
+    plan: dict[str, Any]
+    observation_source_identity: str | None = None
+
+
 class _BoundedRoleResultRows:
     """Row-accounted fetch surface over one guarded statement cursor."""
 
@@ -23715,52 +23748,13 @@ class _BoundedRoleResultLoader:
         self._node_memo[job_id] = material
 
 
-def _bounded_role_result_material(
+def _bounded_strict_root_metadata(
     loader: _BoundedRoleResultLoader,
-    *,
+    root_row: sqlite3.Row | None,
     root_token: str,
-    job_token: str,
-    attempt_token: str,
-    digest_token: str,
-) -> BoundedRoleResultSnapshot:
-    """Identity/root/digest law for one selection, before any payload return."""
+) -> BoundedRoleResultRootMetadata:
+    """Reuse strict root creation law with the caller's already-bounded row."""
 
-    # Narrow identity columns first: membership, role, terminal status, and
-    # the exact current Attempt precede every projected payload column.
-    selected = loader.execute(
-        "SELECT job_id,parent_job_id,root_job_id,orchestration_role,status,"
-        "current_attempt_id FROM jobs WHERE job_id=?",
-        (job_token,),
-    ).fetchone()
-    if selected is None:
-        raise StateConflict(
-            f"terminal completion Job {job_token!r} does not exist"
-        )
-    if (
-        selected["orchestration_role"] not in {"plan", "work", "review", "repair", "aggregation"}
-        or selected["status"] != JobStatus.COMPLETED.value
-        or selected["root_job_id"] != root_token
-        or (
-            selected["orchestration_role"] == "aggregation"
-            and (job_token != root_token or selected["parent_job_id"] is not None)
-        )
-        or (
-            selected["orchestration_role"] != "aggregation"
-            and selected["parent_job_id"] != root_token
-        )
-        or selected["current_attempt_id"] != attempt_token
-    ):
-        raise StateConflict("terminal completion binding is not current")
-
-    # The frozen narrow root metadata comes from the aggregation self-root's
-    # own validated provenance and its unique immutable creation Event.
-    root_row = loader.execute(
-        "SELECT job_id,parent_job_id,root_job_id,orchestration_role,"
-        "orchestration_provenance_json,orchestration_provenance_digest,"
-        "plan_attempt_id,plan_digest,plan_step_id,repair_round,supersedes_job_id "
-        "FROM jobs WHERE job_id=?",
-        (root_token,),
-    ).fetchone()
     if root_row is None:
         raise StateConflict("terminal completion lost its strict v2 root")
     root_role, root_provenance, root_provenance_digest = (
@@ -23824,6 +23818,65 @@ def _bounded_role_result_material(
     ):
         raise StateConflict("terminal completion root workstream is invalid")
 
+    return BoundedRoleResultRootMetadata(
+        job_id=root_token,
+        root_job_id=root_token,
+        orchestration_role="aggregation",
+        creation_command_id=str(root_provenance["command_id"]),
+        work_ref=work_ref if isinstance(work_ref, str) else None,
+        orchestration_provenance_digest=str(root_provenance_digest),
+        source_digest=str(root_provenance["source_digest"]),
+    )
+
+
+def _bounded_role_result_material(
+    loader: _BoundedRoleResultLoader,
+    *,
+    root_token: str,
+    job_token: str,
+    attempt_token: str,
+    digest_token: str,
+) -> BoundedRoleResultSnapshot:
+    """Identity/root/digest law for one selection, before any payload return."""
+
+    # Narrow identity columns first: membership, role, terminal status, and
+    # the exact current Attempt precede every projected payload column.
+    selected = loader.execute(
+        "SELECT job_id,parent_job_id,root_job_id,orchestration_role,status,"
+        "current_attempt_id FROM jobs WHERE job_id=?",
+        (job_token,),
+    ).fetchone()
+    if selected is None:
+        raise StateConflict(
+            f"terminal completion Job {job_token!r} does not exist"
+        )
+    if (
+        selected["orchestration_role"] not in {"plan", "work", "review", "repair", "aggregation"}
+        or selected["status"] != JobStatus.COMPLETED.value
+        or selected["root_job_id"] != root_token
+        or (
+            selected["orchestration_role"] == "aggregation"
+            and (job_token != root_token or selected["parent_job_id"] is not None)
+        )
+        or (
+            selected["orchestration_role"] != "aggregation"
+            and selected["parent_job_id"] != root_token
+        )
+        or selected["current_attempt_id"] != attempt_token
+    ):
+        raise StateConflict("terminal completion binding is not current")
+
+    # The frozen narrow root metadata comes from the aggregation self-root's
+    # own validated provenance and its unique immutable creation Event.
+    root_row = loader.execute(
+        "SELECT job_id,parent_job_id,root_job_id,orchestration_role,"
+        "orchestration_provenance_json,orchestration_provenance_digest,"
+        "plan_attempt_id,plan_digest,plan_step_id,repair_round,supersedes_job_id "
+        "FROM jobs WHERE job_id=?",
+        (root_token,),
+    ).fetchone()
+    root_metadata = _bounded_strict_root_metadata(loader, root_row, root_token)
+
     completion = _validated_role_completion_snapshot(
         loader,
         job_token=job_token,
@@ -23836,18 +23889,9 @@ def _bounded_role_result_material(
         )
     if (
         completion.dialogue_source is not None
-        and completion.dialogue_source.work_ref != work_ref
+        and completion.dialogue_source.work_ref != root_metadata.work_ref
     ):
         raise StateConflict("terminal completion dialogue source drifted")
-    root_metadata = BoundedRoleResultRootMetadata(
-        job_id=root_token,
-        root_job_id=root_token,
-        orchestration_role="aggregation",
-        creation_command_id=str(root_provenance["command_id"]),
-        work_ref=work_ref if isinstance(work_ref, str) else None,
-        orchestration_provenance_digest=str(root_provenance_digest),
-        source_digest=str(root_provenance["source_digest"]),
-    )
     return BoundedRoleResultSnapshot(
         root_job_id=root_token,
         job_id=job_token,
@@ -23892,6 +23936,52 @@ def _read_role_result_bounded(
         if vm_guard.tripped:
             # The finally block deactivates this exact owner's budget
             # before transaction cleanup or physical close.
+            raise RuntimeRoleResultOverBudget() from exc
+        raise
+    finally:
+        vm_guard.deactivate()
+
+
+def _read_admitted_plan_bounded(
+    acquisition: BoundedRuntimeAcquisition,
+    vm_guard: _RuntimeReadProgressGuard,
+    *,
+    root_job_id: str,
+) -> BoundedAdmittedPlanSnapshot:
+    """Revalidate one exact admission with one shared loader and VM budget."""
+
+    root_token = _bounded_acquisition_identifier(root_job_id, name="root")
+    acquisition._require_open()
+    loader = _BoundedRoleResultLoader(acquisition._connection)
+    vm_guard.activate()
+    try:
+        # The canonical admission validator needs the full root's authority
+        # and validation fields, not only the narrow result-reader metadata.
+        root_row = loader.execute(
+            "SELECT * FROM jobs WHERE job_id=?", (root_token,)
+        ).fetchone()
+        root_metadata = _bounded_strict_root_metadata(loader, root_row, root_token)
+        admissions = loader.execute(
+            "SELECT event_id FROM events "
+            "WHERE event_type='COO_PLAN_ADMITTED' AND job_id=? "
+            "ORDER BY event_id LIMIT 2",
+            (root_token,),
+        ).fetchall()
+        if not admissions:
+            raise RuntimePlanAdmissionNotEstablished()
+        if len(admissions) != 1:
+            raise RuntimePlanAdmissionConflict()
+        # Preserve canonical branch selection, uniqueness and all seal/grant/
+        # policy checks. Active failure never falls back to completed history.
+        admission, plan = _validated_plan_admission(loader, root_row)
+        return BoundedAdmittedPlanSnapshot(
+            root_job_id=root_token,
+            root_metadata=root_metadata,
+            admission=json.loads(_json_dumps(admission)),
+            plan=json.loads(_json_dumps(plan)),
+        )
+    except sqlite3.OperationalError as exc:
+        if vm_guard.tripped:
             raise RuntimeRoleResultOverBudget() from exc
         raise
     finally:
@@ -24109,6 +24199,27 @@ class BoundedRuntimeReadObservation:
                 self._vm_progress.deactivate()
             return tuple(dataclasses.replace(row, provenance=(None if row.provenance is None
                 else json.loads(_json_dumps(row.provenance)))) for row in self._origin_cache)
+        except BaseException:
+            self._failed = True
+            raise
+
+    def read_admitted_plan_bounded(
+        self, root_job_id: str
+    ) -> BoundedAdmittedPlanSnapshot:
+        """Select a canonical admitted plan, whether active or completed.
+
+        This uses the same one-selection allowance and fixed shared budgets
+        as the bounded result reader. A proposal without an admission is not
+        an admitted plan. No currentness receipt is available before close.
+        """
+        self._select()
+        try:
+            result = _read_admitted_plan_bounded(
+                self._acquisition, self._vm_progress, root_job_id=root_job_id
+            )
+            return dataclasses.replace(
+                result, observation_source_identity=self._identity
+            )
         except BaseException:
             self._failed = True
             raise

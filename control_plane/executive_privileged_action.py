@@ -43,6 +43,7 @@ WORKER_AUTH_ACTIONS = frozenset(
         "executive.worker_auth.verify_only",
         "executive.worker_auth.verify_ready",
         "executive.worker_auth.recover_transaction",
+        "executive.worker_auth.issue_due10_incident_grant",
     }
 )
 HOST_POLICY_ACTIONS = frozenset(
@@ -60,6 +61,8 @@ ACTION_EFFECT_CLASS = {
     "executive.worker_auth.verify_only": "CREDENTIAL_ADMIN_READINESS",
     "executive.worker_auth.verify_ready": "CREDENTIAL_ADMIN_READINESS",
     "executive.worker_auth.recover_transaction": "CREDENTIAL_ADMIN_RECOVERY",
+    "executive.worker_auth.issue_due10_incident_grant":
+        "CREDENTIAL_ADMIN_INCIDENT_ISSUANCE",
     "executive.host.prepare_secondary_power_policy": "HOST_POWER_POLICY",
 }
 ACTION_EFFECT_UNKNOWN_EXIT_CODE = {
@@ -149,7 +152,9 @@ def _validate_optional_slot_args(args: Mapping[str, Any]) -> tuple[tuple[str, st
     return (("slot_id", _validate_slot_id(args["slot_id"])),)
 
 
-def _validate_verify_ready_args(args: Mapping[str, Any]) -> tuple[tuple[str, str], ...]:
+def _validate_verify_ready_args(
+    args: Mapping[str, Any], request_id: str
+) -> tuple[tuple[str, str], ...]:
     keys = frozenset(args)
     slot_keys = frozenset({"slot_id", "credential_expires_at"})
     company_keys = frozenset(
@@ -174,7 +179,13 @@ def _validate_verify_ready_args(args: Mapping[str, Any]) -> tuple[tuple[str, str
         "requalify_terminal_adverse_sha256", "renew_device_revalidation_sha256",
         "requalify_company_device_drift_sha256",
     )
-    if keys not in (company_keys, *(company_keys | {key} for key in requalification_keys)):
+    recovery_keys = ("recover_current_pin_grant_sha256", "successor_request_id")
+    allowed = (
+        company_keys,
+        *(company_keys | {key} for key in requalification_keys),
+        company_keys | set(recovery_keys),
+    )
+    if keys not in allowed:
         raise PrivilegedActionError(
             "verify_ready arguments must select a reviewed slot or the complete company policy"
         )
@@ -198,6 +209,34 @@ def _validate_verify_ready_args(args: Mapping[str, Any]) -> tuple[tuple[str, str
                     and digest != COMPANY_DEVICE_DRIFT_PREDECESSOR_SHA256):
                 raise PrivilegedActionError("company-device drift preimage is not the reviewed incident")
             values[requalification_key] = digest
+    # The bounded current-pin recovery transition is mutually exclusive with
+    # every historical requalification route and must designate itself as the
+    # grant's named successor request.  It can never ride on another route.
+    recovery_digest = args.get("recover_current_pin_grant_sha256")
+    successor_request_id = args.get("successor_request_id")
+    if (recovery_digest is None) is not (successor_request_id is None):
+        raise PrivilegedActionError(
+            "current-pin recovery requires both the grant digest and its designated successor request"
+        )
+    if recovery_digest is not None:
+        if keys & set(requalification_keys):
+            raise PrivilegedActionError(
+                "current-pin recovery cannot be combined with a requalification route"
+            )
+        if kind != "device-auth":
+            raise PrivilegedActionError("current-pin recovery requires device-auth")
+        digest = _require_string(recovery_digest, "recover_current_pin_grant_sha256")
+        if re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            raise PrivilegedActionError("current-pin recovery requires an exact grant SHA256")
+        designated = _require_string(successor_request_id, "successor_request_id")
+        if _REQUEST_ID_RE.fullmatch(designated) is None:
+            raise PrivilegedActionError("successor_request_id is not a bounded safe token")
+        if designated != request_id:
+            raise PrivilegedActionError(
+                "successor_request_id must name this request, not a different one"
+            )
+        values["recover_current_pin_grant_sha256"] = digest
+        values["successor_request_id"] = designated
     return tuple(sorted(values.items()))
 
 
@@ -227,7 +266,21 @@ def validate_request(raw: Mapping[str, Any]) -> ValidatedPrivilegedAction:
             raise PrivilegedActionError("host policy action arguments must be empty")
         validated_args = ()
     elif action == "executive.worker_auth.verify_ready":
-        validated_args = _validate_verify_ready_args(args)
+        validated_args = _validate_verify_ready_args(args, request_id)
+    elif action == "executive.worker_auth.issue_due10_incident_grant":
+        # The incident issuer takes exactly one designated successor request.
+        # Caller evidence, authority, body, date, budget, path and source
+        # overrides are all rejected; the outer issuer identity is this
+        # request's own explicit id.
+        _require_exact_keys(args, frozenset({"successor_request_id"}), "arguments")
+        designated = _require_string(args["successor_request_id"], "successor_request_id")
+        if _REQUEST_ID_RE.fullmatch(designated) is None:
+            raise PrivilegedActionError("successor_request_id is not a bounded safe token")
+        if designated == request_id:
+            raise PrivilegedActionError(
+                "incident issuer request cannot designate itself as its own successor"
+            )
+        validated_args = (("successor_request_id", designated),)
     else:
         validated_args = _validate_optional_slot_args(args)
 
@@ -270,6 +323,13 @@ def build_argv(request: ValidatedPrivilegedAction, release_root: str | Path) -> 
             "-B",
             str(root / "ops/executive_os/secondary_host_power_policy.py"),
         )
+    if request.action == "executive.worker_auth.issue_due10_incident_grant":
+        # Internal broker action: derivation runs inside the authenticated root
+        # broker process.  There is deliberately no reviewed argv, no shell
+        # issuer, and no handbuilt credential path for it.
+        raise PrivilegedActionError(
+            "incident issuance is an internal broker action without an argv"
+        )
 
     argv: list[str] = [
         "/bin/bash",
@@ -298,6 +358,10 @@ def build_argv(request: ValidatedPrivilegedAction, release_root: str | Path) -> 
         argv.extend(("--renew-device-revalidation-sha256", args["renew_device_revalidation_sha256"]))
     if "requalify_company_device_drift_sha256" in args:
         argv.extend(("--requalify-company-device-drift-sha256", args["requalify_company_device_drift_sha256"]))
+    if "recover_current_pin_grant_sha256" in args:
+        argv.extend(("--recover-current-pin-grant-sha256", args["recover_current_pin_grant_sha256"]))
+    if "successor_request_id" in args:
+        argv.extend(("--successor-request-id", args["successor_request_id"]))
     return tuple(argv)
 
 

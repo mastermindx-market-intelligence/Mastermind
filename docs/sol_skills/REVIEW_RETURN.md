@@ -76,8 +76,10 @@ RELEASE_BLOCKED
   non-material;
 * protected movement is disjoint from owned paths and does not materially intersect the declared
   dependency closure;
-* the latest-base merge ref/integrated candidate is conflict-free and passes required repository and
-  security checks;
+* the latest-base merge ref/integrated candidate is conflict-free and its identity is bound. Head
+  checks and mandatory semantic review must pass before queue entry; with GitHub's native merge
+  queue, required `merge_group` repository/security checks pass **in the queue before merge**,
+  not necessarily on the synthetic PR merge ref before queue entry;
 * no unresolved blocker/thread applies;
 * capability/non-goal claims are unchanged and no new live/production proof is claimed.
 
@@ -187,7 +189,7 @@ Do not send the builder back to “rethink everything” unless the architecture
 Accept only when:
 
 * every blocker is closed on the exact current semantic head;
-* required latest-base integration/hosted checks are green for that same semantic head;
+* required latest-base integration/hosted checks are green for that same semantic head **at final merge acceptance**; with a native merge queue, a missing prequeue synthetic merge-ref check is not grounds to withhold an otherwise eligible queue entry;
 * the changed-file set and authority surface remain bounded;
 * production/browser/consumer proof exists when the wave owes it;
 * the capability ledger is updated truthfully;
