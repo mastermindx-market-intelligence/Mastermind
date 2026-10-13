@@ -14,6 +14,10 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
+from common.company_dialogue_principal_limits import (
+    MAX_REQUEST_BYTES,
+    MAX_RESPONSE_BYTES,
+)
 from common.agent_dialogue_contract import (
     DialogueContractError,
     MAX_BOUNDED_TEXT_CHARS,
@@ -30,8 +34,6 @@ PRINCIPAL_SERVER_IDENTITY = "mastermind-company-dialogue-principal-mcp"
 PRINCIPAL_SERVER_VERSION = "0.1.0"
 PRINCIPAL_RESULT_SCHEMA = "mastermind.company_dialogue_principal_mcp_result.v1"
 
-MAX_REQUEST_BYTES = 32 * 1024
-MAX_RESPONSE_BYTES = 64 * 1024
 MAX_ERROR_MESSAGE_CHARS = 240
 
 ERROR_CODES = frozenset(

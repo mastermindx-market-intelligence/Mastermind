@@ -249,3 +249,20 @@ Then obtain independent review of the native policy observation and supervisor a
 Only the existing installation/enrollment owners can authorize the actual generation and live
 canary. No login, credential inspection, service restart or profile enablement is requested by
 this design. H2 static work and H3 source packaging can advance while native qualification is held.
+
+## Default-policy separation repair
+
+The RG1 source candidate now lives at `config/candidates/claude_principal_rg1.json`
+and is loaded only with an explicit path through the existing
+`ExecutionCapabilityRegistry.load`. Its frozen profile/grant/policy generations
+are unchanged. The default `config/executive_agent_capabilities.json` preserves
+the prior reviewed Company Consultation generation and has no rich principal
+profile or either principal-only grant. Default Claude parity therefore covers
+the incumbent profiles only; RG1 validation remains separately exercised.
+
+Frozen projection descriptors live in
+`common/claude_principal_capability_contract.py`, not the production policy's
+source declarations. This is a shared data contract, never admission or a
+second parser. The existing registry still refuses an enabled or widened RG1
+profile even when its candidate is explicitly loaded. The native factory,
+Runtime COMMIT fence and Unix transport remain source-built and uninstalled.

@@ -88,7 +88,10 @@ def test_candidate_manifest_matches_current_registry_and_source_generations() ->
     assert manifest["profile_state"] == "DISABLED_REGISTRY_CANDIDATE"
     assert manifest["execution_surface"] == "claude-agent-sdk"
 
-    registry = ExecutionCapabilityRegistry.load()
+    registry = ExecutionCapabilityRegistry.load(
+        ROOT / "config" / "candidates" / "claude_principal_rg1.json",
+        source_root=ROOT,
+    )
     profile = registry.profiles[RICH_CLAUDE_PRINCIPAL_PROFILE_ID]
     assert profile.enabled is False
     assert manifest["policy_version"] == registry.policy_version

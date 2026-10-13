@@ -129,6 +129,8 @@ from control_plane.executive_workspace import (
 
 CONTROL_PROTOCOL_VERSION = "mastermind.executive_control/v1"
 DEFAULT_MAX_REQUEST_BYTES = 64 * 1024
+# Control owner may list/write; designated peer group may search; others denied.
+_PRINCIPAL_COMPANY_PARENT_MODE = stat.S_IRWXU | stat.S_IXGRP
 DEFAULT_MAX_RESPONSE_BYTES = 1024 * 1024
 _PRODUCTION_CONTROL_SOCKET = Path("/var/run/mastermind-executive/control.sock")
 DIALOGUE_OBSERVATION_IO_TIMEOUT_SECONDS = 5.0
@@ -3366,7 +3368,7 @@ class ExecutiveControlService:
     async def _bind_principal_company_dialogue_server(
         self, *, start_serving: bool
     ) -> None:
-        from integrations.company_dialogue_principal_host_contract import (
+        from common.company_dialogue_principal_limits import (
             MAX_REQUEST_BYTES,
         )
 
@@ -3380,7 +3382,7 @@ class ExecutiveControlService:
         if activated is None:
             parent = path.parent
             existed = parent.exists()
-            parent.mkdir(mode=0o710, parents=True, exist_ok=True)
+            parent.mkdir(mode=_PRINCIPAL_COMPANY_PARENT_MODE, parents=True, exist_ok=True)
             info = parent.lstat()
             if (
                 not stat.S_ISDIR(info.st_mode)
@@ -3392,9 +3394,9 @@ class ExecutiveControlService:
                 )
             if not existed:
                 os.chown(parent, os.geteuid(), gid, follow_symlinks=False)
-                parent.chmod(0o710)
+                parent.chmod(_PRINCIPAL_COMPANY_PARENT_MODE)
                 info = parent.lstat()
-            if info.st_gid != gid or stat.S_IMODE(info.st_mode) != 0o710:
+            if info.st_gid != gid or stat.S_IMODE(info.st_mode) != _PRINCIPAL_COMPANY_PARENT_MODE:
                 raise ServiceError(
                     "Principal Company Dialogue parent permissions differ"
                 )

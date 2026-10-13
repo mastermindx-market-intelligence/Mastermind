@@ -298,28 +298,6 @@
         }
       }
     },
-    "principal.claude.coo.rich.v1": {
-      "package_generation_digests": {},
-      "profile_digest": "c7c104f39940a96f105be5e30954db2a14d9919e7366e2c38fbe36390d394930",
-      "surfaces": {
-        "agent-sdk": {
-          "reason": "H1-RG1 freezes grants/profile only; native transport, network, tool-schema and supervisor admission remain unqualified.",
-          "status": "deferred"
-        },
-        "cli": {
-          "reason": "H1-RG1 freezes grants/profile only; native transport, network, tool-schema and supervisor admission remain unqualified.",
-          "status": "deferred"
-        },
-        "desktop-local": {
-          "reason": "H1-RG1 freezes grants/profile only; native transport, network, tool-schema and supervisor admission remain unqualified.",
-          "status": "deferred"
-        },
-        "inline-subagent": {
-          "reason": "H1-RG1 freezes grants/profile only; native transport, network, tool-schema and supervisor admission remain unqualified.",
-          "status": "deferred"
-        }
-      }
-    },
     "sealed.worker.claude.readonly.no-extensions.v1": {
       "package_generation_digests": {},
       "profile_digest": "421b642a6a4ae978efffbe311023dd3495adc54cbc00e86bf5f6254be3dd5555",

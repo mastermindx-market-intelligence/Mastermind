@@ -42,7 +42,7 @@ from integrations.mastermind_company_mcp.principal_schemas import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
-POLICY = ROOT / "config" / "executive_agent_capabilities.json"
+POLICY = ROOT / "config" / "candidates" / "claude_principal_rg1.json"
 POLICY_VERSION = "2026-10-06.claude-rich-principal-rg1"
 
 
@@ -54,6 +54,14 @@ def write_policy(tmp_path: Path, value: dict) -> Path:
     path = tmp_path / "policy.json"
     path.write_text(json.dumps(value), encoding="utf-8")
     return path
+
+
+def test_default_registry_has_no_future_principal_profile_or_grants() -> None:
+    registry = ExecutionCapabilityRegistry.load()
+    assert RICH_CLAUDE_PRINCIPAL_PROFILE_ID not in registry.profiles
+    assert not set(RICH_CLAUDE_PRINCIPAL_MCP_IDS) & set(registry.mcp_servers)
+    with pytest.raises(CapabilityPolicyError):
+        registry.resolve(RICH_CLAUDE_PRINCIPAL_PROFILE_ID)
 
 
 def test_rich_principal_grants_match_current_source_generations() -> None:
@@ -70,7 +78,7 @@ def test_rich_principal_grants_match_current_source_generations() -> None:
     )
 
 
-def test_default_policy_contains_only_disabled_inert_rich_candidate() -> None:
+def test_explicit_candidate_contains_only_disabled_inert_rich_profile() -> None:
     registry = ExecutionCapabilityRegistry.load(POLICY, source_root=ROOT)
     assert registry.policy_version == POLICY_VERSION
     profile = registry.profiles[RICH_CLAUDE_PRINCIPAL_PROFILE_ID]
