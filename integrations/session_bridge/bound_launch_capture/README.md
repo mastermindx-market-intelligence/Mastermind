@@ -336,3 +336,29 @@ source refuse before spawn, preserving the original reservation/lease.
 These changes remain source-only. Production fixed-caller loading, finite actual
 realm/V2 canary, host selection/admission, protected installation and observed
 original-parent consumption are not proved by these inert source checks.
+
+Finite subscription qualification now has a source observer and a real V2
+open-only probe. `SubscriptionRealmOwner` preserves its eight-field ABI and
+legacy Codex branch. The finite MiniMax/Claude branch checks the same original
+root config, actual principal/HOME, catalog binding and private credential
+custody. Its installer input is `claude_attestation_receipt` with exact
+`claude_attestation_sha256`, `claude_binary` and `allowed_claude_versions`.
+The root-owned mode-0440 receipt contains exactly `schema_version` =
+`mastermind.attended_claude_binary/v1` and `binary` = the canonical
+`BinaryAttestation` fields from the existing Claude attester. The reader verifies
+actual file identity/content and rejects privilege-changing modes. No installer
+has published that new receipt merely because this source exists.
+
+`run_attended_secret_canary` performs a new probe under the actual current
+principal. It holds the original HOME and credential inodes through the protected
+open-denial checks, reads no credential content, and commits the exact immutable
+Attempt/Job/worker/physical/HOME coordinates. It accepts the ordinary and governed
+LaunchSpec types; copied V1 receipts cannot become V2. The original owner checks
+that commitment with `validate_attended_secret_canary_binding`.
+
+Remaining source composition must request this probe through the existing
+worker-local owner for each claimed Attempt, before Supervisor persists its
+recovery spec and before START is pinned. The Control caller must revalidate
+foreground and lease after that await. The current static service canary is not
+that join. Fixed startup resources, actual profile/realm installation, protected
+host qualification and production acceptance remain separate and unproven.
