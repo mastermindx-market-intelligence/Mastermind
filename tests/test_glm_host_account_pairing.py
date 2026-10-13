@@ -14,7 +14,7 @@ COMPONENT = Path(__file__).resolve().parents[1]/'integrations/session_bridge/glm
 
 @pytest.fixture
 def ext(tmp_path, monkeypatch):
-    dst=tmp_path/'ext';shutil.copytree(COMPONENT/'fixtures',dst)
+    dst=tmp_path/'ext';shutil.copytree(Path(__file__).parent/'fixtures/glm_host_account_pairing',dst)
     subprocess.run(['git','apply',str(COMPONENT/'glm-host-account-pairing.patch')],cwd=dst,check=True,capture_output=True)
     monkeypatch.syspath_prepend(str(dst))
     for name in ['glm_host_account_source','glm_host_account_probe','lease_broker']:
@@ -257,7 +257,7 @@ def test_complete_local_projection_to_broker_consumes_only_compatible_pair(ext,t
 def test_paid_predicate_contract_suite(ext):
     (ext/'tests').mkdir()
     script=ext/'tests/test_glm_host_account_readiness.py'
-    shutil.copyfile(COMPONENT/'predicate_tests.py',script)
+    shutil.copyfile(Path(__file__).parent/'fixtures/glm_host_account_pairing/predicate_contract.py',script)
     r=subprocess.run([sys.executable,str(script)],cwd=ext,capture_output=True,text=True,timeout=10)
     assert r.returncode==0,r.stdout+r.stderr
     assert 'Ran 33 tests' in r.stderr

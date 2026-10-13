@@ -9,3 +9,5 @@ Readiness is local configuration evidence, not provider authentication, a Runtim
 Apply the patch only to exact manifest preimages after review. Publish/refresh the existing collector and qualify actual observations before installing selector/broker gating; preserve the sole existing launchd service. This package is source qualification, not an installation claim. Do not install the separate unreviewed/held expiry-selector proposal #1365 or overwrite newer bytes.
 
 The paid direct coordinator-to-worker return and coordinator correction are retained separately in the manifest; the corrected predicate contract has33 tests. The parent wiring tests cover real fixture projection through the broker, explicit preference, model room, root conservation, unavailable-vs-capacity behavior, unsafe sources and structural mode holds.
+
+Frozen preimages and the inert predicate contract live under `tests/fixtures/glm_host_account_pairing/`; moving test inputs does not alter installed runtime bytes.
