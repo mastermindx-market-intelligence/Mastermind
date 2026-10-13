@@ -254,3 +254,78 @@ def test_invalid_cancel_reason_refuses_before_signal(lr, tmp_path, monkeypatch, 
             process_identity=owner.process_identity, reason=reason)
     assert not owner._cancel_attempted
     release.touch(); lr.finish_owned_process(owner)
+
+
+
+@pytest.mark.parametrize('cleanup_passing', [True, False])
+def test_natural_exit_cancel_before_finisher_preserves_original_success(lr, tmp_path, monkeypatch, cleanup_passing):
+    owner, run = capture(lr, tmp_path)
+    owner.process.wait(timeout=3)
+    assert owner.result is None and owner.process.poll() == 0
+    def no_signal(proc, pgid, **kwargs):
+        assert proc is owner.process and proc.poll() == 0
+        return dict(status='not_needed' if cleanup_passing else 'unknown',
+                    identity_verified=True, census_proven=cleanup_passing,
+                    residual_count=0 if cleanup_passing else 1,
+                    sigterm_sent=False, sigkill_sent=False)
+    monkeypatch.setattr(lr, '_terminate_verified_group', no_signal)
+    observed = lr.cancel_exact_owned_process(owner, label=owner.label,
+        process_identity=owner.process_identity, reason='late observation')
+    assert observed['cancel_receipt']['already_exited'] is True
+    assert observed['cancel_receipt']['signal_sent'] is False
+    assert observed['cancel_receipt']['escalated_to_sigkill'] is False
+    assert owner.result is None and owner._cancel_attempted
+    result = lr.finish_owned_process(owner)
+    assert result.returncode == 0 and result.cleanup_proven
+    projected = lr.owned_capture_collection(owner)
+    assert projected['cancel_receipt'] == observed['cancel_receipt']
+    if cleanup_passing:
+        assert result.structured_result == {'summary':'ok'}
+        assert result.owned_capture['result']['state'] == 'published'
+        assert json.loads((run/'output/result.json').read_bytes()) == {'summary':'ok'}
+    else:
+        assert result.structured_result is None
+        assert result.owned_capture['result']['reason'] == 'cancelled'
+        assert (run/'output/result.json').read_bytes() == b''
+
+
+def test_uncertain_late_cancel_still_suppresses_success_and_refuses_resend(lr, tmp_path, monkeypatch):
+    owner, run = capture(lr, tmp_path)
+    owner.process.wait(timeout=3)
+    calls=[]
+    def uncertain(*args, **kwargs):
+        calls.append(True); raise OSError('inert cancellation observation unknown')
+    monkeypatch.setattr(lr, '_terminate_verified_group', uncertain)
+    args=dict(label=owner.label, process_identity=owner.process_identity, reason='late unknown')
+    with pytest.raises(OSError): lr.cancel_exact_owned_process(owner, **args)
+    with pytest.raises(lr.LaneRuntimeError, match='cancel_unconfirmed'):
+        lr.cancel_exact_owned_process(owner, **args)
+    result = lr.finish_owned_process(owner)
+    assert calls == [True] and owner._cancel_observation is None
+    assert result.structured_result is None
+    assert result.owned_capture['result']['reason'] == 'cancelled'
+    assert (run/'output/result.json').read_bytes() == b''
+
+
+def test_active_signal_with_zero_exit_still_suppresses_success(lr, tmp_path):
+    import time
+    run=tmp_path/'run'; run.mkdir(mode=0o700)
+    ready=tmp_path/'ready'
+    script=('import signal,sys,time; from pathlib import Path; '
+            'signal.signal(signal.SIGTERM,lambda *args:sys.exit(0)); '
+            'print(bytes.fromhex("7b22737472756374757265645f6f7574707574223a7b2273756d6d617279223a226f6b227d7d").decode(),flush=True); '
+            'Path(sys.argv[1]).touch(); time.sleep(30)')
+    owner=lr.begin_owned_process([sys.executable,'-c',script,str(ready)],
+        timeout=5,label='original-run',receipt_path=tmp_path/'terminal.jsonl',
+        owned_capture_run_dir=run,owned_capture_result_schema_json=SCHEMA)
+    deadline=time.monotonic()+3
+    while not ready.exists() and time.monotonic()<deadline: time.sleep(.01)
+    assert ready.exists() and owner.process.poll() is None
+    observed=lr.cancel_exact_owned_process(owner,label=owner.label,
+        process_identity=owner.process_identity,reason='active cancellation')
+    assert observed['cancel_receipt']['already_exited'] is False
+    assert observed['cancel_receipt']['signal_sent'] is True
+    result=lr.finish_owned_process(owner)
+    assert result.returncode == 0 and result.structured_result is None
+    assert result.owned_capture['result']['reason'] == 'cancelled'
+    assert (run/'output/result.json').read_bytes() == b''

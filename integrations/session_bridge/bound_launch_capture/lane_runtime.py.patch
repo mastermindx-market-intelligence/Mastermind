@@ -1516,7 +1516,7 @@
          _clear_current(proc)
          capture_deadline = time.monotonic() + max(
              0.25, min(2.0, terminate_grace + 0.25)
-@@ -1136,12 +2379,48 @@
+@@ -1136,12 +2379,60 @@
          stdin_complete = stdin_thread is None or (
              not stdin_thread.is_alive() and bool(stdin_state.get("complete"))
          )
@@ -1543,10 +1543,22 @@
 +            stderr_error=stderr_error, stdin_error=stdin_state.get('error_code'))
 +        if capture_reservation is not None:
 +            try:
++                # A no-signal observation after natural process exit does not
++                # cancel its result. The once-only request fence stays consumed;
++                # missing/uncertain/signaled observations remain conservative.
++                cancel_observation = _owner._cancel_observation
++                cancelled = _owner._cancel_attempted
++                if (cancelled and type(cancel_observation) is dict
++                        and cancel_observation.get('already_exited') is True
++                        and cancel_observation.get('signal_sent') is False
++                        and cancel_observation.get('escalated_to_sigkill') is False
++                        and type(_owner._cancel_receipt) is dict
++                        and cleanup_receipt_is_proven(_owner._cancel_receipt)):
++                    cancelled = False
 +                owned_capture_block, structured_result = capture_reservation.finalize(
 +                    stdout_collector, stderr_collector,
 +                    cleanup=cleanup, returncode=returncode, timed_out=timed_out,
-+                    cancelled=_owner._cancel_attempted,
++                    cancelled=cancelled,
 +                )
 +                stdout_file_complete = bool(owned_capture_block.get("stdout_file_complete"))
 +                stderr_file_complete = bool(owned_capture_block.get("stderr_file_complete"))
@@ -1565,7 +1577,7 @@
          cleanup = _mark_stream_state_unproven(
              cleanup,
              stdout_complete=stdout_complete,
-@@ -1150,8 +2429,20 @@
+@@ -1150,8 +2441,20 @@
              stdout_error=stdout_error,
              stderr_error=stderr_error,
              stdin_error=stdin_state.get("error_code"),
@@ -1586,7 +1598,7 @@
          diagnostic_fields = {}
          if receipt_diagnostics is not None:
              try:
-@@ -1169,6 +2460,14 @@
+@@ -1169,6 +2472,14 @@
                  {
                      "schema": PROCESS_RECEIPT_SCHEMA,
                      **diagnostic_fields,
@@ -1601,7 +1613,7 @@
                      "label": safe_label,
                      "pid": proc.pid,
                      "pgid": pgid,
-@@ -1199,7 +2498,441 @@
+@@ -1199,7 +2510,441 @@
          stderr_bytes=stderr_bytes,
          stdout_truncated=stdout_truncated,
          stderr_truncated=stderr_truncated,

@@ -241,6 +241,10 @@ only the log label is normalized. One original cancellation entry is consumed
 before signaling. The same successful request returns its retained observation
 without signaling again; a changed reason or uncertain attempt refuses.
 Completed-owner cleanup comes from its retained private record.
+If the original child naturally exited before the finisher joins, a retained
+already-exited/no-signal observation with passing original group cleanup does
+not suppress its valid result. The cancellation request remains consumed.
+Signaled, missing or uncertain observations still suppress result publication.
 
 Assembly entry and durable publication have separate once-only fences. A
 failed or cancelled assembly cannot be reopened by repairing caller inputs.
