@@ -19,7 +19,8 @@ This module owns three closed things and nothing else:
    The table is not a configuration input.  No CLI flag, config key,
    environment value, receipt field, or raw JSON attribute can extend it, and
    no production path can mint qualified ordinary cause. The separate
-   internal incident issuer below remains dormant with its policy set to None.
+   internal incident issuer is bound below to the separately authorized
+   exact incident.
 
 2. *Grant custody.*  One immutable root-owned grant document at a fixed
    internal location, bound to the authority reference, the exact installed
@@ -76,7 +77,7 @@ RECOVERY_STATE_ROOT = Path(
 RECOVERY_GRANT_PATH = RECOVERY_STATE_ROOT / "grant.json"
 RECOVERY_ALLOCATION_PATH = RECOVERY_STATE_ROOT / "allocation.json"
 
-# Dormant exact-incident recovery.  The incident grant and its issuance
+# Exact-incident recovery.  The incident grant and its issuance
 # commitment live under the SAME existing recovery state root and reuse the
 # SAME fixed allocation path; only their immutable document schemas differ.
 # This names a separate policy class, not the ordinary-only human decision.
@@ -96,11 +97,10 @@ RECOVERY_INCIDENT_COMMITMENT_PATH = RECOVERY_STATE_ROOT / "incident-commitment.j
 INCIDENT_HISTORICAL_CAUSE = "UNKNOWN"
 INCIDENT_CAUSAL_LINK = "NOT_ESTABLISHED"
 
-# Fixed designated evidence of the one retained incident.  These constants are
-# documentation of the reviewed incident identity; the production activation
-# policy below is None, and no environment, config, CLI, JSON or receipt field
-# can install one.  A future authority must ship reviewed source that binds
-# the actual retained human question/answer/provenance digest.
+# Fixed designated evidence of the one retained incident. No environment,
+# config, CLI, JSON or receipt field can install or alter its source policy.
+# The separate reviewed human authorization below does not establish either
+# historical cause or request-to-readiness attribution.
 INCIDENT_DESIGNATED_EVIDENCE = {
     "original_request_id": "codex01-current-v5-company-01a1230a-20261011-10",
     "original_request_sha256":
@@ -416,15 +416,19 @@ class IncidentPolicy:
         }
 
 
-# PRODUCTION INCIDENT POLICY.  It is None: the actual human decision for this
-# exception is pending, ordinary-only approval does not authorize it, and this
-# candidate carries no reviewed activation binding (no retained human
-# question/answer/provenance digest), so the incident issuer cannot issue in
-# production.  There is no environment, config, CLI, JSON or receipt channel
-# that can replace this value; only reviewed source shipped by a real
-# authority may, and a test-only private injection is never a production
-# input.
-PRODUCTION_INCIDENT_POLICY: IncidentPolicy | None = None
+# Source-reviewed authorization for exactly this designated incident. The
+# retained human question and answer explicitly accept both historical unknowns.
+# Digests reference retained provenance; they are not a cryptographic chat
+# attestation. No caller, environment, config or receipt field can replace this
+# policy. Importing it creates no grant, successor, clock, allocation or effect;
+# the authenticated broker and installed host gates still own issuance/use.
+PRODUCTION_INCIDENT_POLICY: IncidentPolicy | None = IncidentPolicy(
+    policy_id="due10-dual-unknown-one-attempt-20261013",
+    question_sha256="660ddac062ace661a01984e4abddc0d36145c17226c352134ca4883eb7f82b0b",
+    answer_sha256="590b9e4398dbd11400728d7c566e29bc4afd6c574a39a464f6581eae60b75028",
+    provenance_sha256="b55221d99bbd31a90d68b9ea9c59a43d3b3191595a8fe2ce99dfdef2e7bcd2de",
+    **INCIDENT_DESIGNATED_EVIDENCE,
+)
 
 
 def _require_exact_fields(
@@ -1022,8 +1026,8 @@ def validate_incident_policy(value: Any) -> dict[str, Any]:
     """Return the designated evidence of one well-formed incident policy.
 
     Structural and closed-value checks only: this never activates anything and
-    never compares the policy to caller-supplied evidence.  With the
-    production policy ``None`` this function is unreachable in production.
+    never compares the policy to caller-supplied evidence. Live consumption
+    separately requires the exact configured policy and authenticated issuance.
     """
 
     if not isinstance(value, IncidentPolicy):
