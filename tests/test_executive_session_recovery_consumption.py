@@ -148,6 +148,25 @@ def test_same_model_other_pool_successor_consumes_checkpoint_after_runtime_reope
     assert FRONTIER["next_actions"][0] in json.dumps(seals[0].payload)
     assert not any(event.event_type == "OPERATOR_OPERATION_EFFECT_UNKNOWN"
                    for event in runtime.events.list_events(job_id=planner.job_id))
+    # The original COO root must ingest the completed replacement planner
+    # rather than leaving its logically returned plan inaccessible.
+    from control_plane.executive_coo_cycle import CooCycle
+    admission = CooCycle(runtime, dispatcher=lambda *_: None).run_once(root.job_id)
+    assert admission.action == "PLAN_ADMITTED"
+    work = [item for item in runtime.jobs.list_jobs()
+            if item.root_job_id == root.job_id and item.orchestration_role == "work"]
+    assert len(work) == 1
+    assert work[0].objective == FRONTIER["next_actions"][0]
+    assert work[0].parent_job_id == root.job_id
+    # A repeated parent notification cannot materialize another work child:
+    # the canonical deterministic plan-admission command must reconcile.
+    admission_command = (
+        f"coo-cycle:{root.job_id}:admit-plan:{job.current_attempt_id}"
+    )
+    replayed = runtime.jobs.admit_cycle_plan(root.job_id, command_id=admission_command)
+    assert len(replayed) == 1 and replayed[0].job_id == work[0].job_id
+    assert sum(e.event_type == "COO_PLAN_ADMITTED"
+               for e in runtime.events.list_events(job_id=root.job_id)) == 1
 
 
 def test_root_triage_identifies_modern_stop_receipt_gap_without_authorizing_requeue(tmp_path):

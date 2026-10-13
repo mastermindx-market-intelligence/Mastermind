@@ -207,3 +207,14 @@ An important capacity boundary was confirmed from the existing protected `coo_cy
 The latest completed GitHub CI for prior head `26c96204e96b1b03d433c87c08f95feb4e5772f5` failed on precisely the **five already-known quota-proof tests and two socket cursor integration tests**; the prior sporadic SQLite malformed-database error was **not present** in that run. Other CI checks were green. This is one supporting CI observation, not an unconditional lifetime fix.
 
 An independent fresh read-only Fabric review request using original root/parent `fabric-session-continuity-20261012-web-001` and new ID `fabric-session-recovery-wal-review-20261013-r1` was refused by the incumbent broker: no eligible host cleared current disk, load, thermal and qualification constraints. Exact original ID status is `NOT_FOUND`, so there is **no active reviewer or uncertain work to replay**, and the request was not rerouted or forced to another host. Review remains owed after actual capacity/admission changes. All source remains PR-draft and not installed.
+
+## Same-root successor result consumption (synthetic provider, real owners)
+
+The real-owner recovery integration test is extended beyond "the replacement received a checkpoint and sealed its own result." On a disposable Executive Runtime, it now exercises the following **same-root** path:
+
+1. Existing planner Attempt on pool A commits a generation-bound checkpoint, stops through the supported legacy typed release path, and rate-limits; existing atomic COO owner requeues the original Job with one logical identity.
+2. A qualified synthetic pool B registration receives the new Attempt after a fresh Runtime reopen. The substitute adapter consumes the model-visible production prompt with exact persisted checkpoint and READ-only grant; it emits a typed accepted planner result derived from the frontier.
+3. The *existing original root* is handed that closed result through `CooCycle(runtime).run_once(root_job_id)`, which returns `PLAN_ADMITTED` and creates exactly one real work child whose objective is the saved checkpoint's next action.
+4. A duplicate canonical plan-admission command is replayed through the existing JobRegistry, which reconciles to the **same** child Job rather than creating another work item; exactly one `COO_PLAN_ADMITTED` event remains.
+
+This is stronger than merely retaining and relaying source bytes. Still, the provider/process is **simulated**, the original root is Executive's logical COO root, not a live ChatGPT Web session, and the predecessor uses the legacy release API. It does not prove full modern-stop quota correction, an authenticated Web parent wake, same-session model change, shared account budget or 30 real paid workers. No production dispatcher/service or native provider pool is modified.
