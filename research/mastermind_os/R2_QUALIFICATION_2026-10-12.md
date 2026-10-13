@@ -136,3 +136,36 @@ consumption trace, native qualification, deliberate principal comparison, curren
 audience/permission enforcement, and the genuine seven-day installed campaign.
 No account enrollment, Dot or native Chat submission, production deployment or
 full programme acceptance follows from this checkpoint.
+
+## Principal transaction guard candidate
+
+A separate direct candidate repairs the observed principal admission race after
+the original Fabric implementation run settled with an artifact delivery contract
+failure and its supported export refused. The failed worker patch is unaccepted;
+the direct candidate has its own exact source hashes, tests and review.
+
+The existing Runtime transaction rechecks the trusted synchronous guard after
+acquiring the SQLite writer lock and before commit. A failed recheck rolls back
+the Job and creation event. An accepted command that appears while a concurrent
+caller waits is reconciled before current role eligibility, with the existing
+sink fingerprint check preserving exact-operation replay. No public guard or
+role token, new lifecycle, authority map or RULING implementation is added.
+
+The exact candidate module passed 53 tests. An independent SQLite driver passed
+lock-wait role relief, post-insert relief with rollback, original accepted replay,
+and accepted-event arrival during lock wait. These tests load the exact candidate
+modules with incumbent dependencies; hosted tests of the integrated candidate and
+installed real-path acceptance remain separate. Fabric review
+`r2-principal-direct-review-01a13316` returned source acceptance with no blockers,
+and its assigning coordinator adjudicated and accepted that retained result.
+
+This closes the demonstrated lock-wait and insertion windows. It does not
+serialize external owner changes after the final recheck, establish OAuth/peer
+authentication, or establish provider-turn eligibility. PR #1240 retains the
+RULING consumer and its release/custody obligations.
+
+The later protected `f9bab9b1f56d747416d80c6f04c810d2960fc2ee` adds optional
+management-layer/conserved-lineage guidance and disabled provider-recovery
+source. The current guidance was read; these commits do not modify this
+candidate's three source paths or the Office application. This permits bounded
+evidence reuse, not a claim that the union has already passed hosted checks.
