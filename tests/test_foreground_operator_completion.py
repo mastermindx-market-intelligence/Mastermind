@@ -17,7 +17,7 @@ from control_plane.executive_runtime import (
     Runtime,
     StateConflict,
 )
-from control_plane.executive_service import ExecutiveControlService, _canonical_json
+from control_plane.executive_service import ExecutiveControlService, _canonical_json, _ForegroundExecution
 from tests.test_executive_service import _config, _FakeSupervisor
 from tests.test_foreground_operation import frame, admit
 from tests import test_executive_os_phase1fc as roles
@@ -41,7 +41,7 @@ def test_empty_placements_still_reserve_serial_scope_before_admission(tmp_path, 
         monkeypatch.setattr(s, "_require_coo_worker_composed", lambda: pytest.fail("foreign cycle entered"))
         async with scope._session_bridge_foreground_dispatch(s.runtime, frame(), lambda: None) as op:
             async with s._foreground_cycle_scope(op) as drive:
-                assert drive is True
+                assert not drive
                 assert s._foreground_cycle_owner == (asyncio.current_task(), op)
                 assert asyncio.current_task() in s._coo_action_tasks
                 # The slot is held before any fresh admission can commit.
@@ -77,12 +77,14 @@ def test_scope_refuses_a_foreign_operation_source(tmp_path):
 def test_operator_plan_completion_returns_finite_result_without_plan_admission(tmp_path, monkeypatch, oversize):
     async def run():
         s, f = service_at(tmp_path), frame()
+        # Result-shaping fixture only; real eligibility/factory coverage is separate.
+        monkeypatch.setattr(s, "_foreground_execution_state", lambda **kw: _ForegroundExecution("ORDINARY_OPERATOR", b"{}"))
         async with scope._session_bridge_foreground_dispatch(s.runtime, f, lambda: None) as op:
             async with s._foreground_cycle_scope(op) as drive:
-                assert drive is True
+                assert bool(drive) is True
                 receipt = await admit(s.runtime, tmp_path, op, f)
                 root = receipt["job_id"]
-                monkeypatch.setattr(s, "_coo_binding_for_root", lambda _: {"operator_execution_profile_id": "ordinary"})
+                monkeypatch.setattr(s, "_coo_binding_for_root", lambda _: {"operator_execution_profile_id": "ordinary", "operator_harness_armed": True})
                 finishes = []
                 async def finish(dispatched):
                     # The already-owned collector: real Runtime claim, profile,
@@ -228,6 +230,7 @@ def test_native_profile_and_foreign_root_never_extend_operator_cycle(tmp_path, m
                     with pytest.raises(StateConflict, match="native no-child return profile"):
                         await s._drive_foreground_cycle(op, root)
                 else:
+                    monkeypatch.setattr(s, "_coo_binding_for_root", lambda _: {"operator_execution_profile_id": "ordinary", "operator_harness_armed": True})
                     calls = []
                     async def once(root_id):
                         calls.append(root_id)
@@ -270,7 +273,7 @@ def test_malformed_plan_seal_never_reports_operator_completion(tmp_path, monkeyp
             async with s._foreground_cycle_scope(op):
                 receipt = await admit(s.runtime, tmp_path, op, f)
                 root = receipt["job_id"]
-                monkeypatch.setattr(s, "_coo_binding_for_root", lambda _: {"operator_execution_profile_id": "ordinary"})
+                monkeypatch.setattr(s, "_coo_binding_for_root", lambda _: {"operator_execution_profile_id": "ordinary", "operator_harness_armed": True})
                 async def finish(dispatched):
                     await asyncio.sleep(0)
                     job = s.runtime.jobs.get_job(dispatched.job_id)
@@ -308,7 +311,7 @@ def test_quarantined_service_never_reports_operator_completion(tmp_path, monkeyp
             async with s._foreground_cycle_scope(op):
                 receipt = await admit(s.runtime, tmp_path, op, f)
                 root = receipt["job_id"]
-                monkeypatch.setattr(s, "_coo_binding_for_root", lambda _: {"operator_execution_profile_id": "ordinary"})
+                monkeypatch.setattr(s, "_coo_binding_for_root", lambda _: {"operator_execution_profile_id": "ordinary", "operator_harness_armed": True})
                 async def finish(dispatched):
                     await asyncio.sleep(0)
                     job = s.runtime.jobs.get_job(dispatched.job_id)

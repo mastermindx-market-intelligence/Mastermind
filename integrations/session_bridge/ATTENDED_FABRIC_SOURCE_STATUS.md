@@ -117,6 +117,16 @@ host gates. A repeated transition, no action, finite cutoff or unresolved
 finisher stops progression; there is no polling or separate retry scheduler.
 The existing native-return no-child profile is explicitly excluded.
 
+With no attended placements, a currently qualified ordinary Operator may drive
+only through its exact validated planner completion. The root remains queued;
+no plan admission or Work creation follows. Autonomy-off, native-return and
+empty-placement/harness-off configurations keep queued admission without
+driving. The factory binds an immutable eligibility/binding expectation before
+admission, rechecks it at the canonical fresh-admission guard and on return,
+and preserves effect-unknown classification for drift after commit. A frozen
+harness-off root is never promoted by a later host arm. This is source behavior,
+not evidence of installed provider execution or parent result consumption.
+
 Caller cancellation closes attendance immediately while the original physical
 transition drains. The original request slot is not released while that action
 can still cross START. Collection remains with the existing finisher; exact
