@@ -12,6 +12,28 @@ from control_plane.executive_runtime import AttemptStatus
 from control_plane.executive_service import ExecutiveControlService, _NativeOperatorDispatch
 
 
+def _canonical_reply():
+    """Authentic closed V2 Dialogue shape; unlike the native writer's receipt."""
+    from common.agent_dialogue_contract_v2 import MESSAGE_SCHEMA_V2, build_message_v2
+    from tests.test_session_bridge_native_reply import ACTOR, APPLIES, COMMISSION, REQUEST
+    return build_message_v2({
+        "schema":MESSAGE_SCHEMA_V2,
+        "message_key":"asd-native-reply-"+"a"*40,
+        "message_type":"PROGRESS",
+        "work_ref":"WS:DOT-BRIDGE",
+        "commission_ref":COMMISSION,
+        "session_ref":"asd-session-dotbridge01",
+        "actor_ref":ACTOR,
+        "reply_to_message_key":REQUEST,
+        "applies_to":APPLIES,
+        "summary":"Native session replied to the current executive message.",
+        "body":{"stage":"message_reply","completed":"Source finding.","next":"Continue."},
+        "evidence_refs":[],
+        "requires_response":False,
+        "created_at":"2026-10-01T20:00:00Z",
+    })
+
+
 def test_verified_native_reply_can_terminalize_while_callback_remains_pending():
     async def scenario():
         callback_entered = asyncio.Event()
@@ -55,9 +77,7 @@ def test_verified_native_reply_can_terminalize_while_callback_remains_pending():
             async def require_committed_native_reply(self, *, read_ref):
                 assert read_ref == "read-ref-001"
                 calls.append("canonical-committed")
-                return {"reply_committed": True,
-                        "message_key":"asd-native-reply-"+ "a"*40,
-                        "fingerprint":"b"*64,"parent_consumed":False}
+                return _canonical_reply()
 
         class DummyService:
             _service_state = "READY"
@@ -232,8 +252,7 @@ def test_existing_executive_service_shutdown_drain_retains_pending_callback():
 
         host=ExistingOwner()
         ExecutiveControlService._schedule_native_reply_events(
-            host,"read-ref-001",{"reply_committed":True,
-                "message_key":"original-msg-001","fingerprint":"f"*64})
+            host,"read-ref-001",_canonical_reply())
         await asyncio.wait_for(entered.wait(),timeout=1)
         assert len(host._physical_workers)==1
         drain=asyncio.create_task(ExecutiveControlService._drain_service_tasks(
@@ -255,10 +274,11 @@ def test_already_scheduled_notification_survives_shutdown_start_before_task_runs
         called = asyncio.Event()
         owned_runtime=object()
 
+        canonical = _canonical_reply()
         async def authorized_consumer(**kwargs):
             assert kwargs == {
-                "read_ref":"read-ref-001","message_key":"reply-original-001",
-                "fingerprint":"f"*64,
+                "read_ref":"read-ref-001","message_key":canonical["message_key"],
+                "fingerprint":canonical["fingerprint"],
             }
             called.set()
 
@@ -281,8 +301,7 @@ def test_already_scheduled_notification_survives_shutdown_start_before_task_runs
 
         service=Owned()
         ExecutiveControlService._schedule_native_reply_events(
-            service,"read-ref-001",{"reply_committed":True,
-            "message_key":"reply-original-001","fingerprint":"f"*64})
+            service,"read-ref-001",canonical)
         # Service begins a normal owned drain *before* this task has a timeslice.
         service._closing=True
         for pending in tuple(service._physical_workers):
@@ -317,8 +336,7 @@ def test_admitted_callback_error_is_not_relabelled_as_native_job_failure():
 
         owner=Owner()
         ExecutiveControlService._schedule_native_reply_events(
-            owner,"read-ref-001",{"reply_committed":True,
-                "message_key":"asd-native-reply-001","fingerprint":"f"*64})
+            owner,"read-ref-001",_canonical_reply())
         assert len(owner._physical_workers)==1
         for pending in tuple(owner._physical_workers):
             await asyncio.wait_for(pending,timeout=1)
@@ -381,3 +399,36 @@ def test_legacy_direct_notifier_with_no_optional_provider_is_noop():
         LegacyHost(),"fixture-read",
         {"reply_committed":True,"message_key":"canonical-fixture","fingerprint":"f"*64},
     ))
+
+
+def test_writer_receipt_and_malformed_dialogue_are_not_commit_evidence():
+    from common.reply_subscription_private_contract import ReplyEventCommitConsumer
+    runtime=object()
+    invoked=[]
+
+    async def consumer(**kwargs):
+        invoked.append(kwargs)
+
+    class Host:
+        _closing=False
+        _service_state="READY"
+        _physical_workers=set()
+        _ceo_ingress_app_binding=SimpleNamespace(
+            armed=True,reply_event_provider_factory=lambda _:None)
+        _company_consultation_host=SimpleNamespace(
+            reply_event_consumer=ReplyEventCommitConsumer(runtime,consumer))
+
+        def _require_runtime(self):
+            return runtime
+
+    host=Host()
+    canonical=_canonical_reply()
+    receipt={"reply_committed":True,"message_key":canonical["message_key"],
+             "fingerprint":canonical["fingerprint"],"parent_consumed":False}
+    bad_message={**canonical,"fingerprint":"0"*64}
+    wrong_stage={**canonical,"body":{**canonical["body"],"stage":"not-message-reply"}}
+    for input_record in (receipt,bad_message,wrong_stage):
+        ExecutiveControlService._schedule_native_reply_events(
+            host,"read-ref-001",input_record)
+        assert not host._physical_workers
+    assert invoked==[]

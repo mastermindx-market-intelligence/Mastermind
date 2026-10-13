@@ -381,3 +381,44 @@ def test_installed_host_factory_composes_actual_runtime_read_and_company_consume
         worker_uid=os.geteuid()+1,relay_socket_path=s.owner.socket_path,
         workspace_id='T0BRD2AQXQV',channel_id='C0BSBM78V1N',native_return_armed=True,reply_event_host=host)
     assert company.reply_event_consumer is host.consumer
+
+
+def test_executive_native_postcommit_scheduler_receives_canonical_message_not_writer_receipt(event_case,tmp_path,short_socket_root):
+    """The production source reads the committed Dialogue message, not native writer receipt."""
+    from common.reply_subscription_private_contract import ReplyEventCommitConsumer
+    s=event_case
+    async def subscribe(client,service):
+        return await client.subscribe(s.principal,EventSubscribeRequest(s.event.command_id,URL,SECRET,600000))
+    asyncio.run(with_peer(s,tmp_path,short_socket_root,subscribe))
+    assert len(s.http)==1
+    native=asyncio.run(native_commit(s))
+    assert native["reply_committed"] is True
+    canonical=asyncio.run(s.owner.require_committed_native_reply(read_ref=s.ref))
+    assert canonical["message_type"]=="PROGRESS"
+    assert canonical["body"]["stage"]=="message_reply"
+    assert "reply_committed" not in canonical
+    assert canonical["message_key"]==native["message_key"]
+    assert canonical["fingerprint"]==native["fingerprint"]
+
+    binding=CeoIngressAppBinding(peer_uid=os.geteuid(),armed=True,
+        grounding_provider=SimpleNamespace(observe=lambda:None),
+        reply_event_provider_factory=lambda runtime:s.host.ingress)
+    service=ExecutiveControlService(
+        _config(tmp_path,socket_root=short_socket_root),
+        ceo_ingress_app_binding=binding,
+        ceo_ingress_socket_path=short_socket_root/'unarmed-test.sock',
+        ceo_ingress_peer_uid=os.geteuid()+1,
+        ceo_ingress_grounding_provider=binding.grounding_provider,
+    )
+    service.runtime=s.f.runtime
+    service._service_state="READY"
+    service._company_consultation_host=SimpleNamespace(reply_event_consumer=s.host.consumer)
+    async def scheduled():
+        service._schedule_native_reply_events(s.ref,canonical)
+        for pending in tuple(service._physical_workers):
+            await asyncio.wait_for(pending,timeout=5)
+    asyncio.run(scheduled())
+    assert len(s.http)==2, "exact committed reply must reach bound subscriber"
+    assert s.http[1][0]["name"]=="session.reply_committed"
+    assert s.http[1][0]["data"]["read_ref"]==s.ref
+    assert s.http[1][0]["data"]["parent_consumed"] is False

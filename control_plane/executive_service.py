@@ -7045,10 +7045,23 @@ class ExecutiveControlService:
                 or app is None or not getattr(app, "armed", False)
                 or getattr(app, "reply_event_provider_factory", None) is None
                 or type(read_ref) is not str or not read_ref
-                or type(committed_reply) is not dict
-                or committed_reply.get("reply_committed") is not True
-                or type(committed_reply.get("message_key")) is not str
-                or type(committed_reply.get("fingerprint")) is not str):
+                or type(committed_reply) is not dict):
+            return
+        # The canonical RuntimeSessionReturn.require_committed_native_reply
+        # supplies the *validated Dialogue message*, NOT the writer receipt.
+        # Validate its closed native-reply shape without accepting a caller-
+        # asserted reply_committed bit as independent COMMIT evidence. The
+        # actual durable COMMIT authority is the upstream Runtime reader.
+        try:
+            from common.agent_dialogue_contract_v2 import validate_message_v2
+            canonical = validate_message_v2(committed_reply)
+            if (canonical["message_type"] != "PROGRESS"
+                    or canonical["body"].get("stage") != "message_reply"
+                    or not canonical["message_key"].startswith("asd-native-reply-")):
+                return
+            message_key = canonical["message_key"]
+            fingerprint = canonical["fingerprint"]
+        except Exception:
             return
         try:
             if consumer.runtime is not self._require_runtime():
@@ -7063,8 +7076,8 @@ class ExecutiveControlService:
         async def deliver_admitted():
             try:
                 await consumer.handle_committed(
-                    read_ref=read_ref, message_key=committed_reply["message_key"],
-                    fingerprint=committed_reply["fingerprint"],
+                    read_ref=read_ref, message_key=message_key,
+                    fingerprint=fingerprint,
                 )
             except Exception:
                 pass  # Native COMMIT and Job completion are independent.
