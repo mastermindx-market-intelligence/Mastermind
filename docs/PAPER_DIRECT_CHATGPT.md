@@ -73,6 +73,18 @@ normal immutable release. On `UPSTREAM_SCHEMA_UNREVIEWED`, inspect
 `catalog_drift` before attempting another edit. The refusal is
 pre-dispatch, but never replay a previously ambiguous modifying effect.
 
+Named-seat direct bundles additionally append a **non-secret, non-authorizing**
+`transport_diagnostic` to existing MCP responses: the already verified
+`seat_id`, immutable `source_revision`, and reviewed `bridge_sha256`.
+This eliminates guesswork between active C2, Ryan and other direct tunnels when
+an operator inspects a read/write refusal. It does not contain local paths,
+host identity, tunnel IDs, tokens, or workspace credentials; it grants no
+permission or ownership. Legacy unnamed bundles omit the field. Callers must
+still use canonical installation/transport evidence to verify who owns a
+service or to make a modifying rollout. No MCP action name or input schema
+changes; a stale published app action description is a separate publication
+issue.
+
 This change uses the same app/tunnel, Paper Desktop and per-OS-user lock.
 Do not add a parallel watchdog, unsafe raw-port fallback or automatic
 runtime overwrite. Production rollout remains a separate approved

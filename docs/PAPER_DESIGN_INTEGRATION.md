@@ -156,6 +156,14 @@ never flips `accepted_for_write` to true. No new background agent,
 credential, auth plane, queue, retry owner, or alternate Paper gateway is
 created. The registered Paper service/tunnel continues owning live calls.
 
+V3/V4 named direct service bundles report `transport_diagnostic` in MCP
+responses, consisting solely of the verified seat label, reviewed source
+revision and bridge SHA. This is informational provenance for distinguishing
+the actual C2 versus Ryan route, **not** host attestation, workspace enrollment,
+auth, file ownership, a merge/install receipt or an effect ledger. It never
+takes a caller-selected host, path, tunnel ID, token or secret; legacy direct
+bundles have no invented seat identity.
+
 Immutable runtime v12 is separately staged and checked; v11 remains
 unchanged. Release still requires CI, independent review, existing-service
 deployment and same-carrier direct-app proof. This section supersedes only

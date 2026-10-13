@@ -51,6 +51,64 @@ class McpResultTests(unittest.IsolatedAsyncioTestCase):
     def payload(self, result):
         return json.loads(result.content[0].text)
 
+    async def test_seat_diagnostics_trace_exact_host_bundle_without_granting_authority(self):
+        diag = {
+            "schema": "mastermind.paper_transport_diagnostic.v1",
+            "seat_id": "c2",
+            "source_revision": "a" * 40,
+            "bridge_sha256": "b" * 64,
+        }
+        self.server = self.module.build_server(True, True, transport_diagnostic=diag)
+        with patch.object(self.module, "execute", return_value={
+            "state": "CONNECTED", "document": {"identity": {"kind": "file-id", "id": "X"}},
+        }):
+            result = await self.invoke("paper_inspect", {})
+        self.assertEqual(self.payload(result)["transport_diagnostic"], diag)
+        self.assertFalse(result.isError)
+
+        # Preserve same original effect identity and do not add retry permission.
+        with patch.object(self.module, "execute", return_value={
+            "state": "EFFECT_UNKNOWN", "operation_id": "orig-01", "retry_allowed": False,
+        }):
+            result = await self.invoke("paper_edit", {
+                "tool": "set_text_content", "arguments": {"fileId": "X"},
+                "expected_snapshot": "0" * 64, "operation_id": "orig-01",
+            })
+        payload = self.payload(result)
+        self.assertTrue(result.isError)
+        self.assertEqual(payload["transport_diagnostic"], diag)
+        self.assertEqual(payload["operation_id"], "orig-01")
+        self.assertFalse(payload["retry_allowed"])
+        self.assertNotIn("execution_binding", payload)
+
+        with patch.object(self.module, "execute", return_value={
+            "state": "OBSERVED", "result": {"content": []},
+        }):
+            result = await self.invoke("paper_catalog", {})
+        self.assertEqual(self.payload(result)["transport_diagnostic"], diag)
+
+    async def test_transport_diagnostic_rejects_untrusted_or_malformed_metadata(self):
+        good = {
+            "schema": "mastermind.paper_transport_diagnostic.v1",
+            "seat_id": "c2",
+            "source_revision": "a" * 40,
+            "bridge_sha256": "b" * 64,
+        }
+        for modification in (
+            {"seat_id": "../c2"}, {"seat_id": "C2"}, {"source_revision": "bad"},
+            {"bridge_sha256": "bad"}, {"schema": "unexpected"},
+            {"runtime_key": "/private/secret"},
+        ):
+            with self.subTest(modification=modification):
+                bad = dict(good, **modification)
+                with self.assertRaisesRegex(ValueError, "TRANSPORT_DIAGNOSTIC_INVALID"):
+                    self.module.build_server(True, True, transport_diagnostic=bad)
+        with patch.object(self.module, "execute", return_value={"state": "CONNECTED"}):
+            # Existing native clients with no enrolled seat continue to omit
+            # rather than manufacturing a transport identity.
+            normal = await self.invoke("paper_inspect", {})
+        self.assertNotIn("transport_diagnostic", self.payload(normal))
+
     async def test_prepare_lost_reply_preserves_unknown_effect_and_operation(self):
         value = {"state": "EFFECT_UNKNOWN", "operation_id": "lost-focus-1", "file_id": "0" * 26,
                  "result": None, "retry_allowed": False, "response_observed": False,

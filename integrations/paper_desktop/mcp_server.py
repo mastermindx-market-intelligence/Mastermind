@@ -12,6 +12,7 @@ import argparse
 import asyncio
 import copy
 import json
+import re
 from pathlib import Path
 import sys
 
@@ -19,8 +20,29 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bridge import execute, Refusal, READ_TOOLS, EDIT_TOOLS, validate_execution_binding
 
 
-def build_server(allow_write=False, allow_prepare=False, *, execution_binding=None):
+def _transport_diagnostic(value):
+    """Validate host-owned informational metadata, not caller authority."""
+    if value is None:
+        return None
+    expected = {"schema", "seat_id", "source_revision", "bridge_sha256"}
+    if type(value) is not dict or set(value) != expected:
+        raise ValueError("TRANSPORT_DIAGNOSTIC_INVALID")
+    if value["schema"] != "mastermind.paper_transport_diagnostic.v1":
+        raise ValueError("TRANSPORT_DIAGNOSTIC_INVALID")
+    for key, pattern in (
+        ("seat_id", r"[a-z0-9][a-z0-9-]{0,47}"),
+        ("source_revision", r"[0-9a-f]{40}"),
+        ("bridge_sha256", r"[0-9a-f]{64}"),
+    ):
+        if type(value[key]) is not str or not re.fullmatch(pattern, value[key]):
+            raise ValueError("TRANSPORT_DIAGNOSTIC_INVALID")
+    return dict(value)
+
+
+def build_server(allow_write=False, allow_prepare=False, *,
+                 execution_binding=None, transport_diagnostic=None):
     execution_binding = validate_execution_binding(execution_binding)
+    transport_diagnostic = _transport_diagnostic(transport_diagnostic)
     from mcp.server.fastmcp import FastMCP
     from mcp.types import ToolAnnotations, CallToolResult, TextContent, ImageContent
 
@@ -67,6 +89,10 @@ def build_server(allow_write=False, allow_prepare=False, *, execution_binding=No
                 })
         if execution_binding is not None:
             value = dict(value, execution_binding=dict(execution_binding))
+        if transport_diagnostic is not None:
+            # Append only after the guarded bridge has produced an effect receipt.
+            # This does not enter snapshot hash, permission or retry decisions.
+            value = dict(value, transport_diagnostic=dict(transport_diagnostic))
         bad = value.get("state") not in {None, "CONNECTED", "OBSERVED", "APPLIED_RESPONSE_OBSERVED", "PAPER_READY", "PAPER_READY_READ_ONLY"}
         # Formatting is downstream of effect observation. A missing reply or
         # malformed image must not erase the operation's canonical receipt.
