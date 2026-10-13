@@ -68,7 +68,7 @@ def _paths(roots):
         if type(value) is not str or not value or len(value) > 500:
             raise StageRefused("STAGE_PATH_REFUSED")
         path = PurePosixPath(value)
-        if (path.is_absolute() or str(path) != value or ".." in path.parts
+        if (value == "." or path.is_absolute() or str(path) != value or ".." in path.parts
                 or any(part in {".git", ".lane"} or part.startswith(".env") for part in path.parts)
                 or any(char in value for char in ("\\", "\x00", "*", "?", "[", "]", ":"))
                 or value.startswith("-")):

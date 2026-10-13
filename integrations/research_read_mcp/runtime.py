@@ -138,7 +138,7 @@ def read_secure_json(path: str, *, expected_owner_uid: int, maximum: int = 65536
         _absolute(path)
         if type(expected_owner_uid) is not int or expected_owner_uid < 0:
             raise RuntimeRefused()
-        if type(maximum) is not int or not 0 < maximum <= 65536:
+        if type(maximum) is not int or not 0 < maximum <= 4 * 1024 * 1024:
             raise RuntimeRefused()
         target = Path(path)
         for ancestor in (target, *target.parents):

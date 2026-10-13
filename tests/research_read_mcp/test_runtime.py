@@ -79,6 +79,7 @@ os.open = forbidden
 subprocess.run = forbidden
 socket.socket = forbidden
 import integrations.research_read_mcp.runtime
+import integrations.research_read_mcp.release_identity
 """
     subprocess.run([sys.executable, "-B", "-c", script], check=True, capture_output=True,
                    cwd=Path(__file__).resolve().parents[2], timeout=15)
