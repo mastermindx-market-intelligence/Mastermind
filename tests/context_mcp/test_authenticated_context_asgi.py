@@ -10,6 +10,7 @@ import asyncio
 import dataclasses
 import hashlib
 import json
+import os
 import time
 import unittest
 
@@ -104,6 +105,32 @@ class ContextSDKTests(unittest.IsolatedAsyncioTestCase):
                 self.clock += 7200  # expire after handler ran, before final auth
             if self.mode == "port_error":
                 raise RuntimeError("PRIVATE_PORT_EXCEPTION")
+            if self.mode == "real_agentos_receipt":
+                # Explicit M2 source-only opt-in. This owner API is the same
+                # canonical bounded Agent OS reader used by the native Fabric
+                # bootstrap; no second memory store or synthetic context body.
+                from ops.fabric_launch.agentos import read_context
+                import hashlib
+
+                raw, owner_receipt = await asyncio.to_thread(
+                    read_context, "WS:EXECUTIVE-CAPACITY-FABRIC", 1600,
+                )
+                digest = hashlib.sha256(raw).hexdigest()
+                assert digest == owner_receipt["bundle_sha256"]
+                return {
+                    "status": "OK", "schema": "mastermind.agentos_context_receipt_fixture/v1",
+                    "project_ref": selected.project_ref,
+                    "context_ref": "context:agentos:executive-capacity-fabric",
+                    "source_digest": digest,
+                    "data": {
+                        "source_owner": "agent_os",
+                        "bundle_sha256": digest,
+                        "degraded_count": owner_receipt["degraded_count"],
+                        "omitted_count": owner_receipt["omitted_count"],
+                        "advisory_not_authority": True,
+                    },
+                    "degraded": [],
+                }
             result = {
                 "status": "OK", "schema": "mastermind.context_fixture/v1",
                 "project_ref": selected.project_ref,
@@ -408,3 +435,35 @@ class ContextSDKTests(unittest.IsolatedAsyncioTestCase):
                 observed_tool_catalog={**catalog, "nextCursor": "not-complete"},
             )
         assert self.calls == []  # only tools/list, no context task execution
+
+    async def test_optin_real_agentos_receipt_over_authenticated_mcp(self):
+        """Canonical live M2 Agent OS -> existing Context MCP JWT/port chain.
+
+        The entitlement/project mapping is a **disposable fixture** only.
+        There is no production OAuth grant, installed MCP or raw context leak.
+        """
+        if os.environ.get("MASTERMIND_REAL_AGENTOS_CONTEXT_MCP_TEST") != "1":
+            self.skipTest("real M2 Agent OS source requires explicit opt-in")
+        self.mode = "real_agentos_receipt"
+        response = self.result(await self.call(project="project:alpha"))
+        self.assertFalse(response.get("isError", False), response)
+        published = response["structuredContent"]
+        self.assertEqual(published["schema"], "mastermind.agentos_context_receipt_fixture/v1")
+        self.assertEqual(published["data"]["source_owner"], "agent_os")
+        self.assertEqual(published["source_digest"], published["data"]["bundle_sha256"])
+        self.assertRegex(published["source_digest"], r"^[0-9a-f]{64}$")
+        self.assertIs(type(published["data"]["degraded_count"]), int)
+        self.assertIs(type(published["data"]["omitted_count"]), int)
+        self.assertTrue(published["data"]["advisory_not_authority"])
+        self.assertEqual(set(published["data"]), {
+            "source_owner", "bundle_sha256", "degraded_count", "omitted_count",
+            "advisory_not_authority",
+        })
+        self.assertEqual(len(self.calls), 1)
+        # A second valid subject without the same project grant fails before
+        # invoking another canonical owner read, even with a signed JWT.
+        denied = await self.call(
+            token=self.token("beta-reader"), project="project:alpha"
+        )
+        self.assertEqual(self.error_code(denied), "CONTEXT_REFUSED")
+        self.assertEqual(len(self.calls), 1)
