@@ -581,6 +581,9 @@ def test_grant_bindings_and_bounds_are_closed(recovery, change):
         grant["ordinary"] = True
     write_json(s.grant_path, grant)
     digest = receipt_digest(s.grant_path)
+    if change == "worker_user":
+        with pytest.raises(rec.RecoveryError, match="recovery_grant_worker_mismatch"):
+            rec.read_grant(expected_digest=digest)
     if change in {"expired", "window_short", "window_long"}:
         code = "recovery_grant_expired" if change == "expired" else "recovery_grant_window_invalid"
         with pytest.raises(rec.RecoveryError, match=code):
