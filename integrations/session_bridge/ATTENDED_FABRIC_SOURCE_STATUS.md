@@ -274,3 +274,20 @@ source and inert/local-child proofs, not Linux production admission. The physica
 owner still needs an independently qualified executable/interpreter chain, realm,
 attendance, isolation, assignment and complete retained launch attestation before
 exposing START. No service, provider credential, profile or installed lane changes.
+
+
+## Fixed original Backend and terminal consumer join (uninstalled)
+
+Draft #1391 now composes the original live owner into the existing authenticated
+bridge. It retains authority-before-reservation, one original lease/handle and
+finisher, canonical result projection, independent immutable cleanup readback,
+configured Control assignment sealing and durable-ACK-before-physical-release.
+The finite caller refuses nonempty validation commands before effects. Supervisor
+and Runtime accept the truthful empty command receipt while preserving the
+original grant/request join, collection cleanup and assignment revocation.
+
+This is source composition, not production enrollment. Actual supported Linux
+issuer/realm/profile/binary/assignment and shutdown inputs are still required by
+the existing fixed factory; its unconfigured invocation remains refused. Ordinary
+attended shell Fabric and the already-accepted active Stop return remain usable
+independently. No new dispatcher, queue, lifecycle, fake WorkerRef or root is added.

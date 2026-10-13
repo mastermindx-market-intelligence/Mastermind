@@ -1,8 +1,38 @@
 # Original-owner launch evidence — source integration
 
-This is an uninstalled extension of the existing Fabric controller reservation
-and process-capture boundaries. It does not supply a production Backend or arm
-Executive submission. Existing accepted runs and their records are unchanged.
+This uninstalled source extends the existing Fabric controller reservation,
+process capture and authenticated bridge. `control_plane/fabric_attended_backend.py`
+now supplies the fixed original-owner Backend composition. It does not enroll
+production resources or arm Executive submission. Existing accepted runs and
+records are unchanged. The sections below retain the earlier component history;
+the current integrated source contract is described next.
+
+## Current fixed Backend composition
+
+The existing service receives independently qualified, typed owner resources.
+Only its authenticated Control command can construct the single assignment
+Backend, before original reservation and lease acquisition. It uses the same
+process handle, canonical parser, immutable capture and exact cancellation owner.
+Collection and terminal cleanup independently reread the original carrier; they
+keep its bytes and timestamp. Nonempty validation plans refuse before launch.
+An empty plan produces an empty command receipt without pretending that a
+validation process ran. Runtime still joins the original launch and grant,
+collection cleanup, actual Control seal, Worker denial and durable ACK.
+
+The MH1 gateway routes assignment sealing to its configured Control principal
+through finite bridge prepare/commit operations. Only after authenticated ACK
+may the original lease produce its verified physical release receipt. A held,
+changed or partially released lease remains excluded; ACK alone is not release.
+The source includes the actual interrupted-release self-lock correction.
+
+The default factory remains closed unless the existing composition owner supplies
+real Linux issuer, supported attended realm/profile, independently pinned binary,
+finite HOME/TMP, isolation/canary, Capacity and dedicated assignment resources.
+No JSON, environment selector or digest-shaped record creates that authority.
+The existing original shutdown owner also needs qualification with the lane's
+signal handler. No second dispatcher, registry, lifecycle or retry is added.
+Source/inert verification and paid reviews do not prove production installation,
+idle Wake or authenticated external-worker acceptance by the original Desktop.
 
 `fabric_launch_reservation.py` reserves the incumbent `remote_sub.sh` run log
 with its existing `O_EXCL` ownership rule. The optional first line binds the

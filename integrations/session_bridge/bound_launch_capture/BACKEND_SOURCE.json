@@ -12,7 +12,8 @@
     }
   },
   "dependencies": [
-    "c8479a83446824e093bf8e3265a882237115c403"
+    "c8479a83446824e093bf8e3265a882237115c403",
+    "d3ba60bd7985c605164147fdc0a3d691e4eeb3e9"
   ],
   "root": "01a11e90-4b5d-7f53-b966-8aaaad38701f",
   "immediate_parent": "01a1321e-f5fc-7e10-b790-f06f300206b9",
@@ -37,5 +38,5 @@
   "factory_source_join": "create_attended_backend(trusted BridgeConfig, owner_resources=_FixedOwnerResources) -> fixed single-use service composition. It authenticates exact in-process ControlStartAuthority before deriving Runtime request/correlation and retaining ONE FabricAttendedBackend. Default unconfigured invocation refuses; no JSON/env/import selectors.",
   "activation_path": "Qualified composition owner supplies independent typed policy/catalogue/profile/binary/physical/path/evidence resources, creates backend through fixed factory, then calls existing scripts.executive_fabric_bridge.serve(config, backend, stop_event=original owner event) on original main thread/event loop; existing named launchd socket only. Default main signal registration cannot be claimed qualified alongside lane original signal handler without owner-specific shutdown qualification.",
   "unsupported": "Nonempty validation argv refused pre-effect. validation/nonterminal/restart/unbound absence cleanup scopes remain unavailable. Existing original owner reconciliation required after controller restart.",
-  "pending": "Combined independent source review and root-owned empty-validation Supervisor correction; missing actual Linux host qualification retained separately"
+  "pending": "Combined independent source review; actual qualified Linux production resources and original owner shutdown composition remain separate activation obligations"
 }
