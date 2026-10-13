@@ -136,18 +136,20 @@ def test_claimed_review_uncertainty_settles_original_command_before_work(tmp_pat
     assert runtime.jobs.pending_cycle_dispatch_effect_unknown(root.job_id) is None
 
 
-def test_active_work_reconciles_before_missing_review_creation(tmp_path):
+def test_active_review_reconciles_before_further_work(tmp_path):
     runtime, root, jobs, _, _ = _pending_review(tmp_path)
-    active = _dispatch(runtime, jobs["step-1"].job_id,
-                       f"coo-cycle:{root.job_id}:dispatch:{jobs['step-1'].job_id}:attempt:1")
+    review = _create_review(runtime, root, jobs["step-0"])
+    active = _dispatch(runtime, review.job_id,
+                       f"coo-cycle:{root.job_id}:dispatch:{review.job_id}:attempt:1")
     calls = []
     def reconcile(job_id, command):
         calls.append(job_id)
         return active
     outcome = CooCycle(runtime, dispatcher=reconcile).run_once(root.job_id)
-    assert outcome.selected_job_id == jobs["step-1"].job_id
-    assert calls == [jobs["step-1"].job_id]
-    assert not [j for j in runtime.jobs.list_jobs() if j.orchestration_role == "review"]
+    assert outcome.selected_job_id == review.job_id
+    assert calls == [review.job_id]
+    assert runtime.jobs.get_job(jobs["step-1"].job_id).attempt_count == 0
+    assert len([j for j in runtime.jobs.list_jobs() if j.orchestration_role == "review"]) == 1
 
 
 def _finish_review(runtime, root, review, target_dispatch, seal, verdict, *, same_worker=False):

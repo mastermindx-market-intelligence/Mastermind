@@ -287,6 +287,61 @@ class CooCycle:
                 return False
         return True
 
+    def _read_review_frontier_open(
+        self,
+        root_id: str,
+        active: list[Job],
+        queued: list[Job],
+        targets: Mapping[str, Job],
+        current_by_step: Mapping[str, Mapping[str, Any]],
+        plan_body: Mapping[str, Any] | None,
+    ) -> bool:
+        """Prove same-plan READ review overlap without widening active work."""
+        if not active or not targets or plan_body is None or plan_body.get("schema_version") not in {
+            "mastermind.execution_plan/v3", "mastermind.execution_plan/v4",
+            "mastermind.execution_plan/v5",
+        }:
+            return False
+        scope = self.runtime.jobs.get_job(root_id)
+        if scope is None:
+            return False
+        plan_attempt, plan_digest = active[0].plan_attempt_id, active[0].plan_digest
+        for job in [*active, *queued, *targets.values()]:
+            if (
+                job.parent_job_id != root_id or job.root_job_id != scope.root_job_id
+                or job.requested_authorities != ["READ"]
+                or job.allowed_write_paths or job.validation_commands
+                or job.plan_attempt_id != plan_attempt or job.plan_digest != plan_digest
+            ):
+                return False
+        for target in targets.values():
+            if (
+                target.orchestration_role not in {"work", "repair"}
+                or target.status is not JobStatus.COMPLETED
+                or current_by_step.get(str(target.plan_step_id), {}).get("current_job_id") != target.job_id
+                or current_by_step.get(str(target.plan_step_id), {}).get("review_required") is not True
+            ):
+                return False
+        for job in active:
+            if (
+                not self._is_read_only_frontier_work(job)
+                or current_by_step.get(str(job.plan_step_id), {}).get("current_job_id") != job.job_id
+                or not self._active_attempt_is_current_and_live(job)
+                or any(target.plan_step_id == job.plan_step_id for target in targets.values())
+            ):
+                return False
+        for job in queued:
+            if job.orchestration_role == "review":
+                target = targets.get(str(job.reviews_job_id))
+                if target is None or job.plan_step_id != target.plan_step_id or job.repair_round != target.repair_round:
+                    return False
+            elif (
+                not self._is_read_only_frontier_work(job)
+                or current_by_step.get(str(job.plan_step_id), {}).get("current_job_id") != job.job_id
+            ):
+                return False
+        return True
+
     def _drain_current_reviews(
         self,
         root_id: str,
@@ -302,8 +357,8 @@ class CooCycle:
         A proven pre-claim review capacity miss permits only an already admitted
         disjoint READ revision; Runtime still validates its claim/dependencies.
         """
-        if any(job.status in {JobStatus.RUNNING, JobStatus.CHECKPOINTED} for job in children):
-            return None
+        active = [job for job in children
+                  if job.status in {JobStatus.RUNNING, JobStatus.CHECKPOINTED}]
         queued = sorted(
             [job for job in children if job.status == JobStatus.QUEUED],
             key=lambda job: _job_sort_key(job, ordinals),
@@ -317,6 +372,10 @@ class CooCycle:
         }
         reviews = [job for job in queued if job.orchestration_role == "review"
                    and job.reviews_job_id in targets]
+        if active and not self._read_review_frontier_open(
+            root_id, active, queued, targets, current_by_step, plan_body,
+        ):
+            return None
         # Recovery is never demoted by quality-loop priority.
         if repairs:
             selected = repairs[0]
@@ -349,6 +408,7 @@ class CooCycle:
             for candidate in queued:
                 if not (
                     self._is_read_only_frontier_work(candidate)
+                    and (not active or self._ready_frontier_candidate(candidate, active))
                     and candidate.plan_attempt_id == target.plan_attempt_id
                     and candidate.plan_digest == target.plan_digest
                     and candidate.plan_step_id != target.plan_step_id
@@ -359,6 +419,10 @@ class CooCycle:
                 if outcome is not None:
                     return outcome
                 unavailable.append(candidate.job_id)
+        if active:
+            # Capacity pressure must not hide the incumbent's original return.
+            # Step 7 performs its exact replay; no fresh work was claimed here.
+            return None
         # Do not retry the unavailable review in the ordinary queued loop.
         return self._outcome(root_id, "NO_ACTION", None, None, {
             "reason": "exact_dispatch_unavailable",
@@ -375,7 +439,7 @@ class CooCycle:
         )
         try:
             receipt = self.dispatcher(selected.job_id, command)
-        except Exception:
+        except Exception as exc:
             # Preserve the existing Runtime-owned reconciliation barrier when
             # a dispatch raises after committing its exact claim.
             if not self._dispatch_none_was_preclaim(selected):
@@ -384,6 +448,10 @@ class CooCycle:
                     selected_job_id=selected.job_id,
                     dispatch_command_id=command,
                 )
+            else:
+                from control_plane.executive_supervisor import NoEligibleWorkerCapacity
+                if isinstance(exc, NoEligibleWorkerCapacity) and exc.job_id == selected.job_id:
+                    return None
             raise
         if receipt is None:
             if not self._dispatch_none_was_preclaim(selected):

@@ -135,6 +135,14 @@ class SupervisorError(RuntimeProofError):
     """The supervisor could not safely launch or accept an attempt."""
 
 
+class NoEligibleWorkerCapacity(SupervisorError):
+    """The exact Runtime claim returned None before any worker was selected."""
+
+    def __init__(self, job_id: str) -> None:
+        self.job_id = job_id
+        super().__init__(f"no eligible worker capacity for {job_id}")
+
+
 def validate_effective_grant(
     job: Job, attempt: Attempt, decision: AuthorityDecision
 ) -> dict[str, Any] | None:
@@ -2051,7 +2059,7 @@ class ExecutiveSupervisor:
             **({"exact_target": target} if target is not None else {}),
         )
         if outcome is None:
-            raise SupervisorError(f"no eligible worker capacity for {job_id}")
+            raise NoEligibleWorkerCapacity(job_id)
         if (
             (target is not None and not outcome.claimed_now)
             or outcome.outcome == "TERMINAL"
