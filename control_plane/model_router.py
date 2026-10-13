@@ -811,6 +811,12 @@ class ModelRouter:
             raise RoutingPolicyError(f"model alias {alias!r} is not worker eligible")
         return profile
 
+    def resolve_attended_model_alias(self, model_alias: str, binding_id: str) -> ModelAlias:
+        """Resolve finite attended catalogue eligibility, never claim authority."""
+        from control_plane.fabric_attended_routing import resolve_attended_alias
+
+        return resolve_attended_alias(self, model_alias, binding_id)[0]
+
     def route(
         self,
         request: WorkRequest,

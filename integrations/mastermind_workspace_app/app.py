@@ -62,6 +62,7 @@ _WORK_ROUTE = "/workspace/work/current"
 _MISSION_ROUTE = "/workspace/mission/current"
 _MISSION_V3_ROUTE = "/workspace/mission/v3/current"
 _RESULT_ROUTE = "/workspace/result/current"
+_PLAN_ROUTE = "/workspace/plan/current"
 _MISSION_QUERY_KEYS = frozenset({"work_ref", "root_job_id"})
 _RESULT_QUERY_KEYS = frozenset(
     {"work_ref", "root_job_id", "job_id", "attempt_id", "result_envelope_digest"}
@@ -323,7 +324,7 @@ def _dispatch_v2_selection(operation: str, query: Mapping[str, str]) -> dict[str
     """Dispatch the v2 selection validator by frozen operation."""
     if operation == "result":
         return _v2_selection(query)
-    if operation == "mission_v3":
+    if operation in ("mission_v3", "admitted_plan"):
         return _mission_v3_selection(query)
     return None
 
@@ -692,12 +693,18 @@ async def _dispatch_v2(
         return _refuse_json(403, "access_denied")
 
     try:
-        frame = contract.validate_v2_frame({
-            "schema": contract.FRAME_SCHEMA_V2,
-            "operation": operation,
-            "selection": contract.v2_selection(selection_value, operation),
-            "principal": principal_frame,
-        })
+        if operation == "admitted_plan":
+            frame = contract.validate_v3_frame({
+                "schema": contract.FRAME_SCHEMA_V3, "operation": operation,
+                "selection": contract.v3_selection(selection_value), "principal": principal_frame,
+            })
+        else:
+            frame = contract.validate_v2_frame({
+                "schema": contract.FRAME_SCHEMA_V2,
+                "operation": operation,
+                "selection": contract.v2_selection(selection_value, operation),
+                "principal": principal_frame,
+            })
     except ValueError:
         return _refuse_json(400, "invalid_input")
 
@@ -724,6 +731,10 @@ async def _dispatch_v2(
             return _refuse_json(403, "access_denied")
     except Exception:
         return _refuse_json(403, "access_denied")
+    if operation == "admitted_plan" and isinstance(envelope, dict) and envelope.get("ok") is True:
+        body = envelope.get("result")
+        if type(body) is not dict or body.get("selection") != selection_value:
+            return _refuse_json(503, "source_unavailable")
     return response_fn(envelope)
 
 
@@ -768,6 +779,45 @@ async def result_current(
     )
 
 
+def _plan_envelope_response(envelope):
+    """Bound the entire new response, retaining the producer's closed body."""
+    if type(envelope) is dict and envelope.get("ok") is True:
+        body = envelope.get("result")
+        if (set(envelope) != {"ok", "result"} or type(body) is not dict
+                or set(body) != {"schema", "selection", "availability", "reason_codes", "source_observation", "plan"}
+                or body["schema"] != contract.PLAN_BODY_SCHEMA
+                or body["availability"] not in ("AVAILABLE", "UNAVAILABLE")):
+            return _refuse_json(503, "source_unavailable")
+        try:
+            selected = contract.v3_selection(body["selection"])
+            if body["availability"] == "UNAVAILABLE":
+                reasons = body["reason_codes"]
+                if type(reasons) is not list or len(reasons) != 1 or envelope != contract.plan_unavailable(selected, reasons[0]):
+                    return _refuse_json(503, "source_unavailable")
+            else:
+                observed = body["source_observation"]
+                if (body["reason_codes"] != [] or type(body["plan"]) is not dict
+                        or body["plan"].get("root_job_id") != selected["root_job_id"]
+                        or type(observed) is not dict
+                        or set(observed) != {"schema", "state", "selection", "control_room", "runtime"}
+                        or observed["schema"] != contract.PLAN_OBSERVATION_SCHEMA
+                        or observed["state"] != "SAME" or observed["selection"] != selected
+                        or type(observed["control_room"]) is not dict or type(observed["runtime"]) is not dict):
+                    return _refuse_json(503, "source_unavailable")
+            try:
+                contract.bounded_canonical(envelope, limit=contract.MAX_PLAN_RESPONSE_BYTES - 1)
+            except (TypeError, ValueError):
+                envelope = contract.plan_unavailable(selected, "RESPONSE_OVER_BUDGET")
+        except (TypeError, ValueError):
+            return _refuse_json(503, "source_unavailable")
+    return _v2_envelope_response(envelope, operation="admitted_plan")
+
+
+async def plan_current(request: Request, *, config: WorkspaceAppConfig) -> JSONResponse:
+    return await _dispatch_v2(request, config=config, operation="admitted_plan",
+                              required_keys=_MISSION_QUERY_KEYS, response_fn=_plan_envelope_response)
+
+
 class _RawPathFence:
     """ASGI wrapper refusing any HTTP request whose raw path bytes contain an
     encoded/alternate separator or whose method is not GET, before routing
@@ -784,6 +834,7 @@ class _RawPathFence:
         _MISSION_ROUTE,
         _MISSION_V3_ROUTE,
         _RESULT_ROUTE,
+        _PLAN_ROUTE,
     )
 
     def __init__(self, app: Any) -> None:
@@ -836,12 +887,16 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
     async def result_endpoint(request: Request) -> JSONResponse:
         return await result_current(request, config=config)
 
+    async def plan_endpoint(request: Request) -> JSONResponse:
+        return await plan_current(request, config=config)
+
     routes = [
         Route(_PROGRAMS_ROUTE, programs_endpoint, methods=["GET"]),
         Route(_WORK_ROUTE, work_endpoint, methods=["GET"]),
         Route(_MISSION_ROUTE, mission_endpoint, methods=["GET"]),
         Route(_MISSION_V3_ROUTE, mission_v3_endpoint, methods=["GET"]),
         Route(_RESULT_ROUTE, result_endpoint, methods=["GET"]),
+        Route(_PLAN_ROUTE, plan_endpoint, methods=["GET"]),
     ]
     application = Starlette(routes=routes)
     # Never silently rewrite a trailing-slash alias onto a different route:

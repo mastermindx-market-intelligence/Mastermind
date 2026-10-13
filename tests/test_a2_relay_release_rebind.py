@@ -16,7 +16,8 @@ NEW = '7' * 40
 def test_rebind_parser_is_non_enrolling():
     p = a2.build_parser()
     assert p.parse_args(['rebind-release', '--expected-bot-user-id', BOT]).command == 'rebind-release'
-    for flag in ['--enable-w3c', '--token', '--config', '--plist']:
+    assert p.parse_args(['rebind-release', '--expected-bot-user-id', BOT, '--enable-w3c']).enable_w3c is True
+    for flag in ['--token', '--config', '--plist']:
         with pytest.raises(a2.A2EnrollmentError):
             p.parse_args(['rebind-release', '--expected-bot-user-id', BOT, flag])
 
@@ -429,3 +430,79 @@ def test_staged_source_drift_never_publishes_or_rolls_back(host, monkeypatch, st
         assert staged_path.read_bytes() == foreign
     else:
         assert leftovers == []  # Only our own held inode may be unlinked.
+
+
+@pytest.mark.parametrize('sha', [OLD, NEW])
+@pytest.mark.parametrize('scopes', [a2.DEDICATED_A2_SCOPES, a2.SHARED_A2_SCOPES])
+def test_explicit_w3c_enable_updates_existing_pair_even_at_same_release(host, monkeypatch, sha, scopes):
+    host(scopes=scopes, w3c=False, sha=sha)
+    token_info = a2.TOKEN_PATH.stat()
+    original = json.loads(a2.CONFIG_PATH.read_bytes())
+    original_read = os.read
+    def no_token_read(fd, count):
+        assert os.fstat(fd).st_ino != token_info.st_ino
+        return original_read(fd, count)
+    monkeypatch.setattr(os, 'read', no_token_read)
+    result = asyncio.run(a2._rebind(bot_user_id=BOT, enable_w3c=True))
+    assert result['action'] == 'rebound'
+    expected = {**original, 'release_sha': NEW, 'w3c_enabled': True}
+    assert json.loads(a2.CONFIG_PATH.read_bytes()) == expected
+    assert a2.PLIST_PATH.read_bytes() == a2.render_plist(bot_user_id=BOT, release_sha=NEW, w3c_enabled=True)
+    assert a2.TOKEN_PATH.stat() == token_info
+    before = pair()
+    inodes = (a2.CONFIG_PATH.stat().st_ino, a2.PLIST_PATH.stat().st_ino)
+    assert asyncio.run(a2._rebind(bot_user_id=BOT, enable_w3c=True))['action'] == 'already-current'
+    assert pair() == before
+    assert inodes == (a2.CONFIG_PATH.stat().st_ino, a2.PLIST_PATH.stat().st_ino)
+    # Default rebind still preserves the newly selected true state.
+    assert rebind()['action'] == 'already-current'
+    assert pair() == before
+
+
+def test_explicit_w3c_enable_refuses_loaded_relay_without_pair_or_credential_change(host, monkeypatch):
+    before = pair()
+    token_info = a2.TOKEN_PATH.stat()
+    def loaded():
+        raise a2.A2EnrollmentError('A2_ENROLLMENT_HOST_REFUSED')
+    monkeypatch.setattr(a2, '_assert_disarmed', loaded)
+    with pytest.raises(a2.A2EnrollmentError, match='A2_ENROLLMENT_HOST_REFUSED'):
+        asyncio.run(a2._rebind(bot_user_id=BOT, enable_w3c=True))
+    assert pair() == before
+    assert a2.TOKEN_PATH.stat() == token_info
+
+
+def test_explicit_w3c_enable_fault_restores_owned_false_generation(host, monkeypatch):
+    before = pair()
+    token_info = a2.TOKEN_PATH.stat()
+    original = a2._A2Rebind.replace
+    writes = []
+    def fail_after_first(self, path, payload):
+        original(self, path, payload)
+        writes.append(path)
+        if len(writes) == 1:
+            raise RuntimeError('owned first replacement settled')
+    monkeypatch.setattr(a2._A2Rebind, 'replace', fail_after_first)
+    with pytest.raises(a2.A2EnrollmentError, match='A2_REBIND_WRITE_REFUSED'):
+        asyncio.run(a2._rebind(bot_user_id=BOT, enable_w3c=True))
+    assert pair() == before
+    assert a2.TOKEN_PATH.stat() == token_info
+
+
+def test_explicit_w3c_enable_is_typed_and_does_not_disable_true(host):
+    with pytest.raises(a2.A2EnrollmentError, match='A2_ENROLLMENT_ARGUMENTS_REFUSED'):
+        asyncio.run(a2._rebind(bot_user_id=BOT, enable_w3c='true'))
+    host(w3c=True, sha=NEW)
+    before = pair()
+    assert asyncio.run(a2._rebind(bot_user_id=BOT, enable_w3c=False))['action'] == 'already-current'
+    assert pair() == before
+
+
+def test_existing_relay_enable_cli_uses_same_owned_transaction(host):
+    import io
+    output = io.StringIO()
+    result = a2._run_invocation(
+        ['rebind-release', '--expected-bot-user-id', BOT, '--enable-w3c'],
+        stdin=io.BytesIO(), stdout=output, environ={}, require_native_tty=True)
+    assert result == 0, output.getvalue()
+    assert json.loads(output.getvalue())['action'] == 'rebound'
+    assert json.loads(a2.CONFIG_PATH.read_bytes())['w3c_enabled'] is True

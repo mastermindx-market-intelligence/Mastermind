@@ -122,7 +122,8 @@ def harness(tmp_path):
     block = block.replace("/usr/bin/git", fake + " git")
     env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "PYTHON_BINARY": str(python_wrapper),
            "REPO_ROOT": str(ROOT), "SYSTEM_ROOT": str(system), "SOURCE_REPO": str(source),
-           "EXPECTED_SHA": sha, "TREE_SHA": tree, "RELEASE_ROOT": str(canonical)}
+           "EXPECTED_SHA": sha, "TREE_SHA": tree, "RELEASE_ROOT": str(canonical),
+           "OS_WEB_ASSETS": ""}  # Backend-only installer default; optional path has its own harness.
     # The installer's cleanup only removes its still-owned staging pathname.
     cleanup = """trap 'if [ -n "$STAGING" ] && [ -d "$STAGING" ]; then /bin/rm -rf -- "$STAGING"; fi' EXIT\n"""
     script = 'set -euo pipefail\nSTAGING=""\n' + helper + "\n" + cleanup + block

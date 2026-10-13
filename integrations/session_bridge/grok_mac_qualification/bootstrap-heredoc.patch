@@ -1,0 +1,25 @@
+--- a/bootstrap_host.sh
++++ b/bootstrap_host.sh
+@@ -129,9 +129,8 @@
+ }
+ 
+ mkdir_SCRIPT='mkdir -p "$HOME/lanes/ext" "$HOME/lanes/tmp" "$HOME/lanes/wt" "$HOME/lanes/nm_cache" "$HOME/lanes/ext/lanes" "$HOME/lanes/ext/active"'
+-OCCUPANCY_INIT_SCRIPT="$(cat <<'OCCUPANCY_INIT_EOF'
+-RPATH_PLACEHOLDER
+-python3 - <<'PY'
++OCCUPANCY_INIT_SCRIPT='RPATH_PLACEHOLDER
++python3 - <<'"'"'PY'"'"'
+ import os
+ from pathlib import Path
+ import stat
+@@ -154,9 +153,7 @@
+ finally:
+     os.close(fd)
+ print("occupancy_lock=ready")
+-PY
+-OCCUPANCY_INIT_EOF
+-)"
++PY'
+ OCCUPANCY_INIT_SCRIPT="${OCCUPANCY_INIT_SCRIPT//RPATH_PLACEHOLDER/$RPATH}"
+ TOOLS_SCRIPT="RPATH_PLACEHOLDER
+ npm config set prefix \"\$HOME/.npm-global\"

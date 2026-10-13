@@ -1,4 +1,5 @@
 import { createNativeExecutiveTransport } from "./native-executive-transport";
+import type { ExecutiveSessionTransport } from "./orchestration/executive-session-command-port";
 import type { OsExecutiveTransport } from "./orchestration/os-executive-host";
 import {
   decodeMission,
@@ -38,6 +39,8 @@ export interface AuthState {
 }
 export interface RawClient {
   readonly executive?: OsExecutiveTransport;
+  /** Optional fixed selected-session continuation transport; same private bearer custody. */
+  readonly executiveSession?: ExecutiveSessionTransport;
   getState(): AuthState;
   /** Existing source epoch, when exposed by the fixed client; never a principal or grant. */
   invalidationGeneration?(): number;
@@ -96,10 +99,24 @@ export interface MissionHost {
   selection?: unknown;
   auth?: Pick<RawClient, "getState" | "subscribe" | "signIn" | "signOut">;
   commandBinding?: OrchestratorCommandBinding;
+  /** Separately mounted session binding; never the launch route. */
+  sessionCommandBinding?: unknown;
+  /** Pushes the exact selection on every transition and registers the explicit condition provider. */
+  session?: {
+    refresh(selection: unknown): Promise<void>;
+    setStopCondition(provider: () => unknown): void;
+  };
 }
+export interface SessionHostAttachment {
+  readonly binding: unknown;
+  refresh(selection: unknown): Promise<void>;
+  setStopCondition(provider: () => unknown): void;
+}
+
 export function bindMissionHost(
   client: RawClient,
   commandBinding?: unknown,
+  session?: SessionHostAttachment,
 ): MissionHost {
   let epoch = 0;
   let previous = JSON.stringify(client.getState());
@@ -239,6 +256,15 @@ export function bindMissionHost(
       return result;
     },
     ...(command ? { commandBinding: command } : {}),
+    ...(session
+      ? {
+          sessionCommandBinding: session.binding,
+          session: {
+            refresh: (selection: unknown) => session.refresh(selection),
+            setStopCondition: (provider: () => unknown) => session.setStopCondition(provider),
+          },
+        }
+      : {}),
   };
 }
 

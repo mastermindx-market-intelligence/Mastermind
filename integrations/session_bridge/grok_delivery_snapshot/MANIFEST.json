@@ -1,0 +1,9 @@
+{
+  "preimage": "a2ed5494fbc724e18d7b25623a34e3c49106755b5877f13d5f0a2e51c3415289",
+  "postimage": "2553dc29a818baf12020f296c6294fa331700e56f826605d293db65deb01b82a",
+  "tests": "9 focused PASS",
+  "review": "APPROVE_SCOPED existing reasoning coordinator",
+  "original_failure_reason": "unknown; generic rc75 preserved",
+  "scope": "Shared existing read lock and fixed safe diagnostics; no broker/lease writes or sidecar weakening",
+  "same_id_delivery_continuation": "Only original qualified run and untouched exact destination; no worker replay; any actual denial or uncertain effect ends continuation"
+}
