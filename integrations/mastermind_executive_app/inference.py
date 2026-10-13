@@ -198,13 +198,32 @@ class InferenceApp:
                 if args['view'] == 'service_inference':
                     if ref.get('schema') != inference_io.CONTENT_RESULT_REF_SCHEMA or args['reference'] != ref:
                         return refused()
-                    # The existing backend reader must implement this narrow
-                    # view. Its current absence is an unavailable result, not
-                    # permission for this App to read files/Runtime directly.
-                    value = await self._reader.call(name, {
-                        'operation_key': operation, 'view': 'service_inference',
-                        'reference': dict(ref),
-                    })
+                    # The distinct service OS peer reads the existing
+                    # canonical Runtime over the SAME installed CEO Unix
+                    # socket. Do not borrow Web-CEO's read peer or install
+                    # another queue/Runtime path for this third existing tool.
+                    from datetime import datetime, timezone
+                    from integrations.executive_mcp.schemas import result_envelope, ServerMode
+                    from integrations.executive_mcp.web_ceo import WEB_CEO_V2_SERVER_VERSION
+                    source = await self._client.send_frame(
+                        self.settings.executive.ceo_ingress_socket_path, {
+                            'schema': ingress.DIRECT_RESULT_SCHEMA,
+                            'operation_key': operation, 'reference': dict(ref),
+                        })
+                    if (type(source) is not CeoIngressResponse
+                            or source.transport != 'sent_ok'
+                            or source.ok is not True
+                            or not isinstance(source.result, dict)):
+                        return refused('backend_unavailable', 503)
+                    value = result_envelope(
+                        name, mode=ServerMode.READONLY,
+                        generated_at=datetime.now(timezone.utc).isoformat(),
+                        data=source.result,
+                        grounding={'source': 'canonical-bounded-runtime',
+                                   'runtime': 'installed-executive'},
+                        degraded=[],
+                    )
+                    value['server_version'] = WEB_CEO_V2_SERVER_VERSION
                     validate_direct_result(value, operation_key=operation, receipt=receipt,
                         reference=ref, max_output_chars=inference_io.MAX_OUTPUT_CHARS)
                 else:

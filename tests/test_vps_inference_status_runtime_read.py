@@ -138,3 +138,48 @@ def test_queued_status_with_bound_owner_returns_original_receipt_without_writer_
         cleanup(binding)
     assert observed["receipt"]["fingerprint"] == receipt["fingerprint"]
     assert observed["terminal_result_ref"] is None
+
+
+def test_direct_read_cannot_cross_runtime_sources_even_when_job_and_request_match(tmp_path):
+    from control_plane.executive_inference_ingress import DIRECT_RESULT_SCHEMA
+    from control_plane.executive_ceo_ingress import CeoIngressError
+    left_root=tmp_path/"left";right_root=tmp_path/"right"
+    left_root.mkdir();right_root.mkdir()
+    writer,receipt=admitted(left_root)
+    other,foreign=admitted(right_root)
+    assert receipt["job_id"]==foreign["job_id"]
+    assert receipt["fingerprint"]==foreign["fingerprint"]
+    ref,_,_=synthetic_complete(other,foreign["job_id"])
+    reader,binding=qualified_reader(other,right_root)
+    class Grounding:
+        def observe(self):return {}
+    try:
+        with pytest.raises(CeoIngressError) as raised:
+            asyncio.run(ingress.handle_frame({
+                "schema":DIRECT_RESULT_SCHEMA,"operation_key":OP,"reference":ref},
+                runtime=writer,grounding_provider=Grounding(),workspace_root=left_root,
+                admission_guard=None,result_read_runtime=reader))
+        assert raised.value.code=="backend_unavailable"
+    finally:cleanup(binding)
+
+
+def test_direct_read_cannot_use_operation_present_only_in_foreign_reader(tmp_path):
+    from control_plane.executive_inference_ingress import DIRECT_RESULT_SCHEMA
+    from control_plane.executive_ceo_ingress import CeoIngressError
+    left_root=tmp_path/"left";right_root=tmp_path/"right"
+    left_root.mkdir();right_root.mkdir()
+    from control_plane.executive_runtime import Runtime
+    writer=Runtime.at(left_root/"runtime")
+    other,foreign=admitted(right_root)
+    ref,_,_=synthetic_complete(other,foreign["job_id"])
+    reader,binding=qualified_reader(other,right_root)
+    class Grounding:
+        def observe(self):return {}
+    try:
+        with pytest.raises(CeoIngressError) as raised:
+            asyncio.run(ingress.handle_frame({
+                "schema":DIRECT_RESULT_SCHEMA,"operation_key":OP,"reference":ref},
+                runtime=writer,grounding_provider=Grounding(),workspace_root=left_root,
+                admission_guard=None,result_read_runtime=reader))
+        assert raised.value.code=="backend_unavailable"
+    finally:cleanup(binding)

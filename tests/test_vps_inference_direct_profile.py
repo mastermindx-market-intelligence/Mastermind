@@ -44,20 +44,20 @@ def configure(rsa_key,tmp_path,*,fault=None):
     receipt=service_receipt(tmp_path/'receipt',OP,OBJECTIVE);response,ref=fixture_response(receipt)
     frames=[];reads=[]
     async def send(path,frame):
-        frames.append(frame)
-        assert frame['schema'].endswith('status.v1'),'read must not submit'
-        if fault=='revoke_at_status':current['binding']=None
-        return CeoIngressResponse('sent_ok',ok=True,result={'receipt':receipt,'terminal_result_ref':None if fault=='no_result' else ref})
-    async def reader(name,selection):
-        reads.append(deepcopy(selection))
-        assert name=='executive_fabric' and selection==args(ref)
+        from control_plane import executive_inference_ingress as service
+        frames.append(deepcopy(frame))
+        if frame['schema']==service.STATUS_SCHEMA:
+            if fault=='revoke_at_status':current['binding']=None
+            return CeoIngressResponse('sent_ok',ok=True,result={'receipt':receipt,'terminal_result_ref':None if fault=='no_result' else ref})
+        assert frame == {'schema':service.DIRECT_RESULT_SCHEMA,'operation_key':OP,'reference':ref}
+        reads.append(deepcopy(frame))
         if fault=='read_error':raise RuntimeError('PRIVATE_BACKEND_DETAIL')
         if fault=='revoke_at_read':current['binding']=None
-        result=deepcopy(response)
-        if fault=='substitution':result['data']['document']['result']['answer']='substituted'
-        if fault=='partial':result['data']['content_complete']=False
-        return result
-    app._client.send_frame=send;app._reader.call=reader
+        data=deepcopy(response['data'])
+        if fault=='substitution':data['document']['result']['answer']='substituted'
+        if fault=='partial':data['content_complete']=False
+        return CeoIngressResponse('sent_ok',ok=True,result=data)
+    app._client.send_frame=send
     return app,token,current,ref,response,frames,reads
 
 
@@ -65,8 +65,9 @@ def test_enrolled_service_gets_exact_direct_view_not_an_aggregation(rsa_key,tmp_
     app,token,_,ref,response,frames,reads=configure(rsa_key,tmp_path)
     value=asyncio.run(call(app,token,'executive_fabric',args(ref)))
     assert value.status_code==200,value.text
-    assert value.json()==response
-    assert len(frames)==len(reads)==1
+    assert value.json()['data']==response['data']
+    assert value.json()['server_version']=='1.2.0'
+    assert len(frames)==2 and len(reads)==1
     assert 'role_result' not in value.text and value.json()['data']['acceptance']=='NOT_PROJECTED'
 
 
@@ -76,7 +77,7 @@ def test_direct_app_never_returns_unauthorized_unqualified_or_partial_answer(rsa
     value=asyncio.run(call(app,token,'executive_fabric',args(ref)))
     assert value.status_code in {403,503}
     assert 'data' not in value.json() and 'PRIVATE_BACKEND_DETAIL' not in value.text
-    assert len(reads)==expected_reads and len(frames)==1
+    assert len(reads)==expected_reads and len(frames)==1+expected_reads
 
 
 def test_foreign_valid_reference_is_refused_before_answer_read(rsa_key,tmp_path):
@@ -106,8 +107,10 @@ def test_actual_client_and_authenticated_asgi_profile_round_trip(rsa_key,tmp_pat
     assert result==response['data']
     assert result['reference']==ref and result['document']['result']['answer'].startswith('Observed')
     assert tools==['service_intent_status','executive_fabric']
-    assert len(frames)==2 and len(reads)==1
-    assert all(frame['schema'].endswith('status.v1') for frame in frames)
+    assert len(frames)==3 and len(reads)==1
+    assert frames[0]['schema'].endswith('status.v1')
+    assert frames[1]['schema'].endswith('status.v1')
+    assert frames[2]['schema'].endswith('read.v1')
 
 
 def test_client_asgi_round_trip_refuses_identity_revoked_between_requests(rsa_key,tmp_path):

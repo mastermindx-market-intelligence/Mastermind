@@ -389,6 +389,10 @@ class CeoIngressClient:
             stream_limit = response_ceiling + 4096
         elif isinstance(frame, Mapping) and frame.get("schema") in inference_ingress.SCHEMAS:
             request_ceiling = inference_ingress.MAX_FRAME_BYTES
+            if frame.get("schema") == inference_ingress.DIRECT_RESULT_SCHEMA:
+                from control_plane.executive_inference_contract import MAX_RESULT_BYTES as INFERENCE_VIEW_MAX_BYTES
+                response_ceiling = INFERENCE_VIEW_MAX_BYTES
+                stream_limit = response_ceiling + 4096
         try:
             encoded = json.dumps(frame, ensure_ascii=False, sort_keys=True).encode(
                 "utf-8"
