@@ -17,7 +17,7 @@ from integrations.mastermind_company_mcp.adapter import (
     CompanyDialogueGateway,
     DialogueBindingResolver,
 )
-from integrations.agentos_product_acceptance_basis import (
+from control_plane.agentos_product_acceptance_basis import (
     AgentOsProductAcceptanceBasisReader,
 )
 from integrations.product_acceptance_request_owner import ProductAcceptanceRequestOwner

@@ -1203,8 +1203,8 @@ class ExecutiveSupervisor:
         self.runtime = runtime
         self._product_acceptance_review_owner = None
         if product_acceptance_macro_root is not None:
-            from integrations.agentos_product_acceptance_basis import AgentOsProductAcceptanceBasisReader
-            from integrations.product_acceptance_review_owner import ProductAcceptanceReviewBasisOwner
+            from control_plane.agentos_product_acceptance_basis import AgentOsProductAcceptanceBasisReader
+            from control_plane.product_acceptance_review_owner import ProductAcceptanceReviewBasisOwner
             self._product_acceptance_review_owner = ProductAcceptanceReviewBasisOwner(
                 runtime, AgentOsProductAcceptanceBasisReader(macro_root=Path(product_acceptance_macro_root))
             )
@@ -1485,7 +1485,7 @@ class ExecutiveSupervisor:
         input_dir.mkdir(mode=0o750 if self.shared_run_gid is not None else 0o700)
         schema_path = input_dir / "worker-result.schema.json"
         if job.orchestration_role == "review":
-            from integrations.product_acceptance_review_owner import read_retained_product_review_input
+            from control_plane.product_acceptance_review_owner import read_retained_product_review_input
             selected = read_retained_product_review_input(self.runtime, job=job, attempt=attempt)
             if selected is not None:
                 if effective_grant is None:
@@ -1555,7 +1555,7 @@ class ExecutiveSupervisor:
     def _product_acceptance_review_suffix(self, job: Job, attempt: Attempt) -> str:
         if job.orchestration_role != "review":
             return ""
-        from integrations.product_acceptance_review_owner import read_retained_product_review_input
+        from control_plane.product_acceptance_review_owner import read_retained_product_review_input
         selected = read_retained_product_review_input(self.runtime, job=job, attempt=attempt)
         return "" if selected is None else selected.prompt_suffix()
 

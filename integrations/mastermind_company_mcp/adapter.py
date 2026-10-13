@@ -303,7 +303,7 @@ class CompanyDialogueGateway:
                 operation = "send_message"
                 if normalized_arguments.get("purpose") == "PRODUCT_ACCEPTANCE":
                     from integrations.product_acceptance_request_owner import ProductAcceptanceRequestUnavailable
-                    from integrations.agentos_product_acceptance_basis import ProductAcceptanceBasisUnavailable
+                    from control_plane.agentos_product_acceptance_basis import ProductAcceptanceBasisUnavailable
                     try:
                         prepared = self._product_acceptance_owner.prepare(
                             binding=binding, subject_job_id=normalized_arguments["subject_job_id"],

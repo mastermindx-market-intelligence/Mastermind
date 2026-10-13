@@ -19,11 +19,11 @@ from control_plane.executive_supervisor import (
     VerifiedCommission,
     SupervisorError,
 )
-from integrations.agentos_product_acceptance_basis import (
+from control_plane.agentos_product_acceptance_basis import (
     AgentOsProductAcceptanceBasisReader,
     ProductAcceptanceBasisUnavailable,
 )
-from integrations.product_acceptance_review_owner import (
+from control_plane.product_acceptance_review_owner import (
     ProductAcceptanceReviewBasisOwner,
     read_retained_product_review_input,
     AGGREGATE,

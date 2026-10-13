@@ -16,11 +16,11 @@ from common.product_acceptance_contract import (
     require_complete_product_acceptance_review_proof,
 )
 from control_plane.executive_runtime import RuntimeProofError
-from integrations.agentos_product_acceptance_basis import (
+from control_plane.agentos_product_acceptance_basis import (
     _canonical_digest,
     reconcile_unchanged_acceptance_basis,
 )
-from integrations.product_acceptance_review_owner import _decode
+from control_plane.product_acceptance_review_owner import _decode
 from integrations.product_acceptance_request_owner import (
     ProductAcceptanceRequestOwner,
     ProductAcceptanceRequestUnavailable,

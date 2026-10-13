@@ -5,7 +5,7 @@ import hashlib
 
 import pytest
 
-from integrations import agentos_product_acceptance_basis as owner
+from control_plane import agentos_product_acceptance_basis as owner
 
 
 def acquired_basis():

@@ -91,3 +91,5 @@ parent consumption remain separate delivery facts.
 A sealed `-I`/`-S` context runtime remains `CONTEXT_RUNTIME_UNQUALIFIED`; this module
 does not choose another interpreter or relax isolation. Rollout must use the
 incumbent Context and Executive release owners and their actual grants.
+
+The Agent OS basis reader and retained review-input owner live in `control_plane`, beside the existing boot-packet and Runtime owners. Integration adapters depend on these core owners; the Supervisor never imports the integration or MCP SDK packages. This preserves restart acquisition of the same retained review basis without introducing an injected callback or a second event decoder.

@@ -7,7 +7,7 @@ from common.product_acceptance_contract import (
     require_complete_product_acceptance_review_proof,
     ProductAcceptanceContractError,
 )
-from integrations import agentos_product_acceptance_basis as owner
+from control_plane import agentos_product_acceptance_basis as owner
 from tests.test_product_acceptance_basis_continuity import acquired_basis, restamp
 
 

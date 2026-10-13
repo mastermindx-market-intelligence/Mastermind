@@ -22,7 +22,7 @@ from control_plane.executive_runtime import (
 from control_plane.mission_acceptance_criteria import (
     parse_acceptance_criteria_candidate,
 )
-from integrations.agentos_product_acceptance_basis import (
+from control_plane.agentos_product_acceptance_basis import (
     AgentOsProductAcceptanceBasisReader,
     ProductAcceptanceBasisRead,
     ProductAcceptanceBasisUnavailable,

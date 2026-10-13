@@ -16,12 +16,12 @@ from common.product_acceptance_contract import (
     require_complete_product_acceptance_review_proof,
 )
 from control_plane.executive_runtime import Runtime, BoundedProductAcceptanceSubject
-from integrations.agentos_product_acceptance_basis import (
+from control_plane.agentos_product_acceptance_basis import (
     AgentOsProductAcceptanceBasisReader,
     _canonical_digest,
     reconcile_unchanged_acceptance_basis,
 )
-from integrations.product_acceptance_review_owner import (
+from control_plane.product_acceptance_review_owner import (
     read_retained_product_review_input,
 )
 from integrations.mastermind_company_mcp.adapter import (

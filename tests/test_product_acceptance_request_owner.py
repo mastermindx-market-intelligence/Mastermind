@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from integrations.agentos_product_acceptance_basis import (
+from control_plane.agentos_product_acceptance_basis import (
     AgentOsProductAcceptanceBasisReader,
 )
 from integrations.product_acceptance_request_owner import (
@@ -24,7 +24,7 @@ from tests.test_product_acceptance_basis_continuity import acquired_basis, resta
 from tests import test_executive_coo_ready_frontier as frontier
 from control_plane.executive_runtime import Runtime
 from control_plane.executive_supervisor import VerifiedCommission
-from integrations.product_acceptance_review_owner import (
+from control_plane.product_acceptance_review_owner import (
     ProductAcceptanceReviewBasisOwner,
 )
 from common.commission_ref import normalize_commission_ref
@@ -247,7 +247,7 @@ def test_missing_must_have_proof_returns_exact_repair_identity_without_send_star
 def test_gateway_preserves_canonical_missing_extra_and_order_repair_identity(
     tmp_path, monkeypatch, kind
 ):
-    from integrations.agentos_product_acceptance_basis import _canonical_digest
+    from control_plane.agentos_product_acceptance_basis import _canonical_digest
 
     basis = acquired_basis()
     second = {**basis.entry["proof_obligations"][0], "label": "Original parent return"}

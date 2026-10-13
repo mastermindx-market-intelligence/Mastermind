@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from common.commission_ref import normalize_commission_ref
-from integrations import agentos_product_acceptance_basis as owner
+from control_plane import agentos_product_acceptance_basis as owner
 
 
 def execution_ref():

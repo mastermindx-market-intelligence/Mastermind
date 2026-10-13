@@ -340,7 +340,7 @@ def test_parent_receipt_alone_cannot_replace_exact_worker_consumption(
 def test_corrected_requirement_invalidates_acceptance_after_both_returns(
     tmp_path, monkeypatch
 ):
-    from integrations.agentos_product_acceptance_basis import (
+    from control_plane.agentos_product_acceptance_basis import (
         ProductAcceptanceBasisUnavailable,
     )
 
