@@ -10,7 +10,7 @@ import pytest
 from control_plane import foreground_operation as scope
 from control_plane.executive_coo_cycle import CooCycle, CooCycleOutcome
 from control_plane.executive_runtime import Runtime, StateConflict, JobStatus
-from control_plane.executive_service import ExecutiveControlService
+from control_plane.executive_service import ExecutiveControlService, _ForegroundExecution
 from control_plane.fabric_attended_routing import AttendedWorkPlacement
 from tests.test_executive_service import _config, _FakeSupervisor
 from tests.test_foreground_operation import frame, admit
@@ -24,6 +24,9 @@ def service_at(tmp_path):
     # Host-config presence fixture only; production catalogue stays disabled.
     service.config = dataclasses.replace(service.config,
         coo_attended_work_placements=(AttendedWorkPlacement("fixture", "fixture", "fixture"),))
+    # These cycle/finisher tests isolate host composition; real eligibility
+    # and factory guards are covered in test_foreground_operator_eligibility.
+    service._foreground_execution_state = lambda: _ForegroundExecution("ATTENDED_WORK", b"{}")
     return service
 
 
