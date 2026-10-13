@@ -9,22 +9,37 @@ The frozen v2-v24 implementations/results are intentionally not imported/changed
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 import math
 from numbers import Real
 from typing import Iterable, Optional, Sequence
 
 
 def _finite(value: object, name: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, Real) or not math.isfinite(value):
+    if isinstance(value, bool) or not isinstance(value, Real):
         raise ValueError(f'{name} must be a finite real number, not a boolean')
-    return float(value)
+    try:
+        number = float(value)
+    except (OverflowError, ValueError) as exc:
+        raise ValueError(f'{name} is not representable as a finite number') from exc
+    if not math.isfinite(number):
+        raise ValueError(f'{name} must be finite')
+    return number
 
 
 def _clock(value: datetime, name: str) -> datetime:
     if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
         raise ValueError(f'{name} must be timezone-aware')
-    return value
+    # Python compares equal-tzinfo datetimes by wall time, ignoring a DST fold.
+    # Normalize actual instants before ANY ordering; this is not a venue calendar.
+    return value.astimezone(timezone.utc)
+
+
+def _sum(values: Iterable[float], name: str) -> float:
+    try:
+        return _finite(math.fsum(values), name)
+    except OverflowError as exc:
+        raise ValueError(f'{name} exceeds finite accounting range') from exc
 
 
 def _key(value: str) -> None:
@@ -50,20 +65,21 @@ class TrainingLabel:
     def __post_init__(self) -> None:
         _key(self.episode)
         for name in ('decision_at', 'feature_available_at', 'baseline_end_at', 'intervention_end_at'):
-            _clock(getattr(self, name), name)
+            object.__setattr__(self, name, _clock(getattr(self, name), name))
         if self.feature_available_at > self.decision_at:
             raise ValueError('feature unavailable at the claimed decision')
         if min(self.baseline_end_at, self.intervention_end_at) < self.decision_at:
             raise ValueError('decision label includes a path closed before the decision')
         if self.outcome_available_at is not None:
-            _clock(self.outcome_available_at, 'outcome_available_at')
+            object.__setattr__(self, 'outcome_available_at',
+                               _clock(self.outcome_available_at, 'outcome_available_at'))
             if self.outcome_available_at < max(self.baseline_end_at, self.intervention_end_at):
                 raise ValueError('outcome availability precedes paired-path completion')
 
 
 def mature_training_labels(labels: Iterable[TrainingLabel], fit_at: datetime) -> list[TrainingLabel]:
     """Strictly prior available labels; entry week is not a maturity test."""
-    _clock(fit_at, 'fit_at')
+    fit_at = _clock(fit_at, 'fit_at')
     selected: list[TrainingLabel] = []
     seen: set[str] = set()
     for row in labels:
@@ -83,11 +99,10 @@ def check_decision_clocks(completed_bar_at: datetime, feature_available_at: date
     """Reject retroactive information/fills, without claiming order marketability."""
     clocks = (completed_bar_at, feature_available_at, decision_recorded_at,
               submitted_at, first_allowed_fill_at)
-    for i, value in enumerate(clocks):
-        _clock(value, f'clock[{i}]')
-    if not completed_bar_at <= feature_available_at <= decision_recorded_at <= submitted_at:
+    clocks = tuple(_clock(value, f'clock[{i}]') for i, value in enumerate(clocks))
+    if not clocks[0] <= clocks[1] <= clocks[2] <= clocks[3]:
         raise ValueError('decision clocks are not causally ordered')
-    if first_allowed_fill_at <= submitted_at:
+    if clocks[4] <= clocks[3]:
         raise ValueError('fill must follow submission; simultaneous OHLC open is not proof')
 
 
@@ -226,9 +241,13 @@ def summarize(cohort_ids: Sequence[str], rows: Iterable[PairedOutcome], *,
         _finite(delta, 'net delta')
         point.append(delta); lower.append(delta); upper.append(delta)
     n = len(ids)
-    lo = math.fsum(lower)/n if all(v is not None for v in lower) else None
-    hi = math.fsum(upper)/n if all(v is not None for v in upper) else None
-    exact = math.fsum(point)/n if len(point) == n else None
+    # Finite inputs can still overflow derived sums, even when net deltas cancel.
+    # Never publish a positive/finite headline beside infinite component values.
+    for name, value in {**components, **bridge, 'extra_sell_cost': total_cost}.items():
+        _finite(value, name)
+    lo = _sum(lower, 'lower total')/n if all(v is not None for v in lower) else None
+    hi = _sum(upper, 'upper total')/n if all(v is not None for v in upper) else None
+    exact = _sum(point, 'net total')/n if len(point) == n else None
     return dict(original_episodes=n, resolved_episodes=len(point),
                 unresolved_episodes=states['UNRESOLVED'], discretionary_fills=states['FILLED'],
                 no_action_episodes=states['NO_ACTION'], verified_no_fill_episodes=states['VERIFIED_NO_FILL'],
@@ -254,7 +273,10 @@ def break_even_share(mean_benefit_pp: float, mean_harm_pp: float, *,
     cost = _finite(decision_cost_pp, 'decision_cost_pp')
     if benefit <= 0 or harm < 0 or cost < 0:
         raise ValueError('positive benefit and nonnegative harm/cost required')
-    return (harm + cost) / (benefit + harm)
+    scale = max(benefit, harm)
+    # Scaling preserves the payoff identity without overflowing b+h or h+cost.
+    result = (harm/scale + cost/scale) / (benefit/scale + harm/scale)
+    return _finite(result, 'break-even share')
 
 
 def overlap_components(intervals: Iterable[tuple[str, datetime, datetime]]) -> list[list[str]]:
@@ -264,13 +286,14 @@ def overlap_components(intervals: Iterable[tuple[str, datetime, datetime]]) -> l
     Long chains can yield one component; never count its symbols as new trials.
     Exchange sessions/calendars and horizon clocks remain upstream-owned.
     """
-    values = list(intervals)
+    values: list[tuple[str, datetime, datetime]] = []
     seen: set[str] = set()
-    for key, start, end in values:
-        _key(key); _clock(start, 'start'); _clock(end, 'end')
+    for key, start, end in intervals:
+        _key(key); start = _clock(start, 'start'); end = _clock(end, 'end')
         if key in seen or end <= start:
             raise ValueError('duplicate episode or invalid exposure interval')
         seen.add(key)
+        values.append((key, start, end))
     groups: list[list[str]] = []
     end_at: Optional[datetime] = None
     for key, start, end in sorted(values, key=lambda x: (x[1], x[2], x[0])):
