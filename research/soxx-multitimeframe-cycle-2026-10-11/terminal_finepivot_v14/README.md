@@ -2,7 +2,7 @@
 
 This is a **frozen exploratory research** wave, not a trading strategy, licensed raw-data export, or an independent holdout.
 
-Full findings and limitations: [FINDINGS_V14.md](FINDINGS_V14.md). Original historical data remain in the private mini4 research scratch directory with source hashes in `sources.json` and `PEER_SOURCE_METADATA.json`.
+Full findings and limitations: [FINDINGS_V14.md](FINDINGS_V14.md). Original historical data remain in the private mini4 research scratch directory with source hashes in `sources.json` and `ASSET_SOURCE_METADATA.json`.
 
 Provenance: existing public Terminal read-only `/api/intraday` with explicit ET market-local display epochs and source evidence `point_in_time_availability=not_verified`, `price_adjustment=not_verified`, `completeness=not_assessed`. No direct Tiingo/Alpaca/Massive credentials or vendor API calls.
 
@@ -15,3 +15,5 @@ Evidence files:
 The scripts depend on the preserved v11 upstream source modules and intentionally **do not** fetch vendor data or create new archives. To reproduce locally, provide your own lawfully licensed Terminal snapshots at the original private dataset paths and match the SHA evidence. The source files, unlike the actual OHLCV, are suitable for public code review.
 
 Status: new granular access **PROVEN FOR EXISTING READ-ONLY TERMINAL CONSUMER**; new strategy quality/production/BOATS execution **NOT PROVEN**.
+
+The metadata bytes and all pair-table values are preserved from PR #1338 at `7ec0207a`. The v25 representation repair names financial-asset metadata explicitly, quotes string episode keys, and expresses the unchanged ET clock rule using `datetime.time`. It does not alter the repository identity guard, research parameters, or historical outcomes.

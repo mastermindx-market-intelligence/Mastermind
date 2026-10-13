@@ -10,6 +10,30 @@ BASE=Path(__file__).resolve().parent
 UTC=dt.timezone.utc
 ET=ZoneInfo("America/New_York")
 
+
+def _is_rth_15m_start(et):
+    """Frozen v14 ET clock rule, expressed as clock values rather than minute IDs.
+
+    This does not add a calendar, alter early-close handling, or strengthen the
+    original subminute validation; the existing source checks remain in place.
+    """
+    return dt.time(9, 30) <= et.time() < dt.time(16, 0) and et.minute % 15 == 0
+
+
+def _save_episode_pairs(name, rows):
+    """Serialize compound episode keys as strings; keep numbers numeric.
+
+    The records and field order are the same as study_v14.save_csv. Explicit
+    nonnumeric quoting prevents a string key's bar offsets being read as code.
+    """
+    if not rows:
+        return
+    cols = list(dict.fromkeys(k for row in rows for k in row))
+    with (BASE / name).open("w", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=cols, quoting=csv.QUOTE_NONNUMERIC)
+        writer.writeheader()
+        writer.writerows(rows)
+
 def source_data(symbol,tf):
     path=BASE/f"{symbol}_Terminal_{tf}_ext0.json"
     result=json.loads(path.read_bytes())
@@ -25,7 +49,7 @@ def peer_context(symbol):
     raw=[];days=collections.defaultdict(list);closes={}
     for ep,o,h,l,c,v in a["bars"]:
         et=dt.datetime.fromtimestamp(ep,UTC).replace(tzinfo=ET)
-        assert 570<=et.hour*60+et.minute<960 and et.minute%15==0
+        assert _is_rth_15m_start(et)
         start=int(et.timestamp());end=int((et+dt.timedelta(minutes=15)).timestamp())
         assert 0<l<=min(o,c)<=max(o,c)<=h and v>=0
         row=dict(idx=len(raw),start=start,end=end,day=et.date().isoformat(),local=et.isoformat(),
@@ -120,7 +144,10 @@ def run():
                 interval95=[round(means[int(.025*len(means))],4),round(means[int(.975*len(means))],4)] if means else None))
     for n,z in [("peer_summary_v14.csv",results),("peer_portfolio_v14.csv",portfolios),("peer_pairs_v14.csv",pairs),
                 ("peer_block_stress_v14.csv",cluster)]:
-        s.save_csv(n,z)
+        if n == "peer_pairs_v14.csv":
+            _save_episode_pairs(n, z)
+        else:
+            s.save_csv(n, z)
     provenance=dict(sample="historical 2025-10-09 to2026-10-08",
        source="Terminal's public existing intraday consumer; privately cached price bars not republished",
        predeclared_cohort=spec["cohort"],data_checks=audit,
