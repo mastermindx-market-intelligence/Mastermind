@@ -2,7 +2,7 @@
   "operation": "bot-intelligence-renewal-20261011",
   "source_basis": "cbc7503536b6853ec7c35c2192abdfaccb87b561",
   "macro_ci_source": "256c757b3c4f0ec759571c29a30a71387d0a18f8",
-  "test_scope": "WIP/HOLD: candidate claim 50 pass, full Bot producer+claim 97 pass/1 existing denied zero-evidence failure; 7 synthetic source-consumer canary pass; independent final read-only review scoped clear, no live-provider proof",
+  "test_scope": "DRAFT/HOLD: new manual 2-case exact-source authenticated synthetic App/Unix Job/claim canary passes; existing Bot snapshot 11 known failed and zero-evidence 1 failed remain; service 145 focused pass and broader 599 pass/1 held fixture; no provider/production execution",
   "manifest_self_excluded": true,
   "files": [
     {
@@ -57,8 +57,8 @@
     },
     {
       "path": "docs/superpowers/plans/2026-10-11-bot-autonomy-renewal-validation.md",
-      "bytes": 48951,
-      "sha256": "8e723f759ee12afe1f8f6de1d92d2ece81f996eafabe10e7f618701073887519"
+      "bytes": 51823,
+      "sha256": "ae571e8010ce47e24e871020d67fb943ee005af3a6b83dc098ad22cdbd857087"
     },
     {
       "path": "docs/superpowers/plans/2026-10-11-bot-autonomy-source-capture.acceptance.py.txt",
@@ -176,6 +176,11 @@
       "sha256": "797ff5b7715fa91c73f5ec5b0172ff009829d42658cca1bf67befb2674971859"
     },
     {
+      "path": "tests/fixtures/bot_service_socket/verification.json",
+      "bytes": 1674,
+      "sha256": "b0f40bd3559dade3a99f44aec2b8cd47417503cce2cf03ecca05504af647d021"
+    },
+    {
       "path": "tests/fixtures/decision_evidence_browser/evidence-1440.png",
       "bytes": 203859,
       "sha256": "8beb67882965694a38fef21eeeeada23e80f67dd1f9a47665fca279d4aca2d05"
@@ -194,6 +199,11 @@
       "path": "tests/fixtures/decision_evidence_browser/verification.json",
       "bytes": 2165,
       "sha256": "1ee6500f1c474da855d845f47f0858456bdbe4687c3f9708073f621942e160b5"
+    },
+    {
+      "path": "tests/integration_canary_bot_socket.py",
+      "bytes": 9508,
+      "sha256": "d7b445b5896604e3e61a836484039971b06e13a1d92da3e2d2048dddc19c18a0"
     },
     {
       "path": "tests/test_calendar_authority_consistency.py",
