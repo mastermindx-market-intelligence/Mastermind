@@ -26,6 +26,7 @@ import os
 import re
 import secrets
 import sqlite3
+import stat
 import threading
 from types import MappingProxyType
 from abc import ABC, abstractmethod
@@ -3735,26 +3736,119 @@ class RuntimeStore:
         migration 5 or create a sidecar as a by-product of discovering staleness.
         """
 
-        connection: sqlite3.Connection | None = None
-        try:
-            connection = sqlite3.connect(
-                f"{self.path.as_uri()}?mode=ro&immutable=1",
-                uri=True,
-                timeout=self.busy_timeout_ms / 1000,
-                isolation_level=None,
+        # SQLite immutable=1 explicitly ignores a live uncheckpointed WAL.
+        # Looking only at the main file could attest the wrong schema or read
+        # partially checkpointed pages while another writable owner is active.
+        # Before opening anything, select the sidecar-aware read-only path if
+        # both verified WAL artifacts are already present. Never create a
+        # missing WAL sidecar as part of a stale-schema preflight.
+        wal = Path(str(self.path) + "-wal")
+        shm = Path(str(self.path) + "-shm")
+
+        def sidecar_identity(path: Path) -> tuple[int, int] | None:
+            try:
+                observed = os.lstat(path)
+            except FileNotFoundError:
+                return None
+            except OSError as exc:
+                raise PersistenceError(
+                    "Executive schema sidecar identity is unavailable"
+                ) from exc
+            if (not stat.S_ISREG(observed.st_mode)
+                    or observed.st_uid != os.getuid()
+                    or observed.st_mode & 0o002):
+                raise PersistenceError(
+                    "Executive schema sidecar is not a protected regular file"
+                )
+            return observed.st_dev, observed.st_ino
+
+        def one_read(*, immutable: bool) -> tuple[list[sqlite3.Row], str]:
+            uri = self.path.as_uri() + (
+                "?mode=ro&immutable=1" if immutable else "?mode=ro"
             )
-            connection.row_factory = sqlite3.Row
-            rows = connection.execute(
-                "SELECT version,name,checksum FROM schema_migrations ORDER BY version"
-            ).fetchall()
-            schema_digest = _normalized_schema_digest(connection)
-        except sqlite3.Error as exc:
+            connection: sqlite3.Connection | None = None
+            try:
+                connection = sqlite3.connect(
+                    uri, uri=True,
+                    timeout=self.busy_timeout_ms / 1000,
+                    isolation_level=None,
+                )
+                connection.row_factory = sqlite3.Row
+                connection.execute("BEGIN")
+                rows = connection.execute(
+                    "SELECT version,name,checksum FROM schema_migrations ORDER BY version"
+                ).fetchall()
+                return rows, _normalized_schema_digest(connection)
+            finally:
+                if connection is not None:
+                    connection.close()
+
+        def snapshot() -> tuple[list[sqlite3.Row], str] | None:
+            before = (sidecar_identity(wal), sidecar_identity(shm))
+            # If WAL was witnessed, SQLite's native read-only connection must
+            # arbitrate its own locks/snapshot. It may create/recover a SHM
+            # index but must never be asked to write Executive schema/data.
+            if before[0] is not None and before[1] is not None:
+                try:
+                    return one_read(immutable=False)
+                except sqlite3.Error as exc:
+                    after = (sidecar_identity(wal), sidecar_identity(shm))
+                    if after != before:
+                        return None
+                    raise PersistenceError(
+                        f"executive runtime database at {self.path} is not a verified Executive schema: {exc}"
+                    ) from exc
+
+            # With absent OR incomplete sidecars, we first verify the frozen
+            # main file. Until v5 identity is established, using mode=ro could
+            # create sidecars on an offline stale/foreign schema. Keep it
+            # strictly mutation-free and fail closed on any unverified main.
+            try:
+                main_rows, main_digest = one_read(immutable=True)
+            except sqlite3.Error as exc:
+                after = (sidecar_identity(wal), sidecar_identity(shm))
+                if after != before and after[0] is not None and after[1] is not None:
+                    try:
+                        return one_read(immutable=False)
+                    except sqlite3.Error:
+                        return None
+                raise PersistenceError(
+                    f"executive runtime database at {self.path} is not a verified Executive schema: {exc}"
+                ) from exc
+            if main_digest != _NORMALIZED_V5_SCHEMA_DIGEST:
+                return main_rows, main_digest
+            # A v5 main file is now positively observed. For a stable offline
+            # file use it unchanged: no WAL/SHM files may be manufactured by
+            # schema discovery. If there is WAL activity, switch ONCE to
+            # SQLite locks instead of repeatedly racing immutable snapshots.
+            after = (sidecar_identity(wal), sidecar_identity(shm))
+            if before == (None, None) and after == (None, None):
+                return main_rows, main_digest
+            # An unpaired WAL/SHM is not a trustworthy live SQLite snapshot:
+            # mode=ro may silently treat a malformed orphan WAL as empty and
+            # attest stale main bytes. Retry only the bounded read observation.
+            if (after[0] is None) != (after[1] is None):
+                return None
+            if before[0] is not None and before[1] is None and after == before:
+                return None
+            if before[1] is not None and before[0] is None and after == before:
+                return None
+            try:
+                return one_read(immutable=False)
+            except sqlite3.Error:
+                return None
+
+        # This is a bounded *read-snapshot* re-acquisition under transient WAL
+        # create/checkpoint churn, not a retry of a Job, lease, writer or effect.
+        for _observation in range(4):
+            observed = snapshot()
+            if observed is not None:
+                rows, schema_digest = observed
+                break
+        else:
             raise PersistenceError(
-                f"executive runtime database at {self.path} is not a verified Executive schema: {exc}"
-            ) from exc
-        finally:
-            if connection is not None:
-                connection.close()
+                "Executive schema WAL sidecars changed during all bounded preflight reads"
+            )
         versions = [int(row["version"]) for row in rows]
         if not versions or versions != list(range(1, max(versions) + 1)):
             raise PersistenceError(
