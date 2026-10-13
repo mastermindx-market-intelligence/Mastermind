@@ -73,12 +73,24 @@ def eventize(
     """
 
     ordered = sorted(points, key=lambda point: (point.known_at, point.state_family))
+    # A repeated observation is replay, not a choice of whichever row arrived
+    # first. Validate before admission so even a degraded conflicting copy
+    # cannot silently select the trusted row. Corrections belong to amendments.
+    unique: list[SourceStateRef] = []
+    for point in ordered:
+        if unique and (point.known_at, point.state_family) == (
+            unique[-1].known_at, unique[-1].state_family
+        ):
+            if point.to_dict() != unique[-1].to_dict():
+                raise ContractError("conflicting same-clock observation; use the amendment path")
+            continue
+        unique.append(point)
     active: dict[str, SourceStateRef] = {}
     last_seen: dict[str, SourceStateRef] = {}
     last_emitted: dict[tuple[str, int], SourceStateRef] = {}
     emitted: list[ShockRecord] = []
 
-    for point in ordered:
+    for point in unique:
         if not _observable(point, policy):
             # Missing/stale/low-quality evidence proves neither a reset nor a
             # continuous observation history. Leave both clocks untouched.

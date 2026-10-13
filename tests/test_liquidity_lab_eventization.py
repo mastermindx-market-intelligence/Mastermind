@@ -110,3 +110,26 @@ def test_untrusted_readings_cannot_bridge_valid_observation_gap(changes):
     assert [e.first_detected.date().isoformat() for e in events] == [
         "2026-01-02", "2026-01-09",
     ]
+
+
+@pytest.mark.parametrize("changes", [
+    {"magnitude_z": 1.8}, {"direction": -1, "magnitude_z": -1.4},
+    {"coverage": 0.1}, {"freshness": "stale"},
+    {"model_version": "glt_state_2"}, {"source_snapshot_hash": "c" * 64},
+])
+def test_conflicting_same_clock_observations_are_not_order_selected(changes):
+    from brain.liquidity_lab.contracts import ContractError
+    point = _point("2026-01-02", 1.2)
+    conflict = replace(point, **changes)
+    policy = EventizationPolicy(1.0, 0.4, 0.7, 0.7, 10, 0)
+    for inputs in ([point, conflict], [conflict, point]):
+        with pytest.raises(ContractError, match="conflicting.*observation"):
+            eventize(inputs, policy)
+
+
+def test_exact_duplicate_observations_preserve_replay_result():
+    point = _point("2026-01-02", 1.2)
+    followup = _point("2026-01-05", 1.6)
+    policy = EventizationPolicy(1.0, 0.4, 0.7, 0.7, 10, 0)
+    expected = [e.to_dict() for e in eventize([point, followup], policy)]
+    assert [e.to_dict() for e in eventize([followup, point, point], policy)] == expected
