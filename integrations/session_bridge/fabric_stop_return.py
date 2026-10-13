@@ -208,6 +208,7 @@ class _ParentMetadata:
 
     def read(self, suffix):
         self.verify()
+        self.no_pending(suffix)
         name = self.stem + suffix
         fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=self.fd)
         try:
@@ -231,6 +232,32 @@ class _ParentMetadata:
             return data
         finally:
             os.close(fd)
+
+    def no_pending(self, suffix):
+        self.verify()
+        try:
+            os.stat(self.stem + suffix + ".pending", dir_fd=self.fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return
+        raise FileExistsError("unsettled subscription metadata write")
+
+    def write_once(self, suffix, value):
+        """Retain one immutable snapshot, including an interrupted partial write."""
+        self.verify()
+        self.no_pending(suffix)
+        data = json.dumps(value, sort_keys=True).encode() + b"\n"
+        if len(data) > MAX_EVENT:
+            raise ReturnUnavailable("retirement archive bound")
+        fd = os.open(self.stem + suffix, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                     stat.S_IRUSR | stat.S_IWUSR, dir_fd=self.fd)
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.fsync(self.fd)
+        self.verify()
+        if self.read(suffix) != data:
+            raise ReturnUnavailable("retirement archive publication unconfirmed")
 
     def write(self, suffix, value):
         self.verify()
@@ -262,17 +289,25 @@ class _ParentMetadata:
 
 
 def _load_index(store):
+    store.no_pending(".attempts.json")
     try:
         data = json.loads(store.read(".subscriptions.json"))
     except FileNotFoundError:
         return {"schema": "mastermind.fabric_stop_subscriptions.v1", "root": store.root, "runs": []}
+    _validate_index(data, store.root)
+    for run in data["runs"]:
+        if _read_retirement(store, run) is not None:
+            raise ReturnUnavailable("incomplete subscription retirement; preserve archive")
+    return data
+
+
+def _validate_index(data, root):
     if (type(data) is not dict or set(data) != {"schema", "root", "runs"}
-            or data["schema"] != "mastermind.fabric_stop_subscriptions.v1" or data["root"] != store.root
+            or data["schema"] != "mastermind.fabric_stop_subscriptions.v1" or data["root"] != root
             or type(data["runs"]) is not list or len(data["runs"]) > MAX_SUBSCRIPTIONS
             or any(type(run) is not str or not ID.fullmatch(run) for run in data["runs"])
             or len(set(data["runs"])) != len(data["runs"])):
         raise ReturnUnavailable("invalid subscription index")
-    return data
 
 
 def register_subscription(root: str, run: str, state_dir: Path) -> None:
@@ -280,6 +315,8 @@ def register_subscription(root: str, run: str, state_dir: Path) -> None:
     if not ID.fullmatch(run):
         raise ReturnUnavailable("invalid subscription run")
     with _ParentMetadata(root, state_dir) as store:
+        if _read_retirement(store, run) is not None:
+            raise ReturnUnavailable("native return already retired; do not resubmit")
         data = _load_index(store)
         if run in data["runs"]:
             raise ReturnUnavailable("native return already subscribed; do not resubmit")
@@ -294,8 +331,13 @@ def _load_attempts(store, index):
         data = json.loads(store.read(".attempts.json"))
     except FileNotFoundError:
         return {"schema": "mastermind.fabric_stop_attempts.v1", "root": store.root, "runs": {}}
+    _validate_attempts(data, index, store.root)
+    return data
+
+
+def _validate_attempts(data, index, root):
     if (type(data) is not dict or set(data) != {"schema", "root", "runs"}
-            or data["schema"] != "mastermind.fabric_stop_attempts.v1" or data["root"] != store.root
+            or data["schema"] != "mastermind.fabric_stop_attempts.v1" or data["root"] != root
             or type(data["runs"]) is not dict or any(run not in index["runs"] for run in data["runs"])):
         raise ReturnUnavailable("invalid prior attention attempts")
     for run, row in data["runs"].items():
@@ -307,7 +349,93 @@ def _load_attempts(store, index):
                 or any(type(row[k]) is not str or not SHA.fullmatch(row[k])
                        for k in ("result_sha256", "frame_sha256", "adapter_sha256"))):
             raise ReturnUnavailable("invalid prior attention record")
-    return data
+
+
+def valid_accepted_snapshot(status, root, run):
+    """A current owner acceptance projection, not permanent acceptance or custody."""
+    if not isinstance(status, dict):
+        return False
+    unaccepted = dict(status, accepted=False, acceptance_state="NOT_ACCEPTED",
+                      acceptance_reason="NO_OUTCOME")
+    return (valid_terminal(unaccepted, root, run) and status.get("accepted") is True
+            and status.get("acceptance_state") == "ACCEPTED"
+            and status.get("acceptance_reason") == "VALIDATED_OUTCOME"
+            and status.get("accepted_by") in ("reviewer", "deterministic"))
+
+
+def _retirement_suffix(run):
+    return ".retired." + digest(run.encode()) + ".json"
+
+
+def _read_retirement(store, run):
+    try:
+        archive = json.loads(store.read(_retirement_suffix(run)))
+    except FileNotFoundError:
+        return None
+    if (type(archive) is not dict or set(archive) != {"schema", "root", "run_id",
+            "index", "attempts", "status", "status_sha256", "adapter_sha256"}
+            or archive["schema"] != "mastermind.fabric_stop_retirement.v1"
+            or archive["root"] != store.root or archive["run_id"] != run
+            or not valid_accepted_snapshot(archive["status"], store.root, run)
+            or archive["status_sha256"] != digest(json.dumps(archive["status"], sort_keys=True).encode())
+            or type(archive["adapter_sha256"]) is not str or not SHA.fullmatch(archive["adapter_sha256"])):
+        raise ReturnUnavailable("invalid retirement archive")
+    _validate_index(archive["index"], store.root)
+    _validate_attempts(archive["attempts"], archive["index"], store.root)
+    if run not in archive["index"]["runs"]:
+        raise ReturnUnavailable("retirement archive lacks original subscription")
+    return archive
+
+
+def retire_accepted_subscription(root: str, run: str, *, state_dir: Path,
+                                 adapter_sha256: str,
+                                 read_adapter: Callable[[str, str], bytes]) -> dict:
+    """Explicit accepted-only attention retirement. Never alter run artifacts or outcomes.
+
+    Archive first, then attempts, then subscriptions. Any interruption retains
+    a pending write or an indexed archive and refuses subsequent callback work.
+    Recovery is deliberately not inferred here. A later outcome revocation does
+    not erase this historical snapshot or make the original run replayable.
+    """
+    if not ID.fullmatch(run) or not SHA.fullmatch(adapter_sha256):
+        raise ReturnUnavailable("invalid retirement identity")
+    with _ParentMetadata(root, state_dir) as store:
+        if _read_retirement(store, run) is not None:
+            raise ReturnUnavailable("native return already retired or retirement incomplete")
+        index = _load_index(store)
+        attempts = _load_attempts(store, index)
+        if run not in index["runs"]:
+            raise ReturnUnavailable("run is not subscribed")
+        snapshots = []
+        for _ in range(2):
+            raw = read_adapter("status", run)
+            if len(raw) > MAX_EVENT:
+                raise ReturnUnavailable("retirement status bound")
+            snapshot = json.loads(raw)
+            if not valid_accepted_snapshot(snapshot, root, run):
+                raise ReturnUnavailable("retirement requires current exact-parent accepted outcome")
+            snapshots.append(snapshot)
+        if snapshots[0] != snapshots[1]:
+            raise ReturnUnavailable("retirement status changed")
+        if _load_index(store) != index or _load_attempts(store, index) != attempts:
+            raise ReturnUnavailable("retirement preimage changed")
+        archive = {"schema": "mastermind.fabric_stop_retirement.v1", "root": root,
+                   "run_id": run, "index": index, "attempts": attempts,
+                   "status": snapshots[0], "adapter_sha256": adapter_sha256,
+                   "status_sha256": digest(json.dumps(snapshots[0], sort_keys=True).encode())}
+        store.write_once(_retirement_suffix(run), archive)
+        # This order preserves the invariant that every attention attempt is indexed.
+        remaining_attempts = dict(attempts, runs={k: v for k, v in attempts["runs"].items() if k != run})
+        store.write(".attempts.json", remaining_attempts)
+        remaining_index = dict(index, runs=[k for k in index["runs"] if k != run])
+        store.write(".subscriptions.json", remaining_index)
+        if (_read_retirement(store, run) != archive or _load_index(store) != remaining_index
+                or _load_attempts(store, remaining_index) != remaining_attempts):
+            raise ReturnUnavailable("retirement readback unconfirmed")
+        return {"schema": "mastermind.fabric_stop_retirement_receipt.v1", "root": root,
+                "run_id": run, "state": "ATTENTION_RETIRED", "remaining": len(remaining_index["runs"]),
+                "archive_sha256": digest(store.read(_retirement_suffix(run))),
+                "run_artifacts_changed": False, "retry_authorized": False}
 
 
 def prepare_subscribed_stop(event: object, *, adapter_sha256: str,
@@ -369,12 +497,11 @@ def main() -> int:
     parser.add_argument("--adapter-sha256", required=True)
     parser.add_argument("--receipt-dir", type=Path)
     parser.add_argument("--subscribed-state-dir", type=Path)
+    parser.add_argument("--retire-accepted", action="store_true")
     args = parser.parse_args()
     try:
-        raw = sys.stdin.buffer.read(MAX_EVENT + 1)
-        if len(raw) > MAX_EVENT or not args.adapter.is_absolute():
+        if not args.adapter.is_absolute():
             raise ReturnUnavailable("invalid input")
-        event = json.loads(raw)
 
         deadline = time.monotonic() + MAX_CALLBACK_SECONDS
 
@@ -396,6 +523,20 @@ def main() -> int:
                 raise ReturnUnavailable("adapter source changed during read")
             return completed.stdout
 
+        if args.retire_accepted:
+            if (not args.root or not args.run or not args.subscribed_state_dir or args.receipt_dir
+                    or os.environ.get("CODEX_THREAD_ID") != args.root
+                    or os.environ.get("POOL_ORCHESTRATOR_ID", args.root) != args.root):
+                raise ReturnUnavailable("retirement requires explicit original native parent")
+            output = retire_accepted_subscription(args.root, args.run,
+                state_dir=args.subscribed_state_dir, adapter_sha256=args.adapter_sha256,
+                read_adapter=adapter_read)
+            print(json.dumps(output))
+            return 0
+        raw = sys.stdin.buffer.read(MAX_EVENT + 1)
+        if len(raw) > MAX_EVENT:
+            raise ReturnUnavailable("invalid input")
+        event = json.loads(raw)
         if args.subscribed_state_dir:
             if args.root or args.run or args.receipt_dir:
                 raise ReturnUnavailable("mixed hook modes")
@@ -407,7 +548,10 @@ def main() -> int:
             output = prepare_stop(event, root=args.root, run=args.run,
                                   adapter_sha256=args.adapter_sha256,
                                   read_adapter=adapter_read, receipt_dir=args.receipt_dir)
-    except (OSError, ValueError, subprocess.SubprocessError):
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        if args.retire_accepted:
+            print(json.dumps({"state": "RETIREMENT_UNCONFIRMED", "reason": str(exc)[:300]}))
+            return 75
         # Hook errors must never turn a refused or uncertain run into a return.
         output = {}
     print(json.dumps(output))

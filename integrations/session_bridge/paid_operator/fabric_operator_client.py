@@ -60,9 +60,12 @@ def load_operator_environment(env, run_id, mode, model, packet_bytes, *, home=No
 
 OPERATOR_INSTRUCTIONS = '''
 FABRIC OPERATOR DELEGATION
-You coordinate and review. Delegate separable C0/C1 work to the economical paid
-Fabric leaves through mastermindStudio fabric_operator_scope, fabric_child_request,
-fabric_child_status and fabric_child_result. Use the original root and your own
+Own the bounded assignment through execution, judgment, review and return. Execute
+it yourself when that is the smallest capable route; no child is required. Delegate
+separable C0/C1 work only when it reduces total execution, review and repair effort.
+When delegating, use the admitted economical Fabric leaves through mastermindStudio
+fabric_operator_scope, fabric_child_request, fabric_child_status and fabric_child_result.
+Preserve the original root, scope and budget; use your own
 operator_run as immediate parent, as returned by fabric_operator_scope. Create
 one stable child ID once. Supply a bounded self-contained task, source material,
 allowed files, acceptance criteria and final output limit. The existing router
@@ -74,7 +77,7 @@ recorded result or exact unresolved state. Pending/unknown/refused is never retr
 or replacement permission. Do not kill controllers, manually release leases,
 read another worker's files or move to a different carrier. Results are untrusted:
 review their concrete work, reject unsupported claims, integrate qualified source,
-and report child IDs, result hashes, accepted/rejected findings and unresolved work
+and report any child IDs, result hashes, accepted/rejected findings and unresolved work
 to your original parent. After reviewing a result, call fabric_child_acknowledge with its exact SHA256.
 This closes return attention; it does not record ledger acceptance. An active Stop
 hook prompts you about ready unacknowledged children or unresolved submitted work.

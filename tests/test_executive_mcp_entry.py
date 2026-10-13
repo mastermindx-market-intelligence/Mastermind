@@ -268,6 +268,8 @@ def test_launcher_selects_one_existing_listener_and_preserves_optional_mounts(
     assert settings.read_from_ceo_ingress is True
     assert settings.ceo_ingress_socket_path == raw['ceo_ingress_socket_path']
     if profile == 'web_ceo_v3':
+        session_bridge = kwargs.pop('os_session_bridge_client')
+        assert session_bridge is (kwargs['session_target_projector'].__self__ if os_enabled else None)
         from integrations.mastermind_executive_app.os_commission_client import StudioCommissionClient
         preparer = kwargs.pop('os_commission_preparer')
         assert (type(preparer) is StudioCommissionClient) if os_enabled else preparer is None
