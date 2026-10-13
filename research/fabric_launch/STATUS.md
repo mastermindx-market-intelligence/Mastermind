@@ -49,7 +49,7 @@ by its disk-space admission floor, which was not lowered.
 
 ## Recovery and next action
 
-Read EVIDENCE.json in this same commit for exact artifacts, runs and hashes. Do not repeat
+Read EVIDENCE.json for the retained historical artifacts and runs. Its `affected_source_hashes` values are SHA-256 of the exact files at the explicitly pinned `affected_source_hashes_commit` (`40a7f3986942c915198071cd8def92c53416f682`), **not** hashes of the current checkout. Verify current source separately before an install/release decision. Do not repeat
 the accepted worker tests, compiler design, independent review, or native parser work
 without a material invalidator. No worker remains running and no uncertain dispatch is
 left for replay. Next, the retained source/release owners reconcile the Craft dependency

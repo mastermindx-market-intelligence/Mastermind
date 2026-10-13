@@ -48,10 +48,16 @@ _SENSITIVE_BASENAMES = {
     "secrets.json",
     "id_rsa",
     "id_ed25519",
+    "id_ecdsa",
     "auth.json",
+    ".netrc",
+    ".npmrc",
+    ".pypirc",
+    "secrets.yaml",
+    "secrets.yml",
 }
 _SENSITIVE_SUFFIXES = (".pem", ".key", ".p12", ".pfx")
-_SENSITIVE_PARTS = {".ssh", ".aws", ".gnupg"}
+_SENSITIVE_PARTS = {".git", ".ssh", ".aws", ".gnupg", "secrets"}
 
 
 class ProjectAtlasError(ValueError):
@@ -85,7 +91,8 @@ def is_sensitive_path(path: object) -> bool:
     if not lower_parts:
         return False
     base = lower_parts[-1]
-    if base in _SENSITIVE_BASENAMES or base.startswith(".env."):
+    if (base in _SENSITIVE_BASENAMES or base.startswith(".env.")
+            or base.startswith("secrets.") or base.endswith("_sk")):
         return True
     return base.endswith(_SENSITIVE_SUFFIXES)
 

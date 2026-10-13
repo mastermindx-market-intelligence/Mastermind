@@ -141,7 +141,18 @@ PR #1205
         ("keys/id_rsa", True),
         ("config/client.pem", True),
         (".ssh/config.py", True),
+        (".git/config", True),
+        (".git/worktrees/example/config.worktree", True),
+        ("accounts/.netrc", True),
+        ("config/.npmrc", True),
+        ("config/.pypirc", True),
+        ("config/secrets.yaml", True),
+        ("config/secrets.yml", True),
+        ("ssh/id_ecdsa", True),
+        ("certs/host_sk", True),
+        ("secrets/service.py", True),
         ("src/module.py", False),
+        ("docs/.github-workflows.md", False),
         ("docs/guide.md", False),
     ],
 )
@@ -408,3 +419,81 @@ def test_manifest_cache_path_traversal_is_refused(tmp_path: Path):
             kind="any",
             limit=10,
         )
+
+
+def test_atlas_git_process_is_identity_and_output_bounded(monkeypatch, tmp_path):
+    from control_plane import ceo_boot_packet
+    root = _repo(tmp_path)
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.fsmonitor")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "/not/an/authorized/observer")
+    monkeypatch.setenv("GIT_PAGER", "/not/a/safe/pager")
+    captured = []
+    owned = ceo_boot_packet.bounded_subprocess_runner
+
+    def spy(argv, **kwargs):
+        captured.append((tuple(argv), kwargs.copy()))
+        return owned(argv, **kwargs)
+
+    monkeypatch.setattr(adapter, "bounded_subprocess_runner", spy)
+    assert adapter._commit_sha(root, "HEAD") == _git(root, "rev-parse", "HEAD")
+    assert len(captured) == 1
+    argv, values = captured[0]
+    assert argv[0] == "/usr/bin/git"
+    assert argv[1:3] == ("--no-pager", "-c")
+    assert "core.fsmonitor=false" in argv
+    assert "GIT_CONFIG_COUNT" not in values["env"]
+    assert "GIT_PAGER" not in values["env"]
+    assert values["env"]["GIT_TERMINAL_PROMPT"] == "0"
+    assert values["env"]["GIT_CONFIG_NOSYSTEM"] == "1"
+    assert values["env"]["HOME"] == "/nonexistent"
+    assert values["max_bytes"] <= 64 * 1024 * 1024
+    assert values["timeout"] <= adapter._GIT_TIMEOUT_SECONDS
+
+
+def test_atlas_git_output_limit_refuses_before_parsing(monkeypatch, tmp_path):
+    root = _repo(tmp_path)
+
+    def over_bound(*_args, **_kwargs):
+        return {
+            "code": None, "stdout": "", "stderr": "",
+            "timed_out": False, "limit_exceeded": True, "invalid_utf8": False,
+        }
+
+    monkeypatch.setattr(adapter, "bounded_subprocess_runner", over_bound)
+    with pytest.raises(ProjectAtlasError, match="Git (read|output)"):
+        adapter._tree_rows(root, "a" * 40)
+
+
+def test_atlas_cache_writer_never_follows_predictable_symlink(tmp_path):
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    destination = cache / ("a" * 40 + ".json")
+    victim = tmp_path / "victim.txt"
+    victim.write_text("preserve me", encoding="utf-8")
+    attack = destination.with_name(f".{destination.name}.{__import__('os').getpid()}.tmp")
+    attack.symlink_to(victim)
+    # Even if the attacker has pre-planted the original predictable temp path,
+    # the new owned temp must be O_EXCL/NOfollow and must not clobber victim.
+    record = index_blob(blob_sha="a" * 40, language="python", content="x=1\n")
+    adapter._write_cache(destination, record)
+    assert victim.read_text(encoding="utf-8") == "preserve me"
+    assert attack.is_symlink()
+    assert destination.is_file()
+    assert destination.read_bytes()
+
+
+def test_historical_fabric_source_hashes_are_explicitly_pinned():
+    import hashlib
+
+    root = Path(__file__).resolve().parents[1]
+    evidence = json.loads((root / "research/fabric_launch/EVIDENCE.json").read_text())
+    commit = evidence["affected_source_hashes_commit"]
+    assert commit == "40a7f3986942c915198071cd8def92c53416f682"
+    assert len(evidence["affected_source_hashes"]) == 8
+    for relative, digest in evidence["affected_source_hashes"].items():
+        payload = subprocess.run(
+            ["git", "-C", str(root), "show", f"{commit}:{relative}"],
+            capture_output=True, check=True, timeout=10,
+        ).stdout
+        assert hashlib.sha256(payload).hexdigest() == digest

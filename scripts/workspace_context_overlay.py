@@ -23,6 +23,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 if os.fspath(_ROOT) not in sys.path:
     sys.path.insert(0, os.fspath(_ROOT))
 
+from control_plane.ceo_boot_packet import bounded_subprocess_runner  # noqa: E402
 from control_plane.project_atlas import is_sensitive_path  # noqa: E402
 from control_plane.session_truth_contract import canonical_json  # noqa: E402
 from control_plane.workspace_context_overlay import (  # noqa: E402
@@ -54,11 +55,16 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _git_env() -> dict[str, str]:
-    env = dict(os.environ)
-    env["GIT_OPTIONAL_LOCKS"] = "0"
-    env["GIT_TERMINAL_PROMPT"] = "0"
-    env["GCM_INTERACTIVE"] = "never"
-    return env
+    # Git may execute repo-configured fsmonitor programs or inherit GIT_* and
+    # user HOME directives. The observed managed worktree supplies source
+    # identity, never subprocess configuration/credentials/commands.
+    return {
+        "PATH": "/usr/bin:/bin", "HOME": "/nonexistent",
+        "XDG_CONFIG_HOME": "/nonexistent", "LC_ALL": "C",
+        "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_NO_REPLACE_OBJECTS": "1", "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never",
+    }
 
 
 def _git(
@@ -67,23 +73,19 @@ def _git(
     binary: bool = False,
 ) -> bytes | str:
     try:
-        proc = subprocess.run(
-            ["git", "-C", os.fspath(root), *args],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=not binary,
-            env=_git_env(),
-            timeout=_GIT_TIMEOUT,
-            check=False,
+        result = bounded_subprocess_runner(
+            ("/usr/bin/git", "--no-pager", "-c", "core.fsmonitor=false",
+             "-c", "core.hooksPath=/dev/null", "-C", os.fspath(root), *args),
+            cwd=root, env=_git_env(), timeout=_GIT_TIMEOUT,
+            max_bytes=_MAX_GIT_OUTPUT,
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    except (OSError, ValueError, RuntimeError) as exc:
         raise WorkspaceContextOverlayError("Git observation failed") from exc
-    if proc.returncode != 0:
-        raise WorkspaceContextOverlayError("Git observation failed")
-    output = proc.stdout
-    if len(output) > _MAX_GIT_OUTPUT:
-        raise WorkspaceContextOverlayError("Git observation exceeds byte bound")
-    return output
+    if (result["code"] != 0 or result["timed_out"]
+            or result["limit_exceeded"] or result["invalid_utf8"]):
+        raise WorkspaceContextOverlayError("Git observation failed or exceeds byte bound")
+    text = result["stdout"]
+    return text.encode("utf-8") if binary else text
 
 
 def _root(value: str, label: str) -> Path:

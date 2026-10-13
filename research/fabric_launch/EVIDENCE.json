@@ -2,6 +2,7 @@
   "active_review": null,
   "active_review_obligations": [],
   "active_workers": 0,
+  "affected_source_hashes_commit": "40a7f3986942c915198071cd8def92c53416f682",
   "affected_source_hashes": {
     "docs/superpowers/plans/2026-10-06-subagent-operating-environment.md": "063ca1ec982899e61c59d004f86469743169e46739eff7df16100380071bfe69",
     "ops/fabric_launch/agentos.py": "b146c008c939ca8276f91eadca4b60b781ec694e64ff02ddaa9908cc6c8f2dfe",

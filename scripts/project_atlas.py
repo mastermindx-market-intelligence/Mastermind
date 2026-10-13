@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import secrets
 import subprocess
 import sys
 from typing import Any
@@ -21,6 +22,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 if os.fspath(_ROOT) not in sys.path:
     sys.path.insert(0, os.fspath(_ROOT))
 
+from control_plane.ceo_boot_packet import bounded_subprocess_runner  # noqa: E402
 from control_plane.project_atlas import (  # noqa: E402
     BLOB_SCHEMA,
     MAX_BLOB_BYTES,
@@ -40,6 +42,7 @@ QUERY_SCHEMA = "mastermind.project_atlas_query.v1"
 CACHE_SCHEMA = "mastermind.project_atlas_cache_entry.v1"
 
 _GIT_TIMEOUT_SECONDS = 15
+_MAX_GIT_OUTPUT_BYTES = 64 * 1024 * 1024
 _MAX_MANIFEST_FILES = 100_000
 _MAX_QUERY_RESULTS = 100
 _CACHE_LANGUAGES = frozenset({"python", "markdown"})
@@ -74,21 +77,45 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _run_git(root: Path, *args: str, binary: bool = False) -> bytes | str:
+def _git_env() -> dict[str, str]:
+    """Fixed read-only Git subprocess environment, not inherited host settings.
+
+    Inherited GIT_CONFIG_COUNT/KEY/VALUE, GIT_DIR/WORK_TREE, pager, HOME or
+    fsmonitor hooks can alter the observed repo or invoke unadmitted helpers.
+    Git still reads the named repository, but gets no ambient user Git grants.
+    """
+    return {
+        "PATH": "/usr/bin:/bin", "HOME": "/nonexistent",
+        "XDG_CONFIG_HOME": "/nonexistent",
+        "LC_ALL": "C", "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": os.devnull, "GIT_NO_REPLACE_OBJECTS": "1",
+        "GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0",
+        "GCM_INTERACTIVE": "never",
+    }
+
+
+def _run_git(
+    root: Path, *args: str, binary: bool = False,
+    max_output_bytes: int = 8 * 1024 * 1024,
+) -> bytes | str:
+    # Use the existing bounded, group-owning subprocess runner rather than
+    # buffer an unbounded malicious or unexpectedly large tree before checking.
+    argv = (
+        "/usr/bin/git", "--no-pager", "-c", "core.fsmonitor=false",
+        "-c", "core.hooksPath=/dev/null", "-C", os.fspath(root), *args,
+    )
     try:
-        proc = subprocess.run(
-            ["git", "-C", os.fspath(root), *args],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=not binary,
-            timeout=_GIT_TIMEOUT_SECONDS,
-            check=False,
+        result = bounded_subprocess_runner(
+            argv, cwd=root, timeout=_GIT_TIMEOUT_SECONDS,
+            max_bytes=max_output_bytes, env=_git_env(),
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    except (OSError, ValueError, RuntimeError) as exc:
         raise ProjectAtlasError("local Git read failed") from exc
-    if proc.returncode != 0:
-        raise ProjectAtlasError("local Git read failed")
-    return proc.stdout
+    if (result["code"] != 0 or result["timed_out"]
+            or result["limit_exceeded"] or result["invalid_utf8"]):
+        raise ProjectAtlasError("local Git read or output refused")
+    payload = result["stdout"]
+    return payload.encode("utf-8") if binary else payload
 
 
 def _canonical_root(value: str, label: str) -> Path:
@@ -117,7 +144,7 @@ def _validate_cache_root(cache_root: Path, repo_root: Path | None = None) -> Non
 def _commit_sha(root: Path, revision: str) -> str:
     if not revision or "\x00" in revision or len(revision.encode("utf-8")) > 512:
         raise ProjectAtlasError("revision is invalid")
-    value = _run_git(root, "rev-parse", "--verify", f"{revision}^{{commit}}")
+    value = _run_git(root, "rev-parse", "--verify", "--end-of-options", f"{revision}^{{commit}}")
     if not isinstance(value, str):
         raise ProjectAtlasError("commit resolution failed")
     sha = value.strip()
@@ -127,7 +154,10 @@ def _commit_sha(root: Path, revision: str) -> str:
 
 
 def _tree_rows(root: Path, commit_sha: str) -> list[dict[str, Any]]:
-    raw = _run_git(root, "ls-tree", "-r", "-l", "-z", commit_sha, binary=True)
+    raw = _run_git(
+        root, "ls-tree", "-r", "-l", "-z", commit_sha,
+        binary=True, max_output_bytes=_MAX_GIT_OUTPUT_BYTES,
+    )
     if not isinstance(raw, bytes):
         raise ProjectAtlasError("Git tree output is invalid")
     rows: list[dict[str, Any]] = []
@@ -204,12 +234,21 @@ def _write_cache(path: Path, record: dict[str, Any]) -> None:
     }
     payload = (canonical_json(entry) + "\n").encode("utf-8")
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    temporary = path.with_name(f".{path.name}.{secrets.token_hex(16)}.tmp")
+    descriptor = -1
     try:
-        with temporary.open("wb") as handle:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
+        flags = (os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                 | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0))
+        descriptor = os.open(temporary, flags, 0o600)
+        try:
+            with os.fdopen(descriptor, "wb") as handle:
+                descriptor = -1  # the file object owns and closes the fd
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
         os.replace(temporary, path)
     finally:
         try:
@@ -219,7 +258,10 @@ def _write_cache(path: Path, record: dict[str, Any]) -> None:
 
 
 def _read_blob(root: Path, blob_sha: str) -> bytes:
-    raw = _run_git(root, "cat-file", "blob", blob_sha, binary=True)
+    raw = _run_git(
+        root, "cat-file", "blob", blob_sha,
+        binary=True, max_output_bytes=MAX_BLOB_BYTES + 1,
+    )
     if not isinstance(raw, bytes):
         raise ProjectAtlasError("Git blob output is invalid")
     if len(raw) > MAX_BLOB_BYTES:

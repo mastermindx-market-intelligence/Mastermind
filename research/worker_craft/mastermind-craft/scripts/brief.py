@@ -31,6 +31,21 @@ ROLES = (
     "data-scientist", "reviewer", "verifier",
 )
 METHOD_ROOT = Path(__file__).resolve().parents[1] / "references"
+# Exact versioned AUTHORING source bytes for the nine canonical method files.
+# These hashes protect the compiler's own reviewed method content; they are not
+# protected Git releases, Runtime permissions, or a new Skill registry. A
+# method change requires an explicitly reviewed matching source pin update.
+CANONICAL_METHOD_SHA256 = {
+    "common.md": "48e8c7b74d8925c54db4ff40b704d63111bf9e3e7ff492f1ccc3561181b5bf60",
+    "orchestrator.md": "fe788fe7506affe6be8bcfbd4e3d3a98b35b8a7eca14e3121d527789f6f70aec",
+    "designer.md": "c0cc44c994521aa8ee81d215e90dda499b0b7533b434308d34248d6e1ee97f0c",
+    "frontend.md": "a705cc43828e4e927378fd5e7be23b44afb9136a1178c3a7302b0fb60ef6f678",
+    "backend.md": "a5e81551955eac28b7167c52ac33c5f14632165cb0c9da2241746fd8b37f50e1",
+    "researcher.md": "269cb1d9f5256de5a85d181471976a6767f9c4898b8fb005bd9c434d8223185e",
+    "data-scientist.md": "1ed83b65ca925cf6dc8dcb9b7eb6404a9fb9d7a401761c13611fe508901f0760",
+    "reviewer.md": "ed22eccc8ee016044af90a92e2cc744e1950a887ebfd7cecfa5811c3768ce363",
+    "verifier.md": "65c78130f17ec6c50e795da8bd2b854a70bb9fa631fd6fef3ede39a745f6e6ab",
+}
 FIELDS = {
     "schema_version", "role", "assignment_ref", "mission", "why", "user_journey",
     "machine_outcome", "source_refs", "scope", "workspace", "inputs",
@@ -357,8 +372,13 @@ def compile_brief(value: Any, method_root: Path = METHOD_ROOT) -> dict[str, Any]
     b = validate_brief(value)
     docs = []
     inventory = []
+    canonical_method_root = method_root.resolve() == METHOD_ROOT.resolve()
     for name in ("common.md", b["role"] + ".md"):
         raw = read_bounded_file(method_root / name, MAX_METHOD_BYTES, "method")
+        if canonical_method_root and (
+            hashlib.sha256(raw).hexdigest() != CANONICAL_METHOD_SHA256[name]
+        ):
+            refuse("method", "source_drift")
         try:
             doc = raw.decode("utf-8")
         except UnicodeError:
