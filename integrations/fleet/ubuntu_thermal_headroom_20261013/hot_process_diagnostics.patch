@@ -1,0 +1,109 @@
+--- a/host_pull_probe.template
++++ b/host_pull_probe.template
+@@ -106,9 +106,33 @@
+         except ValueError:
+             continue
+     return result
++# Read bounded process CPU deltas in the SAME short sample interval.
++# Never collect argv, environment, open files, or credentials.
++import os
++def proc_ticks():
++    seen={}
++    for p in pathlib.Path("/proc").glob("[0-9]*"):
++        try:
++            s=(p/"stat").read_text(encoding="ascii",errors="replace")
++            j=s.rfind(") ")
++            i=s.find("(")
++            if i<0 or j<=i:continue
++            comm=s[i+1:j]
++            fields=s[j+2:].split()
++            if len(fields)<20:continue
++            ticks=int(fields[11])+int(fields[12])
++            born=int(fields[19])
++            seen[int(p.name)]=(ticks,born,comm)
++        except (OSError,ValueError,IndexError):
++            continue
++    return seen
++start=time.monotonic()
++first_procs=proc_ticks()
+ first=ticks()
+ time.sleep(0.15)
+ last=ticks()
++last_procs=proc_ticks()
++elapsed=max(0.15,time.monotonic()-start)
+ usages={}
+ for k,(total,idle) in last.items():
+     if k not in first: continue
+@@ -118,6 +142,21 @@
+         usages[k]=round(max(0,min(100,100*(dt-(idle-bi))/dt)),1)
+ if "cpu" in usages:
+     print("therm_cpu_total_busy_pct="+str(usages["cpu"]))
++top=[]
++if cpu.get("cpu_tctl_mc",0)>=75000:
++    hz=os.sysconf("SC_CLK_TCK")
++    max_cpu=100*(os.cpu_count() or 1)
++    for pid,(after,born,comm) in last_procs.items():
++        before=first_procs.get(pid)
++        if not before or before[1]!=born:continue
++        delta=after-before[0]
++        if delta<=0:continue
++        pct=round(min(max_cpu,max(0.0,100*delta/(hz*elapsed))),1)
++        if pct<10:continue
++        safe="".join(c if c.isalnum() or c in "._+-" else "_" for c in comm)[:24]
++        if safe:top.append((pct,pid,born,safe))
++    top.sort(reverse=True)
++print("therm_top_cpu_csv="+",".join(f"{pid}:{born}:{pct:g}:{name}" for pct,pid,born,name in top[:5]))
+ print("therm_cpu_core_busy_csv="+",".join(f"{k}:{v:g}" for k,v in sorted(usages.items()) if k!="cpu"))
+ freq={}
+ for name in usages:
+--- a/host_pull_backend.py
++++ b/host_pull_backend.py
+@@ -168,6 +168,34 @@
+                     and nvme_count.isascii() and nvme_count.isdigit()
+                     and len(nvme_count) <= 3 else None),
+             }
++            # Bounded, read-only sampled process attribution. PID birth ticks
++            # protect against PID reuse; argv is never present in this record.
++            top_raw = kv.get("therm_top_cpu_csv", "")
++            top_records = []
++            if isinstance(top_raw, str) and len(top_raw) <= 512:
++                for item in top_raw.split(",") if top_raw else []:
++                    fields = item.split(":")
++                    if len(fields) != 4 or len(top_records) >= 5:
++                        top_records = []
++                        break
++                    pid_s, born_s, pct_s, name = fields
++                    if (not pid_s.isascii() or not pid_s.isdigit()
++                        or not born_s.isascii() or not born_s.isdigit()
++                        or not re.fullmatch(r"[A-Za-z0-9_.+-]{1,24}",name)):
++                        top_records = []
++                        break
++                    try:
++                        pct=float(pct_s)
++                    except (ValueError, OverflowError):
++                        top_records=[]
++                        break
++                    if (not math.isfinite(pct) or not 10<=pct<=12800
++                        or not 0<int(pid_s)<2**31 or not 0<int(born_s)<2**63):
++                        top_records=[]
++                        break
++                    top_records.append({"pid":int(pid_s),"start_ticks":int(born_s),
++                                        "cpu_pct":pct,"comm":name})
++            doc["thermal"]["top_cpu_processes"] = top_records
+             # One existing per-host snapshot carries a bounded cooldown. This
+             # is evidence for the existing host picker, never a new scheduler,
+             # daemon, termination policy or authority. Expired evidence drops.
+@@ -295,6 +323,13 @@
+                 summary += f" {name}={value:g}"
+         if type(doc.get("active_lanes")) is int:
+             summary += f" active_lanes={doc['active_lanes']}"
++        therm = doc.get("thermal") or {}
++        if therm.get("risk") in ("HOT","CRITICAL"):
++            top = therm.get("top_cpu_processes") or []
++            if top:
++                summary += " sampled_top_cpu=" + ",".join(
++                    f"{p['comm']}:{p['cpu_pct']:g}%/pid{p['pid']}"
++                    for p in top[:3])
+     elif rc == 255:
+         doc["error"] = "ssh_unreachable"
+         summary = "reachable=false error=ssh_unreachable"
