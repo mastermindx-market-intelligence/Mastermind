@@ -1,0 +1,259 @@
+"""Only a fully preserved pre-Job interruption may carry to a fresh release."""
+import grp
+import json
+import os
+import pwd
+from types import SimpleNamespace
+from pathlib import Path
+
+import pytest
+
+from ops.executive_os import acceptance_maintenance as m
+from tests.test_executive_acceptance_supersede_unstarted import (
+    A, S, N, _fixture as unstarted_fixture, _rewrite,
+)
+
+
+def receipt_prefix(runtime, selected, monkeypatch):
+    monkeypatch.setattr(pwd, "getpwnam", lambda name: SimpleNamespace(pw_uid=os.getuid()))
+    monkeypatch.setattr(grp, "getgrnam", lambda name: SimpleNamespace(gr_gid=os.getgid()))
+    root = runtime / "control/acceptance" / selected["successor_sha"]
+    root.parent.chmod(0o700)
+    os.chown(root.parent, -1, os.getgid())
+    root.mkdir(mode=0o700)
+    os.chown(root, -1, os.getgid())
+    docs = {
+        "nonexecutive-launchd-before.json": {"sha256": "1" * 64, "labels_excluded": 2},
+        "protected-group-membership.json": {
+            "passed": True, "effective_members": {"control": ["fixture"]},
+            "primary_gid_census": "COMPLETE", "name_members": "EXACT",
+            "uuid_members": "EXACT", "nested_groups": "ABSENT",
+        },
+    }
+    for name, doc in docs.items():
+        (root / name).write_text(json.dumps(doc))
+        (root / name).chmod(0o400)
+        os.chown(root / name, -1, os.getgid())
+    m.write_sealed(m.bundle_path(selected["successor_sha"]) / "run-started.json", {
+        "schema_version": m.SCHEMA_V2, "descriptor_sha256": m.digest(selected),
+    }, public=True)
+    return root
+
+
+def fixture(tmp_path, monkeypatch):
+    d, selected, before, artifacts, canary, bundle, runtime = unstarted_fixture(tmp_path, monkeypatch)
+    root = receipt_prefix(runtime, selected, monkeypatch)
+    del d["superseded_unstarted_sha"]
+    d.update(schema_version=m.SCHEMA_PREJOB, interrupted_prejob_sha=S,
+             prejob_evidence_sha256=m.prejob_evidence(S))
+    return d, selected, before, artifacts, canary, bundle, root
+
+
+def test_exact_prejob_prefix_is_preserved_and_never_grants_replay(tmp_path, monkeypatch):
+    d, selected, before, artifacts, canary, bundle, root = fixture(tmp_path, monkeypatch)
+    original = {str(p): p.read_bytes() for p in [*bundle.iterdir(), *root.iterdir()]}
+    m.validate_superseded_binding(d, before=before, artifacts=artifacts, prior_canary=canary)
+    new = m.bundle_path(N)
+    new.mkdir()
+    m.write_sealed(new / "descriptor.json", d, public=True)
+    assert m.descriptor_for(N) == d
+    assert original == {str(p): p.read_bytes() for p in [*bundle.iterdir(), *root.iterdir()]}
+    owner = object.__new__(m.Maintenance)
+    owner.descriptor = d
+    assert owner.predecessor_recovery_required is False
+    assert m.recovery_permitted(None, "old", N, "worker", "proof") is False
+    assert not (new / "run-started.json").exists()
+    assert not (bundle / "carry-forward.json").exists()
+
+
+@pytest.mark.parametrize("fault", [
+    "marker-missing", "marker-digest", "marker-schema", "extra-bundle", "carry",
+    "receipt-missing", "receipt-extra", "summary", "canary-receipt", "receipt-change",
+    "receipt-mode", "receipt-link", "receipt-hardlink", "receipt-schema", "receipt-owner",
+    "receipt-group", "receipt-acl", "receipt-race", "root-mode", "root-link", "root-acl",
+    "parent-mode", "baseline", "live-job", "live-attempt", "live-event", "live-quota",
+    "inventory", "canary", "root-identity", "selected-digest", "evidence-digest",
+    "selected-schema", "selected-carry", "path-alias",
+])
+def test_prejob_refuses_drift_or_any_later_acceptance_state(tmp_path, monkeypatch, fault):
+    d, selected, before, artifacts, canary, bundle, root = fixture(tmp_path, monkeypatch)
+    receipt = root / "nonexecutive-launchd-before.json"
+    if fault == "marker-missing":
+        (bundle / "run-started.json").unlink()
+    elif fault.startswith("marker-"):
+        _rewrite(bundle / "run-started.json", {
+            "schema_version": m.SCHEMA if fault == "marker-schema" else m.SCHEMA_V2,
+            "descriptor_sha256": "0" * 64 if fault == "marker-digest" else m.digest(selected),
+        })
+    elif fault in {"extra-bundle", "carry", "selected-carry"}:
+        m.write_sealed(bundle / ("carry-forward.json" if fault != "extra-bundle" else "unknown.json"), {})
+    elif fault == "receipt-missing":
+        receipt.unlink()
+    elif fault in {"receipt-extra", "summary", "canary-receipt"}:
+        (root / {"receipt-extra": "unknown.json", "summary": "acceptance-summary.json",
+                 "canary-receipt": "secret-canary.json"}[fault]).write_text("{}")
+    elif fault in {"receipt-change", "receipt-schema"}:
+        _rewrite(receipt, {"sha256": "2" * 64, "labels_excluded": 3 if fault == "receipt-schema" else 2})
+    elif fault == "receipt-mode":
+        receipt.chmod(0o600)
+    elif fault == "receipt-link":
+        target = tmp_path / "receipt"
+        receipt.rename(target)
+        receipt.symlink_to(target)
+    elif fault == "receipt-hardlink":
+        os.link(receipt, tmp_path / "receipt-link")
+    elif fault in {"receipt-owner", "receipt-group"}:
+        if fault == "receipt-owner":
+            monkeypatch.setattr(pwd, "getpwnam", lambda name: SimpleNamespace(pw_uid=os.getuid()+1))
+        else:
+            monkeypatch.setattr(grp, "getgrnam", lambda name: SimpleNamespace(gr_gid=os.getgid()+1))
+    elif fault in {"receipt-acl", "root-acl"}:
+        from ops.executive_os import autonomy_control as ac
+        monkeypatch.setattr(ac, "_has_acl", lambda path: path == receipt)
+        if fault == "root-acl":
+            monkeypatch.setattr(m, "has_macos_acl", lambda path: path == root)
+    elif fault == "receipt-race":
+        from ops.executive_os import autonomy_control as ac
+        original = ac._root_json
+        def racing(path, **kwargs):
+            result = original(path, **kwargs)
+            if path == receipt:
+                _rewrite(path, {"sha256": "7" * 64, "labels_excluded": 2})
+            return result
+        monkeypatch.setattr(ac, "_root_json", racing)
+    elif fault in {"root-mode", "parent-mode"}:
+        (root if fault == "root-mode" else root.parent).chmod(0o755)
+    elif fault == "root-link":
+        target = tmp_path / "receipts"
+        root.rename(target)
+        root.symlink_to(target)
+    elif fault == "path-alias":
+        target = root.parent.with_name("actual-acceptance")
+        root.parent.rename(target)
+        root.parent.symlink_to(target)
+    elif fault == "baseline":
+        _rewrite(bundle / "baseline.json", {"changed": True})
+    elif fault.startswith("live-"):
+        before["tables"][fault.removeprefix("live-")] = [{"changed": True}]
+    elif fault == "inventory":
+        artifacts["changed"] = True
+    elif fault == "canary":
+        canary["changed"] = True
+    elif fault == "root-identity":
+        d["root_job_id"] = "foreign"
+    elif fault == "selected-digest":
+        d["superseded_descriptor_sha256"] = "0" * 64
+    elif fault == "evidence-digest":
+        d["prejob_evidence_sha256"] = "0" * 64
+    elif fault == "selected-schema":
+        selected["schema_version"] = m.SCHEMA_PREJOB
+        _rewrite(bundle / "descriptor.json", selected)
+    with pytest.raises((m.MaintenanceError, OSError)):
+        m.validate_superseded_binding(d, before=before, artifacts=artifacts, prior_canary=canary)
+
+
+def test_unstarted_stays_strict_with_the_same_prejob_prefix(tmp_path, monkeypatch):
+    d, selected, before, artifacts, canary, bundle, root = fixture(tmp_path, monkeypatch)
+    del d["interrupted_prejob_sha"], d["prejob_evidence_sha256"]
+    d.update(schema_version=m.SCHEMA_SUPERSEDE, superseded_unstarted_sha=S)
+    with pytest.raises(m.MaintenanceError, match="partial state"):
+        m.validate_superseded_binding(d, before=before, artifacts=artifacts, prior_canary=canary)
+
+
+@pytest.mark.parametrize("mutation", [
+    {"interrupted_prejob_sha": A}, {"interrupted_prejob_sha": N},
+    {"interrupted_prejob_sha": "bad"}, {"prejob_evidence_sha256": "bad"}, {"extra": True},
+])
+def test_prejob_descriptor_is_closed_and_binds_distinct_releases(tmp_path, monkeypatch, mutation):
+    d, *_ = fixture(tmp_path, monkeypatch)
+    d.update(mutation)
+    root = m.bundle_path(N)
+    root.mkdir()
+    m.write_sealed(root / "descriptor.json", d, public=True)
+    with pytest.raises(m.MaintenanceError):
+        m.descriptor_for(N)
+
+
+@pytest.mark.parametrize("drift", [False, True])
+def test_prejob_is_revalidated_before_new_run_marker(tmp_path, monkeypatch, drift):
+    d, selected, before, artifacts, canary, bundle, root = fixture(tmp_path, monkeypatch)
+    runtime = root.parent.parent.parent
+    new = m.bundle_path(N)
+    new.mkdir()
+    for name in ("baseline.json", "inventory.json", "prior-secret-canary.json", "prestate.sqlite3"):
+        (new / name).write_bytes((bundle / name).read_bytes())
+        (new / name).chmod(0o400)
+    m.write_sealed(new / "descriptor.json", d, public=True)
+    monkeypatch.setattr(m, "validate_prior_carry_binding", lambda descriptor: None)
+    monkeypatch.setattr(m, "require_stopped", lambda: None)
+    monkeypatch.setattr(m, "verify_inventory", lambda value: None)
+    database = runtime / "data/control_plane/executive.sqlite3"
+    database.parent.mkdir(parents=True)
+    database.write_bytes((bundle / "prestate.sqlite3").read_bytes())
+    live_canary = tmp_path / "live-canary.json"
+    live_canary.write_text(json.dumps(canary))
+    from control_plane.executive_runtime import Runtime
+    monkeypatch.setattr(Runtime, "at", lambda *a, **kw: SimpleNamespace(
+        jobs=SimpleNamespace(get_job=lambda job: SimpleNamespace(job_id=job))))
+    monkeypatch.setattr(m, "terminal_carry_fields", lambda *a: (None, {
+        key: d[key] for key in m._DESCRIPTOR_V2_KEYS - m._DESCRIPTOR_KEYS}))
+    config = dict(runtime_root=str(runtime), secret_canary_receipt_path=str(live_canary),
+                  ceo_submit_armed=False, coo_autonomy_armed=False, coo_operator_harness_armed=False)
+    if drift:
+        _rewrite(root / "nonexecutive-launchd-before.json", {"sha256": "9" * 64, "labels_excluded": 2})
+        with pytest.raises(m.MaintenanceError):
+            m.Maintenance(N, m.digest(d), config)
+        assert not (new / "run-started.json").exists()
+    else:
+        owner = m.Maintenance(N, m.digest(d), config)
+        assert owner.predecessor_recovery_required is False
+        assert m.sealed_json(new / "run-started.json") == {
+            "schema_version": m.SCHEMA_PREJOB, "descriptor_sha256": m.digest(d)}
+        with pytest.raises(FileExistsError):
+            m.Maintenance(N, m.digest(d), config)
+
+
+@pytest.mark.parametrize("fault", [None, "absolute", "target", "owner", "changed", "descendant", "linux"])
+def test_existing_prejob_receipts_accept_only_trusted_var_alias(tmp_path, monkeypatch, fault):
+    from ops.executive_os import autonomy_control as ac
+    d, selected, before, artifacts, canary, bundle, root = fixture(tmp_path, monkeypatch)
+    physical = tmp_path / "private/var"
+    (physical / "db").mkdir(parents=True)
+    root.parent.parent.parent.rename(physical / "db/mastermind-executive")
+    alias = tmp_path / "var"
+    alias.symlink_to(physical if fault == "absolute" else "private/var")
+    monkeypatch.setattr(m, "_MACOS_VAR_ALIAS", alias)
+    monkeypatch.setattr(m, "_MACOS_VAR_PHYSICAL", physical)
+    # Isolate the target-platform branch without changing the real ACL host.
+    monkeypatch.setattr(m, "sys", SimpleNamespace(platform="linux" if fault == "linux" else "darwin"))
+    monkeypatch.setattr(ac, "RUNTIME_ROOT", alias / "db/mastermind-executive")
+    if fault == "target":
+        alias.unlink()
+        alias.symlink_to("private/./var")
+    elif fault == "owner":
+        original = Path.lstat
+        def foreign(path, *args, **kwargs):
+            info = original(path, *args, **kwargs)
+            if path == alias:
+                return SimpleNamespace(**{key: getattr(info, key) for key in dir(info)
+                    if key.startswith("st_") and key != "st_uid"}, st_uid=info.st_uid+1)
+            return info
+        monkeypatch.setattr(Path, "lstat", foreign)
+    elif fault == "descendant":
+        parent = physical / "db/mastermind-executive/control/acceptance"
+        moved = tmp_path / "moved"
+        parent.rename(moved)
+        parent.symlink_to(moved)
+    elif fault == "changed":
+        original = ac._root_json
+        def changed(path, **kwargs):
+            result = original(path, **kwargs)
+            alias.unlink()
+            alias.symlink_to("private/./var")
+            return result
+        monkeypatch.setattr(ac, "_root_json", changed)
+    if fault in {None, "absolute"}:
+        m.validate_superseded_binding(d, before=before, artifacts=artifacts, prior_canary=canary)
+    else:
+        with pytest.raises((m.MaintenanceError, OSError)):
+            m.validate_superseded_binding(d, before=before, artifacts=artifacts, prior_canary=canary)

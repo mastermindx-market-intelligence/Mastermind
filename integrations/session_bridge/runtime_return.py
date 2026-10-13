@@ -7,6 +7,7 @@ only send/dedup owner; this module creates no endpoint, retry or session store.
 from __future__ import annotations
 
 import dataclasses
+from contextlib import contextmanager
 import hashlib
 import json
 import re
@@ -16,96 +17,45 @@ from typing import Any
 
 from integrations.mastermind_executive_app.gateway import READ_SCOPE, SUBMIT_SCOPE
 from control_plane.executive_runtime import Runtime
-from control_plane.operator_harness_contract import runtime_binding_id_for
+from control_plane.native_continuation import (
+    _ACTOR,
+    _EPOCH,
+    _EVENT,
+    _GENERATION,
+    _IDENTITY,
+    _PAYLOAD,
+    _PREFIX,
+    _READ,
+    _SCHEMA,
+    _SHA,
+    _TOKEN,
+    _canonical,
+    _continue_key,
+    _digest,
+    _epoch,
+    _generation,
+    _request_key,
+    _validate_payload,
+    stored_continuation_request,
+)
 from control_plane.principal_projection import NeutralPrincipalProjection
 from integrations.slack_agent_dialogue.contract_v2 import validate_message_v2, validate_parent_v2
 from integrations.slack_agent_dialogue.engine_v2 import DialogueContextV2
 from integrations.slack_agent_dialogue.service import CONTROL_VERSION_V2, RELAY_PARENT_ATTESTATION, call_service
 from integrations.workspace_agent_runtime_binding import _read_current_target, _read_dialogue_source
-from control_plane.wake_ledger import LedgerPhase, wake_record_from_event
+from control_plane.wake_ledger import AckMode, LedgerPhase, wake_record_from_event
+from control_plane.wake_persist import WakeLedgerRepository
 from .dialogue_reply import AgentDialogueContinueWriter
 from .native_read import NativeReplyReadBinding
 from .native_reply import NativeReplyBinding
 from .runtime_owner import RuntimeCodexTargetProjector, RuntimeFabricTargetProjector
 from .schemas import BridgeError, validate_tool_arguments
 
-_SCHEMA = "mastermind.session_bridge.continue_request.v1"
-_EVENT = "SESSION_BRIDGE_CONTINUE_REQUESTED"
-_ACTOR = "executive-session-bridge"
 _COMMIT_EVENT = "SESSION_BRIDGE_CONTINUE_COMMIT_STARTED"
 _COMMIT_SCHEMA = "mastermind.session_bridge.continue_commit.v1"
 _COMMIT_PREFIX = "session-bridge-continue-commit:"
-_PREFIX = "session-bridge-continue:"
-_READ = re.compile(r"^session-reply-([0-9a-f]{64})$")
-_IDENTITY = ("policy_id", "issuer_digest", "resource", "subject_digest", "client_ref")
-_PAYLOAD = frozenset({"schema", "principal", "target_ref", "target_generation", "operation_key",
-    "binding_sha256", "root_job_id", "root_event_id", "root_event_sha256", "job_id", "attempt_id",
-    "worker_id", "generation", "context", "thread_ts", "predecessor_message_key",
-    "request_message_key", "input_sha256", "read_ref", "epoch", "carrier"})
-_EPOCH = ("root_job_id", "job_id", "session_ref", "attempt_id", "worker_id", "fence_generation",
-          "harness_session_epoch_id", "harness_generation_number", "harness_provider_session_id",
-          "harness_provider", "harness_account_label", "harness_owner_seat")
-
-def _epoch(target):
-    value = {key:getattr(target,key) for key in _EPOCH}
-    value["harness_provider_session_id"] = hashlib.sha256(value["harness_provider_session_id"].encode()).hexdigest()
-    return value
-
-_GENERATION = frozenset({"session_epoch_id", "process_generation_id", "binding_id",
-    "binding_generation", "native_session_sha256"})
-_SHA = re.compile(r"^[0-9a-f]{64}$")
-_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
-
-
-def _request_key(operation_key):
-    return _digest({"schema": _SCHEMA, "operation_key": operation_key})
-
-
-def _validate_payload(value):
-    if type(value) is not dict or set(value) != _PAYLOAD or value["schema"] != _SCHEMA:
-        raise ValueError("request schema changed")
-    if (type(value["principal"]) is not dict or set(value["principal"]) != set(_IDENTITY)
-            or any(type(v) is not str or not v or len(v) > 2048 for v in value["principal"].values())
-            or type(value["root_event_id"]) is not int or value["root_event_id"] < 1
-            or type(value["generation"]) is not dict or set(value["generation"]) != _GENERATION
-            or type(value["generation"]["binding_generation"]) is not int
-            or value["generation"]["binding_generation"] < 1):
-        raise ValueError("request identity malformed")
-    for field in ("binding_sha256", "root_event_sha256", "input_sha256"):
-        if not isinstance(value[field], str) or _SHA.fullmatch(value[field]) is None:
-            raise ValueError("request digest malformed")
-    for field in ("target_ref", "target_generation", "operation_key", "root_job_id", "job_id",
-                  "attempt_id", "worker_id", "predecessor_message_key", "request_message_key", "read_ref"):
-        if not isinstance(value[field], str) or _TOKEN.fullmatch(value[field]) is None:
-            raise ValueError("request reference malformed")
-    if (not isinstance(value["thread_ts"], str)
-            or re.fullmatch(r"[0-9]{10}\.[0-9]{6}", value["thread_ts"]) is None):
-        raise ValueError("request thread malformed")
-    for field in ("session_epoch_id", "process_generation_id", "binding_id"):
-        item = value["generation"][field]
-        if not isinstance(item, str) or _TOKEN.fullmatch(item) is None:
-            raise ValueError("request generation malformed")
-    native = value["generation"]["native_session_sha256"]
-    if not isinstance(native, str) or _SHA.fullmatch(native) is None:
-        raise ValueError("native generation malformed")
-    if (type(value["epoch"]) is not dict or set(value["epoch"]) != set(_EPOCH)
-            or type(value["carrier"]) is not dict
-            or set(value["carrier"]) != {"workspace_id", "channel_id", "thread_ts"}
-            or value["carrier"]["thread_ts"] != value["thread_ts"]
-            or any(type(v) is not str or not v for v in value["carrier"].values())):
-        raise ValueError("original physical source malformed")
-    if type(value["context"]) is not dict or DialogueContextV2(**value["context"]).normalized() != value["context"]:
-        raise ValueError("request context malformed")
-
-
-
-def _canonical(value: Any) -> bytes:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"),
-                      ensure_ascii=True, allow_nan=False).encode("ascii")
-
-
-def _digest(value: Any) -> str:
-    return hashlib.sha256(_canonical(value)).hexdigest()
+_NATIVE_COMMIT_EVENT = "SESSION_BRIDGE_NATIVE_REPLY_COMMIT_STARTED"
+_NATIVE_COMMIT_PREFIX = "session-bridge-native-reply-commit:"
 
 
 def _principal(principal: NeutralPrincipalProjection, *, submit: bool = False) -> dict:
@@ -123,23 +73,6 @@ def _principal(principal: NeutralPrincipalProjection, *, submit: bool = False) -
     if any(type(value) is not str or not value for value in identity.values()):
         raise BridgeError("reply_unavailable", "authorized canonical reply is unavailable")
     return identity
-
-
-def _continue_key(operation_key: str) -> str:
-    digest = hashlib.sha256(
-        ("mastermind.session_bridge.continue.v1\n" + operation_key).encode()
-    ).hexdigest()[:40]
-    return "asd-dot-continue-" + digest
-
-
-def _generation(facts) -> dict:
-    return {
-        "session_epoch_id": facts.session_epoch_id,
-        "process_generation_id": facts.process_generation_id,
-        "binding_id": runtime_binding_id_for(facts.attempt_id, facts.session_epoch_id),
-        "binding_generation": facts.generation_number,
-        "native_session_sha256": hashlib.sha256(facts.provider_session_id.encode()).hexdigest(),
-    }
 
 
 class RuntimeSessionReturn:
@@ -259,15 +192,52 @@ class RuntimeSessionReturn:
             "message_sha256": _digest(message),
         }
 
+    def _native_commit_admission(self, event, events, *, connection=None):
+        """Recognize only the closed native admission bound to this request.
+
+        Its opaque reply hashes attest admission, not carrier success. Parent
+        recovery must not need a live native writer or a visible native reply.
+        """
+        command = _NATIVE_COMMIT_PREFIX + event.aggregate_id
+        indexed = self.runtime.store.get_event_by_command_id(command, connection=connection)
+        native = [item for item in events if item.event_type == _NATIVE_COMMIT_EVENT]
+        if not native and indexed is None:
+            return None
+        expected_key = "asd-native-reply-" + hashlib.sha256(
+            ("mastermind.session_bridge.native_reply.v1\n" + event.payload["operation_key"]).encode()
+        ).hexdigest()[:40]
+        if (len(native) != 1 or indexed is None or native[0].to_dict() != indexed.to_dict()
+                or indexed.actor != _ACTOR or indexed.command_id != command
+                or indexed.aggregate_type != event.aggregate_type
+                or indexed.aggregate_id != event.aggregate_id
+                or (indexed.job_id, indexed.attempt_id, indexed.worker_id) !=
+                   (event.job_id, event.attempt_id, event.worker_id)):
+            raise ValueError("native reply admission changed")
+        payload = indexed.payload
+        if (set(payload) != {"schema", "request_event_id", "request_event_sha256",
+                            "message_key", "fingerprint", "message_sha256", "binding_sha256"}
+                or payload["schema"] != "mastermind.session_bridge.native_reply_commit.v1"
+                or type(payload["request_event_id"]) is not int
+                or payload["request_event_id"] != event.event_id
+                or payload["request_event_sha256"] != _digest(event.to_dict())
+                or payload["message_key"] != expected_key
+                or any(type(payload[key]) is not str or _SHA.fullmatch(payload[key]) is None
+                       for key in ("fingerprint", "message_sha256", "binding_sha256"))):
+            raise ValueError("native reply admission payload changed")
+        return indexed
+
     def _commit_started(self, event, message, *, connection=None):
         """Validate the sole commit-start fact on the existing request aggregate."""
         events = self.runtime.store.list_events(
             aggregate_type="session_bridge_continue", aggregate_id=event.aggregate_id,
             connection=connection)
         others = [item for item in events if item.event_id != event.event_id]
+        native = self._native_commit_admission(event, others, connection=connection)
+        if native is not None:
+            others = [item for item in others if item.event_id != native.event_id]
         command = _COMMIT_PREFIX + event.aggregate_id
         indexed = self.runtime.store.get_event_by_command_id(command, connection=connection)
-        if not others and indexed is None:
+        if not others and indexed is None and native is None:
             return False
         if (len(others) != 1 or indexed is None or others[0].to_dict() != indexed.to_dict()
                 or indexed.event_type != _COMMIT_EVENT or indexed.actor != _ACTOR
@@ -276,6 +246,8 @@ class RuntimeSessionReturn:
                    (event.job_id, event.attempt_id, event.worker_id)
                 or indexed.payload != self._commit_payload(event, message)):
             raise ValueError("continuation commit fact changed")
+        if native is not None and native.event_id <= indexed.event_id:
+            raise ValueError("native admission precedes continuation commit")
         return True
 
     def begin_continuation_commit(self, principal, arguments, *,
@@ -405,28 +377,7 @@ class RuntimeSessionReturn:
                               "original continuation could not be reconciled") from None
 
     def _stored_request(self, read_ref: str):
-        match = _READ.fullmatch(read_ref) if isinstance(read_ref, str) else None
-        if match is None:
-            raise ValueError("invalid read reference")
-        event = self.runtime.events.get_event_by_command_id(_PREFIX + match[1])
-        if (event is None or event.event_type != _EVENT or event.actor != _ACTOR
-                or event.aggregate_type != "session_bridge_continue"
-                or event.aggregate_id != match[1]):
-            raise ValueError("request unavailable")
-        value = event.payload
-        _validate_payload(value)
-        if (value.get("schema") != _SCHEMA or value.get("read_ref") != read_ref
-                or _request_key(value["operation_key"]) != match[1]
-                or value["request_message_key"] != _continue_key(value["operation_key"])
-                or (event.job_id, event.attempt_id, event.worker_id) != (
-                    value["job_id"], value["attempt_id"], value["worker_id"])):
-            raise ValueError("request binding changed")
-        roots = [e for e in self.runtime.events.list_events(job_id=value["root_job_id"])
-                 if e.event_type == "JOB_CREATED"]
-        if (len(roots) != 1 or roots[0].event_id != value["root_event_id"]
-                or _digest(roots[0].to_dict()) != value["root_event_sha256"]):
-            raise ValueError("original root changed")
-        return event, value
+        return stored_continuation_request(self.runtime, read_ref)
 
     def _request(self, read_ref: str):
         event, value = self._stored_request(read_ref)
@@ -561,10 +512,63 @@ class RuntimeSessionReturn:
         except Exception:
             raise BridgeError("reply_unavailable", "authorized canonical reply is unavailable") from None
 
+    def _read_request(self, read_ref):
+        """A committed result retains its original read provenance after cleanup.
+
+        This grants no target discovery, writer lease, attention or execution.
+        Uncommitted requests still need the current writer. A native admission
+        proves COMMIT admission only; the exact canonical reply must also be
+        read and matched before any result can be returned.
+        """
+        event, value = self._stored_request(read_ref)
+        events = self.runtime.events.list_events(
+            aggregate_type=event.aggregate_type, aggregate_id=event.aggregate_id)
+        admission = self._native_commit_admission(event, events)
+        if admission is None:
+            event, value, _ = self._request(read_ref)
+        return event, value, admission
+
+    async def require_committed_native_reply(self, *, read_ref):
+        """Internal owner read of the exact reply; grants no parent identity."""
+        try:
+            event, value, _ = self._request(read_ref)
+            response = await self.service_call(self.socket_path, {
+                "version": CONTROL_VERSION_V2, "operation": "read_thread",
+                "args": {"context": value["context"], "thread_ts": value["thread_ts"]}})
+            if not isinstance(response, dict) or response.get("ok") is not True:
+                raise ValueError("canonical carrier unavailable")
+            messages, request = self._continuation_messages(value, response["result"])
+            events = self.runtime.events.list_events(
+                aggregate_type=event.aggregate_type, aggregate_id=event.aggregate_id)
+            admission = self._native_commit_admission(event, events)
+            if admission is None or not self._commit_started(event, request):
+                raise ValueError("native COMMIT unavailable")
+            replies = [item for item in messages
+                if item["message_key"] == admission.payload["message_key"]]
+            if (len(replies) != 1 or _digest(replies[0]) != admission.payload["message_sha256"]
+                    or replies[0]["fingerprint"] != admission.payload["fingerprint"]
+                    or replies[0]["reply_to_message_key"] != value["request_message_key"]
+                    or replies[0]["message_type"] != "PROGRESS"
+                    or replies[0]["body"].get("stage") != "message_reply"
+                    or any(replies[0][key] != value["context"][key] for key in (
+                        "actor_ref", "applies_to", "work_ref", "commission_ref", "session_ref"))):
+                raise ValueError("exact canonical native reply unavailable")
+            after, after_value, _ = self._request(read_ref)
+            after_events = self.runtime.events.list_events(
+                aggregate_type=after.aggregate_type, aggregate_id=after.aggregate_id)
+            after_admission = self._native_commit_admission(after, after_events)
+            if (after.to_dict() != event.to_dict() or after_value != value
+                    or after_admission is None or after_admission.to_dict() != admission.to_dict()
+                    or not self._commit_started(after, request)):
+                raise ValueError("canonical commit changed during read")
+            return replies[0]
+        except Exception:
+            raise BridgeError("reply_unavailable", "exact canonical native reply unavailable") from None
+
     async def resolve_read(self, *, principal, read_ref):
         try:
             identity = _principal(principal)
-            event, value, _ = self._request(read_ref)
+            event, value, admission = self._read_request(read_ref)
             if value["principal"] != identity:
                 raise ValueError("foreign principal")
             response = await self.service_call(self.socket_path, {
@@ -573,6 +577,8 @@ class RuntimeSessionReturn:
             if not isinstance(response, dict) or response.get("ok") is not True:
                 raise ValueError("carrier unavailable")
             messages, request = self._continuation_messages(value, response["result"])
+            if admission is not None and not self._commit_started(event, request):
+                raise ValueError("original continuation COMMIT is unavailable")
             expected_reply_key = "asd-native-reply-" + hashlib.sha256(
                 ("mastermind.session_bridge.native_reply.v1\n" + value["operation_key"]).encode()
             ).hexdigest()[:40]
@@ -582,15 +588,24 @@ class RuntimeSessionReturn:
             if len(replies) != 1:
                 raise ValueError("reply unavailable or ambiguous")
             reply = replies[0]
+            if admission is not None and (
+                    reply["fingerprint"] != admission.payload["fingerprint"]
+                    or _digest(reply) != admission.payload["message_sha256"]):
+                raise ValueError("canonical reply differs from its native COMMIT admission")
             if (reply["message_type"] != "PROGRESS" or reply["body"].get("stage") != "message_reply"
                     or any(reply[k] != value["context"][k] for k in (
                         "actor_ref", "applies_to", "work_ref", "commission_ref", "session_ref"))
                     or any(request[k] != value["context"][k] for k in (
                         "applies_to", "work_ref", "commission_ref", "session_ref"))):
                 raise ValueError("reply context changed")
-            after, after_value, _ = self._request(read_ref)
-            if after.to_dict() != event.to_dict() or after_value["principal"] != _principal(principal):
+            after, after_value, after_admission = self._read_request(read_ref)
+            if (after.to_dict() != event.to_dict()
+                    or (None if admission is None else admission.to_dict())
+                    != (None if after_admission is None else after_admission.to_dict())
+                    or after_value["principal"] != _principal(principal)):
                 raise ValueError("authorization changed")
+            if after_admission is not None and not self._commit_started(after, request):
+                raise ValueError("original continuation COMMIT changed during read")
             return NativeReplyReadBinding(
                 authorized_principal=principal, read_ref=read_ref,
                 request_ref=event.command_id, request_message_key=value["request_message_key"],
@@ -599,6 +614,147 @@ class RuntimeSessionReturn:
                 authorization_revision="event-" + str(event.event_id))
         except Exception:
             raise BridgeError("reply_unavailable", "authorized canonical reply is unavailable") from None
+
+    def require_native_ack(self, binding, *, workspace_id, channel_id, connection=None):
+        """Reuse the exact causal inbound ACK; never claim parent consumption.
+
+        Wake ingress validates its native session/turn observation and stores a
+        versioned evidence facet in TARGET_ACKNOWLEDGED. Historical ACKs without
+        that evidence cannot register this new callback. Recheck today's writer,
+        consume the existing validated ACK/delivery pair, never a model claim.
+        """
+        try:
+            current = self.resolve(native_session_id=binding.native_session_id,
+                operation_key=binding.reply_operation_key, in_reply_to=binding.request_message_key)
+            if dataclasses.asdict(current) != dataclasses.asdict(binding):
+                raise ValueError("native binding changed")
+            request_event, value, facts = self._request("session-reply-" + _request_key(binding.reply_operation_key))
+            if value["carrier"] != {"workspace_id": workspace_id, "channel_id": channel_id,
+                                     "thread_ts": binding.thread_ts}:
+                raise ValueError("outside installed carrier")
+            if connection is not None:
+                locked = self.runtime.current_harness_binding_source(value["attempt_id"], connection=connection)
+                if locked != facts:
+                    raise ValueError("native writer changed")
+            events = self.runtime.events.list_events(job_id=value["job_id"], attempt_id=value["attempt_id"])
+            if len(events) > 1024:
+                raise ValueError("native evidence exceeds bound")
+            repo = WakeLedgerRepository(self.runtime)
+            matched = []
+            for event in events:
+                if event.event_type != LedgerPhase.WAKE_REQUESTED.value:
+                    continue
+                record = wake_record_from_event(event)
+                source = record.physical_source
+                if (source is None or source.operation_key != value["context"]["operation_key"]
+                        or source.predecessor_message_key != binding.request_message_key):
+                    continue
+                # _request/_same_thread has already checked root/Attempt/worker,
+                # original carrier and workstream for all matching sources.
+                records = (repo.list_ledger_records_on_connection(connection, record.obligation.obligation_id)
+                           if connection is not None else
+                           tuple(item.record for item in repo.list_records(record.obligation.obligation_id)))
+                for item in records:
+                    ack = item.ack
+                    if (item.phase is LedgerPhase.TARGET_ACKNOWLEDGED and ack is not None
+                            and ack.ack_mode is AckMode.REASONING_SESSION
+                            and ack.reasoning_surface == "codex"
+                            and ack.binding_id == binding.binding_id
+                            and ack.binding_generation == binding.binding_generation
+                            and ack.native_continuation is not None):
+                        evidence = ack.native_continuation
+                        delivered = next((r for r in records if r.command_id == ack.delivered_command_id), None)
+                        if (evidence.request_event_id != request_event.event_id
+                                or evidence.request_event_sha256 != _digest(request_event.to_dict())
+                                or evidence.target_attempt_id != facts.attempt_id
+                                or evidence.process_generation_id != binding.process_generation_id
+                                or evidence.native_session_sha256 != hashlib.sha256(binding.native_session_id.encode()).hexdigest()
+                                or delivered is None or evidence.nudge_id != delivered.nudge_id):
+                            raise ValueError("native consumption evidence changed")
+                        matched.append(item.command_id)
+            if len(matched) != 1:
+                raise ValueError("exact native continuation acknowledgment unavailable")
+            return matched[0]
+        except Exception:
+            raise BridgeError("binding_unavailable", "exact native continuation acknowledgment unavailable") from None
+
+    def _native_commit_source(self, binding, message, *, connection):
+        if type(binding) is not NativeReplyBinding:
+            raise ValueError("native binding unavailable")
+        current = self.resolve(native_session_id=binding.native_session_id,
+            operation_key=binding.reply_operation_key, in_reply_to=binding.request_message_key)
+        if dataclasses.asdict(current) != dataclasses.asdict(binding):
+            raise ValueError("native return changed")
+        event, value = self._stored_request("session-reply-" + _request_key(binding.reply_operation_key))
+        facts = self.runtime.current_harness_binding_source(value["attempt_id"], connection=connection)
+        if (_generation(facts) != value["generation"]
+                or (facts.job_id, facts.worker_id) != (value["job_id"], value["worker_id"])):
+            raise ValueError("native writer changed")
+        validated = validate_message_v2(message)
+        expected_key = "asd-native-reply-" + hashlib.sha256(
+            ("mastermind.session_bridge.native_reply.v1\n" + binding.reply_operation_key).encode()
+        ).hexdigest()[:40]
+        if (validated != message or validated["message_key"] != expected_key
+                or validated["message_type"] != "PROGRESS"
+                or validated["body"].get("stage") != "message_reply"
+                or validated["reply_to_message_key"] != value["request_message_key"]
+                or any(validated[k] != value["context"][k] for k in (
+                    "actor_ref", "applies_to", "work_ref", "commission_ref", "session_ref"))):
+            raise ValueError("native message changed")
+        return event, {
+            "schema": "mastermind.session_bridge.native_reply_commit.v1",
+            "request_event_id": event.event_id,
+            "request_event_sha256": _digest(event.to_dict()),
+            "message_key": validated["message_key"], "fingerprint": validated["fingerprint"],
+            "message_sha256": _digest(validated),
+            "binding_sha256": _digest(dataclasses.asdict(binding)),
+        }
+
+    @contextmanager
+    def native_reply_commit_fence(self, binding, message, *, guard):
+        """Durably admit once, then fence Runtime through the local COMMIT write.
+
+        The host supplies the connected-child/capability guard. Both transactions
+        are synchronous: canonical carrier reads precede them, and drain/response
+        waits follow them. The first transaction MUST commit before any external
+        handoff; a crash cannot roll its admission back. A revocation in the gap
+        leaves a conservative unknown that only the original carrier can settle.
+        This is not a distributed fence on Slack/provider execution.
+        """
+        try:
+            if not callable(guard):
+                raise ValueError("authenticated guard required")
+            with self.runtime.store.transaction() as connection:
+                guard(connection)
+                event, payload = self._native_commit_source(binding, message, connection=connection)
+                command = _NATIVE_COMMIT_PREFIX + event.aggregate_id
+                if self.runtime.store.get_event_by_command_id(command, connection=connection) is not None:
+                    raise BridgeError("carrier_effect_unknown", "native reply requires original-operation reconciliation")
+                self.runtime.store.append_event(
+                    connection, aggregate_type="session_bridge_continue", aggregate_id=event.aggregate_id,
+                    event_type=_NATIVE_COMMIT_EVENT, actor=_ACTOR,
+                    job_id=event.job_id, attempt_id=event.attempt_id, worker_id=event.worker_id,
+                    payload=payload, command_id=command)
+        except BridgeError:
+            raise
+        except Exception:
+            raise BridgeError("binding_unavailable", "native COMMIT was not admitted") from None
+        with self.runtime.store.transaction() as connection:
+            try:
+                guard(connection)
+                current_event, current_payload = self._native_commit_source(binding, message, connection=connection)
+                stored = self.runtime.store.get_event_by_command_id(command, connection=connection)
+                if (current_event.to_dict() != event.to_dict() or current_payload != payload
+                        or stored is None or stored.event_type != _NATIVE_COMMIT_EVENT
+                        or stored.actor != _ACTOR or stored.aggregate_id != event.aggregate_id
+                        or stored.aggregate_type != "session_bridge_continue" or stored.payload != payload
+                        or (stored.job_id, stored.attempt_id, stored.worker_id)
+                           != (event.job_id, event.attempt_id, event.worker_id)):
+                    raise ValueError("native admission changed")
+            except Exception:
+                raise BridgeError("carrier_effect_unknown", "native reply requires original-operation reconciliation") from None
+            # Caller may perform only the synchronous local transport handoff.
+            yield
 
     def resolve(self, *, native_session_id, operation_key, in_reply_to):
         """Native host still authenticates its connection and owns atomic fencing."""

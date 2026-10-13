@@ -26,6 +26,8 @@ ALLOW_FROZEN_ACCEPTED_ANCESTOR="0"
 ARM_PRIVILEGED_BROKER="0"
 PRIVILEGED_BROKER_LIVE="0"
 CONTROL_CONFIG_SOURCE=""
+OS_WEB_ASSETS=""
+OS_WEB_ASSETS_DIGEST=""
 OPERATOR_USER=""
 PYTHON_BINARY=""
 PYTHON_RUNTIME_ROOT=""
@@ -49,7 +51,7 @@ CODEX_VERSION="0.159.2"
 CODEX_SHA256="16593cc2f422d5f398a8e40f550ebbaf1245392528957be342c295920a300704"
 
 usage() {
-  /bin/echo "usage: $0 --source-repo PATH --expected-sha SHA --operator-user NAME [--control-config PATH] [--allow-frozen-accepted-ancestor --protected-master-sha SHA] [options]" >&2
+  /bin/echo "usage: $0 --source-repo PATH --expected-sha SHA --operator-user NAME [--control-config PATH] [--os-web-assets PATH] [--allow-frozen-accepted-ancestor --protected-master-sha SHA] [options]" >&2
   exit 64
 }
 
@@ -62,6 +64,7 @@ while [ "$#" -gt 0 ]; do
     --arm-privileged-broker) ARM_PRIVILEGED_BROKER="1"; shift ;;
     --operator-user) OPERATOR_USER="${2:-}"; shift 2 ;;
     --control-config) CONTROL_CONFIG_SOURCE="${2:-}"; shift 2 ;;
+    --os-web-assets) OS_WEB_ASSETS="${2:-}"; shift 2 ;;
     --python-binary) PYTHON_BINARY="${2:-}"; shift 2 ;;
     --python-runtime-root) PYTHON_RUNTIME_ROOT="${2:-}"; shift 2 ;;
     --python-team-identifier) PYTHON_TEAM_ID="${2:-}"; shift 2 ;;
@@ -110,6 +113,9 @@ for install_path in "$SOURCE_REPO" "$PYTHON_BINARY" "$PYTHON_RUNTIME_ROOT" "$COD
 done
 if [ -n "$CONTROL_CONFIG_SOURCE" ]; then
   case "$CONTROL_CONFIG_SOURCE" in /*) ;; *) /bin/echo "control config path must be absolute" >&2; exit 65 ;; esac
+fi
+if [ -n "$OS_WEB_ASSETS" ]; then
+  case "$OS_WEB_ASSETS" in /*) ;; *) /bin/echo "OS web asset path must be absolute" >&2; exit 65 ;; esac
 fi
 [ -x "$PYTHON_BINARY" ] && [ ! -L "$PYTHON_BINARY" ] || {
   /bin/echo "Python binary must be a direct executable file" >&2
@@ -884,6 +890,17 @@ TREE_SHA="$(/usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" -C
 SYSTEM_ROOT="/Library/Application Support/MastermindExecutive"
 RUNTIME_ROOT="/var/db/mastermind-executive"
 RELEASE_ROOT="$SYSTEM_ROOT/releases/$EXPECTED_SHA"
+# Optional build artifact is qualified before maintenance or service stop. A
+# same-SHA reinstall may only verify identical existing assets, never graft or
+# recreate its seal. Later import captures only this exact preflight digest.
+if [ -n "$OS_WEB_ASSETS" ]; then
+  OS_WEB_ASSETS_DIGEST="$("$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/os_release_assets.py" check \
+    --source-repo "$SOURCE_REPO" --expected-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA" \
+    --bundle "$OS_WEB_ASSETS" --release-root "$RELEASE_ROOT")" || {
+      /bin/echo "OS web asset preflight refused before maintenance" >&2
+      exit 65
+    }
+fi
 CONTROL_CONFIG="$SYSTEM_ROOT/config/control.json"
 WORKER_CONFIG="$SYSTEM_ROOT/config/worker-codex.json"
 PRIVILEGED_CONFIG="$SYSTEM_ROOT/config/privileged-broker.json"
@@ -1048,12 +1065,26 @@ wait_for_launchd_absent "$PRIVILEGED_LABEL" privileged || exit 65
 
 if [ ! -d "$RELEASE_ROOT" ]; then
   STAGING="$(/usr/bin/mktemp -d "$SYSTEM_ROOT/releases/.install.$EXPECTED_SHA.XXXXXX")"
-  /usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" -C "$SOURCE_REPO" archive --format=tar "$EXPECTED_SHA" | /usr/bin/tar -xf - -C "$STAGING"
+  /usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" -C "$SOURCE_REPO" archive --format=tar "$EXPECTED_SHA" | (
+    archive_extract_status=0
+    /usr/bin/tar -xf - -C "$STAGING" || archive_extract_status=$?
+    # BSD tar can stop at its end marker before Git finishes trailing padding.
+    # Drain to EOF so Git can report its real status; pipefail still rejects a
+    # producer error, and the subshell preserves any extraction error.
+    /bin/cat >/dev/null
+    exit "$archive_extract_status"
+  )
   /usr/sbin/chown -R root:wheel "$STAGING"
   /bin/chmod -R go-w "$STAGING"
   # mktemp creates the staging root as 0700. Both non-root service UIDs need
   # read/traverse access to the immutable release, while only root may mutate.
   /bin/chmod 0755 "$STAGING"
+  if [ -n "$OS_WEB_ASSETS" ]; then
+    "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/os_release_assets.py" import \
+      --source-repo "$SOURCE_REPO" --expected-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA" \
+      --bundle "$OS_WEB_ASSETS" --expected-digest "$OS_WEB_ASSETS_DIGEST" \
+      --release-root "$STAGING" >/dev/null || exit 65
+  fi
   # Seal and verify while the directory is still operation-owned staging. A
   # settled interruption must never expose a canonical release without a seal.
   "$PYTHON_BINARY" -I -S -B "$STAGING/ops/executive_os/release_manifest.py" create \

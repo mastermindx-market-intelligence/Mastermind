@@ -762,6 +762,8 @@ def test_control_config_template_tracks_strict_service_schema() -> None:
     assert value["schema_version"] == CONTROL_CONFIG_SCHEMA_VERSION
     # Installed product groups, the optional read-profile selector, and the
     # attended subscription realm stay omitted in the unconfigured template.
+    # Fabric also requires explicitly installed bindings and remains unarmed
+    # when its three optional composition keys are omitted.
     # Null groups fail validation; an omitted executive_mcp_profile preserves
     # the legacy generation and an omitted realm preserves the v4 worker.
     installed_product_keys = {
@@ -775,6 +777,9 @@ def test_control_config_template_tracks_strict_service_schema() -> None:
         "subscription_canary_realm",
         "privileged_readiness_armed",
         "privileged_broker_socket_path",
+        "fabric_bridge_armed",
+        "fabric_bindings_path",
+        "fabric_bindings_sha256",
         # Provenance is injected only after the installer validates the live
         # receipt; the static template intentionally has no host digest.
         "python_runtime_provenance_digest",

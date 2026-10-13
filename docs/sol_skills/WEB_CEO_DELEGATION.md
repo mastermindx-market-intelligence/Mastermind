@@ -17,7 +17,15 @@ Enrolled companion procedure. This skill is enrolled in the same pinned INDEX as
 
 These are provisional role preferences, not duration guarantees, service limits, mandatory elapsed times, reasoning-mode admission, or runtime/model aliases. Either model may perform either profile when current evidence and capability favor it. Do not force an Astra-to-Sol handoff, add two principals to every task, or interrupt a productive incumbent just because of a model label. One existing action-authoritative responsibility and current RuntimeBinding remain in charge.
 
-Reasoning-mode admission remains separate and fail-closed. The default is `COGNITION_ROUTE: CHAT_INCLUDED_DEFAULT` with `CHAT_REASONING_MODE: NON_PRO_DEFAULT`. A Pro turn must carry the complete governing exception receipt, cite one currently allowed `PRO_MODE_TASK_CLASS`, satisfy the current duration and stop-condition rules, and remain eligible after the turn itself is classified. A substantive mission may include routine lifecycle steps, but standalone handoff, `ACK / PICKUP_ACK / START / CONTINUE / STOP`, status, polling, routing, mechanical edit, test or simple-review turns do not inherit Pro eligibility. Missing, stale, under-duration, over-duration or ineligible receipts produce `PRO_MODE_REFUSED / USE_NON_PRO_MODE`. Never invent a task class or pad a duration estimate; consume #506 or its accepted successor when that owner lawfully changes the gate. `SUSTAINED_ORCHESTRATION` is a work profile, not a `PRO_MODE_TASK_CLASS`; under currently protected law, a Sol Pro turn must independently classify as `LONG_HORIZON_FRONTIER_REASONING`, `CROSS_SYSTEM_ARCHITECTURE`, `HARD_DEBUGGING`, or `ADVERSARIAL_JUDGMENT`.
+Automated Executive/ModelRouter cognition retains its current routing, budget and Pro exception
+requirements: `PRO_MODE_TASK_CLASS` remains one of `LONG_HORIZON_FRONTIER_REASONING`,
+`CROSS_SYSTEM_ARCHITECTURE`, `HARD_DEBUGGING`, or `ADVERSARIAL_JUDGMENT`; ineligible automated
+requests retain `PRO_MODE_REFUSED / USE_NON_PRO_MODE`. `SUSTAINED_ORCHESTRATION` is a work
+profile, not a `PRO_MODE_TASK_CLASS`. Human-attended ChatGPT/Codex sessions use ACTIVE_EXECUTION section 1B for mode fit
+and stickiness. An already human-selected session does not fabricate an automated admission or
+duration receipt merely to continue assigned work. Routine steps inside a substantive mission do
+not trigger mode switching, reauthorization or a new classification ceremony. A model label grants
+no resource permission, runtime admission or extra budget.
 
 ## 2. Make a delegation decision before substantial routine execution
 
@@ -39,7 +47,42 @@ Model Router fixes the first lawful suitability tier; Capacity Fabric ranks only
 
 Keep all applicable provider/credential/activation holds effective before any credential read or provider call. Cheap workers are not exceptions. Use the existing approved worker-spend envelope and include review/repair consumption; willingness to spend more is not an unlimited cap. Keep metered executive cognition separate from economical worker execution. Do not invent a direct-spawn, raw-socket, alternate-queue or ad hoc credential fallback when the supported path is absent. Before any effect begins, an already-approved available manual/operator route may still be used under current placement/custody law; report it as manual transport with separate pickup/START/evidence, not Executive dispatch. Missing Web tools do not prove the entire fabric is down. This is not permission to retry a platform-blocked action through another actor or carrier.
 
-Concurrency is bounded globally by independent ready work, admitted provider/host capacity, workspace custody, the approved budget and the principal's review/integration capacity. Include the existing COO policy's reserved review/repair descendants and depth/child limits, not just currently running workers; a free execution slot does not prove the full admitted work-and-review graph fits. Do not multiply a per-chat allowance across the fleet or split tightly coupled edits among conflicting workers. Nested helpers require existing explicit admission and accounting, not inherited recursive spawning permission.
+Sol is the default coordinator for sustained orchestration, analysis, review and integration; Astra
+is optional for useful frontier judgment. Eligible bounded leaf work defaults to admitted paid Fabric
+workers, including GLM, Qwen/Bailian and Grok when suitable under the existing routing law. A Sol
+coordinator uses the current Executive ingress when serviceable, or the already accepted attended
+stable-handle adapter when its procedure permits it. Native Codex children are not a substitute for
+that paid-provider route merely because the native spawn tool is available or familiar.
+
+A native child requires a genuinely needed reasoning/coordinator role. Never explicitly select Sol
+for routine implementation, tests, research or repair labor. Section 2's direct-work reasons justify
+principal retention, not native labor children. If Fabric has a real admission, host or permission
+blocker, perform permitted work directly or return that exact blocker; do not silently substitute
+native Sol labor. An optional native Executive integration gap does not block an admitted existing
+adapter route, and a QUEUED Executive receipt is not a running worker or permission to duplicate it
+through that adapter.
+
+Record the role decision and supporting current route/capability evidence briefly in the existing
+commission/checkpoint; no new form or approval round is required. One unavailable pool does not
+establish that every suitable paid pool is unavailable, and unknown capability is not an observed
+outage. Use existing evidence without probing refused routes or requiring a provider census.
+Preserve any existing worker
+and unresolved effect; do not cancel, replace or move started work merely to change its token source.
+An explicit permission refusal remains attached to its exact operation and is never a fallback trigger.
+Apply the default at the next pre-effect delegation decision. Record an earlier native-for-paid
+routing deviation with its actual carrier in the existing checkpoint, without replaying the work.
+
+Concurrency is bounded globally by independent ready work, admitted provider/host capacity, workspace
+custody, the approved budget and the principal's review/integration capacity. Include the existing COO
+policy's reserved review/repair descendants and depth/child limits. Use the runtime's actually
+advertised slots and supported depth within the original root grant and any tighter configured limit.
+Count the root and coordinators when the advertised limit includes them; they are not extra slots.
+A configured ceiling or a free
+slot does not prove that the full work-and-review graph is admitted. Useful coordinator levels are
+permitted only where supported, with shared descendant accounting; a leaf does not recursively expand
+its scope. Do not multiply allowances across chats or levels, split conflicting edits, or claim a
+not-yet-supported Fabric graph is running. A native Sol-to-Sol return proves that native path only:
+paid-provider START, retained result and parent consumption require evidence from the actual Fabric run.
 
 ## 5. Remain productive after dispatch
 
@@ -66,7 +109,7 @@ Prefer exact existing event-driven return handling; do not keep Pro generating u
 Use the requested work profile separately from observed model/mode and available tools. These are
 working approaches, not a minimum run length, tool entitlement, provider selection or new admission
 receipt. Unobserved limits remain UNKNOWN. Current cognition/routing and economic gates stay controlling;
-a Chairman preference requires reconciliation by that existing owner rather than an inferred mode switch.
+automated placement still uses its existing owner; an attended session uses ACTIVE_EXECUTION 1B.
 
 Sustained delivery advances successive useful units while safe, checkpointing material progress without
 forcing a user request after every milestone. Bounded execution chooses a narrow result with targeted

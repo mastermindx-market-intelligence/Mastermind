@@ -17,7 +17,7 @@ from typing import Any, Mapping, Sequence
 VALIDATION_SCHEMA = "mastermind.plugin_package_validation.v1"
 MARKETPLACE_PATH = Path(".agents/plugins/marketplace.json")
 PLUGIN_VERSIONS = {
-    "mastermind-sol": "0.2.0",
+    "mastermind-sol": "0.2.1",
     "mastermind-operator": "0.1.0",
     "mastermind-cortex": "0.1.0",
     "mastermind-navigator": "0.1.0",
@@ -212,7 +212,12 @@ TEMPLATES = {
 }
 
 REFERENCES = {
-    "mastermind-sol": ("authority-boundaries.md",),
+    "mastermind-sol": (
+        "authority-boundaries.md",
+        "codex-execution-defaults.md",
+        "codex-agents/sol-coordinator.toml",
+        "codex-agents/astra-coordinator.toml",
+    ),
     "mastermind-operator": ("dialogue-boundary.md",),
     "mastermind-cortex": (
         "orientation-contract.md",
