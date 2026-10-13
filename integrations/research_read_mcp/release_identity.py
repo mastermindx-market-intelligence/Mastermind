@@ -6,12 +6,16 @@ does not qualify dependency completeness, install files or create that trust.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from pathlib import Path, PurePosixPath
 import re
 import stat
+from dataclasses import asdict
 
-from .runtime import RuntimeRefused, _identity, _json, read_secure_json
+from .runtime import (DEPLOYMENT_SCHEMA, READ_PORT_CONTRACT, RuntimeRefused,
+                      _absolute, _identity, _json, parse_deployment, read_secure_json)
+from . import CONTRACT
 
 _SHA = re.compile(r"[0-9a-f]{40}\Z")
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
@@ -21,6 +25,7 @@ _MANIFEST_FIELDS = frozenset({
 })
 _MAX_BYTES = 64 * 1024 * 1024
 _MAX_MEMBERS = 8192
+ARCHIVE_OWNER_SCHEMA = "mastermind.research_read_archive_owner.v1"
 
 
 def _refuse():
@@ -64,6 +69,7 @@ def _file_digest(path, expected_size, expected_uid):
         return digest.hexdigest(), _identity(before)
     except Exception:
         _refuse()
+
     finally:
         if descriptor is not None:
             try:
@@ -178,3 +184,65 @@ def verify_archive_release(path: str, commit: str, tree: str, *, project: str,
         raise
     except Exception:
         _refuse()
+
+
+def load_archive_verifier(config_path, deployment, *, owner_uid, release_owner_uid=0):
+    """Bind the runtime callback to separately secured owner-selected manifest trust.
+
+    The callable re-verifies bytes on every invocation. Its receipts are evidence
+    only, never a cached release admission. Reading configuration is explicit.
+    """
+    try:
+        # A manually constructed Deployment must pass the same closed parser.
+        data = asdict(deployment)
+        data.update(schema=DEPLOYMENT_SCHEMA, mode="production", server_contract=CONTRACT,
+                    read_port_contract=READ_PORT_CONTRACT,
+                    allowed_hosts=list(deployment.allowed_hosts),
+                    allowed_origins=list(deployment.allowed_origins))
+        qualified = parse_deployment(json.dumps(data).encode())
+        raw = read_secure_json(config_path, expected_owner_uid=owner_uid, maximum=32768)
+        config = _json(raw, 32768)
+        if (type(config) is not dict
+                or set(config) != {"schema", "manifest_path", "manifest_sha256"}
+                or config["schema"] != ARCHIVE_OWNER_SCHEMA
+                or type(config["manifest_sha256"]) is not str
+                or _DIGEST.fullmatch(config["manifest_sha256"]) is None
+                or type(release_owner_uid) is not int or release_owner_uid < 0):
+            _refuse()
+        _absolute(config["manifest_path"])
+        bindings = {
+            (qualified.mastermind_release, qualified.mastermind_commit,
+             qualified.mastermind_tree): "mastermind",
+            (qualified.macro_release, qualified.macro_commit, qualified.macro_tree): "macro",
+        }
+    except RuntimeRefused:
+        raise
+    except Exception:
+        _refuse()
+
+    class BoundArchiveVerifier:
+        def __init__(self):
+            self._receipts = {}
+
+        @property
+        def receipts(self):
+            return tuple(dict(receipt) for receipt in self._receipts.values())
+
+        def __call__(self, path, commit, tree):
+            try:
+                project = bindings.get((path, commit, tree))
+                if project is None:
+                    _refuse()
+                receipt = verify_archive_release(
+                    path, commit, tree, project=project,
+                    manifest_path=config["manifest_path"],
+                    expected_manifest_sha256=config["manifest_sha256"],
+                    manifest_owner_uid=owner_uid, release_owner_uid=release_owner_uid)
+                self._receipts[project] = receipt
+            except RuntimeRefused:
+                raise
+            except Exception:
+                _refuse()
+            return None
+
+    return BoundArchiveVerifier()

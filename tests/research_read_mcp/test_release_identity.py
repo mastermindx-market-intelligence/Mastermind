@@ -126,3 +126,70 @@ def test_earlier_file_change_during_later_capture_is_detected(tmp_path, monkeypa
     monkeypatch.setattr(identity, "_file_digest", change_earlier)
     with pytest.raises(RuntimeRefused):
         identity.verify_archive_release(**kwargs)
+
+
+def owner_config(tmp_path, **changes):
+    path = tmp_path.resolve() / "archive-owner.json"
+    value = {"schema": identity.ARCHIVE_OWNER_SCHEMA,
+             "manifest_path": str(tmp_path.resolve() / "manifest.json"),
+             "manifest_sha256": "e" * 64}
+    value.update(changes)
+    path.write_text(json.dumps(value))
+    path.chmod(0o600)
+    return path
+
+
+def test_secure_owner_binding_callback_retains_receipt_and_reverifies(tmp_path, monkeypatch):
+    from tests.research_read_mcp.test_runtime import parsed
+    deployment = parsed()
+    path = owner_config(tmp_path)
+    calls = []
+    def verifier(*args, **kwargs):
+        calls.append((args, kwargs))
+        return {"project": kwargs["project"], "state": "ARCHIVE_BYTES_VERIFIED"}
+    monkeypatch.setattr(identity, "verify_archive_release", verifier)
+    bound = identity.load_archive_verifier(str(path), deployment, owner_uid=os.geteuid())
+    args = (deployment.mastermind_release, deployment.mastermind_commit, deployment.mastermind_tree)
+    assert bound(*args) is None
+    assert bound(*args) is None
+    assert len(calls) == 2 and len(bound.receipts) == 1
+    assert calls[0][1] == {"project": "mastermind", "manifest_path": str(tmp_path.resolve() / "manifest.json"),
+                           "expected_manifest_sha256": "e" * 64,
+                           "manifest_owner_uid": os.geteuid(), "release_owner_uid": 0}
+    bound.receipts[0]["state"] = "mutable-copy"
+    assert bound.receipts[0]["state"] == "ARCHIVE_BYTES_VERIFIED"
+    with pytest.raises(RuntimeRefused):
+        bound(args[0], args[1], "f" * 40)
+    assert len(calls) == 2
+    def changed(*args, **kwargs):
+        raise RuntimeRefused("ARCHIVE_IDENTITY_REFUSED")
+    monkeypatch.setattr(identity, "verify_archive_release", changed)
+    with pytest.raises(RuntimeRefused):
+        bound(*args)
+
+
+@pytest.mark.parametrize("change", ["mode", "symlink", "owner", "digest", "relative", "extra", "deployment"])
+def test_owner_binding_refuses_untrusted_configuration(tmp_path, change):
+    from tests.research_read_mcp.test_runtime import parsed
+    from dataclasses import replace
+    path = owner_config(tmp_path)
+    owner = os.geteuid()
+    deployment = parsed()
+    if change == "mode":
+        path.chmod(0o644)
+    elif change == "symlink":
+        actual = path.with_name("actual.json")
+        path.rename(actual)
+        path.symlink_to(actual)
+    elif change == "owner":
+        owner += 1
+    elif change == "digest":
+        path = owner_config(tmp_path, manifest_sha256="not-a-pin")
+    elif change == "relative":
+        path = owner_config(tmp_path, manifest_path="manifest.json")
+    elif change == "extra":
+        path = owner_config(tmp_path, issuer="https://extra.invalid/")
+    elif change == "deployment":
+        deployment = replace(deployment, macro_release="/tmp/arbitrary")
+    with pytest.raises(RuntimeRefused):
+        identity.load_archive_verifier(str(path), deployment, owner_uid=owner)
