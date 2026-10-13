@@ -92,3 +92,18 @@ The existing `host_pull_probe.template` now performs a bounded ~150 ms, process-
 **Proof:** new embedded sampler Python compiled, whole shell parsed, read-only probe executed on actual Ubuntu 2, synthetic hotter branch returned bounded process data, and parser accepted a valid record while rejecting malformed input. The first live sample at 11:09 UTC recorded Ubuntu 2 rising at +54.26°C/min to 76.5°C and triggered a three-minute rising-heat cooldown. Sample process CPU percentages: `bluetoothd` 97.9%, `python3` 91.8%, two `chrome-headless` processes 49% and 36.7%. A second 0.8-second targeted sample found `bluetoothd` at **0%** and `python3` at **100%**; thus the first short Bluetooth sample does **not** prove a sustained runaway daemon. The sustained Python PID traced through `bash → claude → slot.py → sub.sh`, working within `/home/ubuntu2/lanes/wt/fif-a0-se-r2-20261013`. M2 `fabric_task.py status fif-a0-se-r2-20261013` was `NOT_FOUND`; the worktree name alone is not a canonical controller run identity. No processes or workers were stopped.
 
 **Interpretation and held effects:** A minority of heavy processes can boost specific CPU cores even with modest machine-average utilization. For true physical heat reduction, preserve the authenticated OS/BIOS host-admin gate, check BIOS Eco Mode/cooler/fan and power profiles, and benchmark worker throughput versus Tctl under matched load. The evidence is sufficient to improve awareness and decline new hot/rising placements, not to claim resolved cooling, host profile changes, or server-wide worker-run attribution.
+
+## Operator thermal and effective-capacity display
+
+To make the live sensors usable in normal Fabric operations, the incumbent `pool_status.py` now exposes a dedicated read-only table using existing host snapshots, with two direct commands:
+
+```sh
+python3 -B "$FABRIC_EXT/pool_status.py" --thermal
+python3 -B "$FABRIC_EXT/pool_status.py" --hosts
+```
+
+`--thermal` shows the four Linux lane hosts' temperature, aggregate CPU percentage, risk, cooldown and sample age. `--hosts` also shows the legacy host-capacity view with true effective `min(lane_ceiling,max_active)`, explicit `!` on disk-free amounts below their registered reserve, and stale telemetry after **180s** rather than the previous 600s. No network call, new collector, broker mutation, authorization or admission rule was added; the source is a read-only presentation projection. Full source diff: [status_thermal_dashboard.patch](status_thermal_dashboard.patch).
+
+Installed M2 `pool_status.py` SHA-256 `ec1c15f8090aafd509db8b6943513ae33f5f6013b5c8dbb78f2827e50e6aceb0` → `5afda5072ec2b18869b8c1de66b3e7da0ba462a137a12ad4d5497c82169c2b05`; original backup `pool_status.py.bak-host-thermal-view-20261013`. Candidate compilation, synthetic CRITICAL/10-minute cooldown, 3/12 effective capacity, disk-floor warning, stale fail-closed view and actual live 15-host rendering passed. Live CLI readback showed all Ubuntu hosts with recent metrics (e.g., Ubuntu 0 63.2°C and 6.3% aggregate CPU; Ubuntu 2 46.1°C and 0% in that sample). These values are point-in-time, not cooling acceptance.
+
+As of the readback, Ubuntu 0's storage headroom had independently improved to about **307GiB** (above 300GiB reserve), while Ubuntu 1/2/3 remained below their respective disk floors. This is a changing host resource condition, not an effect of the thermal dashboard. No caches or active worktrees were deleted by this thermal mission.
