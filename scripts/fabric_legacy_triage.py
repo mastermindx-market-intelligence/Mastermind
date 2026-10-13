@@ -118,6 +118,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fabric-task", type=Path, required=True)
     parser.add_argument("--expected-sha256", required=True)
     parser.add_argument("--run-id", action="append", required=True)
+    parser.add_argument("--expected-root-id")
+    parser.add_argument("--expected-parent-run-id")
     parser.add_argument("--timeout-seconds", type=int, default=10)
     parser.add_argument("--total-seconds", type=int, default=30)
     args = parser.parse_args(argv)
@@ -127,7 +129,11 @@ def main(argv: list[str] | None = None) -> int:
         path, args.expected_sha256, per_run_seconds=args.timeout_seconds,
         total_seconds=args.total_seconds,
     )
-    result = project_legacy_fleet(args.run_id, reader)
+    result = project_legacy_fleet(
+        args.run_id, reader,
+        expected_root_id=args.expected_root_id,
+        expected_parent_run_id=args.expected_parent_run_id,
+    )
     print(json.dumps(result, sort_keys=True, separators=(",", ":"), ensure_ascii=False))
     return 0
 

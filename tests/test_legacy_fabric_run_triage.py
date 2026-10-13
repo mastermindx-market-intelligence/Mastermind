@@ -48,8 +48,9 @@ def test_accepted_terminal_return_is_not_a_running_worker():
     value = _status("run-a", "TERMINAL", rc=0, signal="ok", result_available=True,
                     accepted=True, acceptance_state="ACCEPTED")
     result = _module().project_legacy_fabric_run(value)
-    assert result["next_action"] == "CONSUME_ACCEPTED_RETURN"
+    assert result["next_action"] == "VERIFY_ORIGINAL_PARENT_BEFORE_CONSUMPTION"
     assert result["accepted"] is True
+    assert result["lineage_confirmed_for_caller"] is False
     assert result["queue_confirmed"] is False
 
 
@@ -204,3 +205,163 @@ def test_batch_deadline_does_not_hang_all_thirty_workers():
     assert result["run_count"]==30
     assert result["count_by_action"]=={
         "OBSERVE_INCUMBENT_CONTROLLER":2,"RECONCILE_ORIGINAL_STATUS":28}
+
+
+def test_accepted_native_run_cannot_be_assigned_to_unknown_original_parent():
+    value = _status("run-a", "TERMINAL", rc=0, signal="ok",
+                    result_available=True, accepted=True, acceptance_state="ACCEPTED",
+                    root_id="root-a", parent_run_id="orchestrator-a")
+    result = _module().project_legacy_fabric_run(value)
+    assert result["next_action"] == "VERIFY_ORIGINAL_PARENT_BEFORE_CONSUMPTION"
+    assert result["accepted"] is True
+    assert result["return_consumed_by_parent"] is False
+    assert result["lineage_confirmed_for_caller"] is False
+
+
+@pytest.mark.parametrize("actual_root,actual_parent", [
+    ("other-root", "orchestrator-a"), (None, "orchestrator-a"),
+    ("root-a", "other-parent"), ("root-a", None)
+])
+def test_foreign_or_unproven_native_lineage_cannot_be_consumed(actual_root, actual_parent):
+    value = _status("run-a", "TERMINAL", rc=0, signal="ok",
+                    result_available=True, accepted=True, acceptance_state="ACCEPTED",
+                    root_id=actual_root, parent_run_id=actual_parent)
+    projection = _module().project_legacy_fleet(
+        ["run-a"], lambda _run: value,
+        expected_root_id="root-a", expected_parent_run_id="orchestrator-a")
+    record = projection["runs"][0]
+    assert record["next_action"] == "RECONCILE_ORIGINAL_IDENTITY"
+    assert record["accepted"] is False
+    assert record["lineage_confirmed_for_caller"] is False
+    assert record["model_switch_authorized"] is False
+
+
+def test_exact_retained_root_parent_identity_can_be_returned_without_relaunch():
+    value = _status("run-a", "TERMINAL", rc=0, signal="ok",
+                    result_available=True, accepted=True, acceptance_state="ACCEPTED",
+                    root_id="root-a", parent_run_id="orchestrator-a")
+    projection = _module().project_legacy_fleet(
+        ["run-a"], lambda _run: value,
+        expected_root_id="root-a", expected_parent_run_id="orchestrator-a")
+    record = projection["runs"][0]
+    assert record["next_action"] == "CONSUME_ACCEPTED_RETURN"
+    assert record["accepted"] is True
+    assert record["lineage_confirmed_for_caller"] is True
+    assert record["return_consumed_by_parent"] is False
+    assert record["retry_authorized"] is False
+    assert "root-a" not in json.dumps(record)
+    assert "orchestrator-a" not in json.dumps(record)
+
+
+@pytest.mark.parametrize("bad", ["", "../other", "with whitespace", [], True, 42, "a"*130])
+def test_invalid_expected_root_is_rejected_before_any_native_reader(bad):
+    calls = []
+    with pytest.raises((ValueError, TypeError)):
+        _module().project_legacy_fleet(["run-a"], lambda run: calls.append(run),
+                                        expected_root_id=bad)
+    assert calls == []
+
+
+def test_active_worker_without_native_acceptance_cannot_claim_lineage():
+    value = _status("run-a", "ACTIVE_OR_WAITING")
+    result = _module().project_legacy_fleet(
+        ["run-a"], lambda _run: value,
+        expected_root_id="root-a", expected_parent_run_id="orchestrator-a")["runs"][0]
+    assert result["next_action"] == "OBSERVE_INCUMBENT_CONTROLLER"
+    assert result["lineage_confirmed_for_caller"] is False
+    assert result["queue_confirmed"] is False
+
+
+@pytest.mark.parametrize("missing_or_foreign", [None, "other-root"])
+def test_scoped_unaccepted_terminal_artifact_cannot_be_reviewed_under_wrong_root(missing_or_foreign):
+    value = _status("run-a", "TERMINAL", rc=0, signal="ok", result_available=True,
+                    accepted=False, acceptance_state="NOT_ACCEPTED", root_id=missing_or_foreign,
+                    parent_run_id="parent-a")
+    item = _module().project_legacy_fleet(
+        ["run-a"], lambda _run: value, expected_root_id="root-a",
+        expected_parent_run_id="parent-a")["runs"][0]
+    assert item["next_action"] == "RECONCILE_ORIGINAL_IDENTITY"
+    assert item["accepted"] is False
+
+
+def test_original_root_match_without_parent_match_never_recommends_consumption():
+    value = _status("run-a", "TERMINAL", rc=0, signal="ok", result_available=True,
+                    accepted=True, acceptance_state="ACCEPTED", root_id="root-a",
+                    parent_run_id="unrelated-parent")
+    item = _module().project_legacy_fleet(["run-a"], lambda _run: value,
+        expected_root_id="root-a", expected_parent_run_id="parent-a")["runs"][0]
+    assert item["next_action"] == "RECONCILE_ORIGINAL_IDENTITY"
+
+
+def test_partial_scoped_root_without_parent_only_requests_original_parent_verification():
+    value = _status("run-a", "TERMINAL", rc=0, signal="ok", result_available=True,
+                    accepted=True, acceptance_state="ACCEPTED", root_id="root-a",
+                    parent_run_id="parent-a")
+    item = _module().project_legacy_fleet(["run-a"], lambda _run: value,
+        expected_root_id="root-a")["runs"][0]
+    assert item["next_action"] == "VERIFY_ORIGINAL_PARENT_BEFORE_CONSUMPTION"
+    assert item["lineage_confirmed_for_caller"] is False
+
+
+def test_incumbent_stale_controller_poll_is_not_proof_worker_died_or_quota_exhausted():
+    native = _status("run-a", "ACTIVE_OR_WAITING",
+        controller_observation={
+            "source": "local_retained_controller_log",
+            "state": "STALE_NO_TERMINAL_EVIDENCE",
+            "worker_state": "UNKNOWN",
+            "retry_authorized": False,
+            "silence_lower_bound_seconds": 1480,
+            "last_poll_at": "2026-10-12T19:00Z",
+            "log_excerpt": "private content",
+        })
+    item = _module().project_legacy_fabric_run(native)
+    assert item["next_action"] == "RECONCILE_INCUMBENT_CONTROLLER"
+    assert item["controller_observation_state"] == "STALE_NO_TERMINAL_EVIDENCE"
+    assert item["silence_lower_bound_seconds"] == 1480
+    assert item["retry_authorized"] is False
+    assert item["model_switch_authorized"] is False
+    assert item["provider_quota_known"] is False
+    assert item["queue_confirmed"] is False
+    assert "private content" not in json.dumps(item)
+    assert "2026-10-12" not in json.dumps(item)
+
+
+def test_recent_controller_poll_does_not_infer_provider_liveness_or_all_slots_busy():
+    native = _status("run-a", "ACTIVE_OR_WAITING",
+        controller_observation={
+            "source": "local_retained_controller_log",
+            "state": "LOCAL_POLL_EVIDENCE_ONLY",
+            "worker_state": "UNKNOWN",
+            "retry_authorized": False,
+            "silence_lower_bound_seconds": 0})
+    item = _module().project_legacy_fabric_run(native)
+    assert item["next_action"] == "OBSERVE_INCUMBENT_CONTROLLER"
+    assert item["controller_observation_state"] == "LOCAL_POLL_EVIDENCE_ONLY"
+    assert item["provider_quota_known"] is False
+
+
+@pytest.mark.parametrize("observation", [
+    {"source":"malicious","state":"STALE_NO_TERMINAL_EVIDENCE","worker_state":"UNKNOWN","retry_authorized":False,"silence_lower_bound_seconds":500},
+    {"source":"local_retained_controller_log","state":"STALE_NO_TERMINAL_EVIDENCE","worker_state":"DEAD","retry_authorized":False,"silence_lower_bound_seconds":500},
+    {"source":"local_retained_controller_log","state":"STALE_NO_TERMINAL_EVIDENCE","worker_state":"UNKNOWN","retry_authorized":True,"silence_lower_bound_seconds":500},
+    {"source":"local_retained_controller_log","state":"STALE_NO_TERMINAL_EVIDENCE","worker_state":"UNKNOWN","retry_authorized":False,"silence_lower_bound_seconds":True},
+    {"source":"local_retained_controller_log","state":"STALE_NO_TERMINAL_EVIDENCE","worker_state":"UNKNOWN","retry_authorized":False,"silence_lower_bound_seconds":-1},
+    {"state":"STALE_NO_TERMINAL_EVIDENCE"},
+    "STALLED",
+])
+def test_unverified_staleness_evidence_cannot_promote_a_dead_worker_claim(observation):
+    native=_status("run-a", "ACTIVE_OR_WAITING",controller_observation=observation)
+    item=_module().project_legacy_fabric_run(native)
+    assert item["next_action"] == "OBSERVE_INCUMBENT_CONTROLLER"
+    assert item["controller_observation_state"] is None
+    assert item["retry_authorized"] is False
+
+
+def test_native_result_ownership_and_staleness_are_not_same_plane():
+    native=_status("run-a", "EFFECT_UNKNOWN",controller_observation={
+        "source":"local_retained_controller_log","state":"STALE_NO_TERMINAL_EVIDENCE",
+        "worker_state":"UNKNOWN","retry_authorized":False,
+        "silence_lower_bound_seconds":2000})
+    item=_module().project_legacy_fabric_run(native)
+    assert item["next_action"] == "RECONCILE_ORIGINAL_EFFECT"
+    assert item["controller_observation_state"] is None

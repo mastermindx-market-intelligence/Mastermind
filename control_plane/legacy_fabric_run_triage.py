@@ -34,13 +34,18 @@ def _validate_run_id(value: object) -> str:
 
 
 def _result(run_id: str, action: str, *, state: str | None = None,
-            accepted: bool = False) -> dict[str, Any]:
+            accepted: bool = False, lineage_confirmed: bool = False,
+            controller_state: str | None = None,
+            silence_seconds: int | None = None) -> dict[str, Any]:
     return {
         "schema_version": "mastermind.legacy_fabric_run_triage/v1",
         "run_id": run_id,
         "observed_state": state,
         "next_action": action,
         "accepted": accepted,
+        "lineage_confirmed_for_caller": lineage_confirmed,
+        "controller_observation_state": controller_state,
+        "silence_lower_bound_seconds": silence_seconds,
         "authority_effect": "NONE",
         "retry_authorized": False,
         "model_switch_authorized": False,
@@ -51,8 +56,23 @@ def _result(run_id: str, action: str, *, state: str | None = None,
     }
 
 
-def project_legacy_fabric_run(value: object) -> dict[str, Any]:
-    """Project only documented incumbent status fields without raw log strings."""
+def project_legacy_fabric_run(
+    value: object, *, expected_root_id: str | None = None,
+    expected_parent_run_id: str | None = None,
+) -> dict[str, Any]:
+    """Project only documented incumbent status fields without raw log strings.
+
+    A successful native ledger outcome still requires the caller's exact root
+    and original parent binding before recommending result consumption. The
+    native source can project local lineage; it does not authenticate or wake
+    a live original parent.
+    """
+    if expected_root_id is not None:
+        _validate_run_id(expected_root_id)
+    if expected_parent_run_id is not None:
+        _validate_run_id(expected_parent_run_id)
+        if expected_root_id is None:
+            raise ValueError("expected parent requires an exact original root")
     if not isinstance(value, Mapping):
         return _result("", "RECONCILE_ORIGINAL_STATUS")
     run_id = value.get("run_id")
@@ -70,18 +90,53 @@ def project_legacy_fabric_run(value: object) -> dict[str, Any]:
                 and value.get("signal") == "ok"):
             if value.get("result_available") is not True:
                 return _result(run_id, "RECONCILE_RESULT_AVAILABILITY", state=state)
+            if expected_root_id is not None and value.get("root_id") != expected_root_id:
+                return _result(run_id, "RECONCILE_ORIGINAL_IDENTITY", state=state)
+            if (expected_parent_run_id is not None
+                    and value.get("parent_run_id") != expected_parent_run_id):
+                return _result(run_id, "RECONCILE_ORIGINAL_IDENTITY", state=state)
             if (value.get("accepted") is True
                     and value.get("acceptance_state") == "ACCEPTED"):
-                return _result(run_id, "CONSUME_ACCEPTED_RETURN", state=state, accepted=True)
+                if expected_root_id is None or expected_parent_run_id is None:
+                    return _result(run_id, "VERIFY_ORIGINAL_PARENT_BEFORE_CONSUMPTION",
+                                   state=state, accepted=True)
+                return _result(run_id, "CONSUME_ACCEPTED_RETURN",
+                               state=state, accepted=True, lineage_confirmed=True)
             return _result(run_id, "REVIEW_DELIVERED_RESULT", state=state)
         return _result(run_id, "CLASSIFY_ORIGINAL_TERMINAL_FAILURE", state=state)
+    if state == "ACTIVE_OR_WAITING":
+        observation = value.get("controller_observation")
+        if (isinstance(observation, Mapping)
+                and observation.get("source") == "local_retained_controller_log"
+                and observation.get("state") in {
+                    "STALE_NO_TERMINAL_EVIDENCE", "LOCAL_POLL_EVIDENCE_ONLY"
+                }
+                and observation.get("worker_state") == "UNKNOWN"
+                and observation.get("retry_authorized") is False
+                and type(observation.get("silence_lower_bound_seconds")) is int
+                and 0 <= observation["silence_lower_bound_seconds"] <= 2**31 - 1):
+            observed_state = observation["state"]
+            action = ("RECONCILE_INCUMBENT_CONTROLLER"
+                      if observed_state == "STALE_NO_TERMINAL_EVIDENCE"
+                      else "OBSERVE_INCUMBENT_CONTROLLER")
+            return _result(run_id, action, state=state,
+                           controller_state=observed_state,
+                           silence_seconds=observation["silence_lower_bound_seconds"])
     return _result(run_id, _ACTIONS.get(state, "RECONCILE_ORIGINAL_STATUS"), state=state)
 
 
 def project_legacy_fleet(
-    run_ids: Sequence[str], status_reader: Callable[[str], object],
+    run_ids: Sequence[str], status_reader: Callable[[str], object], *,
+    expected_root_id: str | None = None,
+    expected_parent_run_id: str | None = None,
 ) -> dict[str, Any]:
-    """Read one prevalidated, bounded set. A failed read is *not* a dead run."""
+    """Read prevalidated IDs; preserve exact caller lineage without effect."""
+    if expected_root_id is not None:
+        _validate_run_id(expected_root_id)
+    if expected_parent_run_id is not None:
+        _validate_run_id(expected_parent_run_id)
+        if expected_root_id is None:
+            raise ValueError("exact original root required with parent")
     if (not isinstance(run_ids, (tuple, list)) or not 1 <= len(run_ids) <= 100):
         raise ValueError("provide 1..100 original run IDs")
     checked = [_validate_run_id(value) for value in run_ids]
@@ -93,7 +148,10 @@ def project_legacy_fleet(
     for run_id in checked:
         try:
             status = status_reader(run_id)
-            result = project_legacy_fabric_run(status)
+            result = project_legacy_fabric_run(
+                status, expected_root_id=expected_root_id,
+                expected_parent_run_id=expected_parent_run_id,
+            )
             if result["run_id"] != run_id:
                 result = _result(run_id, "RECONCILE_ORIGINAL_STATUS")
         except (OSError, TimeoutError, subprocess.TimeoutExpired, ValueError, RuntimeError):
