@@ -1,8 +1,8 @@
 {
   "source_sha256": "c6b4292cdb7d106d5b376587f29276da1550e5eee02268f479abd7ad2ea61189",
-  "candidate_sha256": "4bef963ba4f4ec32230b9d932d4b9f23485b565368b3211eb6da562563d44ba5",
+  "candidate_sha256": "26809b1af112e937f4a02461f74a0064aaf401d46064dbb05caa94082d8798a4",
   "classification": "SOURCE_ONLY_UNINSTALLED",
-  "patch_sha256": "21f8a4d753ef100d3e407f5c947b464ed2d11af02ba0a7e2829c66a0b63c74ee",
+  "patch_sha256": "f3d58ab8a05ed32ba6616a5843cd9b3c3300d6e365e31709eff485bc23af9a85",
   "validation": "Final combined fixture/materialized checks retained in CAPTURE_ASSEMBLY_FINAL_v3.xml; source-only local-child FD/pipe mechanics and inert identity/issuer fixtures. Nested early-receipt checks are included in one outer node, never added to the outer count.",
   "parent_delta": "Original prepared descriptor/private FD capture and canonical parser; Control-manifest run/store coordinates; entry-once publication; exact reason/real cancellation telemetry; sole-finisher immutable terminal bytes; uncertainty retains original lease and no replay.",
   "original_symbols": 5,
@@ -15,7 +15,8 @@
     "_run_reserved_attended_under_lease",
     "_retain_original_cleanup_hold",
     "_begin_lease_process",
-    "_begin_reserved_attended_under_lease"
+    "_begin_reserved_attended_under_lease",
+    "_verify_reserved_credential_admission"
   ],
   "capture_worker": {
     "id": "fabric-owned-capture-build-01a11e90-v1",
@@ -30,5 +31,25 @@
     "Capture and group cleanup are not authenticated realm, dedicated UID sweep, assignment seal or Supervisor ACK",
     "No production factory, public bound CLI, profile, credential, enrollment, service or host activation",
     "Original lease/exclusion must remain through actual assignment seal/worker denial/durable Supervisor ACK"
-  ]
+  ],
+  "credential_boundary": {
+    "classification": "SOURCE_ONLY_UNINSTALLED",
+    "secret_key": "ANTHROPIC_AUTH_TOKEN",
+    "loader": "Existing fixed-owner CredentialLoader/_safe_credential; only loaded after fresh Control, actual existing sealed canary/catalog and original-owner qualification.",
+    "authority": "Canonical canary facts do not authorize ordinary task/profile. Descriptor stays nonsecret; parent argument token scrubbed after begin/failure.",
+    "not_enabled": [
+      "production factory",
+      "provider realm enrollment",
+      "credentials",
+      "profile activation"
+    ],
+    "validation": {
+      "tests": 82,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0,
+      "proof_sha256": "1602d1b24a406f82c722b0258836926fe18853eabef04c1a51c00f495f724a50",
+      "red_sha256": "9c2182cf02118e3a33d472a42cb1155176bbe1ed7e55637f09ed0fcc62205619"
+    }
+  }
 }

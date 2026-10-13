@@ -1,7 +1,7 @@
 """Actual compiler/shared runner; owner, lease and host admission are inert fixtures.
 
 One positive invokes a harmless local executable through the incumbent runtime.
-No provider, credentials, remote process probe, live lease or START attestation.
+No provider, real credentials, remote process probe, live lease or START attestation.
 """
 import ast
 import dataclasses
@@ -25,6 +25,8 @@ from test_fabric_reserved_attended_launch import fixture
 BUNDLE = Path(__file__).resolve().parents[1] / 'integrations/session_bridge/bound_launch_capture'
 RUNTIME = BUNDLE / 'fixtures/lane_runtime.base.py'
 from test_fabric_bound_controller_wire import patched
+from test_claude_subscription_worker import (_inject_owner_test_keys, _documents, _owner_seal)
+from control_plane.claude_subscription_worker import _resolve_catalog_pair
 from integrations.session_bridge.bound_launch_capture import fabric_reserved_attended_launch
 rs = importlib.util.spec_from_file_location('fixture_lane_runtime', RUNTIME)
 lr = importlib.util.module_from_spec(rs)
@@ -44,7 +46,8 @@ def runner(monkeypatch, tmp_path):
     tree = ast.parse(patched(tmp_path, 'remote_sub_exec.py', 'EXECUTOR_SOURCE.json'))
     functions = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                  and n.name in {'_run_lease_process', '_run_reserved_attended_under_lease',
-                                '_prepare_reserved_attended_under_lease', '_retain_original_cleanup_hold'}]
+                                '_prepare_reserved_attended_under_lease', '_retain_original_cleanup_hold',
+                                '_verify_reserved_credential_admission'}]
     ns = dict(json=json, Path=Path, install_signal_cleanup=lambda **kw: None,
               run_owned_process=lr.run_owned_process, OwnedProcessStartError=lr.OwnedProcessStartError,
               cleanup_receipt_is_proven=lr.cleanup_receipt_is_proven)
@@ -54,6 +57,13 @@ def runner(monkeypatch, tmp_path):
 
 def setup(tmp_path, monkeypatch):
     payload, kw = fixture(tmp_path)
+    bindings, profiles = _documents()
+    admission = _owner_seal(bindings=bindings, profiles=profiles)
+    binding, profile, _ = _resolve_catalog_pair(admission.binding_id,
+        bindings_document=bindings, profiles_document=profiles)
+    kw['binding'], kw['profile'] = binding, profile
+    payload['launch_spec']['model'] = binding.model_for(profile, kw['model_class'])
+    kw['correlation']['runtime_binding']['start_request_sha256'] = start_request_sha256(payload)
     expires = time.time() + 60
     projection = dict(schema_version=control.SCHEMA, attempt_id='run-1',
         fence_generation=1, pin_version=1, pin_identity_sha256=control.launch_identity(payload),
@@ -64,6 +74,9 @@ def setup(tmp_path, monkeypatch):
     args = dict(payload=payload, authority=authority, preparation=kw,
         lease=HeldOriginalLease(), state={'started': False}, key='run-1',
         receipt=tmp_path/'terminal.jsonl', nice=10, check_original_owner=lambda prepared: None)
+    args.update(credential_loader=lambda: 'inert-owner-token',
+        credential_admission=admission, credential_bindings_document=bindings,
+        credential_profiles_document=profiles)
     return ns, args, expires
 
 
@@ -137,7 +150,7 @@ def test_compiled_stdin_closed_environment_through_original_runner(tmp_path, mon
     ns, args, _ = setup(tmp_path, monkeypatch)
     binary = tmp_path/'inert-harness'
     binary.write_text('#!' + sys.executable + '\nimport os,sys,json\n'
-        'print(json.dumps({"stdin":sys.stdin.read(),"argv":sys.argv[1:],"env":dict(os.environ)}))\n')
+        'print(json.dumps({"stdin":sys.stdin.read(),"argv":sys.argv[1:],"env":{k:v for k,v in os.environ.items() if k != "ANTHROPIC_AUTH_TOKEN"}}))\n')
     binary.chmod(0o700)
     args['preparation']['binary'] = dataclasses.replace(args['preparation']['binary'],
         path=str(binary), real_path=str(binary), sha256=hashlib.sha256(binary.read_bytes()).hexdigest())

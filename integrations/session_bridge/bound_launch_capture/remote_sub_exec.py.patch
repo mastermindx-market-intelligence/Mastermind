@@ -22,7 +22,7 @@
  )
 
 
-@@ -110,6 +118,198 @@
+@@ -110,6 +118,284 @@
          contract=contract,manifest=manifest)
 
 
@@ -46,9 +46,55 @@
 +        _retain_original_cleanup_hold(lease=lease, state=state, key=key, receipt=receipt)
 +
 +
++def _verify_reserved_credential_admission(*, prepared, preparation,
++                                         credential_loader, credential_admission,
++                                         credential_bindings_document=None,
++                                         credential_profiles_document=None):
++    """Reprove existing realm/canary facts; never load or issue task authority.
++
++    A loader is fixed trusted owner composition, not caller/RPC configuration.
++    The existing canary seal remains canary evidence: current foreground Control,
++    attended profile and assignment gates independently authorize the task.
++    """
++    from control_plane.fabric_control_start import ControlStartRefused
++    if not callable(credential_loader):
++        raise ControlStartRefused('realm_credential_loader_required')
++    from control_plane.claude_subscription_worker import (
++        ClaudeSubscriptionWorkerAdapter, _resolve_catalog_pair)
++    from control_plane.subscription_canary_admission import verify_subscription_canary_admission
++    verification_failed = False
++    try:
++        sealed = verify_subscription_canary_admission(credential_admission,
++            adapter_id=ClaudeSubscriptionWorkerAdapter.adapter_id,
++            bindings_document=credential_bindings_document,
++            profiles_document=credential_profiles_document)
++        binding, profile, _ = _resolve_catalog_pair(sealed.binding_id,
++            bindings_document=credential_bindings_document,
++            profiles_document=credential_profiles_document)
++        descriptor = prepared.descriptor
++        if (sealed.worker_id != descriptor.worker_id
++                or binding != preparation['binding'] or profile != preparation['profile']
++                or sealed.binding_id != descriptor.binding_id
++                or sealed.profile_id != descriptor.profile_id
++                or sealed.adapter_id != descriptor.adapter_id
++                or descriptor.model_class != preparation['model_class']
++                or descriptor.model != binding.model_for(profile, preparation['model_class'])
++                or descriptor.endpoint != binding.effective_base_url):
++            raise ControlStartRefused('realm_credential_binding_changed')
++    except Exception:
++        verification_failed = True
++    if verification_failed:
++        # Raise outside the handler: no hostile verifier context is retained.
++        # No secret is read here or copied into descriptors/receipts.
++        raise ControlStartRefused('realm_credential_admission_unqualified') from None
++
++
 +def _prepare_reserved_attended_under_lease(*, payload, authority, preparation,
 +                                       lease, state, key, receipt, nice,
-+                                       check_original_owner):
++                                       check_original_owner, credential_loader=None,
++                                       credential_admission=None,
++                                       credential_bindings_document=None,
++                                       credential_profiles_document=None):
 +    """Private composition seam, not exposed by CLI, RPC or environment.
 +
 +    Only the existing authenticated owner may call this inside its original
@@ -68,24 +114,59 @@
 +    prepared = prepare_reserved_attended_launch(original, **preparation)
 +    if prepared.descriptor.run_id != key:
 +        raise ControlStartRefused("original_owner_run_mismatch")
++    credential_inputs = dict(prepared=prepared, preparation=preparation,
++        credential_loader=credential_loader, credential_admission=credential_admission,
++        credential_bindings_document=credential_bindings_document,
++        credential_profiles_document=credential_profiles_document)
++    _verify_reserved_credential_admission(**credential_inputs)
 +    arguments = prepared.lane_runtime_arguments()
++    if arguments['env'] != dict(prepared.descriptor.environment):
++        raise ControlStartRefused('realm_nonsecret_environment_changed')
 +    arguments['nice'] = nice
++    credential_attempted = False
 +
 +    def at_boundary():
++        nonlocal credential_attempted
++        if credential_attempted:
++            raise ControlStartRefused('realm_credential_boundary_already_consumed')
 +        # The callback checks actual owner evidence; its return is never a seal.
 +        if check_original_owner(prepared) is not None:
 +            raise ControlStartRefused("owner_check_must_not_issue_authority")
 +        # A slow check or wait must not extend the existing Control command.
 +        authority.require(original)
++        _verify_reserved_credential_admission(**credential_inputs)
++        from control_plane.claude_subscription_worker import _safe_credential
++        if arguments['env'] != dict(prepared.descriptor.environment):
++            raise ControlStartRefused('realm_nonsecret_environment_changed')
++        credential_attempted = True
++        load_failed = False
++        try:
++            credential = _safe_credential(credential_loader)
++        except Exception:
++            load_failed = True
++        if load_failed:
++            # Raise outside the handler so a hostile exception is not retained
++            # as __context__ even when an outer owner records the refusal.
++            raise ControlStartRefused('realm_credential_unavailable') from None
++        try:
++            # Loading can be slow; neither expiry nor current catalog may drift.
++            authority.require(original)
++            _verify_reserved_credential_admission(**credential_inputs)
++            arguments['env']['ANTHROPIC_AUTH_TOKEN'] = credential
++        finally:
++            credential = None
 +
 +    return prepared, arguments, at_boundary
 +
 +
 +def _run_reserved_attended_under_lease(**kwargs):
 +    prepared, arguments, at_boundary = _prepare_reserved_attended_under_lease(**kwargs)
-+    result = _run_lease_process(lease=kwargs['lease'], state=kwargs['state'],
-+        key=kwargs['key'], receipt=kwargs['receipt'], arguments=arguments, at_boundary=at_boundary)
-+    return result, prepared.validation_commands
++    try:
++        result = _run_lease_process(lease=kwargs['lease'], state=kwargs['state'],
++            key=kwargs['key'], receipt=kwargs['receipt'], arguments=arguments, at_boundary=at_boundary)
++        return result, prepared.validation_commands
++    finally:
++        arguments['env'].pop('ANTHROPIC_AUTH_TOKEN', None)
 +
 +
 +def _retain_original_cleanup_hold(*, lease, state, key, receipt):
@@ -195,8 +276,13 @@
 +            raise LaneRuntimeError('owned_capture_assignment_invalid')
 +        arguments['owned_capture_assignment'] = dict(run=run_entries[0], store=stores[0],
 +            control_uid=kwargs['preparation']['policy'].control_uid, worker_gid=kwargs['preparation']['policy'].worker_gid)
-+    owner = _begin_lease_process(lease=kwargs['lease'], state=kwargs['state'],
-+        key=kwargs['key'], receipt=kwargs['receipt'], arguments=arguments, at_boundary=at_boundary)
++    try:
++        owner = _begin_lease_process(lease=kwargs['lease'], state=kwargs['state'],
++            key=kwargs['key'], receipt=kwargs['receipt'], arguments=arguments, at_boundary=at_boundary)
++    finally:
++        # The original generator shares this mapping. Popen copied it for the
++        # child; remove the parent copy before returning the original handle.
++        arguments['env'].pop('ANTHROPIC_AUTH_TOKEN', None)
 +    owner._original_preparation = prepared.descriptor
 +    owner._original_start_receipt_path = start_path
 +    owner._original_start_context = dict(binding=original['binding'],
@@ -221,7 +307,7 @@
  def _execute(argv: list[str], state: dict) -> int:
      if len(argv) != 6:
          return _fail(
-@@ -134,6 +334,21 @@
+@@ -134,6 +420,21 @@
          except (ImportError, ValueError, TypeError, KeyError, RecursionError):
              return _fail("ARTIFACT_DELIVERY_CONTRACT_REFUSED", 65)
      artifact_failure = False
@@ -243,7 +329,7 @@
 
      # Tilde belongs to this host, not to the controller that selected it.
      if cwd.startswith("~") and cwd != "~" and not cwd.startswith("~/"):
-@@ -230,34 +445,12 @@
+@@ -230,34 +531,12 @@
                          or not os.access(guard, os.X_OK)):
                      return _fail("FABRIC_CPU_STRESS_GUARD_UNAVAILABLE", 78)
                  child_env["PATH"] = str(here) + os.pathsep + child_env.get("PATH", "/usr/bin:/bin")
@@ -284,7 +370,7 @@
 
              display_stdout = result.stdout
              if mode == "grok":
-@@ -294,6 +487,9 @@
+@@ -294,6 +573,9 @@
                  except (OSError, ValueError, TypeError, KeyError, RecursionError):
                      artifact_failure = True
 
