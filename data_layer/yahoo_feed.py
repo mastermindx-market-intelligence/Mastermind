@@ -25,11 +25,12 @@ import os
 import threading
 import time
 from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
 
 log = logging.getLogger(__name__)
 
 _CACHE: dict[str, float] = {}      # SYMBOL -> latest Close quote in its local currency (per process)
-_OPEN_CACHE: dict[str, float] = {} # SYMBOL -> today's session Open price (cleared daily, same TTL)
+_OPEN_CACHE: dict[str, tuple[float, datetime]] = {}  # SYMBOL -> (Open, source daily-bar timestamp)
 _TS: dict[str, float] = {}         # SYMBOL -> monotonic ts of its last fetch (drives the intraday TTL)
 _ASOF: dict[str, str] = {}         # SYMBOL -> wall-clock UTC fetch time (display/provenance)
 _HISTORY_CACHE: dict[tuple[str, str], object] = {}  # (SYMBOL, period) -> native-currency close Series
@@ -169,7 +170,7 @@ def _fetch_and_cache(want) -> None:
                 if len(s):
                     k = str(sym).upper().strip()
                     _CACHE[k], _TS[k], _ASOF[k] = float(s.iloc[-1]), now, fetched_at
-            # Populate _OPEN_CACHE from the last row's Open value (the current/today's open).
+            # Preserve the Open's source-bar timestamp so readers can reject older sessions.
             if open_col is not None and hasattr(open_col, "columns"):
                 for sym in open_col.columns:
                     s = open_col[sym].dropna()
@@ -177,7 +178,7 @@ def _fetch_and_cache(want) -> None:
                         k = str(sym).upper().strip()
                         v = float(s.iloc[-1])
                         if v > 0:
-                            _OPEN_CACHE[k] = v
+                            _OPEN_CACHE[k] = (v, s.index[-1])
         else:                                     # single ticker → a bare Series
             s = close.dropna()
             if len(s) and len(want) == 1:
@@ -188,7 +189,7 @@ def _fetch_and_cache(want) -> None:
                 if len(so) and len(want) == 1:
                     v = float(so.iloc[-1])
                     if v > 0:
-                        _OPEN_CACHE[want[0]] = v
+                        _OPEN_CACHE[want[0]] = (v, so.index[-1])
     except Exception as e:  # noqa: BLE001
         log.debug("yahoo_feed parse failed (%s)", e)
 
@@ -282,14 +283,32 @@ def open_price_local(ticker: str) -> float | None:
     Populated as a side-effect of ``warm()`` from the ``Open`` column of the same
     yfinance 7d daily download — so a prior ``warm([ticker])`` call makes this free.
     Used by ``bot.settle._open_price_usd`` to fill overnight-queued Brain orders at the
-    true session open rather than the mid-session last print.  Returns None pre-open,
-    when the feed is unavailable, or when yfinance is not installed.
+    true session open rather than the mid-session last print. The bar must belong to
+    today's exchange-local date; a fresh download can still contain only yesterday's bar.
+    Returns None pre-open, when the feed is unavailable, or when yfinance is not installed.
     """
     t = (ticker or "").upper().strip()
     if not t:
         return None
     warm([t])                                     # ensure the daily bar has been fetched
-    return _OPEN_CACHE.get(t) or None            # None → caller falls back to Close / snapshot
+    quote = _OPEN_CACHE.get(t)
+    if quote is None:
+        return None
+    try:
+        zone = ZoneInfo(
+            "Asia/Hong_Kong" if t.endswith(".HK") or t == "^HSI"
+            else "Asia/Shanghai" if t.endswith((".SS", ".SZ"))
+            else "America/New_York"
+        )
+        value, bar_at = quote
+        # Daily downloads normally strip timezone without changing the session label.
+        # If a source retains it, compare the timestamp in the ticker's exchange zone.
+        bar_day = bar_at.astimezone(zone).date() if bar_at.tzinfo else bar_at.date()
+        if bar_day == datetime.now(zone).date():
+            return value
+    except Exception:
+        pass
+    return None                                 # existing Close / snapshot fallback remains
 
 
 _HEALTH_PROBE = "0700.HK"          # Tencent — about as liquid as Hong Kong gets; if Yahoo can't
