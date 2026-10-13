@@ -1754,10 +1754,15 @@ def _service_from_config(
                 )
             from control_plane.codex_worker import validate_secret_canary_verdict
             validate_secret_canary_verdict(initial_canary, require_passed=True)
-        if any((binding.worker_uid, binding.worker_gid) !=
-               (raw.get("worker_uid"), raw.get("worker_gid"))
-               for binding in fabric_worker_binding_source.bindings):
-            raise ServiceError("Fabric bindings differ from the fixed Supervisor worker principal")
+        # Mixed ownership is keyed by worker_id, while physical lookup also
+        # includes host. One logical owner may not silently change principal
+        # according to binding-file order or the selected host.
+        principals = {}
+        for binding in fabric_worker_binding_source.bindings:
+            principal = (binding.worker_uid, binding.worker_gid)
+            previous = principals.setdefault(binding.worker_id, principal)
+            if previous != principal:
+                raise ServiceError("Fabric worker has conflicting physical principals")
         if any(binding.worker_id == str(raw.get("worker_id") or "codex-01")
                for binding in fabric_worker_binding_source.bindings):
             raise ServiceError("Fabric binding cannot replace the primary worker")
@@ -2006,24 +2011,25 @@ def _service_from_config(
         fabric_adapter = AttendedFabricWorkerAdapter(runtime, fabric_worker_binding_source,
             request_client_factory=fabric_worker_binding_source.client_for,
             attended_probe_source=fabric_attended_probe_source)
-        fabric_owner = ExecutiveSupervisor(
-            runtime, fabric_adapter,
-            runs_root=raw["worker_runs_root"],
-            isolation_roots=(raw["proof_workspace_root"], raw["worker_runs_root"]),
-            receipts_root=raw["receipts_root"],
-            worker_user=raw["worker_user"], worker_uid=raw["worker_uid"],
-            worker_gid=raw["worker_gid"], shared_run_gid=raw["shared_run_gid"],
-            # The primary boot canary never qualifies the Fabric owner.
-            # Its exact claimed Attempt obtains its own attended probe verdict.
-            secret_canary_verdict={}, require_complete_launch_attestation=True,
-            cleanup_policy=CleanupPolicy.FABRIC_PROCESS_GROUP,
-            process_controller=fabric_adapter, instance_id=primary.instance_id,
-        )
-        mixed = MixedExecutionOwnerSupervisor(primary, {
-            config.worker_id: primary,
-            **{binding.worker_id: fabric_owner
-               for binding in fabric_worker_binding_source.bindings},
-        })
+        owners = {config.worker_id: primary}
+        for physical in fabric_worker_binding_source.bindings:
+            if physical.worker_id in owners:
+                continue  # Principal conflicts were refused before clients.
+            owners[physical.worker_id] = ExecutiveSupervisor(
+                runtime, fabric_adapter,
+                runs_root=raw["worker_runs_root"],
+                isolation_roots=(raw["proof_workspace_root"], raw["worker_runs_root"]),
+                receipts_root=raw["receipts_root"],
+                worker_user=raw["worker_user"], worker_uid=physical.worker_uid,
+                worker_gid=physical.worker_gid,
+                # This remains Control's local filesystem group. It is not
+                # remote policy enrollment or a substitute for its wire join.
+                shared_run_gid=raw["shared_run_gid"],
+                secret_canary_verdict={}, require_complete_launch_attestation=True,
+                cleanup_policy=CleanupPolicy.FABRIC_PROCESS_GROUP,
+                process_controller=fabric_adapter, instance_id=primary.instance_id,
+            )
+        mixed = MixedExecutionOwnerSupervisor(primary, owners)
         recovery_controller["owners"] = mixed.owners
         return mixed
 
@@ -2612,11 +2618,25 @@ def _ceo_admission_guard(raw: Mapping[str, Any], config_path: Path,
     return require_ceo_admission
 
 
-async def _serve_from_config(config_path: Path) -> None:
+async def _serve_from_config(config_path: Path, *, attended_work_placements: tuple = ()) -> None:
     raw = load_control_config(config_path)
-    # Staging is a source read only. Production retains its existing broker;
-    # no JSON flag or dedicated-worker canary can qualify shared Fabric.
-    _staged_fabric_binding_source(raw)
+    # Only a fixed host composition may select typed placements. Merely
+    # staging a file or setting a JSON flag cannot activate its worker owners.
+    physical_source = _staged_fabric_binding_source(raw)
+    from control_plane.fabric_attended_routing import AttendedWorkPlacement, placement_member
+    if (type(attended_work_placements) is not tuple
+            or len(attended_work_placements) > 6
+            or any(type(item) is not AttendedWorkPlacement for item in attended_work_placements)):
+        raise ServiceError('attended placements require bounded typed host configuration')
+    if attended_work_placements:
+        if physical_source is None or 'fabric_attended_probe' not in raw:
+            raise ServiceError('attended placements require the binding and startup probe sources')
+        # Refuse an unselected/disabled catalogue before any host canary call.
+        # The constructor checks the current catalogue again before clients.
+        from control_plane.model_router import ModelRouter
+        router = ModelRouter.load()
+        for placement in attended_work_placements:
+            placement_member(router, placement)
     control_attestation = _load_control_environment_attestation(
         Path(raw["control_environment_attestation_path"]),
         config_path=config_path,
@@ -2721,6 +2741,8 @@ async def _serve_from_config(config_path: Path) -> None:
 
     service = _service_from_config(
         raw,
+        fabric_worker_binding_source=physical_source if attended_work_placements else None,
+        attended_work_placements=attended_work_placements,
         fabric_attended_probe_source=(
             AttendedControlProbeSource.from_startup(config_path, raw, control_attestation)
             if 'fabric_attended_probe' in raw else None),
