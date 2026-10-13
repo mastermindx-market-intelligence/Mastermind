@@ -7045,14 +7045,30 @@ class ExecutiveControlService:
                 or type(consumer) is not ReplyEventCommitConsumer
                 or type(read_ref) is not str or not read_ref
                 or type(committed_reply) is not dict
-                or committed_reply.get("reply_committed") is not True):
+                or committed_reply.get("reply_committed") is not True
+                or type(committed_reply.get("message_key")) is not str
+                or type(committed_reply.get("fingerprint")) is not str):
             return
         try:
             if consumer.runtime is not self._require_runtime():
                 return
         except Exception:
             return  # An optional notifier cannot change native Job completion.
-        coroutine = self._notify_native_reply_events(read_ref, committed_reply)
+        # Capture the already admitted exact same-Runtime consumer. A normal
+        # service shutdown may begin before the scheduled task gets a
+        # timeslice; _notify_native_reply_events' new-admission gate would
+        # otherwise silently discard the committed reply. This retained task
+        # still runs all canonical subscription/READ checks inside the owner.
+        async def deliver_admitted():
+            try:
+                await consumer.handle_committed(
+                    read_ref=read_ref, message_key=committed_reply["message_key"],
+                    fingerprint=committed_reply["fingerprint"],
+                )
+            except Exception:
+                pass  # Native COMMIT and Job completion are independent.
+
+        coroutine = deliver_admitted()
         try:
             task = asyncio.create_task(
                 coroutine, name="executive-native-reply-notification",

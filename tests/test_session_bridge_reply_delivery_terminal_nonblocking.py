@@ -86,13 +86,6 @@ def test_verified_native_reply_can_terminalize_while_callback_remains_pending():
             def _native_return_source(self, _root):
                 return None
 
-            async def _notify_native_reply_events(self, read_ref, committed):
-                assert read_ref == "read-ref-001" and committed["reply_committed"] is True
-                calls.append("callback-start")
-                callback_entered.set()
-                await release_callback.wait()
-                calls.append("callback-finished")
-
             async def _project_terminal_return(self, job_id, *, expected_attempt_id):
                 assert job_id == "job-001" and expected_attempt_id == "attempt-001"
                 calls.append("terminal-projected")
@@ -104,8 +97,16 @@ def test_verified_native_reply_can_terminalize_while_callback_remains_pending():
 
         owner=DummyService()
         from common.reply_subscription_private_contract import ReplyEventCommitConsumer
+
+        async def delayed_consumer(**kwargs):
+            assert kwargs["read_ref"]=="read-ref-001"
+            calls.append("callback-start")
+            callback_entered.set()
+            await release_callback.wait()
+            calls.append("callback-finished")
+
         owner._company_consultation_host=SimpleNamespace(
-            reply_event_consumer=ReplyEventCommitConsumer(runtime,lambda **kw:None))
+            reply_event_consumer=ReplyEventCommitConsumer(runtime,delayed_consumer))
         owner._ceo_ingress_app_binding=SimpleNamespace(
             armed=True,reply_event_provider_factory=lambda _runtime:None)
         loop=asyncio.get_running_loop()
@@ -211,6 +212,10 @@ def test_existing_executive_service_shutdown_drain_retains_pending_callback():
         entered = asyncio.Event()
         release = asyncio.Event()
 
+        async def slow_owned_consumer(**kwargs):
+            entered.set()
+            await release.wait()
+
         class ExistingOwner:
             _closing=False
             _service_state="READY"
@@ -220,18 +225,15 @@ def test_existing_executive_service_shutdown_drain_retains_pending_callback():
                 armed=True,reply_event_provider_factory=lambda _:None)
             _company_consultation_host=SimpleNamespace(
                 reply_event_consumer=ReplyEventCommitConsumer(
-                    runtime=owned_runtime,handler=lambda **kw:None))
+                    runtime=owned_runtime,handler=slow_owned_consumer))
 
             def _require_runtime(self):
                 return owned_runtime
 
-            async def _notify_native_reply_events(self,*args):
-                entered.set()
-                await release.wait()
-
         host=ExistingOwner()
         ExecutiveControlService._schedule_native_reply_events(
-            host,"read-ref-001",{"reply_committed":True})
+            host,"read-ref-001",{"reply_committed":True,
+                "message_key":"original-msg-001","fingerprint":"f"*64})
         await asyncio.wait_for(entered.wait(),timeout=1)
         assert len(host._physical_workers)==1
         drain=asyncio.create_task(ExecutiveControlService._drain_service_tasks(
@@ -242,5 +244,85 @@ def test_existing_executive_service_shutdown_drain_retains_pending_callback():
         await asyncio.wait_for(drain,timeout=1)
         await asyncio.sleep(0)
         assert all(task.done() for task in host._physical_workers)
+
+    asyncio.run(scenario())
+
+
+def test_already_scheduled_notification_survives_shutdown_start_before_task_runs():
+    from common.reply_subscription_private_contract import ReplyEventCommitConsumer
+
+    async def scenario():
+        called = asyncio.Event()
+        owned_runtime=object()
+
+        async def authorized_consumer(**kwargs):
+            assert kwargs == {
+                "read_ref":"read-ref-001","message_key":"reply-original-001",
+                "fingerprint":"f"*64,
+            }
+            called.set()
+
+        class Owned:
+            _closing=False
+            _service_state="READY"
+            _physical_workers=set()
+            _ceo_ingress_app_binding=SimpleNamespace(
+                armed=True,reply_event_provider_factory=lambda _:None)
+            _company_consultation_host=SimpleNamespace(
+                reply_event_consumer=ReplyEventCommitConsumer(
+                    runtime=owned_runtime,handler=authorized_consumer))
+
+            def _require_runtime(self):
+                return owned_runtime
+
+            async def _notify_native_reply_events(self,ref,committed):
+                return await ExecutiveControlService._notify_native_reply_events(
+                    self,ref,committed)
+
+        service=Owned()
+        ExecutiveControlService._schedule_native_reply_events(
+            service,"read-ref-001",{"reply_committed":True,
+            "message_key":"reply-original-001","fingerprint":"f"*64})
+        # Service begins a normal owned drain *before* this task has a timeslice.
+        service._closing=True
+        for pending in tuple(service._physical_workers):
+            await asyncio.wait_for(pending,timeout=1)
+        assert called.is_set(), "admitted callback must not disappear at shutdown"
+
+    asyncio.run(scenario())
+
+
+def test_admitted_callback_error_is_not_relabelled_as_native_job_failure():
+    from common.reply_subscription_private_contract import ReplyEventCommitConsumer
+
+    async def scenario():
+        runtime=object()
+        calls=[]
+
+        async def callback(**kwargs):
+            calls.append(kwargs["read_ref"])
+            raise RuntimeError("synthetic callback transport failed after native COMMIT")
+
+        class Owner:
+            _closing=False
+            _service_state="READY"
+            _physical_workers=set()
+            _company_consultation_host=SimpleNamespace(
+                reply_event_consumer=ReplyEventCommitConsumer(runtime,callback))
+            _ceo_ingress_app_binding=SimpleNamespace(
+                armed=True,reply_event_provider_factory=lambda _runtime:None)
+
+            def _require_runtime(self):
+                return runtime
+
+        owner=Owner()
+        ExecutiveControlService._schedule_native_reply_events(
+            owner,"read-ref-001",{"reply_committed":True,
+                "message_key":"asd-native-reply-001","fingerprint":"f"*64})
+        assert len(owner._physical_workers)==1
+        for pending in tuple(owner._physical_workers):
+            await asyncio.wait_for(pending,timeout=1)
+            assert pending.exception() is None
+        assert calls==["read-ref-001"] and owner._service_state=="READY"
 
     asyncio.run(scenario())
