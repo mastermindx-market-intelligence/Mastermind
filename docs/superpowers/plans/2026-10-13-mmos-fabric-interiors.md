@@ -67,3 +67,17 @@ No unattended continuation, review return, watcher or deployment is implied. The
 Original source is published in **PR #1411**, first semantic head `6289b6ac9030f1c75511136d868be2b7b21b7604`. Incumbent binding hand-in is #1359 comment `6144631923`; transport delivery is not proof of pickup or execution. Native source inspection confirmed existing reads use a fixed HTTPS owner with private acquisition-bearer custody, not arbitrary local shell.
 
 The independent review child `mmos-fabric-interiors-review-20261013-c4-01` returned terminal rc0/ok. Its findings are adjudicated in `REVIEW_ADJUDICATION.md`; one actual strictness gap was repaired and the full suite/build passed again. A repaired-head review is still required. Build-worker refusal, original root and all direct-source/production/Paper gates remain unchanged.
+
+## Continuation: browsable recent-run consumer
+
+Predecessor #1411 is now **merged**, commit `98d00027cf5e228be9bd584684ad0284769cdf74`, at2026-10-13T12:36:45Z. Its original source and reviews remain accepted; merged is not installed. Current base `54e8659730141fc130ebbeb214dbb50f3edb04a7` includes the separate Research host capability, preserved here. Protected procedures at the original compatible pin were unchanged in the affected-source comparison.
+
+Owned continuation workspace `/Volumes/Mastermind/agent-workspaces/web/mmos-fabric-discovery-20261013-c4`, branch `sol/mmos-fabric-discovery-20261013-c4`; original Web root/parent stays `mmos-fabric-interiors-20261013-c4`. #1359 source custody and Paper repairs #1399/#1409 remain unchanged.
+
+New actual-app consumer: Recent Fabric runs, explicit load/refresh, local ID/root/parent search, active-or-waiting/results/awaiting-acceptance/attention filters, inline metadata and exact root/run handoff into existing inspector. Its optional `readAttendedFabricCatalog` requires the same existing signed-in acquisition and source-generation boundaries. Default clients remain disconnected. The presentation contract is `mastermind.attended_fabric_catalog.v1`, metadata-only/32rows, sequential non-atomic observation, explicit owner scope and coverage; it is not a server, grant, registry or fabricated lifecycle. Root-null records remain visible without invented root navigation.
+
+Current complete app suite1468pass/1skip/0fail63files; new catalog20cases. TypeScript/Vite build passes. Test outputs and source hashes: `docs/evidence/2026-10-13-mmos-fabric-discovery/verification.json`. Parent fixed compiler null narrowing before final tests; no existing test removed or weakened.
+
+**Affected lanes held:** platform blocked shared backend contract creation `common/attended_fabric_contract.py` before dispatch; absence confirmed. Never replay or substitute its denied effect. Platform separately blocked new Playwright qualification before dispatch; no browser run or screenshot claimed and no alternate-carrier retry. Neither changes the accepted predecessor proof. New UI child `mmos-fabric-catalog-ui-20261013-c4-01` received no_pool_available and never STARTed. This source was completed directly; no duplicate child exists.
+
+Next: exact-head independent source review and published Draft/HOLD continuation; actual new browser proof and source-binding work only after the corresponding lawful gates are resolved. No live-feed, production, permission or installation claim. User's end-to-end mission remains incomplete; current limitation is not lack of willingness to proceed or a new requested approval.

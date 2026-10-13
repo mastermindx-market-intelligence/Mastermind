@@ -3,7 +3,10 @@ import type { MissionHost } from "../host";
 import { attendedSelection, decodeAttendedStatus, type AttendedStatus } from "./attended-status";
 import "./fabric-inspector.css";
 
-export function AttendedFabricInspector({ host, locale = "en" }: { host?: MissionHost; locale?: "en" | "zh-CN" }) {
+export function AttendedFabricInspector({ host, locale = "en", selection }: {
+  host?: MissionHost; locale?: "en" | "zh-CN";
+  selection?: { rootId: string; runId: string; sourceEpoch: number; sourceHost: MissionHost } | null;
+}) {
   const zh = locale === "zh-CN";
   const t = (en: string, cn: string) => zh ? cn : en;
   const id = useId();
@@ -23,26 +26,32 @@ export function AttendedFabricInspector({ host, locale = "en" }: { host?: Missio
     cancel();
     // An unmounted source must not install an extra authentication observer.
     if (!host?.readAttendedFabric || typeof host.invalidationGeneration !== "function") return;
-    const unsub = host.auth?.subscribe(() => { cancel(); invalidate(n => n + 1); });
+    const unsub = host.auth?.subscribe(() => { cancel(); setRoot(""); setRun(""); invalidate(n => n + 1); });
     return () => { serial.current++; request.current?.abort(); unsub?.(); };
   }, [host]);
+  useEffect(() => {
+    const supplied = attendedSelection(selection);
+    if (supplied && selection && selection.sourceHost === host && selection.sourceEpoch === host?.invalidationGeneration?.()) {
+      cancel(); setRoot(supplied.rootId); setRun(supplied.runId);
+    }
+  }, [selection, host]);
   const state = host?.auth?.getState();
   const ready = !!host?.readAttendedFabric && typeof host.invalidationGeneration === "function" && state?.status === "signed_in" && state.acquisition;
   const epoch = host?.invalidationGeneration?.() ?? 0;
   const shown = ready && result?.host === host && result?.epoch === epoch && result.rootId === rootId && result.runId === runId ? result : null;
-  const selection = attendedSelection({ rootId, runId });
+  const manualSelection = attendedSelection({ rootId, runId });
   async function inspect() {
-    if (!host?.readAttendedFabric || !ready || !selection || busy) return;
+    if (!host?.readAttendedFabric || !ready || !manualSelection || busy) return;
     request.current?.abort();
     const abort = new AbortController(); request.current = abort;
     const ticket = ++serial.current, started = host.invalidationGeneration?.() ?? 0;
     setBusy(true); setResult(null); setError(null);
     try {
-      const raw = await host.readAttendedFabric({ ...selection, signal: abort.signal });
+      const raw = await host.readAttendedFabric({ ...manualSelection, signal: abort.signal });
       if (abort.signal.aborted || ticket !== serial.current || mountedHost.current !== host || started !== (host.invalidationGeneration?.() ?? 0)) return;
       const now = host.auth?.getState();
       if (now?.status !== "signed_in" || !now.acquisition) throw new Error("FABRIC_READ_UNAUTHORIZED");
-      setResult({ value: decodeAttendedStatus(raw, selection), acquiredAt: new Date().toISOString(), epoch: started, ...selection, host });
+      setResult({ value: decodeAttendedStatus(raw, manualSelection), acquiredAt: new Date().toISOString(), epoch: started, ...manualSelection, host });
     } catch (cause) {
       if (abort.signal.aborted || ticket !== serial.current) return;
       const code = cause instanceof Error ? cause.message : "";
@@ -58,14 +67,14 @@ export function AttendedFabricInspector({ host, locale = "en" }: { host?: Missio
     [t("Acceptance", "验收"), shown.value.acceptance_state], [t("Accepted by", "验收方式"), shown.value.accepted_by],
     [t("Acceptance reason", "验收依据"), shown.value.acceptance_reason], [t("Locally acquired", "本地获取时间"), shown.acquiredAt]
   ] : [];
-  return <details className="fi-workspace fi-attended"><summary>{t("Direct M2 Fabric · inspect an existing run", "直接 M2 Fabric · 查看现有运行")}</summary>
+  return <details className="fi-workspace fi-attended" open={selection ? true : undefined}><summary>{t("Direct M2 Fabric · inspect an existing run", "直接 M2 Fabric · 查看现有运行")}</summary>
     <p>{t("A separate source from Executive missions. Run and root labels are selectors, not permission or native-session identity.", "此来源不同于 Executive 任务。运行和根标识仅用于选择，不构成权限或原生会话身份。")}</p>
     {!ready ? <p className="fi-notice" role="status">{t("No authorized direct Fabric reader is mounted. This is not an idle-fleet reading.", "尚未挂载已授权的直接 Fabric 读取器，不代表代理池空闲。")}</p> : <form className="fi-inspect-form" onSubmit={e => { e.preventDefault(); void inspect(); }}>
       <label htmlFor={`${id}-root`}>{t("Original root", "原始根标识")}</label>
       <input id={`${id}-root`} autoComplete="off" maxLength={128} value={rootId} onChange={e => { cancel(); setRoot(e.target.value); }} />
       <label htmlFor={`${id}-run`}>{t("Existing run ID", "现有运行标识")}</label>
       <input id={`${id}-run`} autoComplete="off" maxLength={128} value={runId} onChange={e => { cancel(); setRun(e.target.value); }} />
-      <button type="submit" disabled={!selection || busy}>{busy ? t("Reading…", "读取中…") : t("Inspect run", "查看运行")}</button>
+      <button type="submit" disabled={!manualSelection || busy}>{busy ? t("Reading…", "读取中…") : t("Inspect run", "查看运行")}</button>
     </form>}
     {error && <p role="alert" className="fi-warning">{error}</p>}
     {shown && <div className="fi-detail" aria-label={t("Direct Fabric observation", "直接 Fabric 观测")}>

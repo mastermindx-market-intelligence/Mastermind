@@ -1,0 +1,36 @@
+.fc-panel { --fc-line: color-mix(in srgb, currentColor 16%, transparent); --fc-fill: color-mix(in srgb, currentColor 4%, transparent); --fc-muted: color-mix(in srgb, currentColor 74%, transparent); min-width: 0; padding: 24px; margin-block: 24px; border: 1px solid var(--fc-line); border-radius: 14px; color: inherit; background: var(--fc-fill); }
+.fc-panel *, .fc-panel *::before, .fc-panel *::after { box-sizing: border-box; }
+.fc-panel h2 { margin: 4px 0 8px; font-size: 24px; line-height: 1.3; }
+.fc-panel h3 { margin: 0 0 12px; font-size: 16px; }
+.fc-panel p { margin: 8px 0; font-size: 14px; line-height: 1.55; color: var(--fc-muted); }
+.fc-panel small { font-size: 12.5px; line-height: 1.5; color: var(--fc-muted); }
+.fc-eyebrow { letter-spacing: .08em; text-transform: uppercase; font-size: 12.5px !important; }
+.fc-heading { display: flex; justify-content: space-between; align-items: start; gap: 16px; }
+.fc-panel button { font: inherit; color: inherit; background: var(--fc-fill); border: 1px solid var(--fc-line); cursor: pointer; }
+.fc-panel button:disabled { opacity: .5; cursor: not-allowed; }
+.fc-panel button:focus-visible, .fc-panel input:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+.fc-panel button:hover:not(:disabled) { background: color-mix(in srgb, currentColor 8%, transparent); }
+.fc-panel button[aria-pressed="true"] { background: color-mix(in srgb, currentColor 10%, transparent); border-color: color-mix(in srgb, currentColor 60%, transparent); }
+.fc-load { padding: 9px 14px; font-size: 13px !important; border-radius: 8px; white-space: nowrap; }
+.fc-scope { padding-block: 8px; }
+.fc-notice { border-left: 2px solid color-mix(in srgb, currentColor 50%, transparent); padding: 10px 12px; background: var(--fc-fill); border-radius: 4px; overflow-wrap: anywhere; }
+.fc-coverage, .fc-summary { display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 12.5px; line-height: 1.5; }
+.fc-coverage { margin-top: 16px; padding: 12px; border: 1px solid var(--fc-line); border-radius: 8px; }
+.fc-coverage small { width: 100%; overflow-wrap: anywhere; }
+.fc-summary { padding-block: 12px; }
+.fc-controls { display: flex; flex-direction: column; gap: 8px; margin-block: 8px 20px; }
+.fc-controls label { font-size: 12.5px; }
+.fc-controls input { max-width: 540px; width: 100%; min-width: 0; background: var(--fc-fill); border: 1px solid var(--fc-line); color: inherit; font: inherit; font-size: 14px; padding: 9px 12px; border-radius: 8px; }
+.fc-filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 4px; }
+.fc-filters button { font-size: 12.5px; padding: 7px 10px; border-radius: 8px; }
+.fc-layout { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+.fc-list { display: flex; flex-direction: column; gap: 8px; max-height: 600px; overflow: auto; padding: 4px; min-width: 0; }
+.fc-row { width: 100%; display: flex; flex-direction: column; align-items: start; gap: 7px; padding: 14px; text-align: left; border-radius: 10px; min-width: 0; font-size: 12.5px !important; line-height: 1.5; overflow-wrap: anywhere; }
+.fc-row > * { max-width: 100%; }
+.fc-row strong { font-size: 14px; }
+.fc-detail { border: 1px solid var(--fc-line); padding: 16px; border-radius: 10px; min-width: 0; }
+.fc-detail dl { margin: 8px 0 16px; }
+.fc-detail dl > div { display: grid; grid-template-columns: minmax(85px, .8fr) minmax(0, 1.2fr); gap: 8px 12px; padding-block: 10px; border-bottom: 1px solid var(--fc-line); font-size: 12.5px; line-height: 1.5; }
+.fc-detail dt { color: var(--fc-muted); }
+.fc-detail dd { margin: 0; min-width: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+@media (max-width: 760px) { .fc-panel { padding: 16px; } .fc-layout { grid-template-columns: minmax(0, 1fr); } .fc-heading { flex-wrap: wrap; } .fc-detail .fc-load { white-space: normal; } }
