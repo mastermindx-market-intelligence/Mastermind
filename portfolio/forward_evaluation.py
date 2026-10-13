@@ -939,7 +939,10 @@ def _current_exposure_metrics(raw: dict[str, Any], asof: str) -> dict[str, dict[
     # A merely earlier latest.json is stale and must not override post-mark account prices.
     latest_day = _day(values["latest"].get("as_of"))
     latest_positions = values["latest"].get("positions")
-    if latest_day and latest_day == mark_day and isinstance(latest_positions, list):
+    # The reader drops malformed position rows and marks the source partial.  Its
+    # surviving weights cannot stand in for the complete current portfolio.
+    if (statuses["latest"] == "available" and latest_day and latest_day == mark_day
+            and isinstance(latest_positions, list)):
         candidate_weights: list[float] = []
         invalid = 0
         for position in latest_positions:
