@@ -6,7 +6,7 @@
     "fabric_operator_contract.py": "a2589a23151d75300d89443624ae2ba95ca4af2fbfd222cea50c48575a5b904f",
     "fabric_operator_owner.py": "e83fe2d82f982bad4ab27d6df14d91cdf6f0de79c7ef84503c3eae193fea6d7d",
     "fabric_operator_issue.py": "bca96a78976b111303050ef3ca61c77d4a3e69f53f9e29a961eb1a70396a0b9d",
-    "fabric_operator_client.py": "cf0eb5b628e0c7ae39a184d3488e64c7867bce91381e6c4765222d3373ce4a46",
+    "fabric_operator_client.py": "6718ade7a1245c8e5295edaee3ca75330bde4c92fd69c531caeee8d9c6f10d08",
     "fabric_operator_stop.py": "5ad090e703468503ec5466a83c61e1de9b93320e432d71963e9ba1d33e301ec5",
     "fabric_operator_recovery.py": "08d54778b3ec1d31ae0388d8ceebefff78990924a458630a35d8e517ae24fd63"
   },

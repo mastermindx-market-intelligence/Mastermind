@@ -117,6 +117,16 @@ host gates. A repeated transition, no action, finite cutoff or unresolved
 finisher stops progression; there is no polling or separate retry scheduler.
 The existing native-return no-child profile is explicitly excluded.
 
+With no attended placements, a currently qualified ordinary Operator may drive
+only through its exact validated planner completion. The root remains queued;
+no plan admission or Work creation follows. Autonomy-off, native-return and
+empty-placement/harness-off configurations keep queued admission without
+driving. The factory binds an immutable eligibility/binding expectation before
+admission, rechecks it at the canonical fresh-admission guard and on return,
+and preserves effect-unknown classification for drift after commit. A frozen
+harness-off root is never promoted by a later host arm. This is source behavior,
+not evidence of installed provider execution or parent result consumption.
+
 Caller cancellation closes attendance immediately while the original physical
 transition drains. The original request slot is not released while that action
 can still cross START. Collection remains with the existing finisher; exact
@@ -139,3 +149,90 @@ collection and assignment-revocation producer, the existing provider-policy
 and C1 boundaries, protected release/installation, and an actual same-Desktop
 paid return remain required. This finite same-call source does not establish
 durable GUI enrollment, later-request reentry or idle Wake.
+
+## Original owner lifetime split
+
+The original lane runner now exposes begin, finish and exact-handle cancellation
+mechanics while its one generator retains Popen, bounded collectors, stdin,
+cleanup and terminal receipt. The original main-thread controller can keep one
+shielded asynchronous finisher after a START handler returns. Cancelling a
+waiting RPC does not transfer settlement; cancellation before the finisher first
+executes aborts the same yielded stack. A second begin refuses before Popen,
+and an unknown spawn, missing receipt or unproven cleanup retains exclusion.
+Legacy synchronous callers retain their existing reconciliation behavior.
+
+The private executor seam retains the original lease object and applies the
+existing cleanup hold after terminal settlement. It does not release that
+lease or prove assignment revocation. The eventual concrete Backend must keep
+the original lease and admission exclusion through Control seal, worker denial
+and durable Supervisor ACK. The resource handle is not full START: independently
+pinned post-exec image, live original generation, all existing admission and
+isolation evidence, retained collection and native parent acceptance remain
+required. No CLI/RPC, installed service or production profile is activated.
+
+
+### Original-owner executed-image observation (source only)
+
+The original runner can now inspect only its retained live Popen PID, using a
+pinned Linux process directory and a bounded executable-image hash. Boot, exact
+start ticks, process group/session and real/effective UID/GID must match the
+original handle. A changed, dead or foreign process refuses; the original owner
+retains collection and settlement. No argv pathname or controller PID stands in
+for the executed image. File ownership remains distinct from process credentials.
+
+The paid image patch was consumed by the exact original Codex parent and accepted
+once after two independently identified defects reproduced and were repaired.
+80 image/identity cases and32 affected original-owner cases pass. These are
+source and inert/local-child proofs, not Linux production admission. The physical
+owner still needs an independently qualified executable/interpreter chain, realm,
+attendance, isolation, assignment and complete retained launch attestation before
+exposing START. No service, provider credential, profile or installed lane changes.
+
+## Existing remote gateway composition
+
+The optional remote target uses the incumbent MH1 mTLS gateway and its fixed
+Unix connection to `FabricBridgeBroker`. It does not use the ordinary
+`ExecutiveWorkerBroker` launch lifecycle. The validated Control command remains
+in the original request; only the remote bridge's actual authenticated Unix
+peer can construct the in-process authority consumed by `Backend.start_owned`.
+The original Fabric reservation, lease, controller, retained result and
+assignment owner remain responsible for every execution effect.
+
+The same root-installed Fabric composition file accepts an explicit V2 schema
+with unchanged physical `bindings` and a `remote_transports` list. Each transport
+names its exact host, worker and physical binding digest, private IP/port,
+existing CA/client-certificate/key paths, server certificate fingerprint and
+finite timeout. TLS material is not copied into Runtime, the launch request or
+receipts. Its protected file identities and the approved composition file are
+rechecked before and after requests. An existing V1 file selects the original
+local Unix client. Neither route falls back to the other on failure.
+
+The gateway must explicitly select `broker_target: attended-fabric`, the actual
+`expected_broker_peer_uid`, and its fixed protected Fabric socket. It preserves
+the exact seven Fabric operations and forwards assignment sealing to the
+original Fabric owner instead of the Worker Broker's separate seal handler.
+Its startup metadata check is not a Backend-readiness check: Fabric has no
+global `status {}` operation, and startup must not invent an Attempt to probe.
+Actual calls authenticate the fixed Unix peer before sending their payload.
+Existing Worker Broker documents, startup probing and sealing stay unchanged.
+
+The loader selects the existing Linux installer namespace `/etc/mastermind-executive`
+and `/run` on Linux. The new macOS Fabric target requires the canonical
+`/private/var/run/mastermind-executive` namespace; the existing worker-broker
+keeps its `/var/run` default and digest. Symlink/ownership guards are unchanged.
+It never searches the
+other platform namespace after refusal. The transport preserves EFFECT_UNKNOWN
+if its pinned trust source changes after a modifying request has been sent.
+
+These are installed-input contracts, not enrolled values. No endpoint,
+certificate, worker generation, credential realm, binary/canary/isolation
+attestation or selected profile is supplied by this source change. The finite
+profile and `fabric_bridge_armed` remain disabled. The real Backend composition,
+post-exec START, collection and assignment revocation must qualify before an
+existing installation owner selects these inputs and before a live native
+same-parent acceptance can be claimed.
+
+The remote client preserves the optional exactly-once Runtime generation binding.
+A synchronous call inside a running loop reports the existing no-effect transport
+error. A cancelled modifying transport await retains `EFFECT_UNKNOWN`, because
+cancellation does not establish whether the original command was already sent.

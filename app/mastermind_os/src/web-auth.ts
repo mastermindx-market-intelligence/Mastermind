@@ -20,6 +20,7 @@ import {
 } from "./public-config";
 import { normalizeSelection, normalizeWorkspaceSelection } from "./mission";
 import { normalizeResultSelection, RESULT_HTTP_BODY_BYTES } from "./result";
+import type { ExecutiveSessionTransport } from "./orchestration/executive-session-command-port";
 import type { AuthState, RawClient } from "./host";
 export type { AuthState } from "./host";
 export interface WebPopup {
@@ -547,11 +548,15 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       signal.removeEventListener("abort", onAbort);
     }
   }
-  async function executivePost(route: "context" | "submit" | "status", arguments_: unknown, signal: AbortSignal) {
+  async function executivePost(
+    route: "context" | "submit" | "status" | "session/context" | "session/send" | "session/reply",
+    arguments_: unknown,
+    signal: AbortSignal,
+  ) {
     const token = tokens.executive, ticket = executiveGeneration;
     if (!configured || !executiveResource || !token || !valid("executive"))
       throw new Error("EXECUTIVE_AUTH_REQUIRED");
-    const body = JSON.stringify(route === "context" ? {} : { arguments: arguments_ });
+    const body = JSON.stringify(route === "context" ? {} : route === "session/context" ? arguments_ : { arguments: arguments_ });
     if (new TextEncoder().encode(body).length > 65_536) throw new Error("EXECUTIVE_INPUT_TOO_LARGE");
     const controller = new AbortController();
     const abort = () => controller.abort();
@@ -598,6 +603,29 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       submit: (arguments_, signal) => executivePost("submit", arguments_, signal),
       status: (arguments_, signal) => executivePost("status", { intent_id: arguments_.intent_id }, signal),
     },
+    /**
+     * Fixed selected-session continuation transport over the same private
+     * Executive bearer. Three fixed POST routes only; the selection is
+     * normalized before any call and the exact argument shapes are passed
+     * through verbatim. Without Executive configuration or a valid Executive
+     * token this reports unavailable and executivePost sends no request.
+     */
+    executiveSession: {
+      authGeneration: () => executiveGeneration,
+      available: () => configured && executiveResource !== null && valid("executive"),
+      subscribe(listener) { executiveListeners.add(listener); return () => { executiveListeners.delete(listener); }; },
+      context: (selection, signal) => {
+        const normalized = normalizeSelection(selection);
+        if (!normalized) return Promise.reject(new Error("SELECTION_INVALID"));
+        return executivePost(
+          "session/context",
+          { selection: { work_ref: normalized.workRef, root_job_id: normalized.rootJobId } },
+          signal,
+        );
+      },
+      send: (arguments_, signal) => executivePost("session/send", arguments_, signal),
+      reply: (arguments_, signal) => executivePost("session/reply", arguments_, signal),
+    } satisfies ExecutiveSessionTransport,
     getState,
     subscribe(listener) {
       listeners.add(listener);

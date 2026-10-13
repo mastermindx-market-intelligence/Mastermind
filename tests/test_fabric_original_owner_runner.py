@@ -43,7 +43,8 @@ def runner(monkeypatch, tmp_path):
     src = tmp_path / 'remote_sub_exec.py'
     tree = ast.parse(patched(tmp_path, 'remote_sub_exec.py', 'EXECUTOR_SOURCE.json'))
     functions = [n for n in tree.body if isinstance(n, ast.FunctionDef)
-                 and n.name in {'_run_lease_process', '_run_reserved_attended_under_lease'}]
+                 and n.name in {'_run_lease_process', '_run_reserved_attended_under_lease',
+                                '_prepare_reserved_attended_under_lease', '_retain_original_cleanup_hold'}]
     ns = dict(json=json, Path=Path, install_signal_cleanup=lambda **kw: None,
               run_owned_process=lr.run_owned_process, OwnedProcessStartError=lr.OwnedProcessStartError,
               cleanup_receipt_is_proven=lr.cleanup_receipt_is_proven)
