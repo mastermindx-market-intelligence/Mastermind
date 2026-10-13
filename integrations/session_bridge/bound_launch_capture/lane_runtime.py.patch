@@ -2,7 +2,7 @@
 +++ b/lane_runtime.py
 @@ -9,6 +9,9 @@
  from __future__ import annotations
-
+ 
  import atexit
 +import asyncio
 +import ctypes
@@ -16,11 +16,11 @@
      stderr_truncated: bool = False
 +    owned_capture: dict[str, Any] | None = None
 +    structured_result: dict[str, Any] | None = None
-
+ 
      @property
      def cleanup_proven(self) -> bool:
 @@ -508,17 +513,23 @@
-
+ 
          if time.monotonic() >= deadline:
              return "timeout"
 -        members, identity_ok = _verified_group_members(expected_pgid)
@@ -51,8 +51,8 @@
 +            return "completed"
 +        raise ProcessCensusError("process_group_census_empty_while_leader_live")
 +    return None
-
-
+ 
+ 
  def cleanup_receipt_is_proven(value: Mapping[str, Any]) -> bool:
 @@ -597,7 +608,9 @@
      def direct_only() -> dict[str, Any]:
@@ -78,8 +78,8 @@
          receipt["residual_count"] = len(residual)
 @@ -805,13 +820,856 @@
      _fsync_parent(path)
-
-
+ 
+ 
 +# --- owned private file capture (opt-in) ------------------------------------
 +# Fixed bounded stdout/stderr/result file capture for ONE owned process of the
 +# original runner.  This is capture mechanics on the same original handle, not
@@ -923,7 +923,7 @@
 +
  class _BoundedStreamCollector:
      """Drain one child pipe without allowing output volume to grow storage."""
-
+ 
 -    def __init__(self, stream: Any, limit_bytes: int, name: str):
 +    def __init__(self, stream: Any, limit_bytes: int, name: str,
 +                 capture_file: "_OwnedCaptureFile | None" = None):
@@ -971,7 +971,7 @@
 +            "overcap": state["overcap"],
 +            "error_code": state["error_code"],
 +        }
-
+ 
      def finish(self, wait_seconds: float) -> tuple[str, int, bool, bool, str | None]:
          self._thread.join(max(0.0, wait_seconds))
 @@ -929,6 +1813,9 @@
@@ -1005,8 +1005,8 @@
          cleanup["status"] = "output_capture_unproven"
 @@ -958,8 +1855,236 @@
      return None
-
-
+ 
+ 
 -def run_owned_process(
 +
 +LAUNCH_RECEIPT_SCHEMA = "mastermind.local_owned_process_launch.v1"
@@ -1428,7 +1428,7 @@
 +            capture_reservation.close_fds_only()
 +            capture_reservation = None
          raise
-
+ 
 -    stdout_collector = _BoundedStreamCollector(
 -        proc.stdout, int(capture_limit_bytes), "stdout"
 -    )
@@ -1447,7 +1447,7 @@
 -            _clear_current(proc)
 -            raise LaneRuntimeError("owned_stdin_stream_missing")
 -        stdin_thread, stdin_state = _start_input_writer(proc.stdin, input_bytes)
-
+ 
      timed_out = False
      cleanup: dict[str, Any] = {
 @@ -1084,7 +2277,55 @@
@@ -2052,6 +2052,168 @@
 +) -> OwnedProcessResult:
 +    owner = _begin_owned_process(command, _main_thread=False, cwd=cwd, timeout=timeout, input_text=input_text, shell=shell, env=env, nice=nice, terminate_grace=terminate_grace, label=label, receipt_path=receipt_path, timeout_returncode=timeout_returncode, capture_limit_bytes=capture_limit_bytes, receipt_diagnostics=receipt_diagnostics, launch_receipt_path=launch_receipt_path, launch_receipt_metadata=launch_receipt_metadata, launch_receipt_context_sha256=launch_receipt_context_sha256, owned_capture_run_dir=owned_capture_run_dir, owned_capture_result_schema_json=owned_capture_result_schema_json, owned_capture_assignment=owned_capture_assignment)
 +    return finish_owned_process(owner)
-
+ 
  def _read_marker(fd: int) -> str:
      os.lseek(fd, 0, os.SEEK_SET)
+@@ -1576,6 +3321,20 @@
+     return None
+ 
+ 
++@dataclass(frozen=True)
++class LaneReleaseReceipt:
++    """Original physical release observation, never assignment/ACK authority."""
++    schema: str
++    key: str
++    marker_device: int
++    marker_inode: int
++    parent_device: int
++    parent_inode: int
++    released_at: str
++    marker_absent: bool
++    parent_synced: bool
++
++
+ class LaneLease:
+     def __init__(self, path: Path, fd: int, snapshot: HostAdmissionSnapshot,
+                  reconciliation_binding: Mapping[str, Any] | None = None):
+@@ -1589,6 +3348,29 @@
+         self._preserve = False
+         self._reconciliation_binding = dict(reconciliation_binding or {})
+         self._hold_replaced = False
++        self._assignment_release_attempted = False
++        self._assignment_release_receipt = None
++        self._assignment_release_lock_fd = None
++        self._assignment_release_parent_fd = None
++        self._assignment_release_failure = None
++        self._assignment_owner_pid = os.getpid()
++        self._assignment_owner_thread = threading.get_ident()
++        # Optional observation only: constructing an ordinary legacy lease
++        # keeps its old behavior. The finite release requires these preimages.
++        self._assignment_parent_identity = None
++        self._assignment_admission_identity = None
++        try:
++            parent = path.parent.lstat()
++            lock = (path.parent / ".admission.lock").lstat()
++            if stat.S_ISDIR(parent.st_mode) and stat.S_ISREG(lock.st_mode):
++                self._assignment_parent_identity = (
++                    parent.st_dev, parent.st_ino, parent.st_uid, parent.st_gid,
++                    stat.S_IMODE(parent.st_mode))
++                self._assignment_admission_identity = (
++                    lock.st_dev, lock.st_ino, lock.st_uid, lock.st_gid,
++                    stat.S_IMODE(lock.st_mode))
++        except OSError:
++            pass
+         atexit.register(self.release)
+ 
+     @classmethod
+@@ -1930,6 +3712,110 @@
+             if marker_fd is not None: os.close(marker_fd)
+             fcntl.flock(lock_fd, fcntl.LOCK_UN);os.close(lock_fd)
+ 
++    def release_after_assignment_ack(self) -> LaneReleaseReceipt:
++        """Once-only physical release after the original owner verified its ACK.
++
++        This method does NOT validate or mint an ACK. The Backend owns that
++        separate authenticated evidence and may free its slot only after this
++        actual observation returns. Legacy release remains unchanged. Unknown
++        unlink/durability keeps the existing admission lock and descriptors,
++        never recreates a missing marker or supplies restart reconciliation.
++        """
++        if (self._released or self._preserve or self.fd is None
++                or self._assignment_release_attempted):
++            raise LaneRuntimeError("lane_assignment_release_not_fresh")
++        self._assignment_release_attempted = True
++        directory_fd = admission_fd = None
++        effect_possible = False
++        def directory_identity(info):
++            return (info.st_dev, info.st_ino, info.st_uid, info.st_gid,
++                    stat.S_IMODE(info.st_mode))
++        try:
++            if (os.getpid() != self._assignment_owner_pid
++                    or threading.get_ident() != self._assignment_owner_thread
++                    or not self._reconciliation_binding
++                    or self._reconciliation_binding.get("reconcile_unreleased") is not True
++                    or self._reconciliation_binding.get("pid") != os.getpid()
++                    or self._reconciliation_binding.get("key") != self.path.name
++                    or not self.path.is_absolute()
++                    or self._assignment_parent_identity is None
++                    or self._assignment_admission_identity is None):
++                raise LaneRuntimeError("lane_assignment_release_owner_unqualified")
++            directory_fd = os.open(self.path.parent, os.O_RDONLY
++                | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0))
++            parent = os.fstat(directory_fd)
++            if (not stat.S_ISDIR(parent.st_mode)
++                    or directory_identity(parent) != self._assignment_parent_identity
++                    or directory_identity(self.path.parent.lstat()) != self._assignment_parent_identity):
++                raise LaneRuntimeError("lane_assignment_release_parent_changed")
++            admission_fd = os.open(".admission.lock", os.O_RDWR
++                | getattr(os, "O_NOFOLLOW", 0), dir_fd=directory_fd)
++            lock = os.fstat(admission_fd)
++            if (not stat.S_ISREG(lock.st_mode) or lock.st_nlink != 1
++                    or directory_identity(lock) != self._assignment_admission_identity
++                    or directory_identity(os.stat(".admission.lock", dir_fd=directory_fd,
++                        follow_symlinks=False)) != self._assignment_admission_identity):
++                raise LaneRuntimeError("lane_assignment_release_lock_changed")
++            # Same existing physical admission lock; bounded refusal if another
++            # original admission is in progress, not a second queue or retry.
++            fcntl.flock(admission_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
++            opened = os.fstat(self.fd)
++            visible = os.stat(self.path.name, dir_fd=directory_fd, follow_symlinks=False)
++            expected = json.dumps(self._reconciliation_binding, sort_keys=True,
++                separators=(",", ":"), ensure_ascii=True).encode("utf-8")
++            if (not stat.S_ISREG(opened.st_mode) or not stat.S_ISREG(visible.st_mode)
++                    or opened.st_nlink != 1 or visible.st_nlink != 1
++                    or (opened.st_dev, opened.st_ino) != (self._device, self._inode)
++                    or directory_identity(opened) != directory_identity(visible)
++                    or opened.st_size != len(expected)
++                    or os.pread(self.fd, len(expected) + 1, 0) != expected
++                    or directory_identity(self.path.parent.lstat()) != self._assignment_parent_identity):
++                raise LaneRuntimeError("lane_assignment_release_marker_changed")
++            effect_possible = True
++            os.unlink(self.path.name, dir_fd=directory_fd)
++            os.fsync(directory_fd)
++            try:
++                os.stat(self.path.name, dir_fd=directory_fd, follow_symlinks=False)
++            except FileNotFoundError:
++                pass
++            else:
++                raise LaneRuntimeError("lane_assignment_release_marker_still_visible")
++            if (directory_identity(os.fstat(directory_fd)) != self._assignment_parent_identity
++                    or directory_identity(self.path.parent.lstat()) != self._assignment_parent_identity
++                    or directory_identity(os.stat(".admission.lock", dir_fd=directory_fd,
++                        follow_symlinks=False)) != self._assignment_admission_identity
++                    or os.fstat(self.fd).st_nlink != 0):
++                raise LaneRuntimeError("lane_assignment_release_readback_changed")
++            fd = self.fd
++            self.fd = None
++            os.close(fd)
++            value = LaneReleaseReceipt("mastermind.lane.owned_release/v1", self.path.name,
++                self._device, self._inode, parent.st_dev, parent.st_ino, _utc_now(), True, True)
++            # Keep admission excluded until the entire physical observation is
++            # complete. A close failure is uncertainty, never a success receipt.
++            os.close(directory_fd)
++            directory_fd = None
++            os.close(admission_fd)
++            admission_fd = None
++            self._assignment_release_receipt = value
++            self._released = True
++            return value
++        except BaseException as exc:
++            self._preserve = True
++            self._assignment_release_failure = type(exc).__name__
++            if effect_possible:
++                self._assignment_release_lock_fd = admission_fd
++                self._assignment_release_parent_fd = directory_fd
++                admission_fd = directory_fd = None
++            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
++                raise
++            raise LaneRuntimeError("lane_assignment_release_unknown") from exc
++        finally:
++            if admission_fd is not None:
++                os.close(admission_fd)
++            if directory_fd is not None:
++                os.close(directory_fd)
++
+     def release(self) -> None:
+         if self._released:
+             return
