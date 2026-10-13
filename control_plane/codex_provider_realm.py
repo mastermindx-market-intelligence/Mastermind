@@ -871,10 +871,12 @@ def _observe_attended_claude_binary(config, gid):
         with _native_open(receipt) as (_, info), _native_open(binary):
             if info.st_gid != gid or stat.S_IMODE(info.st_mode) != 0o440:
                 _native_refuse()
-            _assert_binary_unchanged(BinaryAttestation(**values))
+            attestation = BinaryAttestation(**values)
+            _assert_binary_unchanged(attestation)
     except (OSError, BinaryAttestationError):
         raise ProviderRealmError("SUBSCRIPTION_REALM_UNAVAILABLE") from None
     _native_read_config(receipt, digest)
+    return attestation
 
 
 @dataclasses.dataclass(frozen=True, repr=False)
