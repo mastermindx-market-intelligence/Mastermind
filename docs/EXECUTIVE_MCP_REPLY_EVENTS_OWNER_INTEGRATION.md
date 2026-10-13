@@ -24,7 +24,7 @@ The SDK currently installed for legacy Executive MCP on M2 rejected modern `2026
 
 ## Mandatory existing-owner implementation before arming
 
-The missing `OriginalReplySubscriptionOwner` is a **canonical Executive extension**, not a new subscription service in the Web session. The existing Runtime schema v5 is protected against generic live migrations; do **not** add an ad-hoc SQLite table or append callback secrets to Agent OS/Dialogue/Slack. A real approved subscription/credential persistence capability is required before production arming; source fixtures may use private temporary records but prove no durable production grant.
+The `OriginalReplySubscriptionOwner` remains a **canonical Executive extension**, not a new subscription service in the Web session. A concrete Runtime-event implementation now exists in `integrations/session_bridge/runtime_reply_subscriptions.py`; it requires an explicitly host-provisioned at-rest key and is not installed or armed by source publication. The existing Runtime schema v5 is protected against generic live migrations; do **not** add an ad-hoc SQLite table or append callback secrets to Agent OS/Dialogue/Slack. A real approved subscription/credential persistence capability is required before production arming; source fixtures may use private temporary records but prove no durable production grant.
 
 The existing owner must:
 1. Verify the *current authenticated principal*, original request, exact session/parent, and `session_reply_read` grant on each discovery, subscribe, unsubscribe, refresh and send. The user-supplied `request_ref`, callback URL, event fields and subscription ID confer **no** authority on their own.
@@ -57,14 +57,14 @@ No generic Chrome extension, alternate callback database, parallel Job lifecycle
 `integrations/session_bridge/web_reply_subscription_owner.py` is an optional adapter implementing the existing `OriginalReplySubscriptionOwner` protocol **only when** an incumbent authenticated host explicitly injects all three capabilities:
 
 - A trusted current original-request resolver yielding `OriginalReplyGrant` (account principal digest, exact request/read reference, generation, expiration, current permission).
-- The incumbent durable + encrypted subscription store with atomic `commit`, `read`, and `remove` operations. The store's `StoredReplySubscription` receipt exposes only keyed metadata and SHA-256 digests. **There is no implementation of this store in this source slice.**
+- The incumbent durable + encrypted subscription store with atomic `commit`, `read`, and `remove` operations. The store's `StoredReplySubscription` receipt exposes only keyed metadata and SHA-256 digests. The concrete `RuntimeReplySubscriptionStore` supplies versioned Runtime-event CAS and AES-GCM sealed URL/signing-key custody when its host explicitly provides the storage key. Source fixture proof does not qualify installed key custody.
 - A host-owned, bounded HTTPS challenge sender that returns an observed response. The adapter creates a fresh single-use challenge and checks exact signed echo; it does not own transport retries or credentials.
 
 The opt-in flag defaults to **disabled**. The subscription identifier is deterministic by owner principal, event name, original request and callback URL, without becoming an authorization token. A successful callback is followed by a second current-grant check, a single atomic existing-store commit, readback, and a final current-grant check. A missing/changed result or lost post-commit acknowledgment is `EFFECT_UNKNOWN`, not a green subscription or permission to dispatch another attempt.
 
 A recently verified callback can be reused for a short, fixed window **only from the incumbent store's readback** when owner, original request, URL, signing-key digest, current revision, and grant expiry all still agree. Reusing cached verification does not refresh its original verification timestamp. A new/rotated secret, changed generation, expired proof or changed callback URL requires a new verification, not an implicit trust upgrade.
 
-Tests use an in-memory **fake** store; no new file, secret database, HTTP endpoint, production grant, Worker, Runtime migration, or service setting was added. Production stays gated on a reviewed current-store implementation, exact-installed host selection and a real Work/dot callback receipt.
+Adapter tests use an in-memory **fake** store; concrete store tests use disposable real Runtime databases and synthetic storage keys. No production grant, key provision, HTTP endpoint, Worker, Runtime migration, or service setting was added. Production stays gated on installed key custody, exact host selection and a real Work/dot callback receipt. See `docs/EXECUTIVE_REPLY_SUBSCRIPTION_STORAGE.md` for the closed CAS/private-payload and installation contract.
 
 
 ## Inert original-request owner adapter (same PR, no new state plane)
@@ -72,14 +72,14 @@ Tests use an in-memory **fake** store; no new file, secret database, HTTP endpoi
 `integrations/session_bridge/web_reply_subscription_owner.py` is an optional adapter implementing the existing `OriginalReplySubscriptionOwner` protocol **only when** an incumbent authenticated host explicitly injects all three capabilities:
 
 - A trusted current original-request resolver yielding `OriginalReplyGrant` (account principal digest, exact request/read reference, generation, expiration, current permission).
-- The incumbent durable + encrypted subscription store with atomic `commit`, `read`, and `remove` operations. The store's `StoredReplySubscription` receipt exposes only keyed metadata and SHA-256 digests. **There is no implementation of this store in this source slice.**
+- The incumbent durable + encrypted subscription store with atomic `commit`, `read`, and `remove` operations. The store's `StoredReplySubscription` receipt exposes only keyed metadata and SHA-256 digests. The concrete `RuntimeReplySubscriptionStore` supplies versioned Runtime-event CAS and AES-GCM sealed URL/signing-key custody when its host explicitly provides the storage key. Source fixture proof does not qualify installed key custody.
 - A host-owned, bounded HTTPS challenge sender that returns an observed response. The adapter creates a fresh single-use challenge and checks exact signed echo; it does not own transport retries or credentials.
 
 The opt-in flag defaults to **disabled**. The subscription identifier is deterministic by owner principal, event name, original request and callback URL, without becoming an authorization token. A successful callback is followed by a second current-grant check, a single atomic existing-store commit, readback, and a final current-grant check. A missing/changed result or lost post-commit acknowledgment is `EFFECT_UNKNOWN`, not a green subscription or permission to dispatch another attempt.
 
 A recently verified callback can be reused for a short, fixed window **only from the incumbent store's readback** when owner, original request, URL, signing-key digest, current revision, and grant expiry all still agree. Reusing cached verification does not refresh its original verification timestamp. A new/rotated secret, changed generation, expired proof or changed callback URL requires a new verification, not an implicit trust upgrade.
 
-Tests use an in-memory **fake** store; no new file, secret database, HTTP endpoint, production grant, Worker, Runtime migration, or service setting was added. Production stays gated on a reviewed current-store implementation, exact-installed host selection and a real Work/dot callback receipt.
+Adapter tests use an in-memory **fake** store; concrete store tests use disposable real Runtime databases and synthetic storage keys. No production grant, key provision, HTTP endpoint, Worker, Runtime migration, or service setting was added. Production stays gated on installed key custody, exact host selection and a real Work/dot callback receipt. See `docs/EXECUTIVE_REPLY_SUBSCRIPTION_STORAGE.md` for the closed CAS/private-payload and installation contract.
 
 
 ### Same-operation lost acknowledgment and idempotent refresh

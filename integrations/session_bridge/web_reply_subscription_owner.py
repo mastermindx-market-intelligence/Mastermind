@@ -47,6 +47,10 @@ class SubscriptionUnavailable(ValueError):
     """Original-request authorization or required local capability is absent."""
 
 
+class SubscriptionConflict(SubscriptionUnavailable):
+    """Known pre-write CAS conflict; no replacement is authorized."""
+
+
 class SubscriptionEffectUnknown(RuntimeError):
     """A callback or durable effect may have happened; same owner must reconcile."""
 
@@ -84,6 +88,13 @@ class StoredReplySubscription:
     schema: str=SCHEMA
 
 
+@dataclasses.dataclass(frozen=True,slots=True)
+class SubscriptionSnapshot:
+    record: StoredReplySubscription | None
+    version: str
+    binding: tuple[str,str,str] | None
+
+
 class OriginalRequestResolver(Protocol):
     async def resolve(self, principal: NeutralPrincipalProjection,
                       request_ref: str) -> OriginalReplyGrant: ...
@@ -96,10 +107,14 @@ class CanonicalSubscriptionStore(Protocol):
     transactions to subscription_id/owner_key; commit must be atomic and
     idempotent. An async return is not enough: readback is required.
     """
+    async def snapshot(self, subscription_id: str) -> SubscriptionSnapshot: ...
     async def commit(self, record: StoredReplySubscription,
-                     signing_secret: str) -> StoredReplySubscription: ...
+                     signing_secret: str, *, callback_url: str,
+                     expected_version: str) -> StoredReplySubscription: ...
     async def read(self, subscription_id: str) -> StoredReplySubscription | None: ...
-    async def remove(self, subscription_id: str, owner_key: str) -> None: ...
+    async def remove(self, subscription_id: str, owner_key: str, *,
+                     request_ref: str, callback_url_digest: str,
+                     expected_version: str) -> None: ...
 
 
 class ChallengeSender(Protocol):
@@ -168,6 +183,7 @@ class OriginalReplySubscriptionAdapter:
         if (not callable(getattr(resolver,"resolve",None))
                 or not callable(getattr(storage,"commit",None))
                 or not callable(getattr(storage,"read",None))
+                or not callable(getattr(storage,"snapshot",None))
                 or not callable(getattr(storage,"remove",None))
                 or not callable(getattr(challenge_sender,"verify",None))
                 or not callable(clock) or type(enabled) is not bool):
@@ -230,7 +246,10 @@ class OriginalReplySubscriptionAdapter:
         # new cache, in-memory registry or invented owner. The stored proof
         # remains tied to account, original request, URL, secret and generation.
         try:
-            prior=await self._store.read(subscription_id)
+            before_snapshot=await self._store.snapshot(subscription_id)
+            if type(before_snapshot) is not SubscriptionSnapshot or type(before_snapshot.version) is not str:
+                raise ValueError("canonical subscription snapshot required")
+            prior=before_snapshot.record
         except Exception:
             raise SubscriptionUnavailable("current subscription read unavailable") from None
         if prior is not None and (
@@ -302,15 +321,21 @@ class OriginalReplySubscriptionAdapter:
             # Reconcile the SAME exact durable fact twice and return without
             # issuing a duplicate mutation, challenge or new operation.
             try:
-                current_again=await self._store.read(subscription_id)
+                current_snapshot=await self._store.snapshot(subscription_id)
+                current_again=current_snapshot.record
+                if current_snapshot.version != before_snapshot.version:
+                    raise ValueError("subscription version changed")
             except Exception:
                 raise SubscriptionEffectUnknown("original committed subscription readback unknown") from None
             if not _current_store_readback(current_again,record):
                 raise SubscriptionEffectUnknown("original committed subscription changed")
             return EventSubscriptionReceipt(subscription_id,expires,True,True,True)
         try:
-            written=await self._store.commit(record,requested.signing_secret)
+            written=await self._store.commit(record,requested.signing_secret,
+                callback_url=url,expected_version=before_snapshot.version)
             current=await self._store.read(subscription_id)
+        except SubscriptionConflict:
+            raise
         except BaseException as exc:
             if isinstance(exc,(KeyboardInterrupt,SystemExit)):
                 raise
@@ -343,14 +368,20 @@ class OriginalReplySubscriptionAdapter:
             raise SubscriptionUnavailable("invalid original unsubscribe")
         try:
             url=_callback_url(requested.callback_url)
-            _current_grant(await self._resolver.resolve(
-                principal,requested.request_ref),key,requested.request_ref,now)
         except Exception:
             raise SubscriptionUnavailable("original unsubscribe authority unavailable") from None
         subscription_id=_subscription_id(key,requested.request_ref,url)
         try:
-            await self._store.remove(subscription_id,key)
+            snapshot=await self._store.snapshot(subscription_id)
+            if type(snapshot) is not SubscriptionSnapshot:
+                raise ValueError("canonical subscription snapshot required")
+            if snapshot.binding is not None and snapshot.binding != (key,requested.request_ref,_digest(url)):
+                raise SubscriptionUnavailable("foreign subscription")
+            await self._store.remove(subscription_id,key,request_ref=requested.request_ref,
+                callback_url_digest=_digest(url),expected_version=snapshot.version)
             remaining=await self._store.read(subscription_id)
+        except SubscriptionConflict:
+            raise
         except BaseException as exc:
             if isinstance(exc,(KeyboardInterrupt,SystemExit)):
                 raise
@@ -360,7 +391,7 @@ class OriginalReplySubscriptionAdapter:
         return EventUnsubscribeReceipt(stopped=True,committed=True)
 
 
-__all__=["SubscriptionUnavailable","SubscriptionEffectUnknown",
+__all__=["SubscriptionUnavailable","SubscriptionEffectUnknown","SubscriptionConflict","SubscriptionSnapshot",
          "OriginalReplyGrant","VerifiedChallengeHTTP",
          "StoredReplySubscription","OriginalRequestResolver",
          "CanonicalSubscriptionStore","ChallengeSender","owner_key",

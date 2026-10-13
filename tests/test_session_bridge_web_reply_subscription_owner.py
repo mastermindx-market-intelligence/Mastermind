@@ -65,10 +65,22 @@ class ExistingStore:
         self.calls=[]
         self.lock=asyncio.Lock()
         self.after_write=None
-    async def commit(self, record, secret):
+        self.versions={}
+        self.bindings={}
+    async def snapshot(self, subscription_id):
+        row=await self.read(subscription_id)
+        return api().SubscriptionSnapshot(row,self.versions.get(subscription_id,"empty"),self.bindings.get(subscription_id))
+    async def commit(self, record, secret, **kwargs):
         self.calls.append(("commit", record.subscription_id))
         assert type(secret) is str and secret.startswith("whsec_")
         assert secret not in repr(record)
+        if self.rows.get(record.subscription_id)==record:
+            return record
+        if kwargs["expected_version"] != self.versions.get(record.subscription_id,"empty"):
+            raise api().SubscriptionConflict("stale subscription")
+        assert hashlib.sha256(kwargs["callback_url"].encode()).hexdigest()==record.callback_url_digest
+        self.versions[record.subscription_id]="version-"+str(len(self.calls))
+        self.bindings[record.subscription_id]=(record.owner_key,record.request_ref,record.callback_url_digest)
         self.rows[record.subscription_id]=record
         if self.after_write:
             raise self.after_write
@@ -76,11 +88,15 @@ class ExistingStore:
     async def read(self, subscription_id):
         self.calls.append(("read",subscription_id))
         return self.rows.get(subscription_id)
-    async def remove(self, subscription_id, owner_key):
+    async def remove(self, subscription_id, owner_key, **kwargs):
         self.calls.append(("remove",subscription_id))
         row=self.rows.get(subscription_id)
         if row is not None and row.owner_key!=owner_key:
             raise ValueError("FOREIGN_ACCOUNT")
+        if kwargs["expected_version"] != self.versions.get(subscription_id,"empty"):
+            raise api().SubscriptionConflict("stale subscription")
+        self.versions[subscription_id]="version-"+str(len(self.calls))
+        self.bindings[subscription_id]=(owner_key,kwargs["request_ref"],kwargs["callback_url_digest"])
         self.rows.pop(subscription_id,None)
 
 
@@ -247,7 +263,7 @@ def test_unsubscribe_is_idempotent_but_requires_same_original_owner():
 
 def test_revoke_after_commit_not_proven_if_readback_still_exists():
     class UnremovedStore(ExistingStore):
-        async def remove(self,subscription_id,owner_key):
+        async def remove(self,subscription_id,owner_key, **kwargs):
             self.calls.append(("remove",subscription_id))
     store=UnremovedStore()
     a,_,_,_=owner(store=store)
@@ -352,8 +368,8 @@ def test_durable_readback_mismatch_retains_effect_unknown_not_success():
 
 def test_unsubscribe_keeps_effect_unknown_on_lost_remove_ack():
     class RemovalLostAck(ExistingStore):
-        async def remove(self,subscription_id,owner_key):
-            await super().remove(subscription_id,owner_key)
+        async def remove(self,subscription_id,owner_key, **kwargs):
+            await super().remove(subscription_id,owner_key, **kwargs)
             raise OSError("connection lost after tombstone commit")
     adapter,store,_,cb=owner(store=RemovalLostAck())
     run(adapter.subscribe(principal(),subscribe()))
@@ -426,8 +442,8 @@ def test_same_owner_refuses_mismatched_store_identity_before_using_cached_callba
 def test_expired_token_during_committed_write_never_reports_accepted_subscription():
     now=[NOW]
     class SlowCommittedStore(ExistingStore):
-        async def commit(self,record,secret):
-            result=await super().commit(record,secret)
+        async def commit(self,record,secret, **kwargs):
+            result=await super().commit(record,secret, **kwargs)
             now[0]=NOW+110
             return result
     store=SlowCommittedStore()
@@ -442,8 +458,8 @@ def test_expired_token_during_committed_write_never_reports_accepted_subscriptio
 def test_revoked_request_after_commit_cannot_be_promoted_to_completed_grant():
     access=Access()
     class RevokingOnCommit(ExistingStore):
-        async def commit(self,record,secret):
-            result=await super().commit(record,secret)
+        async def commit(self,record,secret, **kwargs):
+            result=await super().commit(record,secret, **kwargs)
             access.active=False
             return result
     store=RevokingOnCommit()
@@ -468,3 +484,14 @@ def test_lost_commit_ack_reconciles_existing_exact_record_without_replay():
     assert len(store.rows)==1
     assert [x[0] for x in store.calls].count("commit")==1
     assert len(callback.calls)==1
+
+
+def test_owned_unsubscribe_survives_writer_retirement_but_not_expired_principal():
+    adapter, store, access, _ = owner()
+    run(adapter.subscribe(principal(),subscribe()))
+    access.active=False
+    calls=len(access.calls)
+    assert run(adapter.unsubscribe(principal(),unsubscribe())).stopped is True
+    assert len(access.calls)==calls and not store.rows
+    with pytest.raises(api().SubscriptionUnavailable):
+        run(adapter.unsubscribe(dataclasses.replace(principal(),expires_at=NOW),unsubscribe()))
