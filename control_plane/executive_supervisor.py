@@ -3067,9 +3067,15 @@ class ExecutiveSupervisor:
             )
         sweep_reader = getattr(self.adapter, "uid_sweep_receipt", None)
         if self.cleanup_policy is CleanupPolicy.FABRIC_PROCESS_GROUP:
-            payload["fabric_cleanup"] = self._fabric_cleanup_evidence(
-                active.process_ref, active.lease.attempt, operation="validation"
-            )
+            commands = (active.effective_grant["validation_argv"]
+                if active.effective_grant is not None
+                else self._job(active.lease.attempt.job_id).validation_commands)
+            if commands:
+                payload["fabric_cleanup"] = self._fabric_cleanup_evidence(
+                    active.process_ref, active.lease.attempt, operation="validation"
+                )
+            elif receipts:
+                raise SupervisorError("unassigned validation receipts are invalid")
         elif callable(sweep_reader):
             payload["uid_sweep"] = _jsonable(sweep_reader(active.process_ref))
         elif self.require_complete_launch_attestation:
@@ -3102,8 +3108,9 @@ class ExecutiveSupervisor:
             ):
                 break
         persisted = tuple(receipts)
-        self._retain_unqualified_fabric_evidence(active, kind="validation", evidence=persisted)
-        await self._prepare_fabric_cleanup(active, operation="validation")
+        if validation_commands:
+            self._retain_unqualified_fabric_evidence(active, kind="validation", evidence=persisted)
+            await self._prepare_fabric_cleanup(active, operation="validation")
         await self._prepare_fabric_cleanup(active, operation="terminal")
         path = self._persist_validations(active, persisted)
         if len(persisted) != len(validation_commands):
