@@ -326,3 +326,58 @@ def test_admitted_callback_error_is_not_relabelled_as_native_job_failure():
         assert calls==["read-ref-001"] and owner._service_state=="READY"
 
     asyncio.run(scenario())
+
+
+def test_legacy_native_host_without_optional_reply_event_field_is_noop():
+    """Pre-event enabled ceo ingress bindings have no reply_event_provider_factory."""
+    from common.reply_subscription_private_contract import ReplyEventCommitConsumer
+
+    class ExistingLegacyHost:
+        _closing=False
+        _service_state="READY"
+        _physical_workers=set()
+        _company_consultation_host=SimpleNamespace(reply_event_consumer=None)
+        # The installed native-host fixture retains a legacy App binding.
+        _ceo_ingress_app_binding=SimpleNamespace(
+            armed=True,session_bridge_provider_factory=lambda runtime:None)
+
+        def _require_runtime(self):
+            raise AssertionError("disabled notifier must not query Runtime")
+
+    host=ExistingLegacyHost()
+    ExecutiveControlService._schedule_native_reply_events(
+        host,"fixture-read",{"message_key":"canonical-fixture"})
+    assert not host._physical_workers
+
+
+def test_malformed_optional_notifier_cannot_quarantine_committed_legacy_job():
+    class LegacyHost:
+        _closing=False
+        _service_state="READY"
+        _physical_workers=set()
+        _company_consultation_host=SimpleNamespace(reply_event_consumer=None)
+        _ceo_ingress_app_binding=SimpleNamespace(armed=True)
+
+        def _require_runtime(self):
+            raise AssertionError("no optional consumer")
+
+    ExecutiveControlService._schedule_native_reply_events(
+        LegacyHost(),"fixture-read",{"message_key":"canonical-fixture"})
+
+
+def test_legacy_direct_notifier_with_no_optional_provider_is_noop():
+    """Direct internal helper must also tolerate the installed legacy App view."""
+    class LegacyHost:
+        _closing=False
+        _service_state="READY"
+        _company_consultation_host=SimpleNamespace(reply_event_consumer=None)
+        _ceo_ingress_app_binding=SimpleNamespace(
+            armed=True,session_bridge_provider_factory=lambda _:None)
+
+        def _require_runtime(self):
+            raise AssertionError("unarmed optional notifier may not read Runtime")
+
+    asyncio.run(ExecutiveControlService._notify_native_reply_events(
+        LegacyHost(),"fixture-read",
+        {"reply_committed":True,"message_key":"canonical-fixture","fingerprint":"f"*64},
+    ))

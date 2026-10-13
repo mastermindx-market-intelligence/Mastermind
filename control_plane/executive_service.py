@@ -7041,8 +7041,9 @@ class ExecutiveControlService:
         host, app = self._company_consultation_host, self._ceo_ingress_app_binding
         consumer = getattr(host, "reply_event_consumer", None)
         if (self._closing or self._service_state not in {"READY", "AWAITING_CANARY"}
-                or app is None or not app.armed or app.reply_event_provider_factory is None
                 or type(consumer) is not ReplyEventCommitConsumer
+                or app is None or not getattr(app, "armed", False)
+                or getattr(app, "reply_event_provider_factory", None) is None
                 or type(read_ref) is not str or not read_ref
                 or type(committed_reply) is not dict
                 or committed_reply.get("reply_committed") is not True
@@ -7091,8 +7092,9 @@ class ExecutiveControlService:
         host, app = self._company_consultation_host, self._ceo_ingress_app_binding
         consumer = getattr(host,"reply_event_consumer",None)
         if (self._closing or self._service_state not in {"READY","AWAITING_CANARY"}
-                or app is None or not app.armed or app.reply_event_provider_factory is None
-                or type(consumer) is not ReplyEventCommitConsumer):
+                or type(consumer) is not ReplyEventCommitConsumer
+                or app is None or not getattr(app, "armed", False)
+                or getattr(app, "reply_event_provider_factory", None) is None):
             return
         try:
             if consumer.runtime is not self._require_runtime():
