@@ -2227,17 +2227,44 @@ def _service_from_config(
                     except ForegroundOperationRefusal as exc:
                         raise BridgeError(exc.code, exc.message) from None
 
-                    def require_summon_admission(_envelope=None):
+                    expectation = None
+
+                    def require_summon_session(_envelope=None):
                         require_session_admission(_envelope)
                         if operation is not None:
                             operation.require_arguments(payload)
+
+                    def require_summon_admission(_envelope=None):
+                        require_summon_session(_envelope)
+                        if operation is not None:
+                            try:
+                                if expectation is None:
+                                    raise ValueError("fresh foreground binding is unavailable")
+                                service._require_foreground_execution(expectation)
+                            except Exception:
+                                raise BridgeError("ingress_unavailable", "Executive admission is unavailable") from None
+
+                    def current_execution_binding():
+                        nonlocal expectation
+                        current = service._require_current_coo_binding()
+                        if operation is not None:
+                            # This callback is fresh-only. Durable duplicates
+                            # do not require renewed autonomy or current routing.
+                            if expectation is None:
+                                expectation = service._foreground_execution_state(binding=current)
+                            # Exact immutable request-local binding, including
+                            # queued-mode reasons, must survive fresh admission.
+                            if current != json.loads(expectation.binding):
+                                raise ValueError("foreground binding changed")
+                            return json.loads(expectation.binding)
+                        return current
 
                     request = dict(payload)
                     request_ref = ceo_request.app_request_ref(request.pop("operation_key"))
                     try:
                         observed = await session_ingress._observe_trusted_grounding(readers)
-                        require_summon_admission()
-                        async with service._foreground_cycle_scope(operation) as drive:
+                        require_summon_session()
+                        async with service._foreground_cycle_scope(operation):
                             receipt = await service._run_owned_coroutine(session_ingress.handle_frame(
                                 {"schema": session_ingress.SUBMIT_SCHEMA_V2,
                                  "request_ref": request_ref, "observed_grounding": observed,
@@ -2247,14 +2274,14 @@ def _service_from_config(
                                 service_state=service._service_state,
                                 ceo_ingress_armed=binding.armed,
                                 strict_v2_admission=True,
-                                execution_binding_provider=service._require_current_coo_binding,
+                                execution_binding_provider=current_execution_binding,
                                 dialogue_source_provider=commission_source_provider,
                                 admission_guard=require_summon_admission,
                                 fresh_admission_observer=(
                                     operation._bind_admitted_root if operation is not None else None
                                 ),
                             ))
-                            if drive and receipt.get("duplicate") is False:
+                            if expectation and receipt.get("duplicate") is False:
                                 try:
                                     operation.require_root(receipt["job_id"])
                                     completion = await service._drive_foreground_cycle(operation, receipt["job_id"])
@@ -2275,7 +2302,10 @@ def _service_from_config(
                     # After the mutation owner returns, drift cannot be described
                     # as a zero-effect refusal. The private transport preserves it.
                     try:
-                        require_summon_admission()
+                        if receipt.get("duplicate") is True:
+                            require_summon_session()
+                        else:
+                            require_summon_admission()
                     except (BridgeError, ForegroundOperationRefusal):
                         raise BridgeError("effect_unknown", "reconcile the original Executive operation") from None
                     return receipt
