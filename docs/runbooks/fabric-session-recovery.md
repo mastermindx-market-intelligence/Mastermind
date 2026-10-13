@@ -218,3 +218,19 @@ The real-owner recovery integration test is extended beyond "the replacement rec
 4. A duplicate canonical plan-admission command is replayed through the existing JobRegistry, which reconciles to the **same** child Job rather than creating another work item; exactly one `COO_PLAN_ADMITTED` event remains.
 
 This is stronger than merely retaining and relaying source bytes. Still, the provider/process is **simulated**, the original root is Executive's logical COO root, not a live ChatGPT Web session, and the predecessor uses the legacy release API. It does not prove full modern-stop quota correction, an authenticated Web parent wake, same-session model change, shared account budget or 30 real paid workers. No production dispatcher/service or native provider pool is modified.
+
+## Ubuntu0 host-admission diagnosis and regenerable cache cleanup (October 13)
+
+A fresh incumbent `pool hosts grok` read showed **all four Ubuntu worker hosts INELIGIBLE**, primarily because their actual disk headroom is below each existing reviewed `min_free_gb` threshold. Ubuntu0 is the narrowest gap: initially about 295.5 GiB free against **300 GiB required**, while its reachability, load, lane, thermal, memory, tools and IO-pressure checks passed. Mac M2 had sufficient disk but failed load; MacBook's grok route retained explicit-canary-only qualification and at one observation its lane ceiling was full. Broker-advertised Grok/model tokens or leases are therefore **not** independently deployable host slots.
+
+Original Fabric review request `fabric-session-recovery-wal-review-20261013-r1` returned NONE before launch; readback `NOT_FOUND`. No run was admitted and no retry/host selection override was attempted.
+
+Inspected Ubuntu0 using its existing configured SSH alias `mmx-ubuntu0`, read-only first. Its active source worktrees and current browser binaries were **preserved**. There were no processes referencing the standard package cache paths. Three ordinary regenerable package-cache cleanup operations were issued on the same original host carrier and returned success:
+
+- `npm cache clean --force` — npm content-addressable cache purged.
+- `uv cache clean` — 17,247 cached files, uv reported 615.8 MiB removed.
+- `python3 -m pip cache purge` — pip reported 384 cached files removed.
+
+The readback on Ubuntu0 and fresh incumbent `pool hosts grok` now reported roughly **297.6 GiB free**, still below the unmodified 300 GiB threshold. **No admission or provider run was attempted after cleanup**; root/host policy was not weakened or overridden. Remaining project-sized `/tmp/mm-lineage-work`, `/tmp/e05repair`, `/tmp/pr883-*` and installed Playwright/Puppeteer browsers retain uncertain or other-workstream custody and were not removed. No source, payment, worker lease or original native run was changed.
+
+A further approximate 2.4 GiB of positively safe headroom, plus transient usage margin, is needed to qualify Ubuntu0 **if all other incumbent criteria still pass at a fresh selection**. Another host remediation owner may address that condition, but this session will not delete recent/dirty workspaces or active tool caches merely to force an admission.
