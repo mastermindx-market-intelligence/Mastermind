@@ -171,6 +171,20 @@ def reviewed_literal_spans(path: str, source: str):
     """
     if type(source) is not str:
         return ()
+    # Independent scoped review of the fixed ten-minute telemetry age, not a UID.
+    # The complete production patch is pinned; a changed or duplicated site is
+    # fully visible to D8 again. Never derive this digest from current source.
+    if path == "integrations/session_bridge/glm_host_account_pairing/glm-host-account-pairing.patch":
+        expected = "55fdbca61880b8834dd33cd22a9263927c8dc36735dfde4d069461ab78dd9b66"
+        anchor = "+DEFAULT_MAX_AGE = 600"
+        if hashlib.sha256(source.encode()).hexdigest() != expected:
+            return ()
+        lines = source.splitlines()
+        sites = [i for i, line in enumerate(lines, 1) if line == anchor]
+        if len(sites) != 1:
+            return ()
+        start = anchor.index("600")
+        return ((sites[0], start, start + 3, "int"),)
     reviewed_container = None
     if path == REVIEWED_PATH:
         reviewed_anchors = REVIEWED_ANCHORS
