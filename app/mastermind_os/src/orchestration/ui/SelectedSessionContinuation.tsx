@@ -7,6 +7,7 @@ export {
   SESSION_TEXT_MAX_CODEPOINTS as MAX_CONDITION_CODEPOINTS,
   codePointLength,
 } from "../session-text-contract";
+import "./session-continuation.css";
 import type {
   OperationPointer,
   OperationState,
@@ -29,7 +30,41 @@ export type SessionContinuationOutcome =
   | { status: "accepted" }
   | { status: "refused" };
 
+type SessionLocale = "en" | "zh-CN";
+const STATIC_ZH: Record<string, string> = {
+  "Session continuation": "会话继续",
+  "Retained continuation": "保留的继续请求",
+  "Original message reference": "原消息引用",
+  "Its outcome is unresolved here; status recovery reads that exact original key only and never sends again.": "此处尚未确认结果；状态查询仅使用原操作键，不会再次发送。",
+  "Check status": "查看状态",
+  "Checking…": "正在查询…",
+  "Checking for a retained continuation…": "正在查找保留的继续请求…",
+  "Session continuation is unavailable for the exact selected mission.": "此项目暂时无法发送。",
+  "Technical details": "技术详情",
+  "Refresh session capability": "重新核验会话能力",
+  "Continuation target": "继续请求目标",
+  "Send capability": "发送能力",
+  "Exactly one verified target": "仅一个已核验目标",
+  "No verified target; nothing is guessed": "没有已核验目标；不会猜测",
+  "Stop control": "停止控制",
+  "Not offered — the completion condition is content, not cancel.": "不提供停止控制；完成条件是请求内容，不是取消命令。",
+  "Message committed.": "消息已提交。",
+  "Further activity has not been established by this receipt.": "此回执尚未证明后续活动。",
+  "This invocation was refused before any effect:": "本次请求在产生效果前被拒绝：",
+  "What would you like done?": "你希望完成什么？",
+  "How will we know it is done?": "达到什么条件才算完成？",
+  "Describe the change and its completion condition.": "请说明要做的事及完成条件。",
+  "Use 1–700 characters.": "请输入 1–700 个字符。",
+  "Sending…": "正在发送…",
+  "Send": "发送",
+  "The completion condition is captured once; it is not evaluated here and authorizes no stop.": "完成条件仅捕获一次；此处不判断是否达成，也不授权停止。",
+  "Continue this project’s verified session.": "继续此项目已验证的会话。",
+  "Outcome not yet established.": "结果尚未确认。"
+};
+function ui(locale: SessionLocale, text: string) { return locale === "zh-CN" ? STATIC_ZH[text] ?? text : text; }
+
 export interface SelectedSessionContinuationProps {
+  locale?: SessionLocale;
   /** Host-projected target ref when send is exactly capable; otherwise null. */
   sessionKey: string | null;
   unavailableReason?: string;
@@ -64,6 +99,7 @@ function isTerminal(outcome: unknown): outcome is SessionContinuationOutcome {
 }
 
 export function SelectedSessionContinuation({
+  locale = "en",
   sessionKey,
   unavailableReason,
   status,
@@ -151,46 +187,38 @@ export function SelectedSessionContinuation({
   const retained = retainedPointer !== null;
   const outcomeState = status?.status ?? null;
   return (
-    <section className="card" aria-label="Selected session continuation">
+    <section className="card session-continuation" aria-label={ui(locale, "Session continuation")}>
       <div className="section-title">
         <div>
-          <h2>Session continuation</h2>
+          <h2>{ui(locale, "Session continuation")}</h2>
           <p className="muted">
-            Continuation for the exact selected Mission's verified fabric_attempt
-            target. A committed receipt is the only shown outcome; it is not
-            worker execution, result evidence or parent consumption.
+            {ui(locale, "Continue this project’s verified session.")}
           </p>
         </div>
-        <span
-          className={`state state-${sessionKey && !unavailableReason ? "available" : "unavailable"}`}
-        >
-          {sessionKey && !unavailableReason ? "AVAILABLE" : "UNAVAILABLE"}
-        </span>
+
       </div>
           {retained || recoveryRequired ? (
             <div className="unjoined" role="note">
-              <b>Retained continuation</b>
+              <b>{ui(locale, "Retained continuation")}</b>
               <p>
-                Original message reference: <code>{retainedPointer?.operationKey ?? "POINTER_READ_UNAVAILABLE"}</code>. Its
-                outcome is unresolved here; status recovery reads that exact
-                original key only and never sends again.
+                {ui(locale, "Original message reference")}: <code>{retainedPointer?.operationKey ?? "POINTER_READ_UNAVAILABLE"}</code>. {ui(locale, "Its outcome is unresolved here; status recovery reads that exact original key only and never sends again.")}
               </p>
               <div className="form-actions">
-                <button type="button" onClick={onRecover} disabled={recovering || reading}>
-                  {recovering ? "Checking…" : "Check status"}
+                <button className="primary" type="button" onClick={onRecover} disabled={recovering || reading}>
+                  {recovering ? ui(locale, "Checking\u2026") : ui(locale, "Check status")}
                 </button>
               </div>
             </div>
           ) : reading ? (
-            <p className="muted">Checking for a retained continuation…</p>
+            <p className="muted">{ui(locale, "Checking for a retained continuation…")}</p>
           ) : null}
       {unavailableReason ? (
         <>
           <p className="muted">
-            Session continuation is unavailable for the exact selected mission.
+            {ui(locale, "Session continuation is unavailable for the exact selected mission.")}
           </p>
           <details className="reason-details">
-            <summary>Technical details</summary>
+            <summary>{ui(locale, "Technical details")}</summary>
             <code>{unavailableReason}</code>
           </details>
           {onRequalify ? (
@@ -201,23 +229,27 @@ export function SelectedSessionContinuation({
         </>
       ) : (
         <>
-          <dl>
-            <dt>Continuation target</dt>
+          <details className="session-technical"><summary>{ui(locale, "Technical details")}</summary>        <span
+          className={`state state-${sessionKey && !unavailableReason ? "available" : "unavailable"}`}
+        >
+          {sessionKey && !unavailableReason ? "AVAILABLE" : "UNAVAILABLE"}
+        </span><dl>
+            <dt>{ui(locale, "Continuation target")}</dt>
             <dd>{sessionKey ? <code>{sessionKey}</code> : <code>SESSION_UNAVAILABLE</code>}</dd>
-            <dt>Send capability</dt>
-            <dd>{sessionKey ? "Exactly one verified target" : "No verified target; nothing is guessed"}</dd>
-            <dt>Stop control</dt>
-            <dd>Not offered — the completion condition is content, not cancel.</dd>
-          </dl>
+            <dt>{ui(locale, "Send capability")}</dt>
+            <dd>{sessionKey ? ui(locale, "Exactly one verified target") : ui(locale, "No verified target; nothing is guessed")}</dd>
+            <dt>{ui(locale, "Stop control")}</dt>
+            <dd>{ui(locale, "Not offered — the completion condition is content, not cancel.")}</dd>
+          </dl></details>
           {outcomeState === "accepted" && !retained ? (
-            <p className="muted">
-              Continuation committed. Receipt only — no transcript, worker
-              execution or parent consumption is proven by this client.
-            </p>
+            <div className="session-receipt" role="status">
+              <p>{ui(locale, "Message committed.")}</p>
+              <p className="muted">{ui(locale, "Further activity has not been established by this receipt.")}</p>
+            </div>
           ) : null}
           {outcomeState === "refused" && !retained ? (
             <p className="muted">
-              This invocation was refused before any effect:{" "}
+              {ui(locale, "This invocation was refused before any effect:")}{" "}
               <code>{status?.reason}</code>
             </p>
           ) : null}
@@ -229,7 +261,7 @@ export function SelectedSessionContinuation({
           <form onSubmit={submit} noValidate className="session-send-form">
             <div className="form-field">
               <label htmlFor={instructionId}>
-                <span>Instruction</span>
+                <span>{ui(locale, "What would you like done?")}</span>
                 {instructionPoints > MAX_CONDITION_CODEPOINTS && (
                   <span className="field-error">
                     {" "}
@@ -244,11 +276,12 @@ export function SelectedSessionContinuation({
                 rows={3}
                 disabled={dispatchBusy}
                 aria-invalid={instructionPoints > MAX_CONDITION_CODEPOINTS}
+                aria-describedby={`${formId}-bounds`}
               />
             </div>
             <div className="form-field">
               <label htmlFor={conditionId}>
-                <span>Completion condition</span>
+                <span>{ui(locale, "How will we know it is done?")}</span>
                 {(conditionPoints > MAX_CONDITION_CODEPOINTS || (conditionPoints > 0 && !conditionValid)) && (
                   <span className="field-error">
                     {" "}
@@ -261,18 +294,19 @@ export function SelectedSessionContinuation({
                 value={condition}
                 onChange={(e) => setField("condition", e.target.value)}
                 rows={2}
-                placeholder="Explicit completion or stop condition for this continuation"
+                placeholder={ui(locale, "Describe the change and its completion condition.")}
                 disabled={dispatchBusy}
                 aria-invalid={conditionPoints > MAX_CONDITION_CODEPOINTS || (conditionPoints > 0 && !conditionValid)}
+                aria-describedby={`${formId}-bounds`}
               />
               <p className="muted">
-                Captured once with the instruction when the continuation is
-                made; it is never re-evaluated here and authorizes no stop.
+                {ui(locale, "The completion condition is captured once; it is not evaluated here and authorizes no stop.")}
               </p>
             </div>
+            <p id={`${formId}-bounds`} className="session-bounds">{ui(locale, "Use 1–700 characters.")} ({instructionPoints}/700 · {conditionPoints}/700)</p>
             <div className="form-actions">
               <button type="submit" disabled={!canContinue} className="primary">
-                {dispatchBusy ? "Sending…" : "Continue session"}
+                {dispatchBusy ? ui(locale, "Sending\u2026") : ui(locale, "Send")}
               </button>
             </div>
           </form>

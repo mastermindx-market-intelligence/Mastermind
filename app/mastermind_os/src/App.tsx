@@ -1262,7 +1262,12 @@ function Conversation({
   );
 }
 
-export function App() {
+export interface AppProps {
+  /** Explicit render inputs only; never inferred from auth, storage or OS preferences. */
+  locale?: "en" | "zh-CN";
+  theme?: "dark" | "light";
+}
+export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
   const native = "__TAURI_INTERNALS__" in window,
     initialLocation = useMemo(() => locationSelectionInput(), []),
     initial = useMemo(
@@ -2829,6 +2834,7 @@ export function App() {
     sessionBinding && !sessionLive ? "SESSION_UNAVAILABLE" : undefined;
   const sessionContinuationPanel = sessionBinding ? (
     <SelectedSessionContinuation
+      locale={locale}
       key={JSON.stringify([sessionOwner?.principalScope, sessionOwner?.generation])}
       sessionKey={sessionTargetKey}
       unavailableReason={sessionContinuationUnavailable}
@@ -3078,6 +3084,7 @@ export function App() {
       <>
         <MetaCeoOffice
           key={JSON.stringify([authRevision, selection])}
+          locale={locale}
           projection={office.projection}
           draft={office.draft}
           onDraftChange={office.changeDraft}
@@ -3102,6 +3109,9 @@ export function App() {
     content = (
       <>
         <ConversationWindow
+          locale={locale}
+          continuation={sessionContinuationPanel}
+          notesPresentation="collapsed"
           projection={observedConversation.projection}
           draft={observedConversation.draft}
           onDraftChange={observedConversation.changeDraft}
@@ -3121,7 +3131,7 @@ export function App() {
         >
           Refresh observed window
         </button>
-        {sessionPanel}
+        {!sessionBinding && sessionPanel}
       </>
     );
   else if (active === "Knowledge")
@@ -3434,7 +3444,7 @@ export function App() {
   else if (active === "Evidence") content = <Evidence d={d} />;
   else content = <Conversation />;
   return (
-    <div className="shell">
+    <div className="shell" data-theme={theme} lang={locale}>
       <a className="skip" href="#content" onClick={event => {
         event.preventDefault();
         document.getElementById("content")?.focus();

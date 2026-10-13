@@ -14,9 +14,9 @@ const SCOPE = 'c'.repeat(64), REF = `fabric_attempt:${'a'.repeat(64)}`, KEY = `s
 const pointer: OperationPointer = { operationKey: KEY, kind: 'message', targetKey: REF };
 const deferred = <T,>() => { let resolve!: (v:T)=>void; const promise = new Promise<T>(r=>{resolve=r;}); return {promise,resolve}; };
 let dispose: (()=>void) | undefined;
-function fixture(retained: OperationPointer | null = null, target = true) {
+function fixture(retained: OperationPointer | null = null, target = true, content = false) {
   let saved = retained, hasTarget = target, gen = 1;
-  let auth: AuthState = { status: 'signed_in', reason: null, acquisition: false, content: false };
+  let auth: AuthState = { status: 'signed_in', reason: null, acquisition: false, content };
   const authListeners = new Set<(a:AuthState)=>void>();
   const listeners = new Set<()=>void>();
   const store: PendingPointerStore = {
@@ -36,21 +36,23 @@ function fixture(retained: OperationPointer | null = null, target = true) {
     reply: vi.fn(async () => { throw new Error('reply unavailable'); }),
   };
   const host = createOsExecutiveSessionHost(transport,store); dispose=host.dispose;
+  const readCurrentWindow=vi.fn(async()=>{throw new Error('fixture window unavailable')});
   window.MastermindMissionHost = {
+    readCurrentWindow,
     sessionCommandBinding:host.binding, session:{refresh:s=>host.refresh(s as Parameters<typeof host.refresh>[0]),setStopCondition:host.setStopCondition},
     auth:{ getState:()=>auth,subscribe:fn=>{authListeners.add(fn);return ()=>{authListeners.delete(fn);};}, signIn:async()=>{},signOut:async()=>{} },
   };
-  return { host, store, transport, saved:()=>saved, loseTarget:()=>{hasTarget=false;},
+  return { host, store, transport, readCurrentWindow, saved:()=>saved, loseTarget:()=>{hasTarget=false;},
     notifyAuth:()=>{ gen++; for(const fn of listeners)fn(); for(const fn of authListeners)fn(auth); },
   };
 }
 beforeEach(()=>{ history.replaceState(null,'','/os/?work_ref=WS%3AALPHA&root_job_id=JOB-1'); delete window.MastermindMissionHost; });
 afterEach(()=>{cleanup();dispose?.();dispose=undefined;delete window.MastermindMissionHost;vi.restoreAllMocks();});
-async function panel() { fireEvent.click(screen.getByRole('button',{name:'Conversations'})); return screen.findByLabelText('Selected session continuation'); }
-async function enter() { await waitFor(()=>expect((screen.getByRole('button',{name:'Continue session'}) as HTMLButtonElement).disabled).toBe(true));
-  fireEvent.change(screen.getByLabelText('Instruction'),{target:{value:'Continue this selected slice'}});
-  fireEvent.change(screen.getByLabelText('Completion condition'),{target:{value:'Owner confirms the slice'}});
-  await waitFor(()=>expect((screen.getByRole('button',{name:'Continue session'}) as HTMLButtonElement).disabled).toBe(false));
+async function panel() { fireEvent.click(screen.getByRole('button',{name:'Conversations'})); return screen.findByLabelText('Session continuation'); }
+async function enter() { await waitFor(()=>expect((screen.getByRole('button',{name:'Send'}) as HTMLButtonElement).disabled).toBe(true));
+  fireEvent.change(screen.getByLabelText('What would you like done?'),{target:{value:'Continue this selected slice'}});
+  fireEvent.change(screen.getByLabelText('How will we know it is done?'),{target:{value:'Owner confirms the slice'}});
+  await waitFor(()=>expect((screen.getByRole('button',{name:'Send'}) as HTMLButtonElement).disabled).toBe(false));
 }
 describe('App selected-session composition',()=>{
   it('does not qualify context during an uncommitted render',()=>{
@@ -62,7 +64,7 @@ describe('App selected-session composition',()=>{
     const f=fixture();render(<App/>);await panel();await enter();
     const provider=vi.spyOn(window.MastermindMissionHost!.session!,'setStopCondition');
     const intent=vi.spyOn(f.host.binding,'makeMessageIntent');
-    fireEvent.click(screen.getByRole('button',{name:'Continue session'}));
+    fireEvent.click(screen.getByRole('button',{name:'Send'}));
     await waitFor(()=>expect(f.transport.send).toHaveBeenCalledTimes(1));
     expect(intent).toHaveBeenCalledTimes(1);expect(provider).toHaveBeenCalledTimes(1);
     expect(f.transport.send).toHaveBeenCalledWith({target_ref:REF,instruction:'Continue this selected slice',stop_condition:'Owner confirms the slice',operation_key:KEY},expect.any(AbortSignal));
@@ -75,30 +77,30 @@ describe('App selected-session composition',()=>{
     await waitFor(()=>expect(f.transport.reply).toHaveBeenCalledTimes(1));
     expect(f.transport.reply).toHaveBeenCalledWith({operation_key:KEY},expect.any(AbortSignal));
     expect(f.transport.send).not.toHaveBeenCalled();expect(f.store.reserve).not.toHaveBeenCalled();expect(f.saved()).toEqual(pointer);
-    expect(screen.queryByLabelText('Instruction')).toBeNull();
+    expect(screen.queryByLabelText('What would you like done?')).toBeNull();
   });
   it('holds SEND on unreadable pointer storage instead of inferring absence',async()=>{
     const f=fixture(); vi.mocked(f.store.read).mockRejectedValue(new Error('private store failure'));render(<App/>);await panel();
     await screen.findByRole('button',{name:'Check status'});
     expect(screen.queryByText('private store failure')).toBeNull();
-    fireEvent.change(screen.getByLabelText('Instruction'),{target:{value:'Continue'}});
-    fireEvent.change(screen.getByLabelText('Completion condition'),{target:{value:'done'}});
-    expect((screen.getByRole('button',{name:'Continue session'}) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText('What would you like done?'),{target:{value:'Continue'}});
+    fireEvent.change(screen.getByLabelText('How will we know it is done?'),{target:{value:'done'}});
+    expect((screen.getByRole('button',{name:'Send'}) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole('button',{name:'Check status'}));
     await waitFor(()=>expect(f.store.read).toHaveBeenCalledTimes(2));
     await waitFor(()=>expect(screen.getByRole('button',{name:'Check status'})).toBeTruthy());
     expect(screen.getByText('POINTER_READ_UNAVAILABLE')).toBeTruthy();
-    expect((screen.getByRole('button',{name:'Continue session'}) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button',{name:'Send'}) as HTMLButtonElement).disabled).toBe(true);
     expect(f.transport.send).not.toHaveBeenCalled();
   });
   it('shows a safe local reservation refusal and retains the typed draft with zero SEND',async()=>{
     const f=fixture();vi.mocked(f.store.reserve).mockRejectedValue(new Error('private write failure'));
     render(<App/>);await panel();await enter();
-    fireEvent.click(screen.getByRole('button',{name:'Continue session'}));
+    fireEvent.click(screen.getByRole('button',{name:'Send'}));
     await screen.findByRole('alert');
     expect(screen.getByRole('alert').textContent).toBe('STORE_WRITE_FAILED');
     expect(screen.queryByText('private write failure')).toBeNull();
-    expect((screen.getByLabelText('Instruction') as HTMLTextAreaElement).value).toBe('Continue this selected slice');
+    expect((screen.getByLabelText('What would you like done?') as HTMLTextAreaElement).value).toBe('Continue this selected slice');
     expect(f.transport.send).not.toHaveBeenCalled();expect(f.saved()).toBeNull();
   });
   it('requalifies an expired unchanged selection before original-key status recovery',async()=>{
@@ -125,7 +127,7 @@ describe('App selected-session composition',()=>{
     const f=fixture(); const reserve=deferred<{reserved:true}>();
     const commit=vi.mocked(f.store.reserve).getMockImplementation()!;
     vi.mocked(f.store.reserve).mockImplementation(async (scope,pointer)=>{await reserve.promise; return commit(scope,pointer);});
-    render(<App/>);await panel();await enter();fireEvent.click(screen.getByRole('button',{name:'Continue session'}));
+    render(<App/>);await panel();await enter();fireEvent.click(screen.getByRole('button',{name:'Send'}));
     await waitFor(()=>expect(f.store.reserve).toHaveBeenCalledTimes(1));
     const before=vi.mocked(f.transport.context).mock.calls.length;
     await act(async()=>{ window.dispatchEvent(new PopStateEvent('popstate')); history.replaceState(null,'','/os/?work_ref=WS%3AOTHER&root_job_id=JOB-1'); window.dispatchEvent(new PopStateEvent('popstate')); history.replaceState(null,'','/os/?work_ref=WS%3AALPHA&root_job_id=JOB-1'); window.dispatchEvent(new PopStateEvent('popstate')); });
@@ -142,4 +144,34 @@ describe('App selected-session composition',()=>{
     await act(async()=>{read.resolve(pointer);await read.promise;});
     expect(screen.queryByText(KEY)).toBeNull();expect(f.transport.reply).not.toHaveBeenCalled();expect(f.transport.send).not.toHaveBeenCalled();
   });
+  it('places one actual Session inside Conversations and preserves its explicit pair across passive read and presentation changes',async()=>{
+    const f=fixture(null,true,true); const view=render(<App/>); await panel(); await enter();
+    const instruction=screen.getByLabelText('What would you like done?') as HTMLTextAreaElement;
+    const condition=screen.getByLabelText('How will we know it is done?') as HTMLTextAreaElement;
+    expect(screen.getAllByLabelText('Session continuation')).toHaveLength(1);
+    expect(instruction.closest('.conversation-window')).not.toBeNull();
+    expect(screen.getByRole('button',{name:'Unsent notes'}).getAttribute('aria-expanded')).toBe('false');
+    instruction.focus();
+    view.rerender(<App locale="zh-CN" theme="light"/>);
+    expect(screen.getByLabelText('你希望完成什么？')).toBe(instruction);
+    expect(screen.getByLabelText('达到什么条件才算完成？')).toBe(condition);
+    expect(instruction.value).toBe('Continue this selected slice');
+    expect(condition.value).toBe('Owner confirms the slice');
+    expect(document.activeElement).toBe(instruction);
+    // The passive observation body may re-key; the independent Session owner has not changed.
+    const observedReads=f.readCurrentWindow.mock.calls.length;
+    fireEvent.click(screen.getByRole('button',{name:'Refresh observed window'}));
+    await waitFor(()=>expect(f.readCurrentWindow).toHaveBeenCalledTimes(observedReads+1));
+    view.rerender(<App/>);
+    expect(screen.getByLabelText('What would you like done?')).toBe(instruction);
+    expect(f.transport.send).not.toHaveBeenCalled();
+    const before=vi.mocked(f.transport.context).mock.calls.length;
+    await act(async()=>window.dispatchEvent(new PopStateEvent('popstate')));
+    await waitFor(()=>expect(f.transport.context).toHaveBeenCalledTimes(before+1));
+    await panel(); // Selection navigation returns the shell to its canonical default view.
+    await waitFor(()=>expect(screen.getByLabelText('What would you like done?')).not.toBe(instruction));
+    expect((screen.getByLabelText('What would you like done?') as HTMLTextAreaElement).value).toBe('');
+    expect(f.transport.send).not.toHaveBeenCalled();
+  });
+
 });
