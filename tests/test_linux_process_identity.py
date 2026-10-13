@@ -630,7 +630,7 @@ class ApiSurfaceTests(SeamTestCase):
                 imported.update(alias.name.split(".")[0] for alias in node.names)
             elif isinstance(node, ast.ImportFrom) and node.module:
                 imported.add(node.module.split(".")[0])
-        self.assertLessEqual(imported, {"os", "re", "typing", "__future__"})
+        self.assertLessEqual(imported, {"hashlib", "os", "re", "typing", "__future__"})
 
     def test_public_api_surface(self):
         self.assertEqual(
@@ -638,6 +638,7 @@ class ApiSurfaceTests(SeamTestCase):
             {
                 "LinuxProcessIdentityError",
                 "inspect_linux_process",
+                "inspect_linux_process_image",
                 "read_linux_boot_id",
             },
         )

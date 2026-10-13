@@ -1,10 +1,10 @@
 """Production factory joins the real canonical sink, with fixture grounding/host admission."""
 import asyncio
-import dataclasses
 from pathlib import Path
 
 import pytest
 
+from control_plane.executive_service import _ForegroundExecution, _canonical_json
 from control_plane import executive_ceo_ingress as ingress, foreground_operation as scope
 from integrations.executive_mcp.web_ceo_sessions import WEB_CEO_SESSIONS_PROFILE
 from tests.test_executive_mcp_installed_fabric_composition import factory_service
@@ -23,10 +23,13 @@ def test_actual_factory_fresh_source_and_committed_error_classification(tmp_path
             await service.start()
             runtime = service._require_runtime()
             drives = []
-            if edge in {"drive", "duplicate", "drive_failure"}:
-                from control_plane.fabric_attended_routing import AttendedWorkPlacement
-                service.config = dataclasses.replace(service.config,
-                    coo_attended_work_placements=(AttendedWorkPlacement("fixture", "fixture", "fixture"),))
+            if edge in {"fresh", "drive", "duplicate", "drive_failure"}:
+                # Wrapper-only fixture: actual host eligibility and the real
+                # driver are exercised separately in the eligibility tests.
+                snapshot = _ForegroundExecution("ORDINARY_OPERATOR", _canonical_json(service._require_current_coo_binding()))
+                monkeypatch.setattr(service, "_foreground_execution_state", lambda **kw: snapshot)
+                monkeypatch.setattr(service, "_require_foreground_execution", lambda expected: None if expected == snapshot else pytest.fail("foreign fixture snapshot"))
+                assert service.config.coo_attended_work_placements == ()
                 async def drive(op, root):
                     op.require_root(root)
                     assert service._foreground_cycle_owner == (asyncio.current_task(), op)
@@ -52,7 +55,7 @@ def test_actual_factory_fresh_source_and_committed_error_classification(tmp_path
                     grounding_provider=fresh.hooks.pr_a._FakeGrounding(),
                     workspace_root=Path(raw["proof_workspace_root"]),
                     service_state="READY", ceo_ingress_armed=True, strict_v2_admission=True,
-                    execution_binding_provider=fresh.phase1fc._v3_execution_binding,
+                    execution_binding_provider=lambda: (kw["execution_binding_provider"](), fresh.phase1fc._v3_execution_binding())[1],
                     dialogue_source_provider=lambda *_: fresh.hooks._dialogue_source(),
                     admission_guard=kw["admission_guard"], fresh_admission_observer=kw["fresh_admission_observer"])
             monkeypatch.setattr(ingress, "_observe_trusted_grounding", observed)
@@ -76,7 +79,7 @@ def test_actual_factory_fresh_source_and_committed_error_classification(tmp_path
                         replay = await owner.handle_frame(f)
                         assert replay["ok"] and replay["data"]["duplicate"]
                         assert "foreground_completion" not in replay["data"] and replay_op._root is None
-                if edge in {"drive", "duplicate"}:
+                if edge in {"fresh", "drive", "duplicate"}:
                     assert drives == [result["data"]["job_id"]]
                     assert result["data"]["foreground_completion"]["delivery"] == "INCOMPLETE"
             if edge in {"fresh", "legacy", "drive", "duplicate"}:

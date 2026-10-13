@@ -955,18 +955,9 @@ def _scan_added_identity_diff(
         if _is_production_identity_scan_path(path)
     }
 
-    # A patch file remains source: scan its added code, including real UID/GID
-    # constants. Only nested unified-diff range coordinates are metadata.
-    for path, lines in production.items():
-        if path.endswith((".patch", ".diff")):
-            production[path] = [re.sub(
-                r'^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@',
-                '', line,
-            ) for line in lines]
-
     string_accounts: dict[str, list[list[str]]] = {}
     for path, lines in production.items():
-        if _scope_language(path) != "py" or source_postimages is None or path not in source_postimages:
+        if (_scope_language(path) != "py" and not path.endswith((".patch", ".diff"))) or source_postimages is None or path not in source_postimages:
             continue
         source_lines = source_postimages[path].splitlines()
         numbers = added_numbers.get(path, [])
@@ -977,13 +968,23 @@ def _scan_added_identity_diff(
         # projection. Only exact independently reviewed literal tokens can be
         # neutralized; surrounding code and all unreviewed identities stay visible.
         reviewed = mask_reviewed_identity_literals(path, source_postimages[path])
-        masked, accounts = _python_multiline_string_view(reviewed)
+        masked, accounts = (_python_multiline_string_view(reviewed) if _scope_language(path) == "py"
+                            else (reviewed.splitlines(), {}))
         rendered, literal_flags = [], []
         for number in numbers:
             rendered.append(masked[number - 1])
             literal_flags.append(accounts.get(number, []))
         production[path] = rendered
         string_accounts[path] = literal_flags
+
+    # A patch file remains source: scan its added code, including real UID/GID
+    # constants. Only nested unified-diff range coordinates are metadata.
+    for path, lines in production.items():
+        if path.endswith((".patch", ".diff")):
+            production[path] = [re.sub(
+                r'^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@',
+                '', line,
+            ) for line in lines]
 
     import_edges: dict[str, dict[str, set[tuple[str, str]]]] = {
         path: {} for path in production
@@ -2053,7 +2054,7 @@ def test_d8_template_topology_and_protected_defaults():
             check=True, capture_output=True, text=True,
         ).stdout
         source_diffs.append(diff)
-        if _scope_language(path) == "py":
+        if _scope_language(path) == "py" or path.endswith((".patch", ".diff")):
             source_postimages[path] = subprocess.run(
                 ["git", "show", f"HEAD:{path}"], cwd=ROOT,
                 check=True, capture_output=True, text=True,
@@ -2346,3 +2347,19 @@ def test_d8_error_token_postimage_preserves_conservative_numeric_guard(quote):
     source = '"""ordinary\npeer_uid = 459\n"""\nbad = ' + quote + 'unfinished\n'
     diff = _d8_frozen_source_diff(path, source)
     assert _scan_added_identity_diff(diff, source_postimages={path: source}) == ['459']
+
+
+def test_d8_exact_reviewed_pairing_age_keeps_all_other_patch_bytes_guarded():
+    path='integrations/session_bridge/glm_host_account_pairing/glm-host-account-pairing.patch'
+    source=(ROOT/path).read_text()
+    def scan(content, *, actual_path=path, postimage=True):
+        diff=(f'--- /dev/null\n+++ b/{actual_path}\n@@ -0,0 +1,{len(content.splitlines())} @@\n'
+              +'\n'.join('+'+line for line in content.splitlines()))
+        return _scan_added_identity_diff(diff,source_postimages={actual_path:content} if postimage else None)
+    assert scan(source)==[]
+    assert scan(source,postimage=False)
+    assert scan(source,actual_path='integrations/other_account/changed.patch')
+    for changed in [source.replace('+DEFAULT_MAX_AGE = 600','+DEFAULT_MAX_AGE = 601'),
+                    source+'\n+peer_uid = 600\n',source+'\n+DEFAULT_MAX_AGE = 600\n',
+                    source+'\n+# unrelated drift\n']:
+        assert scan(changed)
