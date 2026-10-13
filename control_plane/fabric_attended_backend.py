@@ -21,7 +21,7 @@ from types import SimpleNamespace
 
 from control_plane.fabric_control_start import ControlStartAuthority
 from control_plane.claude_subscription_worker import CredentialLoader
-from control_plane.subscription_canary_admission import SubscriptionCanaryAdmission
+from control_plane.codex_provider_realm import SubscriptionRealmOwner
 from control_plane.executive_fabric_adapter import FabricHostBinding
 from control_plane.worker_execution_contract import (
     BinaryAttestation, CollectionReceipt, WorkerResult, WorkerRunStatus, _jsonable,
@@ -77,7 +77,7 @@ class _OriginalOwnerInputs:
     provider_home_identity: dict
     nice: int = 0
     credential_loader: CredentialLoader | None = None
-    credential_admission: SubscriptionCanaryAdmission | None = None
+    credential_realm_owner: SubscriptionRealmOwner | None = None
     credential_bindings_document: dict | None = None
     credential_profiles_document: dict | None = None
 
@@ -103,7 +103,7 @@ class _FixedOwnerResources:
     provider_home_identity: dict
     nice: int = 0
     credential_loader: CredentialLoader | None = None
-    credential_admission: SubscriptionCanaryAdmission | None = None
+    credential_realm_owner: SubscriptionRealmOwner | None = None
     credential_bindings_document: dict | None = None
     credential_profiles_document: dict | None = None
 
@@ -275,7 +275,8 @@ class FabricAttendedBackend:
                 _refuse('backend_resource_path_invalid')
         self._inputs = inputs
         self._credentials = dict(credential_loader=inputs.credential_loader,
-            credential_admission=inputs.credential_admission,
+            credential_physical_binding=inputs.physical,
+            credential_realm_owner=inputs.credential_realm_owner,
             credential_bindings_document=(_copy(inputs.credential_bindings_document)
                 if inputs.credential_bindings_document is not None else None),
             credential_profiles_document=(_copy(inputs.credential_profiles_document)
@@ -330,7 +331,8 @@ class FabricAttendedBackend:
         return self._slot
 
     def _hold(self, reason):
-        if self._slot.backend is self and self._slot.lease is not None:
+        if (self._slot.backend is self and self._slot.lease is not None
+                and not self._slot.resource_released):
             self._slot.reconciliation_required = True
             self._slot.lease.hold_for_reconciliation(reason)
 
@@ -374,9 +376,9 @@ class FabricAttendedBackend:
         from integrations.session_bridge.bound_launch_capture.fabric_reserved_attended_launch import prepare_reserved_attended_launch
         prepared = prepare_reserved_attended_launch(payload, **self._preparation)
         self._check_original_owner(prepared)
-        # Pure canonical admission/catalog join, never a secret read, before
+        # Pure current realm/catalog join, never a secret read, before
         # any slot, O_EXCL reservation or account lease is consumed.
-        remote_sub_exec._verify_reserved_credential_admission(
+        remote_sub_exec._verify_reserved_realm_observation(
             prepared=prepared, preparation=self._preparation, **self._credentials)
         self._spec = _launch_spec_from_wire(payload['launch_spec'], self._preparation['policy'])
         if self._spec.worker_id != self._inputs.physical.worker_id:
@@ -766,7 +768,7 @@ class _SingleAssignmentComposition:
             log_path=r.log_path, active_dir=r.active_dir, receipt_path=r.receipt_path,
             qualified_evidence=r.qualified_evidence, workspace_identity=r.workspace_identity,
             provider_home_identity=r.provider_home_identity, nice=r.nice,
-            credential_loader=r.credential_loader, credential_admission=r.credential_admission,
+            credential_loader=r.credential_loader, credential_realm_owner=r.credential_realm_owner,
             credential_bindings_document=r.credential_bindings_document,
             credential_profiles_document=r.credential_profiles_document)
         value = FabricAttendedBackend(inputs)
@@ -799,13 +801,17 @@ def create_attended_backend(config=None, *, owner_resources=None):
     if (type(config) is not BridgeConfig or config._trust is not _TRUSTED_CONFIG
             or type(owner_resources) is not _FixedOwnerResources
             or not callable(owner_resources.credential_loader)
-            or type(owner_resources.credential_admission) is not SubscriptionCanaryAdmission):
+            or type(owner_resources.credential_realm_owner) is not SubscriptionRealmOwner):
         raise BackendNotConfiguredError('production_attended_backend_not_configured')
     physical = owner_resources.physical
     policy = owner_resources.preparation['policy']
     if (type(physical) is not FabricHostBinding or type(policy) is not BrokerPolicy
             or config.adapter_id != 'attended-fabric'
             or config.bridge_uid != physical.bridge_uid or str(config.socket_path) != physical.socket_path
+            or config.bridge_uid != physical.worker_uid
+            or os.getuid() != physical.worker_uid or os.geteuid() != physical.worker_uid
+            or os.getgid() != physical.worker_gid or os.getegid() != physical.worker_gid
+            or Path(policy.provider_home) != Path(physical.provider_home)
             or config.control_uid != policy.control_uid or policy.worker_uid != physical.worker_uid
             or policy.worker_gid != physical.worker_gid or policy.worker_id != physical.worker_id
             or config.workspace_root != policy.workspace_root

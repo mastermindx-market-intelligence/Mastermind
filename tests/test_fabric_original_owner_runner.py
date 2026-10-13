@@ -47,8 +47,8 @@ def runner(monkeypatch, tmp_path):
     functions = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                  and n.name in {'_run_lease_process', '_run_reserved_attended_under_lease',
                                 '_prepare_reserved_attended_under_lease', '_retain_original_cleanup_hold',
-                                '_verify_reserved_credential_admission'}]
-    ns = dict(json=json, Path=Path, install_signal_cleanup=lambda **kw: None,
+                                '_verify_reserved_realm_observation'}]
+    ns = dict(json=json, os=__import__("os"), Path=Path, install_signal_cleanup=lambda **kw: None,
               run_owned_process=lr.run_owned_process, OwnedProcessStartError=lr.OwnedProcessStartError,
               cleanup_receipt_is_proven=lr.cleanup_receipt_is_proven)
     exec(compile(ast.Module(body=functions, type_ignores=[]), str(src), 'exec'), ns)
@@ -58,10 +58,28 @@ def runner(monkeypatch, tmp_path):
 def setup(tmp_path, monkeypatch):
     payload, kw = fixture(tmp_path)
     bindings, profiles = _documents()
-    admission = _owner_seal(bindings=bindings, profiles=profiles)
-    binding, profile, _ = _resolve_catalog_pair(admission.binding_id,
+    binding, profile, _ = _resolve_catalog_pair("glm-coding-plan.claude-code-anthropic",
         bindings_document=bindings, profiles_document=profiles)
     kw['binding'], kw['profile'] = binding, profile
+    from control_plane.codex_provider_realm import SubscriptionRealmOwner, _SUBSCRIPTION_REALM_OWNER_SEAL
+    from control_plane.subscription_catalog import compose_catalog_digest
+    from control_plane.executive_fabric_adapter import FabricHostBinding
+    physical = FabricHostBinding(socket_path=str(tmp_path/'inert.sock'), host_ref='inert-host',
+        worker_id=kw['policy'].worker_id, worker_uid=kw['policy'].worker_uid,
+        worker_gid=kw['policy'].worker_gid, bridge_uid=kw['policy'].worker_uid,
+        provider=binding.provider, model=binding.model_for(profile,kw['model_class']),
+        worker_source_config_digest='a'*64, execution_profile_digest='e'*64,
+        service_source_sha256='f'*64, provider_home=str(kw['policy'].provider_home),
+        binary_sha256=kw['binary'].sha256, permission_profile_sha256='b'*64)
+    payload['physical_binding_sha256']=physical.digest
+    kw['correlation']['runtime_binding']['physical_binding_sha256']=physical.digest
+    owner = SubscriptionRealmOwner(tmp_path / 'inert-root-config', 'a' * 64, _SUBSCRIPTION_REALM_OWNER_SEAL)
+    observed = dict(worker_id=payload['launch_spec']['worker_id'], control_uid=kw['policy'].control_uid,
+        binding_id=binding.binding_id, profile_id=profile.profile_id, adapter_id=binding.adapter_id,
+        realm_config_sha256=owner._config_sha256, realm_generation=1,
+        catalog_digest=compose_catalog_digest(bindings_document=bindings, profiles_document=profiles))
+    # Inert realm observation only. Separate observer tests exercise filesystem/principal checks.
+    monkeypatch.setattr(SubscriptionRealmOwner, 'observe', lambda self: dict(observed))
     payload['launch_spec']['model'] = binding.model_for(profile, kw['model_class'])
     kw['correlation']['runtime_binding']['start_request_sha256'] = start_request_sha256(payload)
     expires = time.time() + 60
@@ -75,7 +93,7 @@ def setup(tmp_path, monkeypatch):
         lease=HeldOriginalLease(), state={'started': False}, key='run-1',
         receipt=tmp_path/'terminal.jsonl', nice=10, check_original_owner=lambda prepared: None)
     args.update(credential_loader=lambda: 'inert-owner-token',
-        credential_admission=admission, credential_bindings_document=bindings,
+        credential_realm_owner=owner, credential_physical_binding=physical, credential_bindings_document=bindings,
         credential_profiles_document=profiles)
     return ns, args, expires
 

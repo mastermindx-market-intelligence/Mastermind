@@ -165,9 +165,10 @@ inherited environment and PATH augmentation.
 The private owner-check callback is a composition/test seam, **not an admission
 producer**. A callable or boolean establishes no realm, attendance, canary,
 binary, schema or isolation evidence. No production factory or public CLI/RPC
-selects this function. Real realm credential insertion, authenticated remote
-owner composition, current assignment checks and full post-exec START remain
-necessary. The public bound path stays refused until those obligations have
+selects this function. The original credential boundary now invokes the fixed
+loader only after fresh Control, typed realm and physical-config checks, and
+scrubs its transient parent mapping after launch. Authenticated remote owner
+composition and actual realm/secret-canary producers remain necessary. The public bound path stays refused until those obligations have
 an actual qualified implementation. Control authority is not serialized to an
 ordinary SSH principal.
 
@@ -282,3 +283,25 @@ Successful capture/group settlement does not authorize the Backend to release
 its original assignment slot or lease before real Control seal, worker denial
 and durable Supervisor ACK. No installer, profile, issuer, credential, host
 probe or production activation is included in this source change.
+
+
+### Current realm and original process principal
+
+The attended owner uses the existing typed `SubscriptionRealmOwner`. Every
+observation is bound to `FabricHostBinding.worker_source_config_digest`, whose
+physical digest is pinned by the original Control command and Runtime Capacity
+join. The owner object's own config hash cannot replace that independent pin.
+Legacy test-only HMAC enrollment and an interactive-canary claim never grant
+ordinary task authority. The current observer and run-bound V2 secret canary
+remain separate obligations.
+
+The original lane's `Popen` does not switch UID or GID. This finite composition
+therefore requires the actual real/effective controller UID/GID to equal the
+fixed worker principal, with bridge UID equal to worker UID and Control distinct.
+The policy credential HOME must match the physical credential realm HOME; the
+child's isolated `run/home` remains separately qualified by the canary. A
+different bridge/worker principal topology is refused before reservation.
+
+After verified physical lease release, a later unavailable cleanup carrier still
+fails its readback, but cannot re-hold the released lease or mask the original
+read error. The original ACK and release receipt remain unchanged.

@@ -47,7 +47,7 @@ def harness(world, lr, tmp_path, monkeypatch, request):
     world.with_spec(effective_grant_digest=world.binding['effective_grant_digest'])
     credential_source, credential_args, _expires, credential_calls = credential_fixture(tmp_path, monkeypatch)
     credentials={key:credential_args[key] for key in (
-        'credential_loader','credential_admission','credential_bindings_document','credential_profiles_document')}
+        'credential_loader','credential_realm_owner','credential_bindings_document','credential_profiles_document')}
     source = patched(tmp_path, 'remote_sub_exec.py', 'EXECUTOR_SOURCE.json')
     node = next(n for n in ast.parse(source).body if isinstance(n, ast.FunctionDef)
                 and n.name == '_begin_reserved_attended_under_lease')
@@ -56,7 +56,7 @@ def harness(world, lr, tmp_path, monkeypatch, request):
         kw['authority'].require(kw['payload'])
         kw['check_original_owner'](prepared)
         assert kw['credential_loader'] is credentials['credential_loader']
-        assert kw['credential_admission'] is credentials['credential_admission']
+        assert kw['credential_realm_owner'] is credentials['credential_realm_owner']
         assert all(kw[key]==credentials[key] for key in (
             'credential_bindings_document','credential_profiles_document'))
         return prepared, {'env':{}}, lambda: None
@@ -75,15 +75,20 @@ def harness(world, lr, tmp_path, monkeypatch, request):
     credential_verifications=[]
     def verify_credentials(**kw):
         # Existing publisher fixtures use an inert, noncatalog descriptor.
-        # Actual seal/catalog negatives below reuse the canonical source helper.
+        # Actual realm/catalog negatives below reuse the canonical source helper.
         credential_verifications.append(kw)
         assert kw['prepared'] is prepared and callable(kw['credential_loader'])
     executor=SimpleNamespace(_begin_reserved_attended_under_lease=ns[node.name],
-        _verify_reserved_credential_admission=verify_credentials)
+        _verify_reserved_realm_observation=verify_credentials)
     monkeypatch.setitem(sys.modules, 'remote_sub_exec', executor)
     # Immutable actual fixed policy observation only needed by the fragment.
     policy_workspace=tmp_path.parent/(tmp_path.name+'-workspaces');policy_workspace.mkdir(mode=0o700)
     policy_home=tmp_path.parent/(tmp_path.name+'-provider');policy_home.mkdir(mode=0o700)
+    world.physical=dataclasses.replace(world.physical,bridge_uid=os.geteuid(),provider_home=str(policy_home))
+    world.canary['realm_binding']['physical_binding_sha256']=world.physical.digest
+    world.canary['realm_binding']['provider_home']=world.physical.provider_home
+    world.material['physical_binding_sha256']=world.physical.digest
+    world.with_spec(secret_canary_verdict=world.canary)
     policy = BrokerPolicy(control_uid=450,worker_uid=os.geteuid(),worker_gid=os.getegid(),
         worker_user=world.worker_user,worker_id=world.spec['worker_id'],workspace_root=policy_workspace,
         run_root=Path(world.spec['run_dir']).parent,provider_home=policy_home,
@@ -545,6 +550,33 @@ def test_real_original_lease_ack_requires_actual_durable_release(settled_assignm
     run(scenario())
 
 
+@pytest.mark.parametrize('harness', [True], indirect=True)
+def test_post_release_cleanup_refusal_preserves_verified_settlement(settled_assignment, monkeypatch):
+    h, start, _ = settled_assignment
+    async def scenario():
+        ack = await committed_assignment(h, start)
+        await h.service.execute(h.request('assignment-seal-finalize', ack),
+                                peer=PeerCredentials(uid=450,gid=450))
+        assert h.slot.resource_released and h.slot.control_acknowledged
+        assert type(h.slot.lease) is h.lr.LaneLease and h.slot.lease.fd is None
+        release_receipt = h.slot.release_receipt
+        # Failure injection only: no synthetic carrier is accepted as evidence.
+        h.slot.cleanup_record = (b'unavailable original row', {}, {'collection': b'{}'})
+        query = dict(schema_version='mastermind.executive_fabric_cleanup_query/v1',
+            scope='collection', process_ref=backend._jsonable(h.slot.start[0].process_ref),
+            host_ref=h.inputs.physical.host_ref, observed_after=backend.time.time(),
+            readback_sha256=None)
+        def unavailable(*args, **kwargs):
+            raise FileNotFoundError('original terminal carrier unavailable after seal')
+        monkeypatch.setattr(backend, '_read_original_file', unavailable)
+        with pytest.raises(FileNotFoundError, match='original terminal carrier unavailable'):
+            h.instance._cleanup({'cleanup_query': query}, {})
+        assert not h.slot.reconciliation_required
+        assert h.slot.release_receipt == release_receipt and h.slot.resource_released
+        assert h.slot.control_acknowledged and not h.slot.lease.path.exists()
+    run(scenario())
+
+
 def test_settlement_status_uses_same_retained_original_after_control_seal(settled_assignment, monkeypatch):
     h, start, _ = settled_assignment
     async def scenario():
@@ -599,7 +631,7 @@ def fixed_resources(h):
         log_path=h.inputs.log_path,active_dir=h.inputs.active_dir,receipt_path=h.inputs.receipt_path,
         qualified_evidence=h.inputs.qualified_evidence,workspace_identity=h.inputs.workspace_identity,
         provider_home_identity=h.inputs.provider_home_identity,
-        credential_loader=h.inputs.credential_loader,credential_admission=h.inputs.credential_admission,
+        credential_loader=h.inputs.credential_loader,credential_realm_owner=h.inputs.credential_realm_owner,
         credential_bindings_document=h.inputs.credential_bindings_document,
         credential_profiles_document=h.inputs.credential_profiles_document)
 
@@ -643,34 +675,35 @@ def test_fixed_factory_requires_trusted_static_service_join(harness):
     foreign=dataclasses.replace(resources,physical=dataclasses.replace(resources.physical,worker_id='other-worker'))
     with pytest.raises(backend.AttendedBackendRefused,match='fixed_service_resource_mismatch'):
         backend.create_attended_backend(config,owner_resources=foreign)
-    for changed in ({'credential_loader':None},{'credential_admission':None}):
+    for changed in ({'credential_loader':None},{'credential_realm_owner':None}):
         with pytest.raises(backend.BackendNotConfiguredError):
             backend.create_attended_backend(config,owner_resources=dataclasses.replace(resources,**changed))
 
 
 @pytest.mark.parametrize('damage',['unsealed','worker'])
-def test_canonical_credential_admission_refuses_before_original_reservation(harness,monkeypatch,damage):
+def test_canonical_credential_realm_owner_refuses_before_original_reservation(harness,monkeypatch,damage):
     h=harness
     args=h.credential_args
     ns=h.credential_source
     prepared=h.canonical_prepare(args['payload'],**args['preparation'])
     # The fixed compiler/owner observations remain explicit inert fixtures;
-    # canonical admission verification below is the actual committed source.
+    # canonical current realm verification below is the actual committed source.
     import integrations.session_bridge.bound_launch_capture.fabric_reserved_attended_launch as compiler
     monkeypatch.setattr(compiler,'prepare_reserved_attended_launch',lambda *_a,**_k:prepared)
     monkeypatch.setattr(h.instance,'_check_original_owner',lambda _prepared:None)
     h.instance._preparation=args['preparation']
     h.instance._credentials={key:args[key] for key in (
-        'credential_loader','credential_admission','credential_bindings_document','credential_profiles_document')}
-    h.executor._verify_reserved_credential_admission=ns['_verify_reserved_credential_admission']
-    if damage=='unsealed':h.instance._credentials['credential_admission']=object()
+        'credential_loader','credential_realm_owner','credential_bindings_document','credential_profiles_document')}
+    h.instance._credentials['credential_physical_binding']=args['credential_physical_binding']
+    h.executor._verify_reserved_realm_observation=ns['_verify_reserved_realm_observation']
+    if damage=='unsealed':h.instance._credentials['credential_realm_owner']=object()
     else:
-        from test_claude_subscription_worker import _owner_seal,_capacity_fact
-        h.instance._credentials['credential_admission']=_owner_seal(
-            capacity_fact=_capacity_fact(worker_id='another-original-worker'),
-            bindings=args['credential_bindings_document'],profiles=args['credential_profiles_document'])
+        from control_plane.codex_provider_realm import SubscriptionRealmOwner
+        observed=args['credential_realm_owner'].observe()
+        observed['worker_id']='another-original-worker'
+        monkeypatch.setattr(SubscriptionRealmOwner,'observe',lambda self:dict(observed))
     async def scenario():
-        with pytest.raises(ValueError,match='realm_credential_admission_unqualified'):
+        with pytest.raises(ValueError,match='realm_(observation_unqualified|owner_required)'):
             authority=authorize_control_command(h.command,peer=PeerCredentials(uid=450,gid=450))
             await h.instance.start_owned(h.world.original,authority=authority)
     run(scenario())

@@ -1,4 +1,4 @@
-"""Only inert issuer keys and sentinel credentials; no provider or real secret."""
+"""Only inert typed realm observations and sentinel credentials; no live secret."""
 import ast
 import dataclasses
 import json
@@ -19,12 +19,12 @@ def test_original_process_boundary_has_actual_credential_input(tmp_path, monkeyp
     assert 'ANTHROPIC_AUTH_TOKEN' not in prepared.descriptor.environment
 
 from control_plane import fabric_control_start as control
-from test_claude_subscription_worker import _owner_seal, _capacity_fact
+from control_plane.codex_provider_realm import SubscriptionRealmOwner
 import traceback
 
 
 def credential_fixture(tmp_path, monkeypatch):
-    """Export canonical prepared+sealed facts under the existing INERT key seam."""
+    """Export canonical prepared inputs and explicitly inert realm observations."""
     ns, args, expires = setup(tmp_path, monkeypatch)
     calls = []
     args['credential_loader'] = lambda: (calls.append('load'), 'inert-owner-token')[1]
@@ -35,13 +35,13 @@ def credential_fixture(tmp_path, monkeypatch):
 def test_missing_or_foreign_credential_composition_never_loads(tmp_path, monkeypatch, damage):
     ns, args, _, calls = credential_fixture(tmp_path, monkeypatch)
     if damage == 'loader': args['credential_loader'] = None
-    if damage == 'unsealed': args['credential_admission'] = object()
+    if damage == 'unsealed': args['credential_realm_owner'] = object()
     if damage == 'worker':
-        args['credential_admission'] = _owner_seal(
-            capacity_fact=_capacity_fact(worker_id='other-worker'),
-            bindings=args['credential_bindings_document'], profiles=args['credential_profiles_document'])
+        observed = args['credential_realm_owner'].observe()
+        observed['worker_id'] = 'other-worker'
+        monkeypatch.setattr(SubscriptionRealmOwner, 'observe', lambda self: dict(observed))
     if damage == 'catalog':
-        args['credential_bindings_document']['bindings'][args['credential_admission'].binding_id]['implementation_state'] = 'SPEC_ONLY'
+        args['credential_bindings_document']['bindings'][args['preparation']['binding'].binding_id]['implementation_state'] = 'SPEC_ONLY'
     if damage == 'binding':
         args['preparation']['binding'] = dataclasses.replace(args['preparation']['binding'],
                                                            effective_base_url='https://other.invalid')
@@ -93,7 +93,7 @@ def test_expiry_or_catalog_drift_during_load_refuses_and_scrubs(tmp_path, monkey
         if drift == 'expiry':
             monkeypatch.setattr(control.time, 'time', lambda: expires + 1)
         else:
-            args['credential_bindings_document']['bindings'][args['credential_admission'].binding_id]['implementation_state'] = 'SPEC_ONLY'
+            args['credential_bindings_document']['bindings'][args['preparation']['binding'].binding_id]['implementation_state'] = 'SPEC_ONLY'
         return 'inert-owner-token'
     args['credential_loader'] = loader
     _, arguments, boundary = ns['_prepare_reserved_attended_under_lease'](**args)
@@ -106,7 +106,7 @@ def test_expiry_or_catalog_drift_during_load_refuses_and_scrubs(tmp_path, monkey
 def test_live_catalog_drift_before_boundary_stops_load(tmp_path, monkeypatch):
     ns, args, _, calls = credential_fixture(tmp_path, monkeypatch)
     _, arguments, boundary = ns['_prepare_reserved_attended_under_lease'](**args)
-    args['credential_bindings_document']['bindings'][args['credential_admission'].binding_id]['implementation_state'] = 'SPEC_ONLY'
+    args['credential_bindings_document']['bindings'][args['preparation']['binding'].binding_id]['implementation_state'] = 'SPEC_ONLY'
     with pytest.raises(control.ControlStartRefused): boundary()
     assert calls == [] and 'ANTHROPIC_AUTH_TOKEN' not in arguments['env']
 
@@ -153,12 +153,102 @@ def test_original_begin_scrubs_parent_mapping_on_return_or_failure(tmp_path, mon
 
 def test_verifier_failure_has_no_sensitive_diagnostic_or_context(tmp_path, monkeypatch):
     ns, args, _, calls = credential_fixture(tmp_path, monkeypatch)
-    from control_plane import subscription_canary_admission as canonical
+    from control_plane import codex_provider_realm as canonical
     sentinel = 'inert-verifier-sensitive-detail'
     def refuse(*a, **kw): raise RuntimeError(sentinel)
-    monkeypatch.setattr(canonical, 'verify_subscription_canary_admission', refuse)
+    monkeypatch.setattr(canonical.SubscriptionRealmOwner, 'observe', refuse)
     with pytest.raises(control.ControlStartRefused) as raised:
         ns['_prepare_reserved_attended_under_lease'](**args)
     assert raised.value.__context__ is None and raised.value.__cause__ is None
     assert sentinel not in ''.join(traceback.format_exception(raised.value))
     assert calls == [] and not args['receipt'].exists()
+
+
+@pytest.mark.parametrize('field,value', [
+    ('control_uid', True), ('control_uid', 999), ('realm_generation', False),
+    ('realm_generation', 0), ('realm_config_sha256', 'b' * 64),
+    ('catalog_digest', 'c' * 64), ('adapter_id', 'codex-cli'),
+])
+def test_current_realm_identity_join_refuses_before_credential(tmp_path, monkeypatch, field, value):
+    ns, args, _, calls = credential_fixture(tmp_path, monkeypatch)
+    observed = args['credential_realm_owner'].observe()
+    observed[field] = value
+    monkeypatch.setattr(SubscriptionRealmOwner, 'observe', lambda self: dict(observed))
+    with pytest.raises(control.ControlStartRefused, match='realm_observation_unqualified'):
+        ns['_prepare_reserved_attended_under_lease'](**args)
+    assert calls == [] and not args['receipt'].exists()
+
+
+@pytest.mark.parametrize('when', ['before_load', 'during_load'])
+def test_changed_current_realm_generation_cannot_extend_original_admission(tmp_path, monkeypatch, when):
+    ns, args, _, calls = credential_fixture(tmp_path, monkeypatch)
+    observed = args['credential_realm_owner'].observe()
+    monkeypatch.setattr(SubscriptionRealmOwner, 'observe', lambda self: dict(observed))
+    def loader():
+        calls.append('load')
+        observed['realm_generation'] += 1
+        return 'inert-owner-token'
+    if when == 'during_load':
+        args['credential_loader'] = loader
+    _, arguments, boundary = ns['_prepare_reserved_attended_under_lease'](**args)
+    if when == 'before_load':
+        observed['realm_generation'] += 1
+    with pytest.raises(control.ControlStartRefused, match='realm_observation_changed'):
+        boundary()
+    assert calls == ([] if when == 'before_load' else ['load'])
+    assert 'ANTHROPIC_AUTH_TOKEN' not in arguments['env']
+    assert not args['receipt'].exists()
+
+
+def test_ordinary_credential_path_never_consumes_interactive_or_legacy_canary_as_authority(tmp_path, monkeypatch):
+    ns, args, _, calls = credential_fixture(tmp_path, monkeypatch)
+    from control_plane import subscription_canary_admission
+    def forbidden(*args, **kwargs):
+        pytest.fail('ordinary credential observation consumed a canary as task authority')
+    monkeypatch.setattr(subscription_canary_admission, 'verify_subscription_canary_admission', forbidden)
+    monkeypatch.setattr(subscription_canary_admission, 'verify_broker_subscription_canary_admission', forbidden)
+    _, arguments, boundary = ns['_prepare_reserved_attended_under_lease'](**args)
+    boundary()
+    assert calls == ['load']
+    arguments['env'].pop('ANTHROPIC_AUTH_TOKEN')
+
+
+@pytest.mark.parametrize('damage', ['config', 'bridge', 'worker_uid', 'worker_gid', 'home'])
+def test_independent_physical_realm_pin_refuses_before_secret_or_process(tmp_path, monkeypatch, damage):
+    ns, args, _, calls = credential_fixture(tmp_path, monkeypatch)
+    physical=args['credential_physical_binding']
+    changes={'config':{'worker_source_config_digest':'b'*64},
+             'bridge':{'bridge_uid':physical.bridge_uid+10000},
+             'worker_uid':{'worker_uid':physical.worker_uid+10000},
+             'worker_gid':{'worker_gid':physical.worker_gid+10000},
+             'home':{'provider_home':str(tmp_path/'other-private-home')}}[damage]
+    args['credential_physical_binding']=dataclasses.replace(physical, **changes)
+    ns['run_owned_process']=lambda **kw:pytest.fail('foreign physical realm reached process')
+    with pytest.raises(control.ControlStartRefused,match='realm_observation_unqualified'):
+        ns['_run_reserved_attended_under_lease'](**args)
+    assert calls==[] and not args['state']['started'] and not args['receipt'].exists()
+
+
+def test_current_owner_self_pin_cannot_replace_original_physical_config(tmp_path, monkeypatch):
+    ns,args,_,calls=credential_fixture(tmp_path,monkeypatch)
+    observed=args['credential_realm_owner'].observe()
+    observed['realm_config_sha256']='c'*64
+    owner=dataclasses.replace(args['credential_realm_owner'],_config_sha256='c'*64)
+    args['credential_realm_owner']=owner
+    monkeypatch.setattr(SubscriptionRealmOwner,'observe',lambda self:dict(observed))
+    assert owner.observe()['realm_config_sha256']==owner._config_sha256
+    with pytest.raises(control.ControlStartRefused,match='realm_observation_unqualified'):
+        ns['_prepare_reserved_attended_under_lease'](**args)
+    assert calls==[] and not args['receipt'].exists()
+
+
+@pytest.mark.parametrize('getter',['getuid','geteuid','getgid','getegid'])
+def test_original_controller_cannot_claim_a_different_launch_principal(tmp_path,monkeypatch,getter):
+    ns,args,_,calls=credential_fixture(tmp_path,monkeypatch)
+    real=ns['os']
+    view=SimpleNamespace(**{name:getattr(real,name) for name in ('getuid','geteuid','getgid','getegid')})
+    setattr(view,getter,lambda:999999)
+    ns['os']=view
+    with pytest.raises(control.ControlStartRefused,match='realm_observation_unqualified'):
+        ns['_prepare_reserved_attended_under_lease'](**args)
+    assert calls==[] and not args['receipt'].exists()

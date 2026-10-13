@@ -19,7 +19,7 @@ def original(tmp_path, monkeypatch, lr):
     ns, args, _ = setup(tmp_path, monkeypatch)
     tree = ast.parse(patched(tmp_path, 'remote_sub_exec.py', 'EXECUTOR_SOURCE.json'))
     names = {'_begin_reserved_attended_under_lease', '_prepare_reserved_attended_under_lease',
-             '_begin_lease_process', '_retain_original_cleanup_hold', '_verify_reserved_credential_admission'}
+             '_begin_lease_process', '_retain_original_cleanup_hold', '_verify_reserved_realm_observation'}
     functions = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in names]
     ns.update(asyncio=asyncio, os=os, LaneRuntimeError=lr.LaneRuntimeError,
               _launch_receipt_directory=lr._launch_receipt_directory,

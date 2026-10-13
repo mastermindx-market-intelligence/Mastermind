@@ -22,7 +22,7 @@
  )
 
 
-@@ -110,6 +118,284 @@
+@@ -110,6 +118,310 @@
          contract=contract,manifest=manifest)
 
 
@@ -46,37 +46,60 @@
 +        _retain_original_cleanup_hold(lease=lease, state=state, key=key, receipt=receipt)
 +
 +
-+def _verify_reserved_credential_admission(*, prepared, preparation,
-+                                         credential_loader, credential_admission,
-+                                         credential_bindings_document=None,
-+                                         credential_profiles_document=None):
-+    """Reprove existing realm/canary facts; never load or issue task authority.
++def _verify_reserved_realm_observation(*, prepared, preparation,
++                                     credential_loader, credential_realm_owner, credential_physical_binding,
++                                     credential_bindings_document=None,
++                                     credential_profiles_document=None):
++    """Observe the existing fixed realm owner, never issue task authority.
 +
-+    A loader is fixed trusted owner composition, not caller/RPC configuration.
-+    The existing canary seal remains canary evidence: current foreground Control,
-+    attended profile and assignment gates independently authorize the task.
++    Ordinary Control/Runtime authority and the independently verified run-bound
++    secret canary remain separate. An interactive canary is not a task grant.
 +    """
 +    from control_plane.fabric_control_start import ControlStartRefused
++    from control_plane.codex_provider_realm import SubscriptionRealmOwner
++    from control_plane.executive_fabric_adapter import FabricHostBinding
 +    if not callable(credential_loader):
 +        raise ControlStartRefused('realm_credential_loader_required')
-+    from control_plane.claude_subscription_worker import (
-+        ClaudeSubscriptionWorkerAdapter, _resolve_catalog_pair)
-+    from control_plane.subscription_canary_admission import verify_subscription_canary_admission
++    if type(credential_realm_owner) is not SubscriptionRealmOwner:
++        raise ControlStartRefused('realm_owner_required')
++    if type(credential_physical_binding) is not FabricHostBinding:
++        raise ControlStartRefused('realm_physical_owner_required')
++    from control_plane.claude_subscription_worker import _resolve_catalog_pair
++    from control_plane.subscription_catalog import compose_catalog_digest
 +    verification_failed = False
 +    try:
-+        sealed = verify_subscription_canary_admission(credential_admission,
-+            adapter_id=ClaudeSubscriptionWorkerAdapter.adapter_id,
-+            bindings_document=credential_bindings_document,
-+            profiles_document=credential_profiles_document)
-+        binding, profile, _ = _resolve_catalog_pair(sealed.binding_id,
++        observed = credential_realm_owner.observe()
++        fields = {'worker_id', 'control_uid', 'binding_id', 'profile_id', 'adapter_id',
++                  'realm_config_sha256', 'realm_generation', 'catalog_digest'}
++        if type(observed) is not dict or set(observed) != fields:
++            raise ControlStartRefused('realm_observation_invalid')
++        binding, profile, _ = _resolve_catalog_pair(observed['binding_id'],
 +            bindings_document=credential_bindings_document,
 +            profiles_document=credential_profiles_document)
 +        descriptor = prepared.descriptor
-+        if (sealed.worker_id != descriptor.worker_id
++        physical = credential_physical_binding
++        policy = preparation['policy']
++        catalog_digest = compose_catalog_digest(
++            bindings_document=credential_bindings_document,
++            profiles_document=credential_profiles_document)
++        if (physical.digest != preparation['correlation']['runtime_binding']['physical_binding_sha256']
++                or observed['worker_id'] != descriptor.worker_id
++                or type(observed['control_uid']) is not int
++                or observed['control_uid'] != preparation['policy'].control_uid
++                or observed['realm_config_sha256'] != physical.worker_source_config_digest
++                or observed['worker_id'] != physical.worker_id
++                or policy.worker_uid != physical.worker_uid or policy.worker_gid != physical.worker_gid
++                or physical.bridge_uid != physical.worker_uid
++                or os.getuid() != physical.worker_uid or os.geteuid() != physical.worker_uid
++                or os.getgid() != physical.worker_gid or os.getegid() != physical.worker_gid
++                or Path(policy.provider_home) != Path(physical.provider_home)
++                or type(observed['realm_generation']) is not int
++                or observed['realm_generation'] < 1
++                or observed['catalog_digest'] != catalog_digest
 +                or binding != preparation['binding'] or profile != preparation['profile']
-+                or sealed.binding_id != descriptor.binding_id
-+                or sealed.profile_id != descriptor.profile_id
-+                or sealed.adapter_id != descriptor.adapter_id
++                or observed['binding_id'] != descriptor.binding_id
++                or observed['profile_id'] != descriptor.profile_id
++                or observed['adapter_id'] != descriptor.adapter_id
 +                or descriptor.model_class != preparation['model_class']
 +                or descriptor.model != binding.model_for(profile, preparation['model_class'])
 +                or descriptor.endpoint != binding.effective_base_url):
@@ -84,15 +107,15 @@
 +    except Exception:
 +        verification_failed = True
 +    if verification_failed:
-+        # Raise outside the handler: no hostile verifier context is retained.
-+        # No secret is read here or copied into descriptors/receipts.
-+        raise ControlStartRefused('realm_credential_admission_unqualified') from None
++        # No opaque observer error or sensitive context crosses the boundary.
++        raise ControlStartRefused('realm_observation_unqualified') from None
++    return observed
 +
 +
 +def _prepare_reserved_attended_under_lease(*, payload, authority, preparation,
 +                                       lease, state, key, receipt, nice,
 +                                       check_original_owner, credential_loader=None,
-+                                       credential_admission=None,
++                                       credential_realm_owner=None, credential_physical_binding=None,
 +                                       credential_bindings_document=None,
 +                                       credential_profiles_document=None):
 +    """Private composition seam, not exposed by CLI, RPC or environment.
@@ -115,10 +138,11 @@
 +    if prepared.descriptor.run_id != key:
 +        raise ControlStartRefused("original_owner_run_mismatch")
 +    credential_inputs = dict(prepared=prepared, preparation=preparation,
-+        credential_loader=credential_loader, credential_admission=credential_admission,
++        credential_loader=credential_loader, credential_realm_owner=credential_realm_owner,
++        credential_physical_binding=credential_physical_binding,
 +        credential_bindings_document=credential_bindings_document,
 +        credential_profiles_document=credential_profiles_document)
-+    _verify_reserved_credential_admission(**credential_inputs)
++    original_realm = _verify_reserved_realm_observation(**credential_inputs)
 +    arguments = prepared.lane_runtime_arguments()
 +    if arguments['env'] != dict(prepared.descriptor.environment):
 +        raise ControlStartRefused('realm_nonsecret_environment_changed')
@@ -134,7 +158,8 @@
 +            raise ControlStartRefused("owner_check_must_not_issue_authority")
 +        # A slow check or wait must not extend the existing Control command.
 +        authority.require(original)
-+        _verify_reserved_credential_admission(**credential_inputs)
++        if _verify_reserved_realm_observation(**credential_inputs) != original_realm:
++            raise ControlStartRefused('realm_observation_changed')
 +        from control_plane.claude_subscription_worker import _safe_credential
 +        if arguments['env'] != dict(prepared.descriptor.environment):
 +            raise ControlStartRefused('realm_nonsecret_environment_changed')
@@ -151,7 +176,8 @@
 +        try:
 +            # Loading can be slow; neither expiry nor current catalog may drift.
 +            authority.require(original)
-+            _verify_reserved_credential_admission(**credential_inputs)
++            if _verify_reserved_realm_observation(**credential_inputs) != original_realm:
++                raise ControlStartRefused('realm_observation_changed')
 +            arguments['env']['ANTHROPIC_AUTH_TOKEN'] = credential
 +        finally:
 +            credential = None
@@ -307,7 +333,7 @@
  def _execute(argv: list[str], state: dict) -> int:
      if len(argv) != 6:
          return _fail(
-@@ -134,6 +420,21 @@
+@@ -134,6 +446,21 @@
          except (ImportError, ValueError, TypeError, KeyError, RecursionError):
              return _fail("ARTIFACT_DELIVERY_CONTRACT_REFUSED", 65)
      artifact_failure = False
@@ -329,7 +355,7 @@
 
      # Tilde belongs to this host, not to the controller that selected it.
      if cwd.startswith("~") and cwd != "~" and not cwd.startswith("~/"):
-@@ -230,34 +531,12 @@
+@@ -230,34 +557,12 @@
                          or not os.access(guard, os.X_OK)):
                      return _fail("FABRIC_CPU_STRESS_GUARD_UNAVAILABLE", 78)
                  child_env["PATH"] = str(here) + os.pathsep + child_env.get("PATH", "/usr/bin:/bin")
@@ -370,7 +396,7 @@
 
              display_stdout = result.stdout
              if mode == "grok":
-@@ -294,6 +573,9 @@
+@@ -294,6 +599,9 @@
                  except (OSError, ValueError, TypeError, KeyError, RecursionError):
                      artifact_failure = True
 

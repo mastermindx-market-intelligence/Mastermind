@@ -3,12 +3,12 @@
   "classification": "SOURCE_ONLY_UNINSTALLED",
   "files": {
     "control_plane/fabric_attended_backend.py": {
-      "bytes": 46264,
-      "sha256": "2adefe4099f55131234dd1c36f713917a76af44eeb62c61b0924bac0d2ed9480"
+      "bytes": 46660,
+      "sha256": "a4ead111d65dcf3de832c1a2229d2c839ca4225ab2fd385b99b5e7525c6493b7"
     },
     "tests/test_fabric_attended_backend.py": {
-      "bytes": 52075,
-      "sha256": "0d2c487a45fec81054feb1a822458f8ce33b930dcc52738f6a6c35a4bad737e2"
+      "bytes": 54220,
+      "sha256": "b178e4c76afcfaa62ca21dc965ac9ef3590ec64d69e783198316b5682cec05d8"
     }
   },
   "dependencies": [
@@ -42,12 +42,29 @@
       "failures": 0,
       "errors": 0,
       "exit_code": 0
+    },
+    "CURRENT_REALM_PHYSICAL_FINAL.xml": {
+      "path": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/native-closure-20261012/bound-launch-producer/complete-start/assignment-control-join/CURRENT_REALM_PHYSICAL_FINAL.xml",
+      "bytes": 11282,
+      "sha256": "290e1260a67610b4608d8956b5c455d0080a55c0ed748d68c8b6bd5db7baf1ba",
+      "tests": 42,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "CURRENT_REALM_PATCH_GUARD.xml": {
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "8e34b04c37f6a527fb96f784110b8cc66ad2cfda4af7ed336f5ee3d84a990a2c"
     }
   },
   "factory_source_join": "create_attended_backend(trusted BridgeConfig, owner_resources=_FixedOwnerResources) -> fixed single-use service composition. It authenticates exact in-process ControlStartAuthority before deriving Runtime request/correlation and retaining ONE FabricAttendedBackend. Default unconfigured invocation refuses; no JSON/env/import selectors.",
-  "activation_path": "Qualified fixed owner supplies independent typed policy/catalog/profile/binary/physical/path/evidence resources plus actual sealed credential admission/loader, creates backend through fixed factory, then calls existing scripts.executive_fabric_bridge.serve(config, backend, stop_event=original owner event, activate_socket=existing qualified platform producer) on original main thread/event loop. Darwin default is activate_launchd_socket; Linux composition uses existing scripts.executive_os_linux_worker.activate_systemd_socket (closed one-FD producer) with independently qualified Control GID. No new listener. Original signal/cleanup owner shutdown composition remains required.",
+  "activation_path": "Qualified fixed owner supplies independent typed policy/catalog/profile/binary/physical/path/evidence resources plus actual typed current realm owner/loader, creates backend through fixed factory, then calls existing scripts.executive_fabric_bridge.serve(config, backend, stop_event=original owner event, activate_socket=existing qualified platform producer) on original main thread/event loop. Darwin default is activate_launchd_socket; Linux composition uses existing scripts.executive_os_linux_worker.activate_systemd_socket (closed one-FD producer) with independently qualified Control GID. No new listener. Original signal/cleanup owner shutdown composition remains required.",
   "unsupported": "Nonempty validation argv refused pre-effect. validation/nonterminal/restart/unbound absence cleanup scopes remain unavailable. Existing original owner reconciliation required after controller restart.",
-  "pending": "One authorized zero-child independent source review; actual Linux issuer/realm/profile/binary/assignment and platform socket/shutdown inputs remain separate activation obligations. Source is uninstalled.",
-  "credential_source_join": "Four separately fixed owner inputs: canonical CredentialLoader, actual sealed SubscriptionCanaryAdmission and original binding/profile catalog documents. Reuse pure original executor verifier before slot/O_EXCL/lease; exact worker/catalog/profile/model/endpoint verified again at actual boundary. Canonical _safe_credential once; token enters only transient env and is scrubbed on begin return/failure. No credential loaded by Backend, RPC, descriptor or evidence.",
-  "canonical_cancellation": "Authenticated FabricBridgeBroker validates the closed cancellation body; original lane owner independently validates before signals. Backend delegates without a third duplicated numeric bound."
+  "pending": "Actual finite Anthropic current observer/V2 producer and installed composition, final source review/release and host qualification remain. Prior paid review exceeded bound and is NOT_ACCEPTED; concrete F3 independently reproduced and repaired.",
+  "credential_source_join": "Fixed canonical CredentialLoader, typed current SubscriptionRealmOwner and original binding/profile catalogs. Existing physical route pins realm config, worker and actual controller UID/GID/HOME before reservation and at original credential boundary. No secret in RPC/descriptor/evidence, no interactive-canary task authority.",
+  "canonical_cancellation": "Authenticated FabricBridgeBroker validates the closed cancellation body; original lane owner independently validates before signals. Backend delegates without a third duplicated numeric bound.",
+  "post_release_failure": "Verified original lease release is immutable. A later cleanup carrier read failure is propagated without re-holding the released lease or obscuring original failure."
 }
