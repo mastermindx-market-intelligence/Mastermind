@@ -11,6 +11,112 @@ import pytest
 from brain import distill as D
 
 
+def _pairwise_auc(y, scores):
+    """Independent probability-of-superiority reference: wins + half-credit ties.
+
+    This compares every positive/negative pair rather than implementing rank averaging.
+    See https://arxiv.org/abs/2409.05038 for the tie-adjusted Mann-Whitney effect.
+    """
+    positives = [score for label, score in zip(y, scores) if label == 1]
+    negatives = [score for label, score in zip(y, scores) if label == 0]
+    if not positives or not negatives:
+        return None
+    credit = sum(
+        1.0 if positive > negative else 0.5 if positive == negative else 0.0
+        for positive in positives
+        for negative in negatives
+    )
+    return round(credit / (len(positives) * len(negatives)), 3)
+
+
+def test_auc_all_ties_receive_half_credit_in_either_class_order():
+    for y in ([0, 1], [1, 0], [0, 0, 1, 1], [1, 1, 0, 0], [1, 0, 1, 0]):
+        assert D._auc(y, [0.5] * len(y)) == 0.5
+
+
+def test_auc_mixed_ties_match_pairwise_half_credit():
+    cases = (
+        ([0, 1, 0, 1], [0.1, 0.1, 0.8, 0.8]),
+        ([0, 0, 1, 1], [0.1, 0.4, 0.4, 0.9]),
+        ([1, 0, 0, 1, 0, 1], [-2.0, -2.0, 0.0, 0.0, 4.0, 4.0]),
+    )
+    for y, scores in cases:
+        assert D._auc(y, scores) == _pairwise_auc(y, scores)
+
+
+def test_auc_joint_row_permutations_preserve_mixed_tie_result():
+    from itertools import permutations
+
+    y = [0, 1, 0, 1, 1, 0]
+    scores = [0.1, 0.1, 0.4, 0.4, 0.9, 0.9]
+    expected = _pairwise_auc(y, scores)
+    count = 0
+    for order in permutations(range(len(y))):
+        assert D._auc([y[i] for i in order], [scores[i] for i in order]) == expected
+        count += 1
+    assert count == 720
+
+
+def test_auc_exhaustive_small_populations_match_pairwise_reference():
+    from itertools import product
+
+    count = 0
+    for size in range(2, 6):
+        for rows in product(tuple(product((0, 1), (-1.0, 0.0, 1.0))), repeat=size):
+            y, scores = zip(*rows)
+            if len(set(y)) < 2:
+                continue
+            assert D._auc(y, scores) == _pairwise_auc(y, scores), (y, scores)
+            count += 1
+    assert count == 8604
+
+
+def test_auc_retains_three_decimal_rounding():
+    assert D._auc([1, 0, 0, 0], [1.0, 0.0, 2.0, 3.0]) == 0.333
+    assert D._auc([1, 0, 0, 0], [2.0, 0.0, 1.0, 3.0]) == 0.667
+    assert D._auc([1, 0, 0, 0], [0.0, 0.0, 1.0, 2.0]) == 0.167
+
+
+def test_auc_empty_and_one_class_populations_stay_undefined():
+    for y, scores in (([], []), ([0, 0], [0.1, 0.9]), ([1, 1], [0.1, 0.9])):
+        assert D._auc(y, scores) is None
+
+
+def test_auc_does_not_mutate_array_inputs():
+    import numpy as np
+
+    y = np.array([1, 0, 1, 0])
+    scores = np.array([0.8, 0.8, 0.1, 0.1])
+    original_y, original_scores = y.copy(), scores.copy()
+    assert D._auc(y, scores) == 0.5
+    np.testing.assert_array_equal(y, original_y)
+    np.testing.assert_array_equal(scores, original_scores)
+
+
+def test_auc_large_tie_group_retains_half_credit():
+    import numpy as np
+
+    y = np.tile([0, 1], 10_000)
+    assert D._auc(y, np.full(len(y), 0.5)) == 0.5
+
+
+def test_auc_untied_populations_preserve_ordinal_rank_results():
+    import numpy as np
+
+    rng = np.random.default_rng(20261013)
+    for size in range(2, 32):
+        for _ in range(10):
+            y = rng.integers(0, 2, size=size)
+            y[0], y[1] = 0, 1
+            scores = rng.permutation(size).astype(float)
+            # With no ties, each value has its unique one-based ordinal rank.
+            n_pos, n_neg = int((y == 1).sum()), int((y == 0).sum())
+            rank_sum = (scores[y == 1] + 1).sum()
+            expected = round(float((rank_sum - n_pos * (n_pos + 1) / 2) / (n_pos * n_neg)), 3)
+            assert D._auc(y, scores) == expected
+
+
+
 def _panel(n: int = 460, ntick: int = 30, start: str = "2024-05-01"):
     import numpy as np
     import pandas as pd

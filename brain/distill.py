@@ -38,7 +38,7 @@ _FEATURES = _student._NUM_FEATURES + _student._CAT_FEATURES   # SAME PIT feature
 
 
 def _auc(y, p) -> float | None:
-    """Rank-based ROC-AUC (Mann-Whitney U), no sklearn dependency. None if one class is empty."""
+    """Tie-aware ROC-AUC (Mann-Whitney U), no sklearn dependency. None if one class is empty."""
     try:
         import numpy as np
         y = np.asarray(y).astype(int)
@@ -48,7 +48,11 @@ def _auc(y, p) -> float | None:
             return None
         order = np.argsort(p, kind="mergesort")
         ranks = np.empty(len(p), dtype=float)
-        ranks[order] = np.arange(1, len(p) + 1)
+        sorted_p = p[order]
+        starts = np.r_[0, np.flatnonzero(sorted_p[1:] != sorted_p[:-1]) + 1]
+        ends = np.r_[starts[1:], len(p)]
+        # Equal scores share their average one-based rank: half-credit for a tied pair.
+        ranks[order] = np.repeat((starts + ends + 1) / 2.0, ends - starts)
         return round(float((ranks[y == 1].sum() - n_pos * (n_pos + 1) / 2.0) / (n_pos * n_neg)), 3)
     except Exception:  # noqa: BLE001
         return None
