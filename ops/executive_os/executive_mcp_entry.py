@@ -43,8 +43,12 @@ def validate_additional_resources(raw):
 
 def validate_document(raw):
     if (type(raw) is not dict or not CONFIG_KEYS <= set(raw)
-            or not set(raw) <= CONFIG_KEYS | {'workspace', 'steward', 'coo', 'executive_mcp_profile', 'executive_additional_resources', 'os_executive_transport', 'os_executive_resource', 'os_commission_port'}):
+            or not set(raw) <= CONFIG_KEYS | {'workspace', 'steward', 'coo', 'executive_mcp_profile', 'executive_additional_resources', 'os_executive_transport', 'os_executive_resource', 'os_commission_port', 'reply_events_armed'}):
         raise ValueError('installed MCP configuration fields differ')
+    if type(raw.get('reply_events_armed',False)) is not bool:
+        raise ValueError('event receiver selection must be boolean')
+    if raw.get('reply_events_armed',False) and raw.get('executive_mcp_profile') != 'web_ceo_v3':
+        raise ValueError('reply events require explicit Web-CEO v3 receiver')
     from integrations.executive_mcp.personal_read import PERSONAL_READ_PROFILE
     from integrations.executive_mcp.web_ceo_v3 import validate_installed_mcp_profile_current
     profile = validate_installed_mcp_profile_current(raw.get('executive_mcp_profile', 'legacy'))
@@ -492,6 +496,12 @@ def main(argv=None):
             v3_kwargs = {}
             if coo_settings is not None:
                 v3_kwargs["coo_settings"] = coo_settings
+            if raw.get("reply_events_armed",False):
+                from integrations.session_bridge.installed_reply_events import build_installed_reply_event_rpc
+                from integrations.session_bridge.reply_policy_selection import ReplyPolicySelection
+                v3_kwargs["reply_event_rpc"] = build_installed_reply_event_rpc(
+                    settings.ceo_ingress_socket_path,ReplyPolicySelection((policies,*additional_policies)),
+                    clock=lambda:int(settings.clock()),enabled=True)
             # One installed client instance; the opt-in OS session transport
             # receives this same object only while the transport is enabled.
             os_transport_enabled = raw.get('os_executive_transport', False)

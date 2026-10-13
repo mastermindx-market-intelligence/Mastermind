@@ -23,6 +23,7 @@ from integrations.session_bridge.web_reply_event_rpc import _callback_url
 from integrations.session_bridge.web_reply_delivery import _secret
 
 _SCHEMA = "mastermind.reply_subscription_event.v1"
+_AUTH_SCHEMA = "mastermind.reply_subscription_event.v2"
 _AGGREGATE = "reply_subscription"
 _DELIVERY = "reply_subscription_delivery"
 _ACTOR = "executive.reply_subscriptions"
@@ -120,8 +121,9 @@ class RuntimeReplySubscriptionStore:
             p = event.payload
             if (event.sequence != sequence or event.actor != _ACTOR
                     or event.event_type not in {"REPLY_SUBSCRIPTION_COMMITTED", "REPLY_SUBSCRIPTION_REVOKED"}
-                    or type(p) is not dict or set(p) != {"schema", "previous", "record", "binding", "envelope", "operation_digest"}
-                    or p["schema"] != _SCHEMA or p["previous"] != snapshot.version
+                    or type(p) is not dict or set(p) not in ({"schema", "previous", "record", "binding", "envelope", "operation_digest"},
+                        {"schema", "previous", "record", "binding", "envelope", "operation_digest", "authorization_digest"})
+                    or p["schema"] != (_AUTH_SCHEMA if "authorization_digest" in p else _SCHEMA) or p["previous"] != snapshot.version
                     or event.command_id != "reply-subscription:" + p["operation_digest"]
                     or type(p["binding"]) is not list or len(p["binding"]) != 3):
                 raise ValueError("subscription event chain unavailable")
@@ -137,11 +139,17 @@ class RuntimeReplySubscriptionStore:
                     raise ValueError("subscription metadata changed")
                 envelope = p["envelope"]
                 associated = {"metadata": metadata, "previous": p["previous"], "binding": p["binding"]}
+                if "authorization_digest" in p:
+                    if type(p["authorization_digest"]) is not str or not _SHA.fullmatch(p["authorization_digest"]):
+                        raise ValueError("authorization digest unavailable")
+                    associated["authorization_digest"] = p["authorization_digest"]
             elif record is not None or p["envelope"] is not None:
                 raise ValueError("invalid revocation event")
             else:
                 envelope = associated = None
             semantic = {"previous": p["previous"], "record": p["record"], "binding": p["binding"], "kind": event.event_type}
+            if "authorization_digest" in p:
+                semantic["authorization_digest"] = p["authorization_digest"]
             if _hash(semantic) != p["operation_digest"]:
                 raise ValueError("subscription operation identity changed")
             snapshot = SubscriptionSnapshot(record, event.command_id, binding)
@@ -158,7 +166,8 @@ class RuntimeReplySubscriptionStore:
 
     def _private(self, snapshot, envelope, associated):
         private = self._cipher.open(envelope, associated)
-        if type(private) is not dict or set(private) != {"url", "current", "previous", "previous_until"}:
+        if type(private) is not dict or set(private) not in ({"url", "current", "previous", "previous_until"},
+                {"url", "current", "previous", "previous_until", "authorization"}):
             raise ValueError("private subscription shape unavailable")
         record = snapshot.record
         if record is None or _callback_url(private["url"]) != private["url"] or _digest(private["url"]) != record.callback_url_digest or _digest(private["current"]) != record.signing_secret_digest:
@@ -172,9 +181,14 @@ class RuntimeReplySubscriptionStore:
                 raise ValueError("duplicate rotation key")
         elif private["previous_until"] != 0:
             raise ValueError("invalid empty key grace")
+        if "authorization_digest" in associated:
+            if "authorization" not in private or _hash(private["authorization"]) != associated["authorization_digest"]:
+                raise ValueError("sealed authorization binding changed")
+        elif "authorization" in private:
+            raise ValueError("unbound sealed authorization")
         return private
 
-    async def commit(self, record, signing_secret, *, callback_url, expected_version):
+    async def commit(self, record, signing_secret, *, callback_url, expected_version, authorization=None):
         metadata = _record(record)
         if type(expected_version) is not str or not _ID.fullmatch(expected_version):
             raise ValueError("canonical store version required")
@@ -196,21 +210,41 @@ class RuntimeReplySubscriptionStore:
                 private["previous"], private["previous_until"] = old["current"], min(now + 300, prior.record.expires_at)
         binding = [record.owner_key, record.request_ref, record.callback_url_digest]
         semantic = {"previous": expected_version, "record": metadata, "binding": binding, "kind": "REPLY_SUBSCRIPTION_COMMITTED"}
+        associated = {"metadata": metadata, "previous": expected_version, "binding": binding}
+        if authorization is not None:
+            from control_plane.native_continuation import stored_continuation_request
+            from .installed import _principal
+            from .web_reply_subscription_owner import owner_key
+            event, value = stored_continuation_request(self._runtime, record.read_ref)
+            if (type(authorization) is not dict or authorization.get("request_ref") != record.request_ref
+                    or authorization.get("read_ref") != record.read_ref or authorization.get("expires_at") != record.expires_at
+                    or authorization.get("request_event_sha256") != _hash(event.to_dict())
+                    or event.command_id != record.request_ref
+                    or owner_key(_principal(authorization.get("principal"))) != record.owner_key):
+                raise ValueError("original accepted authorization differs")
+            # Source authorization comes only from the authenticated receiver;
+            # current policy admission is rechecked by its concrete owner.
+            authorization = json.loads(_json(authorization))
+            private["authorization"] = authorization
+            associated["authorization_digest"] = _hash(authorization)
+            semantic["authorization_digest"] = associated["authorization_digest"]
         digest = _hash(semantic)
-        sealed = self._cipher.seal(private, {"metadata": metadata, "previous": expected_version, "binding": binding})
+        sealed = self._cipher.seal(private, associated)
         with self._store.transaction() as connection:
-            current, _, _ = self._state(record.subscription_id, connection)
+            current, _, current_associated = self._state(record.subscription_id, connection)
             existing = self._store.get_event_by_command_id("reply-subscription:" + digest, connection=connection)
             if existing is not None:
-                if current.record != record or current.version != existing.command_id:
+                if (current.record != record or current.version != existing.command_id
+                        or (current_associated or {}).get("authorization_digest") != associated.get("authorization_digest")):
                     raise SubscriptionConflict("original subscription was superseded")
                 return record
             if current.version != expected_version or (current.binding is not None and current.binding != tuple(binding)):
                 raise SubscriptionConflict("subscription version changed")
             self._store.append_event(connection, aggregate_type=_AGGREGATE, aggregate_id=record.subscription_id,
                 event_type=semantic["kind"], actor=_ACTOR, command_id="reply-subscription:" + digest,
-                payload={"schema": _SCHEMA, "previous": expected_version, "record": metadata, "binding": binding,
-                         "envelope": sealed, "operation_digest": digest})
+                payload={"schema": _AUTH_SCHEMA if authorization is not None else _SCHEMA, "previous": expected_version, "record": metadata, "binding": binding,
+                         "envelope": sealed, "operation_digest": digest,
+                         **({"authorization_digest": associated["authorization_digest"]} if authorization is not None else {})})
         return record
 
     async def remove(self, subscription_id, owner_key, *, request_ref, callback_url_digest, expected_version):
@@ -236,6 +270,33 @@ class RuntimeReplySubscriptionStore:
                 event_type=semantic["kind"], actor=_ACTOR, command_id="reply-subscription:" + digest,
                 payload={"schema": _SCHEMA, "previous": expected_version, "record": None, "binding": binding,
                          "envelope": None, "operation_digest": digest})
+
+    def accepted_authorization(self, subscription_id, *, expected_version=None):
+        snapshot, envelope, associated = self._state(subscription_id)
+        if snapshot.record is None or expected_version is not None and snapshot.version != expected_version:
+            raise SubscriptionConflict("accepted subscription changed")
+        private = self._private(snapshot, envelope, associated)
+        value = private.get("authorization")
+        if type(value) is not dict:
+            raise ValueError("legacy subscription has no retained authorization")
+        return snapshot, json.loads(_json(value))
+
+    def subscriptions_for_reply(self, request_ref, read_ref):
+        # Existing event owner only; no new index/database/queue. Refuse an
+        # excessive census rather than omitting an unknown matching audience.
+        events = self._store.list_events(aggregate_type=_AGGREGATE)
+        if len(events) > _MAX_HISTORY:
+            raise ValueError("subscription audience census exceeds bound")
+        ids = sorted({e.aggregate_id for e in events if type(e.payload) is dict
+            and type(e.payload.get("record")) is dict and e.payload["record"].get("request_ref") == request_ref})
+        if len(ids) > 32:
+            raise ValueError("reply audience exceeds bound")
+        result = []
+        for ident in ids:
+            snapshot, _, _ = self._state(ident)
+            if snapshot.record is not None and snapshot.record.request_ref == request_ref and snapshot.record.read_ref == read_ref:
+                result.append(ident)
+        return tuple(result)
 
     def delivery_view(self, subscription_id, *, expected_version, owner_key, grant_revision):
         snapshot, envelope, associated = self._state(subscription_id)

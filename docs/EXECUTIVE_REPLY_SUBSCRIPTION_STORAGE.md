@@ -14,9 +14,11 @@ callback URL received from ChatGPT on authenticated `events/subscribe`.
 
 The installed Executive service/credential owner must provision and retain that
 storage key through its actual approved host custody mechanism before selecting
-this composition. There is no default key, key creation command, filesystem path,
-provider credential reuse, generic vault, or installed-readiness claim in this
-source. The model/request cannot select a key file or credential account. Key bytes
+this composition. The default-off host accepts an explicit provisioned key path
+under root-sealed parents, owned privately by the existing Executive control UID,
+with strict file and executing-identity validation; it supplies no default path, key
+creation command, provider credential reuse, generic vault or installed-readiness
+claim. The model/request cannot select a key file or credential account. Key bytes
 must stay out of arguments, environment/config JSON, logs, events, Agent OS and tool
 responses. Host custody must prove private access, restart recovery, backup/restore
 and correct key-id binding. At-rest key rotation needs actual access to previous
@@ -25,7 +27,11 @@ This is an installation obligation, not an instruction to create a live key here
 
 Subscription metadata contains public original-request, owner and URL/key digests.
 The raw URL (which may contain callback capability material), current signing secret,
-and at most one previous signing secret remain in the sealed private payload. Owner
+and at most one previous signing secret remain in the sealed private payload.
+The receiving host can additionally bind its accepted finite original-account READ
+grant into the same ciphertext and event CAS, with an authenticated public digest.
+It stores no raw JWT. Legacy payloads remain readable but cannot provide retained
+background authorization. See `EXECUTIVE_REPLY_DELIVERY_COMPOSITION.md`. Owner
 only `delivery_view` opens that payload; its representation hides URL and signing
 keys. No public MCP catalog or response exposes this private view.
 

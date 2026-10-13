@@ -16,6 +16,8 @@ owner MUST control the resolver, connector, signed packet and transaction.
 """
 from __future__ import annotations
 
+import inspect
+
 import base64
 import binascii
 import dataclasses
@@ -185,7 +187,7 @@ def _signed_request_headers(packet: PreparedReplyWebhook, host: str,
 def send_once(callback_url: str, packet: PreparedReplyWebhook, *,
               resolver: Callable[...,Sequence[Any]] | None=None,
               connector: Callable[...,Any] | None=None,
-              timeout_s: int=7) -> CallbackHTTPReceipt:
+              timeout_s: int=7, before_request: Callable[[],PreparedReplyWebhook] | None=None) -> CallbackHTTPReceipt:
     """One pinned HTTPS POST, never follow redirects, retry or claim consumption.
 
     All checks that can refuse a callback precede socket creation. An error
@@ -195,7 +197,8 @@ def send_once(callback_url: str, packet: PreparedReplyWebhook, *,
     """
     if (type(timeout_s) is not int or not 1<=timeout_s<=10
             or (resolver is not None and not callable(resolver))
-            or (connector is not None and not callable(connector))):
+            or (connector is not None and not callable(connector))
+            or (before_request is not None and (not callable(before_request) or inspect.iscoroutinefunction(before_request)))):
         raise CallbackDestinationRefused("invalid bounded callback dependencies")
     try:
         safe=_callback_url(callback_url)
@@ -210,6 +213,11 @@ def send_once(callback_url: str, packet: PreparedReplyWebhook, *,
         addresses=_allowed_addresses(answers,port)
     except (OSError,TypeError,ValueError,UnicodeError):
         raise CallbackDestinationRefused("callback destination unavailable") from None
+    if before_request is not None:
+        refreshed = before_request()
+        if type(refreshed) is not PreparedReplyWebhook or refreshed.body != packet.body:
+            raise CallbackDestinationRefused("owner fence changed callback event")
+        headers = _signed_request_headers(refreshed,host,port)
     # First address only. Do not retry alternate addresses after failed send.
     conn=None
     try:

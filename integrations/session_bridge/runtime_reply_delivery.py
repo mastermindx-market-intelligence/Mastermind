@@ -1,10 +1,9 @@
-"""Default-disabled executable reply delivery for a CURRENT authenticated caller.
+"""Default-disabled delivery through current JWT or bounded receiver authorization.
 
-The existing host must provide VerifiedPrincipal from its real JWT owner. This
-module cannot recover fresh account authority from persisted identity digests or
-from a native worker. No listener/tool, token cache, watcher or background hook is
-installed here. Native-COMMIT wiring/current original-account issuance remain
-separate installation obligations. Reader calls never trigger outbound effects.
+The retained path consumes only canonical accepted Runtime subscription grants,
+rechecking the existing receiver's current selected policy at I/O. It stores no
+bearer and invents no account authority. The installed Company consumer is in
+installed_reply_events; reader calls remain free of outbound effects.
 """
 from __future__ import annotations
 
@@ -16,6 +15,7 @@ from typing import Any
 from integrations.business_mcp_auth.principal_projection import principal_projection
 from integrations.slack_agent_dialogue.contract_v2 import validate_message_v2
 from integrations.slack_agent_dialogue.service import CONTROL_VERSION_V2
+from .runtime_reply_authorization_owner import (RuntimeReplyAuthorizationOwner, RetainedReplyAudience, ObservedReplyPolicyDenial)
 from .native_read import NativeReplyReader
 from .runtime_return import RuntimeSessionReturn
 from .runtime_reply_subscriptions import RuntimeReplySubscriptionStore
@@ -38,14 +38,21 @@ class ResolvedReplyEvent:
 
 class RuntimeReplyEventResolver:
     """Actual async authorized reads; synchronous projection receives their snapshot."""
-    def __init__(self, owner: RuntimeSessionReturn, *, clock):
+    def __init__(self, owner: RuntimeSessionReturn, *, clock, audience_owner=None):
         if type(owner) is not RuntimeSessionReturn or not callable(clock):
             raise TypeError("exact canonical read owner required")
+        if audience_owner is not None and type(audience_owner) is not RuntimeReplyAuthorizationOwner:
+            raise TypeError("concrete retained audience owner required")
+        self._audience_owner = audience_owner
         self._owner = owner
         self._reader = NativeReplyReader(owner, socket_path=owner.socket_path,
             service_call=owner.service_call, clock=clock)
 
     def current(self, principal):
+        if type(principal) is RetainedReplyAudience:
+            if self._audience_owner is None:
+                raise ReplyDeliveryUnavailable("retained audience owner unavailable")
+            return self._audience_owner.current(principal)
         # Existing edge projection and reader lifetime/READ checks, no new auth.
         try:
             principal_projection(principal)
@@ -110,6 +117,8 @@ class RuntimeReplyEventResolver:
             projected = CanonicalReplyEventProjector(SnapshotResolver()).project(
                 principal_ref=public_principal, arguments={"request_ref":request_ref}, message_key=binding.reply_message_key)
             return ResolvedReplyEvent(projected, read_ref, public_principal)
+        except ObservedReplyPolicyDenial:
+            raise
         except Exception:
             raise ReplyDeliveryUnavailable("authorized canonical reply event unavailable") from None
 
@@ -128,20 +137,40 @@ class RuntimeReplyDelivery:
         # A busy executor may start later than the interactive preflight. Check
         # current READ lifetime, subscription/version/expiry, and rotation keys
         # on the actual owned I/O lane before entering the one-shot transport.
-        try:
-            self._events.current(principal)
-            view = self._store.delivery_view(record.subscription_id, expected_version=version,
-                owner_key=record.owner_key, grant_revision=record.revision)
-            self._events.current(principal)
-            packet = prepare_reply_webhook(subscription=VerifiedReplySubscription(
-                subscription_id=record.subscription_id, principal_ref=record.owner_key, request_ref=record.request_ref,
-                event_name=EVENT_NAME, access_current=True, active=True, expires_at=record.expires_at,
-                signing_secrets=view.signing_secrets), event=resolved.event, signed_at=int(self._clock()))
-        except Exception:
-            raise ReplyDeliveryUnavailable("delivery admission expired before I/O") from None
-        return send_once(view.callback_url, packet, resolver=self._resolver, connector=self._connector)
+        def prepare_current():
+            try:
+                self._events.current(principal)
+                view = self._store.delivery_view(record.subscription_id, expected_version=version,
+                    owner_key=record.owner_key, grant_revision=record.revision)
+                self._events.current(principal)
+                packet = prepare_reply_webhook(subscription=VerifiedReplySubscription(
+                    subscription_id=record.subscription_id, principal_ref=record.owner_key, request_ref=record.request_ref,
+                    event_name=EVENT_NAME, access_current=True, active=True, expires_at=record.expires_at,
+                    signing_secrets=view.signing_secrets), event=resolved.event, signed_at=int(self._clock()))
+                return view, packet
+            except ObservedReplyPolicyDenial:
+                raise
+            except Exception:
+                raise ReplyDeliveryUnavailable("delivery admission expired before I/O") from None
+        view, packet = prepare_current()
+        return send_once(view.callback_url, packet, resolver=self._resolver, connector=self._connector,
+            before_request=lambda: prepare_current()[1])
 
     async def deliver_current(self, principal, subscription_id):
+        principal_projection(principal)  # Public current-token path stays exact.
+        return await self._deliver(principal,subscription_id)
+
+    async def deliver_subscription(self, subscription_id):
+        if not self._enabled or self._events._audience_owner is None:
+            raise ReplyDeliveryUnavailable("retained delivery is not selected")
+        try:
+            audience = self._events._audience_owner.capture(subscription_id)
+            return await self._deliver(audience,subscription_id)
+        except ObservedReplyPolicyDenial as denial:
+            await self._events._audience_owner.revoke_observed(denial)
+            return {"state":"NOT_SENT","fresh_send":False,"parent_consumed":False}
+
+    async def _deliver(self, principal, subscription_id):
         if not self._enabled:
             raise ReplyDeliveryUnavailable("reply delivery is not selected by the host")
         projection = self._events.current(principal)
@@ -173,11 +202,19 @@ class RuntimeReplyDelivery:
                 raise ReplyDeliveryUnavailable("delivery admission changed")
             view = self._store.delivery_view(subscription_id, expected_version=snapshot.version,
                 owner_key=record.owner_key, grant_revision=record.revision)
+        except ObservedReplyPolicyDenial as denial:
+            await self._store.settle_delivery(reservation.delivery_ref, outcome="REFUSED")
+            await self._events._audience_owner.revoke_observed(denial)
+            return dict(result, state="NOT_SENT")
         except Exception:
             await self._store.settle_delivery(reservation.delivery_ref, outcome="REFUSED")
             return dict(result, state="NOT_SENT")
         try:
             observed = await asyncio.to_thread(self._send_selected, principal, record, snapshot.version, resolved)
+        except ObservedReplyPolicyDenial as denial:
+            await self._store.settle_delivery(reservation.delivery_ref, outcome="REFUSED")
+            await self._events._audience_owner.revoke_observed(denial)
+            return dict(result, state="NOT_SENT")
         except (CallbackDestinationRefused, ReplyDeliveryUnavailable):
             await self._store.settle_delivery(reservation.delivery_ref, outcome="REFUSED")
             return dict(result, state="NOT_SENT")
@@ -196,12 +233,13 @@ class RuntimeReplyDelivery:
         return dict(result, state=classified, fresh_send=True)
 
 
-def build_runtime_reply_delivery(owner, store, *, clock, enabled=False, resolver=None, connector=None):
+def build_runtime_reply_delivery(owner, store, *, clock, enabled=False, resolver=None, connector=None, audience_owner=None):
     """Explicit existing-host composition; starts/installs/arms nothing by itself.
 
-    The actual host must call deliver_current with its freshly JWT-authorized
-    original-account VerifiedPrincipal. No automatic native-COMMIT registration
-    or cached/fabricated original principal is supplied by this factory.
+    deliver_current requires the existing JWT owner's VerifiedPrincipal.
+    deliver_subscription requires the concrete canonical retained-audience owner;
+    it cannot reconstruct authority from model-supplied identity digests. The
+    existing installed Company/App composition owns the post-COMMIT callsite.
     """
-    return RuntimeReplyDelivery(RuntimeReplyEventResolver(owner, clock=clock), store,
+    return RuntimeReplyDelivery(RuntimeReplyEventResolver(owner, clock=clock, audience_owner=audience_owner), store,
         clock=clock, enabled=enabled, resolver=resolver, connector=connector)
