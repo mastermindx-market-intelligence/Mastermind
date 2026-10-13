@@ -1,0 +1,29 @@
+# Research Read runtime preparation
+
+The accepted four-tool app is published separately in #1393 at eb6e36c4. This source tranche adds a closed production deployment parser, secure current-grant composition and inert staging. It is not an installed service, qualified Macro import closure, tunnel association or client acceptance receipt.
+
+Current Chairman target is C4 Pro for actual ChatGPT and Deep Research: “Yes sure c4 pro works, we can get the other ones installed later”. Business/other-account rollout is deferred by the user. Licensed body processing, redistribution and changes are authorized for the selected internal workflow. The existing business_mcp_auth module supplies neutral OAuth principal and grant primitives; its name does not require Business workspace membership. Provider/account consent controls remain actual controls.
+
+## Source and configuration
+
+`integrations/research_read_mcp/runtime.py` imports without I/O. It parses exactly `mastermind.research_read_mcp.deployment.v1`; the example config contains dummy commit/tree identities and `.invalid` resource host. Port8767 is provisional until actual host readback. Policy and grant examples plus the Linux Python3.12 lock are existing accepted source and are reused.
+
+Owner-selected config, policy and grant files must be regular, non-symlink, bounded and0600, owned by the specified service UID; reads check descriptor/path identity before and after. Provision the grant for the service UID explicitly. The existing secure loader is reused with that expected UID. One current owner loads grants for every entitlement/quote lookup, and the app retains its final token/grant recheck. Revocation or expiry denies without an additional read-port call. No second policy store, cached caller or expanded ServerReadContext exists.
+
+Production release paths are exact `/opt/mastermind-research/releases/<commit>` and `/opt/macro-research/releases/<commit>`. Commit and tree identities are mandatory; loopback is mandatory; local/moving checkout configuration refuses. `verify_git_release` currently qualifies a clean pinned Git checkout and rejects `.env`, dirty input and mismatched identities. **Archive deployment requires a separately implemented and verified archive identity reader**; do not substitute manifest strings for tree/file verification. The default Git verifier honestly refuses archives without Git identity.
+
+`compose_runtime` requires the real caller-supplied authenticator, read-service, adapter, canonical-context and readiness factories. It does not invent the pending adapter API or fallback Macro port. The actual launcher is still to be integrated after the adapter return and qualified F11 revision binding. The real Macro zero-argument `build_read_service` and production store mode must be verified before real composition. Source tests use a synthetic injected service and port, including actual HTTP/SDK calls; they do not demonstrate production R2.
+
+Healthz returns process liveness only. Readyz returns503 unless the explicit readiness callback qualifies the actual composed service. It must never infer95%fulltext coverage from source presence or a health status. F11's existing>=95%fulltext prerequisite remains held, and its multi-page reads must bind the complete internal text revision before accepting bodies. Current-only PDF URLs are not exact-revision evidence citations.
+
+## Inert staging
+
+`ops/research_read_tunnel/stage.py` accepts exact clean source commits/trees, explicit Macro archive roots and a new output directory. It emits bounded tar archives, member/file hashes, rendered systemd candidate and a manifest with state `INERT_CANDIDATE` and `macro_import_closure=OWNER_QUALIFICATION_REQUIRED`. It performs no SSH, service, proxy, DNS, OAuth, app-association, environment installation or restart. Unsafe paths, symbolic-link members, oversized archives, dirty source and output overwrites refuse.
+
+The eventual fixed launcher must exist at the selected commit before staging; missing `scripts/mastermind_research_read_server.py` refuses. The stager verifies selected bytes, not complete production dependency sufficiency. Owner qualification must supply the exact Macro import closure and Linux dependency evidence, then the archive verifier must prove installed bytes before serving.
+
+The service candidate uses a dedicated unprivileged user, an immutable source release, a virtualenv keyed by the accepted lock digest, loopback runtime config, empty capabilities, strict filesystem protection and a0600root-owned EnvironmentFile loaded by systemd. This repository contains only a candidate; nothing installs it. Keep the source and service/tunnel/account effect receipts separate.
+
+## Client proof still owed
+
+The selected C4 Pro app must be installed, scanned, selected and invoked through the actual approved Research transport. First demonstrate the four public tools and a denied subject with zero body/zero port calls. Afterward add specialized search/fetch over complete bounded evidence items for Deep Research, with stable revision-bound IDs and nonempty canonical citation URLs through an adjudicated auth route. Actual ChatGPT and actual Deep Research must consume licensed content and replay the exact canonical UTF-8 byte slice/hash. A mock, API response, app settings screen or URL string is not this acceptance.
