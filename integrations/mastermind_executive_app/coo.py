@@ -242,6 +242,8 @@ class CooApp:
             authority, context = await self._authority(principal, work_ref, stamp)
         except Exception:
             return refused("authority_refused", 403)
+        if name == "submit_principal_intent" and "bounded_intent" not in authority.principal_actions:
+            return refused("authority_refused", 403)
         if name == "executive_mandate":
             try:
                 data = await self._mandate(principal, stamp, authority)
