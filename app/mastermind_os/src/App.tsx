@@ -2751,6 +2751,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     ) : commandReady && commandView ? (
       <>
         <LaunchOrchestrator
+          locale={locale}
           key={JSON.stringify([
             ownerContext?.principalScope,
             ownerContext?.generation,

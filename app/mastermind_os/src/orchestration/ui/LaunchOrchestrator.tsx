@@ -47,6 +47,7 @@ export type LaunchOutcome = { status: "accepted" } | { status: "refused" };
 export type LaunchCompletion = (outcome: LaunchOutcome) => void;
 
 export interface LaunchOrchestratorProps {
+  locale?: "en" | "zh-CN";
   projects: readonly LaunchChoice[];
   profiles: readonly LaunchChoice[];
   /** Owner-side pending signal. Disables the form; never releases the guard. */
@@ -132,6 +133,7 @@ function readTerminalStatus(outcome: unknown): "accepted" | "refused" | null {
 // ---------------------------------------------------------------------------
 
 export function LaunchOrchestrator({
+  locale = "en",
   projects,
   profiles,
   submitting,
@@ -141,6 +143,17 @@ export function LaunchOrchestrator({
   onSubmit,
   onCancel,
 }: LaunchOrchestratorProps) {
+  const criteriaCopy = locale === "zh-CN" ? {
+    label: "验收条件（可选，每行一项）",
+    placeholder: "完成这项任务时，哪些结果必须有证据证明？",
+    error: "最多填写六项条件，每项不超过 500 个字符。目标和条件合计不得超过 4,000 个 UTF-8 字节。",
+    help: "验收条件会随任务目标提交，用于后续验证；填写条件不代表验证已通过。",
+  } : {
+    label: "Acceptance criteria (optional, one per line)",
+    placeholder: "What must be demonstrably true when this mission is finished?",
+    error: "Use at most six criteria (500 characters each). Goal and criteria together must fit 4,000 UTF-8 bytes.",
+    help: "Criteria travel with the existing mission goal. They are requirements for validation, not a claim that checks have passed.",
+  };
   const formId = useId();
   const goalId = `${formId}-goal`;
   const projectId = `${formId}-project`;
@@ -306,23 +319,23 @@ export function LaunchOrchestrator({
           </div>
 
           <div className="form-field">
-            <label htmlFor={acceptanceId}>Acceptance criteria (optional, one per line)</label>
+            <label htmlFor={acceptanceId}>{criteriaCopy.label}</label>
             <textarea
               id={acceptanceId}
               value={draftAcceptance}
               onChange={(e) => setDraftAcceptance(e.target.value)}
               rows={3}
-              placeholder="What must be demonstrably true when this mission is finished?"
+              placeholder={criteriaCopy.placeholder}
               disabled={launchPending}
               aria-invalid={acceptanceInvalid}
               aria-describedby={acceptanceInvalid ? `${acceptanceId}-error` : undefined}
             />
             {acceptanceInvalid && (
               <p id={`${acceptanceId}-error`} className="field-error" role="alert">
-                Use at most six criteria (500 characters each). Goal and criteria together must fit 4,000 UTF-8 bytes.
+                {criteriaCopy.error}
               </p>
             )}
-            <p className="muted">Criteria travel with the existing mission goal. They are requirements for validation, not a claim that checks have passed.</p>
+            <p className="muted">{criteriaCopy.help}</p>
           </div>
 
           {/* Project select */}
