@@ -18,8 +18,8 @@ This module owns three closed things and nothing else:
 
    The table is not a configuration input.  No CLI flag, config key,
    environment value, receipt field, or raw JSON attribute can extend it, and
-   this release ships no code that writes a grant, so no production path can
-   mint qualified evidence.
+   no production path can mint qualified ordinary cause. The separate
+   internal incident issuer below remains dormant with its policy set to None.
 
 2. *Grant custody.*  One immutable root-owned grant document at a fixed
    internal location, bound to the authority reference, the exact installed
@@ -75,6 +75,53 @@ RECOVERY_STATE_ROOT = Path(
 )
 RECOVERY_GRANT_PATH = RECOVERY_STATE_ROOT / "grant.json"
 RECOVERY_ALLOCATION_PATH = RECOVERY_STATE_ROOT / "allocation.json"
+
+# Dormant exact-incident recovery.  The incident grant and its issuance
+# commitment live under the SAME existing recovery state root and reuse the
+# SAME fixed allocation path; only their immutable document schemas differ.
+# This names a separate policy class, not the ordinary-only human decision.
+INCIDENT_AUTHORITY_REFERENCE = "mastermind.due10_incident_recovery/v1"
+INCIDENT_POLICY_SCHEMA = "mastermind.executive_provider_incident_policy/v1"
+INCIDENT_GRANT_SCHEMA = "mastermind.executive_provider_incident_grant/v1"
+INCIDENT_COMMITMENT_SCHEMA = "mastermind.executive_provider_incident_commitment/v1"
+INCIDENT_ALLOCATION_SCHEMA = "mastermind.executive_provider_incident_allocation/v1"
+INCIDENT_RECOVERY_CLASS = "due10_incident"
+INCIDENT_ISSUER_ACTION = "executive.worker_auth.issue_due10_incident_grant"
+RECOVERY_INCIDENT_GRANT_PATH = RECOVERY_STATE_ROOT / "incident-grant.json"
+RECOVERY_INCIDENT_COMMITMENT_PATH = RECOVERY_STATE_ROOT / "incident-commitment.json"
+
+# Truthful historical classification.  Metadata proximity is not causation and
+# no historical raw messages were retained, so the incident grant can never
+# claim an established request-to-readiness causal link or a proven no-denial.
+INCIDENT_HISTORICAL_CAUSE = "UNKNOWN"
+INCIDENT_CAUSAL_LINK = "NOT_ESTABLISHED"
+
+# Fixed designated evidence of the one retained incident.  These constants are
+# documentation of the reviewed incident identity; the production activation
+# policy below is None, and no environment, config, CLI, JSON or receipt field
+# can install one.  A future authority must ship reviewed source that binds
+# the actual retained human question/answer/provenance digest.
+INCIDENT_DESIGNATED_EVIDENCE = {
+    "original_request_id": "codex01-current-v5-company-01a1230a-20261011-10",
+    "original_request_sha256":
+        "612e85ce922cc9f97f2399d2a1d99e0250795026d86b3101ce32303df48e7863",
+    "original_release_sha": "a858ac249296ffaa7bf523863dea5917bbbc1f24",
+    "original_terminal_sha256":
+        "1ed264ba7e356cd5f673056a8275aca5492016e9e5fb0f4b2f02f6768bcbdde3",
+    "original_terminal_bytes": 785,
+    "original_broker_exit_code": 65,
+    "readiness_receipt_sha256":
+        "05d9505d022dd82deca57b093759c6d44b4d2a1ddb09afd613b12b18a4b12b1a",
+    "readiness_receipt_bytes": 3457,
+    "canary_id": "canary-127d79f1f6bb",
+    "canary_exit_code": 1,
+}
+# Retained diagnostic vocabulary that, if it ever appears in the retained
+# canary evidence, excludes admission outright.  Absence of these terms is NOT
+# proof that no denial occurred; raw messages were not retained.
+INCIDENT_DENIAL_TERMS = frozenset(
+    {"denied", "forbidden", "permission", "unauthorized"}
+)
 
 _GRANT_MAX_BYTES = 16 * 1024
 MIN_GRANT_LIFETIME = timedelta(minutes=30)
@@ -213,6 +260,51 @@ _OBSERVATION_FIELDS = frozenset(
 _OBSERVATION_CATALOG_FIELDS = frozenset(
     {"listed_in_returned_page", "complete"}
 )
+_INCIDENT_EVIDENCE_FIELDS = frozenset(INCIDENT_DESIGNATED_EVIDENCE)
+_INCIDENT_GRANT_FIELDS = frozenset(
+    {
+        "schema_version",
+        "authority_reference",
+        "incident_class",
+        "historical_cause",
+        "causal_link",
+        "raw_provider_messages_retained",
+        "authorization",
+        "evidence",
+        "installed_source",
+        "executive_source",
+        "worker",
+        "credential_lstat",
+        "model",
+        "issuer_request_id",
+        "issuer_request_sha256",
+        "successor_request_id",
+        "budget",
+        "granted_at",
+        "expires_at",
+    }
+)
+_INCIDENT_AUTHORIZATION_FIELDS = frozenset({
+    "schema_version", "policy_id", "question_sha256", "answer_sha256", "provenance_sha256",
+})
+_INCIDENT_COMMITMENT_FIELDS = frozenset(
+    {
+        "schema_version",
+        "authorization",
+        "incident_class",
+        "grant_sha256",
+        "issuer_request_id",
+        "issuer_request_sha256",
+        "successor_request_id",
+        "created_at",
+    }
+)
+_INCIDENT_ALLOCATION_FIELDS = _ALLOCATION_FIELDS | {
+    "policy_id",
+    "issuer_request_id",
+    "issuer_request_sha256",
+    "commitment_sha256",
+}
 
 
 class RecoveryError(RuntimeError):
@@ -271,6 +363,68 @@ PRODUCER_QUALIFICATION = ProducerQualification(
         "event_processor_with_jsonl_output.rs discards structured error info"
     ),
 )
+
+
+@dataclasses.dataclass(frozen=True)
+class IncidentPolicy:
+    """Immutable, closed activation record for the one exact DUE10 incident.
+
+    Every field is a fixed designated fact of the retained incident.  The
+    policy is never an ordinary qualification table, never extends the
+    ordinary producer review, and can never be assembled from caller
+    evidence, dates, budgets, paths or source selectors.
+    """
+
+    policy_id: str
+    question_sha256: str
+    answer_sha256: str
+    provenance_sha256: str
+    original_request_id: str
+    original_request_sha256: str
+    original_release_sha: str
+    original_terminal_sha256: str
+    original_terminal_bytes: int
+    original_broker_exit_code: int
+    readiness_receipt_sha256: str
+    readiness_receipt_bytes: int
+    canary_id: str
+    canary_exit_code: int
+
+    def authorization_binding(self) -> dict[str, Any]:
+        # These are retained provenance references supplied only by reviewed
+        # installed source after a real decision, not cryptographic chat proof.
+        return {
+            "schema_version": INCIDENT_POLICY_SCHEMA,
+            "policy_id": self.policy_id,
+            "question_sha256": self.question_sha256,
+            "answer_sha256": self.answer_sha256,
+            "provenance_sha256": self.provenance_sha256,
+        }
+
+    def designated_evidence(self) -> dict[str, Any]:
+        return {
+            "original_request_id": self.original_request_id,
+            "original_request_sha256": self.original_request_sha256,
+            "original_release_sha": self.original_release_sha,
+            "original_terminal_sha256": self.original_terminal_sha256,
+            "original_terminal_bytes": self.original_terminal_bytes,
+            "original_broker_exit_code": self.original_broker_exit_code,
+            "readiness_receipt_sha256": self.readiness_receipt_sha256,
+            "readiness_receipt_bytes": self.readiness_receipt_bytes,
+            "canary_id": self.canary_id,
+            "canary_exit_code": self.canary_exit_code,
+        }
+
+
+# PRODUCTION INCIDENT POLICY.  It is None: the actual human decision for this
+# exception is pending, ordinary-only approval does not authorize it, and this
+# candidate carries no reviewed activation binding (no retained human
+# question/answer/provenance digest), so the incident issuer cannot issue in
+# production.  There is no environment, config, CLI, JSON or receipt channel
+# that can replace this value; only reviewed source shipped by a real
+# authority may, and a test-only private injection is never a production
+# input.
+PRODUCTION_INCIDENT_POLICY: IncidentPolicy | None = None
 
 
 def _require_exact_fields(
@@ -628,7 +782,12 @@ def validate_grant_document(
 def _validate_state_directory(path: Path) -> None:
     """Require the fixed root-owned custody chain, without following symlinks."""
 
-    if path not in (RECOVERY_GRANT_PATH, RECOVERY_ALLOCATION_PATH):
+    if path not in (
+        RECOVERY_GRANT_PATH,
+        RECOVERY_ALLOCATION_PATH,
+        RECOVERY_INCIDENT_GRANT_PATH,
+        RECOVERY_INCIDENT_COMMITMENT_PATH,
+    ):
         raise RecoveryError("recovery_custody_path_unreviewed")
     for ancestor in (
         RECOVERY_STATE_ROOT.parent.parent,
@@ -788,7 +947,11 @@ def read_allocation(path: Path | None = None) -> dict[str, Any] | None:
     except OSError as exc:
         raise RecoveryError("recovery_custody_unreadable") from exc
     raw = _read_custody_bytes(path, maximum=_GRANT_MAX_BYTES)
-    record = _read_custody_document(raw, schema=RECOVERY_ALLOCATION_SCHEMA)
+    record = _read_custody_json(raw)
+    if record.get("schema_version") == INCIDENT_ALLOCATION_SCHEMA:
+        return _validate_incident_allocation_document(record)
+    if record.get("schema_version") != RECOVERY_ALLOCATION_SCHEMA:
+        raise RecoveryError("recovery_custody_schema_malformed")
     _require_exact_fields(record, _ALLOCATION_FIELDS, "recovery_allocation_fields_malformed")
     if record["allocation_class"] != "current_pin_recovery":
         raise RecoveryError("recovery_allocation_fields_malformed")
@@ -815,6 +978,662 @@ def read_allocation(path: Path | None = None) -> dict[str, Any] | None:
         raise RecoveryError("recovery_allocation_not_consumed")
     _readiness._timestamp(record["claimed_at"], code="recovery_allocation_fields_malformed")
     return record
+
+def _read_custody_json(raw: bytes) -> dict[str, Any]:
+    """Parse custody bytes with duplicate-key rejection but any known schema."""
+
+    try:
+        value = json.loads(
+            raw.decode("utf-8", errors="strict"),
+            object_pairs_hook=_reject_duplicate_keys,
+        )
+    except RecoveryError:
+        raise
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise RecoveryError("recovery_custody_unreadable") from exc
+    if not isinstance(value, dict):
+        raise RecoveryError("recovery_custody_unreadable")
+    return value
+
+
+def validate_incident_authorization(value: Any) -> dict[str, Any]:
+    binding = _require_exact_fields(
+        value, _INCIDENT_AUTHORIZATION_FIELDS, "incident_authorization_malformed"
+    )
+    if binding["schema_version"] != INCIDENT_POLICY_SCHEMA:
+        raise RecoveryError("incident_authorization_malformed")
+    _request_id(binding["policy_id"], "incident_authorization_malformed")
+    for field in ("question_sha256", "answer_sha256", "provenance_sha256"):
+        _hex_digest(binding[field], "incident_authorization_malformed")
+    return binding
+
+
+def require_current_incident_policy(grant: Mapping[str, Any]) -> None:
+    policy = PRODUCTION_INCIDENT_POLICY
+    if policy is None:
+        raise RecoveryError("incident_policy_dormant")
+    designated = validate_incident_policy(policy)
+    if (grant["authorization"] != policy.authorization_binding()
+            or grant["evidence"] != designated):
+        raise RecoveryError("incident_policy_binding_mismatch")
+
+
+def validate_incident_policy(value: Any) -> dict[str, Any]:
+    """Return the designated evidence of one well-formed incident policy.
+
+    Structural and closed-value checks only: this never activates anything and
+    never compares the policy to caller-supplied evidence.  With the
+    production policy ``None`` this function is unreachable in production.
+    """
+
+    if not isinstance(value, IncidentPolicy):
+        raise RecoveryError("incident_policy_malformed")
+    validate_incident_authorization(value.authorization_binding())
+    evidence = value.designated_evidence()
+    _request_id(evidence["original_request_id"], "incident_policy_malformed")
+    for field in ("original_request_sha256", "original_terminal_sha256",
+                  "readiness_receipt_sha256"):
+        _hex_digest(evidence[field], "incident_policy_malformed")
+    if not isinstance(evidence["original_release_sha"], str) or re.fullmatch(
+        r"[0-9a-f]{40}", evidence["original_release_sha"]
+    ) is None:
+        raise RecoveryError("incident_policy_malformed")
+    for field in ("original_terminal_bytes", "readiness_receipt_bytes"):
+        if type(evidence[field]) is not int or evidence[field] <= 0:
+            raise RecoveryError("incident_policy_malformed")
+    if (type(evidence["original_broker_exit_code"]) is not int
+            or evidence["original_broker_exit_code"] <= 0):
+        raise RecoveryError("incident_policy_malformed")
+    if (type(evidence["canary_exit_code"]) is not int
+            or evidence["canary_exit_code"] != RECOVERY_REFUSAL_EXIT_CODE):
+        raise RecoveryError("incident_policy_malformed")
+    if (not isinstance(evidence["canary_id"], str)
+            or _readiness.CANARY_ID_RE.fullmatch(evidence["canary_id"]) is None):
+        raise RecoveryError("incident_policy_malformed")
+    return evidence
+
+
+def refuse_evidenced_incident_denial(document: Any) -> None:
+    """Exclude admission when retained evidence actually shows a denial.
+
+    This is an exclusion only.  Retained clean terms are never promoted into a
+    claim that no denial occurred, because no historical raw messages exist.
+    """
+
+    if not isinstance(document, Mapping):
+        return
+    canary = document.get("inference_canary")
+    terms = canary.get("provider_error_terms") if isinstance(canary, Mapping) else None
+    if isinstance(terms, list) and any(term in INCIDENT_DENIAL_TERMS for term in terms):
+        raise RecoveryError("incident_denial_evidenced")
+
+
+def validate_incident_designated_terminal(designated: Mapping[str, Any]) -> dict[str, Any]:
+    """Join the designated original terminal bytes from the fixed broker store.
+
+    Custody walk, settled-marker absence, exact byte digest and length, and the
+    canonical FAILED receipt shape with the designated broker exit code.  No
+    timing-proximity claim is made: metadata proximity is not causation and the
+    incident grant never asserts one.
+    """
+
+    from control_plane import executive_privileged_broker as broker
+
+    request_id = _request_id(
+        designated["original_request_id"], "incident_evidence_malformed"
+    )
+    receipt_root = broker._RECEIPT_ROOT
+    path = receipt_root / (request_id + ".json")
+    try:
+        for directory in (receipt_root.parent.parent, receipt_root.parent,
+                          receipt_root, receipt_root / "inflight",
+                          receipt_root / "reconciled"):
+            broker._assert_root_owned_nonwritable(directory, directory=True)
+            _readiness._assert_no_macos_acl(directory)
+        for directory in ("inflight", "reconciled"):
+            other = receipt_root / directory / path.name
+            try:
+                other.lstat()
+            except FileNotFoundError:
+                continue
+            raise RecoveryError("recovery_original_request_unsettled")
+        raw, info = broker._read_stable_bounded_bytes(path)
+        if (info.st_uid != CUSTODY_UID or info.st_gid != CUSTODY_GID
+                or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o600):
+            raise RecoveryError("recovery_original_request_custody_unsafe")
+        _readiness._assert_no_macos_acl(path)
+        if (hashlib.sha256(raw).hexdigest() != designated["original_terminal_sha256"]
+                or len(raw) != designated["original_terminal_bytes"]):
+            raise RecoveryError("recovery_original_request_preimage_mismatch")
+        value = json.loads(raw, object_pairs_hook=_reject_duplicate_keys)
+        result = broker.validate_terminal_receipt(
+            value,
+            expected_request_id=request_id,
+            expected_request_sha256=designated["original_request_sha256"],
+            expected_release_sha=designated["original_release_sha"],
+            expected_action="executive.worker_auth.verify_ready",
+        )
+        if result["outcome"] != "FAILED":
+            raise RecoveryError("recovery_original_request_not_adverse")
+        if result["exit_code"] != designated["original_broker_exit_code"]:
+            raise RecoveryError("recovery_original_request_exit_mismatch")
+    except (OSError, ValueError, broker.BrokerTrustError) as exc:
+        raise RecoveryError("recovery_original_request_unverified") from exc
+    return result
+
+
+def validate_incident_designated_readiness(
+    document: Any,
+    designated: Mapping[str, Any],
+    *,
+    auth_identity: Mapping[str, Any],
+    binary_identity: Mapping[str, Any],
+    worker_uid: int = _readiness.WORKER_UID,
+    worker_gid: int = _readiness.WORKER_GID,
+) -> None:
+    """Check the retained readiness predecessor against the designated policy.
+
+    Closed terminal-adverse shape only: the pinned binary, the current
+    credential identity, the designated canary identity, exit and refusal
+    class.  This is evidence consistency, never a causal proof.
+    """
+
+    if (not isinstance(document, Mapping)
+            or frozenset(document) != _readiness._RECEIPT_FIELDS
+            or document.get("schema_version") != _readiness.SCHEMA_VERSION
+            or document.get("passed") is not False
+            or document.get("refusal") != RECOVERY_REFUSAL
+            or document.get("expected_credential_kind") != "device-auth"
+            or document.get("workspace_binding_class")
+            != _readiness.COMPANY_WORKSPACE_BINDING_CLASS
+            or document.get("forced_chatgpt_workspace_id_applied") is not False):
+        raise RecoveryError("recovery_predecessor_not_terminal_adverse")
+    _readiness._deadline_fields(
+        observed_at=document.get("observed_at"),
+        credential_expires_at=document.get("credential_expires_at"),
+        readiness_expires_at=document.get("readiness_expires_at"),
+        allow_expired_readiness=True,
+    )
+    _readiness._assert_worker_identity(
+        auth_identity, worker_uid=worker_uid, worker_gid=worker_gid
+    )
+    if dict(document.get("credential_lstat") or {}) != dict(auth_identity):
+        raise RecoveryError("recovery_predecessor_credential_mismatch")
+    if dict(document.get("codex_binary") or {}) != dict(binary_identity):
+        raise RecoveryError("recovery_predecessor_source_mismatch")
+    identity, canary = document.get("provider_identity"), document.get("inference_canary")
+    if not isinstance(identity, Mapping) or not isinstance(canary, Mapping):
+        raise RecoveryError("recovery_predecessor_not_terminal_adverse")
+    safe_identity = _readiness._safe_identity(identity)
+    safe_canary = _readiness._safe_canary(canary, binary_identity=binary_identity)
+    if (safe_identity["refusal"] is not None
+            or safe_identity["codex_binary"] != dict(binary_identity)
+            or safe_identity["credential_lstat"] != dict(auth_identity)
+            or safe_identity["expected_credential_kind"] != "device-auth"
+            or safe_identity["workspace_binding_class"]
+            != _readiness.COMPANY_WORKSPACE_BINDING_CLASS):
+        raise RecoveryError("recovery_predecessor_identity_mismatch")
+    if (safe_canary["passed"] is not False
+            or type(safe_canary["exit_code"]) is not int
+            or safe_canary["exit_code"] != designated["canary_exit_code"]
+            or safe_canary["timed_out"] is not False
+            or safe_canary["terminal_event_class"] != RECOVERY_TERMINAL_EVENT_CLASS
+            or safe_canary["result_valid"] is not False
+            or safe_canary["refusal"] != RECOVERY_REFUSAL
+            or safe_canary["canary_id"] != designated["canary_id"]
+            or safe_canary["model"] != _readiness.PRODUCTION_MODEL):
+        raise RecoveryError("recovery_predecessor_effect_not_closed")
+
+    def _component_time(value: Any) -> Any:
+        try:
+            return _readiness._timestamp(
+                value, code="recovery_predecessor_timestamp_malformed"
+            )
+        except _readiness.ReadinessError as exc:
+            raise RecoveryError("recovery_predecessor_timestamp_malformed") from exc
+
+    observed = _component_time(document["observed_at"])
+    for component in (safe_identity, safe_canary):
+        if abs(_component_time(component["observed_at"]) - observed) > _readiness.MAX_CLOCK_SKEW:
+            raise RecoveryError("recovery_predecessor_timestamp_conflict")
+
+
+def _validate_incident_evidence(value: Any) -> dict[str, Any]:
+    evidence = _require_exact_fields(
+        value, _INCIDENT_EVIDENCE_FIELDS, "incident_evidence_malformed"
+    )
+    _request_id(evidence["original_request_id"], "incident_evidence_malformed")
+    for field in ("original_request_sha256", "original_terminal_sha256",
+                  "readiness_receipt_sha256"):
+        _hex_digest(evidence[field], "incident_evidence_malformed")
+    if not isinstance(evidence["original_release_sha"], str) or re.fullmatch(
+        r"[0-9a-f]{40}", evidence["original_release_sha"]
+    ) is None:
+        raise RecoveryError("incident_evidence_malformed")
+    for field in ("original_terminal_bytes", "readiness_receipt_bytes",
+                  "original_broker_exit_code", "canary_exit_code"):
+        if type(evidence[field]) is not int:
+            raise RecoveryError("incident_evidence_malformed")
+    if (not isinstance(evidence["canary_id"], str)
+            or _readiness.CANARY_ID_RE.fullmatch(evidence["canary_id"]) is None):
+        raise RecoveryError("incident_evidence_malformed")
+    return evidence
+
+
+def _validate_incident_grant_document(value: Any) -> dict[str, Any]:
+    """Validate the immutable incident grant structure; no admission is granted."""
+
+    grant = _require_exact_fields(
+        value, _INCIDENT_GRANT_FIELDS, "recovery_grant_fields_malformed"
+    )
+    if grant["schema_version"] != INCIDENT_GRANT_SCHEMA:
+        raise RecoveryError("recovery_grant_schema_malformed")
+    if grant["authority_reference"] != INCIDENT_AUTHORITY_REFERENCE:
+        raise RecoveryError("recovery_grant_authority_mismatch")
+    if grant["incident_class"] != INCIDENT_RECOVERY_CLASS:
+        raise RecoveryError("recovery_grant_schema_malformed")
+    # Truthful historical classification is mandatory: an incident grant can
+    # never manufacture ordinary cause evidence or assert a proven no-denial.
+    if grant["historical_cause"] != INCIDENT_HISTORICAL_CAUSE:
+        raise RecoveryError("incident_history_mislabelled")
+    if grant["causal_link"] != INCIDENT_CAUSAL_LINK:
+        raise RecoveryError("incident_history_mislabelled")
+    if grant["raw_provider_messages_retained"] is not False:
+        raise RecoveryError("incident_history_mislabelled")
+    validate_incident_authorization(grant["authorization"])
+    _validate_incident_evidence(grant["evidence"])
+    _grant_source(grant["installed_source"])
+    _executive_source(grant["executive_source"])
+    _grant_worker(grant["worker"])
+    _credential_lstat(grant["credential_lstat"], "recovery_grant_credential_mismatch")
+    if grant["model"] != _readiness.PRODUCTION_MODEL:
+        raise RecoveryError("recovery_grant_model_mismatch")
+    budget = grant["budget"]
+    if isinstance(budget, bool) or not isinstance(budget, int) or budget != RECOVERY_BUDGET:
+        raise RecoveryError("recovery_grant_budget_invalid")
+    _request_id(grant["successor_request_id"], "recovery_grant_successor_malformed")
+    _request_id(grant["issuer_request_id"], "recovery_grant_successor_malformed")
+    _hex_digest(grant["issuer_request_sha256"], "recovery_grant_fields_malformed")
+    try:
+        granted_at = _readiness._timestamp(
+            grant["granted_at"], code="recovery_grant_window_invalid"
+        )
+        expires_at = _readiness._timestamp(
+            grant["expires_at"], code="recovery_grant_window_invalid"
+        )
+    except _readiness.ReadinessError as exc:
+        raise RecoveryError("recovery_grant_window_invalid") from exc
+    if not MIN_GRANT_LIFETIME <= expires_at - granted_at <= MAX_GRANT_LIFETIME:
+        raise RecoveryError("recovery_grant_window_invalid")
+    return grant
+
+
+def validate_incident_grant_document(
+    value: Any, *, now: datetime | None = None
+) -> dict[str, Any]:
+    """Validate the immutable incident grant and its current live window."""
+
+    grant = _validate_incident_grant_document(value)
+    granted_at = _readiness._timestamp(grant["granted_at"], code="recovery_grant_window_invalid")
+    expires_at = _readiness._timestamp(grant["expires_at"], code="recovery_grant_window_invalid")
+    current = datetime.now(UTC) if now is None else now
+    if granted_at > current:
+        raise RecoveryError("recovery_grant_window_invalid")
+    if expires_at <= current:
+        raise RecoveryError("recovery_grant_expired")
+    return grant
+
+
+def _read_incident_grant_document(*, expected_digest: str) -> dict[str, Any]:
+    _hex_digest(expected_digest, "recovery_grant_digest_malformed")
+    raw = _read_custody_bytes(RECOVERY_INCIDENT_GRANT_PATH, maximum=_GRANT_MAX_BYTES)
+    if hashlib.sha256(raw).hexdigest() != expected_digest:
+        raise RecoveryError("recovery_grant_digest_mismatch")
+    return _read_custody_document(raw, schema=INCIDENT_GRANT_SCHEMA)
+
+
+def read_incident_grant(*, expected_digest: str, now: datetime | None = None) -> dict[str, Any]:
+    """Read the custody-checked incident grant and enforce its live window."""
+
+    return validate_incident_grant_document(
+        _read_incident_grant_document(expected_digest=expected_digest), now=now
+    )
+
+
+def _read_incident_historical_grant(*, expected_digest: str) -> dict[str, Any]:
+    """Read immutable incident grant evidence for reconstruction only.
+
+    No live window admission, no issuance join and no new inference.
+    """
+
+    return _validate_incident_grant_document(
+        _read_incident_grant_document(expected_digest=expected_digest)
+    )
+
+
+def historical_recovery_grants() -> list[tuple[str, dict[str, Any]]]:
+    records = []
+    for path, reader in (
+        (RECOVERY_GRANT_PATH, _read_historical_grant),
+        (RECOVERY_INCIDENT_GRANT_PATH, _read_incident_historical_grant),
+    ):
+        try:
+            digest = read_grant_digest(path)
+        except FileNotFoundError:
+            continue
+        records.append((digest, reader(expected_digest=digest)))
+    return records
+
+
+def read_historical_recovery_grant(*, expected_digest: str) -> dict[str, Any]:
+    _hex_digest(expected_digest, "recovery_grant_digest_malformed")
+    matches = [grant for digest, grant in historical_recovery_grants()
+               if digest == expected_digest]
+    if len(matches) != 1:
+        raise RecoveryError("recovery_grant_digest_mismatch")
+    return matches[0]
+
+
+def validate_recovery_history(grant: Mapping[str, Any], *, grant_sha256: str) -> str:
+    if grant["schema_version"] == INCIDENT_GRANT_SCHEMA:
+        validate_incident_issuance_join(grant, grant_sha256=grant_sha256)
+        validate_incident_designated_terminal(grant["evidence"])
+        return grant["evidence"]["readiness_receipt_sha256"]
+    validate_original_terminal(grant["cause_evidence"])
+    return grant["cause_evidence"]["original_receipt_sha256"]
+
+
+def read_grant_for_admission(
+    *, expected_digest: str, now: datetime | None = None
+) -> tuple[str, dict[str, Any]]:
+    """Resolve the recovery grant digest to its typed document class.
+
+    Both fixed grant files live under the same custody root.  The caller's
+    digest preimage selects the class; nothing else does.  Ordinary custody
+    failures stay ordinary failures and never silently fall through to the
+    incident path.
+    """
+
+    _hex_digest(expected_digest, "recovery_grant_digest_malformed")
+    ordinary_refusal: RecoveryError | None = None
+    try:
+        return "ordinary", read_grant(expected_digest=expected_digest, now=now)
+    except RecoveryError as exc:
+        if exc.code != "recovery_grant_digest_mismatch":
+            raise
+        ordinary_refusal = exc
+    except FileNotFoundError:
+        ordinary_refusal = None
+    try:
+        return "incident", read_incident_grant(
+            expected_digest=expected_digest, now=now
+        )
+    except FileNotFoundError:
+        if ordinary_refusal is not None:
+            raise ordinary_refusal from None
+        raise RecoveryError("recovery_grant_digest_mismatch") from None
+
+
+def read_incident_commitment() -> tuple[dict[str, Any], bytes]:
+    """Return the custody-checked issuance commitment and its exact bytes."""
+
+    raw = _read_custody_bytes(
+        RECOVERY_INCIDENT_COMMITMENT_PATH, maximum=_GRANT_MAX_BYTES
+    )
+    commitment = _read_custody_document(raw, schema=INCIDENT_COMMITMENT_SCHEMA)
+    _require_exact_fields(
+        commitment, _INCIDENT_COMMITMENT_FIELDS, "recovery_grant_fields_malformed"
+    )
+    if commitment["incident_class"] != INCIDENT_RECOVERY_CLASS:
+        raise RecoveryError("recovery_grant_schema_malformed")
+    validate_incident_authorization(commitment["authorization"])
+    _hex_digest(commitment["grant_sha256"], "recovery_grant_fields_malformed")
+    _hex_digest(commitment["issuer_request_sha256"], "recovery_grant_fields_malformed")
+    _request_id(commitment["issuer_request_id"], "recovery_grant_successor_malformed")
+    _request_id(commitment["successor_request_id"], "recovery_grant_successor_malformed")
+    _readiness._timestamp(commitment["created_at"], code="recovery_grant_window_invalid")
+    return commitment, raw
+
+
+def validate_incident_issuance_join(
+    grant: Mapping[str, Any], *, grant_sha256: str
+) -> dict[str, Any]:
+    """Join one incident grant to its complete actual issuance terminal.
+
+    Required, in order: the custody-checked commitment binds this exact grant
+    digest, designated successor and issuer identity; the issuer request has
+    no in-flight or reconciliation record; and one root-owned terminal broker
+    receipt SUCCEEDED with a stdout digest that binds the exact commitment
+    bytes.  A root-owned handwritten JSON grant alone is insufficient.
+    """
+
+    from control_plane import executive_privileged_broker as broker
+
+    try:
+        issuer_request_id = _request_id(
+            grant["issuer_request_id"], "recovery_grant_successor_malformed"
+        )
+        commitment, commitment_raw = read_incident_commitment()
+        if commitment["authorization"] != grant["authorization"]:
+            raise RecoveryError("incident_commitment_mismatch")
+        if commitment["grant_sha256"] != grant_sha256:
+            raise RecoveryError("incident_commitment_mismatch")
+        if commitment["successor_request_id"] != grant["successor_request_id"]:
+            raise RecoveryError("incident_commitment_mismatch")
+        if commitment["issuer_request_id"] != issuer_request_id:
+            raise RecoveryError("incident_commitment_mismatch")
+        if commitment["issuer_request_sha256"] != grant["issuer_request_sha256"]:
+            raise RecoveryError("incident_commitment_mismatch")
+        receipt_root = broker._RECEIPT_ROOT
+        for directory in (receipt_root.parent.parent, receipt_root.parent,
+                          receipt_root, receipt_root / "inflight",
+                          receipt_root / "reconciled"):
+            broker._assert_root_owned_nonwritable(directory, directory=True)
+            _readiness._assert_no_macos_acl(directory)
+        for directory in ("inflight", "reconciled"):
+            other = receipt_root / directory / (issuer_request_id + ".json")
+            try:
+                other.lstat()
+            except FileNotFoundError:
+                continue
+            raise RecoveryError("incident_issuance_unsettled")
+        terminal_path = receipt_root / (issuer_request_id + ".json")
+        raw, info = broker._read_stable_bounded_bytes(terminal_path)
+        if (info.st_uid != CUSTODY_UID or info.st_gid != CUSTODY_GID
+                or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o600):
+            raise RecoveryError("recovery_original_request_custody_unsafe")
+        _readiness._assert_no_macos_acl(terminal_path)
+        value = json.loads(raw, object_pairs_hook=_reject_duplicate_keys)
+        result = broker.validate_terminal_receipt(
+            value,
+            expected_request_id=issuer_request_id,
+            expected_request_sha256=grant["issuer_request_sha256"],
+            expected_release_sha=grant["executive_source"]["release_sha"],
+            expected_action=INCIDENT_ISSUER_ACTION,
+        )
+        if result["outcome"] != "SUCCEEDED" or result["exit_code"] != 0:
+            raise RecoveryError("incident_issuance_not_successful")
+        if (result["stdout_sha256"] != hashlib.sha256(commitment_raw).hexdigest()
+                or result["stdout_bytes"] != len(commitment_raw)):
+            raise RecoveryError("incident_commitment_digest_mismatch")
+    except (OSError, ValueError, broker.BrokerTrustError) as exc:
+        raise RecoveryError("incident_issuance_unverified") from exc
+    return {"terminal": result, "commitment_sha256": hashlib.sha256(commitment_raw).hexdigest()}
+
+
+def admit_recovery_context(
+    grant: Mapping[str, Any],
+    *,
+    grant_sha256: str,
+    qualification: ProducerQualification | None = None,
+) -> dict[str, Any]:
+    """Typed common admission for both recovery grant classes.
+
+    Ordinary grants still go through :func:`evaluate_cause` and the empty
+    production producer table.  Incident grants go through the exact incident
+    validator plus the complete issuer terminal join.  No fake ordinary
+    document is manufactured for an incident and no producer qualification is
+    required for it: its authorization is the authority-owned policy binding,
+    not derived cause.
+    """
+
+    schema = grant.get("schema_version") if isinstance(grant, Mapping) else None
+    if schema == RECOVERY_GRANT_SCHEMA:
+        kwargs = {} if qualification is None else {"qualification": qualification}
+        cause = evaluate_cause(grant["cause_evidence"], **kwargs)
+        return {
+            "admission_class": "ordinary",
+            "cause": cause,
+            "original_receipt_sha256": cause["original_receipt_sha256"],
+        }
+    if schema == INCIDENT_GRANT_SCHEMA:
+        _validate_incident_grant_document(grant)
+        require_current_incident_policy(grant)
+        validate_incident_designated_terminal(grant["evidence"])
+        validate_incident_issuance_join(grant, grant_sha256=grant_sha256)
+        return {
+            "admission_class": "incident",
+            "cause": None,
+            "original_receipt_sha256":
+                grant["evidence"]["readiness_receipt_sha256"],
+        }
+    raise RecoveryError("recovery_grant_schema_malformed")
+
+
+def write_custody_document(path: Path, payload: bytes) -> str:
+    """Create one immutable custody document exclusively, root-owned, fsync'd.
+
+    Mode 0400, one link, no ACL, create-only: a partial issuance can never be
+    replaced by a retry.  Returns the digest of the written bytes.
+    """
+
+    _validate_state_directory(path)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags, 0o400)
+    except FileExistsError:
+        raise
+    except OSError as exc:
+        raise RecoveryError("recovery_allocation_unwritable") from exc
+    try:
+        os.fchown(descriptor, CUSTODY_UID, CUSTODY_GID)
+        os.fchmod(descriptor, 0o400)
+        view = memoryview(payload)
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:
+                raise RecoveryError("recovery_allocation_short_write")
+            view = view[written:]
+        os.fsync(descriptor)
+    except OSError as exc:
+        raise RecoveryError("recovery_allocation_unwritable") from exc
+    finally:
+        os.close(descriptor)
+    _readiness._fsync_directory(path.parent)
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _validate_incident_allocation_document(value: Any) -> dict[str, Any]:
+    record = _require_exact_fields(
+        value, _INCIDENT_ALLOCATION_FIELDS, "recovery_allocation_fields_malformed"
+    )
+    if record["allocation_class"] != INCIDENT_RECOVERY_CLASS:
+        raise RecoveryError("recovery_allocation_fields_malformed")
+    if record["authority_reference"] != INCIDENT_AUTHORITY_REFERENCE:
+        raise RecoveryError("recovery_allocation_fields_malformed")
+    for field in ("predecessor_receipt_sha256", "predecessor_request_sha256",
+                  "grant_sha256", "commitment_sha256"):
+        _hex_digest(record[field], "recovery_allocation_fields_malformed")
+    for field in ("predecessor_request_id", "successor_request_id",
+                  "issuer_request_id"):
+        _request_id(record[field], "recovery_allocation_fields_malformed")
+    _hex_digest(record["issuer_request_sha256"], "recovery_allocation_fields_malformed")
+    if (record["worker_uid"], record["worker_gid"]) != (
+        _readiness.WORKER_UID,
+        _readiness.WORKER_GID,
+    ) or record["provider_home"] != os.fspath(_readiness.AUTH_PATH.parent):
+        raise RecoveryError("recovery_allocation_fields_malformed")
+    if (record["codex_version"], record["codex_sha256"]) != (
+        _readiness.CODEX_VERSION,
+        _readiness.CODEX_SHA256,
+    ):
+        raise RecoveryError("recovery_allocation_fields_malformed")
+    _credential_lstat(record["credential_lstat"], "recovery_allocation_fields_malformed")
+    _executive_source(record["executive_source"])
+    if (type(record["budget"]) is not int or record["budget"] != RECOVERY_BUDGET
+            or record["consumed"] is not True):
+        raise RecoveryError("recovery_allocation_not_consumed")
+    _readiness._timestamp(record["claimed_at"], code="recovery_allocation_fields_malformed")
+    grant = _read_incident_historical_grant(expected_digest=record["grant_sha256"])
+    join = validate_incident_issuance_join(grant, grant_sha256=record["grant_sha256"])
+    expected = {
+        "policy_id": grant["authorization"]["policy_id"],
+        "issuer_request_id": grant["issuer_request_id"],
+        "issuer_request_sha256": grant["issuer_request_sha256"],
+        "commitment_sha256": join["commitment_sha256"],
+        "successor_request_id": grant["successor_request_id"],
+        "predecessor_request_id": grant["evidence"]["original_request_id"],
+        "predecessor_request_sha256": grant["evidence"]["original_request_sha256"],
+        "predecessor_receipt_sha256": grant["evidence"]["readiness_receipt_sha256"],
+        "executive_source": grant["executive_source"],
+        "credential_lstat": grant["credential_lstat"],
+    }
+    if any(record[key] != value for key, value in expected.items()):
+        raise RecoveryError("recovery_allocation_scope_conflict")
+    return record
+
+
+def _claim_incident_allocation(
+    path: Path,
+    *,
+    grant: Mapping[str, Any],
+    grant_sha256: str,
+    predecessor_receipt_sha256: str,
+) -> dict[str, Any]:
+    """Consume the single allocation with the truthful incident schema.
+
+    Same fixed O_EXCL path, same one-use semantics, same no-refund rule as
+    :func:`claim_allocation`; only the record schema and its truthful fields
+    differ.
+    """
+
+    _hex_digest(predecessor_receipt_sha256, "recovery_predecessor_digest_malformed")
+    _validate_state_directory(path)
+    join = validate_incident_issuance_join(grant, grant_sha256=grant_sha256)
+    evidence = grant["evidence"]
+    if predecessor_receipt_sha256 != evidence["readiness_receipt_sha256"]:
+        raise RecoveryError("recovery_allocation_scope_conflict")
+    record = {
+        "schema_version": INCIDENT_ALLOCATION_SCHEMA,
+        "allocation_class": INCIDENT_RECOVERY_CLASS,
+        "authority_reference": INCIDENT_AUTHORITY_REFERENCE,
+        "predecessor_receipt_sha256": predecessor_receipt_sha256,
+        "predecessor_request_id": evidence["original_request_id"],
+        "predecessor_request_sha256": evidence["original_request_sha256"],
+        "grant_sha256": grant_sha256,
+        "executive_source": dict(grant["executive_source"]),
+        "successor_request_id": grant["successor_request_id"],
+        "policy_id": grant["authorization"]["policy_id"],
+        "issuer_request_id": grant["issuer_request_id"],
+        "issuer_request_sha256": grant["issuer_request_sha256"],
+        "commitment_sha256": join["commitment_sha256"],
+        "worker_uid": _readiness.WORKER_UID,
+        "worker_gid": _readiness.WORKER_GID,
+        "provider_home": os.fspath(_readiness.AUTH_PATH.parent),
+        "codex_version": _readiness.CODEX_VERSION,
+        "codex_sha256": _readiness.CODEX_SHA256,
+        "credential_lstat": dict(grant["credential_lstat"]),
+        "budget": RECOVERY_BUDGET,
+        "consumed": True,
+        "claimed_at": _readiness.now_iso(),
+    }
+    payload = (
+        json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n"
+    ).encode("utf-8")
+    write_custody_document(path, payload)
+    return record
+
 
 
 def claim_allocation(
@@ -898,7 +1717,18 @@ def claim_or_refuse_allocation(
     predecessor is an already-consumed budget, so a regrant refuses too.
     """
 
+    incident = (
+        isinstance(grant, Mapping)
+        and grant.get("schema_version") == INCIDENT_GRANT_SCHEMA
+    )
     try:
+        if incident:
+            return _claim_incident_allocation(
+                path,
+                grant=grant,
+                grant_sha256=grant_sha256,
+                predecessor_receipt_sha256=predecessor_receipt_sha256,
+            )
         return claim_allocation(
             path,
             grant=grant,
@@ -909,6 +1739,10 @@ def claim_or_refuse_allocation(
         existing = read_allocation(path)
         if existing is None:
             raise RecoveryError("recovery_allocation_unreadable") from None
+        if existing["allocation_class"] != (
+            INCIDENT_RECOVERY_CLASS if incident else "current_pin_recovery"
+        ):
+            raise RecoveryError("recovery_allocation_scope_conflict") from None
         if existing["predecessor_receipt_sha256"] != predecessor_receipt_sha256:
             raise RecoveryError("recovery_allocation_scope_conflict") from None
         if existing["grant_sha256"] != grant_sha256:
@@ -997,7 +1831,13 @@ def validate_current_pin_recovery_predecessor_document(
     cause evidence and production cannot qualify any producer anyway.
     """
 
-    cause = grant["cause_evidence"]
+    if grant.get("schema_version") == INCIDENT_GRANT_SCHEMA:
+        validate_incident_designated_readiness(
+            document, grant["evidence"], auth_identity=auth_identity,
+            binary_identity=binary_identity, worker_uid=worker_uid, worker_gid=worker_gid,
+        )
+        refuse_evidenced_incident_denial(document)
+    cause = grant.get("cause_evidence")
     if (expected_kind != "device-auth"
             or workspace_binding_class != _readiness.COMPANY_WORKSPACE_BINDING_CLASS
             or (worker_uid, worker_gid) != (_readiness.WORKER_UID, _readiness.WORKER_GID)):
@@ -1043,15 +1883,17 @@ def validate_current_pin_recovery_predecessor_document(
             or safe_identity["expected_credential_kind"] != expected_kind
             or safe_identity["workspace_binding_class"] != workspace_binding_class):
         raise RecoveryError("recovery_predecessor_identity_mismatch")
-    if (safe_canary["passed"] is not False
+    effect_not_closed = (safe_canary["passed"] is not False
             or type(safe_canary["exit_code"]) is not int
             or safe_canary["exit_code"] != RECOVERY_REFUSAL_EXIT_CODE
-            or safe_canary["exit_code"] != cause["original_canary_exit_code"]
             or safe_canary["timed_out"] is not False
             or safe_canary["terminal_event_class"] != RECOVERY_TERMINAL_EVENT_CLASS
             or safe_canary["result_valid"] is not False
             or safe_canary["refusal"] != RECOVERY_REFUSAL
-            or safe_canary["model"] != _readiness.PRODUCTION_MODEL):
+            or safe_canary["model"] != _readiness.PRODUCTION_MODEL)
+    if cause is not None and safe_canary["exit_code"] != cause["original_canary_exit_code"]:
+        effect_not_closed = True
+    if effect_not_closed:
         raise RecoveryError("recovery_predecessor_effect_not_closed")
     def _predecessor_time(value: Any) -> Any:
         try:
@@ -1065,7 +1907,9 @@ def validate_current_pin_recovery_predecessor_document(
     for component in (safe_identity, safe_canary):
         if abs(_predecessor_time(component["observed_at"]) - observed) > _readiness.MAX_CLOCK_SKEW:
             raise RecoveryError("recovery_predecessor_timestamp_conflict")
-    if abs(observed - _predecessor_time(cause["observed_at"])) > _readiness.MAX_CLOCK_SKEW:
+    if cause is not None and abs(
+        observed - _predecessor_time(cause["observed_at"])
+    ) > _readiness.MAX_CLOCK_SKEW:
         raise RecoveryError("recovery_predecessor_timestamp_conflict")
 
 
@@ -1084,13 +1928,26 @@ __all__ = [
     "RECOVERY_GRANT_PATH",
     "RECOVERY_GRANT_SCHEMA",
     "RECOVERY_STATE_ROOT",
+    "INCIDENT_DESIGNATED_EVIDENCE",
+    "INCIDENT_GRANT_SCHEMA",
+    "INCIDENT_ISSUER_ACTION",
+    "IncidentPolicy",
+    "PRODUCTION_INCIDENT_POLICY",
     "ProducerQualification",
+    "RECOVERY_INCIDENT_COMMITMENT_PATH",
+    "RECOVERY_INCIDENT_GRANT_PATH",
     "RecoveryError",
+    "admit_recovery_context",
     "claim_or_refuse_allocation",
     "evaluate_cause",
     "read_allocation",
     "read_grant",
     "read_grant_digest",
+    "read_grant_for_admission",
+    "read_incident_grant",
+    "refuse_evidenced_incident_denial",
+    "validate_incident_policy",
+    "write_custody_document",
     "validate_cause_document",
     "validate_current_pin_recovery_predecessor_document",
     "validate_grant_document",

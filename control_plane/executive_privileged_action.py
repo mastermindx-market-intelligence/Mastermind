@@ -43,6 +43,7 @@ WORKER_AUTH_ACTIONS = frozenset(
         "executive.worker_auth.verify_only",
         "executive.worker_auth.verify_ready",
         "executive.worker_auth.recover_transaction",
+        "executive.worker_auth.issue_due10_incident_grant",
     }
 )
 HOST_POLICY_ACTIONS = frozenset(
@@ -60,6 +61,8 @@ ACTION_EFFECT_CLASS = {
     "executive.worker_auth.verify_only": "CREDENTIAL_ADMIN_READINESS",
     "executive.worker_auth.verify_ready": "CREDENTIAL_ADMIN_READINESS",
     "executive.worker_auth.recover_transaction": "CREDENTIAL_ADMIN_RECOVERY",
+    "executive.worker_auth.issue_due10_incident_grant":
+        "CREDENTIAL_ADMIN_INCIDENT_ISSUANCE",
     "executive.host.prepare_secondary_power_policy": "HOST_POWER_POLICY",
 }
 ACTION_EFFECT_UNKNOWN_EXIT_CODE = {
@@ -264,6 +267,20 @@ def validate_request(raw: Mapping[str, Any]) -> ValidatedPrivilegedAction:
         validated_args = ()
     elif action == "executive.worker_auth.verify_ready":
         validated_args = _validate_verify_ready_args(args, request_id)
+    elif action == "executive.worker_auth.issue_due10_incident_grant":
+        # The incident issuer takes exactly one designated successor request.
+        # Caller evidence, authority, body, date, budget, path and source
+        # overrides are all rejected; the outer issuer identity is this
+        # request's own explicit id.
+        _require_exact_keys(args, frozenset({"successor_request_id"}), "arguments")
+        designated = _require_string(args["successor_request_id"], "successor_request_id")
+        if _REQUEST_ID_RE.fullmatch(designated) is None:
+            raise PrivilegedActionError("successor_request_id is not a bounded safe token")
+        if designated == request_id:
+            raise PrivilegedActionError(
+                "incident issuer request cannot designate itself as its own successor"
+            )
+        validated_args = (("successor_request_id", designated),)
     else:
         validated_args = _validate_optional_slot_args(args)
 
@@ -305,6 +322,13 @@ def build_argv(request: ValidatedPrivilegedAction, release_root: str | Path) -> 
             "-S",
             "-B",
             str(root / "ops/executive_os/secondary_host_power_policy.py"),
+        )
+    if request.action == "executive.worker_auth.issue_due10_incident_grant":
+        # Internal broker action: derivation runs inside the authenticated root
+        # broker process.  There is deliberately no reviewed argv, no shell
+        # issuer, and no handbuilt credential path for it.
+        raise PrivilegedActionError(
+            "incident issuance is an internal broker action without an argv"
         )
 
     argv: list[str] = [

@@ -1047,17 +1047,25 @@ def _current_pin_recovery_context_checked(
         expected_mode=expected_mode,
     ) != receipt_identity:
         raise ReadinessError("recovery_predecessor_changed")
-    grant = recovery.read_grant(expected_digest=digest)
+    _origin, grant = recovery.read_grant_for_admission(expected_digest=digest)
     if grant["successor_request_id"] != request_id:
         raise ReadinessError("recovery_successor_request_mismatch")
-    cause = recovery.evaluate_cause(
-        grant["cause_evidence"],
+    context = recovery.admit_recovery_context(
+        grant,
+        grant_sha256=digest,
         **({} if qualification is None else {"qualification": qualification}),
     )
     if grant["executive_source"] != recovery.current_executive_source():
         raise ReadinessError("recovery_executive_source_mismatch")
-    recovery.validate_original_terminal(cause)
-    if cause["original_receipt_sha256"] != predecessor_digest:
+    if context["admission_class"] == "ordinary":
+        recovery.validate_original_terminal(context["cause"])
+    else:
+        # Incident admission: the exact validator already joined the designated
+        # original terminal, the issuance commitment and the successful issuer
+        # terminal.  Retained denial evidence still excludes admission, and no
+        # claim that no denial occurred is ever manufactured from clean terms.
+        recovery.refuse_evidenced_incident_denial(document)
+    if context["original_receipt_sha256"] != predecessor_digest:
         raise ReadinessError("recovery_predecessor_preimage_mismatch")
     recovery.validate_current_pin_recovery_predecessor_document(
         document, grant=grant, auth_identity=auth_identity,

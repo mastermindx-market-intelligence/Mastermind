@@ -49,6 +49,9 @@ STATUS_TERMINAL = "TERMINAL"
 STATUS_EFFECT_UNKNOWN = "EFFECT_UNKNOWN"
 STATUS_RECONCILED_NOT_APPLIED = "RECONCILED_NOT_APPLIED"
 STATUS_NOT_FOUND = "NOT_FOUND"
+# Internal, dormant incident issuer.  It never maps to a reviewed argv; the
+# broker derives and writes everything inside the authenticated root process.
+INCIDENT_ISSUER_ACTION = "executive.worker_auth.issue_due10_incident_grant"
 _RELEASE_PREFIX = Path("/Library/Application Support/MastermindExecutive/releases")
 _RECEIPT_ROOT = Path("/var/db/mastermind-executive/privileged-actions/receipts")
 _SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -233,24 +236,15 @@ def _reconciliation_target(raw: Mapping[str, Any]):
         # this request contributes no variant at all.
         try:
             from ops.executive_os import provider_recovery
-
-            grant_digest = provider_recovery.read_grant_digest()
-        except Exception:  # noqa: BLE001 - absence is simply not a variant
-            grant_digest = None
-        if isinstance(grant_digest, str):
-            try:
-                from ops.executive_os import provider_recovery as _recovery
-
-                if _recovery._read_historical_grant(
-                    expected_digest=grant_digest,
-                ).get("successor_request_id") == raw.get("target_request_id"):
-                    variants.append({
-                        **args,
-                        "recover_current_pin_grant_sha256": grant_digest,
-                        "successor_request_id": raw.get("target_request_id"),
-                    })
-            except Exception:  # noqa: BLE001 - absence is simply not a variant
-                grant_digest = None
+            grants = provider_recovery.historical_recovery_grants()
+        except Exception:  # noqa: BLE001 - unreadable evidence supplies no variant
+            grants = []
+        for grant_digest, grant in grants:
+            if grant["successor_request_id"] == raw.get("target_request_id"):
+                variants.append({
+                    **args, "recover_current_pin_grant_sha256": grant_digest,
+                    "successor_request_id": raw.get("target_request_id"),
+                })
     matches = []
     for candidate in variants:
         try:
@@ -1195,6 +1189,8 @@ class PrivilegedActionBroker:
         if existing is not None:
             return existing, True
         self._check_inflight(request, digest)
+        if request.action == INCIDENT_ISSUER_ACTION:
+            return self._issue_incident_grant(request, digest)
 
         started_at = _utc_now()
         self._write_inflight(request, digest, started_at)
@@ -1258,6 +1254,202 @@ class PrivilegedActionBroker:
         except OSError as exc:
             # The terminal receipt wins replay, but cleanup drift must not be called clean success.
             raise EffectUnknownError("terminal receipt exists but in-flight cleanup failed") from exc
+        return receipt, False
+
+    def _issue_incident_grant(
+        self, request: PrivilegedActionRequest, digest: str
+    ) -> tuple[dict[str, Any], bool]:
+        """Dormant internal issuer for the bounded exact-incident recovery.
+
+        Reached only through the existing authenticated peer, replay and
+        in-flight admission.  There is no shell issuer and no handbuilt
+        credential.  With the production incident policy ``None`` this refuses
+        before any grant, commitment, successor designation, deadline or
+        allocation exists.  Under an authority-owned policy it derives the
+        current sealed Executive source separately from the historical
+        release, requires the unchanged pinned provider identity and the
+        current designated evidence, custody, marker, lock and process
+        prerequisites, then writes the fixed immutable grant and issuance
+        commitment under the existing recovery state root and closes the
+        existing broker terminal lifecycle with a SUCCESS receipt whose stdout
+        digest binds the exact commitment bytes.  Partial issuance or a lost
+        response stays the same operation: create-only custody can never be
+        replaced, and there is no cleanup, refund or NOT_APPLIED route.
+        """
+        from ops.executive_os import provider_recovery as recovery
+
+        started_at = _utc_now()
+        policy = recovery.PRODUCTION_INCIDENT_POLICY
+        if policy is None:
+            raise PrivilegedBrokerError(
+                "PRODUCTION INCIDENT POLICY is None; the incident issuer is dormant"
+            )
+        try:
+            designated = recovery.validate_incident_policy(policy)
+            if recovery.read_allocation() is not None:
+                raise PrivilegedBrokerError("recovery allocation already consumed; no regrant")
+            successor = request.args_dict()["successor_request_id"]
+            evidence = self._reconciliation_observer()
+            required_evidence = {
+                "readiness_receipt_sha256",
+                "readiness_document",
+                "readiness_transaction_lock_present",
+                "verify_ready_processes",
+                "current_auth_identity",
+                "current_binary_identity",
+            }
+            if not isinstance(evidence, Mapping) or set(evidence) != required_evidence:
+                raise BrokerTrustError("incident issuance observation is incomplete")
+            if evidence["readiness_receipt_sha256"] != designated["readiness_receipt_sha256"]:
+                raise BrokerTrustError(
+                    "incident readiness predecessor digest does not match the incident policy"
+                )
+            binary_identity = evidence["current_binary_identity"]
+            if (not isinstance(binary_identity, Mapping)
+                    or binary_identity.get("path") != recovery.os.fspath(recovery._readiness.CODEX_BINARY)
+                    or binary_identity.get("version") != recovery._readiness.CODEX_VERSION
+                    or binary_identity.get("sha256") != recovery._readiness.CODEX_SHA256
+                    or binary_identity.get("team_identifier") != recovery._readiness.CODEX_TEAM_ID):
+                raise BrokerTrustError("incident provider identity is not the pinned reviewed binary")
+            document = evidence["readiness_document"]
+            recovery.validate_incident_designated_readiness(
+                document,
+                designated,
+                auth_identity=evidence["current_auth_identity"],
+                binary_identity=binary_identity,
+            )
+            recovery.refuse_evidenced_incident_denial(document)
+            recovery.validate_incident_designated_terminal(designated)
+            if evidence["readiness_transaction_lock_present"] is not False:
+                raise BrokerTrustError("provider readiness transaction lock is still present")
+            processes = evidence["verify_ready_processes"]
+            if (
+                not isinstance(processes, (tuple, list))
+                or any(not isinstance(value, str) for value in processes)
+                or len(processes) != 0
+            ):
+                raise BrokerTrustError("a verify_ready process may still be active")
+            source = recovery.current_executive_source()
+            if source["release_sha"] != self.config.release_root.name:
+                raise BrokerTrustError(
+                    "current sealed Executive source does not match the running release"
+                )
+            grant = {
+                "schema_version": recovery.INCIDENT_GRANT_SCHEMA,
+                "authority_reference": recovery.INCIDENT_AUTHORITY_REFERENCE,
+                "incident_class": recovery.INCIDENT_RECOVERY_CLASS,
+                "historical_cause": recovery.INCIDENT_HISTORICAL_CAUSE,
+                "causal_link": recovery.INCIDENT_CAUSAL_LINK,
+                "raw_provider_messages_retained": False,
+                "authorization": policy.authorization_binding(),
+                "evidence": dict(designated),
+                "installed_source": {
+                    "path": recovery.os.fspath(recovery._readiness.CODEX_BINARY),
+                    "version": recovery._readiness.CODEX_VERSION,
+                    "sha256": recovery._readiness.CODEX_SHA256,
+                    "team_identifier": recovery._readiness.CODEX_TEAM_ID,
+                },
+                "executive_source": dict(source),
+                "worker": {
+                    "worker_user": recovery.get_slot("codex-01").worker_user,
+                    "worker_uid": recovery._readiness.WORKER_UID,
+                    "worker_gid": recovery._readiness.WORKER_GID,
+                    "provider_home": recovery.os.fspath(recovery._readiness.AUTH_PATH.parent),
+                    "workspace_binding_class":
+                        recovery._readiness.COMPANY_WORKSPACE_BINDING_CLASS,
+                    "expected_credential_kind": "device-auth",
+                },
+                "credential_lstat": dict(evidence["current_auth_identity"]),
+                "model": recovery._readiness.PRODUCTION_MODEL,
+                "issuer_request_id": request.request_id,
+                "issuer_request_sha256": digest,
+                "successor_request_id": successor,
+                "budget": recovery.RECOVERY_BUDGET,
+                "granted_at": started_at,
+                "expires_at": recovery._readiness._iso(
+                    recovery.datetime.now(recovery.UTC)
+                    + recovery.MIN_GRANT_LIFETIME
+                    + (recovery.MAX_GRANT_LIFETIME - recovery.MIN_GRANT_LIFETIME) / 2
+                ),
+            }
+            validated = recovery._validate_incident_grant_document(grant)
+            grant_bytes = (
+                json.dumps(validated, sort_keys=True, separators=(",", ":")) + "\n"
+            ).encode("utf-8")
+            grant_sha256 = hashlib.sha256(grant_bytes).hexdigest()
+            commitment = {
+                "schema_version": recovery.INCIDENT_COMMITMENT_SCHEMA,
+                "authorization": policy.authorization_binding(),
+                "incident_class": recovery.INCIDENT_RECOVERY_CLASS,
+                "grant_sha256": grant_sha256,
+                "issuer_request_id": request.request_id,
+                "issuer_request_sha256": digest,
+                "successor_request_id": successor,
+                "created_at": started_at,
+            }
+            commitment_bytes = (
+                json.dumps(commitment, sort_keys=True, separators=(",", ":")) + "\n"
+            ).encode("utf-8")
+        except (recovery.RecoveryError, recovery._readiness.ReadinessError) as exc:
+            # Every derivation refusal leaves this exact bounded broker refusal;
+            # no readiness, custody or trust error escapes untyped.
+            raise PrivilegedBrokerError(getattr(exc, "code", str(exc))) from exc
+
+        # Derivation is complete and read-only so far; nothing has been written.
+        self._write_inflight(request, digest, started_at)
+        try:
+            recovery.write_custody_document(
+                recovery.RECOVERY_INCIDENT_GRANT_PATH, grant_bytes
+            )
+        except FileExistsError:
+            raise EffectUnknownError(
+                "incident grant already exists; the same operation cannot be replaced"
+            ) from None
+        except (OSError, recovery.RecoveryError) as exc:
+            raise EffectUnknownError(
+                "incident grant write failed; same operation retained"
+            ) from exc
+        try:
+            recovery.write_custody_document(
+                recovery.RECOVERY_INCIDENT_COMMITMENT_PATH, commitment_bytes
+            )
+        except (FileExistsError, OSError, recovery.RecoveryError) as exc:
+            raise EffectUnknownError(
+                "incident commitment failed after the grant; same operation retained"
+            ) from exc
+        receipt: dict[str, Any] = {
+            "schema": RECEIPT_SCHEMA,
+            "request_id": request.request_id,
+            "request_sha256": digest,
+            "action": request.action,
+            "effect_class": request.effect_class,
+            "started_at": started_at,
+            "finished_at": _utc_now(),
+            "exit_code": 0,
+            "outcome": "SUCCEEDED",
+            "release_sha": self.config.release_root.name,
+            "broker_version": self.config.broker_version,
+            "stdout_bytes": len(commitment_bytes),
+            "stdout_sha256": hashlib.sha256(commitment_bytes).hexdigest(),
+            "stdout_excerpt": _sanitize_terminal_excerpt(
+                commitment_bytes.decode("utf-8", "replace")
+            ),
+            "stderr_bytes": 0,
+            "stderr_sha256": hashlib.sha256(b"").hexdigest(),
+            "stderr_excerpt": "",
+        }
+        try:
+            self._write_terminal_receipt(request, receipt)
+        except (OSError, recovery.RecoveryError) as exc:
+            raise EffectUnknownError(
+                "incident issuance completed but terminal receipt failed"
+            ) from exc
+        try:
+            self._remove_inflight(request.request_id)
+        except (OSError, recovery.RecoveryError) as exc:
+            raise EffectUnknownError(
+                "terminal receipt exists but in-flight cleanup failed"
+            ) from exc
         return receipt, False
 
     def handle(self, raw_request: Mapping[str, Any], *, peer_uid: int) -> dict[str, Any]:
@@ -1352,7 +1544,7 @@ class PrivilegedActionBroker:
                 # the grant, its designated successor binding and the consumed
                 # allocation all still hold exactly.
                 try:
-                    grant = provider_recovery._read_historical_grant(
+                    grant = provider_recovery.read_historical_recovery_grant(
                         expected_digest=request.recover_current_pin_grant_sha256,
                     )
                 except (provider_recovery.RecoveryError, ReadinessError, OSError) as exc:
@@ -1365,7 +1557,9 @@ class PrivilegedActionBroker:
                     )
                 try:
                     current_source = provider_recovery.current_executive_source()
-                    provider_recovery.validate_original_terminal(grant["cause_evidence"])
+                    predecessor_digest = provider_recovery.validate_recovery_history(
+                        grant, grant_sha256=request.recover_current_pin_grant_sha256,
+                    )
                 except (provider_recovery.RecoveryError, ReadinessError, OSError) as exc:
                     raise BrokerTrustError(
                         "current-pin recovery source or original terminal is unverified"
@@ -1373,7 +1567,7 @@ class PrivilegedActionBroker:
                 if (grant["executive_source"]["release_sha"] != self.config.release_root.name
                         or grant["executive_source"] != current_source):
                     raise BrokerTrustError("current-pin recovery Executive source changed")
-                if grant["cause_evidence"]["original_receipt_sha256"] != request.readiness_receipt_sha256:
+                if predecessor_digest != request.readiness_receipt_sha256:
                     raise BrokerTrustError(
                         "current-pin recovery grant does not bind the retained predecessor"
                     )
@@ -1396,6 +1590,16 @@ class PrivilegedActionBroker:
                         "current-pin recovery allocation is unreadable"
                     ) from exc
                 if allocation is not None:
+                    expected_class = (
+                        provider_recovery.INCIDENT_RECOVERY_CLASS
+                        if grant["schema_version"] == provider_recovery.INCIDENT_GRANT_SCHEMA
+                        else "current_pin_recovery"
+                    )
+                    if (allocation.get("allocation_class") != expected_class
+                            or allocation["grant_sha256"] != request.recover_current_pin_grant_sha256):
+                        raise BrokerTrustError(
+                            "current-pin recovery allocation is held by a different incident class"
+                        )
                     if allocation["executive_source"] != grant["executive_source"]:
                         raise BrokerTrustError("current-pin recovery allocation source changed")
                     if allocation["predecessor_receipt_sha256"] != request.readiness_receipt_sha256:

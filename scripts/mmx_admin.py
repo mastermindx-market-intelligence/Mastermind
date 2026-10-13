@@ -40,7 +40,9 @@ _ACTIONS = (
     "executive.worker_auth.verify_only",
     "executive.worker_auth.verify_ready",
     "executive.worker_auth.recover_transaction",
+    "executive.worker_auth.issue_due10_incident_grant",
 )
+_INCIDENT_ACTION = "executive.worker_auth.issue_due10_incident_grant"
 _STATUS_ACTION = "status"
 _SLOT_IDS = ("codex-01", "codex-pro-01", "codex-pro-02", "codex-pro-03")
 _CREDENTIAL_KINDS = ("service-account", "personal-access-token", "device-auth")
@@ -75,6 +77,21 @@ def _parser() -> argparse.ArgumentParser:
 
 def build_request(argv: Sequence[str]) -> dict[str, object]:
     args = _parser().parse_args(list(argv))
+    if args.action == _INCIDENT_ACTION:
+        # The issuer request identity is explicit and never randomly replaced.
+        # Only the designated successor argument exists; caller evidence,
+        # authority, body, date, budget, path and source overrides are all
+        # rejected here before any request is built.
+        if args.request_id is None:
+            parser = _parser()
+            parser.error("incident issuance requires an explicit --request-id")
+        if args.successor_request_id is None:
+            parser = _parser()
+            parser.error("incident issuance requires --successor-request-id")
+        for flag, attribute in _EFFECT_ONLY_FLAGS:
+            if attribute != "successor_request_id" and getattr(args, attribute) is not None:
+                parser = _parser()
+                parser.error(f"incident issuance does not accept {flag}")
     values: dict[str, str] = {}
     if args.slot_id is not None:
         values["slot_id"] = args.slot_id
