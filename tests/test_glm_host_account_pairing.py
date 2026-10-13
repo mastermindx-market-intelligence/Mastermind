@@ -278,3 +278,26 @@ def test_readiness_matches_launcher_when_host_env_returns_nonzero(ext,tmp_path,s
     actual=subprocess.run(['/bin/bash','-c',command],env=dict(os.environ,HOME=str(tmp_path/'home')),capture_output=True,text=True,timeout=10)
     assert actual.returncode==0 and actual.stdout=='1\n'
     assert doc['status']=='known' and doc['accounts'][expected] is True
+
+
+@pytest.mark.parametrize('ready,expected',[(set(),False),({'ready'},True)])
+def test_review_f1_public_acquire_normalizes_alias_before_pairing(ext,tmp_path,monkeypatch,ready,expected):
+    import yaml
+    br,calls=broker_fixture(ext,tmp_path,monkeypatch,ready)
+    policy=Path(br.accounts_path)
+    doc=yaml.safe_load(policy.read_text());doc['providers']['glm']['pool_aliases']=['glm-frontier']
+    policy.write_text(yaml.safe_dump(doc))
+    result=br.acquire('original-root','glm-frontier',host='worker-host',model='glm-5.3',
+                      pid=123,task_class='remote-glm',wait=0)
+    assert result.ok is expected
+    assert len(calls)==1 and calls[0]['host']=='worker-host'
+    conn=br._conn()
+    try:
+        rows=conn.execute('select * from leases').fetchall()
+        assert len(rows)==int(expected)
+        assert conn.execute('select count(*) from waiters').fetchone()[0]==0
+        if expected:
+            assert rows[0]['pool']=='glm' and rows[0]['account']=='ready'
+            assert rows[0]['orchestrator_id']=='original-root'
+        else:assert result.reason=='host_account_unavailable'
+    finally:conn.close()
