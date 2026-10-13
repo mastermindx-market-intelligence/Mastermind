@@ -74,3 +74,26 @@ Review consumption: accepted the warnings that native home installation does not
 Evidence files are in the existing operation evidence directory `/Volumes/Mastermind/evidence/operator-first-fabric-20261006-c3-001/`: baseline-red.txt, law-red.txt, policy-green-2.txt, combined-green-1.txt, incumbent-compat-1.txt, incumbent-compat-2.txt and grok-design-review-return.txt. Exact patch/source/asset SHA256 values live in source-pins.json. Do not reinterpret older subset test totals as additive runs or install receipts.
 
 The direct Workbench tool census exposes fixed source/canary actions, not child admission. Executive v3 remains an observed read-only/QUEUED-only surface. Existing per-Attempt capability/Runtime/COO/Supervisor and native projection owners must supply the real delegated client and its admitted graph before live upgrade acceptance. Missing runtime access does not block this bounded source delivery, but no role string or environment correlation field can replace it.
+
+## Protected Operator package and new role source stay separate until release
+
+The candidate deliberately preserves the existing protected
+`plugins/mastermind-operator/skills/receive-commission/SKILL.md` bytes (SHA256
+`212f5253c812ca47174ca9aac92977d5f649891da28c12b6948c4e0284422c4d`)
+so the immutable V4 `mastermind-operator.p1` source generation from protected
+commit `12c2cb8993f78e81c6cb9e9a75a9829f9b194dab` remains truthful. An
+unmerged role overlay is not a new protected package generation: embedding
+its text in that signed package before source release caused legitimate
+`package_file_size_mismatch` refusals across the registry, Codex adapter and
+other capability consumers. Do not weaken source verification or re-label the
+unmerged commit as `PROTECTED` to work around those refusals.
+
+The new `skills/mastermind-fabric-orchestration/` core plus the exact assigned
+role remain separate candidate instructions under the **existing incumbent
+provider-orchestrator policy installer**. They can be individually installed and
+explicitly loaded only under that installer and the already-admitted operator's
+role/Attempt selection; merely checking in a role file never activates it.
+Future changes to the *protected* `receive-commission` Skill require a properly
+reviewed/released new capability-package generation, fresh full file/closure
+hashes and native per-session loading/Runtime admission evidence. This choice
+preserves all role-source content while keeping the old package's trust boundary.

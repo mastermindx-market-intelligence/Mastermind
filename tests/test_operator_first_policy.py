@@ -287,13 +287,30 @@ def test_canonical_routing_addendum_enrolls_completion_economics():
     assert "direct commissioning owner retains adjudication" in text
 
 
-def test_existing_plugins_load_shared_role_source_without_new_plugin_identity():
+def test_principal_role_overlay_does_not_mutate_protected_operator_package():
+    """The new role is a separately installed Skill, not old package authority.
+
+    Re-pointing a protected V4 package's Skill bytes at this unmerged role text
+    breaks its signed generation and cannot be called source-qualified. The
+    accepted incumbent role installer owns future explicit role selection.
+    """
+    import hashlib
+
     ceo = (ROOT / "plugins/mastermind-sol/skills/mastermind-web-ceo/SKILL.md").read_text()
-    operator = (ROOT / "plugins/mastermind-operator/skills/receive-commission/SKILL.md").read_text()
-    for text in (ceo, operator):
-        assert "skills/mastermind-fabric-orchestration/SKILL.md" in text
-        assert "same exact commit" in text
-        assert "only the assigned role" in text
-    assert "ordinary return adjudication" in operator
-    assert "not a spawning API" in operator
+    operator_path = ROOT / "plugins/mastermind-operator/skills/receive-commission/SKILL.md"
+    operator = operator_path.read_bytes()
+    assert hashlib.sha256(operator).hexdigest() == (
+        "212f5253c812ca47174ca9aac92977d5f649891da28c12b6948c4e0284422c4d"
+    )
+    assert "skills/mastermind-fabric-orchestration/SKILL.md" in ceo
+    assert "same exact commit" in ceo
+    assert "only the assigned role" in ceo
+    assert "Read `../../references/dialogue-boundary.md`" in operator.decode()
     assert len(ceo.split()) <= 650
+    core = (ROOT / "skills/mastermind-fabric-orchestration/SKILL.md").read_text()
+    delivery = (ROOT / "skills/mastermind-fabric-orchestration/references/operator.md").read_text()
+    assert "ordinary return adjudication" in core
+    assert "only the role supplied by the accepted assignment" in core
+    assert "not authentication" in core
+    assert "No" in delivery or "no" in delivery
+    assert "independent review" in delivery
