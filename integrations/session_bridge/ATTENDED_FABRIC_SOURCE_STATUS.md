@@ -177,3 +177,52 @@ source and inert/local-child proofs, not Linux production admission. The physica
 owner still needs an independently qualified executable/interpreter chain, realm,
 attendance, isolation, assignment and complete retained launch attestation before
 exposing START. No service, provider credential, profile or installed lane changes.
+
+## Existing remote gateway composition
+
+The optional remote target uses the incumbent MH1 mTLS gateway and its fixed
+Unix connection to `FabricBridgeBroker`. It does not use the ordinary
+`ExecutiveWorkerBroker` launch lifecycle. The validated Control command remains
+in the original request; only the remote bridge's actual authenticated Unix
+peer can construct the in-process authority consumed by `Backend.start_owned`.
+The original Fabric reservation, lease, controller, retained result and
+assignment owner remain responsible for every execution effect.
+
+The same root-installed Fabric composition file accepts an explicit V2 schema
+with unchanged physical `bindings` and a `remote_transports` list. Each transport
+names its exact host, worker and physical binding digest, private IP/port,
+existing CA/client-certificate/key paths, server certificate fingerprint and
+finite timeout. TLS material is not copied into Runtime, the launch request or
+receipts. Its protected file identities and the approved composition file are
+rechecked before and after requests. An existing V1 file selects the original
+local Unix client. Neither route falls back to the other on failure.
+
+The gateway must explicitly select `broker_target: attended-fabric`, the actual
+`expected_broker_peer_uid`, and its fixed protected Fabric socket. It preserves
+the exact seven Fabric operations and forwards assignment sealing to the
+original Fabric owner instead of the Worker Broker's separate seal handler.
+Its startup metadata check is not a Backend-readiness check: Fabric has no
+global `status {}` operation, and startup must not invent an Attempt to probe.
+Actual calls authenticate the fixed Unix peer before sending their payload.
+Existing Worker Broker documents, startup probing and sealing stay unchanged.
+
+The loader selects the existing Linux installer namespace `/etc/mastermind-executive`
+and `/run` on Linux. The new macOS Fabric target requires the canonical
+`/private/var/run/mastermind-executive` namespace; the existing worker-broker
+keeps its `/var/run` default and digest. Symlink/ownership guards are unchanged.
+It never searches the
+other platform namespace after refusal. The transport preserves EFFECT_UNKNOWN
+if its pinned trust source changes after a modifying request has been sent.
+
+These are installed-input contracts, not enrolled values. No endpoint,
+certificate, worker generation, credential realm, binary/canary/isolation
+attestation or selected profile is supplied by this source change. The finite
+profile and `fabric_bridge_armed` remain disabled. The real Backend composition,
+post-exec START, collection and assignment revocation must qualify before an
+existing installation owner selects these inputs and before a live native
+same-parent acceptance can be claimed.
+
+The remote client preserves the optional exactly-once Runtime generation binding.
+A synchronous call inside a running loop reports the existing no-effect transport
+error. A cancelled modifying transport await retains `EFFECT_UNKNOWN`, because
+cancellation does not establish whether the original command was already sent.
