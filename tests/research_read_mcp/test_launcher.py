@@ -47,6 +47,45 @@ def test_launcher_identity_refuses_before_policy_or_provider(tmp_path,monkeypatc
 def test_composes_existing_auth_current_grant_and_actual_health_routes(tmp_path,monkeypatch):
     asyncio.run(composition(tmp_path,monkeypatch))
 
+
+@pytest.mark.parametrize('unsafe', [None, 'writable', 'symlink'])
+def test_serving_entry_opens_secure_durable_audit_before_runtime(tmp_path, monkeypatch, unsafe):
+    from integrations.business_mcp_auth.contracts import AUTH_AUDIT_SCHEMA, AuthAuditEvent
+    import uvicorn
+    m = launcher()
+    target = tmp_path.resolve() / 'audit'
+    target.mkdir(mode=0o700)
+    selected = target
+    if unsafe == 'writable':
+        target.chmod(0o777)
+    elif unsafe == 'symlink':
+        selected = tmp_path.resolve() / 'audit-link'
+        selected.symlink_to(target, target_is_directory=True)
+    policy = Harness().policy
+    deployment = parsed(policy_id=policy.policy_id)
+    monkeypatch.setattr(m, 'qualify', lambda *args: (deployment, None, policy))
+    composed = []
+    served = []
+    def create(*args, audit_sink):
+        # Exercise real append/fsync and secure acquisition. No store is opened.
+        audit_sink.emit(AuthAuditEvent(AUTH_AUDIT_SCHEMA, policy.policy_id, 'accepted', True))
+        composed.append(audit_sink)
+        return object()
+    monkeypatch.setattr(m, 'create_runtime', create)
+    monkeypatch.setattr(uvicorn, 'run', lambda *args, **kwargs: served.append(kwargs))
+    result = m.main(['--config', '/synthetic/deployment.json', '--audit-directory', str(selected)])
+    if unsafe:
+        assert result == 1 and not composed and not served
+        assert not (target / 'auth-audit.jsonl').exists()
+    else:
+        assert result == 0 and len(composed) == len(served) == 1
+        record = target / 'auth-audit.jsonl'
+        assert record.stat().st_uid == os.geteuid()
+        assert record.stat().st_mode & 0o777 == 0o600
+        assert json.loads(record.read_text())['accepted'] is True
+        assert served[0]['host'] == '127.0.0.1'
+        assert served[0]['access_log'] is False and served[0]['proxy_headers'] is False
+
 async def composition(tmp_path,monkeypatch):
     from integrations.research_read_mcp import port_adapter
     h=Harness();s=Service();m=launcher();h.clock=int(time.time())

@@ -141,6 +141,7 @@ def render_unit(template: str, *, commit: str, lock_sha256: str):
         "--config /etc/mastermind/research-read-deployment.json",
         "EnvironmentFile=/etc/mastermind/research-read.env", "NoNewPrivileges=true",
         "ProtectSystem=strict", "ProtectHome=true", "PrivateTmp=true", "UMask=0077",
+        "ReadWritePaths=/var/lib/mastermind-research/audit",
         "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6",
         "CapabilityBoundingSet=", "AmbientCapabilities=",
     }

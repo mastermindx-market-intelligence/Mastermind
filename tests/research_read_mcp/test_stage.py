@@ -34,8 +34,13 @@ def test_unit_is_closed_hardened_exact_pin():
     assert "User=mastermind-research" in rendered
     assert "/releases/" + "a" * 40 in rendered
     assert "/venvs/" + "b" * 64 in rendered
+    assert "ReadWritePaths=/var/lib/mastermind-research/audit" in rendered
     for hostile in (UNIT + "\nExecStartPost=/bin/true\n", UNIT.replace("ProtectSystem=strict", "ProtectSystem=false"),
-                    UNIT.replace("User=mastermind-research", "User=root")):
+                    UNIT.replace("User=mastermind-research", "User=root"),
+                    UNIT.replace("ReadWritePaths=/var/lib/mastermind-research/audit\n", ""),
+                    UNIT.replace("ReadWritePaths=/var/lib/mastermind-research/audit", "ReadWritePaths=/var/lib"),
+                    UNIT + "\nReadWritePaths=/etc/mastermind\n",
+                    UNIT + "\nReadWritePaths=/opt/mastermind-research\n"):
         with pytest.raises(stage.StageRefused):
             stage.render_unit(hostile, commit="a" * 40, lock_sha256="b" * 64)
 
