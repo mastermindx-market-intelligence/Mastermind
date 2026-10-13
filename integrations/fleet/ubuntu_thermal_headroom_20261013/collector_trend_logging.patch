@@ -1,0 +1,23 @@
+--- a/host_pull_backend.py
++++ b/host_pull_backend.py
+@@ -217,7 +217,20 @@
+                 "mem_available_bytes":uint(mem_free),
+                 "swap_used_bytes":uint(swap_used),
+             }
++        # Read-only, bounded trend summary in the existing host_pull daemon
++        # log. The current state JSON remains the only picker input; no new
++        # observer, historical authority, or admission decision is introduced.
+         summary = "reachable=true"
++        for name, value in (
++            ("tctl_c", (doc.get("thermal") or {}).get("cpu_tctl_c")),
++            ("load1", doc.get("load1")),
++            ("cpu_busy_pct", (doc.get("granular") or {}).get("cpu_busy_pct")),
++        ):
++            if (type(value) in (int, float) and math.isfinite(value)
++                    and 0 <= value <= (150 if name == "tctl_c" else 100)):
++                summary += f" {name}={value:g}"
++        if type(doc.get("active_lanes")) is int:
++            summary += f" active_lanes={doc['active_lanes']}"
+     elif rc == 255:
+         doc["error"] = "ssh_unreachable"
+         summary = "reachable=false error=ssh_unreachable"
