@@ -179,6 +179,15 @@ _PROOF_VALIDATION = (
 _CLIENT_GONE = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
 
 
+@dataclasses.dataclass(frozen=True)
+class _ForegroundExecution:
+    mode: str
+    binding: bytes
+
+    def __bool__(self):
+        return self.mode in {"ORDINARY_OPERATOR", "ATTENDED_WORK"}
+
+
 class ServiceError(RuntimeProofError):
     """A private control-service request could not be completed safely."""
 
@@ -6669,14 +6678,48 @@ class ExecutiveControlService:
         except asyncio.InvalidStateError:
             return  # A settled waiter never grants another provider turn.
 
+    def _foreground_execution_state(self, *, binding=None):
+        """Snapshot configured eligibility; a queued mode does not grant driving.
+
+        The serialized binding detaches nested placement data. The factory
+        compares this same expectation again at fresh admission and on return;
+        an old eligible snapshot is never a substitute for current guards.
+        """
+        # Reservation may also wrap a durable duplicate, which must not need
+        # fresh execution authority. The factory supplies a current binding
+        # only from the canonical fresh-only execution-binding callback.
+        binding = self._coo_execution_binding if binding is None else binding
+        if not self.config.coo_autonomy_armed:
+            mode = "QUEUED_AUTONOMY_OFF"
+        elif binding["operator_execution_profile_id"] == NATIVE_RETURN_TX5_EXECUTION_PROFILE:
+            mode = "QUEUED_NATIVE_RETURN"
+        elif not self.config.coo_attended_work_placements and not binding["operator_harness_armed"]:
+            mode = "QUEUED_OPERATOR_HARNESS_OFF"
+        else:
+            mode = "ATTENDED_WORK" if self.config.coo_attended_work_placements else "ORDINARY_OPERATOR"
+        return _ForegroundExecution(mode, _canonical_json(binding))
+
+    def _require_foreground_execution(self, expectation):
+        binding = self._require_current_coo_binding()
+        if self._foreground_execution_state(binding=binding) != expectation:
+            raise StateConflict("foreground eligibility changed")
+        if expectation:
+            if self._closing or self._service_state != "READY":
+                raise StateConflict("foreground execution is unavailable")
+            self._require_current_autonomy()
+            self._require_coo_worker_composed()
+
     @asynccontextmanager
     async def _foreground_cycle_scope(self, operation):
         """Reserve the existing serial cycle before fresh admission can commit.
 
         The canonical admission observer executes on its own thread. It binds
         the actual operation there; only this request task owns cycle driving.
+        Reservation is independent of execution eligibility. Known non-driving
+        configurations retain queued admission; qualified ordinary Operators
+        use the existing broker/OHF path with no attended placements.
         """
-        if operation is None or not self.config.coo_attended_work_placements:
+        if operation is None:
             yield False
             return
         from control_plane.foreground_operation import current_foreground_operation
@@ -6690,7 +6733,7 @@ class ExecutiveControlService:
             self._foreground_cycle_owner = (task, operation)
             self._coo_action_tasks.add(task)
         try:
-            yield True
+            yield bool(self._foreground_execution_state())
         finally:
             if self._foreground_cycle_owner == (task, operation):
                 self._foreground_cycle_owner = None
@@ -6764,8 +6807,12 @@ class ExecutiveControlService:
         root = runtime.jobs.get_job(root_id)
         if root is None:
             raise StateConflict("foreground root is unavailable")
-        if self._coo_binding_for_root(root)["operator_execution_profile_id"] == NATIVE_RETURN_TX5_EXECUTION_PROFILE:
+        root_binding = self._coo_binding_for_root(root)
+        if root_binding["operator_execution_profile_id"] == NATIVE_RETURN_TX5_EXECUTION_PROFILE:
             raise StateConflict("native no-child return profile is not a paid work cycle")
+        if not self.config.coo_attended_work_placements and not root_binding["operator_harness_armed"]:
+            # A frozen harness-off root is not promoted by a later host arm.
+            return {"state": "NO_ACTION", "root_job_id": root_id, "delivery": "INCOMPLETE"}
         results = {}
         seen = set()
         progress = {"PLANNER_CREATED", "WORK_CREATED", "PLAN_ADMITTED", "REVIEW_CREATED",
@@ -6790,6 +6837,15 @@ class ExecutiveControlService:
                         "role_result_digest": material.role_result_digest,
                         "result_envelope": material.result_envelope,
                     }
+                if (material is not None and material.job.job_id != root_id
+                        and material.job.orchestration_role == "plan"
+                        and not self.config.coo_attended_work_placements):
+                    # Ordinary Operator bound: the exact validated plan
+                    # completion is this call's finite result. No plan
+                    # admission, work creation or dispatch may follow here.
+                    settled = self._operator_plan_completion(root_id, material)
+                    if settled is not None:
+                        return settled
             operation.require_root(root_id)
             root = runtime.jobs.get_job(root_id)
             if root is None:
@@ -6823,6 +6879,46 @@ class ExecutiveControlService:
                         "delivery": "INCOMPLETE"}
         return {"state": "STEP_BOUND_REACHED", "root_job_id": root_id,
                 "delivery": "INCOMPLETE"}
+
+    def _operator_plan_completion(self, root_id, material):
+        """Shape the ordinary Operator's finite plan-only result for this call.
+
+        The exact validated plan completion stays retained at its Runtime
+        owner; this response only carries it, or its identities, on the same
+        call. The root stays open: this is never a root completion, external
+        Worker proof, native-return delivery or new admission authority.
+        """
+        root = self._require_runtime().jobs.get_job(root_id)
+        if root is None or root.status is JobStatus.COMPLETED:
+            # Only the independently validated ROOT_COMPLETED path reports a
+            # completed root; anything else keeps driving toward that branch.
+            return None
+        value = {
+            "state": "OPERATOR_COMPLETED",
+            "root_job_id": root_id,
+            "root_status": root.status.value,
+            "delivery": "INCOMPLETE",
+            "operator_delivery": "COMPLETE",
+            "operator_completion": {
+                "job_id": material.job.job_id,
+                "attempt_id": material.attempt.attempt_id,
+                "role": material.job.orchestration_role,
+                "result_digest": material.result_digest,
+                "role_result_digest": material.role_result_digest,
+                "result_envelope": material.result_envelope,
+            },
+        }
+        if len(_canonical_json(value)) > 16384:
+            # Retain exact identities/digests; omit only the envelope and
+            # never truncate it into a claimed complete delivery. The exact
+            # result stays readable later through its existing owner read.
+            value["operator_delivery"] = "RESULT_TOO_LARGE"
+            value["operator_completion"] = {
+                key: item
+                for key, item in value["operator_completion"].items()
+                if key != "result_envelope"
+            }
+        return value
 
     async def _run_coo_cycle_once(self, root_job_id: str) -> CooCycleOutcome:
         if self._closing:
