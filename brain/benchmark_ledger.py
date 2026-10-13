@@ -40,6 +40,7 @@ injected input (fixture-driven in tests, the daily regime frame in prod)."""
 from __future__ import annotations
 
 import json
+from datetime import date
 from pathlib import Path
 from typing import Optional
 
@@ -312,10 +313,20 @@ def load(asof: str) -> dict:
         return {}
 
 
+def _is_dated_ledger(path: Path) -> bool:
+    """Only canonical YYYY-MM-DD filenames identify daily ledger artifacts."""
+    try:
+        return date.fromisoformat(path.stem).isoformat() == path.stem
+    except ValueError:
+        return False
+
+
 def latest() -> dict:
     """The most recent benchmark ledger on disk (for cio / the agenda)."""
     try:
-        files = sorted(_BENCH_DIR.glob("*.json"))
+        # The scheduler and backfill keep _series*.json beside daily ledgers.
+        # Select by the writer's date filename contract, never a sidecar name.
+        files = sorted(p for p in _BENCH_DIR.glob("*.json") if _is_dated_ledger(p))
         return json.loads(files[-1].read_text()) if files else {}
     except Exception:  # noqa: BLE001
         return {}
