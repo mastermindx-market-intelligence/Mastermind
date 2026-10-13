@@ -86,6 +86,35 @@ artifact delivery remain the supported return path.
 
 ## Evidence retained and remaining proof
 
+The separate context qualification identified Macro's existing
+`scripts/agentos.py::compile_bundle` and Mastermind's
+`control_plane/session_truth_acquire.py::collect_agentos` as the actual cited
+context producer/consumer. The installed Macro `88804ed7…` compiler, using its
+documented explicit record-root option over records at `c7543cd1…`, recovered
+meaningful corrected constraints: the old 79% abandonment interpretation was
+superseded by an 8–14% PR-state measurement, and human Web/ChatGPT roots remain
+excluded from automatic reclamation. The requested budget overrun was exposed.
+The default packaged record root lacked the selected workstream, and the explicit
+record-root result had no qualified Git/date freshness. These limitations remain
+in the receipt. This proves retrieval of cited constraints; it does not prove a
+later principal consumed and obeyed a correction.
+
+An independent Fabric review rejected a planted plausible Stage1 completion
+claim for supported reasons: missing corrected-turn/resumed-worker evidence,
+command receipt misrepresented as parent consumption, and native substitution
+in the full-vision claim. Its additional overbroad grounds were excluded, so the
+whole return was not ledger-accepted. Describing a grant is not itself granting
+authority, and a held native lane does not bar independent core-office work.
+
+No compiler rewrite was justified. The missing join belongs at the existing
+trusted office consumer: original intent/revision, current receiving role and
+audience, actual effects, canonical context and exact requested proof. Existing
+PR #1273 owns the workstream boot reader, #1307 the native context adapter/bridge,
+and #1316 the acceptance-criteria reader. Their respective release, original
+review-effect and trusted acceptance obligations are not cleared by this review.
+The named Context Fabric continuation also preserves those original carriers;
+the R2 assignment has not created another writer against them.
+
 Sanitized source conclusions above derive from the following unchanged local
 receipts; their raw browser/account context is not copied into this repository:
 
@@ -95,6 +124,7 @@ receipts; their raw browser/account context is not copied into this repository:
 | `READ_OUTAGE_DIAGNOSIS.md` | `411cc10e38c63b8fa6c591f1c48d9d094f17556e3ac6b942d01c3e74cc9e8aed` |
 | `STAGE0A_DOT_OBSERVATION.md` | `44a92cfddb291a6cb1697255dc31a8a415c419304008aba8450c6ffe2a6b772f` |
 | Independent contract review result | `b6e7ab40bb3337c6775c598c47275502e0fb8bc331e6601849652a9258923153` |
+| `CONTEXT_QUALITY_STAGE1.md` | `4c9ba6f6a14e31be302aff24e004cf57c41464c57db7b6f92fe016796490635b` |
 
 The Stage0B receipt's preliminary wording about attended-native status is read
 with this explicit correction: an attended route is a candidate, not a qualified

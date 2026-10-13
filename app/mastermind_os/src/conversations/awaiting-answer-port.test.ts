@@ -23,7 +23,7 @@ function fixture() {
       saved = pointer; return { reserved: true as const };
     }),
     clearIfEqual: vi.fn((_scope, pointer) => {
-      if (saved?.operationKey !== pointer.operationKey || saved.kind !== pointer.kind || saved.targetKey !== pointer.targetKey) return false;
+      if (!saved || saved.operationKey !== pointer.operationKey || saved.kind !== pointer.kind || saved.targetKey !== pointer.targetKey) return false;
       saved = null; return true;
     }),
   };
