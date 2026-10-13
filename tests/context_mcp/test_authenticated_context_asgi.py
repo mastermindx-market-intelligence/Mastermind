@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import hashlib
 import json
 import time
 import unittest
@@ -293,3 +294,117 @@ class ContextSDKTests(unittest.IsolatedAsyncioTestCase):
         unknown = await self.call(name="read_absolute_host_file")
         self.assertEqual(self.error_code(unknown), "TOOL_NOT_AVAILABLE")
         self.assertEqual(len(self.calls), 0)
+
+    async def test_real_mcp_catalog_projects_into_existing_dsh_capability_contract(self):
+        """Same SDK catalog, existing DSH owner, no grant or runtime activation.
+
+        This is a SYNTHETIC typed profile projection, not an Executive policy
+        mutation or authorization to select MCP tools in a live Worker Attempt.
+        """
+        from pathlib import Path
+
+        from control_plane.dsh_mcp_client_projection import (
+            DshMcpProjectionError, project_dsh_mcp_tools,
+        )
+        from control_plane.executive_agent_capabilities import (
+            ExecutionCapabilityRegistry, observed_mcp_tool_schema_digest,
+        )
+
+        initialized = self.result(await self.rpc(
+            "initialize",
+            {"protocolVersion": "2025-03-26", "capabilities": {},
+             "clientInfo": {"name": "context-dsh-fixture", "version": "1"}},
+            token=self.token(),
+        ))
+        server_identity = initialized["serverInfo"]
+        assert server_identity["name"] == "Mastermind Context"
+        assert isinstance(server_identity["version"], str) and server_identity["version"]
+        observed = self.result(await self.rpc("tools/list", token=self.token()))
+        expected = sorted(TOOL_NAMES)
+        catalog = {"tools": observed["tools"]}
+        assert sorted(row["name"] for row in catalog["tools"]) == expected
+        assert all(row["annotations"]["readOnlyHint"] is True
+                   and row["annotations"]["destructiveHint"] is False
+                   for row in catalog["tools"])
+
+        root = Path(__file__).resolve().parents[2]
+        registry = ExecutionCapabilityRegistry.load(
+            root / "scripts/ohf/fixtures/"
+            "executive_agent_capabilities_v4_mastermind_operator.json",
+            source_root=root,
+        )
+        assert registry.production_armed is False
+        base_profile = registry.resolve("operator.browser.local-review.v1")
+        source_grant = next(
+            grant for grant in base_profile.mcp_server_grants
+            if grant.transport == "stdio"
+        )
+        synthetic_capability_id = "fixture.context_mcp.read.only"
+        selected = {row["name"]: row for row in catalog["tools"]}
+        digest = observed_mcp_tool_schema_digest({"tools": selected})
+        assert len(digest) == 64
+        grant = dataclasses.replace(
+            source_grant,
+            capability_id=synthetic_capability_id,
+            config_name="ContextReadFixture",
+            transport="streamable-http",
+            url="https://context.example/mcp",
+            command=None, args=(), required=True,
+            enabled_tools=tuple(expected),
+            server_identity=server_identity["name"],
+            server_version=server_identity["version"],
+            default_tools_approval_mode="approve",
+            tool_schema_digest=digest,
+            grant_digest=hashlib.sha256(b"SYNTHETIC_CONTEXT_DSH_GRANT_NO_AUTHORITY").hexdigest(),
+        )
+        profile = dataclasses.replace(
+            base_profile,
+            profile_id="fixture.context.dsh.projection",
+            mcp_server_grants=(grant,),
+            profile_digest=hashlib.sha256(b"SYNTHETIC_CONTEXT_DSH_PROFILE_NO_AUTHORITY").hexdigest(),
+        )
+        projection = project_dsh_mcp_tools(
+            profile,
+            capability_id=synthetic_capability_id,
+            observed_tool_catalog=catalog,
+        ).configuration()
+        assert projection["production_armed"] is False
+        assert projection["required"] is True
+        assert projection["approvalMode"] == "approve"
+        assert projection["target"] == {
+            "serverName": "ContextReadFixture",
+            "transport": "streamable-http",
+            "url": "https://context.example/mcp",
+        }
+        assert projection["serverInfo"] == server_identity
+        assert projection["source"]["tool_schema_digest"] == digest
+        assert [t["name"] for t in projection["tools"]] == expected
+        assert all(t["annotations"]["readOnlyHint"] for t in projection["tools"])
+
+        # Fail closed on incomplete or tampered catalogs; an app's own claimed
+        # readonly annotation is not a permission grant or schema-drift waiver.
+        changed = json.loads(json.dumps(catalog))
+        changed["tools"][0]["inputSchema"]["type"] = "null"
+        with self.assertRaises(DshMcpProjectionError):
+            project_dsh_mcp_tools(
+                profile, capability_id=synthetic_capability_id,
+                observed_tool_catalog=changed,
+            )
+        changed_annotations = json.loads(json.dumps(catalog))
+        changed_annotations["tools"][0]["annotations"]["readOnlyHint"] = False
+        with self.assertRaises(DshMcpProjectionError):
+            project_dsh_mcp_tools(
+                profile, capability_id=synthetic_capability_id,
+                observed_tool_catalog=changed_annotations,
+            )
+        with self.assertRaises(DshMcpProjectionError):
+            project_dsh_mcp_tools(
+                profile, capability_id=synthetic_capability_id,
+                observed_tool_catalog={"tools": catalog["tools"][:-1]},
+            )
+        with self.assertRaises(DshMcpProjectionError):
+            project_dsh_mcp_tools(
+                profile, capability_id=synthetic_capability_id,
+                observed_tool_catalog={**catalog, "nextCursor": "not-complete"},
+            )
+        assert self.calls == []  # only tools/list, no context task execution
