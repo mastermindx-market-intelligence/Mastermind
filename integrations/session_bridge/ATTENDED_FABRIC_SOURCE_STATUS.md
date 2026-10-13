@@ -209,7 +209,7 @@ local Unix client. Neither route falls back to the other on failure.
 
 The gateway must explicitly select `broker_target: attended-fabric`, the actual
 `expected_broker_peer_uid`, and its fixed protected Fabric socket. It preserves
-the exact seven Fabric operations and forwards assignment sealing to the
+the closed Fabric operations and forwards assignment sealing to the
 original Fabric owner instead of the Worker Broker's separate seal handler.
 Its startup metadata check is not a Backend-readiness check: Fabric has no
 global `status {}` operation, and startup must not invent an Attempt to probe.
@@ -291,3 +291,38 @@ issuer/realm/profile/binary/assignment and shutdown inputs are still required by
 the existing fixed factory; its unconfigured invocation remains refused. Ordinary
 attended shell Fabric and the already-accepted active Stop return remain usable
 independently. No new dispatcher, queue, lifecycle, fake WorkerRef or root is added.
+
+
+## Per-Attempt finite canary composition (uninstalled)
+
+The existing broker now offers `attended-secret-canary` as an observational
+operation bound to the original governed LaunchSpec, Attempt and physical route.
+Control calls it under its live claim before START. The source pins the original
+Control config file SHA, complete startup attestation and normalized loaded
+configuration, then checks the lease, foreground claim, route and definition
+again after the response. A changed startup definition cannot be adopted by an
+already constructed service.
+
+The only current producer preset is `darwin-same-host/v1` for the finite MiniMax
+Claude-compatible binding. The fixed factory uses the existing Control environment
+probe and V2 open-only canary helper. The enrolled realm retains ownership and
+inode checks through those probes; credential bytes are not read by the canary.
+Linux remains refused because a Mac Control PID cannot identify an Ubuntu process.
+Cancellation of a socket waiter keeps the original probe busy until its thread
+actually finishes. The operation reserves no worker or provider lane.
+
+Supervisor preserves the final V2 receipt in the START request, Runtime launch
+pin, launch attestation and WorkerRecoveryBinding. The commissioned integration
+test uses real SQLite grants and recovery metadata with explicitly inert profile,
+provenance and RPC issuers. The separate producer composition uses fixture realm
+and environment issuers with real harmless filesystem denial checks. These are
+source proofs, not host enrollment or provider execution. The 240 affected checks
+pass; a real loaded-Path serialization failure was reproduced and repaired using
+the existing normalized-definition projection.
+
+`fabric_attended_probe` references one protected worker definition. A typed source
+is passed into the existing in-process service composition; the standalone service
+still does not select Fabric execution or enable `fabric_bridge_armed`. An existing
+installation owner must supply and qualify the actual worker definition, realm,
+binary, same-host environment owner and selected finite profile before any live
+Attempt. No new lifecycle or credential enrollment is created by this change.

@@ -42,7 +42,7 @@ _COMMIT = re.compile(r'[0-9a-f]{40}')
 _BINDING_FIELDS = frozenset({'root_id','job_id','attempt_id','effective_grant_digest','commission_sha256'})
 _ASSIGNMENT_OPERATIONS = frozenset({'assignment-seal', 'assignment-seal-prepare', 'assignment-seal-commit', 'assignment-seal-finalize'})
 _MODIFYING_OPERATIONS = frozenset({'start', 'cancel', 'validate'}) | _ASSIGNMENT_OPERATIONS
-_OPERATIONS = frozenset({'start','status','collect','cancel','validate'}) | _ASSIGNMENT_OPERATIONS
+_OPERATIONS = frozenset({'start','status','collect','cancel','validate','attended-secret-canary'}) | _ASSIGNMENT_OPERATIONS
 _TRUSTED_CONFIG = object()
 _ERROR_CODES = frozenset({'BrokerProtocolError','PeerAuthorizationError','ConfigTrustError',
     'EFFECT_UNKNOWN','BridgeIdentityError','SocketBindingError','BackendNotConfiguredError',
@@ -381,6 +381,7 @@ class FabricBridgeBroker:
 
     def _payload(self,operation,payload):
         extra={'start':{'launch_spec','validation_commands'},'status':{'run_id'},
+               'attended-secret-canary':{'run_id','launch_spec','control_environment_attestation'},
                'collect':{'run_id'},'cancel':{'run_id','reason'},'validate':{'run_id','argv','timeout_seconds'},
                'assignment-seal': {'run_id', 'worker_id', 'process_ref'},
                'assignment-seal-prepare': {'run_id', 'worker_id', 'process_ref'},
@@ -422,7 +423,7 @@ class FabricBridgeBroker:
                 cleanup_transport.validate_query(payload['cleanup_query'],run_id=payload['run_id'])
             except (ValueError,TypeError,KeyError) as exc:
                 raise BridgeProtocolError('BrokerProtocolError','Invalid bound cleanup query') from exc
-        if operation=='start':
+        if operation in {'start','attended-secret-canary'}:
             spec=payload['launch_spec']
             fields={f.name for f in dataclasses.fields(OrchestrationLaunchSpec)}
             required={'run_id','job_id','worker_id','workspace_path','run_dir','prompt','result_schema_path',
@@ -446,9 +447,13 @@ class FabricBridgeBroker:
             if type(spec['prompt']) is not str or '\x00' in spec['prompt']:_refuse()
             if type(spec['expected_base_sha']) is not str or _COMMIT.fullmatch(spec['expected_base_sha']) is None:_refuse()
             _digest(spec['isolation_manifest_sha256'])
-            commands=payload['validation_commands']
-            if type(commands) is not list or len(commands)>32:_refuse()
-            for argv in commands:self._validation_argv(argv)
+            if operation == 'start':
+                commands=payload['validation_commands']
+                if type(commands) is not list or len(commands)>32:_refuse()
+                for argv in commands:self._validation_argv(argv)
+            else:
+                from scripts.executive_os_phase1c_worker import _CONTROL_ENV_ATTESTATION_FIELDS
+                _object(payload['control_environment_attestation'], _CONTROL_ENV_ATTESTATION_FIELDS)
         elif operation=='cancel':
             if type(payload['reason']) is not str or not 1<=len(payload['reason'])<=500 or '\x00' in payload['reason']:_refuse()
         elif operation=='validate':
@@ -525,6 +530,12 @@ class FabricBridgeBroker:
         common={'adapter_id','binding','physical_binding_sha256'}
         if result.get('physical_binding_sha256')!=payload['physical_binding_sha256']:
             _refuse('EFFECT_UNKNOWN','Backend route differs from the Runtime-pinned physical binding')
+        if operation == 'attended-secret-canary':
+            from control_plane.fabric_attended_canary import digest
+            _object(result, common | {'probe_request_sha256','envelope'})
+            if result['probe_request_sha256'] != digest(payload) or type(result['envelope']) is not dict:
+                _refuse('BackendRefusedError','Original probe request differs')
+            return
         if operation in _ASSIGNMENT_OPERATIONS:
             self._assignment_result(operation, result, payload, common)
             return

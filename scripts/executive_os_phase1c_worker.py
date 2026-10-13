@@ -107,6 +107,14 @@ _CONFIG_FIELDS = frozenset(
 )
 _SUBSCRIPTION_CONFIG_FIELDS = _CONFIG_FIELDS | frozenset({"harness_binding_id"})
 _SUBSCRIPTION_OPTIONAL_CONFIG_FIELDS = frozenset({"subscription_realm_enrollment"})
+_FINITE_ATTENDED_BINDING = "minimax-token-plan.claude-code-anthropic"
+_FINITE_ATTENDED_FIELDS = (_SUBSCRIPTION_CONFIG_FIELDS - frozenset({
+    "codex_binary", "codex_attestation_receipt", "allowed_codex_versions",
+    "required_team_identifier",
+})) | frozenset({"subscription_realm_enrollment", "control_gid", "claude_binary",
+    "claude_attestation_receipt", "claude_attestation_sha256", "allowed_claude_versions"})
+_FINITE_ATTENDED_PROBE = {"schema_version": "mastermind.attended_secret_canary_definition/v1",
+                          "environment_probe": "darwin-same-host/v1"}
 _NATIVE_CONFIG_FIELDS = _CONFIG_FIELDS | frozenset({
     "native_provider", "native_realm_enrollment",
 })
@@ -180,6 +188,9 @@ def _load_config(path: Path, *, require_root_owner: bool) -> dict[str, Any]:
             if "subscription_realm_enrollment" in value
             else frozenset()
         )
+        if value.get("harness_binding_id") == _FINITE_ATTENDED_BINDING:
+            expected_fields = _FINITE_ATTENDED_FIELDS | (
+                {"attended_secret_canary"} if "attended_secret_canary" in value else set())
     elif schema_version == NATIVE_CONFIG_SCHEMA_VERSION:
         expected_fields = (_NATIVE_CLAUDE_CONFIG_FIELDS if value.get("native_provider") == "claude"
                            else _NATIVE_CONFIG_FIELDS)
@@ -194,7 +205,17 @@ def _load_config(path: Path, *, require_root_owner: bool) -> dict[str, Any]:
             raise WorkerConfigError("native provider is not supported")
         if not isinstance(value.get("native_realm_enrollment"), dict):
             raise WorkerConfigError("native realm enrollment must be an object")
-    provider = "claude" if value.get("native_provider") == "claude" else "codex"
+    finite = (schema_version == SUBSCRIPTION_CONFIG_SCHEMA_VERSION
+              and value.get("harness_binding_id") == _FINITE_ATTENDED_BINDING)
+    provider = "claude" if value.get("native_provider") == "claude" or finite else "codex"
+    if finite:
+        if (type(value.get("control_gid")) is not int or value["control_gid"] <= 0
+                or value["control_gid"] == value.get("worker_gid")
+                or type(value.get("claude_attestation_sha256")) is not str
+                or re.fullmatch(r"[0-9a-f]{64}", value["claude_attestation_sha256"]) is None
+                or ("attended_secret_canary" in value
+                    and value["attended_secret_canary"] != _FINITE_ATTENDED_PROBE)):
+            raise WorkerConfigError("finite attended definition differs from its fixed probe contract")
     versions = value.get(f"allowed_{provider}_versions")
     if (
         not isinstance(versions, list)
@@ -231,6 +252,8 @@ def _load_config(path: Path, *, require_root_owner: bool) -> dict[str, Any]:
         if binding.implementation_state == "SPEC_ONLY":
             raise WorkerConfigError("subscription harness binding is not implemented")
         enrollment = value.get("subscription_realm_enrollment")
+        if finite and not isinstance(enrollment, dict):
+            raise WorkerConfigError("finite attended worker requires its original realm enrollment")
         if (
             enrollment is not None and (
                 not isinstance(enrollment, dict)
@@ -264,6 +287,12 @@ def _resolve_subscription_binding(value: Any) -> SubscriptionHarnessBinding:
         descriptor = adapter_descriptor(binding.adapter_id)
     except (HarnessBindingError, ValueError) as exc:
         raise WorkerConfigError("subscription harness binding is not reviewed") from exc
+    if value == _FINITE_ATTENDED_BINDING:
+        if (binding.adapter_id != "claude-compatible-subscription"
+                or binding.protocol != "anthropic" or binding.autonomous_allowed
+                or binding.implementation_state == "SPEC_ONLY"):
+            raise WorkerConfigError("finite attended harness binding is not implemented")
+        return binding
     if binding.adapter_id != "codex-cli" or not descriptor.implemented:
         raise WorkerConfigError("subscription harness binding is not implemented by Codex")
     wire_api = binding.protocol
@@ -313,6 +342,8 @@ def _assert_service_activation_allowed(config: Mapping[str, Any]) -> None:
     binding = _subscription_binding_for_config(config)
     if binding is None:
         return
+    if binding.binding_id == _FINITE_ATTENDED_BINDING:
+        raise WorkerConfigError("finite attended definition requires the existing Fabric bridge owner")
     # A root-owned v5 config with a valid subscription_realm_enrollment is the
     # attended-only lane: the broker only accepts that request through the
     # typed interactive-canary operation, which the underlying binding

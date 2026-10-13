@@ -323,6 +323,7 @@ _CONFIG_OPTIONAL = frozenset(
         "fabric_bindings_path",
         "fabric_bindings_sha256",
         "fabric_bridge_armed",
+        "fabric_attended_probe",
     }
 )
 _CEO_INGRESS_CONFIG_KEYS = frozenset(
@@ -375,6 +376,15 @@ def _validate_fabric_bridge_config(raw: Mapping[str, Any]) -> bool:
                 or ".." in Path(value).parts or str(Path(value)) != value or "\x00" in value
                 or type(digest) is not str or re.fullmatch(r"[0-9a-f]{64}", digest) is None):
             raise ServiceError("Fabric bindings require a canonical absolute path and exact SHA-256")
+    if "fabric_attended_probe" in raw:
+        probe = raw["fabric_attended_probe"]
+        if (not present or type(probe) is not dict or set(probe) != {"worker_config_path"}
+                or type(probe["worker_config_path"]) is not str
+                or not Path(probe["worker_config_path"]).is_absolute()
+                or ".." in Path(probe["worker_config_path"]).parts
+                or str(Path(probe["worker_config_path"])) != probe["worker_config_path"]
+                or "\x00" in probe["worker_config_path"]):
+            raise ServiceError("Fabric attended probe requires one fixed worker definition")
     return bool(present)
 
 
@@ -1460,6 +1470,8 @@ def _validate_canary_envelope(
     *,
     raw: Mapping[str, Any],
     control_attestation: Mapping[str, Any],
+    attended_config=None,
+    attended_binding=None,
 ) -> dict[str, Any]:
     """Validate an in-memory or persisted same-PID worker-bound envelope."""
 
@@ -1468,8 +1480,15 @@ def _validate_canary_envelope(
         SecretCanaryConfig,
         SecretCanaryError,
         validate_secret_canary_binding,
+        validate_attended_secret_canary_binding,
+        AttendedCanaryBinding,
     )
 
+    if ((attended_config is None) != (attended_binding is None)
+            or (attended_config is not None and (
+                type(attended_config) is not SecretCanaryConfig
+                or type(attended_binding) is not AttendedCanaryBinding))):
+        raise ServiceError("finite canary validation requires coupled typed owner inputs")
     required_envelope = {
         "schema_version",
         "secret_canary",
@@ -1513,10 +1532,10 @@ def _validate_canary_envelope(
         raise ServiceError("control-environment probe process identity is stale")
     worker_principal = probe.get("worker_principal")
     expected_worker_principal = {
-        "real_uid": int(raw["worker_uid"]),
-        "effective_uid": int(raw["worker_uid"]),
-        "real_gid": int(raw["worker_gid"]),
-        "effective_gid": int(raw["worker_gid"]),
+        "real_uid": attended_config.expected_worker_uid if attended_config else int(raw["worker_uid"]),
+        "effective_uid": attended_config.expected_worker_uid if attended_config else int(raw["worker_uid"]),
+        "real_gid": attended_config.expected_worker_gid if attended_config else int(raw["worker_gid"]),
+        "effective_gid": attended_config.expected_worker_gid if attended_config else int(raw["worker_gid"]),
     }
     if worker_principal != expected_worker_principal:
         raise ServiceError("control-environment probe worker principal differs")
@@ -1569,6 +1588,16 @@ def _validate_canary_envelope(
     if not isinstance(inner, Mapping):
         raise ServiceError("secret-canary envelope has no inner receipt")
     try:
+        if attended_config is not None:
+            if (attended_config.control_environment_probe_sha256 != probe_sha256
+                    or attended_config.control_uid != raw["control_uid"]
+                    or attended_config.control_gid != control_identity["effective_gid"]
+                    or any(getattr(attended_config, key) != getattr(canary_config, key) for key in (
+                        "administrative_checkout_sentinel", "executive_database",
+                        "other_worker_home_sentinel", "forbidden_production_sentinel"))):
+                raise ServiceError("finite probe targets differ from the actual Control layout")
+            return validate_attended_secret_canary_binding(
+                attended_config, attended_binding, principal, inner)
         return validate_secret_canary_binding(canary_config, principal, inner)
     except SecretCanaryError as exc:
         raise ServiceError(f"secret-canary binding is invalid: {exc.code}") from exc
@@ -1682,6 +1711,7 @@ def _service_from_config(
     native_dialogue_canary_profile_loader: Callable[[], Any] | None = None,
     remote_worker_binding_source: Callable[..., Any] | None = None,
     fabric_worker_binding_source: Any | None = None,
+    fabric_attended_probe_source: Any | None = None,
 ) -> ExecutiveControlService:
     from control_plane.dialogue_wake_canary_activation import DialogueWakeCanaryProfile
     if dialogue_canary_profile is None:
@@ -1690,6 +1720,11 @@ def _service_from_config(
         raise ServiceError("dialogue canary profile requires trusted composition")
     # This is trusted host composition, never a JSON/model-selected factory.
     _validate_fabric_bridge_config(raw)
+    if fabric_attended_probe_source is not None:
+        from control_plane.fabric_attended_canary import AttendedControlProbeSource
+        if type(fabric_attended_probe_source) is not AttendedControlProbeSource:
+            raise ServiceError('attended probe requires the exact startup-bound source')
+        fabric_attended_probe_source.require_definition(raw)
     if fabric_worker_binding_source is not None:
         from control_plane.executive_fabric_composition import FabricBindingSource
         if type(fabric_worker_binding_source) is not FabricBindingSource:
@@ -1943,7 +1978,8 @@ def _service_from_config(
         from control_plane.executive_fabric_adapter import AttendedFabricWorkerAdapter
         from control_plane.mixed_worker_supervisor import MixedExecutionOwnerSupervisor
         fabric_adapter = AttendedFabricWorkerAdapter(runtime, fabric_worker_binding_source,
-            request_client_factory=fabric_worker_binding_source.client_for)
+            request_client_factory=fabric_worker_binding_source.client_for,
+            attended_probe_source=fabric_attended_probe_source)
         fabric_owner = ExecutiveSupervisor(
             runtime, fabric_adapter,
             runs_root=raw["worker_runs_root"],
@@ -2652,9 +2688,13 @@ async def _serve_from_config(config_path: Path) -> None:
     # Bind fresh public CEO admission to the exact running config and the
     # existing root-owned receipt pair. Never read worker-codex.json as Control.
     require_ceo_admission = _ceo_admission_guard(raw, config_path, content_attestation_loader)
+    from control_plane.fabric_attended_canary import AttendedControlProbeSource
 
     service = _service_from_config(
         raw,
+        fabric_attended_probe_source=(
+            AttendedControlProbeSource.from_startup(config_path, raw, control_attestation)
+            if 'fabric_attended_probe' in raw else None),
         dialogue_canary_profile=dialogue_canary_profile,
         native_dialogue_canary_profile_loader=native_dialogue_canary_profile_loader,
         canary_loader=load_canary,

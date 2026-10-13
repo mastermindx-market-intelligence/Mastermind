@@ -728,6 +728,8 @@ class _SingleAssignmentComposition:
             _refuse('fixed_preparation_contains_command_coordinates')
         self._backend = None
         self._attempted = False
+        self._probe_busy = False
+        self._probe_task = None
 
     async def start_owned(self, payload, *, authority):
         if threading.current_thread() is not threading.main_thread():
@@ -736,7 +738,7 @@ class _SingleAssignmentComposition:
             _refuse('control_start_authority_unavailable')
         authority.require(payload)  # No slot/constructor/reservation before this.
         r = self._resources
-        if self._attempted:
+        if self._attempted or self._probe_busy:
             _refuse('original_assignment_already_attempted')
         if payload.get('physical_binding_sha256') != r.physical.digest:
             _refuse('foreign_original_route')
@@ -784,6 +786,27 @@ class _SingleAssignmentComposition:
         return await value.start_owned(payload, authority=authority)
 
     async def execute(self, operation, payload):
+        if operation == 'attended-secret-canary':
+            if self._attempted or self._backend is not None or self._probe_busy:
+                _refuse('original_assignment_already_attempted')
+            from control_plane.fabric_attended_canary import produce
+            self._probe_busy = True
+            task = asyncio.create_task(asyncio.to_thread(produce, self._resources, payload))
+            self._probe_task = task
+            def completed(original):
+                # Cancellation of the socket waiter cannot cancel a thread's
+                # actual read or free the original owner's busy fence early.
+                if not original.cancelled():
+                    original.exception()
+                if self._probe_task is original:
+                    self._probe_busy = False
+                    self._probe_task = None
+            task.add_done_callback(completed)
+            try:
+                return await asyncio.shield(task)
+            finally:
+                if task.done():
+                    completed(task)
         if self._backend is not None:
             return await self._backend.execute(operation, payload)
         if (operation != 'status' or type(payload) is not dict

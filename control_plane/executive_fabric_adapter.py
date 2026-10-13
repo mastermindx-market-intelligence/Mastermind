@@ -232,6 +232,7 @@ class AttendedFabricWorkerAdapter:
     def __init__(self, runtime: Runtime, binding_source: Callable[[str, str], FabricHostBinding],
                  *, client_factory: Callable[[FabricHostBinding], Any] | None = None,
                  request_client_factory: Callable[[FabricHostBinding, Mapping[str, Any]], Any] | None = None,
+                 attended_probe_source=None,
                  heartbeat_interval_seconds: float = 5.0):
         if not isinstance(runtime, Runtime) or not callable(binding_source):
             raise BrokerStateError("Fabric adapter requires trusted Runtime composition")
@@ -243,6 +244,10 @@ class AttendedFabricWorkerAdapter:
             raise BrokerStateError("Fabric request transport factory must be callable")
         self.runtime = runtime
         self.binding_source = binding_source
+        from control_plane.fabric_attended_canary import AttendedControlProbeSource
+        if attended_probe_source is not None and type(attended_probe_source) is not AttendedControlProbeSource:
+            raise BrokerStateError('Fabric probe requires the fixed Control definition source')
+        self._attended_probe_source = attended_probe_source
         legacy_client = client_factory or _fixed_client
         self._client_factory = request_client_factory or (lambda physical, payload: legacy_client(physical))
         self._heartbeat_interval = heartbeat_interval_seconds
@@ -254,6 +259,51 @@ class AttendedFabricWorkerAdapter:
         self._control_recovery: dict[str, dict[str, str]] = {}
         self._cleanup_pairs: dict[tuple[str, str], tuple[dict, dict, dict]] = {}
         self._cleanup_not_before: dict[str, float] = {}
+
+    async def prepare_attended_launch_spec(self, spec, *, lease):
+        """Observe this claimed Attempt before START; no pin or task reservation."""
+        from control_plane.fabric_attended_canary import OPERATION, digest
+        from control_plane.foreground_operation import current_foreground_operation
+        job = self.runtime.jobs.get_job(spec.job_id)
+        if job is None:
+            raise BrokerStateError('Original Fabric job is unavailable')
+        if 'attended_route' not in job.constraints:
+            return spec
+        if self._attended_probe_source is None or spec.run_id in self._bound:
+            raise BrokerStateError('Finite Fabric probe owner is not configured or START already attempted')
+        if not isinstance(lease, AttemptLease) or lease.attempt.attempt_id != spec.run_id:
+            raise BrokerStateError('Finite Fabric probe requires its original lease')
+
+        def current():
+            with self.runtime.store.read() as connection:
+                self.runtime.attempts._leased_row(connection, attempt_id=spec.run_id,
+                    fence_generation=lease.attempt.fence_generation, lease_token=lease.lease_token,
+                    timestamp=self.runtime.store.now_ms(), statuses={AttemptStatus.CLAIMED})
+            attempt, physical, start = self._resolve(spec, launch=True)
+            if attempt != lease.attempt:
+                raise BrokerStateError('Finite Fabric claim changed before START')
+            foreground = current_foreground_operation()
+            foreground._current_claim(start['binding'], physical.digest, digest(start))
+            snap = self._attended_probe_source.snapshot(physical, spec)
+            payload = dict(binding=start['binding'], physical_binding_sha256=physical.digest,
+                run_id=spec.run_id, launch_spec=start['launch_spec'],
+                control_environment_attestation=snap[2])
+            return physical, payload, snap, foreground
+
+        physical, payload, snapshot, foreground = current()
+        client = self._client_factory(physical, payload)
+        result = await client.request(OPERATION, payload, timeout_seconds=30.0)
+        check, check_payload, check_snapshot, check_foreground = current()
+        if (check != physical or check_payload != payload or check_snapshot != snapshot
+                or check_foreground is not foreground
+                or type(result) is not dict
+                or set(result) != {'adapter_id','binding','physical_binding_sha256','probe_request_sha256','envelope'}
+                or result['adapter_id'] != ADAPTER_ID or result['binding'] != payload['binding']
+                or result['physical_binding_sha256'] != physical.digest
+                or result['probe_request_sha256'] != digest(payload)):
+            raise BrokerStateError('Finite Fabric probe returned a changed owner or request')
+        verdict = self._attended_probe_source.validate(snapshot, result)
+        return dataclasses.replace(spec, secret_canary_verdict=verdict)
 
     @property
     def process_controller(self):

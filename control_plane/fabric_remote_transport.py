@@ -20,7 +20,7 @@ from types import MappingProxyType
 from control_plane.remote_worker_broker_client import RemoteWorkerBrokerClient
 from control_plane.remote_worker_transport import BrokerTransportBinding
 
-FABRIC_OPERATIONS = frozenset({'start', 'status', 'collect', 'cancel', 'validate',
+FABRIC_OPERATIONS = frozenset({'start', 'status', 'collect', 'cancel', 'validate', 'attended-secret-canary',
                               'assignment-seal', 'assignment-seal-finalize'})
 _FIELDS = frozenset({'host_ref', 'worker_id', 'physical_binding_sha256',
     'endpoint_host', 'endpoint_port', 'ca_path', 'client_cert_path', 'client_key_path',

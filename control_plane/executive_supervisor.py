@@ -2104,6 +2104,8 @@ class ExecutiveSupervisor:
                 ),
             )
             spec = self._enrich_spec_with_canary_claim(spec, job)
+            if self.cleanup_policy is CleanupPolicy.FABRIC_PROCESS_GROUP:
+                spec = await self.adapter.prepare_attended_launch_spec(spec, lease=lease)
             recovery_prompt_path = schema_path.parent / "worker-prompt.txt"
             _write_private_recovery_prompt(recovery_prompt_path, spec.prompt)
             if exact_target is not None:

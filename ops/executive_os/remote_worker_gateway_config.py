@@ -35,6 +35,7 @@ FABRIC_ALLOWED_OPERATIONS = frozenset(
         "collect",
         "cancel",
         "validate",
+        "attended-secret-canary",
         "assignment-seal",
         "assignment-seal-finalize",
     }
