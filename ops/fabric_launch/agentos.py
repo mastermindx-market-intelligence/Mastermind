@@ -7,8 +7,8 @@ from pathlib import Path
 import re
 import subprocess
 import sys
-import tempfile
 
+from control_plane.ceo_boot_packet import bounded_subprocess_runner
 from ops.fabric_launch.context import LaunchInputError
 
 OWNER_ROOT = Path('/Users/chriswong/Documents/Cluade/macro-main')
@@ -46,7 +46,7 @@ def validate_bundle(raw, workstream):
     return bundle
 
 
-def read_context(workstream, budget=4000, *, owner_root=OWNER_ROOT, run=subprocess.run):
+def read_context(workstream, budget=4000, *, owner_root=OWNER_ROOT, run=bounded_subprocess_runner):
     if type(workstream) is not str or not re.fullmatch(r'(?:WS[:-])?[A-Z][A-Z0-9-]{0,95}',workstream):
         raise LaunchInputError('AGENTOS_WORKSTREAM_INVALID')
     if type(budget) is not int or not 800 <= budget <= 12000:
@@ -56,16 +56,33 @@ def read_context(workstream, budget=4000, *, owner_root=OWNER_ROOT, run=subproce
     if script.is_symlink() or not script.is_file():
         raise LaunchInputError('AGENTOS_OWNER_UNAVAILABLE')
     before=hashlib.sha256(script.read_bytes()).hexdigest()
-    with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
-        try:
-            result=run([sys.executable,str(script),'compile-context','--workstream',workstream,
-                        '--json','--budget',str(budget)],cwd=root,stdout=out,stderr=err,
-                       timeout=25,check=False)
-        except subprocess.TimeoutExpired:
-            raise LaunchInputError('AGENTOS_CONTEXT_READ_TIMEOUT') from None
-        if result.returncode!=0:
-            raise LaunchInputError('AGENTOS_CONTEXT_READ_REFUSED')
-        out.seek(0);raw=out.read(MAX_BUNDLE_BYTES+1)
+    try:
+        # The incumbent runner owns both stream limits and process-group cleanup,
+        # including descendants of a normally exited leader. -B keeps imports inert.
+        result=run([sys.executable,'-B',str(script),'compile-context','--workstream',workstream,
+                    '--json','--budget',str(budget)],cwd=root,timeout=25,
+                   max_bytes=MAX_BUNDLE_BYTES)
+    except (OSError,RuntimeError,subprocess.SubprocessError):
+        # A raised timeout/cleanup error is not proof that the owned group settled.
+        # Preserve uncertainty; do not retry or copy underlying diagnostics.
+        raise LaunchInputError('AGENTOS_CONTEXT_READ_UNCERTAIN') from None
+    if (type(result) is not dict or type(result.get('code')) is not int
+            or any(type(result.get(flag)) is not bool
+                   for flag in ('timed_out','limit_exceeded','invalid_utf8'))
+            or any(type(result.get(stream)) is not str for stream in ('stdout','stderr'))):
+        raise LaunchInputError('AGENTOS_CONTEXT_RESULT_INVALID')
+    if result['limit_exceeded']:
+        raise LaunchInputError('AGENTOS_CONTEXT_OUTPUT_LIMIT')
+    if result['timed_out']:
+        raise LaunchInputError('AGENTOS_CONTEXT_READ_TIMEOUT')
+    if result['invalid_utf8']:
+        raise LaunchInputError('AGENTOS_CONTEXT_INVALID_UTF8')
+    if result['code']!=0:
+        raise LaunchInputError('AGENTOS_CONTEXT_READ_REFUSED')
+    try:
+        raw=result['stdout'].encode('utf-8',errors='strict')
+    except UnicodeError:
+        raise LaunchInputError('AGENTOS_CONTEXT_INVALID_UTF8') from None
     if hashlib.sha256(script.read_bytes()).hexdigest()!=before:
         raise LaunchInputError('AGENTOS_OWNER_SOURCE_CHANGED')
     bundle=validate_bundle(raw,workstream)

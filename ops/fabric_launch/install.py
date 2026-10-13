@@ -19,10 +19,17 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
 PREFIXES = ('ops/fabric_launch/', 'research/worker_craft/mastermind-craft/', 'skills/mastermind-worker-bootstrap/')
-EXACT_FILES = {'control_plane/__init__.py', 'control_plane/worker_craft.py', 'control_plane/worker_execution_contract.py'}
+# Include the incumbent reader's complete import-time closure. strategic_state
+# imports only stdlib until its unrelated YAML-loading operation is requested.
+EXACT_FILES = {'control_plane/__init__.py', 'control_plane/worker_craft.py',
+               'control_plane/worker_execution_contract.py',
+               'control_plane/ceo_boot_packet.py', 'control_plane/strategic_state.py'}
 BEGIN = '# BEGIN MASTERMIND WORKER BOOTSTRAP'
 END = '# END MASTERMIND WORKER BOOTSTRAP'
 STUDIO_CONSUMER_ROOT = Path.home() / '.local/share/studio-direct-mcp/private'
+# Syntax-check wrapper candidates with the exact OS Bash used at dispatch,
+# not a possibly newer PATH Bash that accepts unsupported script syntax.
+SYSTEM_DISPATCH_BASH = '/bin/bash'
 
 
 def sha(data):
@@ -222,7 +229,7 @@ def stage_wrapper_candidate(wrapper, release, expected_sha, output):
         stream.flush()
         os.fchmod(stream.fileno(),0o600)
         os.fsync(stream.fileno())
-    subprocess.run(['bash','-n',str(output)],check=True,timeout=10)
+    subprocess.run([SYSTEM_DISPATCH_BASH,'-n',str(output)],check=True,timeout=10)
     if Path(output).read_bytes()!=candidate:raise ValueError('WRAPPER_CANDIDATE_READBACK_FAILED')
     return {'state':'WRAPPER_CANDIDATE_NOT_INSTALLED','original_sha256':expected_sha,
             'candidate_sha256':sha(candidate),'pinned_consumer_count':consumer_count}
@@ -249,7 +256,7 @@ def activate(wrapper, release, expected_sha):
     try:
         with os.fdopen(fd,'wb') as stream:
             stream.write(updated);stream.flush();os.fchmod(stream.fileno(),stat.S_IMODE(before.st_mode));os.fsync(stream.fileno())
-        subprocess.run(['bash','-n',name],check=True,timeout=10)
+        subprocess.run([SYSTEM_DISPATCH_BASH,'-n',name],check=True,timeout=10)
         after=wrapper.lstat()
         if (before.st_dev,before.st_ino,before.st_mtime_ns)!=(after.st_dev,after.st_ino,after.st_mtime_ns) or wrapper.read_bytes()!=data:
             raise ValueError('WRAPPER_CHANGED_DURING_PREPARE')

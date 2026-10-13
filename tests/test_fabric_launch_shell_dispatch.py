@@ -96,3 +96,19 @@ def test_native_remote_option_missing_value_refuses_before_launch(tmp_path, monk
                 kit, "remote", ["auto", "glm", str(packet), "~/lanes", "glm-5.3", key],
                 task_class="review", call=lambda _: pytest.fail("must not dispatch"),
             )
+
+
+def test_missing_os_bash_refuses_once_before_provider_start(tmp_path, monkeypatch, capsys):
+    kit = _kit(tmp_path, monkeypatch)
+    attempts = []
+
+    def unavailable(argv):
+        attempts.append(tuple(argv))
+        raise FileNotFoundError("synthetic missing system Bash")
+
+    monkeypatch.setattr(entry.subprocess, "Popen", unavailable)
+    rc = entry.main(["--kit", str(kit), "run", "glm", "read only", str(tmp_path)])
+    assert rc == 78
+    assert len(attempts) == 1
+    assert attempts[0][:2] == ("/bin/bash", str(kit / "ext/sub.sh"))
+    assert "FABRIC_BOOT_REFUSED FileNotFoundError" in capsys.readouterr().err

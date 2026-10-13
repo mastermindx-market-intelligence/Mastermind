@@ -1,6 +1,4 @@
 import json
-import subprocess
-import types
 import pytest
 from ops.fabric_launch import agentos as a
 from ops.fabric_launch.context import LaunchInputError
@@ -14,19 +12,27 @@ def bundle():
             'repo_sha':'fixture-source','generated_at':'2026-10-06T00:00:00Z'}
 
 
+def runner_result(raw=b'', **overrides):
+    result={'code':0,'stdout':raw.decode('utf-8'),'stderr':'',
+            'timed_out':False,'limit_exceeded':False,'invalid_utf8':False}
+    result.update(overrides)
+    return result
+
+
 def test_exact_owner_bytes_and_degraded_accounting_are_preserved(tmp_path):
     script=tmp_path/'scripts/agentos.py';script.parent.mkdir();script.write_text('# owner fixture')
     raw=(json.dumps(bundle(),indent=2)+'\n').encode();calls=[]
     def run(argv,**kwargs):
-        calls.append((argv,kwargs));kwargs['stdout'].write(raw);return types.SimpleNamespace(returncode=0)
+        calls.append((argv,kwargs));return runner_result(raw)
     before=set(tmp_path.rglob('*'))
     actual,receipt=a.read_context('FIXTURE',800,owner_root=tmp_path,run=run)
     assert actual==raw
     assert receipt['owner']=='agent_os' and receipt['execution_authority'] is False
     assert receipt['degraded_count']==1 and receipt['omitted_count']==1
     assert len(calls)==1
-    assert calls[0][0][2:]==['compile-context','--workstream','FIXTURE','--json','--budget','800']
-    assert calls[0][1]['timeout']==25 and 'shell' not in calls[0][1]
+    assert calls[0][0][1:3]==['-B',str(script)]
+    assert calls[0][0][3:]==['compile-context','--workstream','FIXTURE','--json','--budget','800']
+    assert calls[0][1]=={'cwd':tmp_path,'timeout':25,'max_bytes':a.MAX_BUNDLE_BYTES}
     assert set(tmp_path.rglob('*'))==before
 
 
@@ -55,10 +61,11 @@ def test_bad_budget_never_invokes_owner(tmp_path,budget):
         a.read_context('FIXTURE',budget,owner_root=tmp_path,run=lambda *a,**k:pytest.fail('not invoked'))
 
 
-def test_timeout_has_no_retry_or_mutation(tmp_path):
+def test_settled_timeout_has_no_retry_or_mutation(tmp_path):
     p=tmp_path/'scripts/agentos.py';p.parent.mkdir();p.write_text('# owner')
     calls=[]
-    def run(argv,**kwargs):calls.append(argv);raise subprocess.TimeoutExpired(argv,25)
+    def run(argv,**kwargs):
+        calls.append(argv);return runner_result(code=-9,timed_out=True)
     with pytest.raises(LaunchInputError,match='READ_TIMEOUT'):
         a.read_context('FIXTURE',owner_root=tmp_path,run=run)
     assert len(calls)==1
@@ -67,6 +74,6 @@ def test_timeout_has_no_retry_or_mutation(tmp_path):
 def test_source_change_refuses_result(tmp_path):
     p=tmp_path/'scripts/agentos.py';p.parent.mkdir();p.write_text('# old')
     def run(argv,**kwargs):
-        p.write_text('# changed');kwargs['stdout'].write(json.dumps(bundle()).encode());return types.SimpleNamespace(returncode=0)
+        p.write_text('# changed');return runner_result(json.dumps(bundle()).encode())
     with pytest.raises(LaunchInputError,match='SOURCE_CHANGED'):
         a.read_context('FIXTURE',owner_root=tmp_path,run=run)
