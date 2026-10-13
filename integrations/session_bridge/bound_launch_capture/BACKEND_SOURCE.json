@@ -115,7 +115,7 @@
   ],
   "architecture_boundary": "Concrete backend lives under existing session_bridge integration; control_plane keeps shared protocol. No compatibility shim or dynamic import.",
   "current_verification": {
-    "state": "SOURCE_CHECKS_PASS_COMMITTED_D8_AND_CURRENT_BASE_PENDING",
+    "state": "SOURCE_CHECKS_PASS_UNINSTALLED",
     "checks": {
       "LOCAL_RED.xml": {
         "path": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/restart-resume-20261013-1038/LOCAL_RED.xml",
@@ -148,8 +148,34 @@
         "failures": 0,
         "errors": 0,
         "skipped": 0
+      },
+      "D8_COMMITTED.xml": {
+        "path": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/restart-resume-20261013-1038/D8_COMMITTED.xml",
+        "sha256": "9a11818ee68b2ec3361d22af7d9c80afa94acadcbe2235e2ac6606627338c041",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "MERGED_GREEN.xml": {
+        "path": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/restart-resume-20261013-1038/MERGED_GREEN.xml",
+        "sha256": "ebc67d05389e80704e097434df9d1e10873d91898a5e1bc05fef150ef5a600d5",
+        "tests": 112,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "MERGED_TERMINAL.xml": {
+        "path": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/restart-resume-20261013-1038/MERGED_TERMINAL.xml",
+        "sha256": "2f07e9a546792ea7c19eb061eed44caef092efee1a9b743adee799967d6da8d8",
+        "tests": 17,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
       }
     },
-    "note": "LOCAL_RED preserves three initial failures. GATEWAY_GREEN contains52passes and one macOS test-socket path-length failure; that exact test passed separately with a short fresh external-SSD basetemp in GATEWAY_SHORT_PATH. No production guard changed."
+    "note": "LOCAL_RED preserves three initial failures. GATEWAY_GREEN contains52passes and one macOS test-socket path-length failure; that exact test passed separately with a short fresh external-SSD basetemp in GATEWAY_SHORT_PATH. No production guard changed.",
+    "tested_revision": "5e91f622f5ef8849887464014769be05eb2e48be",
+    "integrated_main": "a246810e22257ea19a41aa6c3f3c42399f682f01"
   }
 }
