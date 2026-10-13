@@ -298,3 +298,36 @@ def test_pure_overlay_has_no_filesystem_network_runtime_imports():
         "runtime",
     }
     assert imports.isdisjoint(forbidden)
+
+
+def test_managed_overlay_never_inherits_untrusted_git_config(monkeypatch, tmp_path):
+    source, managed_root, workspace, _base = _fixture(tmp_path)
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.fsmonitor")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "/tmp/not-an-authorized-fsmonitor")
+    monkeypatch.setenv("GIT_PAGER", "/tmp/not-an-authorized-pager")
+    monkeypatch.setenv("GIT_WORK_TREE", "/tmp/incorrect-git-worktree")
+    env = adapter._git_env()
+    assert "GIT_CONFIG_COUNT" not in env
+    assert "GIT_PAGER" not in env
+    assert "GIT_WORK_TREE" not in env
+    assert env["GIT_TERMINAL_PROMPT"] == "0"
+    assert env["GIT_CONFIG_NOSYSTEM"] == "1"
+    assert env["HOME"] == "/nonexistent"
+    observed = _observe(source, managed_root, workspace)
+    assert observed["dirty"] is False
+
+
+def test_sensitive_untracked_key_file_is_hidden_even_with_nonstandard_name(tmp_path: Path):
+    source, root, workspace, _base = _fixture(tmp_path)
+    confidential = workspace / ".netrc"
+    confidential.write_text("machine fixture login test password PRIVATE_TEST_VALUE\n")
+    result = _observe(source, root, workspace)
+    record = next(x for x in result["working_changes"]
+                  if x["content_state"] == "SENSITIVE_PATH")
+    assert record["path"] is None
+    assert record["content_sha256"] is None
+    assert len(record["path_digest"]) == 64
+    serialized = json.dumps(result)
+    assert ".netrc" not in serialized
+    assert "PRIVATE_TEST_VALUE" not in serialized

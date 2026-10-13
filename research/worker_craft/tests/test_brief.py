@@ -320,3 +320,37 @@ class BriefTests(unittest.TestCase):
 
 
 if __name__=='__main__':unittest.main()
+
+class CanonicalCraftMethodPinTests(unittest.TestCase):
+    def test_canonical_method_documents_have_declared_exact_digests(self):
+        import hashlib
+
+        expected = brief.CANONICAL_METHOD_SHA256
+        self.assertEqual(set(expected), {'common.md'} | {role + '.md' for role in brief.ROLES})
+        for name, digest in expected.items():
+            self.assertEqual(hashlib.sha256((brief.METHOD_ROOT/name).read_bytes()).hexdigest(), digest)
+        self.assertEqual(len(expected), 9)
+
+    def test_canonical_method_pin_mismatch_refuses_before_rendering(self):
+        from unittest.mock import patch
+
+        original = brief.CANONICAL_METHOD_SHA256
+        wrong = {**original, 'common.md': '0' * 64}
+        with patch.object(brief, 'CANONICAL_METHOD_SHA256', wrong):
+            with self.assertRaisesRegex(brief.BriefError, 'method.source_drift'):
+                brief.compile_brief(EXAMPLE)
+        self.assertFalse(brief.compile_brief(EXAMPLE)['execution_authority'])
+
+    def test_disposable_method_override_remains_unverified_authoring_only(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory(prefix='mmx-craft-authoring-') as name:
+            root = Path(name)
+            (root/'common.md').write_text('# fixture common\n')
+            (root/'designer.md').write_text('# fixture designer\n')
+            source = deepcopy(EXAMPLE)
+            source['role'] = 'designer'
+            product = brief.compile_brief(source, root)
+            self.assertEqual(product['source_verification'], 'NOT_PERFORMED')
+            self.assertFalse(product['execution_authority'])
+            self.assertIn('fixture designer', product['instructions_markdown'])
