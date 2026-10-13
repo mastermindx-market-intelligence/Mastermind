@@ -1,0 +1,21 @@
+{
+  "installed_at": "2026-10-12T04:58:52.685259+00:00",
+  "scope": "exact original mac-policy evidence read only",
+  "files": {
+    "fabric_task.py": {
+      "pre": "cbd46bd88a4e5d545c77010bfb9eb1997399fe4f5cc67596210e849858eddd99",
+      "installed": "5596de46d2e8ca88178152fcd540db0ce50b3d96250aabe34bacf8a7a47727da"
+    },
+    "artifact_delivery.py": {
+      "pre": "2553dc29a818baf12020f296c6294fa331700e56f826605d293db65deb01b82a",
+      "installed": "c2f7c308c12f55435c1ef6d6557fa9b7de1295167f2f660fe278f656687e92cf"
+    },
+    "mac_policy_return.py": {
+      "pre": null,
+      "installed": "407ab7d80d1ffc1064eada25aa1a5d447e11a41ee4873d8980f9e68ebb4dfa0a"
+    }
+  },
+  "checks": 16,
+  "independent_review": "collector_continuation_ruling scoped approval",
+  "remote_effects": false
+}

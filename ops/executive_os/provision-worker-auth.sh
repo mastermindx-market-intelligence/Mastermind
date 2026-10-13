@@ -32,6 +32,7 @@ WORKSPACE_BINDING_CLASS=""
 CREDENTIAL_EXPIRES_AT=""
 REQUALIFY_TERMINAL_ADVERSE_SHA256=""
 RENEW_DEVICE_REVALIDATION_SHA256=""
+REQUALIFY_COMPANY_DEVICE_DRIFT_SHA256=""
 READINESS_RECEIPT="/Library/Application Support/MastermindExecutive/config/provider-readiness-v2.json"
 READINESS_TRANSACTION_LOCK="$SYSTEM_CONFIG/provider-readiness.transaction.lock"
 READINESS_LOCK_HELD="false"
@@ -89,7 +90,7 @@ trap 'preserve_readiness_lock_on_signal 131' QUIT
 trap 'preserve_readiness_lock_on_signal 143' TERM
 
 usage() {
-  /bin/echo "usage: sudo /bin/bash $0 MODE [--slot-id codex-pro-01|codex-pro-02|codex-pro-03] [--replace-existing] [--expected-credential-kind KIND] [--workspace-binding-class CLASS] [--credential-expires-at UTC] [--requalify-terminal-adverse-sha256 SHA256 | --renew-device-revalidation-sha256 SHA256] [options]" >&2
+  /bin/echo "usage: sudo /bin/bash $0 MODE [--slot-id codex-pro-01|codex-pro-02|codex-pro-03] [--replace-existing] [--expected-credential-kind KIND] [--workspace-binding-class CLASS] [--credential-expires-at UTC] [--requalify-terminal-adverse-sha256 SHA256 | --renew-device-revalidation-sha256 SHA256 | --requalify-company-device-drift-sha256 SHA256] [options]" >&2
   /bin/echo "modes: --verify-only | --verify-ready | --enroll-service-account | --enroll-personal-access-token | --reauthorize-device | --recover-readiness-transaction" >&2
   exit 64
 }
@@ -109,6 +110,7 @@ while [ "$#" -gt 0 ]; do
     --credential-expires-at) CREDENTIAL_EXPIRES_AT="${2:-}"; shift 2 ;;
     --requalify-terminal-adverse-sha256) REQUALIFY_TERMINAL_ADVERSE_SHA256="${2:-}"; shift 2 ;;
     --renew-device-revalidation-sha256) RENEW_DEVICE_REVALIDATION_SHA256="${2:-}"; shift 2 ;;
+    --requalify-company-device-drift-sha256) REQUALIFY_COMPANY_DEVICE_DRIFT_SHA256="${2:-}"; shift 2 ;;
     --codex-binary) CODEX_BINARY="${2:-}"; shift 2 ;;
     --codex-version) CODEX_VERSION="${2:-}"; shift 2 ;;
     --worker-uid) WORKER_UID="${2:-}"; WORKER_GID="${2:-}"; LOW_LEVEL_SLOT_OVERRIDE="true"; shift 2 ;;
@@ -154,10 +156,12 @@ resolve_selected_slot() {
 
 resolve_selected_slot
 
-if [ -n "$REQUALIFY_TERMINAL_ADVERSE_SHA256" ] && [ -n "$RENEW_DEVICE_REVALIDATION_SHA256" ]; then
-  usage
-fi
-EXPLICIT_PREDECESSOR_SHA256="${REQUALIFY_TERMINAL_ADVERSE_SHA256:-$RENEW_DEVICE_REVALIDATION_SHA256}"
+explicit_count=0
+[ -z "$REQUALIFY_TERMINAL_ADVERSE_SHA256" ] || explicit_count=$((explicit_count + 1))
+[ -z "$RENEW_DEVICE_REVALIDATION_SHA256" ] || explicit_count=$((explicit_count + 1))
+[ -z "$REQUALIFY_COMPANY_DEVICE_DRIFT_SHA256" ] || explicit_count=$((explicit_count + 1))
+[ "$explicit_count" -le 1 ] || usage
+EXPLICIT_PREDECESSOR_SHA256="${REQUALIFY_COMPANY_DEVICE_DRIFT_SHA256:-${REQUALIFY_TERMINAL_ADVERSE_SHA256:-$RENEW_DEVICE_REVALIDATION_SHA256}}"
 if [ -n "$EXPLICIT_PREDECESSOR_SHA256" ]; then
   [ "$VERIFY_READY" = "true" ] && [ "$SLOT_SELECTED" = "false" ] \
     && [ "$LOW_LEVEL_SLOT_OVERRIDE" = "false" ] \
@@ -165,6 +169,9 @@ if [ -n "$EXPLICIT_PREDECESSOR_SHA256" ]; then
     && [ "$WORKSPACE_BINDING_CLASS" = "company-workspace-admin-attested" ] \
     && [ "${#EXPLICIT_PREDECESSOR_SHA256}" -eq 64 ] || usage
   case "$EXPLICIT_PREDECESSOR_SHA256" in *[!0-9a-f]*) usage ;; esac
+fi
+if [ -n "$REQUALIFY_COMPANY_DEVICE_DRIFT_SHA256" ]; then
+  [ "$REQUALIFY_COMPANY_DEVICE_DRIFT_SHA256" = "654abd66f6baef1b610a6c03fafe85f76fd81ed646266d3ff90db3c6e85e2a7d" ] || usage
 fi
 
 if [ "$SLOT_SELECTED" = "true" ]; then
@@ -709,7 +716,9 @@ if [ "$VERIFY_READY" = "true" ]; then
   verify_complete_auth
   verify_installed_binary_available
   requalification_args=()
-  if [ -n "$REQUALIFY_TERMINAL_ADVERSE_SHA256" ]; then
+  if [ -n "$REQUALIFY_COMPANY_DEVICE_DRIFT_SHA256" ]; then
+    requalification_args=(--requalify-company-device-drift-sha256 "$REQUALIFY_COMPANY_DEVICE_DRIFT_SHA256")
+  elif [ -n "$REQUALIFY_TERMINAL_ADVERSE_SHA256" ]; then
     requalification_args=(--requalify-terminal-adverse-sha256 "$REQUALIFY_TERMINAL_ADVERSE_SHA256")
   elif [ -n "$RENEW_DEVICE_REVALIDATION_SHA256" ]; then
     requalification_args=(--renew-device-revalidation-sha256 "$RENEW_DEVICE_REVALIDATION_SHA256")
@@ -727,7 +736,12 @@ if [ "$VERIFY_READY" = "true" ]; then
   else
     reuse_status=$?
   fi
-  if [ -n "$RENEW_DEVICE_REVALIDATION_SHA256" ]; then
+  if [ -n "$REQUALIFY_COMPANY_DEVICE_DRIFT_SHA256" ]; then
+    [ "$reuse_status" -eq 7 ] || {
+      /bin/echo "explicit company-device drift requalification is not eligible; no canary spent" >&2
+      exit 65
+    }
+  elif [ -n "$RENEW_DEVICE_REVALIDATION_SHA256" ]; then
     [ "$reuse_status" -eq 6 ] || {
       /bin/echo "explicit device-auth revalidation is not due or eligible; no canary spent" >&2
       exit 65
@@ -752,7 +766,9 @@ if [ "$VERIFY_READY" = "true" ]; then
       --expected-kind "$EXPECTED_CREDENTIAL_KIND" \
       --workspace-binding-class "$WORKSPACE_BINDING_CLASS" \
       >"$IDENTITY_RESULT" 2>/dev/null; then
-    /bin/echo "provider identity policy refused before inference; no canary spent" >&2
+    refusal_code="$("$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/provider_identity_probe.py" \
+      --refusal-code-stdin 2>/dev/null <"$IDENTITY_RESULT")" || refusal_code=identity_probe_failed
+    /bin/echo "provider identity policy refused before inference: $refusal_code; no canary spent" >&2
     exit 65
   fi
 

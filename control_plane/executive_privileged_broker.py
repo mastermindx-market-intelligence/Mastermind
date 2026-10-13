@@ -187,6 +187,7 @@ class ReconcileNotAppliedRequest:
     # Derived from the target digest, never a new wire claim.
     requalify_terminal_adverse_sha256: str | None = None
     renew_device_revalidation_sha256: str | None = None
+    requalify_company_device_drift_sha256: str | None = None
 
     def to_dict(self) -> dict[str, str]:
         return {
@@ -221,6 +222,9 @@ def _reconciliation_target(raw: Mapping[str, Any]):
         variants.append({
             **args, "renew_device_revalidation_sha256": raw.get("readiness_receipt_sha256"),
         })
+        variants.append({
+            **args, "requalify_company_device_drift_sha256": raw.get("readiness_receipt_sha256"),
+        })
     matches = []
     for candidate in variants:
         try:
@@ -228,10 +232,10 @@ def _reconciliation_target(raw: Mapping[str, Any]):
                 "schema": REQUEST_SCHEMA, "request_id": raw.get("target_request_id"),
                 "action": "executive.worker_auth.verify_ready", "args": candidate,
             })
-        except ValueError as exc:
-            raise PrivilegedBrokerError(
-                "reconciliation target verify_ready arguments are invalid"
-            ) from exc
+        except ValueError:
+            # Optional incident-specific variants may be ineligible. Only one
+            # fully validated target matching the exact original hash is used.
+            continue
         if hashlib.sha256(canonical_request_bytes(target)).hexdigest() == raw.get("target_request_sha256"):
             matches.append(target)
     if len(matches) != 1:
@@ -278,6 +282,7 @@ def validate_reconcile_not_applied_request(
         credential_expires_at=args["credential_expires_at"],
         requalify_terminal_adverse_sha256=args.get("requalify_terminal_adverse_sha256"),
         renew_device_revalidation_sha256=args.get("renew_device_revalidation_sha256"),
+        requalify_company_device_drift_sha256=args.get("requalify_company_device_drift_sha256"),
     )
 
 
@@ -1299,13 +1304,17 @@ class PrivilegedActionBroker:
         if evidence["readiness_receipt_sha256"] != request.readiness_receipt_sha256:
             raise BrokerTrustError("provider readiness receipt changed after target request")
         document = evidence["readiness_document"]
-        if (request.requalify_terminal_adverse_sha256 is not None
+        if (request.requalify_company_device_drift_sha256 is not None
+                or request.requalify_terminal_adverse_sha256 is not None
                 or request.renew_device_revalidation_sha256 is not None):
             from ops.executive_os.provider_readiness import (
                 ReadinessError, validate_terminal_predecessor_document,
                 validate_revalidation_predecessor_document,
+                validate_company_device_drift_predecessor_document,
             )
-            predecessor_validator = (validate_revalidation_predecessor_document
+            predecessor_validator = (validate_company_device_drift_predecessor_document
+                                     if request.requalify_company_device_drift_sha256 is not None
+                                     else validate_revalidation_predecessor_document
                                      if request.renew_device_revalidation_sha256 is not None
                                      else validate_terminal_predecessor_document)
             if (not isinstance(document, Mapping)

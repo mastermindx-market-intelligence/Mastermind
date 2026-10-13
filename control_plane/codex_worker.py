@@ -92,7 +92,14 @@ _MAX_VALIDATION_ARGV_BYTES = 64 * 1024
 _MAX_PROJECT_CONFIG_BYTES = 64 * 1024
 _LOCAL_TRANSPORT_FINALIZATION_SECONDS = 5.0
 _LOCAL_STREAM_DRAIN_SECONDS = 0.1
-_AUDITED_PROJECT_CONFIG_SHA256 = "d7e836eb5a6cbd4cb4e97de41f8182add663cb2a152dc4e381f82553f571bb7f"
+# Both exact project configurations are audited. The legacy pin preserves
+# already-selected source workspaces; the current pin permits the Chairman's
+# coordinator defaults. Leaf launches still disable agents and both multi-agent
+# feature generations in their explicit argv, regardless of these defaults.
+_AUDITED_PROJECT_CONFIG_SHA256S = frozenset({
+    "d7e836eb5a6cbd4cb4e97de41f8182add663cb2a152dc4e381f82553f571bb7f",
+    "f29f8839f10304b69fd24571aa2303dfe11900ac6ca3bad02b7dc764ec5c2bca",
+})
 _ALLOWED_AUTHORITIES = frozenset({"READ", "RESEARCH", "WRITE_BRANCH", "RUN_TESTS"})
 _GIT_COMMAND_TIMEOUT_SECONDS = 15.0
 _SAFE_GIT_OPERATION_IDENTITIES = {
@@ -541,6 +548,60 @@ def validate_secret_canary_verdict(
 ) -> dict[str, Any]:
     """Validate a hash/status-only canary receipt; raw sentinel values are forbidden."""
 
+    return _validate_secret_canary_verdict(value, require_passed=require_passed)
+
+
+def validate_attended_claude_secret_canary(
+    value: Mapping[str, Any] | None,
+    *,
+    spec: WorkerLaunchSpec,
+    execution_profile_id: str,
+    harness_binding_id: str,
+    physical_binding_sha256: str,
+    provider_home: str,
+) -> dict[str, Any]:
+    """Validate the exact finite supported-harness exception, never issue it.
+
+    A remote owner's actual canary and authenticated assignment transport must
+    supply this receipt. This validation does not establish their provenance,
+    enroll a provider realm, admit execution or change catalog readiness.
+    Default Codex callers continue to accept only their original V1 receipt.
+    """
+    from control_plane.subscription_harness_bindings import get_binding
+
+    if (execution_profile_id != "fabric.attended.claude.bounded.v1"
+            or harness_binding_id != "minimax-token-plan.claude-code-anthropic"
+            or not isinstance(spec, WorkerLaunchSpec)
+            or spec.require_secret_canary is not True
+            or not isinstance(physical_binding_sha256, str)
+            or re.fullmatch(r"[0-9a-f]{64}", physical_binding_sha256) is None
+            or not isinstance(provider_home, str)
+            or not Path(provider_home).is_absolute()
+            or str(Path(provider_home)) != provider_home
+            or ".." in Path(provider_home).parts):
+        raise LaunchValidationError("unsupported attended secret canary binding")
+    binding = get_binding(harness_binding_id)
+    if (binding.provider != "minimax" or binding.harness_id != "claude-code"
+            or binding.adapter_id != "claude-compatible-subscription"
+            or binding.protocol != "anthropic"):
+        raise LaunchValidationError("attended secret canary catalog binding changed")
+    expected = dict(
+        execution_profile_id=execution_profile_id,
+        harness_binding_id=harness_binding_id,
+        run_id=spec.run_id, job_id=spec.job_id, worker_id=spec.worker_id,
+        physical_binding_sha256=physical_binding_sha256,
+        provider_home=provider_home,
+    )
+    return _validate_secret_canary_verdict(
+        value, require_passed=True, attended_realm=expected,
+    )
+
+
+def _validate_secret_canary_verdict(
+    value: Mapping[str, Any] | None, *, require_passed: bool,
+    attended_realm: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+
     if not value:
         if require_passed:
             raise LaunchValidationError("a passing distinct-principal secret canary is required")
@@ -572,10 +633,16 @@ def validate_secret_canary_verdict(
         "observed_at",
         "worker_auth_exception",
     }
+    if attended_realm is not None:
+        allowed_top.add("realm_binding")
     if set(document) != allowed_top:
         raise LaunchValidationError("secret canary verdict fields are incomplete or unknown")
-    if document.get("schema_version") != SECRET_CANARY_SCHEMA_VERSION:
+    schema = ("mastermind.executive_secret_canary/v2" if attended_realm is not None
+              else SECRET_CANARY_SCHEMA_VERSION)
+    if document.get("schema_version") != schema:
         raise LaunchValidationError("secret canary verdict schema is unsupported")
+    if attended_realm is not None and document.get("realm_binding") != attended_realm:
+        raise LaunchValidationError("secret canary belongs to another assigned realm")
     checks = document.get("checks")
     if not isinstance(checks, dict) or set(checks) != _SECRET_CANARY_CHECKS:
         raise LaunchValidationError("secret canary verdict is missing required checks")
@@ -592,7 +659,9 @@ def validate_secret_canary_verdict(
         raise LaunchValidationError(
             "secret canary verdict requires a control-environment probe SHA-256"
         )
-    if document.get("worker_auth_exception") != "DEDICATED_CODEX_HOME_ONLY":
+    exception = ("ASSIGNED_CLAUDE_PROVIDER_REALM_ONLY" if attended_realm is not None
+                 else "DEDICATED_CODEX_HOME_ONLY")
+    if document.get("worker_auth_exception") != exception:
         raise LaunchValidationError("worker authentication exception is not explicit")
     if document.get("passed") is not True:
         raise LaunchValidationError("secret canary verdict did not pass")
@@ -1103,6 +1172,12 @@ class ProcessInspector:
     """OS process identity source, injectable in model-free tests."""
 
     def boot_session_id(self) -> str:
+        if platform.system() == "Linux":
+            from control_plane.linux_process_identity import LinuxProcessIdentityError, read_linux_boot_id
+            try:
+                return read_linux_boot_id()
+            except LinuxProcessIdentityError as exc:
+                raise ProcessIdentityError("cannot qualify Linux boot identity") from exc
         if platform.system() == "Darwin":
             result = _run_checked(["/usr/sbin/sysctl", "-n", "kern.bootsessionuuid"])
             if result.returncode == 0 and result.stdout.strip():
@@ -1112,6 +1187,12 @@ class ProcessInspector:
         return f"adapter-{os.getpid()}"
 
     def inspect(self, pid: int) -> ProcessIdentity:
+        if platform.system() == "Linux":
+            from control_plane.linux_process_identity import LinuxProcessIdentityError, inspect_linux_process
+            try:
+                return ProcessIdentity(**inspect_linux_process(pid))
+            except LinuxProcessIdentityError as exc:
+                raise ProcessIdentityError("cannot qualify Linux process identity") from exc
         if platform.system() == "Darwin":
             libproc = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
             proc_pidinfo = libproc.proc_pidinfo
@@ -1488,7 +1569,7 @@ def _validate_project_configuration(workspace: Path) -> None:
         raise LaunchValidationError("workspace .codex/config.toml is not immutable enough")
     raw = _read_limited(config_path, _MAX_PROJECT_CONFIG_BYTES)
     actual_hash = hashlib.sha256(raw).hexdigest()
-    if actual_hash != _AUDITED_PROJECT_CONFIG_SHA256:
+    if actual_hash not in _AUDITED_PROJECT_CONFIG_SHA256S:
         raise LaunchValidationError(
             "workspace .codex/config.toml does not match the audited worker-safe hash"
         )
@@ -4046,10 +4127,19 @@ class CodexWorkerAdapter:
             for name, value in expected.items()
         ):
             return _RecoveredPresence.IDENTITY_CHANGED
-        if (
-            self._group_presence_for_recovery(ref.pgid)
-            is not _RecoveredPresence.LIVE
-        ):
+        group = self._group_presence_for_recovery(ref.pgid)
+        if group is _RecoveredPresence.ABSENT:
+            # The exact leader may have exited after its identity was read.
+            # Require independent leader absence as well: a live/reused PID
+            # or a refused observation must not become a cleanup receipt.
+            try:
+                os.kill(ref.pid, 0)
+            except ProcessLookupError:
+                return _RecoveredPresence.ABSENT
+            except (PermissionError, OSError):
+                return _RecoveredPresence.UNKNOWN
+            return _RecoveredPresence.UNKNOWN
+        if group is not _RecoveredPresence.LIVE:
             return _RecoveredPresence.UNKNOWN
         return _RecoveredPresence.LIVE
 

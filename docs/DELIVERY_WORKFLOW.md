@@ -66,11 +66,15 @@ worktree and move only the task's deliberate edits there.
    gh pr merge --squash --delete-branch
    ```
 
-7. Resolve the merge commit from GitHub and deploy that exact commit:
+7. Deploy only when the assigned change requires runtime rollout and release is authorized.
+   A source-only, research, documentation or instruction task must not restart an unrelated
+   application. For a required deployment, resolve this operation's actual merge commit from
+   GitHub; the newest default-branch commit may belong to another operation:
 
    ```bash
    git fetch origin master
-   merge_sha="$(git rev-parse origin/master)"
+   merge_sha="$(gh pr view --json mergeCommit --jq '.mergeCommit.oid')"
+   test -n "$merge_sha" && test "$merge_sha" != null
    ./scripts/deploy_from_git.sh "$merge_sha"
    ```
 

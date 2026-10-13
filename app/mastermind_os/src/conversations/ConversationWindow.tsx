@@ -1,6 +1,10 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { observedMissionAssociation } from "../workspace-contract";
 import type { OfficeProjection, SourceClaim } from "../meta-ceo/projection";
+import type { MissionResultRead } from "../host";
+import { normalizeResultSelection, type ResultSelection } from "../result";
+import type { DraftInsertion, DraftSource } from "./drafts";
+import { ResultSourceReader } from "./ResultSourceReader";
 import "./conversation.css";
 
 export interface ConversationWindowProps {
@@ -8,6 +12,11 @@ export interface ConversationWindowProps {
   /** Shell-controlled, unsent text. Scope and auth isolation live in drafts.ts. */
   draft: string;
   onDraftChange: (text: string) => void;
+  readResult?: MissionResultRead;
+  draftRevision?: number;
+  draftInsertion?: DraftInsertion | null;
+  onAppendSource?: (source: DraftSource, expectedRevision: number) => boolean;
+  onUndoSource?: (identity: string, expectedRevision: number) => boolean;
 }
 function Provenance({ source }: { source: SourceClaim }) {
   return <dl><dt>Owner</dt><dd>{source.owner}</dd><dt>Reference</dt><dd>{source.ref ?? "Not supplied"}</dd>
@@ -15,9 +24,13 @@ function Provenance({ source }: { source: SourceClaim }) {
     <dt>{source.observed_at_kind === "LOCAL_ACQUISITION" ? "Locally acquired" : "Observed"}</dt><dd>{source.observed_at ?? "Not supplied"}</dd>
     <dt>State</dt><dd>{source.state}</dd><dt>Coverage</dt><dd>{source.coverage}</dd></dl>;
 }
-function ConversationBody({ projection, draft, onDraftChange }: ConversationWindowProps) {
+function ConversationBody({ projection, draft, onDraftChange, readResult, draftRevision,
+  draftInsertion, onAppendSource, onUndoSource }: ConversationWindowProps) {
   const [panel, setPanel] = useState<"evidence" | "context" | null>(null);
+  const [readerSelection, setReaderSelection] = useState<ResultSelection | null>(null);
   const evidenceTrigger = useRef<HTMLButtonElement>(null), contextTrigger = useRef<HTMLButtonElement>(null);
+  const sourceTrigger = useRef<HTMLButtonElement>(null), draftInput = useRef<HTMLTextAreaElement>(null);
+  const returningFromReader = useRef(false);
   const companion = useRef<HTMLElement>(null), panelId = useId();
   const { conversation: read, mission, result, context } = projection;
   const retained = read.source.state === "CURRENT" || read.source.state === "STALE";
@@ -26,6 +39,13 @@ function ConversationBody({ projection, draft, onDraftChange }: ConversationWind
   const association = mission.source.state === "CURRENT"
     ? observedMissionAssociation(read.value, mission.value, context.selection) : null;
   const document = retained && association ? read.value : null;
+  const refs = mission.value?.schema === "mastermind.mission_workspace.v3" ? mission.value.result_refs.refs : [];
+  const candidates = association ? refs.filter(ref => ref.root_job_id === context.selection?.rootJobId &&
+    ref.job_id === association.job_id && ref.attempt_id === association.attempt_id) : [];
+  const exactResult = candidates.length === 1 ? normalizeResultSelection({
+    workRef: context.selection?.workRef, rootJobId: candidates[0].root_job_id,
+    jobId: candidates[0].job_id, attemptId: candidates[0].attempt_id, resultEnvelopeDigest: candidates[0].result_envelope_digest,
+  }) : null;
   const state = retained && read.value && !association ? "UNASSOCIATED" : read.source.state;
   const privateHidden = state === "WITHHELD";
   const title = mission.source.state === "CURRENT" ? mission.value?.program.title : null;
@@ -39,6 +59,11 @@ function ConversationBody({ projection, draft, onDraftChange }: ConversationWind
   const resultSummary = resultVisible ? result.value?.result?.content?.summary : null;
   const showPanel = !!panel && !!document;
   useEffect(() => { if (showPanel) companion.current?.focus(); }, [showPanel, panel]);
+  useLayoutEffect(() => {
+    if (!readerSelection && returningFromReader.current) {
+      returningFromReader.current = false; sourceTrigger.current?.focus();
+    }
+  }, [readerSelection]);
   const close = () => {
     const trigger = panel === "evidence" ? evidenceTrigger : contextTrigger;
     setPanel(null); trigger.current?.focus();
@@ -47,7 +72,7 @@ function ConversationBody({ projection, draft, onDraftChange }: ConversationWind
     <header className="conversation-header"><div className="conversation-mark" aria-hidden="true">✧</div>
       <div><h1>{title || "Conversations"}</h1><p>Observed managed turn window</p></div>
       <button ref={contextTrigger} type="button" disabled={!document} aria-expanded={panel === "context" && showPanel}
-        aria-controls={panelId} onClick={() => setPanel(panel === "context" ? null : "context")}>Context</button></header>
+        aria-controls={panelId} onClick={() => { setReaderSelection(null); setPanel(panel === "context" ? null : "context"); }}>Context</button></header>
     <div className="conversation-layout" data-companion={showPanel}>
       <div className="conversation-reading">
         <div className="conversation-source"><span data-state={state} className="conversation-state">{state}</span>
@@ -70,9 +95,9 @@ function ConversationBody({ projection, draft, onDraftChange }: ConversationWind
           <section className="conversation-result" aria-label="Returned evidence">
             <div><p className="conversation-eyebrow">Returned evidence</p><h2>{resultSummary ? "A source-backed result is available." : "Inspect the supplied sources."}</h2>
               {resultSummary && <p>{resultSummary}</p>}
-              <p>Result source · {resultState}. Review and acceptance remain separate.</p></div>
+              <p>{readerSelection ? "The exact result source is open below. Review and acceptance remain separate." : `Result source · ${resultState}. Review and acceptance remain separate.`}</p></div>
             <button type="button" ref={evidenceTrigger} aria-expanded={panel === "evidence" && showPanel} aria-controls={panelId}
-              onClick={() => setPanel(panel === "evidence" ? null : "evidence")}>Review evidence</button>
+              onClick={() => { setReaderSelection(null); setPanel(panel === "evidence" ? null : "evidence"); }}>Review evidence</button>
           </section>
           <details className="conversation-receipts"><summary>Delivery, review and acceptance</summary>
             <section aria-label="Independent receipts">{Object.entries(projection.receipts).map(([name, value]) =>
@@ -84,19 +109,32 @@ function ConversationBody({ projection, draft, onDraftChange }: ConversationWind
           <p>No transcript or session relationship is reconstructed from neighboring records.</p></div>}
         {!privateHidden && <div className="conversation-composer">
           <label htmlFor={`${panelId}-draft`}>Unsent draft</label>
-          <textarea id={`${panelId}-draft`} value={draft} rows={3} onChange={event => onDraftChange(event.target.value)}
+          <textarea ref={draftInput} id={`${panelId}-draft`} value={draft} rows={3} onChange={event => onDraftChange(event.target.value)}
             placeholder="Keep a thought here…" aria-describedby={`${panelId}-draft-reason`} />
           <div className="conversation-composer-actions"><p id={`${panelId}-draft-reason`}>No recipient is qualified by this window. Send is unavailable.</p>
             <button type="button" disabled aria-label="Send message" title="Send message is unavailable">↑</button></div>
           <p className="conversation-draft-note">Draft only · Opening evidence or context never sends.</p>
         </div>}
       </div>
-      {showPanel && <aside id={panelId} ref={companion} tabIndex={-1} role="region"
+      {showPanel && readerSelection && readResult ? <ResultSourceReader projection={projection} selection={readerSelection}
+        readResult={readResult} draftRevision={draftRevision ?? 0} draftInsertion={draftInsertion ?? null}
+        appendAvailable={!!onAppendSource && !!onUndoSource && draftRevision !== undefined && !!context.selection && !privateHidden}
+        onAppend={(source, revision) => onAppendSource?.(source, revision) ?? false}
+        onUndo={(identity, revision) => onUndoSource?.(identity, revision) ?? false}
+        onEditDraft={() => { setReaderSelection(null); setPanel(null); draftInput.current?.focus(); }}
+        onClose={() => { returningFromReader.current = true; setReaderSelection(null); }} />
+        : showPanel && <aside id={panelId} ref={companion} tabIndex={-1} role="region"
         aria-label={panel === "evidence" ? "Conversation evidence" : "Conversation context"}
-        className="conversation-companion" onKeyDown={event => { if (event.key === "Escape") close(); }}>
+        className="conversation-companion" onKeyDown={event => {
+          if (event.key === "Escape" && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) close();
+        }}>
         <header><h2>{panel === "evidence" ? "Evidence" : "Context"}</h2><button type="button" onClick={close}>Close {panel}</button></header>
         {panel === "evidence" ? <><h3>Observed window</h3><Provenance source={read.source} />
           {resultVisible && result.value && <><h3>Result source</h3><Provenance source={result.source} /></>}
+          <button ref={sourceTrigger} type="button" disabled={!exactResult || !readResult} onClick={() => {
+            if (exactResult && readResult) setReaderSelection(exactResult);
+          }}>Read exact result source</button>
+          {(!exactResult || !readResult) && <p>An exact result and its fixed read capability are required. No source is guessed.</p>}
           <p>Window observations do not prove action/result correspondence or acceptance.</p></>
           : <><h3>Selected project context</h3><p>{context.selection?.workRef} · {context.selection?.rootJobId}</p>
             <Provenance source={mission.source} /><p>This window supplies no provider conversation, session binding or model selection.</p>

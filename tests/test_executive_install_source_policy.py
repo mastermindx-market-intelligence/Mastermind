@@ -292,6 +292,13 @@ def test_installer_source_reads_work_without_persistent_ownership_trust(
     ]
     assert len(statements) == 1
     script = "set -euo pipefail\n" + statements[0] + "\n"
+    if operation == "archive":
+        # Exercise the complete production archive/extraction statement, which
+        # may include a stream-draining consumer before ownership is applied.
+        lines = INSTALL.read_text(encoding="utf-8").splitlines()
+        start = next(i for i, line in enumerate(lines) if selectors[operation] in line)
+        end = next(i for i in range(start + 1, len(lines)) if "/usr/sbin/chown" in lines[i])
+        script = "set -euo pipefail\n" + "\n".join(lines[start:end]) + "\n"
     if operation == "tree":
         script += 'printf "%s\\n" "$TREE_SHA"\n'
     completed = subprocess.run(
@@ -345,7 +352,13 @@ def test_acceptance_reads_different_owner_without_changing_git_state(
     assert proof._source_tree_sha() == tree
     for path, (raw, old_stat) in zip(paths, before):
         assert path.read_bytes() == raw
-        assert path.stat() == old_stat
+        current = path.stat()
+        # Reading the index/config may advance atime on the host filesystem.
+        # Keep every write, ownership and inode invariant, including nanosecond
+        # timestamps; access time is not evidence of a Git state mutation.
+        for field in ("st_dev", "st_ino", "st_nlink", "st_mode", "st_uid", "st_gid",
+                      "st_size", "st_mtime_ns", "st_ctime_ns"):
+            assert getattr(current, field) == getattr(old_stat, field), field
     assert not (git_dir / "index.lock").exists()
 
 

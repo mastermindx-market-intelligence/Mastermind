@@ -220,6 +220,78 @@ def test_recovered_changed_boot_never_observes_old_process(monkeypatch):
     assert adapter._observe_recovered_ref(ref) is P.BOOT_CHANGED
 
 
+@pytest.mark.parametrize("signal_sent", [False, True])
+def test_recovered_exit_between_identity_and_group_observation(
+    monkeypatch, signal_sent,
+):
+    """A captured identity can precede reaping; prove both absences, never signal."""
+    ref, values = _identity_fixture()
+    adapter, state = _adapter(), _state()
+    state.ref = ref
+    state.signal_sent = signal_sent
+    object.__setattr__(adapter, "inspector", SimpleNamespace(
+        boot_session_id=lambda: ref.boot_session_id,
+        inspect=lambda pid: SimpleNamespace(**values),
+    ))
+    probes = []
+
+    def absent_group(pgid, value):
+        assert (pgid, value) == (ref.pgid, 0)
+        probes.append("group")
+        raise ProcessLookupError()
+
+    def absent_leader(pid, value):
+        assert (pid, value) == (ref.pid, 0)
+        probes.append("leader")
+        raise ProcessLookupError()
+
+    monkeypatch.setattr(cw.os, "killpg", absent_group)
+    monkeypatch.setattr(cw.os, "kill", absent_leader)
+    assert asyncio.run(adapter._terminate_recovered(state)) == (
+        signal_sent, False, not signal_sent,
+    )
+    assert probes == ["group", "leader"]
+
+
+@pytest.mark.parametrize("leader", ["still-present", "permission", "os-error"])
+def test_recovered_group_exit_does_not_hide_unproven_leader_absence(
+    monkeypatch, leader,
+):
+    ref, values = _identity_fixture()
+    adapter = _adapter()
+    object.__setattr__(adapter, "inspector", SimpleNamespace(
+        boot_session_id=lambda: ref.boot_session_id,
+        inspect=lambda pid: SimpleNamespace(**values),
+    ))
+    def group_absent(pgid, value):
+        assert (pgid, value) == (ref.pgid, 0)
+        raise ProcessLookupError()
+    def leader_probe(pid, value):
+        assert (pid, value) == (ref.pid, 0)
+        if leader == "permission":
+            raise PermissionError()
+        if leader == "os-error":
+            raise OSError()
+    monkeypatch.setattr(cw.os, "killpg", group_absent)
+    monkeypatch.setattr(cw.os, "kill", leader_probe)
+    assert adapter._observe_recovered_ref(ref) is P.UNKNOWN
+
+
+def test_recovered_group_permission_refusal_never_probes_around_it(monkeypatch):
+    ref, values = _identity_fixture()
+    adapter = _adapter()
+    object.__setattr__(adapter, "inspector", SimpleNamespace(
+        boot_session_id=lambda: ref.boot_session_id,
+        inspect=lambda pid: SimpleNamespace(**values),
+    ))
+    def refused_group(pgid, value):
+        assert (pgid, value) == (ref.pgid, 0)
+        raise PermissionError()
+    monkeypatch.setattr(cw.os, "killpg", refused_group)
+    monkeypatch.setattr(cw.os, "kill", lambda *_: pytest.fail("group refusal is final"))
+    assert adapter._observe_recovered_ref(ref) is P.UNKNOWN
+
+
 @pytest.mark.parametrize("leader", ["live-unreadable", "permission", "os-error"])
 def test_recovered_unreadable_identity_is_not_absence(monkeypatch, leader):
     ref, _ = _identity_fixture()

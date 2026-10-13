@@ -656,6 +656,34 @@ def test_git_snapshot_preserves_typed_nonzero_instead_of_collapsing_to_stage(
     assert "top-secret" not in str(raised.value)
 
 
+@pytest.mark.parametrize("legacy", (False, True))
+def test_reviewed_coordinator_configs_are_exact_worker_inputs(
+    tmp_path: Path, legacy: bool
+) -> None:
+    workspace, _ = _workspace(tmp_path)
+    config = workspace / ".codex" / "config.toml"
+    if legacy:
+        config.write_text(
+            '[shell_environment_policy]\ninherit = "core"\n\n'
+            '[shell_environment_policy.set]\nBOT_REASONING_LAYER = "1"\n\n'
+            '[agents]\nenabled = true\n'
+            '# Daily portfolio research is read-heavy. Keep fan-out bounded so one nightly run\n'
+            '# cannot turn a wide Prophet board into an unbounded token tree.\n'
+            'max_concurrent_threads_per_session = 3\n'
+            'default_subagent_model = "gpt-5.6-terra"\n'
+            'default_subagent_reasoning_effort = "medium"\n',
+            encoding="utf-8",
+        )
+    cw._validate_project_configuration(workspace)
+
+    # Neither a similar configuration nor an added configuration layer is
+    # admitted merely because the approved coordinator defaults are enabled.
+    with config.open("a", encoding="utf-8") as handle:
+        handle.write('\n[features]\nmulti_agent_v2 = true\n')
+    with pytest.raises(cw.LaunchValidationError, match="audited worker-safe hash"):
+        cw._validate_project_configuration(workspace)
+
+
 def test_project_configuration_failure_is_attributed_without_private_detail(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -903,6 +931,8 @@ def test_success_uses_exact_one_shot_argv_empty_env_and_private_logs(tmp_path: P
     assert 'default_permissions="mastermind_exec_read"' in rendered
     assert 'approval_policy="never"' in rendered
     assert "agents.enabled=false" in rendered
+    assert ("--disable", "multi_agent") in pairs
+    assert ("--disable", "multi_agent_v2") in pairs
     assert 'web_search="disabled"' in rendered
     assert (
         f'projects={{{json.dumps(str(workspace))}={{trust_level="untrusted"}}}}'
