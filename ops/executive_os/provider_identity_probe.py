@@ -646,6 +646,20 @@ _DIAGNOSTIC_REFUSALS = frozenset({
     "diagnostic_arguments_invalid", "diagnostic_payload_invalid", "diagnostic_probe_failed",
 })
 
+# Internal, transaction-bound recovery observation.  Unlike the exported
+# capacity diagnostic above, this document is bound to one designated successor
+# request, the live installed source, the live credential metadata and one
+# observation time, and it is consumable only by the readiness transaction that
+# named that request.  It is never a readiness receipt and never a standalone
+# authorization.
+RECOVERY_OBSERVATION_FLAG = "--recovery-observation"
+RECOVERY_OBSERVATION_SCHEMA = "mastermind.executive_provider_recovery_observation/v1"
+_RECOVERY_OBSERVATION_REFUSALS = frozenset({
+    "recovery_observation_arguments_invalid", "recovery_observation_payload_invalid",
+    "recovery_observation_probe_failed",
+})
+_RECOVERY_REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$")
+
 
 def _diagnostic_code(value: Any) -> str:
     if type(value) is str and value in IDENTITY_REFUSAL_CODES | _DIAGNOSTIC_REFUSALS:
@@ -733,6 +747,109 @@ def diagnostic_document(slot_id: str | None, observation: dict[str, Any] | None 
     }
 
 
+def _recovery_observation_code(value: Any) -> str:
+    if type(value) is str and value in IDENTITY_REFUSAL_CODES | _RECOVERY_OBSERVATION_REFUSALS:
+        return value
+    return "recovery_observation_probe_failed"
+
+
+def recovery_observation_document(
+    successor_request_id: str | None,
+    slot_id: str | None,
+    observation: dict[str, Any] | None,
+    identity: Mapping[str, Any] | None,
+    *,
+    refusal: str | None = None,
+) -> dict[str, Any]:
+    """Project one bound observation; never a readiness receipt."""
+
+    from ops.executive_os.provider_readiness import PRODUCTION_MODEL
+
+    observed = observation is not None and identity is not None
+    document: dict[str, Any] = {
+        "schema_version": RECOVERY_OBSERVATION_SCHEMA,
+        "observation_only": True,
+        "readiness_issued": False,
+        "observation_status": "observed" if observed else "refused",
+        "refusal": None if observed else _recovery_observation_code(refusal),
+        "observed_at": identity.get("observed_at") if identity is not None else now_iso(),
+        "successor_request_id": successor_request_id,
+        "slot_id": slot_id,
+        "workspace_binding_class": (
+            identity.get("workspace_binding_class") if identity is not None else "UNATTESTED"
+        ),
+        "expected_credential_kind": (
+            identity.get("expected_credential_kind") if identity is not None else None
+        ),
+        "configured_model": PRODUCTION_MODEL,
+        "codex_binary": identity.get("codex_binary") if identity is not None else None,
+        "executive_source": identity.get("executive_source") if identity is not None else None,
+        "credential_lstat": identity.get("credential_lstat") if identity is not None else None,
+        "provider_identity": ({k: v for k, v in identity.items() if k != "executive_source"}
+                              if observed else None),
+        "ordinary_usage_allowed": None,
+        "model_catalog": None,
+    }
+    if observed:
+        document["ordinary_usage_allowed"] = observation["capacity"]["ordinary_usage_allowed"]
+        document["model_catalog"] = dict(observation["model_catalog"])
+    return document
+
+
+def _recovery_observation_main(tokens: Sequence[str]) -> int:
+    slot_id = None
+    request_id = None
+    try:
+        from ops.executive_os.provider_worker_slots import get_slot
+
+        if (list(tokens).count(RECOVERY_OBSERVATION_FLAG) != 1
+                or any(sum(t.split("=", 1)[0] == flag for t in tokens) != 1
+                       for flag in ("--slot-id", "--expected-kind", "--successor-request-id"))
+                or any(token.split("=", 1)[0] in (MODEL_CAPACITY_FLAG, COMPARE_SEAT_FLAG,
+                                                  REFUSAL_CODE_FLAG) for token in tokens)):
+            raise IdentityProbeError("recovery_observation_arguments_invalid")
+        parser = _SeatArgumentParser(allow_abbrev=False, add_help=False)
+        parser.add_argument(RECOVERY_OBSERVATION_FLAG, action="store_true")
+        parser.add_argument("--slot-id", required=True)
+        parser.add_argument("--expected-kind", required=True, choices=sorted(EXPECTED_AUTH_MODE))
+        parser.add_argument("--successor-request-id", required=True)
+        args = parser.parse_args(list(tokens))
+        if _RECOVERY_REQUEST_ID_RE.fullmatch(args.successor_request_id) is None:
+            raise IdentityProbeError("recovery_observation_arguments_invalid")
+        slot = get_slot(args.slot_id)
+        if slot.provider_family != "openai" or args.expected_kind not in slot.allowed_credential_kinds:
+            raise IdentityProbeError("recovery_observation_arguments_invalid")
+        slot_id = slot.slot_id
+        request_id = args.successor_request_id
+        if sys.platform != "darwin" or os.geteuid() != 0:
+            raise IdentityProbeError("live_probe_requires_darwin_root")
+        observation, identity = live_probe(
+            binary=INSTALLED_CODEX_BINARY, provider_home=slot.provider_home,
+            expected_kind=args.expected_kind,
+            workspace_binding_class=slot.workspace_binding_class,
+            worker_user=slot.worker_user, worker_group=slot.worker_group,
+            worker_uid=slot.worker_uid, worker_gid=slot.worker_gid,
+            recovery_request_id=request_id,
+        )
+        result = recovery_observation_document(
+            request_id, slot_id, observation, identity,
+        )
+    except _SeatArgumentRefusal:
+        result = recovery_observation_document(
+            None, None, None, None, refusal="recovery_observation_arguments_invalid"
+        )
+    except (Exception, SystemExit, KeyboardInterrupt) as exc:
+        code = (exc.args[0] if isinstance(exc, IdentityProbeError) and len(exc.args) == 1
+                else "recovery_observation_arguments_invalid" if isinstance(exc, ValueError)
+                else "recovery_observation_probe_failed")
+        result = recovery_observation_document(
+            request_id, slot_id, None, None, refusal=_recovery_observation_code(code)
+        )
+    json.dump(result, sys.stdout, sort_keys=True, separators=(",", ":"))
+    sys.stdout.write("\n")
+    return 0 if result["observation_status"] == "observed" else 2
+
+
 def _model_capacity_main(tokens: Sequence[str]) -> int:
     slot_id = None
     try:
@@ -781,7 +898,15 @@ def live_probe(
     worker_gid: int = WORKER_GID,
     expected_seat_email: str | None = None,
     diagnostic_slot_id: str | None = None,
-) -> dict[str, Any] | str:
+    recovery_request_id: str | None = None,
+) -> dict[str, Any] | tuple[dict[str, Any] | None, dict[str, Any] | None] | str:
+    if recovery_request_id is not None:
+        if (diagnostic_slot_id is not None or expected_seat_email is not None
+                or type(recovery_request_id) is not str
+                or _RECOVERY_REQUEST_ID_RE.fullmatch(recovery_request_id) is None):
+            raise IdentityProbeError("recovery_observation_arguments_invalid")
+        from ops.executive_os.provider_recovery import current_executive_source
+        recovery_executive_source = current_executive_source()
     if diagnostic_slot_id is not None:
         from ops.executive_os.provider_worker_slots import get_slot
 
@@ -863,7 +988,7 @@ def live_probe(
             raise IdentityProbeError("forced_auth_configuration_present")
         account = client.request(3, "account/read", {"refreshToken": False})
         diagnostic_observation = None
-        if diagnostic_slot_id is not None:
+        if diagnostic_slot_id is not None or recovery_request_id is not None:
             admitted = evaluate_identity(account_read=account, auth_mode=auth_mode_before,
                 expected_kind=expected_kind, workspace_binding_class=workspace_binding_class)
             if admitted.get("passed") is True:
@@ -910,6 +1035,15 @@ def live_probe(
             return diagnostic_document(diagnostic_slot_id,
                 diagnostic_observation if result.get("passed") is True else None,
                 refusal=result.get("refusal"))
+        if recovery_request_id is not None:
+            # Only a passing, still-current identity may carry an observation.
+            # Any refusal returns the bounded refusal document instead.
+            if result.get("passed") is not True:
+                return (None, result)
+            if current_executive_source() != recovery_executive_source:
+                raise IdentityProbeError("recovery_observation_source_mismatch")
+            result["executive_source"] = recovery_executive_source
+            return (diagnostic_observation, result)
         if expected_seat_email is not None:
             # Return only the bounded enum after every existing policy,
             # config, login, binary, and credential guard has completed, and it
@@ -995,6 +1129,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             MODEL_CAPACITY_FLAG.startswith(token.split("=", 1)[0])
             or token.split("=", 1)[0].startswith(MODEL_CAPACITY_FLAG)) for token in tokens):
         return _model_capacity_main(tokens)
+    if any(token.startswith("--") and (
+            RECOVERY_OBSERVATION_FLAG.startswith(token.split("=", 1)[0])
+            or token.split("=", 1)[0].startswith(RECOVERY_OBSERVATION_FLAG))
+            for token in tokens):
+        return _recovery_observation_main(tokens)
     if any(
         token.startswith("--")
         and (
