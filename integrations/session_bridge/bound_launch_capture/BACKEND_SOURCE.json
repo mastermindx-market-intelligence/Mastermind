@@ -1,0 +1,41 @@
+{
+  "schema": "mastermind.fabric_attended_backend_source/v1",
+  "classification": "SOURCE_ONLY_UNINSTALLED",
+  "files": {
+    "control_plane/fabric_attended_backend.py": {
+      "bytes": 43859,
+      "sha256": "5449e129531086c8ab782a076df213a7aeb7204f319b637c0d8910fcbf10a6eb"
+    },
+    "tests/test_fabric_attended_backend.py": {
+      "bytes": 43103,
+      "sha256": "be33f3458524648b2ca314079aacddab05aa585b99057d1adb748eb9fe5f348d"
+    }
+  },
+  "dependencies": [
+    "c8479a83446824e093bf8e3265a882237115c403"
+  ],
+  "root": "01a11e90-4b5d-7f53-b966-8aaaad38701f",
+  "immediate_parent": "01a1321e-f5fc-7e10-b790-f06f300206b9",
+  "original_worker": {
+    "id": "fabric-attended-backend-build-01a11e90-v1",
+    "consumed_once": true,
+    "raw_bytes": 32107,
+    "raw_characters": 32101,
+    "raw_sha256": "7f631be392722bd6ffc6affff3527297e1373a340f1f340a37bf80219d7f44e5",
+    "acceptance": "NOT_ACCEPTED",
+    "contract_overrun_characters": 101
+  },
+  "checks": {
+    "CALLER_FINITE_PROFILE_v23.xml": {
+      "sha256": "534b38333b775186939cb4f90179868ffbe48fd2b329661d3731daa38233d618",
+      "tests": 30,
+      "failures": 0,
+      "errors": 0,
+      "exit_code": 0
+    }
+  },
+  "factory_source_join": "create_attended_backend(trusted BridgeConfig, owner_resources=_FixedOwnerResources) -> fixed single-use service composition. It authenticates exact in-process ControlStartAuthority before deriving Runtime request/correlation and retaining ONE FabricAttendedBackend. Default unconfigured invocation refuses; no JSON/env/import selectors.",
+  "activation_path": "Qualified composition owner supplies independent typed policy/catalogue/profile/binary/physical/path/evidence resources, creates backend through fixed factory, then calls existing scripts.executive_fabric_bridge.serve(config, backend, stop_event=original owner event) on original main thread/event loop; existing named launchd socket only. Default main signal registration cannot be claimed qualified alongside lane original signal handler without owner-specific shutdown qualification.",
+  "unsupported": "Nonempty validation argv refused pre-effect. validation/nonterminal/restart/unbound absence cleanup scopes remain unavailable. Existing original owner reconciliation required after controller restart.",
+  "pending": "Combined independent source review and root-owned empty-validation Supervisor correction; missing actual Linux host qualification retained separately"
+}
