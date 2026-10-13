@@ -246,6 +246,15 @@ def _findings(state, metrics, series, thermal, now):
     if busy is not None and busy >= 90 and duration >= 1800:
         result.append(_finding("SUSTAINED_CPU_PRESSURE", "warning", "performance", "Sustained CPU saturation",
             "CPU busy time has remained at least 90% for 30 minutes in contiguous observations. Consider deferring or redistributing future work through the existing scheduler. Heavy CPU use alone is not evidence of hardware damage.", duration))
+    # Some Macs expose load average but no CPU-busy sensor through the
+    # incumbent collector. Only report sustained *performance* pressure from
+    # normalized load; never infer heat, wear, or a damage threshold.
+    load, cores = metrics["load1"], metrics["logical_cpus"]
+    if busy is None and load is not None and cores is not None and load >= 1.5 * cores:
+        duration = _duration(series, "load1", 1.5 * cores, now)
+        if duration >= 1800:
+            result.append(_finding("SUSTAINED_LOAD_PRESSURE", "warning", "performance", "Sustained elevated host load",
+                "One-minute load average has remained at least 1.5 times logical CPU count for 30 minutes. Load average is not CPU busy time or a temperature reading; it can reflect runnable and uninterruptible tasks. Investigate process/IO pressure and consider shifting future work through the existing Capacity owner. This is not evidence of hardware damage.", duration))
     margin = _number(thermal.get("nvme_margin_crit_c"), -150, 150)
     if margin is not None and margin <= 0 and metrics["nvme_temp_c"] is not None:
         result.append(_finding("NVME_CRITICAL_TEMPERATURE", "critical", "hardware", "Storage thermal limit observed",

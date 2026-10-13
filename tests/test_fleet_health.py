@@ -227,3 +227,33 @@ def test_invalid_window_and_clock_are_rejected():
         compose(window="../../secret")
     with pytest.raises(ValueError):
         compose_fleet_health(registry(), {}, "", window="1h", now=float("nan"))
+
+def test_sustained_normalized_load_warns_for_mac_without_cpu_busy_sensor():
+    mac = {"m2": {"platform": "darwin", "ram_gb": 192}}
+    snap = {"host": "m2", "reachable": True, "ts": NOW, "ncpu": 8,
+            "load1": 20, "load5": 18, "active_lanes_status": "known",
+            "active_lanes": 0}
+    log = "".join(line(NOW - n * 60,
+                       "load1=20 active_lanes=0", host="m2")
+                  for n in range(32, -1, -1))
+    d = compose_fleet_health(mac, {"m2": snap}, log, window="24h", now=NOW)
+    h = d["hosts"][0]
+    f = next(f for f in h["findings"] if f["code"] == "SUSTAINED_LOAD_PRESSURE")
+    assert f["category"] == "performance"
+    assert f["duration_seconds"] >= 1800
+    assert "not CPU busy" in f["detail"]
+    assert "not evidence of hardware damage" in f["detail"]
+
+
+def test_normalized_load_warning_requires_known_cores_contiguous_samples_and_freshness():
+    mac = {"m2": {"platform": "darwin"}}
+    log = "".join(line(NOW - n * 60,
+                       "load1=30 active_lanes=0", host="m2")
+                  for n in (40, 39, 38, 2, 1, 0))
+    for source in (
+        {"host": "m2", "reachable": True, "ts": NOW, "load1": 30},  # cores absent
+        {"host": "m2", "reachable": True, "ts": NOW, "load1": 30, "ncpu": 8},  # gap
+        {"host": "m2", "reachable": True, "ts": NOW - 1000, "load1": 30, "ncpu": 8},  # stale
+    ):
+        h = compose_fleet_health(mac, {"m2": source}, log, window="24h", now=NOW)["hosts"][0]
+        assert not any(f["code"] == "SUSTAINED_LOAD_PRESSURE" for f in h["findings"])
