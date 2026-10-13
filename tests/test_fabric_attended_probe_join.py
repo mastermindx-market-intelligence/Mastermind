@@ -207,7 +207,8 @@ def test_real_factory_v2_helper_and_coupled_validator_compose(tmp_path,monkeypat
     from control_plane import executive_worker_broker as wire
     # Explicit Darwin environment fixture; filesystem denials remain real.
     # The separate unsupported-platform test preserves Linux refusal.
-    monkeypatch.setattr(probe.sys,'platform','darwin')
+    # Do not mutate shared sys.platform: Linux CI must retain its native ACL path.
+    monkeypatch.setattr(probe,'sys',SimpleNamespace(platform='darwin'))
     release,host,raw,att=boot_fixture(tmp_path)
     uid,gid=os.getuid(),os.getgid()
     assert uid > 0
