@@ -3,17 +3,18 @@
   "classification": "SOURCE_ONLY_UNINSTALLED",
   "files": {
     "control_plane/fabric_attended_backend.py": {
-      "bytes": 43859,
-      "sha256": "5449e129531086c8ab782a076df213a7aeb7204f319b637c0d8910fcbf10a6eb"
+      "bytes": 46253,
+      "sha256": "4aa9007f8c23bc6da5138bd533ab2fd891713f6551e349046426c410700881d7"
     },
     "tests/test_fabric_attended_backend.py": {
-      "bytes": 43103,
-      "sha256": "be33f3458524648b2ca314079aacddab05aa585b99057d1adb748eb9fe5f348d"
+      "bytes": 51367,
+      "sha256": "6249df0d75d611d2d16cd53e6963f3344d2a25e1ebe9f0cb392616ebe68f2807"
     }
   },
   "dependencies": [
     "c8479a83446824e093bf8e3265a882237115c403",
-    "d3ba60bd7985c605164147fdc0a3d691e4eeb3e9"
+    "d3ba60bd7985c605164147fdc0a3d691e4eeb3e9",
+    "c00d19eddf70aaf09801c7ef00ac6cfe6909a181"
   ],
   "root": "01a11e90-4b5d-7f53-b966-8aaaad38701f",
   "immediate_parent": "01a1321e-f5fc-7e10-b790-f06f300206b9",
@@ -27,16 +28,18 @@
     "contract_overrun_characters": 101
   },
   "checks": {
-    "CALLER_FINITE_PROFILE_v23.xml": {
-      "sha256": "534b38333b775186939cb4f90179868ffbe48fd2b329661d3731daa38233d618",
-      "tests": 30,
+    "W8_CREDENTIAL_COUPLED_GREEN.xml": {
+      "sha256": "7a901c2add4e6f438536f4827772dc2c67dcfc0e1703c72fae5497eb145374d5",
+      "tests": 33,
       "failures": 0,
       "errors": 0,
+      "skipped": 0,
       "exit_code": 0
     }
   },
   "factory_source_join": "create_attended_backend(trusted BridgeConfig, owner_resources=_FixedOwnerResources) -> fixed single-use service composition. It authenticates exact in-process ControlStartAuthority before deriving Runtime request/correlation and retaining ONE FabricAttendedBackend. Default unconfigured invocation refuses; no JSON/env/import selectors.",
-  "activation_path": "Qualified composition owner supplies independent typed policy/catalogue/profile/binary/physical/path/evidence resources, creates backend through fixed factory, then calls existing scripts.executive_fabric_bridge.serve(config, backend, stop_event=original owner event) on original main thread/event loop; existing named launchd socket only. Default main signal registration cannot be claimed qualified alongside lane original signal handler without owner-specific shutdown qualification.",
+  "activation_path": "Qualified fixed owner supplies independent typed policy/catalog/profile/binary/physical/path/evidence resources plus actual sealed credential admission/loader, creates backend through fixed factory, then calls existing scripts.executive_fabric_bridge.serve(config, backend, stop_event=original owner event, activate_socket=existing qualified platform producer) on original main thread/event loop. Darwin default is activate_launchd_socket; Linux composition uses existing scripts.executive_os_linux_worker.activate_systemd_socket (closed one-FD producer) with independently qualified Control GID. No new listener. Original signal/cleanup owner shutdown composition remains required.",
   "unsupported": "Nonempty validation argv refused pre-effect. validation/nonterminal/restart/unbound absence cleanup scopes remain unavailable. Existing original owner reconciliation required after controller restart.",
-  "pending": "Combined independent source review; actual qualified Linux production resources and original owner shutdown composition remain separate activation obligations"
+  "pending": "One authorized zero-child independent source review; actual Linux issuer/realm/profile/binary/assignment and platform socket/shutdown inputs remain separate activation obligations. Source is uninstalled.",
+  "credential_source_join": "Four separately fixed owner inputs: canonical CredentialLoader, actual sealed SubscriptionCanaryAdmission and original binding/profile catalog documents. Reuse pure original executor verifier before slot/O_EXCL/lease; exact worker/catalog/profile/model/endpoint verified again at actual boundary. Canonical _safe_credential once; token enters only transient env and is scrubbed on begin return/failure. No credential loaded by Backend, RPC, descriptor or evidence."
 }

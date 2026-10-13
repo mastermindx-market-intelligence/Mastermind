@@ -20,6 +20,8 @@ import time
 from types import SimpleNamespace
 
 from control_plane.fabric_control_start import ControlStartAuthority
+from control_plane.claude_subscription_worker import CredentialLoader
+from control_plane.subscription_canary_admission import SubscriptionCanaryAdmission
 from control_plane.executive_fabric_adapter import FabricHostBinding
 from control_plane.worker_execution_contract import (
     BinaryAttestation, CollectionReceipt, WorkerResult, WorkerRunStatus, _jsonable,
@@ -57,7 +59,8 @@ def _copy(value):
 class _OriginalOwnerInputs:
     """Private fixed composition inputs, not a grant or authenticated factory.
 
-    No executable callbacks or import paths are accepted. Production wiring
+    Only the existing fixed CredentialLoader is executable; it supplies no
+    admission authority. No RPC callbacks or import paths are accepted. Production wiring
     requires the actual realm/profile/canary/assignment and shutdown owner;
     making this dataclass or presenting digest-shaped JSON establishes none.
     """
@@ -73,6 +76,10 @@ class _OriginalOwnerInputs:
     workspace_identity: dict
     provider_home_identity: dict
     nice: int = 0
+    credential_loader: CredentialLoader | None = None
+    credential_admission: SubscriptionCanaryAdmission | None = None
+    credential_bindings_document: dict | None = None
+    credential_profiles_document: dict | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -95,6 +102,10 @@ class _FixedOwnerResources:
     workspace_identity: dict
     provider_home_identity: dict
     nice: int = 0
+    credential_loader: CredentialLoader | None = None
+    credential_admission: SubscriptionCanaryAdmission | None = None
+    credential_bindings_document: dict | None = None
+    credential_profiles_document: dict | None = None
 
 
 class _ResourceSlot:
@@ -263,6 +274,12 @@ class FabricAttendedBackend:
             if not isinstance(path, Path) or not path.is_absolute() or '..' in path.parts:
                 _refuse('backend_resource_path_invalid')
         self._inputs = inputs
+        self._credentials = dict(credential_loader=inputs.credential_loader,
+            credential_admission=inputs.credential_admission,
+            credential_bindings_document=(_copy(inputs.credential_bindings_document)
+                if inputs.credential_bindings_document is not None else None),
+            credential_profiles_document=(_copy(inputs.credential_profiles_document)
+                if inputs.credential_profiles_document is not None else None))
         self._original = _bytes(inputs.original)
         self._preparation = dict(inputs.preparation)
         if 'result_schema' in self._preparation:
@@ -357,7 +374,13 @@ class FabricAttendedBackend:
         from integrations.session_bridge.bound_launch_capture.fabric_reserved_attended_launch import prepare_reserved_attended_launch
         prepared = prepare_reserved_attended_launch(payload, **self._preparation)
         self._check_original_owner(prepared)
+        # Pure canonical admission/catalog join, never a secret read, before
+        # any slot, O_EXCL reservation or account lease is consumed.
+        remote_sub_exec._verify_reserved_credential_admission(
+            prepared=prepared, preparation=self._preparation, **self._credentials)
         self._spec = _launch_spec_from_wire(payload['launch_spec'], self._preparation['policy'])
+        if self._spec.worker_id != self._inputs.physical.worker_id:
+            _refuse('fixed_service_resource_mismatch')
         self._baseline = _git_snapshot(Path(self._spec.workspace_path), require_clean=False)
         if self._baseline.head != self._spec.expected_base_sha:
             _refuse('original_workspace_changed')
@@ -379,7 +402,7 @@ class FabricAttendedBackend:
                 owned_capture=True, payload=_copy(payload), authority=authority,
                 preparation=self._preparation, lease=self._slot.lease, state={},
                 key=self._spec.run_id, receipt=self._inputs.receipt_path, nice=self._inputs.nice,
-                check_original_owner=self._check_original_owner)
+                check_original_owner=self._check_original_owner, **self._credentials)
             self._slot.owner = owner
             if Path(owner._original_start_receipt_path) != self._inputs.receipt_path.with_suffix('.start.json'):
                 _refuse('original_start_carrier_changed')
@@ -700,7 +723,11 @@ class _SingleAssignmentComposition:
             preparation=dict(resources.preparation),
             qualified_evidence=_copy(resources.qualified_evidence),
             workspace_identity=_copy(resources.workspace_identity),
-            provider_home_identity=_copy(resources.provider_home_identity))
+            provider_home_identity=_copy(resources.provider_home_identity),
+            credential_bindings_document=(_copy(resources.credential_bindings_document)
+                if resources.credential_bindings_document is not None else None),
+            credential_profiles_document=(_copy(resources.credential_profiles_document)
+                if resources.credential_profiles_document is not None else None))
         if 'result_schema' in self._resources.preparation:
             self._resources.preparation['result_schema'] = _copy(resources.preparation['result_schema'])
         if {'correlation', 'run_id', 'routing_root_id', 'routing_parent_run_id'} & set(resources.preparation):
@@ -738,7 +765,10 @@ class _SingleAssignmentComposition:
             preparation=preparation, physical=r.physical, binary_pin=r.binary_pin,
             log_path=r.log_path, active_dir=r.active_dir, receipt_path=r.receipt_path,
             qualified_evidence=r.qualified_evidence, workspace_identity=r.workspace_identity,
-            provider_home_identity=r.provider_home_identity, nice=r.nice)
+            provider_home_identity=r.provider_home_identity, nice=r.nice,
+            credential_loader=r.credential_loader, credential_admission=r.credential_admission,
+            credential_bindings_document=r.credential_bindings_document,
+            credential_profiles_document=r.credential_profiles_document)
         value = FabricAttendedBackend(inputs)
         authority.require(payload)
         self._attempted = True
@@ -767,7 +797,9 @@ def create_attended_backend(config=None, *, owner_resources=None):
     from control_plane.executive_fabric_bridge_broker import BridgeConfig, _TRUSTED_CONFIG
     from control_plane.executive_worker_broker import BrokerPolicy
     if (type(config) is not BridgeConfig or config._trust is not _TRUSTED_CONFIG
-            or type(owner_resources) is not _FixedOwnerResources):
+            or type(owner_resources) is not _FixedOwnerResources
+            or not callable(owner_resources.credential_loader)
+            or type(owner_resources.credential_admission) is not SubscriptionCanaryAdmission):
         raise BackendNotConfiguredError('production_attended_backend_not_configured')
     physical = owner_resources.physical
     policy = owner_resources.preparation['policy']
@@ -775,7 +807,8 @@ def create_attended_backend(config=None, *, owner_resources=None):
             or config.adapter_id != 'attended-fabric'
             or config.bridge_uid != physical.bridge_uid or str(config.socket_path) != physical.socket_path
             or config.control_uid != policy.control_uid or policy.worker_uid != physical.worker_uid
-            or policy.worker_gid != physical.worker_gid or config.workspace_root != policy.workspace_root
+            or policy.worker_gid != physical.worker_gid or policy.worker_id != physical.worker_id
+            or config.workspace_root != policy.workspace_root
             or config.run_root != policy.run_root):
         _refuse('fixed_service_resource_mismatch')
     return _SingleAssignmentComposition(owner_resources)

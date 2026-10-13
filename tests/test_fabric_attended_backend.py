@@ -26,6 +26,7 @@ from control_plane.worker_execution_contract import OrchestrationLaunchSpec
 from test_fabric_owned_start_assembly import world, lr
 from test_fabric_bound_controller_wire import patched
 from test_fabric_cleanup_bound_record import actual_record
+from test_fabric_executor_credential_boundary import credential_fixture, _inject_owner_test_keys
 
 
 @pytest.fixture
@@ -38,11 +39,15 @@ def harness(world, lr, tmp_path, monkeypatch, request):
     prepared = SimpleNamespace(request_sha256=world.original['start_request_sha256'],
         descriptor=world.descriptor, validation_commands=(), lane_runtime_arguments=lambda: {})
     import integrations.session_bridge.bound_launch_capture.fabric_reserved_attended_launch as compiler
+    canonical_prepare=compiler.prepare_reserved_attended_launch
     monkeypatch.setattr(compiler, 'prepare_reserved_attended_launch', lambda *a, **k: prepared)
     from control_plane import codex_worker, executive_worker_broker
     baseline = SimpleNamespace(head=world.spec['expected_base_sha'], status='')
     monkeypatch.setattr(codex_worker, '_git_snapshot', lambda *a, **k: baseline)
     world.with_spec(effective_grant_digest=world.binding['effective_grant_digest'])
+    credential_source, credential_args, _expires, credential_calls = credential_fixture(tmp_path, monkeypatch)
+    credentials={key:credential_args[key] for key in (
+        'credential_loader','credential_admission','credential_bindings_document','credential_profiles_document')}
     source = patched(tmp_path, 'remote_sub_exec.py', 'EXECUTOR_SOURCE.json')
     node = next(n for n in ast.parse(source).body if isinstance(n, ast.FunctionDef)
                 and n.name == '_begin_reserved_attended_under_lease')
@@ -50,7 +55,11 @@ def harness(world, lr, tmp_path, monkeypatch, request):
     def original_prepare(**kw):
         kw['authority'].require(kw['payload'])
         kw['check_original_owner'](prepared)
-        return prepared, {}, lambda: None
+        assert kw['credential_loader'] is credentials['credential_loader']
+        assert kw['credential_admission'] is credentials['credential_admission']
+        assert all(kw[key]==credentials[key] for key in (
+            'credential_bindings_document','credential_profiles_document'))
+        return prepared, {'env':{}}, lambda: None
     def original_begin(**kw):
         calls.append(kw)
         assert isinstance(kw['receipt'], Path)
@@ -63,8 +72,15 @@ def harness(world, lr, tmp_path, monkeypatch, request):
         owned_capture_paths=lr.owned_capture_paths,
         validate_owned_capture_live=lr.validate_owned_capture_live)
     exec(compile(ast.Module(body=[node], type_ignores=[]), '<exact-committed-executor>', 'exec'), ns)
-    monkeypatch.setitem(sys.modules, 'remote_sub_exec', SimpleNamespace(
-        _begin_reserved_attended_under_lease=ns[node.name]))
+    credential_verifications=[]
+    def verify_credentials(**kw):
+        # Existing publisher fixtures use an inert, noncatalog descriptor.
+        # Actual seal/catalog negatives below reuse the canonical source helper.
+        credential_verifications.append(kw)
+        assert kw['prepared'] is prepared and callable(kw['credential_loader'])
+    executor=SimpleNamespace(_begin_reserved_attended_under_lease=ns[node.name],
+        _verify_reserved_credential_admission=verify_credentials)
+    monkeypatch.setitem(sys.modules, 'remote_sub_exec', executor)
     # Immutable actual fixed policy observation only needed by the fragment.
     policy_workspace=tmp_path.parent/(tmp_path.name+'-workspaces');policy_workspace.mkdir(mode=0o700)
     policy_home=tmp_path.parent/(tmp_path.name+'-provider');policy_home.mkdir(mode=0o700)
@@ -110,7 +126,8 @@ def harness(world, lr, tmp_path, monkeypatch, request):
         preparation=dict(policy=policy,binary=world.pin,result_schema={'type':'object'}),
         physical=world.physical,binary_pin=world.pin,log_path=tmp_path/'original.log',
         active_dir=tmp_path/'active',receipt_path=receipt,qualified_evidence=world.evidence,
-        workspace_identity=world.workspace_identity,provider_home_identity=world.provider_home_identity)
+        workspace_identity=world.workspace_identity,provider_home_identity=world.provider_home_identity,
+        **credentials)
     instance = backend.FabricAttendedBackend(inputs)
     # Trusted config and Control identity are explicitly inert fixtures.
     config = bridge.BridgeConfig(schema_version=bridge.CONFIG_SCHEMA_VERSION,
@@ -133,7 +150,10 @@ def harness(world, lr, tmp_path, monkeypatch, request):
         return await service.execute(request('start',command),peer=PeerCredentials(uid=450,gid=450))
     yield SimpleNamespace(world=world,lr=lr,instance=instance,service=service,slot=instance._slot,
         inputs=inputs,command=command,request=request,start=start,holds=holds,releases=releases,
-        calls=calls,shutdown=shutdown,acquisitions=acquisitions,baseline=baseline,spec=spec)
+        calls=calls,shutdown=shutdown,acquisitions=acquisitions,baseline=baseline,spec=spec,
+        credential_source=credential_source,credential_args=credential_args,
+        credential_calls=credential_calls,executor=executor,prepared=prepared,
+        credential_verifications=credential_verifications,canonical_prepare=canonical_prepare)
     if actual_lease:
         # Fixture teardown closes descriptors only, never reconciles the marker.
         for name in ('fd', '_assignment_release_lock_fd', '_assignment_release_parent_fd'):
@@ -562,7 +582,10 @@ def fixed_resources(h):
         routing_parent_run_id=h.inputs.correlation['routing_parent_run_id'],
         log_path=h.inputs.log_path,active_dir=h.inputs.active_dir,receipt_path=h.inputs.receipt_path,
         qualified_evidence=h.inputs.qualified_evidence,workspace_identity=h.inputs.workspace_identity,
-        provider_home_identity=h.inputs.provider_home_identity)
+        provider_home_identity=h.inputs.provider_home_identity,
+        credential_loader=h.inputs.credential_loader,credential_admission=h.inputs.credential_admission,
+        credential_bindings_document=h.inputs.credential_bindings_document,
+        credential_profiles_document=h.inputs.credential_profiles_document)
 
 
 def test_single_assignment_constructor_waits_for_actual_control_command(harness):
@@ -601,6 +624,42 @@ def test_fixed_factory_requires_trusted_static_service_join(harness):
         backend.create_attended_backend(dataclasses.replace(config,_trust=None),owner_resources=resources)
     with pytest.raises(backend.AttendedBackendRefused,match='fixed_service_resource_mismatch'):
         backend.create_attended_backend(dataclasses.replace(config,control_uid=policy.control_uid+1),owner_resources=resources)
+    foreign=dataclasses.replace(resources,physical=dataclasses.replace(resources.physical,worker_id='other-worker'))
+    with pytest.raises(backend.AttendedBackendRefused,match='fixed_service_resource_mismatch'):
+        backend.create_attended_backend(config,owner_resources=foreign)
+    for changed in ({'credential_loader':None},{'credential_admission':None}):
+        with pytest.raises(backend.BackendNotConfiguredError):
+            backend.create_attended_backend(config,owner_resources=dataclasses.replace(resources,**changed))
+
+
+@pytest.mark.parametrize('damage',['unsealed','worker'])
+def test_canonical_credential_admission_refuses_before_original_reservation(harness,monkeypatch,damage):
+    h=harness
+    args=h.credential_args
+    ns=h.credential_source
+    prepared=h.canonical_prepare(args['payload'],**args['preparation'])
+    # The fixed compiler/owner observations remain explicit inert fixtures;
+    # canonical admission verification below is the actual committed source.
+    import integrations.session_bridge.bound_launch_capture.fabric_reserved_attended_launch as compiler
+    monkeypatch.setattr(compiler,'prepare_reserved_attended_launch',lambda *_a,**_k:prepared)
+    monkeypatch.setattr(h.instance,'_check_original_owner',lambda _prepared:None)
+    h.instance._preparation=args['preparation']
+    h.instance._credentials={key:args[key] for key in (
+        'credential_loader','credential_admission','credential_bindings_document','credential_profiles_document')}
+    h.executor._verify_reserved_credential_admission=ns['_verify_reserved_credential_admission']
+    if damage=='unsealed':h.instance._credentials['credential_admission']=object()
+    else:
+        from test_claude_subscription_worker import _owner_seal,_capacity_fact
+        h.instance._credentials['credential_admission']=_owner_seal(
+            capacity_fact=_capacity_fact(worker_id='another-original-worker'),
+            bindings=args['credential_bindings_document'],profiles=args['credential_profiles_document'])
+    async def scenario():
+        with pytest.raises(ValueError,match='realm_credential_admission_unqualified'):
+            authority=authorize_control_command(h.command,peer=PeerCredentials(uid=450,gid=450))
+            await h.instance.start_owned(h.world.original,authority=authority)
+    run(scenario())
+    assert h.credential_calls==[] and not h.slot.claimed and not h.inputs.log_path.exists()
+    assert h.acquisitions==h.calls==[]
 
 
 @pytest.fixture
