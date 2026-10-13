@@ -385,16 +385,18 @@ def product_acceptance_review_result_schema(
         raise OrchestrationResultError("product review expected identities are invalid") from exc
 
     def bound_rows(expected: tuple[str, ...], identity: str) -> dict[str, Any]:
-        rows = []
-        for digest in expected:
-            row = _schema_object({identity: {"const": digest},
-                "state": {"type": "string", "enum": ["SATISFIED", "UNSATISFIED", "UNPROVEN"]},
-                "evidence_digests": _schema_array(_schema_digest(), unique=True)})
-            row["allOf"] = [{"if": {"properties": {"state": {"const": "SATISFIED"}}},
-                "then": {"properties": {"evidence_digests": {"minItems": 1}}}}]
-            rows.append(row)
-        return {"type": "array", "minItems": len(rows), "maxItems": len(rows),
-            "prefixItems": rows, "items": False}
+        # Provider Structured Outputs is a subset of JSON Schema: do not send
+        # tuple items or allOf/if/then. The canonical proof codec rejects duplicate
+        # identities/evidence, and the request owner checks the full ordered
+        # expected tuple before any decision request can be issued.
+        variants = []
+        for states, minimum_evidence in ((["SATISFIED"], 1), (["UNSATISFIED", "UNPROVEN"], 0)):
+            variants.append(_schema_object({
+                identity: {"type": "string", "enum": list(expected)},
+                "state": {"type": "string", "enum": states},
+                "evidence_digests": _schema_array(_schema_digest(), minimum=minimum_evidence),
+            }))
+        return _schema_array({"anyOf": variants}, minimum=len(expected), maximum=len(expected))
 
     schema = orchestration_result_schema("review", job_id=job_id, run_id=run_id,
         worker_id=worker_id, root_job_id=root_job_id)

@@ -12,6 +12,10 @@ from control_plane.executive_orchestration_result import (
     role_schema_digest,
 )
 from tests.test_product_acceptance_review_proof import proof
+from common.product_acceptance_contract import (
+    ProductAcceptanceContractError,
+    require_complete_product_acceptance_review_proof,
+)
 
 
 def body():
@@ -78,6 +82,53 @@ def test_opt_in_actual_provider_schema_binds_every_proof_identity():
         else:
             value["product_acceptance_proof"]["accepted"] = True
         assert not Draft202012Validator(selected).is_valid(value), change
+
+
+def test_provider_schema_avoids_unsupported_conditionals_and_tuple_keywords():
+    # The Codex adapter forwards this schema unchanged via --output-schema.
+    # Exact order and identity uniqueness remain canonical-owner checks.
+    forbidden = {
+        "allOf",
+        "if",
+        "then",
+        "else",
+        "prefixItems",
+        "not",
+        "dependentRequired",
+        "dependentSchemas",
+    }
+
+    def inspect(value):
+        if isinstance(value, dict):
+            assert not forbidden.intersection(value)
+            for item in value.values():
+                inspect(item)
+        elif isinstance(value, list):
+            for item in value:
+                inspect(item)
+
+    inspect(schema())
+
+
+@pytest.mark.parametrize(
+    "change", ["duplicate_identity", "reordered", "empty_satisfied"]
+)
+def test_provider_shape_cannot_replace_exact_canonical_proof(change):
+    value = body()
+    rows = value["product_acceptance_proof"]["obligations"]
+    if change == "duplicate_identity":
+        rows[1]["obligation_digest"] = rows[0]["obligation_digest"]
+    elif change == "reordered":
+        rows.reverse()
+    else:
+        rows[0]["evidence_digests"] = []
+    with pytest.raises(ProductAcceptanceContractError):
+        require_complete_product_acceptance_review_proof(
+            value["product_acceptance_proof"],
+            expected_basis_digest="a" * 64,
+            expected_criterion_digests=("b" * 64,),
+            expected_obligation_digests=("d" * 64, "e" * 64),
+        )
 
 
 def test_canonical_v2_review_retains_unproven_product_data_without_accepting():

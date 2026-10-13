@@ -47,6 +47,14 @@ issuance and identifies the exact row requiring repair. This mechanical check
 does not establish whether the review's evidence is true: the authorized principal
 must inspect the actual original intent and delivered artifacts.
 
+The provider schema uses bounded arrays, allowed identity enums and `anyOf`
+state variants. It avoids tuple items and conditional composition keywords that
+are unsuitable for the provider's Structured Outputs subset. The canonical
+codec separately rejects duplicate identities/evidence; the request owner
+requires the complete expected identities in the retained order. Provider output
+shape alone never authorizes a ruling. The relevant schema restrictions are
+described in the [OpenAI Structured Outputs guide](https://developers.openai.com/api/docs/guides/structured-outputs).
+
 Qualification requires the exact visible original request, the existing Relay's
 reply/authority validation, and the existing principal COMMIT owner confirming
 identical committed RULING bytes in the current principal generation. The accepted
