@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -156,3 +157,62 @@ def test_complete_runner_import_closure_is_in_staged_content(tmp_path):
     after = {str(p.relative_to(release)): hashlib.sha256(p.read_bytes()).hexdigest()
              for p in release.rglob('*') if p.is_file()}
     assert after == before, 'staged-only read mutated its immutable release'
+
+
+def test_unexpected_read_error_must_settle_owned_process_group(tmp_path, monkeypatch):
+    """A failed read must not skip group teardown of a real live descendant.
+
+    RED-first against the incumbent runner. The test owns and forcibly cleans
+    its synthetic private process group even if the regression assertion fails.
+    """
+    from control_plane import ceo_boot_packet as boot
+
+    marker = tmp_path / "descendant-survived-read-failure"
+    quiet_child = (
+        "import time,pathlib;time.sleep(0.65);"
+        f"pathlib.Path({str(marker)!r}).write_text('escaped')"
+    )
+    code = (
+        "import subprocess,sys,time\n"
+        "subprocess.Popen([sys.executable,'-c'," + repr(quiet_child)
+        + "],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)\n"
+        "sys.stdout.write('ready\\n');sys.stdout.flush()\n"
+        "time.sleep(2)\n"
+    )
+    real_popen = boot.subprocess.Popen
+    real_read = boot.os.read
+    owned = []
+
+    def traced_popen(*args, **kwargs):
+        process = real_popen(*args, **kwargs)
+        owned.append(process)
+        return process
+
+    def injected_read(fd, size):
+        if owned and fd in {owned[0].stdout.fileno(), owned[0].stderr.fileno()}:
+            raise OSError("synthetic after-start read failure")
+        return real_read(fd, size)
+
+    monkeypatch.setattr(boot.subprocess, "Popen", traced_popen)
+    monkeypatch.setattr(boot.os, "read", injected_read)
+    try:
+        with pytest.raises(OSError, match="after-start read failure"):
+            boot.bounded_subprocess_runner(
+                [sys.executable, "-B", "-c", code],
+                cwd=tmp_path, timeout=1.5, max_bytes=4096,
+            )
+        assert len(owned) == 1
+        assert owned[0].poll() is not None, "unexpected read error left process leader alive"
+        assert boot._process_group_presence(owned[0].pid) is False, (
+            "unexpected read error skipped descendant group teardown"
+        )
+    finally:
+        if owned:
+            # Defensive test cleanup even on the intended red pre-fix failure.
+            try:
+                os.killpg(owned[0].pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            owned[0].wait(timeout=4)
+    time.sleep(0.8)
+    assert not marker.exists(), "a synthetic quiet descendant survived read failure"
