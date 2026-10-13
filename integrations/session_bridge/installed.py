@@ -200,6 +200,51 @@ def private_ingress_owner(provider: InstalledSessionBridgeProvider) -> SessionBr
     )
 
 
+
+def build_runtime_native_reply_writer(runtime: Any, *, dialogue_socket_path: Path,
+                                      native_session_id: str,
+                                      current_writer_guard: Callable,
+                                      codex_owner_configured: Callable,
+                                      service_call=None):
+    """Compose an inert reply callback for one authenticated current native host.
+
+    The host supplies the session from its authenticated connection, not model
+    arguments, and registers this callback only after native consumption. Its
+    synchronous guard must attest the exact NativeReplyBinding on each resolver
+    read, including after the final carrier read between READY and COMMIT.
+    The host remains responsible for its authenticated current-writer fence.
+    No provider turn, listener, host registration, wake or arm is created here.
+    Hosts without that guard/registration remain disarmed. Claude is unavailable
+    until RuntimeSessionReturn has an admitted Claude binding owner.
+    """
+    from .runtime_owner import RuntimeFabricTargetProjector, RuntimeCodexTargetProjector
+    from .runtime_return import RuntimeSessionReturn
+    from .native_reply import NativeReplyWriter
+    from integrations.slack_agent_dialogue.service import call_service
+
+    if (not callable(current_writer_guard) or not callable(codex_owner_configured)
+            or inspect.iscoroutinefunction(current_writer_guard)
+            or inspect.iscoroutinefunction(getattr(current_writer_guard, "__call__", None))):
+        raise TypeError("synchronous current writer and native owner gates are required")
+    call = call_service if service_call is None else service_call
+    fabric = RuntimeFabricTargetProjector(runtime)
+    codex = RuntimeCodexTargetProjector(fabric, owner_configured=codex_owner_configured)
+    returns = RuntimeSessionReturn(runtime, fabric=fabric, codex=codex,
+                                   socket_path=dialogue_socket_path, service_call=call)
+
+    class GuardedNativeResolver:
+        def resolve(self, **identity):
+            binding = returns.resolve(**identity)
+            # Exact True only: absent, unknown or malformed ownership is refusal.
+            # The trusted host must not return an awaitable or a cached lease.
+            if current_writer_guard(binding) is not True:
+                raise BridgeError("binding_unavailable", "current native writer is unavailable")
+            return binding
+
+    return NativeReplyWriter(GuardedNativeResolver(), native_session_id=native_session_id,
+                             socket_path=dialogue_socket_path, service_call=call)
+
+
 def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
                                  summon_handler: Callable | None = None,
                                  codex_owner_configured: Callable[[], bool] | None = None):
@@ -301,7 +346,23 @@ class InstalledSessionBridgeClient:
             "principal": principal_frame(principal),
             "arguments": args,
         }
-        response = await self._client.send_frame(self._socket_path, frame)
+        send = self._client.send_frame
+        # Actual installed source opts summons into the same socket's duplex
+        # lifetime. Incumbent injected clients keep their one-shot contract;
+        # no such fallback may be treated as qualified foreground attendance.
+        foreground = getattr(self._client, "send_foreground_frame", None)
+        if tool == "session_summon" and callable(foreground):
+            from integrations.session_bridge.http_foreground import (
+                HttpForegroundClosed, _current_request_or_none,
+            )
+            try:
+                source = _current_request_or_none()
+            except HttpForegroundClosed:
+                raise BridgeError("effect_unknown",
+                    "originating request ended; reconcile the original operation") from None
+            if source is not None:
+                send = foreground
+        response = await send(self._socket_path, frame)
         transport = getattr(response, "transport", None)
         if transport == TRANSPORT_NOT_SENT:
             raise BridgeError(

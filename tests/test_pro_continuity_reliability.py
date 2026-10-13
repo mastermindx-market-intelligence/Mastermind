@@ -48,7 +48,7 @@ def test_no_boundary_means_continue_not_checkpoint_as_excuse():
 
 def test_checkpoint_precedes_risky_work_and_is_cumulative():
     raw = section("ACTIVE_EXECUTION.md", "Step 7A — Preserve operational continuity before interruption")
-    for clause in ("before long/effectful/high-output operations", "Do not defer all persistence",
+    for clause in ("before a long/risky action could lose the last known effect", "Do not defer all persistence",
                    "last verified effect", "rejected approaches", "hypotheses and falsifiers",
                    "working checkpoint", "immutable transfer capsule"):
         assert clause in raw
@@ -92,7 +92,7 @@ def test_bootstrap_still_uses_protected_source_and_contains_no_live_operation():
     raw = text("BOOTSTRAP_KERNEL.md").split("```text\n", 1)[1].split("```", 1)[0]
     assert "docs/sol_skills/INDEX.md" in raw
     assert "protected master" in raw
-    assert "SAME repository + commit" in raw
+    assert "SAME repository + SHA" in raw
     assert "pro-continuity-reliability-20260919-sol-001" not in raw
 
 @pytest.mark.parametrize("scenario_id", [f"PCR{i:02d}" for i in range(1,18)])

@@ -77,6 +77,7 @@ _AUTH_REALMS = frozenset({"dedicated-worker-account"})
 _ADAPTER_EXECUTION_SURFACES = {
     "codex-cli": frozenset({"codex-exec", "codex-app-server"}),
     "claude-code": frozenset({"claude-code"}),
+    "attended-fabric": frozenset({"claude-code"}),
 }
 _SEALED_WORKER_EXECUTION_SURFACES = frozenset({"codex-exec", "claude-code"})
 
@@ -242,6 +243,15 @@ from common.claude_principal_capability_contract import (
     RICH_CLAUDE_PRINCIPAL_MCP_IDS,
 )
 
+# Separate, disabled-by-default return facet over the same sealed SDK edge.
+# The consultation command and grant remain byte-for-byte unchanged.
+NATIVE_RETURN_MCP_ARGS = (*COMPANY_MCP_ARGS[:-1], COMPANY_MCP_BOOTSTRAP.replace(
+    'str(P),"stdio"', 'str(P),"native-stdio"'))
+NATIVE_RETURN_EXECUTION_PROFILE = "operator.appserver.interactive.native-return.v1"
+NATIVE_RETURN_CONFIG_NAME = "mastermind-native-return"
+NATIVE_RETURN_SERVER_IDENTITY = "mastermind-native-return-mcp"
+NATIVE_RETURN_SERVER_VERSION = "1.0.0"
+NATIVE_RETURN_TOOL_SCHEMA_DIGEST = "b2ed6841f5693bd3f2fcd91b036ba1bae529ea9a8472e524b61648c1ced8fb40"
 _RESOURCE_KEYS = frozenset(
     {
         "artifact_root",
@@ -1346,6 +1356,7 @@ class ExecutionCapabilityRegistry:
                         PRINCIPAL_COMPANY_MCP_COMMAND,
                         PRINCIPAL_COMPANY_MCP_ARGS,
                     ),
+                    "native-return-mcp-v1": (COMPANY_MCP_COMMAND, NATIVE_RETURN_MCP_ARGS),
                 }.get(capability_id)
                 if reviewed is None or command_value != reviewed[0]:
                     raise CapabilityPolicyError(
@@ -1442,6 +1453,16 @@ class ExecutionCapabilityRegistry:
                 raise CapabilityPolicyError(
                     "Principal Company MCP grant differs from its reviewed binding"
                 )
+            if capability_id == "native-return-mcp-v1" and (
+                config_name != NATIVE_RETURN_CONFIG_NAME or transport != "stdio"
+                or auth_status != "unsupported"
+                or server_identity != NATIVE_RETURN_SERVER_IDENTITY
+                or server_version != NATIVE_RETURN_SERVER_VERSION
+                or enabled_tools != ("native.reply",)
+                or approval_mode != "approve"
+                or tool_schema_digest != NATIVE_RETURN_TOOL_SCHEMA_DIGEST
+            ):
+                raise CapabilityPolicyError("Native return MCP grant differs from its reviewed binding")
             normalized_grant = {
                 "capability_id": capability_id,
                 "config_name": config_name,

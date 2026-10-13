@@ -26,6 +26,28 @@
         }
       }
     },
+    "operator.appserver.interactive.native-return.v1": {
+      "package_generation_digests": {},
+      "profile_digest": "ef9460d90e76c9f3842f55bfd0625fddaf4764e0da9742f3993ebb347dbc1dd8",
+      "surfaces": {
+        "agent-sdk": {
+          "reason": "Canonical native-return host selection targets Codex App Server; this Claude static configuration slice does not qualify its native binding or transport.",
+          "status": "deferred"
+        },
+        "cli": {
+          "reason": "Canonical native-return host selection targets Codex App Server; this Claude static configuration slice does not qualify its native binding or transport.",
+          "status": "deferred"
+        },
+        "desktop-local": {
+          "reason": "Canonical native-return host selection targets Codex App Server; this Claude static configuration slice does not qualify its native binding or transport.",
+          "status": "deferred"
+        },
+        "inline-subagent": {
+          "reason": "Canonical native-return host selection targets Codex App Server; this Claude static configuration slice does not qualify its native binding or transport.",
+          "status": "deferred"
+        }
+      }
+    },
     "operator.appserver.interactive.v1": {
       "package_generation_digests": {},
       "profile_digest": "cd10fce1f53d01d1253e88fcf7850c0ab7928a2d9c7fc2340e3b8a1475fd324f",

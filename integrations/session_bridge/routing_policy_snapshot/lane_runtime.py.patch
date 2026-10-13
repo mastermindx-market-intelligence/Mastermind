@@ -1,0 +1,12 @@
+--- a/lane_runtime.py
++++ b/lane_runtime.py
+@@ -1566,0 +1567,9 @@
++            # New immutable routing generations retain shared admission policy.
++            # Recheck compatibility atomically before this physical marker exists.
++            policy_here = Path(__file__).resolve().parent
++            if os.path.lexists(policy_here / "pools.yaml"):
++                try:
++                    from fabric_policy_snapshot import verify_for_admission
++                    verify_for_admission(policy_here, active_dir)
++                except Exception as exc:
++                    raise LaneRuntimeError("routing_policy_admission_refused") from exc

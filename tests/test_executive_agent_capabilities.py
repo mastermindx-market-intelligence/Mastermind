@@ -136,7 +136,7 @@ def test_default_policy_is_secret_free_unarmed_and_resolves_closed_profiles():
     registry = ExecutionCapabilityRegistry.load()
     assert registry.lifecycle_authority == "executive_os"
     assert registry.production_armed is False
-    assert registry.policy_version == "2026-10-03.company-consultation-edge-p0"
+    assert registry.policy_version == "2026-10-11.native-return-host-selection"
     assert len(registry.policy_digest) == 64
 
     sealed = registry.resolve("sealed.worker.write.no-extensions.v1")
@@ -688,41 +688,43 @@ def test_browser_grants_refuse_transport_identity_or_profile_widening(tmp_path, 
 
 
 def test_v3_ratified_generation_and_schema_constants_remain_exact(tmp_path):
-    """Freeze both V3 generations and the explicitly loaded inert H1-RG1.
-
-    CAP-S1 remains opt-in for V4 and the default schema remains V3.  The two
-    rich-principal MCP grants and disabled profile rotate only the candidate policy
-    identity; the immediately previous protected-master generation and the
-    older pre-isolated-browser generation remain reproducible byte-for-byte.
-    """
-
+    """Preserve protected native-return and explicit RG1 predecessor identities."""
     assert CAPABILITY_POLICY_SCHEMA == CAPABILITY_POLICY_SCHEMA_V3
     assert CAPABILITY_POLICY_SCHEMA_V3 == "mastermind.executive_agent_capabilities/v3"
     assert CAPABILITY_POLICY_SCHEMA_V4 == "mastermind.executive_agent_capabilities/v4"
 
+    default = ExecutionCapabilityRegistry.load()
+    assert default.schema_version == CAPABILITY_POLICY_SCHEMA_V3
+    assert default.capability_packages == {}
     root = Path(__file__).resolve().parents[1]
-    current = ExecutionCapabilityRegistry.load(
+    candidate_raw = json.loads(
+        (root / "config" / "candidates" / "claude_principal_rg1.json").read_text()
+    )
+    candidate = ExecutionCapabilityRegistry.load(
         root / "config" / "candidates" / "claude_principal_rg1.json",
         source_root=root,
     )
-    assert current.schema_version == CAPABILITY_POLICY_SCHEMA_V3
-    assert current.capability_packages == {}
-
-    raw = json.loads(
-        (root / "config" / "candidates" / "claude_principal_rg1.json").read_text()
-    )
-    del raw["profiles"]["principal.claude.coo.rich.v1"]
-    del raw["mcp_servers"]["executive-coo-mcp-v1"]
-    del raw["mcp_servers"]["company-dialogue-principal-mcp-v1"]
-    raw["policy_version"] = "2026-10-03.company-consultation-edge-p0"
-    previous = ExecutionCapabilityRegistry.load(_write(tmp_path, raw))
-    assert current.policy_digest != previous.policy_digest
-    assert ExecutionCapabilityRegistry.load().policy_digest == previous.policy_digest
+    del candidate_raw["profiles"]["principal.claude.coo.rich.v1"]
+    del candidate_raw["mcp_servers"]["executive-coo-mcp-v1"]
+    del candidate_raw["mcp_servers"]["company-dialogue-principal-mcp-v1"]
+    candidate_raw["policy_version"] = "2026-10-03.company-consultation-edge-p0"
+    previous = ExecutionCapabilityRegistry.load(_write(tmp_path, candidate_raw))
+    assert candidate.policy_digest != previous.policy_digest
     assert previous.policy_digest == (
         "506c1e2aa4bb730bf0325383bfdbbcf73adba7f248378af4dfc7d89ff23c6dd5"
     )
 
-    older_raw = json.loads(json.dumps(raw))
+    # The accepted native-return generation remains in the default policy;
+    # removing only its own additions recovers the same frozen predecessor.
+    protected_raw = _raw_policy()
+    del protected_raw["profiles"]["operator.appserver.interactive.native-return.v1"]
+    del protected_raw["mcp_servers"]["native-return-mcp-v1"]
+    protected_raw["policy_version"] = "2026-10-03.company-consultation-edge-p0"
+    protected_previous = ExecutionCapabilityRegistry.load(_write(tmp_path, protected_raw))
+    assert default.policy_digest != protected_previous.policy_digest
+    assert protected_previous.policy_digest == previous.policy_digest
+
+    older_raw = json.loads(json.dumps(candidate_raw))
     del older_raw["profiles"]["operator.browser.isolated.v1"]
     del older_raw["resources"]["worker-browser-isolated"]
     older = ExecutionCapabilityRegistry.load(_write(tmp_path, older_raw))
@@ -734,7 +736,6 @@ def test_v3_ratified_generation_and_schema_constants_remain_exact(tmp_path):
     ).profile_digest == (
         "028fce73ff8c4cb8f8ada7b514e89b74fba64b92f29db3780004a360e0995d39"
     )
-
     for profile in older.profiles.values():
         assert profile.skill_grants == ()
         assert profile.app_server_config_projection()["skills"] == {"config": None}

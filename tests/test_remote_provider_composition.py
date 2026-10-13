@@ -136,7 +136,7 @@ def setup(tmp_path, monkeypatch, provider, adapter_id):
 def test_claim_to_real_client_launch_status_collect_keeps_parent_and_target(tmp_path,monkeypatch,provider,adapter_id):
     runtime,job,lease,bound,source,lookup,wire,adapter,spec=setup(tmp_path,monkeypatch,provider,adapter_id)
     async def exercise():
-        ref=await adapter.start(spec)
+        ref=await adapter.start(spec, lease=lease)
         assert ref.binary.path == ('/fixtures/claude' if provider=='anthropic' else '/fixtures/codex')
         assert await adapter.status(ref) is WorkerRunStatus.RUNNING
         result=await adapter.collect_result(ref)
@@ -146,7 +146,8 @@ def test_claim_to_real_client_launch_status_collect_keeps_parent_and_target(tmp_
         assert result.result.structured_output['summary']=='fixture-result'
         return ref
     ref=asyncio.run(exercise())
-    assert lookup==[(fx.HOST_A,WORKER)]
+    # Launch validates before and after pinning; status/collect recheck the same target.
+    assert lookup==[(fx.HOST_A,WORKER)] * 4
     assert [req['broker_operation'] for _,req in wire.calls]==['start','status','collect']
     for identity,req in wire.calls:
         assert identity==dict(host_ref=fx.HOST_A,job_id=job.job_id,attempt_id=ref.run_id,worker_id=WORKER,operation_id=ref.run_id)
@@ -183,22 +184,23 @@ def test_trusted_adapter_binding_is_frozen(tmp_path):
 def test_loss_after_start_keeps_original_carrier_and_no_second_start(tmp_path,monkeypatch,provider,adapter_id):
     runtime,job,lease,bound,source,lookup,wire,adapter,spec=setup(tmp_path,monkeypatch,provider,adapter_id)
     wire.lose_start=True
-    with pytest.raises(TransportError) as error: asyncio.run(adapter.start(spec))
+    with pytest.raises(TransportError) as error: asyncio.run(adapter.start(spec, lease=lease))
     assert error.value.classification is TransportEffect.EFFECT_UNKNOWN
-    with pytest.raises(broker.BrokerStateError): asyncio.run(adapter.start(spec))
-    assert len(wire.calls)==1 and len(lookup)==1
+    with pytest.raises(broker.BrokerStateError): asyncio.run(adapter.start(spec, lease=lease))
+    assert len(wire.calls)==1
+    assert lookup==[(fx.HOST_A,WORKER)] * 2
 
 
 @pytest.mark.parametrize('provider,adapter_id',PAIRS)
 def test_new_controller_recovers_same_process_and_has_no_start_permission(tmp_path,monkeypatch,provider,adapter_id):
     runtime,job,lease,bound,source,lookup,wire,old,spec=setup(tmp_path,monkeypatch,provider,adapter_id)
-    ref=asyncio.run(old.start(spec))
+    ref=asyncio.run(old.start(spec, lease=lease))
     prompt=spec.run_dir/'input'/'worker-prompt.txt';prompt.parent.mkdir(parents=True);prompt.write_text(spec.prompt);prompt.chmod(0o600)
     recovery=WorkerRecoveryBinding.bind(adapter_id=old.adapter_id,spec=spec,process_ref=ref,prompt_path=prompt)
     fresh=rt.AttemptBoundRemoteWorkerAdapter(runtime,source)
     assert fresh.reattach(spec,recovery)==ref
     assert asyncio.run(fresh.status(ref)) is WorkerRunStatus.RUNNING
-    with pytest.raises(broker.BrokerStateError): asyncio.run(fresh.start(spec))
+    with pytest.raises(broker.BrokerStateError): asyncio.run(fresh.start(spec, lease=lease))
     assert [req['broker_operation'] for _,req in wire.calls]==['start','status','status']
     recovered_client=wire.opens[-1]
     assert 'start' not in recovered_client.allowed_operations
@@ -209,11 +211,12 @@ def test_new_controller_recovers_same_process_and_has_no_start_permission(tmp_pa
 
 @pytest.mark.parametrize('observed',['codex-cli',None,'claude-code '])
 def test_native_wrong_status_adapter_refuses_without_restarting(tmp_path,monkeypatch,observed):
-    _,_,_,_,_,lookup,wire,adapter,spec=setup(tmp_path,monkeypatch,'anthropic','claude-code')
-    ref=asyncio.run(adapter.start(spec));wire.observed_adapter_id=observed
+    _,_,lease,_,_,lookup,wire,adapter,spec=setup(tmp_path,monkeypatch,'anthropic','claude-code')
+    ref=asyncio.run(adapter.start(spec, lease=lease));wire.observed_adapter_id=observed
     with pytest.raises(broker.BrokerProtocolError): asyncio.run(adapter.status(ref))
-    with pytest.raises(broker.BrokerStateError): asyncio.run(adapter.start(spec))
-    assert len(wire.calls)==2 and len(lookup)==1
+    with pytest.raises(broker.BrokerStateError): asyncio.run(adapter.start(spec, lease=lease))
+    assert len(wire.calls)==2
+    assert lookup==[(fx.HOST_A,WORKER)] * 3
 
 
 def test_native_payload_cannot_retarget_claimed_worker(tmp_path,monkeypatch):
@@ -239,7 +242,7 @@ def test_native_claim_movement_during_binding_resolution_refuses_before_io(tmp_p
 @pytest.mark.parametrize('failure',['lost_response','wrong_process','wrong_adapter'])
 def test_native_failed_recovery_cannot_issue_another_start(tmp_path,monkeypatch,failure):
     runtime,job,lease,bound,source,lookup,wire,old,spec=setup(tmp_path,monkeypatch,'anthropic','claude-code')
-    ref=asyncio.run(old.start(spec))
+    ref=asyncio.run(old.start(spec, lease=lease))
     prompt=spec.run_dir/'input'/'worker-prompt.txt';prompt.parent.mkdir(parents=True);prompt.write_text(spec.prompt);prompt.chmod(0o600)
     recovery=WorkerRecoveryBinding.bind(adapter_id=old.adapter_id,spec=spec,process_ref=ref,prompt_path=prompt)
     if failure=='lost_response': wire.lose_status=True
@@ -248,7 +251,7 @@ def test_native_failed_recovery_cannot_issue_another_start(tmp_path,monkeypatch,
     fresh=rt.AttemptBoundRemoteWorkerAdapter(runtime,source)
     with pytest.raises((TransportError,broker.BrokerProtocolError)):
         fresh.reattach(spec,recovery)
-    with pytest.raises(broker.BrokerStateError): asyncio.run(fresh.start(spec))
+    with pytest.raises(broker.BrokerStateError): asyncio.run(fresh.start(spec, lease=lease))
     assert [req['broker_operation'] for _,req in wire.calls]==['start','status']
     assert 'start' not in wire.opens[-1].allowed_operations
 
@@ -266,8 +269,8 @@ def test_relabelled_resolution_cannot_override_endpoint_facade(tmp_path,monkeypa
 @pytest.mark.parametrize('field',['job_id','run_id','worker_id'])
 def test_correct_transport_envelope_cannot_hide_foreign_result_identity(tmp_path,monkeypatch,provider,adapter_id,field):
     runtime,job,lease,bound,source,lookup,wire,adapter,spec=setup(tmp_path,monkeypatch,provider,adapter_id)
-    ref=asyncio.run(adapter.start(spec));wire.result_identity_override={field:'foreign-identity'}
+    ref=asyncio.run(adapter.start(spec, lease=lease));wire.result_identity_override={field:'foreign-identity'}
     with pytest.raises(broker.BrokerProtocolError,match='result identity'):
         asyncio.run(adapter.collect_result(ref))
     assert [req['broker_operation'] for _,req in wire.calls]==['start','collect']
-    with pytest.raises(broker.BrokerStateError): asyncio.run(adapter.start(spec))
+    with pytest.raises(broker.BrokerStateError): asyncio.run(adapter.start(spec, lease=lease))

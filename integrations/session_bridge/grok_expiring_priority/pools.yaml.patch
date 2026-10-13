@@ -1,0 +1,13 @@
+--- a/pools.yaml
++++ b/pools.yaml
+@@ -50 +50,4 @@
+-        reset_approx: "Sun 00:00Z"         # exact 402 signal governs; 5-h window implied
++        source: chairman_provider_screenshot
++        observed_at: "2026-10-12T01:37:00Z"
++        reset_at: "2026-10-12T05:54:00Z"    # Oct 11 22:54 America/Vancouver
++        remaining_pct: 53                 # screenshot 47% used; not a live meter
+@@ -419,0 +423,4 @@
++  # Chairman 2026-10-11: use expiring Grok for useful work on Ubuntu only.
++  # Self-expires with the dated paired window; no quota/capacity grant.
++  grok_expiring_priority:
++    enabled: true

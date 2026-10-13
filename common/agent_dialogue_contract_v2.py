@@ -622,3 +622,41 @@ def presentation_label(actor_ref: Mapping[str, Any]) -> str:
             return "Mastermind · Fable"
         return "Mastermind · COO/Other"
     return "Mastermind · Executive"
+
+def normalize_context_v2(*, work_ref, commission_ref, session_ref, operation_key,
+                         watch_mode, actor_ref, applies_to) -> dict[str, Any]:
+    """Normalize immutable dialogue context through the canonical V2 contracts."""
+    try:
+        parent = build_parent_v2(
+            {
+                "schema": "mastermind.agent_dialogue_parent.v2",
+                "work_ref": work_ref,
+                "commission_ref": dict(commission_ref),
+                "session_ref": session_ref,
+                "operation_key": operation_key,
+                "watch_mode": watch_mode,
+                "allowed_sol_user_ids": ["U00000000"],
+                "created_at": "2000-01-01T00:00:00Z",
+            }
+        )
+        actor = validate_actor_ref(dict(actor_ref))
+        applies_to = validate_applies_to_v2(dict(applies_to))
+    except (DialogueContractError, TypeError, ValueError):
+        raise DialogueContractError("THREAD_CONTEXT_MISMATCH") from None
+
+    if actor["kind"] == "worker_attempt":
+        if applies_to["kind"] != "executive_attempt" or any(
+            actor[key] != applies_to[key]
+            for key in ("job_id", "attempt_id", "worker_id")
+        ):
+            raise DialogueContractError("THREAD_CONTEXT_MISMATCH")
+
+    return {
+        "work_ref": parent["work_ref"],
+        "commission_ref": parent["commission_ref"],
+        "session_ref": parent["session_ref"],
+        "operation_key": parent["operation_key"],
+        "watch_mode": parent["watch_mode"],
+        "actor_ref": actor,
+        "applies_to": applies_to,
+    }

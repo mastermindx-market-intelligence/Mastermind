@@ -256,9 +256,10 @@ The RG1 source candidate now lives at `config/candidates/claude_principal_rg1.js
 and is loaded only with an explicit path through the existing
 `ExecutionCapabilityRegistry.load`. Its frozen profile/grant/policy generations
 are unchanged. The default `config/executive_agent_capabilities.json` preserves
-the prior reviewed Company Consultation generation and has no rich principal
-profile or either principal-only grant. Default Claude parity therefore covers
-the incumbent profiles only; RG1 validation remains separately exercised.
+the current protected native-return generation and has no rich principal
+profile or either principal-only grant. The accepted native-return facet is
+separate from principal RULING and remains unchanged. Default Claude parity
+covers the incumbent profiles only; RG1 validation is exercised separately.
 
 Frozen projection descriptors live in
 `common/claude_principal_capability_contract.py`, not the production policy's

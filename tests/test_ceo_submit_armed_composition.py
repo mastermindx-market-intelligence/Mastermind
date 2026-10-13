@@ -758,16 +758,58 @@ def _masked_identity_call_arguments(line: str, masked: str) -> list[str]:
     return arguments
 
 
+def _is_mkdir_mode_literal(line: str, token_text: str) -> bool:
+    """Recognize only the octal mode argument of a standalone mkdir expression.
+
+    Do not exempt a whole line containing arbitrary identity arguments, additional
+    statements or another numeric argument that merely shares the same spelling.
+    The caller still rejects every line with an explicit identity-bearing name.
+    """
+    source = line.strip()
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError, TypeError):
+        return False
+    if len(tree.body) != 1 or not isinstance(tree.body[0], ast.Expr):
+        return False
+    call = tree.body[0].value
+    if (not isinstance(call, ast.Call) or call.args
+            or not isinstance(call.func, ast.Attribute) or call.func.attr != "mkdir"):
+        return False
+    modes = 0
+    for keyword in call.keywords:
+        if keyword.arg == "mode":
+            if (not isinstance(keyword.value, ast.Constant)
+                    or type(keyword.value.value) is not int
+                    or ast.get_source_segment(source, keyword.value) != token_text):
+                return False
+            modes += 1
+        elif (keyword.arg not in {"parents", "exist_ok"}
+              or not isinstance(keyword.value, ast.Constant)
+              or type(keyword.value.value) is not bool):
+            return False
+    return modes == 1
+
+
 def _is_known_non_identity_numeric(line: str, token_text: str, value: int) -> bool:
     stripped = line.lstrip()
     if stripped.startswith(_COMMENT_PREFIXES):
         return True
     if _line_mentions_identity_name(line):
         return False
+    # Recognize only the mode slot of this closed shell statement shape.
+    # Additional commands, substitutions and unquoted operands stay guarded.
+    chmod = re.fullmatch(
+        r'\s*chmod\s+([0-7]{3,4})\s+"[A-Za-z0-9_$\{\}./-]+"'
+        r'(?:\s+2>/dev/null\s+\|\|\s+true)?\s*', line,
+    )
+    if chmod is not None and token_text == chmod.group(1):
+        return True
     lowered = line.lower()
     if (
         token_text.lower().startswith("0o")
-        and any(marker in lowered for marker in _PERMISSION_MODE_MARKERS)
+        and (any(marker in lowered for marker in _PERMISSION_MODE_MARKERS)
+             or _is_mkdir_mode_literal(line, token_text))
     ):
         return True
     if 400 <= value <= 600 and any(marker in lowered for marker in _HTTP_STATUS_MARKERS):
@@ -798,12 +840,17 @@ def _scan_identity_source_lines(
                         normalized, token.string, value
                     )):
                         flagged.append(token.string)
-                elif token.type in {tokenize.NAME, tokenize.STRING} and "_mastermind_" in token.string:
-                    start = token.string.find("_mastermind_")
-                    end = start + len("_mastermind_")
-                    while end < len(token.string) and (token.string[end].isalnum() or token.string[end] == "_"):
-                        end += 1
-                    flagged.append(token.string[start:end])
+                elif token.type in {tokenize.NAME, tokenize.STRING}:
+                    # A function name, including its quoted attribute spelling,
+                    # is not an OS account. Keep reserved-prefix identifiers and
+                    # account strings at real token/path boundaries protected.
+                    account = (
+                        re.match(r"_mastermind_\w*", token.string)
+                        if token.type == tokenize.NAME
+                        else re.search(r"(?<!\w)_mastermind_\w*", token.string)
+                    )
+                    if account:
+                        flagged.append(account.group(0))
         except (IndentationError, tokenize.TokenError):
             continue
     return flagged
@@ -910,7 +957,7 @@ def _scan_added_identity_diff(
 
     string_accounts: dict[str, list[list[str]]] = {}
     for path, lines in production.items():
-        if _scope_language(path) != "py" or source_postimages is None or path not in source_postimages:
+        if (_scope_language(path) != "py" and not path.endswith((".patch", ".diff"))) or source_postimages is None or path not in source_postimages:
             continue
         source_lines = source_postimages[path].splitlines()
         numbers = added_numbers.get(path, [])
@@ -921,13 +968,23 @@ def _scan_added_identity_diff(
         # projection. Only exact independently reviewed literal tokens can be
         # neutralized; surrounding code and all unreviewed identities stay visible.
         reviewed = mask_reviewed_identity_literals(path, source_postimages[path])
-        masked, accounts = _python_multiline_string_view(reviewed)
+        masked, accounts = (_python_multiline_string_view(reviewed) if _scope_language(path) == "py"
+                            else (reviewed.splitlines(), {}))
         rendered, literal_flags = [], []
         for number in numbers:
             rendered.append(masked[number - 1])
             literal_flags.append(accounts.get(number, []))
         production[path] = rendered
         string_accounts[path] = literal_flags
+
+    # A patch file remains source: scan its added code, including real UID/GID
+    # constants. Only nested unified-diff range coordinates are metadata.
+    for path, lines in production.items():
+        if path.endswith((".patch", ".diff")):
+            production[path] = [re.sub(
+                r'^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@',
+                '', line,
+            ) for line in lines]
 
     import_edges: dict[str, dict[str, set[tuple[str, str]]]] = {
         path: {} for path in production
@@ -1938,6 +1995,31 @@ def test_d8_identity_context_normalizes_camelcase_and_unicode_names():
     ])
     assert _scan_added_identity_diff(diff) == ["459", "501", "684"]
 
+
+def test_d8_patch_ranges_are_metadata_but_patch_identity_body_is_guarded():
+    path = "integrations/session_bridge/owner-recovery.patch"
+    ranges = "@@ -575,6 +575,11 @@\n@@ -664,6 +669,11 @@\n@@ -748,6 +748,11 @@"
+    assert _scan_added_identity_diff(_d8_frozen_added_diff([(path, ranges)])) == []
+    for source in (ranges + "\n+worker_uid = 451", "@@ -1 +2 @@ worker_uid = 451",
+                   "+@@ -575,6 +575,11 @@"):
+        assert _scan_added_identity_diff(_d8_frozen_added_diff([(path, source)]))
+
+
+@pytest.mark.parametrize("line,allowed", [
+    ('chmod 700 "$HERE/lanes" 2>/dev/null || true', True),
+    ('chmod 750 "$HERE/lanes"', True),
+    ('chown 700 "$HERE/lanes"', False),
+    ('worker_uid=700; chmod 700 "$HERE/lanes"', False),
+    ('chmod 700 "$HERE/lanes"; launch_worker 700', False),
+    ('chmod 700 "$(launch_worker 700)"', False),
+    ('chmod 700 "$WORKER_UID/lanes"', False),
+])
+def test_d8_shell_mode_exemption_is_one_closed_operand(line, allowed):
+    findings = _scan_added_identity_diff(_d8_frozen_added_diff([
+        ("integrations/owner/base.sh", line),
+    ]))
+    assert (findings == []) is allowed
+
 def test_d8_template_topology_and_protected_defaults():
     value = json.loads(TEMPLATE.read_text(encoding="utf-8"))
     assert value["allowed_peer_uids"] == [450, 501]
@@ -1972,7 +2054,7 @@ def test_d8_template_topology_and_protected_defaults():
             check=True, capture_output=True, text=True,
         ).stdout
         source_diffs.append(diff)
-        if _scope_language(path) == "py":
+        if _scope_language(path) == "py" or path.endswith((".patch", ".diff")):
             source_postimages[path] = subprocess.run(
                 ["git", "show", f"HEAD:{path}"], cwd=ROOT,
                 check=True, capture_output=True, text=True,
@@ -2265,3 +2347,19 @@ def test_d8_error_token_postimage_preserves_conservative_numeric_guard(quote):
     source = '"""ordinary\npeer_uid = 459\n"""\nbad = ' + quote + 'unfinished\n'
     diff = _d8_frozen_source_diff(path, source)
     assert _scan_added_identity_diff(diff, source_postimages={path: source}) == ['459']
+
+
+def test_d8_exact_reviewed_pairing_age_keeps_all_other_patch_bytes_guarded():
+    path='integrations/session_bridge/glm_host_account_pairing/glm-host-account-pairing.patch'
+    source=(ROOT/path).read_text()
+    def scan(content, *, actual_path=path, postimage=True):
+        diff=(f'--- /dev/null\n+++ b/{actual_path}\n@@ -0,0 +1,{len(content.splitlines())} @@\n'
+              +'\n'.join('+'+line for line in content.splitlines()))
+        return _scan_added_identity_diff(diff,source_postimages={actual_path:content} if postimage else None)
+    assert scan(source)==[]
+    assert scan(source,postimage=False)
+    assert scan(source,actual_path='integrations/other_account/changed.patch')
+    for changed in [source.replace('+DEFAULT_MAX_AGE = 600','+DEFAULT_MAX_AGE = 601'),
+                    source+'\n+peer_uid = 600\n',source+'\n+DEFAULT_MAX_AGE = 600\n',
+                    source+'\n+# unrelated drift\n']:
+        assert scan(changed)
