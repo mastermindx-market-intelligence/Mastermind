@@ -4894,19 +4894,28 @@ class ExecutiveControlService:
                         "effect": "EFFECT_UNKNOWN", "error": {"code": "RELEASE_RESPONSE_UNKNOWN"}}})
                 return
             from common.executive_workspace_contract import (
-                FRAME_SCHEMA, FRAME_SCHEMA_V2,
+                FRAME_SCHEMA, FRAME_SCHEMA_V2, FRAME_SCHEMA_V3,
+                MAX_PLAN_RESPONSE_BYTES, validate_v3_frame, plan_unavailable,
                 MAX_RESPONSE_BYTES as WORKSPACE_MAX_RESPONSE_BYTES,
                 MAX_RESULT_RESPONSE_BYTES,
                 response_ceiling_for,
                 error as workspace_error,
                 bounded_canonical as workspace_encode,
             )
-            if app_peer and isinstance(parsed, dict) and parsed.get("schema") in {FRAME_SCHEMA, FRAME_SCHEMA_V2}:
+            if app_peer and isinstance(parsed, dict) and parsed.get("schema") in {FRAME_SCHEMA, FRAME_SCHEMA_V2, FRAME_SCHEMA_V3}:
                 factory = app_binding.workspace_read_provider_factory
                 # Pick the operation-specific ceiling BEFORE any work so an
                 # unknown or malformed frame never widens to a larger ceiling.
                 operation = parsed.get("operation") if isinstance(parsed, dict) else None
-                if parsed.get("schema") == FRAME_SCHEMA_V2:
+                if parsed.get("schema") == FRAME_SCHEMA_V3:
+                    ceiling = MAX_PLAN_RESPONSE_BYTES
+                    try:
+                        validate_v3_frame(parsed)
+                    except (TypeError, ValueError):
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400),
+                                                             response_ceiling=ceiling)
+                        return
+                elif parsed.get("schema") == FRAME_SCHEMA_V2:
                     ceiling = response_ceiling_for(operation)
                 else:
                     ceiling = WORKSPACE_MAX_RESPONSE_BYTES
@@ -4922,7 +4931,9 @@ class ExecutiveControlService:
                 try:
                     workspace_encode(result, limit=ceiling - 1)
                 except (TypeError, ValueError):
-                    result = workspace_error("source_unavailable", 503)
+                    result = (plan_unavailable(parsed["selection"], "RESPONSE_OVER_BUDGET")
+                              if parsed.get("schema") == FRAME_SCHEMA_V3
+                              else workspace_error("source_unavailable", 503))
                 await self._send_ceo_ingress_response(writer, result, response_ceiling=ceiling)
                 return
             from common.executive_content_contract import ACCESS_SCHEMA, PAGE_SCHEMA, STEWARD_SCHEMA, MAX_PAGE_BYTES

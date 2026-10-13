@@ -14,6 +14,15 @@ FRAME_SCHEMA = "mastermind.executive_workspace_read.v1"
 #: v2 frame schema and result observation schema for the result-detail and
 #: Mission v3 routes.  Frozen by the parent-ratified workspace contract.
 FRAME_SCHEMA_V2 = "mastermind.executive_workspace_read.v2"
+FRAME_SCHEMA_V3 = "mastermind.executive_workspace_read.v3"
+PLAN_BODY_SCHEMA = "mastermind.workspace_admitted_execution_plan.v1"
+PLAN_OBSERVATION_SCHEMA = "mastermind.workspace_plan_observation.v1"
+MAX_PLAN_RESPONSE_BYTES = 16_384
+PLAN_REFUSAL_REASONS = frozenset({
+    "ADMISSION_NOT_ESTABLISHED", "ADMISSION_CONFLICT", "SOURCE_CHANGED",
+    "SOURCE_UNAVAILABLE", "OVER_BUDGET", "CONTENT_WITHHELD",
+    "CONTENT_OVER_BUDGET", "RESPONSE_OVER_BUDGET",
+})
 PROGRAMS_SCHEMA = "mastermind.workspace_programs.v1"
 OBSERVATION_SCHEMA = "mastermind.workspace_source_observation.v1"
 RESULT_OBSERVATION_SCHEMA = "mastermind.workspace_result_observation.v1"
@@ -153,13 +162,51 @@ def validate_v2_frame(frame):
     return frame
 
 
+def v3_selection(value):
+    """The plan selector reuses the existing two-field v2 grammar."""
+    return v2_selection(value, "mission_v3")
+
+
+def validate_v3_frame(frame):
+    """The separate v3 schema admits only the read-only admitted_plan operation."""
+    if (type(frame) is not dict or set(frame) != {"schema", "operation", "selection", "principal"}
+            or frame["schema"] != FRAME_SCHEMA_V3 or frame["operation"] != "admitted_plan"
+            or type(frame["principal"]) is not dict or set(frame["principal"]) != PRINCIPAL_KEYS
+            or frame["principal"]["resource"] != RESOURCE or frame["principal"]["scopes"] != [SCOPE]
+            or any(type(frame["principal"][key]) is not str or not 1 <= len(frame["principal"][key]) <= 256
+                   for key in PRINCIPAL_KEYS - {"scopes"})):
+        raise ValueError("invalid_input")
+    v3_selection(frame["selection"])
+    if len(canonical(frame)) + 1 > MAX_REQUEST_BYTES:
+        raise ValueError("invalid_input")
+    return frame
+
+
+def plan_unavailable(selected, reason):
+    """Small closed refusal shared by the producer and transport budget fences."""
+    if reason not in PLAN_REFUSAL_REASONS:
+        raise ValueError("invalid_input")
+    selected = v3_selection(selected)
+    return {"ok": True, "result": {
+        "schema": PLAN_BODY_SCHEMA, "selection": dict(selected),
+        "availability": "UNAVAILABLE", "reason_codes": [reason], "plan": None,
+        "source_observation": {
+            "schema": PLAN_OBSERVATION_SCHEMA, "selection": dict(selected),
+            "state": "CONFLICT" if reason == "SOURCE_CHANGED" else "UNKNOWN",
+            "control_room": None, "runtime": None,
+        },
+    }}
+
+
 def response_ceiling_for(operation):
-    """Return the frozen response ceiling for the supplied v2 operation.
+    """Return the frozen response ceiling for the supplied Workspace read operation.
 
     Returns the existing Mission v2 ``MAX_RESPONSE_BYTES`` for unknown or
-    v1 operations and the 16384-byte result ceiling for ``"result"`` so the
+    v1 operations and the 16384-byte ceiling for result and admitted-plan reads so the
     caller cannot widen an unknown frame to a larger ceiling.
     """
+    if operation == "admitted_plan":
+        return MAX_PLAN_RESPONSE_BYTES
     if operation == "result":
         return MAX_RESULT_RESPONSE_BYTES
     return MAX_RESPONSE_BYTES
