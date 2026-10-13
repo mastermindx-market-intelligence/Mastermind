@@ -1712,6 +1712,7 @@ def _service_from_config(
     remote_worker_binding_source: Callable[..., Any] | None = None,
     fabric_worker_binding_source: Any | None = None,
     fabric_attended_probe_source: Any | None = None,
+    attended_work_placements: tuple = (),
 ) -> ExecutiveControlService:
     from control_plane.dialogue_wake_canary_activation import DialogueWakeCanaryProfile
     if dialogue_canary_profile is None:
@@ -1720,6 +1721,14 @@ def _service_from_config(
         raise ServiceError("dialogue canary profile requires trusted composition")
     # This is trusted host composition, never a JSON/model-selected factory.
     _validate_fabric_bridge_config(raw)
+    from control_plane.fabric_attended_routing import AttendedWorkPlacement, placement_member
+    if (type(attended_work_placements) is not tuple
+            or len(attended_work_placements) > 6
+            or any(type(item) is not AttendedWorkPlacement for item in attended_work_placements)):
+        raise ServiceError('attended placements require bounded typed host configuration')
+    if attended_work_placements and (fabric_worker_binding_source is None
+                                    or fabric_attended_probe_source is None):
+        raise ServiceError('attended placements require the binding and startup probe sources')
     if fabric_attended_probe_source is not None:
         from control_plane.fabric_attended_canary import AttendedControlProbeSource
         if type(fabric_attended_probe_source) is not AttendedControlProbeSource:
@@ -1742,6 +1751,11 @@ def _service_from_config(
         if any(binding.worker_id == str(raw.get("worker_id") or "codex-01")
                for binding in fabric_worker_binding_source.bindings):
             raise ServiceError("Fabric binding cannot replace the primary worker")
+    if attended_work_placements:
+        from control_plane.model_router import ModelRouter
+        router = ModelRouter.load()
+        for placement in attended_work_placements:
+            placement_member(router, placement)
     if (remote_worker_binding_source is not None
             and not callable(remote_worker_binding_source)):
         raise ServiceError("remote worker binding source must be callable")
@@ -1842,6 +1856,7 @@ def _service_from_config(
         coo_operator_harness_armed=raw.get(
             "coo_operator_harness_armed", False
         ),
+        coo_attended_work_placements=attended_work_placements,
         coo_tick_interval_seconds=float(
             raw.get("coo_tick_interval_seconds", 15.0)
         ),
