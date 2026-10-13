@@ -188,6 +188,11 @@ def reviewed_literal_spans(path: str, source: str):
     reviewed_container = None
     if path == REVIEWED_PATH:
         reviewed_anchors = REVIEWED_ANCHORS
+    elif path == "integrations/research_read_mcp/release_identity.py":
+        from tests.research_read_archive_identity_review import (
+            REVIEWED_ANCHORS as archive_path_anchors,
+        )
+        reviewed_anchors = archive_path_anchors
     elif path == "control_plane/executive_service.py":
         from tests.executive_company_identity_review import (
             REVIEWED_ANCHORS as company_anchors, REVIEWED_CONTAINER,
