@@ -1,14 +1,8 @@
-"""Dormant exact-incident recovery: production issuance stays closed.
+"""Exact incident policy, authenticated issuance and one-use qualification.
 
-The bounded DUE10 incident issuer exists only as a typed internal broker
-action whose production activation policy is ``None``.  Every production
-submission must refuse before any grant, commitment, successor designation,
-deadline or allocation exists.  The positive path below exercises the real
-issuance, terminal join, typed common admission, one-use allocation and
-finalization machinery against a test-only ``IncidentPolicy`` built from the
-fixtures themselves; it is reachable only by injecting that policy object in
-process and is never reachable from argv, config, environment, or any receipt
-field.
+The production policy binds the separately authorized exact incident without
+claiming an ordinary cause. Positive issuer/consumer tests use private fixture
+policies and real machinery; no fixture is production permission or readiness.
 """
 from __future__ import annotations
 
@@ -365,12 +359,24 @@ def nothing_created(s):
 
 
 # ---------------------------------------------------------------------------
-# Production dormancy: None policy, no activation channel, ordinary untouched.
+# Source-bound production policy, explicit dormancy, ordinary unchanged.
 # ---------------------------------------------------------------------------
 
 
-def test_production_incident_policy_is_none_and_designated_evidence_is_frozen():
-    assert rec.PRODUCTION_INCIDENT_POLICY is None
+def test_production_incident_policy_binds_exact_human_answer_and_designated_evidence():
+    policy = rec.PRODUCTION_INCIDENT_POLICY
+    assert isinstance(policy, rec.IncidentPolicy)
+    assert policy.authorization_binding() == {
+        "schema_version": rec.INCIDENT_POLICY_SCHEMA,
+        "policy_id": "due10-dual-unknown-one-attempt-20261013",
+        "question_sha256": "660ddac062ace661a01984e4abddc0d36145c17226c352134ca4883eb7f82b0b",
+        "answer_sha256": "590b9e4398dbd11400728d7c566e29bc4afd6c574a39a464f6581eae60b75028",
+        "provenance_sha256": "b55221d99bbd31a90d68b9ea9c59a43d3b3191595a8fe2ce99dfdef2e7bcd2de",
+    }
+    assert policy.designated_evidence() == rec.INCIDENT_DESIGNATED_EVIDENCE
+    assert rec.INCIDENT_HISTORICAL_CAUSE == "UNKNOWN"
+    assert rec.INCIDENT_CAUSAL_LINK == "NOT_ESTABLISHED"
+    assert not rec.PRODUCER_QUALIFICATION.terminal_events
     assert rec.INCIDENT_DESIGNATED_EVIDENCE == {
         "original_request_id": "codex01-current-v5-company-01a1230a-20261011-10",
         "original_request_sha256":
@@ -388,7 +394,8 @@ def test_production_incident_policy_is_none_and_designated_evidence_is_frozen():
     }
 
 
-def test_none_policy_issuance_refuses_before_any_state_exists(recovery):
+def test_none_policy_issuance_refuses_before_any_state_exists(recovery, monkeypatch):
+    monkeypatch.setattr(rec, "PRODUCTION_INCIDENT_POLICY", None)
     s = recovery
     broker = make_broker(s)
     with pytest.raises(PrivilegedBrokerError, match="dormant"):
@@ -396,6 +403,22 @@ def test_none_policy_issuance_refuses_before_any_state_exists(recovery):
     assert nothing_created(s)
     assert not broker.inflight_path(ISSUER_REQUEST_ID).exists()
     assert not broker.receipt_path(ISSUER_REQUEST_ID).exists()
+
+
+@pytest.mark.parametrize("section,field", [
+    ("authorization", key) for key in ("policy_id", "question_sha256", "answer_sha256", "provenance_sha256")
+] + [("evidence", key) for key in rec.INCIDENT_DESIGNATED_EVIDENCE])
+def test_live_production_policy_rejects_each_changed_binding_before_state(recovery, section, field):
+    policy = rec.PRODUCTION_INCIDENT_POLICY
+    assert isinstance(policy, rec.IncidentPolicy)
+    grant = {"authorization": policy.authorization_binding(), "evidence": policy.designated_evidence()}
+    rec.require_current_incident_policy(grant)
+    assert nothing_created(recovery)
+    old = grant[section][field]
+    grant[section][field] = old + 1 if type(old) is int else old + "-changed"
+    with pytest.raises(rec.RecoveryError, match="incident_policy_binding_mismatch"):
+        rec.require_current_incident_policy(grant)
+    assert nothing_created(recovery)
 
 
 def test_incident_policy_shape_is_closed():
