@@ -3,12 +3,12 @@
   "classification": "SOURCE_ONLY_UNINSTALLED",
   "files": {
     "control_plane/fabric_attended_backend.py": {
-      "bytes": 46253,
-      "sha256": "4aa9007f8c23bc6da5138bd533ab2fd891713f6551e349046426c410700881d7"
+      "bytes": 46264,
+      "sha256": "2adefe4099f55131234dd1c36f713917a76af44eeb62c61b0924bac0d2ed9480"
     },
     "tests/test_fabric_attended_backend.py": {
-      "bytes": 51367,
-      "sha256": "6249df0d75d611d2d16cd53e6963f3344d2a25e1ebe9f0cb392616ebe68f2807"
+      "bytes": 52075,
+      "sha256": "0d2c487a45fec81054feb1a822458f8ce33b930dcc52738f6a6c35a4bad737e2"
     }
   },
   "dependencies": [
@@ -35,11 +35,19 @@
       "errors": 0,
       "skipped": 0,
       "exit_code": 0
+    },
+    "CANONICAL_CANCEL_GREEN.xml": {
+      "sha256": "6cbebe667dfe4ee2fda9808c18f053ebc65bbd53cae13f964cb252ecb485c95c",
+      "tests": 18,
+      "failures": 0,
+      "errors": 0,
+      "exit_code": 0
     }
   },
   "factory_source_join": "create_attended_backend(trusted BridgeConfig, owner_resources=_FixedOwnerResources) -> fixed single-use service composition. It authenticates exact in-process ControlStartAuthority before deriving Runtime request/correlation and retaining ONE FabricAttendedBackend. Default unconfigured invocation refuses; no JSON/env/import selectors.",
   "activation_path": "Qualified fixed owner supplies independent typed policy/catalog/profile/binary/physical/path/evidence resources plus actual sealed credential admission/loader, creates backend through fixed factory, then calls existing scripts.executive_fabric_bridge.serve(config, backend, stop_event=original owner event, activate_socket=existing qualified platform producer) on original main thread/event loop. Darwin default is activate_launchd_socket; Linux composition uses existing scripts.executive_os_linux_worker.activate_systemd_socket (closed one-FD producer) with independently qualified Control GID. No new listener. Original signal/cleanup owner shutdown composition remains required.",
   "unsupported": "Nonempty validation argv refused pre-effect. validation/nonterminal/restart/unbound absence cleanup scopes remain unavailable. Existing original owner reconciliation required after controller restart.",
   "pending": "One authorized zero-child independent source review; actual Linux issuer/realm/profile/binary/assignment and platform socket/shutdown inputs remain separate activation obligations. Source is uninstalled.",
-  "credential_source_join": "Four separately fixed owner inputs: canonical CredentialLoader, actual sealed SubscriptionCanaryAdmission and original binding/profile catalog documents. Reuse pure original executor verifier before slot/O_EXCL/lease; exact worker/catalog/profile/model/endpoint verified again at actual boundary. Canonical _safe_credential once; token enters only transient env and is scrubbed on begin return/failure. No credential loaded by Backend, RPC, descriptor or evidence."
+  "credential_source_join": "Four separately fixed owner inputs: canonical CredentialLoader, actual sealed SubscriptionCanaryAdmission and original binding/profile catalog documents. Reuse pure original executor verifier before slot/O_EXCL/lease; exact worker/catalog/profile/model/endpoint verified again at actual boundary. Canonical _safe_credential once; token enters only transient env and is scrubbed on begin return/failure. No credential loaded by Backend, RPC, descriptor or evidence.",
+  "canonical_cancellation": "Authenticated FabricBridgeBroker validates the closed cancellation body; original lane owner independently validates before signals. Backend delegates without a third duplicated numeric bound."
 }

@@ -244,6 +244,22 @@ def test_carrier_symlink_and_foreign_route_fail_closed(harness):
     run(scenario())
 
 
+@pytest.mark.parametrize('reason', [None, '', 'x' * 501, 'stop\x00now'])
+def test_real_broker_refuses_invalid_cancel_before_backend_or_hold(harness, monkeypatch, reason):
+    h = harness
+    async def forbidden(*args, **kwargs):
+        pytest.fail('invalid cancellation reached Backend')
+    async def scenario():
+        await h.start()
+        monkeypatch.setattr(h.instance, 'execute', forbidden)
+        payload = h.request('cancel')['payload']
+        payload['reason'] = reason
+        with pytest.raises(bridge.BridgeProtocolError):
+            await h.service.execute(h.request('cancel', payload), peer=PeerCredentials(uid=450, gid=450))
+    run(scenario())
+    assert h.holds == h.releases == []
+
+
 def test_real_cancel_wire_preserves_exact_whitespace_and_owner(harness,monkeypatch):
     h=harness; calls=[]
     def cancel(owner, **kw):

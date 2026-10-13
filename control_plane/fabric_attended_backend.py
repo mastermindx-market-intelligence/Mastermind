@@ -454,8 +454,8 @@ class FabricAttendedBackend:
             if slot.assignment_task is not None:
                 _refuse('assignment_settlement_already_entered')
             reason = payload.get('reason')
-            if type(reason) is not str or not 1 <= len(reason) <= 500 or '\x00' in reason:
-                _refuse('cancel_reason_invalid')
+            # The authenticated broker validates the closed cancel payload;
+            # the original process owner revalidates it before any signal.
             try:
                 observed = lane_runtime.cancel_exact_owned_process(slot.owner, label=slot.owner.label,
                     process_identity=slot.owner.process_identity, reason=reason)
