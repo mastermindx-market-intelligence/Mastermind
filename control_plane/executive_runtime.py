@@ -1962,35 +1962,154 @@ def _interactive_in_flight_turn_id(
 ) -> str | None:
     rows = connection.execute(
         """
-        SELECT g.session_epoch_id,e.attempt_id
+        SELECT g.session_epoch_id,e.attempt_id,e.worker_id,
+               e.provider_session_id,a.job_id,a.quota_class
         FROM process_generations g
         JOIN harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id
+        JOIN attempts a ON a.attempt_id=e.attempt_id
         WHERE g.process_generation_id=?
         """,
         (generation_id,),
     ).fetchall()
     if len(rows) != 1:
         raise StateConflict("interactive generation identity is ambiguous")
-    session_epoch_id = rows[0]["session_epoch_id"]
-    attempt_id = rows[0]["attempt_id"]
-    receipts: dict[str, set[str]] = {}
+    bound = rows[0]
+    session_epoch_id = str(bound["session_epoch_id"])
+    attempt_id = str(bound["attempt_id"])
+    worker_id = str(bound["worker_id"])
+    expected_source = (
+        str(bound["job_id"]), attempt_id, worker_id, str(bound["quota_class"])
+    )
+    relevant: dict[str, dict[str, tuple[sqlite3.Row, dict[str, Any]]]] = {}
+    unknown: list[tuple[sqlite3.Row, dict[str, Any]]] = []
     for event in connection.execute(
         """
-        SELECT event_type,payload_json
+        SELECT event_type,payload_json,aggregate_id,command_id,actor,
+               job_id,attempt_id,worker_id,quota_class
         FROM events
         WHERE aggregate_type='operator_operation' AND attempt_id=?
         """,
         (attempt_id,),
     ):
-        payload = _json_loads(event["payload_json"], fallback={})
-        if (
-            payload.get("operation_kind") != OperationKind.BEGIN_TURN.value
-            or payload.get("session_epoch_id") != session_epoch_id
-            or payload.get("process_generation_id") != generation_id
-        ):
+        kind = str(event["event_type"])
+        if kind not in {
+            OperationReceiptKind.INTENT.value, OperationReceiptKind.APPLIED.value,
+            OperationReceiptKind.EFFECT_UNKNOWN.value,
+        }:
             continue
-        turn_id = str(payload.get("turn_id"))
-        receipts.setdefault(turn_id, set()).add(event["event_type"])
+        payload = _json_loads(event["payload_json"], fallback={})
+        if not isinstance(payload, dict):
+            raise StateConflict("interactive turn receipt provenance invalid")
+        if kind == OperationReceiptKind.EFFECT_UNKNOWN.value:
+            unknown.append((event, payload))
+            continue
+        if payload.get("operation_kind") != OperationKind.BEGIN_TURN.value:
+            continue
+        if (payload.get("session_epoch_id") != session_epoch_id
+                or payload.get("process_generation_id") != generation_id):
+            # Another generation of the same Attempt can be valid; an
+            # unbound one cannot be quietly treated as a settled turn.
+            other = connection.execute(
+                "SELECT 1 FROM process_generations g "
+                "JOIN harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id "
+                "WHERE g.process_generation_id=? AND e.attempt_id=? "
+                "AND g.session_epoch_id=? LIMIT 1",
+                (payload.get("process_generation_id"), attempt_id,
+                 payload.get("session_epoch_id")),
+            ).fetchone()
+            if other is None:
+                raise StateConflict("interactive turn receipt provenance invalid")
+            continue
+        if (event["actor"] != "supervisor"
+                or (event["job_id"], event["attempt_id"],
+                    event["worker_id"], event["quota_class"]) != expected_source):
+            raise StateConflict("interactive turn receipt source identity invalid")
+        turn_id = payload.get("turn_id")
+        op_id = event["aggregate_id"]
+        if (type(turn_id) is not str or not turn_id
+                or type(op_id) is not str):
+            raise StateConflict("interactive turn receipt identity invalid")
+        try:
+            operation = OperationId(op_id)
+            expected_command = operation_receipt_command_id(
+                operation, OperationReceiptKind(kind),
+            )
+        except (ValueError, TypeError):
+            raise StateConflict("interactive turn receipt identity invalid") from None
+        if event["command_id"] != expected_command:
+            raise StateConflict("interactive turn receipt provenance invalid")
+        packet = relevant.setdefault(operation.command_id, {})
+        if kind in packet:
+            raise StateConflict("interactive duplicate turn receipt identity")
+        packet[kind] = (event, payload)
+
+    for event, payload in unknown:
+        packet = relevant.get(str(event["aggregate_id"]))
+        if packet is None:
+            continue
+        try:
+            operation = OperationId(str(event["aggregate_id"]))
+            expected_command = operation_receipt_command_id(
+                operation, OperationReceiptKind.EFFECT_UNKNOWN,
+            )
+        except (ValueError, TypeError):
+            raise StateConflict("interactive unknown-effect receipt identity invalid") from None
+        if (event["command_id"] != expected_command
+                or event["actor"] != "supervisor"
+                or (event["job_id"], event["attempt_id"],
+                    event["worker_id"], event["quota_class"]) != expected_source
+                or payload.get("schema_version")
+                != "mastermind.operator_harness_effect_unknown/v1"):
+            raise StateConflict("interactive unknown-effect receipt provenance invalid")
+        if OperationReceiptKind.EFFECT_UNKNOWN.value in packet:
+            raise StateConflict("interactive duplicate unknown-effect receipt")
+        packet[OperationReceiptKind.EFFECT_UNKNOWN.value] = (event, payload)
+
+    receipts: dict[str, set[str]] = {}
+    for operation_key, packet in relevant.items():
+        if OperationReceiptKind.INTENT.value not in packet:
+            raise StateConflict("interactive turn receipt has no original INTENT")
+        intent = packet[OperationReceiptKind.INTENT.value][1]
+        expected_intent = {
+            "schema_version": "mastermind.operator_harness_turn_intent/v1",
+            "operation_kind": OperationKind.BEGIN_TURN.value,
+            "attempt_id": attempt_id,
+            "session_epoch_id": session_epoch_id,
+            "process_generation_id": generation_id,
+            "worker_id": worker_id,
+            "provider_session_id": bound["provider_session_id"],
+            "turn_id": intent.get("turn_id"),
+        }
+        if intent != expected_intent:
+            raise StateConflict("interactive turn INTENT provenance invalid")
+        if OperationReceiptKind.APPLIED.value in packet:
+            applied = packet[OperationReceiptKind.APPLIED.value][1]
+            if (
+                set(applied) != {
+                    "schema_version", "operation_kind", "attempt_id",
+                    "session_epoch_id", "process_generation_id", "turn_id",
+                    "provider_native_turn_id", "acknowledged",
+                }
+                or applied.get("schema_version")
+                != "mastermind.operator_harness_turn_applied/v1"
+                or applied.get("operation_kind") != OperationKind.BEGIN_TURN.value
+                or applied.get("attempt_id") != attempt_id
+                or applied.get("session_epoch_id") != session_epoch_id
+                or applied.get("process_generation_id") != generation_id
+                or applied.get("turn_id") != intent["turn_id"]
+                or applied.get("acknowledged") is not True
+            ):
+                raise StateConflict("interactive turn APPLIED provenance invalid")
+        if (
+            OperationReceiptKind.EFFECT_UNKNOWN.value in packet
+            and OperationReceiptKind.APPLIED.value in packet
+        ):
+            raise StateConflict("interactive contradictory turn receipts")
+        turn_id = str(intent["turn_id"])
+        if turn_id in receipts:
+            raise StateConflict("interactive duplicate turn source identity")
+        receipts[turn_id] = set(packet)
+
     for turn_id, states in receipts.items():
         if states == {OperationReceiptKind.INTENT.value}:
             return turn_id
@@ -1999,20 +2118,71 @@ def _interactive_in_flight_turn_id(
             return turn_id
     for turn_id, states in receipts.items():
         if OperationReceiptKind.APPLIED.value in states:
-            turn_operation_applied = connection.execute(
+            interrupts = connection.execute(
                 """
-                SELECT 1
+                SELECT aggregate_id,command_id,actor,job_id,attempt_id,
+                       worker_id,quota_class,payload_json
                 FROM events
                 WHERE event_type='OPERATOR_OPERATION_APPLIED'
                   AND aggregate_type='operator_operation'
                   AND attempt_id=?
                   AND json_extract(payload_json,'$.operation_kind')='interrupt_turn'
                   AND json_extract(payload_json,'$.turn_id')=?
-                LIMIT 1
                 """,
                 (attempt_id, turn_id),
-            ).fetchone()
-            if turn_operation_applied is not None:
+            ).fetchall()
+            if interrupts:
+                if len(interrupts) != 1:
+                    raise StateConflict("interactive interrupt receipt identity ambiguous")
+                interrupt = interrupts[0]
+                try:
+                    operation = OperationId(str(interrupt["aggregate_id"]))
+                    derived = operation_receipt_command_id(
+                        operation, OperationReceiptKind.APPLIED,
+                    )
+                except (TypeError, ValueError):
+                    raise StateConflict("interactive interrupt receipt identity invalid") from None
+                expected_applied = {
+                    "schema_version": "mastermind.operator_harness_turn_operation_applied/v1",
+                    "operation_kind": "interrupt_turn",
+                    "turn_id": turn_id,
+                }
+                expected_intent = {
+                    "schema_version": "mastermind.operator_harness_turn_operation/v1",
+                    "operation_kind": "interrupt_turn",
+                    "attempt_id": attempt_id,
+                    "session_epoch_id": session_epoch_id,
+                    "process_generation_id": generation_id,
+                    "worker_id": worker_id,
+                    "turn_id": turn_id,
+                }
+                if (
+                    interrupt["command_id"] != derived
+                    or interrupt["actor"] != "supervisor"
+                    or (interrupt["job_id"], interrupt["attempt_id"],
+                        interrupt["worker_id"], interrupt["quota_class"]) != expected_source
+                    or _json_loads(interrupt["payload_json"], fallback=None)
+                    != expected_applied
+                ):
+                    raise StateConflict("interactive interrupt APPLIED provenance invalid")
+                original = connection.execute(
+                    """
+                    SELECT payload_json FROM events
+                    WHERE event_type='OPERATOR_OPERATION_INTENT'
+                      AND aggregate_type='operator_operation'
+                      AND aggregate_id=? AND command_id=?
+                      AND actor='supervisor' AND job_id=? AND attempt_id=?
+                      AND worker_id=? AND quota_class=?
+                    LIMIT 1
+                    """,
+                    (operation.command_id, operation.command_id, *expected_source),
+                ).fetchone()
+                if (
+                    original is None
+                    or _json_loads(original["payload_json"], fallback=None)
+                    != expected_intent
+                ):
+                    raise StateConflict("interactive interrupt INTENT provenance invalid")
                 continue
             candidate = connection.execute(
                 """

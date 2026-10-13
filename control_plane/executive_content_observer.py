@@ -9,6 +9,9 @@ from common.executive_content_contract import (
     load_content_profiles, ACCESS_SCHEMA, PAGE_SCHEMA, ERRORS, MAX_PAGE_BYTES,
     canonical, digest, epoch,
 )
+from control_plane.operator_harness_contract import (
+    OperationId, OperationReceiptKind, operation_receipt_command_id,
+)
 
 
 class ContentRefused(ValueError):
@@ -105,7 +108,7 @@ class ExecutiveContentObserver:
             if live and connection.execute("SELECT 1 FROM events WHERE event_type='OHF_RESTORE_INVALIDATED' AND worker_id=? LIMIT 1",(row['worker_id'],)).fetchone():
                 raise ContentRefused('GRANT_INVALIDATED')
             turns = connection.execute('''
-                SELECT aggregate_id,event_type,payload_json FROM events
+                SELECT aggregate_id,command_id,actor,event_type,payload_json FROM events
                 WHERE aggregate_type='operator_operation' AND attempt_id=?
                   AND event_type IN ('OPERATOR_OPERATION_INTENT','OPERATOR_OPERATION_APPLIED')
                   AND json_extract(payload_json,'$.operation_kind')='begin_turn'
@@ -113,6 +116,21 @@ class ExecutiveContentObserver:
             ''',(p.attempt_id,p.local_turn_id)).fetchall()
             import json
             if len(turns) != 2 or {t['event_type'] for t in turns} != {'OPERATOR_OPERATION_INTENT','OPERATOR_OPERATION_APPLIED'} or len({t['aggregate_id'] for t in turns}) != 1:
+                raise ContentRefused('GRANT_INVALIDATED')
+            by_type = {t['event_type']: t for t in turns}
+            intent = by_type['OPERATOR_OPERATION_INTENT']
+            applied = by_type['OPERATOR_OPERATION_APPLIED']
+            try:
+                operation = OperationId(intent['aggregate_id'])
+                applied_command_id = operation_receipt_command_id(
+                    operation, OperationReceiptKind.APPLIED,
+                )
+            except (ValueError, TypeError):
+                raise ContentRefused('GRANT_INVALIDATED') from None
+            if (intent['actor'] != 'supervisor'
+                    or applied['actor'] != 'supervisor'
+                    or intent['command_id'] != operation.command_id
+                    or applied['command_id'] != applied_command_id):
                 raise ContentRefused('GRANT_INVALIDATED')
             native = None
             for t in turns:
