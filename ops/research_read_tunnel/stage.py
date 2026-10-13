@@ -5,6 +5,7 @@ this stager verifies their bytes, not production dependency sufficiency.
 """
 from __future__ import annotations
 
+from dataclasses import asdict, dataclass
 import hashlib
 import io
 import json
@@ -155,9 +156,89 @@ def render_unit(template: str, *, commit: str, lock_sha256: str):
     return rendered
 
 
+
+# Exact accepted proposal bytes; changing deployment semantics needs owner review.
+CITATION_PROPOSALS = (
+    ("ops/research_read_tunnel/mastermind-research-citation.socket", "mastermind-research-citation.socket", "ab706bf82e8c1b62993696a177078a6b26cec69d46e3a8abaf5044a4da277c77"),
+    ("ops/research_read_tunnel/mastermind-research-read-citation.conf", "mastermind-research-read-citation.conf", "f72a49374a0ed0518b646adf0bc4708bbb5da897eb275be215989b96d8ec9a7c"),
+    ("ops/research_read_tunnel/research-citation.tmpfiles.conf", "research-citation.tmpfiles.conf", "94418065cb60c201bcdda08ff214bd2680762ec6ef51e06777eb1cf4f233cfd5"),
+    ("ops/research_read/research_evidence_http.caddy.fragment", "research_evidence_http.caddy.fragment", "e2c7c47ac550512b25202c8f94b8d9fef429134308a8c43de6c40e5b4849f44e"),
+)
+
+
+@dataclass(frozen=True)
+class CitationProposalParameters:
+    """Explicit trusted-owner inputs, not host custody or installation proof."""
+    caddy_uid: int
+    caddy_gid: int
+    os_relay_port: int
+
+    def __post_init__(self):
+        if (type(self.caddy_uid) is not int or not 1 <= self.caddy_uid < 2**31
+                or type(self.caddy_gid) is not int or not 1 <= self.caddy_gid < 2**31
+                or type(self.os_relay_port) is not int or not 1 <= self.os_relay_port <= 65535):
+            raise StageRefused("STAGE_PROPOSAL_REFUSED")
+
+
+def render_citation_proposal(source_path, template, *, parameters, commit, lock_sha256):
+    """Render ONLY reviewed fixed proposals; never an arbitrary target/template."""
+    pins = {path: digest for path, _name, digest in CITATION_PROPOSALS}
+    if (type(source_path) is not str or source_path not in pins
+            or type(template) is not str or type(parameters) is not CitationProposalParameters
+            or type(commit) is not str or _SHA.fullmatch(commit) is None
+            or type(lock_sha256) is not str or _DIGEST.fullmatch(lock_sha256) is None):
+        raise StageRefused("STAGE_PROPOSAL_REFUSED")
+    try:
+        if hashlib.sha256(template.encode("utf-8", errors="strict")).hexdigest() != pins[source_path]:
+            raise StageRefused("STAGE_PROPOSAL_REFUSED")
+        rendered = template
+        for token, value in (("__QUALIFIED_CADDY_UID__", parameters.caddy_uid),
+                             ("__QUALIFIED_CADDY_GID__", parameters.caddy_gid),
+                             ("__OS_RELAY_PORT__", parameters.os_relay_port),
+                             ("@MASTERMIND_COMMIT@", commit), ("@LOCK_SHA256@", lock_sha256)):
+            rendered = rendered.replace(token, str(value))
+        if re.search(r"__[A-Z0-9_]+__|@[A-Z0-9_]+@", rendered):
+            raise StageRefused("STAGE_PROPOSAL_REFUSED")
+        return rendered
+    except UnicodeError:
+        raise StageRefused("STAGE_PROPOSAL_REFUSED") from None
+
+
+def _citation_artifacts(source, commit, lock_sha256, parameters):
+    if type(parameters) is not CitationProposalParameters:
+        raise StageRefused("STAGE_PROPOSAL_REFUSED")
+    blobs, members = {}, []
+    for source_path, name, source_sha256 in CITATION_PROPOSALS:
+        # A Git symlink, executable or missing template cannot supply config bytes.
+        row = _git(source, "ls-tree", "-l", commit, "--", source_path).strip()
+        try:
+            header, actual_path = row.split("\t")
+            mode, kind, _oid, size = header.split()
+            if mode != "100644" or kind != "blob" or actual_path != source_path or not 0 < int(size) <= 16384:
+                raise ValueError()
+        except ValueError:
+            raise StageRefused("STAGE_PROPOSAL_REFUSED") from None
+        raw = _git(source, "show", f"{commit}:{source_path}", binary=True)
+        try:
+            rendered = render_citation_proposal(source_path, raw.decode("utf-8", errors="strict"),
+                parameters=parameters, commit=commit, lock_sha256=lock_sha256).encode("utf-8")
+        except UnicodeError:
+            raise StageRefused("STAGE_PROPOSAL_REFUSED") from None
+        if name in blobs or len(PurePosixPath(name).parts) != 1:
+            raise StageRefused("STAGE_PROPOSAL_REFUSED")
+        _paths((name,))
+        blobs[name] = rendered
+        members.append({"path": name, "bytes": len(rendered),
+            "sha256": hashlib.sha256(rendered).hexdigest(),
+            "source_path": source_path, "source_sha256": source_sha256})
+    return blobs, {"schema": "mastermind.research_read_citation_proposals.v1",
+        "state": "INERT_PROPOSAL", "parameters": asdict(parameters), "members": members,
+        "custody": "OWNER_QUALIFICATION_REQUIRED; active Caddy overlay, no file-only reload"}
+
+
 def prepare_bundle(*, mastermind_source: Path, mastermind_commit: str, mastermind_tree: str,
                    macro_source: Path, macro_commit: str, macro_tree: str,
-                   macro_roots, output: Path):
+                   macro_roots, output: Path, citation_parameters: CitationProposalParameters | None = None):
     """Write a NEW candidate directory; no overwrites or install effects."""
     try:
         qualify_source(mastermind_source, mastermind_commit, mastermind_tree)
@@ -166,11 +247,16 @@ def prepare_bundle(*, mastermind_source: Path, mastermind_commit: str, mastermin
         template = _git(mastermind_source, "show", f"{mastermind_commit}:{UNIT_PATH}")
         unit = render_unit(template, commit=mastermind_commit,
                            lock_sha256=hashlib.sha256(lock).hexdigest()).encode()
+        proposal_blobs, proposal_receipt = ({}, None) if citation_parameters is None else _citation_artifacts(
+            mastermind_source, mastermind_commit, hashlib.sha256(lock).hexdigest(), citation_parameters)
         mm, mm_members = source_archive(mastermind_source, mastermind_commit,
                                         mastermind_tree, MASTERMIND_ROOTS)
         macro, macro_members = source_archive(macro_source, macro_commit, macro_tree, macro_roots)
         blobs = {"mastermind-release.tar": mm, "macro-release.tar": macro,
                  "mastermind-research-read.service": unit}
+        if set(blobs) & set(proposal_blobs):
+            raise StageRefused("STAGE_PROPOSAL_REFUSED")
+        blobs.update(proposal_blobs)
         manifest = {"schema": SCHEMA, "state": "INERT_CANDIDATE",
                     "mastermind_commit": mastermind_commit, "mastermind_tree": mastermind_tree,
                     "macro_commit": macro_commit, "macro_tree": macro_tree,
@@ -179,6 +265,14 @@ def prepare_bundle(*, mastermind_source: Path, mastermind_commit: str, mastermin
                     "files": [{"path": name, "bytes": len(raw),
                                "sha256": hashlib.sha256(raw).hexdigest()} for name, raw in blobs.items()],
                     "members": {"mastermind": mm_members, "macro": macro_members}}
+        if proposal_receipt is not None:
+            proposal_metadata = (json.dumps(proposal_receipt, sort_keys=True, indent=2) + "\n").encode()
+            name = "research-citation-proposals.json"
+            if name in blobs:
+                raise StageRefused("STAGE_PROPOSAL_REFUSED")
+            blobs[name] = proposal_metadata
+            manifest["files"].append({"path": name, "bytes": len(proposal_metadata),
+                                      "sha256": hashlib.sha256(proposal_metadata).hexdigest()})
         blobs["manifest.json"] = (json.dumps(manifest, sort_keys=True, indent=2) + "\n").encode()
         if (not output.is_absolute() or output.exists()
                 or any(path.is_symlink() for path in output.parents)):
@@ -193,3 +287,35 @@ def prepare_bundle(*, mastermind_source: Path, mastermind_commit: str, mastermin
         raise
     except Exception:
         raise StageRefused() from None
+
+
+def main(argv=None):
+    """Thin local CLI over the same inert stager; never installs or dispatches."""
+    import argparse
+    import sys
+    parser = argparse.ArgumentParser(description="Prepare an inert exact-source Research Read bundle")
+    for name in ("mastermind-source", "mastermind-commit", "mastermind-tree",
+                 "macro-source", "macro-commit", "macro-tree", "output"):
+        parser.add_argument("--" + name, required=True)
+    parser.add_argument("--macro-root", action="append", required=True)
+    for name in ("caddy-uid", "caddy-gid", "os-relay-port"):
+        parser.add_argument("--" + name, type=int)
+    args = parser.parse_args(argv)
+    values = (args.caddy_uid, args.caddy_gid, args.os_relay_port)
+    if any(value is not None for value in values) and not all(value is not None for value in values):
+        parser.error("citation proposal parameters must be supplied together")
+    try:
+        parameters = None if all(value is None for value in values) else CitationProposalParameters(*values)
+        manifest = prepare_bundle(mastermind_source=Path(args.mastermind_source),
+            mastermind_commit=args.mastermind_commit, mastermind_tree=args.mastermind_tree,
+            macro_source=Path(args.macro_source), macro_commit=args.macro_commit, macro_tree=args.macro_tree,
+            macro_roots=args.macro_root, output=Path(args.output), citation_parameters=parameters)
+    except StageRefused as error:
+        print(error.code, file=sys.stderr)
+        return 2
+    print(json.dumps(manifest, sort_keys=True, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

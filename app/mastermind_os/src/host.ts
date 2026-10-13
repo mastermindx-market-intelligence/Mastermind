@@ -38,7 +38,11 @@ export interface AuthState {
   acquisition: boolean;
   content: boolean;
 }
+import type { ResearchEvidenceTransport } from "./research/evidence-contract";
+
 export interface RawClient {
+  /** Optional fixed Research capability; private Auth0 token stays with its owner. */
+  readonly research?: ResearchEvidenceTransport;
   readonly executive?: OsExecutiveTransport;
   /** Optional fixed selected-session continuation transport; same private bearer custody. */
   readonly executiveSession?: ExecutiveSessionTransport;
