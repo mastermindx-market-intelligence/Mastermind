@@ -292,3 +292,33 @@ def test_new_session_cannot_replay_an_uncertain_send(tmp_path, monkeypatch):
         prepare(owner, replacement, target)
     assert error.value.message_key == prepared.message["message_key"]
     assert len(runtime.events.list_events(aggregate_type=AGGREGATE)) == 1
+
+
+@pytest.mark.parametrize("state", ["UNSATISFIED", "UNPROVEN"])
+def test_actual_gateway_returns_the_exact_requirement_to_repair(
+    tmp_path, monkeypatch, state
+):
+    runtime, owner, binding, target, basis = programme(
+        tmp_path, monkeypatch, state=state
+    )
+    service = _RecordingService()
+    gateway = CompanyDialogueGateway(
+        _StaticResolver(binding),
+        socket_path=Path("/private/tmp/product-fixture.sock"),
+        service_call=service,
+        product_acceptance_owner=owner,
+    )
+    result = asyncio.run(
+        gateway.call(
+            "request_decision",
+            {"purpose": "PRODUCT_ACCEPTANCE", "subject_job_id": target.job_id},
+        )
+    )
+    assert result["ok"] is False
+    assert result["error"]["detail_code"] == "PRODUCT_PROOF_INCOMPLETE"
+    assert result["data"] == {
+        "repair_identity": basis.entry["proof_obligation_digests"][0],
+        "repair_kind": state,
+    }
+    assert service.calls == []
+    assert runtime.events.list_events(aggregate_type=AGGREGATE) == []

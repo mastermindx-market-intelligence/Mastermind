@@ -324,8 +324,17 @@ class CompanyDialogueGateway:
                             except Exception:
                                 return _error(tool_name, "DIALOGUE_REFUSED", detail_code="PRODUCT_RULING_UNAVAILABLE",
                                     reconciliation_message_key=exc.message_key)
-                        return _error(tool_name, "DIALOGUE_REFUSED", detail_code=exc.code,
+                        envelope = _error(tool_name, "DIALOGUE_REFUSED", detail_code=exc.code,
                             reconciliation_message_key=exc.message_key)
+                        # Return only the source-bound row identity and closed
+                        # evidence state, so the actual worker can repair it.
+                        if (exc.code == "PRODUCT_PROOF_INCOMPLETE"
+                            and exc.repair_kind in {"UNSATISFIED", "UNPROVEN"}
+                            and isinstance(exc.repair_identity, str)
+                            and re.fullmatch(r"[0-9a-f]{64}", exc.repair_identity)):
+                            envelope["data"] = {"repair_identity": exc.repair_identity,
+                                "repair_kind": exc.repair_kind}
+                        return envelope
                     except ProductAcceptanceBasisUnavailable as exc:
                         return _error(tool_name, "DIALOGUE_REFUSED", detail_code=exc.code)
                     except Exception:
