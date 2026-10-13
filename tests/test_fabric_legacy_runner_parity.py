@@ -33,7 +33,7 @@ def invoke(source, tmp, mode, outcome, monkeypatch):
             cleanup_proven=outcome=='ok',stdout_truncated=False,stderr_truncated=False)
     tree=ast.parse(source.read_text())
     funcs=[n for n in tree.body if isinstance(n,ast.FunctionDef)
-           and n.name in {'_execute','_run_lease_process'}]
+           and n.name in {'_execute','_run_lease_process','_retain_original_cleanup_hold'}]
     namespace=dict(__file__=str(tmp/'remote_sub_exec.py'), Path=Path, json=json,
         os=SimpleNamespace(environ={},cpu_count=lambda:2), sys=SimpleNamespace(platform='darwin'),
         ExitStack=ExitStack, native_remote=SimpleNamespace(MODES=()),

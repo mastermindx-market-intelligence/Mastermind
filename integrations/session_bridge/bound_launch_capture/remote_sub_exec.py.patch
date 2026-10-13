@@ -1,6 +1,27 @@
 --- a/remote_sub_exec.py
 +++ b/remote_sub_exec.py
-@@ -112,0 +113,68 @@
+@@ -8,6 +8,7 @@
+ from __future__ import annotations
+ 
+ import json
++import asyncio
+ import hashlib
+ from contextlib import ExitStack
+ import os
+@@ -27,6 +28,9 @@
+     load_runtime_config,
+     parse_bounded_seconds,
+     run_owned_process,
++    begin_owned_process,
++    abort_owned_process,
++    start_owned_process_finisher,
+ )
+ 
+ 
+@@ -110,6 +114,137 @@
+         contract=contract,manifest=manifest)
+ 
+ 
 +def _run_lease_process(*, lease, state, key, receipt, arguments, at_boundary=None):
 +    """Shared incumbent process/capture/cleanup path. Never acquire a new lease.
 +
@@ -18,18 +39,10 @@
 +        state["started"] = False
 +        raise
 +    finally:
-+        if state.get("started"):
-+            proven = False
-+            try:
-+                row = json.loads(receipt.read_text().splitlines()[-1])
-+                proven = row.get("label") == key and cleanup_receipt_is_proven(row.get("cleanup", {}))
-+            except (OSError, ValueError, IndexError):
-+                pass
-+            if not proven:
-+                lease.hold_for_reconciliation("worker_cleanup_unproven")
++        _retain_original_cleanup_hold(lease=lease, state=state, key=key, receipt=receipt)
 +
 +
-+def _run_reserved_attended_under_lease(*, payload, authority, preparation,
++def _prepare_reserved_attended_under_lease(*, payload, authority, preparation,
 +                                       lease, state, key, receipt, nice,
 +                                       check_original_owner):
 +    """Private composition seam, not exposed by CLI, RPC or environment.
@@ -61,15 +74,92 @@
 +        # A slow check or wait must not extend the existing Control command.
 +        authority.require(original)
 +
-+    result = _run_lease_process(lease=lease, state=state, key=key,
-+                               receipt=receipt, arguments=arguments,
-+                               at_boundary=at_boundary)
-+    # Existing validation owner receives the exact original allowlisted argv;
-+    # this component neither runs validation nor declares acceptance.
++    return prepared, arguments, at_boundary
++
++
++def _run_reserved_attended_under_lease(**kwargs):
++    prepared, arguments, at_boundary = _prepare_reserved_attended_under_lease(**kwargs)
++    result = _run_lease_process(lease=kwargs['lease'], state=kwargs['state'],
++        key=kwargs['key'], receipt=kwargs['receipt'], arguments=arguments, at_boundary=at_boundary)
 +    return result, prepared.validation_commands
 +
 +
-@@ -136,0 +205,15 @@
++def _retain_original_cleanup_hold(*, lease, state, key, receipt):
++    if state.get("started"):
++        proven = False
++        try:
++            row = json.loads(receipt.read_text().splitlines()[-1])
++            proven = row.get("label") == key and cleanup_receipt_is_proven(row.get("cleanup", {}))
++        except (OSError, ValueError, IndexError):
++            pass
++        if not proven:
++            lease.hold_for_reconciliation("worker_cleanup_unproven")
++
++
++def _begin_lease_process(*, lease, state, key, receipt, arguments, at_boundary):
++    """Original main-thread controller keeps its lease after START mechanics.
++
++    The caller must already own the reservation and lease for this entire
++    controller lifetime. This helper never enters/exits/releases that context.
++    The same runtime finisher retains capture/cleanup; the done callback merely
++    applies this original controller's existing terminal hold check.
++    """
++    asyncio.get_running_loop()  # Refuse missing event-loop owner before effects.
++    install_signal_cleanup(on_unproven=lease.hold_for_reconciliation)
++    owner = None
++    try:
++        at_boundary()
++        state['started'] = True
++        owner = begin_owned_process(label=key, receipt_path=receipt,
++                                    timeout_returncode=124, **arguments)
++        finisher = start_owned_process_finisher(owner)
++        # The resources stay strongly retained even if the successful START
++        # handler returns. This is the original lease, never a new acquisition.
++        owner._original_lease = lease
++        def settled(task):
++            try:
++                if not task.cancelled():
++                    task.exception()  # Retained on owner; suppress unobserved-task log.
++            finally:
++                _retain_original_cleanup_hold(lease=lease, state=state, key=key, receipt=receipt)
++        finisher.add_done_callback(settled)
++        return owner
++    except OwnedProcessStartError:
++        state['started'] = False
++        raise
++    except BaseException as exc:
++        if owner is not None and owner.result is None and owner.failure is None:
++            try:
++                abort_owned_process(owner, exc)
++            finally:
++                _retain_original_cleanup_hold(lease=lease, state=state, key=key, receipt=receipt)
++        else:
++            _retain_original_cleanup_hold(lease=lease, state=state, key=key, receipt=receipt)
++        raise
++
++
++def _begin_reserved_attended_under_lease(**kwargs):
++    """Source-only private composition, not a CLI/RPC/public admission bypass.
++
++    The returned resource is NOT a full START. The qualified original Backend
++    must separately observe the independently pinned executed image and retain
++    complete launch/assignment evidence before exposing native START.
++    """
++    prepared, arguments, at_boundary = _prepare_reserved_attended_under_lease(**kwargs)
++    owner = _begin_lease_process(lease=kwargs['lease'], state=kwargs['state'],
++        key=kwargs['key'], receipt=kwargs['receipt'], arguments=arguments, at_boundary=at_boundary)
++    return owner, prepared.validation_commands
++
++
++
++
+ def _execute(argv: list[str], state: dict) -> int:
+     if len(argv) != 6:
+         return _fail(
+@@ -134,6 +269,21 @@
+         except (ImportError, ValueError, TypeError, KeyError, RecursionError):
+             return _fail("ARTIFACT_DELIVERY_CONTRACT_REFUSED", 65)
+     artifact_failure = False
 +
 +    # Optional correlation is read outside the prompt, before physical admission.
 +    # It does not change Runtime, provider or host admission requirements.
@@ -85,7 +175,13 @@
 +    # an early gate receipt must never make that legacy path a native START.
 +    if launch_arguments or "FABRIC_LAUNCH_SNAPSHOT_SHA256" in os.environ:
 +        return _fail("BOUND_ATTENDED_EXECUTOR_UNAVAILABLE before_admission=1 before_spawn=1", 78)
-@@ -233,28 +316,6 @@
+ 
+     # Tilde belongs to this host, not to the controller that selected it.
+     if cwd.startswith("~") and cwd != "~" and not cwd.startswith("~/"):
+@@ -230,34 +380,12 @@
+                         or not os.access(guard, os.X_OK)):
+                     return _fail("FABRIC_CPU_STRESS_GUARD_UNAVAILABLE", 78)
+                 child_env["PATH"] = str(here) + os.pathsep + child_env.get("PATH", "/usr/bin:/bin")
 -            install_signal_cleanup(on_unproven=lease.hold_for_reconciliation)
 -            try:
 -                state["started"] = True
@@ -120,7 +216,16 @@
 +                               env=child_env, nice=config.nice,
 +                               receipt_diagnostics=diagnostic_reader,
 +                               **launch_arguments))
-@@ -296,0 +358,3 @@
+ 
+             display_stdout = result.stdout
+             if mode == "grok":
+@@ -294,6 +422,9 @@
+                 except (OSError, ValueError, TypeError, KeyError, RecursionError):
+                     artifact_failure = True
+ 
 +    except OwnedProcessStartError as exc:
 +        number = str(exc.error_number) if exc.error_number is not None else "unknown"
 +        return _fail("REMOTE_SUB_EXEC_NOT_STARTED errno=" + number, 78)
+     except (LaneRuntimeError, OSError, ValueError) as exc:
+         if state.get("started"):
+             return _fail("REMOTE_CLEANUP_UNPROVEN " + type(exc).__name__, 76)

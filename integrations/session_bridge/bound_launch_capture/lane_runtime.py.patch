@@ -1,9 +1,55 @@
 --- a/lane_runtime.py
 +++ b/lane_runtime.py
-@@ -11,0 +12,2 @@
+@@ -9,6 +9,9 @@
+ from __future__ import annotations
+ 
+ import atexit
++import asyncio
 +import ctypes
 +import sys
-@@ -960,0 +963,218 @@
+ import fcntl
+ import hashlib
+ import json
+@@ -508,17 +511,23 @@
+ 
+         if time.monotonic() >= deadline:
+             return "timeout"
+-        members, identity_ok = _verified_group_members(expected_pgid)
+-        if not identity_ok:
+-            raise ProcessCensusError("process_group_session_identity_mismatch")
+-        if len(members) > MAX_OWNED_PROCESS_GROUP_MEMBERS:
+-            return "process_limit"
+-        if not members:
+-            if proc.poll() is not None:
+-                return "completed"
+-            raise ProcessCensusError(
+-                "process_group_census_empty_while_leader_live"
+-            )
++        outcome = _owned_fuse_check(proc, expected_pgid)
++        if outcome is not None:
++            return outcome
++
++
++def _owned_fuse_check(proc, expected_pgid):
++    """One shared sync/async identity and growth decision; no altered policy."""
++    members, identity_ok = _verified_group_members(expected_pgid)
++    if not identity_ok:
++        raise ProcessCensusError("process_group_session_identity_mismatch")
++    if len(members) > MAX_OWNED_PROCESS_GROUP_MEMBERS:
++        return "process_limit"
++    if not members:
++        if proc.poll() is not None:
++            return "completed"
++        raise ProcessCensusError("process_group_census_empty_while_leader_live")
++    return None
+ 
+ 
+ def cleanup_receipt_is_proven(value: Mapping[str, Any]) -> bool:
+@@ -958,8 +967,227 @@
+     return None
+ 
+ 
+-def run_owned_process(
 +
 +LAUNCH_RECEIPT_SCHEMA = "mastermind.local_owned_process_launch.v1"
 +_LAUNCH_ID_FIELDS = frozenset({"root_id", "job_id", "attempt_id"})
@@ -222,11 +268,26 @@
 +            *(os.fspath(v) for v in target)]
 +
 +
-@@ -975,0 +1196,3 @@
++def _owned_process_steps(
+     command: str | Sequence[str],
++    _owner,
+     *,
+     cwd: str | os.PathLike[str] | None = None,
+     timeout: float,
+@@ -973,6 +1201,9 @@
+     timeout_returncode: int = -9,
+     capture_limit_bytes: int = DEFAULT_CAPTURE_LIMIT_BYTES,
+     receipt_diagnostics=None,
 +    launch_receipt_path: str | os.PathLike[str] | None = None,
 +    launch_receipt_metadata: Mapping[str, str] | None = None,
 +    launch_receipt_context_sha256: str | None = None,
-@@ -989,0 +1213,20 @@
+ ) -> OwnedProcessResult:
+     try:
+         timeout = float(timeout)
+@@ -987,81 +1218,107 @@
+     if not 64 <= int(capture_limit_bytes) <= MAX_CAPTURE_LIMIT_BYTES:
+         raise LaneRuntimeConfigError("capture_limit_out_of_bounds")
+     safe_label = _safe_label(label)
 +    launch_path, launch_context = _launch_receipt_input(
 +        launch_receipt_path, launch_receipt_metadata)
 +    if launch_receipt_context_sha256 is not None and (
@@ -247,22 +308,33 @@
 +            os.close(gate_write)
 +            raise
 +        extra_popen["pass_fds"] = (gate_read,)
-@@ -991 +1233,0 @@
+     started_at = _utc_now()
 -    input_bytes = input_text.encode("utf-8") if input_text is not None else None
-@@ -994 +1236 @@
++    _owner.spawn_attempted = True
+     try:
+         proc = subprocess.Popen(
 -            command,
 +            launch_command,
-@@ -999,2 +1241,2 @@
+             cwd=cwd,
+             stdin=subprocess.PIPE if input_bytes is not None else subprocess.DEVNULL,
+             stdout=subprocess.PIPE,
+             stderr=subprocess.PIPE,
 -            shell=shell,
 -            executable=_owned_shell() if shell else None,
 +            shell=shell if launch_path is None else False,
 +            executable=_owned_shell() if shell and launch_path is None else None,
-@@ -1003,0 +1246 @@
+             env=dict(env) if env is not None else None,
+             close_fds=True,
+             start_new_session=True,
 +            **extra_popen,
-@@ -1007,0 +1251,2 @@
+         )
+     except OSError as exc:
++        _owner.spawn_attempted = False
+         # Popen's exec-error pipe confirms failed exec. Exceptions after this
+         # boundary remain uncertain and must preserve the reconciliation hold.
 +        if gate_write is not None:
 +            os.close(gate_write)
-@@ -1009,6 +1254,19 @@
+         raise OwnedProcessStartError(exc.errno) from None
 -    pgid = proc.pid
 -    try:
 -        observed_pgid = os.getpgid(proc.pid)
@@ -276,6 +348,7 @@
 +    finally:
 +        if gate_read is not None:
 +            os.close(gate_read)
++    _owner.process = proc
 +    try:
 +        pgid = proc.pid
 +        try:
@@ -288,7 +361,7 @@
 +            observed_pgid = pgid
 +            observed_sid = pgid
 +        except PermissionError as exc:
-@@ -1016,29 +1274,28 @@
+             _kill_exact_leader(proc, grace=2.0)
 -            raise LaneRuntimeError("owned_process_identity_unavailable")
 -        observed_pgid = pgid
 -        observed_sid = pgid
@@ -310,14 +383,6 @@
 -        if not MIN_NICE <= int(nice) <= MAX_NICE:
 -            _terminate_verified_group(proc, pgid, grace=0.2, reason="invalid_nice")
 -            raise LaneRuntimeConfigError("lane_nice_out_of_bounds")
--        try:
--            os.setpriority(os.PRIO_PROCESS, proc.pid, int(nice))
--            applied_nice = True
--        except (AttributeError, PermissionError, ProcessLookupError):
--            applied_nice = False
--
--    try:
--        _set_current(proc, pgid, safe_label)
 +            raise LaneRuntimeError("owned_process_identity_unavailable") from exc
 +        if observed_pgid != pgid:
 +            _kill_exact_leader(proc, grace=2.0)
@@ -340,17 +405,25 @@
 +            except (AttributeError, PermissionError, ProcessLookupError):
 +                applied_nice = False
 +
-+        try:
+         try:
+-            os.setpriority(os.PRIO_PROCESS, proc.pid, int(nice))
+-            applied_nice = True
+-        except (AttributeError, PermissionError, ProcessLookupError):
+-            applied_nice = False
+-
+-    try:
+-        _set_current(proc, pgid, safe_label)
 +            _set_current(proc, pgid, safe_label)
 +        except BaseException:
 +            _terminate_verified_group(proc, pgid, grace=0.2, reason="set_current_failed")
 +            raise
 +
-@@ -1046 +1303,2 @@
+     except BaseException:
 -        _terminate_verified_group(proc, pgid, grace=0.2, reason="set_current_failed")
 +        if gate_write is not None:
 +            os.close(gate_write)
-@@ -1049,8 +1307,2 @@
+         raise
+ 
 -    stdout_collector = _BoundedStreamCollector(
 -        proc.stdout, int(capture_limit_bytes), "stdout"
 -    )
@@ -361,14 +434,22 @@
 -    stderr_collector.start()
 +    stdout_collector = stderr_collector = None
 +    stdout_started = stderr_started = False
-@@ -1059,6 +1310,0 @@
+     stdin_thread: threading.Thread | None = None
+     stdin_state: dict[str, Any] = {"complete": True, "error_code": None}
 -    if input_bytes is not None:
 -        if proc.stdin is None:
 -            _terminate_verified_group(proc, pgid, grace=0.2, reason="stdin_missing")
 -            _clear_current(proc)
 -            raise LaneRuntimeError("owned_stdin_stream_missing")
 -        stdin_thread, stdin_state = _start_input_writer(proc.stdin, input_bytes)
-@@ -1086,0 +1333,24 @@
+ 
+     timed_out = False
+     cleanup: dict[str, Any] = {
+@@ -1084,7 +1341,43 @@
+     runtime_failure_code: str | None = None
+     try:
+         try:
+-            wait_outcome = _wait_owned_process_with_fuse(proc, pgid, timeout)
 +            # Collector setup is post-spawn and must share the same settlement
 +            # and gate-fd finally path as publication, exec and input delivery.
 +            stdout_collector = _BoundedStreamCollector(proc.stdout, int(capture_limit_bytes), "stdout")
@@ -393,22 +474,323 @@
 +                gate_write = None
 +                if input_bytes is not None:
 +                    stdin_thread, stdin_state = _start_input_writer(proc.stdin, input_bytes)
-@@ -1129,0 +1400,2 @@
++            _owner.pgid = pgid
++            _owner.label = safe_label
++            _owner.timeout = timeout
++            _owner.deadline = time.monotonic() + timeout
++            if _owner.capture_identity:
++                if proc.poll() is not None:
++                    raise LaneRuntimeError("owned_child_not_live")
++                _owner._identity = _observe_owned_launch_identity(proc.pid)
++                if proc.poll() is not None:
++                    raise LaneRuntimeError("owned_child_not_live")
++            # The same stack retains collectors, gate, receipt and cleanup.
++            # Yield is mechanics only: it is not a POST_EXEC/START attestation.
++            wait_outcome = yield
+             if wait_outcome == "completed":
+                 returncode = int(proc.returncode or 0)
+                 try:
+@@ -1127,6 +1420,8 @@
+             )
+             raise
+     finally:
 +        if gate_write is not None:
 +            os.close(gate_write)
-@@ -1138,0 +1411,4 @@
+         _clear_current(proc)
+         capture_deadline = time.monotonic() + max(
+             0.25, min(2.0, terminate_grace + 0.25)
+@@ -1136,11 +1431,17 @@
+         stdin_complete = stdin_thread is None or (
+             not stdin_thread.is_alive() and bool(stdin_state.get("complete"))
+         )
 +        if not stdout_started:
 +            proc.stdout.close()
 +        if not stderr_started:
 +            proc.stderr.close()
-@@ -1140,0 +1417 @@
+         stdout, stdout_bytes, stdout_truncated, stdout_complete, stdout_error = (
+             stdout_collector.finish(max(0.0, capture_deadline - time.monotonic()))
 +            if stdout_started else ("", 0, False, False, "collector_unavailable")
-@@ -1143,0 +1421 @@
+         )
+         stderr, stderr_bytes, stderr_truncated, stderr_complete, stderr_error = (
+             stderr_collector.finish(max(0.0, capture_deadline - time.monotonic()))
 +            if stderr_started else ("", 0, False, False, "collector_unavailable")
-@@ -1171,0 +1450,6 @@
+         )
+         cleanup = _mark_stream_state_unproven(
+             cleanup,
+@@ -1169,6 +1470,12 @@
+                 {
+                     "schema": PROCESS_RECEIPT_SCHEMA,
+                     **diagnostic_fields,
 +                    **({"launch_capture": {
 +                        "phase": "PRE_EXEC_HANDSHAKE",
 +                        "receipt_sha256": launch_receipt_sha256,
 +                        "context_sha256": launch_receipt_context_sha256,
 +                        "provider_execution_attested": False,
 +                    }} if launch_path is not None else {}),
+                     "label": safe_label,
+                     "pid": proc.pid,
+                     "pgid": pgid,
+@@ -1200,6 +1507,263 @@
+         stdout_truncated=stdout_truncated,
+         stderr_truncated=stderr_truncated,
+     )
++
++
++_EXECUTION_OWNER = None
++
++
++class OwnedExecution:
++    """Resources of the one original runner, not a Job registry or authority.
++
++    A handle must stay in its original main-thread controller until terminal
++    collection/cleanup. Its finisher survives cancellation of an RPC waiter.
++    The surrounding original owner retains its lease and assignment exclusion.
++    """
++    def __init__(self, *, capture_identity):
++        self.capture_identity = capture_identity
++        self.owner_thread = threading.get_ident()
++        self.process = None
++        self.spawn_attempted = False
++        self.pgid = None
++        self.label = None
++        self.timeout = None
++        self.deadline = None
++        self._identity = None
++        self._steps = None
++        self._finisher = None
++        self._cancel_receipt = None
++        self.result = None
++        self.failure = None
++        self._settling = False
++
++    @property
++    def process_identity(self):
++        return dict(self._identity) if self._identity is not None else None
++
++
++def _require_owned_execution(owner):
++    if type(owner) is not OwnedExecution or owner.owner_thread != threading.get_ident():
++        raise LaneRuntimeError("owned_process_owner_thread_required")
++    if owner.failure is not None:
++        raise owner.failure
++    if owner.result is not None:
++        return
++    if _EXECUTION_OWNER is not owner:
++        raise LaneRuntimeError("owned_process_handle_stale")
++
++
++def _begin_owned_process(command, *, _main_thread, **kwargs):
++    global _EXECUTION_OWNER
++    if _main_thread and threading.current_thread() is not threading.main_thread():
++        raise LaneRuntimeError("owned_process_main_thread_required")
++    owner = OwnedExecution(capture_identity=_main_thread)
++    with _CURRENT_LOCK:
++        if _EXECUTION_OWNER is not None or _CURRENT_PROCESS is not None:
++            raise LaneRuntimeError("owned_process_owner_busy")
++        _EXECUTION_OWNER = owner
++    owner._steps = _owned_process_steps(command, _owner=owner, **kwargs)
++    try:
++        next(owner._steps)
++    except BaseException as exc:
++        owner.failure = exc
++        # A proven pre-spawn/exec failure has no effect. An interruption
++        # during Popen may have an unknown effect even without a returned PID.
++        if not owner.spawn_attempted or not owner.capture_identity:
++            with _CURRENT_LOCK:
++                if _EXECUTION_OWNER is owner:
++                    _EXECUTION_OWNER = None
++        raise
++    return owner
++
++
++def begin_owned_process(command, **kwargs):
++    """Begin once on the original main thread. Does not claim native START."""
++    return _begin_owned_process(command, _main_thread=True, **kwargs)
++
++
++def observe_owned_process_image(owner):
++    """Observe the live image of this exact original handle; not a START seal.
++
++    The physical owner separately matches an independently pinned executable
++    (or qualified interpreter chain), realm/principal and full launch evidence.
++    This function never substitutes argv, a broker PID or a caller pathname.
++    """
++    _require_owned_execution(owner)
++    if not sys.platform.startswith("linux"):
++        raise LaneRuntimeError("owned_image_platform_unqualified")
++    if (owner.result is not None or owner.process is None
++            or owner.process.poll() is not None or owner._identity is None):
++        raise LaneRuntimeError("owned_image_not_live")
++    from control_plane.linux_process_identity import (
++        LinuxProcessIdentityError, inspect_linux_process_image)
++    try:
++        image = inspect_linux_process_image(owner.process.pid)
++    except LinuxProcessIdentityError as exc:
++        raise LaneRuntimeError("owned_image_observation_unqualified") from exc
++    identity = dict(pid=owner.process.pid, pgid=image['pgid'],
++        session_id=image['session_id'], boot_id=image['boot_id'],
++        process_start_identity='linux:' + image['start_identity'],
++        effective_uid=image['effective_uid'], effective_gid=image['effective_gid'],
++        real_uid=image['real_uid'], real_gid=image['real_gid'])
++    if identity != owner._identity or owner.process.poll() is not None:
++        raise LaneRuntimeError("owned_image_generation_changed")
++    _require_owned_execution(owner)
++    return dict(image, pid=owner.process.pid, label=owner.label)
++
++
++def _settle_owned_process(owner, *, outcome=None, failure=None):
++    global _EXECUTION_OWNER
++    _require_owned_execution(owner)
++    if owner.result is not None:
++        return owner.result
++    if owner._settling:
++        raise LaneRuntimeError("owned_process_settlement_already_owned")
++    owner._settling = True
++    try:
++        if failure is not None:
++            owner._steps.throw(failure)
++        else:
++            owner._steps.send(outcome)
++        raise LaneRuntimeError("owned_process_unexpected_second_yield")
++    except StopIteration as done:
++        owner.result = done.value
++        if type(owner.result) is not OwnedProcessResult:
++            raise LaneRuntimeError("owned_process_result_invalid")
++        # Keep exclusion through capture and durable terminal receipt. Unknown
++        # cleanup must stay held; no public reset or new run replaces it.
++        if owner.result.cleanup_proven or not owner.capture_identity:
++            with _CURRENT_LOCK:
++                if _EXECUTION_OWNER is owner:
++                    _EXECUTION_OWNER = None
++        return owner.result
++    except BaseException as exc:
++        owner.failure = exc
++        raise
++    finally:
++        owner._settling = False
++        # Legacy synchronous callers still settle their reconciliation lease
++        # in the incumbent controller; do not add a new lasting global hold.
++        if not owner.capture_identity:
++            with _CURRENT_LOCK:
++                if _EXECUTION_OWNER is owner:
++                    _EXECUTION_OWNER = None
++
++
++def abort_owned_process(owner, failure):
++    """Original begin/owner failure uses the same exception/cleanup stack."""
++    if not isinstance(failure, BaseException):
++        raise TypeError("owned_process_exception_required")
++    return _settle_owned_process(owner, failure=failure)
++
++
++def finish_owned_process(owner):
++    _require_owned_execution(owner)
++    if owner.result is not None:
++        return owner.result
++    if owner._finisher is not None:
++        raise LaneRuntimeError("owned_process_async_finisher_owns_settlement")
++    try:
++        outcome = _wait_owned_process_with_fuse(
++            owner.process, owner.pgid, max(0.0, owner.deadline - time.monotonic()))
++    except BaseException as exc:
++        return abort_owned_process(owner, exc)
++    return _settle_owned_process(owner, outcome=outcome)
++
++
++async def _finish_owned_process_async(owner):
++    try:
++        while True:
++            remaining = owner.deadline - time.monotonic()
++            if remaining <= 0:
++                outcome = "timeout"
++                break
++            if owner.process.poll() is not None:
++                outcome = "completed"
++                break
++            await asyncio.sleep(min(OWNED_PROCESS_CENSUS_INTERVAL_SECONDS, remaining))
++            if owner.process.poll() is not None:
++                outcome = "completed"
++                break
++            if time.monotonic() >= owner.deadline:
++                outcome = "timeout"
++                break
++            outcome = _owned_fuse_check(owner.process, owner.pgid)
++            if outcome is not None:
++                break
++    except BaseException as exc:
++        return abort_owned_process(owner, exc)
++    return _settle_owned_process(owner, outcome=outcome)
++
++
++def start_owned_process_finisher(owner):
++    """Exactly one retained task uses this runner's wait/settlement stack."""
++    _require_owned_execution(owner)
++    if threading.current_thread() is not threading.main_thread():
++        raise LaneRuntimeError("owned_process_main_thread_required")
++    if owner._finisher is None:
++        owner._finisher = asyncio.get_running_loop().create_task(_finish_owned_process_async(owner))
++        def cancelled_before_entry(task):
++            # Cancelling a Task before its coroutine first executes never enters
++            # that coroutine's try/finally. Close the SAME yielded runner stack
++            # on its owner thread; its original collectors/receipt settle once.
++            if task.cancelled() and owner.result is None and owner.failure is None:
++                try:
++                    abort_owned_process(owner, asyncio.CancelledError())
++                except BaseException:
++                    # The exact failure is retained on owner; no replacement.
++                    pass
++        owner._finisher.add_done_callback(cancelled_before_entry)
++    return owner._finisher
++
++
++async def collect_owned_process(owner):
++    _require_owned_execution(owner)
++    if owner.result is not None:
++        return owner.result
++    return await asyncio.shield(start_owned_process_finisher(owner))
++
++
++def cancel_exact_owned_process(owner, *, label, process_identity, reason):
++    """No run-id/global-current substitution: exact retained handle and generation."""
++    _require_owned_execution(owner)
++    if (label != owner.label or type(process_identity) is not dict
++            or owner._identity is None or process_identity != owner._identity):
++        raise LaneRuntimeError("owned_process_cancel_identity_mismatch")
++    if owner._cancel_receipt is not None:
++        return dict(owner._cancel_receipt)
++    if owner.result is not None or owner.process.poll() is not None:
++        raise LaneRuntimeError("owned_process_cancel_not_live")
++    with _CURRENT_LOCK:
++        if (_CURRENT_PROCESS is None or _CURRENT_PROCESS[0] is not owner.process
++                or _CURRENT_PROCESS[1:] != (owner.pgid, owner.label)
++                or _observe_owned_launch_identity(owner.process.pid) != owner._identity):
++            raise LaneRuntimeError("owned_process_cancel_generation_changed")
++        owner._cancel_receipt = _terminate_verified_group(
++            owner.process, owner.pgid, grace=1.0, reason=_safe_label(reason))
++    return dict(owner._cancel_receipt)
++
++
++def run_owned_process(
++    command: str | Sequence[str],
++    *,
++    cwd: str | os.PathLike[str] | None = None,
++    timeout: float,
++    input_text: str | None = None,
++    shell: bool = False,
++    env: Mapping[str, str] | None = None,
++    nice: int | None = None,
++    terminate_grace: float = 2.0,
++    label: str = "lane-process",
++    receipt_path: str | os.PathLike[str] | None = None,
++    timeout_returncode: int = -9,
++    capture_limit_bytes: int = DEFAULT_CAPTURE_LIMIT_BYTES,
++    receipt_diagnostics=None,
++    launch_receipt_path: str | os.PathLike[str] | None = None,
++    launch_receipt_metadata: Mapping[str, str] | None = None,
++    launch_receipt_context_sha256: str | None = None,
++) -> OwnedProcessResult:
++    owner = _begin_owned_process(command, _main_thread=False, cwd=cwd, timeout=timeout, input_text=input_text, shell=shell, env=env, nice=nice, terminate_grace=terminate_grace, label=label, receipt_path=receipt_path, timeout_returncode=timeout_returncode, capture_limit_bytes=capture_limit_bytes, receipt_diagnostics=receipt_diagnostics, launch_receipt_path=launch_receipt_path, launch_receipt_metadata=launch_receipt_metadata, launch_receipt_context_sha256=launch_receipt_context_sha256)
++    return finish_owned_process(owner)
+ 
+ def _read_marker(fd: int) -> str:
+     os.lseek(fd, 0, os.SEEK_SET)
