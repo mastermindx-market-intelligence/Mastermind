@@ -1,8 +1,10 @@
 # Original-owner launch evidence — source integration
 
 This uninstalled source extends the existing Fabric controller reservation,
-process capture and authenticated bridge. `control_plane/fabric_attended_backend.py`
-now supplies the fixed original-owner Backend composition. It does not enroll
+process capture and authenticated bridge. `integrations/session_bridge/bound_launch_capture/fabric_attended_backend.py`
+supplies the fixed original-owner Backend composition. The shared protocol stays
+in `control_plane.executive_fabric_bridge_broker`; the existing service receives
+the concrete backend by injection. Control/common do not import integrations. It does not enroll
 production resources or arm Executive submission. Existing accepted runs and
 records are unchanged. The sections below retain the earlier component history;
 the current integrated source contract is described next.

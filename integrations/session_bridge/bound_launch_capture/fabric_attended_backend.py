@@ -845,7 +845,7 @@ def _observe_assigned_resources(resources, payload, projection):
                           policy, spec.isolation_manifest)
     identities = {name: _path_identity(path) for name, path in (('home', home), ('tmp', tmp))}
     if any(item['uid'] != policy.worker_uid or item['gid'] != policy.worker_gid
-           or item['mode'] != 0o700 for item in identities.values()):
+           or item['mode'] != stat.S_IRWXU for item in identities.values()):
         _refuse('finite_assignment_directory_identity')
     def evidence(source, value):
         return dict(source=source, evidence_sha256=hashlib.sha256(_bytes(value)).hexdigest())

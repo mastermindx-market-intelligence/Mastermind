@@ -205,6 +205,9 @@ def test_real_factory_v2_helper_and_coupled_validator_compose(tmp_path,monkeypat
     from tests.test_fabric_attended_secret_canary import inputs
     from control_plane import executive_canary as canary, codex_provider_realm as realm
     from control_plane import executive_worker_broker as wire
+    # Explicit Darwin environment fixture; filesystem denials remain real.
+    # The separate unsupported-platform test preserves Linux refusal.
+    monkeypatch.setattr(probe.sys,'platform','darwin')
     release,host,raw,att=boot_fixture(tmp_path)
     uid,gid=os.getuid(),os.getgid()
     assert uid > 0
@@ -262,7 +265,7 @@ def test_real_factory_v2_helper_and_coupled_validator_compose(tmp_path,monkeypat
 
 def test_cancelled_probe_waiter_does_not_release_inflight_owner(tmp_path,monkeypatch):
     import threading
-    from control_plane.fabric_attended_backend import _FixedOwnerResources,_SingleAssignmentComposition,AttendedBackendRefused
+    from integrations.session_bridge.bound_launch_capture.fabric_attended_backend import _FixedOwnerResources,_SingleAssignmentComposition,AttendedBackendRefused
     entered=threading.Event();finish=threading.Event()
     def producer(*args):
         entered.set()

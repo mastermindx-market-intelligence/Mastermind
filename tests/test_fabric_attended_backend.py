@@ -16,7 +16,7 @@ import threading
 from types import SimpleNamespace
 
 import pytest
-from control_plane import fabric_attended_backend as backend
+from integrations.session_bridge.bound_launch_capture import fabric_attended_backend as backend
 from control_plane import executive_fabric_bridge_broker as bridge
 from control_plane.fabric_control_start import (
     ControlStartAuthority, authorize_control_command, launch_identity, SCHEMA,

@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from types import SimpleNamespace
 import pytest
-from control_plane import fabric_attended_backend as backend
+from integrations.session_bridge.bound_launch_capture import fabric_attended_backend as backend
 from control_plane import broker_assignment_seal, codex_worker
 
 @pytest.mark.parametrize('damage', ['none','home_inode','home_mode','home_symlink','tmp_inode','workspace_inode','head','dirty','binary'])
