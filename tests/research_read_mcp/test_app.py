@@ -60,6 +60,7 @@ CLOCK = 1_700_000_000
 MARKER = "zz-do-not-echo-9f3c"
 LICENSED = "LICENSED_PROSE_7f3a_DO_NOT_LEAK"
 WITHHELD = "WITHHELD_RESULT_MARKER"
+EVIDENCE_CANONICAL_PREFIX = "fixture-canonical-"
 LEAK_R2 = "r2://bucket/opt/object-key.r2.cloudflarestorage.com"
 KNOWN_REPORT = "rpt-1"
 
@@ -122,19 +123,15 @@ def build_fixture(tool: str, arguments: Mapping[str, object], marker: str = "") 
             },
             "catalog": {
                 "report_count": 1,
-                "institution_count": 1,
-                "newest_report_date": "2026-01-02",
-                "oldest_report_date": "2026-01-02",
             },
             "coverage": {
-                "text_layer_ok": 1,
-                "text_layer_missing": 0,
-                "rio_available": 0,
+                "full_text_ratio": 1.0,
+                "rio_ratio": 0.0,
             },
+            "degradation": [],
             "generation": {
                 "server_contract": CONTRACT,
                 "read_port_contract": "research.vault.read_port",
-                "macro_commit": "a" * 40,
                 "mastermind_commit": "b" * 40,
             },
         }
@@ -142,20 +139,31 @@ def build_fixture(tool: str, arguments: Mapping[str, object], marker: str = "") 
         result = {
             "contract": CONTRACT,
             "source_state": "SOURCE_FRESH",
-            "candidates": [{
-                "report_id": KNOWN_REPORT,
-                "title": "Note",
-                "institution": "Example",
-                "published_date": "2026-01-02",
-                "tickers": ["IBM"],
-                "text_layer": "FULL_TEXT",
-                "rio_state": "CURRENT",
-                "rank": 1,
-            }],
-            "coverage_note": marker or "coverage",
+            "candidates": [
+                {
+                    "report_id": KNOWN_REPORT,
+                    "title": "Note",
+                    "institution": "Example",
+                    "side": None,
+                    "published_at": None,
+                    "rank": 1,
+                },
+                {
+                    "report_id": KNOWN_REPORT + "-2",
+                    "title": "Note",
+                    "institution": "Example",
+                    "side": "sell",
+                    "published_at": "2026-01-02",
+                    "rank": 2,
+                },
+            ],
+            "coverage_state": None,
         }
     elif tool == "research_fetch":
-        text = "fixture-text" + marker
+        first_text = "fixture-text" + marker
+        second_text = "fixture-tail"
+        first_bytes = len(first_text.encode("utf-8"))
+        second_bytes = len(second_text.encode("utf-8"))
         result = {
             "contract": CONTRACT,
             "source_state": "SOURCE_FRESH",
@@ -163,25 +171,41 @@ def build_fixture(tool: str, arguments: Mapping[str, object], marker: str = "") 
                 "report_id": arguments.get("report_id", KNOWN_REPORT),
                 "title": "Note",
                 "institution": "Example",
-                "published_date": "2026-01-02",
+                "side": "sell",
+                "published_at": "2026-01-02",
             },
             "provenance": {
                 "source_class": "mastermind_private_institutional",
                 "license_class": "internal_licensed",
             },
-            "text": text,
-            "window": {
-                "start": 0,
-                "end": len(text),
-                "total_chars": len(text),
-                "truncated": False,
-                "next_cursor": None,
-            },
-            "text_sha256": _sha(text),
+            "text_layer_state": "full",
+            "coverage_state": "FULL_TEXT",
+            "segment_count_total": 3,
+            "segments": [
+                {
+                    "segment_index": 0,
+                    "page_start": None,
+                    "page_end": None,
+                    "byte_start": 0,
+                    "byte_end": first_bytes,
+                    "text": first_text,
+                },
+                {
+                    "segment_index": 1,
+                    "page_start": 2,
+                    "page_end": 3,
+                    "byte_start": first_bytes,
+                    "byte_end": first_bytes + second_bytes,
+                    "text": second_text,
+                },
+            ],
+            "next_segment_start": 2,
             "rio_state": "CURRENT",
         }
     elif tool == "research_find_evidence":
         if marker:
+            passage_raw = marker.encode("utf-8")
+            byte_start = len(EVIDENCE_CANONICAL_PREFIX.encode("utf-8"))
             result = {
                 "contract": CONTRACT,
                 "source_state": "SOURCE_FRESH",
@@ -189,9 +213,11 @@ def build_fixture(tool: str, arguments: Mapping[str, object], marker: str = "") 
                 "passages": [{
                     "report_id": KNOWN_REPORT,
                     "passage_text": marker,
-                    "char_start": 0,
-                    "char_end": len(marker),
+                    "byte_start": byte_start,
+                    "byte_end": byte_start + len(passage_raw),
                     "text_sha256": _sha(marker),
+                    "canonical_text_sha256": _sha(EVIDENCE_CANONICAL_PREFIX + marker),
+                    "segment_index": 0,
                 }],
                 "rio_state": "CURRENT",
             }
@@ -354,7 +380,7 @@ class Harness:
             return result
         if self.port_mode == "long-text":
             result = build_fixture("research_fetch", {"report_id": KNOWN_REPORT})
-            result["text"] = LEAK_R2 + ("x" * 12001)
+            result["segments"][0]["text"] = LEAK_R2 + ("x" * 12001)
             self.last_result = result
             return result
         if self.port_mode == "huge":
@@ -695,6 +721,69 @@ class ResearchReadAppTests(unittest.IsolatedAsyncioTestCase):
             _assert_error(response, "INTERNAL_ERROR", LEAK_R2)
             assert len(response.content) < 4096
 
+    async def test_a5b_closed_v11_shapes_over_http(self):
+        # Regression: the closed v1.1 success shapes must survive the public
+        # HTTP app path, including the null and string search candidate forms.
+        harness = self.harness
+        token = harness.token()
+
+        response = await harness.call("research_status", {}, token=token)
+        payload = _result(response)["structuredContent"]
+        validate_output("research_status", payload)
+        assert payload["catalog"] == {"report_count": 1}
+        assert payload["coverage"] == {"full_text_ratio": 1.0, "rio_ratio": 0.0}
+        assert payload["degradation"] == []
+        assert set(payload["generation"]) == {
+            "server_contract", "read_port_contract", "mastermind_commit",
+        }
+
+        response = await harness.call("research_search", {"query": "rates"}, token=token)
+        payload = _result(response)["structuredContent"]
+        validate_output("research_search", payload)
+        shapes = [(item["side"], item["published_at"]) for item in payload["candidates"]]
+        assert (None, None) in shapes
+        assert ("sell", "2026-01-02") in shapes
+        assert payload["coverage_state"] is None
+
+        response = await harness.call("research_fetch", {"report_id": KNOWN_REPORT}, token=token)
+        payload = _result(response)["structuredContent"]
+        validate_output("research_fetch", payload)
+        assert payload["report"]["side"] == "sell"
+        assert payload["report"]["published_at"] == "2026-01-02"
+        assert payload["text_layer_state"] == "full"
+        assert payload["coverage_state"] == "FULL_TEXT"
+        first, second = payload["segments"]
+        assert (first["page_start"], first["page_end"]) == (None, None)
+        assert (second["page_start"], second["page_end"]) == (2, 3)
+        first_raw = first["text"].encode("utf-8")
+        second_raw = second["text"].encode("utf-8")
+        assert (first["byte_start"], first["byte_end"]) == (0, len(first_raw))
+        assert second["byte_start"] == first["byte_end"]
+        assert second["byte_end"] - second["byte_start"] == len(second_raw)
+        assert payload["segment_count_total"] == 3
+        assert payload["next_segment_start"] == 2
+
+        harness.result_marker = MARKER
+        try:
+            response = await harness.call(
+                "research_find_evidence",
+                {"claim": "rates rose", "report_ids": [KNOWN_REPORT]},
+                token=token,
+            )
+        finally:
+            harness.result_marker = ""
+        payload = _result(response)["structuredContent"]
+        validate_output("research_find_evidence", payload, quote_limit_chars=1200)
+        passage = payload["passages"][0]
+        raw = passage["passage_text"].encode("utf-8")
+        assert passage["byte_start"] == len(EVIDENCE_CANONICAL_PREFIX.encode("utf-8"))
+        assert passage["byte_end"] - passage["byte_start"] == len(raw)
+        assert passage["text_sha256"] == _sha(MARKER)
+        assert passage["canonical_text_sha256"] == _sha(EVIDENCE_CANONICAL_PREFIX + MARKER)
+        assert passage["segment_index"] == 0
+        assert harness.port_calls == 4
+
+
     async def test_a7_post_await_recheck(self):
         harness = self.harness
         token = harness.token()
@@ -818,7 +907,7 @@ async def _a10(caplog) -> str:
         )
         result = _result(response)
         assert result["isError"] is False
-        assert LICENSED in result["structuredContent"]["text"]
+        assert LICENSED in result["structuredContent"]["segments"][0]["text"]
         return harness.subjects["reader"]
     finally:
         await harness.stop()
