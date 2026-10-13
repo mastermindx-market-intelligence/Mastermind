@@ -60,5 +60,7 @@
   },
   "installation_receipt_sha256": "200df1bfea621ef7ae6a689a09039a06590653f320f9f8e663f07dad2baa5340",
   "local_original_qualification_sha256": "62b52256eed862eb411bd627bdc076b6b7c6e26b5edf087c3cad2c4419cf30a0",
-  "remote_retrieval": "PENDING_ASSIGNING_PARENT_ONCE_COMMAND_DELIVERED"
+  "remote_retrieval": "COMPLETE_CURRENT_CONTENT_ONLY_ORIGINAL_RC65_UNACCEPTED",
+  "parent_delivery_proof_sha256": "16157e96c341f70a6ed80b3cf6bd14138fe9589fd3b0a9a441b6061e12e98b1f",
+  "original_source_review": "Assigning parent independent review active; not outcome acceptance"
 }
