@@ -20,7 +20,7 @@ import sys
 import time
 from typing import Any
 
-VERSION = "0.1.5"
+VERSION = "0.1.6"
 ENDPOINT = "http://127.0.0.1:29979/mcp"
 MAX_BYTES = 16 * 1024 * 1024
 MAX_REQUEST = 1 << 19
@@ -41,6 +41,56 @@ EDIT_TOOLS = frozenset({
     "duplicate_nodes", "move_nodes", "update_styles", "finish_working_on_nodes",
     "create_page", "create_tokens", "set_tokens", "set_comment_thread_status",
 })
+# Both digests below are independently reviewed complete upstream catalogs.
+# A changed tool schema is NOT admitted based on a subset or similarity check.
+PREVIOUSLY_REVIEWED_CATALOG_SHA256 = frozenset({
+    "ac18857df0aa6323646333368e5798e7c28de7b4d5f5dc3cb320276e3535daa9",
+})
+# The diagnostic profile never grants write permission. It lets operators
+# rapidly distinguish likely read-description-only churn from actual schema
+# changes without exposing raw vendor content, adding a watcher or new auth.
+DIAGNOSTIC_READ_DESCRIPTION_TOOLS = READ_TOOLS - {"get_basic_info"}
+DIAGNOSTIC_DESCRIPTION_LIMIT = 8192
+REVIEWED_DESCRIPTION_PROFILE_SHA256 = "210fa4e8801986b07fec879b8f734c653a04d369e3e79227a09c583e6ee6978a"
+REVIEWED_TOOL_SHA256 = {
+    "create_artboard": "69397924c5de8dd93f2159d09ec12f69afda9666a83660091a43b2880c8f85a4",
+    "create_file": "635cad7f83390cf94f967247a2f0996b32efac54a93b9bbb4dd0472ee4ecb4a8",
+    "create_page": "054d9ab984702a91b72af029b4e11e8bdfaed324dfb6ecb4d6f2d9d1d72306e4",
+    "create_tokens": "8935e10a54416875f2ecb5bc562333a6d046b89070786f3165529db2b95ba0a1",
+    "delete_nodes": "7993f27f0fe74ce6de51a9c60a0570669e13b5c32eb6ece3ed9c3c71cf00e823",
+    "duplicate_nodes": "f618a6647a141868a1ef00a92b25916fd085afe81b4083f195a36ba2a1b49bc9",
+    "export": "3ffe106644541a86b702c63eba87670513d87999eff8ff0e1af0ba5a91233d1d",
+    "export_combined_pdf": "1b3e2c8486af5d0b9919ad52cc63b6fbc5ada4ecfbcd3374d2183fb82210c34f",
+    "find_nodes": "d93cca1f909f66211316310dc085aa299cdba1de5a267db271d3e43c29b94049",
+    "finish_working_on_nodes": "279ad91a4ffc42758f107927638224745692d6c8dc94bbe7c95e01ee8d66ee6e",
+    "get_basic_info": "c810bf741bda4053d6d6793e65cc5b69eb18c45e1e82783bca7efb9a09ce6228",
+    "get_children": "cc8f62d18bf67ec88f1536a7e7185ff2984ae0de67a1c79b4512e5f780f5f365",
+    "get_comment_thread": "c5b9755ce9d4b496145eb23c40944a685decf697aab4b21df1d7441b18bc2db4",
+    "get_computed_styles": "2eb2c85f219c545d593f10c00f5b44b10efdb91c66377df9b4b26a7d6a00fba7",
+    "get_fill_image": "d02d30ff64edde2de5f4d89e91098d7677baf3c98f36607de1fa3d1c16275d28",
+    "get_font_family_info": "cf7f00cbd5b489e41eb0bcba83c8bcce7f0fd4f16fb96f6c2841eb04ef7a77c1",
+    "get_guide": "56622d114b2430cde45782040422332f7ffacc9ac5b874b96a33dee5b9560d46",
+    "get_jsx": "d5268ea27e6c98d86109c44eca48622c9544395ac45b09215ee59d987032a6d1",
+    "get_node_info": "b0f86ff1419f1ca53dba5102dee4c970855015c1ae290b98c498f9a343f4c4c1",
+    "get_screenshot": "6e3dc2037a50c5cd7393ab9aa6f887d31dceb67e3d21e14e6dc4893df09a7fee",
+    "get_selection": "f06282fa36cb710c36c11aec7475a7a2e0fc29fe529c0abe3e1a242f9994207c",
+    "get_tokens": "67eac1dba9442cdf80b9fead63e4c53a329894cdf00810b06443704e18114bbe",
+    "get_tree_summary": "7c0af8c9e411b1660d2bfd787d4d7cc418cb8483b0b461b5243065df0cc18f7d",
+    "list_comment_thread_authors": "91f063cc884546d9e7f1020d1a8b7a58f089242e309034062b0eff80fdbd3a4a",
+    "list_comment_threads": "f73cdeeecc5acfd4dae14ab5c00d263aea4210f51f8cc961f040c5d8c74dfd8e",
+    "list_resources": "47e74048dcaac66cb7a8a7b2b4f84cf612183665aae06ac2a26d45189619043b",
+    "move_nodes": "0286050634b4097a5a4aa3e575b580a33d207fc505a1e502de21d5538944a9d5",
+    "open_file": "fc257403c5b7b6199016b44d9e17b17a512e0dfe9aeb3c5813db3edeab61e717",
+    "rename_nodes": "f27d608b51f8dcc1cdeab3abaf631771c5a22bed4fe8e1b1f452711f7a843c40",
+    "rename_pages": "53a6446843a4c8c8cc30ff3c02973e6c3a1f00b02c003700c2482c70507dfe83",
+    "rename_resource": "5ed7d160d1c517a78be52939cceeb00e18e4a8d14128914ce5f4cecc19f31850",
+    "set_comment_thread_status": "a5f2a87bed89041feb8e3718dd3893d80bfa3b58ca60f54bd6c62cb6637f3329",
+    "set_text_content": "613762a015d7be7feb5e5c53ca5562b16962886d865db0d564c1ff1961c672d8",
+    "set_tokens": "e88c1558fb71f4fd989bb3d8f4c0af229221c4fb62f4642363a2a80c5804277b",
+    "update_styles": "406531e52e53eded14589371dea58a3f6d327ac423630a9c562382a546c6b5de",
+    "write_html": "c85ea2476c5f29c562901c79dbcb00742c10d45a81af29e5f5373029e1b4c781",
+}
+
 # Native export can write arbitrary host paths; delete can destroy a whole document.
 # Neither is exposed. Screenshots/JSX use explicit private artifact saving instead.
 
@@ -402,6 +452,38 @@ def same_document(identity, info):
     return (info.get("fileName") == identity["file"] and info.get("pageName") == identity["page"]
             and any(isinstance(b, dict) and b.get("id") == identity["anchor"] for b in info.get("artboards", [])))
 
+def description_drift_profile(catalog):
+    """Diagnostic only; never a catalog write-admission shortcut."""
+    if type(catalog) is not dict:
+        return None
+    candidate = {}
+    for name, descriptor in catalog.items():
+        if name in DIAGNOSTIC_READ_DESCRIPTION_TOOLS:
+            if (type(descriptor) is not dict
+                    or type(descriptor.get("description")) is not str
+                    or not 0 < len(descriptor["description"]) <= DIAGNOSTIC_DESCRIPTION_LIMIT):
+                return None
+            candidate[name] = {**descriptor, "description": ""}
+        else:
+            candidate[name] = descriptor
+    return candidate
+
+
+def catalog_drift_names(catalog):
+    """Compact bounded evidence; never echo untrusted descriptor prose."""
+    reviewed_names = set(REVIEWED_TOOL_SHA256)
+    observed_names = set(catalog)
+    changed = sorted(name for name in (reviewed_names & observed_names)
+                     if digest(catalog[name]) != REVIEWED_TOOL_SHA256[name])
+    bound = lambda names: [n[:80] for n in names[:32]]
+    return {"added": bound(sorted(observed_names - reviewed_names)),
+            "removed": bound(sorted(reviewed_names - observed_names)),
+            "changed": bound(changed),
+            "added_count": len(observed_names - reviewed_names),
+            "removed_count": len(reviewed_names - observed_names),
+            "changed_count": len(changed)}
+
+
 def schema_receipt(client, catalog, *, server_pin=SUPPORTED_SERVER,
                    catalog_pin=SUPPORTED_CATALOG_SHA256):
     server = client.server if isinstance(client.server, dict) else {}
@@ -410,17 +492,34 @@ def schema_receipt(client, catalog, *, server_pin=SUPPORTED_SERVER,
     expected_name = server_pin[0] if server_pin else None
     expected_version = server_pin[1] if server_pin and len(server_pin) > 1 else None
     server_name_ok = expected_name is None or actual["server_name"] == expected_name
-    # Paper's release version is diagnostic metadata, not a write-compatibility
-    # boundary. Exact reviewed tool schemas remain the fail-closed write gate.
+    # Version strings are observational. Only EXACT complete reviewed catalogs
+    # qualify writes. Diagnostics never grant write permission for unknown drift.
     server_version_ok = expected_version is None or actual["server_version"] == expected_version
-    catalog_ok = catalog_pin is None or actual["catalog_sha256"] == catalog_pin
-    return {**actual, "accepted_for_write": bool(server_name_ok and server_version_ok and catalog_ok),
-            "expected_server": [expected_name, expected_version] if server_pin else None,
-            "server_name_compatible": server_name_ok,
-            "server_version_compatible": server_version_ok,
-            "server_version_policy": "EXACT" if expected_version is not None else "OBSERVED_NOT_PINNED",
-            "catalog_compatible": catalog_ok,
-            "expected_catalog_sha256": catalog_pin}
+    exact_current = catalog_pin is None or actual["catalog_sha256"] == catalog_pin
+    # An explicitly injected/overridden pin never inherits this registry.
+    exact_prior = (catalog_pin == SUPPORTED_CATALOG_SHA256
+                   and actual["catalog_sha256"] in PREVIOUSLY_REVIEWED_CATALOG_SHA256)
+    catalog_ok = exact_current or exact_prior
+    result = {**actual, "accepted_for_write": bool(server_name_ok and server_version_ok and catalog_ok),
+              "expected_server": [expected_name, expected_version] if server_pin else None,
+              "server_name_compatible": server_name_ok,
+              "server_version_compatible": server_version_ok,
+              "server_version_policy": "EXACT" if expected_version is not None else "OBSERVED_NOT_PINNED",
+              "catalog_compatible": catalog_ok,
+              "catalog_exact_match": exact_current,
+              "catalog_admission_mode": ("EXACT_CURRENT" if exact_current
+                                         else "EXACT_PREVIOUSLY_REVIEWED" if exact_prior
+                                         else "UNREVIEWED"),
+              "expected_catalog_sha256": catalog_pin}
+    if not exact_current:
+        result["catalog_drift"] = catalog_drift_names(catalog)
+        if not exact_prior:
+            profile = description_drift_profile(catalog)
+            result["drift_triage"] = (
+                "READ_DESCRIPTION_ONLY_REQUIRES_REVIEW"
+                if profile is not None and digest(profile) == REVIEWED_DESCRIPTION_PROFILE_SHA256
+                else "UNKNOWN_OR_MATERIAL_CHANGE_REQUIRES_REVIEW")
+    return result
 
 
 def execute(action: str, *, tool: str | None = None, arguments: dict | None = None,
@@ -455,8 +554,18 @@ def execute(action: str, *, tool: str | None = None, arguments: dict | None = No
     with desktop_lock(lock_root):
         client.initialize()
         if action == "status":
+            # Readiness includes catalog qualification, not just Paper liveness.
+            # A catalog failure must never be reported as write_ready.
+            document = snapshot(client, execution_binding=execution_binding)
+            try:
+                inspection_catalog = client.catalog()
+                inspection_schema = schema_receipt(client, inspection_catalog,
+                                                  server_pin=_server_pin, catalog_pin=_catalog_pin)
+            except (Refusal, OSError, TypeError, ValueError):
+                inspection_schema = {"accepted_for_write": False,
+                                     "catalog_admission_mode": "CATALOG_UNAVAILABLE"}
             return {"state": "CONNECTED", "server": client.server, "endpoint": ENDPOINT,
-                    "document": snapshot(client, execution_binding=execution_binding),
+                    "document": document, "write_schema": inspection_schema,
                     "quota_remaining": None, "plan": "UNKNOWN"}
         catalog = client.catalog()
         schema = schema_receipt(client, catalog, server_pin=_server_pin, catalog_pin=_catalog_pin)

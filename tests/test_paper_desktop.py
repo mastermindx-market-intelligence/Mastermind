@@ -299,6 +299,126 @@ class CoreTests(unittest.TestCase):
         drift["get_font_family_info"]["inputSchema"]["required"].remove("fileId")
         self.assertNotEqual(b.digest(drift), b.SUPPORTED_CATALOG_SHA256)
 
+    def test_two_reviewed_full_catalogs_and_fingerprints(self):
+        root = ROOT / "tests/fixtures/paper_desktop"
+        prior = json.loads((root / "ac18857_full_catalog.json").read_text())
+        current = json.loads((root / "48b258_full_catalog.json").read_text())
+        self.assertEqual(
+            b.digest(prior),
+            "ac18857df0aa6323646333368e5798e7c28de7b4d5f5dc3cb320276e3535daa9",
+        )
+        self.assertEqual(b.digest(current), b.SUPPORTED_CATALOG_SHA256)
+        self.assertEqual(b.PREVIOUSLY_REVIEWED_CATALOG_SHA256, {b.digest(prior)})
+        self.assertEqual(set(b.REVIEWED_TOOL_SHA256), set(current))
+        for name in current:
+            with self.subTest(name=name):
+                self.assertEqual(b.digest(current[name]), b.REVIEWED_TOOL_SHA256[name])
+        self.assertEqual(
+            b.digest(b.description_drift_profile(current)),
+            b.REVIEWED_DESCRIPTION_PROFILE_SHA256,
+        )
+        self.assertEqual(
+            b.schema_receipt(type("Paper", (), {"server": {"name": "paper-desktop", "version": "0.5.99"}})(),
+                             current)["catalog_admission_mode"],
+            "EXACT_CURRENT",
+        )
+        compatible = b.schema_receipt(
+            type("Paper", (), {"server": {"name": "paper-desktop", "version": "0.5.99"}})(),
+            prior,
+        )
+        self.assertTrue(compatible["accepted_for_write"])
+        self.assertEqual(compatible["catalog_admission_mode"], "EXACT_PREVIOUSLY_REVIEWED")
+        self.assertEqual(compatible["catalog_drift"]["changed"], ["get_font_family_info"])
+        self.assertEqual(compatible["catalog_drift"]["added_count"], 0)
+        self.assertEqual(compatible["catalog_drift"]["removed_count"], 0)
+
+    def test_diagnostic_read_metadata_never_admits_unreviewed_catalog(self):
+        fixture = json.loads((ROOT / "tests/fixtures/paper_desktop/48b258_full_catalog.json").read_text())
+        altered = copy.deepcopy(fixture)
+        for name in b.DIAGNOSTIC_READ_DESCRIPTION_TOOLS:
+            altered[name]["description"] += " Vendor documentation-only change."
+        self.assertNotEqual(b.digest(altered), b.SUPPORTED_CATALOG_SHA256)
+        self.assertEqual(b.digest(b.description_drift_profile(altered)),
+                         b.REVIEWED_DESCRIPTION_PROFILE_SHA256)
+        fake = Fake()
+        fake.server = {"name": "paper-desktop", "version": "0.5.99"}
+        fake.catalog = lambda: copy.deepcopy(altered)
+        schema = b.schema_receipt(fake, altered)
+        self.assertFalse(schema["accepted_for_write"])
+        self.assertEqual(schema["catalog_admission_mode"], "UNREVIEWED")
+        self.assertEqual(schema["drift_triage"], "READ_DESCRIPTION_ONLY_REQUIRES_REVIEW")
+        self.assertEqual(schema["catalog_drift"]["changed_count"],
+                         len(b.DIAGNOSTIC_READ_DESCRIPTION_TOOLS))
+        with self.assertRaisesRegex(b.Refusal, "UPSTREAM_SCHEMA_UNREVIEWED"):
+            self.call(client=fake, _catalog_pin=b.SUPPORTED_CATALOG_SHA256)
+        self.assertEqual(fake.calls, [])
+
+        altered["get_font_family_info"]["inputSchema"]["required"].append("unexpected")
+        schema = b.schema_receipt(fake, altered)
+        self.assertFalse(schema["accepted_for_write"])
+        self.assertEqual(schema["drift_triage"], "UNKNOWN_OR_MATERIAL_CHANGE_REQUIRES_REVIEW")
+
+    def test_every_unreviewed_tool_descriptor_change_blocks_before_dispatch(self):
+        fixture = json.loads((ROOT / "tests/fixtures/paper_desktop/48b258_full_catalog.json").read_text())
+        fake = Fake()
+        fake.server = {"name": "paper-desktop", "version": "0.5.99"}
+        for name in fixture:
+            with self.subTest(name=name, mutation="description"):
+                changed = copy.deepcopy(fixture)
+                changed[name]["description"] += " unexpected"
+                self.assertFalse(b.schema_receipt(fake, changed)["accepted_for_write"])
+            with self.subTest(name=name, mutation="schema"):
+                changed = copy.deepcopy(fixture)
+                changed[name]["inputSchema"]["additionalProperties"] = True
+                self.assertFalse(b.schema_receipt(fake, changed)["accepted_for_write"])
+            with self.subTest(name=name, mutation="annotations"):
+                changed = copy.deepcopy(fixture)
+                changed[name].setdefault("annotations", {})["openWorldHint"] = True
+                self.assertFalse(b.schema_receipt(fake, changed)["accepted_for_write"])
+        for mutation in ("add", "remove", "server_wrong", "injected_pin"):
+            with self.subTest(mutation=mutation):
+                changed = copy.deepcopy(fixture)
+                if mutation == "add":
+                    changed["new_resource"] = {"name": "new_resource", "description": "blocked"}
+                elif mutation == "remove":
+                    del changed["get_font_family_info"]
+                elif mutation in ("server_wrong", "injected_pin"):
+                    changed["get_font_family_info"]["description"] += " change"
+                fake.server = {"name": "another-server" if mutation == "server_wrong"
+                               else "paper-desktop", "version": "any"}
+                schema = b.schema_receipt(fake, changed, catalog_pin=(
+                    "f" * 64 if mutation == "injected_pin" else b.SUPPORTED_CATALOG_SHA256))
+                self.assertFalse(schema["accepted_for_write"])
+
+    def test_inspect_reports_write_readiness_and_drift_before_first_edit(self):
+        fixture = json.loads((ROOT / "tests/fixtures/paper_desktop/48b258_full_catalog.json").read_text())
+        fake = Fake()
+        fake.server = {"name": "paper-desktop", "version": "0.5.14"}
+        fake.catalog = lambda: copy.deepcopy(fixture)
+        v = b.execute("status", client=fake, lock_root=self.root)
+        self.assertEqual(v["state"], "CONNECTED")
+        self.assertTrue(v["write_schema"]["accepted_for_write"])
+        self.assertEqual(v["write_schema"]["catalog_admission_mode"], "EXACT_CURRENT")
+        self.assertEqual(fake.calls, ["get_basic_info"])
+
+        bad = copy.deepcopy(fixture)
+        bad["write_html"]["inputSchema"]["required"].append("new_constraint")
+        fake.calls.clear()
+        fake.catalog = lambda: copy.deepcopy(bad)
+        v = b.execute("status", client=fake, lock_root=self.root)
+        self.assertEqual(v["state"], "CONNECTED")
+        self.assertFalse(v["write_schema"]["accepted_for_write"])
+        self.assertEqual(v["write_schema"]["catalog_drift"]["changed"], ["write_html"])
+        self.assertEqual(v["write_schema"]["drift_triage"],
+                         "UNKNOWN_OR_MATERIAL_CHANGE_REQUIRES_REVIEW")
+        self.assertEqual(fake.calls, ["get_basic_info"])
+
+        fake.catalog = lambda: (_ for _ in ()).throw(b.Refusal("INVALID_CATALOG"))
+        v = b.execute("status", client=fake, lock_root=self.root)
+        self.assertEqual(v["state"], "CONNECTED")
+        self.assertFalse(v["write_schema"]["accepted_for_write"])
+        self.assertEqual(v["write_schema"]["catalog_admission_mode"], "CATALOG_UNAVAILABLE")
+
     def test_token_delete_refused_before_dispatch(self):
         self.client.info = {"fileId": "file-a", "artboards": []}
         with self.assertRaisesRegex(b.Refusal, "TOKEN_DELETE_NOT_ALLOWED"):

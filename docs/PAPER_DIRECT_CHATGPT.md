@@ -53,6 +53,31 @@ from accepted `8cd...` is removal of read tool `list_files` and addition of bloc
 owns these new bridge bytes; v9 remains immutable historical evidence. A future catalog change still
 returns read-only until separately reviewed, and source merge alone never updates a running seat.
 
+## Fail-closed catalog hardening and early readiness (candidate v12)
+
+Following the verified C2/Ryan v11 `48b258...` recovery, bridge 0.1.6/v12
+adds a second **exact reviewed full-catalog** hash for the earlier accepted
+`ac18857...` variant. It does not auto-accept unseen schema descriptions,
+new required parameters, removed/added tools or new Paper releases.
+Previously reviewed exact-v11/v10 variants can be observed without
+unnecessary schema-dependent write downtime when Paper alternates between
+those two fully reviewed catalog dictionaries.
+
+`paper_inspect` returns both `CONNECTED` and an independent
+`write_schema.accepted_for_write` preflight, preventing a false impression
+that document reads prove edit readiness. `paper_catalog` reports the
+current full digest, exact qualification mode and bounded changed tool
+names. A read-description-only drift hint is diagnostic **only**; all new
+full-catalog hashes still require source review/qualification and
+normal immutable release. On `UPSTREAM_SCHEMA_UNREVIEWED`, inspect
+`catalog_drift` before attempting another edit. The refusal is
+pre-dispatch, but never replay a previously ambiguous modifying effect.
+
+This change uses the same app/tunnel, Paper Desktop and per-OS-user lock.
+Do not add a parallel watchdog, unsafe raw-port fallback or automatic
+runtime overwrite. Production rollout remains a separate approved
+release/canary step from source and local tests.
+
 ## Implementation
 
 `integrations/paper_desktop/direct_service.py` owns deployment mechanics only:
