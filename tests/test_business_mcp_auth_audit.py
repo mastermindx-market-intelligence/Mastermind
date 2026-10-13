@@ -4,6 +4,8 @@ import fcntl
 import json
 import os
 import stat
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -658,3 +660,141 @@ def test_owner_proof_retains_unlock_and_close_failures_in_order(
         raise primary_failure.with_traceback(primary_failure.__traceback__)
     if fixture_cleanup_failures:
         raise BaseExceptionGroup("fixture cleanup failures", fixture_cleanup_failures)
+
+
+def test_preexisting_extended_acl_refuses_audit_acquisition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    directory = tmp_path / "audit"
+    host_fd = open_directory(directory)
+    target = directory / "auth-audit.jsonl"
+    target.write_bytes(b"")
+    target.chmod(0o600)
+    observed: list[int] = []
+
+    def acl_on_verified_descriptor(name, *, expected_identity, descriptor):
+        assert name == "auth-audit.jsonl"
+        opened = os.fstat(descriptor)
+        assert (opened.st_dev, opened.st_ino) == (
+            expected_identity.st_dev,
+            expected_identity.st_ino,
+        )
+        observed.append(descriptor)
+        return True
+
+    monkeypatch.setattr(audit, "has_macos_acl", acl_on_verified_descriptor)
+    try:
+        with pytest.raises(AuditSinkPoisoned, match="extended ACL refused"):
+            DurableAuthAuditSink.open(host_fd, policy_id=POLICY_ID)
+        assert target.read_bytes() == b""
+        assert len(observed) == 1
+    finally:
+        os.close(host_fd)
+
+
+def test_extended_acl_drift_poisons_before_any_audit_append(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    directory = tmp_path / "audit"
+    host_fd = open_directory(directory)
+    sink = DurableAuthAuditSink.open(host_fd, policy_id=POLICY_ID)
+    monkeypatch.setattr(audit, "has_macos_acl", lambda *args, **kwargs: True)
+    try:
+        with pytest.raises(AuditSinkPoisoned, match="extended ACL refused"):
+            sink.emit(event())
+        assert (directory / "auth-audit.jsonl").read_bytes() == b""
+        with pytest.raises(AuditSinkPoisoned, match="not live"):
+            sink.emit(event())
+        with pytest.raises(AuditSinkPoisoned, match="audit close is uncertain"):
+            sink.close()
+    finally:
+        os.close(host_fd)
+
+
+def test_acl_observer_uncertainty_fails_closed_at_acquisition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    directory = tmp_path / "audit"
+    host_fd = open_directory(directory)
+
+    def fail_acl_observation(*args, **kwargs):
+        raise audit.FilesystemSecurityError("synthetic ACL observation failure")
+
+    monkeypatch.setattr(audit, "has_macos_acl", fail_acl_observation)
+    try:
+        with pytest.raises(AuditSinkPoisoned, match="ACL observation refused"):
+            DurableAuthAuditSink.open(host_fd, policy_id=POLICY_ID)
+    finally:
+        os.close(host_fd)
+
+
+def test_acl_free_ledger_checks_same_owned_descriptor_across_append(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    directory = tmp_path / "audit"
+    host_fd = open_directory(directory)
+    observed: list[tuple[int, int]] = []
+
+    def acl_free(name, *, expected_identity, descriptor):
+        assert name == "auth-audit.jsonl"
+        opened = os.fstat(descriptor)
+        assert (opened.st_dev, opened.st_ino) == (
+            expected_identity.st_dev,
+            expected_identity.st_ino,
+        )
+        observed.append((opened.st_dev, opened.st_ino))
+        return False
+
+    monkeypatch.setattr(audit, "has_macos_acl", acl_free)
+    try:
+        sink = DurableAuthAuditSink.open(host_fd, policy_id=POLICY_ID)
+        sink.emit(event())
+        sink.close()
+        assert len(observed) >= 4
+        assert len(set(observed)) == 1
+    finally:
+        os.close(host_fd)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="requires native macOS ACLs")
+def test_native_macos_existing_audit_acl_is_refused(
+    tmp_path: Path,
+) -> None:
+    directory = tmp_path / "audit"
+    host_fd = open_directory(directory)
+    target = directory / "auth-audit.jsonl"
+    target.write_bytes(b"")
+    target.chmod(0o600)
+    subprocess.run(
+        ["/bin/chmod", "+a", "everyone allow read", str(target)],
+        check=True,
+        capture_output=True,
+    )
+    try:
+        with pytest.raises(AuditSinkPoisoned, match="extended ACL refused"):
+            DurableAuthAuditSink.open(host_fd, policy_id=POLICY_ID)
+    finally:
+        os.close(host_fd)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="requires native macOS ACLs")
+def test_native_macos_acl_added_after_open_refuses_append(
+    tmp_path: Path,
+) -> None:
+    directory = tmp_path / "audit"
+    host_fd = open_directory(directory)
+    sink = DurableAuthAuditSink.open(host_fd, policy_id=POLICY_ID)
+    target = directory / "auth-audit.jsonl"
+    subprocess.run(
+        ["/bin/chmod", "+a", "everyone allow read", str(target)],
+        check=True,
+        capture_output=True,
+    )
+    try:
+        with pytest.raises(AuditSinkPoisoned, match="extended ACL refused"):
+            sink.emit(event())
+        assert target.read_bytes() == b""
+        with pytest.raises(AuditSinkPoisoned, match="audit close is uncertain"):
+            sink.close()
+    finally:
+        os.close(host_fd)

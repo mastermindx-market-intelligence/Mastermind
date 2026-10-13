@@ -24,6 +24,8 @@ import threading
 from collections.abc import Iterable
 from typing import Any
 
+from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
+
 from .contracts import (
     AUTH_AUDIT_SCHEMA,
     CHANNEL_AUDIT_SCHEMA,
@@ -226,6 +228,7 @@ class DurableAuthAuditSink:
             cls._check_file_stat(named_stat)
             if _identity(file_stat) != _identity(named_stat):
                 raise AuditSinkPoisoned("audit file identity changed during open")
+            cls._check_file_acl(audit_fd, named_stat)
             if file_stat.st_size > file_budget:
                 raise AuditSinkPoisoned("audit file exceeds its fixed budget")
             cls._check_file_flags(audit_fd)
@@ -277,6 +280,23 @@ class DurableAuthAuditSink:
             or value.st_nlink != 1
         ):
             raise AuditSinkPoisoned("audit file security refused")
+
+    @staticmethod
+    def _check_file_acl(audit_fd: int, named_stat: os.stat_result) -> None:
+        """Refuse a Darwin ACL on the already-verified named audit descriptor.
+
+        Never reopen via a pathname: the existing directory and file identity
+        checks establish the trusted object, and the shared ACL observer binds
+        its check to that same open descriptor. Off Darwin this is inert.
+        """
+        try:
+            extended_acl = has_macos_acl(
+                _AUDIT_NAME, expected_identity=named_stat, descriptor=audit_fd
+            )
+        except FilesystemSecurityError as error:
+            raise AuditSinkPoisoned("audit file ACL observation refused") from error
+        if extended_acl:
+            raise AuditSinkPoisoned("audit file extended ACL refused")
 
     @staticmethod
     def _check_file_flags(audit_fd: int) -> None:
@@ -389,6 +409,7 @@ class DurableAuthAuditSink:
             or named.st_size != expected_size
         ):
             raise AuditSinkPoisoned("named audit file identity or size changed")
+        self._check_file_acl(self._audit_fd, named)
         self._check_file_flags(self._audit_fd)
         self._prove_owner_lock(expected_size=expected_size)
 
