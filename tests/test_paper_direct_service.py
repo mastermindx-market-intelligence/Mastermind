@@ -60,6 +60,25 @@ class DirectServiceTests(unittest.TestCase):
         self.assertFalse((self.target / "secrets/runtime-key").exists())
         self.assertFalse((self.home / "Library/LaunchAgents").exists())
 
+    def test_verified_named_seat_reports_only_public_transport_diagnostics(self):
+        receipt = self.stage(seat_id="c2", allow_prepare=True)
+        diag = self.service().transport_diagnostic(receipt)
+        self.assertEqual(diag, {
+            "schema": "mastermind.paper_transport_diagnostic.v1",
+            "seat_id": "c2",
+            "source_revision": "a" * 40,
+            "bridge_sha256": receipt["files"]["runtime/bridge.py"],
+        })
+        raw = json.dumps(diag)
+        self.assertNotIn(str(self.home), raw)
+        self.assertNotIn("tunnel_id", raw)
+        self.assertNotIn("runtime_key", raw)
+        self.assertEqual(set(diag), {"schema", "seat_id", "source_revision", "bridge_sha256"})
+
+    def test_legacy_direct_bundle_does_not_invent_seat_identity(self):
+        receipt = self.stage()
+        self.assertIsNone(self.service().transport_diagnostic(receipt))
+
     def test_bridge_is_reused_byte_for_byte(self):
         self.stage()
         self.assertEqual((self.target / "runtime/bridge.py").read_bytes(),

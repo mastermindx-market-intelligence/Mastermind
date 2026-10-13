@@ -128,6 +128,51 @@ bridge SHA-256 `7d810c458a53e00e21014fd7375ac338dc9c1421b30f823feb4d34184f9d08fc
 Exact target, snapshot, token-delete, desktop mutex, and EFFECT_UNKNOWN/no-replay guards are preserved.
 Evidence: `docs/evidence/paper_desktop/20261001_0514_catalog_compatibility.json`.
 
+### Fail-closed catalog resilience — 2026-10-13 candidate (v12)
+
+The 2026-10-13 `48b258...` vendor catalog change, though confined to one
+read-only helper's description and new required `fileId`, disabled the prior
+strict full-digest write gate until verified v11 was installed and canaried.
+The prevention goal is fast, safe diagnosis and service continuity across
+**already reviewed** exact versions, not auto-approval of new vendor APIs.
+
+Bridge 0.1.6/v12 adds the complete `ac18857...` full-catalog digest as a
+**second previously reviewed exact catalog**, alongside current `48b258...`.
+Both 36-tool maps were independently reconstructed/reviewed with raw fixture
+evidence. Qualification remains **full catalog equality** against one of
+these exact hashes plus the expected `paper-desktop` server identity.
+An unexpected digest, even if the change affects only a read-only tool's
+human-readable description, remains `UPSTREAM_SCHEMA_UNREVIEWED` before
+any modifying RPC. No tool-name subset, schema-family or metadata-only
+shortcut is used for write admission.
+
+Existing `paper_inspect` now returns a `write_schema` preflight separate
+from basic document liveness. A `CONNECTED` result alone does not
+authorize editing: operators check `accepted_for_write`. On mismatch,
+`paper_catalog.write_schema` includes bounded added/removed/modified tool
+names and a **nonauthorizing** triage hint when the drift is confined to
+description strings on 15 non-identity read tools. The latter diagnostic
+never flips `accepted_for_write` to true. No new background agent,
+credential, auth plane, queue, retry owner, or alternate Paper gateway is
+created. The registered Paper service/tunnel continues owning live calls.
+
+V3/V4 named direct service bundles report `transport_diagnostic` in MCP
+responses, consisting solely of the verified seat label, reviewed source
+revision and bridge SHA. This is informational provenance for distinguishing
+the actual C2 versus Ryan route, **not** host attestation, workspace enrollment,
+auth, file ownership, a merge/install receipt or an effect ledger. It never
+takes a caller-selected host, path, tunnel ID, token or secret; legacy direct
+bundles have no invented seat identity.
+
+Immutable runtime v12 is separately staged and checked; v11 remains
+unchanged. Release still requires CI, independent review, existing-service
+deployment and same-carrier direct-app proof. This section supersedes only
+the prior **single currently approved hash** expectation; it preserves the
+historical exact-full-digest security rule, all blocklists and
+`EFFECT_UNKNOWN` no-replay requirements. Unreviewed future schema changes
+can still deliberately hold writes; they should no longer be mistaken for
+a general connection failure.
+
 ### Paper release-version compatibility ruling — 2026-09-30
 
 Paper Desktop's reported release version is now **observational metadata, not a write-admission
