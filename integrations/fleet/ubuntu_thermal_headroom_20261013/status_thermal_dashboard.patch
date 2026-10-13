@@ -1,0 +1,164 @@
+--- a/pool_status.py
++++ b/pool_status.py
+@@ -9,6 +9,7 @@
+ from __future__ import annotations
+ 
+ import json
++import math
+ import os
+ import sys
+ import time
+@@ -667,7 +668,7 @@
+ 
+ HOSTS_JSON_PATH = os.path.join(HERE, "hosts.json")
+ HOSTS_STATE_DIR = os.path.join(HERE, "state", "hosts")
+-HOST_STALE_SECS = 600
++HOST_STALE_SECS = 180
+ 
+ _DAY_TOKENS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+ 
+@@ -787,6 +788,9 @@
+             "roles": ",".join(str(r) for r in (entry.get("roles") or [])),
+             "cores": entry.get("cores"),
+             "lane_ceiling": entry.get("lane_ceiling"),
++            "max_active": entry.get("max_active"),
++            "platform": entry.get("platform"),
++            "disk_floor_gb": entry.get("min_free_gb"),
+             "window": window_state(entry.get("windows"), now),
+             "probe": "NO_PROBE",
+             "reachable": None,
+@@ -807,18 +811,87 @@
+             continue
+         row["probe"] = "FILE"
+         row["age"] = age
+-        row["age_label"] = "STALE" if age > HOST_STALE_SECS else _fmt_host_age(age)
++        # Match the real picker budget without truncation-at-threshold.
++        row["age_label"] = "STALE" if now.timestamp() - float(st["ts"]) > HOST_STALE_SECS else _fmt_host_age(age)
+         row["reachable"] = bool(st.get("reachable"))
++        cap, active = entry.get("lane_ceiling"), entry.get("max_active")
++        row["effective_ceiling"] = (
++            min(cap, active)
++            if type(cap) is int and type(active) is int
++            and 0 < cap <= 32 and 0 < active <= 32 else None
++        )
+         if row["reachable"]:
+             row["load1"] = st.get("load1")
+             row["mem_free_gb"] = st.get("mem_free_gb")
+             row["disk_free_gb"] = st.get("disk_free_gb")
+             row["active_lanes"] = st.get("active_lanes")
+             row["on_ac"] = st.get("on_ac")
++            thermal = st.get("thermal")
++            thermal = thermal if isinstance(thermal, dict) else {}
++            if (thermal.get("schema") == "mastermind.fabric_host_thermal.v1"
++                and thermal.get("source") == "linux_hwmon"
++                and thermal.get("observed_at") == st.get("ts")
++                and thermal.get("status") == "OBSERVED"):
++                value = thermal.get("cpu_tctl_c")
++                if type(value) in (int, float) and math.isfinite(value) and 10 <= value <= 120:
++                    row["cpu_temp_c"] = value
++                risk = thermal.get("risk")
++                if risk in ("NORMAL", "RECOVERING", "RISING_FAST", "HOT", "CRITICAL"):
++                    row["thermal_risk"] = risk
++                until = thermal.get("cooldown_until")
++                ts = st.get("ts")
++                if (type(until) is int and type(ts) is int
++                        and ts <= until <= ts + 600):
++                    row["cooldown_remaining_s"] = max(0, math.ceil(until - now.timestamp()))
++                tops = thermal.get("top_cpu_processes")
++                if isinstance(tops,list):
++                    row["hot_processes"] = [
++                        {"comm":x.get("comm"), "cpu_pct":x.get("cpu_pct")}
++                        for x in tops[:3]
++                        if isinstance(x,dict)
++                        and isinstance(x.get("comm"),str)
++                        and type(x.get("cpu_pct")) in (int,float)
++                    ]
++            granular = st.get("granular")
++            granular = granular if isinstance(granular, dict) else {}
++            val = granular.get("cpu_busy_pct")
++            if (granular.get("schema") == "mastermind.fabric_host_granular.v1"
++                and granular.get("observed_at") == st.get("ts")
++                and type(val) in (int,float) and math.isfinite(val) and 0<=val<=100):
++                row["cpu_busy_pct"] = val
+         else:
+             row["error"] = st.get("error")
+         rows.append(row)
+     return rows
++
++
++def print_thermal_table(rows: List[Dict[str, Any]]) -> None:
++    """Read-only live host thermal projection, never a placement owner."""
++    entries = [r for r in rows if r.get("platform") == "linux"
++               and "lanes" in str(r.get("roles") or "").split(",")]
++    print("  THERMAL  (existing hwmon/procfs host snapshots; no extra daemon)")
++    if not entries:
++        print("  (no Linux lane hosts observed)")
++        return
++    print(f"  {'HOST':<8} {'CPU TCTL':>9} {'CPU BUSY':>9} {'HEAT':>14} {'COOLDOWN':>10} {'AGE':>8}")
++    for r in entries:
++        is_fresh = bool(r.get("reachable")) and r.get("age_label") not in ("STALE","NO_PROBE")
++        temp = r.get("cpu_temp_c") if is_fresh else None
++        busy = r.get("cpu_busy_pct") if is_fresh else None
++        risk = r.get("thermal_risk", "UNKNOWN") if is_fresh else (
++            "STALE" if r.get("age_label") == "STALE" else "DOWN/NO_PROBE")
++        temp_s = f"{float(temp):.1f}C" if type(temp) in (int,float) else "—"
++        busy_s = f"{float(busy):.1f}%" if type(busy) in (int,float) else "—"
++        secs = r.get("cooldown_remaining_s",0) if is_fresh else 0
++        cooldown = f"{(secs+59)//60}m" if type(secs) is int and secs>0 else "—"
++        print(f"  {r['host']:<8} {temp_s:>9} {busy_s:>9} {risk:>14} {cooldown:>10} {r.get('age_label','—'):>8}")
++        if is_fresh and risk in ("HOT","CRITICAL","RISING_FAST"):
++            tops = r.get("hot_processes") or []
++            if tops:
++                names = ", ".join(f"{x['comm']} {float(x['cpu_pct']):.0f}%"
++                                  for x in tops if isinstance(x.get("cpu_pct"),(int,float)))
++                print(f"    sampled CPU: {names[:105]}")
++    print("  Thermal observations are advisory; host picker and LaneLease enforce admission.")
+ 
+ 
+ def print_host_table(now: Optional[datetime] = None) -> None:
+@@ -839,8 +912,8 @@
+         roles = r.get("roles") or "—"
+         if len(roles) > 17:
+             roles = roles[:16] + "…"
+-        ceil = r.get("lane_ceiling")
+-        ceil_s = str(ceil) if isinstance(ceil, int) else "—"
++        ceil = r.get("effective_ceiling")
++        ceil_s = str(ceil) if type(ceil) is int else "—"
+         if r.get("probe") == "NO_PROBE":
+             load = mem = disk = act = "—"
+         elif not r.get("reachable"):
+@@ -854,12 +927,20 @@
+             mem = "—" if not isinstance(mem_v, (int, float)) else f"{float(mem_v):.1f}g"
+             dk_v = r.get("disk_free_gb")
+             disk = "—" if not isinstance(dk_v, (int, float)) else f"{float(dk_v):.1f}g"
++            floor = r.get("disk_floor_gb")
++            if type(dk_v) in (int,float) and type(floor) in (int,float) and dk_v < floor:
++                disk += "!"
+             act_v = r.get("active_lanes")
+             act = f"{act_v if isinstance(act_v, int) else '—'}/{ceil_s}"
+         print(
+             f"  {r['host']:<5} {roles:<17} {load:>12} {mem:>9} {disk:>10} "
+             f"{act:>12} {r.get('window', '—'):>7} {r.get('age_label', '—'):>8}"
+         )
++    if any(type(r.get("disk_free_gb")) in (int,float)
++           and type(r.get("disk_floor_gb")) in (int,float)
++           and r["disk_free_gb"] < r["disk_floor_gb"] for r in rows):
++        print("  ! DISK below configured reserve; host selection may be held.")
++    print_thermal_table(rows)
+ 
+ 
+ # ── human table ────────────────────────────────────────────────────────────────
+@@ -1136,6 +1217,13 @@
+ # ── main ──────────────────────────────────────────────────────────────────────
+ 
+ def main() -> int:
++    # Minimal read-only host views do not mutate/poll the broker.
++    if sys.argv[1:] == ["--thermal"]:
++        print_thermal_table(host_rows())
++        return 0
++    if sys.argv[1:] == ["--hosts"]:
++        print_host_table()
++        return 0
+     # The broker owns fleet-wide leases and this shared projection. Local PID
+     # files are supporting legacy evidence, not the cluster's worker count.
+     # Keep build_status() available to the broker without delegating recursively.
