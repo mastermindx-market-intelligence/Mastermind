@@ -22,7 +22,10 @@ from control_plane.remote_worker_transport import (
     encode_frame,
     validate_request,
 )
-from ops.executive_os.remote_worker_gateway_config import RemoteWorkerGatewayConfig
+from ops.executive_os.remote_worker_gateway_config import (
+    FABRIC_BROKER_TARGET,
+    RemoteWorkerGatewayConfig,
+)
 from ops.executive_os.remote_assignment_control import seal_original_assignment
 
 
@@ -31,9 +34,16 @@ class RemoteWorkerGateway:
 
     def __init__(self, config: RemoteWorkerGatewayConfig) -> None:
         self.config = config
+        client_arguments: dict[str, Any] = {}
+        if config.broker_target == FABRIC_BROKER_TARGET:
+            # Only the explicit Fabric target pins the broker peer uid; the
+            # socket path and identity always come from the config, never from
+            # a caller-supplied override.
+            client_arguments["expected_peer_uid"] = config.expected_broker_peer_uid
         self._broker_client = WorkerBrokerClient(
             config.broker_socket_path,
             timeout_seconds=config.request_timeout_seconds,
+            **client_arguments,
         )
         # Deliberate seam for hermetic tests; production uses the fixed AF_UNIX
         # WorkerBrokerClient above and never accepts a caller-supplied socket.
@@ -75,7 +85,13 @@ class RemoteWorkerGateway:
         )
 
     async def _dispatch_authenticated(self, request: Mapping[str, Any]) -> dict[str, Any]:
-        if request["broker_operation"] == "assignment-seal":
+        if (
+            request["broker_operation"] == "assignment-seal"
+            and self.config.broker_target != FABRIC_BROKER_TARGET
+        ):
+            # Sealing an original assignment is a WorkerBroker-side intercept.
+            # An attended Fabric target never takes it; its assignment-seal
+            # requests forward to the broker unchanged.
             binding = self.config.assignment_control
             if binding is None:
                 raise ValueError("gateway assignment Control is not configured")

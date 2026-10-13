@@ -126,6 +126,32 @@ class _RemoteOnlyInspector:
         raise BrokerStateError("local PID inspection cannot identify a Fabric worker")
 
 
+def _execution_home(spec, physical):
+    """Keep the assigned credential realm separate from finite process HOME.
+
+    Only the existing exact attended canary contract selects run/home. Its
+    receipt still binds the fixed realm in the physical route; an arbitrary
+    path, alternate profile or a caller's passed=True cannot select this mode.
+    This validates retained evidence, never produces canary or realm authority.
+    """
+    from control_plane.codex_worker import _validate_secret_canary_verdict, LaunchValidationError
+
+    canary = spec.get('secret_canary_verdict')
+    if type(canary) is not dict or 'realm_binding' not in canary:
+        return physical.provider_home
+    expected = dict(execution_profile_id='fabric.attended.claude.bounded.v1',
+        harness_binding_id='minimax-token-plan.claude-code-anthropic',
+        run_id=spec['run_id'], job_id=spec['job_id'], worker_id=spec['worker_id'],
+        physical_binding_sha256=physical.digest, provider_home=physical.provider_home)
+    if physical.provider != 'minimax' or spec.get('require_secret_canary') is not True:
+        raise BrokerProtocolError('Unsupported attended execution home contract')
+    try:
+        _validate_secret_canary_verdict(canary, require_passed=True, attended_realm=expected)
+    except LaunchValidationError as exc:
+        raise BrokerProtocolError('Finite execution home lacks its exact realm evidence') from exc
+    return str(Path(spec['run_dir']) / 'home')
+
+
 def validate_start_result(result: Mapping[str, Any], *, payload: Mapping[str, Any],
                           physical: FabricHostBinding) -> tuple[WorkerProcessRef, dict[str, Any]]:
     """Check actual full receipt binding; PRE_EXEC_HANDSHAKE is insufficient."""
@@ -179,7 +205,7 @@ def validate_start_result(result: Mapping[str, Any], *, payload: Mapping[str, An
     if (not isinstance(att.get("workspace_identity"), dict)
             or att["workspace_identity"].get("path") != spec["workspace_path"]
             or not isinstance(att.get("provider_home_identity"), dict)
-            or att["provider_home_identity"].get("path") != physical.provider_home):
+            or att["provider_home_identity"].get("path") != _execution_home(spec, physical)):
         raise BrokerProtocolError("Fabric workspace/provider home differs from actual binding")
     worker = att.get("worker_identity")
     if not isinstance(worker, dict) or any(worker.get(k) != identity[k] for k in (
@@ -205,14 +231,20 @@ class AttendedFabricWorkerAdapter:
 
     def __init__(self, runtime: Runtime, binding_source: Callable[[str, str], FabricHostBinding],
                  *, client_factory: Callable[[FabricHostBinding], Any] | None = None,
+                 request_client_factory: Callable[[FabricHostBinding, Mapping[str, Any]], Any] | None = None,
                  heartbeat_interval_seconds: float = 5.0):
         if not isinstance(runtime, Runtime) or not callable(binding_source):
             raise BrokerStateError("Fabric adapter requires trusted Runtime composition")
         if not 0.01 <= heartbeat_interval_seconds <= 30:
             raise BrokerStateError("Fabric heartbeat interval is outside its bound")
+        if client_factory is not None and request_client_factory is not None:
+            raise BrokerStateError("Fabric requires one exact transport factory")
+        if request_client_factory is not None and not callable(request_client_factory):
+            raise BrokerStateError("Fabric request transport factory must be callable")
         self.runtime = runtime
         self.binding_source = binding_source
-        self._client_factory = client_factory or _fixed_client
+        legacy_client = client_factory or _fixed_client
+        self._client_factory = request_client_factory or (lambda physical, payload: legacy_client(physical))
         self._heartbeat_interval = heartbeat_interval_seconds
         self.inspector = _RemoteOnlyInspector()
         self._bound: dict[str, tuple[Any, dict[str, Any], FabricHostBinding, WorkerLaunchSpec]] = {}
@@ -446,7 +478,7 @@ class AttendedFabricWorkerAdapter:
         attempt, physical, payload = self._resolve(spec, launch=True)
         if lease.attempt != attempt or spec.run_id in self._bound:
             raise BrokerStateError("Fabric claim moved or start already attempted")
-        client = self._client_factory(physical)
+        client = self._client_factory(physical, payload)
         pinned = self.runtime.attempts.pin_remote_launch_identity(spec.run_id,
             fence_generation=attempt.fence_generation, lease_token=lease.lease_token,
             expected_version=attempt.version, identity_digest=self._identity(physical, payload))
@@ -657,7 +689,7 @@ class AttendedFabricWorkerAdapter:
             raise BrokerStateError("Fabric recovery changed the original adapter/LaunchSpec")
         if context is not None:
             self._control_recovery[spec.run_id] = context
-        client = self._client_factory(physical)
+        client = self._client_factory(physical, payload)
         # Recovery is status-only even when the old start response was lost.
         result = client.request_sync("status", dict(binding=payload["binding"],
                     physical_binding_sha256=physical.digest, run_id=spec.run_id,
