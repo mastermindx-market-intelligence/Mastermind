@@ -18,7 +18,7 @@ from test_executive_os_phase1fc import (
 )
 
 
-def _busy(tmp_path, *, reviewer=True):
+def _busy(tmp_path, *, reviewer=True, independent_ready=False):
     runtime = Runtime.at(tmp_path)
     _register_placement_union(runtime)
     if reviewer:
@@ -52,8 +52,8 @@ def _busy(tmp_path, *, reviewer=True):
             "allowed_write_paths": [], "validation_ids": [], "attempt_limit": 1, "cost_class": "small",
             "placement": {"provider_realm": "claude-compatible-subscription" if i == 2 else "codex",
                           "quota_class": "claude-hf1q-step" if i == 2 else "codex-hf1q-step"},
-            "prerequisite_step_ids": ["step-0"] if i == 3 else [],
-        } for i in range(4)]}
+            "prerequisite_step_ids": (["step-3"] if i == 4 else []) if independent_ready else (["step-0"] if i == 3 else []),
+        } for i in range(5 if independent_ready else 4)]}
     _complete_ohf_role(runtime, planned, plan, identity_seed=8601)
     admitted = runtime.jobs.admit_cycle_plan(root.job_id, command_id=f"coo-cycle:{root.job_id}:admit-plan:{planned.attempt.attempt_id}")
     jobs = {j.plan_step_id: j for j in admitted}
@@ -64,6 +64,16 @@ def _busy(tmp_path, *, reviewer=True):
     _complete_ohf_role(runtime, target, {"schema_version": "mastermind.work_result/v1",
         "root_job_id": root.job_id, "plan_attempt_id": planned.attempt.attempt_id, "plan_digest": canonical_digest(plan),
         "plan_step_id": "step-0", "repair_round": 0, "artifacts": [], "evidence_digests": []}, identity_seed=8602)
+    if independent_ready:
+        prerequisite = runtime.attempts.dispatch_cycle_job(
+            jobs["step-3"].job_id,
+            command_id=f"coo-cycle:{root.job_id}:dispatch:{jobs['step-3'].job_id}:attempt:1",
+            worker_id="worker-a", quota_class="codex-hf1q-step",
+        )
+        _complete_ohf_role(runtime, prerequisite, {"schema_version": "mastermind.work_result/v1",
+            "root_job_id": root.job_id, "plan_attempt_id": planned.attempt.attempt_id,
+            "plan_digest": canonical_digest(plan), "plan_step_id": "step-3", "repair_round": 0,
+            "artifacts": [], "evidence_digests": []}, identity_seed=8603)
     active = runtime.attempts.dispatch_cycle_job(
         jobs["step-1"].job_id, command_id=f"coo-cycle:{root.job_id}:dispatch:{jobs['step-1'].job_id}:attempt:1",
         worker_id="worker-a", quota_class="codex-hf1q-step",
@@ -236,3 +246,31 @@ def test_review_target_and_queued_frontier_require_closed_read_scope(tmp_path, w
         root.job_id, [runtime.jobs.get_job(active.job_id)], [review, work],
         {target.job_id: target}, current, {"schema_version": "mastermind.execution_plan/v3"},
     )
+
+
+def test_capacity_pressure_reconciles_before_independent_dependency_materialization(tmp_path):
+    runtime, root, jobs, active = _busy(tmp_path, reviewer=False, independent_ready=True)
+    review = _create_review(runtime, root, jobs["step-0"])
+    supervisor = object.__new__(ExecutiveSupervisor)
+    supervisor.runtime, supervisor.instance_id, supervisor._exact_target_provider = runtime, "fixture-supervisor", None
+    manifest = runtime.jobs.project_cycle_work_dependency_manifest(root.job_id, "step-4")
+    assert manifest["plan_step_id"] == "step-4"
+    before_jobs = runtime.jobs.list_jobs()
+    before_events = runtime.events.list_events()
+    calls = []
+    def dispatch(j, c):
+        calls.append((j, c))
+        if j == review.job_id:
+            return asyncio.run(supervisor.start_cycle_job(j, command_id=c))
+        if j == active.job_id:
+            return active
+        assert j == jobs["step-2"].job_id
+        return None
+    outcome = CooCycle(runtime, dispatcher=dispatch).run_once(root.job_id)
+    assert outcome.action == "DISPATCHED"
+    assert outcome.selected_job_id == active.job_id
+    assert [j for j, _ in calls] == [review.job_id, jobs["step-2"].job_id, active.job_id]
+    assert calls[-1][1] == f"coo-cycle:{root.job_id}:dispatch:{active.job_id}:attempt:1"
+    assert runtime.jobs.list_jobs() == before_jobs
+    assert runtime.events.list_events() == before_events
+    assert not any(j.plan_step_id == "step-4" for j in runtime.jobs.list_jobs())

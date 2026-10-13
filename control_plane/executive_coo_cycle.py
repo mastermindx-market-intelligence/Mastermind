@@ -54,6 +54,13 @@ _RECOVERABLE = {JobStatus.RATE_LIMITED, JobStatus.FAILED, JobStatus.LOST}
 Dispatch = Callable[[str, str], OrchestrationDispatchOutcome | None]
 
 
+class _ReviewDrainReconcileActive:
+    """Private cycle disposition: skip fresh work and settle the incumbent."""
+
+
+_RECONCILE_ACTIVE_REVIEW = _ReviewDrainReconcileActive()
+
+
 @dataclasses.dataclass(frozen=True)
 class CooCycleOutcome:
     root_job_id: str
@@ -350,7 +357,7 @@ class CooCycle:
         ordinals: Mapping[str, int],
         plan_body: Mapping[str, Any] | None,
         policy_sha: str,
-    ) -> CooCycleOutcome | None:
+    ) -> CooCycleOutcome | _ReviewDrainReconcileActive | None:
         """Prefer existing repair/current review demand without a new queue.
 
         Incumbent and uncertain settlement remains with the existing cycle.
@@ -421,8 +428,8 @@ class CooCycle:
                 unavailable.append(candidate.job_id)
         if active:
             # Capacity pressure must not hide the incumbent's original return.
-            # Step 7 performs its exact replay; no fresh work was claimed here.
-            return None
+            # The caller skips materialization before step 7's exact replay.
+            return _RECONCILE_ACTIVE_REVIEW
         # Do not retry the unavailable review in the ordinary queued loop.
         return self._outcome(root_id, "NO_ACTION", None, None, {
             "reason": "exact_dispatch_unavailable",
@@ -1295,17 +1302,21 @@ class CooCycle:
                 return self._outcome(root_id, "REPAIR_CREATED", receipt.job_id, command, receipt)
 
         # Drain current quality obligations before fresh discretionary work.
+        review_pressure_reconciliation = False
         if admission is not None:
             review_outcome = self._drain_current_reviews(
                 root_id, children, current_by_step, ordinals, plan_body,
                 policy.policy_sha256,
             )
-            if review_outcome is not None:
+            if review_outcome is _RECONCILE_ACTIVE_REVIEW:
+                review_pressure_reconciliation = True
+            elif review_outcome is not None:
                 return review_outcome
 
         # 4. Materialize one lowest-ordinal missing dependency-ready V3/V4 work Job.
         if (
-            admission is not None
+            not review_pressure_reconciliation
+            and admission is not None
             and plan_body is not None
             and admission.get("schema_version") == "mastermind.coo_plan_admission/v2"
             and plan_body.get("schema_version") in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4"}
