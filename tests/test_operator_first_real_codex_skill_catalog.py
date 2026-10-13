@@ -7,10 +7,13 @@ Executive Job, account authentication, role selection or authority to delegate.
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
 import shutil
+import subprocess
+import uuid
 
 import pytest
 
@@ -156,3 +159,101 @@ def test_immutable_operator_package_and_separate_role_are_discoverable(tmp_path,
     result["process_closed"] = True
     with capsys.disabled():
         print(json.dumps(result, sort_keys=True))
+
+
+def test_incumbent_operator_installer_auto_loads_role_in_real_codex(tmp_path, capsys):
+    """Staged original installer -> isolated user home -> real provider Skill list.
+
+    This is native Skill visibility from the incumbent installer, not an
+    authenticated provider turn, Attempt role selection or production grant.
+    """
+    if os.environ.get(ENV_KEY) != "1":
+        pytest.skip("requires explicit credential-free Codex catalog opt-in")
+    binary = shutil.which("codex")
+    assert binary is not None
+    original = REPO / "tests/fixtures/operator_first/provider_orchestrator_policy.baseline.txt"
+    patch = REPO / "patches/operator-first/provider-orchestrator-policy.patch"
+    source = tmp_path / "incumbent-source"
+    target = source / "ops/executive_os/provider_orchestrator_policy.py"
+    target.parent.mkdir(parents=True)
+    before = original.read_bytes()
+    assert hashlib.sha256(before).hexdigest() == (
+        "1d4658ac237217ac565e6feda922e55f9bc8a15a0448e8724d00d8ba5ec04594"
+    )
+    target.write_bytes(before)
+    subprocess.run(["git", "apply", "--check", str(patch)], cwd=source,
+                   check=True, capture_output=True, timeout=10)
+    subprocess.run(["git", "apply", str(patch)], cwd=source,
+                   check=True, capture_output=True, timeout=10)
+    shutil.copytree(ROLE_ROOT, source / "skills/mastermind-fabric-orchestration")
+    guard = source / "ops/executive_os/provider_orchestrator_guard.py"
+    guard.write_text("# intentionally inert disposable fixture, not a live guard\n")
+    spec = importlib.util.spec_from_file_location(
+        "isolated_operator_policy_" + uuid.uuid4().hex, target,
+    )
+    assert spec is not None and spec.loader is not None
+    installer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(installer)
+
+    home = tmp_path.resolve() / "isolated-home"
+    home.mkdir(mode=0o700)
+    applied = installer.apply_policy(home, guard_source=guard)
+    verified = installer.verify_policy(home, guard_source=guard)
+    assert applied["state"] == "READY"
+    assert verified["state"] == "READY"
+    assert applied["runtime_admission_proven"] is False
+    assert applied["session_loading_proven"] is False
+    installed_skill = home / ".agents/skills/mastermind-fabric-orchestration/SKILL.md"
+    assert installed_skill.read_bytes() == (ROLE_ROOT / "SKILL.md").read_bytes()
+    installed_refs = home / ".agents/skills/mastermind-fabric-orchestration/references/operator.md"
+    assert installed_refs.read_bytes() == (
+        ROLE_ROOT / "references/operator.md"
+    ).read_bytes()
+    # Existing per-user selected configuration is not an inferred Tool grant.
+    assert (home / ".claude/skills/mastermind-fabric-orchestration/SKILL.md").is_file()
+
+    workspace = tmp_path.resolve() / "workspace"
+    workspace.mkdir(mode=0o700)
+    client = AppServerClient(
+        [binary, "app-server", "--strict-config",
+         "-c", 'sandbox_mode="read-only"',
+         "-c", "skills.bundled.enabled=false",
+         "-c", "features.apps=false",
+         "-c", "features.plugins=false",
+         "-c", "agents.enabled=false"],
+        env={"HOME": str(home), "CODEX_HOME": str(home / ".codex"),
+             "PATH": os.environ.get("PATH", "/opt/homebrew/bin:/usr/bin:/bin"),
+             "LC_ALL": "C"},
+        cwd=workspace, start_new_session=True,
+    )
+    rows = ()
+    try:
+        client.start()
+        client.request(
+            "initialize",
+            {"clientInfo": _CLIENT_INFO,
+             "capabilities": {"experimentalApi": True}}, timeout=10,
+        )
+        client.notify("initialized", {})
+        # No skills/extraRoots/set at all: native user-home discovery only.
+        observed = parse_skills_list_strict(
+            client.request("skills/list", skills_list_params(str(workspace)), timeout=10),
+            expected_cwd=str(workspace),
+        )
+        assert enabled_skill_names(observed) == ["mastermind-fabric-orchestration"]
+        enabled = [r for r in observed if r.get("enabled") is True]
+        assert len(enabled) == 1
+        assert str(enabled[0]["path"]) == str(installed_skill.resolve(strict=True))
+        rows = tuple(r["name"] for r in enabled)
+    finally:
+        client.close()
+        assert not client.alive()
+    with capsys.disabled():
+        print(json.dumps({
+            "schema": "mastermind.incumbent_role_install_real_codex/v1",
+            "provider_names": rows,
+            "installer_apply": "READY", "installer_verify": "READY",
+            "automatic_discovery": True, "credential_home_isolated": True,
+            "source_candidate": True, "production_installed": False,
+            "model_turns": 0, "process_closed": True,
+        }, sort_keys=True))
