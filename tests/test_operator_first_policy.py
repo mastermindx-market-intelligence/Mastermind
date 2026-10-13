@@ -294,8 +294,6 @@ def test_principal_role_overlay_does_not_mutate_protected_operator_package():
     breaks its signed generation and cannot be called source-qualified. The
     accepted incumbent role installer owns future explicit role selection.
     """
-    import hashlib
-
     ceo = (ROOT / "plugins/mastermind-sol/skills/mastermind-web-ceo/SKILL.md").read_text()
     operator_path = ROOT / "plugins/mastermind-operator/skills/receive-commission/SKILL.md"
     operator = operator_path.read_bytes()
@@ -312,5 +310,5 @@ def test_principal_role_overlay_does_not_mutate_protected_operator_package():
     assert "ordinary return adjudication" in core
     assert "only the role supplied by the accepted assignment" in core
     assert "not authentication" in core
-    assert "No" in delivery or "no" in delivery
+    assert "missing access is not authority" in delivery
     assert "independent review" in delivery
