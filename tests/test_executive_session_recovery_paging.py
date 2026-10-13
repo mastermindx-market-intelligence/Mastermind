@@ -136,3 +136,43 @@ def test_orphaned_route_observation_stays_unknown_without_hiding_worker(tmp_path
     item = project_root_recovery(runtime, root.job_id)["jobs"][0]
     assert item["current_model"] is None
     assert item["capacity_assessment"] == "NOT_EVALUATED"
+
+
+def test_root_diagnostic_reports_existing_reviewed_fanout_without_granting_it(tmp_path):
+    runtime, root, planner, attempt = _fixture(tmp_path)
+    before = len(runtime.events.list_events())
+    view = project_root_recovery(runtime, root.job_id)
+    policy = view["reviewed_coo_policy"]
+    assert policy["max_fan_out_per_parent"] == 8
+    assert policy["max_children_total"] == 16
+    assert policy["max_depth"] == 1
+    assert policy["direct_children_observed"] == 1
+    assert policy["state"] == "WITHIN_REVIEWED_BOUNDS"
+    assert policy["capacity_admitted_by_view"] is False
+    assert policy["one_root_can_admit_30_workers"] is False
+    assert policy["native_fabric_lease_capacity_unchanged"] is True
+    assert len(runtime.events.list_events()) == before
+
+
+def test_thirty_fixture_rows_are_not_claimed_as_thirty_admitted_coo_children(tmp_path):
+    runtime, root, planner, attempt = _fleet(tmp_path, size=30)
+    before = len(runtime.events.list_events())
+    view = project_root_recovery(runtime, root.job_id, limit=30)
+    policy = view["reviewed_coo_policy"]
+    assert policy["direct_children_observed"] == 30
+    assert policy["state"] == "EXCEEDS_REVIEWED_CHILD_CEILING"
+    assert policy["max_children_total"] == 16
+    assert policy["one_root_can_admit_30_workers"] is False
+    assert policy["capacity_admitted_by_view"] is False
+    assert view["total_jobs"] == 30
+    assert len(runtime.events.list_events()) == before
+
+
+def test_thirty_under_one_strict_coo_root_is_rejected_by_reviewed_plan_policy():
+    from control_plane.executive_coo_policy import CooCyclePolicy, CooCyclePolicyError
+    policy = CooCyclePolicy.load()
+    assert policy.reserved_children_total((False,) * 8) == 9
+    with pytest.raises(CooCyclePolicyError, match="fan-out"):
+        policy.reserved_children_total((False,) * 30)
+    with pytest.raises(CooCyclePolicyError, match="max_children_total"):
+        policy.reserved_children_total((True,) * 2)

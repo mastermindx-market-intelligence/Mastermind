@@ -87,6 +87,68 @@ def portable_context_fit(*, target_context_limit: int, mandatory_tokens: int,
                        max_optional_tokens=optional_budget, available_input_tokens=max(0, budget))
 
 
+def _modern_stop_without_legacy_quota_proof(con, *, job_id: str,
+                                            attempt_id: str, worker_id: str,
+                                            quota_class: str) -> bool:
+    """Recognize a valid existing stop receipt, never grant quota requeue.
+
+    This explains one known source integration gap. An OPERATION_APPLIED receipt
+    proves that the current Runtime stop path committed, but is not the old
+    OHF_GRACEFUL_STOP event required by the existing positive quota proof.
+    All retry/reconciliation authority remains with the existing COO owner.
+    """
+    from .executive_runtime import (
+        OHF_INTERNAL_GENERATION_OPERATION_SCHEMA_VERSION, _json_loads,
+    )
+
+    modern = con.execute(
+        "SELECT payload_json FROM events WHERE event_type='OPERATOR_OPERATION_APPLIED' "
+        "AND aggregate_type='operator_operation' AND actor='supervisor' "
+        "AND job_id=? AND attempt_id=? AND worker_id=? AND quota_class=? "
+        "ORDER BY event_id",
+        (job_id, attempt_id, worker_id, quota_class),
+    ).fetchall()
+    for event in modern:
+        payload = _json_loads(event["payload_json"], fallback={})
+        if not isinstance(payload, dict) or set(payload) != {
+            "schema_version", "operation_kind", "process_generation_id",
+            "process_liveness", "provider_writer_state",
+            "executive_writer_released",
+        }:
+            continue
+        if (payload.get("schema_version")
+                != OHF_INTERNAL_GENERATION_OPERATION_SCHEMA_VERSION
+                or payload.get("operation_kind") != "graceful_stop"
+                or payload.get("process_liveness") != "PROVEN_DEAD"
+                or payload.get("provider_writer_state") != "RELEASED"
+                or payload.get("executive_writer_released") is not True
+                or not isinstance(payload.get("process_generation_id"), str)
+                or not payload["process_generation_id"]):
+            continue
+        bound_generation = con.execute(
+            "SELECT 1 FROM process_generations g JOIN harness_session_epochs h "
+            "ON h.session_epoch_id=g.session_epoch_id "
+            "WHERE g.process_generation_id=? AND g.worker_id=? "
+            "AND h.attempt_id=? AND h.worker_id=? "
+            "AND g.ended_at_ms IS NOT NULL AND g.executive_writer_held=0 "
+            "AND g.provider_writer_state='RELEASED' LIMIT 1",
+            (payload["process_generation_id"], worker_id, attempt_id, worker_id),
+        ).fetchone()
+        if bound_generation is None:
+            continue
+        legacy = con.execute(
+            "SELECT 1 FROM events WHERE event_type='OHF_GRACEFUL_STOP' "
+            "AND aggregate_type='process_generation' AND aggregate_id=? "
+            "AND job_id=? AND attempt_id=? AND worker_id=? AND quota_class=? "
+            "LIMIT 1",
+            (payload["process_generation_id"], job_id, attempt_id,
+             worker_id, quota_class),
+        ).fetchone()
+        if legacy is None:
+            return True
+    return False
+
+
 def project_root_recovery(runtime, root_job_id: str, *, limit: int = 100,
                           after_job_id: str | None = None) -> dict[str, Any]:
     """One read snapshot for an already-authorized original root's worker triage.
@@ -98,7 +160,9 @@ def project_root_recovery(runtime, root_job_id: str, *, limit: int = 100,
     from .executive_runtime import _retry_safety_material, _json_loads
     from .executive_retry_safety import classify_retry_safety, RetrySafetyDecision
     from .executive_registered_supply import registered_supply_projection
+    from .executive_coo_policy import CooCyclePolicy
 
+    policy = CooCyclePolicy.load()
     if not isinstance(root_job_id, str) or not root_job_id or root_job_id.strip() != root_job_id:
         raise ValueError("an exact existing root_job_id is required")
     if type(limit) is not int or not 1 <= limit <= 500:
@@ -121,6 +185,10 @@ def project_root_recovery(runtime, root_job_id: str, *, limit: int = 100,
         total_jobs = con.execute(
             "SELECT COUNT(*) FROM jobs WHERE root_job_id=? AND job_id!=?",
             (root_job_id, root_job_id),
+        ).fetchone()[0]
+        direct_children = con.execute(
+            "SELECT COUNT(*) FROM jobs WHERE parent_job_id=?",
+            (root_job_id,),
         ).fetchone()[0]
         observed_event_id = con.execute(
             "SELECT COALESCE(MAX(e.event_id),0) FROM events e JOIN jobs j ON j.job_id=e.job_id "
@@ -145,6 +213,7 @@ def project_root_recovery(runtime, root_job_id: str, *, limit: int = 100,
             action = "INSPECT_CURRENT_ATTEMPT"
             reasons = []
             retry = None
+            quota_stop_gap = None
             if status == "QUEUED" and attempt_id is None:
                 action = "WAIT_FOR_EXISTING_SCHEDULER"
                 reasons.append("canonical_job_queued_capacity_not_resolved_by_this_view")
@@ -185,6 +254,14 @@ def project_root_recovery(runtime, root_job_id: str, *, limit: int = 100,
                     reasons.append("predecessor_writer_not_released")
                 if evidence.effect_unknown:
                     reasons.append("unresolved_effect_or_missing_positive_release_proof")
+                    if (status == "RATE_LIMITED" and current is not None
+                            and _modern_stop_without_legacy_quota_proof(
+                                con, job_id=row["job_id"], attempt_id=attempt_id,
+                                worker_id=current["worker_id"],
+                                quota_class=current["quota_class"],
+                            )):
+                        quota_stop_gap = "MODERN_STOP_NOT_LEGACY_QUOTA_PROOF"
+                        reasons.append("modern_stop_applied_but_quota_proof_not_recognized")
                 if not evidence.effective_grant_non_modifying:
                     reasons.append("modifying_or_unknown_grant_requires_existing_continuation_gate")
                 if evidence.candidate_present or evidence.result_present or evidence.seal_present:
@@ -215,6 +292,7 @@ def project_root_recovery(runtime, root_job_id: str, *, limit: int = 100,
                 "orchestration_role": row["orchestration_role"],
                 "attempts_remaining": max(0, row["attempt_limit"] - row["attempt_count"]),
                 "retry_decision": retry, "reason_codes": reasons,
+                "quota_stop_receipt_gap": quota_stop_gap,
                 "checkpoint_available": row["checkpoint_json"] is not None,
                 "queue_position": None, "capacity_eta": None,
             })
@@ -227,6 +305,23 @@ def project_root_recovery(runtime, root_job_id: str, *, limit: int = 100,
             "read_only_supply_scope": "REGISTRY_NOT_GLOBAL_CAPACITY_ADMISSION",
             "recovery_queue_count": sum(item["source_status"] == "QUEUED" for item in items),
             "total_jobs": total_jobs, "observed_event_id": observed_event_id,
+            "reviewed_coo_policy": {
+                "policy_sha256": policy.policy_sha256,
+                "max_fan_out_per_parent": policy.max_fan_out_per_parent,
+                "max_children_total": policy.max_children_total,
+                "max_depth": policy.max_depth,
+                "direct_children_observed": direct_children,
+                "state": ("EXCEEDS_REVIEWED_CHILD_CEILING"
+                          if direct_children > policy.max_children_total
+                          else "WITHIN_REVIEWED_BOUNDS"),
+                "observation_scope": "DIRECT_CHILD_COUNT_NOT_ADMISSION",
+                "capacity_admitted_by_view": False,
+                "one_root_can_admit_30_workers": (
+                    policy.max_fan_out_per_parent >= 30
+                    and policy.max_children_total >= 30
+                ),
+                "native_fabric_lease_capacity_unchanged": True,
+            },
             "root_status": root["status"], "root_attempt_id": root["current_attempt_id"],
             "count_by_action": dict(sorted(Counter(item["next_action"] for item in items).items()))}
 

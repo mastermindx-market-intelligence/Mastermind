@@ -148,3 +148,63 @@ def test_same_model_other_pool_successor_consumes_checkpoint_after_runtime_reope
     assert FRONTIER["next_actions"][0] in json.dumps(seals[0].payload)
     assert not any(event.event_type == "OPERATOR_OPERATION_EFFECT_UNKNOWN"
                    for event in runtime.events.list_events(job_id=planner.job_id))
+
+
+def test_root_triage_identifies_modern_stop_receipt_gap_without_authorizing_requeue(tmp_path):
+    from control_plane.executive_session_recovery import project_root_recovery
+    runtime, root, planner, attempt = _checkpointed_predecessor(tmp_path, operation_stop=True)
+    before = len(runtime.events.list_events())
+    view = project_root_recovery(runtime, root.job_id)
+    item = next(value for value in view["jobs"] if value["job_id"] == planner.job_id)
+    assert "modern_stop_applied_but_quota_proof_not_recognized" in item["reason_codes"]
+    assert item["quota_stop_receipt_gap"] == "MODERN_STOP_NOT_LEGACY_QUOTA_PROOF"
+    assert item["next_action"] == "RECONCILE_ORIGINAL_ATTEMPT"
+    assert item["retry_decision"] != "SAFE_REQUEUE"
+    assert view["operation_performed"] is False
+    assert len(runtime.events.list_events()) == before
+    assert runtime.jobs.get_job(planner.job_id).status.value == "RATE_LIMITED"
+
+
+def test_legacy_positive_graceful_stop_never_claims_modern_receipt_gap(tmp_path):
+    from control_plane.executive_session_recovery import project_root_recovery
+    runtime, root, planner, attempt = _checkpointed_predecessor(tmp_path, operation_stop=False)
+    item = project_root_recovery(runtime, root.job_id)["jobs"][0]
+    assert item["quota_stop_receipt_gap"] is None
+    assert "modern_stop_applied_but_quota_proof_not_recognized" not in item["reason_codes"]
+    assert item["next_action"] == "REQUEUE_WITH_EXISTING_COO"
+
+
+def test_spoofed_modern_stop_for_unknown_generation_is_not_a_proven_gap(tmp_path):
+    from control_plane.executive_runtime import OHF_INTERNAL_GENERATION_OPERATION_SCHEMA_VERSION
+    from control_plane.executive_session_recovery import _modern_stop_without_legacy_quota_proof
+    runtime, root, planner, attempt = _checkpointed_predecessor(tmp_path, operation_stop=False)
+    with runtime.store.transaction() as con:
+        runtime.store.append_event(
+            con, aggregate_type="operator_operation", aggregate_id="forged-stop",
+            event_type="OPERATOR_OPERATION_APPLIED", command_id="forged-stop:applied",
+            actor="supervisor", job_id=planner.job_id, attempt_id=attempt.attempt_id,
+            worker_id=attempt.worker_id, quota_class=attempt.quota_class,
+            payload={
+                "schema_version": OHF_INTERNAL_GENERATION_OPERATION_SCHEMA_VERSION,
+                "operation_kind":"graceful_stop",
+                "process_generation_id":"unbound-other-generation",
+                "process_liveness":"PROVEN_DEAD",
+                "provider_writer_state":"RELEASED",
+                "executive_writer_released":True,
+            },
+        )
+    with runtime.store.read() as con:
+        assert not _modern_stop_without_legacy_quota_proof(
+            con, job_id=planner.job_id, attempt_id=attempt.attempt_id,
+            worker_id=attempt.worker_id, quota_class=attempt.quota_class,
+        )
+
+
+def test_nonrelease_modern_operation_is_not_labeled_as_stop_gap(tmp_path):
+    from control_plane.executive_session_recovery import _modern_stop_without_legacy_quota_proof
+    runtime, root, planner, attempt = _checkpointed_predecessor(tmp_path, operation_stop=False)
+    with runtime.store.read() as con:
+        assert not _modern_stop_without_legacy_quota_proof(
+            con, job_id=planner.job_id, attempt_id=attempt.attempt_id,
+            worker_id=attempt.worker_id, quota_class=attempt.quota_class,
+        )
