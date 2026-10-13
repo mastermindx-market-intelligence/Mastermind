@@ -53,3 +53,15 @@ The batch for Ubuntu2 was detailed separately. Ubuntu0's nine C19 checks yielded
 The most important prevention gap is that many other agents create full Macro worktrees with `data/`, `site/`, `mockups/` (roughly 10 GiB per checkout), even though one `lane2.py` route already establishes a pre-checkout sparse profile. Do not pretend its scoped behavior covers every provider/worker worktree. Prevent recurrent full checkout at the **existing** worktree-storage owner and admission seam, after verifying who is still modifying those sources. A correctly placed size-aware reservation must preserve the existing host resource floor while accounting for expected checkout materialization; no new queue, daemon, source lifecycle or homebrew GC authority.
 
 Ubuntu3 remains protected by its `min_free_gb=300` policy. Some remaining trees are branch-attached, dirty, unpublished, or have ignored outputs, so this inspection did **not** authorize deleting them merely to satisfy the reserve. Host power-profile adjustment on Ubuntu2 also remains blocked by the earlier explicit DBus AccessDenied; no sudo/failover attempt was made. Physical temperature/throughput proof is still pending.
+
+## Subsequent verified recovery — same-day continuation
+
+At 13:xx–14:xx UTC, another three C19 checkouts on **Ubuntu 2** passed the same full non-force Git safety validation and were removed by the original host using `git worktree remove -- <exact_path>`:
+
+- `c19-w4-i5-wp22-census`
+- `c19-w4-i3-wp19-census`
+- `c19-w4-i1-wp17-census`
+
+All three had identical remote-contained HEAD `c5a79a69826eaa6c34b8d7a59ead6506c5f8888d`, clean tracked/untracked/ignored state, detached checkout, no active-marker and no process file/CWD references, with path and Git registration absent after removal. The return was `BATCH 3 of 3 reclaimed_gib 30.54 free_gib 185.63`; previous free was ~155.09 GiB. Subsequent concurrent worker activity reduced that reading again, so do not treat the recovery point as permanent free-space entitlement.
+
+**Updated exact fleet total:** **35** individually verified removals; approximately **355.23 GiB** cumulatively reclaimed (prior 32 / 324.69 GiB plus these 3 / 30.54 GiB). All existing branch identities and original remote HEADs were preserved. Admission storage thresholds were not lowered; the installed 15 GiB staging buffer remains separately enforced by host picker plus physical LaneLease check. The owner must prevent recurrence of full 10.3 GiB checkouts to make the disk reserve durable.
