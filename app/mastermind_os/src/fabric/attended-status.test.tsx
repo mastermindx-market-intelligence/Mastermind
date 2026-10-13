@@ -49,7 +49,7 @@ describe("direct Fabric status-only boundary", () => {
   });
   it("refuses mismatched run/root and malformed numerical values", () => {
     expect(() => decodeAttendedStatus({ ...raw(), root_id: "another-root" }, selected)).toThrow("FABRIC_ROOT_MISMATCH");
-    for (const extra of [{ run_id: "other-run" }, { rc: NaN }, { result_bytes: -1 }, { result_bytes: 1.5 }, { accepted_by: "CEO" }])
+    for (const extra of [{ run_id: "other-run" }, { rc: NaN }, { result_bytes: -1 }, { result_bytes: 1.5 }, { result_available: false, result_bytes: 100 }, { accepted_by: "CEO" }])
       expect(() => decodeAttendedStatus({ ...raw(), ...extra }, selected)).toThrow();
   });
   it("does not expose a reader on unconfigured clients", () => {

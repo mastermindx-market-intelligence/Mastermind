@@ -61,3 +61,9 @@ Open PR #1403 adds a separate optional Research field to RawClient; its inspecte
 5. Prove the actual authenticated app with an existing admitted run, source refresh, unavailable/unknown effects, stale identity revocation and return/acceptance separation. Verify installation, selection, settings and release independently. Only then adjudicate the original product mission complete.
 
 No unattended continuation, review return, watcher or deployment is implied. The next executing owner must reconcile the latest exact PR/head, any active review child and the original source-binding owner before modifications.
+
+## Publication and review delta
+
+Original source is published in **PR #1411**, first semantic head `6289b6ac9030f1c75511136d868be2b7b21b7604`. Incumbent binding hand-in is #1359 comment `6144631923`; transport delivery is not proof of pickup or execution. Native source inspection confirmed existing reads use a fixed HTTPS owner with private acquisition-bearer custody, not arbitrary local shell.
+
+The independent review child `mmos-fabric-interiors-review-20261013-c4-01` returned terminal rc0/ok. Its findings are adjudicated in `REVIEW_ADJUDICATION.md`; one actual strictness gap was repaired and the full suite/build passed again. A repaired-head review is still required. Build-worker refusal, original root and all direct-source/production/Paper gates remain unchanged.

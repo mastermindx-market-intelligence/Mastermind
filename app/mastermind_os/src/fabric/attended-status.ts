@@ -36,7 +36,8 @@ export function decodeAttendedStatus(value: unknown, selected: AttendedSelection
       !nullableId(v.root_id) || !nullableId(v.parent_run_id) ||
       !ATTENDED_STATES.includes(v.state as AttendedStatus["state"]) ||
       !(v.rc === null || Number.isSafeInteger(v.rc) && Number(v.rc) >= 0 && Number(v.rc) <= 255) || !nullableCode(v.signal) ||
-      typeof v.result_available !== "boolean" || !(v.result_bytes === null || Number.isSafeInteger(v.result_bytes) && Number(v.result_bytes) >= 0) ||
+      typeof v.result_available !== "boolean" || (!v.result_available && v.result_bytes !== null) ||
+      !(v.result_bytes === null || Number.isSafeInteger(v.result_bytes) && Number(v.result_bytes) >= 0) ||
       !nullableBool(v.accepted) || ![null, "deterministic", "reviewer", "none"].includes(v.accepted_by as never) ||
       !["UNVERIFIED", "NOT_ACCEPTED", "ACCEPTED"].includes(v.acceptance_state as string) ||
       typeof v.acceptance_reason !== "string" || !codePattern.test(v.acceptance_reason)) return refuse();
