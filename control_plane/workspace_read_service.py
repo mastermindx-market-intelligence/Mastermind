@@ -21,6 +21,9 @@ from typing import Any
 
 from common.executive_workspace_contract import (
     FABRIC_VIEW_SCHEMA_V3,
+    FRAME_SCHEMA_V3, PLAN_BODY_SCHEMA, PLAN_OBSERVATION_SCHEMA,
+    MAX_PLAN_RESPONSE_BYTES,
+    validate_v3_frame, plan_unavailable,
     MAX_RESPONSE_BYTES,
     MAX_RESULT_RESPONSE_BYTES,
     OBSERVATION_SCHEMA,
@@ -366,6 +369,21 @@ def _observation(before, after, selected, runtime):
     }
 
 
+def _plan_validity_identity(value):
+    """Compare proof identities without treating elapsed time as republication.
+
+    Canonical remaining_ms/state age on every owner clock sample. Preserve
+    every other field; the unchanged _qualified check separately refuses an
+    expired or unqualified selected card after the read.
+    """
+    identity = copy.deepcopy(value)
+    for card in identity["cards"]:
+        for component in card["components"].values():
+            component.pop("remaining_ms", None)
+            component.pop("state", None)
+    return identity
+
+
 class WorkspaceReadService:
     """Fixed App-peer frame handler for an existing control-service binding.
 
@@ -585,6 +603,97 @@ class WorkspaceReadService:
         response = {"ok": True, "result": result}
         bounded_canonical(response, limit=MAX_RESPONSE_BYTES - 1)
         return response
+
+    def _read_admitted_plan(self, frame):
+        """One owner read, physical close, policy/CCR bracket, then pure display."""
+        from control_plane.executive_runtime import (
+            BoundedAdmittedPlanSnapshot, BoundedRoleResultRootMetadata,
+            CooCyclePolicy, RuntimePlanAdmissionNotEstablished,
+            RuntimePlanAdmissionConflict, RuntimeRoleResultOverBudget,
+        )
+        from control_plane.fabric_plan_projection import (
+            project_admitted_plan, FabricPlanProjectionError,
+        )
+        selected = frame["selection"]
+        try:
+            before = self.cache.snapshot()
+        except Exception:
+            return plan_unavailable(selected, "SOURCE_UNAVAILABLE")
+        # Preserve the existing selection 404 before any Runtime acquisition.
+        _join(before.document, selected)
+        try:
+            if not _qualified(before, selected):
+                return plan_unavailable(selected, "SOURCE_UNAVAILABLE")
+            policy_before = CooCyclePolicy.load().policy_sha256
+            bounded = self._bounded_runtime(self.runtime) if self._bounded_runtime else self.runtime
+            with bounded.observe_bounded_read() as observation:
+                snapshot = observation.read_admitted_plan_bounded(selected["root_job_id"])
+            receipt = observation.receipt  # finalized only after physical close
+            policy_after = CooCyclePolicy.load().policy_sha256
+            if (not isinstance(snapshot, BoundedAdmittedPlanSnapshot)
+                    or not isinstance(snapshot.root_metadata, BoundedRoleResultRootMetadata)
+                    or snapshot.root_job_id != selected["root_job_id"]
+                    or snapshot.root_metadata.work_ref not in (None, selected["work_ref"])
+                    or type(policy_before) is not str or re.fullmatch(r"[0-9a-f]{64}", policy_before) is None
+                    or policy_before != policy_after
+                    or snapshot.admission.get("policy_sha") != policy_before):
+                return plan_unavailable(selected, "SOURCE_UNAVAILABLE")
+            after = self.cache.snapshot()
+            if (before.owner is not after.owner or before.instance != after.instance
+                    or before.publication != after.publication
+                    or digest(before.document) != digest(after.document)
+                    or digest(_plan_validity_identity(before.validity)) != digest(_plan_validity_identity(after.validity))
+                    or digest(before.currentness) != digest(after.currentness)):
+                return plan_unavailable(selected, "SOURCE_CHANGED")
+            if not _qualified(after, selected):
+                return plan_unavailable(selected, "SOURCE_UNAVAILABLE")
+            plan = project_admitted_plan(snapshot, receipt)
+            source = self._result_observation(before, after, selected, receipt)
+            source["schema"] = PLAN_OBSERVATION_SCHEMA
+            body = {"schema": PLAN_BODY_SCHEMA, "selection": dict(selected),
+                    "availability": "AVAILABLE", "reason_codes": [],
+                    "source_observation": source, "plan": plan}
+            try:
+                bounded_canonical({"ok": True, "result": body}, limit=MAX_PLAN_RESPONSE_BYTES - 1)
+            except (TypeError, ValueError):
+                return plan_unavailable(selected, "RESPONSE_OVER_BUDGET")
+            return {"ok": True, "result": body}
+        except RuntimePlanAdmissionNotEstablished:
+            return plan_unavailable(selected, "ADMISSION_NOT_ESTABLISHED")
+        except RuntimePlanAdmissionConflict:
+            return plan_unavailable(selected, "ADMISSION_CONFLICT")
+        except RuntimeRoleResultOverBudget:
+            return plan_unavailable(selected, "OVER_BUDGET")
+        except FabricPlanProjectionError as exc:
+            return plan_unavailable(selected, exc.code)
+        except Exception:
+            return plan_unavailable(selected, "SOURCE_UNAVAILABLE")
+
+    async def _handle_v3_frame(self, frame):
+        try:
+            validate_v3_frame(frame)
+        except (TypeError, ValueError):
+            return error("invalid_input", 400)
+        try:
+            if self.authorize(frame["principal"]) is not True:
+                return error("access_denied", 403)
+            before = permission_stamp(self.authorize, frame["principal"])
+        except Exception:
+            return error("access_denied", 403)
+        task = asyncio.create_task(asyncio.to_thread(self._read_admitted_plan, frame))
+        try:
+            result = await await_owned(task)
+        except LookupError:
+            result = error("selection_not_found", 404)
+        except Exception:
+            result = plan_unavailable(frame["selection"], "SOURCE_UNAVAILABLE")
+        try:
+            if (self.authorize(frame["principal"]) is not True
+                    or permission_stamp(self.authorize, frame["principal"]) != before):
+                return error("access_denied", 403)
+        except Exception:
+            return error("access_denied", 403)
+        return result
 
     def _read_result(self, frame):
         """Read one bounded role result through the actual Fabric seam.
@@ -885,6 +994,8 @@ class WorkspaceReadService:
         return self._read_mission_v3({"selection": selection})["result"]
 
     async def handle_frame(self, frame):
+        if isinstance(frame, dict) and frame.get("schema") == FRAME_SCHEMA_V3:
+            return await self._handle_v3_frame(frame)
         # v2 frames take the closed v2 validation path; v1 frames keep their
         # existing envelope.  The two are mutually exclusive — never both.
         if isinstance(frame, dict) and frame.get("schema") == "mastermind.executive_workspace_read.v2":
