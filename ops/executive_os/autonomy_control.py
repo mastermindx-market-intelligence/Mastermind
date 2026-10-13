@@ -400,6 +400,7 @@ class ArmRequest:
     workspace_binding_class: str
     credential_expires_at: str
     native_return: bool = False
+    foreground_only: bool = False
 
 
 @dataclasses.dataclass(frozen=True)
@@ -693,6 +694,8 @@ def _parser() -> argparse.ArgumentParser:
     arm.add_argument("--credential-expires-at", action=_StoreOnce, required=True)
     arm.add_argument("--native-return", action="store_true",
                      help="Select the bounded native-return profile after full v5 acceptance; requires the installed Company listener.")
+    arm.add_argument("--foreground-only", action="store_true",
+                     help="Allow only fresh authenticated same-call cycles; keep background selection disabled across restart.")
 
     arm_quiesce = sub.add_parser(
         "arm-quiesce-control-uid",
@@ -825,7 +828,8 @@ def _native_selection_matches(control: Mapping[str, Any], native_return: bool) -
 
 
 def derive_candidate_configs(
-    configs: ConfigEvidence, *, armed: bool, native_return: bool = False
+    configs: ConfigEvidence, *, armed: bool, native_return: bool = False,
+    foreground_only: bool = False,
 ) -> CandidateConfigs:
     control_value = copy.deepcopy(dict(configs.control))
     worker_value = copy.deepcopy(dict(configs.worker))
@@ -836,6 +840,9 @@ def derive_candidate_configs(
     ):
         raise ArmTransactionError("arm_rolled_back")
     if type(native_return) is not bool or (native_return and not armed):
+        raise ArmAdmissionError("native_selection_invalid")
+    if (type(foreground_only) is not bool or (foreground_only and not armed)
+            or (foreground_only and native_return)):
         raise ArmAdmissionError("native_selection_invalid")
     if native_return:
         _require_native_preselection(control_value)
@@ -854,6 +861,8 @@ def derive_candidate_configs(
         raise ArmAdmissionError("native_selection_invalid")
     control_value["coo_autonomy_armed"] = armed
     control_value["coo_operator_harness_armed"] = armed
+    if foreground_only or "coo_foreground_only" in control_value:
+        control_value["coo_foreground_only"] = foreground_only
     worker_value["operator_harness_armed"] = armed
     control_bytes = encode_config(control_value)
     worker_bytes = encode_config(worker_value)
@@ -1562,7 +1571,8 @@ def evaluate_arm_admission(
 ) -> ArmAdmission:
     """Evaluate all arm gates in fixed order without mutating host state."""
 
-    if type(request.native_return) is not bool:
+    if (type(request.native_return) is not bool or type(request.foreground_only) is not bool
+            or (request.foreground_only and request.native_return)):
         raise ArmAdmissionError("native_selection_invalid")
     _request_expiry(request, now=now)
     host.require_exact_install(request.expected_sha)
@@ -1601,7 +1611,8 @@ def evaluate_arm_admission(
 def execute_arm(
     host: TransactionHost, request: ArmRequest, *, now: datetime
 ) -> TransactionResult:
-    if type(request.native_return) is not bool:
+    if (type(request.native_return) is not bool or type(request.foreground_only) is not bool
+            or (request.foreground_only and request.native_return)):
         raise ArmAdmissionError("native_selection_invalid")
     existing = host.existing_arm(request, now=now)
     if existing is not None:
@@ -1612,7 +1623,8 @@ def execute_arm(
         expected_sha=request.expected_sha,
         prior_configs=admission.configs,
         candidates=derive_candidate_configs(admission.configs, armed=True,
-                                            native_return=request.native_return),
+                                            native_return=request.native_return,
+                                            foreground_only=request.foreground_only),
         admission=admission,
     )
     try:
@@ -3414,6 +3426,7 @@ class ProductionTransactionHost(ProductionArmHost):
             raise ArmAdmissionError("changed_arm_evidence") from exc
         if (control_digest != snapshot.control_config_sha256
                 or worker_digest != snapshot.worker_config_sha256
+                or control.get("coo_foreground_only", False) is not request.foreground_only
                 or not _native_selection_matches(control, request.native_return)):
             raise ArmAdmissionError("changed_arm_evidence")
         if request.native_return:
@@ -5171,6 +5184,7 @@ def main(
                     workspace_binding_class=args.workspace_binding_class,
                     credential_expires_at=args.credential_expires_at,
                     native_return=args.native_return,
+                    foreground_only=args.foreground_only,
                 ),
                 now=current,
             )

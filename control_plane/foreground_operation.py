@@ -114,6 +114,11 @@ class ForegroundOperation:
                 raise ValueError("invalid trusted host guard result")
         except Exception:
             raise ForegroundOperationRefusal("host_not_current", "the originating host connection is no longer current") from None
+        # A trusted host read may block while the original event loop closes.
+        if self._closed or _ACTIVE.get() is not self:
+            raise ForegroundOperationClosed("the originating invocation is no longer current")
+        if not p.issued_at <= time.time() < p.expires_at:
+            raise ForegroundOperationRefusal("principal_not_live", "principal window is not live")
 
     def require_arguments(self, arguments):
         self._require_live()
@@ -155,6 +160,7 @@ class ForegroundOperation:
         event = self._runtime.store.find_event_by_command_id(self._command)
         if event is None or event.get("job_id") != root_id or _digest(event) != self._root_event_sha256:
             raise ForegroundOperationRefusal("root_replaced", "canonical root creation source changed")
+        self._require_live()  # The canonical read may have waited for another writer.
 
     def _current_claim(self, binding, physical_binding_sha256, start_request_sha256):
         self._require_live()

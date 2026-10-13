@@ -107,6 +107,7 @@ def test_parser_exposes_only_closed_commands_and_bounded_arguments():
         "workspace_binding_class": "company-workspace-admin-attested",
         "credential_expires_at": "2026-08-25T12:00:00Z",
         "native_return": False,
+        "foreground_only": False,
     }
 
     disarm = parser.parse_args(["disarm", "--expected-sha", SHA])

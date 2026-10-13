@@ -288,6 +288,7 @@ _CONFIG_OPTIONAL = frozenset(
         "effort",
         "cost_class",
         "coo_autonomy_armed",
+        "coo_foreground_only",
         "ceo_submit_armed",
         "coo_operator_harness_armed",
         "coo_tick_interval_seconds",
@@ -1206,6 +1207,12 @@ def load_control_config(
         config["coo_autonomy_armed"], bool
     ):
         raise ServiceError("control config coo_autonomy_armed must be boolean")
+    if type(config.get("coo_foreground_only", False)) is not bool:
+        raise ServiceError("control config coo_foreground_only must be boolean")
+    if config.get("coo_foreground_only", False) and (
+            config.get("coo_autonomy_armed") is not True
+            or config.get("coo_operator_model_alias") == "coo.operator.native-return"):
+        raise ServiceError("foreground-only mode requires armed ordinary foreground execution")
     if "ceo_submit_armed" in config and not isinstance(
         config["ceo_submit_armed"], bool
     ):
@@ -1741,9 +1748,12 @@ def _service_from_config(
         if remote_worker_binding_source is not None:
             raise ServiceError("Fabric and remote worker binding sources conflict")
         if initial_canary is not None:
-            raise FabricActivationRefused(
-                "A dedicated-worker canary does not qualify shared Fabric execution"
-            )
+            if fabric_attended_probe_source is None or not attended_work_placements:
+                raise FabricActivationRefused(
+                    "A dedicated-worker canary does not qualify shared Fabric execution"
+                )
+            from control_plane.codex_worker import validate_secret_canary_verdict
+            validate_secret_canary_verdict(initial_canary, require_passed=True)
         if any((binding.worker_uid, binding.worker_gid) !=
                (raw.get("worker_uid"), raw.get("worker_gid"))
                for binding in fabric_worker_binding_source.bindings):
@@ -1852,6 +1862,7 @@ def _service_from_config(
         privileged_readiness_armed=raw.get("privileged_readiness_armed", False),
         privileged_broker_socket_path=raw.get("privileged_broker_socket_path"),
         coo_autonomy_armed=raw.get("coo_autonomy_armed", False),
+        coo_foreground_only=raw.get("coo_foreground_only", False),
         ceo_submit_armed=raw.get("ceo_submit_armed", False),
         coo_operator_harness_armed=raw.get(
             "coo_operator_harness_armed", False
@@ -2002,7 +2013,9 @@ def _service_from_config(
             receipts_root=raw["receipts_root"],
             worker_user=raw["worker_user"], worker_uid=raw["worker_uid"],
             worker_gid=raw["worker_gid"], shared_run_gid=raw["shared_run_gid"],
-            secret_canary_verdict=canary, require_complete_launch_attestation=True,
+            # The primary boot canary never qualifies the Fabric owner.
+            # Its exact claimed Attempt obtains its own attended probe verdict.
+            secret_canary_verdict={}, require_complete_launch_attestation=True,
             cleanup_policy=CleanupPolicy.FABRIC_PROCESS_GROUP,
             process_controller=fabric_adapter, instance_id=primary.instance_id,
         )
@@ -2044,6 +2057,7 @@ def _service_from_config(
             runtime,
             claimed_adapter_factory=(factory if factory is not None else primary_factory),
             workspace_identity_source=workspace_source,
+            foreground_only=config.coo_foreground_only,
             prompt_source=(sealed_supervisor.primary
                            if type(sealed_supervisor) is MixedExecutionOwnerSupervisor
                            else sealed_supervisor),
