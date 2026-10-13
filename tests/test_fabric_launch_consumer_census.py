@@ -120,3 +120,53 @@ def test_unbounded_registry_refuses_before_wrapper_write(scene):
     for index in range(33):
         account=root/str(index);account.mkdir();(account/'config.json').write_text('{}')
     assert_no_swap(wrapper)
+
+
+def test_staged_wrapper_candidate_lints_against_system_bash(tmp_path, monkeypatch):
+    wrapper = tmp_path / "pool"
+    wrapper.write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
+    candidate = tmp_path / "pool-candidate"
+    monkeypatch.setattr(install, "pinned_consumers", lambda *_a: [])
+    monkeypatch.setattr(
+        install, "wrapper_content", lambda _data, _release: b"#!/bin/bash\nexit 0\n",
+    )
+    original = install.subprocess.run
+    calls = []
+
+    def spy(argv, **kwargs):
+        calls.append(tuple(argv))
+        return original(argv, **kwargs)
+
+    monkeypatch.setattr(install.subprocess, "run", spy)
+    result = install.stage_wrapper_candidate(
+        wrapper, tmp_path / "release", install.sha(wrapper.read_bytes()), candidate,
+    )
+    assert result["state"] == "WRAPPER_CANDIDATE_NOT_INSTALLED"
+    assert calls == [("/bin/bash", "-n", str(candidate))]
+    assert candidate.read_bytes() == wrapper.read_bytes()
+
+
+def test_atomic_wrapper_syntax_check_uses_system_bash(tmp_path, monkeypatch):
+    wrapper = tmp_path / "pool"
+    wrapper.write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
+    monkeypatch.setattr(install, "pinned_consumers", lambda *_a: [])
+    monkeypatch.setattr(
+        install, "wrapper_content",
+        lambda _data, _release: b"#!/bin/bash\n# reviewed inert synthetic wrapper\nexit 0\n",
+    )
+    original = install.subprocess.run
+    calls = []
+
+    def spy(argv, **kwargs):
+        calls.append(tuple(argv))
+        return original(argv, **kwargs)
+
+    monkeypatch.setattr(install.subprocess, "run", spy)
+    result = install.activate(
+        wrapper, tmp_path / "release", install.sha(wrapper.read_bytes()),
+    )
+    assert result["state"] == "PROMPT_HOOK_INSTALLED"
+    assert len(calls) == 1
+    assert calls[0][0:2] == ("/bin/bash", "-n")
+    assert Path(calls[0][2]).parent == wrapper.parent
+    assert "# reviewed inert synthetic wrapper" in wrapper.read_text()
