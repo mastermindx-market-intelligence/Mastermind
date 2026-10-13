@@ -4,7 +4,7 @@
   "mission": "SOXX 2H/3H/4H extreme MACD/Stoch RSI nested pivots, cycle failure economic exits, authentic full-session BOATS and quant validation; no production accept yet",
   "DONE_WHEN": "Genuine licensed, source-authentic overnight SOXX bars and quote marketability with temporal/PIT evidence; full-session/no-lookahead/consistent-horizon four-arm comparisons, untouched holdout showing useful exits with risk and fill stress; separate permitted deployment proof if commissioned",
   "state": "CHECKPOINTED_CONTINUATION_RESEARCH_INCOMPLETE",
-  "protected_law_sha": "ee081ad5f20caec26deb1fdd198a42f620c516e1",
+  "protected_law_sha": "e93feb33fe3f30a36b1a15bd8686cc42773f9a9d",
   "protected_skillpack": {
     "version": "1.0.1",
     "bootstrap_major": 1,
@@ -21,7 +21,7 @@
   "PR": 1338,
   "branch": "sol/research-soxx-cycle-boats-20261011",
   "inspected_precheckpoint_head": "154864726435d970cecebc43bc04776137270192",
-  "publication_effect": "The handoff must be retrieved from the exact live branch after GitHub update; do not assume merge or deployment.",
+  "publication_effect": "This checkpoint updates the existing handoff and JSON on the same PR branch; verify new commit and branch ref before treating as canonically saved. It is not a merge or CI/production/trading acceptance.",
   "source_refs": {
     "repo_research_root": "research/soxx-multitimeframe-cycle-2026-10-11",
     "handoff": "research/soxx-multitimeframe-cycle-2026-10-11/NEXT_SESSION_HANDOFF_2026-10-12.md",
@@ -82,7 +82,14 @@
     "actual_old_BOATS_bidask_coverage_proven": false,
     "new_firehose_receipts_oct13_utc": 2000,
     "original_SOXX_BOATS_history_offline_plan_chunks_one_year": 53,
-    "no_licensed_data_export_to_Github": true
+    "no_licensed_data_export_to_Github": true,
+    "m2_receipt_inventory_census_date_ET": "2026-10-12",
+    "m2_historical_BOATS_bar_receipts": 2,
+    "m2_historical_BOATS_bar_symbols": [
+      "AAPL",
+      "AMD"
+    ],
+    "m2_firehose_total_receipts": 2022
   },
   "release": {
     "pr_open": true,
@@ -93,7 +100,12 @@
     "previous_CI_job": 114723929073,
     "exact_failed_test": "tests/test_ceo_submit_armed_composition.py::test_d8_template_topology_and_protected_defaults",
     "failure_observation": "D8 identity-like numeric literals in changed source/evidence; 261 literals; precise offending paths not isolated",
-    "no_CI_waiver": true
+    "no_CI_waiver": true,
+    "most_recent_head_pre_handoff_update": "82c7664baf38c3374362f8d6878d7fcab1b6618d",
+    "most_recent_CI_run": 38335424338,
+    "most_recent_CI_status_observed": "IN_PROGRESS",
+    "most_recent_CI_conclusion": "UNKNOWN_AS_OF_2026_10_12_RECONCILIATION",
+    "current_run_requires_recheck_before_CI_acceptance": true
   },
   "DO_NOT_REDO": [
     "Do not retune or call 2025-10-09..2026-10-08 an untouched holdout",
@@ -108,10 +120,20 @@
     "pending_unknown_modifying_effects": [],
     "active_research_worker_known": false,
     "last_mini4_research_process_census_matches": 0,
-    "branch_update_must_be_verified_before_claiming_save": true
+    "branch_update_must_be_verified_before_claiming_save": true,
+    "last_bounded_mini4_process_census_SOXx_named_matches": 0,
+    "unreconciled_changes_in_this_checkpoint_turn": [],
+    "other_worker_liveness_not_proven": true
   },
-  "exact_next_action": "Read NEXT_SESSION_HANDOFF_2026-10-12.md and current GitHub PR/head, verify no active writer, inspect newly published v21-v24 frozen sources, diagnose CI D8 identity guard without waiver; only then pursue genuinely independent early-failure sample and authorized source-owner BOATS SOXX history/quote admission.",
+  "exact_next_action": "Recover this single next-session handoff and GitHub head; evaluate latest run 38335424338 (last observed IN_PROGRESS), diagnose D8 identity guard only if still failing and fix narrowly on existing PR without waiver. Then pursue genuinely independent/future samples for the frozen 91-episode parent-turn/early-exit economics, and via only existing admitted Macro Data OS source authority obtain verified SOXX BOATS history/quotes; do not reuse denied provider probe or claim broker-fill proof.",
   "next_source_rights_question": "Licensed actual SOXX BOATS history and historical quote availability must be resolved by the incumbent Macro Data OS owner; never treat account ACTIVE as a blanket read/write grant.",
   "capability_state": "RESEARCH_PRESERVED_AND_CENSORED_NO_TRADING_ACCEPTANCE",
-  "no_unattended_continuation_promised": true
+  "no_unattended_continuation_promised": true,
+  "prior_protected_law_sha_at_initial_checkpoint": "ee081ad5f20caec26deb1fdd198a42f620c516e1",
+  "last_reconciliation_date_ET": "2026-10-12",
+  "last_verified_pr_head_before_this_update": "82c7664baf38c3374362f8d6878d7fcab1b6618d",
+  "last_verified_changed_files_before_this_update": 217,
+  "last_verified_pr_state": "OPEN_NOT_MERGED",
+  "research_v21_v24_sources_published_and_enumerated": true,
+  "last_save_purpose": "User explicitly requested next-session full-context handoff; no additional research parameters fitted in this turn."
 }

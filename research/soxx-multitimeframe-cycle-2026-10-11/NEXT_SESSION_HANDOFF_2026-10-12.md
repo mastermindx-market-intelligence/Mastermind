@@ -1,5 +1,21 @@
 # SOXX Multitimeframe Reversal, Cycle-Failure and BOATS — Next-Session Handoff
 
+## Current-state reconciliation — verified 2026-10-12 ET
+
+**This is the current update to the single handoff below; it supersedes stale *status observations*, not accepted previous results.** The authoritative ongoing research remains [Mastermind PR #1338](https://github.com/mastermindx-market-intelligence/Mastermind/pull/1338) on `sol/research-soxx-cycle-boats-20261011`. Before this specific checkpoint update, the live branch head was **`82c7664baf38c3374362f8d6878d7fcab1b6618d`**, and PR #1338 was **open, not merged**, with **217 changed files**. The preceding `82c7664` commit successfully published executable v21–v24 sources, validators, both structured research specifications, and the complete v2–v24 outcome handoff. The full branch head *after* this update must be read from GitHub, not inferred from this prefatory observation.
+
+**Protected procedure freshly verified:** Mastermind protected `master` commit `e93feb33fe3f30a36b1a15bd8686cc42773f9a9d`, same-commit `INDEX.md`, `COLD_START.md`, `ACTIVE_EXECUTION.md`, `SESSION_RELIABILITY.md` and `CLOSEOUT.md`, skillpack **v1.0.1**, bootstrap major **1**. The earlier pin `ee081...` remains useful as the prior checkpoint's dated authority evidence, not a reason to fetch mixed revisions.
+
+**Latest CI observation:** PR-head `82c7664baf38c3374362f8d6878d7fcab1b6618d` triggered [CI run 38335424338](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/38335424338), observed **IN_PROGRESS**, conclusion **UNKNOWN** during this reconciliation. The older run [38223110593](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/38223110593) **FAILED** the legitimate D8 identity-literal test; its issue is unproven fixed, so do not claim the new head green without an observed completed passing CI receipt. Do not waive, mask, or weaken guard semantics. If the new CI fails, inspect the exact offending paths and narrowly repair on the *same* branch under normal safety constraints.
+
+**Actual source-custody reconciliation:** mini4 `/private/tmp/soxx_terminal_finepivot_20261011_v14/` is present with all archived original `SOXX/SMH/QQQ/AMD` 5m/15m/30m snapshots and extended v19 comparison snapshots. `/private/tmp/soxx_early_failure_frontier_v21_20261012/` is present with **six** Python source scripts. A bounded mini4 process census found **zero processes matching the specific SOXX research names**; this does not prove all collaborators/source writers globally inactive. There were **no newly observed effect-unknown writes** in this handoff turn.
+
+**Tiingo owner archive read-only census:** on M2, exactly **two** existing historical `boats-bars` receipts (AMD and AAPL, not SOXX), **2,022** `boats-firehose` receipts (2 on Oct 11 UTC, 20 on Oct 12 UTC, 2,000 on Oct 13 UTC). No full-year SOXX BOATS historical OHLC receipt or bid/ask marketability proof was found by this census. `ACTIVE` BOATS licensing and Macro PR #8698 merge do not themselves establish those missing facts or authorize a previously refused credential request.
+
+**Immediate new-session action (no repeated permission ceremony):** retrieve this handoff and `CHECKPOINT_2026-10-12.json` from the *current* PR head; reconcile actual host/branch writer and CI run 38335424338; act only if an exact new failing guard is proven. Independently continue the **frozen 91-parent-episode research** with genuinely unseen time/regime observations rather than retuning the inspected 2025–26 year. The incumbent Macro Data OS owner alone may advance source-qualified SOXX BOATS history and quote provenance. Never activate trading or imply marketable fills from OHLC.
+
+---
+
 **Authoritative checkpoint prepared 2026-10-12 ET.** **Status: CHECKPOINTED_CONTINUATION / RESEARCH_INCOMPLETE.** This handoff is an execution frontier, not an accepted trading strategy, separate memory system, autonomous daemon, PR merge, live deployment or permission to bypass vendor/authentication gates.
 
 ## 1. Exactly what the Chairman commissioned / DONE_WHEN
