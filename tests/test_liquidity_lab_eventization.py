@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
+import pytest
+
 from brain.liquidity_lab.contracts import SourceStateRef
 from brain.liquidity_lab.eventization import EventizationPolicy, eventize
 
@@ -66,4 +70,43 @@ def test_long_gap_closes_episode_and_allows_new_first_detection():
     assert [shock.first_detected.date().isoformat() for shock in shocks] == [
         "2026-01-02",
         "2026-01-12",
+    ]
+
+
+# An unavailable observation is not evidence that a previous episode ended.
+# All observations below are synthetic; thresholds are test-only.
+@pytest.mark.parametrize("changes", [
+    {"freshness": "stale"}, {"freshness": "unknown"},
+    {"freshness": "degraded"}, {"coverage": 0.1}, {"confidence": 0.1},
+])
+def test_untrusted_low_reading_cannot_reset_and_remint_episode(changes):
+    policy = EventizationPolicy(1.0, 0.4, 0.7, 0.7, 10, 0)
+    points = [
+        _point("2026-01-02", 1.2),
+        replace(_point("2026-01-05", 0.1), **changes),
+        _point("2026-01-06", 1.3),
+    ]
+    events = eventize(points, policy)
+    assert [e.first_detected.date().isoformat() for e in events] == ["2026-01-02"]
+
+
+def test_trusted_low_reading_still_resets_episode():
+    policy = EventizationPolicy(1.0, 0.4, 0.7, 0.7, 10, 0)
+    events = eventize([_point("2026-01-02", 1.2), _point("2026-01-05", 0.1),
+                      _point("2026-01-06", 1.3)], policy)
+    assert len(events) == 2
+
+
+@pytest.mark.parametrize("changes", [
+    {"freshness": "stale"}, {"coverage": 0.1}, {"confidence": 0.1},
+])
+def test_untrusted_readings_cannot_bridge_valid_observation_gap(changes):
+    policy = EventizationPolicy(1.0, 0.4, 0.7, 0.7, 2, 0)
+    points = [_point("2026-01-02", 1.2)]
+    for day in ("2026-01-05", "2026-01-06", "2026-01-07", "2026-01-08"):
+        points.append(replace(_point(day, 1.3), **changes))
+    points.append(_point("2026-01-09", 1.4))
+    events = eventize(points, policy)
+    assert [e.first_detected.date().isoformat() for e in events] == [
+        "2026-01-02", "2026-01-09",
     ]

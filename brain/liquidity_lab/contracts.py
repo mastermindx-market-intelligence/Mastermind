@@ -1,9 +1,9 @@
 """Closed research contracts for W-LIQ.3.
 
 W-LIQ.1 owns liquidity-state semantics and computation.  ``SourceStateRef`` is
-therefore an adapter boundary, not a parser for the still-unfrozen producer
-payload: a later adapter must copy the canonical producer's already-computed
-values into this envelope without re-deriving them here.
+therefore an adapter boundary, not a second state producer. The sole raw
+producer parser in ``brain.liquidity_lab.adapter`` validates and copies the
+canonical producer's already-computed values without re-deriving them here.
 
 Every object in this module is research/shadow evidence only.  None carries a
 portfolio action, size, candidacy, Market View vote, or promotion authority.
@@ -174,8 +174,9 @@ TARGET_BY_ID = MappingProxyType({target.target_id: target for target in TARGETS}
 class SourceStateRef:
     """Adapter-normalized reference to one W-LIQ.1 state observation.
 
-    ``observed_at`` is the upstream measurement/release timestamp and ``known_at``
-    is the first timestamp at which this exact payload was available to the lab.
+    ``observed_at`` is the producer's conservative all-evidence availability
+    clock and ``known_at`` is its recorded first-known time for this exact payload.
+    Neither clock is reconstructed from historical source series by the adapter.
     The lab may eventize these supplied values; it may not reconstruct them from
     raw central-bank, money, credit, funding, or market series.
     """

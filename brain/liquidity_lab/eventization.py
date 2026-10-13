@@ -48,14 +48,13 @@ class EventizationPolicy:
             raise ContractError("refractory_bdays may not be negative")
 
 
-def _eligible(point: SourceStateRef, policy: EventizationPolicy) -> bool:
-    """Stale/unknown or low-coverage input cannot mint a supportive episode."""
+def _observable(point: SourceStateRef, policy: EventizationPolicy) -> bool:
+    """Only trustworthy observations can open, reset, or bridge an episode."""
 
     return (
         point.freshness == "fresh"
         and point.coverage >= policy.min_coverage
         and point.confidence >= policy.min_confidence
-        and abs(point.magnitude_z) >= policy.material_abs_z
     )
 
 
@@ -80,6 +79,10 @@ def eventize(
     emitted: list[ShockRecord] = []
 
     for point in ordered:
+        if not _observable(point, policy):
+            # Missing/stale/low-quality evidence proves neither a reset nor a
+            # continuous observation history. Leave both clocks untouched.
+            continue
         family = point.state_family
         previous = last_seen.get(family)
         if previous is not None:
@@ -92,8 +95,7 @@ def eventize(
         if abs(point.magnitude_z) <= policy.reset_abs_z:
             active.pop(family, None)
             continue
-        if not _eligible(point, policy):
-            # Missing/stale evidence neither creates a shock nor proves a reset.
+        if abs(point.magnitude_z) < policy.material_abs_z:
             continue
         if current is not None and current.direction == point.direction:
             continue
