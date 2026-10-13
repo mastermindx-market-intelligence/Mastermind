@@ -1,3 +1,4 @@
+import { FLEET_WINDOWS } from "./fleet";
 import {
   EXECUTIVE_SCOPE,
   validateExecutiveResource,
@@ -647,6 +648,12 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
           typedUnavailableSchema: "mastermind.workspace_work_queue.v1",
         },
       ),
+    readFleet: ({ window, signal }) => {
+      if (typeof window !== "string" || !Object.hasOwn(FLEET_WINDOWS, window))
+        return Promise.reject(new Error("SELECTION_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/fleet/current?window=${window}`, signal,
+        { cap: 1_500_000, typedUnavailableSchema: "mastermind.fleet_health.v1" });
+    },
     readMission: ({ work_ref, root_job_id, signal }) => {
       if (!normalizeSelection({ workRef: work_ref, rootJobId: root_job_id }))
         return Promise.reject(new Error("SELECTION_INVALID"));

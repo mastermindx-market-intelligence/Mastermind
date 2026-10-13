@@ -395,7 +395,8 @@ class WorkspaceReadService:
     def __init__(self, *, cache, runtime, authorize, armed, runtime_identity,
                  acquire=None, compose=None, bounded_runtime=None,
                  result_acquire=None, result_project=None, mission_v3_acquire=None,
-                 mission_v3_compose=None, work_acquire=None, work_compose=None):
+                 mission_v3_compose=None, work_acquire=None, work_compose=None,
+                 fleet_read=None):
         self.cache = cache
         self.runtime = runtime
         self.authorize = authorize
@@ -418,6 +419,19 @@ class WorkspaceReadService:
         # or an unfrozen schema.
         self._work_acquire = work_acquire
         self._work_compose = work_compose
+        if fleet_read is not None and not callable(fleet_read):
+            raise ValueError("Fleet source binding refused")
+        self._fleet_read = fleet_read
+
+    def _read_fleet(self, frame):
+        from common.fleet_health_contract import validate_fleet_document, FLEET_MAX_RESPONSE_BYTES
+        from control_plane.fleet_health import unavailable_fleet
+        window = frame["selection"]["window"]
+        document = (self._fleet_read(window=window) if self._fleet_read is not None
+                    else unavailable_fleet(window, time.time()))
+        result = {"ok": True, "result": validate_fleet_document(document, expected_window=window)}
+        bounded_canonical(result, limit=FLEET_MAX_RESPONSE_BYTES - 1)
+        return result
 
     def _read(self, frame):
         selected = frame["selection"]
@@ -1013,7 +1027,8 @@ class WorkspaceReadService:
             permission_before = permission_stamp(self.authorize, frame["principal"])
         except Exception:
             return error("access_denied", 403)
-        worker = self._read_work if frame["operation"] == "work" else self._read
+        worker = (self._read_fleet if frame["operation"] == "fleet" else
+                  self._read_work if frame["operation"] == "work" else self._read)
         task = asyncio.create_task(asyncio.to_thread(worker, frame))
         try:
             result = await await_owned(task)
@@ -1168,7 +1183,8 @@ class _WorkRefusal(Exception):
         self.reason_code = reason_code
 
 
-def workspace_provider_factory(*, control_room, authorize, armed, runtime_identity, bounded_runtime=None):
+def workspace_provider_factory(*, control_room, authorize, armed, runtime_identity, bounded_runtime=None,
+                               fleet_read=None):
     """Compose a sibling factory from the existing hosted owner and permissions.
 
     Installers pass this to CeoIngressAppBinding.workspace_read_provider_factory.
@@ -1186,5 +1202,6 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
     cache = ExistingControlRoomCache(control_room.current_owner)
     def provide(runtime):
         return WorkspaceReadService(cache=cache, runtime=runtime, authorize=authorize,
-                                    armed=armed, runtime_identity=runtime_identity, bounded_runtime=bounded_runtime)
+                                    armed=armed, runtime_identity=runtime_identity, bounded_runtime=bounded_runtime,
+                                    fleet_read=fleet_read)
     return provide

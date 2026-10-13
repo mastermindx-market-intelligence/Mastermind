@@ -7,6 +7,8 @@ import re
 from collections.abc import Mapping
 
 from control_plane.wake_events import JOB_ID_RE
+from common.fleet_health_contract import (FLEET_SCHEMA, FLEET_WINDOWS,
+    FLEET_MAX_RESPONSE_BYTES, fleet_selection, validate_fleet_document)
 
 RESOURCE = "https://mcp.mastermind-x.com/workspace/read"
 SCOPE = "mastermind.workspace.read"
@@ -209,6 +211,8 @@ def response_ceiling_for(operation):
         return MAX_PLAN_RESPONSE_BYTES
     if operation == "result":
         return MAX_RESULT_RESPONSE_BYTES
+    if operation == "fleet":
+        return FLEET_MAX_RESPONSE_BYTES
     return MAX_RESPONSE_BYTES
 
 
@@ -216,7 +220,7 @@ def response_ceiling_for(operation):
 
 def validate_frame(frame):
     if (type(frame) is not dict or set(frame) != {"schema", "operation", "selection", "principal"}
-            or frame["schema"] != FRAME_SCHEMA or frame["operation"] not in ("programs", "work", "mission")
+            or frame["schema"] != FRAME_SCHEMA or frame["operation"] not in ("programs", "work", "mission", "fleet")
             or type(frame["principal"]) is not dict or set(frame["principal"]) != PRINCIPAL_KEYS
             or frame["principal"]["resource"] != RESOURCE or frame["principal"]["scopes"] != [SCOPE]
             or any(type(frame["principal"][key]) is not str or not 1 <= len(frame["principal"][key]) <= 256
@@ -226,6 +230,8 @@ def validate_frame(frame):
     if frame["operation"] in ("programs", "work"):
         if frame["selection"] is not None:
             raise ValueError("invalid_input")
+    elif frame["operation"] == "fleet":
+        fleet_selection(frame["selection"])
     else:
         selection(frame["selection"])
     return frame

@@ -554,6 +554,22 @@ pub async fn callback(app: AppHandle, raw: String) {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct FleetSelection {
+    window: String,
+}
+impl FleetSelection {
+    fn url(&self) -> Result<Url> {
+        if !matches!(self.window.as_str(), "1h" | "24h" | "7d" | "30d") {
+            return Err("SELECTION_INVALID".into());
+        }
+        let mut url = Url::parse(&format!("{ORIGIN}{FLEET_PATH}")).map_err(|_| "REQUEST_INVALID")?;
+        url.query_pairs_mut().append_pair("window", &self.window);
+        Ok(url)
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MissionSelection {
     work_ref: String,
     root_job_id: String,
@@ -618,6 +634,9 @@ const MISSION_V3_RESPONSE_CAP: usize = 2_000_000;
 const RESULT_MISSION_V3_PATH: &str = "/workspace/mission/v3/current";
 const RESULT_DETAIL_PATH: &str = "/workspace/result/current";
 const WORK_PATH: &str = "/workspace/work/current";
+const FLEET_PATH: &str = "/workspace/fleet/current";
+const FLEET_SCHEMA: &str = "mastermind.fleet_health.v1";
+const FLEET_RESPONSE_CAP: usize = 1_500_000;
 const MISSION_V3_SCHEMA: &str = "mastermind.mission_workspace.v3";
 const RESULT_SCHEMA: &str = "mastermind.workspace_role_result.v1";
 const WORK_SCHEMA: &str = "mastermind.workspace_work_queue.v1";
@@ -693,6 +712,15 @@ pub async fn read_programs(app: AppHandle) -> Result<Value> {
 #[tauri::command]
 pub async fn read_work(app: AppHandle) -> Result<Value> {
     let url = Url::parse(&format!("{ORIGIN}{WORK_PATH}")).map_err(|_| "REQUEST_INVALID")?;
+    read_observation(app, url, WORK_SCHEMA, MAX_RESPONSE).await
+}
+#[tauri::command]
+pub async fn read_fleet(app: AppHandle, selection: FleetSelection) -> Result<Value> {
+    read_observation(app, selection.url()?, FLEET_SCHEMA, FLEET_RESPONSE_CAP).await
+}
+// Only the fixed Work/Fleet commands call this existing acquisition path.
+// The full closed DTO remains validated before the renderer can display it.
+async fn read_observation(app: AppHandle, url: Url, schema: &str, cap: usize) -> Result<Value> {
     let state = app.state::<NativeAuth>();
     let (token, generation) = {
         let inner = state.lock()?;
@@ -715,11 +743,11 @@ pub async fn read_work(app: AppHandle) -> Result<Value> {
         .await
         .map_err(|_| "SOURCE_UNAVAILABLE")?;
     let result = if response.status().as_u16() == 503 {
-        read_json_body(response, MAX_RESPONSE)
+        read_json_body(response, cap)
             .await
-            .and_then(|value| typed_unavailable(value, WORK_SCHEMA, false))
+            .and_then(|value| typed_unavailable(value, schema, false))
     } else {
-        bounded_json(response, MAX_RESPONSE).await
+        bounded_json(response, cap).await
     };
     if !state
         .lock()?
@@ -728,7 +756,7 @@ pub async fn read_work(app: AppHandle) -> Result<Value> {
         return Err("AUTHENTICATION_CHANGED".into());
     }
     let value = result?;
-    if !value.is_object() || value.get("schema").and_then(Value::as_str) != Some(WORK_SCHEMA) {
+    if !value.is_object() || value.get("schema").and_then(Value::as_str) != Some(schema) {
         return Err("RESPONSE_INVALID".into());
     }
     Ok(value)
@@ -1217,6 +1245,28 @@ mod tests {
         let mut non_null = result;
         non_null["result"] = serde_json::json!({});
         assert!(typed_unavailable(non_null, RESULT_SCHEMA, true).is_err());
+    }
+
+    #[test]
+    fn fleet_selector_uses_only_a_fixed_window_on_the_existing_origin() {
+        for window in ["1h", "24h", "7d", "30d"] {
+            let selected = serde_json::from_value::<FleetSelection>(serde_json::json!({"window": window})).unwrap();
+            assert_eq!(selected.url().unwrap().as_str(), format!("{ORIGIN}/workspace/fleet/current?window={window}"));
+        }
+        for window in ["", "all", "../private", "1h&path=/secret", "%31h", "constructor"] {
+            let selected = serde_json::from_value::<FleetSelection>(serde_json::json!({"window": window})).unwrap();
+            assert!(selected.url().is_err());
+        }
+        assert!(serde_json::from_value::<FleetSelection>(serde_json::json!({"window": "1h", "path": "/secret"})).is_err());
+        assert!(serde_json::from_value::<FleetSelection>(serde_json::json!({"window": true})).is_err());
+    }
+
+    #[test]
+    fn fleet_typed_unavailable_does_not_admit_other_schema_or_success() {
+        let value = serde_json::json!({"schema": "mastermind.fleet_health.v1", "availability": "UNAVAILABLE"});
+        assert!(typed_unavailable(value.clone(), "mastermind.fleet_health.v1", false).is_ok());
+        assert!(typed_unavailable(value, WORK_SCHEMA, false).is_err());
+        assert!(typed_unavailable(serde_json::json!({"schema": "mastermind.fleet_health.v1", "availability": "AVAILABLE"}), "mastermind.fleet_health.v1", false).is_err());
     }
 
     #[test]

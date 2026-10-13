@@ -23,6 +23,7 @@ import {
   type ResultSelection,
 } from "./result";
 import { decodeWorkDocument, type WorkDocument } from "./work";
+import { decodeFleetHealth, FLEET_WINDOWS, type FleetRead, type FleetWindow } from "./fleet";
 import { decodeProgramsObservation, type ProgramsObservation } from "./programs-observation";
 import {
   completeOrchestratorCommandBinding,
@@ -49,6 +50,7 @@ export interface RawClient {
   signOut(): Promise<unknown>;
   readPrograms(request: { signal: AbortSignal }): Promise<unknown>;
   readWork(request: { signal: AbortSignal }): Promise<unknown>;
+  readFleet?(request: { window: FleetWindow; signal: AbortSignal }): Promise<unknown>;
   readMission(request: {
     work_ref: string;
     root_job_id: string;
@@ -91,6 +93,7 @@ export interface MissionHost {
   /** Same fixed Programs acquisition, retaining its collection owner receipt. */
   readProgramsObservation?: (request: { signal: AbortSignal }) => Promise<ProgramsObservation>;
   readWork?: (request: { signal: AbortSignal }) => Promise<WorkDocument>;
+  readFleet?: FleetRead;
   readResult?: MissionResultRead;
   readCurrentWindow?: (request: {
     signal: AbortSignal;
@@ -173,6 +176,16 @@ export function bindMissionHost(
       if (!result) throw new Error("WORK_RESPONSE_INVALID");
       return result;
     },
+    readFleet: client.readFleet ? async ({ window, signal }) => {
+      if (typeof window !== "string" || !Object.hasOwn(FLEET_WINDOWS, window)) throw new Error("SELECTION_INVALID");
+      const started = epoch;
+      check(signal, started);
+      const raw = await client.readFleet!({ window, signal });
+      check(signal, started);
+      const result = decodeFleetHealth(raw, window);
+      if (!result) throw new Error("FLEET_RESPONSE_INVALID");
+      return result;
+    } : undefined,
     async readMission({ workRef, rootJobId, signal }) {
       const selection = normalizeSelection({ workRef, rootJobId });
       if (!selection) throw new Error("SELECTION_INVALID");
@@ -341,6 +354,7 @@ export async function createNativeClient(
     command:
       | "read_programs"
       | "read_work"
+      | "read_fleet"
       | "read_mission"
       | "read_mission_v3"
       | "read_result"
@@ -418,6 +432,10 @@ export async function createNativeClient(
     },
     readPrograms: ({ signal }) => read("read_programs", signal),
     readWork: ({ signal }) => read("read_work", signal),
+    readFleet: ({ window, signal }) => {
+      if (typeof window !== "string" || !Object.hasOwn(FLEET_WINDOWS, window)) return Promise.reject(new Error("SELECTION_INVALID"));
+      return read("read_fleet", signal, { selection: { window } });
+    },
     readMission: ({ work_ref, root_job_id, signal }) => {
       if (!normalizeSelection({ workRef: work_ref, rootJobId: root_job_id }))
         return Promise.reject(new Error("SELECTION_INVALID"));
