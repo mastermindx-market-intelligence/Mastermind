@@ -14,11 +14,25 @@
   --noir-rose: #dea4a5;
   --noir-steel: #a7b4c2;
   --noir-lilac: #bdb2ce;
+  /* Existing Paper light material; projected here once, not inferred preferences. */
+  --mx-light-bg: #f7f8fa;
+  --mx-light-panel: #ffffff;
+  --mx-light-panel2: #eef1f6;
+  --mx-light-text: #1c2430;
+  --mx-light-muted: #5d6b7e;
+  --mx-light-line: #c9ccd1;
+  --mx-light-ink-warn: #7d5922;
+  --mx-light-ink-link: #2758e6;
+  --mx-light-ink-up: #1e6d47;
+  --mx-light-ink-down: #b23c3d;
   --bg: var(--noir-canvas);
   --sidebar: var(--noir-sidebar);
   --panel: var(--noir-panel);
   --raised: var(--noir-raised);
   --border: var(--noir-hover);
+  --hover: var(--noir-hover);
+  --control-border: var(--noir-text-tertiary);
+  --focus: var(--noir-champagne);
   --text: var(--noir-text-primary);
   --muted: var(--noir-text-secondary);
   --faint: var(--noir-text-tertiary);
@@ -32,6 +46,20 @@
   --red-wash: var(--noir-raised);
   --violet: var(--noir-lilac);
   --violet-wash: var(--noir-raised);
+  --font-ui: Inter, system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-display: Manrope, var(--font-ui);
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-7: 32px;
+  --sp-8: 44px;
+  --r-ctl: 8px;
+  --r-btn: 10px;
+  --r-card: 12px;
+  --r-panel: 14px;
   font-family:
     Inter,
     -apple-system,
@@ -70,13 +98,15 @@ button {
   cursor: pointer;
 }
 button:hover:not(:disabled) {
-  background: var(--noir-hover);
+  background: var(--hover);
 }
 button:disabled {
   color: var(--faint);
   cursor: not-allowed;
 }
 .shell {
+  color: var(--text);
+  color-scheme: dark;
   display: grid;
   grid-template-columns: 232px minmax(0, 1fr);
   min-height: 100vh;
@@ -85,6 +115,76 @@ button:disabled {
   max-width: 100%;
   min-width: 0;
   background: var(--bg);
+}
+.shell[data-theme="light"] {
+  --bg: var(--mx-light-bg);
+  --sidebar: var(--mx-light-panel2);
+  --panel: var(--mx-light-panel);
+  --raised: var(--mx-light-panel2);
+  --border: var(--mx-light-line);
+  --hover: var(--mx-light-panel2);
+  --control-border: var(--mx-light-muted);
+  --focus: var(--mx-light-ink-link);
+  --text: var(--mx-light-text);
+  --muted: var(--mx-light-muted);
+  --faint: var(--mx-light-muted);
+  --brass: var(--mx-light-text);
+  --brass-wash: var(--mx-light-panel2);
+  --blue: var(--mx-light-ink-link);
+  --blue-wash: var(--mx-light-panel2);
+  --green: var(--mx-light-ink-up);
+  --green-wash: var(--mx-light-panel2);
+  --red: var(--mx-light-ink-down);
+  --red-wash: var(--mx-light-panel2);
+  --violet: var(--mx-light-muted);
+  --violet-wash: var(--mx-light-panel2);
+  color-scheme: light;
+}
+.shell[data-theme="light"] :is(button, textarea, input, select, summary):focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+}
+/* The Office owns local aliases; explicitly compose them with this shell scope. */
+.shell[data-theme="light"] .meta-ceo-office {
+  --office-canvas: var(--bg);
+  --office-panel: var(--panel);
+  --office-raised: var(--raised);
+  --office-text: var(--text);
+  --office-secondary: var(--muted);
+  --office-muted: var(--faint);
+  --office-line: var(--border);
+  --office-champagne: var(--brass);
+}
+.shell[data-theme="light"] .office-state[data-state="CURRENT"] { color: var(--green); }
+.shell[data-theme="light"] .office-state[data-state="STALE"] { color: var(--mx-light-ink-warn); }
+.shell[data-theme="light"] .office-state[data-state="UNKNOWN"] { color: var(--muted); border-style: dotted; }
+.shell[data-theme="light"] .office-state[data-state="UNAVAILABLE"] { color: var(--red); }
+.shell[data-theme="light"] .office-state[data-state="WITHHELD"] { color: var(--muted); }
+.shell[data-theme="light"] .office-attention.has-attention { border-color: var(--mx-light-ink-warn); }
+.shell[data-theme="light"] .meta-ceo-office button { border-color: var(--control-border); }
+.shell[data-theme="light"] .meta-ceo-office button:hover:not(:disabled) { background: var(--hover); }
+.shell[data-theme="light"] .meta-ceo-office .office-primary {
+  color: var(--panel);
+  background: var(--text);
+  border-color: var(--text);
+}
+.shell[data-theme="light"] .meta-ceo-office .office-primary:hover:not(:disabled) { background: var(--muted); }
+.shell[data-theme="light"] .meta-ceo-office .office-primary:disabled {
+  color: var(--faint);
+  background: var(--raised);
+  border-color: var(--border);
+}
+.shell[data-theme="light"] .office-composer textarea { border-color: var(--control-border); }
+.shell[data-theme="light"] :is(.office-composer, .office-evidence, .office-preview) {
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--mx-light-text) 8%, transparent);
+}
+.shell[data-theme="light"] .office-effect-alert {
+  color: var(--red);
+  background: var(--panel);
+  border-color: var(--red);
+}
+.shell[lang="zh-CN"] :is(.office-eyebrow, .meta-ceo-office h1, .meta-ceo-office h2, .office-direction > p) {
+  letter-spacing: normal;
 }
 .shell > aside {
   position: sticky;
@@ -913,4 +1013,11 @@ main .form-actions button:hover:not(:disabled) {
 main .form-actions button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+/* The compact shell keeps its rail: stack the observed-window header so the
+   independent context control cannot squeeze a title to one-word fragments. */
+@media (max-width: 600px) {
+  .shell .conversation-header { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; }
+  .shell .conversation-header button { justify-self: start; margin-inline-start: 0; }
 }

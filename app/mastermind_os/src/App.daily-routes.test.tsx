@@ -131,12 +131,13 @@ describe("owner-backed daily routes in App", () => {
     ).toContain("CURRENT");
     await user.click(screen.getByRole("button", { name: "Conversations" }));
     expect(await screen.findByText(visible)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Unsent notes" }));
     expect(
-      screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Unsent draft" })
+      screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Unsent notes" })
         .value,
     ).toBe("");
     await user.type(
-      screen.getByRole("textbox", { name: "Unsent draft" }),
+      screen.getByRole("textbox", { name: "Unsent notes" }),
       "Keep this conversation thought",
     );
     await user.click(screen.getByRole("button", { name: "Review evidence" }));
@@ -151,14 +152,15 @@ describe("owner-backed daily routes in App", () => {
     await user.click(screen.getByRole("button", { name: "Knowledge" }));
     await user.click(screen.getByRole("button", { name: "Conversations" }));
     expect(await screen.findByText(visible)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Unsent notes" }));
     expect(
-      screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Unsent draft" })
+      screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Unsent notes" })
         .value,
     ).toBe("Keep this conversation thought");
     expect(
-      screen.getByRole<HTMLButtonElement>("button", { name: "Send message" })
-        .disabled,
-    ).toBe(true);
+      screen.queryByRole("button", { name: "Send message" }),
+    ).toBeNull();
+    expect(screen.getByText("No recipient is qualified by this window. Send is unavailable.")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Today" }));
     expect(
       screen.getByRole<HTMLTextAreaElement>("textbox", {
@@ -189,8 +191,9 @@ describe("owner-backed daily routes in App", () => {
     render(<App />);
     await user.click(screen.getByRole("button", { name: "Conversations" }));
     expect(await screen.findByText(visible)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Unsent notes" }));
     await user.type(
-      screen.getByRole("textbox", { name: "Unsent draft" }),
+      screen.getByRole("textbox", { name: "Unsent notes" }),
       "Private draft",
     );
     await user.click(screen.getByRole("button", { name: "Review evidence" }));
@@ -204,17 +207,17 @@ describe("owner-backed daily routes in App", () => {
       expect(
         screen.queryByRole("region", { name: "Conversation evidence" }),
       ).toBeNull();
-      expect(
-        screen.getByRole<HTMLTextAreaElement>("textbox", {
-          name: "Unsent draft",
-        }).value,
-      ).toBe("");
+      expect(screen.queryByRole("textbox", { name: "Unsent notes" })).toBeNull();
+      expect(Array.from(document.querySelectorAll("textarea"), input => input.value))
+        .not.toContain("Private draft");
     } finally {
       await act(async () => {
         e.settle();
         for (let n = 0; n < 20; n++) await Promise.resolve();
       });
     }
+    await user.click(screen.getByRole("button", { name: "Unsent notes" }));
+    expect(screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Unsent notes" }).value).toBe("");
   });
 
   it("opens an exact project into the Paper five-tab local workspace without removing legacy reachability", async () => {
