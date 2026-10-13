@@ -35,6 +35,12 @@ import {
   subscribeCommandView,
   type OrchestratorCommandBinding,
 } from "./orchestration/host-command-bindings";
+import { SelectedSessionContinuation } from "./orchestration/ui/SelectedSessionContinuation";
+import {
+  completeExecutiveSessionBinding,
+  readSessionOwnerContext,
+  type MountedExecutiveSessionBinding,
+} from "./orchestration/os-executive-session-host";
 import {
   allEvidence,
   decodeMission,
@@ -152,6 +158,23 @@ function isRetainedOperation(value: unknown): value is OperationPointer {
     typeof pointer.operationKey === "string" && pointer.operationKey.length > 0 &&
     typeof pointer.kind === "string" && ["launch", "message", "stop"].includes(pointer.kind) &&
     (pointer.targetKey === null || typeof pointer.targetKey === "string");
+}
+const SESSION_OPERATION_KEY = /^session-continue-[0-9a-f]{64}$/;
+const SESSION_TARGET_REF = /^fabric_attempt:[0-9a-f]{64}$/;
+// Only a session message pointer is restored from the session-exclusive
+// namespace; launch pointers live in their own store and are never adopted.
+function sessionStoreHold(state: OperationState): boolean {
+  return (state.status === "unknown" && !state.pointer) ||
+    (state.status === "idle" && ["LOCAL_UNAVAILABLE", "MALFORMED_POINTER", "STORE_WRITE_FAILED"].includes(state.reason));
+}
+
+function isRetainedSessionOperation(value: unknown): value is OperationPointer {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const pointer = value as Record<string, unknown>;
+  return Object.keys(pointer).every(key => ["operationKey", "kind", "targetKey"].includes(key)) &&
+    typeof pointer.operationKey === "string" && SESSION_OPERATION_KEY.test(pointer.operationKey) &&
+    pointer.kind === "message" &&
+    typeof pointer.targetKey === "string" && SESSION_TARGET_REF.test(pointer.targetKey);
 }
 type ReopenedOperation = {
   binding: OrchestratorCommandBinding;
@@ -1364,6 +1387,44 @@ export function App() {
     selection,
     authState?.content,
   );
+  // Separately mounted session capability: never the launch route, never
+  // multiplexed through whichever screen happens to be current.
+  const sessionBinding = completeExecutiveSessionBinding(
+    window.MastermindMissionHost?.sessionCommandBinding,
+  );
+  const sessionControl = window.MastermindMissionHost?.session ?? null;
+  const sessionSlot = useRef<{
+    controller: OperationController;
+    binding: MountedExecutiveSessionBinding;
+    principalScope: string;
+    generation: string;
+  } | null>(null);
+  const sessionPending = useRef<{
+    binding: MountedExecutiveSessionBinding;
+    principalScope: string;
+    generation: string;
+    selectionSeq: number;
+    complete: (
+      outcome: { status: "accepted" } | { status: "refused" },
+    ) => void;
+  } | null>(null);
+  const [sessionStatus, setSessionStatus] = useState<OperationState | null>(null);
+  const [sessionRefusal, setSessionRefusal] = useState<{
+    binding: MountedExecutiveSessionBinding;
+    principalScope: string;
+    generation: string;
+    reason: string;
+  } | null>(null);
+  const [sessionPointer, setSessionPointer] = useState<OperationPointer | null>(null);
+  const [sessionReading, setSessionReading] = useState(true);
+  const [sessionPointerError, setSessionPointerError] = useState(false);
+  const [sessionRecovering, setSessionRecovering] = useState(false);
+  const [sessionTick, setSessionTick] = useState(0);
+  void sessionTick;
+  const sessionRecoveryFlight = useRef(0);
+  // Initial qualification belongs to the committed mount. Subsequent
+  // selection transitions still invalidate synchronously at their owners.
+  const sessionMounted = useRef<MountedExecutiveSessionBinding | null>(null);
   const resultContext = useMemo(
     () => ({ selection, authRevision, missionV3 }),
     [selection, authRevision, missionV3],
@@ -1376,6 +1437,30 @@ export function App() {
   const signedIn = authState?.status === "signed_in";
   const ownerContext =
     signedIn && commandBinding ? readOwnerContext(commandBinding.port) : null;
+  // The session owner context and host-projected target stay fenced on the
+  // live signed-in state; the binding itself is read once per render above.
+  const sessionOwner =
+    sessionBinding && signedIn ? readSessionOwnerContext(sessionBinding) : null;
+  const sessionTargetKey = sessionOwner && sessionBinding
+    ? sessionBinding.port.currentTargetRef()
+    : null;
+  const ownsSession = (binding: MountedExecutiveSessionBinding, ctx: { principalScope: string; generation: string }, sequence: number) => {
+    const liveBinding = completeExecutiveSessionBinding(window.MastermindMissionHost?.sessionCommandBinding);
+    const liveContext = liveBinding ? readSessionOwnerContext(liveBinding) : null;
+    return liveBinding === binding && selectionSeq.current === sequence &&
+      window.MastermindMissionHost?.auth?.getState().status === "signed_in" &&
+      liveContext?.principalScope === ctx.principalScope && liveContext.generation === ctx.generation;
+  };
+  const invalidateSessionPresentation = () => {
+    sessionSlot.current?.controller.invalidate();
+    sessionSlot.current = null;
+    const held = sessionPending.current;
+    sessionPending.current = null;
+    held?.complete({ status: "refused" });
+    sessionRecoveryFlight.current++;
+    setSessionStatus(null); setSessionPointer(null); setSessionRefusal(null);
+    setSessionPointerError(false); setSessionReading(true); setSessionRecovering(false);
+  };
   const commandReady = !!commandBinding && signedIn && !!ownerContext;
   const commandSelectionRevision = selectionSeq.current;
   const currentReopened = reopenedOperation && commandReady &&
@@ -1427,6 +1512,24 @@ export function App() {
     );
   }, [commandBinding]);
   useEffect(() => {
+    if (!sessionBinding) return;
+    return subscribeCommandView(sessionBinding, () => {
+      const cur = sessionSlot.current;
+      const ctx = readSessionOwnerContext(sessionBinding);
+      if (cur && (cur.binding !== sessionBinding || !ctx ||
+          cur.principalScope !== ctx.principalScope || cur.generation !== ctx.generation)) {
+        invalidateSessionPresentation();
+      }
+      setSessionTick((n) => n + 1);
+    });
+  }, [sessionBinding]);
+  useEffect(() => {
+    if (!sessionBinding || !sessionControl || sessionMounted.current === sessionBinding) return;
+    sessionMounted.current = sessionBinding;
+    sessionControl.setStopCondition(() => undefined);
+    void sessionControl.refresh(selection);
+  }, [sessionBinding, sessionControl]);
+  useEffect(() => {
     if (!commandBinding || !ownerContext) {
       if (commandSlot.current) {
         commandSlot.current.controller.invalidate();
@@ -1457,6 +1560,30 @@ export function App() {
       generation: ownerContext.generation,
     };
   }, [commandBinding, ownerContext?.principalScope, ownerContext?.generation]);
+  useEffect(() => {
+    if (!sessionBinding || !sessionOwner) {
+      if (sessionSlot.current) {
+        sessionSlot.current.controller.invalidate();
+        sessionSlot.current = null;
+      }
+      return;
+    }
+    const cur = sessionSlot.current;
+    if (
+      cur &&
+      cur.principalScope === sessionOwner.principalScope &&
+      cur.generation === sessionOwner.generation &&
+      cur.binding === sessionBinding
+    )
+      return;
+    if (cur) cur.controller.invalidate();
+    sessionSlot.current = {
+      controller: new OperationController(sessionBinding.port, sessionBinding.store),
+      binding: sessionBinding,
+      principalScope: sessionOwner.principalScope,
+      generation: sessionOwner.generation,
+    };
+  }, [sessionBinding, sessionOwner?.principalScope, sessionOwner?.generation]);
   useEffect(() => {
     // Discover the retained hint without invoking prepare, submit or even a
     // status request. This is available before any launch catalog is loaded.
@@ -1497,7 +1624,45 @@ export function App() {
     return () => { cancelled = true; abort.abort(); };
   }, [commandBinding, ownerContext?.principalScope, ownerContext?.generation,
     authRevision, commandSelectionRevision, selection?.workRef, selection?.rootJobId]);
-  useEffect(() => () => { commandSlot.current?.controller.invalidate(); recoveryFlight.current++; }, []);
+  useEffect(() => {
+    const revision = ++sessionRecoveryFlight.current;
+    setSessionReading(false); setSessionPointer(null); setSessionPointerError(false);
+    setSessionRecovering(false);
+    if (!sessionBinding || !sessionOwner) return;
+    if (sessionPending.current?.binding === sessionBinding) return;
+    const binding = sessionBinding, ctx = sessionOwner, sequence = selectionSeq.current;
+    const slot = sessionSlot.current;
+    const abort = new AbortController();
+    let cancelled = false;
+    const current = () => !cancelled && sessionRecoveryFlight.current === revision &&
+      ownsSession(binding, ctx, sequence) && sessionSlot.current === slot && !sessionPending.current;
+    setSessionReading(true);
+    void Promise.resolve().then(() => {
+      if (!current()) return undefined;
+      return binding.store.read(ctx.principalScope, abort.signal);
+    }).then((value) => {
+      if (!current()) return;
+      if (value === null) setSessionPointer(null);
+      else if (isRetainedSessionOperation(value)) setSessionPointer(value);
+      else setSessionPointerError(true);
+    }).catch(() => {
+      if (current()) setSessionPointerError(true);
+    }).finally(() => { if (current()) setSessionReading(false); });
+    return () => { cancelled = true; abort.abort(); };
+  }, [sessionBinding, sessionOwner?.principalScope, sessionOwner?.generation,
+    authRevision, commandSelectionRevision]);
+  useEffect(() => {
+    setSessionRefusal(null);
+  }, [sessionBinding, sessionOwner?.principalScope, sessionOwner?.generation,
+    selection?.workRef, selection?.rootJobId]);
+  useEffect(() => () => {
+    commandSlot.current?.controller.invalidate();
+    recoveryFlight.current++;
+    sessionSlot.current?.controller.invalidate();
+    sessionSlot.current = null;
+    sessionPending.current = null;
+    sessionRecoveryFlight.current++;
+  }, []);
   const currentResultContext = useRef(resultContext);
   currentResultContext.current = resultContext;
   const resultController = useRef<AbortController | null>(null);
@@ -1554,6 +1719,16 @@ export function App() {
         setReopenedOperation(null);
         recoveryFlight.current++;
         setRecoverInFlight(false);
+        sessionSlot.current?.controller.invalidate();
+        const heldSession = sessionPending.current;
+        if (heldSession) {
+          heldSession.complete({ status: "refused" });
+          sessionPending.current = null;
+        }
+        setSessionStatus(null);
+        setSessionRefusal(null);
+        setSessionPointer(null);
+        sessionRecoveryFlight.current++;
         bumpInvalidation();
         // Invalidate rendered and in-flight source data at the notification,
         // not after replacement reads resolve or a passive effect runs.
@@ -1885,6 +2060,8 @@ export function App() {
       office.clearSelection(next);
       observedConversation.clear();
       selectionSeq.current += 1;
+      invalidateSessionPresentation();
+      void window.MastermindMissionHost?.session?.refresh(next);
       commandSlot.current?.controller.invalidate();
       bumpInvalidation();
       setWindowDocument(null);
@@ -2066,7 +2243,7 @@ export function App() {
         ? office.projection.mission.source.state
         : active === "Projects"
           ? office.projection.programs.source.state
-          : active === "Today"
+          : active === "Today" || active === "Programs"
             ? index.state === "PENDING"
               ? "SOURCE_READ_PENDING"
               : index.state
@@ -2097,6 +2274,12 @@ export function App() {
               ? "Supplied Mission references retain exact provenance; canonical record content is not reconstructed."
               : active === "Projects"
                 ? "Exact Project identities from the supplied owner collection; company-wide coverage is not established."
+                : active === "Programs"
+                  ? index.state === "PENDING"
+                    ? "Reading the bounded Programs projection; no company-wide queue is inferred."
+                    : index.state === "AVAILABLE"
+                      ? `${index.programs.length} Programs from the bounded source observation.`
+                      : "Program source unavailable; current company movement is not inferred."
                 : active === "Today"
                   ? d && d.read_state.state !== "CURRENT"
                     ? `Selected mission projection is ${label(d.read_state.state)}; source qualification is not current.`
@@ -2155,6 +2338,7 @@ export function App() {
         office.clearSelection({ workRef: w, rootJobId: r });
         observedConversation.clear();
         selectionSeq.current += 1;
+        invalidateSessionPresentation();
         commandSlot.current?.controller.invalidate();
         bumpInvalidation();
         setWindowDocument(null);
@@ -2174,6 +2358,7 @@ export function App() {
         setMission(unavailableMission(next, "SOURCE_READ_PENDING"));
         setNotice("Reading the exact selected mission pair…");
         setSelection(next);
+        void window.MastermindMissionHost?.session?.refresh(next);
         setProjectTab("Overview");
         setActive("Projects");
       }
@@ -2378,6 +2563,135 @@ export function App() {
       .catch(() => {})
       .finally(() => { if (recoveryFlight.current === flight) setRecoverInFlight(false); });
   };
+  const settleSessionCommand = (
+    state: OperationState,
+    pending: NonNullable<typeof sessionPending.current>,
+  ) => {
+    if (sessionPending.current !== pending) return;
+    if (!ownsSession(pending.binding, pending, pending.selectionSeq)) {
+      sessionPending.current = null;
+      pending.complete({ status: "refused" });
+      return;
+    }
+    setSessionStatus(state); setSessionPointer(state.pointer);
+    setSessionPointerError(sessionStoreHold(state));
+    sessionPending.current = null;
+    pending.complete({ status: state.status === "accepted" ? "accepted" : "refused" });
+    if (state.status === "refused" || state.status === "idle") setSessionRefusal({
+      binding: pending.binding, principalScope: pending.principalScope,
+      generation: pending.generation, reason: state.reason,
+    });
+  };
+  const beginSessionCommand = (
+    instruction: string,
+    stopCondition: string,
+    onComplete: (outcome: { status: "accepted" } | { status: "refused" }) => void,
+  ) => {
+    setSessionRefusal(null);
+    const binding = completeExecutiveSessionBinding(
+      window.MastermindMissionHost?.sessionCommandBinding,
+    );
+    const liveAuth = window.MastermindMissionHost?.auth?.getState();
+    const ctx = binding ? readSessionOwnerContext(binding) : null;
+    const liveTarget = binding ? binding.port.currentTargetRef() : null;
+    if (!binding || liveAuth?.status !== "signed_in" || !ctx || !liveTarget) {
+      onComplete({ status: "refused" });
+      return;
+    }
+    if (sessionPending.current) {
+      // One session dispatch at a time: the newer callback is refused exactly
+      // once and the original held completion is never replaced.
+      onComplete({ status: "refused" });
+      return;
+    }
+    // Explicit synchronous capture: the user-entered instruction and
+    // completion condition are captured once into the immutable intent here.
+    // No condition re-evaluation, no Stop authority, no unsolicited action.
+    const control = window.MastermindMissionHost?.session;
+    if (!control || control !== sessionControl) { onComplete({ status: "refused" }); return; }
+    control.setStopCondition(() => stopCondition);
+    const intent = binding.makeMessageIntent(liveTarget, instruction);
+    if (!intent) {
+      onComplete({ status: "refused" });
+      return;
+    }
+    let controller = sessionSlot.current?.controller ?? null;
+    if (
+      !sessionSlot.current ||
+      sessionSlot.current.binding !== binding ||
+      sessionSlot.current.principalScope !== ctx.principalScope ||
+      sessionSlot.current.generation !== ctx.generation
+    ) {
+      sessionSlot.current?.controller.invalidate();
+      controller = new OperationController(binding.port, binding.store);
+      sessionSlot.current = {
+        controller,
+        binding,
+        principalScope: ctx.principalScope,
+        generation: ctx.generation,
+      };
+    }
+    if (!controller) {
+      onComplete({ status: "refused" });
+      return;
+    }
+    sessionPending.current = {
+      binding,
+      principalScope: ctx.principalScope,
+      generation: ctx.generation,
+      selectionSeq: selectionSeq.current,
+      complete: onComplete,
+    };
+    const pending = sessionPending.current;
+    const activeController = controller;
+    setSessionStatus(null);
+    void Promise.resolve()
+      .then(() => activeController.begin(intent))
+      .then((state) => settleSessionCommand(state, pending))
+      .catch(() => {
+        const current = activeController.getState();
+        settleSessionCommand(current, pending);
+      });
+  };
+  const checkSessionStatus = () => {
+    if (sessionRecovering) return;
+    const binding = completeExecutiveSessionBinding(
+      window.MastermindMissionHost?.sessionCommandBinding,
+    );
+    const liveAuth = window.MastermindMissionHost?.auth?.getState();
+    const ctx = binding ? readSessionOwnerContext(binding) : null;
+    const slot = sessionSlot.current;
+    if (!binding || liveAuth?.status !== "signed_in" || !ctx || !slot) return;
+    if (
+      slot.generation !== ctx.generation ||
+      slot.principalScope !== ctx.principalScope ||
+      slot.binding !== binding
+    )
+      return;
+    // Status-only recovery through readOperation: the exact original
+    // operation key, no send, no target lookup, no second dispatch.
+    setSessionRecovering(true);
+    setSessionRefusal(null);
+    const flight = ++sessionRecoveryFlight.current;
+    const sequence = selectionSeq.current;
+    const current = () => sessionRecoveryFlight.current === flight &&
+      ownsSession(binding, ctx, sequence) && sessionSlot.current === slot;
+    void Promise.resolve()
+      .then(() => current() ? slot.controller.recover() : null)
+      .then((state) => {
+        if (!current() || !state) return;
+        setSessionPointerError(sessionStoreHold(state));
+        setSessionStatus(state);
+        setSessionPointer(state.pointer);
+        if (state.status === "idle" && state.reason !== "RECOVER_NO_POINTER") setSessionRefusal({
+          binding, principalScope: ctx.principalScope, generation: ctx.generation, reason: state.reason,
+        });
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (current()) { setSessionRecovering(false); setSessionReading(false); }
+      });
+  };
   const reopenedOperationControl = currentReopened ? (
     <section className="card" aria-label="Retained operation">
       <h2>{currentReopened.pointer ? "Retained operation" : "Operation recovery"}</h2>
@@ -2509,7 +2823,40 @@ export function App() {
       </details>
     </section>
   );
-  const sessionPanel = commandBinding ? (
+  const sessionLive =
+    !!sessionBinding && signedIn && !!sessionOwner && !!sessionTargetKey;
+  const sessionContinuationUnavailable =
+    sessionBinding && !sessionLive ? "SESSION_UNAVAILABLE" : undefined;
+  const sessionContinuationPanel = sessionBinding ? (
+    <SelectedSessionContinuation
+      key={JSON.stringify([sessionOwner?.principalScope, sessionOwner?.generation])}
+      sessionKey={sessionTargetKey}
+      unavailableReason={sessionContinuationUnavailable}
+      status={sessionStatus}
+      retainedPointer={sessionPointer}
+      reading={!!sessionOwner && sessionReading}
+      recoveryRequired={!!sessionOwner && sessionPointerError}
+      recovering={sessionRecovering}
+      sending={!!sessionPending.current}
+      refusalReason={
+        sessionRefusal &&
+        sessionRefusal.binding === sessionBinding &&
+        sessionRefusal.principalScope === sessionOwner?.principalScope &&
+        sessionRefusal.generation === sessionOwner?.generation
+          ? sessionRefusal.reason
+          : undefined
+      }
+      onContinue={beginSessionCommand}
+      onRecover={checkSessionStatus}
+      onRequalify={signedIn && !sessionOwner && sessionControl ? () => {
+        invalidateSessionPresentation();
+        void sessionControl.refresh(selection);
+      } : undefined}
+    />
+  ) : null;
+  const sessionPanel = sessionBinding ? (
+    sessionContinuationPanel
+  ) : commandBinding ? (
     sessionExact && commandView?.session ? (
       <>
         <SessionWorkspace
@@ -2892,7 +3239,7 @@ export function App() {
                 <b>{p.title || p.workRef}</b>
                 <span>
                   {label(p.state)} ·{" "}
-                  {display(p.nextAction, "No next action projected")}
+                  {p.nextActionWithheld ? "Next action withheld" : display(p.nextAction, "No next action projected")}
                 </span>
                 <small>
                   {p.rootJobId

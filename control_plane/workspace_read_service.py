@@ -231,6 +231,61 @@ def _admitted_row(row, *, doc_generated_at, validity):
     return budget is None and remaining is None and state == "unqualified"
 
 
+def _program_membership(autonomy, work_refs, rows, validity):
+    """Mapped cards and explicit unmapped receipts partition the Work list.
+
+    The canonical mapper emits no card/validity receipt for an unmapped row.
+    Reading that explicit absence must neither invent a seat nor hide a work
+    reference. Only mapped rows participate in the paired card-validity join;
+    their currentness is still checked by ``_admitted_row``.
+    """
+    unmapped = autonomy.get("unmapped_responsibilities", [])
+    if type(unmapped) is not list:
+        return False
+    unmapped_refs = []
+    for row in unmapped:
+        if (type(row) is not dict
+                or not {"responsibility_ref", "reason"} <= row.keys()
+                or not row.keys() <= {"responsibility_ref", "reason", "declared_blocker"}
+                or type(row["responsibility_ref"]) is not str or not row["responsibility_ref"]
+                or row["reason"] not in ("owner_not_a_recognized_seat", "row_unreadable")):
+            return False
+        if "declared_blocker" in row:
+            blocker = row["declared_blocker"]
+            if (row["reason"] != "owner_not_a_recognized_seat"
+                    or type(blocker) is not dict
+                    or blocker.keys() != {"code", "explanation", "target_seat"}
+                    or blocker["code"] != "blocked_by"
+                    or type(blocker["explanation"]) is not str or not blocker["explanation"].strip()
+                    or blocker["target_seat"] not in (None, "ceo")):
+                return False
+        unmapped_refs.append(row["responsibility_ref"])
+    mapped_refs = {row["responsibility_ref"] for row in rows}
+    if (len(set(unmapped_refs)) != len(unmapped_refs)
+            or mapped_refs.intersection(unmapped_refs)
+            or set(work_refs) != mapped_refs.union(unmapped_refs)):
+        return False
+    if unmapped:
+        counts = autonomy.get("counts")
+        if (type(counts) is not dict or type(counts.get("total")) is not int
+                or counts["total"] != len(rows) or counts.get("empty") is not False):
+            return False
+    # Reject missing, duplicate, orphan or unmapped validity entries. This
+    # is the same publication's complete mapped-card identity set, not a
+    # new receipt for the unmapped rows or an all([]) currentness claim.
+    pairs = []
+    for entry in validity["cards"]:
+        if (type(entry) is not dict
+                or type(entry.get("responsibility_ref")) is not str
+                or not entry["responsibility_ref"]
+                or (entry.get("root_job_id") is not None
+                    and (type(entry["root_job_id"]) is not str or not entry["root_job_id"]))):
+            return False
+        pairs.append((entry["responsibility_ref"], entry.get("root_job_id")))
+    return (len(set(pairs)) == len(pairs)
+            and set(pairs) == {(row["responsibility_ref"], row.get("root_job_id")) for row in rows})
+
+
 def _qualified(snapshot, selected=None):
     from control_plane.mission_workspace import (
         SOURCE_VALIDITY_PROFILE, SOURCE_VALIDITY_SCHEMA,
@@ -264,7 +319,7 @@ def _qualified(snapshot, selected=None):
             or type(snapshot.currentness.get("publication_seq")) is not int
             or snapshot.currentness.get("publication_seq") != publication_seq):
         return False
-    if selected is None and not rows and not _qualified_empty_programs(doc, validity):
+    if selected is None and not work and not _qualified_empty_programs(doc, validity):
         return False
     if not all(type(row) is dict for row in rows) or not all(
             type(item) is dict and isinstance(item.get("work_ref"), str) and item["work_ref"]
@@ -272,16 +327,17 @@ def _qualified(snapshot, selected=None):
         return False
     work_refs = [item["work_ref"] for item in work]
     refs = [row.get("responsibility_ref") for row in rows]
-    if len(set(work_refs)) != len(work_refs) or len(set(refs)) != len(refs):
+    if (any(type(ref) is not str or not ref for ref in refs)
+            or len(set(work_refs)) != len(work_refs) or len(set(refs)) != len(refs)):
         return False
     # Every responsibility must cite exactly one genuine work row. Orphan or
     # duplicated identities never read as a healthy absence of Programs.
     if any(refs.count(ref) != 1 or work_refs.count(ref) != 1 for ref in refs):
         return False
-    if selected is None and set(work_refs) != set(refs):
+    if not all(_admitted_row(row, doc_generated_at=doc.get("generated_at"),
+                             validity=validity) for row in rows):
         return False
-    return all(_admitted_row(row, doc_generated_at=doc.get("generated_at"),
-                             validity=validity) for row in rows)
+    return selected is not None or _program_membership(autonomy, work_refs, rows, validity)
 
 
 def _observation(before, after, selected, runtime):

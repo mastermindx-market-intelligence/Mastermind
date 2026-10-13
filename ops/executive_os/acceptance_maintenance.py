@@ -41,6 +41,12 @@ _TRUSTED_GID = 0
 # the same finite limit before either publishing or parsing a document.
 _MAX_DOCUMENT_BYTES = 16 * 1024 * 1024
 _MAX_INVENTORY_BYTES = 64 * 1024 * 1024
+# Maximum release nodes on one predecessor path, including a prospective
+# successor. Keep recursion finite without rejecting ordinary release history.
+_MAX_CARRY_DEPTH = 64
+# Selected unstarted releases form a separate sealed lineage; include the
+# prospective successor in its finite budget as well.
+_MAX_SUPERSEDE_DEPTH = 64
 _SHA = re.compile(r"[0-9a-f]{40}")
 _DIGEST = re.compile(r"[0-9a-f]{64}")
 _TERMINAL = {"COMPLETED", "FAILED", "LOST", "CANCELLED", "RATE_LIMITED"}
@@ -242,8 +248,10 @@ def summary_document(sha: str) -> tuple[dict, bytes]:
 def validate_carry_receipt(
     sha: str, summary_sha256: str, *, _seen: frozenset[str] = frozenset()
 ) -> None:
-    if sha in _seen or len(_seen) >= 8:
-        raise MaintenanceError("maintenance carry chain is cyclic or too deep")
+    if sha in _seen:
+        raise MaintenanceError("maintenance carry chain is cyclic")
+    if len(_seen) >= _MAX_CARRY_DEPTH:
+        raise MaintenanceError("maintenance carry chain is too deep")
     descriptor = descriptor_for(sha)
     if descriptor is None:
         return
@@ -597,10 +605,19 @@ def terminal_assignment(config: dict, job: Any, attempt: Any) -> dict:
     return {"assignment_seal_sha256": hashlib.sha256(raw).hexdigest()}
 
 
-def terminal_carry_fields(runtime: Any, root: Any, config: dict, before: dict, predecessor: str) -> tuple[Any, dict]:
+def terminal_carry_fields(
+    runtime: Any, root: Any, config: dict, before: dict, predecessor: str,
+    successor: str | None = None,
+) -> tuple[Any, dict]:
     """Qualify one inert failed planner using existing Runtime evidence owners."""
     from control_plane.executive_runtime import RuntimeProofError
-    prior, summary, material = prior_carry_material(predecessor)
+    # Preparation must validate the same path that acceptance will traverse,
+    # before publishing a bundle that could only fail the depth/cycle guard.
+    if successor is None:
+        prior, summary, material = prior_carry_material(predecessor)
+    else:
+        prior, summary, material = prior_carry_material(
+            predecessor, _seen=frozenset({successor}))
     if (
         prior["root_job_id"] != root.job_id
         or prior["root_identity_sha256"] != root_identity(root)
@@ -865,16 +882,37 @@ def prejob_evidence(sha: str) -> str:
 def validate_superseded_binding(descriptor: dict, *, before: dict | None = None,
                                  artifacts: dict | None = None,
                                  prior_canary: dict | None = None) -> None:
-    """Keep the selected unstarted V2 bundle separate from the accepted ancestor.
+    """Validate the entire selected unstarted lineage against one accepted ancestor.
 
     No provider recovery, schema translation, or partial-acceptance replay is
     granted. Future carry validation retains this immutable selected binding,
     but compares live prestate only before this successor starts acceptance.
     """
+    if descriptor["schema_version"] not in {SCHEMA_SUPERSEDE, SCHEMA_PREJOB}:
+        raise MaintenanceError("invalid supersession schema")
+    seen = {descriptor["successor_sha"]}
+    while True:
+        prejob = descriptor["schema_version"] == SCHEMA_PREJOB
+        selected_sha = descriptor["interrupted_prejob_sha" if prejob else "superseded_unstarted_sha"]
+        if selected_sha in seen:
+            raise MaintenanceError("unstarted supersession chain is cyclic")
+        if len(seen) >= _MAX_SUPERSEDE_DEPTH:
+            raise MaintenanceError("unstarted supersession chain is too deep")
+        seen.add(selected_sha)
+        selected = _validate_superseded_link(
+            descriptor, before=before, artifacts=artifacts, prior_canary=prior_canary)
+        if selected["schema_version"] == SCHEMA_V2:
+            return
+        descriptor = selected
+
+
+def _validate_superseded_link(descriptor: dict, *, before: dict | None,
+                              artifacts: dict | None, prior_canary: dict | None) -> dict:
     prejob = descriptor["schema_version"] == SCHEMA_PREJOB
     selected_sha = descriptor["interrupted_prejob_sha" if prejob else "superseded_unstarted_sha"]
     selected = descriptor_for(selected_sha)
-    if (selected is None or selected["schema_version"] != SCHEMA_V2
+    allowed = {SCHEMA_V2} if prejob else {SCHEMA_V2, SCHEMA_SUPERSEDE}
+    if (selected is None or selected["schema_version"] not in allowed
             or digest(selected) != descriptor["superseded_descriptor_sha256"]
             or selected["predecessor_sha"] != descriptor["predecessor_sha"]):
         raise MaintenanceError("superseded descriptor or accepted ancestor mismatch")
@@ -892,7 +930,7 @@ def validate_superseded_binding(descriptor: dict, *, before: dict | None = None,
     legacy_pair = {"prestate.sqlite3-wal", "prestate.sqlite3-shm"}
     if entries not in (expected, expected | legacy_pair):
         raise MaintenanceError("superseded bundle contains acceptance or partial state")
-    if sealed_json(bundle/"preparing.json") != {"schema_version": SCHEMA_V2}:
+    if sealed_json(bundle/"preparing.json") != {"schema_version": selected["schema_version"]}:
         raise MaintenanceError("superseded preparation state is invalid")
     from ops.executive_os.autonomy_control import RUNTIME_ROOT
     if prejob:
@@ -916,6 +954,7 @@ def validate_superseded_binding(descriptor: dict, *, before: dict | None = None,
     versions = [row.get("version") for row in baseline["tables"].get("schema_migrations", [])]
     if not versions or any(type(version) is not int for version in versions) or max(versions) != 5:
         raise MaintenanceError("supersession requires unchanged schema v5")
+    return selected
 
 
 def prepare(args: argparse.Namespace) -> Path:
@@ -968,7 +1007,8 @@ def prepare(args: argparse.Namespace) -> Path:
         raise MaintenanceError("maintenance runtime is not quiescent")
     extra = {}
     if terminal_carry:
-        proof, extra = terminal_carry_fields(runtime, root, config, before, args.predecessor_sha)
+        proof, extra = terminal_carry_fields(
+            runtime, root, config, before, args.predecessor_sha, args.successor_sha)
     else:
         runtime.workers.proof_capacity_recovery_snapshot(
             proof.job_id,args.recovery_attempt_id,worker_id=config["worker_id"],quota_class=config["quota_class"])

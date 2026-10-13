@@ -77,6 +77,7 @@ _AUTH_REALMS = frozenset({"dedicated-worker-account"})
 _ADAPTER_EXECUTION_SURFACES = {
     "codex-cli": frozenset({"codex-exec", "codex-app-server"}),
     "claude-code": frozenset({"claude-code"}),
+    "attended-fabric": frozenset({"claude-code"}),
 }
 _SEALED_WORKER_EXECUTION_SURFACES = frozenset({"codex-exec", "claude-code"})
 

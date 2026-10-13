@@ -88,7 +88,10 @@ function engineText(result) {
   return items.map(c=>c.text).join('\n');
 }
 function processPid(text) {
-  const match=text.match(/Process started with PID (\d+)\b/); return match ? Number(match[1]) : null;
+  const match=text.match(/^Process started with PID ([1-9]\d*) \(shell: [^\r\n]+\)(?:\r?\n|$)/);
+  if(!match) return null;
+  const pid=Number(match[1]);
+  return Number.isSafeInteger(pid) && pid>0 ? pid : null;
 }
 function completedOutput(text) {
   const startToken='MMX_FABRIC_BEGIN\n';
@@ -177,7 +180,7 @@ export function createFabricFacade(engine, options={}) {
         return response({action:name,...args,process_output:raw,execution_absence_proven:false});
       }
       if(name==='fabric_request') {
-        const requestKey=JSON.stringify([args.root_id,args.run_id]);
+        const requestKey=args.run_id;
         if(attempted.has(requestKey)) fail('REQUEST_ALREADY_ATTEMPTED');
         if(attempted.size>=MAX_CONTROLLERS) fail('CONTROLLER_TRACKING_CAPACITY');
         const s=await status(args);
