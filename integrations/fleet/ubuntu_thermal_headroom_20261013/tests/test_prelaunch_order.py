@@ -45,7 +45,7 @@ with tempfile.TemporaryDirectory(prefix='mmx-worker-start-order-') as dirname:
     original_file=mod.__file__
     mod.__file__=str(support/'remote_sub_exec.py')
     try:
-        for case in ('legacy','new','mint_uncertain'):
+        for case in ('legacy','new','new-glmcodex','mint_uncertain'):
             steps=[]
             def acquire(*a,**k):
                 steps.append('PHYSICAL_LEASE_ACQUIRED')
@@ -54,14 +54,17 @@ with tempfile.TemporaryDirectory(prefix='mmx-worker-start-order-') as dirname:
                 steps.append('MACRO_SPARSE_MINT_CALLED')
                 if case=='mint_uncertain':
                     raise mod.SparseWorkspaceRefused('FABRIC_SPARSE_MINT_UNVERIFIED',effect_unknown=True)
-                return str(root/'home/lanes/wt/new-worktree') if case=='new' else args[1]
+                return str(root/'home/lanes/wt/new-worktree') if case in ('new','new-glmcodex') else args[1]
             def worker(command,*,cwd,timeout,env,nice,label,receipt_path,timeout_returncode,**kw):
                 steps.append('PROVIDER_CHILD_START')
                 assert label=='run-original'
-                assert command[0:4]==['bash',str(support.resolve()/'sub.sh'),'--prompt-file','glm'],repr(command)
-                expected=str(root/'home/lanes/wt/new-worktree') if case=='new' else str(donor)
-                assert command[5]==expected,(command,expected)
-                if case=='new':
+                assert command[:2]==['bash',str(support.resolve()/'sub.sh')],repr(command)
+                expected=str(root/'home/lanes/wt/new-worktree') if case in ('new','new-glmcodex') else str(donor)
+                if case=='new-glmcodex':
+                    assert command[2]=='glm-codex' and command[4]==expected,(command,expected)
+                else:
+                    assert command[2:4]==['--prompt-file','glm'] and command[5]==expected,(command,expected)
+                if case in ('new','new-glmcodex'):
                     assert env.get('FABRIC_WORKSPACE_READY')=='1'
                     assert env.get('FABRIC_WORKSPACE_RUN_ID')=='run-original'
                 else:
@@ -91,7 +94,7 @@ with tempfile.TemporaryDirectory(prefix='mmx-worker-start-order-') as dirname:
                  patch.object(mod,'cleanup_receipt_is_proven',return_value=True):
                 state={'started':False}
                 with contextlib.redirect_stdout(io.StringIO()):
-                    rc=mod._execute(['remote_sub_exec.py','run-original','glm',str(packet),str(donor),'glm-5.3'],state)
+                    rc=mod._execute(['remote_sub_exec.py','run-original','glm-codex' if case=='new-glmcodex' else 'glm',str(packet),str(donor),'glm-5.3'],state)
             (support/'lanes/run-original.process.jsonl').unlink(missing_ok=True)
             if case=='mint_uncertain':
                 assert rc==76
