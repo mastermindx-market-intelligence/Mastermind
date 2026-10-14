@@ -6,7 +6,7 @@ Fabric returns `lp-20261014-micro-a` and `lp-20261014-options-b` completed with 
 
 Material corrections: FINRA daily short-volume files are not a consolidated inventory report; lack of delayed ATS corroboration cannot falsify the identity of an intraday passive absorber. Cont/Kukanov/Stoikov measures contemporaneous book-event impact, not a general bullish high-volume/low-return signal. Pan/Poteshman's key opening-buy information set must not be replaced with unsigned public OPRA volume. Ge/Lin/Pearson is a 2016 Journal of Financial Economics paper on option-volume information and embedded leverage, not the venue/title/mechanism claimed by the options leaf. Public OPRA does not deliver the complete customer/dealer/open-close label set assumed by that return. Cboe's current Open-Close product includes EOD and one-/ten-minute summaries; its data conventions and external-derived licensing must be read directly. The returned OptionMetrics price was not verified and is excluded.
 
-Because two literature leaves exposed source-quality problems, independent statistical review uses a different admitted provider lane (GLM), run `lp-20261014-stat-review-c`, same original root/parent `latent-pressure-research-20261014-chatgpt4-001`. It is not a retry or duplicate of either original work item. Acceptance remains pending until its findings are adjudicated.
+Because two literature leaves exposed source-quality problems, independent statistical review uses a different admitted provider lane (GLM), run `lp-20261014-stat-review-c`, same original root/parent `latent-pressure-research-20261014-chatgpt4-001`. It is not a retry or duplicate of either original work item. The review subsequently returned and was adjudicated; see the final section below.
 
 ## Incumbent findings that narrow the recommendation
 
@@ -21,3 +21,14 @@ The three daily proxy families and their combination failed the preregistered pr
 ## Publication boundary
 
 Mastermind repository is public. Publish source code, aggregate scientific findings, input hashes, fit receipts and this adjudication. Retain per-date predictions/forward returns and vendor input bars on the existing authorized M2 research surface; no raw or reconstructive series redistribution is inferred from read access. Original raw run files remain unchanged and hashed in PRIVATE_RUN_MANIFEST.json.
+
+
+## Final independent statistical review adjudication
+
+GLM run `lp-20261014-stat-review-c` returned terminal rc=0 under the original root/parent. It independently checked Brier differences, Holm arithmetic, calibration-bin counts and chronological code structure and supports a bounded NO-GO without model refits. Principal accepts this review within that scope, not as an independent dataset acquisition/replication.
+
+Required claim qualifications adopted: target prevalence shifts 0.498663 to 0.457017, so Brier includes calibration under drift; roughly eleven 60-date holdout block lengths imply limited power; no AUC confidence intervals were estimated; common complete cases condition absolute baseline metrics; positive gross top-three returns lack a full factor/random-selection control and do not prove executable alpha; volume/share-basis around every split was not audited; the unit identity assertion is only a sanity check.
+
+Principal corrections to reviewer wording: development impact's raw p=.041958 does NOT survive Holm p=.167832, so it is not claimed family-wise significantly harmful. Small numerical AUC differences do not prove absence of all rank information. The review's broad warning about late-period pivot confirmations was qualified with an outcome-only 24-session boundary check, without any model refit or changed original result. Holdout remains17/7 baseline and18/7 combined; development becomes91/39 and144/61. No matched pivot base-rate, matched false-alarm lead comparison or timing-skill claim is supplied.
+
+No active child remains. Literature leaves A/B are terminal but not accepted as scientific evidence; their erroneous claims were excluded. The accepted third return does not elevate the new features to validated forecasts.

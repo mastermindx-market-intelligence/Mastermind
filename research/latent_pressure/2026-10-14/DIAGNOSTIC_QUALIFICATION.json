@@ -1,0 +1,45 @@
+{
+  "classification": "POST_RUN_DIAGNOSTIC_QUALIFICATION_NOT_NEW_MODEL_SELECTION",
+  "no_refits": true,
+  "original_results_unchanged": true,
+  "periods": {
+    "development": {
+      "baseline": {
+        "alerts_with_full_24session_outcome_window": 91,
+        "matches": 39,
+        "false_alarms": 52,
+        "precision": 0.42857142857142855,
+        "median_lead_among_matches": 9.0
+      },
+      "combined": {
+        "alerts_with_full_24session_outcome_window": 144,
+        "matches": 61,
+        "false_alarms": 83,
+        "precision": 0.4236111111111111,
+        "median_lead_among_matches": 8.0
+      },
+      "base_rate": 0.4986633631088218,
+      "rows": 15337,
+      "eligible_dates": 1208
+    },
+    "holdout": {
+      "baseline": {
+        "alerts_with_full_24session_outcome_window": 17,
+        "matches": 7,
+        "false_alarms": 10,
+        "precision": 0.4117647058823529,
+        "median_lead_among_matches": 16.0
+      },
+      "combined": {
+        "alerts_with_full_24session_outcome_window": 18,
+        "matches": 7,
+        "false_alarms": 11,
+        "precision": 0.3888888888888889,
+        "median_lead_among_matches": 15.0
+      },
+      "base_rate": 0.45701714801444043,
+      "rows": 8864,
+      "eligible_dates": 682
+    }
+  }
+}
