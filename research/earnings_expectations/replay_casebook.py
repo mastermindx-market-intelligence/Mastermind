@@ -20,9 +20,10 @@ from reaction_replay import replay
 RESEARCH_AUTHORITY = 'RESEARCH_ONLY_NO_TRADING'
 PACKETS = Path(__file__).parent / 'sourced_event_packets'
 GUIDANCE = Path(__file__).parent / 'amazon_management_guidance_cases.json'
+MEDIA = Path(__file__).parent / 'media_reported_expectations.json'
 
 
-def build_report(folder: Path = PACKETS, guidance_path: Path = GUIDANCE) -> dict:
+def build_report(folder: Path = PACKETS, guidance_path: Path = GUIDANCE, media_path: Path = MEDIA) -> dict:
     entries = []
     for path in sorted(folder.glob('*.json')):
         packet = json.loads(path.read_text(encoding='utf-8'))
@@ -98,6 +99,74 @@ def build_report(folder: Path = PACKETS, guidance_path: Path = GUIDANCE) -> dict
                 'issuer_reaction_status': match['reaction_status'] if match else 'NOT_IN_COHORT',
             })
         guidance_state = 'AVAILABLE_COMPANY_MANAGEMENT_GUIDANCE_ONLY'
+    media = []
+    media_state = 'MEDIA_REPORTED_EXPECTATIONS_SOURCE_UNAVAILABLE'
+    revision = None
+    if media_path.is_file():
+        exhibit = json.loads(media_path.read_text(encoding='utf-8'))
+        if (exhibit.get('authority') != 'RESEARCH_DISPLAY_ONLY_NO_BASELINE_ADMISSION'
+                or exhibit.get('aggregate_pit_status') != 'NOT_ADMITTED'
+                or exhibit.get('metric') != 'SEGMENT_REVENUE_YEAR_OVER_YEAR_GROWTH'
+                or exhibit.get('value_unit') != 'PERCENTAGE_POINTS'):
+            raise ValueError('MEDIA_WITNESS_PROVENANCE_NOT_ADMISSIBLE')
+        by_packet = {entry['packet_ref']: entry for entry in entries}
+        seen_packets = set()
+        for obs in exhibit['source_reported_event_expectations']:
+            if (obs.get('observation_class') != 'POST_EVENT_ARTICLE_QUOTED_ANALYST_AGGREGATE_NOT_ADMITTED'
+                    or obs.get('aggregation_basis') != 'AS_REPORTED_IN_ARTICLE_NOT_INDEPENDENTLY_NORMALIZED'
+                    or obs.get('underlying_analyst_vintage_utc') is not None):
+                raise ValueError('MEDIA_WITNESS_IMPROPERLY_PROMOTED')
+            packet_ref = obs['packet_ref']
+            if packet_ref in seen_packets:
+                raise ValueError('DUPLICATE_MEDIA_WITNESS')
+            seen_packets.add(packet_ref)
+            event = by_packet.get(packet_ref)
+            if (event is None or obs['event_ref'] != event['event_ref']
+                    or obs['issuer_ref'] != event['issuer_ref']
+                    or obs['fiscal_target'] != event['fiscal_target']):
+                raise ValueError('MEDIA_WITNESS_EVENT_IDENTITY_MISMATCH')
+            expected = D(str(obs['expected_yoy_growth_pct']))
+            actual = D(str(obs['actual_yoy_growth_pct']))
+            if not (-100 < expected < 1000 and -100 < actual < 1000):
+                raise ValueError('MEDIA_WITNESS_GROWTH_OUT_OF_RANGE')
+            media.append({
+                'event_ref': event['event_ref'],
+                'packet_ref': packet_ref,
+                'source_ref': obs['article_source_url'],
+                'source_publication_utc': obs['article_first_reported_utc'],
+                'segment_name': obs['segment_name'],
+                'reported_provider': obs['provider_attribution_in_article'],
+                'reported_expected_growth_pct': float(expected),
+                'reported_actual_growth_pct': float(actual),
+                'article_reported_gap_pp': float(actual - expected),
+                'stock_reaction_pct': event['issuer_return_pct'],
+                'consensus_vintage_admitted': False,
+                'observation_class': obs['observation_class'],
+            })
+        old = exhibit['indicative_consensus_revision_report']
+        if (old.get('event_ref') != 'earnings:CIK:1652044:2026Q2'
+                or old.get('article_pit_eligible') is not False
+                or old.get('article_published_utc') is not None):
+            raise ValueError('REVISION_PREVIEW_PIT_NOT_QUALIFIED')
+        revenue_older = D(str(old['consolidated_revenue_consensus_older_billion']))
+        revenue_current = D(str(old['consolidated_revenue_consensus_current_billion']))
+        eps_older = D(str(old['eps_consensus_older_per_share']))
+        eps_current = D(str(old['eps_consensus_current_per_share']))
+        revision = {
+            'source_ref': old['article_source_url'],
+            'fiscal_target': '2026Q2',
+            'issuer_ref': 'CIK:1652044',
+            'revenue_estimate_older_billion': float(revenue_older),
+            'revenue_estimate_current_billion': float(revenue_current),
+            'revenue_change_billion': float(revenue_current - revenue_older),
+            'eps_estimate_older': float(eps_older),
+            'eps_estimate_current': float(eps_current),
+            'eps_change': float(eps_current-eps_older),
+            'exact_publication_clock_known': False,
+            'historical_consensus_vintages_admitted': False,
+            'older_eps_asof': old['eps_consensus_older_asof'],
+        }
+        media_state = 'PUBLIC_ARTICLE_WITNESSES_ONLY_NOT_ADMITTED_AS_PIT'
     return {
         'schema': 'earnings.reaction_replay.casebook_report.research.v1',
         'authority': RESEARCH_AUTHORITY,
@@ -106,6 +175,9 @@ def build_report(folder: Path = PACKETS, guidance_path: Path = GUIDANCE) -> dict
         'point_in_time_analyst_consensus': 'NOT_ADMITTED',
         'management_guidance_status': guidance_state,
         'management_guidance_comparisons': guidance,
+        'media_reported_expectation_status': media_state,
+        'media_reported_expectation_witnesses': media,
+        'indicative_expectation_revision_report': revision,
         'prediction_status': 'NOT_TESTED',
         'tradeable_alpha_status': 'NOT_ESTABLISHED',
         'methodology': 'Retrospective two-session adjusted close/close total return; simple issuer minus SPY and issuer minus sector ETF in percentage points. Comparators are not factor-neutral or ex-issuer; publication windows corroborated but earliest public instant unknown.',
@@ -150,6 +222,29 @@ def markdown(report: dict) -> str:
                 f"{above_high_fmt} | {reaction} |"
             )
         lines.extend(['', 'Both comparisons use prior issuer guidance for as-reported consolidated net sales, which includes FX. Neither is a historical Street-consensus baseline, unique market belief or predictive-trading result.', ''])
+    if report['media_reported_expectation_witnesses']:
+        lines.extend([
+            '## Media-reported cloud growth consensus witnesses (NOT PIT-admitted)',
+            '',
+            '| Event | Segment | Reported expected YoY | Reported actual YoY | Reported gap | Stock reaction | Source |',
+            '|---|---|---:|---:|---:|---:|---|',
+        ])
+        for row in report['media_reported_expectation_witnesses']:
+            reaction = f"{row['stock_reaction_pct']:+.2f}%" if row['stock_reaction_pct'] is not None else 'unavailable'
+            lines.append(
+                f"| {row['event_ref']} | {row['segment_name']} | "
+                f"{row['reported_expected_growth_pct']:.2f}% | {row['reported_actual_growth_pct']:.2f}% | "
+                f"{row['article_reported_gap_pp']:+.2f} pp | {reaction} | [report]({row['source_ref']}) |"
+            )
+        lines.extend(['', 'Every consensus figure is quoted by a dated news article after the result; it is NOT an independently verified prior-vintage forecast for a historical prediction.', ''])
+    if report['indicative_expectation_revision_report']:
+        r = report['indicative_expectation_revision_report']
+        lines.extend([
+            '## Alphabet Q2 S&P/Visible Alpha revision context (date-only source)',
+            '',
+            f"The [S&P/Visible Alpha research article]({r['source_ref']}) describes revenue-consensus movement ${r['revenue_estimate_older_billion']:.1f}B → ${r['revenue_estimate_current_billion']:.1f}B ({r['revenue_change_billion']:+.1f}B), alongside EPS-consensus movement ${r['eps_estimate_older']:.2f} → ${r['eps_estimate_current']:.2f} ({r['eps_change']:+.2f}). Exact publication clock and original estimate vintages are not admitted; this is qualitative disagreement evidence, not a usable model feature.",
+            '',
+        ])
     return '\n'.join(lines)
 
 
