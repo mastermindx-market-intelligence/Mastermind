@@ -272,6 +272,9 @@ def test_corrob_window_friday_to_monday():
 
 
 @pytest.mark.parametrize("stem,first,last,ex_spy,ex_sector", [
+    ("googl_2025q4", 332.39, 330.61, 0.007129, -0.000344),
+    ("msft_fy2026q2", 478.59, 430.77, -0.097933, -0.084114),
+    ("amzn_2025q4", 222.69, 210.32, -0.074734, -0.059658),
     ("googl_2026q1", 349.51, 384.32, 0.089639, 0.088952),
     ("msft_fy2026q3", 422.75, 406.13, -0.049272, -0.041708),
     ("amzn_2026q1", 263.04, 265.06, -0.002278, -0.005299),
@@ -279,7 +282,7 @@ def test_corrob_window_friday_to_monday():
     ("msft_fy2026q4", 389.81, 450.25, 0.138284, 0.100055),
     ("amzn_2026q2", 235.50, 271.58, 0.146002, 0.120301),
 ])
-def test_retrospective_sourced_april_and_july_public_windows(stem, first, last, ex_spy, ex_sector):
+def test_retrospective_sourced_nine_public_windows(stem, first, last, ex_spy, ex_sector):
     import json
     from pathlib import Path
     packet = json.loads((Path(__file__).parent / "sourced_event_packets" / (stem + ".json")).read_text())
@@ -338,3 +341,44 @@ def test_april_vs_july_differs_without_any_predictive_or_causal_claim():
     assert moves[0][0] > 0 and moves[0][1] < 0
     assert moves[1][0] < 0 and moves[1][1] > 0
     assert moves[2][1] > moves[2][0]
+
+
+def test_nine_casebook_three_per_issuer_fiscal_context_and_source_links():
+    import json
+    from pathlib import Path
+    root = Path(__file__).parent / "sourced_event_packets"
+    paths=sorted(root.glob("*.json"))
+    assert len(paths)==9
+    packets=[json.loads(path.read_text()) for path in paths]
+    assert sorted([p["event"]["issuer_ref"] for p in packets]).count("CIK:1652044")==3
+    assert sorted([p["event"]["issuer_ref"] for p in packets]).count("CIK:789019")==3
+    assert sorted([p["event"]["issuer_ref"] for p in packets]).count("CIK:1018724")==3
+    assert len({p["event"]["event_ref"] for p in packets})==9
+    assert all(p["casebook_provenance"]["evidence_grade"] == "RESEARCH_RETROSPECTIVE_PUBLIC_PAGE_TWO_DAY_ADJ_CLOSE_ONLY" for p in packets)
+    assert all(r["reaction"]["status"] == "AVAILABLE" and r["first_published_utc"] is None for r in (replay(p) for p in packets))
+
+
+def test_winter_and_summer_exchange_clocks_are_seasonal():
+    import json
+    from pathlib import Path
+    root=Path(__file__).parent / "sourced_event_packets"
+    winter=json.loads((root / "msft_fy2026q2.json").read_text())
+    summer=json.loads((root / "msft_fy2026q4.json").read_text())
+    assert winter["sessions"][0]["open_utc"].endswith("T14:30:00Z")
+    assert winter["sessions"][0]["close_utc"].endswith("T21:00:00Z")
+    assert summer["sessions"][0]["open_utc"].endswith("T13:30:00Z")
+    assert summer["sessions"][0]["close_utc"].endswith("T20:00:00Z")
+    assert replay(winter)["reaction"]["status"] == replay(summer)["reaction"]["status"] == "AVAILABLE"
+
+
+def test_utc_close_mismatch_is_rejected_for_winter_case():
+    import json
+    from pathlib import Path
+    packet=json.loads((Path(__file__).parent / "sourced_event_packets" / "msft_fy2026q2.json").read_text())
+    packet["sessions"][0]["open_utc"]="2026-01-28T13:30:00Z"  # 8:30 EST, not market open; software checks date/order only, not a market-calendar authority.
+    # This is still a structurally valid clock! External exchange-session data remains the responsible authority.
+    assert replay(packet)["reaction"]["status"] == "AVAILABLE"
+    packet["sessions"][0]["close_utc"]="2026-01-28T10:00:00Z"
+    with pytest.raises(ReplayError) as exc:
+        replay(packet)
+    assert exc.value.reason == "INVALID_EXCHANGE_SESSION_CLOCK"
