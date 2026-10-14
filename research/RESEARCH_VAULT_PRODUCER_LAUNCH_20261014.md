@@ -93,5 +93,17 @@ JWT in the default Python environment. Those8 passed unchanged in the existing
 qualified Research test environment. No source change was needed for that
 environment repair. This is105 distinct passing cases, not one all-green run.
 
-Protected merge, independent review, pinned actual CLI integration, installed
-host/dependency proof and live writer adoption are separate remaining gates.
+The committed launcher at14fdc017bcb7c461150adb95cd5a8b675b20d1b2 also ran the
+actual Macro CLI atbe01e9ec44532d4e6352f00a9be4dfd0cabd0dbb through the existing
+stager:806 Mastermind and2008 Macro members verified before/after execution.
+With a sanitized credential-free child environment, the actual CLI refused the
+absent Store with exit1, preserved exactly one original journal header and its
+stream-captured digest, and created no public mirror. Reusing the original run
+was refused before child execution. This is actual launcher/CLI integration on
+the no-Store path; it does not prove a live generation or dependency installation.
+
+Normal Fabric review `rv-producer-launch-review-01a13301-r1` reserved MiniMax on
+Ubuntu2 but exhausted host lane admission before model execution, endingrc75.
+The same-run diagnostic was retained without acceptance or replacement. No
+independent reviewer ran. Protected merge, independent review, installed
+host/dependency proof and live writer adoption remain separate gates.
