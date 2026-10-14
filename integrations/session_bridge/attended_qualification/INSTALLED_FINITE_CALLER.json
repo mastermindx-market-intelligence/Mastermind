@@ -1,0 +1,57 @@
+{
+  "at": "2026-10-14T03:08:08.464886+00:00",
+  "scope": "Fixed original-parent finite Control startup and canonical binary path; installation separate",
+  "decision": "SCOPED_SOURCE_PASS",
+  "source_base": "b278155a9974e75fa60363589ca142a1a305ab75",
+  "source_sha256": {
+    "control_plane/fabric_attended_routing.py": "a04cea495c9536f1c3bae8604dba59139c497abcfa6da177caf5e45274e9a15c",
+    "control_plane/fabric_attended_claude.py": "562969ca2d26a6b5d096198d98e39013adc82deca5f70ec5d77ceadaf8469cf5",
+    "scripts/executive_os_phase1c.py": "744255d12e4f37c1ad1ec91720e1632a497e79cd58b465ee14e3f7bc6349af96",
+    "scripts/executive_os_phase1c_control_wrapper.py": "1b9e227393c1920a9dedd3f26324ab387612d1b1949bf36ea526c00c3d9c4e5a",
+    "ops/executive_os/attended_worker_definition.py": "fd69baaf0516c177f2376fadf0dbf6c8d4e040d211b81766e3e65207a4f00846",
+    "tests/test_installed_finite_control.py": "978b97a094fc33fe2308a107e35d3ecb369cc4cdfd33b6078477f81664eca3c6",
+    "tests/test_attended_canonical_binary_path.py": "b598a961065b8c7f149f645adb18abcc04f2ebec440595f4b96529cd86fab3a6"
+  },
+  "independent_review": "/root/native_activation_adjudication final postimage review; prior config/receipt TOCTOU corrected",
+  "tests": {
+    "INSTALLED_FINITE_CALLER_FINAL.xml": {
+      "sha256": "3c104c73ffc52039e9ff759d0960cede9013f2c684a38eb19633bf99b74f3625",
+      "tests": 127,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0
+    },
+    "INSTALLED_FINITE_CALLER_PATH_FINAL.xml": {
+      "sha256": "6cc705379b5d93b46593351b1000c23ae586dce4d336eedec5129709ec592e77",
+      "tests": 29,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0
+    }
+  },
+  "distinct_final_case_identities": 129,
+  "count_note": "Reports overlap; later affected case supersedes prior. Do not add raw counts.",
+  "paid_review": {
+    "id": "fabric-installed-caller-review-01a11e90-v1",
+    "state": "NOT_ACCEPTED",
+    "rc": 75,
+    "result_bytes": 231,
+    "result_sha256": "65252672ed16b69848d6baabbc8ea2238c040597ed95012b8efc59c53f4fad6d",
+    "reason": "REMOTE_SUB_ADMISSION_REFUSED active_lane_limit_reached, active_count3/max_active3",
+    "consumed_once": true,
+    "retry": false,
+    "provider_start_or_paid_review_claimed": false,
+    "independent_source_review": "Existing native architecture coordinator review; no replacement paid worker"
+  },
+  "effects": {
+    "installed_control_changed": false,
+    "provider_start": false,
+    "original_native_operation": "NOT_SUBMITTED"
+  },
+  "original_root": "01a11e90-4b5d-7f53-b966-8aaaad38701f",
+  "operation": "fabric-parent-native-operator-proof-01a11e90-v1",
+  "arguments_sha256": "36678c742b06b0ce04aa2b6acc46cb8aba9eba82c322ca960611e2cbb2580f56",
+  "proposed_quota_class": "minimax-finite-read",
+  "quota_registered_or_admitted": false,
+  "nonsemantic_postreview": "Removed one extra final blank line from test file; no production or test behavior changed"
+}

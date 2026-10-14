@@ -2638,11 +2638,26 @@ def _ceo_admission_guard(raw: Mapping[str, Any], config_path: Path,
     return require_ceo_admission
 
 
-async def _serve_from_config(config_path: Path, *, attended_work_placements: tuple = ()) -> None:
+async def _serve_from_config(config_path: Path, *, attended_work_placements: tuple = (),
+                             _installed_control: bool = False) -> None:
+    installed_config_sha256 = _sha256_file(config_path) if _installed_control else None
     raw = load_control_config(config_path)
     # Only a fixed host composition may select typed placements. Merely
     # staging a file or setting a JSON flag cannot activate its worker owners.
     physical_source = _staged_fabric_binding_source(raw)
+    if _installed_control:
+        if attended_work_placements:
+            raise ServiceError('installed Control cannot replace its fixed source composition')
+        from control_plane.fabric_attended_routing import installed_control_placements, FINITE_SOCKET_PATH
+        attended_work_placements = installed_control_placements(raw)
+        if attended_work_placements and _sha256_file(config_path) != installed_config_sha256:
+            raise ServiceError('installed finite Control definition changed while loading')
+        if attended_work_placements and (physical_source is None
+                or len(physical_source.bindings) != 1
+                or physical_source.bindings[0].worker_id != 'minimax-finite-01'
+                or physical_source.bindings[0].provider != 'minimax'
+                or physical_source.bindings[0].socket_path != FINITE_SOCKET_PATH):
+            raise ServiceError('installed finite composition requires its one physical owner')
     from control_plane.fabric_attended_routing import AttendedWorkPlacement, placement_member, qualification_for
     if (type(attended_work_placements) is not tuple
             or len(attended_work_placements) > 6
@@ -2700,9 +2715,16 @@ async def _serve_from_config(config_path: Path, *, attended_work_placements: tup
     initial_canary: Mapping[str, Any] | None = None
     if raw.get("coo_autonomy_armed") is True:
         own_config_sha256 = _sha256_file(config_path)
+        finite_installed = _installed_control and bool(attended_work_placements)
+        if finite_installed:
+            own_config_sha256 = control_attestation['config_sha256']
+            if own_config_sha256 != installed_config_sha256:
+                raise ServiceError('installed finite Control attestation changed')
         release_sha = str(raw["proof_base_sha"])
 
         def require_autonomy() -> None:
+            if finite_installed and _sha256_file(config_path) != own_config_sha256:
+                raise ServiceError('installed finite Control definition changed')
             try:
                 validate_runtime_guard_file(
                     AUTONOMY_RECEIPT,
@@ -2712,6 +2734,8 @@ async def _serve_from_config(config_path: Path, *, attended_work_placements: tup
                 )
             except AutonomyRefusal as exc:
                 raise ServiceError("Executive autonomy receipt refused") from exc
+            if finite_installed and _sha256_file(config_path) != own_config_sha256:
+                raise ServiceError('installed finite Control definition changed')
 
         autonomy_guard = require_autonomy
         require_autonomy()
@@ -2780,6 +2804,16 @@ async def _serve_from_config(config_path: Path, *, attended_work_placements: tup
         **({"exact_target_source": exact_target_source} if exact_target_source is not None else {}),
     )
     await service.serve_until_stopped()
+
+
+def serve_installed_control(config_path: Path) -> int:
+    """Canonical wrapper entry; same service/guard, fixed source composition."""
+    try:
+        asyncio.run(_serve_from_config(config_path, _installed_control=True))
+        return 0
+    except (OSError, RuntimeProofError, ServiceError, ValueError) as exc:
+        print(f'error: {exc}', file=sys.stderr)
+        return 2
 
 
 def _client_request(args: argparse.Namespace) -> tuple[str, dict[str, Any]]:

@@ -120,9 +120,11 @@ MOVING_MODEL_ALIASES = frozenset(
     {"best", "default", "fable", "haiku", "opus", "opusplan", "sonnet"}
 )
 _MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
-# Conservative reviewed-binary grammar: absolute, single path token, no shell
-# metacharacters or whitespace.  Fail closed on anything else.
-_SAFE_BINARY_PATH_RE = re.compile(r"^[A-Za-z0-9/._+-]+$")
+# Preserve the conservative grammar; admit only the canonical macOS install
+# directory's literal space. The compiler transports this as one argv element
+# with shell=False, never a quoted shell command or a broader path selector.
+_SAFE_BINARY_PATH_RE = re.compile(
+    r"^(?:[A-Za-z0-9/._+-]+|/Library/Application Support/MastermindExecutive/bin/claude-[0-9][A-Za-z0-9._+-]*)$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _SECRET_NAME_RE = re.compile(
     r"(?:^|_)(?:api[-_]?key|authorization|credential|secret|token)(?:$|_)",
@@ -257,6 +259,7 @@ def _reviewed_binary(binary: Any) -> str:
             not isinstance(value, str)
             or not value
             or not PurePosixPath(value).is_absolute()
+            or str(PurePosixPath(value)) != value or '..' in PurePosixPath(value).parts
             or _SAFE_BINARY_PATH_RE.fullmatch(value) is None
         ):
             raise AttendedClaudePreparationError(

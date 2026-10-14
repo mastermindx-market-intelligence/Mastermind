@@ -81,6 +81,37 @@ def attest_binary_document(path, *, allowed_versions):
                   'binary': dataclasses.asdict(binary)})
 
 
+def build_finite_control_delta(*, definition_dir, worker_artifacts):
+    """Pure staging delta for the existing root-owned Control publisher.
+
+    No arm/submit flag, activation receipt, quota or service is produced here.
+    The existing autonomy owner later derives foreground-only armed bytes and
+    binds them in its original transaction. Host publication supplies the real
+    installed artifacts, never placeholder release/binary/realm digests.
+    """
+    from control_plane.executive_fabric_composition import _document
+    from control_plane.fabric_attended_routing import FINITE_DEFINITION_DIR, FINITE_SOCKET_PATH
+    directory = _path(definition_dir)
+    if str(directory) != FINITE_DEFINITION_DIR:
+        raise AttendedDefinitionError('finite Control requires its fixed definition directory')
+    try:
+        worker_bytes = worker_artifacts['worker.json']
+        bindings_bytes = worker_artifacts['bindings.json']
+        worker = _document(worker_bytes)
+        physical, = _bindings(bindings_bytes)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise AttendedDefinitionError('one complete rendered finite owner required') from exc
+    if (worker.get('worker_id') != 'minimax-finite-01'
+            or physical.worker_id != worker['worker_id'] or physical.provider != 'minimax'
+            or physical.socket_path != FINITE_SOCKET_PATH
+            or physical.worker_source_config_digest != _digest(worker_bytes)
+            or worker.get('harness_binding_id') != canary.BINDING):
+        raise AttendedDefinitionError('finite Control delta differs from its original worker')
+    return dict(fabric_bridge_armed=False, fabric_bindings_path=str(directory/'bindings.json'),
+        fabric_bindings_sha256=_digest(bindings_bytes),
+        fabric_attended_probe={'worker_config_path': str(directory/'worker.json')})
+
+
 def _entry(release_root, commit_sha, tree_sha, manifest_sha256, arguments):
     # Root-installed generated entry is OUTSIDE the sealed release. Only a
     # literal exact release is importable under -I -S; argv/env select nothing.
