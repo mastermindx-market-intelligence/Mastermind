@@ -2271,16 +2271,18 @@ class InstalledExecutiveReaders(ExecutiveMcpGateway):
             code_root=self._code_root, macro_root=self._macro_root,
         )
         try:
-            mastermind_sha = _clean_git_snapshot(
-                self._source_root, runner=self._read_runner, env=env,
-                label="Mastermind source",
-                _allow_synthetic_fixture=self._allow_synthetic_fixture,
-            )
-            macro_sha = _clean_git_snapshot(
-                self._macro_root, runner=self._read_runner, env=env,
-                label="Macro source",
-                _allow_synthetic_fixture=self._allow_synthetic_fixture,
-            )
+            with executive_ceo_ingress.grounding_observation_scope() as deadline:
+                mastermind_sha = _clean_git_snapshot(
+                    self._source_root, runner=self._read_runner, env=env,
+                    label="Mastermind source", content_scope="all", deadline=deadline,
+                    _allow_synthetic_fixture=self._allow_synthetic_fixture,
+                )
+                macro_sha = _clean_git_snapshot(
+                    self._macro_root, runner=self._read_runner, env=env,
+                    label="Macro source", content_scope="all", deadline=deadline,
+                    _allow_synthetic_fixture=self._allow_synthetic_fixture,
+                )
+                executive_ceo_ingress._require_grounding_budget()
         except GatewayError as exc:
             raise ValueError("installed grounding is unavailable") from exc
         if self._expected_source_sha is not None and mastermind_sha != self._expected_source_sha:
