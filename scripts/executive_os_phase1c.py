@@ -870,13 +870,17 @@ def company_consultation_launchd_entry(config: Mapping[str, Any]) -> dict[str, A
     if "company_consultation" not in config:
         return None
     if (type(value) is not dict
-            or set(value) not in ({"armed", "socket_path", "launchd_socket_name"},
-                                  {"armed", "socket_path", "launchd_socket_name", "native_return_armed"})
+            or not {"armed", "socket_path", "launchd_socket_name"} <= set(value)
+            or set(value) - {"armed", "socket_path", "launchd_socket_name", "native_return_armed", "product_acceptance_armed"}
             or type(value.get("native_return_armed", False)) is not bool
+            or type(value.get("product_acceptance_armed", False)) is not bool
             or type(value["armed"]) is not bool
             or value["socket_path"] != _CANONICAL_COMPANY_CONSULTATION_SOCKET
             or value["launchd_socket_name"] != _COMPANY_CONSULTATION_SOCKET_NAME):
         raise ServiceError("Company consultation control binding is invalid")
+    if value.get("product_acceptance_armed", False) and (
+            value["armed"] is not True or config.get("coo_principal_dialogue_armed") is not True):
+        raise ServiceError("Product acceptance requires the Company socket and principal dialogue owner")
     if not value["armed"]:
         return None
     for key in ("control_uid", "worker_uid", "worker_gid"):
@@ -2521,6 +2525,15 @@ def _service_from_config(
 
         company_repository = Path(raw["proof_source_repository"])
         company_worker_uid = int(raw["worker_uid"])
+        acceptance_selected = raw["company_consultation"].get("product_acceptance_armed", False)
+        acceptance_reader = None
+        if acceptance_selected:
+            from control_plane.agentos_product_acceptance_basis import AgentOsProductAcceptanceBasisReader
+            if product_acceptance_context_owner is None or product_acceptance_macro_root is None:
+                raise ServiceError("Product acceptance requires the sealed Context and Workspace owners")
+            acceptance_reader = AgentOsProductAcceptanceBasisReader(
+                macro_root=product_acceptance_macro_root,
+                installed_context_owner=product_acceptance_context_owner)
         answer_bridge = dialogue_observation_kwargs.get("dialogue_wake_handler")
         if answer_bridge is None or answer_bridge.canary_profile is not None:
             # Company answer obligations keep their incumbent generic owner;
@@ -2542,11 +2555,21 @@ def _service_from_config(
                 return await answer_bridge.dispatch_requester_answer(
                     runtime, projection, before_effect=service._require_company_answer_attention,
                 )
+            acceptance_host = None
+            if acceptance_selected:
+                from integrations.product_acceptance_request_host import ProductAcceptanceRequestHost
+                service._namespace_custody.bound_runtime(runtime)
+                acceptance_host = ProductAcceptanceRequestHost(
+                    runtime=runtime, reader=acceptance_reader, worker_uid=company_worker_uid,
+                    relay_socket_path=_CANONICAL_AGENT_RELAY_SOCKET,
+                    workspace_id=SLACK_WORKSPACE_ID, channel_id=SLACK_CHANNEL_ID,
+                    armed=True, principal_authority=coo_factory(runtime))
             return CompanyConsultationHost(
                 runtime=runtime, repository_root=company_repository,
                 worker_uid=company_worker_uid, relay_socket_path=_CANONICAL_AGENT_RELAY_SOCKET,
                 workspace_id=SLACK_WORKSPACE_ID, channel_id=SLACK_CHANNEL_ID,
                 requester_answer_wake_dispatch=dispatch_answer,
+                product_acceptance_host=acceptance_host,
                 native_return_armed=raw["company_consultation"].get("native_return_armed", False))
         company_listener = activate_launchd_socket(_COMPANY_CONSULTATION_SOCKET_NAME)
         activated_listeners.append(company_listener)

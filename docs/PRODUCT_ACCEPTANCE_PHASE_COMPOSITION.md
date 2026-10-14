@@ -44,7 +44,26 @@ Recovery permits only Relay reads and the existing qualification event. It never
 constructs a send gateway or authorizes another COMMIT. Its local host and source
 observations remain fixtures requiring installed qualification.
 
-Installed SDK selection, capability profile and service composition still
-require completion and qualification. The held Context CLI and actual sealed
-source path remain prerequisites. No source package here authorizes installation,
-enrollment, dispatch, deadline changes or replay of any old uncertain run.
+The default-off source now includes tools-only SDK registration, the existing
+one-request Unix client, and `acceptance-stdio` / `acceptance-sdk-stdio` commands
+through the same sealed Company SDK edge. The new
+`operator.appserver.interactive.product-acceptance.v1` profile contains only the
+separate `product-acceptance-mcp-v1` grant. Existing profiles/grants remain
+unchanged, and the policy's `production_armed` remains false. Its presence is
+source eligibility, not a grant to any running worker.
+
+The Control selector is `company_consultation.product_acceptance_armed`, absent
+or false by default. True requires the already-selected Company socket and
+principal dialogue owner, sealed COO source, existing Workspace owner and exact
+Context collector. The host receives the same Runtime, worker UID, Relay socket,
+workspace and channel; mismatched host composition refuses. No additional
+listener, public endpoint, credential or lifecycle is created.
+
+Local checks cover the real Unix client/Company host/canonical request-owner
+chain with explicit peer, target and Relay fixtures: a duplicate selector keeps
+one retained request and one send. Closed protocol, wrong-peer/identity,
+ambiguous transport, exact profile, default-off and actual Control factory tests
+are source qualification. Installed SDK selection, observed worker capability,
+held Context CLI, actual sealed source path and principal/parent consumption
+remain real-path obligations. No source package here authorizes installation,
+enrollment, dispatch or replay of any old uncertain run.
