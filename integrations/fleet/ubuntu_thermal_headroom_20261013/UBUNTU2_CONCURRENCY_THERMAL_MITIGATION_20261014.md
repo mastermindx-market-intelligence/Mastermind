@@ -60,3 +60,20 @@ The first bounded follow-up at **2026-10-14T04:31Z** examined the original M2 `s
 Ubuntu2's earlier incumbents declined naturally below the newly configured `max_active=6` without an operator signal, worker termination or lease migration. Thus the live mitigation did not interrupt existing workers and temperatures were below the 85°C hardware-reading cutoff in this initial sampled interval.
 
 **Inference boundary:** 19 discrete per-minute samples in a confounded, declining-workload interval are neither matched before/after throughput evidence nor proof that a six-lane limit keeps 9950X below the desired thermal point in every regime. The BIOS 85°C PBO Thermal Point/Config TDP and physical cooler remain untouched; no elevated remote profile switch was attempted. Retain the original physical-headroom acceptance obligation and the exact rollback/source-CAS fence above.
+
+## Continued heat at <=3 lanes: temporary one-lane admission fence
+
+**New evidence through 2026-10-14 08:13 UTC:** 215 post-six-lane admission observations had mean Tctl **66.94°C**, p95 **84.5°C**, and peak **93.625°C**. There were **9 observations at ≥85°C** and **4 at ≥90°C**, disproving an earlier implication that the six-lane cap by itself kept the CPU below 85°C. Individual high-heat cases included **93.625°C at only 3 Fabric lanes** (06:25Z) and **93.375°C at 2 lanes** (07:44Z). This is workload-correlated evidence, not proof that Fabric is the sole consumer: Python/Git processes and intermittent sampled `bluetoothd` CPU were observed. A fresh 0.8-second direct PID CPU-delta check found `bluetoothd` at **0% CPU** while the service was running and adapter powered; the high samples are not sustained 100% evidence and **the service was not changed**. No worker was stopped, reniced, killed or migrated.
+
+**Second, more conservative Ubuntu2 new-worker admission-only change, original M2 controller:**
+
+| Field | Previous | New |
+|---|---:|---:|
+| `max_active` | 6 | **1** |
+| `load_gate` | 6 | **4** |
+| `cpu_tctl_limit_c` | 85.0°C | **80.0°C** |
+| `min_free_gb` + `checkout_reserve_gb` | 150+15 GiB | **unchanged** |
+
+CAS source `hosts.json` SHA-256 before `ccda5a87d4e627486a0017a6fe7be79ab2b8d0e400c3ff1212d8860d30d6090f` → after **`918fd0e7d856c7b8bb26400690322122d18e0227ff673a9432710d083a47e56e`**. Exact previous configuration backup `hosts.json.bak-ubuntu2-lowlane-20261014` retained on incumbent M2. Atomic write, byte-level readback and all-other-hosts-equal checks passed. The existing `remote_sub.sh` host-policy loader returned **max_active 1, load_gate 4, Tctl limit 80°C, min disk 165 GiB**. Actual M2 host picker returned `ubuntu2 eligible=false` while four incumbent lanes remained active, specifically `lane-ceiling FAIL 4<1`. **No incumbent worker was terminated.** Original host/provisioning files otherwise unchanged.
+
+This is a **throughput-costly safety hold**, not a permanent model-routing or cooling optimum. Continue to route eligible work to approved cooler hosts with intact disk/thermal gates; never lower other hosts' reserve or exceed their gates just to recover capacity. If one CPU-intensive worker can still drive Tctl to 95°C, only host-level BIOS/PBO thermal-power regulation can enforce a physical bound. Ubuntu2's previous ordinary `powerprofilesctl set balanced` action remains explicitly `AccessDenied`; no sudo/alternate carrier retry. Chris's attended MSI 9950X thermal-point/cooler-maintenance procedure in `BOARD_LEVEL_THERMAL_ACCEPTANCE.md` remains the physical blocker. Accept a higher lane cap only after repeatable matching 10–15-minute thermal/throughput and error evidence at the newly proposed profile.
