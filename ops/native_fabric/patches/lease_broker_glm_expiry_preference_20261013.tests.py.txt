@@ -224,3 +224,100 @@ def test_no_urgency_on_other_provider_pool(case):
     br, now, data, save, acquire, _=case
     assert br._fresh_glm_expiring_accounts(set())=={}
     assert br._fresh_glm_expiring_accounts({"unknown"})=={}
+
+
+def test_cache_symlink_swap_between_stat_and_open_cannot_promote(case, monkeypatch, tmp_path):
+    """Adversarial path swap after lstat cannot change the opened quota file."""
+    br, now, data, save, acquire, cache = case
+    target = tmp_path / "other.json"
+    target.write_text(json.dumps(data))
+    original_open = lease_broker.os.open
+    changed = [False]
+
+    def swap(path, *args, **kwargs):
+        if not changed[0] and str(path) == str(cache):
+            cache.unlink()
+            cache.symlink_to(target)
+            changed[0] = True
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(lease_broker.os, "open", swap)
+    assert br._fresh_glm_expiring_accounts(set(ACCOUNT_NAMES)) == {}
+    assert changed == [True]
+
+
+def test_cache_modified_while_open_is_not_trusted(case, monkeypatch):
+    """A simultaneous provider cache replace/in-place edit cannot combine epochs."""
+    br, now, data, save, acquire, cache = case
+    original_read = lease_broker.os.read
+    touched = [False]
+
+    def mutate(fd, n):
+        chunk = original_read(fd, n)
+        if not touched[0]:
+            touched[0] = True
+            cache.write_text('{"glm":{"accounts":{}}}\n' + ' ' * 120)
+        return chunk
+
+    monkeypatch.setattr(lease_broker.os, "read", mutate)
+    assert br._fresh_glm_expiring_accounts(set(ACCOUNT_NAMES)) == {}
+    assert touched == [True]
+
+
+def test_cache_truncated_json_is_not_urgency(case):
+    br, now, data, save, acquire, cache = case
+    cache.write_bytes(b'{"glm": {"accounts": ')
+    assert br._fresh_glm_expiring_accounts(set(ACCOUNT_NAMES)) == {}
+
+
+def test_cache_exceeding_bounded_file_limit_is_not_urgency(case):
+    br, now, data, save, acquire, cache = case
+    cache.write_bytes(b' ' * (1_048_576 + 1))
+    assert br._fresh_glm_expiring_accounts(set(ACCOUNT_NAMES)) == {}
+
+
+def test_host_qualified_account_subset_precedes_expiry_preference(case, monkeypatch):
+    """The current host+model qualification owner is never overridden by expiry."""
+    import glm_host_account_source
+    br, now, data, save, acquire, cache = case
+    seen = []
+
+    def compatible(rows, *, host, model, now, preferred, hosts_path):
+        seen.append((host, model, preferred))
+        return ([row for row in rows if row["name"] == "alpha_far_reset"], ())
+
+    monkeypatch.setattr(glm_host_account_source, "filter_observed_accounts", compatible)
+    actual = br.acquire(
+        orchestrator_id="host-bound-1", pool="glm", account=None,
+        model="glm-5.3-flash", task_class="remote-glm", host="ubuntu0",
+        pid=os.getpid(), ttl=120, wait=0, poll=.01,
+    )
+    assert actual.ok and actual.account == "alpha_far_reset"
+    assert seen == [("ubuntu0", "glm-5.3-flash", None)]
+    with br._conn() as conn:
+        row = conn.execute("SELECT account, model, host FROM leases WHERE id=?",
+                           (actual.lease_id,)).fetchone()
+    assert (row["account"], row["model"], row["host"]) == (
+        "alpha_far_reset", "glm-5.3-flash", "ubuntu0",
+    )
+
+
+def test_explicit_account_outside_host_qualified_subset_stays_refused(case, monkeypatch):
+    import glm_host_account_source
+    br, now, data, save, acquire, cache = case
+
+    def compatible(rows, *, host, model, now, preferred, hosts_path):
+        allowed = ([row for row in rows if row["name"] == "alpha_far_reset"]
+                   if preferred in (None, "alpha_far_reset") else [])
+        return allowed, ()
+
+    monkeypatch.setattr(glm_host_account_source, "filter_observed_accounts", compatible)
+    result = br.acquire(
+        orchestrator_id="host-refused-1", pool="glm", account="zeta_near_reset",
+        model="glm-5.3-flash", task_class="remote-glm", host="ubuntu0",
+        pid=os.getpid(), ttl=120, wait=0, poll=.01,
+    )
+    assert not result.ok and result.reason == "host_account_unavailable"
+    with br._conn() as conn:
+        rows = conn.execute("SELECT COUNT(*) AS n FROM leases").fetchone()
+    assert rows["n"] == 0

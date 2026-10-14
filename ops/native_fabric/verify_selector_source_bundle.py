@@ -90,7 +90,7 @@ def _manifest(path: Path) -> dict[str, Any]:
         raise PreflightRefusal("INVALID_MANIFEST_SCHEMA")
     sources = doc.get("sources")
     patches = doc.get("patches")
-    if not isinstance(sources, list) or len(sources) != 5 or not isinstance(patches, list) or len(patches) != 6:
+    if not isinstance(sources, list) or len(sources) != 6 or not isinstance(patches, list) or len(patches) != 7:
         raise PreflightRefusal("BUNDLE_COMPLETENESS_REFUSED")
     return doc
 

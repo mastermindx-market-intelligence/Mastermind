@@ -146,7 +146,7 @@
      p_request.add_argument("--subject-pool", help="Author pool for canonical reviewer independence rules")
      p_request.add_argument("--root")
      p_request.add_argument("--parent")
-@@ -697,10 +774,19 @@
+@@ -712,10 +789,19 @@
              command.extend(["--" + name, getattr(args, name.replace("-", "_"))])
          for path in args.path:
              command.extend(["--path", path])
@@ -166,7 +166,7 @@
                  _json(completion_reconcile.reconcile(args.run_id, args.root, apply=args.apply))
                  return 0
              except (OSError, ValueError, completion_reconcile.sqlite3.Error) as exc:
-@@ -753,10 +839,11 @@
+@@ -768,10 +854,11 @@
                  parent_run_id=args.parent,
                  task_complexity=args.task_complexity,
                  escalation_reason=args.escalation_reason,

@@ -22,14 +22,16 @@ PAIRS = {
     "ext/pick.py": (b"old picker\n", b"final picker\n"),
     "ext/lease_broker.py": (b"old broker\n", b"new broker\n"),
     "ext/tests/test_r31_glm_burn_down.py": (b"old policy test\n", b"new policy test\n"),
+    "ext/tests/test_pick_policy.py": (b"old picker test\n", b"new picker test\n"),
     "bin/pool": (b"old wrapper\n", b"new wrapper\n"),
 }
 PATCH_NAMES = (
     "fabric_task_expiry_host_select_20261012_v2.patch",
     "pick_exact_model_selection_20261012.patch",
     "pick_glm_paired_window_urgency_20261012.patch",
-    "lease_broker_glm_expiry_account_20261012.patch",
+    "lease_broker_glm_expiry_preference_20261013.patch",
     "test_r31_paired_quota_truth_20261012.patch",
+    "test_pick_policy_host_mock_20261013.patch",
     "pool_cli_selector_20261012.patch",
 )
 
@@ -69,6 +71,7 @@ def kit(tmp_path):
         _patch("ext/pick.py",b"mid picker\n",b"final picker\n"),
         _patch("ext/lease_broker.py",b"old broker\n",b"new broker\n"),
         _patch("ext/tests/test_r31_glm_burn_down.py",b"old policy test\n",b"new policy test\n"),
+        _patch("ext/tests/test_pick_policy.py",b"old picker test\n",b"new picker test\n"),
         _patch("bin/pool",b"old wrapper\n",b"new wrapper\n"),
     ]
     manifests=[]
@@ -95,8 +98,8 @@ def test_complete_replay_verifies_and_leaves_original_source_unchanged(kit):
     ext,bundle,manifest,originals,wrapper=kit
     result=module.verify(ext,bundle,manifest,wrapper)
     assert result["result"]=="QUALIFIED_SOURCE_ONLY"
-    assert result["patches_verified"]==6
-    assert result["sources_verified"]==5
+    assert result["patches_verified"]==7
+    assert result["sources_verified"]==6
     assert result["live_source_modified"] is False
     assert result["account_or_lease_modified"] is False
     assert result["production_installed"] is False
@@ -201,4 +204,4 @@ def test_replay_never_executes_shell_or_installer(kit,monkeypatch):
         return real_run(args,*a,**kw)
     monkeypatch.setattr(module.subprocess,"run",wrapped_run)
     assert module.verify(ext,bundle,manifest,wrapper)["result"]=="QUALIFIED_SOURCE_ONLY"
-    assert len(seen)==12  # six check+apply pairs
+    assert len(seen)==14  # seven check+apply pairs

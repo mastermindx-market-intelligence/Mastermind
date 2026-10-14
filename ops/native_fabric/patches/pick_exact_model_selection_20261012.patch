@@ -1,6 +1,6 @@
 --- a/ext/pick.py
 +++ b/ext/pick.py
-@@ -1859,31 +1859,52 @@
+@@ -1892,31 +1892,52 @@
      complexity = str(task_complexity or "").strip().upper()
      explicit_model = str(requested_model or "").strip().casefold()
      forced = canonical_pool(pool)
