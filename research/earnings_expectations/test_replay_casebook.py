@@ -59,6 +59,7 @@ def test_corrupt_witness_refuses_without_replacing_with_zero(tmp_path):
     assert exc.value.reason == 'NON_SEC_PUBLIC_RELEASE_WITNESS_REQUIRED'
 
 
+
 def test_guidance_is_composed_as_an_explicit_non_consensus_channel():
     report=build_report()
     assert report['management_guidance_status']=='AVAILABLE_COMPANY_MANAGEMENT_GUIDANCE_ONLY'
