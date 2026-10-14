@@ -13,7 +13,7 @@ Refuse or preserve typed absence for intraday-close contamination, exact regular
 
 ```sh
 cd research/earnings_expectations
-python3 -m pytest -q test_reaction_replay.py test_replay_casebook.py test_management_guidance_cases.py test_media_witnesses.py
+python3 -m pytest -q test_reaction_replay.py test_replay_casebook.py test_management_guidance_cases.py test_media_witnesses.py test_expectation_owner_adapter.py test_owner_inspection_consumer.py
 python3 reaction_replay.py /path/to/source_verified_input.json
 python3 replay_casebook.py --format markdown
 python3 replay_casebook.py --format json
@@ -49,7 +49,7 @@ This is a **field-shape illustration**, deliberately too short to calculate a re
 
 ## Verified tests
 
-**78/78 offline tests passed** with Python 3.13 / pytest 9. Code and tests were verified by Git blob against tested local sources. Tests include after-close, premarket, intraday, weekend, UTC winter/summer clocks, missing benchmark, cutoff leakage, unsupported sources, and refusal to accept an SEC-only clock. Synthetic structural fixtures are supplemented with **nine actual retrospective adjusted-close source packets**, independently checked for arithmetic; this does not prove data licensing, current vendor freshness, a live backtest, causal attribution, or Terminal operation.
+**107/107 offline tests passed** with Python 3.13 / pytest 9. Code and tests were verified by Git blob against tested local sources. Tests include after-close, premarket, intraday, weekend, UTC winter/summer clocks, missing benchmark, cutoff leakage, unsupported sources, and refusal to accept an SEC-only clock. Synthetic structural fixtures are supplemented with **nine actual retrospective adjusted-close source packets**, independently checked for arithmetic; this does not prove data licensing, current vendor freshness, a live backtest, causal attribution, or Terminal operation.
 
 ## Nine SEC timestamps — not first-publication proof
 
@@ -99,4 +99,19 @@ The read-only `replay_casebook.py` consumer now joins the two Amazon first-party
 
 `media_reported_expectations.json` holds seven small, properly cited numerical excerpts from dated financial reporting (Reuters/LSEG or Visible Alpha), matched to seven of the nine underlying source events; the other two remain absent, not zero. The separate S&P Global/Visible Alpha July 22 Alphabet Q2 preview indicates Q2 revenue consensus increased **$113.0B in February → $117.2B by July**, while EPS consensus fell **$3.43 → $3.32** (the older EPS vintage date is unspecified). Article publication timing or contributor-level vintages are not established as pre-event machine observations.
 
-`replay_casebook.py --format json|markdown` now renders three distinct channels in one evidence response: (1) nine observed next-session adjusted returns; (2) two issuer management-guidance/actual comparisons; (3) seven article-quoted expected-versus-reported cloud-growth comparisons and one source-reported multi-metric revision narrative. The media channel is explicitly `PUBLIC_ARTICLE_WITNESSES_ONLY_NOT_ADMITTED_AS_PIT`, every `consensus_vintage_admitted` is `false`, and exact source links are included. It rejects wrong source authority, duplicate/mismatched fiscal targets, fake pre-event estimate timestamps and preview PIT promotion. **78/78 local research tests passed and the existing CI-discovery bridge exercised the full suite locally.** The article data cannot support backtest forecasting, redistribution beyond lawful quoted numerical facts or new market-belief authority without incumbent source acceptance.
+`replay_casebook.py --format json|markdown` now renders three distinct channels in one evidence response: (1) nine observed next-session adjusted returns; (2) two issuer management-guidance/actual comparisons; (3) seven article-quoted expected-versus-reported cloud-growth comparisons and one source-reported multi-metric revision narrative. The media channel is explicitly `PUBLIC_ARTICLE_WITNESSES_ONLY_NOT_ADMITTED_AS_PIT`, every `consensus_vintage_admitted` is `false`, and exact source links are included. It rejects wrong source authority, duplicate/mismatched fiscal targets, fake pre-event estimate timestamps and preview PIT promotion. **107/107 local research tests passed and the existing CI-discovery bridge exercised the full suite locally.** The article data cannot support backtest forecasting, redistribution beyond lawful quoted numerical facts or new market-belief authority without incumbent source acceptance.
+
+## Read-only bridge to the incumbent EXP-1/K3E owner
+
+The source-owner contract is **not** reimplemented in this research branch. `expectation_owner_adapter.py` consumes a previously produced `engine.k3e_expectation_surface.inspect_expectation_surface()` receipt from Macro, with its `semantic_payload`, `semantic_digest`, `query_identity` and immutable source/input pins. It verifies the owner schema, semantic digest, query identity, source revision, historical/as-of provenance, native identity-gate contract, status and rights. The current owner's `normalized_baseline.value = null` is faithfully projected as `NOT_ADMITTED`, with explanatory reason codes; raw candidate observations and Yahoo snapshots never become a forecast.
+
+Example research-only CLI use after an authorized owner produces a K3E inspection receipt:
+
+```sh
+python3 replay_casebook.py --format markdown --owner-inspection /path/to/native_k3e_receipt.json
+python3 replay_casebook.py --format json --owner-inspection /path/to/native_k3e_receipt.json
+```
+
+The receipt is *optional*. With no receipt, `native_expectation_owner_inspection = null`, not fabricated empty consensus. A requested missing/invalid receipt refuses; a future non-null normalized baseline under the old owner contract also refuses until that new owner contract is deliberately requalified. The bridge intentionally does not map a `ticker_compat` to an issuer's economic identity or bind a free-standing inspection to an event. It cannot grant publication/trading rights, replace MAS-271 qualification, or cause any collector/job changes.
+
+Tests: `test_expectation_owner_adapter.py` exercises digest/input pin/cutoff/rights/refusal cases; `test_owner_inspection_consumer.py` proves Markdown and JSON output and fail-closed source handoff; the existing `tests/test_earnings_reaction_research.py` bridge executes all six research test modules in hosted CI. All **107 local research tests** passed in an isolated M2 Studio checkout of this PR after the bridge changes.
