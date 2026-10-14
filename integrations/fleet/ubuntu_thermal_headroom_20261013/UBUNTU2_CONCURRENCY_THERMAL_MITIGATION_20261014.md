@@ -45,3 +45,18 @@ An actual M2 `host_pick.py --mode grok --explain --json` run after publication r
 2. Finish the **attended UEFI MSI MAG B850M MORTAR WIFI 85°C PBO Thermal Point** or documented Eco Mode qualified maintenance from the board-specific runbook. The firmware remains **NOT_CHANGED**.
 3. Reassess this conservative max-6/load-6 policy only with enough repeatable workload/cooling evidence, under source CAS and original owner constraints. Do not trade away thermal reserve to increase token-throughput claims.
 4. Preserve the existing source/owner boundaries of Macro draft #9194 (not yet production activated), Mastermind draft #1404, and the earlier separate Ubuntu0/3 collector hold.
+
+## First 19 live samples following the admission change
+
+The first bounded follow-up at **2026-10-14T04:31Z** examined the original M2 `state/host_pull.log`, beginning at least one minute after the installed file's verified 04:06:39Z mtime (so as not to misattribute a pre-policy reading). **19 matched 60-second observations per host** were available:
+
+| Host | Mean Tctl | Peak Tctl | ≥85°C / ≥90°C readings | Observed lane range |
+|---|---:|---:|---:|---:|
+| Ubuntu0 | 51.0°C | 66.75°C | 0 / 0 | 0–4 |
+| Ubuntu1 | 68.7°C | 80.0°C | 0 / 0 | 1–4 |
+| **Ubuntu2** | **64.1°C** | **84.0°C** | **0 / 0** | **1–9** |
+| Ubuntu3 | 40.2°C | 59.625°C | 0 / 0 | 0–1 |
+
+Ubuntu2's earlier incumbents declined naturally below the newly configured `max_active=6` without an operator signal, worker termination or lease migration. Thus the live mitigation did not interrupt existing workers and temperatures were below the 85°C hardware-reading cutoff in this initial sampled interval.
+
+**Inference boundary:** 19 discrete per-minute samples in a confounded, declining-workload interval are neither matched before/after throughput evidence nor proof that a six-lane limit keeps 9950X below the desired thermal point in every regime. The BIOS 85°C PBO Thermal Point/Config TDP and physical cooler remain untouched; no elevated remote profile switch was attempted. Retain the original physical-headroom acceptance obligation and the exact rollback/source-CAS fence above.
