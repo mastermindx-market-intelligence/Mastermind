@@ -50,6 +50,335 @@ CODEX_CODE_MODE_HOST_ACTION=""
 CODEX_VERSION="0.159.2"
 CODEX_SHA256="16593cc2f422d5f398a8e40f550ebbaf1245392528957be342c295920a300704"
 
+# --- BEGIN native ACL guard ---
+# Use the Apple OS runtime before trusting the candidate /Library Python.
+# Its Ruby/Fiddle loader stays inside the OS System framework; no user gems,
+# RUBYOPT, RUBYLIB, DYLD environment, candidate interpreter or CLI selector.
+require_native_no_acl() {
+  /usr/bin/env -i PATH=/usr/bin:/bin LC_ALL=C /usr/bin/ruby \
+    --disable-gems --disable=rubyopt - "$@" <<'MASTERMIND_NATIVE_ACL_RUBY'
+# frozen_string_literal: true
+# native_acl.rb -- Darwin native extended-ACL bootstrap guard (Ruby 2.6, Fiddle).
+#
+# Contract: exit 0  == every inspected inode certified free of a native ACL.
+#           exit 65 == bounded refusal (ACL present -- even an empty allocated
+#           ACL --, unsupported inode type, missing path, identity drift,
+#           traversal error, unavailable native API/runtime, usage error).
+# There is no fallback and no success text: any condition that cannot be
+# positively certified refuses. Missing OS runtime/API refuses; it never
+# degrades to POSIX-mode heuristics. This helper never mutates anything
+# (no delete/chmod/chown, no content or credential reads) and invokes no
+# external commands.
+#
+# CLI:  ruby --disable-gems --disable=rubyopt - <one|tree> <abs-path>...
+# "one"  inspects each given path exactly, the object itself (a symlink is
+#        inspected as the link, never its target).
+# "tree" inspects each named directory recursively without following
+#        symlinks; every inode including symlink entries is inspected.
+#
+# Identity checking is sampled (lstat before/after each native query) and is
+# valid only under a trusted owner; it is not atomic malicious-root
+# containment.
+
+module NativeAcl
+  EXIT_OK = 0
+  EXIT_REFUSE = 65
+
+  # Refusal reasons are a fixed bounded symbol set; the CLI prints only the
+  # generic prefix plus the symbol, never paths, errnos or payloads.
+  class Refusal < StandardError
+    attr_reader :reason
+    def initialize(reason)
+      @reason = reason
+      super("refusal")
+    end
+  end
+
+  # --- pure argument policy -------------------------------------------------
+  class PathPolicy
+    MODES = %w[one tree].freeze
+
+    # -> [mode, [paths]]; raises Refusal(:usage) on anything else.
+    def self.parse(argv)
+      args = Array(argv)
+      mode = args.shift
+      raise Refusal, :usage unless MODES.include?(mode)
+      raise Refusal, :usage if args.empty?
+      args.each do |p|
+        raise Refusal, :usage unless p.is_a?(String)
+        raise Refusal, :usage if p.include?("\0")
+        raise Refusal, :usage unless p.start_with?("/")
+      end
+      [mode, args]
+    end
+  end
+
+  # --- pure identity tuple --------------------------------------------------
+  # mtime/ctime compared exactly; atime deliberately excluded per contract.
+  class Identity
+    FIELDS = %i[dev ino mode uid gid nlink size mtime ctime].freeze
+
+    def self.capture(stat)
+      FIELDS.map { |f| stat.__send__(f) }
+    end
+
+    def self.same?(a, b)
+      capture(a) == capture(b)
+    end
+  end
+
+  # --- filesystem collaborators (real implementations; tests inject fakes) --
+  class RealLstat
+    def lstat(path) # no-follow
+      File.lstat(path)
+    rescue Errno::ENOENT
+      raise Refusal, :missing
+    rescue SystemCallError
+      raise Refusal, :lstat_error
+    end
+  end
+
+  class RealEntries
+    def children(dir) # names only; sorted for determinism; never follows
+      out = []
+      Dir.open(dir) { |d| d.each_child { |n| out << n } }
+      out.sort
+    rescue SystemCallError
+      raise Refusal, :traverse_error
+    end
+  end
+
+  # --- native ABI (isolated; resolves lazily, refuses when unavailable) -----
+  class NativeResolver
+    ACL_TYPE_EXTENDED = 0x100
+    RUBY_FRAMEWORK_PREFIX = "/System/Library/Frameworks/Ruby.framework/".freeze
+
+    # -> :absent (NULL + ENOENT only) or an allocated pointer object.
+    # Any allocated ACL, even an empty one, is returned as present.
+    def get_link(path)
+      ensure_functions!
+      reset_last_error!
+      ptr = @get_link_fn.call(path, ACL_TYPE_EXTENDED)
+      # An allocated ACL must reach the single free attempt without any
+      # dependency on errno (which is relevant only to a NULL result).
+      return ptr unless ptr.null?
+      return :absent if read_last_error == enoent
+      raise Refusal, :acl_error
+    end
+
+    # int acl_free(void*). Called at most once per allocated pointer; the
+    # caller (AclProbe) never retries, even if this raises.
+    def acl_free(ptr)
+      ensure_functions!
+      @free_fn.call(ptr)
+    end
+
+    private
+
+    def enoent
+      Errno::ENOENT::Errno
+    end
+
+    def reset_last_error!
+      raise Refusal, :runtime unless Fiddle.respond_to?(:last_error=) &&
+                                     Fiddle.respond_to?(:last_error)
+      Fiddle.send(:last_error=, 0)
+    end
+
+    def read_last_error
+      raise Refusal, :runtime unless Fiddle.respond_to?(:last_error)
+      value = Fiddle.last_error
+      raise Refusal, :runtime unless value.is_a?(Integer)
+      value
+    end
+
+    def ensure_functions!
+      return if @get_link_fn
+      load_fiddle!
+      handle = default_handle
+      get_link_fn = Fiddle::Function.new(
+        symbol!(handle, "acl_get_link_np"),
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
+        Fiddle::TYPE_VOIDP
+      )
+      free_fn = Fiddle::Function.new(
+        symbol!(handle, "acl_free"),
+        [Fiddle::TYPE_VOIDP],
+        Fiddle::TYPE_INT
+      )
+      @get_link_fn, @free_fn = get_link_fn, free_fn
+    end
+
+    def load_fiddle!
+      $LOAD_PATH.replace(
+        $LOAD_PATH.select do |p|
+          p.respond_to?(:start_with?) && p.start_with?(RUBY_FRAMEWORK_PREFIX)
+        end
+      )
+      require "fiddle"
+      raise Refusal, :runtime unless defined?(Fiddle::Function) &&
+                                     defined?(Fiddle::TYPE_VOIDP)
+    rescue Refusal
+      raise
+    rescue StandardError, LoadError
+      raise Refusal, :runtime
+    end
+
+    def default_handle
+      Fiddle::Handle::DEFAULT
+    rescue StandardError
+      begin
+        Fiddle.dlopen(nil)
+      rescue StandardError
+        raise Refusal, :runtime
+      end
+    end
+
+    def symbol!(handle, name)
+      handle[name]
+    rescue StandardError
+      raise Refusal, :runtime
+    end
+  end
+
+  # --- allocation-safe probe: free exactly once, never retried --------------
+  # The allocated pointer stays a local; the single acl_free attempt happens
+  # before any other fallible work, so every refusal path (including a throw
+  # out of acl_free itself) leaves exactly one free attempt and no leak from
+  # our side and no double free.
+  class AclProbe
+    def initialize(resolver)
+      @resolver = resolver
+    end
+
+    def query(path)
+      ptr = @resolver.get_link(path)
+      return :absent if ptr.equal?(:absent)
+      raise Refusal, :acl_error if ptr.nil? || !ptr.respond_to?(:null?)
+      raise Refusal, :acl_error if ptr.null?
+      rc = begin
+        @resolver.acl_free(ptr)
+      rescue Refusal
+        raise
+      rescue Exception
+        raise Refusal, :acl_free_error
+      end
+      raise Refusal, :acl_free_error unless rc.is_a?(Integer) && rc.zero?
+      raise Refusal, :acl_present
+    end
+  end
+
+  # --- inspection core ------------------------------------------------------
+  class Inspector
+    def initialize(lstat:, probe:, entries:)
+      @lstat = lstat
+      @probe = probe
+      @entries = entries
+    end
+
+    def run(mode, paths)
+      paths.each { |p| mode == "one" ? inspect_one(p) : inspect_tree(p) }
+      :ok
+    end
+
+    private
+
+    def inspect_one(path)
+      before = take_lstat(path)
+      classify!(before)
+      @probe.query(path)
+      after = take_lstat(path)
+      identity!(before, after)
+    end
+
+    def inspect_tree(root)
+      st = take_lstat(root)
+      raise Refusal, :not_directory unless st.directory?
+      walk_dir(root, st)
+    end
+
+    def walk_dir(dir, expected)
+      before = take_lstat(dir)
+      raise Refusal, :not_directory unless before.directory?
+      identity!(expected, before)
+      @probe.query(dir)
+      @entries.children(dir).each do |name|
+        child = File.join(dir, name)
+        cst = take_lstat(child) # no-follow; missing entry refuses, never skips
+        classify!(cst)
+        if cst.directory?
+          walk_dir(child, cst)
+        else
+          @probe.query(child)
+          identity!(cst, take_lstat(child))
+        end
+      end
+      identity!(before, take_lstat(dir))
+    end
+
+    def take_lstat(path)
+      @lstat.lstat(path)
+    end
+
+    def classify!(st)
+      return if st.file? || st.directory? || st.symlink?
+      raise Refusal, :unsupported
+    end
+
+    def identity!(a, b)
+      raise Refusal, :identity unless Identity.same?(a, b)
+    end
+  end
+
+  # --- CLI entry ------------------------------------------------------------
+  class Runner
+    attr_reader :last_reason
+
+    def initialize(lstat: nil, resolver: nil, entries: nil)
+      # Collaborator kwargs exist for the test harness only; the CLI passes
+      # nothing, so the real native library and filesystem are always used.
+      @lstat = lstat
+      @resolver = resolver
+      @entries = entries
+      @last_reason = nil
+    end
+
+    def run(argv)
+      mode, paths = PathPolicy.parse(argv)
+      inspector = Inspector.new(
+        lstat: @lstat || RealLstat.new,
+        probe: AclProbe.new(@resolver || NativeResolver.new),
+        entries: @entries || RealEntries.new
+      )
+      inspector.run(mode, paths)
+      EXIT_OK
+    rescue Refusal => e
+      @last_reason = e.reason
+      report(e.reason)
+      EXIT_REFUSE
+    rescue StandardError
+      @last_reason = :error
+      report(:error)
+      EXIT_REFUSE
+    end
+
+    private
+
+    def report(reason)
+      $stderr.puts("native_acl: refused (#{reason.to_s[0, 40]})")
+    end
+  end
+end
+
+# Main fires only for real CLI invocations (stdin script or executed file),
+# never when the definitions are loaded by the test harness.
+if $PROGRAM_NAME == "-" || __FILE__ == $PROGRAM_NAME
+  exit(NativeAcl::Runner.new.run(ARGV))
+end
+MASTERMIND_NATIVE_ACL_RUBY
+}
+# --- END native ACL guard ---
+
 usage() {
   /bin/echo "usage: $0 --source-repo PATH --expected-sha SHA --operator-user NAME [--control-config PATH] [--os-web-assets PATH] [--allow-frozen-accepted-ancestor --protected-master-sha SHA] [options]" >&2
   exit 64
@@ -135,9 +464,9 @@ for python_ancestor in \
       /bin/echo "Python runtime ancestor is not a direct root:wheel mode 0755 directory: $python_ancestor" >&2
       exit 65
     }
-  case "$(/usr/bin/stat -f '%Sp' "$python_ancestor")" in
-    *+) /bin/echo "Python runtime ancestor has a filesystem ACL: $python_ancestor" >&2; exit 65 ;;
-  esac
+  require_native_no_acl one "$python_ancestor" || {
+    /bin/echo "Python runtime ancestor has a filesystem ACL: $python_ancestor" >&2; exit 65
+  }
 done
 case "$PYTHON_BINARY" in
   "$PYTHON_RUNTIME_ROOT"/*) ;;
@@ -178,8 +507,7 @@ while IFS= read -r -d '' runtime_link; do
     *) /bin/echo "Python runtime symlink escapes the pinned root" >&2; exit 65 ;;
   esac
 done < <(/usr/bin/find "$PYTHON_RUNTIME_ROOT" -type l -print0)
-if [ -n "$(/usr/bin/find "$PYTHON_RUNTIME_ROOT" -exec /usr/bin/stat -f '%Sp' {} \; \
-  | /usr/bin/awk '/\+/{found=1} END {if(found) print "ACL"}')" ]; then
+if ! require_native_no_acl tree "$PYTHON_RUNTIME_ROOT"; then
   /bin/echo "Python runtime contains a filesystem ACL" >&2
   exit 65
 fi
@@ -198,9 +526,9 @@ for python_signature_resource in \
     /bin/echo "Python signature resource is not root:wheel single-link mode 0644: $python_signature_resource" >&2
     exit 65
   }
-  case "$(/usr/bin/stat -f '%Sp' "$python_signature_resource")" in
-    *+) /bin/echo "Python signature resource has a filesystem ACL: $python_signature_resource" >&2; exit 65 ;;
-  esac
+  require_native_no_acl one "$python_signature_resource" || {
+    /bin/echo "Python signature resource has a filesystem ACL: $python_signature_resource" >&2; exit 65
+  }
 done
 [ "$(/usr/bin/id -u "$CONTROL_USER")" = "$CONTROL_UID" ] || {
   /bin/echo "$CONTROL_USER must resolve to UID $CONTROL_UID" >&2
@@ -291,9 +619,9 @@ PY
     /bin/echo "Python runtime provenance receipt is missing or has unsafe metadata" >&2
     exit 65
   }
-case "$(/usr/bin/stat -f '%Sp' "$PYTHON_RUNTIME_RECEIPT")" in
-  *+) /bin/echo "Python runtime provenance receipt has a filesystem ACL" >&2; exit 65 ;;
-esac
+require_native_no_acl one "$PYTHON_RUNTIME_RECEIPT" || {
+  /bin/echo "Python runtime provenance receipt has a filesystem ACL" >&2; exit 65
+}
 "$PYTHON_BINARY" -I -S -B - "$PYTHON_RUNTIME_RECEIPT" "$PYTHON_RUNTIME_ROOT" \
   "$PYTHON_BINARY" "$PYTHON_VERSION" "$PYTHON_TEAM_ID" "$PYTHON_PACKAGE_SHA256" \
   "$PYTHON_BINARY_SHA256" "$PYTHON_FRAMEWORK_SHA256" <<'PY' || {
@@ -391,14 +719,7 @@ PY
 # Codex resolves this native helper beside its executable. Both hashes come
 # from the same signed @openai/codex@0.159.2-darwin-arm64 package.
 verify_codex_no_acl() {
-  local acl_listing
-  # Darwin stat reports POSIX mode bits only. ls -e emits ACL entries on
-  # additional lines, even when extended attributes mask its '+' with '@'.
-  acl_listing="$(LC_ALL=C /bin/ls -lde "$1")" || return 65
-  [ -n "$acl_listing" ] || return 65
-  case "$acl_listing" in
-    *$'\n'*) /bin/echo "Codex path has a filesystem ACL or ambiguous listing: $1" >&2; return 65 ;;
-  esac
+  require_native_no_acl one "$1"
 }
 
 verify_codex_component() {
@@ -992,9 +1313,9 @@ verify_numeric_owner Groups PrimaryGroupID "$OPS_GID" "_mastermind_ops"
   /bin/echo "dedicated worker auth is empty" >&2
   exit 65
 }
-case "$(/usr/bin/stat -f '%Sp' "$AUTH_PATH")" in
-  *+) /bin/echo "dedicated worker auth has an unexpected filesystem ACL" >&2; exit 65 ;;
-esac
+require_native_no_acl one "$AUTH_PATH" || {
+  /bin/echo "dedicated worker auth has an unexpected filesystem ACL" >&2; exit 65
+}
 
 # Cross the mutation boundary only after the identity, runtime, source, auth,
 # and exact-SHA preflight above. From here to process exit the trap keeps all
@@ -1108,8 +1429,7 @@ fi
   /bin/echo "installed autonomy control surface is unavailable or unsafe" >&2
   exit 65
 }
-if [ -n "$(/usr/bin/find "$RELEASE_ROOT" -exec /usr/bin/stat -f '%Sp' {} \; \
-  | /usr/bin/awk '/\+/{found=1} END {if(found) print "ACL"}')" ]; then
+if ! require_native_no_acl tree "$RELEASE_ROOT"; then
   /bin/echo "installed release contains a filesystem ACL" >&2
   exit 65
 fi
@@ -1150,9 +1470,9 @@ INSTALLED_HASH="$(/usr/bin/shasum -a 256 "$INSTALLED_CODEX" | /usr/bin/awk '{pri
   /bin/echo "installed Codex must be a direct single-link file" >&2
   exit 65
 }
-case "$(/usr/bin/stat -f '%Sp' "$INSTALLED_CODEX")" in
-  *+) /bin/echo "installed Codex has a filesystem ACL" >&2; exit 65 ;;
-esac
+require_native_no_acl one "$INSTALLED_CODEX" || {
+  /bin/echo "installed Codex has a filesystem ACL" >&2; exit 65
+}
 
 ADMIN_CHECKOUT="$RUNTIME_ROOT/control/admin-checkout/$EXPECTED_SHA"
 if [ ! -d "$ADMIN_CHECKOUT/.git" ]; then
@@ -1539,9 +1859,9 @@ for receipt_ancestor in /Library "/Library/Application Support" "$SYSTEM_ROOT"; 
     /bin/echo "Codex attestation receipt ancestor is not root-owned and non-group/other-writable: $receipt_ancestor" >&2
     exit 65
   }
-  case "$(/usr/bin/stat -f '%Sp' "$receipt_ancestor")" in
-    *+) /bin/echo "Codex attestation receipt ancestor has a filesystem ACL: $receipt_ancestor" >&2; exit 65 ;;
-  esac
+  require_native_no_acl one "$receipt_ancestor" || {
+    /bin/echo "Codex attestation receipt ancestor has a filesystem ACL: $receipt_ancestor" >&2; exit 65
+  }
 done
 "$PYTHON_BINARY" -I -S -B - "$CODEX_ATTESTATION_RECEIPT" "$INSTALLED_CODEX" \
   "$CODEX_VERSION" "$INSTALLED_TEAM" "$INSTALLED_HASH" "$WORKER_GID" <<'PY' || {
@@ -1595,9 +1915,9 @@ PY
     /bin/echo "Codex binary attestation receipt is missing or has unsafe metadata" >&2
     exit 65
   }
-case "$(/usr/bin/stat -f '%Sp' "$CODEX_ATTESTATION_RECEIPT")" in
-  *+) /bin/echo "Codex binary attestation receipt has a filesystem ACL" >&2; exit 65 ;;
-esac
+require_native_no_acl one "$CODEX_ATTESTATION_RECEIPT" || {
+  /bin/echo "Codex binary attestation receipt has a filesystem ACL" >&2; exit 65
+}
 "$PYTHON_BINARY" -I -S -B - "$CODEX_ATTESTATION_RECEIPT" "$INSTALLED_CODEX" \
   "$CODEX_VERSION" "$INSTALLED_TEAM" "$INSTALLED_HASH" <<'PY' || {
 import json, os, pathlib, stat, sys
@@ -1854,9 +2174,9 @@ PY
 /usr/bin/plutil -replace StandardErrorPath -string /var/log/mastermind-executive/backup/stderr.log "$BACKUP_PLIST"
 
 for installed_policy_file in "$CONTROL_CONFIG" "$WORKER_CONFIG" "$PRIVILEGED_CONFIG" "$CODEX_ATTESTATION_RECEIPT" "$CONTROL_SENTINEL_FILE" "$CONTROL_PLIST" "$WORKER_PLIST" "$BACKUP_PLIST" "$PRIVILEGED_PLIST"; do
-  case "$(/usr/bin/stat -f '%Sp' "$installed_policy_file")" in
-    *+) /bin/echo "installed policy file has a filesystem ACL: $installed_policy_file" >&2; exit 65 ;;
-  esac
+  require_native_no_acl one "$installed_policy_file" || {
+    /bin/echo "installed policy file has a filesystem ACL: $installed_policy_file" >&2; exit 65
+  }
 done
 
 /usr/bin/plutil -lint "$CONTROL_PLIST" "$WORKER_PLIST" "$BACKUP_PLIST" "$PRIVILEGED_PLIST"

@@ -13,6 +13,7 @@ ROOT = Path(__file__).parents[1]
 
 
 @pytest.mark.parametrize("path, count", [
+    ("integrations/session_bridge/artifact_manifest_framing/artifact_production.base.py", 3),
     ("integrations/session_bridge/artifact_manifest_framing/artifact_production.py", 3),
     ("integrations/session_bridge/bound_launch_capture/lane_runtime.py.patch", 1),
 ])
