@@ -372,6 +372,26 @@ class PrincipalDialogueRuntimeCommitOwner:
                     "principal dialogue COMMIT may already have occurred"
                 )
 
+            # Different foreground surfaces can derive different outbound keys
+            # for the same original request. Fence the semantic request inside
+            # this existing BEGIN IMMEDIATE transaction as well as the key.
+            # Caller/authority rotation and an uncertain prior send do not grant
+            # another disposition. Reconciliation retains the first message key.
+            prior_disposition = connection.execute(
+                """
+                SELECT event_id FROM events
+                WHERE aggregate_type=? AND event_type=? AND job_id=?
+                  AND json_extract(payload_json, '$.intent.reply_to_message_key')=?
+                LIMIT 1
+                """,
+                (PRINCIPAL_RUNTIME_AGGREGATE_TYPE, PRINCIPAL_RUNTIME_EVENT_TYPE,
+                 intent.child_job_id, intent.reply_to_message_key),
+            ).fetchone()
+            if prior_disposition is not None:
+                raise PrincipalRuntimeFenceError(
+                    "principal dialogue request already has a COMMIT"
+                )
+
             self.runtime.store.append_event(
                 connection,
                 aggregate_type=PRINCIPAL_RUNTIME_AGGREGATE_TYPE,
