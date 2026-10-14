@@ -211,6 +211,7 @@ class DurableAuthAuditSink:
             cls._check_directory_stat(owned_stat)
             if _directory_identity(owned_stat) != _directory_identity(host_stat):
                 raise AuditSinkPoisoned("audit directory identity changed")
+            cls._check_directory_acl(owned_directory, owned_stat)
             if os.get_inheritable(owned_directory):
                 raise AuditSinkPoisoned("audit directory descriptor is inheritable")
 
@@ -270,6 +271,23 @@ class DurableAuthAuditSink:
             or stat.S_IMODE(value.st_mode) & 0o022
         ):
             raise AuditSinkPoisoned("audit directory security refused")
+
+    @staticmethod
+    def _check_directory_acl(directory_fd: int, directory_stat: os.stat_result) -> None:
+        """Refuse a Darwin extended ACL on the verified directory descriptor.
+
+        Its access-control state is independent of POSIX mode bits. Reuse the
+        same descriptor-bound observer as the named audit file and fail closed
+        if that observation is unavailable or uncertain.
+        """
+        try:
+            extended_acl = has_macos_acl(
+                ".", expected_identity=directory_stat, descriptor=directory_fd
+            )
+        except FilesystemSecurityError as error:
+            raise AuditSinkPoisoned("audit directory ACL observation refused") from error
+        if extended_acl:
+            raise AuditSinkPoisoned("audit directory extended ACL refused")
 
     @staticmethod
     def _check_file_stat(value: os.stat_result) -> None:
@@ -397,6 +415,7 @@ class DurableAuthAuditSink:
             or _directory_identity(relative_directory) != self._directory_identity
         ):
             raise AuditSinkPoisoned("audit directory identity changed")
+        self._check_directory_acl(self._directory_fd, relative_directory)
 
         opened = os.fstat(self._audit_fd)
         named = os.stat(_AUDIT_NAME, dir_fd=self._directory_fd, follow_symlinks=False)
