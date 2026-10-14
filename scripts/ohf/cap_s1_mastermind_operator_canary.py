@@ -2183,6 +2183,10 @@ _CAP_S1_PYTEST_SOURCE_MODULES = (
     # contract at module scope; the isolated CAP-S1 test bootstrap must
     # hash-pin it rather than load unsealed ambient candidate bytes.
     ('common.claude_principal_capability_contract', 'common/claude_principal_capability_contract.py'),
+    # Protected product-acceptance and dialogue source now share this module.
+    # Qualify its exact Git bytes in the test-process source closure rather
+    # than execute a newer ambient module outside the attested generation.
+    ('common.product_acceptance_contract', 'common/product_acceptance_contract.py'),
     ('common.redaction', 'common/redaction.py'),
     ('control_plane', 'control_plane/__init__.py'),
     ('control_plane.executive_orchestration_principal', 'control_plane/executive_orchestration_principal.py'),
