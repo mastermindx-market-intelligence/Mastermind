@@ -6,8 +6,8 @@
   "research_outcome": "COMPLETE: tested daily proxies fail promotion; true microstructure, dated event/breadth/options/network experiments remain conditional",
   "protected_source": "78388ac29f7e54c9dfe7799a8e4769fb46d4aed6",
   "macro_observation": "eb55c8573d94700dde35b6ce5b9af23738c710c0",
-  "carrier": "research/latent-pressure-20261014; discover any PR by exact head branch before any create/replay",
-  "last_implementation_ref": "dcb8a24074cfc73f2ad45fa90bc0bc29464e8ba6",
+  "carrier": "Mastermind PR #1470, exact head branch research/latent-pressure-20261014",
+  "last_implementation_ref": "c3daf4fd119df4bc5c6fcbe2992e424aaacdaff7",
   "effect_state": "Confirmed research commits and push only; no uncertain modifying call; no production effect",
   "review": {
     "micro-a": "terminal, NOT accepted as scientific evidence",
@@ -22,9 +22,9 @@
   ],
   "private_returns": "Original private run remains in ignored results/; PRIVATE_RUN_MANIFEST records hashes; retain workspace until separately relocated and verified",
   "artifacts": {
-    "full_dossier_markdown_sha256": "903b6b1c677afc2407b27deb9b1f62ad062f07ec4a82816daaa5ad8dab26bd1a",
-    "full_dossier_pdf_sha256": "8b28eeea8a1664febf90cff0dc0f0d927c1a54b6e3416fd905fe9da5faf0eb4f",
-    "pdf_pages": 28,
+    "full_dossier_markdown_sha256": "d9f502b4653329b4ea4696d64c26b5584de7646aa03d2611f6e6efa24a28ae32",
+    "full_dossier_pdf_sha256": "c16581555a21e0cac3929d8a4ae738f074d3be58c456ce589e0dbffded70a66b",
+    "pdf_pages": 29,
     "delivery": "conversation artifact, expanded presentation of canonical dossier; not a second production authority"
   },
   "mode_capability": "Attended Web commission; source recommended Pro, actual UI mode not independently verified; Studio Direct M2 read/write and admitted economical Fabric verified, no automated Pro admission fabricated",
@@ -34,5 +34,6 @@
     "No AUC confidence interval or matched pivot-base-rate acceptance",
     "Positive new forecast alpha remains unproven"
   ],
-  "next_action": "Publish/verify research PR for this exact branch and report research completion; no merge/deployment needed or authorized. PR publication receipt is the final transport confirmation."
+  "next_action": "Research commission complete. Deliver verified artifacts and publication receipt. No production merge/deployment requested. Later predictive experiments remain conditional on the stated data and acceptance gates.",
+  "publication": "PR #1470 created and independently read back: open, unmerged, research-only"
 }

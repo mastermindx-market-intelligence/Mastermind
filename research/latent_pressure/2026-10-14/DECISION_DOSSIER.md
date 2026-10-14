@@ -54,6 +54,19 @@ Earnings/revisions, Form4,13F, corporate actions, share counts and supply-chain 
 
 Start with ridge logistic/linear baselines and proper scoring rules. Sequential tests need calibrated repeated-alarm thresholds. State-space models must filter, not smooth using future observations. HMM/HSMM can model state/duration without making those states actual inventories. BOCPD is suitable for online shifts, Hawkes models for event intensity, and survival/competing-risk models for breakout versus reversal with right-censoring. Each must earn incremental value. Deep order-flow results can have effective horizons of only a few price changes; no complexity-to-multiweek bridge is assumed. Published predictors can decay after discovery; literature is not a permanent trading certificate. [S5,S19-S22]
 
+### Viability across the requested timescales
+
+| Scale | Defensible role | Forecast condition |
+|---|---|---|
+| Seconds–minutes | Quote/trade imbalance, depth and immediate liquidity response | Strongest mechanism evidence; verify sequence, quote age, spread and delay |
+| 5–60 minutes | Persistent execution and resiliency episodes | Distinguish continuing pressure from exhausted absorption; model intraday seasonality |
+| 1–5 days | Event reactions, options information and session-to-session persistence | Preserve information sets and event controls; intraday results do not automatically transfer |
+| 1–4 weeks | Residual breadth and leadership transitions | The tested daily proxies fail at approximately this horizon; new families remain conditional |
+| 1–3 months | Economic-link diffusion, revisions and delayed ownership context | Dated graphs, fundamentals and membership across multiple regimes are required |
+| 3–12 months | Structural theme, capex, earnings and macro allocation | Do not extrapolate short-lived order-book states into durable investor inventories |
+
+Cross-scale agreement is not independent evidence by default. Compare each horizon alone and their causally timed interaction on the same forecast origins. Require held-out improvement after shared-factor/provenance controls rather than multiplying confidence values.
+
 ## 2. Falsifiable hypothesis register and ranked opportunities
 
 For every test preserve observation clocks, exact target, independent baselines, opposite-side outcomes, failure criteria and attempted feature history.
