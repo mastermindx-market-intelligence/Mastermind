@@ -13,8 +13,8 @@ import sys
 def test_earnings_reaction_research_contract_under_hosted_gate():
     root = Path(__file__).resolve().parents[1]
     directory = root / 'research' / 'earnings_expectations'
-    sources = ('reaction_replay.py', 'replay_casebook.py', 'amazon_management_guidance_cases.json')
-    suites = ('test_reaction_replay.py', 'test_replay_casebook.py', 'test_management_guidance_cases.py')
+    sources = ('reaction_replay.py', 'replay_casebook.py', 'amazon_management_guidance_cases.json', 'media_reported_expectations.json')
+    suites = ('test_reaction_replay.py', 'test_replay_casebook.py', 'test_management_guidance_cases.py', 'test_media_witnesses.py')
     for name in (*sources, *suites):
         assert (directory / name).is_file(), f'missing research evidence: {name}'
     cmd = [sys.executable, '-m', 'pytest', '-q', '-p', 'no:cacheprovider', *(str(directory / name) for name in suites)]
