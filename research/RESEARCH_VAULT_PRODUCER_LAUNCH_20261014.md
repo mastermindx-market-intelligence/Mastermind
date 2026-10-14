@@ -107,3 +107,30 @@ Ubuntu2 but exhausted host lane admission before model execution, endingrc75.
 The same-run diagnostic was retained without acceptance or replacement. No
 independent reviewer ran. Protected merge, independent review, installed
 host/dependency proof and live writer adoption remain separate gates.
+
+
+## Qualified offline dependency candidate
+
+The observed mac-builder-3 environment runs Python3.12.13 on arm64 and remains
+mutable: the legacy workflow installs dependencies into a shared per-runner
+venv. Source pinning does not freeze that environment. This change neither
+modifies that venv nor directs the recurring workflow to a new one.
+
+`requirements/research-producer-macos-arm64-py312.lock` pins the12 observed
+producer dependency versions to12 downloaded wheels (17,456,927bytes). Its
+SHA256 is0c43d2132a6afaba75e5b5720c234d1b565679b650d7c04c024a1a12d711206a.
+A new external-SSD venv installed them offline with `--require-hashes` and
+`--no-index`; `pip check` passed. The existing reader archive's Linux dependency
+lock remains unchanged; this separate producer lock is not implicitly selected
+or installed by the source archive verifier or launcher.
+
+That isolated environment ran the actual pinned be01e9ec CLI against a new
+synthetic LocalStore using installed Poppler. All3members reached COMPLETE/full;
+receipt/PDF/immutable derivative/corpus hashes and the original journal capture
+matched; the public mirror excluded generation metadata. Four Poppler processes
+ran, temporary PDFs were cleaned, and network use was refused. This direct CLI
+fixture qualifies the dependency closure for that extraction/publication path;
+it does not test live R2, the production launcher with a live Store, or arbitrary
+optional producer features. Interpreter and Poppler byte observations do not
+prove an immutable host installation. Selecting and qualifying the separate
+venv remains part of the held concrete deployment action.
