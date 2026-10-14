@@ -1,0 +1,27 @@
+{
+  "results/summary.json": {
+    "sha256": "4c773ea50bb7f5f601860ef815a1656c52458163c440e1feaf981d47561b8eee",
+    "bytes": 16269,
+    "publication": "retained_on_authorized_M2_not_redistributed"
+  },
+  "results/input_manifest.json": {
+    "sha256": "a3ee6e81075040158ecc9bd620c5bf18b554e9a3058fbb5bfd75899c08b04693",
+    "bytes": 5913,
+    "publication": "retained_on_authorized_M2_not_redistributed"
+  },
+  "results/fit_receipts.json": {
+    "sha256": "9ee0a0de393c60bef1f723012b4167aa9a72171ab754f03f40c876afbe9b6cb2",
+    "bytes": 49542,
+    "publication": "retained_on_authorized_M2_not_redistributed"
+  },
+  "results/results.json": {
+    "sha256": "93c72aa82f3ac3d7fe1d2a132e95284ed0f32d11431a44d223e41d81001344fc",
+    "bytes": 30841,
+    "publication": "retained_on_authorized_M2_not_redistributed"
+  },
+  "results/predictions.csv.gz": {
+    "sha256": "b8856ac0b7275eb746414d0803b7dbdda23eaecbc6f8ba4e4c5e2ff26e83d1c4",
+    "bytes": 2804858,
+    "publication": "retained_on_authorized_M2_not_redistributed"
+  }
+}
