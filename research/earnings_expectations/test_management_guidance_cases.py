@@ -19,6 +19,8 @@ def test_two_real_amazon_guidance_vintages_are_on_matched_fiscal_targets():
     assert report['metric']=='CONSOLIDATED_NET_SALES'
     assert report['basis']=='AS_REPORTED_INCLUDES_FOREIGN_EXCHANGE'
     assert report['unit']=='USD_BILLION'
+    assert report['forecast_channel']=='COMPANY_MANAGEMENT_GUIDANCE_NOT_ANALYST_CONSENSUS'
+    assert report['analyst_consensus_status']=='NOT_ADMITTED'
     assert len(report['observations'])==2
     assert {r['fiscal_target'] for r in report['observations']}=={'2026Q1','2026Q2'}
     assert 'CONSENSUS' not in report['schema']
