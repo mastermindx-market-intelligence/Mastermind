@@ -38,6 +38,19 @@ changed source or epoch refuses; no alternate thread, child or principal is
 selected. The result still does not prove that the original request remains
 unresolved, and it is not a reusable authority lease.
 
+`require_unanswered_principal_decision` checks that the acquired original source
+is still the single unresolved worker `DECISION_REQUEST`. It reuses the existing
+semantic history reducer. Quiet updates from that worker preserve the original
+request; an answer, fork, another material return, mutation or changed identity
+refuses. Both Wake target flags stay false and no attention is created, including
+for a foreground thread with watching disabled. This predicate is deliberately
+limited to decision requests; it is not a general permission to continue or stop.
+
+The canonical turn watcher recognizes accepted COO-principal commands against
+the exact worker and trusted root. A principal STOP is consumed only by that
+worker's ACK. Existing worker-return targets and source/route grants remain
+unchanged; recognizing a command is not enrolling a new principal attention route.
+
 ## Preserve the final effect boundary
 
 The existing principal host accepts `principal_authority_guard=coo_host.guard_dialogue`.
@@ -61,7 +74,7 @@ those in [Source-bound product acceptance](PRODUCT_ACCEPTANCE_REVIEW.md).
 
 The complete host must acquire each physical identity from its canonical owner,
 authenticate the App-to-Control request on the existing allowed peer boundary,
-and compose fresh current-source and unresolved-request validation at COMMIT.
+and compose fresh current-source and unanswered-request acquisition at COMMIT.
 These read adapters do not create that installed request frame or its admission.
 The existing foreground route can be qualified without claiming an idle Wake;
 the separate principal attention route still needs actual source/target evidence.

@@ -9,6 +9,7 @@ from typing import Any, Mapping, Sequence
 
 from common.agent_dialogue_contract import DialogueContractError
 from common.agent_dialogue_contract_v2 import (
+    COO_PRINCIPAL_MESSAGE_TYPES,
     MESSAGE_SCHEMA_V2,
     PARENT_SCHEMA_V2,
     TURN_WATCH_MODE_V1,
@@ -249,6 +250,30 @@ def _is_ceo(message: Mapping[str, Any]) -> bool:
     return actor["kind"] == "executive_surface" and actor["seat"] == "ceo"
 
 
+def _is_principal(message: Mapping[str, Any]) -> bool:
+    actor = message["actor_ref"]
+    return actor["kind"] == "executive_principal"
+
+
+def _is_worker(message: Mapping[str, Any]) -> bool:
+    actor = message["actor_ref"]
+    return actor["kind"] == "worker_attempt"
+
+
+def _principal_root_is_bound(
+    message: Mapping[str, Any], routing: TurnRoutingFacts
+) -> bool:
+    """Bind the principal actor's declared root to the trusted routing root.
+
+    The V2 validator guarantees the digest-shaped principal identity but cannot
+    know the caller's trusted routing facts, so a missing or foreign root is a
+    classification-level refusal here, not a schema failure.
+    """
+    return routing.root_job_id is not None and (
+        message["actor_ref"]["root_job_id"] == routing.root_job_id
+    )
+
+
 def _ordered_semantic_chain(
     messages: Sequence[Mapping[str, Any]],
 ) -> tuple[tuple[Mapping[str, Any], ...], str | None]:
@@ -294,12 +319,18 @@ def _ordered_semantic_chain(
 
     def parent_command(key: str) -> bool:
         message = by_key[key]
-        return _is_ceo(message) and message["message_type"] in {
-            "RULING",
-            "CONTINUE",
-            "STOP",
-            "AMENDMENT_AVAILABLE",
-        }
+        if _is_ceo(message):
+            return message["message_type"] in {
+                "RULING",
+                "CONTINUE",
+                "STOP",
+                "AMENDMENT_AVAILABLE",
+            }
+        # An accepted COO-principal command is the same single command side
+        # branch of one pending material return; the reducer stays shared.
+        return _is_principal(message) and (
+            message["message_type"] in COO_PRINCIPAL_MESSAGE_TYPES
+        )
 
     current_key = roots[0]
     visited: set[str] = set()
@@ -393,6 +424,54 @@ def _ceo_reply_lineage_valid(
     return message_type in {"STOP", "AMENDMENT_AVAILABLE"}
 
 
+def _principal_reply_lineage_valid(
+    message: Mapping[str, Any],
+    previous: Mapping[str, Any] | None,
+    pending_return: Mapping[str, Any] | None,
+) -> bool:
+    """Accept only already-accepted COO-principal dispositions of one worker.
+
+    The command disposes the exact worker_attempt predecessor or current
+    pending material return, keeps the original request key across quiet
+    annotations, carries a matching applies_to target, and preserves the
+    WITHIN_COMMISSION RULING floor plus selected-option validation already
+    enforced by the V2 validator.  This classifies accepted canonical
+    messages; it grants no new authority.
+    """
+    if pending_return is not None:
+        # Quiet contributor annotations never become the disposition subject:
+        # the principal command retains the exact original request key so the
+        # existing request-bound waiter can consume it.
+        if message["reply_to_message_key"] != pending_return["message_key"]:
+            return False
+        subject = pending_return
+    else:
+        if previous is None or not _is_worker(previous):
+            return False
+        if message["reply_to_message_key"] != previous["message_key"]:
+            return False
+        subject = previous
+    if not _is_worker(subject):
+        return False
+    if message["applies_to"] != subject["applies_to"]:
+        return False
+    message_type = message["message_type"]
+    subject_type = subject["message_type"]
+    if message_type == "RULING":
+        return subject_type == "DECISION_REQUEST" and any(
+            option["id"] == message["body"]["selected_option"]
+            for option in subject["body"]["options"]
+        )
+    if message_type == "CONTINUE":
+        if subject_type not in {"ACK", "PROGRESS", "BLOCKED", "RESULT"}:
+            return False
+        return not (
+            subject_type == "BLOCKED"
+            and subject["body"]["needed_from"] != "sol"
+        )
+    return message_type == "STOP"
+
+
 def _classify_accepted_history(
     *,
     normalized_parent: Mapping[str, Any],
@@ -422,13 +501,27 @@ def _classify_accepted_history(
             return _refuse("REPLY_LINEAGE_INVALID")
         if pending_command is not None and pending_command["message_type"] == "STOP":
             actor = message["actor_ref"]
-            if not (
-                pending_command_valid is True
-                and message_type == "ACK"
-                and actor["kind"] == "executive_surface"
-                and actor["seat"] == "coo"
-                and message["reply_to_message_key"] == pending_command["message_key"]
-            ):
+            if _is_principal(pending_command):
+                # Only the exact stopped worker actor/target may consume a
+                # principal STOP, and only with its own ACK; a COO surface
+                # receipt cannot substitute for the stopped worker.
+                consumed = (
+                    pending_command_valid is True
+                    and message_type == "ACK"
+                    and actor["kind"] == "worker_attempt"
+                    and message["applies_to"] == pending_command["applies_to"]
+                    and message["reply_to_message_key"]
+                    == pending_command["message_key"]
+                )
+            else:
+                consumed = (
+                    pending_command_valid is True
+                    and message_type == "ACK"
+                    and actor["kind"] == "executive_surface"
+                    and actor["seat"] == "coo"
+                    and message["reply_to_message_key"] == pending_command["message_key"]
+                )
+            if not consumed:
                 return _refuse("REPLY_LINEAGE_INVALID")
             terminal_consumed = True
             pending_command = None
@@ -457,16 +550,28 @@ def _classify_accepted_history(
             else:
                 return _refuse("MESSAGE_TYPE_UNCLASSIFIED")
         else:
-            if not _is_ceo(message):
-                return _refuse("DIALOGUE_SENDER_INVALID")
-            # Preserve the existing source-reconciliation boundary: a command
-            # that remains the actionable leaf must be valid, while a later
-            # quiet contributor leaf leaves exact successor validation to the
-            # source owner.  This prevents a historical invalid successor from
-            # being relabeled as a whole-history semantics failure.
-            pending_command_valid = _ceo_reply_lineage_valid(
-                message, previous, pending_return
-            )
+            if _is_principal(message):
+                # Accepted principal vocabulary is command-only; the V2
+                # validator already refuses every other principal type, so
+                # this stays an explicit classification boundary.
+                if message["message_type"] not in COO_PRINCIPAL_MESSAGE_TYPES:
+                    return _refuse("DIALOGUE_SENDER_INVALID")
+                if not _principal_root_is_bound(message, routing):
+                    return _refuse("DIALOGUE_BINDING_MISMATCH")
+                pending_command_valid = _principal_reply_lineage_valid(
+                    message, previous, pending_return
+                )
+            else:
+                if not _is_ceo(message):
+                    return _refuse("DIALOGUE_SENDER_INVALID")
+                # Preserve the existing source-reconciliation boundary: a command
+                # that remains the actionable leaf must be valid, while a later
+                # quiet contributor leaf leaves exact successor validation to the
+                # source owner.  This prevents a historical invalid successor from
+                # being relabeled as a whole-history semantics failure.
+                pending_command_valid = _ceo_reply_lineage_valid(
+                    message, previous, pending_return
+                )
             pending_return = None
             pending_command = message
         previous = message
