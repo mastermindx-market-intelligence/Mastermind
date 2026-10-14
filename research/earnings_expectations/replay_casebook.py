@@ -24,11 +24,13 @@ RESEARCH_AUTHORITY = 'RESEARCH_ONLY_NO_TRADING'
 PACKETS = Path(__file__).parent / 'sourced_event_packets'
 GUIDANCE = Path(__file__).parent / 'amazon_management_guidance_cases.json'
 MEDIA = Path(__file__).parent / 'media_reported_expectations.json'
+CAPEX = Path(__file__).parent / 'alphabet_capex_guidance.json'
 
 
 def build_report(folder: Path = PACKETS, guidance_path: Path = GUIDANCE, media_path: Path = MEDIA,
                  owner_inspection_path: Path | None = None,
-                 tiingo_manifest_path: Path | None = None) -> dict:
+                 tiingo_manifest_path: Path | None = None,
+                 capex_path: Path = CAPEX) -> dict:
     entries = []
     for path in sorted(folder.glob('*.json')):
         packet = json.loads(path.read_text(encoding='utf-8'))
@@ -61,6 +63,8 @@ def build_report(folder: Path = PACKETS, guidance_path: Path = GUIDANCE, media_p
             'first_public_release_exact': outcome['first_published_utc'],
             'h5_status': outcome['drift']['H5']['status'],
             'h20_status': outcome['drift']['H20']['status'],
+            'pre_event': outcome['pre_event'],
+            'calendar_basis': outcome['calendar_basis'],
         })
     entries.sort(key=lambda x: ((x['unaffected_last_close_session'] or ''), x['issuer_ref'], x['fiscal_target']))
     guidance = []
@@ -188,6 +192,68 @@ def build_report(folder: Path = PACKETS, guidance_path: Path = GUIDANCE, media_p
             'older_eps_asof': old['eps_consensus_older_asof'],
         }
         media_state = 'PUBLIC_ARTICLE_WITNESSES_ONLY_NOT_ADMITTED_AS_PIT'
+    capex = []
+    capex_state = 'COMPANY_CAPEX_GUIDANCE_UNAVAILABLE'
+    if capex_path.is_file():
+        disclosure = json.loads(capex_path.read_text(encoding='utf-8'))
+        if (disclosure.get('authority') != 'RESEARCH_DISPLAY_ONLY_NO_TRADING'
+                or disclosure.get('issuer_ref') != 'CIK:1652044'
+                or disclosure.get('metric') != 'FULL_YEAR_CAPITAL_EXPENDITURE_GUIDANCE'
+                or disclosure.get('unit') != 'USD_BILLION'
+                or disclosure.get('fiscal_target') != 'FY2026'
+                or disclosure.get('source_type') != 'COMPANY_MANAGEMENT_GUIDANCE_NOT_SELL_SIDE_CONSENSUS'):
+            raise ValueError('CAPEX_GUIDANCE_SOURCE_BASIS_INVALID')
+        by_event = {row['event_ref']: row for row in entries}
+        previous = None
+        seen = set()
+        for update in disclosure['updates']:
+            event_ref = update.get('event_ref')
+            if event_ref in seen:
+                raise ValueError('DUPLICATE_CAPEX_GUIDANCE_EVENT')
+            seen.add(event_ref)
+            if not isinstance(event_ref, str) or not event_ref.startswith(
+                    'earnings:' + disclosure['issuer_ref'] + ':'):
+                raise ValueError('CAPEX_GUIDANCE_EVENT_IDENTITY_MISMATCH')
+            if update.get('observed_fiscal_target') != 'FY2026':
+                raise ValueError('CAPEX_GUIDANCE_FISCAL_TARGET_MISMATCH')
+            if update.get('source_type') not in {'COMPANY_EARNINGS_RELEASE', 'COMPANY_EARNINGS_CALL_REPORTED'}:
+                raise ValueError('CAPEX_GUIDANCE_SOURCE_TYPE_INVALID')
+            if (not isinstance(update.get('source_ref'), str)
+                    or not update['source_ref'].startswith('https://')):
+                raise ValueError('CAPEX_GUIDANCE_SOURCE_LINK_REQUIRED')
+            source_date = date.fromisoformat(update['statement_date'])
+            if previous and source_date <= previous['statement_date']:
+                raise ValueError('CAPEX_GUIDANCE_RELEASE_ORDER_INVALID')
+            if update['same_day_publication_clock_status'] not in {
+                'NOT_VERIFIED_EXACT_SECOND', 'CALL_DISCLOSURE_NOT_PRE_RELEASE'
+            }:
+                raise ValueError('CAPEX_GUIDANCE_UNSUPPORTED_CLOCK_STATUS')
+            low, high = D(str(update['low'])), D(str(update['high']))
+            if not (0 < low < high):
+                raise ValueError('CAPEX_GUIDANCE_RANGE_INVALID')
+            midpoint = (low + high) / 2
+            match = by_event.get(event_ref)
+            if match is not None and (
+                    match['issuer_ref'] != disclosure['issuer_ref']
+                    or update['statement_date'] != match['unaffected_last_close_session']):
+                raise ValueError('CAPEX_GUIDANCE_EVENT_IDENTITY_MISMATCH')
+            capex.append({
+                'event_ref': event_ref,
+                'statement_date': update['statement_date'],
+                'source_ref': update['source_ref'],
+                'clock_quality': update['same_day_publication_clock_status'],
+                'fiscal_target': 'FY2026',
+                'source_type': 'COMPANY_MANAGEMENT_GUIDANCE_NOT_SELL_SIDE_CONSENSUS',
+                'range_low_billion': float(low),
+                'range_high_billion': float(high),
+                'midpoint_billion': float(midpoint),
+                'midpoint_change_billion': round(float(midpoint - previous['midpoint']), 4) if previous else None,
+                'midpoint_change_pct': round(float((midpoint/previous['midpoint'] - 1)*100), 4) if previous else None,
+                'company_reason': update.get('reason_from_company'),
+                'observed_stock_reaction_pct': match['issuer_return_pct'] if match else None,
+            })
+            previous = {'statement_date': source_date, 'midpoint': midpoint}
+        capex_state = 'COMPANY_GUIDANCE_ONLY_NOT_ANALYST_CONSENSUS'
     # This optional receipt is supplied by the incumbent Macro owner, not
     # reconstructed from price/news/Yahoo artifacts. It is deliberately
     # unbound to any issuer event when security identity is not certified.
@@ -206,6 +272,8 @@ def build_report(folder: Path = PACKETS, guidance_path: Path = GUIDANCE, media_p
         'point_in_time_analyst_consensus': 'NOT_ADMITTED',
         'native_expectation_owner_inspection': native_owner,
         'historical_price_materialization_inspection': price_inspection,
+        'capex_guidance_status': capex_state,
+        'capex_guidance_sequence': capex,
         'management_guidance_status': guidance_state,
         'management_guidance_comparisons': guidance,
         'media_reported_expectation_status': media_state,
@@ -238,6 +306,25 @@ def markdown(report: dict) -> str:
             fmt(e['issuer_minus_market_pp'], ' pp'), fmt(e['issuer_minus_sector_pp'], ' pp'),
         ]) + ' |')
     lines.extend(['', f"**Count:** {report['sample_size']} reported events; historical consensus: {report['point_in_time_analyst_consensus']}; predictive validation: {report['prediction_status']}.", '', report['methodology'], ''])
+    pre_available = [entry for entry in report['cases']
+                     if any(window['status'] == 'AVAILABLE'
+                            for window in entry['pre_event'].values())]
+    if pre_available:
+        lines.extend([
+            '',
+            '## Pre-event relative appreciation (supplied-session research only)',
+            '',
+            '| Event | Pre5 issuer vs market | Pre10 issuer vs market | Pre20 issuer vs market |',
+            '|---|---:|---:|---:|',
+        ])
+        for entry in pre_available:
+            vals = []
+            for n in (5, 10, 20):
+                item = entry['pre_event'][f'P{n}']
+                vals.append(f"{item['returns']['issuer_minus_market'] * 100:+.2f} pp"
+                            if item['status'] == 'AVAILABLE' else item['status'])
+            lines.append('| ' + ' | '.join([entry['event_ref'], *vals]) + ' |')
+        lines.extend(['', 'A source-supplied exchange calendar is not independent exchange-day verification; research windows require separately qualified clocks and fully adjusted prices.', ''])
     if report['management_guidance_comparisons']:
         lines.extend([
             '## Public management-guidance comparisons (NOT analyst consensus)',
@@ -292,6 +379,24 @@ def markdown(report: dict) -> str:
             'This is an owner-native raw capture inspection only. No baseline value, analyst vintage, issuer event binding, numeric gap or trade signal has been admitted.',
             '',
         ])
+    if report['capex_guidance_sequence']:
+        lines.extend([
+            '## Alphabet FY2026 capital expenditure guidance changes (company, not consensus)',
+            '',
+            '| Disclosure event | FY2026 range | Midpoint | Midpoint change | Stock next session |',
+            '|---|---:|---:|---:|---:|',
+        ])
+        for entry in report['capex_guidance_sequence']:
+            change = (f"{entry['midpoint_change_billion']:+.1f}B"
+                      if entry['midpoint_change_billion'] is not None else 'initial guidance')
+            reaction = (f"{entry['observed_stock_reaction_pct']:+.2f}%"
+                        if entry['observed_stock_reaction_pct'] is not None else 'not in cohort')
+            lines.append(
+                f"| [{entry['event_ref']}]({entry['source_ref']}) | "
+                f"${entry['range_low_billion']:.0f}–${entry['range_high_billion']:.0f}B | "
+                f"${entry['midpoint_billion']:.1f}B | {change} | {reaction} |"
+            )
+        lines.extend(['', 'Company CapEx guidance may be disclosed during the post-close earnings call. It is not Street consensus and must not be used before that actual publication.', ''])
     if report.get('historical_price_materialization_inspection'):
         inspected = report['historical_price_materialization_inspection']
         lines.extend([

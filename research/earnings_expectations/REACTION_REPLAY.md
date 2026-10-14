@@ -13,7 +13,7 @@ Refuse or preserve typed absence for intraday-close contamination, exact regular
 
 ```sh
 cd research/earnings_expectations
-python3 -m pytest -q test_reaction_replay.py test_replay_casebook.py test_management_guidance_cases.py test_media_witnesses.py test_expectation_owner_adapter.py test_owner_inspection_consumer.py
+python3 -m pytest -q test_reaction_replay.py test_replay_casebook.py test_management_guidance_cases.py test_media_witnesses.py test_expectation_owner_adapter.py test_owner_inspection_consumer.py test_tiingo_manifest_inspection.py test_pre_event_windows.py test_capex_guidance_cases.py
 python3 reaction_replay.py /path/to/source_verified_input.json
 python3 replay_casebook.py --format markdown
 python3 replay_casebook.py --format json
@@ -49,7 +49,7 @@ This is a **field-shape illustration**, deliberately too short to calculate a re
 
 ## Verified tests
 
-**132/132 offline tests passed** with Python 3.13 / pytest 9. Code and tests were verified by Git blob against tested local sources. Tests include after-close, premarket, intraday, weekend, UTC winter/summer clocks, missing benchmark, cutoff leakage, unsupported sources, and refusal to accept an SEC-only clock. Synthetic structural fixtures are supplemented with **nine actual retrospective adjusted-close source packets**, independently checked for arithmetic; this does not prove data licensing, current vendor freshness, a live backtest, causal attribution, or Terminal operation.
+**157/157 offline tests passed** with Python 3.13 / pytest 9. Code and tests were verified by Git blob against tested local sources. Tests include after-close, premarket, intraday, weekend, UTC winter/summer clocks, missing benchmark, cutoff leakage, unsupported sources, and refusal to accept an SEC-only clock. Synthetic structural fixtures are supplemented with **nine actual retrospective adjusted-close source packets**, independently checked for arithmetic; this does not prove data licensing, current vendor freshness, a live backtest, causal attribution, or Terminal operation.
 
 ## Nine SEC timestamps — not first-publication proof
 
@@ -99,7 +99,7 @@ The read-only `replay_casebook.py` consumer now joins the two Amazon first-party
 
 `media_reported_expectations.json` holds seven small, properly cited numerical excerpts from dated financial reporting (Reuters/LSEG or Visible Alpha), matched to seven of the nine underlying source events; the other two remain absent, not zero. The separate S&P Global/Visible Alpha July 22 Alphabet Q2 preview indicates Q2 revenue consensus increased **$113.0B in February → $117.2B by July**, while EPS consensus fell **$3.43 → $3.32** (the older EPS vintage date is unspecified). Article publication timing or contributor-level vintages are not established as pre-event machine observations.
 
-`replay_casebook.py --format json|markdown` now renders three distinct channels in one evidence response: (1) nine observed next-session adjusted returns; (2) two issuer management-guidance/actual comparisons; (3) seven article-quoted expected-versus-reported cloud-growth comparisons and one source-reported multi-metric revision narrative. The media channel is explicitly `PUBLIC_ARTICLE_WITNESSES_ONLY_NOT_ADMITTED_AS_PIT`, every `consensus_vintage_admitted` is `false`, and exact source links are included. It rejects wrong source authority, duplicate/mismatched fiscal targets, fake pre-event estimate timestamps and preview PIT promotion. **132/132 local research tests passed and the existing CI-discovery bridge exercised the full suite locally.** The article data cannot support backtest forecasting, redistribution beyond lawful quoted numerical facts or new market-belief authority without incumbent source acceptance.
+`replay_casebook.py --format json|markdown` now renders three distinct channels in one evidence response: (1) nine observed next-session adjusted returns; (2) two issuer management-guidance/actual comparisons; (3) seven article-quoted expected-versus-reported cloud-growth comparisons and one source-reported multi-metric revision narrative. The media channel is explicitly `PUBLIC_ARTICLE_WITNESSES_ONLY_NOT_ADMITTED_AS_PIT`, every `consensus_vintage_admitted` is `false`, and exact source links are included. It rejects wrong source authority, duplicate/mismatched fiscal targets, fake pre-event estimate timestamps and preview PIT promotion. **157/157 local research tests passed and the existing CI-discovery bridge exercised the full suite locally.** The article data cannot support backtest forecasting, redistribution beyond lawful quoted numerical facts or new market-belief authority without incumbent source acceptance.
 
 ## Read-only bridge to the incumbent EXP-1/K3E owner
 
@@ -131,4 +131,18 @@ python3 replay_casebook.py --format json --tiingo-manifest /path/to/owner_materi
 python3 replay_casebook.py --format markdown --tiingo-manifest /path/to/owner_materialization_receipt.json
 ```
 
-`test_tiingo_manifest_inspection.py` covers false/malformed/missing flags, a hypothetical three-true source receipt without owner acceptance, no-price-export guarantees and both casebook output formats. The CI bridge includes it. **132/132 research tests passed locally on the isolated M2 Studio checkout** after this addition. This is NOT 132 live-market regression tests and is not a source-license certification.
+`test_tiingo_manifest_inspection.py` covers false/malformed/missing flags, a hypothetical three-true source receipt without owner acceptance, no-price-export guarantees and both casebook output formats. The CI bridge includes it. **157/157 research tests passed locally on the isolated M2 Studio checkout** after this addition. This is NOT 132 live-market regression tests and is not a source-license certification.
+
+## Research-ready pre-event windows (source sessions, not market calendar authority)
+
+`reaction_replay.py` now computes three typed, deterministic pre-event anticipation windows `P5`, `P10` and `P20` from the last unaffected regular-session close backwards by exactly the supplied number of sessions, alongside the existing first affected reaction and H5/H20 drift. If the packet lacks full prior prices or enough sessions, each unavailable window records `INSUFFICIENT_PRIOR_SESSIONS`, `MISSING_ISSUER_CLOSE`, `MISSING_MARKET_CLOSE` or `MISSING_SECTOR_CLOSE` as appropriate, not zero or a fabricated trend. Pre-event windows can still be known after an after-close release even when the affected close has not yet occurred. Output includes `calendar_basis: SUPPLIED_SESSION_CLOCKS_NOT_INDEPENDENTLY_EXCHANGE_VERIFIED` because the supplied calendar is not independently authenticated by this helper. The nine currently public two-day case packets correctly have unavailable P5/P10/P20 and H5/H20.
+
+`test_pre_event_windows.py` verifies P5/P10/P20 arithmetic, missing-source handling, no future leakage, no future-session labeling and casebook Markdown display using **synthetic fully populated bars**. A future source owner may supply PIT-qualified adjusted session histories, but the archival Tiingo materialization with false source-eligibility flags remains excluded.
+
+## Company capex-guidance change as a fourth descriptive evidence channel
+
+`alphabet_capex_guidance.json` and `test_capex_guidance_cases.py` reconstruct Alphabet's three FY2026 capex guidance ranges for the February Q4 2025 release ($175–185B), April Q1 2026 earnings call ($180–190B), and July Q2 2026 earnings call ($195–205B). Midpoint revisions were $180B → $185B (**+$5B**) → $200B (**+$15B**). The April company explanation included the Intersect acquisition; July highlighted accelerated infrastructure capacity delivery. Company-linked source and clock-status receipts are attached to each event. The casebook renders the ranges next to the corresponding GOOGL one-session reactions, but **does not** claim company guidance disclosed during an earnings call was known before the release, does not call it an analyst consensus, and does not make it an actionable signal.
+
+Sources: [Alphabet Q4 SEC release](https://www.sec.gov/Archives/edgar/data/1652044/000165204426000012/googexhibit991q42025.htm), [Alphabet Q1 call reported transcript](https://www.fool.com/earnings/call-transcripts/2026/04/29/alphabet-googl-q1-2026-earnings-call-transcript/), [Alphabet Q2 call reported transcript](https://stockanalysis.com/stocks/googl/transcripts/657320-q2-2026/). Separate earnings-press-release versus earnings-call publication clocks remain typed and unknown to the second.
+
+With these two new research families, **157/157 local tests pass**, and the repository's `tests/test_earnings_reaction_research.py` CI bridge runs all eight in-place suites without introducing a second test scheduler. Hosted CI/review/production adoption are separate proof obligations.

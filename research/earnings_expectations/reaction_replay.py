@@ -198,11 +198,25 @@ def replay(packet: dict) -> dict:
         "price_sources": {role: prices_in[role]["source_ref"] for role in prices},
         "authority": "RESEARCH_ONLY_NO_TRADING",
         "reaction": {"status": "UNESTIMABLE"},
+        "pre_event": {"P5": {"status": "NO_UNAFFECTED_PRIOR_CLOSE"},
+                      "P10": {"status": "NO_UNAFFECTED_PRIOR_CLOSE"},
+                      "P20": {"status": "NO_UNAFFECTED_PRIOR_CLOSE"}},
+        "calendar_basis": "SUPPLIED_SESSION_CLOCKS_NOT_INDEPENDENTLY_EXCHANGE_VERIFIED",
         "drift": {"H5": {"status": "UNESTIMABLE"}, "H20": {"status": "UNESTIMABLE"}},
     }
     if before is None:
         out["reaction"] = {"status": "NO_UNAFFECTED_PRIOR_CLOSE"}
         return out
+    # Pre-event anticipation ends at the last unaffected regular-session close.
+    # Session arithmetic requires a complete, externally qualified exchange
+    # calendar; this tool explicitly reports the supplied-only calendar basis.
+    for n in (5, 10, 20):
+        if before < n:
+            out["pre_event"][f"P{n}"] = {"status": "INSUFFICIENT_PRIOR_SESSIONS"}
+        else:
+            out["pre_event"][f"P{n}"] = _window(
+                sessions[before - n]["date"], sessions[before]["date"], prices
+            )
     if first is None:
         out["reaction"] = {"status": "NO_AFFECTED_FUTURE_SESSION"}
         return out

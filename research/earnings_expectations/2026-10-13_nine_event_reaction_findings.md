@@ -7,12 +7,12 @@
 From `research/earnings_expectations/`:
 
 ```bash
-python3 -m pytest -q test_reaction_replay.py test_replay_casebook.py test_management_guidance_cases.py test_media_witnesses.py test_expectation_owner_adapter.py test_owner_inspection_consumer.py
+python3 -m pytest -q test_reaction_replay.py test_replay_casebook.py test_management_guidance_cases.py test_media_witnesses.py test_expectation_owner_adapter.py test_owner_inspection_consumer.py test_tiingo_manifest_inspection.py test_pre_event_windows.py test_capex_guidance_cases.py
 python3 replay_casebook.py --format markdown
 python3 replay_casebook.py --format json
 ```
 
-Local: **132/132 tests passed** (Python 3.13, pytest 9). Implementation, tests and all nine public-source input packets were individually read back from GitHub with byte-matching Git blob hashes. This demonstrates reproducible arithmetic and typed input handling; not any production acceptance or predictive backtest.
+Local: **157/157 tests passed** (Python 3.13, pytest 9). Implementation, tests and all nine public-source input packets were individually read back from GitHub with byte-matching Git blob hashes. This demonstrates reproducible arithmetic and typed input handling; not any production acceptance or predictive backtest.
 
 For each event `R_issuer = adj_close(first affected regular session) / adj_close(last unaffected regular session) − 1`, likewise SPY and the named sector ETF. Report issuer minus SPY / sector in **percentage points**. Source inputs and public-release witness URLs reside in the nine `sourced_event_packets/*.json` files.
 
@@ -92,7 +92,7 @@ Sources: [Alphabet April Reuters](https://www.investing.com/news/stock-market-ne
 
 A **stronger challenge to simplistic recency bias** appears in [S&P Global's Alphabet Q2 preview](https://www.spglobal.com/market-intelligence/en/news-insights/research/2026/07/alphabet-earnings-preview-q2-2026). It reports that consolidated **revenue estimates ratcheted up $113.0B → $117.2B**, but **EPS estimates actually fell $3.43 → $3.32** while Q2 Google Cloud margin expectations were reduced to 30.8%. Forecast changes were multi-dimensional; “the market expected more earnings across every metric” is contradicted by this bounded S&P/Visible Alpha evidence. The preview date is July 22 with no verified intraday publication timestamp or original contributor vintages, therefore it remains illustrative, not a valid ex-ante trading feature.
 
-The research consumer and adversarial fixtures now pass **132/132 offline tests**; normal hosted CI and live user/Terminal acceptance are independent. No historical abnormal-return alpha or behavior-causation claim follows from these selected cases.
+The research consumer and adversarial fixtures now pass **157/157 offline tests**; normal hosted CI and live user/Terminal acceptance are independent. No historical abnormal-return alpha or behavior-causation claim follows from these selected cases.
 
 ### Deep case: Alphabet's July 2026 multi-channel beat and negative repricing
 
@@ -109,3 +109,11 @@ This issuer-specific case gives a stronger **candidate set of rival explanations
 
 **Discriminating analysis that is still required:** separate forward revenue/operating-profit revisions, capex/FCF effects and discount-rate/sector shocks with exactly timed pre-/post-event consensus, event-window benchmarks, long-horizon valuation scenarios and explicit economic-investment assumptions. The conclusion is not that investor psychology necessarily caused the drop: both profit surprises and marginal cash-investment requirements changed substantially. The evidence supports a richer family-specific explanation, not a universal `priced_in_score`.
 
+
+## Follow-on capability: anticipation windows and Alphabet capex repricing evidence
+
+The research engine can now compute `P5/P10/P20` (prior 5/10/20 trading-session issuer/market/sector returns) **when the external exchange calendar and adjusted series are supplied**. The current nine two-day public packets lack sufficient prior history, so **all 27 reported pre-event entries are `INSUFFICIENT_PRIOR_SESSIONS`**, never implicitly flat. The M2's Tiingo cache contains the needed historical raw bars but an inspected materialization receipt explicitly denies PIT backtest and redistribution admission; no licensed vendor bars or derived unauthorized backtests have been published to this branch.
+
+A fourth explanatory evidence family documents Alphabet's **FY2026 management CapEx guidance** revisions: February $175–185B, April $180–190B, July $195–205B; respective midpoints $180B, $185B and $200B. This is a **+$20B midpoint increase** from February to July. It overlaps strongly accelerating cloud demand and divergent stock reactions, but does not establish market mispricing or prove increased capex caused the July decline. April's disclosure reason was acquisition-related (Intersect); July's concerned faster capacity build. Conference-call guidance is after the initial press release and must be treated accordingly. The original company release and publicly reported Q1/Q2 earnings calls are cited in `alphabet_capex_guidance.json`.
+
+**Current verification:** full read-only explanation now includes nine returns, two Amazon management revenue-guide comparisons, seven media-quoted cloud-consensus observations, the three Alphabet capex outlook updates, and optional native EXP-1 source and Tiingo materialization **refusal** receipts. All **155 local offline tests** pass. No production Terminal route, proprietary data rights or positive predictive return model is claimed.
