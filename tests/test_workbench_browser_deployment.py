@@ -269,3 +269,195 @@ def test_ports_can_be_borrowed_without_constructing_web_auth_server(tmp_path: Pa
         assert catalog["tools"]
     finally:
         os.close(fd)
+
+
+def _synthetic_live_resource(caller, services, *, suffix="c"):
+    from integrations.workbench_browser_mcp.contracts import BrowserResourceRef
+
+    return BrowserResourceRef(
+        schema="mastermind.workbench_browser_ref.v1",
+        start_action_id=suffix * 32,
+        subject_digest=caller.subject_digest,
+        client_ref=caller.client_ref,
+        resource=caller.resource,
+        project_ref="project:browser",
+        context_ref="context:browser",
+        responsibility_ref="responsibility:browser",
+        operation_ref="operation:browser",
+        owner_ref="owner:browser",
+        generation="generation:browser",
+        host_id=services.host_binding.host_id,
+        boot_session_id=services.host_binding.boot_session_id,
+        relay_pid=4321,
+        relay_start_identity="synthetic-start",
+        relay_pgid=4321,
+        relay_session_id=4321,
+        mode="persistent",
+        profile_ref="profile-a",
+        tool_schema_digest="d" * 64,
+        issued_at_ms=1000,
+        expires_at_ms=50_000,
+    )
+
+
+def test_deployment_projects_only_resources_it_successfully_started(tmp_path: Path):
+    import asyncio
+
+    fd, services, host_config, catalog, caller, _run_calls = _fixture(tmp_path)
+    try:
+        deployment = create_browser_deployment(
+            services=services,
+            host_config=host_config,
+            tool_catalog=catalog,
+            profile_resolver=lambda _ref: None,
+        )
+        resource = _synthetic_live_resource(caller, services)
+        browser_ref = deployment.resource_port.codec.encode_resource(resource)
+
+        deployment.resource_port.start_resource = lambda actual, start_ref: {
+            "status": "OK",
+            "effect_state": "APPLIED",
+            "browser_ref": browser_ref,
+            "reconciled": False,
+        }
+        deployment.action_port.observe_resource = lambda actual, ref: (
+            resource if actual.subject_digest == caller.subject_digest and ref == browser_ref
+            else (_ for _ in ()).throw(AssertionError("wrong resource observation"))
+        )
+
+        assert asyncio.run(deployment.observe_active_resources(caller)) == ()
+        receipt = asyncio.run(deployment.start_resource(caller, "synthetic-start-ref"))
+        assert receipt["effect_state"] == "APPLIED"
+        projected = asyncio.run(deployment.observe_active_resources(caller))
+        assert len(projected) == 1
+        assert projected[0].browser_ref == browser_ref
+        assert projected[0].resource == resource
+
+        refreshed = dataclasses.replace(caller, expires_at=caller.expires_at + 1)
+        assert asyncio.run(deployment.observe_active_resources(refreshed)) == projected
+        foreign = dataclasses.replace(caller, client_ref="other-client")
+        assert asyncio.run(deployment.observe_active_resources(foreign)) == ()
+    finally:
+        os.close(fd)
+
+
+@pytest.mark.parametrize("effect_state", ["NOT_APPLIED", "EFFECT_UNKNOWN"])
+def test_deployment_never_invents_active_resource_from_unsettled_start(
+    tmp_path: Path, effect_state: str
+):
+    import asyncio
+
+    fd, services, host_config, catalog, caller, _run_calls = _fixture(tmp_path)
+    try:
+        deployment = create_browser_deployment(
+            services=services,
+            host_config=host_config,
+            tool_catalog=catalog,
+            profile_resolver=lambda _ref: None,
+        )
+        deployment.resource_port.start_resource = lambda actual, start_ref: {
+            "status": "OK",
+            "effect_state": effect_state,
+            "browser_ref": None,
+            "reconciled": effect_state == "EFFECT_UNKNOWN",
+        }
+        receipt = asyncio.run(deployment.start_resource(caller, "synthetic-start-ref"))
+        assert receipt["effect_state"] == effect_state
+        assert asyncio.run(deployment.observe_active_resources(caller)) == ()
+    finally:
+        os.close(fd)
+
+
+def test_deployment_tab_projection_delegates_to_fixed_owner_observation(tmp_path: Path):
+    import asyncio
+
+    fd, services, host_config, catalog, caller, _run_calls = _fixture(tmp_path)
+    try:
+        deployment = create_browser_deployment(
+            services=services,
+            host_config=host_config,
+            tool_catalog=catalog,
+            profile_resolver=lambda _ref: None,
+        )
+        resource = _synthetic_live_resource(caller, services)
+        browser_ref = deployment.resource_port.codec.encode_resource(resource)
+        calls = []
+
+        def observe(actual, ref):
+            calls.append((actual, ref))
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "### Result\n- 0: (current) [Example](https://example.test/)",
+                    }
+                ],
+                "isError": False,
+            }
+
+        deployment.action_port.observe_tab_group = observe
+        result = asyncio.run(deployment.observe_tab_group(caller, browser_ref))
+        assert result["isError"] is False
+        assert calls == [(caller, browser_ref)]
+    finally:
+        os.close(fd)
+
+
+def test_successful_owner_cleanup_removes_projection(tmp_path: Path):
+    import asyncio
+
+    fd, services, host_config, catalog, caller, _run_calls = _fixture(tmp_path)
+    try:
+        deployment = create_browser_deployment(
+            services=services,
+            host_config=host_config,
+            tool_catalog=catalog,
+            profile_resolver=lambda _ref: None,
+        )
+        resource = _synthetic_live_resource(caller, services)
+        browser_ref = deployment.resource_port.codec.encode_resource(resource)
+        deployment.resource_port.start_resource = lambda actual, start_ref: {
+            "status": "OK",
+            "effect_state": "APPLIED",
+            "browser_ref": browser_ref,
+            "reconciled": False,
+        }
+        deployment.action_port.observe_resource = lambda actual, ref: resource
+        deployment.resource_port.cleanup_resource = lambda ref, **kwargs: {
+            "status": "OK",
+            "cleanup_action": "terminate_owned_process",
+            "released": True,
+            "profile_deleted": False,
+        }
+
+        asyncio.run(deployment.start_resource(caller, "synthetic-start-ref"))
+        assert len(asyncio.run(deployment.observe_active_resources(caller))) == 1
+        cleaned = asyncio.run(
+            deployment.cleanup_resource(
+                browser_ref,
+                owner_state="terminal",
+                effect_state="APPLIED",
+            )
+        )
+        assert cleaned["released"] is True
+        assert asyncio.run(deployment.observe_active_resources(caller)) == ()
+    finally:
+        os.close(fd)
+
+
+def test_deployment_projection_is_not_a_persistent_registry(tmp_path: Path):
+    fd, services, host_config, catalog, _caller, _run_calls = _fixture(tmp_path)
+    try:
+        deployment = create_browser_deployment(
+            services=services,
+            host_config=host_config,
+            tool_catalog=catalog,
+            profile_resolver=lambda _ref: None,
+        )
+        names = set(vars(deployment))
+        assert "_registry" not in names
+        assert "_lease_store" not in names
+        assert "_scheduler" not in names
+        assert "_retry_queue" not in names
+    finally:
+        os.close(fd)

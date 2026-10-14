@@ -141,14 +141,18 @@ def _time_window(issued: object, expires: object, *, now_ms: int, require_fresh:
 
 
 def _mode_profile(mode: object, profile_ref: object) -> tuple[str, str | None]:
-    if mode not in {BrowserMode.ISOLATED.value, BrowserMode.PERSISTENT.value}:
+    if mode not in {
+        BrowserMode.ISOLATED.value,
+        BrowserMode.PERSISTENT.value,
+        BrowserMode.EXTENSION.value,
+    }:
         raise BrowserContractError("browser mode is invalid")
     if mode == BrowserMode.ISOLATED.value:
         if profile_ref is not None:
-            raise BrowserContractError("isolated browser cannot carry a persistent profile")
+            raise BrowserContractError("isolated browser cannot carry a profile")
         return mode, None
     if profile_ref is None:
-        raise BrowserContractError("persistent browser requires a profile reference")
+        raise BrowserContractError("profile-bound browser requires a profile reference")
     return mode, _ref(profile_ref, "profile_ref")
 
 

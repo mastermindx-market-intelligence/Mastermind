@@ -299,6 +299,53 @@ class BrowserActionPort:
             raise BrowserRelayError("relay response binding changed")
         return response
 
+    def observe_resource(
+        self,
+        caller: ActionCaller,
+        browser_ref: object,
+    ) -> BrowserResourceRef:
+        """Revalidate and project one exact live resource without browser I/O."""
+        browser, _binding, _socket_path = self._resource(
+            caller, browser_ref, require_fresh=True
+        )
+        return browser
+
+    def observe_tab_group(
+        self,
+        caller: ActionCaller,
+        browser_ref: object,
+    ) -> Mapping[str, Any]:
+        """Observe the owner-established tab group through one fixed list call.
+
+        This is not a generic browser_tabs pass-through. The caller cannot select,
+        create, or close tabs here; those operations remain outside the read
+        projection. A relay failure is never retried.
+        """
+        browser, _binding, socket_path = self._resource(
+            caller, browser_ref, require_fresh=True
+        )
+        request_id = secrets.token_hex(16)
+        try:
+            response = self._relay(
+                socket_path=socket_path,
+                browser=browser,
+                request_id=request_id,
+                tool="browser_tabs",
+                arguments={"action": "list"},
+            )
+        except BrowserRelayError as error:
+            raise BrowserPortRefused(
+                "BROWSER_TAB_OBSERVATION_UNAVAILABLE"
+            ) from error
+        result = response.get("result")
+        if (
+            response["ok"] is not True
+            or not isinstance(result, Mapping)
+            or result.get("isError") is True
+        ):
+            raise BrowserPortRefused("BROWSER_TAB_OBSERVATION_REFUSED")
+        return dict(result)
+
     def call_read_tool(
         self,
         caller: ActionCaller,

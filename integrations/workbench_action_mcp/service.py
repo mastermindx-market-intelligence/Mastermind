@@ -819,14 +819,76 @@ def create_browser_sibling(
         raise ServiceConfigurationError("SERVICE_CONFIGURATION_REFUSED") from error
 
 
+def create_browser_fabric_sibling(
+    runtime: WorkbenchActionRuntime,
+    config: ServiceConfig,
+    browser_deployment: object,
+    *,
+    authenticate,
+    auth_challenge: str,
+):
+    """Compose the high-level Browser MCP over the same Workbench deployment.
+
+    This creates no runtime, browser resource, lease, auth policy, credential,
+    listener, tunnel, scheduler, or effect owner. Authentication is injected by
+    the caller so the Browser-specific OAuth/Auth0 policy can remain the final
+    rollout step.
+    """
+    if (
+        not isinstance(runtime, WorkbenchActionRuntime)
+        or not isinstance(config, ServiceConfig)
+        or browser_deployment is None
+        or not callable(authenticate)
+        or type(auth_challenge) is not str
+        or not auth_challenge
+    ):
+        _refuse()
+    if config.browser is None:
+        _refuse()
+    try:
+        from control_plane.browser_resource_contract import (
+            WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST,
+        )
+        from integrations.mastermind_browser_plugin.workbench_service import (
+            browser_broker_caller_from_lease,
+            browser_caller_binding_from_action_caller,
+            create_workbench_browser_fabric_http_app,
+        )
+
+        return create_workbench_browser_fabric_http_app(
+            deployment=browser_deployment,
+            action_token_key=runtime.services.action_token_key,
+            clock_ms=runtime.services.clock_ms,
+            caller_binding=browser_caller_binding_from_action_caller,
+            broker_caller=browser_broker_caller_from_lease(config.lease),
+            authenticate=authenticate,
+            auth_challenge=auth_challenge,
+            allowed_hosts=list(runtime.services.allowed_hosts),
+            allowed_origins=runtime.services.allowed_origins,
+            expected_backend_schema_digest=WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST,
+        )
+    except ServiceConfigurationError:
+        raise
+    except Exception as error:
+        raise ServiceConfigurationError("SERVICE_CONFIGURATION_REFUSED") from error
+
+
 def build_service_app(
     runtime: WorkbenchActionRuntime,
     config: ServiceConfig,
     state: ServiceState,
+    *,
+    browser_fabric_authenticate=None,
+    browser_fabric_auth_challenge: str | None = None,
 ):
     from starlette.applications import Starlette
     from starlette.responses import PlainTextResponse
     from starlette.routing import Mount, Route
+
+    if (browser_fabric_authenticate is None) != (
+        browser_fabric_auth_challenge is None
+    ):
+        _refuse()
 
     inner = runtime.server.streamable_http_app()
     browser_deployment = create_browser_sibling(runtime, config)
@@ -835,6 +897,19 @@ def build_service_app(
         if browser_deployment is not None
         else None
     )
+    browser_fabric = None
+    browser_fabric_app = None
+    if browser_fabric_authenticate is not None:
+        if browser_deployment is None:
+            _refuse()
+        browser_fabric = create_browser_fabric_sibling(
+            runtime,
+            config,
+            browser_deployment,
+            authenticate=browser_fabric_authenticate,
+            auth_challenge=browser_fabric_auth_challenge,
+        )
+        browser_fabric_app = browser_fabric.app
 
     async def health(_request):
         return PlainTextResponse("OK\n", status_code=200)
@@ -852,6 +927,12 @@ def build_service_app(
                 if browser_deployment is not None:
                     await stack.enter_async_context(
                         browser_deployment.server.session_manager.run()
+                    )
+                if browser_fabric_app is not None:
+                    await stack.enter_async_context(
+                        browser_fabric_app.router.lifespan_context(
+                            browser_fabric_app
+                        )
                     )
                 state.lifespan_started = True
                 try:
@@ -874,6 +955,8 @@ def build_service_app(
     ]
     if browser_inner is not None:
         routes.append(Mount(config.browser.mount_path, app=browser_inner))
+    if browser_fabric_app is not None:
+        routes.extend(browser_fabric_app.routes)
     routes.append(Mount("/", app=inner))
     return Starlette(routes=routes, lifespan=lifespan)
 

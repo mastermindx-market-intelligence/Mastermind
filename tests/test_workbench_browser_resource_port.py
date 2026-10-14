@@ -474,3 +474,121 @@ def test_default_relay_command_carries_authoritative_resource_expiry(tmp_path: P
     finally:
         os.close(fd)
         shutil.rmtree(relay_root, ignore_errors=True)
+
+
+def test_extension_profile_requires_typed_exclusive_owner_grant_without_profile_directory(tmp_path: Path):
+    from control_plane.browser_resource_contract import BrowserMode
+    from integrations.workbench_browser_mcp.resource_port import (
+        SharedHumanBrowserProfileGrant,
+    )
+
+    fd, caller, port, relay_root = _port(tmp_path)
+    try:
+        port._profile_resolver = lambda _ref: PersistentBrowserProfileGrant(
+            profile_ref="human-chrome-c2",
+            profile_dir=_private(tmp_path / "wrong-profile-path"),
+            owner_ref="owner:browser",
+            operation_ref="operation:browser",
+            generation="generation:browser",
+            host_id="b" * 64,
+            exclusive=True,
+        )
+        with pytest.raises(BrowserResourceRefused, match="PROFILE_GRANT_INVALID"):
+            port.prepare_resource(
+                caller,
+                project_ref="project:browser",
+                mode=BrowserMode.EXTENSION.value,
+                profile_ref="human-chrome-c2",
+            )
+
+        port._profile_resolver = lambda _ref: SharedHumanBrowserProfileGrant(
+            profile_ref="human-chrome-c2",
+            owner_ref="owner:browser",
+            operation_ref="operation:browser",
+            generation="generation:browser",
+            host_id="b" * 64,
+            exclusive=True,
+        )
+        start_ref = port.prepare_resource(
+            caller,
+            project_ref="project:browser",
+            mode=BrowserMode.EXTENSION.value,
+            profile_ref="human-chrome-c2",
+        )
+        start = port.codec.decode_start(start_ref, now_ms=2000)
+        assert start.mode == BrowserMode.EXTENSION.value
+        assert start.profile_ref == "human-chrome-c2"
+        assert port._profile_path(start) is None
+
+        port._profile_resolver = lambda _ref: SharedHumanBrowserProfileGrant(
+            profile_ref="human-chrome-c2",
+            owner_ref="owner:browser",
+            operation_ref="operation:browser",
+            generation="generation:browser",
+            host_id="b" * 64,
+            exclusive=False,
+        )
+        with pytest.raises(BrowserResourceRefused, match="PROFILE_GRANT_MISMATCH"):
+            port.prepare_resource(
+                caller,
+                project_ref="project:browser",
+                mode=BrowserMode.EXTENSION.value,
+                profile_ref="human-chrome-c2",
+            )
+    finally:
+        os.close(fd)
+        shutil.rmtree(relay_root, ignore_errors=True)
+
+
+def test_extension_resource_starts_and_reconciles_through_existing_artifact_owner(tmp_path: Path):
+    from control_plane.browser_resource_contract import BrowserMode
+    from integrations.workbench_browser_mcp.resource_port import SharedHumanBrowserProfileGrant
+
+    fd, caller, port, relay_root = _port(tmp_path)
+    browser_ref = None
+    try:
+        port._profile_resolver = lambda _ref: SharedHumanBrowserProfileGrant(
+            profile_ref="human-chrome-c2",
+            owner_ref="owner:browser",
+            operation_ref="operation:browser",
+            generation="generation:browser",
+            host_id="b" * 64,
+            exclusive=True,
+        )
+        start_ref = port.prepare_resource(
+            caller,
+            project_ref="project:browser",
+            mode=BrowserMode.EXTENSION.value,
+            profile_ref="human-chrome-c2",
+        )
+        started = port.start_resource(caller, start_ref)
+        assert started["effect_state"] == "APPLIED"
+        browser_ref = started["browser_ref"]
+        browser = port.codec.decode_resource(browser_ref, now_ms=2000)
+        assert browser.mode == BrowserMode.EXTENSION.value
+        assert browser.profile_ref == "human-chrome-c2"
+
+        replay = port.start_resource(caller, start_ref)
+        assert replay["effect_state"] == "APPLIED"
+        assert replay["reconciled"] is True
+        assert replay["browser_ref"] == browser_ref
+
+        release = port.cleanup_resource(
+            browser_ref,
+            owner_state="released",
+            effect_state="APPLIED",
+        )
+        assert release["cleanup_action"] == "terminate_owned_process"
+        assert release["profile_deleted"] is False
+    finally:
+        if browser_ref is not None:
+            try:
+                port.cleanup_resource(
+                    browser_ref,
+                    owner_state="released",
+                    effect_state="APPLIED",
+                )
+            except Exception:
+                pass
+        os.close(fd)
+        shutil.rmtree(relay_root, ignore_errors=True)
