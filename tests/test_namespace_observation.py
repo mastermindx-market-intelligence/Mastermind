@@ -43,10 +43,15 @@ class NamespaceTests(unittest.TestCase):
         self.budget=Budget(1000)
         self.infos={}
         for index,path in enumerate(M._DIRECTORIES+(M._ALIAS,)):
-            self.infos[path]=self.info(100+index,stat.S_IFLNK if path==M._ALIAS else stat.S_IFDIR,0o755,0,0)
+            # Retained host profile: runtime ancestors are root:daemon; only
+            # /private/var/run is group writable. Never broaden other paths.
+            mode=0o775 if path=='/private/var/run' else 0o755
+            gid=1 if path in ('/private/var/run','/private/var/run/mastermind-executive') else 0
+            self.infos[path]=self.info(100+index,stat.S_IFLNK if path==M._ALIAS else stat.S_IFDIR,mode,0,gid)
         self.fd_paths={};self.next_fd=20;self.closed=[];self.socket=None
         self.opened=[];self.fail_open=None;self.fail_close=None;self.acl_path=None
-        self.native=S(getpid=lambda:10,geteuid=lambda:0,O_NOFOLLOW=1,O_CLOEXEC=2,O_SYMLINK=4,
+        self.native=S(getpid=lambda:10,geteuid=lambda:0,O_RDONLY=0,O_NOFOLLOW=1,O_CLOEXEC=2,O_SYMLINK=4,
+                      O_DIRECTORY=8,O_NONBLOCK=16,open=Mock(side_effect=self.native_open),
                       fstat=Mock(side_effect=self.fstat),stat=Mock(side_effect=self.relative))
         self.patches=[patch.object(M,'os',self.native),patch.object(M,'sys',S(platform='darwin')),
                       patch.object(M,'_instance',return_value=OWN),patch.object(R,'_Budget',return_value=self.budget),
@@ -56,7 +61,7 @@ class NamespaceTests(unittest.TestCase):
                       patch.object(P,'_close',side_effect=self.close,create=True)]
         for p in self.patches:p.start();self.addCleanup(p.stop)
     def info(self,ino,kind=stat.S_IFSOCK,mode=0o660,uid=450,gid=453,**kw):
-        args=dict(st_dev=1,st_ino=ino,st_mode=kind|mode,st_uid=uid,st_gid=gid,st_nlink=1,st_size=0,st_mtime_ns=20,st_ctime_ns=20)
+        args=dict(st_dev=1,st_ino=ino,st_mode=kind|mode,st_uid=uid,st_gid=gid,st_nlink=1,st_size=0,st_mtime_ns=20,st_ctime_ns=20,st_flags=0)
         args.update(kw);return S(**args)
     def missing(self): raise FileNotFoundError(errno.ENOENT,'synthetic absent')
     def lstat(self,path):
@@ -75,12 +80,35 @@ class NamespaceTests(unittest.TestCase):
         if path==self.fail_open:raise OSError('open failed')
         fd=self.next_fd;self.next_fd+=1;self.fd_paths[fd]=path;self.opened.append(fd)
         return fd,self.infos[path],self.infos[path]
+    def native_open(self,path,flags):
+        alias=path==M._ALIAS
+        expected=self.native.O_CLOEXEC|self.native.O_NONBLOCK
+        expected|=self.native.O_SYMLINK if alias else self.native.O_NOFOLLOW|self.native.O_DIRECTORY
+        self.assertEqual(flags,expected)
+        return self.open(path,budget=self.budget,allow_symlink=M._ALIAS if alias else None)[0]
     def close(self,fd):
         self.closed.append(fd)
         if fd==self.fail_close:raise OSError('close ambiguous')
         self.fd_paths.pop(fd,None)
     def acl(self,path,*a,**kw):return path==self.acl_path
     def acquire(self):return M._acquire_namespace(deadline_monotonic_ns=1000)
+
+    def test_retained_actual_runtime_profile_qualifies_without_generic_opener(self):
+        with patch.object(P,'_open_trusted',side_effect=AssertionError('generic trust must not be weakened')):
+            h=self.acquire()
+            self.assertEqual(len(self.native.open.call_args_list),len(M._DIRECTORIES)+1)
+            M._release_namespace(h)
+        self.assertEqual(self.fd_paths,{})
+
+    def test_directory_child_link_count_is_not_retained_incarnation(self):
+        before=self.info(300,stat.S_IFDIR,0o755,0,1,st_nlink=2)
+        after=S(**(vars(before)|dict(st_nlink=3,st_size=40,st_mtime_ns=40,st_ctime_ns=40)))
+        self.assertEqual(M._structural(before),M._structural(after))
+
+    def test_directory_native_flags_are_retained_security_metadata(self):
+        before=self.info(300,stat.S_IFDIR,0o755,0,1)
+        after=S(**(vars(before)|dict(st_flags=2)))
+        self.assertNotEqual(M._structural(before),M._structural(after))
 
     def test_holds_exact_qualified_chain_and_alias_then_closes_reverse(self):
         h=self.acquire()
@@ -92,7 +120,7 @@ class NamespaceTests(unittest.TestCase):
         self.assertEqual(self.fd_paths,{})
 
     def test_wrong_owner_platform_or_missing_native_flags_fail_before_open(self):
-        for field,value in [('O_SYMLINK',None),('O_NOFOLLOW',0),('O_CLOEXEC',True)]:
+        for field,value in [('O_SYMLINK',None),('O_NOFOLLOW',0),('O_CLOEXEC',True),('O_DIRECTORY',0),('O_NONBLOCK',None)]:
             with patch.object(self.native,field,value),self.assertRaises(M.NamespaceObservationError):self.acquire()
         with patch.object(self.native,'geteuid',return_value=501),self.assertRaises(M.NamespaceObservationError):self.acquire()
         with patch.object(M.sys,'platform','linux'),self.assertRaises(M.NamespaceObservationError):self.acquire()
@@ -105,11 +133,8 @@ class NamespaceTests(unittest.TestCase):
         self.assertEqual(self.fd_paths,{})
 
     def test_deadline_after_fd_return_does_not_leak_handle(self):
-        checks=0
         def check(*a,**kw):
-            nonlocal checks
-            checks+=1
-            raise R.ReleaseObservationError('deadline')
+            if self.opened:raise R.ReleaseObservationError('deadline')
         self.budget.check=check
         with self.assertRaises(R.ReleaseObservationError):self.acquire()
         self.assertEqual(self.opened,[20]);self.assertEqual(self.closed,[20])
@@ -141,9 +166,57 @@ class NamespaceTests(unittest.TestCase):
 
     def test_expected_child_metadata_change_does_not_pretend_parent_is_a_lock(self):
         h=self.acquire();old=self.infos[M._DIRECTORIES[-1]]
-        self.infos[M._DIRECTORIES[-1]]=S(**(vars(old)|dict(st_size=40,st_mtime_ns=40,st_ctime_ns=40)))
+        self.infos[M._DIRECTORIES[-1]]=S(**(vars(old)|dict(st_nlink=old.st_nlink+1,st_size=40,st_mtime_ns=40,st_ctime_ns=40)))
         M._recheck_namespace(h)
         M._release_namespace(h)
+
+    def test_exact_path_profiles_refuse_wrong_group_mode_or_owner_before_open(self):
+        for path in M._DIRECTORIES:
+            original=self.infos[path]
+            for change in (dict(st_gid=2),dict(st_gid=0 if original.st_gid else 1),dict(st_uid=501),
+                           dict(st_mode=stat.S_IFDIR|0o777),dict(st_mode=stat.S_IFDIR|0o750),
+                           dict(st_mode=stat.S_IFDIR|(0o755 if path=='/private/var/run' else 0o775))):
+                self.infos[path]=S(**(vars(original)|change));self.opened=[];self.closed=[]
+                with self.subTest(path=path,change=change),self.assertRaises(M.NamespaceObservationError):self.acquire()
+                self.assertEqual(self.closed,list(reversed(self.opened)))
+                self.assertEqual(self.fd_paths,{})
+            self.infos[path]=original
+
+    def test_fixed_opener_refuses_unknown_path_without_lookup_or_open(self):
+        P._lstat.reset_mock();self.native.open.reset_mock()
+        with self.assertRaisesRegex(M.NamespaceObservationError,'PROFILE_DRIFT'):
+            M._open_namespace_object('/private/var/run/other',self.budget)
+        P._lstat.assert_not_called();self.native.open.assert_not_called()
+
+    def test_native_flags_change_between_observations_invalidates_context(self):
+        h=self.acquire();path=M._DIRECTORIES[-1];old=self.infos[path]
+        self.infos[path]=S(**(vars(old)|dict(st_flags=2)))
+        with self.assertRaisesRegex(M.NamespaceObservationError,'REPLACED'):M._recheck_namespace(h)
+        M._release_namespace(h)
+
+    def test_link_count_or_flags_change_during_read_is_not_excused(self):
+        for change in (dict(st_nlink=3),dict(st_flags=2)):
+            h=self.acquire();real=self.lstat;calls=0
+            def changed(path):
+                nonlocal calls
+                value=real(path)
+                if path=='/':
+                    calls+=1
+                    if calls==2:return S(**(vars(value)|change))
+                return value
+            with self.subTest(change=change),patch.object(P,'_lstat',side_effect=changed),self.assertRaisesRegex(M.NamespaceObservationError,'CHANGED_DURING_READ'):
+                M._recheck_namespace(h)
+            M._release_namespace(h)
+
+    def test_object_replacement_between_lstat_and_open_refuses_and_closes(self):
+        real=self.native_open
+        def replaced(path,flags):
+            descriptor=real(path,flags)
+            self.infos[path]=S(**(vars(self.infos[path])|dict(st_ino=999)))
+            return descriptor
+        with patch.object(self.native,'open',side_effect=replaced),self.assertRaisesRegex(M.NamespaceObservationError,'REPLACED'):
+            self.acquire()
+        self.assertEqual(self.opened,[20]);self.assertEqual(self.closed,[20]);self.assertEqual(self.fd_paths,{})
 
     def test_change_during_single_read_refuses(self):
         h=self.acquire();real=self.lstat;calls=0

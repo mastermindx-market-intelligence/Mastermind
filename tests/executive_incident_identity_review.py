@@ -1,7 +1,7 @@
 """Static sites in the dormant source composition; never runtime authority.
 
 The fixed UID450 child, existing 450:453 socket owner, and sealed 0644 client
-mode are source-bound to the reviewed origin contract. The 900-second value
+mode and fixed /var alias mode are bound to the reviewed origin contract. The 900-second value
 is a maximum grant duration, not an identity. Every file digest and literal
 position is fixed here; changed bytes must return to the generic D8 guard.
 """
@@ -23,8 +23,9 @@ REVIEWED_FILES = {
         ),
     },
     "control_plane/executive_recovery_namespace.py": {
-        "sha256": "20a1fe425ff2805a9d33607a03d20d52d6ea9be7a280918299f840793f10ccdf",
-        "sites": ((260, 66, 69, "int", "450"), (260, 88, 91, "int", "453")),
+        "sha256": "cca4fe37260a31c78939460b53a860eab1482be2f4fb2d79ee9acc78a10813f8",
+        "sites": ((35, 19, 24, "int", "0o755"),
+                  (302, 66, 69, "int", "450"), (302, 88, 91, "int", "453")),
     },
     "ops/executive_os/provider_incident_forward.py": {
         "sha256": "f4d8ebcb312c12ff9746178e4815841965c139569ab8e01602a8bdd75deccb64",

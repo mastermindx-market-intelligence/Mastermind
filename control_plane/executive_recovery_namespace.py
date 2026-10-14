@@ -24,6 +24,16 @@ _ALIAS_TARGET = 'private/var'
 _LEAF = 'privileged.sock'
 _CANONICAL = _DIRECTORIES[-1] + '/' + _LEAF
 _LEXICAL = '/var/run/mastermind-executive/' + _LEAF
+# Closed profiles for the retained Darwin namespace, not generic ancestor trust.
+# In particular, root:daemon 0775 belongs only to /private/var/run.
+_PROFILES = {
+    '/': (0, 0, 0o755),
+    '/private': (0, 0, 0o755),
+    '/private/var': (0, 0, 0o755),
+    '/private/var/run': (0, 1, 0o775),
+    '/private/var/run/mastermind-executive': (0, 1, 0o755),
+    _ALIAS: (0, 0, 0o755),
+}
 
 
 class NamespaceObservationError(ValueError):
@@ -37,9 +47,14 @@ def _refuse(code):
 
 
 def _structural(info):
-    # Directory timestamps/size change on legitimate child creation. Pin the
+    # Directory timestamps/size/link count change on legitimate child creation. Pin the
     # directory itself and its security metadata, not a claimed child history.
-    return (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid, info.st_nlink)
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid, info.st_flags)
+
+
+def _metadata_identity(info):
+    # Full within-read comparison includes child metadata and native flags.
+    return peer._object_identity(info) + (info.st_flags,)
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,10 +76,13 @@ class _NamespaceHandles:
         self.failed = False
 
 
-def _shape(info, alias):
+def _shape(info, path):
+    profile = _PROFILES.get(path)
+    alias = path == _ALIAS
     expected_type = stat.S_ISLNK if alias else stat.S_ISDIR
-    if (not expected_type(info.st_mode) or info.st_uid != 0 or info.st_gid != 0
-            or stat.S_IMODE(info.st_mode) != 0o755
+    if (profile is None or not expected_type(info.st_mode)
+            or (info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode)) != profile
+            or type(getattr(info, 'st_flags', None)) is not int or info.st_flags < 0
             or (info.st_nlink != 1 if alias else info.st_nlink < 1)):
         _refuse('RECOVERY_NAMESPACE_PROFILE_DRIFT')
 
@@ -72,10 +90,10 @@ def _shape(info, alias):
 def _check_handle(held, budget):
     first = budget.call(os.fstat, held.descriptor)
     named = budget.call(peer._lstat, held.path)
-    _shape(first, held.alias)
-    if peer._object_identity(first) != peer._object_identity(named):
+    _shape(first, held.path)
+    if _metadata_identity(first) != _metadata_identity(named):
         _refuse('RECOVERY_NAMESPACE_REPLACED')
-    identity = peer._object_identity(first) if held.alias else _structural(first)
+    identity = _metadata_identity(first) if held.alias else _structural(first)
     if identity != held.identity:
         _refuse('RECOVERY_NAMESPACE_REPLACED')
     if held.alias and budget.call(peer._readlink, held.path) != _ALIAS_TARGET:
@@ -89,10 +107,40 @@ def _check_handle(held, budget):
     # are deliberately not treated as an exclusive filesystem lock.
     final = budget.call(os.fstat, held.descriptor)
     current = budget.call(peer._lstat, held.path)
-    if (peer._object_identity(final) != peer._object_identity(first)
-            or peer._object_identity(current) != peer._object_identity(first)
+    if (_metadata_identity(final) != _metadata_identity(first)
+            or _metadata_identity(current) != _metadata_identity(first)
             or (held.alias and budget.call(peer._readlink, held.path) != _ALIAS_TARGET)):
         _refuse('RECOVERY_NAMESPACE_CHANGED_DURING_READ')
+
+
+def _open_namespace_object(path, budget):
+    """Own one native no-follow FD under this fixed path's exact profile.
+
+    Generic installed-file trust stays unchanged. Register this allocation in
+    a cleanup scope before the return-side deadline fence can fail.
+    """
+    if path not in _PROFILES:
+        _refuse('RECOVERY_NAMESPACE_PROFILE_DRIFT')
+    before = budget.call(peer._lstat, path)
+    _shape(before, path)
+    alias = path == _ALIAS
+    flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NONBLOCK
+    flags |= os.O_SYMLINK if alias else os.O_NOFOLLOW | os.O_DIRECTORY
+    budget.check(force=True)
+    descriptor = os.open(path, flags)
+    try:
+        budget.check(force=True)
+        observed = budget.call(os.fstat, descriptor)
+        if _metadata_identity(observed) != _metadata_identity(before):
+            _refuse('RECOVERY_NAMESPACE_REPLACED')
+        identity = _metadata_identity(observed) if alias else _structural(observed)
+        held = _Held(path, descriptor, identity, alias)
+        _check_handle(held, budget)
+        budget.check(force=True)
+        return held
+    except BaseException:
+        peer._close(descriptor)
+        raise
 
 
 def _recheck_namespace(handles):
@@ -141,24 +189,18 @@ def _acquire_namespace(*, deadline_monotonic_ns):
     try:
         if sys.platform != 'darwin' or os.geteuid() != 0:
             _refuse('RECOVERY_NAMESPACE_OWNER_UNQUALIFIED')
-        for flag in ('O_NOFOLLOW', 'O_CLOEXEC', 'O_SYMLINK'):
+        for flag in ('O_NOFOLLOW', 'O_CLOEXEC', 'O_SYMLINK', 'O_DIRECTORY', 'O_NONBLOCK'):
             value = getattr(os, flag, None)
             if type(value) is not int or value <= 0:
                 _refuse('RECOVERY_NAMESPACE_NATIVE_FLAGS_UNAVAILABLE')
         handles.owner = _instance(os.getpid(), budget)
         handles.boot = budget.call(release._boot, budget)
         for path in _DIRECTORIES + (_ALIAS,):
-            alias = path == _ALIAS
-            # Do not wrap acquisition in budget.call: _open_trusted owns its
+            # Do not wrap acquisition in budget.call: the fixed opener owns its
             # fences/cleanup. Register its returned FD before any later fence
             # can fail so acquisition cannot leak an unowned returned handle.
-            descriptor, info, _ = peer._open_trusted(
-                path, budget=budget, allow_symlink=_ALIAS if alias else None)
-            handles.held.append(_Held(path, descriptor, (), alias))
-            identity = peer._object_identity(info) if alias else _structural(info)
-            handles.held[-1] = _Held(path, descriptor, identity, alias)
+            handles.held.append(_open_namespace_object(path, budget))
             budget.check(force=True)
-            _shape(info, alias)
         _recheck_namespace(handles)
         return handles
     except BaseException:
