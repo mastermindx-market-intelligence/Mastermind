@@ -63,6 +63,7 @@ def _publish(expected_sha, *, allow_publication, control_sha256=None):
             and contract.parse_observation(target)['control_sha256'] != control_sha256):
         raise owner.TransactionEffectUnknown()
     old = _retained()
+    created_receipt = False
     if old != target:
         if not allow_publication:
             raise owner.TransactionEffectUnknown()
@@ -73,8 +74,25 @@ def _publish(expected_sha, *, allow_publication, control_sha256=None):
                                mode=0o444, uid=0, gid=0, replace=old is not None)
         except Exception as exc:
             raise owner.TransactionEffectUnknown() from exc
-    if _retained() != target or _snapshot(expected_sha) != (target, custody):
+        created_receipt = old is None
+    if _retained() != target:
         raise owner.TransactionEffectUnknown()
+    current_target, current_custody = _snapshot(expected_sha)
+    if current_target != target:
+        raise owner.TransactionEffectUnknown()
+    if current_custody != custody:
+        # APFS counts a newly created regular directory entry in st_nlink.
+        # Permit exactly that one increment, only at our receipt's parent and
+        # only after this call successfully created it. Replacement/readback,
+        # all other ancestors and every object/owner/mode coordinate stay exact.
+        receipt_parent = str(Path(contract.OBSERVATION_PATH).parent)
+        creation_custody = tuple(
+            (path, (*identity[:5], identity[5] + 1))
+            if path == receipt_parent else (path, identity)
+            for path, identity in custody
+        ) if created_receipt else custody
+        if current_custody != creation_custody:
+            raise owner.TransactionEffectUnknown()
     return hashlib.sha256(target).hexdigest()
 
 
