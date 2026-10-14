@@ -55,11 +55,109 @@ def policies(*, unknown=False, no_action=False):
     return {key: (S, A) for key in g.ARMS}
 
 
+def valid_filled_labels(original, arms):
+    by_id = {e.episode: e for e in original}
+    return {
+        key: tuple(
+            u.TrainingLabel(
+                row.episode,
+                by_id[row.episode].entry_at + (
+                    timedelta(minutes=30) if key[0] == "30m" else timedelta(hours=3)),
+                by_id[row.episode].entry_at + (
+                    timedelta(minutes=30) if key[0] == "30m" else timedelta(hours=3)),
+                by_id[row.episode].baseline_end_at, by_id[row.episode].baseline_end_at,
+                by_id[row.episode].outcome_known_at)
+            for row in rows if row.state == "FILLED" and row.episode in by_id
+        )
+        for key, rows in arms.items()
+    }
+
+
 class TestV27FrozenCohort(unittest.TestCase):
     def run_grid(self, **kw):
+        src = kw.get("source", source())
+        original = kw.get("episodes", episodes())
+        arms = kw.get("arms", policies())
+        labels = kw.get("filled_labels", valid_filled_labels(original, arms))
         return g.evaluate_frozen_grid(
-            kw.get("source", source()), kw.get("episodes", episodes()),
-            kw.get("arms", policies()), evaluation_at=kw.get("asof", ASOF))
+            src, original, arms, evaluation_at=kw.get("asof", ASOF),
+            filled_labels=labels)
+
+    def test_missing_filled_path_availability_withholds_finite_scores(self):
+        out = g.evaluate_frozen_grid(
+            source(), episodes(), policies(), evaluation_at=ASOF, filled_labels=None)
+        self.assertEqual(out["status"], "WITHHELD_PAIRED_PATH_EVIDENCE")
+        self.assertIsNone(out["cells"])
+
+    def test_future_intervention_outcome_cannot_be_claimed_mature(self):
+        arms = policies()
+        baseline, secondary = episodes()
+        by_id = {e.episode:e for e in (baseline, secondary)}
+        labels = {
+            key: tuple(
+                u.TrainingLabel(
+                    row.episode, by_id[row.episode].entry_at + timedelta(minutes=30),
+                    by_id[row.episode].entry_at + timedelta(minutes=30),
+                    by_id[row.episode].baseline_end_at,
+                    by_id[row.episode].baseline_end_at,
+                    ASOF + timedelta(days=2) if row.episode == "S"
+                    else by_id[row.episode].outcome_known_at)
+                for row in rows if row.state == "FILLED")
+            for key,rows in arms.items()
+        }
+        with self.assertRaisesRegex(ValueError, "intervention outcome not yet available"):
+            g.evaluate_frozen_grid(source(), episodes(), arms, evaluation_at=ASOF,
+                                   filled_labels=labels)
+
+    def test_one_missing_filled_path_label_censors_all_cells(self):
+        arms = policies()
+        labels = valid_filled_labels(episodes(), arms)
+        labels[("30m", 1)] = labels[("30m", 1)][:1]
+        out = self.run_grid(arms=arms, filled_labels=labels)
+        self.assertEqual(out["status"], "WITHHELD_PAIRED_PATH_EVIDENCE")
+        self.assertIsNone(out["cells"])
+
+    def test_paired_path_must_use_exact_original_baseline_horizon(self):
+        labels = valid_filled_labels(episodes(), policies())
+        first, *others = labels[("3h", 2)]
+        labels[("3h", 2)] = (
+            replace(first, baseline_end_at=first.baseline_end_at + timedelta(minutes=1)),
+            *others,
+        )
+        with self.assertRaisesRegex(ValueError, "baseline end does not match"):
+            self.run_grid(filled_labels=labels)
+
+    def test_paired_path_cannot_backdate_known_baseline_availability(self):
+        labels = valid_filled_labels(episodes(), policies())
+        first, *others = labels[("30m", 2)]
+        labels[("30m", 2)] = (
+            replace(first, outcome_available_at=first.baseline_end_at), *others
+        )
+        with self.assertRaisesRegex(ValueError, "backdates original baseline"):
+            self.run_grid(filled_labels=labels)
+
+    def test_paired_path_decision_cannot_precede_original_entry(self):
+        labels = valid_filled_labels(episodes(), policies())
+        first, *others = labels[("30m", 2)]
+        early = episodes()[0].entry_at - timedelta(minutes=1)
+        labels[("30m", 2)] = (
+            replace(first, decision_at=early, feature_available_at=early),
+            *others,
+        )
+        with self.assertRaisesRegex(ValueError, "precedes actual original entry"):
+            self.run_grid(filled_labels=labels)
+
+    def test_nonfill_cannot_claim_filled_path_outcome(self):
+        arms = policies(no_action=True)
+        labels = valid_filled_labels(episodes(), arms)
+        other = episodes()[1]
+        fake = u.TrainingLabel("A", other.entry_at + timedelta(minutes=30),
+                               other.entry_at + timedelta(minutes=30),
+                               other.baseline_end_at, other.baseline_end_at,
+                               other.outcome_known_at)
+        labels[("30m", 1)] += (fake,)
+        with self.assertRaisesRegex(ValueError, "unmatched filled-path label"):
+            self.run_grid(arms=arms, filled_labels=labels)
 
     def test_full_grid_has_all_prescribed_cells_with_no_selection(self):
         out = self.run_grid()
@@ -206,7 +304,7 @@ class TestV27FrozenCohort(unittest.TestCase):
     def test_resolved_future_outcome_not_available_asof(self):
         a, b = episodes()
         late = replace(a, outcome_known_at=ASOF + timedelta(days=1))
-        with self.assertRaisesRegex(ValueError, "no mature"):
+        with self.assertRaisesRegex(ValueError, "(no mature|intervention outcome not yet available)"):
             self.run_grid(episodes=(late, b))
 
     def test_unresolved_outcome_can_stay_unmatured(self):

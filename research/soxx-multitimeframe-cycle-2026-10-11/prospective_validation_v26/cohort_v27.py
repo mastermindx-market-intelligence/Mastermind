@@ -113,6 +113,7 @@ def evaluate_frozen_grid(
     policies: Mapping[tuple[str, int], Sequence[PairedOutcome]],
     *,
     evaluation_at: datetime,
+    filled_labels: Mapping[tuple[str, int], Sequence[_v26.TrainingLabel]] | None = None,
 ) -> dict:
     """Use SAME original denominator for all 2 x 3 x 5 prescribed comparisons.
 
@@ -174,6 +175,10 @@ def evaluate_frozen_grid(
     sorted_ids = sorted(ids)
     by_arm: dict[tuple[str, int], dict[str, PairedOutcome]] = {}
     baselines: dict[str, float] = {}
+    supplied_labels = {} if filled_labels is None else filled_labels
+    if not isinstance(supplied_labels, Mapping) or not set(supplied_labels).issubset(set(ARMS)):
+        raise ValueError("filled label proof must reference only frozen arms")
+    missing_paired_labels = False
 
     for key in ARMS:
         rows = list(policies[key])
@@ -183,6 +188,26 @@ def evaluate_frozen_grid(
         if len(members) != len(set(members)) or set(members) != set(sorted_ids):
             raise ValueError("missing, duplicated, or invented episodes in policy arm")
         by_arm[key] = {r.episode: r for r in rows}
+        filled_episodes = {r.episode for r in rows if r.state == "FILLED"}
+        labels = list(supplied_labels.get(key, ()))
+        if any(not isinstance(lab, _v26.TrainingLabel) for lab in labels):
+            raise ValueError("only validated V26 paired-path labels are permitted")
+        label_ids = [lab.episode for lab in labels]
+        if len(label_ids) != len(set(label_ids)) or not set(label_ids).issubset(filled_episodes):
+            raise ValueError("duplicate/unmatched filled-path label")
+        if set(label_ids) != filled_episodes:
+            missing_paired_labels = True
+        for lab in labels:
+            original_row = by_id[lab.episode]
+            if lab.baseline_end_at != original_row.baseline_end_at:
+                raise ValueError("paired label baseline end does not match original benchmark")
+            if lab.decision_at < original_row.entry_at:
+                raise ValueError("paired label precedes actual original entry")
+            if lab.outcome_available_at is None or lab.outcome_available_at > evaluation_at:
+                raise ValueError("intervention outcome not yet available")
+            if (original_row.outcome_known_at is None
+                    or lab.outcome_available_at < original_row.outcome_known_at):
+                raise ValueError("paired label backdates original baseline availability")
         for r in rows:
             meta = by_id[r.episode]
             # An unknown discretionary sale can coexist with an already-known
@@ -196,6 +221,14 @@ def evaluate_frozen_grid(
                 prev = baselines.setdefault(r.episode, r.baseline_pp)
                 if prev != r.baseline_pp:
                     raise ValueError("different baseline return across matched arms")
+
+    if missing_paired_labels:
+        return {
+            "status": "WITHHELD_PAIRED_PATH_EVIDENCE",
+            "original_episodes": len(ids), "cells": None,
+            "source_claims_externally_authenticated": False,
+            "live_trading_accepted": False,
+        }
 
     # No exchange-hour arithmetic or independent-trial fiction: these are the
     # actual upstream-reported exposure intervals, with overlap diagnoses only.
