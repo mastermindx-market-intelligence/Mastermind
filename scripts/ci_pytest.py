@@ -24,6 +24,7 @@ import hashlib
 import re
 import subprocess
 import sys
+import time
 import tomllib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -193,7 +194,9 @@ def format_plan(plan: Mapping[str, int], *, shards: Sequence[Sequence[str]] | No
 
 
 def pytest_argv(included: Sequence[str], *, python: str | None = None) -> list[str]:
-    return [python or sys.executable, "-m", "pytest", "-q", *included]
+    # Observability only: report bounded slowest setup/call/teardown durations
+    # without dropping a test, changing its order, or creating new CI contexts.
+    return [python or sys.executable, "-m", "pytest", "--durations=25", "-q", *included]
 
 
 def partition_modules(
@@ -281,7 +284,8 @@ def run_shards(
     which a single serial process could not do.
     """
 
-    def _run(index: int) -> tuple[int, int, str]:
+    def _run(index: int) -> tuple[int, int, str, float]:
+        started = time.monotonic()
         completed = subprocess.run(
             pytest_argv(shards[index], python=python),
             cwd=root,
@@ -289,17 +293,18 @@ def run_shards(
             capture_output=True,
             text=True,
         )
-        return index, completed.returncode, completed.stdout + completed.stderr
+        elapsed = max(0.0, time.monotonic() - started)
+        return index, completed.returncode, completed.stdout + completed.stderr, elapsed
 
     codes: dict[int, int] = {}
     with ThreadPoolExecutor(max_workers=len(shards)) as pool:
         futures = [pool.submit(_run, index) for index in range(len(shards))]
         for future in as_completed(futures):
-            index, returncode, output = future.result()
+            index, returncode, output, elapsed = future.result()
             codes[index] = returncode
             print(
                 f"--- shard {index + 1}/{len(shards)} "
-                f"({len(shards[index])} modules) exit={returncode} ---",
+                f"({len(shards[index])} modules) exit={returncode} elapsed_s={elapsed:.2f} ---",
                 flush=True,
             )
             print(output, end="" if output.endswith("\n") else "\n", flush=True)
