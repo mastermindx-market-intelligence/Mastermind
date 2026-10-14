@@ -1,7 +1,7 @@
 --- a/ext/artifact_production.py
 +++ b/ext/artifact_production.py
 @@ -16,6 +16,7 @@
- 
+
  REQUEST_PREFIX = 'FABRIC_ARTIFACT_REQUEST_V1 '
  RESULT_PREFIX = 'FABRIC_ARTIFACTS_V1 '
 +TOOL_PREFIX = 'FABRIC_ARTIFACT_SEAL_V1 '
@@ -46,6 +46,6 @@
 -    print(RESULT_PREFIX+reader.canonical(observed_manifest(contract,os.environ['LANE_REMOTE_HOST'])).decode())
 +    prefix = TOOL_PREFIX if args.tool_output else RESULT_PREFIX
 +    print(prefix+reader.canonical(observed_manifest(contract,os.environ['LANE_REMOTE_HOST'])).decode())
- 
- 
+
+
  if __name__ == '__main__':
