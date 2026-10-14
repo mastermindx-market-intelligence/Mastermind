@@ -135,13 +135,48 @@ def replay(packet: dict) -> dict:
     event = packet.get("event")
     if not isinstance(event, dict) or not all(isinstance(event.get(k), str) and event[k] for k in ("issuer_ref", "fiscal_target", "event_ref", "first_public_source_ref")):
         raise ReplayError("IMMUTABLE_EVENT_IDENTITY_REQUIRED")
-    if event.get("first_publication_clock_status") != "VERIFIED_FIRST_PUBLIC_RELEASE":
+    clock_class = event.get("first_publication_clock_status")
+    if clock_class not in {"VERIFIED_FIRST_PUBLIC_RELEASE", "AFTER_CLOSE_WINDOW_CORROBORATED"}:
         raise ReplayError("FIRST_PUBLIC_RELEASE_CLOCK_NOT_VERIFIED")
-    published = _time(event.get("first_published_utc"))
     asof = _time(packet.get("evaluated_asof_utc"))
-    if asof < published:
-        raise ReplayError("EVALUATION_BEFORE_PUBLICATION")
     sessions = _sessions(packet.get("sessions"))
+    if clock_class == "VERIFIED_FIRST_PUBLIC_RELEASE":
+        published = _time(event.get("first_published_utc"))
+        if asof < published:
+            raise ReplayError("EVALUATION_BEFORE_PUBLICATION")
+        prior = [idx for idx, s in enumerate(sessions) if s["close"] < published]
+        first = next((idx for idx, s in enumerate(sessions) if s["close"] > published), None)
+        before = prior[-1] if prior else None
+        public_by = published
+        clock_quality = "FIRST_PUBLIC_RELEASE_EXACT_OR_DECLARED_PRECISION"
+        evidences = [event["first_public_source_ref"]]
+    else:
+        # A second, strictly weaker proof: corroborated publication in the
+        # regular-close-to-next-open interval. No claim about its earliest second.
+        if event.get("first_published_utc") is not None:
+            raise ReplayError("WINDOW_MODE_CANNOT_ASSERT_FIRST_PUBLIC_CLOCK")
+        report_session = _day(event.get("after_close_session"))
+        match = [idx for idx, s in enumerate(sessions) if s["date"] == report_session]
+        if not match:
+            raise ReplayError("RELEASE_SESSION_NOT_IN_EXCHANGE_CALENDAR")
+        before = match[0]
+        first = before + 1 if before + 1 < len(sessions) else None
+        evidences = event.get("after_close_evidence_refs")
+        if (not isinstance(evidences, list) or len(evidences) < 2
+                or any(not isinstance(ref, str) or not ref.strip() for ref in evidences)
+                or len(set(evidences)) != len(evidences)):
+            raise ReplayError("CORROBORATING_PUBLIC_RELEASE_EVIDENCE_REQUIRED")
+        if event.get("public_by_source_kind") not in {"ISSUER_WIRE_DISTRIBUTION", "PRESS_RELEASE_REPRINT"}:
+            raise ReplayError("NON_SEC_PUBLIC_RELEASE_WITNESS_REQUIRED")
+        public_by = _time(event.get("observed_public_by_utc"))
+        if public_by <= sessions[before]["close"]:
+            raise ReplayError("PUBLIC_WITNESS_NOT_AFTER_SESSION_CLOSE")
+        if first is not None and public_by >= sessions[first]["open"]:
+            raise ReplayError("PUBLIC_WITNESS_NOT_BEFORE_NEXT_OPEN")
+        if asof < public_by:
+            raise ReplayError("EVALUATION_BEFORE_PUBLICATION")
+        published = None
+        clock_quality = "SESSION_WINDOW_CORROBORATED_EARLIEST_RELEASE_UNKNOWN"
     prices_in = packet.get("price_series")
     if not isinstance(prices_in, dict) or any(k not in prices_in for k in ("issuer", "market", "sector")):
         raise ReplayError("THREE_PRICE_SERIES_REQUIRED")
@@ -152,8 +187,12 @@ def replay(packet: dict) -> dict:
         "event_ref": event["event_ref"],
         "issuer_ref": event["issuer_ref"],
         "fiscal_target": event["fiscal_target"],
-        "first_public_source_ref": event["first_public_source_ref"],
-        "first_published_utc": published.isoformat().replace("+00:00", "Z"),
+        "release_source_ref": event["first_public_source_ref"],
+        "first_public_source_ref": event["first_public_source_ref"] if published else None,
+        "first_published_utc": published.isoformat().replace("+00:00", "Z") if published else None,
+        "observed_public_by_utc": public_by.isoformat().replace("+00:00", "Z"),
+        "clock_quality": clock_quality,
+        "clock_evidence_refs": evidences,
         "evaluated_asof_utc": asof.isoformat().replace("+00:00", "Z"),
         "price_adjustment": ADJUSTMENT,
         "price_sources": {role: prices_in[role]["source_ref"] for role in prices},
@@ -161,19 +200,17 @@ def replay(packet: dict) -> dict:
         "reaction": {"status": "UNESTIMABLE"},
         "drift": {"H5": {"status": "UNESTIMABLE"}, "H20": {"status": "UNESTIMABLE"}},
     }
-    prior = [idx for idx, s in enumerate(sessions) if s["close"] < published]
-    first = next((idx for idx, s in enumerate(sessions) if s["close"] > published), None)
-    if not prior:
+    if before is None:
         out["reaction"] = {"status": "NO_UNAFFECTED_PRIOR_CLOSE"}
         return out
     if first is None:
         out["reaction"] = {"status": "NO_AFFECTED_FUTURE_SESSION"}
         return out
-    before, after = prior[-1], first
+    after = first
     affected = sessions[after]
-    if any(s["close"] == published for s in sessions):
+    if published is not None and any(s["close"] == published for s in sessions):
         out["reaction"] = {"status": "AMBIGUOUS_RELEASE_AT_REGULAR_CLOSE"}
-    elif affected["open"] <= published:
+    elif published is not None and affected["open"] <= published:
         out["reaction"] = {"status": "INTRADAY_CLOSE_WINDOW_CONTAMINATED", "affected_session": affected["date"].isoformat()}
     elif asof < affected["close"]:
         out["reaction"] = {"status": "AFFECTED_CLOSE_NOT_YET_KNOWN", "affected_session": affected["date"].isoformat()}
