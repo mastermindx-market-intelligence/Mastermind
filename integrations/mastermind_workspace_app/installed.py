@@ -34,7 +34,11 @@ class CeoIngressWorkspaceClient:
         # ceiling selection happens BEFORE the socket is opened so a misrouted
         # result frame can never widen into the larger Mission ceiling.
         from control_plane.coo_principal_host import FACT_SCHEMA, validate_facts_frame
-        if isinstance(frame, dict) and frame.get("schema") == FACT_SCHEMA:
+        from common.product_acceptance_read_contract import FRAME_SCHEMA as ACCEPTANCE_FRAME_SCHEMA, validate_frame as validate_acceptance_frame
+        if isinstance(frame, dict) and frame.get("schema") == ACCEPTANCE_FRAME_SCHEMA:
+            validate_acceptance_frame(frame)
+            ceiling = MAX_RESPONSE_BYTES
+        elif isinstance(frame, dict) and frame.get("schema") == FACT_SCHEMA:
             validate_facts_frame(frame)
             ceiling = MAX_RESPONSE_BYTES
         elif isinstance(frame, dict) and frame.get("schema") == FRAME_SCHEMA_V3:

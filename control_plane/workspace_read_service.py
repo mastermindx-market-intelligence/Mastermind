@@ -395,7 +395,8 @@ class WorkspaceReadService:
     def __init__(self, *, cache, runtime, authorize, armed, runtime_identity,
                  acquire=None, compose=None, bounded_runtime=None,
                  result_acquire=None, result_project=None, mission_v3_acquire=None,
-                 mission_v3_compose=None, work_acquire=None, work_compose=None):
+                 mission_v3_compose=None, work_acquire=None, work_compose=None,
+                 product_acceptance_basis_reader=None):
         self.cache = cache
         self.runtime = runtime
         self.authorize = authorize
@@ -418,6 +419,74 @@ class WorkspaceReadService:
         # or an unfrozen schema.
         self._work_acquire = work_acquire
         self._work_compose = work_compose
+        from control_plane.agentos_product_acceptance_basis import AgentOsProductAcceptanceBasisReader
+        if (product_acceptance_basis_reader is not None
+                and type(product_acceptance_basis_reader) is not AgentOsProductAcceptanceBasisReader):
+            raise ValueError("acceptance reader must be the existing source owner")
+        self._product_acceptance_basis_reader = product_acceptance_basis_reader
+
+    def _read_mission_v4(self, frame):
+        from common import product_acceptance_read_contract as contract
+        from integrations.product_acceptance_read import read_acceptance
+        from control_plane.fabric_job_view import read_fabric_view_v3_from_runtime, compose_fabric_view_v4
+        from control_plane.mission_workspace import compose_mission_workspace_v4
+        selected = contract.selection(frame["selection"])
+        mission_selection = {k: selected[k] for k in ("work_ref", "root_job_id")}
+        before = self.cache.snapshot()
+        _join(before.document, mission_selection)
+        if not _qualified(before, mission_selection):
+            raise ValueError("source_unavailable")
+        runtime = self._bounded_runtime(self.runtime) if self._bounded_runtime else self.runtime
+        first = read_fabric_view_v3_from_runtime(runtime, selected["root_job_id"],
+            armed=self.armed, runtime_identity=self.runtime_identity)
+        accepted = read_acceptance(runtime, self._product_acceptance_basis_reader, selected)
+        last = read_fabric_view_v3_from_runtime(runtime, selected["root_job_id"],
+            armed=self.armed, runtime_identity=self.runtime_identity)
+        companion = compose_fabric_view_v4(before=first, after=last, acceptance=accepted)
+        acquisition = last["fabric_view"]["runtime"]["acquisition"]
+        generation = acquisition.get("generation")
+        observed = (dict(generation, snapshot_digest=acquisition.get("snapshot_digest"))
+                    if type(generation) is dict else None)
+        after = self.cache.snapshot()
+        _join(after.document, mission_selection)
+        if not _qualified(after, mission_selection):
+            raise ValueError("source_unavailable")
+        observation = _observation(before, after, mission_selection, observed)
+        result = compose_mission_workspace_v4(control_room=before.document,
+            fabric_view=companion, selection=selected, source_validity=after.validity,
+            cache_currentness=after.currentness, owner_observation=observation)
+        if runtime.store.read_binding is not None:
+            runtime.store.read_binding.validate_before_core_return()
+        response = {"ok": True, "result": result}
+        bounded_canonical(response, limit=MAX_RESPONSE_BYTES - 1)
+        return response
+
+    async def _handle_v4_frame(self, frame):
+        from common import product_acceptance_read_contract as contract
+        try:
+            contract.validate_frame(frame)
+        except (TypeError, ValueError):
+            return error("invalid_input", 400)
+        try:
+            if self.authorize(frame["principal"]) is not True:
+                return error("access_denied", 403)
+            before = permission_stamp(self.authorize, frame["principal"])
+        except Exception:
+            return error("access_denied", 403)
+        task = asyncio.create_task(asyncio.to_thread(self._read_mission_v4, frame))
+        try:
+            result = await await_owned(task)
+        except LookupError:
+            return error("selection_not_found", 404)
+        except Exception:
+            return error("source_unavailable", 503)
+        try:
+            if (self.authorize(frame["principal"]) is not True
+                    or permission_stamp(self.authorize, frame["principal"]) != before):
+                return error("access_denied", 403)
+        except Exception:
+            return error("access_denied", 403)
+        return result
 
     def _read(self, frame):
         selected = frame["selection"]
@@ -994,6 +1063,9 @@ class WorkspaceReadService:
         return self._read_mission_v3({"selection": selection})["result"]
 
     async def handle_frame(self, frame):
+        from common.product_acceptance_read_contract import FRAME_SCHEMA as ACCEPTANCE_FRAME_SCHEMA
+        if isinstance(frame, dict) and frame.get("schema") == ACCEPTANCE_FRAME_SCHEMA:
+            return await self._handle_v4_frame(frame)
         if isinstance(frame, dict) and frame.get("schema") == FRAME_SCHEMA_V3:
             return await self._handle_v3_frame(frame)
         # v2 frames take the closed v2 validation path; v1 frames keep their
@@ -1168,7 +1240,8 @@ class _WorkRefusal(Exception):
         self.reason_code = reason_code
 
 
-def workspace_provider_factory(*, control_room, authorize, armed, runtime_identity, bounded_runtime=None):
+def workspace_provider_factory(*, control_room, authorize, armed, runtime_identity, bounded_runtime=None,
+                               product_acceptance_basis_reader=None):
     """Compose a sibling factory from the existing hosted owner and permissions.
 
     Installers pass this to CeoIngressAppBinding.workspace_read_provider_factory.
@@ -1186,5 +1259,6 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
     cache = ExistingControlRoomCache(control_room.current_owner)
     def provide(runtime):
         return WorkspaceReadService(cache=cache, runtime=runtime, authorize=authorize,
-                                    armed=armed, runtime_identity=runtime_identity, bounded_runtime=bounded_runtime)
+                                    armed=armed, runtime_identity=runtime_identity, bounded_runtime=bounded_runtime,
+                                    product_acceptance_basis_reader=product_acceptance_basis_reader)
     return provide
