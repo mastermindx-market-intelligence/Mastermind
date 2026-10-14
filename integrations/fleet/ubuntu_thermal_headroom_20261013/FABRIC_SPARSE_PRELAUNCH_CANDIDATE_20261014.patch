@@ -177,7 +177,7 @@
  from pathlib import Path
  import native_remote
  import time
-@@ -109,8 +112,121 @@
+@@ -109,8 +112,144 @@
          normalized_bytes=len(normalized),normalized_sha256=hashlib.sha256(normalized).hexdigest(),
          contract=contract,manifest=manifest)
  
@@ -226,6 +226,17 @@
 +        content = helper.read_bytes()
 +    except OSError as exc:
 +        raise SparseWorkspaceRefused("FABRIC_SPARSE_HELPER_UNAVAILABLE") from exc
++    # Detect concurrent modification of the shared source between the
++    # verified read and the controlled child start. Git blob proof binds
++    # reviewed code; inode/stat is the ordinary shared-file drift guard.
++    try:
++        after_read = helper.lstat()
++    except OSError as exc:
++        raise SparseWorkspaceRefused("FABRIC_SPARSE_HELPER_CHANGED") from exc
++    if (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns) != (
++        after_read.st_dev, after_read.st_ino, after_read.st_size, after_read.st_mtime_ns
++    ):
++        raise SparseWorkspaceRefused("FABRIC_SPARSE_HELPER_CHANGED")
 +    git_blob = hashlib.sha1(
 +        b"blob " + str(len(content)).encode() + b"\0" + content
 +    ).hexdigest()
@@ -255,6 +266,18 @@
 +            or not result.cleanup_proven or result.stdout_truncated
 +            or result.stderr_truncated):
 +        raise SparseWorkspaceRefused("FABRIC_SPARSE_MINT_UNVERIFIED",
++                                     effect_unknown=True)
++    try:
++        after_mint = helper.lstat()
++        current_helper = helper.read_bytes()
++    except OSError as exc:
++        raise SparseWorkspaceRefused("FABRIC_SPARSE_HELPER_EFFECT_UNKNOWN",
++                                     effect_unknown=True) from exc
++    if ((after_mint.st_dev, after_mint.st_ino, after_mint.st_size,
++         after_mint.st_mtime_ns) !=
++        (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
++        or current_helper != content):
++        raise SparseWorkspaceRefused("FABRIC_SPARSE_HELPER_EFFECT_UNKNOWN",
 +                                     effect_unknown=True)
 +
 +    def git_value(root: Path, *args: str) -> str:
@@ -299,7 +322,7 @@
      if len(argv) != 6:
          return _fail(
              "usage: remote_sub_exec.py <key> <mode> <packet> <cwd> <model>", 2
-@@ -218,8 +334,35 @@
+@@ -218,8 +357,35 @@
      try:
          with lease, ExitStack() as artifact_stack:
              artifact_owner = (artifact_stack.enter_context(artifact_production.NewDirectory(artifact_contract))
