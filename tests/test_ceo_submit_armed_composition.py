@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import hashlib
 import importlib
 import io
 import json
@@ -18,6 +19,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from tests.executive_identity_review import mask_reviewed_identity_literals
+from tests.executive_fabric_release_identity_review import REVIEWED_FILES
 
 
 ROOT = Path(__file__).parents[1]
@@ -974,7 +976,7 @@ def _scan_added_identity_diff(
 
     string_accounts: dict[str, list[list[str]]] = {}
     for path, lines in production.items():
-        if (_scope_language(path) != "py" and not path.endswith((".patch", ".diff"))) or source_postimages is None or path not in source_postimages:
+        if (_scope_language(path) != "py" and not path.endswith((".patch", ".diff")) and path not in REVIEWED_FILES) or source_postimages is None or path not in source_postimages:
             continue
         source_lines = source_postimages[path].splitlines()
         numbers = added_numbers.get(path, [])
@@ -1388,6 +1390,25 @@ def test_d6_no_new_transport_and_all_arm_defaults_are_false():
     assert not any(isinstance(node, (ast.Import, ast.ImportFrom)) and any(alias.name == "socket" for alias in node.names) for node in tree.body)
 
 
+def _d7_reviewed_installed_event_loop(path, source, tree, node):
+    # Exact source review of the canonical installed wrapper. This does not
+    # exempt other run calls or imports, even inside the same function.
+    from tests.executive_identity_review import _reviewed_ast_dump
+    if (path != 'scripts/executive_os_phase1c.py'
+            or hashlib.sha256(source.encode()).hexdigest() !=
+            '749377f23da20864439edc3bc8b8c5810a047bbf833599a5856c103f7261fead'):
+        return False
+    anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
+               and n.name == 'serve_installed_control']
+    if (len(anchors) != 1 or hashlib.sha256(_reviewed_ast_dump(anchors[0]).encode()).hexdigest()
+            != '060525ac61b01452e7a84397f0e68ab4be9c0a05f6dac560113bce8180adc819'):
+        return False
+    expected = ast.parse('asyncio.run(_serve_from_config(config_path, _installed_control=True))',
+                         mode='eval').body
+    return (any(n is node for n in ast.walk(anchors[0]))
+            and ast.dump(node, include_attributes=False) == ast.dump(expected, include_attributes=False))
+
+
 def test_d7_diff_and_module_have_no_dispatch_or_provider_import():
     base = subprocess.run(
         ["git", "merge-base", "origin/master", "HEAD"], cwd=ROOT,
@@ -1415,7 +1436,45 @@ def test_d7_diff_and_module_have_no_dispatch_or_provider_import():
                 else node.func.attr if isinstance(node.func, ast.Attribute)
                 else None
             )
-            assert name not in calls
+            assert name not in calls or _d7_reviewed_installed_event_loop(
+                PHASE1C.relative_to(ROOT).as_posix(), source, tree, node)
+
+
+@pytest.mark.parametrize('before,after', [
+    ('asyncio.run(_serve_from_config', 'subprocess.run(_serve_from_config'),
+    ('asyncio.run(_serve_from_config', 'run(_serve_from_config'),
+    ('asyncio.run(_serve_from_config', 'foreign.run(_serve_from_config'),
+    ('asyncio.run(_serve_from_config', 'asyncio.run(_other_coroutine'),
+    ('_serve_from_config(config_path, _installed_control=True)',
+     '_serve_from_config(other_path, _installed_control=True)'),
+    ('_installed_control=True)', '_installed_control=False)'),
+    ('_installed_control=True))', '_installed_control=True), debug=True)'),
+    ('def serve_installed_control(', 'def moved_control('),
+    ('import asyncio', 'import foreign as asyncio'),
+    ('', '\nimport subprocess\nsubprocess.run([])\n'),
+])
+def test_d7_reviewed_event_loop_never_adopts_modified_source(before, after):
+    source = PHASE1C.read_text()
+    changed = source.replace(before, after) if before else source + after
+    assert changed != source
+    tree = ast.parse(changed)
+    assert not any(_d7_reviewed_installed_event_loop(
+        PHASE1C.relative_to(ROOT).as_posix(), changed, tree, n) for n in ast.walk(tree)
+        if isinstance(n, ast.Call))
+
+
+def test_d7_exact_event_loop_only_and_foreign_scope_refused():
+    source = PHASE1C.read_text()
+    tree = ast.parse(source)
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)]
+    path = PHASE1C.relative_to(ROOT).as_posix()
+    assert sum(_d7_reviewed_installed_event_loop(path, source, tree, n) for n in calls) == 1
+    assert not any(_d7_reviewed_installed_event_loop('foreign.py', source, tree, n) for n in calls)
+    foreign = ast.parse('asyncio.run(_serve_from_config(config_path, _installed_control=True))').body[0].value
+    assert not _d7_reviewed_installed_event_loop(path, source, tree, foreign)
+    anchor = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'serve_installed_control')
+    tree.body.append(anchor)
+    assert not any(_d7_reviewed_installed_event_loop(path, source, tree, n) for n in calls)
 
 
 @pytest.mark.parametrize("app_uid", [452, 501])
@@ -2161,7 +2220,7 @@ def test_d8_template_topology_and_protected_defaults():
             check=True, capture_output=True, text=True,
         ).stdout
         source_diffs.append(diff)
-        if _scope_language(path) == "py" or path.endswith((".patch", ".diff")):
+        if _scope_language(path) == "py" or path.endswith((".patch", ".diff")) or path in REVIEWED_FILES:
             source_postimages[path] = subprocess.run(
                 ["git", "show", f"HEAD:{path}"], cwd=ROOT,
                 check=True, capture_output=True, text=True,

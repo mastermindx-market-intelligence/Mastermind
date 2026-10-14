@@ -4078,6 +4078,8 @@ class WorkerBrokerClient:
         payload: Mapping[str, Any],
         *,
         timeout_seconds: float | None = None,
+        foreground_start_receipt=None,
+        before_write=None,
     ) -> dict[str, Any]:
         if operation not in _ALLOWED_OPERATIONS | {"assignment-seal"}:
             raise BrokerProtocolError("client operation is not allowed")
@@ -4108,6 +4110,22 @@ class WorkerBrokerClient:
                     peer = writer.get_extra_info("socket")
                     if peer is None or get_peer_credentials(peer).uid != self.expected_peer_uid:
                         raise PeerAuthorizationError("broker peer UID differs from trusted binding")
+                from control_plane.foreground_operation import require_start_transmission, ForegroundOperationRefusal
+                try:
+                    require_start_transmission(operation, json.loads(encoded)["payload"],
+                                               foreground_start_receipt)
+                except (ForegroundOperationRefusal, KeyError, TypeError, ValueError):
+                    from control_plane.remote_worker_transport import TransportError, TransportEffect
+                    raise TransportError("foreground_start_refused", TransportEffect.NO_EFFECT) from None
+                if before_write is not None:
+                    try:
+                        if (operation not in {"ohf-start", "ohf-resume", "ohf-begin-turn"}
+                                or not callable(before_write)
+                                or before_write(operation, json.loads(encoded)["payload"]) is not None):
+                            raise ValueError("invalid local foreground guard")
+                    except Exception:
+                        from control_plane.remote_worker_transport import TransportError, TransportEffect
+                        raise TransportError("foreground_start_refused", TransportEffect.NO_EFFECT) from None
                 writer.write(encoded)
                 await writer.drain()
                 raw = await reader.readline()
@@ -4219,6 +4237,7 @@ class WorkerBrokerClient:
         payload: Mapping[str, Any],
         *,
         timeout_seconds: float | None = None,
+        before_write=None,
     ) -> dict[str, Any]:
         """Synchronous startup/reconciliation seam; never call from a running loop."""
 
@@ -4226,7 +4245,8 @@ class WorkerBrokerClient:
             asyncio.get_running_loop()
         except RuntimeError:
             return asyncio.run(
-                self.request(operation, payload, timeout_seconds=timeout_seconds)
+                self.request(operation, payload, timeout_seconds=timeout_seconds,
+                             **({"before_write": before_write} if before_write is not None else {}))
             )
         raise WorkerBrokerError("request_sync cannot run inside an active event loop")
 

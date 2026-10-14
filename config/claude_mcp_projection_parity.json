@@ -4,6 +4,28 @@
   "policy_schema_version": "mastermind.executive_agent_capabilities/v3",
   "production_armed": false,
   "profiles": {
+    "fabric.attended.claude.bounded.v1": {
+      "package_generation_digests": {},
+      "profile_digest": "351952f0608b7f2c3f5382d1c8028c20e3431a1f97d4f6a9271ecebe945493ba",
+      "surfaces": {
+        "agent-sdk": {
+          "reason": "Sealed attended Claude Code worker; this static MCP projection slice does not qualify its live foreground binding, provider credential, physical process, or Runtime admission.",
+          "status": "deferred"
+        },
+        "cli": {
+          "reason": "Sealed attended Claude Code worker; this static MCP projection slice does not qualify its live foreground binding, provider credential, physical process, or Runtime admission.",
+          "status": "deferred"
+        },
+        "desktop-local": {
+          "reason": "Sealed attended Claude Code worker; this static MCP projection slice does not qualify its live foreground binding, provider credential, physical process, or Runtime admission.",
+          "status": "deferred"
+        },
+        "inline-subagent": {
+          "reason": "Sealed attended Claude Code worker; this static MCP projection slice does not qualify its live foreground binding, provider credential, physical process, or Runtime admission.",
+          "status": "deferred"
+        }
+      }
+    },
     "operator.appserver.interactive.company-mcp.v1": {
       "package_generation_digests": {},
       "profile_digest": "19ea30bee5e609a70cae37c511cb519f8b6cbc535546aafa9b595729a5c59530",

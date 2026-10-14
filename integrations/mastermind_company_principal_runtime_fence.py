@@ -515,6 +515,81 @@ class PrincipalDialogueRuntimeCommitOwner:
 
         return (await self.read_committed_message(message_key)).observation
 
+    async def reconcile_obligation(
+        self, *, obligation_id: str, context: PrincipalAdmissionContext,
+        root_job_id: str, receiving_read_guard: Callable[[], None],
+    ) -> PrincipalCommitObservation | None:
+        """Recover an original reply when its transport response was lost.
+
+        The authenticated host supplies the original caller scope and a current
+        synchronous read-permission guard. New-effect arming and an unanswered
+        source are deliberately unnecessary. Exact principal/generation/mission
+        scope is still required; this does not grant a successor access to a
+        predecessor's records. No binding resolver, new-effect guard, write or
+        fresh source acquisition runs. None means no matching COMMIT was observed
+        at this instant, never permission to replay an uncertain request.
+        """
+        from control_plane.principal_dialogue_obligation import (
+            read_original_principal_dialogue_obligation,
+        )
+
+        def guard():
+            if not callable(receiving_read_guard):
+                raise ValueError
+            result = receiving_read_guard()
+            if result is not None:
+                if inspect.iscoroutine(result):
+                    result.close()
+                raise ValueError
+
+        try:
+            guard()
+            if type(context) is not PrincipalAdmissionContext:
+                raise ValueError
+            anchor = read_original_principal_dialogue_obligation(self.runtime,
+                obligation_id=obligation_id, expected_work_ref=context.work_ref,
+                expected_root_job_id=root_job_id)
+            physical = anchor.physical_source
+            child = physical.candidate
+            matches = []
+            for event in self.runtime.events.list_events(job_id=child.job_id,
+                    attempt_id=child.attempt_id,
+                    aggregate_type=PRINCIPAL_RUNTIME_AGGREGATE_TYPE):
+                stored = self._event_for_message_key(event.aggregate_id)
+                if stored is None or stored[0] != event:
+                    raise ValueError
+                _, intent = stored
+                if (intent.reply_to_message_key != physical.predecessor_message_key
+                        or intent.thread_ts != physical.thread_ts):
+                    continue
+                snapshot = event.payload["binding"]
+                _require_binding_intent_match(snapshot, intent)
+                actor = snapshot["context"]["actor_ref"]
+                if (intent.work_ref != context.work_ref
+                        or intent.operation_key != physical.operation_key
+                        or intent.child_worker_id != child.worker_id
+                        or intent.principal_binding_digest != context.principal_binding_digest
+                        or intent.authority_generation_digest != context.authority_generation_digest
+                        or actor.get("mission_authority_ref") != context.mission_authority_ref
+                        or actor.get("root_job_id") != root_job_id
+                        or actor.get("kind") != "executive_principal"
+                        or actor.get("seat") != "coo"
+                        or intent.message_type != "RULING"):
+                    raise ValueError
+                matches.append(intent.message_key)
+            if len(matches) > 1:
+                raise ValueError
+            guard()
+            if not matches:
+                return None
+            observation = await self.reconcile(matches[0])
+            guard()  # Do not disclose a read after its receiving permission moved.
+            return observation
+        except Exception:
+            raise PrincipalRuntimeFenceError(
+                "principal original reply unavailable"
+            ) from None
+
     def _committed_read(
         self,
         state: PrincipalCommitObservationState,

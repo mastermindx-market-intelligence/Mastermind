@@ -133,6 +133,7 @@ class ExecutiveOperatorSupervisor:
         instance_id: str = "executive-coo-operator",
         claimed_adapter_factory: ClaimedOperatorAdapterFactory | None = None,
         workspace_identity_source: ClaimedWorkspaceIdentitySource | None = None,
+        foreground_only: bool = False,
     ) -> None:
         if ((adapter_factory is None) == (claimed_adapter_factory is None)
                 or (adapter_factory is not None and not callable(adapter_factory))
@@ -144,6 +145,9 @@ class ExecutiveOperatorSupervisor:
             raise ExecutiveOperatorSupervisorError(
                 "selected-host workspace identity requires a claim-aware factory"
             )
+        if type(foreground_only) is not bool:
+            raise ExecutiveOperatorSupervisorError("foreground_only must be boolean")
+        self.foreground_only = foreground_only
         self.runtime = runtime
         self.adapter_factory = adapter_factory
         self._claimed_adapter_factory = claimed_adapter_factory
@@ -983,8 +987,24 @@ class ExecutiveOperatorSupervisor:
         return True
 
     def _run_claimed(
-        self, job: Job, lease: AttemptLease, *, retain_native: bool = False
+        self, job: Job, lease: AttemptLease, *, retain_native: bool = False,
+        foreground_operation=None,
     ) -> OrchestrationDispatchOutcome | RetainedNativeOperatorSession:
+        def require_fresh_effect():
+            if foreground_operation is None:
+                return
+            foreground_operation.require_root(job.root_job_id)
+            with self.runtime.store.read() as connection:
+                self.runtime.attempts._leased_row(connection,
+                    attempt_id=lease.attempt.attempt_id,
+                    fence_generation=lease.attempt.fence_generation,
+                    lease_token=lease.lease_token, timestamp=self.runtime.store.now_ms(),
+                    statuses={AttemptStatus.CLAIMED, AttemptStatus.RUNNING, AttemptStatus.CHECKPOINTED})
+            current = self.runtime.jobs.get_job(job.job_id)
+            if current is None or current.current_attempt_id != lease.attempt.attempt_id:
+                raise ExecutiveOperatorSupervisorError("foreground Attempt is no longer current")
+            foreground_operation._require_live()  # Recheck after possibly blocking canonical reads.
+        require_fresh_effect()  # Thread entry may follow request closure.
         interactive = self.runtime.operator_harness.is_interactive_job(job.job_id)
         if retain_native:
             if (not interactive or job.constraints.get("execution_profile_id")
@@ -1022,6 +1042,11 @@ class ExecutiveOperatorSupervisor:
                 ) from exc
 
         adapter = self._adapter_for_attempt(lease, requested, load_turn, recovery=False)
+        if foreground_operation is not None:
+            from control_plane.remote_operator_harness_adapter import RemoteOperatorHarnessAdapter
+            if not isinstance(adapter, RemoteOperatorHarnessAdapter):
+                raise ExecutiveOperatorSupervisorError("foreground operator needs its qualified transport owner")
+            adapter.bind_fresh_effect_guard(require_fresh_effect, attempt_id=lease.attempt.attempt_id)
         orchestrator = self._orchestrator(lease, adapter)
         attempt_id = lease.attempt.attempt_id
         start_operation = OperationId(f"ohf-op:start:{attempt_id}")
@@ -1114,6 +1139,12 @@ class ExecutiveOperatorSupervisor:
             raise StateConflict("App Server supervisor accepts only planner Jobs")
         if self.runtime.operator_harness.is_interactive_job(job_id):
             raise StateConflict("interactive Jobs are not owned by the one-shot supervisor")
+        from control_plane.foreground_operation import _current_foreground_operation_or_none
+        foreground_operation = _current_foreground_operation_or_none()
+        if self.foreground_only and foreground_operation is None:
+            raise ExecutiveOperatorSupervisorError("foreground-only operator requires its original request")
+        if foreground_operation is not None:
+            foreground_operation.require_root(job.root_job_id)
         outcome = self.runtime.attempts.dispatch_cycle_job(
             job_id,
             command_id=command_id,
@@ -1135,7 +1166,8 @@ class ExecutiveOperatorSupervisor:
         lease = AttemptLease(outcome.attempt, outcome.lease_token)
         # All remote proxy methods are deliberately synchronous so the frozen
         # orchestrator cannot hide provider calls inside an event loop.
-        completed = await asyncio.to_thread(self._run_claimed, job, lease)
+        completed = await asyncio.to_thread(self._run_claimed, job, lease,
+            **({"foreground_operation": foreground_operation} if foreground_operation is not None else {}))
         return OrchestrationDispatchOutcome(
             command_id=command_id,
             job_id=completed.job_id,
@@ -1491,6 +1523,9 @@ class ExecutiveOperatorSupervisor:
                 and observation.provider_writer_state is ProviderWriterState.HELD
             ):
                 if existing_turn is None:
+                    if self.foreground_only:
+                        return ReconcileReceipt(attempt_id=attempt_id, job_id=lease.attempt.job_id,
+                            status=ReconcileStatus.LIVE_QUARANTINED, process_was_live=process_was_live)
                     turn = orchestrator.run_turn(
                         session,
                         operation_id=(
@@ -1545,6 +1580,9 @@ class ExecutiveOperatorSupervisor:
                 provider_session_id = str(
                     session.observation.provider_session_id or ""
                 )
+                if self.foreground_only:
+                    return ReconcileReceipt(attempt_id=attempt_id, job_id=lease.attempt.job_id,
+                        status=ReconcileStatus.LIVE_QUARANTINED, process_was_live=process_was_live)
                 resumed = orchestrator.resume(
                     session,
                     operation_id=OperationId(

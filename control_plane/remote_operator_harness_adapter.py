@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 import dataclasses
+import json
 from typing import Any, Callable
 
 from control_plane.executive_orchestration_principal import (
@@ -129,11 +130,41 @@ class RemoteOperatorHarnessAdapter:
     ) -> None:
         _validate_remote_capabilities(capabilities)
         self.client = client
+        self._fresh_effect_guard = None
+        self._foreground_attempt_id = None
         self.turn_input_loader = turn_input_loader
         self._capabilities = capabilities
         self._start_receipts: dict[str, dict[str, Any]] = {}
         self._turn_results: dict[str, dict[str, Any]] = {}
         self._artifact_receipts: dict[str, BrowserReviewReceipt | None] = {}
+
+    def bind_fresh_effect_guard(self, guard, *, attempt_id):
+        """Trusted local source from the original supervisor; never a wire field."""
+        if (self._fresh_effect_guard is not None or not callable(guard)
+                or type(attempt_id) is not str or not attempt_id):
+            raise BrokerProtocolError("foreground guard binding is invalid")
+        guard()
+        self._fresh_effect_guard = guard
+        self._foreground_attempt_id = attempt_id
+
+    def _fresh_write_options(self, operation, payload):
+        guard = self._fresh_effect_guard
+        if guard is None:
+            return {}
+        identity = payload.get("epoch", payload.get("turn", {}))
+        generation = payload.get("generation", {})
+        if (identity.get("attempt_id") != self._foreground_attempt_id
+                or generation.get("session_epoch_id") != identity.get("session_epoch_id")
+                or ("turn" in payload and generation.get("process_generation_id")
+                    != identity.get("process_generation_id"))):
+            raise BrokerProtocolError("foreground request differs from original Attempt")
+        frozen = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        def before_write(actual_operation, actual_payload):
+            if (actual_operation != operation or json.dumps(actual_payload,
+                    sort_keys=True, separators=(",", ":"), ensure_ascii=False) != frozen):
+                raise BrokerProtocolError("foreground request bytes changed")
+            guard()
+        return {"before_write": before_write}
 
     @staticmethod
     def _mapping(value: Any, *, name: str) -> dict[str, Any]:
@@ -173,7 +204,8 @@ class RemoteOperatorHarnessAdapter:
         }
         if provider_session is not None:
             payload["provider_session"] = to_wire(provider_session)
-        result = self.client.request_sync(operation_name, payload, timeout_seconds=240)
+        result = self.client.request_sync(operation_name, payload, timeout_seconds=240,
+            **self._fresh_write_options(operation_name, payload))
         try:
             observation = session_start_observation(result.get("observation"))
             receipt = {
@@ -345,17 +377,12 @@ class RemoteOperatorHarnessAdapter:
         launch: LaunchComparison,
     ) -> TurnStartObservation:
         prompt = self.turn_input_loader(turn)
-        result = self.client.request_sync(
-            "ohf-begin-turn",
-            {
-                "operation_id": to_wire(operation_id),
-                "turn": to_wire(turn),
-                "generation": to_wire(generation),
-                "launch": to_wire(launch),
-                "prompt": prompt,
-            },
-            timeout_seconds=90,
-        )
+        payload = {
+            "operation_id": to_wire(operation_id), "turn": to_wire(turn),
+            "generation": to_wire(generation), "launch": to_wire(launch), "prompt": prompt,
+        }
+        result = self.client.request_sync("ohf-begin-turn", payload, timeout_seconds=90,
+            **self._fresh_write_options("ohf-begin-turn", payload))
         try:
             return turn_start_observation(result.get("observation"))
         except OperatorHarnessWireError as exc:
