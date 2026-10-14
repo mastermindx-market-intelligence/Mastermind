@@ -347,6 +347,141 @@ class WorkbenchBrowserAppTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(unavailable["isError"])
         self.assertIn("TOOL_NOT_AVAILABLE", unavailable["content"][0]["text"])
 
+    async def test_actual_browser_mcp_read_catalog_projects_to_existing_dsh_grant(self):
+        """Authorize no Browser mutation through an inert DSH read projection.
+
+        Use the actual JWT-authenticated Browser MCP SDK catalog and the
+        existing, immutable V4 source/grant types. The synthetic derivative is
+        NOT source-signed/Runtime-admitted and cannot supply an account grant.
+        """
+        import copy
+        import hashlib
+
+        from control_plane.dsh_mcp_client_projection import (
+            DshMcpProjectionError, project_dsh_mcp_tools,
+        )
+        from control_plane.executive_agent_capabilities import (
+            ExecutionCapabilityRegistry, observed_mcp_tool_schema_digest,
+        )
+
+        protocol = self.result(await self.rpc(
+            "initialize",
+            {"protocolVersion": "2025-03-26", "capabilities": {},
+             "clientInfo": {"name": "browser-read-dsh-fixture", "version": "1"}},
+            token=self.token(),
+        ))
+        identity = protocol["serverInfo"]
+        observed = self.result(await self.rpc("tools/list", token=self.token()))
+        catalog = {"tools": observed["tools"]}
+        by_name = {row["name"]: row for row in observed["tools"]}
+        self.assertEqual(len(by_name), len(observed["tools"]))
+        self.assertIn("browser_snapshot", by_name)
+        self.assertIn(RUN_ACTION_TOOL, by_name)
+        self.assertIn(START_RESOURCE_TOOL, by_name)
+        self.assertTrue(by_name["browser_snapshot"]["annotations"]["readOnlyHint"])
+        self.assertFalse(by_name[RUN_ACTION_TOOL]["annotations"]["readOnlyHint"])
+        self.assertTrue(by_name[RUN_ACTION_TOOL]["annotations"]["destructiveHint"])
+        self.assertFalse(by_name[START_RESOURCE_TOOL]["annotations"]["readOnlyHint"])
+
+        root = Path(__file__).resolve().parents[1]
+        protected = ExecutionCapabilityRegistry.load(
+            root / "scripts/ohf/fixtures/"
+            "executive_agent_capabilities_v4_mastermind_operator.json",
+            source_root=root,
+        )
+        self.assertFalse(protected.production_armed)
+        base = protected.resolve("operator.browser.local-review.v1")
+        original = next(g for g in base.mcp_server_grants if g.transport == "stdio")
+        digest = observed_mcp_tool_schema_digest(
+            {"tools": {"browser_snapshot": by_name["browser_snapshot"]}}
+        )
+        synthetic_capability = "fixture.browser_mcp.snapshot.read_only"
+        grant = dataclasses.replace(
+            original,
+            capability_id=synthetic_capability,
+            config_name="BrowserReadFixture",
+            transport="streamable-http",
+            url=RESOURCE,
+            command=None, args=(), required=True,
+            enabled_tools=("browser_snapshot",),
+            default_tools_approval_mode="approve",
+            server_identity=identity["name"],
+            server_version=identity["version"],
+            tool_schema_digest=digest,
+            grant_digest=hashlib.sha256(b"SYNTHETIC_BROWSER_DSH_NOT_AUTHORITY").hexdigest(),
+        )
+        profile = dataclasses.replace(
+            base, profile_id="fixture.browser.read.only.dsh",
+            profile_digest=hashlib.sha256(b"SYNTHETIC_BROWSER_PROFILE_NOT_ADMITTED").hexdigest(),
+            mcp_server_grants=(grant,),
+        )
+        projected = project_dsh_mcp_tools(
+            profile,
+            capability_id=synthetic_capability,
+            observed_tool_catalog=catalog,
+        ).configuration()
+        self.assertIs(projected["production_armed"], False)
+        self.assertIs(projected["required"], True)
+        self.assertEqual(projected["approvalMode"], "approve")
+        self.assertEqual(projected["target"], {
+            "serverName": "BrowserReadFixture",
+            "transport": "streamable-http", "url": RESOURCE,
+        })
+        self.assertEqual(projected["serverInfo"], identity)
+        self.assertEqual(projected["source"]["tool_schema_digest"], digest)
+        self.assertEqual([x["name"] for x in projected["tools"]], ["browser_snapshot"])
+        self.assertTrue(projected["tools"][0]["annotations"]["readOnlyHint"])
+        self.assertFalse(projected["tools"][0]["annotations"]["destructiveHint"])
+        self.assertFalse(any(x["name"] in (RUN_ACTION_TOOL, START_RESOURCE_TOOL)
+                             for x in projected["tools"]))
+
+        # The mixed live catalog cannot widen a precise grant: changing an
+        # UNGRANTED mutating action does not add it to the worker-facing output.
+        wider_catalog = copy.deepcopy(catalog)
+        next(row for row in wider_catalog["tools"]
+             if row["name"] == RUN_ACTION_TOOL)["inputSchema"] = {"type": "null"}
+        rerender = project_dsh_mcp_tools(
+            profile, capability_id=synthetic_capability,
+            observed_tool_catalog=wider_catalog,
+        ).configuration()
+        self.assertEqual(rerender, projected)
+
+        for mutation in ("inputSchema", "annotations"):
+            changed = copy.deepcopy(catalog)
+            selected = next(row for row in changed["tools"]
+                            if row["name"] == "browser_snapshot")
+            if mutation == "annotations":
+                selected[mutation]["readOnlyHint"] = False
+            else:
+                selected[mutation]["type"] = "null"
+            with self.subTest(mutation=mutation):
+                with self.assertRaises(DshMcpProjectionError):
+                    project_dsh_mcp_tools(
+                        profile, capability_id=synthetic_capability,
+                        observed_tool_catalog=changed,
+                    )
+        with self.assertRaises(DshMcpProjectionError):
+            project_dsh_mcp_tools(
+                profile, capability_id=synthetic_capability,
+                observed_tool_catalog={"tools": [r for r in catalog["tools"]
+                                                 if r["name"] != "browser_snapshot"]},
+            )
+        with self.assertRaises(DshMcpProjectionError):
+            project_dsh_mcp_tools(
+                profile, capability_id=synthetic_capability,
+                observed_tool_catalog={**catalog, "nextCursor": "not-complete"},
+            )
+        wrong_approval = dataclasses.replace(grant, default_tools_approval_mode="auto")
+        with self.assertRaises(DshMcpProjectionError):
+            project_dsh_mcp_tools(
+                dataclasses.replace(profile, mcp_server_grants=(wrong_approval,)),
+                capability_id=synthetic_capability,
+                observed_tool_catalog=catalog,
+            )
+        unauthorized = await self.rpc("tools/list")
+        self.assertEqual(unauthorized.status_code, 401)
+        self.assertEqual(self.calls, [])  # no browser resource/action effects
+
     async def test_schema_drift_refuses_server_creation(self):
         catalog = json.loads(
             (
