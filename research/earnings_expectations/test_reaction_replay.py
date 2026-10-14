@@ -203,3 +203,100 @@ def test_sec_casebook_nine_real_filing_clocks_remain_unadmitted():
         with pytest.raises(ReplayError) as exc:
             replay(p)
         assert exc.value.reason == "FIRST_PUBLIC_RELEASE_CLOCK_NOT_VERIFIED"
+
+
+def make_window_packet():
+    p = make_packet()
+    p["event"].update({
+        "first_publication_clock_status": "AFTER_CLOSE_WINDOW_CORROBORATED",
+        "first_published_utc": None,
+        "after_close_session": "2026-03-03",
+        "observed_public_by_utc": "2026-03-03T21:05:00Z",
+        "public_by_source_kind": "ISSUER_WIRE_DISTRIBUTION",
+        "after_close_evidence_refs": ["issuer-ir-fixture", "wire-fixture"],
+    })
+    return p
+
+
+def test_corrob_after_close_window_is_not_exact_clock():
+    p = make_window_packet()
+    result = replay(p)
+    assert result["reaction"]["status"] == "AVAILABLE"
+    assert result["first_published_utc"] is None
+    assert result["clock_quality"] == "SESSION_WINDOW_CORROBORATED_EARLIEST_RELEASE_UNKNOWN"
+    assert result["observed_public_by_utc"] == "2026-03-03T21:05:00Z"
+    assert result["reaction"]["returns"]["issuer"] == pytest.approx(.02)
+    assert result["clock_evidence_refs"] == ["issuer-ir-fixture", "wire-fixture"]
+
+
+@pytest.mark.parametrize("field,value,reason", [
+    ("first_published_utc", "2026-03-03T21:05:00Z", "WINDOW_MODE_CANNOT_ASSERT_FIRST_PUBLIC_CLOCK"),
+    ("after_close_session", "2026-03-01", "RELEASE_SESSION_NOT_IN_EXCHANGE_CALENDAR"),
+    ("after_close_evidence_refs", ["sec-only"], "CORROBORATING_PUBLIC_RELEASE_EVIDENCE_REQUIRED"),
+    ("after_close_evidence_refs", ["duplicate", "duplicate"], "CORROBORATING_PUBLIC_RELEASE_EVIDENCE_REQUIRED"),
+    ("public_by_source_kind", "SEC_ACCEPTANCE", "NON_SEC_PUBLIC_RELEASE_WITNESS_REQUIRED"),
+    ("observed_public_by_utc", "2026-03-03T20:00:00Z", "PUBLIC_WITNESS_NOT_AFTER_SESSION_CLOSE"),
+    ("observed_public_by_utc", "2026-03-04T14:30:00Z", "PUBLIC_WITNESS_NOT_BEFORE_NEXT_OPEN"),
+    ("observed_public_by_utc", "2026-03-03T21:05:00", "TIMESTAMP_WITH_OFFSET_REQUIRED"),
+])
+def test_corrob_window_refusals(field, value, reason):
+    p = make_window_packet()
+    p["event"][field] = value
+    with pytest.raises(ReplayError) as exc:
+        replay(p)
+    assert exc.value.reason == reason
+
+
+def test_corrob_window_before_asof_refuses():
+    p = make_window_packet()
+    p["evaluated_asof_utc"] = "2026-03-03T21:04:59Z"
+    with pytest.raises(ReplayError) as exc:
+        replay(p)
+    assert exc.value.reason == "EVALUATION_BEFORE_PUBLICATION"
+
+
+def test_corrob_window_future_close_is_not_assumed():
+    p = make_window_packet()
+    p["evaluated_asof_utc"] = "2026-03-04T13:00:00Z"
+    result = replay(p)
+    assert result["reaction"]["status"] == "AFFECTED_CLOSE_NOT_YET_KNOWN"
+
+
+def test_corrob_window_friday_to_monday():
+    p = make_window_packet()
+    p["event"].update(after_close_session="2026-03-06", observed_public_by_utc="2026-03-06T21:05:00Z")
+    r = replay(p)
+    assert r["unaffected_last_close_session"] == "2026-03-06"
+    assert r["first_affected_session"] == "2026-03-09"
+    assert r["reaction"]["status"] == "AVAILABLE"
+
+
+@pytest.mark.parametrize("stem,first,last,ex_spy,ex_sector", [
+    ("googl_2026q2", 341.87, 317.49, -0.058961, -0.036308),
+    ("msft_fy2026q4", 389.81, 450.25, 0.138284, 0.100055),
+    ("amzn_2026q2", 235.50, 271.58, 0.146002, 0.120301),
+])
+def test_retrospective_sourced_july_public_windows(stem, first, last, ex_spy, ex_sector):
+    import json
+    from pathlib import Path
+    packet = json.loads((Path(__file__).parent / "sourced_event_packets" / (stem + ".json")).read_text())
+    r = replay(packet)
+    assert r["first_published_utc"] is None
+    assert r["first_public_source_ref"] is None  # don't misstate earliest first-public timestamp
+    assert r["clock_quality"] == "SESSION_WINDOW_CORROBORATED_EARLIEST_RELEASE_UNKNOWN"
+    assert r["reaction"]["status"] == "AVAILABLE"
+    assert r["reaction"]["returns"]["issuer"] == pytest.approx(last/first-1)
+    assert r["reaction"]["returns"]["issuer_minus_market"] == pytest.approx(ex_spy, abs=0.000001)
+    assert r["reaction"]["returns"]["issuer_minus_sector"] == pytest.approx(ex_sector, abs=0.000001)
+    assert r["drift"]["H5"]["status"] == "INSUFFICIENT_FUTURE_SESSIONS"
+    assert r["authority"] == "RESEARCH_ONLY_NO_TRADING"
+
+
+def test_sourced_case_window_bad_witness_does_not_fallback_to_sec():
+    import json
+    from pathlib import Path
+    packet = json.loads((Path(__file__).parent / "sourced_event_packets" / "amzn_2026q2.json").read_text())
+    packet["event"]["public_by_source_kind"] = "SEC_ACCEPTANCE"
+    with pytest.raises(ReplayError) as exc:
+        replay(packet)
+    assert exc.value.reason == "NON_SEC_PUBLIC_RELEASE_WITNESS_REQUIRED"
