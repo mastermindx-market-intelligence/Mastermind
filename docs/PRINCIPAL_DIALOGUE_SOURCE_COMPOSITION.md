@@ -46,6 +46,16 @@ refuses. Both Wake target flags stay false and no attention is created, includin
 for a foreground thread with watching disabled. This predicate is deliberately
 limited to decision requests; it is not a general permission to continue or stop.
 
+`acquire_principal_decision_source` composes these reads for an already
+authenticated host. It first checks the actual receiving `CooHostProvider`, then
+derives the context from the exact COO-targeted obligation, immutable root
+creation source and current child delegation/attempt. It accepts no request-built
+physical-source or context object. After Relay and Executive observations, it
+checks the unanswered request and rereads the original anchor, context and
+authority. The returned decision source can be passed to the fresh effect fence
+below; the acquisition itself reserves nothing and sends nothing. An absent or
+CEO-targeted obligation still refuses and does not create a principal route.
+
 The canonical turn watcher recognizes accepted COO-principal commands against
 the exact worker and trusted root. A principal STOP is consumed only by that
 worker's ACK. Existing worker-return targets and source/route grants remain
@@ -77,6 +87,11 @@ mission. The Runtime COMMIT owner invokes it synchronously inside the same write
 transaction that checks the current child/lease/quota and records the original
 COMMIT-start event. Revocation, a changed root/profile/generation, a reserved turn
 or an owner failure refuses before the event is recorded. Async guards refuse.
+The host imports only `Runtime` and the canonical `PrincipalAdmissionContext`
+value object from the control plane. The latter is required by the receiving
+guard's exact-type check; this seam does not import envelope builders. The
+dependency test pins both module and symbol boundaries, while the MCP adapters
+remain independent of Runtime, storage, process and Wake implementations.
 
 The transaction also fences the original child request, not only the outgoing
 message key. A second authenticated surface or a principal-generation change
@@ -90,9 +105,10 @@ those in [Source-bound product acceptance](PRODUCT_ACCEPTANCE_REVIEW.md).
 
 ## Remaining installed qualification
 
-The installed host must acquire each physical identity from its canonical owner,
-authenticate the App-to-Control request on the existing allowed peer boundary,
-and select the explicit fresh decision-source composition described above.
+The installed host must authenticate the App-to-Control request on the existing
+allowed peer boundary, select this canonical acquisition for an eligible
+COO-targeted obligation, and compose the explicit fresh decision-source fence
+described above.
 These read adapters do not create that installed request frame or its admission.
 The existing foreground route can be qualified without claiming an idle Wake;
 the separate principal attention route still needs actual source/target evidence.

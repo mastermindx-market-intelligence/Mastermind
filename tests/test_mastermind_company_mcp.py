@@ -712,7 +712,34 @@ def test_sdk_and_runtime_dependency_boundaries_are_exact():
     control_plane_imports = {
         module for module in host_imports if module.startswith("control_plane.")
     }
-    assert control_plane_imports == {"control_plane.executive_runtime"}
+    assert control_plane_imports == {
+        "control_plane.executive_runtime",
+        "control_plane.coo_principal_envelope",
+    }
+    # The receiving authority guard requires this exact canonical value type.
+    # Permit no envelope builder or other control-plane capability at the host
+    # composition seam; a module-only allowlist would hide that expansion.
+    host_tree = ast.parse(
+        (root / "integrations" / "mastermind_company_principal_runtime_fence.py")
+        .read_text(encoding="utf-8")
+    )
+    control_plane_symbols = {
+        (node.module, alias.name)
+        for node in ast.walk(host_tree)
+        if isinstance(node, ast.ImportFrom)
+        and node.module in control_plane_imports
+        for alias in node.names
+    }
+    assert control_plane_symbols == {
+        ("control_plane.executive_runtime", "Runtime"),
+        ("control_plane.coo_principal_envelope", "PrincipalAdmissionContext"),
+    }
+    assert not any(
+        alias.name in control_plane_imports
+        for node in ast.walk(host_tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    )
     assert not (
         host_imports
         & {
