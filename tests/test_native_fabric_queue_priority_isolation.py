@@ -9,6 +9,7 @@ import pytest
 
 import subprocess
 import tempfile
+import textwrap
 
 BUNDLE = (Path(__file__).resolve().parents[1] /
           "ops/native_fabric/routing_audit_20261013/queue_priority")
@@ -16,7 +17,8 @@ PREIMAGE = BUNDLE / "queue_front_reference.py.txt"
 PATCH = BUNDLE / "queue_priority_isolation.patch"
 
 def reviewed_source():
-    original = PREIMAGE.read_bytes()
+    original = ("class BrokerQueueReference:\n" +
+                textwrap.indent(PREIMAGE.read_text(), "    ")).encode("utf-8")
     if os.environ.get("FABRIC_QUEUE_TEST_PREIMAGE") == "1":
         return original.decode("utf-8")
     # Apply the actual published follow-on patch to the exact function excerpt.
@@ -42,7 +44,7 @@ def class_priority(task_class, job_class=None):
 namespace = {"sqlite3": sqlite3, "Optional": Optional,
              "_class_priority": class_priority}
 exec(compile(SOURCE, "<reviewed-queue-decision-excerpt>", "exec"), namespace)
-choose = namespace["_front_of_queue"]
+choose = namespace["BrokerQueueReference"]._front_of_queue
 
 def decide(rows, current, job_class=None):
     # The incumbent query already orders by priority then enqueue time.
@@ -102,3 +104,20 @@ def test_exhaustive_priority_and_fifo_reference():
                                (priority == current_priority and arrival < own))
                               for root, priority, arrival in rows)
                 assert decide(rows, current) is not blocked, (rows, current)
+
+
+def test_patch_applies_with_real_method_indentation_and_offset():
+    import textwrap
+    # Native Broker methods are nested, unlike a dedented function excerpt.
+    # The source patch must work in that structure and at a nonzero file offset.
+    real_shape = ("# unrelated source\n" * 740 +
+                  "class BrokerQueueReference:\n" +
+                  textwrap.indent(PREIMAGE.read_text(), "    "))
+    with tempfile.TemporaryDirectory(prefix="fabric-queue-offset-") as temporary:
+        root = Path(temporary)
+        (root / "ext").mkdir()
+        target = root / "ext/lease_broker.py"
+        target.write_text(real_shape)
+        answer = subprocess.run(["git", "apply", str(PATCH)], cwd=root,
+                                capture_output=True, text=True, check=False)
+        assert answer.returncode == 0, answer.stderr
