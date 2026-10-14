@@ -318,11 +318,14 @@ class PrincipalDialogueRuntimeCommitOwner:
         self.service_call = service_call
         self.principal_authority_guard = principal_authority_guard
 
-    def before_commit(self, intent: PrincipalCommitIntent) -> PrincipalCommitFenceReceipt:
+    def before_commit(self, intent: PrincipalCommitIntent, *,
+                      expected_binding: DialogueBinding | None = None) -> PrincipalCommitFenceReceipt:
         """Persist the sole COMMIT-start fact after a fresh exact binding recheck."""
 
         intent = _validate_intent(intent)
         snapshot = _binding_snapshot(self.binding_resolver.resolve())
+        if expected_binding is not None and snapshot != _binding_snapshot(expected_binding):
+            raise PrincipalRuntimeFenceError("principal source binding changed")
         _require_binding_intent_match(snapshot, intent)
         actor = snapshot["context"]["actor_ref"]
         payload = _event_payload(intent, snapshot)

@@ -53,6 +53,24 @@ unchanged; recognizing a command is not enrolling a new principal attention rout
 
 ## Preserve the final effect boundary
 
+An optional `principal_decision_source` binds already acquired caller, context,
+original physical source and Executive observation client to the host. It
+requires the receiving authority guard. In the actual gateway pre-COMMIT
+callback, `PrincipalDecisionSourceFence` reacquires the exact Relay and current
+Runtime observations, checks the unanswered decision, and supplies the complete
+fresh binding to the existing Runtime owner. No await follows the source
+validation before that owner runs. A changed resolver binding refuses. This
+explicit composition admits RULING only; CONTINUE and STOP require separately
+qualified source families and cannot skip the fence.
+
+Relay adjudicates each new principal reply using its existing trusted authority
+policy before preparing the send and again immediately before posting. The
+original request must exist, its option must be offered, its authority floor
+must permit the ruling, and no earlier disposition may answer the same request.
+Exact existing-message reconciliation precedes these new-write checks. A policy
+change after Runtime COMMIT-start can still cause Relay refusal; the original
+Runtime event and reconciliation identity remain, without a replacement send.
+
 The existing principal host accepts `principal_authority_guard=coo_host.guard_dialogue`.
 This receiving-side guard rereads the installed enrolled source and current
 mission. The Runtime COMMIT owner invokes it synchronously inside the same write
@@ -72,9 +90,9 @@ those in [Source-bound product acceptance](PRODUCT_ACCEPTANCE_REVIEW.md).
 
 ## Remaining installed qualification
 
-The complete host must acquire each physical identity from its canonical owner,
+The installed host must acquire each physical identity from its canonical owner,
 authenticate the App-to-Control request on the existing allowed peer boundary,
-and compose fresh current-source and unanswered-request acquisition at COMMIT.
+and select the explicit fresh decision-source composition described above.
 These read adapters do not create that installed request frame or its admission.
 The existing foreground route can be qualified without claiming an idle Wake;
 the separate principal attention route still needs actual source/target evidence.
