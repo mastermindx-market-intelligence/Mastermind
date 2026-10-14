@@ -42,7 +42,10 @@ PacketRunner = Callable[..., Mapping[str, Any]]
 _default_packet_runner = ceo_boot_packet.bounded_subprocess_runner
 _PACKET_SETTLEMENT_MARGIN_SECONDS = 0.75
 _INSTALLED_PACKET_TOTAL_TIMEOUT_SECONDS = READ_TIMEOUT_SECONDS - 2.0
-_OBJECT_TYPE_PROBE_SHARD_SIZE = 48_000
+# Bound each independent input below the observed 48k-object timeout case.
+# This preserves the complete object set and two-probe concurrency; fitting the
+# installed cumulative deadline still requires actual host qualification.
+_OBJECT_TYPE_PROBE_SHARD_SIZE = 24_000
 
 
 def _valid_sha(value: object) -> bool:
@@ -1197,8 +1200,45 @@ def _clean_git_snapshot(
     if not _valid_sha(head):
         raise GatewayError("backend_unavailable", f"installed {label} HEAD is unavailable")
 
-    ancestry_commits: set[str] = set()
-    if verify_repository_closure:
+
+
+    tree = observe(
+        ["ls-tree", "-r", "-z", "--full-tree", head],
+        max_bytes=32 * 1024 * 1024,
+    )
+    expected: dict[str, tuple[str, str]] = {}
+    for record in tree.split("\0"):
+        if not record:
+            continue
+        meta, sep, rel = record.partition("	")
+        parts = meta.split()
+        if not sep or len(parts) != 3:
+            raise GatewayError("backend_unavailable", f"installed {label} tree is malformed")
+        mode, object_type, oid = parts
+        if (
+            object_type != "blob"
+            or mode not in {"100644", "100755", "120000"}
+            or not _valid_sha(oid)
+            or not rel
+            or rel in expected
+        ):
+            raise GatewayError("backend_unavailable", f"installed {label} tree is unsupported")
+        expected[rel] = (mode, oid)
+
+    # Commit graphs can enumerate missing parents as bare object IDs, so every
+    # ancestry commit still crosses the no-lazy-fetch object database boundary.
+    # Current HEAD blobs stay fully checked. Agent OS also consumes historical
+    # record trees for git log -- <record> dates, but not millions of unrelated
+    # historical blobs/trees; prove that path-limited tree closure separately.
+    def _object_closure() -> None:
+        _require_git_object_types(
+            path,
+            {object_oid: "blob" for _rel, (_mode, object_oid) in expected.items()},
+            runner=runner, env=env, deadline=deadline, label=label,
+        )
+
+    def _history_closure() -> None:
+        ancestry_commits: set[str] = set()
         try:
             history_result = runner(
                 ["git", "rev-list", "--parents", head],
@@ -1235,48 +1275,10 @@ def _clean_git_snapshot(
             raise GatewayError(
                 "backend_unavailable", f"installed {label} repository objects are incomplete"
             )
-
-
-    tree = observe(
-        ["ls-tree", "-r", "-z", "--full-tree", head],
-        max_bytes=32 * 1024 * 1024,
-    )
-    expected: dict[str, tuple[str, str]] = {}
-    for record in tree.split("\0"):
-        if not record:
-            continue
-        meta, sep, rel = record.partition("	")
-        parts = meta.split()
-        if not sep or len(parts) != 3:
-            raise GatewayError("backend_unavailable", f"installed {label} tree is malformed")
-        mode, object_type, oid = parts
-        if (
-            object_type != "blob"
-            or mode not in {"100644", "100755", "120000"}
-            or not _valid_sha(oid)
-            or not rel
-            or rel in expected
-        ):
-            raise GatewayError("backend_unavailable", f"installed {label} tree is unsupported")
-        expected[rel] = (mode, oid)
-
-    # Commit graphs can enumerate missing parents as bare object IDs, so every
-    # ancestry commit still crosses the no-lazy-fetch object database boundary.
-    # Current HEAD blobs stay fully checked. Agent OS also consumes historical
-    # record trees for git log -- <record> dates, but not millions of unrelated
-    # historical blobs/trees; prove that path-limited tree closure separately.
-    def _object_closure() -> None:
         _require_git_object_types(
             path, {object_id: "commit" for object_id in ancestry_commits},
             runner=runner, env=env, deadline=deadline, label=label,
         )
-
-        def current_blobs() -> None:
-            _require_git_object_types(
-                path,
-                {object_oid: "blob" for _rel, (_mode, object_oid) in expected.items()},
-                runner=runner, env=env, deadline=deadline, label=label,
-            )
 
         def historical_record_trees() -> None:
             try:
@@ -1303,12 +1305,7 @@ def _clean_git_snapshot(
                 ) from exc
 
         if content_scope == "macro_brief":
-            _overlap_full_proofs(
-                object_closure=current_blobs,
-                worktree_inventory=historical_record_trees,
-            )
-        else:
-            current_blobs()
+            historical_record_trees()
 
     scoped_capture_files = (
         _macro_brief_content_paths(set(expected))
@@ -1324,21 +1321,29 @@ def _clean_git_snapshot(
     def _worktree_inventory() -> tuple[dict[str, str], set[str], str]:
         try:
             if scoped_capture_files is not None and scoped_capture_directories is not None:
-                return _scoped_worktree_path_sets(
+                observed = _scoped_worktree_path_sets(
                     path, files=set(scoped_capture_files),
                     directories=set(scoped_capture_directories),
                     deadline=deadline, label=label, verify_record_namespaces=True,
                 )
-            return _worktree_path_sets(path, deadline=deadline, label=label)
+            else:
+                observed = _worktree_path_sets(path, deadline=deadline, label=label)
         except (OSError, TimeoutError) as exc:
             raise GatewayError(
                 "backend_unavailable", f"installed {label} worktree observation failed"
             ) from exc
 
-    # The exact HEAD/tree and both complete inventories are decoded above, so the
-    # object closure and the raw path/metadata enumeration are independent and
-    # overlap for the rest of this one invocation.  Path-set comparison, content
-    # verification, seal capture and materialization all wait for both.
+        # This branch reuses the inventory worker for ancestry and record-tree
+        # proof. Current blobs can progress on the other worker without adding
+        # another proof thread or exposing either result before the join.
+        if verify_repository_closure:
+            _history_closure()
+        return observed
+
+    # The fixed HEAD tree makes current-blob proof independent of ancestry.
+    # Reuse the existing two workers: blobs on one, inventory then history on
+    # the other. Path-set comparison, byte verification, seal capture and
+    # materialization still wait for all proofs to finish.
     _object_proof, (actual_types, actual_directories, metadata_seal) = (
         _overlap_full_proofs(
             object_closure=_object_closure if verify_repository_closure else None,
