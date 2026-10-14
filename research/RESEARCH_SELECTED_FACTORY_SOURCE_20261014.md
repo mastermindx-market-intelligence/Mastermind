@@ -44,3 +44,30 @@ root under `runtime-composition/production-factory-source/`: validation.json,
 full.xml, socket.xml, causal-red.log, cross-repo-second.log and the reproducible
 source-bound probe. No broker passages, credentials or runtime state are published.
 The new-source independent Fabric review remains a separate acceptance gate.
+
+
+## Full refresh owned by the application
+
+The selected composition now delegates an explicit full refresh to the same
+Macro provider. Its application lifespan owns one periodic task, defaulting to
+30 seconds and capped by the reuse window. The existing MCP lifespan starts
+first; refresh settles before that lifespan closes, and its yielded state is
+preserved. Neither readiness nor HTTP delivery initiates qualification.
+
+A started synchronous refresh retains ownership through repeated cancellation
+of the lifespan or background task. No replacement can overlap it. Failure is
+counted without retaining private provider diagnostics; ordinary source guards
+continue to determine whether a previously qualified selection is usable. The
+normal launcher still supplies no selected options and enables none of this.
+The factory also rejects a pinned provider without refresh support before store
+construction. A causal test reached the store on the earlier source and now
+refuses cleanly.
+
+Validation accounts for 564 distinct MCP tests: 562 initial broad-run passes,
+one environment-corrected Uvicorn child-import test, and the new capability test.
+The final 22 factory/lifecycle tests pass. The actual Macro-source synthetic HTTP
+probe covers expired selection refusal with zero source reads, automatic full
+requalification, restored search through one store/service, and drained shutdown.
+Its source overlay and synthetic authority are not production release proof.
+Independent lifecycle review remains on its original retained operation; no
+review acceptance or runtime installation is claimed.
