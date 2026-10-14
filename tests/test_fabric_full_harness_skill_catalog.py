@@ -154,6 +154,47 @@ def test_signed_operator_plus_new_role_plus_workforce_catalog(tmp_path, capsys):
                 actual = personal_skills / name / "SKILL.md"
             assert actual.resolve(strict=True).is_file()
             assert row.get("path") == str(actual.resolve(strict=True))
+        # An orchestrator may explicitly stage its separate attended Web
+        # Fabric operating Skill. The ordinary worker's seven-Skill inventory
+        # must not gain recursive delegation instructions by default. This
+        # candidate is a Skill source, NOT a provider or tool-grant receipt.
+        fabric_skill = (
+            REPO / "integrations/studio_direct_mcp/fabric_plugin_source/"
+            "skills/use-subagent-fabric"
+        )
+        candidate_extra_root = root / "orchestrator-only-candidate" / "skills"
+        fabric_staged = candidate_extra_root / "use-subagent-fabric"
+        shutil.copytree(fabric_skill, fabric_staged, symlinks=False)
+        for original in fabric_skill.rglob("*"):
+            if original.is_file():
+                assert hashlib.sha256(original.read_bytes()).digest() == hashlib.sha256(
+                    (fabric_staged / original.relative_to(fabric_skill)).read_bytes()
+                ).digest()
+        client.request("skills/extraRoots/set", extra_roots_set_params([
+            str(protected_skills), str(candidate_extra_root.resolve(strict=True)),
+        ]), timeout=10)
+        orchestrator_rows = parse_skills_list_strict(
+            client.request("skills/list", skills_list_params(str(workspace)), timeout=10),
+            expected_cwd=str(workspace),
+        )
+        # This independent candidate is not a signed/registered package, so
+        # the real Codex provider reports the bare name. Identity therefore
+        # requires the exact observed physical source path below, not a guessed
+        # namespace or a claim that the name grants MCP permissions.
+        selected_name = "use-subagent-fabric"
+        orchestrator_names = sorted(enabled_skill_names(orchestrator_rows))
+        assert orchestrator_names == sorted(exact_names + [selected_name])
+        assert len(orchestrator_rows) == 8
+        selected = next(row for row in orchestrator_rows if row["name"] == selected_name)
+        assert selected["path"] == str((fabric_staged / "SKILL.md").resolve(strict=True))
+        # A Skill document is not MCP tool entitlement. Even a visible source
+        # has not installed an OAuth token, plugin or provider capability.
+        from control_plane.codex_operator_adapter import parse_config_read
+
+        observed_config = parse_config_read(client.request(
+            "config/read", {"includeLayers": False}, timeout=10,
+        ))
+        assert observed_config.get("mcp_servers") in (None, {})
         client.request("skills/extraRoots/set", extra_roots_set_params([]), timeout=10)
         cleared = parse_skills_list_strict(
             client.request("skills/list", skills_list_params(str(workspace)), timeout=10),
@@ -171,6 +212,10 @@ def test_signed_operator_plus_new_role_plus_workforce_catalog(tmp_path, capsys):
             "protected_generation": generation.package_generation_digest,
             "user_home_role_installer": "READY",
             "catalog_enabled_count": len(exact_names),
+            "explicit_orchestrator_skill": selected_name,
+            "orchestrator_enabled_count": len(orchestrator_names),
+            "orchestrator_skill_automatic_worker_default": False,
+            "no_mcp_tool_grant_from_skill_text": True,
             "model_turns": 0, "production_armed": False,
             "credentials_read": False, "process_closed": True,
         }, sort_keys=True))
