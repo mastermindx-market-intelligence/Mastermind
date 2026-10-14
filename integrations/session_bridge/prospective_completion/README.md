@@ -1,6 +1,6 @@
 # Prospective original-parent collection recovery
 
-Status: **source-qualified candidate, uninstalled and not independently reviewed**.
+Status: **F1 source repair qualified; uninstalled, pending the same principal reviewer’s adjudication**.
 The four installed preimages are recorded in `BASE.json`; replacement bytes and
 case-level evidence are in `QUALIFICATION.json`. This package is disjoint from
 PR #1391's accepted `7739ce80c` test-only derivative and does not amend that release.
@@ -70,8 +70,10 @@ existing result and ledger owners must adjudicate any subsequent settlement.
 
 ## Verification
 
-`test_prospective_completion.py`: **40 distinct cases, zero failures/errors/skips**,
-retained in `checks-final.xml`. Actual local process/custody tests use inert fixture
+`test_prospective_completion.py`: **44 distinct cases, zero failures/errors/skips**,
+retained in `f1-successor.xml`. The predecessor’s 40-case report remains unchanged
+in `checks-final.xml`; it does not qualify the successor. Four discriminating F1
+checks fail on predecessor source (`f1-old-red.xml`) and pass on the successor. Actual local process/custody tests use inert fixture
 children only. The test suite executes the production remote executor, actual
 process receipt/cleanup, retained capsule, exact generated read code, collector
 publication, and assigning-parent consumption with fake transport/provider inputs.
@@ -107,3 +109,19 @@ back unchanged after qualification; there was no installation or host effect.
    no source-only test or collected byte stream settles those effects.
 
 No install command or historical recovery command is included in this package.
+
+## Principal review F1 — corrected dependency closure
+
+The principal reviewer found that the collector imported and embedded the validator
+from `remote_sub_exec.py` without including it in `completion_sources()`. The
+successor adds that file to the fixed local source keys in both the binding schema
+and collector. The existing prelaunch seal, collection admission and publication
+rechecks now cover it. No new source path, validator loader or runtime owner is added.
+
+The strengthened fixture copies the actual candidate dependency BEFORE begin/seal;
+its reduced inert support manifest hashes those actual bytes. Four old-source REDs
+cover change before seal, after binding/before transport, after transport, and
+during publication. The admission negative verifies zero transport calls and no
+collection intent or receipt. Later drift never publishes a consumable completion
+or permits a second read. This is local source proof, not installation, historical
+recovery, provider activity, or approval of the full package.

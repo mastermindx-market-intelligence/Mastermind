@@ -370,7 +370,7 @@ def validate_completion_binding(value):
         if type(value[k]) is not str or not re.fullmatch('[a-f0-9]{64}', value[k]):
             raise ValueError('completion_binding_digest')
     sources = value['local_sources']
-    if (type(sources) is not dict or set(sources) != {'fabric_task.py','remote_sub.sh','original_delivery_collector.py','artifact_delivery.py','artifact_reader.py'}
+    if (type(sources) is not dict or set(sources) != {'fabric_task.py','remote_sub.sh','original_delivery_collector.py','artifact_delivery.py','artifact_reader.py','remote_sub_exec.py'}
             or any(type(v) is not str or not re.fullmatch('[a-f0-9]{64}',v) for v in sources.values())):
         raise ValueError('completion_source_binding')
     c = value['controller']

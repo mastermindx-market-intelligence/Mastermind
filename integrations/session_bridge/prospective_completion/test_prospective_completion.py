@@ -43,15 +43,17 @@ def process(binding, stdout=b'useful bounded result\n'):
 @pytest.fixture
 def capsule(tmp_path,monkeypatch):
     here=tmp_path/'ext';here.mkdir();(here/'state/remote_sub').mkdir(parents=True)
-    for name in ('fabric_task.py','remote_sub.sh','original_delivery_collector.py','artifact_delivery.py','artifact_reader.py'):
-        (here/name).write_bytes((EXT/name).read_bytes())
+    for name in ('fabric_task.py','remote_sub.sh','original_delivery_collector.py',
+                 'artifact_delivery.py','artifact_reader.py','remote_sub_exec.py'):
+        source=BASE/'candidate'/name
+        (here/name).write_bytes((source if source.is_file() else EXT/name).read_bytes())
     (here/'hosts.json').write_bytes(raw({'ubuntu1':{'ssh_alias':'fixture-host','allowed_modes':['glm','qwen','minimax']}}))
     monkeypatch.setattr(c,'HERE',here)
     monkeypatch.setattr(delivery,'DESTINATION_ROOT',tmp_path)
     monkeypatch.setattr(adapter,'HERE',here)
     root='fixture-root';parent='fixture-parent';run='fixture-'+uuid.uuid4().hex
     monkeypatch.setenv('CODEX_THREAD_ID',parent);monkeypatch.setenv('POOL_ORCHESTRATOR_ID',root)
-    support={'remote_sub_exec.py':'a'*64};digest=c.sha(raw({'schema':'remote-support-code.v1','files':support}))
+    support={'remote_sub_exec.py':c.sha((here/'remote_sub_exec.py').read_bytes())};digest=c.sha(raw({'schema':'remote-support-code.v1','files':support}))
     (here/'state/remote_sub'/f'{run}.support.json').write_bytes(raw(support))
     route={'MODE':'glm','MODEL':'glm-5.3-flash','HOST':'ubuntu1'}
     packet=b'Only the new fixture task.'
@@ -348,3 +350,50 @@ def test_actual_executor_ordinary_profile_wires_prelaunch_and_terminal(capsule,m
     response=c.remote_envelope(request(x))
     blobs,_,_=c.validate_response(raw(response),request(x),'glm')
     assert blobs['stdout']==b'executor fixture result\n'
+
+
+def test_f1_validator_change_after_binding_refuses_before_transport(capsule,monkeypatch):
+    x=capsule
+    dependency=x.here/'remote_sub_exec.py'
+    assert dependency.read_bytes()==(BASE/'candidate/remote_sub_exec.py').read_bytes()
+    publish(x);x.store.close();calls=[];transport_fixture(monkeypatch,calls)
+    dependency.write_bytes(dependency.read_bytes()+b'\n# F1 inert post-binding drift\n')
+    with pytest.raises(ValueError,match='source|dependency'):
+        collect(x)
+    assert calls==[] and not (x.dest/'receipt.json').exists()
+    assert not (x.store.path/'collection-intent.json').exists()
+
+
+def test_f1_validator_change_before_launch_seal_refuses(capsule):
+    x=capsule;run='f1-seal-'+uuid.uuid4().hex
+    (x.here/'state/remote_sub'/f'{run}.support.json').write_bytes((x.store.path/'support.json').read_bytes())
+    with c.begin_completion(run,x.root,x.parent,x.route,x.packet,'~',x.digest) as owner:
+        dep=x.here/'remote_sub_exec.py';dep.write_bytes(dep.read_bytes()+b'\n# F1 before seal\n')
+        with pytest.raises(ValueError,match='source'):
+            c.seal_completion(str(owner.path),run,x.root,x.parent,'ubuntu1','glm','glm-5.3-flash',
+                'fixture-account','fixture-lease',x.digest,'7200','600','900',str(os.getpid()),str(owner.lock))
+        assert not (owner.path/'launch.json').exists()
+
+
+@pytest.mark.parametrize('phase',['after-transport','publication'])
+def test_f1_validator_change_during_collection_prevents_publication(capsule,monkeypatch,phase):
+    x=capsule;publish(x);x.store.close();calls=[];transport_fixture(monkeypatch,calls)
+    dep=x.here/'remote_sub_exec.py'
+    def drift():dep.write_bytes(dep.read_bytes()+b'\n# F1 during collection\n')
+    if phase=='after-transport':
+        original=delivery.transport
+        def transfer(*args):
+            result=original(*args);drift();return result
+        monkeypatch.setattr(delivery,'transport',transfer)
+    else:
+        original=delivery.publish_receipt
+        def publication(*args,**kwargs):
+            drift();return original(*args,**kwargs)
+        monkeypatch.setattr(delivery,'publish_receipt',publication)
+    with pytest.raises(ValueError):collect(x)
+    assert len(calls)==1
+    receipt=x.dest/'receipt.json'
+    assert not receipt.exists() or json.loads(receipt.read_bytes()).get('state')!='COMPLETE'
+    assert not (x.store.path/'collection-complete.json').exists()
+    with pytest.raises((ValueError,FileExistsError)):collect(x)
+    assert len(calls)==1

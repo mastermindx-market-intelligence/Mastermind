@@ -513,7 +513,7 @@ def completion_caller(root,parent):
 
 def completion_sources():
     return {name:sha(delivery.local_file(HERE/name,2*1024*1024)) for name in
-        ('fabric_task.py','remote_sub.sh','original_delivery_collector.py','artifact_delivery.py','artifact_reader.py')}
+        ('fabric_task.py','remote_sub.sh','original_delivery_collector.py','artifact_delivery.py','artifact_reader.py','remote_sub_exec.py')}
 
 
 def begin_completion(run,root,parent,route,packet,cwd,support_digest):
