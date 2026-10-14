@@ -7,6 +7,7 @@ is separately tested by test_principal_dialogue_authority_commit.py.
 """
 import asyncio
 import dataclasses
+from decimal import Decimal
 import pytest
 
 from integrations.mastermind_company_principal_host import build_principal_company_dialogue_host
@@ -90,7 +91,8 @@ def test_fresh_source_fence_through_actual_host_runtime_and_relay(tmp_path, monk
                 await writer.wait_closed()
         observation_path = tmp_path / "observation.sock"
         server = await asyncio.start_unix_server(observe, path=str(observation_path))
-        slack = InMemorySlackClient(relay_bot_user_id=relay.BOT)
+        slack = InMemorySlackClient(relay_bot_user_id=relay.BOT,
+            next_timestamp=Decimal(relay.LATER_TS) + Decimal("0.000001"))
         slack.add_parent(SlackMessage(ts=relay.THREAD, author_user_id=relay.BOT,
             text=render_parent_v2(parent)))
         slack.add_reply(SlackMessage(ts=relay.PREDECESSOR_TS, author_user_id=relay.BOT,
@@ -163,6 +165,15 @@ def test_fresh_source_fence_through_actual_host_runtime_and_relay(tmp_path, monk
                 assert authority["checks"] == 1
                 key = events[0].aggregate_id
                 assert (await host.reconcile(key)).state is PrincipalCommitObservationState.APPLIED
+                consumed = await service.engine_v2.wait_for_reply(
+                    thread_ts=relay.THREAD,
+                    context=dataclasses.replace(context, actor_ref=message["actor_ref"]),
+                    request_message_key=message["message_key"], expected_types=("RULING",),
+                    max_attempts=1,
+                )
+                assert consumed["reply"]["message_key"] == key
+                assert consumed["authority"]["executable"] is True
+                assert consumed["authority"]["disposition"] == "CONTINUE"
                 await host.gateway.call(tool, arguments)
                 assert slack.post_call_count == 1
                 assert len(fixture.runtime.events.list_events(
