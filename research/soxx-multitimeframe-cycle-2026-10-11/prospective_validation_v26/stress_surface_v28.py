@@ -15,7 +15,11 @@ import math
 from pathlib import Path
 
 V24_SHA256 = "4622211616c99d6f3a68d14250cf85b35e981f1ab8f459962d57fff78473549e"
+V24_JSON_SHA256 = "070be15b276b052029c5d6dbb86029899ddab0c4b65138c91bc6f4b759ad5030"
+V24_SPEC_SHA256 = "b3d6032ff3f3b3a4edc354cfd5afd0de8df4d589c81aa4403be0881fe232d568"
 FILE = Path(__file__).resolve().parent.parent / "early_failure_v21_v24" / "EXECUTION_STRESS_V24.csv"
+RESULT_FILE = FILE.with_name("RESULTS_V24.json")
+SPEC_FILE = FILE.with_name("SPECIFICATION_V24.json")
 GROUPS = ("all", "inspected", "new_semis", "sector")
 CHECKPOINTS = (0.5, 3.)
 DELAYS = (1, 2, 4)
@@ -161,12 +165,79 @@ def audit_surface_text(text: str) -> dict:
     }
 
 
-def load_verified_v24(path: Path = FILE) -> dict:
+def corroborate_v24_result(csv_text: str, result: dict, spec_bytes: bytes) -> int:
+    """Cross-check two published independently serialized summaries and fixed spec.
+
+    This cannot independently requalify the original private source rows or
+    provide proof of executable fills or prospective performance.
+    """
+    if not isinstance(result, dict) or result.get("schema") != "soxx.extended_execution_delay_slippage_v24":
+        raise ValueError("unrecognized V24 result schema")
+    if hashlib.sha256(spec_bytes).hexdigest() != V24_SPEC_SHA256:
+        raise ValueError("V24 frozen specification digest mismatch")
+    if result.get("spec_sha256") != V24_SPEC_SHA256:
+        raise ValueError("V24 result points at another specification")
+    false_claims = ("copied_5m_data_outside_archival_owner",
+                    "raw_quote_price_fills_proven", "branch_production_change")
+    if (result.get("NO_AUTHENTIC_BOATS_HISTORY") is not True or
+            any(result.get(name) is not False for name in false_claims)):
+        raise ValueError("false or changed historical source claim")
+
+    inventory = result.get("input_source_inventory")
+    if not isinstance(inventory, list) or len(inventory) != 12:
+        raise ValueError("12-name original inventory missing")
+    symbols = [x.get("symbol") if isinstance(x, dict) else None for x in inventory]
+    if len(set(symbols)) != 12 or not all(isinstance(x, str) and x for x in symbols):
+        raise ValueError("original symbol source inventory malformed")
+    if sum(x.get("count", -10000) for x in inventory) != 91:
+        raise ValueError("91 original parent episodes do not reconcile")
+    soxx = next((x for x in inventory if x["symbol"] == "SOXX"), None)
+    if soxx is None or soxx.get("count") != 11:
+        raise ValueError("SOXX source census differs from frozen 11 original entries")
+    if any(x.get("source_unknown") != 0 for x in inventory):
+        raise ValueError("unresolved V24 source rows contradict fully reported original cohort")
+
+    reader = csv.DictReader(io.StringIO(csv_text))
+    rows = list(reader)
+    reported = result.get("predeclared_stress")
+    if not isinstance(reported, list) or len(reported) != 120 or len(rows) != len(reported):
+        raise ValueError("V24 CSV/JSON row count mismatch")
+    fields = set(reader.fieldnames or [])
+    numeric_fields = fields - {"group"}
+    for i, (csv_row, json_row) in enumerate(zip(rows, reported)):
+        if not isinstance(json_row, dict) or set(json_row) != fields:
+            raise ValueError(f"V24 CSV/JSON schema mismatch at row {i}")
+        if csv_row["group"] != json_row["group"]:
+            raise ValueError(f"V24 CSV/JSON mismatch in group at row {i}")
+        for key in numeric_fields:
+            value = json_row[key]
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f"V24 JSON nonnumeric or boolean {key} at row {i}")
+            if _number(csv_row[key], key) != _number(value, key):
+                raise ValueError(f"V24 CSV/JSON mismatch in {key} at row {i}")
+    return soxx["count"]
+
+
+def load_verified_v24(path: Path = FILE, *, results_path: Path = RESULT_FILE,
+                      specification_path: Path = SPEC_FILE) -> dict:
     raw = Path(path).read_bytes()
     if hashlib.sha256(raw).hexdigest() != V24_SHA256:
         raise ValueError("frozen published V24 aggregate SHA256 mismatch")
+    json_raw = Path(results_path).read_bytes()
+    if hashlib.sha256(json_raw).hexdigest() != V24_JSON_SHA256:
+        raise ValueError("V24 results JSON SHA256 mismatch")
+    spec_raw = Path(specification_path).read_bytes()
+    if hashlib.sha256(spec_raw).hexdigest() != V24_SPEC_SHA256:
+        raise ValueError("V24 frozen specification digest mismatch")
+
     result = audit_surface_text(raw.decode("utf-8"))
-    result["V24_csv_sha256"] = V24_SHA256
+    soxx_count = corroborate_v24_result(
+        raw.decode("utf-8"), json.loads(json_raw), spec_raw)
+    result.update(V24_csv_sha256=V24_SHA256,
+                  V24_results_json_sha256=V24_JSON_SHA256,
+                  V24_spec_sha256=V24_SPEC_SHA256,
+                  original_SOXX_parent_entries=soxx_count,
+                  v24_authentic_boats_history_absent=True)
     return result
 
 

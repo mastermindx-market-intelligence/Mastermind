@@ -42,11 +42,19 @@ Consequently **no universal 3h exit edge is established** and a 30m edge is **no
 
 ## 3. Reproducible integrity checks
 
-Offline audit module: \`prospective_validation_v26/stress_surface_v28.py\`; 15 focused synthetic corruption and frozen-aggregate tests: \`tests/test_soxx_v28_stress_surface.py\`. Source readback must match the exact original V24 SHA256 before publishing output.
+Offline audit module: \`prospective_validation_v26/stress_surface_v28.py\`; 20 focused synthetic corruption, cross-publication and frozen-aggregate tests: \`tests/test_soxx_v28_stress_surface.py\`. Source readback must match the exact original V24 SHA256 before publishing output.
 
 The checker validates the complete 120-cell key space, fixed per-group original denominators (91 = 34 + 47 + 10), stable elected sales by arm across extra-cost assumptions, each fixed group contribution to the pooled mean and winner-harm/loss-save counts, worst/best episode extrema, and linear non-improving incremental cost stress (within source's six-decimal rounding). Mutation tests reject duplicates, omissions, fake new delays, changed denominator, changed subgroup mean, spurious positive cost response, shifted selected-sales count, nonfinite values and altered archived bytes. It **never** calls the historical v24 simulator.
 
 The returned \`evidence_claim\` is **\`INSPECTED_DEVELOPMENT_AGGREGATE_ONLY_NO_INDEPENDENT_EDGE\`** and trading/live-fill flags remain false. A successful audit verifies arithmetic **inside the frozen reported aggregates**, *not their price provenance*, data licence, strategy robustness, independence, prediction, live marketability, or profit at funded size.
+
+### Second publication-format and specification witness
+
+The first audited snapshot was the immutable CSV. V28 now **also** hash-pins the *separate original* V24 \`RESULTS_V24.json\` (SHA256 \`070be15b276b052029c5d6dbb86029899ddab0c4b65138c91bc6f4b759ad5030\`, 45,534 bytes) and the predeclared \`SPECIFICATION_V24.json\` (SHA256 \`b3d6032ff3f3b3a4edc354cfd5afd0de8df4d589c81aa4403be0881fe232d568\`, 1,891 bytes). The original JSON contains **exactly the same 120 V24 aggregate cells**, with all **11 field values** in each row agreeing with the CSV, and points to the exact pinned specification SHA. This uses three *public published research artifacts*, **not** private historical price or execution rows.
+
+The original JSON inventory lists **12 source instruments / 91 parent entries**, including **SOXX 11**, and zero unresolved original source rows. Crucially, the same original result also explicitly sets \`NO_AUTHENTIC_BOATS_HISTORY=true\`, \`raw_quote_price_fills_proven=false\`, \`branch_production_change=false\`, and \`copied_5m_data_outside_archival_owner=false\`. Those negative source gates are preserved instead of converting a mathematically consistent 120-cell table into “live” BOATS fill proof.
+
+Five additional unit tests were RED before cross-artifact implementation (missing witness API and metadata); the repaired implementation passed **20/20 focused tests**, including corrupted original-result SHA, altered 120-cell JSON economics, unauthorized claim of genuine BOATS history and an inflated SOXX episode inventory. CSV and JSON are **two serialized outputs of the SAME inspected simulation**, not independent measurements or replication. Matching them is evidence against unintentional report drift and forged bookkeeping only; it is not a second independent historical study.
 
 ## 4. Source and acceptance gates unchanged
 

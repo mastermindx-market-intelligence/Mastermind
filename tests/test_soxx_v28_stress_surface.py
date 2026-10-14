@@ -5,6 +5,8 @@ private execution-row archive, and does not rerun the 2025-26 backtest.
 """
 from __future__ import annotations
 import csv
+import copy
+import json
 import io
 import tempfile
 from pathlib import Path
@@ -146,6 +148,44 @@ class TestV28PublishedStressAudit(unittest.TestCase):
                 {"mean_delta_pp": "0.141369"})))
             with self.assertRaisesRegex(ValueError, "SHA256 mismatch"):
                 m.load_verified_v24(p)
+
+    def test_cross_artifact_result_and_spec_match_without_market_replay(self):
+        out = m.load_verified_v24()
+        self.assertEqual(out["V24_results_json_sha256"],
+                         "070be15b276b052029c5d6dbb86029899ddab0c4b65138c91bc6f4b759ad5030")
+        self.assertEqual(out["V24_spec_sha256"],
+                         "b3d6032ff3f3b3a4edc354cfd5afd0de8df4d589c81aa4403be0881fe232d568")
+        self.assertEqual(out["original_SOXX_parent_entries"], 11)
+        self.assertTrue(out["v24_authentic_boats_history_absent"])
+
+    def test_changed_published_result_artifact_cannot_pass_digest_gate(self):
+        source = json.loads(m.RESULT_FILE.read_text())
+        source["predeclared_stress"][0]["mean_delta_pp"] += 1.0
+        with tempfile.TemporaryDirectory() as folder:
+            altered = Path(folder) / "RESULTS_V24.json"
+            altered.write_text(json.dumps(source))
+            with self.assertRaisesRegex(ValueError, "results JSON SHA256 mismatch"):
+                m.load_verified_v24(results_path=altered)
+
+    def test_false_quote_replay_proof_does_not_survive_cross_source_check(self):
+        original = json.loads(m.RESULT_FILE.read_text())
+        mutated = copy.deepcopy(original)
+        mutated["NO_AUTHENTIC_BOATS_HISTORY"] = False
+        with self.assertRaisesRegex(ValueError, "historical source claim"):
+            m.corroborate_v24_result(m.FILE.read_text(), mutated, m.SPEC_FILE.read_bytes())
+
+    def test_one_json_stress_row_cannot_disagree_with_published_csv(self):
+        original = json.loads(m.RESULT_FILE.read_text())
+        original["predeclared_stress"][4]["mean_delta_pp"] += 0.01
+        with self.assertRaisesRegex(ValueError, "CSV/JSON mismatch"):
+            m.corroborate_v24_result(m.FILE.read_text(), original, m.SPEC_FILE.read_bytes())
+
+    def test_soxx_original_parent_count_cannot_inflate_in_result_metadata(self):
+        original = json.loads(m.RESULT_FILE.read_text())
+        soxx = next(x for x in original["input_source_inventory"] if x["symbol"] == "SOXX")
+        soxx["count"] = 12
+        with self.assertRaisesRegex(ValueError, "SOXX source census|91 original"):
+            m.corroborate_v24_result(m.FILE.read_text(), original, m.SPEC_FILE.read_bytes())
 
     def test_bad_schema_is_rejected(self):
         source = m.FILE.read_text().replace("mean_delta_pp", "nominal_goodness")
