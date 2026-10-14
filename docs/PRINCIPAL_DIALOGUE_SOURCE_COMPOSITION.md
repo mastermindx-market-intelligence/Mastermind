@@ -129,6 +129,35 @@ The optional product-acceptance parameters, `request_binding_resolver` and
 independent review, ruling and original-parent consumption requirements remain
 those in [Source-bound product acceptance](PRODUCT_ACCEPTANCE_REVIEW.md).
 
+## Recovering a lost App response
+
+The App knows the original obligation before sending a ruling, even when it
+never receives the resulting message key. The existing Runtime COMMIT owner
+therefore exposes `reconcile_obligation`. The authenticated receiving host
+supplies that obligation, original principal context and root, and a mandatory
+synchronous guard for current read permission. This guard is separate from
+new-effect arming; it must still enforce the actual App peer and permitted
+caller scope. Serialized facts never supply that permission.
+
+Recovery reads the original, causally validated Wake anchor, including after
+`SOURCE_RESOLVED`, then selects the exact retained COMMIT for that original
+child, attempt, worker, request, thread and operation. Principal, generation,
+mission, work and root must match. The same COMMIT owner reconciles the retained
+message key against the original Relay carrier. No new-effect guard, current
+send-binding resolver, source acquisition, write or retry runs. Current read
+permission is checked again after the awaited carrier read.
+
+An absent matching COMMIT returns `None`: nothing matching was observed at that
+instant. It does not prove an in-flight request stopped and never authorizes a
+replay. A retained COMMIT with uncertain delivery remains `EFFECT_UNKNOWN`.
+Recovery does not grant a successor access to a predecessor's records or
+silently translate authority generations. The original unresolved-source reader
+continues to reject resolved sources for all fresh sends.
+
+This is an internal receiving-owner method. A public recovery frame, explicit
+service admission and authenticated App route still require their own
+composition and qualification.
+
 ## Remaining installed qualification
 
 The installed host must authenticate the App-to-Control request on the existing

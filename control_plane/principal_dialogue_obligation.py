@@ -36,6 +36,28 @@ def read_principal_dialogue_obligation(
     runtime: Runtime, *, obligation_id: str, expected_work_ref: str,
     expected_root_job_id: str,
 ) -> PrincipalDialogueObligationRead:
+    """Read an unresolved source for fresh decision acquisition."""
+    return _read_anchor(runtime, obligation_id=obligation_id,
+        expected_work_ref=expected_work_ref, expected_root_job_id=expected_root_job_id,
+        require_unresolved=True)
+
+
+def read_original_principal_dialogue_obligation(
+    runtime: Runtime, *, obligation_id: str, expected_work_ref: str,
+    expected_root_job_id: str,
+) -> PrincipalDialogueObligationRead:
+    """Read the immutable original anchor, including after source resolution.
+
+    Only for receipt reconciliation. This read supplies no fresh-effect authority;
+    decision acquisition must continue using read_principal_dialogue_obligation.
+    """
+    return _read_anchor(runtime, obligation_id=obligation_id,
+        expected_work_ref=expected_work_ref, expected_root_job_id=expected_root_job_id,
+        require_unresolved=False)
+
+
+def _read_anchor(runtime, *, obligation_id, expected_work_ref,
+                 expected_root_job_id, require_unresolved):
     """Read the supplied original obligation; never fall back to another one.
 
     Scope is trusted host input, not an authorization-bearing tool argument.
@@ -51,7 +73,8 @@ def read_principal_dialogue_obligation(
                 or JOB_ID_RE.fullmatch(expected_root_job_id) is None):
             raise PrincipalDialogueObligationUnavailable()
         rows = WakeLedgerRepository(runtime).list_records(obligation_id)
-        if not rows or any(row.record.phase is LedgerPhase.SOURCE_RESOLVED for row in rows):
+        if not rows or (require_unresolved and any(
+                row.record.phase is LedgerPhase.SOURCE_RESOLVED for row in rows)):
             raise PrincipalDialogueObligationUnavailable()
         requested = rows[0].record
         obligation, physical = requested.obligation, requested.physical_source

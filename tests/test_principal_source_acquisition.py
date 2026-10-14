@@ -47,6 +47,11 @@ from tests import test_principal_source_reader as relay
     "ceo_target", "missing", "resolved", "wrong_worker", "root_source_unavailable",
     "answered", "revoke_during_read", "resolve_during_read", "root_source_unavailable_during_read",
     "host_rule", "host_resolved", "host_revoked", "host_ack", "host_request_revoked", "host_request_during_read", "host_framed_rule",
+    "host_recovery_resolved", "host_recovery_paused", "host_recovery_empty",
+    "host_recovery_unknown", "host_recovery_work", "host_recovery_root",
+    "host_recovery_principal", "host_recovery_generation", "host_recovery_mission",
+    "host_recovery_before", "host_recovery_after", "host_recovery_async",
+    "host_recovery_truthy", "host_recovery_missing", "host_recovery_duplicate",
 ])
 def test_acquisition_derives_exact_inputs_and_refuses_drift(tmp_path, monkeypatch, change):
     fixture = _strict_dialogue_runtime(tmp_path, monkeypatch)
@@ -190,6 +195,17 @@ def test_acquisition_derives_exact_inputs_and_refuses_drift(tmp_path, monkeypatc
                 host = await build_acquired_principal_decision_host(**args,
                     receiving_request_guard=receiving_guard)
                 assert calls == [parent]
+                if change == "host_recovery_empty":
+                    before = runtime.events.list_events()
+                    async def no_relay(*_, **__):
+                        raise AssertionError("no COMMIT means no Relay read")
+                    host.commit_owner.service_call = no_relay
+                    assert await host.commit_owner.reconcile_obligation(obligation_id=oid,
+                        context=context, root_job_id=caller.root_job_id,
+                        receiving_read_guard=receiving_guard) is None
+                    assert runtime.events.list_events() == before
+                    assert slack.post_call_count == slack.parent_post_call_count == 0
+                    return
                 if change == "host_resolved": resolve()
                 elif change == "host_revoked": config["missions"][0]["enabled"] = False
                 elif change == "host_request_revoked": request_current[0] = False
@@ -205,7 +221,7 @@ def test_acquisition_derives_exact_inputs_and_refuses_drift(tmp_path, monkeypatc
                 result = await host.gateway.call("ruling", arguments)
                 events = runtime.events.list_events(aggregate_type=PRINCIPAL_RUNTIME_AGGREGATE_TYPE)
                 assert calls == [parent, parent]
-                if change in {"host_rule", "host_ack", "host_framed_rule"}:
+                if change in {"host_rule", "host_ack", "host_framed_rule"} or change.startswith("host_recovery_"):
                     assert result["ok"] is True, result
                     assert len(events) == slack.post_call_count == 1
                     binding = host.commit_owner.binding_resolver.resolve()
@@ -220,6 +236,72 @@ def test_acquisition_derives_exact_inputs_and_refuses_drift(tmp_path, monkeypatc
                     assert consumed["authority"]["executable"] is True
                     await host.gateway.call("ruling", arguments)
                     assert slack.post_call_count == 1
+                    if change.startswith("host_recovery_"):
+                        from integrations.mastermind_company_principal_runtime_fence import (
+                            PrincipalDialogueRuntimeCommitOwner, PrincipalRuntimeFenceError,
+                        )
+                        from integrations.slack_agent_dialogue.service import call_service
+                        # Discard the response and host. A new owner has no live
+                        # binding and must recover solely from original records.
+                        result = None
+                        class NoFreshBinding:
+                            def resolve(self):
+                                raise AssertionError("recovery must not reacquire a send binding")
+                        def no_new_effect(**_):
+                            raise AssertionError("recovery must not request new-effect authority")
+                        operations = []
+                        async def read_only_service(path, frame):
+                            operations.append(frame["operation"])
+                            assert frame["operation"] == "read_thread"
+                            if change == "host_recovery_unknown":
+                                return {"ok": False}
+                            value = await call_service(path, frame)
+                            if change == "host_recovery_after": request_current[0] = False
+                            return value
+                        owner = PrincipalDialogueRuntimeCommitOwner(runtime, NoFreshBinding(),
+                            socket_path=relay_path, service_call=read_only_service,
+                            principal_authority_guard=no_new_effect)
+                        if change == "host_recovery_resolved": resolve()
+                        if change == "host_recovery_paused": config["missions"][0]["enabled"] = False
+                        recovery = dict(obligation_id=oid, context=context,
+                            root_job_id=caller.root_job_id, receiving_read_guard=receiving_guard)
+                        fields = {"work": ("work_ref", "WS:FOREIGN"),
+                            "principal": ("principal_binding_digest", "0" * 64),
+                            "generation": ("authority_generation_digest", "1" * 64),
+                            "mission": ("mission_authority_ref", "authority:foreign")}
+                        fault = change.removeprefix("host_recovery_")
+                        if fault in fields:
+                            key, value = fields[fault]
+                            recovery["context"] = dataclasses.replace(context, **{key: value})
+                        if fault == "root": recovery["root_job_id"] = "JOB-999"
+                        if fault == "before": request_current[0] = False
+                        if fault == "missing": recovery["receiving_read_guard"] = None
+                        if fault == "truthy": recovery["receiving_read_guard"] = lambda: True
+                        if fault == "async":
+                            async def invalid_async():
+                                raise AssertionError("must not await a permission guard")
+                            recovery["receiving_read_guard"] = invalid_async
+                        if fault == "duplicate":
+                            original_list = runtime.events.list_events
+                            def duplicate_list(**kwargs):
+                                rows = original_list(**kwargs)
+                                return rows + rows if kwargs.get("aggregate_type") == PRINCIPAL_RUNTIME_AGGREGATE_TYPE else rows
+                            monkeypatch.setattr(runtime.events, "list_events", duplicate_list)
+                        before = runtime.events.list_events()
+                        if fault in {"resolved", "paused", "unknown"}:
+                            recovered = await owner.reconcile_obligation(**recovery)
+                            assert recovered.message_key == events[0].aggregate_id
+                            assert recovered.event_id == events[0].event_id
+                            assert recovered.state.value == ("EFFECT_UNKNOWN" if fault == "unknown" else "APPLIED")
+                            assert operations == ["read_thread"]
+                        else:
+                            with pytest.raises(PrincipalRuntimeFenceError) as error:
+                                await owner.reconcile_obligation(**recovery)
+                            assert str(error.value) == "principal original reply unavailable"
+                            assert error.value.__cause__ is None
+                            assert operations == (["read_thread"] if fault == "after" else [])
+                        assert runtime.events.list_events() == before
+                        assert slack.post_call_count == 1
                 else:
                     assert result["ok"] is False, result
                     assert result["error"]["code"] == "EFFECT_FENCE_UNAVAILABLE"
