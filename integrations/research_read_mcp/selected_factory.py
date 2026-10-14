@@ -86,7 +86,10 @@ def build_selected(runtime, service_module, reader_module, store_module, options
     options.validate()
     if not callable(clock):
         raise ContractViolation("SOURCE_UNAVAILABLE")
-    provider = reader_module.QualifiedReadProvider(
+    provider_type = getattr(reader_module, "QualifiedReadProvider", None)
+    if not callable(provider_type) or not callable(getattr(provider_type, "refresh", None)):
+        raise ContractViolation("SOURCE_UNAVAILABLE")
+    provider = provider_type(
         store_module.build_store(), expected_producer_commit=options.expected_producer_commit,
         clock=clock, writer_policy=options.writer_policy,
         max_age_seconds=options.max_age_seconds, max_reuse_seconds=options.max_reuse_seconds,

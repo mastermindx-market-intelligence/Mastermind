@@ -161,3 +161,16 @@ async def test_actual_launcher_binds_same_selected_owner_through_http_and_citati
         assert provider.prepares == 1
     finally:
         await h.stop()
+
+
+def test_selected_factory_requires_refresh_capability_before_building_store():
+    from types import SimpleNamespace
+    from integrations.research_read_mcp.selected_factory import build_selected
+    class PriorProvider:
+        def prepare(self):
+            pass
+    options = SelectedReadOptions("a" * 40, lambda: True)
+    store = SimpleNamespace(build_store=lambda: pytest.fail("incompatible source reached store construction"))
+    with pytest.raises(ContractViolation, match="SOURCE_UNAVAILABLE"):
+        build_selected(None, None, SimpleNamespace(QualifiedReadProvider=PriorProvider),
+                       store, options, lambda: 1700000000)
