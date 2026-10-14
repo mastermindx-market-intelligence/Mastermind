@@ -492,6 +492,9 @@ def main(argv=None):
             v3_kwargs = {}
             if coo_settings is not None:
                 v3_kwargs["coo_settings"] = coo_settings
+            # One installed client instance; the opt-in OS session transport
+            # receives this same object only while the transport is enabled.
+            os_transport_enabled = raw.get('os_executive_transport', False)
             app = v3_builder(
                 settings,
                 audit_sink=sink,
@@ -503,6 +506,9 @@ def main(argv=None):
                 enable_os_executive_transport=raw.get('os_executive_transport', False),
                 os_executive_resource=validate_os_executive_resource(raw),
                 os_commission_preparer=build_os_commission_client(raw),
+                os_session_bridge_client=(
+                    session_client if os_transport_enabled else None
+                ),
                 **v3_kwargs,
                 **mounts,
             )

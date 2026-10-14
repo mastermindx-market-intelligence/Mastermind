@@ -125,3 +125,30 @@ def test_completion_mode_rejects_false_progress_and_review_churn() -> None:
     )
     for phrase in required:
         assert phrase in plan, f"missing anti-churn rule: {phrase}"
+
+
+def test_native_merge_queue_owns_final_integrated_checks_without_prequeue_circular_gate() -> None:
+    spec = _normalized('docs/superpowers/specs/2026-09-02-autonomy-release-compatibility-review-reuse.md')
+    review = _normalized('docs/sol_skills/REVIEW_RETURN.md')
+    reconcile = _normalized('docs/sol_skills/RECONCILE_STATE.md')
+    delivery = _normalized('docs/DELIVERY_WORKFLOW.md')
+    assert 'absence of prequeue check runs' in spec
+    assert 'after queue entry' in spec
+    assert 'before the actual merge' in spec
+    assert 'merge_group' in review
+    assert 'before queue admission' in reconcile
+    assert 'do not require nonexistent prequeue merge-ref check runs' in reconcile
+    assert 'do not add a manual synthetic PR merge-ref check requirement' in delivery
+    assert 'If final integrated checks fail, the queue must not merge' in delivery
+    assert 'review pass and queue entry is authorized' in delivery
+
+
+def test_workspace_and_recovery_rules_never_demand_ancestry_only_branch_joins() -> None:
+    delivery_source = _read('docs/DELIVERY_WORKFLOW.md')
+    delivery = _normalized('docs/DELIVERY_WORKFLOW.md')
+    assert 'git merge-base HEAD origin/master' in delivery_source
+    assert 'git merge-base --is-ancestor origin/master HEAD' not in delivery_source
+    assert 'do not block ordinary edits solely because the worktree is behind' in delivery
+    assert 'material overlap or changed source law' in delivery
+    assert 'Do not join/rebase merely to reset GitHub\'s `behind` count' in delivery
+    assert 'actual path/semantic/dependency collisions require composition' in delivery

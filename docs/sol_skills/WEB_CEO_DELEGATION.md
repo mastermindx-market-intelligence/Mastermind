@@ -35,6 +35,36 @@ Compare direct principal effort with framing + necessary review + expected clari
 
 Retain substantial otherwise-delegable work only with a brief concrete reason: `LOWER_TOTAL_OVERHEAD`, `PRINCIPAL_JUDGMENT`, `UNIQUE_APPROVED_ACCESS`, `CRITICAL_PATH_SHORTCUT`, or `NO_ELIGIBLE_PRE_EFFECT_WORKER`. These are explanatory notes aligned to the active-turn owner, not new lifecycle states or runtime enums. Reassess when the remaining task becomes routine, tool work repeats or a repair cycle fails without adding evidence.
 
+### Optional layers, conserved root
+
+The CEO -> native coordinator -> Fabric operator -> Fabric worker pattern is optional.
+Choose the shallowest capable route separately for each bounded assignment:
+
+| Assigning function | Eligible next function |
+|---|---|
+| CEO | Direct Fabric worker, self-executing Fabric operator, useful native coordinator, or direct principal work |
+| Native coordinator | Direct Fabric worker, useful operator/coordinator, or its own judgment/integration |
+| Fabric operator | Execute the assignment itself, or commission a separable worker within its actual grant |
+| Fabric worker | Execute its leaf assignment; escalate decomposition to the assigning parent |
+
+Skipping a model-driven manager does not skip deterministic admission, capacity,
+review independence, plan provenance, cleanup or retained-result owners. Keep existing
+Runtime role enums and policy limits; model titles and native-session depth are different
+from Runtime Job roles and depth. A bounded shell task does not need a fictional planner
+Attempt. A Runtime task still needs its owner's valid plan/revision provenance.
+
+Bind a native coordinator to the original root using its actual ancestry and the parent's
+bounded commission, with the coordinator's own native identity as immediate Fabric parent.
+Do not reset root accounting, copy a native session ID into parent_job_id, or treat
+caller-supplied root/role strings as authentication. Use the existing atomic admission and
+budget owners. Any unqualified mixed accounting or caller binding remains an explicit
+route limitation, not permission to add another registry or allowance.
+
+Return exact retained bytes to the actual assigning parent. Root-only Codex Stop return
+is not a child-session hook; preserve its checks. A qualified foreground coordinator may
+inspect, consume and adjudicate its own child's retained result, then send a compact
+summary to its principal. Active return and foreground consumption do not prove idle Wake.
+
 ## 3. Commission a complete bounded outcome
 
 Use the existing COMMISSION_WAVE and WORKER_AVENUE_ROUTING contracts. Include mission, why it matters, exact source and authority, scoped paths, non-goals, dependency/input identity, time/null/correction behavior, deterministic versus model method, failures, ordered implementation, acceptance/proof, stop condition and continuation return. Reuse the existing worker-brief/capability-package producer; do not build another compiler or paste the whole CEO transcript.

@@ -1,0 +1,118 @@
+{
+  "original_service_head": "da868d8aaa47ef81ec01653c82a71a4e3166e10d",
+  "protected_master_parent": "9a8e9b50b6158eb38af78a5b867eedba1719b908",
+  "merge_state": "IN_PROGRESS_NO_RELEASE",
+  "source_sha256": {
+    "control_plane/runtime_root_origin.py": "912dcdda1be5019c19452b8a5c51d60b9d600167aac6234201e6a0632500a358",
+    "tests/test_runtime_root_origin_bounded.py": "b8296eb5f3e2abca6b44364e2454dba5e0f8acfc97bf1c08b1a60a7300c4438b",
+    "tests/test_runtime_root_origin_service_adversarial.py": "84276c20b32e49f550fd760d705fc38b6f7bc55c2b77a9c111952d003fc57e29",
+    "control_plane/ceo_intent.py": "11dd1a16c227ee8edb4d342e0957aaf529427acfea37a27d38ead9016f6187d3",
+    "control_plane/executive_runtime.py": "808af12b170fffac4e26eec739d4b7119b21caa629197c5c22def32c3c0ca109",
+    "control_plane/executive_service_principal.py": "80e2ae155efd652a8ac53f0ed7445abc8984a33588f31727597086da02c2bf5f"
+  },
+  "red_before_fix": {
+    "affected_cases_failed": 3,
+    "scenarios": [
+      "registered VPS service with mixed CEO roots",
+      "valid 40KB service request plus CEO roots",
+      "registered site-maintenance service plus CEO roots"
+    ]
+  },
+  "focused_after_fix": {
+    "passed": 12,
+    "scope": "admitted service roots and malformed source records"
+  },
+  "additional_adversarial": {
+    "passed": 16,
+    "log_sha256": "763d5628390e7661ca0f859a5897817e73e5829dcf7a19d90bbc5b7a65c373a1",
+    "scope": "ineligible service source, malformed typed evidence, forged authority/seat in synthetic database"
+  },
+  "test_suites": {
+    "merge_control_runtime": {
+      "passed": 317,
+      "failed": [],
+      "errors": [],
+      "skipped": [],
+      "xml_sha256": "8c17bb843d8d5a6ad5aed18e3b1d47c562ac522f8025182f7f4b932962dc03f3"
+    },
+    "merge_native_service": {
+      "passed": 486,
+      "failed": [
+        "tests.test_vps_inference_service::test_direct_emitter_cannot_bypass_sink_guard",
+        "tests.test_vps_inference_supervisor_io::test_admitted_input_reaches_worker_prompt_without_objective_truncation",
+        "tests.test_vps_inference_supervisor_io::test_dedicated_worker_schema_carries_answer_and_original_attempt_identity",
+        "tests.test_vps_inference_supervisor_io::test_bad_service_provenance_refuses_before_schema_materialization[missing_request]",
+        "tests.test_vps_inference_supervisor_io::test_bad_service_provenance_refuses_before_schema_materialization[foreign_actor]",
+        "tests.test_vps_inference_supervisor_io::test_bad_service_provenance_refuses_before_schema_materialization[foreign_principal]",
+        "tests.test_vps_inference_supervisor_io::test_bad_service_provenance_refuses_before_schema_materialization[write_authority]",
+        "tests.test_vps_inference_supervisor_io::test_bad_service_provenance_refuses_before_schema_materialization[wrong_schema]",
+        "tests.test_vps_inference_supervisor_io::test_wrong_attempt_cannot_receive_the_service_payload"
+      ],
+      "errors": [],
+      "skipped": [],
+      "xml_sha256": "84dfe8c216517700d73762ea8d9360e19109eb680bbe4843395017d56cd9d771"
+    },
+    "root_origin": {
+      "passed": 363,
+      "failed": [
+        "tests.test_vps_inference_service::test_direct_emitter_cannot_bypass_sink_guard"
+      ],
+      "errors": [],
+      "skipped": [],
+      "xml_sha256": "307d7d75e08599669f96199a98f31ad3bf7ac4c7b38a4dd9a4c42c210b081501"
+    }
+  },
+  "independent_merge_review": "ONE_P1_SERVICE_ROOT_ORIGIN_INCOMPATIBILITY_FOUND_THEN_REPAIRED",
+  "independent_fix_review": "PENDING",
+  "provider_execution": false,
+  "installed_service_changed": false,
+  "release_prohibited": true,
+  "current_wip_source_sha256": {
+    "control_plane/runtime_root_origin.py": "912dcdda1be5019c19452b8a5c51d60b9d600167aac6234201e6a0632500a358",
+    "tests/test_runtime_root_origin_bounded.py": "b8296eb5f3e2abca6b44364e2454dba5e0f8acfc97bf1c08b1a60a7300c4438b",
+    "tests/test_runtime_root_origin_service_adversarial.py": "84276c20b32e49f550fd760d705fc38b6f7bc55c2b77a9c111952d003fc57e29",
+    "control_plane/ceo_intent.py": "11dd1a16c227ee8edb4d342e0957aaf529427acfea37a27d38ead9016f6187d3",
+    "control_plane/executive_runtime.py": "808af12b170fffac4e26eec739d4b7119b21caa629197c5c22def32c3c0ca109",
+    "control_plane/executive_service_principal.py": "80e2ae155efd652a8ac53f0ed7445abc8984a33588f31727597086da02c2bf5f"
+  },
+  "independent_first_fix_review": "REQUEST_CHANGES_2_P1: optional maintenance boot_packet and narrower canonical service grants",
+  "canonical_source_corrections": [
+    "reuse existing ceo_intent._grounding optional-field validator",
+    "reuse canonical sink accepted nonempty READ/RESEARCH subsets rather than full convenience emitter grant",
+    "preserve registered actor/principal, matching effective and persisted Job authorities, no write authority"
+  ],
+  "canonical_positive_red_before_fix": {
+    "failed": 3,
+    "cases": [
+      "maintenance optional boot_packet_schema",
+      "maintenance READ-only grant",
+      "maintenance RESEARCH-only grant"
+    ]
+  },
+  "canonical_followup_selection": {
+    "passed": 29,
+    "failed": 2,
+    "failed_reason": "legacy adversarial fixture treats canonical sink-admitted optional boot field or its alternate declared value as corrupt; actual valid source cannot be rejected to satisfy those assertions",
+    "test_log_sha256": "9acb28195b7878b28385daa75f1c6e2df9e2807835950b4cbea32a55d6d91875"
+  },
+  "affected_fixture_edit": "PLATFORM_REFUSED_PRE_DISPATCH_NOT_APPLIED_NO_REPLAY",
+  "independent_second_fix_review": "SCOPED_APPROVE_TWO_PREVIOUS_P1_RESOLVED_ONE_P2_FIXTURE_EXPECTATION_REMAINING",
+  "merge_release": "DRAFT_HOLD_WITH_TWO_EXPLICIT_TEST_FAILURES",
+  "independent_reviews": {
+    "first_independent_review.md": {
+      "original_sha256": "e20b63f0aeb9afae4e623c7298b4fe251f9ac72b57efa4dbd69369f3046f3435",
+      "published_sha256": "f4720308cf2f346e6d0ec04a52bf6963e768bfdbf645135458c1879ff52f20b6",
+      "normalization": "absolute local source path rewritten repository-relative; trailing Markdown space normalized"
+    },
+    "followup_independent_review.md": {
+      "original_sha256": "1ef10980ab5d6018eee1d449f627725eb4cf8938cbce122bcf94c04037aebcb6",
+      "published_sha256": "e07d93c7e9895cf278690755c6164fae37ef278d25297d78e9bec18c478590f5",
+      "normalization": "absolute local source path rewritten repository-relative; trailing Markdown space normalized"
+    }
+  },
+  "independent_in_memory_valid_cases": 24,
+  "independent_in_memory_refusals": 41,
+  "release_state": "DRAFT_HOLD_UNRESOLVED_TEST_FAILURES",
+  "known_unapplied_test_revision": "PLATFORM_SAFETY_REFUSED_BEFORE_DISPATCH_NO_RETRY",
+  "merge_semantic_review": "NO_NEW_ISSUES_IN_FIVE_CONFLICT_RESOLUTIONS_BUT_FIRST_P1_DETECTED_AND_REPAIRED"
+}

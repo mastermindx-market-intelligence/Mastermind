@@ -110,6 +110,7 @@ class _PlannerSealedWorkerAdapter(FakeAdapter):
         self.ref = dataclasses.replace(
             ref,
             session_id=ref.pid,
+            base_sha=spec.expected_base_sha,
             effective_uid=uid,
             effective_gid=gid,
             real_uid=uid,
@@ -217,7 +218,7 @@ class _PlannerSealedWorkerAdapter(FakeAdapter):
             status=WorkerRunStatus.SUCCEEDED,
             structured_output=envelope,
             artifact_manifest=(),
-            git_manifest={"base_sha": "b" * 40, "head_sha": "b" * 40},
+            git_manifest={"base_sha": self.spec.expected_base_sha, "head_sha": self.spec.expected_base_sha},
             usage={"input_tokens": 10, "output_tokens": 5},
             provider_session_id=provider_session_id,
             exit_code=0,
@@ -301,31 +302,36 @@ def test_runtime_refuses_dialogue_source_digest_without_source(tmp_path: Path) -
         )
 
 
-def test_reducer_projects_positive_canonical_sealed_worker_completion(
-    tmp_path: Path,
-) -> None:
-    runtime_root = tmp_path / "runtime"
-    runtime = Runtime.at(runtime_root)
-    _register(runtime, "worker-a")
+def completed_sealed_worker_fixture(tmp_path: Path, *, include_launch=False, with_commission=False):
+    if with_commission:
+        from tests.test_executive_supervisor import _strict_v2_root_with_commission
+        runtime_root = tmp_path / "commission-runtime"
+        runtime, root, workspace, _ = _strict_v2_root_with_commission(runtime_root)
+        _register(runtime, "worker-a")
+        workspace_root = workspace.parent
+    else:
+        runtime_root = tmp_path / "runtime"
+        runtime = Runtime.at(runtime_root)
+        _register(runtime, "worker-a")
 
-    workspace_root = tmp_path / "workspaces"
-    workspace = workspace_root / "planner"
-    workspace.mkdir(parents=True, mode=0o700)
-    admitted = submit_intent(
-        runtime,
-        _v2_intent(
-            intent_id="CEO-SEALED-WORKER-TERMINAL-RETURN",
-            execution_contract={
-                "requested_authorities": ["READ"],
-                "worktree": str(workspace),
-                "attempt_limit": 2,
-                "constraints": {"base_sha": "b" * 40},
-            },
-        ),
-        workspace_root=workspace_root,
-    )
-    root = runtime.jobs.get_job(admitted["job_id"])
-    assert root is not None
+        workspace_root = tmp_path / "workspaces"
+        workspace = workspace_root / "planner"
+        workspace.mkdir(parents=True, mode=0o700)
+        admitted = submit_intent(
+            runtime,
+            _v2_intent(
+                intent_id="CEO-SEALED-WORKER-TERMINAL-RETURN",
+                execution_contract={
+                    "requested_authorities": ["READ"],
+                    "worktree": str(workspace),
+                    "attempt_limit": 2,
+                    "constraints": {"base_sha": "b" * 40},
+                },
+            ),
+            workspace_root=workspace_root,
+        )
+        root = runtime.jobs.get_job(admitted["job_id"])
+        assert root is not None
     planner = runtime.jobs.create_cycle_planner(
         root.job_id,
         command_id=f"coo-cycle:{root.job_id}:create-planner:0",
@@ -476,6 +482,14 @@ def test_reducer_projects_positive_canonical_sealed_worker_completion(
         "ATTEMPT_PROCESS_EXITED",
         "JOB_COMPLETED",
     }.issubset(event_types)
+
+    if include_launch:
+        return reopened, row, terminal, adapter.spec, adapter.ref
+    return reopened, row, terminal
+
+
+def test_reducer_projects_positive_canonical_sealed_worker_completion(tmp_path):
+    completed_sealed_worker_fixture(tmp_path)
 
 
 def test_reducer_projects_one_exact_sealed_completed_child(tmp_path) -> None:

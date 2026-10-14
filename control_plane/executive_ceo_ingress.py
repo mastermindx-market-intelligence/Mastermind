@@ -387,6 +387,8 @@ async def _submit(
     principal_admission_guard: Any = None,
     service_admission_guard: Any = None,
     service_execution_binding: Mapping[str, Any] | None = None,
+
+    fresh_admission_observer: Any = None,
 ) -> dict[str, Any]:
     """Call the one v1 mutation sink; classify a raised refusal per §11.3/§12.1."""
 
@@ -408,12 +410,18 @@ async def _submit(
             submit_kwargs.update(principal_context=principal_context,
                 principal_request_ref=principal_request_ref,
                 principal_admission_guard=principal_admission_guard)
+        if fresh_admission_observer is not None:
+            submit_kwargs["fresh_admission_observer"] = fresh_admission_observer
         return await asyncio.to_thread(
             ceo_intent.submit_intent,
             runtime,
             envelope,
             **submit_kwargs,
         )
+    except ceo_intent._FreshAdmissionObserverFailed:
+        # Private attended composition must preserve this known root effect;
+        # the Session Bridge owner maps it to its existing effect_unknown.
+        raise
     except ceo_intent.CeoIntentConflict as exc:
         # A durable sibling with the same request fingerprint may still carry
         # different immutable admission provenance.  That is a real identity
@@ -536,6 +544,7 @@ async def _handle_submit_v2(
         Callable[[str, str], Mapping[str, Any] | None] | None
     ) = None,
     admission_guard: "Callable[[Mapping[str, Any]], None] | None" = None,
+    fresh_admission_observer: Any = None,
 ) -> dict[str, Any]:
     """AD-ID1 automated submit with the same load-bearing v1 order.
 
@@ -566,6 +575,7 @@ async def _handle_submit_v2(
         execution_binding_provider=execution_binding_provider,
         dialogue_source_provider=dialogue_source_provider,
         admission_guard=admission_guard,
+        fresh_admission_observer=fresh_admission_observer,
     )
 
 
@@ -602,6 +612,7 @@ async def _handle_normalized_submit(
     admission_guard: "Callable[[Mapping[str, Any]], None] | None" = None,
     principal_context: Any = None,
     principal_request_ref: str | None = None,
+    fresh_admission_observer: Any = None,
 ) -> dict[str, Any]:
     """Shared replay/grounding/sink law after version-specific validation.
 
@@ -624,6 +635,8 @@ async def _handle_normalized_submit(
         strict_v2=strict_v2,
         principal_context=principal_context, principal_request_ref=principal_request_ref,
     )
+    if fresh_admission_observer is not None and not strict_v2:
+        raise _dependency_failure("backend_refused")
     # 4. exact command-id lookup.
     command_id = ceo_intent.command_id_for(intent_id)
     existing = await _backend_call(runtime.store.find_event_by_command_id, command_id)
@@ -636,7 +649,8 @@ async def _handle_normalized_submit(
         return _finalize_receipt(
             await _submit(runtime, candidate_envelope, workspace_root,
                 principal_context=principal_context, principal_request_ref=principal_request_ref,
-                principal_admission_guard=admission_guard)
+                principal_admission_guard=admission_guard,
+                fresh_admission_observer=fresh_admission_observer)
         )
 
     # 6. only when no canonical event exists, observe current trusted grounding.
@@ -729,6 +743,7 @@ async def _handle_normalized_submit(
         require_dialogue_source=strict_v2,
         principal_context=principal_context, principal_request_ref=principal_request_ref,
         principal_admission_guard=admission_guard,
+        fresh_admission_observer=fresh_admission_observer,
     )
     return _finalize_receipt(receipt)
 
@@ -901,6 +916,7 @@ async def handle_frame(
     admission_guard: "Callable[[Mapping[str, Any]], None] | None" = None,
     principal_peer_authorized: bool = False,
     principal_admission_guard: Any = None,
+    fresh_admission_observer: Any = None,
 ) -> dict[str, Any]:
     """Validate and dispatch one already-parsed JSON frame (§7).
 
@@ -962,6 +978,7 @@ async def handle_frame(
             execution_binding_provider=execution_binding_provider,
             dialogue_source_provider=dialogue_source_provider,
             admission_guard=admission_guard,
+            fresh_admission_observer=fresh_admission_observer,
         )
     if schema == STATUS_SCHEMA_V2:
         _require_v2_admission(

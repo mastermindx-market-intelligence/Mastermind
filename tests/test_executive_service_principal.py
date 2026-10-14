@@ -152,6 +152,24 @@ def _source_window(relative: str, first: int, last: int) -> str:
     return "\n".join(_source_lines(relative)[first - 1 : last])
 
 
+def _assert_source_pins(pins: tuple[dict, ...], predicates: tuple[str, ...]) -> None:
+    """Check each published citation against its exact source predicate.
+
+    The semantic assertions are independent of the citation values. A stale
+    citation still fails, without duplicating line numbers in the test.
+    """
+
+    assert len(pins) == len(predicates)
+    for pin, predicate in zip(pins, predicates):
+        assert pin["file"] == "control_plane/ceo_intent.py"
+        label = pin["line"]
+        assert label.startswith("L") and label[1:].isdigit()
+        lines = _source_lines(pin["file"])
+        line = int(label[1:])
+        assert 1 <= line <= len(lines)
+        assert predicate in lines[line - 1], pin
+
+
 # ---------------------------------------------------------------------------
 # 1. closed schema — drift, unknown ids, actor shape, reserved identities
 # ---------------------------------------------------------------------------
@@ -411,20 +429,12 @@ def test_a1_intent_id_depends_only_on_principal_and_operation_key():
     assert fingerprint(base) != fingerprint(changed_objective)
     assert fingerprint(base) != fingerprint(changed_grounding)
 
-    # The quoted sink predicates this law relies on are still where we cite them.
-    assert "find_event_by_command_id(command_id)" in _source_window(
-        "control_plane/ceo_intent.py", 1343, 1349
-    )
-    assert "if fingerprint is not None and recorded != fingerprint:" in _source_window(
-        "control_plane/ceo_intent.py", 1093, 1099
-    )
-    assert 'return f"{COMMAND_ID_PREFIX}{intent_id}"' in _source_window(
-        "control_plane/ceo_intent.py", 923, 929
-    )
-    pins = admission_status()["identity"]["conflict_predicates"]
-    assert {pin["line"] for pin in pins} == {"L1345", "L1095", "L925"}
-    for pin in pins:
-        assert pin["file"] == "control_plane/ceo_intent.py"
+    # The actual published citations must point at these unchanged predicates.
+    _assert_source_pins(admission_status()["identity"]["conflict_predicates"], (
+        "existing = runtime.store.find_event_by_command_id(command_id)",
+        "if fingerprint is not None and recorded != fingerprint:",
+        'return f"{COMMAND_ID_PREFIX}{intent_id}"',
+    ))
 
 
 def test_a1_duplicate_changed_objective_and_changed_grounding_stay_one_job(tmp_path: Path):
@@ -710,20 +720,12 @@ def test_service_schema_is_durably_carried_with_typed_evidence(tmp_path: Path):
     #     literals: the D8 identity ratchet flags unexplained 4xx-9xx integers
     #     in added production source, and a source-line citation is not an
     #     identity.
-    windows = {
-        "L750": _source_window("control_plane/ceo_intent.py", 748, 754),
-        "L598": _source_window("control_plane/ceo_intent.py", 596, 602),
-        "L1038": _source_window("control_plane/ceo_intent.py", 1036, 1042),
-        "L1437": _source_window("control_plane/ceo_intent.py", 1435, 1441),
-    }
-    assert "_SERVICE_REQUIRED_KEYS" in windows["L750"]
-    assert "def _require_service_ceiling" in windows["L598"]
-    assert 'value["principal_id"] = intent["principal_id"]' in windows["L1038"]
-    assert 'owner_seat="coo"' in windows["L1437"]
-    for predicate in status["predicates"]:
-        assert predicate["line"] in windows, predicate
-        assert predicate["file"] == "control_plane/ceo_intent.py"
-        assert predicate["line"].startswith("L") and predicate["line"][1:].isdigit()
+    _assert_source_pins(status["predicates"], (
+        '_exact_keys(raw, "intent", _SERVICE_REQUIRED_KEYS, _SERVICE_OPTIONAL_KEYS)',
+        "def _require_service_ceiling",
+        'value["principal_id"] = intent["principal_id"]',
+        'owner_seat="coo"',
+    ))
 
     # (f) the Runtime anchors this tier deliberately does NOT edit.
     # Their semantic spellings are the dependency contract; line numbers are

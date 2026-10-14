@@ -51,6 +51,8 @@ class RuntimeFabricTarget:
             "generation": self.generation,
             "addressable": True,
             "continuation_operation_key": self.reply_binding().continuation_operation_key,
+            "work_ref": self.source.work_ref,
+            "root_job_id": self.epoch.root_job_id,
         }
 
     def reply_binding(self):

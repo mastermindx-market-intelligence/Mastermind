@@ -1,0 +1,1408 @@
+{
+  "format_version": 1,
+  "purpose": "review_only_acceptance_design_not_runtime_policy_or_execution_registry",
+  "cases_are_executed": false,
+  "original_handoff_path": "docs/CLAUDE_CAPABILITY_HARDENING_BUILD_HANDOFFS_2026-10-04.md",
+  "cases": [
+    {
+      "id": "H1-01",
+      "handoff": "H1",
+      "level": "native",
+      "scenario": "Exact rich generation",
+      "expected": "Admitted profile, package and native observation agree before first useful effect.",
+      "evidence_owner": "Existing capability/native attestation and Runtime owners",
+      "source_ids": [
+        "S01",
+        "S02",
+        "S03",
+        "S04",
+        "S05",
+        "S29"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H1-02",
+      "handoff": "H1",
+      "level": "native",
+      "scenario": "Independent-owner reads",
+      "expected": "One Executive read and one independently admitted context-owner read succeed within scope.",
+      "evidence_owner": "Existing capability/native attestation and Runtime owners",
+      "source_ids": [
+        "S01",
+        "S02",
+        "S03",
+        "S04",
+        "S05",
+        "S29"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H1-03",
+      "handoff": "H1",
+      "level": "integration",
+      "scenario": "Restricted profile regression",
+      "expected": "Existing sealed and restricted Claude profiles retain their no-extension refusals.",
+      "evidence_owner": "Existing capability/native attestation and Runtime owners",
+      "source_ids": [
+        "S01",
+        "S02",
+        "S03",
+        "S04",
+        "S05",
+        "S29"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H1-04",
+      "handoff": "H1",
+      "level": "native",
+      "scenario": "Ambient extension",
+      "expected": "Unexpected MCP, Skill, plugin or hook prevents new effects; no silent widening.",
+      "evidence_owner": "Existing capability/native attestation and Runtime owners",
+      "source_ids": [
+        "S01",
+        "S02",
+        "S03",
+        "S04",
+        "S05",
+        "S29"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H1-05",
+      "handoff": "H1",
+      "level": "native",
+      "scenario": "Observed catalog drift",
+      "expected": "Wrong or incomplete tool/schema catalog refuses admission.",
+      "evidence_owner": "Existing capability/native attestation and Runtime owners",
+      "source_ids": [
+        "S01",
+        "S02",
+        "S03",
+        "S04",
+        "S05",
+        "S29"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H1-06",
+      "handoff": "H1",
+      "level": "native",
+      "scenario": "Reconnect generation change",
+      "expected": "Changed schema or process/resource identity requires re-attestation before use.",
+      "evidence_owner": "Existing capability/native attestation and Runtime owners",
+      "source_ids": [
+        "S01",
+        "S02",
+        "S03",
+        "S04",
+        "S05",
+        "S29"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H1-07",
+      "handoff": "H1",
+      "level": "native",
+      "scenario": "Settings-source isolation",
+      "expected": "Effective native settings match the qualified source policy, including the empty-list regression.",
+      "evidence_owner": "Existing capability/native attestation and Runtime owners",
+      "source_ids": [
+        "S01",
+        "S02",
+        "S03",
+        "S04",
+        "S05",
+        "S29"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H1-08",
+      "handoff": "H1",
+      "level": "native",
+      "scenario": "Approval versus inventory",
+      "expected": "Approval-list membership does not replace inventory or server-side permission enforcement.",
+      "evidence_owner": "Existing capability/native attestation and Runtime owners",
+      "source_ids": [
+        "S01",
+        "S02",
+        "S03",
+        "S04",
+        "S05",
+        "S29"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H1-09",
+      "handoff": "H1",
+      "level": "integration",
+      "scenario": "Claimed provider/host mismatch",
+      "expected": "Post-claim native binding drift refuses before provider work.",
+      "evidence_owner": "Existing capability/native attestation and Runtime owners",
+      "source_ids": [
+        "S01",
+        "S02",
+        "S03",
+        "S04",
+        "S05",
+        "S29"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H1-10",
+      "handoff": "H1",
+      "level": "integration",
+      "scenario": "Caller echo is not observation",
+      "expected": "A copied requested configuration cannot satisfy trusted native attestation.",
+      "evidence_owner": "Existing capability/native attestation and Runtime owners",
+      "source_ids": [
+        "S01",
+        "S02",
+        "S03",
+        "S04",
+        "S05",
+        "S29"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H1-11",
+      "handoff": "H1",
+      "level": "integration",
+      "scenario": "Launch reply lost",
+      "expected": "Original launch generation is reconciled; no duplicate launch or carrier change.",
+      "evidence_owner": "Existing capability/native attestation and Runtime owners",
+      "source_ids": [
+        "S01",
+        "S02",
+        "S03",
+        "S04",
+        "S05",
+        "S29"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H1-12",
+      "handoff": "H1",
+      "level": "native",
+      "scenario": "Capability removal and cleanup",
+      "expected": "Revoked capability cannot be used and the exact generation is safely reconciled/released.",
+      "evidence_owner": "Existing capability/native attestation and Runtime owners",
+      "source_ids": [
+        "S01",
+        "S02",
+        "S03",
+        "S04",
+        "S05",
+        "S29"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H2-01",
+      "handoff": "H2",
+      "level": "unit",
+      "scenario": "Static projection positive",
+      "expected": "Selected supported canonical profile projects deterministically through the existing projector.",
+      "evidence_owner": "Existing registry/package/projector and CI owners",
+      "source_ids": [
+        "S05",
+        "S29",
+        "S30",
+        "S33"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H2-02",
+      "handoff": "H2",
+      "level": "unit",
+      "scenario": "Canonical profile movement",
+      "expected": "Relevant digest change fails stale parity until explicit requalification.",
+      "evidence_owner": "Existing registry/package/projector and CI owners",
+      "source_ids": [
+        "S05",
+        "S29",
+        "S30",
+        "S33"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H2-03",
+      "handoff": "H2",
+      "level": "unit",
+      "scenario": "Package closure or revocation",
+      "expected": "Referenced package generation/removal changes the applicable parity outcome.",
+      "evidence_owner": "Existing registry/package/projector and CI owners",
+      "source_ids": [
+        "S05",
+        "S29",
+        "S30",
+        "S33"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H2-04",
+      "handoff": "H2",
+      "level": "unit",
+      "scenario": "Tool/schema/security change",
+      "expected": "Security-relevant contract drift cannot remain silently supported.",
+      "evidence_owner": "Existing registry/package/projector and CI owners",
+      "source_ids": [
+        "S05",
+        "S29",
+        "S30",
+        "S33"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H2-05",
+      "handoff": "H2",
+      "level": "unit",
+      "scenario": "New inventory",
+      "expected": "New profile/capability requires explicit disposition and is never auto-admitted.",
+      "evidence_owner": "Existing registry/package/projector and CI owners",
+      "source_ids": [
+        "S05",
+        "S29",
+        "S30",
+        "S33"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H2-06",
+      "handoff": "H2",
+      "level": "unit",
+      "scenario": "Intentional defer",
+      "expected": "A documented unsupported/deferred surface does not retain a misleading stale support claim.",
+      "evidence_owner": "Existing registry/package/projector and CI owners",
+      "source_ids": [
+        "S05",
+        "S29",
+        "S30",
+        "S33"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H2-07",
+      "handoff": "H2",
+      "level": "unit",
+      "scenario": "Strict manifest types",
+      "expected": "Duplicate keys, unknown fields, invalid boolean types and escaping paths refuse.",
+      "evidence_owner": "Existing registry/package/projector and CI owners",
+      "source_ids": [
+        "S05",
+        "S29",
+        "S30",
+        "S33"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H2-08",
+      "handoff": "H2",
+      "level": "integration",
+      "scenario": "Cross-provider equivalence",
+      "expected": "Only equivalent semantic capabilities under the same authority ceiling claim parity.",
+      "evidence_owner": "Existing registry/package/projector and CI owners",
+      "source_ids": [
+        "S05",
+        "S29",
+        "S30",
+        "S33"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H2-09",
+      "handoff": "H2",
+      "level": "integration",
+      "scenario": "Shipped artifact stale",
+      "expected": "Old selected package/projection cannot pass as the current shipped generation.",
+      "evidence_owner": "Existing registry/package/projector and CI owners",
+      "source_ids": [
+        "S05",
+        "S29",
+        "S30",
+        "S33"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H2-10",
+      "handoff": "H2",
+      "level": "native",
+      "scenario": "Observed catalog differs",
+      "expected": "Native observed generation cannot be replaced by static configuration success.",
+      "evidence_owner": "Existing registry/package/projector and CI owners",
+      "source_ids": [
+        "S05",
+        "S29",
+        "S30",
+        "S33"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H2-11",
+      "handoff": "H2",
+      "level": "integration",
+      "scenario": "CI inclusion",
+      "expected": "The existing required CI collector includes the parity tests; no narrowed alternate gate.",
+      "evidence_owner": "Existing registry/package/projector and CI owners",
+      "source_ids": [
+        "S05",
+        "S29",
+        "S30",
+        "S33"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H2-12",
+      "handoff": "H2",
+      "level": "native",
+      "scenario": "End-to-end generation change",
+      "expected": "A supported capability change is requalified or explicitly deferred with stale live use fenced.",
+      "evidence_owner": "Existing registry/package/projector and CI owners",
+      "source_ids": [
+        "S05",
+        "S29",
+        "S30",
+        "S33"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H3-01",
+      "handoff": "H3",
+      "level": "unit",
+      "scenario": "Six-tool contract",
+      "expected": "Current COO package matches the role-correct backend tools and schema snapshot.",
+      "evidence_owner": "Existing COO principal admission and package/enrollment owners",
+      "source_ids": [
+        "S06",
+        "S07",
+        "S08",
+        "S09",
+        "S10",
+        "S11",
+        "S31",
+        "S34"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H3-02",
+      "handoff": "H3",
+      "level": "integration",
+      "scenario": "CEO-only action",
+      "expected": "COO binding refuses CEO-only submission rather than hiding it cosmetically.",
+      "evidence_owner": "Existing COO principal admission and package/enrollment owners",
+      "source_ids": [
+        "S06",
+        "S07",
+        "S08",
+        "S09",
+        "S10",
+        "S11",
+        "S31",
+        "S34"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H3-03",
+      "handoff": "H3",
+      "level": "integration",
+      "scenario": "Closed request shape",
+      "expected": "Extra actor, seat, host, provider, branch, authority or session inputs refuse.",
+      "evidence_owner": "Existing COO principal admission and package/enrollment owners",
+      "source_ids": [
+        "S06",
+        "S07",
+        "S08",
+        "S09",
+        "S10",
+        "S11",
+        "S31",
+        "S34"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H3-04",
+      "handoff": "H3",
+      "level": "integration",
+      "scenario": "Exact principal scopes",
+      "expected": "Wrong scope, issuer, subject, client or resource binding refuses.",
+      "evidence_owner": "Existing COO principal admission and package/enrollment owners",
+      "source_ids": [
+        "S06",
+        "S07",
+        "S08",
+        "S09",
+        "S10",
+        "S11",
+        "S31",
+        "S34"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H3-05",
+      "handoff": "H3",
+      "level": "integration",
+      "scenario": "Wrong mission",
+      "expected": "Request/status workstream must match the exact authorized mission.",
+      "evidence_owner": "Existing COO principal admission and package/enrollment owners",
+      "source_ids": [
+        "S06",
+        "S07",
+        "S08",
+        "S09",
+        "S10",
+        "S11",
+        "S31",
+        "S34"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H3-06",
+      "handoff": "H3",
+      "level": "integration",
+      "scenario": "Duplicate versus conflict",
+      "expected": "Same logical request reconciles; changed semantics under the same key conflict.",
+      "evidence_owner": "Existing COO principal admission and package/enrollment owners",
+      "source_ids": [
+        "S06",
+        "S07",
+        "S08",
+        "S09",
+        "S10",
+        "S11",
+        "S31",
+        "S34"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H3-07",
+      "handoff": "H3",
+      "level": "integration",
+      "scenario": "Lost submit response",
+      "expected": "Original request_ref resolves the original job or preserves uncertainty, never duplicates it.",
+      "evidence_owner": "Existing COO principal admission and package/enrollment owners",
+      "source_ids": [
+        "S06",
+        "S07",
+        "S08",
+        "S09",
+        "S10",
+        "S11",
+        "S31",
+        "S34"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H3-08",
+      "handoff": "H3",
+      "level": "integration",
+      "scenario": "Malformed post-send receipt",
+      "expected": "Wrong schema/request/intent identity or backend uncertainty is not success or assumed no-effect.",
+      "evidence_owner": "Existing COO principal admission and package/enrollment owners",
+      "source_ids": [
+        "S06",
+        "S07",
+        "S08",
+        "S09",
+        "S10",
+        "S11",
+        "S31",
+        "S34"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H3-09",
+      "handoff": "H3",
+      "level": "native",
+      "scenario": "Fresh recovery and useful action",
+      "expected": "Fresh admitted Claude recovers context, submits one harmless in-mission task and reads canonical result.",
+      "evidence_owner": "Existing COO principal admission and package/enrollment owners",
+      "source_ids": [
+        "S06",
+        "S07",
+        "S08",
+        "S09",
+        "S10",
+        "S11",
+        "S31",
+        "S34"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H3-10",
+      "handoff": "H3",
+      "level": "native",
+      "scenario": "Conversation isolation falsifier",
+      "expected": "Sibling-client and same-client sibling-conversation limits are observed and stated truthfully.",
+      "evidence_owner": "Existing COO principal admission and package/enrollment owners",
+      "source_ids": [
+        "S06",
+        "S07",
+        "S08",
+        "S09",
+        "S10",
+        "S11",
+        "S31",
+        "S34"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H3-11",
+      "handoff": "H3",
+      "level": "native",
+      "scenario": "Package install and selection",
+      "expected": "Source, installed package, selected profile, auth and native proof have separate exact receipts.",
+      "evidence_owner": "Existing COO principal admission and package/enrollment owners",
+      "source_ids": [
+        "S06",
+        "S07",
+        "S08",
+        "S09",
+        "S10",
+        "S11",
+        "S31",
+        "S34"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H3-12",
+      "handoff": "H3",
+      "level": "integration",
+      "scenario": "Status while new work fenced",
+      "expected": "Authorized reconciliation remains distinct from new-effect permission.",
+      "evidence_owner": "Existing COO principal admission and package/enrollment owners",
+      "source_ids": [
+        "S06",
+        "S07",
+        "S08",
+        "S09",
+        "S10",
+        "S11",
+        "S31",
+        "S34"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H4-01",
+      "handoff": "H4",
+      "level": "integration",
+      "scenario": "Versioned principal root",
+      "expected": "Role-correct orchestration uses the existing strict root owner; v1 bounded-job semantics remain unchanged.",
+      "evidence_owner": "Existing principal admission, Runtime, CooCycle, Router and Capacity",
+      "source_ids": [
+        "S13",
+        "S14",
+        "S15",
+        "S16",
+        "S17",
+        "S35",
+        "S36"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H4-02",
+      "handoff": "H4",
+      "level": "integration",
+      "scenario": "Root provenance",
+      "expected": "Wrong issuer/root/parent/depth/source identity refuses; generic job creation cannot forge an aggregation root.",
+      "evidence_owner": "Existing principal admission, Runtime, CooCycle, Router and Capacity",
+      "source_ids": [
+        "S13",
+        "S14",
+        "S15",
+        "S16",
+        "S17",
+        "S35",
+        "S36"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H4-03",
+      "handoff": "H4",
+      "level": "integration",
+      "scenario": "Root submit race or reply loss",
+      "expected": "One canonical root and original request identity survive duplicate submission and lost receipt.",
+      "evidence_owner": "Existing principal admission, Runtime, CooCycle, Router and Capacity",
+      "source_ids": [
+        "S13",
+        "S14",
+        "S15",
+        "S16",
+        "S17",
+        "S35",
+        "S36"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H4-04",
+      "handoff": "H4",
+      "level": "unit",
+      "scenario": "Reservation arithmetic",
+      "expected": "Current policy refuses 19 reserved slots and admits the proposed truthful 11-slot graph.",
+      "evidence_owner": "Existing principal admission, Runtime, CooCycle, Router and Capacity",
+      "source_ids": [
+        "S13",
+        "S14",
+        "S15",
+        "S16",
+        "S17",
+        "S35",
+        "S36"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H4-05",
+      "handoff": "H4",
+      "level": "integration",
+      "scenario": "Overlapping child writes",
+      "expected": "Plan/source admission rejects conflicting writers before dispatch.",
+      "evidence_owner": "Existing principal admission, Runtime, CooCycle, Router and Capacity",
+      "source_ids": [
+        "S13",
+        "S14",
+        "S15",
+        "S16",
+        "S17",
+        "S35",
+        "S36"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H4-06",
+      "handoff": "H4",
+      "level": "native",
+      "scenario": "Two eligible distinct lanes",
+      "expected": "Two independent outcomes run on actual admitted non-identical lanes without Chairman placement.",
+      "evidence_owner": "Existing principal admission, Runtime, CooCycle, Router and Capacity",
+      "source_ids": [
+        "S13",
+        "S14",
+        "S15",
+        "S16",
+        "S17",
+        "S35",
+        "S36"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H4-07",
+      "handoff": "H4",
+      "level": "native",
+      "scenario": "Useful principal overlap",
+      "expected": "Principal produces independent integration work while children execute, without duplicating their tasks.",
+      "evidence_owner": "Existing principal admission, Runtime, CooCycle, Router and Capacity",
+      "source_ids": [
+        "S13",
+        "S14",
+        "S15",
+        "S16",
+        "S17",
+        "S35",
+        "S36"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H4-08",
+      "handoff": "H4",
+      "level": "native",
+      "scenario": "Review and repair lineage",
+      "expected": "One reviewed disposable implementation follows actual review/repair and current-revision acceptance.",
+      "evidence_owner": "Existing principal admission, Runtime, CooCycle, Router and Capacity",
+      "source_ids": [
+        "S13",
+        "S14",
+        "S15",
+        "S16",
+        "S17",
+        "S35",
+        "S36"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H4-09",
+      "handoff": "H4",
+      "level": "integration",
+      "scenario": "Partial readiness",
+      "expected": "Ready result is consumed without waiting for an unrelated child.",
+      "evidence_owner": "Existing principal admission, Runtime, CooCycle, Router and Capacity",
+      "source_ids": [
+        "S13",
+        "S14",
+        "S15",
+        "S16",
+        "S17",
+        "S35",
+        "S36"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H4-10",
+      "handoff": "H4",
+      "level": "integration",
+      "scenario": "Provider loss or rate limit",
+      "expected": "Existing Runtime reconciles incumbent effect/binding; no blind duplicate or denial-evading fallback.",
+      "evidence_owner": "Existing principal admission, Runtime, CooCycle, Router and Capacity",
+      "source_ids": [
+        "S13",
+        "S14",
+        "S15",
+        "S16",
+        "S17",
+        "S35",
+        "S36"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H4-11",
+      "handoff": "H4",
+      "level": "native",
+      "scenario": "Parent interruption recovery",
+      "expected": "Exact root/session generation and unconsumed returns are recovered through existing owners.",
+      "evidence_owner": "Existing principal admission, Runtime, CooCycle, Router and Capacity",
+      "source_ids": [
+        "S13",
+        "S14",
+        "S15",
+        "S16",
+        "S17",
+        "S35",
+        "S36"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H4-12",
+      "handoff": "H4",
+      "level": "native",
+      "scenario": "Final accepted aggregation",
+      "expected": "Parent consumes both canonical current results and the required review evidence.",
+      "evidence_owner": "Existing principal admission, Runtime, CooCycle, Router and Capacity",
+      "source_ids": [
+        "S13",
+        "S14",
+        "S15",
+        "S16",
+        "S17",
+        "S35",
+        "S36"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H5-01",
+      "handoff": "H5",
+      "level": "integration",
+      "scenario": "Existing observer contract",
+      "expected": "Exact registration/reuse/reconciliation/return owner is identified and tested before reliance.",
+      "evidence_owner": "Existing process/CI/release and exact return owner",
+      "source_ids": [
+        "S26",
+        "S27",
+        "S22"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H5-02",
+      "handoff": "H5",
+      "level": "integration",
+      "scenario": "Duplicate registration",
+      "expected": "Concurrent same-candidate observation requests reuse one owner handle.",
+      "evidence_owner": "Existing process/CI/release and exact return owner",
+      "source_ids": [
+        "S26",
+        "S27",
+        "S22"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H5-03",
+      "handoff": "H5",
+      "level": "integration",
+      "scenario": "Registration reply lost",
+      "expected": "Original candidate/handle is reconciled without a second observer.",
+      "evidence_owner": "Existing process/CI/release and exact return owner",
+      "source_ids": [
+        "S26",
+        "S27",
+        "S22"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H5-04",
+      "handoff": "H5",
+      "level": "integration",
+      "scenario": "Incomplete required-check evidence",
+      "expected": "Missing, paginated or inaccessible required checks never become PASS from an empty set.",
+      "evidence_owner": "Existing process/CI/release and exact return owner",
+      "source_ids": [
+        "S26",
+        "S27",
+        "S22"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H5-05",
+      "handoff": "H5",
+      "level": "integration",
+      "scenario": "Candidate association",
+      "expected": "Head/synthetic-merge/run identities obey the actual release owner matching rules.",
+      "evidence_owner": "Existing process/CI/release and exact return owner",
+      "source_ids": [
+        "S26",
+        "S27",
+        "S22"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H5-06",
+      "handoff": "H5",
+      "level": "integration",
+      "scenario": "Head changes before consumption",
+      "expected": "Old result remains historical and cannot pass the current candidate.",
+      "evidence_owner": "Existing process/CI/release and exact return owner",
+      "source_ids": [
+        "S26",
+        "S27",
+        "S22"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H5-07",
+      "handoff": "H5",
+      "level": "integration",
+      "scenario": "Producer or check-policy drift",
+      "expected": "Ambiguous or changed required-check policy/producer identity fails current acceptance.",
+      "evidence_owner": "Existing process/CI/release and exact return owner",
+      "source_ids": [
+        "S26",
+        "S27",
+        "S22"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H5-08",
+      "handoff": "H5",
+      "level": "native",
+      "scenario": "Useful work while CI runs",
+      "expected": "Principal produces a path-disjoint useful result instead of synchronous watch polling.",
+      "evidence_owner": "Existing process/CI/release and exact return owner",
+      "source_ids": [
+        "S26",
+        "S27",
+        "S22"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H5-09",
+      "handoff": "H5",
+      "level": "native",
+      "scenario": "Material failure and scoped repair",
+      "expected": "Exact failed step is diagnosed and repaired by the source owner, not the observer.",
+      "evidence_owner": "Existing process/CI/release and exact return owner",
+      "source_ids": [
+        "S26",
+        "S27",
+        "S22"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H5-10",
+      "handoff": "H5",
+      "level": "native",
+      "scenario": "Matching PASS consumption",
+      "expected": "Current candidate result advances only its release prerequisite, not product acceptance.",
+      "evidence_owner": "Existing process/CI/release and exact return owner",
+      "source_ids": [
+        "S26",
+        "S27",
+        "S22"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H5-11",
+      "handoff": "H5",
+      "level": "integration",
+      "scenario": "Wrong or retired return target",
+      "expected": "No wake to another chat/job; retain result with explicit delivery/binding state.",
+      "evidence_owner": "Existing process/CI/release and exact return owner",
+      "source_ids": [
+        "S26",
+        "S27",
+        "S22"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H5-12",
+      "handoff": "H5",
+      "level": "integration",
+      "scenario": "Read-only observer ceiling",
+      "expected": "Observer cannot merge, deploy, rerun, change leases or mutate the candidate.",
+      "evidence_owner": "Existing process/CI/release and exact return owner",
+      "source_ids": [
+        "S26",
+        "S27",
+        "S22"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H6-01",
+      "handoff": "H6",
+      "level": "integration",
+      "scenario": "Canonical context recovery",
+      "expected": "Exact workstream/checkpoint and cited decisions are recovered without creating another memory store.",
+      "evidence_owner": "Existing Agent OS, neutral Dialogue/Relay and binding/Wake owners",
+      "source_ids": [
+        "S18",
+        "S19",
+        "S20",
+        "S21",
+        "S22",
+        "S32"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H6-02",
+      "handoff": "H6",
+      "level": "integration",
+      "scenario": "Authorized Agent OS delta",
+      "expected": "Only scoped Macro record paths change; draft versus merged canonical revision remains explicit.",
+      "evidence_owner": "Existing Agent OS, neutral Dialogue/Relay and binding/Wake owners",
+      "source_ids": [
+        "S18",
+        "S19",
+        "S20",
+        "S21",
+        "S22",
+        "S32"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H6-03",
+      "handoff": "H6",
+      "level": "integration",
+      "scenario": "Current worker facade ceiling",
+      "expected": "Old worker and COO reporting bindings cannot acquire ruling types by package configuration.",
+      "evidence_owner": "Existing Agent OS, neutral Dialogue/Relay and binding/Wake owners",
+      "source_ids": [
+        "S18",
+        "S19",
+        "S20",
+        "S21",
+        "S22",
+        "S32"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H6-04",
+      "handoff": "H6",
+      "level": "integration",
+      "scenario": "Scoped principal ruling",
+      "expected": "Only the accepted current principal-to-subordinate commission can issue its authorized ruling.",
+      "evidence_owner": "Existing Agent OS, neutral Dialogue/Relay and binding/Wake owners",
+      "source_ids": [
+        "S18",
+        "S19",
+        "S20",
+        "S21",
+        "S22",
+        "S32"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H6-05",
+      "handoff": "H6",
+      "level": "integration",
+      "scenario": "Reserved decision",
+      "expected": "COO cannot consume CEO/Chairman authority or globally inherit CEO message types.",
+      "evidence_owner": "Existing Agent OS, neutral Dialogue/Relay and binding/Wake owners",
+      "source_ids": [
+        "S18",
+        "S19",
+        "S20",
+        "S21",
+        "S22",
+        "S32"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H6-06",
+      "handoff": "H6",
+      "level": "integration",
+      "scenario": "Wrong parent or thread",
+      "expected": "Sibling child, wrong root and wrong carrier refuse before send.",
+      "evidence_owner": "Existing Agent OS, neutral Dialogue/Relay and binding/Wake owners",
+      "source_ids": [
+        "S18",
+        "S19",
+        "S20",
+        "S21",
+        "S22",
+        "S32"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H6-07",
+      "handoff": "H6",
+      "level": "integration",
+      "scenario": "Fresh reply lineage",
+      "expected": "Ruling uses current exact return/revision and carrier rather than stale history.",
+      "evidence_owner": "Existing Agent OS, neutral Dialogue/Relay and binding/Wake owners",
+      "source_ids": [
+        "S18",
+        "S19",
+        "S20",
+        "S21",
+        "S22",
+        "S32"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H6-08",
+      "handoff": "H6",
+      "level": "integration",
+      "scenario": "Lost send response",
+      "expected": "Original message-key/prepared send is reconciled with no duplicate ruling.",
+      "evidence_owner": "Existing Agent OS, neutral Dialogue/Relay and binding/Wake owners",
+      "source_ids": [
+        "S18",
+        "S19",
+        "S20",
+        "S21",
+        "S22",
+        "S32"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H6-09",
+      "handoff": "H6",
+      "level": "integration",
+      "scenario": "Arbitrary message wake",
+      "expected": "Unvalidated prose or a stale provider target cannot create a valid wake/job/session effect.",
+      "evidence_owner": "Existing Agent OS, neutral Dialogue/Relay and binding/Wake owners",
+      "source_ids": [
+        "S18",
+        "S19",
+        "S20",
+        "S21",
+        "S22",
+        "S32"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H6-10",
+      "handoff": "H6",
+      "level": "native",
+      "scenario": "Complete reciprocal cycle",
+      "expected": "Real principal-to-counterpart return, continuation and terminal STOP occur on one bound carrier.",
+      "evidence_owner": "Existing Agent OS, neutral Dialogue/Relay and binding/Wake owners",
+      "source_ids": [
+        "S18",
+        "S19",
+        "S20",
+        "S21",
+        "S22",
+        "S32"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H6-11",
+      "handoff": "H6",
+      "level": "native",
+      "scenario": "Exact target consumption",
+      "expected": "Delivery, pickup, execution and acceptance are separately proven without Chairman relay.",
+      "evidence_owner": "Existing Agent OS, neutral Dialogue/Relay and binding/Wake owners",
+      "source_ids": [
+        "S18",
+        "S19",
+        "S20",
+        "S21",
+        "S22",
+        "S32"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H6-12",
+      "handoff": "H6",
+      "level": "integration",
+      "scenario": "Child versus aggregate watch",
+      "expected": "Terminal child closes only its obligation while valid sibling/aggregate sources remain.",
+      "evidence_owner": "Existing Agent OS, neutral Dialogue/Relay and binding/Wake owners",
+      "source_ids": [
+        "S18",
+        "S19",
+        "S20",
+        "S21",
+        "S22",
+        "S32"
+      ],
+      "basis": "deep_design_candidate",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H7-01",
+      "handoff": "H7",
+      "level": "native",
+      "scenario": "Original H7 source binding",
+      "expected": "Browser opens the product from the exact permitted workspace/devserver.",
+      "evidence_owner": "Existing Browser Resource Fabric and native admission owner",
+      "source_ids": [
+        "S04",
+        "S23",
+        "S24",
+        "S25"
+      ],
+      "basis": "original_handoff_only_detailed_packet_write_held",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H7-02",
+      "handoff": "H7",
+      "level": "native",
+      "scenario": "Original H7 resource binding",
+      "expected": "Exact browser resource generation and tool schema match the reviewed Claude profile.",
+      "evidence_owner": "Existing Browser Resource Fabric and native admission owner",
+      "source_ids": [
+        "S04",
+        "S23",
+        "S24",
+        "S25"
+      ],
+      "basis": "original_handoff_only_detailed_packet_write_held",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H7-03",
+      "handoff": "H7",
+      "level": "native",
+      "scenario": "Original H7 origin scope",
+      "expected": "Only approved origins/egress are available; no unrestricted network substitute.",
+      "evidence_owner": "Existing Browser Resource Fabric and native admission owner",
+      "source_ids": [
+        "S04",
+        "S23",
+        "S24",
+        "S25"
+      ],
+      "basis": "original_handoff_only_detailed_packet_write_held",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H7-04",
+      "handoff": "H7",
+      "level": "native",
+      "scenario": "Original H7 responsive inspection",
+      "expected": "Relevant product breakpoints are actually inspected.",
+      "evidence_owner": "Existing Browser Resource Fabric and native admission owner",
+      "source_ids": [
+        "S04",
+        "S23",
+        "S24",
+        "S25"
+      ],
+      "basis": "original_handoff_only_detailed_packet_write_held",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H7-05",
+      "handoff": "H7",
+      "level": "native",
+      "scenario": "Original H7 visual artifact",
+      "expected": "Source/resource-bound screenshot evidence is captured.",
+      "evidence_owner": "Existing Browser Resource Fabric and native admission owner",
+      "source_ids": [
+        "S04",
+        "S23",
+        "S24",
+        "S25"
+      ],
+      "basis": "original_handoff_only_detailed_packet_write_held",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H7-06",
+      "handoff": "H7",
+      "level": "native",
+      "scenario": "Original H7 diagnostics",
+      "expected": "Bounded console and network evidence is captured where appropriate.",
+      "evidence_owner": "Existing Browser Resource Fabric and native admission owner",
+      "source_ids": [
+        "S04",
+        "S23",
+        "S24",
+        "S25"
+      ],
+      "basis": "original_handoff_only_detailed_packet_write_held",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H7-07",
+      "handoff": "H7",
+      "level": "native",
+      "scenario": "Original H7 release",
+      "expected": "The exact browser resource is released with cleanup ownership preserved.",
+      "evidence_owner": "Existing Browser Resource Fabric and native admission owner",
+      "source_ids": [
+        "S04",
+        "S23",
+        "S24",
+        "S25"
+      ],
+      "basis": "original_handoff_only_detailed_packet_write_held",
+      "execution_result": "NOT_RUN"
+    },
+    {
+      "id": "H7-08",
+      "handoff": "H7",
+      "level": "native",
+      "scenario": "Original H7 ambient exclusion",
+      "expected": "No Chairman browser cookies/profile, ambient session or arbitrary Chrome route is used.",
+      "evidence_owner": "Existing Browser Resource Fabric and native admission owner",
+      "source_ids": [
+        "S04",
+        "S23",
+        "S24",
+        "S25"
+      ],
+      "basis": "original_handoff_only_detailed_packet_write_held",
+      "execution_result": "NOT_RUN"
+    }
+  ]
+}
