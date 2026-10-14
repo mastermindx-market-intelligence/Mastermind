@@ -1,0 +1,97 @@
+# Pinned Research producer launcher
+
+The recurring Research workflow currently executes changing repository heads.
+The selected reader expects one exact producer commit. A constant declared SHA
+while executing changing code would be false provenance. Original private
+journals and the working corpus must also survive runner checkout cleanup.
+
+`integrations.research_read_mcp.producer_launch` supplies the invocation mechanism.
+It reuses the existing archive manifest and `verify_archive_release`; it creates
+no release authority, scheduler, queue, writer lease, deployment or retry engine.
+There is no workflow change in this candidate.
+
+## Configuration and invocation
+
+An owner-secured JSON configuration has exactly these fields:
+
+```text
+schema = mastermind.research_producer_launch.v1
+mastermind_release, mastermind_commit, mastermind_tree
+macro_release, macro_commit, macro_tree
+manifest_path, manifest_sha256
+retention_root, public_checkout, runner_work_root
+```
+
+The release/manifest fields use the existing staged archive contract. Both
+release roots and the manifest belong to the invoking UID. The expected manifest
+digest must be obtained from the actual authorized release owner. The staged
+Mastermind closure includes this module through its existing `integrations`
+root. The Macro closure must include `engine`, `lib`, and
+`scripts/ingest_research.py`; metadata-only fixtures previously missed `lib` and
+failed actual PDF extraction. Dependency qualification remains a separate duty.
+
+The existing same-owner retention root must be mode0700, outside both releases,
+the public checkout and the runner work root, without symlink traversal. The
+public checkout remains separate from the executed source. All paths are
+explicit. No fallback to a temporary/shared directory is supplied.
+
+The CLI takes `--config`, `--run-id` and `--attempt`. Its default performs a
+read-only preflight and emits an `INERT_PRODUCER_PLAN`. Only an explicit
+`--execute` starts a child. The workflow owner supplies the original GitHub run
+and attempt; these argument strings do not authenticate the caller or confer
+writer authority. The repository identity is fixed to the existing Macro repo.
+
+Before an effectful invocation, the existing owner must qualify protected source,
+dependencies, active/pending/manual writers, original unknown effects and the
+supported recovery path. Neither a ready plan nor the execute flag supplies
+those facts. An absent directory or new workflow attempt cannot authorize
+replay of an old BUILDING generation.
+
+## Retained evidence and public output
+
+Execution exclusively reserves `macro-<run>-<attempt>` under the private root.
+It never adopts or deletes an existing occupant. `launch.json` binds the selected
+source/manifest and claimed original run. A fresh isolated Python child verifies
+both archives again before importing the Macro engine, and uses the pinned CLI
+with an explicit public mirror and original journal path. Python bytecode is
+disabled. Poppler and other temporary files use a new private `tmp` directory.
+The CLI reserves its own private journal workspace and corpus.
+
+Raw stdout/stderr go only to mode0600 `output.log`, bounded at32MiB. The parent
+extracts one strictly formatted original capture notice directly from that
+child's output stream; it never rehashes a later journal to manufacture a capture.
+Duplicate, incomplete or oversized output suppresses the capture claim. After
+the bound it drains the process without killing it, because termination cannot
+settle an in-flight Store request. There is no automatic timeout or retry here;
+the incumbent workflow retains its own lifecycle policy.
+
+The private `process-result.json` and public response contain only fixed-schema
+source/run metadata, exit code, capture digest if observed and explicit absence
+of completion/recovery authority. An exited process plus capture does not prove
+COMPLETE, all-writer settlement, dependency qualification or user acceptance.
+Failure after reservation reports `ORIGINAL_RUN_UNSETTLED` and preserves the
+original carrier. Raw errors, private paths and private report bodies are never
+forwarded through the public response.
+
+The launcher refuses admission below2GiB free on the retention volume. This is
+headroom, not a retention policy or disk reservation. It does not delete old
+evidence to make room. A retention/archival policy needs the existing evidence
+owner's positive disposition and must preserve unresolved original operations.
+No such policy or host installation is supplied by this source change.
+
+## Validation boundary
+
+The focused tests use real isolated child processes and synthetic archive
+manifests with fake producer source. They cover default no effects, archive
+tampering before and after parent preflight, original-run collision, path/mode
+refusal, private logs and temporary files, exact source/run arguments, bounded
+output, missing/duplicate/truncated capture, nonzero exits, and result persistence
+failure after the child has executed. They do not exercise live R2 credentials.
+
+The first broader run passed97 of105 cases;8 owner-binding cases could not import
+JWT in the default Python environment. Those8 passed unchanged in the existing
+qualified Research test environment. No source change was needed for that
+environment repair. This is105 distinct passing cases, not one all-green run.
+
+Protected merge, independent review, pinned actual CLI integration, installed
+host/dependency proof and live writer adoption are separate remaining gates.
