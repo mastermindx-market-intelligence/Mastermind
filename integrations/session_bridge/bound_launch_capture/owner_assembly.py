@@ -139,3 +139,34 @@ def run_owner_bridge(*, config_path, bindings_path, bindings_sha256,
             credential_loader=credential_loader, nice=nice)
         return create_attended_backend(config, owner_resources=resources)
     return main(['serve', '--config', str(config_path)], backend_factory=fixed_factory)
+
+
+def run_private_owner_bridge(*, config_path, bindings_path, bindings_sha256,
+                             realm_config_path, host_ref, worker_id, routing_root_id,
+                             routing_parent_run_id, active_dir, model_class, max_turns,
+                             nice=0):
+    """Installed fixed caller; bind the existing private loader without reading it.
+
+    The root-owned installation entry supplies only literal data. No configured
+    module, callable, credential path or environment variable selects code.
+    Existing protected definitions own the worker identity and private HOME.
+    """
+    source = FabricBindingSource.from_path(bindings_path, bindings_sha256)
+    physical = source(host_ref, worker_id)
+    raw = canary.definition(realm_config_path, physical)
+
+    def credential_loader():
+        # Recheck the original definition before opening the existing private
+        # credential at the actual launch boundary, never during assembly.
+        if (source(host_ref, worker_id) != physical
+                or canary.definition(realm_config_path, physical) != raw):
+            _refuse()
+        return realm.load_private_provider_credential(Path(raw['provider_home']),
+            expected_uid=raw['worker_uid'], expected_gid=raw['worker_gid'])
+
+    return run_owner_bridge(config_path=config_path, bindings_path=bindings_path,
+        bindings_sha256=bindings_sha256, realm_config_path=realm_config_path,
+        host_ref=host_ref, worker_id=worker_id, routing_root_id=routing_root_id,
+        routing_parent_run_id=routing_parent_run_id, active_dir=active_dir,
+        model_class=model_class, max_turns=max_turns,
+        credential_loader=credential_loader, nice=nice)

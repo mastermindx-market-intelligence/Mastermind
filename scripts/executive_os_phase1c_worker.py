@@ -273,7 +273,10 @@ def _load_config(path: Path, *, require_root_owner: bool) -> dict[str, Any]:
         or any(type(group_id) is not int or group_id <= 0 for group_id in allowed_groups)
         or allowed_groups != sorted(set(allowed_groups))
         or int(value["worker_gid"]) in allowed_groups
-        or frozenset(allowed_groups) not in _REVIEWED_AMBIENT_GID_SETS
+        # The finite bridge seals assignments under an isolated primary group.
+        # Ordinary Codex realms retain their reviewed ambient group contract.
+        or (finite and allowed_groups != [])
+        or (not finite and frozenset(allowed_groups) not in _REVIEWED_AMBIENT_GID_SETS)
     ):
         raise WorkerConfigError("allowed supplementary groups are invalid")
     return value

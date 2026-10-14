@@ -103,6 +103,31 @@ def compose(fixed, **changes):
     return assembly.compose_owner_resources(fixed.config(),**{**fixed.args,**changes})
 
 
+def test_installed_private_entry_binds_loader_without_reading_secret(fixed, monkeypatch):
+    def capture(**kwargs):
+        assert kwargs['routing_root_id'] == fixed.args['routing_root_id']
+        assert callable(kwargs['credential_loader'])
+        return 47
+    monkeypatch.setattr(assembly, 'run_owner_bridge', capture)
+    monkeypatch.setattr(realm, 'load_private_provider_credential',
+        lambda *a,**k: pytest.fail('construction cannot open a private credential'))
+    arguments={key:value for key,value in fixed.args.items() if key != 'credential_loader'}
+    assert assembly.run_private_owner_bridge(**arguments)==47
+
+
+def test_private_entry_loader_rechecks_original_definition_before_open(fixed, monkeypatch):
+    loaded=[]
+    monkeypatch.setattr(realm, 'load_private_provider_credential',
+        lambda *a,**k: loaded.append((a,k)))
+    def capture(**kwargs):
+        fixed.drift='definition'
+        with pytest.raises(bridge.BridgeProtocolError):kwargs['credential_loader']()
+    monkeypatch.setattr(assembly, 'run_owner_bridge', capture)
+    arguments={key:value for key,value in fixed.args.items() if key != 'credential_loader'}
+    assembly.run_private_owner_bridge(**arguments)
+    assert loaded==[]
+
+
 def test_typed_resources_reach_real_fixed_factory_without_start(fixed):
     resources=compose(fixed)
     assert type(resources.preparation['policy']) is BrokerPolicy

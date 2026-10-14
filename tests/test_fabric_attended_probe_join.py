@@ -21,7 +21,7 @@ from tests.test_executive_fabric_bridge_broker import broker, start_payload, env
 def finite_definition():
     value = dict(schema_version=worker.SUBSCRIPTION_CONFIG_SCHEMA_VERSION,
         control_uid=450, control_gid=450, worker_uid=460, worker_gid=460,
-        allowed_supplementary_gids=[12,61,100], worker_user='finite', worker_id='finite-1',
+        allowed_supplementary_gids=[], worker_user='finite', worker_id='finite-1',
         workspace_root='/srv/executive/jobs/workspaces', run_root='/srv/executive/jobs/runs',
         provider_home='/srv/executive/workers/finite-1/provider-home',
         claude_binary='/opt/bin/claude', claude_attestation_receipt='/etc/finite/binary.json',
