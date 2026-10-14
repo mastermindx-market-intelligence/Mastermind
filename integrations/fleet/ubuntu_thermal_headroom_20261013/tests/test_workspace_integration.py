@@ -141,5 +141,18 @@ with tempfile.TemporaryDirectory(prefix='mmx-sparse-fabric-') as tmp:
         mod.run_owned_process=prior
         assert not (home/'lanes/wt/lane-b').exists()
         tests.append('ambiguous_create_holds_original_effect')
+        # A concurrently changed helper after verified execution cannot be
+        # accepted as source-qualified, even if a mock reports rc0.
+        os.environ['REMOTE_SUB_RUN_ID']='lane-c'
+        def mutate_after_mint(*a, **kw):
+            helper.write_text(FAKE_OWNER+'\\n#modified')
+            return SimpleNamespace(returncode=0,timed_out=False,
+                cleanup_proven=True,stdout_truncated=False,
+                stderr_truncated=False)
+        with patch.object(mod,'run_owned_process',side_effect=mutate_after_mint):
+            err(lambda:mod._new_macro_workspace('lane-c',str(donor),here,expected_env,cfg),
+                'FABRIC_SPARSE_HELPER_EFFECT_UNKNOWN',True)
+        helper.write_text(FAKE_OWNER)
+        tests.append('concurrent_helper_drift_fences_original_effect')
 
 print('TESTS',json.dumps({'passed':len(tests),'cases':tests}))
