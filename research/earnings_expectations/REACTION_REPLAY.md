@@ -13,7 +13,7 @@ Refuse or preserve typed absence for intraday-close contamination, exact regular
 
 ```sh
 cd research/earnings_expectations
-python3 -m pytest -q test_reaction_replay.py test_replay_casebook.py
+python3 -m pytest -q test_reaction_replay.py test_replay_casebook.py test_management_guidance_cases.py
 python3 reaction_replay.py /path/to/source_verified_input.json
 python3 replay_casebook.py --format markdown
 python3 replay_casebook.py --format json
@@ -49,7 +49,7 @@ This is a **field-shape illustration**, deliberately too short to calculate a re
 
 ## Verified tests
 
-**59/59 offline tests passed** with Python 3.13 / pytest 9. Code and tests were verified by Git blob against tested local sources. Tests include after-close, premarket, intraday, weekend, UTC winter/summer clocks, missing benchmark, cutoff leakage, unsupported sources, and refusal to accept an SEC-only clock. Synthetic structural fixtures are supplemented with **nine actual retrospective adjusted-close source packets**, independently checked for arithmetic; this does not prove data licensing, current vendor freshness, a live backtest, causal attribution, or Terminal operation.
+**62/62 offline tests passed** with Python 3.13 / pytest 9. Code and tests were verified by Git blob against tested local sources. Tests include after-close, premarket, intraday, weekend, UTC winter/summer clocks, missing benchmark, cutoff leakage, unsupported sources, and refusal to accept an SEC-only clock. Synthetic structural fixtures are supplemented with **nine actual retrospective adjusted-close source packets**, independently checked for arithmetic; this does not prove data licensing, current vendor freshness, a live backtest, causal attribution, or Terminal operation.
 
 ## Nine SEC timestamps — not first-publication proof
 
@@ -81,3 +81,10 @@ The nine `sourced_event_packets/*.json` inputs document **three earnings events 
 **Single-command machine/human consumer:** run `python3 replay_casebook.py --format markdown` for a nine-row comparative report; use `--format json` for machine-readable typed results. The nine rows have a measured first-session close-to-close reaction; H5/H20 remain **UNESTIMABLE** with two-session price packets. This is no historical predictive alpha test. The adjusted prices are retrospectively restated by providers; sector ETFs may contain the issuer itself and are not factor-neutral or leave-one-out. Vendor/source qualification and historical PIT consensus acceptance remain separate gates.
 
 *Key observed contradiction*: Google Cloud growth accelerated from +63% in April to +82% in July, while GOOGL's first-session stock reaction flipped +9.96% to −7.13%. AWS +28%→+37% accompanied AMZN +0.77%→+15.32%; Azure +40%→+43% accompanied MSFT −3.93%→+15.51%. **These observations do not identify investor psychology or predict a trade**, but show why the earnings-growth metric alone is insufficient.
+
+
+## First-party management-guidance contrast, distinct from Street consensus
+
+`amazon_management_guidance_cases.json` and `test_management_guidance_cases.py` add two exact issuer-fiscal-target examples from Amazon's first-party earnings releases: Q1 2026 sales $181.5B vs its previously issued $173.5–178.5B range (prior midpoint $176.0B, +3.1250%), and Q2 2026 sales $200.6B vs its prior $194.0–199.0B range (midpoint $196.5B, +2.0865%). Despite *smaller* percentage exceedance of the management midpoint in Q2, the event-date stock return was larger than Q1. The data explicitly label forecast source type `MANAGEMENT_GUIDANCE` and accounting basis `AS_REPORTED_INCLUDES_FOREIGN_EXCHANGE`, with source links and an FX-comparability caution; they are not analyst consensus or a model-estimated market hurdle.
+
+**Hosted CI inclusion:** the repository's enforced test discovery includes `tests/**` only. `tests/test_earnings_reaction_research.py` adds an isolated bridge to the three offline research suites, preserving the existing single `test` check context. A local simulated-repository CI bridge run passed (one wrapper test exercising all 62 research tests); the actual GitHub Actions job must still finish and report its own result.
