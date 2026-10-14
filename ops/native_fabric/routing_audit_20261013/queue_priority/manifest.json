@@ -10,14 +10,15 @@
     "archived_path": "tests/fixtures/native_fabric/lease_broker.before.py.txt",
     "archived_blob": "3a8122c283dd4d37a7d80387dad7f2533c97c64b",
     "signature_adaptation": "Already-published #1443 logical job_class signature; body unchanged except its priority call.",
-    "full_file_snapshot": false
+    "full_file_snapshot": false,
+    "fixture_wrapper": "Test adds a synthetic class wrapper to preserve native method indentation; patch hunks never modify that wrapper."
   },
   "reference_sha256": "34640225847b785ebc1b4989d23b51a73db657ed994c281d4b6f988f58db1da7",
-  "patch_sha256": "d6c1f15235fb328552efb52e9cf483a5a3ac2bdf959cfe3c8c0e4c5de7716223",
-  "patched_excerpt_sha256": "5cf979f18bf8e603f9d4a0efbcfe30eeb862a59a6ba617b4e0854c6d4cbc1f25",
+  "patch_sha256": "c0e33c5fbf69e9a83c951ee337629b891acd70e8b1bdbed293521a645cf8a351",
+  "patched_excerpt_sha256": "38d42e0f5711b7a8ab340778f0305f311fad1a9a7e7a73a2e967af0569019a9f",
   "verification": {
     "scope": "decision function only; synthetic waiter rows; actual patch applied",
-    "tests": 30,
+    "tests": 31,
     "exhaustive_decision_cases": 3750,
     "full_native_regression": false,
     "production_proof": false,
@@ -27,6 +28,7 @@
       "original GLM fixture gate",
       "original host access refusal",
       "incumbent source integration"
-    ]
+    ],
+    "nonzero_offset_application": true
   }
 }
