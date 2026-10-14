@@ -16,3 +16,7 @@ BROKER_SOURCE=baseline.lease_broker.py python3 -m pytest -q research/fabric_glm_
 ```
 
 Candidate:24 PASS. Old broker:3 FAIL,21 PASS (exhausted candidate exclusion, spare-account selection and explicit exhausted-account refusal). Another51 existing quota/broker/account checks passed against the candidates; retained XML and hashes identify those checks. The normal affected production installation requires exact-preimage verification and review. This package does not install itself, change a live lease, clear a refusal, or establish authenticated native RuntimeBinding/Wake.
+
+## Local adoption
+
+SourceOS independently approved the exact candidates in SOURCE_REVIEW.json. The existing Fabric owner installed the helper before its broker consumer at2026-10-14T17:30:47Z with exact-preimage comparison, backups, file and directory synchronization, unchanged owner/mode and postimage readback. Four fresh installed-module checks passed against an isolated retained-quota fixture. INSTALL_RECEIPT.json and INSTALLED_FRESH_LOAD.json bind the bytes. This is local adoption, not protected branch landing, a real new worker result or authenticated native Runtime acceptance. The old failed run is unchanged.
