@@ -129,6 +129,18 @@ class ForegroundOperation:
         if _digest(normalized) != self._arguments_sha256:
             raise ForegroundOperationRefusal("arguments_changed", "invocation arguments changed")
 
+    def require_qualification_request(self, operation_key, arguments_sha256):
+        """Match fixed host restrictions; actual authentication remains upstream.
+
+        This does not bind a root. Only the original fresh admission callback
+        may bind it, and the current claim/commission is still required at START.
+        """
+        self._require_live()
+        if (operation_key != self._operation_key
+                or arguments_sha256 != self._arguments_sha256):
+            raise ForegroundOperationRefusal("qualification_request_mismatch",
+                "finite qualification belongs to another request")
+
     def _bind_admitted_root(self, root_id, command_id):
         """Private observer passed only to the canonical sink's fresh commit branch.
 

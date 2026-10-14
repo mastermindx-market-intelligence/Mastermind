@@ -22,6 +22,25 @@ from tests import test_executive_mcp_installed_fabric_composition as installed
 from tests import test_foreground_fresh_admission as fresh
 from tests.test_foreground_operation import frame
 from tests.test_executive_operator_supervisor import _ActiveAdapter, _CommissionPromptSource
+from control_plane.remote_operator_harness_adapter import RemoteOperatorHarnessAdapter
+
+
+class _InertForegroundAdapter(_ActiveAdapter, RemoteOperatorHarnessAdapter):
+    """Fixture transport owner; actual guard binding, no sockets or provider."""
+    def __init__(self, *args, **kwargs):
+        _ActiveAdapter.__init__(self, *args, **kwargs)
+        self._fresh_effect_guard = None
+        self._foreground_attempt_id = None
+
+    def start_session(self, **kwargs):
+        assert self._fresh_effect_guard is not None
+        self._fresh_effect_guard()
+        return super().start_session(**kwargs)
+
+    def begin_turn(self, **kwargs):
+        assert self._fresh_effect_guard is not None
+        self._fresh_effect_guard()
+        return super().begin_turn(**kwargs)
 
 
 @asynccontextmanager
@@ -67,7 +86,7 @@ async def real_factory(tmp_path, socket_root, monkeypatch, *, armed=True, harnes
             raise ValueError("fixture receipt expired")
     def claimed(attempt, requested, loader, *, recovery):
         assert not recovery and attempt.worker_id == requested.worker_id == "codex-01"
-        adapter = _ActiveAdapter(service._require_runtime(), loader, cancel_during_collect=False)
+        adapter = _InertForegroundAdapter(service._require_runtime(), loader, cancel_during_collect=False)
         holder["adapters"].append(adapter)
         return adapter
     service = None

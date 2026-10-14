@@ -1,0 +1,77 @@
+{
+  "base_commit": "3d45a0c305c4dc68f46acacfd34c6f641358e05e",
+  "fixture_repairs": [
+    "Normalize test request before digest; do not weaken production normalization",
+    "Use existing python3.11 PyJWT/pytest environment",
+    "Explicit inert RemoteOperatorHarnessAdapter fixture adopts actual foreground guard; production transport unchanged",
+    "Update exact catalogue version assertions and earlier-refusal text assertion",
+    "Correct canonical read fixture from jobs.get_job to store.find_event_by_command_id"
+  ],
+  "independent_architecture_review": {
+    "agent": "/root/native_activation_adjudication",
+    "decision": "SCOPED_PASS",
+    "reviewed_service_sha256": "a5ca5896127e4dbb8af96a55dcaf210843b31cee941f145b21902d3472090951",
+    "reviewed_startup_sha256": "0e5239762f807ec9a3cf05530e6743cc41cfafcce8f2f584eb927ff444a35bbe",
+    "reviewer_ran_tests": false
+  },
+  "limits": [
+    "Source integration and inert host/physical boundaries only",
+    "Legacy HMAC issuer is outside this current attended chain and was not implemented",
+    "No descriptor promotion, live turn, trusted host provisioning, original-parent native return or idle Wake proof",
+    "Published PR1391 e1f610 and active installation interval remain unchanged"
+  ],
+  "paid_catalogue_review": {
+    "acceptance_readback": "ACCEPTED/VALIDATED_OUTCOME/reviewer",
+    "accepted_once": true,
+    "bytes": 1348,
+    "parent": "01a11e90-4b5d-7f53-b966-8aaaad38701f",
+    "root": "01a11e90-4b5d-7f53-b966-8aaaad38701f",
+    "run_id": "fabric-finite-qualification-review-01a11e90-v1",
+    "scope": "Initial embedded catalogue/profile/request-binding review; subsequent race repairs independently adjudicated by parent/Sol. Not blanket production approval.",
+    "sha256": "72c63ae6a03cd6f05dab2edac3eaea1fff8f922436800a8485011fd0bb992169",
+    "usage": "UNKNOWN"
+  },
+  "proven_negative_cases": [
+    "normal provider and R5 promotion remain disabled",
+    "wrong operation/digest/host/source closure",
+    "replay never receives a fresh root",
+    "replacement or removal across blocking policy reads",
+    "precommit drift creates zero roots",
+    "postcommit drift retains original unbound root as uncertain",
+    "cycle qualifier removal refuses later child admission",
+    "canonical root read drift leaves canonical events unchanged"
+  ],
+  "recorded_at": "2026-10-14T00:35:25.683818+00:00",
+  "remaining": [
+    "Normal protected integration and installation of compatible successor",
+    "Actual protected Control/worker/realm/binary/credential callable and physical probe/transport",
+    "Current quota/Runtime claim and original authenticated invocation",
+    "Exact retained paid result delivered to and accepted by original Codex parent"
+  ],
+  "schema": "mastermind.source_qualification.v1",
+  "scope": "One exact foreground request can qualify the unpromoted attended MiniMax route through existing owner chain. No provider, host, installation or release effect.",
+  "source_sha256": {
+    "config/executive_agent_capabilities.json": "cb8f4390b2e8f22f45c302f4825a03b9e5222ffe365f04141741b6990c7df6c3",
+    "config/executive_worker_routes.json": "7879a7b759893b5eb803b7bb66d4814639c28d0d074a3691042c38091704a735",
+    "control_plane/executive_service.py": "a5ca5896127e4dbb8af96a55dcaf210843b31cee941f145b21902d3472090951",
+    "control_plane/fabric_attended_routing.py": "d5b106d3a736151233fb7abdd01a7632afe70e4f9e76a146595daa3a2af0947c",
+    "control_plane/foreground_operation.py": "3f177bf05fb680d2e7ecb2fdbc5d05afc3effc7175a06258daae002aa97a74bc",
+    "scripts/executive_os_phase1c.py": "0e5239762f807ec9a3cf05530e6743cc41cfafcce8f2f584eb927ff444a35bbe",
+    "tests/test_attended_qualification.py": "519ea7f1eb3639dc04f1f5f306c3f605d1eaeda726aadd99532a56568aa3c4c7",
+    "tests/test_attended_qualification_factory.py": "a3c4195c2dbff0eb899c8f3c823f8eaf09bfadc94364dcb2265a98e94f668ace",
+    "tests/test_executive_agent_capabilities.py": "5a57145b0c70277feb00649d78ea588f7190f7e8538ed95feed13423056a6bfa",
+    "tests/test_executive_model_router.py": "5cdb56e1289b5c045745e90edfc525963a1bcdb39a5daf2f1f5b2daec61bca33",
+    "tests/test_fabric_attended_routing.py": "beeadc95bf5aed270b2ebe322702f1c3072df1ee00a0bdcd113213793309b31d",
+    "tests/test_foreground_cycle.py": "d495180aa6bee6c96b5ee38b92780a58b69d5fec395d7bd97e8f73899b6d453f",
+    "tests/test_foreground_operator_eligibility.py": "672f44a7e6e0c5790e7e1d0c932216cdff46bc89494fc1a5bba0aecbc7d2e78a"
+  },
+  "tests": {
+    "count": 291,
+    "errors": 0,
+    "failures": 0,
+    "python": "/opt/homebrew/bin/python3.11",
+    "report": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/original-parent-host-selection-20261013/owner-resource-composition/QUALIFICATION_FINAL_V3.xml",
+    "report_sha256": "f97df33bff32dd763e60be4284eee58a6b773208a9117d9148218247e831da6e",
+    "skipped": 0
+  }
+}

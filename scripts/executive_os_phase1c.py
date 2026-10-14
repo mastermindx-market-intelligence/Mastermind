@@ -1728,11 +1728,13 @@ def _service_from_config(
         raise ServiceError("dialogue canary profile requires trusted composition")
     # This is trusted host composition, never a JSON/model-selected factory.
     _validate_fabric_bridge_config(raw)
-    from control_plane.fabric_attended_routing import AttendedWorkPlacement, placement_member
+    from control_plane.fabric_attended_routing import AttendedWorkPlacement, placement_member, qualification_for
     if (type(attended_work_placements) is not tuple
             or len(attended_work_placements) > 6
             or any(type(item) is not AttendedWorkPlacement for item in attended_work_placements)):
         raise ServiceError('attended placements require bounded typed host configuration')
+    if qualification_for(attended_work_placements) is not None and raw.get('coo_foreground_only') is not True:
+        raise ServiceError('finite qualification requires foreground-only host configuration')
     if attended_work_placements and (fabric_worker_binding_source is None
                                     or fabric_attended_probe_source is None):
         raise ServiceError('attended placements require the binding and startup probe sources')
@@ -2293,6 +2295,7 @@ def _service_from_config(
                     from control_plane.ceo_intent import _FreshAdmissionObserverFailed
                     try:
                         operation = _current_foreground_operation_or_none()
+                        qualification = service._require_attended_qualification()
                         if operation is not None:
                             operation.require_arguments(payload)
                     except ForegroundOperationRefusal as exc:
@@ -2302,6 +2305,8 @@ def _service_from_config(
 
                     def require_summon_session(_envelope=None):
                         require_session_admission(_envelope)
+                        if service._require_attended_qualification() != qualification:
+                            raise BridgeError("ingress_unavailable", "Executive qualification changed")
                         if operation is not None:
                             operation.require_arguments(payload)
 
@@ -2317,7 +2322,7 @@ def _service_from_config(
 
                     def current_execution_binding():
                         nonlocal expectation
-                        current = service._require_current_coo_binding()
+                        current = service._require_coo_admission_binding()
                         if operation is not None:
                             # This callback is fresh-only. Durable duplicates
                             # do not require renewed autonomy or current routing.
@@ -2329,6 +2334,13 @@ def _service_from_config(
                                 raise ValueError("foreground binding changed")
                             return json.loads(expectation.binding)
                         return current
+
+                    def observe_fresh_admission(root_id, command_id):
+                        # This callback is post-commit. Configuration drift
+                        # retains the original root as EFFECT_UNKNOWN and
+                        # prevents binding/driving it; it is not rollback.
+                        require_summon_session()
+                        operation._bind_admitted_root(root_id, command_id)
 
                     request = dict(payload)
                     request_ref = ceo_request.app_request_ref(request.pop("operation_key"))
@@ -2349,7 +2361,7 @@ def _service_from_config(
                                 dialogue_source_provider=commission_source_provider,
                                 admission_guard=require_summon_admission,
                                 fresh_admission_observer=(
-                                    operation._bind_admitted_root if operation is not None else None
+                                    observe_fresh_admission if operation is not None else None
                                 ),
                             ))
                             if expectation and receipt.get("duplicate") is False:
@@ -2623,11 +2635,13 @@ async def _serve_from_config(config_path: Path, *, attended_work_placements: tup
     # Only a fixed host composition may select typed placements. Merely
     # staging a file or setting a JSON flag cannot activate its worker owners.
     physical_source = _staged_fabric_binding_source(raw)
-    from control_plane.fabric_attended_routing import AttendedWorkPlacement, placement_member
+    from control_plane.fabric_attended_routing import AttendedWorkPlacement, placement_member, qualification_for
     if (type(attended_work_placements) is not tuple
             or len(attended_work_placements) > 6
             or any(type(item) is not AttendedWorkPlacement for item in attended_work_placements)):
         raise ServiceError('attended placements require bounded typed host configuration')
+    if qualification_for(attended_work_placements) is not None and raw.get('coo_foreground_only') is not True:
+        raise ServiceError('finite qualification requires foreground-only host configuration')
     if attended_work_placements:
         if physical_source is None or 'fabric_attended_probe' not in raw:
             raise ServiceError('attended placements require the binding and startup probe sources')
