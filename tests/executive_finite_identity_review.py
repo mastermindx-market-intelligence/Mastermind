@@ -1,16 +1,14 @@
-"""Frozen identity sites in the independently reviewed fixed finite composition.
+"""Frozen independently accepted finite identity sites, never runtime authority.
 
-Original root native_activation_adjudication reviewed these exact production
-postimages. The selected isolated OS principal is not a vendor identity,
-availability, credential consent or START. These static AST pins acknowledge
-only eight literal tokens; any semantic drift exposes the entire anchor again.
-No test learns replacement pins from current source.
+Staging postimage 518e3b91 is accepted by reviewer 01a12a08 in receipt5a99ac63;
+this refresh follows that exact source change. Registration sites are unchanged.
+Only these static literal sites are masked; semantic anchor drift exposes all.
 """
 
 REVIEWED_ANCHORS_BY_PATH = {'ops/executive_os/attended_control_staging.py': {'ProductionFiniteStagingHost': {'node_type': 'ClassDef',
-                                                                                  'ast_sha256': '0be2f0114d253d2af161c41095cf56528d2aab54f43b184c06a8a3eb85285b0c',
+                                                                                  'ast_sha256': 'af6bddbea1245488559c85c5d4dcac3a72f07daae2b6a7452c122674beec9a6f',
                                                                                   'sites': ((('body',
-                                                                                              1,
+                                                                                              6,
                                                                                               'body',
                                                                                               8,
                                                                                               'value',
@@ -20,7 +18,7 @@ REVIEWED_ANCHORS_BY_PATH = {'ops/executive_os/attended_control_staging.py': {'Pr
                                                                                              '_mastermind_minimax',
                                                                                              "'_mastermind_minimax'"),
                                                                                             (('body',
-                                                                                              1,
+                                                                                              6,
                                                                                               'body',
                                                                                               9,
                                                                                               'test',
@@ -32,7 +30,7 @@ REVIEWED_ANCHORS_BY_PATH = {'ops/executive_os/attended_control_staging.py': {'Pr
                                                                                              470,
                                                                                              '470'),
                                                                                             (('body',
-                                                                                              1,
+                                                                                              6,
                                                                                               'body',
                                                                                               9,
                                                                                               'test',
@@ -44,7 +42,7 @@ REVIEWED_ANCHORS_BY_PATH = {'ops/executive_os/attended_control_staging.py': {'Pr
                                                                                              470,
                                                                                              '470'),
                                                                                             (('body',
-                                                                                              1,
+                                                                                              6,
                                                                                               'body',
                                                                                               9,
                                                                                               'test',
@@ -56,7 +54,7 @@ REVIEWED_ANCHORS_BY_PATH = {'ops/executive_os/attended_control_staging.py': {'Pr
                                                                                              470,
                                                                                              '470'),
                                                                                             (('body',
-                                                                                              1,
+                                                                                              6,
                                                                                               'body',
                                                                                               9,
                                                                                               'test',
@@ -68,7 +66,7 @@ REVIEWED_ANCHORS_BY_PATH = {'ops/executive_os/attended_control_staging.py': {'Pr
                                                                                              470,
                                                                                              '470'),
                                                                                             (('body',
-                                                                                              1,
+                                                                                              6,
                                                                                               'body',
                                                                                               9,
                                                                                               'test',
@@ -80,7 +78,7 @@ REVIEWED_ANCHORS_BY_PATH = {'ops/executive_os/attended_control_staging.py': {'Pr
                                                                                              '_mastermind_minimax',
                                                                                              "'_mastermind_minimax'"),
                                                                                             (('body',
-                                                                                              1,
+                                                                                              6,
                                                                                               'body',
                                                                                               12,
                                                                                               'test',

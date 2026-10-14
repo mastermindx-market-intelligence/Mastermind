@@ -34,3 +34,22 @@ def test_semantic_or_identity_drift_exposes_entire_anchor(path, before, after):
     changed = text.replace(before, after)
     assert reviewed_literal_spans(path, changed) == ()
     assert scan(changed, path)
+
+
+def test_exact_lifecycle_identity_pins_require_entire_reviewed_source():
+    path = 'ops/executive_os/finite_service_lifecycle.py'
+    text = (Path(__file__).parents[1]/path).read_text()
+    spans = reviewed_literal_spans(path, text)
+    assert len(spans) == 37
+    assert scan(text, path) == []
+    assert reviewed_literal_spans('ops/executive_os/foreign.py', text) == ()
+    for line, start, end, kind in spans:
+        lines = text.splitlines(keepends=True)
+        replacement = '471' if kind == 'int' else '"_mastermind_other"'
+        lines[line - 1] = lines[line - 1][:start] + replacement + lines[line - 1][end:]
+        changed = ''.join(lines)
+        assert reviewed_literal_spans(path, changed) == ()
+        assert scan(changed, path)
+    for suffix in ('\nnew_peer_uid = 471\n', '\n# source drift\n'):
+        assert reviewed_literal_spans(path, text + suffix) == ()
+        assert scan(text + suffix, path)
