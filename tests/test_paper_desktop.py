@@ -232,11 +232,11 @@ class CoreTests(unittest.TestCase):
             self.assertNotIn(name, b.READ_TOOLS | b.EDIT_TOOLS)
         self.assertEqual(
             b.SUPPORTED_CATALOG_SHA256,
-            "ac18857df0aa6323646333368e5798e7c28de7b4d5f5dc3cb320276e3535daa9",
+            "48b2587455d839a57b4b78f5cfdb2e75df8d530ad8059a3ad6af303c0d37224f",
         )
 
     def test_reviewed_full_catalog_fixture_and_descriptor_mutations_fail_closed(self):
-        fixture_path = ROOT / "tests" / "fixtures" / "paper_desktop" / "ac18857_full_catalog.json"
+        fixture_path = ROOT / "tests" / "fixtures" / "paper_desktop" / "48b258_full_catalog.json"
         catalog = json.loads(fixture_path.read_text(encoding="utf-8"))
         self.assertEqual(b.digest(catalog), b.SUPPORTED_CATALOG_SHA256)
         self.assertIn("write_html", catalog)
@@ -251,7 +251,7 @@ class CoreTests(unittest.TestCase):
             def catalog(self):
                 return copy.deepcopy(self.value)
 
-        for tool_name in ("write_html", "rename_pages"):
+        for tool_name in ("get_font_family_info", "write_html", "rename_pages"):
             with self.subTest(tool_name=tool_name):
                 mutated = copy.deepcopy(catalog)
                 mutated[tool_name]["description"] = mutated[tool_name].get("description", "") + " drift"
@@ -266,6 +266,38 @@ class CoreTests(unittest.TestCase):
                         _catalog_pin=b.SUPPORTED_CATALOG_SHA256,
                     )
                 self.assertNotIn("create_artboard", client.calls)
+
+    def test_new_font_catalog_exact_delta_and_blocked_tools_preserved(self):
+        fixture_dir = ROOT / "tests" / "fixtures" / "paper_desktop"
+        previous = json.loads((fixture_dir / "ac18857_full_catalog.json").read_text(encoding="utf-8"))
+        current = json.loads((fixture_dir / "48b258_full_catalog.json").read_text(encoding="utf-8"))
+        self.assertEqual(set(previous), set(current))
+        self.assertEqual(len(current), 36)
+        self.assertEqual(
+            {name for name in previous if previous[name] != current[name]},
+            {"get_font_family_info"},
+        )
+        before = previous["get_font_family_info"]
+        after = current["get_font_family_info"]
+        self.assertEqual(before["inputSchema"]["required"], ["familyNames"])
+        self.assertEqual(after["inputSchema"]["required"], ["familyNames", "fileId"])
+        self.assertNotIn("fileId", before["inputSchema"]["properties"])
+        self.assertEqual(
+            after["inputSchema"]["properties"]["fileId"],
+            {"description": "The file ID that the tool should operate on.", "type": "string"},
+        )
+        self.assertEqual(
+            after["description"], before["description"].replace("available to the user", "available in a file"),
+        )
+        for name in ("create_file", "delete_nodes", "export", "export_combined_pdf",
+                     "list_resources", "open_file", "rename_pages", "rename_resource"):
+            with self.subTest(blocked_tool=name):
+                self.assertEqual(previous[name], current[name])
+                self.assertNotIn(name, b.READ_TOOLS | b.EDIT_TOOLS)
+        # Do not allow catalog compatibility without the new required exact target.
+        drift = copy.deepcopy(current)
+        drift["get_font_family_info"]["inputSchema"]["required"].remove("fileId")
+        self.assertNotEqual(b.digest(drift), b.SUPPORTED_CATALOG_SHA256)
 
     def test_token_delete_refused_before_dispatch(self):
         self.client.info = {"fileId": "file-a", "artboards": []}

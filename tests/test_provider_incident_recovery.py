@@ -828,6 +828,9 @@ def test_incident_consumer_finalizes_ready_and_never_reallocates(recovery, monke
     issue_incident(s, monkeypatch)
     incident_state(s)
     reserve_incident(s)
+    # Finalization must retain the exact reserved expiry, even across a second
+    # boundary. Recomputing now + 55 minutes fabricates a different credential.
+    reserved_expiry = json.loads(s.receipt.read_bytes())["credential_expires_at"]
     canary_path = s.tmp / "canary.json"
     write_json(canary_path, canary(True))
     post = s.tmp / "post-identity.json"
@@ -837,7 +840,7 @@ def test_incident_consumer_finalizes_ready_and_never_reallocates(recovery, monke
         "--post-identity-command-status", "0", "--canary-json", str(canary_path),
         "--canary-command-status", "0", "--expected-kind", "device-auth",
         "--workspace-binding-class", r.COMPANY_WORKSPACE_BINDING_CLASS,
-        "--credential-expires-at", iso(datetime.now(UTC) + timedelta(minutes=55)),
+        "--credential-expires-at", reserved_expiry,
     ]) == 0
     assert json.loads(s.receipt.read_bytes())["passed"] is True
     assert rec.read_allocation()["consumed"] is True

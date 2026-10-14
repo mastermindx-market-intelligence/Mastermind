@@ -8,6 +8,8 @@ table, prints a deterministic report, and exits.
 SQLite may create sidecars/update shared-memory reader bookkeeping; no Runtime
 rows, lifecycle state, schema or authoritative WAL frames are written. It is a
 point observation, not a closed campaign census or acceptance verdict.
+Its additive capacity observation reports conditional recorded Wake intervals
+and snapshot attention coverage; unavailable costs/occupancy stay unavailable.
 
 Not a daemon.  No timer, scheduler, transport, or MCP acknowledgement.
 """
@@ -24,6 +26,7 @@ if os.fspath(_ROOT) not in sys.path:
     sys.path.insert(0, os.fspath(_ROOT))
 
 from control_plane.executive_inbox import load_boot_packet_file  # noqa: E402
+from control_plane.capacity_campaign_observation import observe_capacity_campaign  # noqa: E402
 from control_plane.executive_runtime import PersistenceError, Runtime  # noqa: E402
 from control_plane.wake_ledger import SourceReadHealth  # noqa: E402
 from control_plane.wake_reconcile import (  # noqa: E402
@@ -100,7 +103,9 @@ def main(argv: list[str] | None = None) -> int:
                 runtime, boot_packet=packet,
                 include_boot_packet=not args.no_boot_packet and packet is None,
             )
-            plan = plan_wake_reconciliation(snapshot, collect_ledger_snapshot(runtime))
+            ledger = collect_ledger_snapshot(runtime)
+            plan = plan_wake_reconciliation(snapshot, ledger)
+            measurements = observe_capacity_campaign(snapshot, ledger)
         except Exception as exc:
             print(f"observation unavailable: {type(exc).__name__}", file=sys.stderr)
             return 2
@@ -117,6 +122,7 @@ def main(argv: list[str] | None = None) -> int:
             mode="observe_only", writes_applied=False,
             planned_request=[o.obligation_id for o in result.plan.to_request],
             planned_resolve=[o.obligation_id for o in result.plan.to_resolve],
+            capacity_observation=measurements,
         )
     if args.json:
         print(json.dumps(payload, indent=2, sort_keys=True))
@@ -124,6 +130,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.observe_only:
             print("mode observe_only; writes_applied false")
             print(f"planned_request {len(result.plan.to_request)} planned_resolve {len(result.plan.to_resolve)}")
+            print(f"capacity_observation {measurements['point_status']}; campaign_qualified false")
         print(f"digest {payload['digest']}")
         print(f"requested {len(result.requested)} resolved {len(result.resolved)}")
         print(f"transport_invocations {result.transport_invocations}")
@@ -136,10 +143,10 @@ def main(argv: list[str] | None = None) -> int:
             print("contradictions:")
             for entry in result.plan.contradictions:
                 print(f"  - {entry}")
-    if result.plan.contradictions:
+    if result.plan.contradictions or args.observe_only and measurements["contradictions"]:
         return 3
     if args.observe_only and (
-        result.plan.degraded or result.plan.unsupported_attention
+        result.plan.degraded or result.plan.unsupported_attention or measurements["degraded"]
         or any(health != SourceReadHealth.HEALTHY for health in (
             result.snapshot.runtime_health, result.snapshot.inbox_runtime_health,
             result.snapshot.agentos_health,
