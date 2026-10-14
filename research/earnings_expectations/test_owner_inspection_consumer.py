@@ -62,3 +62,34 @@ def test_without_owner_file_base_report_remains_provenance_honest():
     assert report["native_expectation_owner_inspection"] is None
     assert report["management_guidance_status"] == "AVAILABLE_COMPANY_MANAGEMENT_GUIDANCE_ONLY"
     assert report["media_reported_expectation_status"] == "PUBLIC_ARTICLE_WITNESSES_ONLY_NOT_ADMITTED_AS_PIT"
+
+def test_cli_invalid_owner_digest_returns_structured_refusal(tmp_path, capsys):
+    doc = owner_document()
+    doc['semantic_payload']['normalized_baseline']['value'] = 42.0
+    fixture = tmp_path / 'tampered.json'
+    fixture.write_text(json.dumps(doc))
+    assert main(['--format', 'json', '--owner-inspection', str(fixture)]) == 2
+    result = json.loads(capsys.readouterr().out)
+    assert result['status'] == 'REFUSED'
+    assert result['reason'] == 'SOURCE_OWNER_DIGEST_MISMATCH'
+    assert result['authority'] == 'RESEARCH_ONLY_NO_TRADING'
+    assert '42' not in json.dumps(result)
+
+
+def test_cli_nonexistent_owner_file_fail_closed_without_traceback(tmp_path, capsys):
+    missing = tmp_path / 'not_present.json'
+    assert main(['--format', 'markdown', '--owner-inspection', str(missing)]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ''
+    assert captured.err.strip() == 'Research source refused: RESEARCH_SOURCE_INPUT_INVALID'
+
+
+def test_cli_old_contract_with_non_null_baseline_remains_unadmitted(tmp_path, capsys):
+    doc = owner_document()
+    doc['semantic_payload']['normalized_baseline']['value'] = 3.14
+    fixture = tmp_path / 'unsupported_future_owner_contract.json'
+    fixture.write_text(json.dumps(recalc(doc)))
+    assert main(['--format', 'json', '--owner-inspection', str(fixture)]) == 2
+    result = json.loads(capsys.readouterr().out)
+    assert result['reason'] == 'NORMALIZED_BASELINE_PROMOTION_REQUIRES_NEW_CONTRACT'
+    assert 'baseline_value' not in result

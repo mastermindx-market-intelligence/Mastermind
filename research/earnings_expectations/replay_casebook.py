@@ -14,9 +14,10 @@ from datetime import date, datetime, timezone
 from decimal import Decimal as D
 import json
 from pathlib import Path
+import sys
 
 from reaction_replay import replay
-from expectation_owner_adapter import project_owner_inspection
+from expectation_owner_adapter import OwnerContractError, project_owner_inspection
 
 RESEARCH_AUTHORITY = 'RESEARCH_ONLY_NO_TRADING'
 PACKETS = Path(__file__).parent / 'sourced_event_packets'
@@ -294,7 +295,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--packets', type=Path, default=PACKETS)
     parser.add_argument('--owner-inspection', type=Path, help='Existing Macro K3E declared-capture receipt (read-only)')
     args = parser.parse_args(argv)
-    report = build_report(args.packets, owner_inspection_path=args.owner_inspection)
+    try:
+        report = build_report(args.packets, owner_inspection_path=args.owner_inspection)
+    except (OwnerContractError, ValueError, OSError, json.JSONDecodeError) as exc:
+        reason = exc.code if isinstance(exc, OwnerContractError) else 'RESEARCH_SOURCE_INPUT_INVALID'
+        if args.format == 'json':
+            print(json.dumps({'schema': 'earnings.reaction_replay.casebook_report.research.v1',
+                              'authority': RESEARCH_AUTHORITY, 'status': 'REFUSED',
+                              'reason': reason}, sort_keys=True))
+        else:
+            print('Research source refused: ' + reason, file=sys.stderr)
+        return 2
     if args.format == 'json':
         print(json.dumps(report, sort_keys=True, separators=(',', ':'), allow_nan=False))
     else:
