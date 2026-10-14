@@ -7,12 +7,12 @@
 From `research/earnings_expectations/`:
 
 ```bash
-python3 -m pytest -q test_reaction_replay.py test_replay_casebook.py test_management_guidance_cases.py
+python3 -m pytest -q test_reaction_replay.py test_replay_casebook.py test_management_guidance_cases.py test_media_witnesses.py
 python3 replay_casebook.py --format markdown
 python3 replay_casebook.py --format json
 ```
 
-Local: **67/67 tests passed** (Python 3.13, pytest 9). Implementation, tests and all nine public-source input packets were individually read back from GitHub with byte-matching Git blob hashes. This demonstrates reproducible arithmetic and typed input handling; not any production acceptance or predictive backtest.
+Local: **78/78 tests passed** (Python 3.13, pytest 9). Implementation, tests and all nine public-source input packets were individually read back from GitHub with byte-matching Git blob hashes. This demonstrates reproducible arithmetic and typed input handling; not any production acceptance or predictive backtest.
 
 For each event `R_issuer = adj_close(first affected regular session) / adj_close(last unaffected regular session) − 1`, likewise SPY and the named sector ETF. Report issuer minus SPY / sector in **percentage points**. Source inputs and public-release witness URLs reside in the nine `sourced_event_packets/*.json` files.
 
@@ -73,3 +73,23 @@ The reproducible **descriptive nine-event casebook is delivered**. The binding s
 ### Reproducible combined research answer
 
 `python3 replay_casebook.py --format markdown` now renders not only the nine observed price returns but the two prior-Amazon-management-guidance-vs-reported-actual rows. `--format json` includes `management_guidance_status`, source URLs, strict issuer/fiscal-target matching, prior guidance chronology, midpoint/upper-bound arithmetic and the observed stock reaction. The forecast channel is **COMPANY_MANAGEMENT_GUIDANCE_NOT_ANALYST_CONSENSUS**; analyst consensus is **NOT_ADMITTED**. The 67 tests include late/mismatched/duplicate/misclassified guidance refusals. This describes current and historical known company guidance rather than an inferred market belief.
+
+
+### Separating observed cloud beats from market-expectation certainty
+
+A third research-evidence channel now joins **seven contemporaneous media-reported cloud-growth estimates** to seven of the nine observed stock-reaction cases. These numbers are extracted from dated source-attributed reporting **after publication of each company's earnings**; their underlying actual sell-side estimate vintages have not been admitted. They are not useable historical machine-forecast features. The source links and strict `POST_EVENT_ARTICLE_QUOTED_ANALYST_AGGREGATE_NOT_ADMITTED` status are preserved in `media_reported_expectations.json` and in the report CLI/JSON.
+
+| Example | Article-reported expected cloud YoY | Reported actual cloud YoY | Ex-post reported gap | Next-session stock |
+|---|---:|---:|---:|---:|
+| Alphabet Apr 29 Q1 | 50.1% (LSEG) | 63% | +12.9 pp | +9.96% |
+| Alphabet Jul 22 Q2 | 64% (LSEG) | 82% | +18.0 pp | −7.13% |
+| Microsoft Apr 29 Q3 FY26 | 40% (Reuters-reported consensus) | 40% | 0 pp | −3.93% |
+| Microsoft Jul 29 Q4 FY26 | 39.98% (Visible Alpha) | 43% | +3.02 pp | +15.51% |
+| Amazon Apr 29 Q1 | 25.1% (LSEG) | 28% | +2.9 pp | +0.77% |
+| Amazon Jul 30 Q2 | 31.21% (LSEG) | 37% | +5.79 pp | +15.32% |
+
+Sources: [Alphabet April Reuters](https://www.investing.com/news/stock-market-news/alphabets-cloud-unit-beats-quarterly-revenue-estimates-on-strong-ai-demand-4646789); [Alphabet July Reuters](https://www.schwab.wallst.com/schwab/Prospect/research/stocks/news.asp?doc=3200-nL4N43O22B-4&symbol=MSFT); [Microsoft April Reuters](https://www.investing.com/news/stock-market-news/microsofts-cloud-revenue-growth-disappoints-investors-shares-drop-2-4647241); [Microsoft July Reuters](https://www.investing.com/news/stock-market-news/microsoft-tops-quarterly-cloud-growth-estimates-easing-spending-concerns-4821582); [Amazon April Reuters](https://www.investing.com/news/stock-market-news/amazon-beats-quarterly-cloud-growth-estimates-4646732); [Amazon July Reuters](https://www.forth.news/articles/CdYr4frSVtfzchs9aw3y6). The seventh available event is Microsoft Jan Q2 38.8% expected vs 39% reported, documented with a source URL in the JSON.
+
+A **stronger challenge to simplistic recency bias** appears in [S&P Global's Alphabet Q2 preview](https://www.spglobal.com/market-intelligence/en/news-insights/research/2026/07/alphabet-earnings-preview-q2-2026). It reports that consolidated **revenue estimates ratcheted up $113.0B → $117.2B**, but **EPS estimates actually fell $3.43 → $3.32** while Q2 Google Cloud margin expectations were reduced to 30.8%. Forecast changes were multi-dimensional; “the market expected more earnings across every metric” is contradicted by this bounded S&P/Visible Alpha evidence. The preview date is July 22 with no verified intraday publication timestamp or original contributor vintages, therefore it remains illustrative, not a valid ex-ante trading feature.
+
+The research consumer and adversarial fixtures now pass **78/78 offline tests**; normal hosted CI and live user/Terminal acceptance are independent. No historical abnormal-return alpha or behavior-causation claim follows from these selected cases.
