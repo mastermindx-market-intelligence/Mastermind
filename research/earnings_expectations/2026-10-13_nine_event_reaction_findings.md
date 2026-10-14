@@ -7,12 +7,12 @@
 From `research/earnings_expectations/`:
 
 ```bash
-python3 -m pytest -q test_reaction_replay.py test_replay_casebook.py
+python3 -m pytest -q test_reaction_replay.py test_replay_casebook.py test_management_guidance_cases.py
 python3 replay_casebook.py --format markdown
 python3 replay_casebook.py --format json
 ```
 
-Local: **59/59 tests passed** (Python 3.13, pytest 9). Implementation, tests and all nine public-source input packets were individually read back from GitHub with byte-matching Git blob hashes. This demonstrates reproducible arithmetic and typed input handling; not any production acceptance or predictive backtest.
+Local: **62/62 tests passed** (Python 3.13, pytest 9). Implementation, tests and all nine public-source input packets were individually read back from GitHub with byte-matching Git blob hashes. This demonstrates reproducible arithmetic and typed input handling; not any production acceptance or predictive backtest.
 
 For each event `R_issuer = adj_close(first affected regular session) / adj_close(last unaffected regular session) − 1`, likewise SPY and the named sector ETF. Report issuer minus SPY / sector in **percentage points**. Source inputs and public-release witness URLs reside in the nine `sourced_event_packets/*.json` files.
 
@@ -36,6 +36,19 @@ Cloud operating growth and stock-price sign clearly do not map one-to-one. Per-i
 - **Amazon:** 28%→37% AWS while +0.77%→+15.32% stock, a **+14.55-point** reaction swing.
 
 All three published after the Apr 29 close: the following Apr 30 SPY return (+1.00%) is shared background context, not a controlled experiment. Microsoft Azure +40% in April reportedly matched a contemporaneous +40% analyst estimate while Google Cloud +63% beat a reported +50.1% expectation; Amazon AWS +28% beat a reported +25%. These estimates were reported by financial news at the time, **not** admitted historical point-in-time source-owner consensus.
+
+## Management guidance is a separate expectation channel: a real Amazon comparison
+
+Amazon's own prior-quarter management guidance provides a public, fixed-fiscal-target expectation baseline **distinct from sell-side consensus**:
+
+| Actual fiscal target | Prior management sales range | Midpoint | Reported sales | Above midpoint | Above upper bound | Post-report stock move |
+|---|---:|---:|---:|---:|---:|---:|
+| 2026 Q1 (guided Feb 5) | $173.5–178.5B | $176.0B | $181.5B | +$5.5B (+3.125%) | +$3.0B | +0.77% |
+| 2026 Q2 (guided Apr 29) | $194.0–199.0B | $196.5B | $200.6B | +$4.1B (+2.0865%) | +$1.6B | +15.32% |
+
+Source evidence: [2025 Q4 guidance for 2026 Q1](https://ir.aboutamazon.com/news-release/news-release-details/2026/Amazon-com-Announces-Fourth-Quarter-Results/default.aspx), [2026 Q1 actual and guidance for Q2](https://www.sec.gov/Archives/edgar/data/1018724/000101872426000012/amzn-20260331xex991.htm), [2026 Q2 actual](https://www.sec.gov/Archives/edgar/data/1018724/000101872426000024/amzn-20260630xex991.htm). The prior guidance and later actuals concern the same issuer, metric, unit, currency and fiscal target; the guide's approximate FX assumptions differed (+180bp vs −10bp impact on revenue growth), so this is reported-sales exceedance rather than an ex-FX organic surprise.
+
+The smaller management-guide exceedance in Q2 accompanied a much larger share-price reaction. This is **direct counterevidence against the simplistic claim that larger headline guide beats mechanically cause larger stock jumps**. It is not causal evidence of expectations ratcheting; market consensus, forward guidance, capex, AWS mix/margins, rates and positioning remain unmeasured. The original source values and explicit basis are preserved in `amazon_management_guidance_cases.json`; `test_management_guidance_cases.py` tests the arithmetic and joins to the two corresponding stock events. No normalized issuer-guidance production owner has been replaced.
 
 ## Evidence and limitations
 
