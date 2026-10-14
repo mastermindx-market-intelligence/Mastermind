@@ -135,6 +135,8 @@ def replay(packet: dict) -> dict:
     event = packet.get("event")
     if not isinstance(event, dict) or not all(isinstance(event.get(k), str) and event[k] for k in ("issuer_ref", "fiscal_target", "event_ref", "first_public_source_ref")):
         raise ReplayError("IMMUTABLE_EVENT_IDENTITY_REQUIRED")
+    if event.get("first_publication_clock_status") != "VERIFIED_FIRST_PUBLIC_RELEASE":
+        raise ReplayError("FIRST_PUBLIC_RELEASE_CLOCK_NOT_VERIFIED")
     published = _time(event.get("first_published_utc"))
     asof = _time(packet.get("evaluated_asof_utc"))
     if asof < published:
