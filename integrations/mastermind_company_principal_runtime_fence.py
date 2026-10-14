@@ -15,6 +15,7 @@ from __future__ import annotations
 import copy
 import dataclasses
 import hashlib
+import inspect
 import re
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -22,6 +23,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Protocol
 
+from control_plane.coo_principal_envelope import PrincipalAdmissionContext
 from control_plane.executive_runtime import Runtime
 from integrations.mastermind_company_mcp.adapter import DialogueBinding
 from integrations.mastermind_company_mcp.principal_adapter import (
@@ -296,6 +298,7 @@ class PrincipalDialogueRuntimeCommitOwner:
         *,
         socket_path: Path,
         service_call: ServiceCall = call_service,
+        principal_authority_guard: Callable[..., None] | None = None,
     ) -> None:
         if type(runtime) is not Runtime:
             raise TypeError("runtime must be the exact Executive Runtime owner")
@@ -304,16 +307,25 @@ class PrincipalDialogueRuntimeCommitOwner:
             raise ValueError("socket_path must be absolute")
         if not callable(service_call):
             raise TypeError("service_call must be callable")
+        if principal_authority_guard is not None and (
+            not callable(principal_authority_guard)
+            or inspect.iscoroutinefunction(principal_authority_guard)
+        ):
+            raise TypeError("principal authority guard must be synchronous and callable")
         self.runtime = runtime
         self.binding_resolver = binding_resolver
         self.socket_path = path
         self.service_call = service_call
+        self.principal_authority_guard = principal_authority_guard
 
-    def before_commit(self, intent: PrincipalCommitIntent) -> PrincipalCommitFenceReceipt:
+    def before_commit(self, intent: PrincipalCommitIntent, *,
+                      expected_binding: DialogueBinding | None = None) -> PrincipalCommitFenceReceipt:
         """Persist the sole COMMIT-start fact after a fresh exact binding recheck."""
 
         intent = _validate_intent(intent)
         snapshot = _binding_snapshot(self.binding_resolver.resolve())
+        if expected_binding is not None and snapshot != _binding_snapshot(expected_binding):
+            raise PrincipalRuntimeFenceError("principal source binding changed")
         _require_binding_intent_match(snapshot, intent)
         actor = snapshot["context"]["actor_ref"]
         payload = _event_payload(intent, snapshot)
@@ -383,6 +395,48 @@ class PrincipalDialogueRuntimeCommitOwner:
                 raise PrincipalRuntimeFenceError(
                     "principal dialogue COMMIT may already have occurred"
                 )
+
+            # Different foreground surfaces can derive different outbound keys
+            # for the same original request. Fence the semantic request inside
+            # this existing BEGIN IMMEDIATE transaction as well as the key.
+            # Caller/authority rotation and an uncertain prior send do not grant
+            # another disposition. Reconciliation retains the first message key.
+            prior_disposition = connection.execute(
+                """
+                SELECT event_id FROM events
+                WHERE aggregate_type=? AND event_type=? AND job_id=?
+                  AND json_extract(payload_json, '$.intent.reply_to_message_key')=?
+                LIMIT 1
+                """,
+                (PRINCIPAL_RUNTIME_AGGREGATE_TYPE, PRINCIPAL_RUNTIME_EVENT_TYPE,
+                 intent.child_job_id, intent.reply_to_message_key),
+            ).fetchone()
+            if prior_disposition is not None:
+                raise PrincipalRuntimeFenceError(
+                    "principal dialogue request already has a COMMIT"
+                )
+
+            if self.principal_authority_guard is not None:
+                try:
+                    # Receiving Control rechecks its enrolled mission while it
+                    # holds the same write transaction that records COMMIT.
+                    # The callback comes from host composition, never the tool.
+                    guarded = self.principal_authority_guard(
+                        context=PrincipalAdmissionContext(
+                            intent.work_ref, actor["principal_binding_digest"],
+                            actor["mission_authority_ref"], actor["authority_generation_digest"],
+                        ),
+                        root_job_id=actor["root_job_id"],
+                        capability_profile_digest=actor["capability_profile_digest"],
+                    )
+                    if guarded is not None:
+                        if inspect.iscoroutine(guarded):
+                            guarded.close()
+                        raise ValueError("principal guard must return synchronously")
+                except Exception:
+                    raise PrincipalRuntimeFenceError(
+                        "principal dialogue authority is no longer current"
+                    ) from None
 
             self.runtime.store.append_event(
                 connection,

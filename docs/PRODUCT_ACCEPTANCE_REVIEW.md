@@ -13,6 +13,9 @@ same six tools at version 1.1.0.
   one current programme declaration. Matching objective text is insufficient.
   The declaration retains the original wording/source, current interpretation,
   correction chain, every criterion and every original proof obligation.
+  Its `source_records_digest` retains the canonical `sha256:<64 lowercase hex>`
+  form at acquisition and continuity checks, using the existing Session Truth
+  contract validator. Bare hex is not a substitute for the owner's field.
 - The existing Executive supervisor may receive `product_acceptance_macro_root`.
   For a commissioned review with criteria, it acquires the full current basis
   through the canonical boot-packet CLI and retains it before provider launch.
