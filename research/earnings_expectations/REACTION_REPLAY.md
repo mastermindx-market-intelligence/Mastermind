@@ -49,7 +49,7 @@ This is a **field-shape illustration**, deliberately too short to calculate a re
 
 ## Verified tests
 
-**62/62 offline tests passed** with Python 3.13 / pytest 9. Code and tests were verified by Git blob against tested local sources. Tests include after-close, premarket, intraday, weekend, UTC winter/summer clocks, missing benchmark, cutoff leakage, unsupported sources, and refusal to accept an SEC-only clock. Synthetic structural fixtures are supplemented with **nine actual retrospective adjusted-close source packets**, independently checked for arithmetic; this does not prove data licensing, current vendor freshness, a live backtest, causal attribution, or Terminal operation.
+**67/67 offline tests passed** with Python 3.13 / pytest 9. Code and tests were verified by Git blob against tested local sources. Tests include after-close, premarket, intraday, weekend, UTC winter/summer clocks, missing benchmark, cutoff leakage, unsupported sources, and refusal to accept an SEC-only clock. Synthetic structural fixtures are supplemented with **nine actual retrospective adjusted-close source packets**, independently checked for arithmetic; this does not prove data licensing, current vendor freshness, a live backtest, causal attribution, or Terminal operation.
 
 ## Nine SEC timestamps — not first-publication proof
 
@@ -88,3 +88,8 @@ The nine `sourced_event_packets/*.json` inputs document **three earnings events 
 `amazon_management_guidance_cases.json` and `test_management_guidance_cases.py` add two exact issuer-fiscal-target examples from Amazon's first-party earnings releases: Q1 2026 sales $181.5B vs its previously issued $173.5–178.5B range (prior midpoint $176.0B, +3.1250%), and Q2 2026 sales $200.6B vs its prior $194.0–199.0B range (midpoint $196.5B, +2.0865%). Despite *smaller* percentage exceedance of the management midpoint in Q2, the event-date stock return was larger than Q1. The data explicitly label forecast source type `MANAGEMENT_GUIDANCE` and accounting basis `AS_REPORTED_INCLUDES_FOREIGN_EXCHANGE`, with source links and an FX-comparability caution; they are not analyst consensus or a model-estimated market hurdle.
 
 **Hosted CI inclusion:** the repository's enforced test discovery includes `tests/**` only. `tests/test_earnings_reaction_research.py` adds an isolated bridge to the three offline research suites, preserving the existing single `test` check context. A local simulated-repository CI bridge run passed (one wrapper test exercising all 62 research tests); the actual GitHub Actions job must still finish and report its own result.
+
+
+### Joined guidance + observed-reaction output (source proof)
+
+The read-only `replay_casebook.py` consumer now joins the two Amazon first-party prior-guidance observations to the correct Q1/Q2 stock reactions in **both Markdown and JSON**, with explicit `management_guidance_status` and `management_guidance_comparisons`. This is a typed management-guidance channel, with `point_in_time_analyst_consensus: NOT_ADMITTED`. Validation rejects invalid forecast source/basis, late guidance, mismatched event target or issuer, duplicate targets; missing guidance does not become zero. The five additional focused tests raised the current local count to **67**. When a guidance source is unavailable, returns remain available with an explicit unavailable guidance state. Test count is local; normal hosted CI is separately governed.
