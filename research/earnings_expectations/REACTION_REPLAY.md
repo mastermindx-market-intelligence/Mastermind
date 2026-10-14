@@ -28,7 +28,6 @@ Runtime uses Python standard library only (`zoneinfo`); `pytest` is used in test
     "issuer_ref": "CIK:...",
     "fiscal_target": "issuer-fiscal-quarter",
     "first_public_source_ref": "immutable-source-reference",
-    "first_public_published_utc": "source only; see field below",
     "first_published_utc": "2026-07-30T20:01:00Z",
     "first_publication_clock_status": "VERIFIED_FIRST_PUBLIC_RELEASE"
   },
@@ -44,7 +43,7 @@ Runtime uses Python standard library only (`zoneinfo`); `pytest` is used in test
 }
 ```
 
-This is a **field-shape illustration**, deliberately too short to calculate a return: a complete input needs the true previous session, the first affected session and enough future sessions. No sample value is market evidence. The implementation uses `first_published_utc` (not the illustrative extra `first_public_published_utc` label above).
+This is a **field-shape illustration**, deliberately too short to calculate a return: a complete input needs the true previous session, the first affected session and enough future sessions. No sample value is market evidence. The implementation uses `first_published_utc` and requires its release-proof status, but the sample is intentionally incomplete.
 
 ## Verified tests
 
