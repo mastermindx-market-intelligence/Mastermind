@@ -1,5 +1,6 @@
 """Finite config staging uses the real global transaction, without host effects."""
 import json
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -52,6 +53,96 @@ def installed(monkeypatch, tmp_path):
 
 def stage(s):
     return staging.execute_staging(s.host, SHA, owner.sha256_bytes(s.control))
+
+
+def retained_disarm(s):
+    prior = s.host.checked_configs(SHA)
+    unchanged = owner.CandidateConfigs(prior.control, prior.worker, prior.control_bytes,
+        prior.worker_bytes, prior.control_sha256, prior.worker_sha256)
+    tx = owner.TransactionContext('autonomy-'+'1'*12, SHA, prior, unchanged, None)
+    receipt = owner.build_transaction_receipt(tx, state='DISARMED', now=datetime.now(timezone.utc))
+    owner.AUTONOMY_RECEIPT.write_bytes(owner._encoded_json(receipt))
+    owner.AUTONOMY_RECEIPT.chmod(0o444)
+    return receipt
+
+
+def test_current_disarmed_receipt_stays_bound_without_refreshing_authority(installed):
+    s = installed
+    old = retained_disarm(s)
+    tx = stage(s)
+    current, metadata = owner.load_receipt_file(owner.AUTONOMY_RECEIPT)
+    from control_plane.executive_autonomy import validate_disarmed_interlock_document
+    validate_disarmed_interlock_document(current, metadata=metadata,
+        control_config_sha256=owner.sha256_bytes(owner.CONTROL_CONFIG.read_bytes()),
+        worker_config_sha256=owner.sha256_bytes(s.worker))
+    assert current['transaction_id'] == tx
+    assert {k: v for k, v in current.items() if k not in {
+        'control_config_sha256', 'prior_control_config_sha256', 'transaction_id'}} == {
+        k: v for k, v in old.items() if k not in {
+        'control_config_sha256', 'prior_control_config_sha256', 'transaction_id'}}
+    assert not s.marker.exists()
+
+
+def test_lost_receipt_response_reconciles_without_second_write(installed, monkeypatch):
+    s = installed
+    retained_disarm(s)
+    original = owner._atomic_file
+    writes = []
+    def lost(path, raw, **kw):
+        original(path, raw, **kw)
+        if path == owner.AUTONOMY_RECEIPT:
+            writes.append(raw)
+            raise OSError('lost original receipt publication reply')
+    monkeypatch.setattr(owner, '_atomic_file', lost)
+    with pytest.raises(owner.TransactionEffectUnknown): stage(s)
+    assert len(writes) == 1 and s.marker.exists()
+    s.host._release_transaction_owner()
+    s.host.reconcile_staging(SHA)
+    assert len(writes) == 1 and not s.marker.exists()
+
+
+def test_config_published_without_receipt_is_unknown_not_completed(installed, monkeypatch):
+    s = installed
+    old = retained_disarm(s)
+    original = s.host.replace_control_config
+    def lost(tx):
+        original(tx)
+        raise OSError('lost config response before paired receipt')
+    monkeypatch.setattr(s.host, 'replace_control_config', lost)
+    with pytest.raises(owner.TransactionEffectUnknown): stage(s)
+    s.host._release_transaction_owner()
+    with pytest.raises(owner.TransactionEffectUnknown): s.host.reconcile_staging(SHA)
+    assert s.marker.exists()
+    assert json.loads(owner.AUTONOMY_RECEIPT.read_bytes()) == old
+
+
+@pytest.mark.parametrize('change', [{'state': 'ARMED'}, {'control_config_sha256': 'e'*64}])
+def test_invalid_present_disarm_never_rebinds_or_changes_config(installed, change):
+    s = installed
+    old = retained_disarm(s)
+    owner.AUTONOMY_RECEIPT.chmod(0o600)
+    owner.AUTONOMY_RECEIPT.write_bytes(owner._encoded_json(dict(old, **change)))
+    owner.AUTONOMY_RECEIPT.chmod(0o444)
+    with pytest.raises(Exception): stage(s)
+    assert owner.CONTROL_CONFIG.read_bytes() == s.control and not s.marker.exists()
+
+
+def test_absent_receipt_is_not_created(installed):
+    stage(installed)
+    assert not owner.AUTONOMY_RECEIPT.exists()
+
+
+def test_present_empty_receipt_refuses_before_marker_or_config_publication(installed):
+    s = installed
+    owner.AUTONOMY_RECEIPT.write_bytes(b'')
+    owner.AUTONOMY_RECEIPT.chmod(0o444)
+    with pytest.raises(ValueError, match='existing disarm receipt is empty'):
+        stage(s)
+    assert not s.marker.exists()
+    assert owner.CONTROL_CONFIG.read_bytes() == s.control
+    assert owner.WORKER_CONFIG.read_bytes() == s.worker
+    assert owner.AUTONOMY_RECEIPT.exists()
+    assert owner.AUTONOMY_RECEIPT.read_bytes() == b''
 
 
 def test_existing_global_owner_publishes_only_actual_four_field_delta(installed):

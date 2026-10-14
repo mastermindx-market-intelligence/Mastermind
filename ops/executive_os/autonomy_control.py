@@ -94,6 +94,11 @@ _COEXISTENCE_MANIFEST_FIELDS = frozenset({
     "prior_ceo_receipt_present", "prior_ceo_receipt_sha256",
     "target_ceo_receipt_sha256",
 })
+_FINITE_RECEIPT_ARCHIVE = "prior-finite-disarmed-receipt.json"
+_FINITE_RECEIPT_FIELDS = frozenset({
+    "finite_prior_receipt_present", "finite_prior_receipt_sha256",
+    "finite_target_receipt_sha256",
+})
 
 _CONTROL_LAUNCHD_PREIMAGE_FIELD = "control_launchd_disabled_before_reconcile"
 _CONTROL_LAUNCHD_DISABLED_ROW_RE = re.compile(
@@ -3037,6 +3042,13 @@ class ProductionTransactionHost(ProductionArmHost):
                            for field in _COEXISTENCE_MANIFEST_FIELDS - {"prior_ceo_receipt_present"})):
                 raise TransactionEffectUnknown()
             required |= _COEXISTENCE_MANIFEST_FIELDS
+        if set(value) & _FINITE_RECEIPT_FIELDS:
+            if (value.get("operation") != "FINITE_CONTROL_STAGE"
+                    or type(value.get("finite_prior_receipt_present")) is not bool
+                    or any(re.fullmatch(r"[0-9a-f]{64}", str(value.get(field, ""))) is None
+                           for field in _FINITE_RECEIPT_FIELDS - {"finite_prior_receipt_present"})):
+                raise TransactionEffectUnknown()
+            required |= _FINITE_RECEIPT_FIELDS
         if value.get("operation") in DIALOGUE_CANARY_OPERATIONS:
             required |= _CANARY_MANIFEST_FIELDS
             if (
@@ -3113,6 +3125,8 @@ class ProductionTransactionHost(ProductionArmHost):
             value.update({key: current[key] for key in _CANARY_MANIFEST_FIELDS})
         if current is not None and set(current) & _COEXISTENCE_MANIFEST_FIELDS:
             value.update({key: current[key] for key in _COEXISTENCE_MANIFEST_FIELDS})
+        if current is not None and set(current) & _FINITE_RECEIPT_FIELDS:
+            value.update({key: current[key] for key in _FINITE_RECEIPT_FIELDS})
         _atomic_file(
             self._manifest_path(),
             _encoded_json(value),
@@ -3760,6 +3774,9 @@ class ProductionTransactionHost(ProductionArmHost):
         if set(manifest) & _COEXISTENCE_MANIFEST_FIELDS:
             expected.update(_COEXISTENCE_ARCHIVES)
             archives.extend(AUTONOMY_TRANSACTION / name for name in _COEXISTENCE_ARCHIVES)
+        if set(manifest) & _FINITE_RECEIPT_FIELDS:
+            expected.add(_FINITE_RECEIPT_ARCHIVE)
+            archives.append(AUTONOMY_TRANSACTION / _FINITE_RECEIPT_ARCHIVE)
         if manifest.get("operation") in DIALOGUE_CANARY_OPERATIONS:
             expected.add(_CANARY_RECEIPT_ARCHIVE)
             archives.append(AUTONOMY_TRANSACTION / _CANARY_RECEIPT_ARCHIVE)

@@ -7,6 +7,7 @@ an already-published exact target and never replays the write.
 from __future__ import annotations
 
 import json
+import copy
 from pathlib import Path
 import pwd
 import stat
@@ -14,6 +15,7 @@ import stat
 from control_plane.fabric_attended_routing import FINITE_DEFINITION_DIR
 from ops.executive_os import autonomy_control as owner
 from ops.executive_os.attended_worker_definition import build_finite_control_delta
+from control_plane.executive_autonomy import validate_disarmed_interlock_document
 
 OPERATION = 'FINITE_CONTROL_STAGE'
 COMMANDS = frozenset({'finite-control-stage', 'finite-control-stage-reconcile'})
@@ -38,7 +40,96 @@ def candidate(prior, delta):
         owner.sha256_bytes(raw), prior.worker_sha256)
 
 
+def rebind_disarmed_receipt(tx, payload):
+    """Preserve existing disarm authority and timestamps; change correlation only."""
+    if (payload.get('state') != 'DISARMED'
+            or payload.get('control_config_sha256') != tx.prior_configs.control_sha256
+            or payload.get('worker_config_sha256') != tx.prior_configs.worker_sha256
+            or candidate(tx.prior_configs, {k: tx.candidates.control[k] for k in FIELDS}) != tx.candidates):
+        raise owner.TransactionEffectUnknown()
+    value = copy.deepcopy(payload)
+    value.update(control_config_sha256=tx.candidates.control_sha256,
+                 prior_control_config_sha256=tx.prior_configs.control_sha256,
+                 transaction_id=tx.transaction_id)
+    return value
+
+
 class ProductionFiniteStagingHost(owner.ProductionCeoSubmitHost):
+    @staticmethod
+    def _current_receipt():
+        try:
+            owner.AUTONOMY_RECEIPT.lstat()
+        except FileNotFoundError:
+            return b''
+        raw = owner._read_root_file(owner.AUTONOMY_RECEIPT,
+            modes=frozenset({0o444}), uid=0, gid=0)[0]
+        # Only positive filesystem absence has the empty sentinel. An existing
+        # empty receipt is invalid evidence, including during reconciliation.
+        if not raw:
+            raise ValueError('existing disarm receipt is empty')
+        return raw
+
+    def _seal_generation(self, generation, tx, *, operation):
+        # Finite staging is wholly disarmed and cannot use the armed CEO
+        # coexistence transformer. Retain its receipt in the SAME global owner.
+        if operation != OPERATION:
+            raise owner.TransactionEffectUnknown()
+        raw = self._current_receipt()
+        target = b''
+        if raw:
+            payload, metadata = owner.load_receipt_file(owner.AUTONOMY_RECEIPT)
+            if json.loads(raw) != payload:
+                raise owner.TransactionEffectUnknown()
+            validate_disarmed_interlock_document(payload, metadata=metadata,
+                control_config_sha256=tx.prior_configs.control_sha256,
+                worker_config_sha256=tx.prior_configs.worker_sha256)
+            target = owner._encoded_json(rebind_disarmed_receipt(tx, payload))
+        owner.ProductionTransactionHost._seal_generation(self, generation, tx, operation=operation)
+        owner._atomic_file(generation/owner._FINITE_RECEIPT_ARCHIVE, raw,
+            mode=0o400, uid=0, gid=0, replace=False)
+        manifest = self._manifest_document(tx, 'LOCKED', operation=operation)
+        manifest.update(finite_prior_receipt_present=bool(raw),
+            finite_prior_receipt_sha256=owner.sha256_bytes(raw),
+            finite_target_receipt_sha256=owner.sha256_bytes(target))
+        owner._atomic_file(generation/owner._TRANSACTION_MANIFEST_NAME,
+            owner._encoded_json(manifest), mode=0o400, uid=0, gid=0, replace=True)
+        owner._fsync_directory(generation)
+
+    def _receipt_pair(self, tx):
+        if (self._transaction_owner_fd is None or self._active_transaction is None
+                or self._active_transaction.transaction_id != tx.transaction_id):
+            raise owner.TransactionEffectUnknown()
+        self._verify_published_inode(self._transaction_owner_fd)
+        manifest = self._manifest()
+        if (manifest['operation'] != OPERATION or manifest['transaction_id'] != tx.transaction_id
+                or manifest['expected_sha'] != tx.expected_sha
+                or not owner._FINITE_RECEIPT_FIELDS <= set(manifest)):
+            raise owner.TransactionEffectUnknown()
+        raw, _ = owner._read_root_file(owner.AUTONOMY_TRANSACTION/owner._FINITE_RECEIPT_ARCHIVE,
+            modes=frozenset({0o400}), uid=0, gid=0)
+        if (owner.sha256_bytes(raw) != manifest['finite_prior_receipt_sha256']
+                or bool(raw) is not manifest['finite_prior_receipt_present']):
+            raise owner.TransactionEffectUnknown()
+        target = owner._encoded_json(rebind_disarmed_receipt(tx, json.loads(raw))) if raw else b''
+        if owner.sha256_bytes(target) != manifest['finite_target_receipt_sha256']:
+            raise owner.TransactionEffectUnknown()
+        return raw, target
+
+    def verify_disarmed_receipt(self, tx, *, target):
+        pair = self._receipt_pair(tx)
+        if self._current_receipt() != pair[1 if target else 0]:
+            raise owner.TransactionEffectUnknown()
+
+    def publish_disarmed_receipt(self, tx):
+        self.verify_current(tx, target=True)
+        prior, target = self._receipt_pair(tx)
+        self.verify_disarmed_receipt(tx, target=False)
+        if prior:
+            owner._atomic_file(owner.AUTONOMY_RECEIPT, target,
+                mode=0o444, uid=0, gid=0, replace=True)
+        self.verify_disarmed_receipt(tx, target=True)
+        self._persist_phase(tx, 'FINITE_RECEIPT_REBOUND')
+
     def new_transaction_id(self):
         # Unlike recovery-oriented inherited helpers, a fresh publication may
         # never lock/adopt a marker that appeared after its absence preflight.
@@ -105,7 +196,7 @@ class ProductionFiniteStagingHost(owner.ProductionCeoSubmitHost):
         manifest = self._manifest()
         if (manifest['operation'] != OPERATION or manifest['expected_sha'] != expected_sha
                 or manifest['phase'] not in {'LOCKED', 'CANDIDATES_WRITTEN',
-                    'CANDIDATES_VALIDATED', 'CONTROL_REPLACED', 'FINITE_STAGE_VERIFIED'}):
+                    'CANDIDATES_VALIDATED', 'CONTROL_REPLACED', 'FINITE_RECEIPT_REBOUND', 'FINITE_STAGE_VERIFIED'}):
             raise owner.TransactionEffectUnknown()
         prior = self._archived_configs(expected_sha)
         proposed = candidate(prior, self.read_delta())
@@ -115,6 +206,9 @@ class ProductionFiniteStagingHost(owner.ProductionCeoSubmitHost):
         tx = owner.TransactionContext(manifest['transaction_id'], expected_sha, prior, proposed, None)
         self._active_transaction = tx
         self.verify_current(tx, target=True)
+        # Recovery accepts both exact postimages only. It never republishes a
+        # missing/partial receipt or replays the original config replacement.
+        self.verify_disarmed_receipt(tx, target=True)
         self._persist_phase(tx, 'FINITE_STAGE_VERIFIED')
         self.complete_transaction(tx)
         return tx.transaction_id
@@ -136,11 +230,14 @@ def execute_staging(host, expected_sha, expected_control_sha256):
     host._create_marker(tx, operation=OPERATION)
     try:
         host.verify_current(tx, target=False)
+        host.verify_disarmed_receipt(tx, target=False)
         host.write_candidates(tx)
         host.validate_candidates(tx)
         host.verify_current(tx, target=False)
+        host.verify_disarmed_receipt(tx, target=False)
         host.replace_control_config(tx)
         host.verify_current(tx, target=True)
+        host.publish_disarmed_receipt(tx)
         host._persist_phase(tx, 'FINITE_STAGE_VERIFIED')
         host.complete_transaction(tx)
         return tx.transaction_id
