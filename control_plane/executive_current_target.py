@@ -76,10 +76,20 @@ def read_current_target(runtime: Any, operation_key: str) -> CurrentTargetEpoch:
         ):
             _refuse()
         worker = runtime.workers.get_worker(attempt.worker_id)
+        # Worker availability aggregates independent quota classes. Another
+        # available slot must not hide this exact held native writer.
+        quota = runtime.workers.get_quota_class(attempt.worker_id, attempt.quota_class)
         if (
             worker is None
-            or worker.status is not WorkerStatus.BUSY
-            or worker.active_job_id != job_id
+            or worker.status not in {WorkerStatus.AVAILABLE, WorkerStatus.BUSY}
+            or quota is None
+            or job.assigned_quota_class != attempt.quota_class
+            or quota.worker_id != attempt.worker_id
+            or quota.quota_class != attempt.quota_class
+            or quota.status is not WorkerStatus.BUSY
+            or quota.active_attempt_id != attempt.attempt_id
+            or quota.active_job_id != job_id
+            or quota.fence_generation != attempt.fence_generation
         ):
             _refuse()
         harness = runtime.current_harness_binding_source(attempt.attempt_id)
@@ -94,7 +104,7 @@ def read_current_target(runtime: Any, operation_key: str) -> CurrentTargetEpoch:
             job_status=job.status,
             attempt_status=attempt.status,
             fence_generation=attempt.fence_generation,
-            worker_status=worker.status,
+            worker_status=quota.status,
             harness_session_epoch_id=harness.session_epoch_id,
             harness_generation_number=harness.generation_number,
             harness_provider_session_id=harness.provider_session_id,

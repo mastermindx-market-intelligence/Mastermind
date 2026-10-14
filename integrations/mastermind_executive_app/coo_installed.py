@@ -27,7 +27,14 @@ class CooFactsClient:
         value = await self._read(principal, work_ref, "authority")
         if type(value) is not dict or set(value) != {f.name for f in dataclasses.fields(AuthorityFact)}:
             raise ValueError("installed COO authority shape refused")
-        parsed = dict(value, release_class=ReleaseClass(value["release_class"]))
+        actions = value.get("principal_actions")
+        if type(actions) is not list:
+            raise ValueError("installed COO principal action grant refused")
+        parsed = dict(
+            value,
+            release_class=ReleaseClass(value["release_class"]),
+            principal_actions=tuple(actions),
+        )
         authority = AuthorityFact(**parsed)
         if authority.work_ref != work_ref or authority.release_class is not ReleaseClass.RESERVED_RELEASE:
             raise ValueError("installed COO authority identity refused")

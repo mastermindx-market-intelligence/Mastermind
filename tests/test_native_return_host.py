@@ -87,11 +87,11 @@ def test_native_authority_binds_separate_grant_and_transaction(connected):
         authority.revalidate()
 
 
-def test_native_profile_is_separate_and_disabled():
+def test_native_profile_is_separate_and_source_eligible_without_production_arm():
     from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry, observed_mcp_tool_schema_digest
     registry = ExecutionCapabilityRegistry.load()
     profile = registry.profiles['operator.appserver.interactive.native-return.v1']
-    assert not profile.enabled and not registry.production_armed
+    assert profile.enabled and not registry.production_armed
     assert profile.mcp_servers == ('native-return-mcp-v1',)
     assert profile.skills == profile.plugins == profile.resource_grants == ()
     grant = profile.mcp_server_grants[0]

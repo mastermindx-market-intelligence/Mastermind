@@ -30,6 +30,23 @@ Chairman intent assigns responsibility. The active assigned principal owns deliv
 COO, architect, reviewer and worker are functions, not mandatory named-chat relays.
 Use the shallowest useful delegation structure and one owner for conflicting changes.
 
+Management layers are optional per task. A CEO may assign bounded work directly to an
+eligible Fabric operator or worker; a native coordinator may assign directly to an
+eligible worker or operator; an operator may execute its own assignment. Add a manager
+only for useful decomposition, context isolation, review or integration. Preserve useful
+deeper routes within actual admission; never manufacture an operator to relay one packet.
+A worker stays a leaf unless its existing owner explicitly grants delegation capability.
+
+Conserve the original root, scope and budget at every level. A native child uses the
+verified original root from its parent's commission and its own verified native identity
+as the immediate parent of its Fabric child; it must not mint a new root from its thread
+ID. Verify actual ancestry as well as the commission. Native session IDs are not Runtime
+Job IDs. Transport labels do not authenticate a caller or grant admission. Consume the
+retained result in the actual assigning parent and return a compact accepted summary
+upward. Keep the Codex root-only Stop hook restricted to its original root; a coordinator
+uses its supported foreground inspect-and-consume path unless another return owner is
+independently qualified. Missing idle Wake does not block that admitted foreground path.
+
 A Web conversation is ephemeral, may be archived, and is not an always-on Meta-CEO.
 Do not address a dependency to an archived chat or assume it will wake. A new session
 needs actual creation and current delivery/admission before it is a receiver. Recover
@@ -44,7 +61,11 @@ proof obligation; it must not freeze unrelated permitted implementation or diagn
 ## Execute economically
 
 Prefer existing admitted Fabric workers for separable work when framing, review and
-repair cost less than direct execution. Delegate an outcome with scope, source identity,
+repair cost less than direct execution. For Codex sessions doing bounded Mastermind leaf work, load and apply
+the installed `~/.codex/skills/mastermind-fabric-delegate/SKILL.md` before considering
+native Codex workers. Its existing adapter is independent of optional Executive/Wake
+integration. Claude sessions use their installed Workforce and admitted launcher procedure.
+Delegate an outcome with scope, source identity,
 acceptance and a return location, not every command. Keep useful principal work moving.
 If no eligible worker is available before effects begin, perform permitted work directly;
 a missing optional integration is not a reason to invent a new queue or abandon the task.

@@ -1,6 +1,6 @@
 {
   "schema_version": "mastermind.executive_agent_capabilities/v3",
-  "policy_version": "2026-10-11.dot2api-built-not-proven",
+  "policy_version": "2026-10-13.dot2api-native-return-host-selection",
   "lifecycle_authority": "executive_os",
   "production_armed": false,
   "mcp_servers": {
@@ -332,7 +332,7 @@
       "forbidden": []
     },
     "operator.appserver.interactive.native-return.v1": {
-      "enabled": false,
+      "enabled": true,
       "execution_surface": "codex-app-server",
       "auth_realm": "dedicated-worker-account",
       "sandbox_policy": "read-only",

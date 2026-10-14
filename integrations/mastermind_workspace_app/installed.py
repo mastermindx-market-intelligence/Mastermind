@@ -11,6 +11,7 @@ from pathlib import Path
 
 from .contract import (
     MAX_RESPONSE_BYTES,
+    FRAME_SCHEMA_V3, MAX_PLAN_RESPONSE_BYTES, validate_v3_frame,
     MAX_RESULT_RESPONSE_BYTES,
     canonical,
     response_ceiling_for,
@@ -36,6 +37,9 @@ class CeoIngressWorkspaceClient:
         if isinstance(frame, dict) and frame.get("schema") == FACT_SCHEMA:
             validate_facts_frame(frame)
             ceiling = MAX_RESPONSE_BYTES
+        elif isinstance(frame, dict) and frame.get("schema") == FRAME_SCHEMA_V3:
+            validate_v3_frame(frame)
+            ceiling = MAX_PLAN_RESPONSE_BYTES
         elif isinstance(frame, dict) and frame.get("schema") == "mastermind.executive_workspace_read.v2":
             validate_v2_frame(frame)
             ceiling = response_ceiling_for(frame.get("operation"))

@@ -1,0 +1,12 @@
+{
+  "observed_at": "2026-10-13T11:13:38.298144+00:00",
+  "adapter_sha256": "bfa5fcdc3df04d76d6c3b0b2dda2dac17ab4539253ec3ffb86fca4e2c4c13207",
+  "response_sha256": "299987359b0b3d320ba21d3bf1a56fdec5399cd8777b49ddc0b9c769a667a394",
+  "operation": "status",
+  "effect": "read_only",
+  "run_id": "fabric-mcp-web-20261011-c3-check-01",
+  "root_id": "fabric-mcp-web-20261011-c3",
+  "state": "TERMINAL",
+  "acceptance_state": "NOT_ACCEPTED",
+  "content_fetched": false
+}

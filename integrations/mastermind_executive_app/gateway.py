@@ -369,6 +369,37 @@ class CeoIngressClient:
         self, socket_path: "Path | str", frame: Mapping[str, Any]
     ) -> CeoIngressResponse:
         """Send exactly one JSON frame; never retries internally."""
+        return await self._send_frame(socket_path, frame, keep_write_open=False)
+
+    async def send_foreground_frame(
+        self, socket_path: "Path | str", frame: Mapping[str, Any]
+    ) -> CeoIngressResponse:
+        """Keep this bounded summon connection duplex until its one response.
+
+        This is transport lifetime only, never attendance or launch authority.
+        The installed peer, live principal and actual host source still qualify
+        the in-process operation. No frame field can select this client mode.
+        """
+        from common.session_bridge_private_contract import PRIVATE_SCHEMA, FOREGROUND_PRIVATE_SCHEMA
+        if (not isinstance(frame, Mapping) or frame.get("schema") != PRIVATE_SCHEMA
+                or frame.get("tool") != "session_summon"):
+            return CeoIngressResponse(transport=TRANSPORT_NOT_SENT,
+                detail="foreground transport requires a private summon frame")
+        from integrations.session_bridge.http_foreground import current_request, HttpForegroundClosed
+        try:
+            source = current_request()
+        except HttpForegroundClosed:
+            return CeoIngressResponse(transport=TRANSPORT_NOT_SENT,
+                detail="actual upstream foreground source unavailable")
+        wire_frame = {**frame, "schema": FOREGROUND_PRIVATE_SCHEMA}
+        return await self._send_frame(socket_path, wire_frame, keep_write_open=True,
+                                      foreground_source=source)
+
+    async def _send_frame(
+        self, socket_path: "Path | str", frame: Mapping[str, Any], *,
+        keep_write_open: bool,
+        foreground_source: Any = None,
+    ) -> CeoIngressResponse:
 
         request_ceiling = MAX_REQUEST_BYTES
         response_ceiling = MAX_RESPONSE_BYTES
@@ -413,7 +444,14 @@ class CeoIngressClient:
                 transport=TRANSPORT_NOT_SENT, detail=f"connect failed: {type(exc).__name__}"
             )
 
+        from integrations.session_bridge.http_foreground import HttpForegroundClosed
         try:
+            if foreground_source is not None:
+                try:
+                    foreground_source.attach_writer(writer)
+                except HttpForegroundClosed:
+                    return CeoIngressResponse(transport=TRANSPORT_NOT_SENT,
+                        detail="upstream foreground source ended before send")
             try:
                 writer.write(line)
                 await asyncio.wait_for(writer.drain(), timeout=self._connect_timeout)
@@ -427,19 +465,24 @@ class CeoIngressClient:
                     transport=TRANSPORT_SENT_UNKNOWN,
                     detail=f"send failed after connect: {type(exc).__name__}",
                 )
-            try:
-                writer.write_eof()
-            except (OSError, NotImplementedError):
-                pass
+            if not keep_write_open:
+                try:
+                    writer.write_eof()
+                except (OSError, NotImplementedError):
+                    pass
 
             try:
                 raw = await asyncio.wait_for(
-                    reader.readline(), timeout=self._read_timeout
+                    reader.readline(), timeout=(self._read_timeout if foreground_source is None
+                        else foreground_source.remaining_seconds())
                 )
             except asyncio.TimeoutError:
                 return CeoIngressResponse(
                     transport=TRANSPORT_SENT_UNKNOWN, detail="read timed out after send"
                 )
+            except HttpForegroundClosed:
+                return CeoIngressResponse(transport=TRANSPORT_SENT_UNKNOWN,
+                    detail="upstream foreground source ended after send")
             except (asyncio.LimitOverrunError, ValueError):
                 # StreamReader.readline converts an over-limit readuntil
                 # failure to ValueError. Bytes were sent: never report absence.
