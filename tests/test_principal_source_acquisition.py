@@ -6,6 +6,7 @@ fixtures. No installed App request, enrollment or principal Wake is claimed.
 import asyncio
 import copy
 import dataclasses
+from decimal import Decimal
 import json
 import traceback
 
@@ -45,6 +46,7 @@ from tests import test_principal_source_reader as relay
     "none", "foreign_work", "foreign_root", "generation", "profile", "revoked",
     "ceo_target", "missing", "resolved", "wrong_worker", "root_source_unavailable",
     "answered", "revoke_during_read", "resolve_during_read", "root_source_unavailable_during_read",
+    "host_rule", "host_resolved", "host_revoked", "host_ack", "host_request_revoked", "host_request_during_read", "host_framed_rule",
 ])
 def test_acquisition_derives_exact_inputs_and_refuses_drift(tmp_path, monkeypatch, change):
     fixture = _strict_dialogue_runtime(tmp_path, monkeypatch)
@@ -120,6 +122,7 @@ def test_acquisition_derives_exact_inputs_and_refuses_drift(tmp_path, monkeypatc
 
     async def scenario():
         calls = []
+        request_current = [True]
         async def observe(reader, writer):
             try:
                 request = parse_observation_request(await reader.readline())
@@ -129,6 +132,7 @@ def test_acquisition_derives_exact_inputs_and_refuses_drift(tmp_path, monkeypatc
                 if change == "revoke_during_read": config["missions"][0]["enabled"] = False
                 elif change == "resolve_during_read": resolve()
                 elif change == "root_source_unavailable_during_read": remove_root_source()
+                elif change == "host_request_during_read": request_current[0] = False
                 baseline[0] = runtime.events.list_events()
                 writer.write(response_bytes(response))
                 await writer.drain()
@@ -137,7 +141,8 @@ def test_acquisition_derives_exact_inputs_and_refuses_drift(tmp_path, monkeypatc
                 await writer.wait_closed()
         path = tmp_path / "observation.sock"
         server = await asyncio.start_unix_server(observe, path=str(path))
-        slack = InMemorySlackClient(relay_bot_user_id=relay.BOT)
+        slack = InMemorySlackClient(relay_bot_user_id=relay.BOT,
+            next_timestamp=Decimal(relay.LATER_TS) + Decimal("0.000001"))
         slack.add_parent(SlackMessage(ts=relay.THREAD, author_user_id=relay.BOT, text=render_parent_v2(parent)))
         slack.add_reply(SlackMessage(ts=relay.PREDECESSOR_TS, author_user_id=relay.BOT,
             text=render_message_v2(message), thread_ts=relay.THREAD))
@@ -154,6 +159,73 @@ def test_acquisition_derives_exact_inputs_and_refuses_drift(tmp_path, monkeypatc
         try:
             args = dict(runtime=runtime, authority=authority, caller=caller, obligation_id=oid,
                 socket_path=relay_path, observation_client=ExecutiveDialogueObservationClient(path))
+            if change.startswith("host_"):
+                from integrations.mastermind_company_principal_decision_host import build_acquired_principal_decision_host
+                from integrations.mastermind_company_principal_runtime_fence import PRINCIPAL_RUNTIME_AGGREGATE_TYPE
+                from integrations.slack_agent_dialogue.engine_v2 import DialogueContextV2
+                class DecisionPolicy:
+                    def minimum_authority(self, *, request, option):
+                        return "WITHIN_COMMISSION" if option["id"] == "opt-continue" else "CHAIRMAN_REQUIRED"
+                    def allows_continuation(self, **_):
+                        return False
+                service.engine_v2.authority_policy = DecisionPolicy()
+                def receiving_guard():
+                    if not request_current[0]:
+                        raise ValueError("request closed")
+                framed = None
+                if change == "host_framed_rule":
+                    from integrations.company_dialogue_principal_app_contract import encode_app_request, decode_app_request
+                    framed = decode_app_request(encode_app_request(caller=caller,
+                        obligation_id=oid, tool="ruling",
+                        arguments={k: v for k, v in _body("RULING").items() if k != "canonical_ref"}))
+                    args.update(caller=framed.caller, obligation_id=framed.obligation_id)
+                if change == "host_request_during_read":
+                    with pytest.raises(ValueError, match="request closed"):
+                        await build_acquired_principal_decision_host(**args,
+                            receiving_request_guard=receiving_guard)
+                    assert calls == [parent]
+                    assert runtime.events.list_events() == baseline[0]
+                    assert slack.post_call_count == slack.parent_post_call_count == 0
+                    return
+                host = await build_acquired_principal_decision_host(**args,
+                    receiving_request_guard=receiving_guard)
+                assert calls == [parent]
+                if change == "host_resolved": resolve()
+                elif change == "host_revoked": config["missions"][0]["enabled"] = False
+                elif change == "host_request_revoked": request_current[0] = False
+                elif change == "host_ack":
+                    ack = acknowledge(obligation, trusted=TrustedAckContext(ack_mode=AckMode.HUMAN_OPERATOR,
+                        target_seat="coo", session_alias="SYNTHETIC-OPERATOR", reasoning_surface="human",
+                        acknowledged_at="2026-10-14T00:00:01Z", operator_authority_receipt="OP-SOURCE-TEST"),
+                        claimed_obligation_ids=(oid,))
+                    repository.append_record(ack_record(obligation, ack))
+                arguments = {k: v for k, v in _body("RULING").items() if k != "canonical_ref"}
+                if framed is not None:
+                    arguments = framed.arguments
+                result = await host.gateway.call("ruling", arguments)
+                events = runtime.events.list_events(aggregate_type=PRINCIPAL_RUNTIME_AGGREGATE_TYPE)
+                assert calls == [parent, parent]
+                if change in {"host_rule", "host_ack", "host_framed_rule"}:
+                    assert result["ok"] is True, result
+                    assert len(events) == slack.post_call_count == 1
+                    binding = host.commit_owner.binding_resolver.resolve()
+                    worker_context = DialogueContextV2(work_ref=binding.work_ref,
+                        commission_ref=binding.commission_ref, session_ref=binding.session_ref,
+                        operation_key=binding.operation_key, watch_mode=binding.watch_mode,
+                        actor_ref=message["actor_ref"], applies_to=binding.applies_to)
+                    consumed = await service.engine_v2.wait_for_reply(thread_ts=relay.THREAD,
+                        context=worker_context, request_message_key=message["message_key"],
+                        expected_types=("RULING",), max_attempts=1)
+                    assert consumed["reply"]["message_key"] == events[0].aggregate_id
+                    assert consumed["authority"]["executable"] is True
+                    await host.gateway.call("ruling", arguments)
+                    assert slack.post_call_count == 1
+                else:
+                    assert result["ok"] is False, result
+                    assert result["error"]["code"] == "EFFECT_FENCE_UNAVAILABLE"
+                    assert events == [] and slack.post_call_count == 0
+                assert slack.parent_post_call_count == 0
+                return
             if change == "none":
                 try:
                     result = await acquire_principal_decision_source(**args)
@@ -187,3 +259,18 @@ def test_acquisition_derives_exact_inputs_and_refuses_drift(tmp_path, monkeypatc
             server.close()
             await server.wait_closed()
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("kind", ["missing", "truthy", "async"])
+def test_host_rejects_non_synchronous_request_guard_before_acquisition(monkeypatch, kind):
+    import integrations.mastermind_company_principal_decision_host as composition
+    async def forbidden(**_):
+        raise AssertionError("source acquisition must not start")
+    monkeypatch.setattr(composition, "acquire_principal_decision_source", forbidden)
+    async def asynchronous():
+        raise AssertionError("asynchronous authority must not execute")
+    guard = {"missing": None, "truthy": lambda: True, "async": asynchronous}[kind]
+    with pytest.raises(ValueError, match="receiving principal request unavailable"):
+        asyncio.run(composition.build_acquired_principal_decision_host(
+            runtime=None, authority=None, caller=None, obligation_id="not-used",
+            socket_path=None, observation_client=None, receiving_request_guard=guard))
