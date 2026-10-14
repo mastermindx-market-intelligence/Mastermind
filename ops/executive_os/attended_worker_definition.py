@@ -19,6 +19,7 @@ from control_plane.executive_fabric_adapter import FabricHostBinding
 from control_plane.executive_fabric_composition import CONFIG_SCHEMA_VERSION, _bindings
 from control_plane.fabric_attended_claude import (
     MAX_TURNS_LIMIT, _reviewed_binary, _reviewed_binding_and_profile, _reviewed_model,
+    finite_read_permission_digest,
 )
 from control_plane.subscription_catalog import get_binding
 from control_plane.subscription_provider_profiles import get_profile
@@ -182,8 +183,8 @@ def build_finite_worker_artifacts(*, primary_config, worker_id, worker_user, wor
         worker_uid, worker_gid, control_gid, runtime_root, definition_dir, socket_path,
         binary: BinaryAttestation, binary_receipt_path, binary_receipt_sha256,
         realm_generation, release_root, release_commit, release_tree, release_manifest_sha256, python_binary,
-        host_ref, model_class, execution_profile_digest, service_source_sha256,
-        permission_profile_sha256, routing_root_id, routing_parent_run_id,
+        host_ref, model_class, execution_profile_digest, service_source_sha256=None,
+        permission_profile_sha256=None, routing_root_id, routing_parent_run_id,
         max_turns=2):
     """Return exact bytes for one owner-selected secondary worker, never publish.
 
@@ -228,8 +229,13 @@ def build_finite_worker_artifacts(*, primary_config, worker_id, worker_user, wor
     if release.name != release_commit:
         raise AttendedDefinitionError('exact immutable release directory required')
     _sha(binary_receipt_sha256)
-    for digest in (execution_profile_digest, service_source_sha256, permission_profile_sha256):
-        _sha(digest)
+    _sha(execution_profile_digest)
+    expected_permission = finite_read_permission_digest()
+    if ((service_source_sha256 is not None and service_source_sha256 != release_manifest_sha256)
+            or (permission_profile_sha256 is not None and permission_profile_sha256 != expected_permission)):
+        raise AttendedDefinitionError('source/permission digest differs from canonical producer')
+    service_source_sha256 = release_manifest_sha256
+    permission_profile_sha256 = expected_permission
     _reviewed_binary(binary)
     if type(binary) is not BinaryAttestation or binary.uid != 0 or binary.path != binary.real_path:
         raise AttendedDefinitionError('actual canonical root binary observation required')
@@ -276,7 +282,8 @@ def build_finite_worker_artifacts(*, primary_config, worker_id, worker_user, wor
         bindings_sha256=_digest(bindings_bytes), realm_config_path=str(definitions/'worker.json'),
         host_ref=host_ref, worker_id=worker_id, routing_root_id=routing_root_id,
         routing_parent_run_id=routing_parent_run_id,
-        active_dir=str(runtime/'workers'/worker_id/'active'), model_class=model_class, max_turns=max_turns)
+        active_dir=str(runtime/'workers'/worker_id/'active'), model_class=model_class, max_turns=max_turns,
+        verified_release_manifest_sha256=release_manifest_sha256)
     plist = dict(Label=label, ProgramArguments=[str(python), '-I', '-S', '-B', str(definitions/'owner_entry.py')],
         WorkingDirectory=str(release), UserName=worker_user, GroupName=worker_group, InitGroups=False,
         EnvironmentVariables={'HOME': str(home), 'PATH': '/usr/bin:/bin:/usr/sbin:/sbin', 'LANG': 'C', 'LC_ALL': 'C'},

@@ -18,6 +18,7 @@ from control_plane import fabric_attended_canary as canary
 from control_plane.executive_fabric_composition import FabricBindingSource
 from control_plane.fabric_attended_claude import (
     MAX_TURNS_LIMIT, _reviewed_binary, _reviewed_binding_and_profile, _reviewed_model,
+    finite_read_permission_digest,
 )
 from control_plane.subscription_catalog import compose_catalog_digest, get_binding
 from control_plane.subscription_harness_bindings import load_bindings
@@ -36,7 +37,7 @@ def _refuse():
 def compose_owner_resources(config, *, config_path, bindings_path, bindings_sha256,
                             realm_config_path, host_ref, worker_id,
                             routing_root_id, routing_parent_run_id, active_dir,
-                            model_class, max_turns, credential_loader, nice=0):
+                            model_class, max_turns, verified_release_manifest_sha256, credential_loader, nice=0):
     """Derive static preparation from pinned definitions, not arbitrary kwargs.
 
     The loader is the actual owner's existing private credential callable. It is
@@ -63,6 +64,13 @@ def compose_owner_resources(config, *, config_path, bindings_path, bindings_sha2
         _refuse()
     source = FabricBindingSource.from_path(bindings_path, bindings_sha256)
     physical = source(host_ref, worker_id)
+    # The fixed entry supplies this only AFTER verifying its sealed release.
+    # This is service-source identity, distinct from binary/profile digests.
+    if (type(verified_release_manifest_sha256) is not str
+            or re.fullmatch(r'[0-9a-f]{64}', verified_release_manifest_sha256) is None
+            or physical.service_source_sha256 != verified_release_manifest_sha256
+            or physical.permission_profile_sha256 != finite_read_permission_digest()):
+        _refuse()
     raw = canary.definition(realm_config_path, physical)
     # Use the original worker policy constructor and require its finite
     # assignment seal. Non-isolated supplementary groups remain a refusal.
@@ -121,7 +129,7 @@ def compose_owner_resources(config, *, config_path, bindings_path, bindings_sha2
 def run_owner_bridge(*, config_path, bindings_path, bindings_sha256,
                      realm_config_path, host_ref, worker_id, routing_root_id,
                      routing_parent_run_id, active_dir, model_class, max_turns,
-                     credential_loader, nice=0):
+                     verified_release_manifest_sha256, credential_loader, nice=0):
     """Actual fixed caller of existing main; no new listener or event loop owner.
 
     main supplies the config it just authenticated. Resources are assembled on
@@ -136,6 +144,7 @@ def run_owner_bridge(*, config_path, bindings_path, bindings_sha256,
             realm_config_path=realm_config_path, host_ref=host_ref, worker_id=worker_id,
             routing_root_id=routing_root_id, routing_parent_run_id=routing_parent_run_id,
             active_dir=active_dir, model_class=model_class, max_turns=max_turns,
+            verified_release_manifest_sha256=verified_release_manifest_sha256,
             credential_loader=credential_loader, nice=nice)
         return create_attended_backend(config, owner_resources=resources)
     return main(['serve', '--config', str(config_path)], backend_factory=fixed_factory)
@@ -144,7 +153,7 @@ def run_owner_bridge(*, config_path, bindings_path, bindings_sha256,
 def run_private_owner_bridge(*, config_path, bindings_path, bindings_sha256,
                              realm_config_path, host_ref, worker_id, routing_root_id,
                              routing_parent_run_id, active_dir, model_class, max_turns,
-                             nice=0):
+                             verified_release_manifest_sha256, nice=0):
     """Installed fixed caller; bind the existing private loader without reading it.
 
     The root-owned installation entry supplies only literal data. No configured
@@ -169,4 +178,5 @@ def run_private_owner_bridge(*, config_path, bindings_path, bindings_sha256,
         host_ref=host_ref, worker_id=worker_id, routing_root_id=routing_root_id,
         routing_parent_run_id=routing_parent_run_id, active_dir=active_dir,
         model_class=model_class, max_turns=max_turns,
+        verified_release_manifest_sha256=verified_release_manifest_sha256,
         credential_loader=credential_loader, nice=nice)

@@ -33,7 +33,6 @@ def inputs(tmp_path):
         release_root=str(tmp_path/'releases'/('a'*40)), release_commit='a'*40, release_tree='b'*40,
         release_manifest_sha256='c'*64, python_binary='/usr/bin/python3',
         host_ref='fixture-host', model_class=render.get_binding(render.canary.BINDING).model_classes[0], execution_profile_digest='e'*64,
-        service_source_sha256='f'*64, permission_profile_sha256='1'*64,
         routing_root_id='original-root', routing_parent_run_id='original-parent', max_turns=2)
 
 

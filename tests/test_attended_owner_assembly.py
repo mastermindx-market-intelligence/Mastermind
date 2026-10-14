@@ -49,7 +49,7 @@ def fixed(tmp_path, monkeypatch):
         worker_id=raw['worker_id'], worker_uid=uid, worker_gid=gid, bridge_uid=uid,
         provider='minimax', model='MiniMax-M3', provider_home=raw['provider_home'],
         worker_source_config_digest='a'*64, execution_profile_digest='b'*64,
-        service_source_sha256='c'*64, binary_sha256='d'*64, permission_profile_sha256='e'*64)
+        service_source_sha256='c'*64, binary_sha256='d'*64, permission_profile_sha256=assembly.finite_read_permission_digest())
     holder=SimpleNamespace(physical=physical, raw=raw, document=document, config=config, calls=[],
         realm_reads=0, definition_reads=0, binary_reads=0, drift=None)
     class Source:
@@ -88,7 +88,8 @@ def fixed(tmp_path, monkeypatch):
     args=dict(config_path=config_path,bindings_path=tmp_path/'physical.json',bindings_sha256='f'*64,
         realm_config_path=owner._config_path,host_ref='fixture-host',worker_id=raw['worker_id'],
         routing_root_id='original-root',routing_parent_run_id='assigning-parent',active_dir=paths['active'],
-        model_class='general',max_turns=2,credential_loader=credential)
+        model_class='general',max_turns=2,credential_loader=credential,
+        verified_release_manifest_sha256='c'*64)
     # Use the canonical catalogue's class, not a fixture alias or moving model.
     profiles=assembly.load_profiles()
     binding=assembly.get_binding(assembly.canary.BINDING,profiles_document=profiles)

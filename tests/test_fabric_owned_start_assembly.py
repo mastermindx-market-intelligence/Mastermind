@@ -93,7 +93,7 @@ class World:
             service_source_sha256=D("service-source"),
             provider_home="/tmp/fabric-inert-provider-home",
             binary_sha256=self.binary_sha,
-            permission_profile_sha256=D("permission-profile"),
+            permission_profile_sha256=D('{"permissions":{"allow":["Read(...)"]}}'),
             bridge_uid=bridge_uid)
         self.pin = CONTRACT.BinaryAttestation(
             path="/opt/inert/bin/claude", real_path="/opt/inert/bin/claude",
@@ -128,7 +128,7 @@ class World:
             }),
             workspace_path=WORKSPACE, run_dir=run_dir,
             provider_home=run_dir + "/home", provider_tmp=run_dir + "/tmp",
-            model="inert-model-1", settings_sha256=D("settings"),
+            model="inert-model-1", settings_sha256=D('{"permissions":{"allow":["Read(...)"]}}'),
             result_schema_json='{"type":"object"}',
             preparation_only=True, start_authorized=False)
         self.owner = OwnerFixture(self)

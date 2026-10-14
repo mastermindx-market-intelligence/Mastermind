@@ -4,7 +4,7 @@
   "original_worker_id": "fabric-complete-start-build-01a11e90-v1",
   "original_result_sha256": "73d7de2d8b72a202a333443c1f30883d569c45c7ace2d7acbb9c45c319f3d5f3",
   "original_candidate_sha256": "ea9552eb128372fc47563ac4f23fc6dfa79e014bf687f7f0eac2125cd6071e51",
-  "integrated_candidate_sha256": "0e84ef6582005209cde2ee9040699d33848c0e5bcb3bae96c9f9134db1522de4",
+  "integrated_candidate_sha256": "271bdd86df7b11050dec5bfce96fe0754ba0bdf57a8c23e8b89390476e47e924",
   "w4_dependency": "5d5293aeebc91976031155350d9c5235983f5f2a",
   "original_handle_delta": "1596c53ee29076994dd7bc4671508b32331319f4",
   "validation": {
@@ -31,5 +31,6 @@
     "Failure/cancellation retains original lease and finisher",
     "Once-only assembly entry before validation, distinct from retention write fence",
     "Actual fixed capture FD/path/inode validation before and after canonical START validators"
-  ]
+  ],
+  "finite_permission_digest_repair": "Actual compiled --settings SHA256, independently equal to installed expected profile; pre-lease backend check. See attended_qualification/FINITE_DIGEST_BINDING.json. Historical checks retained, not rerun or relabeled."
 }

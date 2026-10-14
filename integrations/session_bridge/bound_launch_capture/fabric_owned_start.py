@@ -498,7 +498,10 @@ def _build_receipt(
         "real_uid": principal["real_uid"],
         "real_gid": principal["real_gid"],
     }
-    permission_profile_sha256 = physical.permission_profile_sha256
+    from control_plane.fabric_attended_claude import compiled_permission_digest
+    permission_profile_sha256 = compiled_permission_digest(descriptor)
+    if permission_profile_sha256 != physical.permission_profile_sha256:
+        _refuse("compiled_permission_profile_mismatch")
     attestation = contract.LaunchAttestation(
         schema_version=contract.LAUNCH_ATTESTATION_SCHEMA_VERSION,
         created_at=_utc_now(),

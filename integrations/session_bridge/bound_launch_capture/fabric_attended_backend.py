@@ -336,6 +336,9 @@ class FabricAttendedBackend:
         if (prepared.request_sha256 != self._context['start_request_sha256']
                 or self._preparation.get('binary') != self._inputs.binary_pin):
             _refuse('original_preparation_changed')
+        from control_plane.fabric_attended_claude import compiled_permission_digest
+        if compiled_permission_digest(prepared.descriptor) != self._inputs.physical.permission_profile_sha256:
+            _refuse('original_permission_profile_changed')
         spec = json.loads(self._original)['launch_spec']
         evidence = json.loads(self._evidence)
         fabric_owned_start._qualified_evidence(evidence, spec)
