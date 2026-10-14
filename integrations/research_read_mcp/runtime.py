@@ -294,6 +294,7 @@ def compose_runtime(deployment: Deployment, *, release_verifier=verify_git_relea
         audit_sink=audit_sink, port=port, entitlement_resolver=owner.entitlement,
         context_builder=context_factory, allowed_hosts=deployment.allowed_hosts,
         allowed_origins=deployment.allowed_origins, compatibility_port=compatibility_port,
+        selection_scope=getattr(port, "capture_selection", None),
     )
 
     def health():
