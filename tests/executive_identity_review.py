@@ -17,6 +17,39 @@ import inspect
 
 REVIEWED_PATH = "control_plane/executive_installed_peer.py"
 REVIEWED_LITERAL_COUNT = 33
+
+# Exact reviewed private-directory modes, never process identities.
+# The complete fixed source and every literal site must match; source drift
+# restores normal D8 scanning. This is test evidence, not runtime permission.
+REVIEWED_PRIVATE_MODE_SOURCES = {'integrations/session_bridge/prospective_completion/candidate/original_delivery_collector.py': {'sha256': '30cce4abf8b50473906506452dd70f84cf001f5f4a030dd0c6751df108c2df15',
+                                                                                                 'anchors': ('        '
+                                                                                                             'if '
+                                                                                                             '(not '
+                                                                                                             'stat.S_ISDIR(b.st_mode) '
+                                                                                                             'or '
+                                                                                                             'a.st_uid '
+                                                                                                             '!= '
+                                                                                                             'os.getuid() '
+                                                                                                             'or '
+                                                                                                             'stat.S_IMODE(a.st_mode) '
+                                                                                                             '!= '
+                                                                                                             '0o700',
+                                                                                                             '    '
+                                                                                                             'path=completion_path(run);os.mkdir(path,0o700)')},
+ 'integrations/session_bridge/prospective_completion/prospective-completion.patch': {'sha256': 'cc2b765a8b3907474a321ffc93986050a2018dfbe1542d2abffdad05f85d1918',
+                                                                                     'anchors': ('+        '
+                                                                                                 'if (not '
+                                                                                                 'stat.S_ISDIR(b.st_mode) '
+                                                                                                 'or '
+                                                                                                 'a.st_uid '
+                                                                                                 '!= '
+                                                                                                 'os.getuid() '
+                                                                                                 'or '
+                                                                                                 'stat.S_IMODE(a.st_mode) '
+                                                                                                 '!= 0o700',
+                                                                                                 '+    '
+                                                                                                 'path=completion_path(run);os.mkdir(path,0o700)')}}
+
 REVIEWED_ANCHORS = {'_LAUNCHD_ROLES': {'node_type': 'Assign',
                     'ast_sha256': 'caa7c22754197370bf93733aec4cbcb1bc12ee23ef8cc30898be5327cfe8e49c',
                     'sites': ((('value', 'values', 0, 'keywords', 3, 'value'),
@@ -171,6 +204,19 @@ def reviewed_literal_spans(path: str, source: str):
     """
     if type(source) is not str:
         return ()
+    modes = REVIEWED_PRIVATE_MODE_SOURCES.get(path)
+    if modes is not None:
+        if hashlib.sha256(source.encode()).hexdigest() != modes["sha256"]:
+            return ()
+        lines = source.splitlines()
+        spans = []
+        for anchor in modes["anchors"]:
+            sites = [i for i, line in enumerate(lines, 1) if line == anchor]
+            if len(sites) != 1 or anchor.count("0o700") != 1:
+                return ()
+            start = anchor.index("0o700")
+            spans.append((sites[0], start, start + len("0o700"), "int"))
+        return tuple(sorted(spans))
     # Independent scoped review of the fixed ten-minute telemetry age, not a UID.
     # The complete production patch is pinned; a changed or duplicated site is
     # fully visible to D8 again. Never derive this digest from current source.
