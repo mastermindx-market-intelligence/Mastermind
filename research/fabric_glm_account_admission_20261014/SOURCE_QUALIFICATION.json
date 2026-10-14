@@ -1,0 +1,19 @@
+{
+  "at": "2026-10-14T17:23:05.772632+00:00",
+  "state": "SOURCE_QUALIFIED_PENDING_REVIEW",
+  "baseline": "3FAIL21PASS",
+  "candidate": "24PASS",
+  "installed": false,
+  "scope": "New pure cached quota account predicate and one existing account_cap intersection only. Existing unknown behavior preserved; no provider/network/credential/lease mutation. Existing95percent threshold. Passed reset and stale/malformed observations cannot park.",
+  "actual_run": "fabric-ci-read-contract-tests-01a11e90-v1 remains terminal1 NOT_ACCEPTED, never replayed. No automatic retry/midrun transfer.",
+  "files": {
+    "quota_remote.py": "a1dab11da10264836e6271955b375b8e6508c23f23d0444c99d96464deb70f2b",
+    "lease_broker.py": "d59fed1160403d93c2c46a34b39e0ff87d587f3bc207f74aec3749f658ba20ec",
+    "quota_remote.patch": "e5b0612cd4251c73eea3a7ac739bb2e64ced71008f8b67b73fd84f6d0eb1cfe1",
+    "lease_broker.patch": "a7428e6a7ff05a477e9799eaedda80a9207c2878849f92364fc9174660f3507c",
+    "test_account_quota.py": "b69a6abd6d5c801f2f8489a73540c9caf04b75c99ab22417144785ef913c71e4",
+    "BASELINE.xml": "538923697693ccd4c5e836de20466cbe2f4d2ae1f0ca189da194a5b0d0d5b64a",
+    "CANDIDATE.xml": "e96e72cdaca54c22b72b2c875c2a51e864e9a0a8f308b67e46a580f9f3f7d430",
+    "OBSERVED_QUOTA_SNAPSHOT.json": "360c2fc37f4b229fcb0c9a2b83929f441c057e12c7efe16783b51f7a306713c9"
+  }
+}
