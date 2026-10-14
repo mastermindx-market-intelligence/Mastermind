@@ -77,6 +77,9 @@ def test_missing_public_media_evidence_is_explicit_not_zero(tmp_path):
     (lambda x:x['source_reported_event_expectations'].append(dict(x['source_reported_event_expectations'][0])),'DUPLICATE_MEDIA_WITNESS'),
     (lambda x:x['indicative_consensus_revision_report'].update(article_pit_eligible=True),'REVISION_PREVIEW_PIT_NOT_QUALIFIED'),
     (lambda x:x['source_reported_event_expectations'][0].update(actual_yoy_growth_pct=1200),'MEDIA_WITNESS_GROWTH_OUT_OF_RANGE'),
+    (lambda x:x['source_reported_event_expectations'][0].update(article_first_reported_utc='2026-01-28T20:59:00Z'),'MEDIA_WITNESS_NOT_AFTER_REGULAR_CLOSE'),
+    (lambda x:x['source_reported_event_expectations'][0].update(article_first_reported_utc='2026-01-28T16:03:00'),'MEDIA_WITNESS_UTC_REQUIRED'),
+    (lambda x:x['source_reported_event_expectations'][0].update(article_source_url='http://example.com'),'MEDIA_WITNESS_SOURCE_URL_REQUIRED'),
 ])
 def test_media_witness_unsafe_promotion_or_invalidity_refused(tmp_path,change,reason):
     with pytest.raises(ValueError,match=reason):
