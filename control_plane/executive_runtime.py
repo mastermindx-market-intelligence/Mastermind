@@ -8122,6 +8122,15 @@ def _sealed_worker_result_payload(
     collection_receipt = evidence.get("collection_receipt")
     validation_receipt = evidence.get("validation_receipts")
     assignment = evidence.get("assignment_seal_receipt")
+    validation_fields = {"attempt_id", "job_id", "commands", cleanup_field,
+                         "effective_grant_digest"}
+    # Empty Fabric validation has no validation process to clean up. The
+    # pinned original request and actual grant are independently joined below;
+    # collection cleanup and final assignment revocation remain mandatory.
+    if (is_fabric and isinstance(validation_receipt, dict)
+            and validation_receipt.get("commands") == []
+            and cleanup_field not in validation_receipt):
+        validation_fields.remove(cleanup_field)
     if (
         (not is_fabric and evidence.get("schema_version") != "mastermind.sealed_worker_result_evidence/v1")
         or not isinstance(collection_receipt, dict)
@@ -8137,14 +8146,7 @@ def _sealed_worker_result_payload(
         or collection_receipt.get("effective_grant_digest")
         != attempt_row["effective_grant_digest"]
         or not isinstance(validation_receipt, dict)
-        or set(validation_receipt)
-        != {
-            "attempt_id",
-            "job_id",
-            "commands",
-            cleanup_field,
-            "effective_grant_digest",
-        }
+        or set(validation_receipt) != validation_fields
         or validation_receipt.get("effective_grant_digest")
         != attempt_row["effective_grant_digest"]
         or not isinstance(assignment, dict)

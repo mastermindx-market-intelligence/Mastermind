@@ -1,0 +1,31 @@
+{
+  "schema": "mastermind.retained-review-parent-adjudication.v1",
+  "at": "2026-10-13T22:26:48.527806+00:00",
+  "run_id": "fabric-manifest-framing-review-01a11e90-v1",
+  "root": "01a11e90-4b5d-7f53-b966-8aaaad38701f",
+  "parent": "01a11e90-4b5d-7f53-b966-8aaaad38701f",
+  "receipt_sha256": "b191300b7f306c25788e858236db4b701dc6adc851ca7c0d9fd2a4528e8c5f1e",
+  "stdout_sha256": "e32de27dd8d2ebcc8d4ecdc842da5e1cce2ba54bf8925c800d0ff820ccaaf42c",
+  "bytes": 3104,
+  "candidate_sha256": "e126d6432135725a7a7846cbe9f9749305dfe9dd7cfe37037fc413a1136248bf",
+  "parent_consumed_via": "installed fabric_task.py collection-result with exact receipt hash",
+  "review_verdict": "SOURCE_REVIEW_ACCEPTED_CONTENT_ONLY",
+  "findings": "No blocking issue. Two optional formatting assertions are unnecessary: fixed RESULT_PREFIX has exactly one space; strict JSON rejects an extra backtick. Existing negatives cover malformed wrappers; raw stdout hash remains original. Historical failed run is not made eligible.",
+  "tests": {
+    "candidate": 24,
+    "baseline_failures": 10,
+    "baseline_pass": 14,
+    "distinct_behavior_counterexamples": 3
+  },
+  "process": {
+    "start": "2026-10-13T22:02:16.650Z",
+    "end": "2026-10-13T22:08:04.355Z",
+    "rc": 0,
+    "complete_capture": true,
+    "residual_count": 0
+  },
+  "ledger_acceptance": "NOT_RECORDED",
+  "controller_and_lease": "UNKNOWN",
+  "no_replay": true,
+  "native_mission_complete": false
+}

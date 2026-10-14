@@ -1,0 +1,99 @@
+{
+  "schema": "mastermind.finite_staging_registration_source/v1",
+  "at": "2026-10-14T03:43:15.573095+00:00",
+  "source_base": "3f86a1a20d2be6ed4d771e0e77b7b02e29066ece",
+  "scope": "Fixed disarmed Control staging and OFFLINE identity registration through existing owners; not live capacity/admission",
+  "source_sha256": {
+    "control_plane/fabric_attended_registration.py": "856fa873d71cc187571b1b511f53ee00b40c0be1e42889efc2a2b53d1bf1f9f4",
+    "control_plane/executive_service.py": "9e0e8d05a39154940be1e93a0762d6fb5fb8cbc8d6fddb3c16cc862f291892cb",
+    "scripts/executive_os_phase1c.py": "749377f23da20864439edc3bc8b8c5810a047bbf833599a5856c103f7261fead",
+    "scripts/executive_os_phase1c_worker.py": "cc6a2577a5c040ce9381b0684ac19cb5c64093538a584f12dd5561deb6947f3e",
+    "ops/executive_os/attended_worker_definition.py": "494c24eebd25dce82568bbb9069ffb1be4ecdc8c038e5d0e6abc7990ef29570b",
+    "ops/executive_os/autonomy_control.py": "47379c6c42c376a92a660c58983d8ce8ef2ab71f3b3c8ce83a266ad809c907e8",
+    "ops/executive_os/attended_control_staging.py": "80b28989ab9ff9894873496bbafc44d6690f2c958a8042014ca4f754d40c2ead",
+    "tests/test_attended_control_staging.py": "fbbd6210f21855113a62eea8432f47378ac97175713f99e14c32fc9621833651",
+    "tests/test_finite_attended_registration.py": "1c2d8982461fd601066ee10fa374f3c0a4cf21d9cf9514e9e96c74a134d87499",
+    "tests/executive_finite_identity_review.py": "90c96fe0d27bad02270552a3dfab67a602ac77b42beb7207956165ff6a818d0c",
+    "tests/executive_identity_review.py": "e2b29d8631dbea551d0e55899b8d0b2efce5cfacedf67bcbc0af7cae1acff282",
+    "tests/test_executive_finite_identity_review.py": "f0e7909fd511266a29e60480ffbcce280a5f613e58b13d88b008689d6a8ba1f0",
+    "integrations/session_bridge/attended_qualification/FIXED_CONTROL_PUBLICATION.md": "45d1cc1a66f9f1c86278d4fbfd3c0c4b6f070dcbd5b39887f624d4df42f264e9"
+  },
+  "tests": {
+    "FINITE_CONTROL_STAGING_REVIEWED.xml": {
+      "sha256": "aaa35c1b9f98e50e69e63a8f30ba5e74aa2913381274684058263d7a8e3f4b43",
+      "tests": 63,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0
+    },
+    "FINITE_CONTROL_STAGING_DEFINITION.xml": {
+      "sha256": "85f28371ed098930e8b372870aabcbe476264216f0dcfc723f37f84705fcdd04",
+      "tests": 21,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0
+    },
+    "FINITE_REGISTRATION_COMPAT.xml": {
+      "sha256": "9d04ec31bb1dc12bca7384abf76049a1d7593caaf606cd44ecabce8ee0bd7fd3",
+      "tests": 62,
+      "failures": 1,
+      "errors": 0,
+      "skips": 0
+    },
+    "FINITE_REGISTRATION_FINAL.xml": {
+      "sha256": "7f62d234b4baba1c143f9671949bef7a5193a78bb58825e5f8e39d39a023486d",
+      "tests": 19,
+      "failures": 1,
+      "errors": 0,
+      "skips": 0
+    },
+    "FINITE_REGISTRATION_FINAL_JOIN.xml": {
+      "sha256": "692235dad2b5efb90d0867e3b568e7b6c041bdb29c8604f3c9365bbadd8a22da",
+      "tests": 11,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0
+    },
+    "FINITE_IDENTITY_FINAL.xml": {
+      "sha256": "e31efe0655c0d8c247e99b02a6f72450c5e43dcebf2e926a9230b5fc0d62d5b5",
+      "tests": 17,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0
+    }
+  },
+  "distinct_latest_cases": 157,
+  "unresolved_latest_cases": 0,
+  "count_note": "Ordered reports overlap. Retained prior failures are superseded only by the same repaired case in FINAL_JOIN. No raw count sum.",
+  "repairs": [
+    "Fresh staging transaction ID cannot adopt another operation marker",
+    "Post-install four-field Control staging with exact installed manifest/principal and immutable primary bytes",
+    "Existing register-worker callback creates secondary/quota OFFLINE only",
+    "Actual OS-principal check remains; canonical Runtime account label is not vendor authentication",
+    "Final config guard repeats after blocking source observations",
+    "Worker reader accepts optional capacity identity for staging compatibility; registration requires exact identity"
+  ],
+  "historical_failures": [
+    "Registration initially hit actual SQLite leading-underscore account invariant; fixed canonical label without weakening invariant",
+    "Joined test fixture initially lacked AF_UNIX socket contract and READY prerequisite; final test asserts quarantine refusal then explicitly provides READY fixture",
+    "D8 detected eight reviewed fixed identity constants; exact static AST/literal acknowledgement with drift negatives"
+  ],
+  "independent_review": "SCOPED_SOURCE_PASS /root/native_activation_adjudication: staging, OFFLINE registration, freshness repair, and exact eight-site D8 AST/literal amendment; reviewer did not rerun tests or perform effects",
+  "effects": {
+    "installation": false,
+    "service_start": false,
+    "credential_read_or_enrollment": false,
+    "capacity_available": false,
+    "native_submit": false
+  },
+  "original_operation": "fabric-parent-native-operator-proof-01a11e90-v1",
+  "operation_state": "NOT_SUBMITTED",
+  "remaining_capacity": "Existing Capacity/Provider Control owner must bind authentic host_ref/capability identity and current availability; no fabricated slot or manual promotion. Macro producer necessity under adjudication.",
+  "decision": "SCOPED_SOURCE_PASS",
+  "reviewed_amendment": {
+    "tests/executive_finite_identity_review.py": "90c96fe0d27bad02270552a3dfab67a602ac77b42beb7207956165ff6a818d0c",
+    "tests/executive_identity_review.py": "e2b29d8631dbea551d0e55899b8d0b2efce5cfacedf67bcbc0af7cae1acff282",
+    "tests/test_executive_finite_identity_review.py": "f0e7909fd511266a29e60480ffbcce280a5f613e58b13d88b008689d6a8ba1f0",
+    "tests/test_finite_attended_registration.py": "1c2d8982461fd601066ee10fa374f3c0a4cf21d9cf9514e9e96c74a134d87499"
+  }
+}
