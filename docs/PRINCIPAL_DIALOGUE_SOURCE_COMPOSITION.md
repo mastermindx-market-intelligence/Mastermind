@@ -61,6 +61,32 @@ the exact worker and trusted root. A principal STOP is consumed only by that
 worker's ACK. Existing worker-return targets and source/route grants remain
 unchanged; recognizing a command is not enrolling a new principal attention route.
 
+## Carry the authenticated caller to Control
+
+`company_dialogue_principal_app_contract` defines a closed candidate frame for
+RULING, one original obligation and the App-derived caller facts. It reuses the
+bounded strict JSON framing and the principal tool argument validator. The frame
+contains no Runtime object, physical source, child selector or source observation.
+Decoding produces detached data; it does not authenticate that data. Its schema
+is deliberately absent from the existing ingress allowlist. The existing service
+owner must explicitly compose its actual App peer, current binding and admission
+checks before admitting this frame. The existing submit/status schemas cannot
+be used to forward arbitrary Company Dialogue calls.
+
+`build_acquired_principal_decision_host` then composes canonical acquisition with
+the existing RULING source fence. Its required `receiving_request_guard` is a
+synchronous callable supplied by that actual service composition, never a frame
+field. It rechecks the exact request's peer/binding/admission before and after
+awaited acquisition, and around the current authority and original-obligation
+checks inside Runtime's COMMIT transaction. Source resolution after acquisition
+refuses; attention ACK alone remains compatible. Returned binding mappings are
+detached from the resolver's retained snapshot on every resolution.
+
+The principal argument validator also enforces the enum values in its published
+tool schema before binding resolution. The shared Dialogue body contract supports
+additional authority classes, which does not make those values part of this
+bounded COO tool's input contract.
+
 ## Preserve the final effect boundary
 
 An optional `principal_decision_source` binds already acquired caller, context,
