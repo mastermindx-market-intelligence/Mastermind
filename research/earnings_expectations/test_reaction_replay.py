@@ -33,7 +33,7 @@ def make_packet(announce="after", asof_idx=31, dates=None):
         raise ValueError(announce)
     def bars(start, factor):
         return {"adjustment": "split_dividend_adjusted_close", "source_ref": "fixture-bundle", "bars": [{"date": d.isoformat(), "adjusted_close": start * (factor**i)} for i,d in enumerate(dates)]}
-    result = {"event": {"issuer_ref":"CIK:TEST", "fiscal_target":"2026Q1", "event_ref":"ev:test", "first_public_source_ref":"fixture-release", "first_published_utc":announced.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")},
+    result = {"event": {"issuer_ref":"CIK:TEST", "fiscal_target":"2026Q1", "event_ref":"ev:test", "first_public_source_ref":"fixture-release", "first_publication_clock_status":"VERIFIED_FIRST_PUBLIC_RELEASE", "first_published_utc":announced.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")},
               "evaluated_asof_utc": (datetime.combine(dates[asof_idx],datetime.min.time(),ET).replace(hour=20).astimezone(timezone.utc).isoformat().replace("+00:00", "Z")),
               "sessions":sessions,
               "price_series":{"issuer":bars(100,1.02),"market":bars(100,1.01),"sector":bars(100,1.015)}}
@@ -169,3 +169,19 @@ def test_cli_payload(tmp_path, capsys):
     assert main([str(path)]) == 2
     error = json.loads(capsys.readouterr().out)
     assert error["status"] == "REFUSED"
+
+
+def test_sec_acceptance_clock_alone_is_insufficient():
+    p = make_packet()
+    p["event"]["first_publication_clock_status"] = "SEC_ACCEPTANCE_ONLY"
+    with pytest.raises(ReplayError) as e:
+        replay(p)
+    assert e.value.reason == "FIRST_PUBLIC_RELEASE_CLOCK_NOT_VERIFIED"
+
+
+def test_no_first_public_clock_classification_refuses():
+    p = make_packet()
+    p["event"].pop("first_publication_clock_status")
+    with pytest.raises(ReplayError) as e:
+        replay(p)
+    assert e.value.reason == "FIRST_PUBLIC_RELEASE_CLOCK_NOT_VERIFIED"
