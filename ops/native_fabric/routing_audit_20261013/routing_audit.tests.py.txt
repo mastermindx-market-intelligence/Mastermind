@@ -1,0 +1,169 @@
+"""Provider-free regressions for the exact captured native Fabric source.
+Run with AUDIT_EXT=<isolated source>/ext; never imports the installed kit.
+"""
+from __future__ import annotations
+import inspect
+import os
+from pathlib import Path
+import socket
+import sys
+import types
+
+import pytest
+
+EXT = Path(os.environ["AUDIT_EXT"]).resolve()
+assert "/evidence/" in str(EXT) or "native_routing_audit" in str(EXT)
+sys.path.insert(0, str(EXT))
+import pick
+import lease_broker
+
+DOC = {"pools": {
+    "glm": {"models": {"executor": "glm-5.3-flash", "reviewer": "glm-5.3"}},
+    "bailian": {"worker_models": ["qwen3.8-plus"]},
+    "go": {"worker_models": ["glm-5.3-flash"]},
+}, "routing": {"grok_expiring_priority": {"enabled": False}}}
+
+@pytest.fixture(autouse=True)
+def no_network(monkeypatch):
+    def refused(*args, **kwargs):
+        raise AssertionError("audit attempted network access")
+    monkeypatch.setattr(socket.socket, "connect", refused)
+    monkeypatch.setattr(socket, "create_connection", refused)
+
+@pytest.mark.parametrize("mode,model", [
+    ("minimax", "MiniMax-M3"), ("glm", "glm-5.3-flash"),
+    ("glm-codex", "glm-5.3-flash"), ("grok", "grok-4.6"),
+    ("qwen", "qwen3.8-plus"), ("bailian", "qwen3.8-plus"),
+    ("go", "glm-5.3-flash"), ("go-codex", "glm-5.3-flash"),
+    ("cursor", "cursor-pro"), ("codex-native", "sol"),
+    ("claude-native", "opus"), ("oc-free", "mimo-v2.6-flash-free"),
+])
+def test_invalid_complexity_never_silently_admitted(mode, model):
+    answer = pick.launch_policy(mode, "review", model, doc=DOC, task_complexity="C9_TYPO")
+    assert answer["allowed"] is False, answer
+    assert answer["reason"] == "unknown_task_complexity"
+
+@pytest.mark.parametrize("mode,model", [
+    ("minimax", "MiniMax-M3"), ("glm", "glm-5.3-flash"),
+    ("glm-codex", "glm-5.3-flash"), ("grok", "grok-4.6"),
+    ("qwen", "qwen3.8-plus"), ("bailian", "qwen3.8-plus"),
+    ("cursor", "cursor-pro"), ("codex-native", "sol"),
+    ("claude-native", "opus"), ("oc-free", "mimo-v2.6-flash-free"),
+])
+def test_frontier_classification_always_requires_witness(mode, model):
+    answer = pick.launch_policy(mode, "review", model, doc=DOC,
+                               task_complexity="C3_FRONTIER_JUDGMENT")
+    assert answer["allowed"] is False, answer
+    assert answer["reason"] == "frontier_witness_required"
+
+@pytest.mark.parametrize("complexity", ["C0_MECHANICAL", "C1_ROUTINE_BOUNDED"])
+@pytest.mark.parametrize("mode,model", [
+    ("grok", "grok-4.6"), ("cursor", "cursor-pro"),
+    ("codex-native", "sol"), ("claude-native", "opus"),
+    ("glm", "glm-5.3"),
+])
+def test_routine_review_label_does_not_override_explicit_complexity(complexity, mode, model):
+    answer = pick.launch_policy(mode, "review", model, doc=DOC, task_complexity=complexity)
+    assert answer["allowed"] is False, answer
+    assert answer["reason"] == "bounded_complexity_requires_escalation"
+
+@pytest.mark.parametrize("mode,model", [
+    ("minimax", "MiniMax-M3"), ("glm", "glm-5.3-flash"),
+    ("qwen", "qwen3.8-plus"), ("go", "glm-5.3-flash"),
+    ("oc-free", "mimo-v2.6-flash-free"),
+])
+def test_ordinary_economical_workers_stay_eligible(mode, model):
+    assert pick.launch_policy(mode, "mechanical", model, doc=DOC,
+        task_complexity="C1_ROUTINE_BOUNDED")["allowed"] is True
+
+@pytest.mark.parametrize("mode,model", [("grok", "grok-4.6"), ("glm", "glm-5.3")])
+def test_valid_witness_and_unclassified_legacy_reviews_preserved(mode, model):
+    assert pick.launch_policy(mode, "review", model, doc=DOC)["allowed"] is True
+    assert pick.launch_policy(mode, "review", model, doc=DOC,
+        task_complexity="C1_ROUTINE_BOUNDED",
+        escalation_reason="independent evidence requires a stronger cross-file reviewer")["allowed"] is True
+
+
+def broker(tmp_path, accounts=None):
+    import yaml
+    accounts = accounts or [{"name": "synthetic", "per_account_cap": 1}]
+    source = tmp_path / "accounts.yaml"
+    source.write_text(yaml.safe_dump({"providers": {
+        "minimax": {"enabled": True, "accounts": accounts}}}))
+    return lease_broker.Broker(db_path=str(tmp_path / "leases.sqlite"),
+        lock_path=str(tmp_path / "leases.lock"), accounts_path=str(source),
+        now_fn=lambda: 2_000_000_000.0, check_pid=False, external_gates=False,
+        grok_marker=str(tmp_path / "absent"), status_json=str(tmp_path / "status.json"),
+        hosts_path=str(tmp_path / "hosts.json"), this_host="synthetic")
+
+
+def require_logical_class_api():
+    assert "job_class" in inspect.signature(lease_broker.Broker.acquire).parameters, (
+        "remote transport labels currently erase logical job priority; add a separate optional job_class")
+
+
+def test_remote_heal_overtakes_older_mechanical_without_losing_transport_identity(tmp_path):
+    require_logical_class_api()
+    br = broker(tmp_path)
+    first = br.acquire("holder", "minimax", task_class="remote-minimax", job_class="mechanical")
+    assert first.ok
+    older = br.acquire("older", "minimax", task_class="remote-minimax", job_class="mechanical")
+    urgent = br.acquire("urgent", "minimax", task_class="remote-minimax", job_class="heal")
+    assert not older.ok and not urgent.ok
+    assert br.release(first.lease_id, "holder")
+    result = br.acquire("urgent", "minimax", task_class="remote-minimax", job_class="heal")
+    assert result.ok, result
+    with br._conn() as conn:
+        row = conn.execute("SELECT task_class FROM leases WHERE id=?", (result.lease_id,)).fetchone()
+        assert row["task_class"] == "remote-minimax"
+        waiting = conn.execute("SELECT priority FROM waiters WHERE orchestrator_id='older'").fetchone()
+        assert waiting["priority"] == 3
+
+@pytest.mark.parametrize("job_class,priority", [
+    ("heal", 0), ("build", 1), ("review", 2), ("mechanical", 3),
+    ("unexpected", 4), ("", 4), ("  Review  ", 2),
+])
+def test_remote_waiter_priority_uses_logical_class(tmp_path, job_class, priority):
+    require_logical_class_api()
+    br = broker(tmp_path)
+    assert br.acquire("holder", "minimax").ok
+    assert not br.acquire("waiting", "minimax", task_class="remote-minimax", job_class=job_class).ok
+    with br._conn() as conn:
+        row = conn.execute("SELECT priority, task_class FROM waiters WHERE orchestrator_id='waiting'").fetchone()
+        assert row["priority"] == priority
+        assert row["task_class"] == "remote-minimax"
+
+
+def test_glm_pairing_refusal_is_not_bypassed_by_logical_class(tmp_path, monkeypatch):
+    require_logical_class_api()
+    br = broker(tmp_path)
+    seen = []
+    def unavailable(accounts, **kwargs):
+        seen.append(kwargs)
+        return [], ["not_qualified"]
+    monkeypatch.setitem(sys.modules, "glm_host_account_source",
+                        types.SimpleNamespace(filter_observed_accounts=unavailable))
+    answer = br.acquire("root", "glm", task_class="remote-glm", job_class="heal",
+                        model="glm-5.3", host="synthetic")
+    assert not answer.ok and answer.reason == "host_account_unavailable"
+    assert seen and seen[0]["model"] == "glm-5.3"
+    with br._conn() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM leases").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM waiters").fetchone()[0] == 0
+
+
+def test_all_remote_acquire_paths_forward_both_class_dimensions():
+    source = (EXT / "remote_sub.sh").read_text()
+    calls = [line for line in source.splitlines()
+             if ('broker acquire' in line or 'show_args "<broker>" acquire' in line)]
+    assert len(calls) == 3
+    for line in calls:
+        assert '--task-class "remote-$MODE"' in line
+        assert '--job-class "${POOL_TASK_CLASS:-}"' in line, line
+
+
+def test_broker_cli_exposes_logical_class_without_renaming_transport_class():
+    source = (EXT / "lease_broker.py").read_text()
+    assert 'pa.add_argument("--job-class"' in source
+    assert 'job_class=args.job_class' in source
+    assert 'task_class=args.task_class' in source

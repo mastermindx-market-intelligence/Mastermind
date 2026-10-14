@@ -1,0 +1,184 @@
+--- a/ext/lease_broker.py
++++ b/ext/lease_broker.py
+@@ -101,8 +101,11 @@
+         return False
+ 
+ 
+-def _class_priority(task_class: str) -> int:
+-    return CLASS_PRIORITY.get((task_class or "unknown").lower(), 4)
++def _class_priority(task_class: str, job_class: Optional[str] = None) -> int:
++    # Transport identity (remote-glm, etc.) remains intact for admission and
++    # leases. Only the existing queue priority uses the logical work class.
++    logical = str(job_class or "").strip()
++    return CLASS_PRIORITY.get((logical or task_class or "unknown").strip().lower(), 4)
+ 
+ 
+ @dataclass
+@@ -603,6 +606,7 @@
+         poll: float = 1.0,
+         model: str = "",
+         operator_child_id: Optional[str] = None,
++        job_class: Optional[str] = None,
+     ) -> AcquireResult:
+         pool = self.provider_name(pool)
+         model = str(model or "").strip()
+@@ -633,6 +637,7 @@
+                     waiter_id,
+                     model,
+                     operator_child_id,
++                    job_class,
+                 )
+                 if result.ok or last_reason in ("operator_authorization_refused", "host_account_unavailable"):
+                     return result
+@@ -672,6 +677,7 @@
+         task_class: str,
+         host: str,
+         need: int = 1,
++        job_class: Optional[str] = None,
+     ) -> str:
+         now = self.now()
+         existing = conn.execute(
+@@ -686,7 +692,7 @@
+                 (
+                     now,
+                     task_class,
+-                    _class_priority(task_class),
++                    _class_priority(task_class, job_class),
+                     account,
+                     host,
+                     int(need),
+@@ -709,7 +715,7 @@
+                 task_class,
+                 host,
+                 now,
+-                _class_priority(task_class),
++                _class_priority(task_class, job_class),
+                 int(need),
+                 now,
+             ),
+@@ -727,10 +733,11 @@
+         task_class: str,
+         host: str,
+         need: int = 1,
++        job_class: Optional[str] = None,
+     ) -> str:
+         """Blocked/failed acquire: persist demand and drain surplus (B5 / N1)."""
+         wid = self._enqueue_waiter(
+-            conn, waiter_id, orch, pool, account, task_class, host, need
++            conn, waiter_id, orch, pool, account, task_class, host, need, job_class=job_class
+         )
+         share_now = self.fair_share(conn, pool)
+         if self._below_share_waiters(conn, pool, "", share_now):
+@@ -739,13 +746,14 @@
+         return wid
+ 
+     def _front_of_queue(
+-        self, conn: sqlite3.Connection, pool: str, orch: str, task_class: str
++        self, conn: sqlite3.Connection, pool: str, orch: str, task_class: str,
++        job_class: Optional[str] = None,
+     ) -> bool:
+         """True if this orch may take the next slot (priority + oldest-first)."""
+         waiters = self._waiters(conn, pool)
+         if not waiters:
+             return True
+-        my_p = _class_priority(task_class)
++        my_p = _class_priority(task_class, job_class)
+         # higher-priority (lower number) waiter from someone else blocks us
+         for w in waiters:
+             if w["orchestrator_id"] == orch:
+@@ -828,6 +836,7 @@
+         waiter_id: Optional[str],
+         model: str = "",
+         operator_child_id: Optional[str] = None,
++        job_class: Optional[str] = None,
+     ) -> Tuple[AcquireResult, Optional[str], str]:
+         spec = self.provider(pool)
+         if spec.get("enabled") is False:
+@@ -858,7 +867,7 @@
+         try:
+             if cap <= 0:
+                 waiter_id = self._register_demand(
+-                    conn, waiter_id, orch, pool, account, task_class, host
++                    conn, waiter_id, orch, pool, account, task_class, host, job_class=job_class
+                 )
+                 return (
+                     AcquireResult(ok=False, reason="no_grantable_account", pool=pool, orchestrator_id=orch),
+@@ -885,7 +894,7 @@
+             want_surplus = held_n >= share
+             if want_surplus and below:
+                 waiter_id = self._register_demand(
+-                    conn, waiter_id, orch, pool, account, task_class, host
++                    conn, waiter_id, orch, pool, account, task_class, host, job_class=job_class
+                 )
+                 return (
+                     AcquireResult(ok=False, reason="lending_blocked", pool=pool, orchestrator_id=orch),
+@@ -894,16 +903,16 @@
+                 )
+             if len(active) >= cap:
+                 waiter_id = self._register_demand(
+-                    conn, waiter_id, orch, pool, account, task_class, host
++                    conn, waiter_id, orch, pool, account, task_class, host, job_class=job_class
+                 )
+                 return (
+                     AcquireResult(ok=False, reason="cap_full", pool=pool, orchestrator_id=orch),
+                     waiter_id,
+                     "cap_full",
+                 )
+-            if not self._front_of_queue(conn, pool, orch, task_class):
++            if not self._front_of_queue(conn, pool, orch, task_class, job_class=job_class):
+                 waiter_id = self._register_demand(
+-                    conn, waiter_id, orch, pool, account, task_class, host
++                    conn, waiter_id, orch, pool, account, task_class, host, job_class=job_class
+                 )
+                 return (
+                     AcquireResult(ok=False, reason="priority_wait", pool=pool, orchestrator_id=orch),
+@@ -923,7 +932,7 @@
+                 )
+                 if persist:
+                     waiter_id = self._register_demand(
+-                        conn, waiter_id, orch, pool, account, task_class, host
++                        conn, waiter_id, orch, pool, account, task_class, host, job_class=job_class
+                     )
+                 return (
+                     AcquireResult(ok=False, reason=reason, pool=pool, orchestrator_id=orch),
+@@ -1408,6 +1417,7 @@
+     pa.add_argument("--pool", required=True)
+     pa.add_argument("--account", default=None)
+     pa.add_argument("--task-class", default="unknown")
++    pa.add_argument("--job-class", default=None, help="logical work class for queue priority only")
+     pa.add_argument("--model", default="")
+     pa.add_argument("--operator-child-id", default=None)
+     pa.add_argument("--host", default=None)
+@@ -1442,6 +1452,7 @@
+             pool=args.pool,
+             account=args.account,
+             task_class=args.task_class,
++            job_class=args.job_class,
+             model=args.model,
+             host=args.host,
+             pid=args.pid or os.getpid(),
+--- a/ext/remote_sub.sh
++++ b/ext/remote_sub.sh
+@@ -646,19 +646,19 @@
+ fi
+ if [ -n "$ACQUIRE_POOL" ]; then
+   if [ "$DRY_RUN" -eq 1 ]; then
+-    show_args "<broker>" acquire --orchestrator-id "remote-sub-$ID" --pool "$ACQUIRE_POOL" --task-class "remote-$MODE" --model "$MODEL" --pid "$$" --ttl "$PROVIDER_LEASE_TTL" --wait "${REMOTE_SUB_LEASE_WAIT:-3600}"
++    show_args "<broker>" acquire --orchestrator-id "remote-sub-$ID" --pool "$ACQUIRE_POOL" --task-class "remote-$MODE" --job-class "${POOL_TASK_CLASS:-}" --model "$MODEL" --pid "$$" --ttl "$PROVIDER_LEASE_TTL" --wait "${REMOTE_SUB_LEASE_WAIT:-3600}"
+     log "LEASE_WAIT pool=$ACQUIRE_POOL wait=${REMOTE_SUB_LEASE_WAIT:-3600}"
+   else
+     log "LEASE_WAIT pool=$ACQUIRE_POOL wait=${REMOTE_SUB_LEASE_WAIT:-3600}"
+     ORCH_ID="${POOL_ORCHESTRATOR_ID:-${CLAUDE_SESSION_ID:-remote-sub-$ID}}"
+     if [ "$NATIVE_MODE" -eq 1 ]; then
+-      broker acquire ${OPERATOR_CHILD_ARGS[@]+"${OPERATOR_CHILD_ARGS[@]}"} --host "$HOST_ARG" --orchestrator-id "$ORCH_ID" --pool "$ACQUIRE_POOL" --task-class "remote-$MODE" --model "$MODEL" --pid "$$" --ttl "$PROVIDER_LEASE_TTL" --wait "${REMOTE_SUB_LEASE_WAIT:-3600}" > "$LEASE_OUTPUT_FILE" || {
++      broker acquire ${OPERATOR_CHILD_ARGS[@]+"${OPERATOR_CHILD_ARGS[@]}"} --host "$HOST_ARG" --orchestrator-id "$ORCH_ID" --pool "$ACQUIRE_POOL" --task-class "remote-$MODE" --job-class "${POOL_TASK_CLASS:-}" --model "$MODEL" --pid "$$" --ttl "$PROVIDER_LEASE_TTL" --wait "${REMOTE_SUB_LEASE_WAIT:-3600}" > "$LEASE_OUTPUT_FILE" || {
+         RC=$?
+         log "LEASE_REFUSED rc=$RC"
+         exit "$RC"
+       }
+     else
+-      broker acquire ${OPERATOR_CHILD_ARGS[@]+"${OPERATOR_CHILD_ARGS[@]}"} --host "$HOST_ARG" --orchestrator-id "$ORCH_ID" --pool "$ACQUIRE_POOL" --task-class "remote-$MODE" --model "$MODEL" --pid "$$" --ttl "$PROVIDER_LEASE_TTL" --wait "${REMOTE_SUB_LEASE_WAIT:-3600}" > "$LEASE_OUTPUT_FILE" || {
++      broker acquire ${OPERATOR_CHILD_ARGS[@]+"${OPERATOR_CHILD_ARGS[@]}"} --host "$HOST_ARG" --orchestrator-id "$ORCH_ID" --pool "$ACQUIRE_POOL" --task-class "remote-$MODE" --job-class "${POOL_TASK_CLASS:-}" --model "$MODEL" --pid "$$" --ttl "$PROVIDER_LEASE_TTL" --wait "${REMOTE_SUB_LEASE_WAIT:-3600}" > "$LEASE_OUTPUT_FILE" || {
+         RC=$?
+         log "LEASE_REFUSED rc=$RC"
+         exit "$RC"
