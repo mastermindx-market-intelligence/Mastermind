@@ -52,11 +52,19 @@ class CanonicalReadContext(Mapping):
 
 
 class ResearchPortAdapter:
-    def __init__(self, service, quote_limit, mastermind_commit, *, context_type=CanonicalReadContext):
+    def __init__(self, service, quote_limit, mastermind_commit, *, context_type=CanonicalReadContext,
+                 operation_runner=None):
         if (not callable(quote_limit) or not callable(context_type)
                 or type(mastermind_commit) is not str
                 or re.fullmatch(r"[0-9a-f]{40}", mastermind_commit) is None):
             _fail()
+        if operation_runner is not None and not callable(operation_runner):
+            _fail()
+        self._operation_runner = operation_runner
+        self._selection_scopes = None
+        if operation_runner is not None:
+            from .selected_delivery import SelectionScopes
+            self._selection_scopes = SelectionScopes(self._bounded_sync)
         self.service = service
         self.quote_limit = quote_limit
         self.mastermind_commit = mastermind_commit
@@ -89,13 +97,17 @@ class ResearchPortAdapter:
                 or operation not in context.scopes):
             _fail("NOT_ENTITLED")
 
-    async def _call(self, operation, context, *, _authorization_operation=None,
-                    _before_start=None, **kwargs):
-        self._context(context, _authorization_operation or operation)
+    def capture_selection(self):
+        if self._selection_scopes is None:
+            from contextlib import nullcontext
+            return nullcontext(None)
+        return self._selection_scopes.capture()
+
+    async def _bounded_sync(self, function, *, before_start=None):
         await self._slots.acquire()
-        if _before_start is not None:
+        if before_start is not None:
             try:
-                admitted = _before_start() is True
+                admitted = before_start() is True
             except Exception:
                 admitted = False
             if not admitted:
@@ -103,8 +115,7 @@ class ResearchPortAdapter:
                 _fail("NOT_ENTITLED")
         try:
             try:
-                pending = asyncio.create_task(asyncio.to_thread(getattr(self.service, operation),
-                                                               caller_context=context, **kwargs))
+                pending = asyncio.create_task(asyncio.to_thread(function))
             except BaseException:
                 self._slots.release()
                 raise
@@ -116,8 +127,28 @@ class ResearchPortAdapter:
                     done.exception()
             pending.add_done_callback(settled)
             result = await asyncio.shield(pending)
+        except ContractViolation:
+            raise
         except Exception:
             _fail()
+        return result
+
+    async def _call(self, operation, context, *, _authorization_operation=None,
+                    _before_start=None, **kwargs):
+        self._context(context, _authorization_operation or operation)
+        capture = self._selection_scopes.active() if self._selection_scopes is not None else None
+        def produce():
+            def call():
+                try:
+                    return getattr(self.service, operation)(caller_context=context, **kwargs)
+                except Exception:
+                    # Preserve the incumbent exception boundary. Only the explicit
+                    # selection runner may introduce a private guard refusal.
+                    _fail()
+            return self._operation_runner(call) if self._operation_runner is not None else call()
+        result = await self._bounded_sync(produce, before_start=_before_start)
+        if capture is not None:
+            result = capture.retain(result)
         if not isinstance(result, Mapping) or type(result.get("ok")) is not bool:
             _fail()
         if result["ok"] is False:

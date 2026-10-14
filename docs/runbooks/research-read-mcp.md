@@ -40,3 +40,36 @@ Mac qualification on2026-10-13 found the existing CPython3.12.13 MCP1.28.1 envir
 
 
 Canonical auth is selected by Macro#8438 comment6032196487: reuse the existing Executive Auth0 tenant with one dedicated Research API and `mastermind.research.read` scope, pre-register the ChatGPT client, and perform no DCR. The installed Executive policy's issuer/JWKS host is dev-eo0jf8us5mup7wd5.us.auth0.com; its existing Executive audience/scopes/subject grants are not Research authority. Actual Research resource URI/client callback/public ID and current caller/grant binding still require provider/configuration readback. H-04 requires OAuth traversal through the official tunnel's HTTP target and stops any public-edge fallback. The original Codex#633 V1 registration remains EFFECT_UNKNOWN and is not retried or reused. The browser citation path needs the existing PKCE owner to add the Research audience and a qualified identity-to-current-grant bridge; Supabase Pro membership or a C4 tunnel workspace does not grant passage access.
+
+## Selected-generation delivery guard
+
+The adapter accepts an optional, explicitly supplied `operation_runner`. The
+ordinary adapter remains unchanged when it is absent. A dedicated qualified
+runtime can return a private `GuardedOperation` containing the operation result,
+its immutable selection identity `(epoch, catalog_version, catalog_sha256,
+qualified_at)`, and a synchronous delivery guard. No selection metadata enters
+the public response. This seam does not qualify the producer or build a reader.
+
+The runtime passes `adapter.capture_selection` into the existing authenticated
+app. Each request captures every contributing call, refuses mixed selections,
+and rechecks the selected source after final awaited JWT verification. The
+source guard shares the adapter's four worker slots and retains cancellation
+custody until its synchronous work settles. Final grant and token-expiry checks
+follow that await. A moved fence, unavailable guard, or withdrawn selection
+refuses the entire response with `SOURCE_UNAVAILABLE`; bodies are withheld.
+This is a final server decision, not a validity guarantee after ASGI transmission.
+
+The runtime owner must bind this seam to Macro's actual `QualifiedReadProvider`,
+convert its `GuardedRead` using the identity returned by that same operation,
+and translate `SelectedReadUnavailable` to the closed `SOURCE_UNAVAILABLE`
+refusal. Never invent identities from configuration or re-read a mutable corpus
+independently. Explicit preparation, actual writer qualification, exact pinned
+source import ownership, bounded image memory, and the F11 95-percent gate remain
+prerequisites. The default launcher is not enabled by this source change.
+
+Local proof uses the actual MCP SDK and authenticated HTTP harness, plus a separate
+synthetic cross-repository run with Macro's real read service and SQLite image.
+It covers successful selected search, catalog movement during JWT verification,
+and writer-policy withdrawal. It proves neither live R2 selection nor C4 client
+acceptance; production installation and the original full-document/citation
+owners remain separate obligations.
