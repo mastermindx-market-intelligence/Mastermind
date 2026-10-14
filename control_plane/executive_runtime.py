@@ -1120,7 +1120,37 @@ def _capacity_model_alias(row: sqlite3.Row) -> str:
     return str(metadata.get("model_alias") or "").strip().lower()
 
 
-def _capacity_matches_route(row: sqlite3.Row, constraints: dict[str, Any]) -> bool:
+def _host_route_snapshot(store: "RuntimeStore", constraints: dict[str, Any]) -> Any:
+    """One host-selected existing policy object for a complete candidate scan."""
+    if not constraints.get("preferred_model_aliases") or "attended_route" in constraints:
+        return None
+    from control_plane.model_router import ModelRouter
+    return ModelRouter.load(store.routing_policy_path)
+
+
+def _host_route_unchanged(store: "RuntimeStore", original: Any) -> bool:
+    """Revalidate the relevant owner policy before any atomic claim mutation."""
+    if original is None:
+        return True
+    from control_plane.model_router import ModelRouter
+    try:
+        current = ModelRouter.load(store.routing_policy_path)
+        return (
+            current.source_path == original.source_path
+            and current.policy_version == original.policy_version
+            and current.model_aliases == original.model_aliases
+            and current.providers == original.providers
+            and current.routes == original.routes
+            and current.capability_registry.policy_digest
+            == original.capability_registry.policy_digest
+        )
+    except (OSError, ValueError):
+        return False
+
+
+def _capacity_matches_route(
+    row: sqlite3.Row, constraints: dict[str, Any], *, router: Any = None
+) -> bool:
     if str(row["worker_id"]) in set(constraints.get("excluded_worker_ids") or []):
         return False
     aliases = constraints.get("preferred_model_aliases") or []
@@ -1128,18 +1158,105 @@ def _capacity_matches_route(row: sqlite3.Row, constraints: dict[str, Any]) -> bo
     if not aliases and not profile_id:
         return True
     metadata = _capacity_route_metadata(row)
-    if "attended_route" in constraints and metadata.get("attended_route") != constraints["attended_route"]:
-        return False
+    if "attended_route" in constraints:
+        # Existing attended lane is NOT autonomous routing. Its separate
+        # closed catalogue and host placement owner must remain authoritative.
+        from control_plane.fabric_attended_routing import normalize_attended_route
+        try:
+            route = normalize_attended_route(constraints["attended_route"])
+            if (metadata.get("attended_route") != route
+                    or aliases != [route["model_alias"]]
+                    or constraints.get("routing_policy_version") != route["routing_policy_version"]
+                    or constraints.get("execution_profile_id") != route["execution_profile_id"]):
+                return False
+            for key in ("execution_profile_digest", "capability_policy_version",
+                        "capability_policy_digest"):
+                if str(constraints.get(key) or "").lower() != str(route[key]).lower():
+                    return False
+            # sqlite3.Row membership tests VALUES, not column NAMES.
+            # Every physical field must be present for a real broker candidate
+            # and must agree with its separately reviewed catalogue.
+            physical_columns = (
+                ("provider", "provider_alias"), ("worker_provider", "provider_alias"),
+                ("worker_type", "adapter_id"), ("model", "model"),
+                ("effort", "effort"), ("cost_class", "cost_class"),
+            )
+            present = set(row.keys())
+            if any(key not in present for key, _ in physical_columns):
+                return False
+            if any(
+                str(row[key] or "").strip().lower() != str(route[route_key]).strip().lower()
+                for key, route_key in physical_columns
+            ):
+                return False
+            # Retain full outer metadata agreement: catalogue closure does not
+            # authorize an unrelated routing version, profile, or alias.
+            for key in (
+                "model_alias", "routing_policy_version",
+                "execution_profile_id", "execution_profile_digest",
+                "capability_policy_version", "capability_policy_digest",
+            ):
+                if str(metadata.get(key) or "").strip().lower() != str(route[key]).strip().lower():
+                    return False
+            for key, expected in (
+                ("provider_alias", route["provider_alias"]),
+                ("adapter_id", route["adapter_id"]),
+            ):
+                if key in metadata and str(metadata[key]).strip().lower() != str(expected).strip().lower():
+                    return False
+        except (ValueError, TypeError, KeyError, IndexError):
+            return False
+        return True
     if aliases:
-        worker_policy_version = (
-            str(metadata.get("routing_policy_version") or "").strip().lower()
-        )
-        route_matches = _capacity_model_alias(
-            row
-        ) in aliases and worker_policy_version == constraints.get(
-            "routing_policy_version"
-        )
-        if not route_matches:
+        # Assert physical provider/model/worker-type vs one pinned ModelRouter
+        # policy; a quota's copied metadata never authorizes another realm.
+        from control_plane.model_router import ModelRouter, RoutingPolicyError
+        try:
+            active = router if router is not None else ModelRouter.load()
+            selected = _capacity_model_alias(row)
+            if selected not in aliases or active.policy_version != constraints.get(
+                "routing_policy_version"
+            ):
+                return False
+            profile = active.resolve_model_alias(selected)
+            for key, expected in (
+                ("provider", profile.provider_alias),
+                ("worker_provider", profile.provider_alias),
+                ("worker_type", profile.adapter_id),
+                ("model", profile.model),
+                ("effort", profile.effort),
+                ("cost_class", profile.cost_class),
+            ):
+                if str(row[key] or "").strip().lower() != str(expected).strip().lower():
+                    return False
+            # Historical reviewed external_pool_binding producer stores these
+            # identities physically; redundant metadata fields are optional,
+            # but if present they must agree with the physical catalog.
+            for key, expected in (
+                ("provider_alias", profile.provider_alias),
+                ("adapter_id", profile.adapter_id),
+            ):
+                if key in metadata and str(metadata[key]).lower() != str(expected).lower():
+                    return False
+            for key, expected in (
+                ("model_alias", profile.model_alias),
+                ("routing_policy_version", active.policy_version),
+                ("execution_profile_id", profile.execution_profile_id),
+                ("execution_profile_digest", profile.execution_profile_digest),
+                ("capability_policy_version", profile.capability_policy_version),
+                ("capability_policy_digest", profile.capability_policy_digest),
+            ):
+                if str(metadata.get(key) or "").strip().lower() != str(expected).strip().lower():
+                    return False
+            for key in (
+                "execution_profile_id", "execution_profile_digest",
+                "capability_policy_version", "capability_policy_digest",
+            ):
+                if str(constraints.get(key) or "").strip().lower() != str(
+                    getattr(profile, key)
+                ).strip().lower():
+                    return False
+        except (RoutingPolicyError, OSError, ValueError, KeyError, IndexError, TypeError):
             return False
     if not profile_id:
         return True
@@ -3709,7 +3826,13 @@ class RuntimeStore:
         existing_writable: bool = False,
         database_path: str | Path | None = None,
         read_binding: RuntimeReadBinding | None = None,
+        routing_policy_path: str | Path | None = None,
     ) -> None:
+        # This is host construction state, never a Job or worker-provided path.
+        self.routing_policy_path = (
+            Path(routing_policy_path).expanduser().resolve(strict=True)
+            if routing_policy_path is not None else None
+        )
         self.read_binding = read_binding
         self._bound_connections: set[_BoundReadConnection] = set()
         # Exact handles currently owned by ``transaction()`` after
@@ -16329,9 +16452,10 @@ class AttemptRegistry:
             constraints = _normalise_constraints(
                 _json_loads(job_row["constraints_json"], fallback={})
             )
+            pinned_router = _host_route_snapshot(self.store, constraints)
             candidate_rows = connection.execute("""
                 SELECT q.*,w.provider AS worker_provider,w.account_label,
-                       w.identity_status
+                       w.worker_type AS worker_type,w.identity_status
                 FROM worker_quota_classes q JOIN workers w ON w.worker_id=q.worker_id
                 WHERE q.status='AVAILABLE' AND q.held_attempt_id IS NULL
                 ORDER BY q.worker_id,q.quota_class
@@ -16353,7 +16477,7 @@ class AttemptRegistry:
                     continue
                 if selected_quota and row["quota_class"] != selected_quota:
                     continue
-                if not _capacity_matches_route(row, constraints):
+                if not _capacity_matches_route(row, constraints, router=pinned_router):
                     continue
                 if row["quota_class"] not in eligible_classes:
                     continue
@@ -16388,6 +16512,8 @@ class AttemptRegistry:
             if not candidates:
                 return None
             candidates.sort(key=lambda row: _capacity_route_rank(row, constraints))
+            if not _host_route_unchanged(self.store, pinned_router):
+                return None
             capacity = candidates[0]
             effective_grant: dict[str, Any] | None = None
             effective_grant_digest: str | None = None
@@ -22596,9 +22722,11 @@ class ResourceBroker:
         required_cost_class = str(job.constraints.get("cost_class") or "")
         required_capabilities = set(job.constraints.get("required_capabilities") or [])
         eligible = set(job.constraints["eligible_quota_classes"])
+        pinned_router = _host_route_snapshot(self.store, job.constraints)
         with self.store.read() as connection:
             rows = connection.execute("""
-                SELECT q.*,a.job_id AS active_job_id,w.provider AS worker_provider,w.identity_status
+                SELECT q.*,a.job_id AS active_job_id,w.provider AS worker_provider,
+                       w.worker_type AS worker_type,w.identity_status
                 FROM worker_quota_classes q
                 JOIN workers w ON w.worker_id=q.worker_id
                 LEFT JOIN attempts a ON a.attempt_id=q.held_attempt_id
@@ -22609,7 +22737,7 @@ class ResourceBroker:
         for row in rows:
             if worker_id and row["worker_id"] != worker_id:
                 continue
-            if not _capacity_matches_route(row, job.constraints):
+            if not _capacity_matches_route(row, job.constraints, router=pinned_router):
                 continue
             if row["quota_class"] not in eligible:
                 continue
@@ -22629,6 +22757,8 @@ class ResourceBroker:
         if not candidates:
             return None
         candidates.sort(key=lambda row: _capacity_route_rank(row, job.constraints))
+        if not _host_route_unchanged(self.store, pinned_router):
+            return None
         return _quota_from_row(candidates[0])
 
     def select_worker(self, job: Job | str) -> Worker | None:
@@ -24774,6 +24904,7 @@ class Runtime:
         create: bool = True,
         existing_writable: bool = False,
         read_binding: RuntimeReadBinding | None = None,
+        routing_policy_path: str | Path | None = None,
     ) -> "Runtime":
         return cls.from_store(
             RuntimeStore(
@@ -24784,6 +24915,7 @@ class Runtime:
                 create=create,
                 existing_writable=existing_writable,
                 read_binding=read_binding,
+                routing_policy_path=routing_policy_path,
             )
         )
 
