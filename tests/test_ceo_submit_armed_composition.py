@@ -765,7 +765,14 @@ def _is_mkdir_mode_literal(line: str, token_text: str) -> bool:
 
     Do not exempt a whole line containing arbitrary identity arguments, additional
     statements or another numeric argument that merely shares the same spelling.
-    The caller still rejects every line with an explicit identity-bearing name.
+    The caller still rejects every line with an explicit identity-bearing name,
+    and any alias-tainted binding named on the line keeps every non-exempt token
+    guarded above. Both admitted shapes are one closed expression: the
+    keyword-only directory-mode form, and the low-level
+    ``name/mode/dir_fd`` form whose single positional operand is a plain path
+    expression and whose dir_fd is a plain binding name. The admitted shape can
+    contain at most one numeric token, so no second identity-range literal can
+    ride along under this exemption.
     """
     source = line.strip()
     try:
@@ -775,8 +782,15 @@ def _is_mkdir_mode_literal(line: str, token_text: str) -> bool:
     if len(tree.body) != 1 or not isinstance(tree.body[0], ast.Expr):
         return False
     call = tree.body[0].value
-    if (not isinstance(call, ast.Call) or call.args
+    if (not isinstance(call, ast.Call) or len(call.args) > 1
             or not isinstance(call.func, ast.Attribute) or call.func.attr != "mkdir"):
+        return False
+    # The low-level os.mkdir(name, mode=..., dir_fd=...) form takes exactly one
+    # plain path operand (names and attribute chains); anything callable,
+    # subscripted or spread stays guarded.
+    if call.args and not all(
+            isinstance(node, (ast.Name, ast.Attribute, ast.expr_context))
+            for node in ast.walk(call.args[0])):
         return False
     modes = 0
     for keyword in call.keywords:
@@ -786,6 +800,9 @@ def _is_mkdir_mode_literal(line: str, token_text: str) -> bool:
                     or ast.get_source_segment(source, keyword.value) != token_text):
                 return False
             modes += 1
+        elif keyword.arg == "dir_fd":
+            if not isinstance(keyword.value, ast.Name):
+                return False
         elif (keyword.arg not in {"parents", "exist_ok"}
               or not isinstance(keyword.value, ast.Constant)
               or type(keyword.value.value) is not bool):
@@ -2078,6 +2095,96 @@ def test_d8_shell_mode_exemption_is_one_closed_operand(line, allowed):
         ("integrations/owner/base.sh", line),
     ]))
     assert (findings == []) is allowed
+
+
+def _d8_lowlevel_mkdir_chain_source(mkdir_line: str) -> str:
+    """Freeze the f904 custody-chain context that puts the mkdir line in
+    identity context.
+
+    Frozen from the f904 production postimage of
+    ops/executive_os/provider_recovery.py: the identity-bearing
+    ``identities.append(...)`` call taints the bound ``descriptor``, the fixpoint
+    then propagates that alias through
+    ``descriptor = reopen(..., dir_fd=parent_descriptor)``, so the mkdir line
+    below carries the tainted ``parent_descriptor`` exactly as the real
+    production diff does.
+    """
+    return "\n".join([
+        "import os",
+        "def _recovery_directory_chain(create_missing):",
+        "    records: list[tuple[str, int, bool]] = []",
+        "    identities: list[tuple[int, ...]] = []",
+        "    descriptor = prepare()",
+        "    records.append((\"state\", descriptor, False))",
+        "    identities.append(observe(descriptor))",
+        "    revalidate()",
+        "    parent_descriptor = records[-1][1]",
+        "    descriptor = reopen(descriptor, dir_fd=parent_descriptor)",
+        "    " + mkdir_line,
+    ])
+
+
+def test_d8_lowlevel_mkdir_mode_slot_with_dir_fd_is_not_identity():
+    """RED before the repair: the f904 os.mkdir mode slot was misclassified.
+
+    Frozen from the actual f904 production statement
+    ``os.mkdir(path.name, mode=0o700, dir_fd=parent_descriptor)`` in
+    ops/executive_os/provider_recovery.py. Alias taint from the surrounding
+    custody chain puts the line in identity context; its ``mode=`` slot is a
+    directory permission mode, not an identity literal.
+    """
+    chain = _d8_frozen_source_diff(
+        "ops/executive_os/provider_recovery.py",
+        _d8_lowlevel_mkdir_chain_source(
+            "os.mkdir(path.name, mode=0o700, dir_fd=parent_descriptor)",
+        ),
+    )
+    assert _scan_added_identity_diff(chain) == []
+    # Outside an alias chain the same closed statement was already admitted.
+    plain = _d8_frozen_source_diff(
+        "ops/executive_os/provider_recovery.py",
+        "os.mkdir(path.name, mode=0o700, dir_fd=parent_descriptor)\n",
+    )
+    assert _scan_added_identity_diff(plain) == []
+    # The keyword-only directory-mode form keeps its existing exemption.
+    keyword_only = _d8_frozen_source_diff(
+        "ops/executive_os/provider_recovery.py",
+        _d8_lowlevel_mkdir_chain_source(
+            "target.mkdir(mode=0o700, parents=True, exist_ok=True)",
+        ),
+    )
+    assert _scan_added_identity_diff(keyword_only) == []
+
+
+@pytest.mark.parametrize("line,expected", [
+    # A positional wrong-slot literal is not the keyword mode slot.
+    ("os.mkdir(path.name, 0o700, dir_fd=parent_descriptor)", ["0o700"]),
+    # A different callee is not the reviewed mkdir statement.
+    ("os.makedirs(path.name, mode=0o700, dir_fd=parent_descriptor)", ["0o700"]),
+    # dir_fd must be a plain binding name, not an arbitrary expression.
+    ("os.mkdir(descriptor, mode=0o700, dir_fd=slots[-1])", ["0o700"]),
+    # The path operand must be plain; callable operands stay guarded.
+    ("os.mkdir(entry.resolve(), mode=0o700, dir_fd=parent_descriptor)", ["0o700"]),
+    # Unreviewed keywords keep the whole statement guarded.
+    ("os.mkdir(path.name, mode=0o700, dir_fd=parent_descriptor, follow_symlinks=False)",
+     ["0o700"]),
+    # Additional statements are never exempted together with the mode slot.
+    ("os.mkdir(path.name, mode=0o700, dir_fd=parent_descriptor); worker_uid = 501",
+     ["0o700", "501"]),
+    # Identity-bearing argument names stay flagged.
+    ("os.mkdir(peer.name, mode=0o700, dir_fd=parent_descriptor)", ["0o700"]),
+    ("os.mkdir(path.name, mode=0o700, dir_fd=worker_uid)", ["0o700"]),
+    # Reserved account literals stay flagged at their token boundary.
+    ('os.mkdir("_mastermind_worker", mode=0o700, dir_fd=parent_descriptor)',
+     ["_mastermind_worker", "0o700"]),
+])
+def test_d8_lowlevel_mkdir_near_misses_stay_guarded(line, expected):
+    """Boundary pins: each near miss stays red under the repaired exemption."""
+    chain = _d8_frozen_source_diff(
+        "ops/executive_os/provider_recovery.py",
+        _d8_lowlevel_mkdir_chain_source(line),
+    )
+    assert _scan_added_identity_diff(chain) == expected
 
 def test_d8_template_topology_and_protected_defaults():
     value = json.loads(TEMPLATE.read_text(encoding="utf-8"))

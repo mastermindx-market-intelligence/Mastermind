@@ -1762,6 +1762,14 @@ PY
 /usr/bin/install -d -o root -g wheel -m 0700 "$RUNTIME_ROOT/privileged-actions"
 /usr/bin/install -d -o root -g wheel -m 0700 "$PRIVILEGED_RECEIPT_ROOT"
 /usr/bin/install -d -o root -g wheel -m 0700 /var/log/mastermind-executive/privileged
+# Prepare only missing fixed custody directories while services remain stopped.
+# Unsafe existing entries refuse; existing grants/markers are never normalized.
+"$PYTHON_BINARY" -I -S -B - "$RELEASE_ROOT" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+from ops.executive_os.provider_recovery import prepare_recovery_custody
+prepare_recovery_custody()
+PY
 "$PYTHON_BINARY" -I -S -B - "$PRIVILEGED_CONFIG" "$RELEASE_ROOT"   "$PRIVILEGED_RECEIPT_ROOT" "$CONTROL_UID" "$OPERATOR_UID" <<'PY'
 import json, os, pathlib, sys
 path, release_root, receipt_root, control_uid, operator_uid = sys.argv[1:]
