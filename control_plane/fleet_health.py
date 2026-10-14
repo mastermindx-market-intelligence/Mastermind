@@ -19,7 +19,10 @@ from common.fleet_health_contract import (FLEET_SCHEMA as SCHEMA, FLEET_WINDOWS 
 
 MAX_HOSTS = 32
 MAX_POINTS = 360
-MAX_HISTORY_BYTES = 8 * 1024 * 1024
+MAX_HISTORY_BYTES = 32 * 1024 * 1024  # overall bounded 30-day source ceiling
+# Keep short views inexpensive at the incumbent observer's ~0.6 MiB/day.
+_WINDOW_HISTORY_BYTES = {"1h": 1 * 1024 * 1024, "24h": 2 * 1024 * 1024,
+                         "7d": 8 * 1024 * 1024, "30d": MAX_HISTORY_BYTES}
 GIB = 1024 ** 3
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}\Z")
 _LOG = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?Z) \[pull\] host=([A-Za-z0-9_.:-]+) rc=(-?\d+) secs=\d+ (.*)$")
@@ -266,13 +269,16 @@ def _downsample(series):
     if len(series) <= MAX_POINTS:
         selected = range(len(series))
     else:
-        # First/last and every metric's minimum/maximum per bucket preserve
-        # peaks without inventing a vector of simultaneous bucket maxima.
-        size = math.ceil(len(series) / (MAX_POINTS // 12))
+        # Retain four temporal segments per bucket as well as genuine
+        # per-metric extremes. Five time anchors + at most ten extrema keep
+        # the global 360-point ceiling without flattening long steady trends.
+        size = math.ceil(len(series) / (MAX_POINTS // 15))
         selected = set()
         for start in range(0, len(series), size):
             end = min(len(series), start + size)
-            selected.update((start, end - 1))
+            span = end - start - 1
+            selected.update(start + round(span * fraction)
+                            for fraction in (0, 0.25, 0.5, 0.75, 1))
             for key in HISTORY_METRICS:
                 indices = [i for i in range(start, end) if series[i][key] is not None]
                 if indices:
@@ -401,7 +407,7 @@ def read_fleet_health(fabric_root: Path, *, window="24h", now=None):
             except (OSError, ValueError, UnicodeError):
                 snapshots[host] = None
         try:
-            log_text, truncated = _read_at(state, "host_pull.log", MAX_HISTORY_BYTES, tail=True)
+            log_text, truncated = _read_at(state, "host_pull.log", _WINDOW_HISTORY_BYTES[window], tail=True)
         except (OSError, ValueError, UnicodeError):
             log_text, truncated = "", False
         current_registry, _ = _read_at(root, "hosts.json", 256 * 1024)
