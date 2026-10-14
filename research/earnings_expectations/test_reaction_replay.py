@@ -304,6 +304,7 @@ def test_sourced_case_window_bad_witness_does_not_fallback_to_sec():
         replay(packet)
     assert exc.value.reason == "NON_SEC_PUBLIC_RELEASE_WITNESS_REQUIRED"
 
+
 def test_april_three_publishers_share_one_market_session():
     import json
     from pathlib import Path
