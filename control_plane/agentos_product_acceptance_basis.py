@@ -23,6 +23,7 @@ from common.commission_ref import (
     normalize_commission_ref,
 )
 from control_plane.ceo_boot_packet import bounded_subprocess_runner, git_sha
+from control_plane.session_truth_contract import valid_source_records_digest
 
 _SOURCE_ROOT = Path(__file__).resolve().parents[1]
 _WORK_REF = re.compile(r"\AWS:[A-Z0-9][A-Z0-9-]{1,63}\Z")
@@ -123,8 +124,7 @@ def reconcile_unchanged_acceptance_basis(
             or entry.get("reference_observation")
             != "DECLARED_REFERENCES_NOT_RETRIEVED_OR_AUTHENTICATED_HERE"
             or entry.get("snapshot_consistency") != "EXISTING_NON_ATOMIC_RECORD_READ"
-            or type(read.source_records_digest) is not str
-            or _DIGEST.fullmatch(read.source_records_digest) is None
+            or not valid_source_records_digest(read.source_records_digest)
         ):
             raise ProductAcceptanceBasisUnavailable(
                 "SOURCE_REVISION_RECONCILIATION_REQUIRED"
@@ -299,8 +299,7 @@ class AgentOsProductAcceptanceBasisReader:
             or bundle.get("repo_sha") != expected_sha
             or type(bundle.get("target")) is not dict
             or bundle["target"].get("workstream") != work_ref
-            or type(bundle.get("source_records_digest")) is not str
-            or _DIGEST.fullmatch(bundle["source_records_digest"]) is None
+            or not valid_source_records_digest(bundle.get("source_records_digest"))
         ):
             raise ProductAcceptanceBasisUnavailable("CONTEXT_OWNER_UNAVAILABLE")
         basis = bundle.get("acceptance_basis")

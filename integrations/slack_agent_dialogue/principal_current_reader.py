@@ -13,9 +13,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from control_plane.dialogue_source_resolution import PhysicalDialogueSourceIdentity
+from control_plane.dialogue_source_resolution import (
+    PhysicalDialogueSourceIdentity, parse_source_candidate,
+)
 from control_plane.coo_principal_mandate import NewEffectGate
-from control_plane.executive_dialogue_observation import ACTIVE_CURRENT_WORKER
+from control_plane.executive_dialogue_observation import ACTIVE_CURRENT_WORKER, DialogueCandidateReference
 from integrations.mastermind_company_mcp.adapter import DialogueBinding
 from integrations.slack_agent_dialogue.company_dialogue_runtime_binding import (
     CooPrincipalDialogueCaller,
@@ -97,7 +99,9 @@ async def read_current_principal_source(
                 or observed.current_worker is None
                 or observed.dialogue_parent != parent
                 or observed.thread_ts != source.thread_ts
-                or observed.candidate != physical_source.candidate):
+                or type(observed.candidate) is not DialogueCandidateReference
+                or observed.candidate.mode != observed.mode
+                or parse_source_candidate(observed.candidate.to_dict()) != physical_source.candidate):
             raise PrincipalCurrentSourceUnavailable()
         current = observed.current_worker
         predecessor = validate_message_v2(_wire(source.predecessor.message))

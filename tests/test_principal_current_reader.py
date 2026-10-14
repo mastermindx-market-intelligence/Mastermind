@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from control_plane.executive_dialogue_observation import ACTIVE_CURRENT_WORKER
+from control_plane.executive_dialogue_observation import ACTIVE_CURRENT_WORKER, DialogueCandidateReference
 from integrations.slack_agent_dialogue.company_dialogue_runtime_binding import (
     require_company_dialogue_principal_binding,
 )
@@ -47,7 +47,8 @@ def prepared(monkeypatch):
         actor_ref=dict(resolved.actor_ref), applies_to=dict(resolved.applies_to))
     observed = ResolvedDialogueObservation(state="RESOLVED", mode=ACTIVE_CURRENT_WORKER,
         dialogue_parent=parent, thread_ts=relay.THREAD,
-        delegation_identity=binding.identity(), candidate=physical.candidate,
+        delegation_identity=binding.identity(),
+        candidate=DialogueCandidateReference(**physical.candidate.to_dict()),
         target_bindings={}, current_worker=current, actor=None)
     return caller, context, physical, observed
 
@@ -103,6 +104,7 @@ def test_exact_source_joins_current_child_and_preserves_original_predecessor(tmp
     lambda o: dataclasses.replace(o, dialogue_parent={**o.dialogue_parent, "work_ref": "WS:FOREIGN"}),
     lambda o: dataclasses.replace(o, candidate=dataclasses.replace(o.candidate, evidence_digest="c" * 64)),
     lambda o: dataclasses.replace(o, candidate=dataclasses.replace(o.candidate, attempt_id="ATT-" + "3" * 32)),
+    lambda o: dataclasses.replace(o, candidate=relay._physical().candidate),
     lambda o: dataclasses.replace(o, current_worker=dataclasses.replace(o.current_worker, attempt_id="ATT-" + "3" * 32)),
     lambda o: dataclasses.replace(o, current_worker=dataclasses.replace(o.current_worker, worker_id="foreign-worker")),
     lambda o: dataclasses.replace(o, current_worker=dataclasses.replace(o.current_worker, root_job_id="JOB-999")),

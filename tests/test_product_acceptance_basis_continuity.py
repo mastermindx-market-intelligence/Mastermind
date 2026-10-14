@@ -58,7 +58,7 @@ def acquired_basis():
         "snapshot_consistency": "EXISTING_NON_ATOMIC_RECORD_READ",
     }
     entry["acceptance_basis_digest"] = owner._canonical_digest(entry)
-    return owner.ProductAcceptanceBasisRead("a" * 40, "e" * 64, entry)
+    return owner.ProductAcceptanceBasisRead("a" * 40, "sha256:" + "e" * 64, entry)
 
 
 def restamp(entry):
@@ -79,7 +79,7 @@ def test_unrelated_head_and_workstream_progress_preserve_issued_proof_identity()
     entry["source_record_ref"] = source
     entry["current_intent_ref"] = dict(source)
     restamp(entry)
-    current = owner.ProductAcceptanceBasisRead("f" * 40, "2" * 64, entry)
+    current = owner.ProductAcceptanceBasisRead("f" * 40, "sha256:" + "2" * 64, entry)
     observed = owner.reconcile_unchanged_acceptance_basis(issued, current)
     assert observed.disposition == "SOURCE_OBSERVATION_CHANGED_DECLARATION_UNCHANGED"
     assert observed.issued_basis_digest == before["acceptance_basis_digest"]
