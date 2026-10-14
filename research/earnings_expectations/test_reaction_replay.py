@@ -272,11 +272,14 @@ def test_corrob_window_friday_to_monday():
 
 
 @pytest.mark.parametrize("stem,first,last,ex_spy,ex_sector", [
+    ("googl_2026q1", 349.51, 384.32, 0.089639, 0.088952),
+    ("msft_fy2026q3", 422.75, 406.13, -0.049272, -0.041708),
+    ("amzn_2026q1", 263.04, 265.06, -0.002278, -0.005299),
     ("googl_2026q2", 341.87, 317.49, -0.058961, -0.036308),
     ("msft_fy2026q4", 389.81, 450.25, 0.138284, 0.100055),
     ("amzn_2026q2", 235.50, 271.58, 0.146002, 0.120301),
 ])
-def test_retrospective_sourced_july_public_windows(stem, first, last, ex_spy, ex_sector):
+def test_retrospective_sourced_april_and_july_public_windows(stem, first, last, ex_spy, ex_sector):
     import json
     from pathlib import Path
     packet = json.loads((Path(__file__).parent / "sourced_event_packets" / (stem + ".json")).read_text())
@@ -300,3 +303,37 @@ def test_sourced_case_window_bad_witness_does_not_fallback_to_sec():
     with pytest.raises(ReplayError) as exc:
         replay(packet)
     assert exc.value.reason == "NON_SEC_PUBLIC_RELEASE_WITNESS_REQUIRED"
+
+def test_april_three_publishers_share_one_market_session():
+    import json
+    from pathlib import Path
+    root=Path(__file__).parent / "sourced_event_packets"
+    names=("googl_2026q1", "msft_fy2026q3", "amzn_2026q1")
+    packets=[json.loads((root/(n+".json")).read_text()) for n in names]
+    assert {p["event"]["after_close_session"] for p in packets}=={"2026-04-29"}
+    assert len({p["event"]["event_ref"] for p in packets})==3
+    assert packets[0]["price_series"]["market"]["bars"]==packets[1]["price_series"]["market"]["bars"]==packets[2]["price_series"]["market"]["bars"]
+    assert {p["price_series"]["sector"]["ticker"] for p in packets}=={"XLC", "XLK", "XLY"}
+    results=[replay(p) for p in packets]
+    assert all(r["reaction"]["status"]=="AVAILABLE" for r in results)
+    assert results[0]["reaction"]["returns"]["issuer"]>0
+    assert results[1]["reaction"]["returns"]["issuer"]<0
+    assert results[2]["reaction"]["returns"]["issuer"]>0
+
+
+def test_april_vs_july_differs_without_any_predictive_or_causal_claim():
+    import json
+    from pathlib import Path
+    root=Path(__file__).parent / "sourced_event_packets"
+    pairs=(("googl_2026q1","googl_2026q2"), ("msft_fy2026q3","msft_fy2026q4"), ("amzn_2026q1","amzn_2026q2"))
+    moves=[]
+    for first, second in pairs:
+        ra=replay(json.loads((root/(first+".json")).read_text()))
+        rb=replay(json.loads((root/(second+".json")).read_text()))
+        assert ra["issuer_ref"] == rb["issuer_ref"]
+        assert ra["clock_quality"] == rb["clock_quality"]
+        moves.append((ra["reaction"]["returns"]["issuer"], rb["reaction"]["returns"]["issuer"]))
+        assert ra["authority"] == rb["authority"] == "RESEARCH_ONLY_NO_TRADING"
+    assert moves[0][0] > 0 and moves[0][1] < 0
+    assert moves[1][0] < 0 and moves[1][1] > 0
+    assert moves[2][1] > moves[2][0]
