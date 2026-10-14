@@ -605,16 +605,23 @@ def test_operation_key_mismatch_refuses_before_contacting_any_socket(
     tmp_path: Path,
 ) -> None:
     socket_path = tmp_path / "relay" / "unused.sock"
+    operations = []
+
+    async def forbidden_service_call(_path, request):
+        operations.append(request["operation"])
+        raise AssertionError("foreign operation must refuse before source I/O")
+
     with pytest.raises(PrincipalSourceError) as caught:
         asyncio.run(
             read_principal_source(
                 socket_path=socket_path,
                 context=_context(),
                 physical_source=_physical(operation_key="runtime-continuity-r3"),
+                service_call=forbidden_service_call,
             )
         )
     assert caught.value.code == PRINCIPAL_SOURCE_ERROR_CODE
-    assert not socket_path.exists()
+    assert operations == []
 
 
 @pytest.mark.parametrize(
@@ -739,3 +746,21 @@ def test_module_is_read_only_single_attempt_and_statically_inert() -> None:
             "bind_or_verify_relay_parent_thread",
         }
     )
+
+
+@pytest.mark.parametrize('mutation', ['edited', 'deleted'])
+@pytest.mark.parametrize('message_ts', [PREDECESSOR_TS, LATER_TS])
+def test_mutated_created_history_refuses_before_principal_composition(
+    tmp_path, monkeypatch, mutation, message_ts,
+):
+    original_seed = _seed
+
+    def seed_with_mutation(client, **options):
+        original_seed(client, **options)
+        client.mutate_reply(thread_ts=THREAD, message_ts=message_ts,
+                            **{mutation: True})
+
+    monkeypatch.setattr(__import__(__name__, fromlist=['_seed']), '_seed', seed_with_mutation)
+    client, outcome = _attempt(tmp_path)
+    _assert_refused(outcome)
+    assert client.post_call_count == client.parent_post_call_count == 0

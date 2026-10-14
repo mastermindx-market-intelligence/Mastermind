@@ -110,7 +110,10 @@ def _decode_thread(
         or type(result["ineligible_count"]) is not int
         or result["ineligible_count"] < 0
         or type(result["mutated_count"]) is not int
-        or result["mutated_count"] < 0
+        # Created-text reconstruction is useful for reconciliation, but is not
+        # an unchanged source for a new principal disposition. Match the
+        # existing reply owners: any mutation evidence closes this read.
+        or result["mutated_count"] != 0
         or not isinstance(result["messages"], list)
         or len(result["messages"]) > _MAX_THREAD_ENTRIES
     ):

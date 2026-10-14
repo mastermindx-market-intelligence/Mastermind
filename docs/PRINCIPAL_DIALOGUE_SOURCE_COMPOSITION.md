@@ -23,7 +23,9 @@ CEO-targeted worker-return obligation into a COO principal route.
 `read_principal_source` performs one `status`, `read_bound_parent` and
 `read_thread` operation on the same existing Relay socket. It checks the actual
 workspace/channel, Relay parent attestation, parent identity and exact original
-message key/fingerprint. It never chooses the latest message. Its frozen result
+message key/fingerprint. It refuses thread mutation evidence, including an edit
+or deletion whose original created text the Relay can reconstruct. It never
+chooses the latest message. Its frozen result
 is a detached observation; it asserts neither caller authority nor an unresolved
 decision nor a current worker attempt.
 
