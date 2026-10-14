@@ -208,6 +208,7 @@ def recent_broker_faults(
 
     Inspect only the two newest listener logs and 64 KiB of each. Report
     recent broker-poll failures even when GitHub still calls a runner online.
+    Repeated ResponseEnded events count as degradation but never grant restart.
     """
     now = now or datetime.now(timezone.utc)
     found: list[str] = []
@@ -223,6 +224,7 @@ def recent_broker_faults(
             continue
         timeouts = 0
         shutdowns = 0
+        response_ended = 0
         for path in paths:
             try:
                 with path.open("rb") as stream:
@@ -246,8 +248,21 @@ def recent_broker_faults(
                     timeouts += 1
                 if "JobDispatcher] Shutting down JobDispatcher" in line:
                     shutdowns += 1
-        if timeouts or shutdowns:
-            found.append(f"{spec.name}:poll_timeouts={timeouts},self_shutdowns={shutdowns}")
+                # GitHub broker may close long-poll HTTP responses prematurely
+                # without producing a 100s/600s timeout. Two independent
+                # BrokerServer event lines in the bounded 20-minute window are
+                # meaningful degradation; one transient reconnect is not.
+                # This is OBSERVATION only, never a runner restart condition.
+                if (
+                    "BrokerServer] System.Net.Http.HttpIOException:" in line
+                    and "(ResponseEnded)" in line
+                ):
+                    response_ended += 1
+        if timeouts or shutdowns or response_ended >= 2:
+            details = f"{spec.name}:poll_timeouts={timeouts},self_shutdowns={shutdowns}"
+            if response_ended >= 2:
+                details += f",broker_response_ended={response_ended}"
+            found.append(details)
     return found, sorted(set(unknown))
 
 
