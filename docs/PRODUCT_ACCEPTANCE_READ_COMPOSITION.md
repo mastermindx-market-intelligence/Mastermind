@@ -13,6 +13,13 @@ Control requires the same App peer and Workspace provider; the new read does not
 arm submission or acquire a principal COMMIT owner. The same owned-task helper
 drains a cancelled physical read before propagating cancellation.
 
+Only the new v4 exchange defaults to the existing 30-second client ceiling:
+its canonical receipt reader can spend up to 15 seconds in the sealed Context
+observation, plus bounded Runtime proof reads. Older operations retain their
+10-second default. Each operation still honors an explicitly shorter client
+deadline. This does not extend or renew any Context, Git, collector or admission
+deadline and does not establish physical latency on the installed host.
+
 The read service joins the selected workstream/root to the existing qualified
 Control Room cache before any acceptance read. Its namespace-bound readonly
 Runtime is the existing service owner's facade. The installed constructor passes
