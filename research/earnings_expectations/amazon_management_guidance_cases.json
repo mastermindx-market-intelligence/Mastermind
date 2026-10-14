@@ -5,6 +5,8 @@
   "metric": "CONSOLIDATED_NET_SALES",
   "unit": "USD_BILLION",
   "basis": "AS_REPORTED_INCLUDES_FOREIGN_EXCHANGE",
+  "forecast_channel": "COMPANY_MANAGEMENT_GUIDANCE_NOT_ANALYST_CONSENSUS",
+  "analyst_consensus_status": "NOT_ADMITTED",
   "knowledge_warning": "Earlier management range was public a prior quarter; exact first-public timestamp not asserted. Observed actual is later. This does not establish prior sell-side consensus or the buy-side whisper number.",
   "observations": [
     {
