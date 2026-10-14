@@ -369,6 +369,22 @@ export function resolveConfig(partial = {}) {
     throw new TypeError('config.stateDir must be a string when provided');
   }
 
+  // The private Fabric-only installation is its own explicitly restricted
+  // product: an installed host-global Studio fleet inventory must never leak
+  // into its native MCP tools/list, even if a caller bypasses Python staging
+  // and loads an old/drifted config directly with this gateway.
+  if (Object.hasOwn(partial, 'fabricOnly') && typeof partial.fabricOnly !== 'boolean') {
+    throw new TypeError('Fabric-only flag must be boolean');
+  }
+  if (cfg.fabricOnly === true && (
+    partial.gitPublish !== false || partial.paperDesign !== false ||
+    isExplicit(partial, 'fleetStatus') ||
+    isExplicit(partial, 'repositoryWorkspaces') ||
+    isExplicit(partial, 'commissionPublication')
+  )) {
+    throw new TypeError('Fabric-only profile refuses unrelated Studio capabilities');
+  }
+
   cfg.gitPublish = resolveGitPublishConfig(cfg.gitPublish);
   cfg.repositoryWorkspaces = resolveRepositoryWorkspaceConfig(cfg.repositoryWorkspaces);
   if (cfg.repositoryWorkspaces && !cfg.gitPublish) throw new TypeError('repositoryWorkspaces requires configured typed Git');

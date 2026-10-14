@@ -941,3 +941,25 @@ test('backend exit after an effect taints the session without replacing its chil
   assert.equal(gw.stats().backend.spawns,2);
   assert.equal(await readFile(markerPath,'utf8'),'DROP_ONCE\n');
 });
+
+
+test('Fabric-only runtime rejects ambient fleet inventory and unrelated tool grants before listener creation', () => {
+  // An actual M2 Fabric-only staging once advertised studio_fleet_status
+  // because the shared Studio installer forwarded host-global fleetStatus.
+  const clean = gatewayMod.resolveConfig({fabricOnly:true,gitPublish:false,paperDesign:false});
+  assert.equal(clean.fabricOnly,true);
+  assert.equal(clean.gitPublish,null);
+  assert.equal(clean.paperDesign,null);
+  assert.equal(clean.fleetStatus,null);
+  const inventory={enabled:true,launcherPath:'/owner/launcher',launcherSha256:'a'.repeat(64),timeoutMs:5000};
+  assert.throws(() => gatewayMod.resolveConfig({fabricOnly:true,gitPublish:false,paperDesign:false,
+    fleetStatus:inventory}),/Fabric-only/i);
+  assert.throws(() => gatewayMod.resolveConfig({fabricOnly:true,gitPublish:false,paperDesign:false,
+    repositoryWorkspaces:{enabled:true,allowedRepositories:['mastermind']}}),/Fabric-only/i);
+  assert.throws(() => gatewayMod.resolveConfig({fabricOnly:true,gitPublish:false,paperDesign:false,
+    commissionPublication:{enabled:true,configurationDigest:'a'.repeat(64)}}),/Fabric-only/i);
+  // The separate original Studio profile retains fleet inventory features.
+  const studio=gatewayMod.resolveConfig({fleetStatus:inventory});
+  assert.equal(studio.fleetStatus.launcherPath,inventory.launcherPath);
+  assert.equal(studio.fleetStatus.launcherSha256,inventory.launcherSha256);
+});

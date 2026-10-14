@@ -574,9 +574,13 @@ def _build_config(
                 or type(commission_digest) is not str or not re.fullmatch(r"[0-9a-f]{64}", commission_digest)):
             raise ValueError("commission publication requires closed private workspace profile")
         config["commissionPublication"] = {"enabled": True, "configurationDigest": commission_digest}
-    fleet_status = _fleet_status_config(user_root)
-    if fleet_status is not None:
-        config["fleetStatus"] = fleet_status
+    # Fabric-only is restricted to its seven delegation tools plus gateway
+    # liveness/paging. Host-global Studio fleet discovery is a separate
+    # machine-owner capability and must not leak from an installed launcher.
+    if not fabric_only:
+        fleet_status = _fleet_status_config(user_root)
+        if fleet_status is not None:
+            config["fleetStatus"] = fleet_status
     return config
 
 
@@ -1029,7 +1033,8 @@ def _fabric_profile_setting(args, roots: dict, prior: dict | None) -> bool:
         if "fabricOnly" in config:
             if (config["fabricOnly"] is not True or config.get("gitPublish") is not False
                     or config.get("paperDesign") is not False
-                    or "repositoryWorkspaces" in config or "commissionPublication" in config):
+                    or "repositoryWorkspaces" in config or "commissionPublication" in config
+                    or "fleetStatus" in config):
                 raise SystemExit("invalid retained Fabric-only profile")
             previous = True
         if requested and not previous:

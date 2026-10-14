@@ -88,5 +88,36 @@ class FabricProfileTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 service._fabric_profile_setting(SimpleNamespace(), {'config': config}, {'configHash':'0'*64})
 
+
+    def test_fabric_only_rejects_machine_fleet_inventory_even_when_installed(self):
+        """An M2 with installed fleetStatus must not expose that unrelated tool.
+
+        RED-first based on the actual newly staged C3 profile tool listing.
+        Ordinary Studio profiles still retain the incumbent fleetStatus owner.
+        """
+        fleet = {"enabled": True, "launcherPath": "/owned/control/launcher",
+                 "launcherSha256": "b" * 64, "timeoutMs": 5000}
+        with mock.patch.object(service, '_fleet_status_config', return_value=fleet):
+            fabric = self.config(fabric_only=True)
+            normal = self.config()
+        self.assertNotIn('fleetStatus', fabric)
+        self.assertEqual(normal.get('fleetStatus'), fleet)
+        self.assertTrue(fabric['fabricOnly'])
+        self.assertEqual(fabric['gitPublish'], False)
+        self.assertEqual(fabric['paperDesign'], False)
+
+    def test_restage_refuses_insecure_retained_fabric_fleet_config(self):
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / 'config.json'
+            config = {'fabricOnly': True, 'gitPublish': False,
+                      'paperDesign': False,
+                      'fleetStatus': {'enabled': True, 'launcherPath': '/owner/fleet'}}
+            path.write_text(json.dumps(config))
+            prior = {'configHash': service._sha256_file(path)}
+            with self.assertRaisesRegex(SystemExit, 'Fabric-only'):
+                service._fabric_profile_setting(
+                    SimpleNamespace(fabric_only=False), {'config': path}, prior)
+
+
 if __name__ == '__main__':
     unittest.main()
