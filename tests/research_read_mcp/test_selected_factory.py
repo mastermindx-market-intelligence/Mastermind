@@ -33,12 +33,17 @@ class MacroResult:
 class Provider:
     def __init__(self):
         self.current = True
-        self.prepares = self.calls = self.guards = 0
+        self.prepares = self.calls = self.guards = self.refreshes = 0
 
     def prepare(self):
         self.prepares += 1
         if not self.current:
             raise Unavailable("private-preparation-reason")
+
+    def refresh(self):
+        self.refreshes += 1
+        if not self.current:
+            raise Unavailable("private-refresh-reason")
 
     def guard(self):
         self.guards += 1
@@ -64,7 +69,11 @@ def test_bridge_preserves_value_guard_and_identity_by_name():
     assert result.selection_identity[0] == "private-epoch"
     result.delivery_guard()
     assert provider.guards == 2
+    selected.refresh()
+    assert provider.refreshes == 1 and provider.prepares == 0
     provider.current = False
+    with pytest.raises(ContractViolation, match="SOURCE_UNAVAILABLE"):
+        selected.refresh()
     with pytest.raises(ContractViolation, match="SOURCE_UNAVAILABLE"):
         selected.run(lambda: pytest.fail("source call after invalidation"))
     assert selected.ready() is False
@@ -83,6 +92,8 @@ def test_ready_never_prepares_or_claims_success_for_foreign_envelope():
 @pytest.mark.parametrize("change", [
     {"expected_producer_commit": "not-a-commit"}, {"writer_policy": True},
     {"max_age_seconds": True}, {"max_age_seconds": 3601},
+    {"refresh_interval_seconds": 0}, {"refresh_interval_seconds": True},
+    {"refresh_interval_seconds": 301},
     {"max_reuse_seconds": 301}, {"corpus_byte_budget": 0},
     {"corpus_byte_budget": 192 * 1024 * 1024 + 1},
     {"image_admission_bytes": 768 * 1024 * 1024 + 1},
@@ -134,6 +145,7 @@ async def test_actual_launcher_binds_same_selected_owner_through_http_and_citati
     assert bindings.service is selected.service
     assert bindings.adapter._operation_runner.__self__ is selected
     assert h.app.state.research_selection_owner is selected
+    assert h.app.state.research_refresh_owner.selection is selected
     await h.start()
     try:
         assert (await h.client.get("/readyz")).status_code == 200

@@ -111,6 +111,11 @@ def create_runtime(deployment, verifier, policy, *, audit_sink, selected_options
     app.state.research_release_receipts = verifier.receipts
     if 'selection' in owned:
         app.state.research_selection_owner = owned['selection']
+        from integrations.research_read_mcp.selected_refresh import SelectedRefreshLifecycle
+        refresh = SelectedRefreshLifecycle(owned['selection'],
+            interval_seconds=min(selected_options.refresh_interval_seconds, selected_options.max_reuse_seconds))
+        refresh.install(app)
+        app.state.research_refresh_owner = refresh
     app.state.research_bindings = RuntimeBindings(owned["service"],owned["adapter"],
         owned["authenticator"],app.state.research_grant_owner,clock,audit_sink)
     return app

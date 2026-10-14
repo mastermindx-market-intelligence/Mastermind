@@ -19,6 +19,7 @@ class SelectedReadOptions:
     max_reuse_seconds: int = 300
     corpus_byte_budget: int = 32 * 1024 * 1024
     image_admission_bytes: int = 256 * 1024 * 1024
+    refresh_interval_seconds: int = 30
 
     def validate(self):
         if (type(self) is not SelectedReadOptions
@@ -33,6 +34,9 @@ class SelectedReadOptions:
                                (self.image_admission_bytes, 768 * 1024 * 1024)):
             if type(value) is not int or not 0 < value <= maximum:
                 raise ContractViolation("SOURCE_UNAVAILABLE")
+        if (type(self.refresh_interval_seconds) is not int
+                or not 0 < self.refresh_interval_seconds <= 300):
+            raise ContractViolation("SOURCE_UNAVAILABLE")
 
 
 class SelectedMacroComposition:
@@ -65,6 +69,14 @@ class SelectedMacroComposition:
         """Explicit owner action only; readiness and requests never resweep."""
         try:
             self._provider.prepare()
+        except self._unavailable_type:
+            raise ContractViolation("SOURCE_UNAVAILABLE") from None
+
+
+    def refresh(self):
+        """Full qualification by the same provider; the lifecycle owns cadence."""
+        try:
+            self._provider.refresh()
         except self._unavailable_type:
             raise ContractViolation("SOURCE_UNAVAILABLE") from None
 
