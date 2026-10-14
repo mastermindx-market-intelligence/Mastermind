@@ -191,6 +191,8 @@ def _load_config(path: Path, *, require_root_owner: bool) -> dict[str, Any]:
         if value.get("harness_binding_id") == _FINITE_ATTENDED_BINDING:
             expected_fields = _FINITE_ATTENDED_FIELDS | (
                 {"attended_secret_canary"} if "attended_secret_canary" in value else set())
+            if 'capacity_capability_id' in value:
+                expected_fields |= {'capacity_capability_id'}
     elif schema_version == NATIVE_CONFIG_SCHEMA_VERSION:
         expected_fields = (_NATIVE_CLAUDE_CONFIG_FIELDS if value.get("native_provider") == "claude"
                            else _NATIVE_CONFIG_FIELDS)
@@ -209,6 +211,10 @@ def _load_config(path: Path, *, require_root_owner: bool) -> dict[str, Any]:
               and value.get("harness_binding_id") == _FINITE_ATTENDED_BINDING)
     provider = "claude" if value.get("native_provider") == "claude" or finite else "codex"
     if finite:
+        if ('capacity_capability_id' in value and (
+                type(value['capacity_capability_id']) is not str
+                or re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,127}', value['capacity_capability_id']) is None)):
+            raise WorkerConfigError('finite capacity identity is invalid')
         if (type(value.get("control_gid")) is not int or value["control_gid"] <= 0
                 or value["control_gid"] == value.get("worker_gid")
                 or type(value.get("claude_attestation_sha256")) is not str

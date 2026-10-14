@@ -256,6 +256,9 @@ def reviewed_literal_spans(path: str, source: str):
     elif path == "ops/executive_os/a2_agent_relay_enrollment.py":
         from tests.executive_a2_identity_review import REVIEWED_ANCHORS as a2_anchors
         reviewed_anchors = a2_anchors
+    elif path in {"ops/executive_os/attended_control_staging.py", "control_plane/fabric_attended_registration.py"}:
+        from tests.executive_finite_identity_review import REVIEWED_ANCHORS_BY_PATH
+        reviewed_anchors = REVIEWED_ANCHORS_BY_PATH[path]
     else:
         return ()
     # str.splitlines recognizes these separators, while Python source/AST

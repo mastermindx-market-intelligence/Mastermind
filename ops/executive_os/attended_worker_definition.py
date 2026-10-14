@@ -216,7 +216,7 @@ def build_finite_worker_artifacts(*, primary_config, worker_id, worker_user, wor
         realm_generation, release_root, release_commit, release_tree, release_manifest_sha256, python_binary,
         host_ref, model_class, execution_profile_digest, service_source_sha256=None,
         permission_profile_sha256=None, routing_root_id, routing_parent_run_id,
-        max_turns=2):
+        max_turns=2, capacity_capability_id=None):
     """Return exact bytes for one owner-selected secondary worker, never publish.
 
     primary_config is the existing installed primary definition supplied by its
@@ -294,6 +294,13 @@ def build_finite_worker_artifacts(*, primary_config, worker_id, worker_user, wor
         require_secret_canary=True, operator_harness_armed=False, harness_binding_id=canary.BINDING,
         subscription_realm_enrollment={'generation': realm_generation, 'binding_id': canary.BINDING},
         attended_secret_canary=dict(canary.PRESET))
+    if capacity_capability_id is not None:
+        # Actual Provider Control identity, supplied by its existing owner.
+        # Omission preserves older staging bytes but cannot register capacity.
+        if (type(capacity_capability_id) is not str
+                or re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,127}', capacity_capability_id) is None):
+            raise AttendedDefinitionError('exact capacity capability identity required')
+        worker['capacity_capability_id'] = capacity_capability_id
     worker_bytes = _json(worker)
     physical = FabricHostBinding(socket_path=str(socket), host_ref=host_ref, worker_id=worker_id,
         worker_uid=worker_uid, worker_gid=worker_gid, bridge_uid=worker_uid,

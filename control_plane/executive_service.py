@@ -2226,8 +2226,12 @@ class ExecutiveControlService:
         release_control_consumer_factory: (
             Callable[[Runtime], "ReleaseControlConsumer"] | None
         ) = None,
+        attended_worker_registration: Callable[[Runtime], Any] | None = None,
     ) -> None:
         self.config = config
+        if attended_worker_registration is not None and not callable(attended_worker_registration):
+            raise ValueError('attended registration requires fixed host composition')
+        self._attended_worker_registration = attended_worker_registration
         self._runtime_factory = runtime_factory
         self._workspace_control_room = workspace_control_room
         self._supervisor_factory = supervisor_factory
@@ -8561,7 +8565,10 @@ class ExecutiveControlService:
             return _jsonable(attempt)
         if command == "register-worker":
             self._exact_args(args, set())
-            return _jsonable(self._register_worker())
+            primary = self._register_worker()
+            if self._attended_worker_registration is not None:
+                self._attended_worker_registration(runtime)
+            return _jsonable(primary)
         if command == "create-proof-job":
             self._exact_args(args, set())
             return _jsonable(await self._create_proof_job())

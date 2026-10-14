@@ -192,7 +192,7 @@ _ARM_ADMISSION_CODES = frozenset(
 _MAX_JSON_BYTES = 1024 * 1024
 _TRANSACTION_SCHEMA = "mastermind.executive_autonomy_transaction/v1"
 A2_DISABLE_COMMANDS = frozenset({"a2-disable-prepare", "a2-disable-prepare-reconcile"})
-_TRANSACTION_OPERATIONS = frozenset({"ARM", "DISARM", "A2_DISABLE_PREPARATION"}) | CONTROL_ONLY_TRANSACTION_OPERATIONS
+_TRANSACTION_OPERATIONS = frozenset({"ARM", "DISARM", "A2_DISABLE_PREPARATION", "FINITE_CONTROL_STAGE"}) | CONTROL_ONLY_TRANSACTION_OPERATIONS
 # One manifest name for the canonical marker and for the private generation it
 # is published from, so a renamed generation is always readable in place.
 _TRANSACTION_MANIFEST_NAME = "transaction.json"
@@ -757,6 +757,11 @@ def _parser() -> argparse.ArgumentParser:
     for command in sorted(A2_DISABLE_COMMANDS):
         a2 = sub.add_parser(command, help="Prepare or reconcile the fixed unloaded A2 disable.")
         a2.add_argument("--expected-sha", type=_exact_sha, action=_StoreOnce, required=True)
+    finite_stage = sub.add_parser('finite-control-stage', help='Stage the fixed finite definition while stopped and disarmed.')
+    finite_stage.add_argument('--expected-sha', type=_exact_sha, action=_StoreOnce, required=True)
+    finite_stage.add_argument('--expected-control-sha256', action=_StoreOnce, required=True)
+    finite_reconcile = sub.add_parser('finite-control-stage-reconcile', help='Prove an already-published finite stage without replay.')
+    finite_reconcile.add_argument('--expected-sha', type=_exact_sha, action=_StoreOnce, required=True)
     return parser
 
 
@@ -5170,6 +5175,10 @@ def main(
 
     if args.command in A2_DISABLE_COMMANDS:
         from ops.executive_os.a2_disable_preparation_control import run_command
+        return run_command(args, host=host)
+
+    if args.command in {'finite-control-stage', 'finite-control-stage-reconcile'}:
+        from ops.executive_os.attended_control_staging import run_command
         return run_command(args, host=host)
 
     transaction_host = ProductionTransactionHost() if host is None else host

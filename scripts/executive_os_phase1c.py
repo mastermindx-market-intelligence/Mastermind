@@ -2536,9 +2536,16 @@ def _service_from_config(
         from control_plane.executive_privileged_authority import PrivilegedReadinessController
         def readiness_factory(runtime):
             return PrivilegedReadinessController(runtime, release_sha=config.proof_base_sha)
+    attended_registration = None
+    if qualification_for(attended_work_placements) is not None:
+        from control_plane.fabric_attended_registration import register_fixed_finite
+        def attended_registration(runtime):
+            return register_fixed_finite(runtime, attended_work_placements[0],
+                fabric_worker_binding_source, fabric_attended_probe_source, autonomy_guard)
     service = ExecutiveControlService(
         config,
         supervisor_factory=supervisor_factory,
+        attended_worker_registration=attended_registration,
         privileged_readiness_controller_factory=readiness_factory,
         proof_capacity_recovery_observer=proof_capacity_recovery_observer,
         proof_capacity_recovery_worker_uid=(
