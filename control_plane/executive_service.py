@@ -37,6 +37,7 @@ from typing import Any, Awaitable, Callable, Mapping, Protocol
 from uuid import uuid4
 
 from common.redaction import sanitize_external_text
+from common import company_dialogue_principal_app_protocol as principal_app_protocol
 from control_plane import ceo_intent
 from control_plane import executive_dialogue_observation as dialogue_observation
 from control_plane import executive_ceo_ingress as ceo_ingress
@@ -2053,6 +2054,8 @@ class CeoIngressAppBinding:
     principal_facts_factory: Callable[[Runtime], Any] | None = None
     principal_admission_armed: bool = False
     principal_admission_guard: Callable[[Mapping[str, Any]], None] | None = None
+    # Separately selected by the trusted host; existing launchers omit it.
+    principal_dialogue_provider_factory: Callable[[Runtime], Any] | None = None
 
     def __post_init__(self) -> None:
         if type(self.peer_uid) is not int or self.peer_uid < 0:
@@ -2076,6 +2079,9 @@ class CeoIngressAppBinding:
             raise ValueError("principal admission requires a host guard")
         if self.principal_admission_armed and self.principal_admission_guard is None:
             raise ValueError("armed principal admission requires a host guard")
+        if (self.principal_dialogue_provider_factory is not None
+                and not callable(self.principal_dialogue_provider_factory)):
+            raise ValueError("principal dialogue requires a host provider")
 
 
 class CompanyConsultationHostProtocol(Protocol):
@@ -5181,8 +5187,55 @@ class ExecutiveControlService:
                 )
                 return
             is_release = isinstance(parsed, dict) and parsed.get("schema") == release_ingress.FRAME_SCHEMA
-            if not is_release and len(raw) > ceo_ingress.MAX_REQUEST_BYTES:
+            is_principal_dialogue = (isinstance(parsed, dict)
+                and parsed.get("schema") == principal_app_protocol.APP_REQUEST_SCHEMA)
+            selected_principal_dialogue = (is_principal_dialogue and app_peer
+                and callable(app_binding.principal_dialogue_provider_factory))
+            request_ceiling = (principal_app_protocol.MAX_REQUEST_BYTES
+                if selected_principal_dialogue else ceo_ingress.MAX_REQUEST_BYTES)
+            if not is_release and len(raw) > request_ceiling:
                 await self._send_ceo_ingress_error(writer, "request_too_large", "request exceeds byte limit")
+                return
+            if is_principal_dialogue:
+                if not selected_principal_dialogue:
+                    await self._send_ceo_ingress_error(writer, "peer_denied", "principal dialogue is unavailable for this peer")
+                    return
+                try:
+                    def require_selected():
+                        if (app_binding is not self._ceo_ingress_app_binding
+                                or not app_binding.principal_admission_armed
+                                or self._closing or not self._ceo_ingress_ready
+                                or self._service_state not in {"READY", "AWAITING_CANARY"}):
+                            raise ValueError("principal dialogue unavailable")
+
+                    require_selected()
+                    expected_qualification = self._require_attended_qualification()
+                    expected_binding = self._require_coo_admission_binding()
+
+                    def require_request():
+                        # Synchronous host guard retained by the existing
+                        # acquisition and sole Runtime COMMIT owners.
+                        require_selected()
+                        if self._require_attended_qualification() != expected_qualification:
+                            raise ValueError("principal dialogue qualification changed")
+                        if self._require_coo_admission_binding() != expected_binding:
+                            raise ValueError("principal dialogue binding changed")
+                        if self._require_attended_qualification() != expected_qualification:
+                            raise ValueError("principal dialogue qualification changed")
+                        require_selected()
+
+                    require_request()
+                    provider = app_binding.principal_dialogue_provider_factory(self._require_runtime())
+                    from control_plane.workspace_owned_task import await_owned
+                    result = await await_owned(asyncio.create_task(provider.ruling(
+                        raw, receiving_request_guard=require_request)))
+                    require_request()
+                    await self._send_ceo_ingress_response(writer, {"ok": True, "result": result},
+                        response_ceiling=principal_app_protocol.MAX_APP_RESPONSE_BYTES)
+                except Exception:
+                    # A COMMIT may already exist. The App must treat a lost or
+                    # refused response as uncertain, preserving the obligation.
+                    await self._send_ceo_ingress_error(writer, "principal_dialogue_unavailable", "principal dialogue was refused")
                 return
             if is_release:
                 if not app_peer:

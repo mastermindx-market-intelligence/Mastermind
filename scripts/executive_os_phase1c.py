@@ -279,6 +279,7 @@ _CONFIG_OPTIONAL = frozenset(
         "workspace_resource_policy",
         "workspace_control_room",
         "coo_principal_armed",
+        "coo_principal_dialogue_armed",
         "proof_branch",
         "exact_worker_claim_target",
         "worker_id",
@@ -2275,6 +2276,21 @@ def _service_from_config(
                 return CooHostProvider(coo_source, workspace_factories["workspace_read_provider_factory"](runtime))
             coo_factories = dict(principal_facts_factory=coo_factory, principal_admission_armed=True,
                 principal_admission_guard=lambda envelope: coo_factory(service._require_runtime()).guard(envelope))
+            if raw.get("coo_principal_dialogue_armed", False) is True:
+                from integrations.mastermind_company_principal_app_receiver import PrincipalDialogueAppReceiver
+                from integrations.slack_agent_dialogue.host_local_observation import HostLocalDialogueObservationReader
+
+                def principal_dialogue_factory(runtime):
+                    # The incumbent namespace/Workspace owner validates this
+                    # Runtime; the reader additionally requires this exact
+                    # Control service and opens no Relay-only observation socket.
+                    service._namespace_custody.bound_runtime(runtime)
+                    authority = coo_factory(runtime)
+                    return PrincipalDialogueAppReceiver(runtime, authority,
+                        _CANONICAL_AGENT_RELAY_SOCKET,
+                        HostLocalDialogueObservationReader(service, runtime))
+
+                coo_factories["principal_dialogue_provider_factory"] = principal_dialogue_factory
         session_factories = {}
         if installed_profile in {WEB_CEO_SESSIONS_PROFILE, WEB_CEO_V3_PROFILE}:
             from integrations.session_bridge.installed import build_runtime_session_bridge

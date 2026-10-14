@@ -20,6 +20,7 @@ from integrations.mastermind_company_principal_host import (
 )
 from integrations.slack_agent_dialogue.company_dialogue_runtime_binding import CooPrincipalDialogueCaller
 from integrations.slack_agent_dialogue.executive_observation_client import ExecutiveDialogueObservationClient
+from integrations.slack_agent_dialogue.host_local_observation import HostLocalDialogueObservationReader
 from integrations.slack_agent_dialogue.principal_current_reader import _wire
 from integrations.slack_agent_dialogue.principal_source_acquisition import acquire_principal_decision_source
 
@@ -40,7 +41,8 @@ class _AcquiredBinding:
 
 async def build_acquired_principal_decision_host(
     *, runtime: Runtime, authority: CooHostProvider, caller: CooPrincipalDialogueCaller,
-    obligation_id: str, socket_path: Path, observation_client: ExecutiveDialogueObservationClient,
+    obligation_id: str, socket_path: Path,
+    observation_client: ExecutiveDialogueObservationClient | HostLocalDialogueObservationReader,
     receiving_request_guard: Callable[[], None],
 ) -> PrincipalCompanyDialogueHost:
     """Acquire once and select the existing fresh RULING effect composition.

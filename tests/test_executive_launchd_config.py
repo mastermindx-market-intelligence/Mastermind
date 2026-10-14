@@ -789,6 +789,7 @@ def test_control_config_template_tracks_strict_service_schema() -> None:
         "fabric_bindings_sha256",
         "fabric_attended_probe",
         "coo_foreground_only",
+        "coo_principal_dialogue_armed",
         # Provenance is injected only after the installer validates the live
         # receipt; the static template intentionally has no host digest.
         "python_runtime_provenance_digest",
