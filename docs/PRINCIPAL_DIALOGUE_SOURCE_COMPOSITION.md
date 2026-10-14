@@ -160,6 +160,14 @@ composition and qualification.
 
 ## Remaining installed qualification
 
+The existing App client selects the canonical 32 KiB request and 64 KiB
+response ceilings only for a fully validated principal ruling frame. Older
+schemas retain their existing transport limits. This supports larger valid
+Chinese rulings and evidence lists without changing general ingress budgets.
+The receiving service must separately select and enforce the same exact-schema
+limits when its owner admits the route; client serialization does not enable
+that route or authenticate its peer.
+
 The installed host must authenticate the App-to-Control request on the existing
 allowed peer boundary, select this canonical acquisition for an eligible
 COO-targeted obligation, and compose the explicit fresh decision-source fence
