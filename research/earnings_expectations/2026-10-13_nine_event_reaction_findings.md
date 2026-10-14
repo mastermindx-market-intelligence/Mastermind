@@ -12,7 +12,7 @@ python3 replay_casebook.py --format markdown
 python3 replay_casebook.py --format json
 ```
 
-Local: **62/62 tests passed** (Python 3.13, pytest 9). Implementation, tests and all nine public-source input packets were individually read back from GitHub with byte-matching Git blob hashes. This demonstrates reproducible arithmetic and typed input handling; not any production acceptance or predictive backtest.
+Local: **67/67 tests passed** (Python 3.13, pytest 9). Implementation, tests and all nine public-source input packets were individually read back from GitHub with byte-matching Git blob hashes. This demonstrates reproducible arithmetic and typed input handling; not any production acceptance or predictive backtest.
 
 For each event `R_issuer = adj_close(first affected regular session) / adj_close(last unaffected regular session) − 1`, likewise SPY and the named sector ETF. Report issuer minus SPY / sector in **percentage points**. Source inputs and public-release witness URLs reside in the nine `sourced_event_packets/*.json` files.
 
@@ -68,3 +68,8 @@ The smaller management-guide exceedance in Q2 accompanied a much larger share-pr
 ## Next scientific / product acceptance
 
 The reproducible **descriptive nine-event casebook is delivered**. The binding scientific dependency is the existing C19 MAS-271/Alpha SRC-A1/EXP-1 owner certifying one rights-bearing, issuer+fiscal-period+metric-matched, timestamp-valid **two-vintage EPS/revenue consensus** pair, or a typed `UNESTIMABLE` refusal. Once supplied, join prior guidance, actuals, forecast revisions, estimated forward economics and a representative pre-registered B2 vs C1 prediction test with a chronological holdout. Reuse the existing Earnings Event / market incorporation / Terminal consumer owners; no second event database or independent belief score plane.
+
+
+### Reproducible combined research answer
+
+`python3 replay_casebook.py --format markdown` now renders not only the nine observed price returns but the two prior-Amazon-management-guidance-vs-reported-actual rows. `--format json` includes `management_guidance_status`, source URLs, strict issuer/fiscal-target matching, prior guidance chronology, midpoint/upper-bound arithmetic and the observed stock reaction. The forecast channel is **COMPANY_MANAGEMENT_GUIDANCE_NOT_ANALYST_CONSENSUS**; analyst consensus is **NOT_ADMITTED**. The 67 tests include late/mismatched/duplicate/misclassified guidance refusals. This describes current and historical known company guidance rather than an inferred market belief.
