@@ -2205,6 +2205,15 @@ done
 "$PYTHON_BINARY" -I -S -B "$RELEASE_ROOT/ops/executive_os/release_manifest.py" verify \
   --root "$RELEASE_ROOT" --commit-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA"
 
+# Existing root install interval: publish only the closed nonsecret Control
+# observation after final config/source checks and before any service starts.
+"$PYTHON_BINARY" -I -S -B - "$RELEASE_ROOT" "$EXPECTED_SHA" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+from ops.executive_os.control_observation import publish_for_install
+publish_for_install(sys.argv[2])
+PY
+
 if [ "$ARM_PRIVILEGED_BROKER" = "1" ]; then
   /bin/launchctl enable "system/$PRIVILEGED_LABEL"
   /bin/launchctl bootstrap system "$PRIVILEGED_PLIST"

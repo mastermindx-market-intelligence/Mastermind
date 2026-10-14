@@ -3012,6 +3012,10 @@ class ProductionTransactionHost(ProductionArmHost):
         if descriptor is None:
             raise TransactionEffectUnknown()
         self._transaction_owner_fd = None
+        self._control_observation_origin = None
+        self._control_observation_fresh_transaction = None
+        self._control_observation_recovery_owner = None
+        self._control_observation_rollback_proven = None
         os.close(descriptor)
 
     def _manifest(self) -> dict[str, Any]:
@@ -3397,6 +3401,12 @@ class ProductionTransactionHost(ProductionArmHost):
                     fcntl.flock(lock, fcntl.LOCK_UN)
                 finally:
                     os.close(lock)
+            # Actual creator provenance remains process-local and bound to the
+            # held marker inode. Reclaiming an old marker never creates it.
+            self._control_observation_origin = (
+                os.getpid(), descriptor, transaction.transaction_id,
+                transaction.expected_sha,
+            )
         except Exception as exc:
             if descriptor >= 0 and self._transaction_owner_fd == descriptor:
                 # Successful or uncertain publication retains the original
@@ -3646,6 +3656,9 @@ class ProductionTransactionHost(ProductionArmHost):
             gid=grp.getgrnam(CONTROL_GROUP).gr_gid,
         )
         self._persist_phase(transaction, "CONTROL_REPLACED")
+        # Process-local publication provenance. Reconstructed recovery contexts
+        # can verify the derivative observation, never issue another write.
+        self._control_observation_fresh_transaction = transaction
 
     def write_autonomy_receipt(
         self, transaction: TransactionContext, receipt: Mapping[str, Any]
@@ -3764,6 +3777,8 @@ class ProductionTransactionHost(ProductionArmHost):
             or manifest.get("expected_sha") != transaction.expected_sha
         ):
             raise TransactionEffectUnknown()
+        from ops.executive_os.control_observation import publish_for_transaction
+        publish_for_transaction(self, transaction)
         control_candidate, worker_candidate = self._candidate_paths(
             transaction.transaction_id
         )
@@ -4820,6 +4835,7 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
         """
 
         if not self._loaded(CONTROL_LABEL):
+            self._persist_phase(transaction, "ROLLBACK_CONTROL_PROVEN")
             return
         try:
             self._reconcile_control_boundary(transaction.expected_sha)
@@ -4886,6 +4902,7 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
             gid=grp.getgrnam(CONTROL_GROUP).gr_gid,
             replace=CONTROL_CONFIG.exists() or CONTROL_CONFIG.is_symlink(),
         )
+        self._control_observation_fresh_transaction = transaction
         if paired is None:
             self.write_ceo_submit_receipt(transaction, receipt)
         else:
@@ -4916,6 +4933,7 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
             raise TransactionEffectUnknown()
         self._prove_rolled_back_control_live(transaction)
         self._restore_control_launchd_preimage_if_recorded(transaction)
+        self._control_observation_rollback_proven = transaction
         self.complete_transaction(transaction)
 
     def recover_ceo_submit_effect_unknown(
@@ -4973,10 +4991,29 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
             separation=separation,
             configs=prior,
         )
-        receipt = build_ceo_submit_receipt(
-            transaction, admission, armed=prior_armed, now=now
+        from ops.executive_os.control_observation import (
+            PUBLICATION_PHASE, ROLLBACK_PUBLICATION_PHASE,
+            verify_ceo_rollback_readback,
         )
-        self.rollback_ceo_submit(transaction, receipt)
+        if manifest['phase'] == PUBLICATION_PHASE:
+            # A projection response cannot authorize rolling back an already
+            # completed forward effect. Preserve this original uncertainty.
+            raise TransactionEffectUnknown()
+        if manifest['phase'] in {ROLLBACK_PUBLICATION_PHASE, 'CONTROL_OVERRIDE_RESTORED'}:
+            verify_ceo_rollback_readback(self, transaction, admission)
+            self.complete_transaction(transaction)
+        else:
+            # Only this incumbent recovery verb, after its original installed
+            # source/archive/launchd checks, may restore its archived preimage.
+            # The observer and a reconstructed context cannot select this path.
+            self._control_observation_recovery_owner = (
+                os.getpid(), self._transaction_owner_fd,
+                transaction.transaction_id, transaction.expected_sha,
+            )
+            receipt = build_ceo_submit_receipt(
+                transaction, admission, armed=prior_armed, now=now,
+            )
+            self.rollback_ceo_submit(transaction, receipt)
         state = "CEO_SUBMIT_ARMED" if prior_armed else "CEO_SUBMIT_DISARMED"
         return TransactionResult(
             state=state,

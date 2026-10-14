@@ -7620,6 +7620,7 @@ def _marker_workspace(workdir: Path) -> Path:
 def _marker_adapter_bindings():
     """The three hermetic adapters, declared once for every harness process."""
 
+    from ops.executive_os import control_observation
     real_fstat = os.fstat
     real_lstat = Path.lstat
 
@@ -7657,6 +7658,9 @@ def _marker_adapter_bindings():
         (control.os, "fchown", privileged_root_chown),
         (control.grp, "getgrnam", lambda name: types.SimpleNamespace(gr_gid=0)),
         (control, "_has_acl", lambda _path: False),
+        # This journal harness does not install a release or its publisher.
+        # The actual publisher/owner composition has separate affected tests.
+        (control_observation, "publish_for_transaction", lambda *args: None),
     ]
 
 
