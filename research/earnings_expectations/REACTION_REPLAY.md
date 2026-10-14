@@ -13,7 +13,7 @@ Refuse or preserve typed absence for intraday-close contamination, exact regular
 
 ```sh
 cd research/earnings_expectations
-python3 -m pytest -q test_reaction_replay.py test_replay_casebook.py test_management_guidance_cases.py
+python3 -m pytest -q test_reaction_replay.py test_replay_casebook.py test_management_guidance_cases.py test_media_witnesses.py
 python3 reaction_replay.py /path/to/source_verified_input.json
 python3 replay_casebook.py --format markdown
 python3 replay_casebook.py --format json
@@ -49,7 +49,7 @@ This is a **field-shape illustration**, deliberately too short to calculate a re
 
 ## Verified tests
 
-**67/67 offline tests passed** with Python 3.13 / pytest 9. Code and tests were verified by Git blob against tested local sources. Tests include after-close, premarket, intraday, weekend, UTC winter/summer clocks, missing benchmark, cutoff leakage, unsupported sources, and refusal to accept an SEC-only clock. Synthetic structural fixtures are supplemented with **nine actual retrospective adjusted-close source packets**, independently checked for arithmetic; this does not prove data licensing, current vendor freshness, a live backtest, causal attribution, or Terminal operation.
+**78/78 offline tests passed** with Python 3.13 / pytest 9. Code and tests were verified by Git blob against tested local sources. Tests include after-close, premarket, intraday, weekend, UTC winter/summer clocks, missing benchmark, cutoff leakage, unsupported sources, and refusal to accept an SEC-only clock. Synthetic structural fixtures are supplemented with **nine actual retrospective adjusted-close source packets**, independently checked for arithmetic; this does not prove data licensing, current vendor freshness, a live backtest, causal attribution, or Terminal operation.
 
 ## Nine SEC timestamps — not first-publication proof
 
@@ -93,3 +93,10 @@ The nine `sourced_event_packets/*.json` inputs document **three earnings events 
 ### Joined guidance + observed-reaction output (source proof)
 
 The read-only `replay_casebook.py` consumer now joins the two Amazon first-party prior-guidance observations to the correct Q1/Q2 stock reactions in **both Markdown and JSON**, with explicit `management_guidance_status` and `management_guidance_comparisons`. This is a typed management-guidance channel, with `point_in_time_analyst_consensus: NOT_ADMITTED`. Validation rejects invalid forecast source/basis, late guidance, mismatched event target or issuer, duplicate targets; missing guidance does not become zero. The five additional focused tests raised the current local count to **67**. When a guidance source is unavailable, returns remain available with an explicit unavailable guidance state. Test count is local; normal hosted CI is separately governed.
+
+
+### Third evidence channel: media-reported cloud-growth consensus witnesses (NOT admitted PIT inputs)
+
+`media_reported_expectations.json` holds seven small, properly cited numerical excerpts from dated financial reporting (Reuters/LSEG or Visible Alpha), matched to seven of the nine underlying source events; the other two remain absent, not zero. The separate S&P Global/Visible Alpha July 22 Alphabet Q2 preview indicates Q2 revenue consensus increased **$113.0B in February → $117.2B by July**, while EPS consensus fell **$3.43 → $3.32** (the older EPS vintage date is unspecified). Article publication timing or contributor-level vintages are not established as pre-event machine observations.
+
+`replay_casebook.py --format json|markdown` now renders three distinct channels in one evidence response: (1) nine observed next-session adjusted returns; (2) two issuer management-guidance/actual comparisons; (3) seven article-quoted expected-versus-reported cloud-growth comparisons and one source-reported multi-metric revision narrative. The media channel is explicitly `PUBLIC_ARTICLE_WITNESSES_ONLY_NOT_ADMITTED_AS_PIT`, every `consensus_vintage_admitted` is `false`, and exact source links are included. It rejects wrong source authority, duplicate/mismatched fiscal targets, fake pre-event estimate timestamps and preview PIT promotion. **78/78 local research tests passed and the existing CI-discovery bridge exercised the full suite locally.** The article data cannot support backtest forecasting, redistribution beyond lawful quoted numerical facts or new market-belief authority without incumbent source acceptance.
