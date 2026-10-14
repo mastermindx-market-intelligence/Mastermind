@@ -186,6 +186,23 @@ class TestV27FrozenCohort(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "different baseline"):
             self.run_grid(arms=arm)
 
+    def test_unresolved_arm_known_baseline_cannot_disagree(self):
+        arms = policies(unknown=True)
+        prior = arms[("3h", 4)][0]
+        arms[("3h", 4)] = (
+            prior,
+            u.PairedOutcome("A", "UNRESOLVED", baseline_pp=-99.,
+                            delta_bounds=(-4., 1.), bounds_cover_slippage_bps=100.)
+        )
+        with self.assertRaisesRegex(ValueError, "different baseline"):
+            self.run_grid(arms=arms)
+
+    def test_unresolved_known_baseline_must_be_mature(self):
+        first, second = episodes()
+        second = replace(second, outcome_known_at=ASOF + timedelta(days=2))
+        with self.assertRaisesRegex(ValueError, "no mature"):
+            self.run_grid(episodes=(first, second), arms=policies(unknown=True))
+
     def test_resolved_future_outcome_not_available_asof(self):
         a, b = episodes()
         late = replace(a, outcome_known_at=ASOF + timedelta(days=1))

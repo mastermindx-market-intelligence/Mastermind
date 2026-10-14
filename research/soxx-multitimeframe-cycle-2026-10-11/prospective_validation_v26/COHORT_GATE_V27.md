@@ -11,6 +11,7 @@ The original development sample comprises 91 correlated parent-turn episodes, an
 - Any observed original episode's baseline horizon has not ended. The original 52 observed RTH hours may run beyond April 13; that horizon is supplied by the incumbent source/calendar and is **not recomputed** here.
 - Any of six frozen checkpoint × next-5m-open delay arms omits, duplicates, or invents a parent episode, or asserts a different original baseline return for the same episode.
 - A resolved return is not known at evaluation time, or an unresolved-fill interval fails to cover a requested adverse-slippage stress.
+- An **unresolved discretionary sale nevertheless asserts a known baseline return** whose source outcome was not mature by evaluation time or disagrees with the same original baseline in another fixed arm. Missing sale execution never makes the original baseline arbitrary.
 
 Empty original populations yield **NO_OBSERVED_PARENT_EPISODES**, not zero estimated profit. No SOXX episodes yields an explicit **NO_PRIMARY_EPISODES** status; semiconductor peers are not allowed to stand in for independent SOXX-time evidence.
 
@@ -34,6 +35,6 @@ Real inputs must be provided and independently qualified by the **incumbent Macr
 
 \`python3 -m unittest discover -s tests -p 'test_soxx_v27_cohort_grid.py' -q\`
 
-**32 distinct synthetic tests pass.** Two tests first failed against the initial implementation, proving it improperly permitted interim scoring and unfinished original horizons; the focused cutoff/horizon repair made both pass. Fixtures are invented SOXX/AMD returns; there are **zero new market observations**. No unchanged v2–v24 replays or previously accepted V26 suite were rerun. Source compilation passes. The existing V26 clock mutation review is reused, not repeated.
+**34 distinct synthetic tests pass.** Two tests first failed against the initial implementation, proving it improperly permitted interim scoring and unfinished original horizons; the focused cutoff/horizon repair made both pass. Two additional targeted tests also failed before repair: an unresolved-fill row was able to assert a conflicting original baseline or an as-yet-unavailable known baseline; both are now rejected. Fixtures are invented SOXX/AMD returns; there are **zero new market observations**. No unchanged v2–v24 replays or previously accepted V26 suite were rerun. Source compilation passes. The existing V26 clock mutation review is reused, not repeated.
 
 Source: \`prospective_validation_v26/cohort_v27.py\`. Tests: \`tests/test_soxx_v27_cohort_grid.py\`. A published GitHub commit and hosted CI receipt are separately required before declaring this candidate green. **The economic decision remains unaccepted** until genuinely unseen source-qualified SOXX data, whole-universe coverage, defensible fill/no-fill stress and independent performance evidence satisfy the original contract.

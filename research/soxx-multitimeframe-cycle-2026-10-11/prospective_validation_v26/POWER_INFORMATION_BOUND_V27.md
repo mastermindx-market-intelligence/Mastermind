@@ -63,3 +63,33 @@ If one **hypothetically transfers** that mixed-cohort sale-exposure product into
 | 100bp | 0.976486 | 95.2002% | 75 |
 
 Thus the optimistic **0.75 assumption** produced illustrative **36 / 54** all-correct independent actions at 50/100bp, while an exposure sensitivity implied by V24's *simulated* 29 sales produces **40 / 75** under otherwise identical heroic assumptions. **Neither table is a power calculation valid for clustered, selected, heavy-tailed outcomes, nor a rule to tune a live classifier.** The valid strategic lesson is unchanged: without independently observed future outcomes and actual executable marketability, a "high accuracy" early exit can easily destroy more profitable continuation than it saves in losing positions.
+
+## Stronger result: use *actual selected-action payoffs*, not forced-action means
+
+A further **cross-source arithmetic audit of the same frozen published aggregates** tightens the interpretation and avoids a conceptual mistake: V23's \`saving_mean_pp=1.54447\` and \`harm_mean_pp=10.28901\` are averages over **all** 52 hypothetically beneficial and 24 hypothetically harmful *forced* early sales at 30m, not the 29 actions selected by the actual naive below-entry policy. The preceding illustrative threshold tables mix those hindsight forced-action means with an observed selected-action exposure sensitivity; **they must not be presented as the actual historical naive policy's required precision**.
+
+For the **matched** V23 naive 30m all-assets cohort and the V24 30m, delay-1, no-extra-slippage scenario, the immutable aggregate evidence reconciles exactly:
+
+| Original-development, retrospectively classified quantity | Published / derived result |
+|---|---:|
+| All original episodes | **91** |
+| Selected naive below-entry sales | **29** |
+| Selected actions economically helpful in hindsight | **26** |
+| Selected actions economically harmful in hindsight | **3** |
+| Selected correct-economics share (retrospective, NOT a calibrated future score) | **89.6552%** |
+| Total return saved across 26 helped actions | **+32.3059 pp-original-position** |
+| Total continuation value surrendered across 3 harmed actions | **−19.4414 pp-original-position** |
+| Net across original 91 episodes, before additional stress | **+12.8645 pp sum / +0.141368 pp mean** |
+| Mean benefit per *selected helped sale*, not all forced candidates | **+1.242535 pp** |
+| Mean harm per *selected wrong sale*, not all forced candidates | **−6.480467 pp** |
+| Implied selected mean \`q × simulated_sale/entry\` from 50bp stress | **0.97648648** |
+| Added 50bp sell stress per selected sale, original-position basis | **0.488243 pp** |
+| Full-original-cohort mean at +50bp | **−0.014226 pp** |
+
+On the retrospectively selected action distribution only, a **fixed-payoff arithmetic identity** gives a **zero-added-stress** break-even correct-sale share of \`6.480467/(6.480467+1.242535) = 83.9112%\`, and at +50bp \`(6.480467 + 0.488243)/(6.480467+1.242535) = 90.2332%\`. The sample's observed hindsight 26/29 **89.6552%** falls above the first hurdle but below the stressed one. These are descriptive identities, NOT ex-ante calibrated thresholds, future precision estimates, or claims about any individual SOXX exit.
+
+Equivalently, the existing modelled \`+12.8645 pp\` total gain before additional stress divided by 29 elected sales leaves only \`0.443603 pp\` of adverse-extra-cost budget per sale. Dividing that by the V24 implied sale exposure product \`0.97648648\` and converting pp to bps gives a **retroactive zero-utility crossing around +45.43 bp** of extra adverse sell cost, assuming the source's linear penalty and unchanged hypothetical fills. This interpolates existing 25bp and 50bp stress, **not an executable break-even spread, a validated fill, a new optimized slippage tolerance or evidence that any provider quotes were marketable**. It is not a trading parameter; selecting an allowed adverse-cost limit from this previously inspected curve would repeat post-outcome fitting.
+
+**Sharper research conclusion:** the **selected-policy payoff composition**, not only the perfect-hindsight forced pool, must enter the prospective loss-avoidance objective. A 26/29 hindsight-selected economic hit ratio still could not withstand +50bp added modelled exit cost. This arithmetic reconciles the V23 sums to V24's +0.141368 pp original-cohort result without repeating the old experiment. New independent SOXX time/regime decisions and marketability/no-fill evidence remain mandatory.
+
+**Concentration diagnostic, not a leave-out optimization:** the same already-published V24 all-assets, 30m, delay-1, 0bp aggregate reports a single worst harmful intervention **−7.95541 pp**. That magnitude equals **40.92%** of the selected policy's total **19.4414 pp** surrendered continuation value and **61.84%** of its pre-stress **12.8645 pp** net aggregate advantage. These are fixed historical contributions, not independent draws; no trade was removed, no threshold tuned, and this is not a claim that a particular upcoming SOXX sale will behave similarly. A tail-aware hold-versus-sale decision must account for exactly this downside asymmetry.

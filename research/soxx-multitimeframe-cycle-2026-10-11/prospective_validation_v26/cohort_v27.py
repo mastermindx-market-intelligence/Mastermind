@@ -185,13 +185,17 @@ def evaluate_frozen_grid(
         by_arm[key] = {r.episode: r for r in rows}
         for r in rows:
             meta = by_id[r.episode]
-            if r.state != "UNRESOLVED":
+            # An unknown discretionary sale can coexist with an already-known
+            # baseline return. That known baseline must be mature and identical
+            # across ALL arms; "UNRESOLVED" cannot launder future or conflicting
+            # baseline information into a supposedly matched original cohort.
+            if r.state != "UNRESOLVED" or r.baseline_pp is not None:
                 if meta.outcome_known_at is None or meta.outcome_known_at > evaluation_at:
-                    raise ValueError("resolved paired return has no mature owner evidence")
-                if r.baseline_pp is not None:
-                    prev = baselines.setdefault(r.episode, r.baseline_pp)
-                    if prev != r.baseline_pp:
-                        raise ValueError("different baseline return across matched arms")
+                    raise ValueError("known paired/baseline return has no mature owner evidence")
+            if r.baseline_pp is not None:
+                prev = baselines.setdefault(r.episode, r.baseline_pp)
+                if prev != r.baseline_pp:
+                    raise ValueError("different baseline return across matched arms")
 
     # No exchange-hour arithmetic or independent-trial fiction: these are the
     # actual upstream-reported exposure intervals, with overlap diagnoses only.
