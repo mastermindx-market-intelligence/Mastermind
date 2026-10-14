@@ -50,7 +50,7 @@ def test_empty_placements_still_reserve_serial_scope_before_admission(tmp_path, 
                 assert unbound.value.code == "root_unbound"
                 # Even an inherited operation context cannot transfer ownership
                 # to a competing asyncio task before admission.
-                with pytest.raises(StateConflict, match="original foreground"):
+                with pytest.raises(StateConflict, match="live original request owner"):
                     await asyncio.create_task(s._run_coo_cycle("not-yet-admitted"))
                 assert not s.runtime.jobs.list_jobs()
                 assert not s._coo_cycle_lock.locked()
