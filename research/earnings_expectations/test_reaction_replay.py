@@ -185,3 +185,21 @@ def test_no_first_public_clock_classification_refuses():
     with pytest.raises(ReplayError) as e:
         replay(p)
     assert e.value.reason == "FIRST_PUBLIC_RELEASE_CLOCK_NOT_VERIFIED"
+
+
+def test_sec_casebook_nine_real_filing_clocks_remain_unadmitted():
+    import json
+    from pathlib import Path
+    casebook = json.loads((Path(__file__).parent / "sec_acceptance_2026.json").read_text())
+    rows = casebook["events"]
+    assert casebook["first_public_release_clocks_verified"] == 0
+    assert len(rows) == 9
+    assert len({r["sec_accession"] for r in rows}) == 9
+    assert all(r["first_publication_utc"] is None and r["first_publication_clock_status"] == "SEC_ACCEPTANCE_ONLY" for r in rows)
+    assert all(r["sec_index_url"].startswith("https://www.sec.gov/Archives/edgar/") for r in rows)
+    for row in rows:
+        p = make_packet()
+        p["event"]["first_publication_clock_status"] = row["first_publication_clock_status"]
+        with pytest.raises(ReplayError) as exc:
+            replay(p)
+        assert exc.value.reason == "FIRST_PUBLIC_RELEASE_CLOCK_NOT_VERIFIED"
