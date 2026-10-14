@@ -328,7 +328,7 @@ def test_root_scripts_are_syntax_valid_and_service_control_is_fixed_scope() -> N
         assert completed.returncode == 0, f"{script.name}: {completed.stderr}"
 
     lifecycle = (OPS / "service-control.sh").read_text(encoding="utf-8")
-    assert "{start|stop|restart|restart-gateway|start-readside|stop-readside|start-agent-relay|stop-agent-relay|status-agent-relay|status}" in lifecycle
+    assert "{start|stop|restart|restart-gateway|start-finite|stop-finite|status-finite|start-readside|stop-readside|start-agent-relay|stop-agent-relay|status-agent-relay|status}" in lifecycle
     assert "com.mastermind.executive.control" in lifecycle
     assert "com.mastermind.executive.worker.codex" in lifecycle
     assert "--label" not in lifecycle and "eval " not in lifecycle
@@ -379,9 +379,16 @@ def test_control_canary_uses_post_drop_wrapper_not_launchd_environment() -> None
     )
     assert "os.execve" in wrapper
     assert "exact_mode=0o440" in wrapper
-    assert wrapper.index("attest_current_service_environment(") < wrapper.index(
-        "service_main("
-    )
+    # Check calls in the actual post-exec entry, not a former service alias
+    # or an earlier function definition. Behavioral order is also exercised
+    # by test_installed_finite_control.py.
+    import ast
+    tree = ast.parse(wrapper)
+    entry = next(node for node in tree.body
+                 if isinstance(node, ast.FunctionDef) and node.name == "_post_exec_main")
+    calls = {node.func.id: node.lineno for node in ast.walk(entry)
+             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)}
+    assert calls["attest_current_service_environment"] < calls["serve_installed_control"]
     assert '"PYTHONDONTWRITEBYTECODE": "1"' in wrapper
     assert "KERN_PROCARGS2" in probe
     assert '"/bin/launchctl", "print"' in probe

@@ -21,8 +21,16 @@ SHA='a'*40
 
 
 @pytest.fixture
-def qualified_host(monkeypatch):
+def qualified_host(monkeypatch, tmp_path):
     calls=[]
+    # A host observation fixture supplies an actual image on every test OS.
+    # Production still resolves its fixed configured interpreter strictly.
+    image = tmp_path / "python-image"
+    image.write_bytes(b"fixture interpreter; never executed")
+    image.chmod(0o555)
+    interpreter = tmp_path / "python3"
+    interpreter.symlink_to(image)
+    monkeypatch.setattr(lifecycle, "PYTHON", str(interpreter))
     runtime=Path('/private/var/db/mastermind-executive')
     primary={'worker_id':'codex-01','worker_user':'_mastermind_worker','worker_uid':451,
              'worker_gid':451,'operator_harness_armed':False,'provider_home':str(runtime/'workers/codex-01/provider-home'),'control_uid':450}
@@ -90,6 +98,7 @@ def test_production_qualifier_consumes_actual_canonical_renderer_and_all_quiesce
     value=host.qualify()
     assert value['artifact_sha256']=={name:lifecycle.digest(raw) for name,raw in artifacts.items()}
     assert value['gateway']=={'state':'running','pid':123}
+    assert value['python_image'] == str(Path(lifecycle.PYTHON).resolve(strict=True))
     assert calls==['installed','no-transaction','stopped','primary-quiescent','credential-disarmed','disarmed','runtime-idle']
 
 
@@ -132,3 +141,10 @@ def test_all_six_arm_fields_require_explicit_boolean_false_before_effect(qualifi
     monkeypatch.setattr(lifecycle,'protected_bytes',lambda *a,**kw:pytest.fail('must refuse before artifact reads'))
     with pytest.raises(lifecycle.LifecycleError,match='configs_not_wholly_disarmed'):host.qualify()
     assert 'runtime-idle' not in calls
+
+
+def test_production_qualifier_refuses_missing_configured_interpreter(qualified_host):
+    host, _, _, _ = qualified_host
+    Path(lifecycle.PYTHON).unlink()
+    with pytest.raises(FileNotFoundError):
+        host.qualify()
