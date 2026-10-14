@@ -1752,8 +1752,8 @@ def _service_from_config(
                 raise FabricActivationRefused(
                     "A dedicated-worker canary does not qualify shared Fabric execution"
                 )
-            from control_plane.codex_worker import validate_secret_canary_verdict
-            validate_secret_canary_verdict(initial_canary, require_passed=True)
+            from control_plane.executive_canary import validate_initial_secret_canary_verdict
+            validate_initial_secret_canary_verdict(initial_canary)
         if any((binding.worker_uid, binding.worker_gid) !=
                (raw.get("worker_uid"), raw.get("worker_gid"))
                for binding in fabric_worker_binding_source.bindings):
