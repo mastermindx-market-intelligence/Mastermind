@@ -1,0 +1,19 @@
+def _front_of_queue(
+    self, conn: sqlite3.Connection, pool: str, orch: str, task_class: str,
+    job_class: Optional[str] = None,
+) -> bool:
+    """True if this orch may take the next slot (priority + oldest-first)."""
+    waiters = self._waiters(conn, pool)
+    if not waiters:
+        return True
+    my_p = _class_priority(task_class, job_class)
+    # higher-priority (lower number) waiter from someone else blocks us
+    for w in waiters:
+        if w["orchestrator_id"] == orch:
+            return True
+        if int(w["priority"]) < my_p:
+            return False
+        if int(w["priority"]) == my_p:
+            # oldest at this class: if it's us, ok; if someone else, wait
+            return w["orchestrator_id"] == orch
+    return True
