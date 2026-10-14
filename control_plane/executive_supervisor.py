@@ -1199,14 +1199,20 @@ class ExecutiveSupervisor:
         ] | None = None,
         subscription_canary_binding_id: str | None = None,
         product_acceptance_macro_root: str | Path | None = None,
+        product_acceptance_context_owner: Any | None = None,
     ) -> None:
         self.runtime = runtime
         self._product_acceptance_review_owner = None
+        if product_acceptance_context_owner is not None and product_acceptance_macro_root is None:
+            raise SupervisorError("installed acceptance Context requires its source root")
         if product_acceptance_macro_root is not None:
             from control_plane.agentos_product_acceptance_basis import AgentOsProductAcceptanceBasisReader
             from control_plane.product_acceptance_review_owner import ProductAcceptanceReviewBasisOwner
             self._product_acceptance_review_owner = ProductAcceptanceReviewBasisOwner(
-                runtime, AgentOsProductAcceptanceBasisReader(macro_root=Path(product_acceptance_macro_root))
+                runtime, AgentOsProductAcceptanceBasisReader(
+                    macro_root=Path(product_acceptance_macro_root),
+                    installed_context_owner=product_acceptance_context_owner,
+                )
             )
         if type(cleanup_policy) is not CleanupPolicy:
             raise SupervisorError("cleanup policy requires a typed trusted composition")

@@ -1929,6 +1929,22 @@ def _service_from_config(
             raise ServiceError("proof capacity has no recovery controller")
         return controller.expected_worker_uid(attempt)
 
+    # The existing R2 selection carries original-intent review on every actual
+    # worker owner. Freeze the host-owned source before constructing a supervisor;
+    # no worker/model can choose or rotate a Macro root through its request.
+    product_acceptance_macro_root = None
+    product_acceptance_context_owner = None
+    if raw.get("coo_principal_dialogue_armed", False) is True:
+        from ops.executive_os.coo_principal_host import CooInstalledSource, validate_control_coo
+        try:
+            if (not validate_control_coo(raw)
+                    or not _CEO_INGRESS_APP_CONFIG_KEYS <= set(raw)
+                    or type(coo_source) is not CooInstalledSource):
+                raise ValueError("incomplete principal binding")
+        except ValueError:
+            raise ServiceError("product acceptance review requires the sealed COO and complete App binding") from None
+        product_acceptance_macro_root = Path(raw["ceo_ingress_app_macro_root"])
+
     def supervisor_factory(runtime):
         def validations(spec):
             job = runtime.jobs.get_job(spec.job_id)
@@ -2006,6 +2022,8 @@ def _service_from_config(
             ),
             subscription_canary_claim_provider=claim_provider,
             subscription_canary_binding_id=claim_binding_id,
+            product_acceptance_macro_root=product_acceptance_macro_root,
+            product_acceptance_context_owner=product_acceptance_context_owner,
         )
         if fabric_worker_binding_source is None:
             return primary
@@ -2039,6 +2057,8 @@ def _service_from_config(
                 secret_canary_verdict={}, require_complete_launch_attestation=True,
                 cleanup_policy=CleanupPolicy.FABRIC_PROCESS_GROUP,
                 process_controller=fabric_adapter, instance_id=primary.instance_id,
+                product_acceptance_macro_root=product_acceptance_macro_root,
+                product_acceptance_context_owner=product_acceptance_context_owner,
             )
         mixed = MixedExecutionOwnerSupervisor(primary, owners)
         recovery_controller["owners"] = mixed.owners
@@ -2242,6 +2262,8 @@ def _service_from_config(
                     Path(raw["ceo_ingress_app_boot_python"])),
                 expected_source_sha=str(raw["proof_base_sha"]),
             )
+            if product_acceptance_macro_root is not None:
+                product_acceptance_context_owner = packet_collector
             compose_inputs = build_workspace_composer(
                 packet_collector=packet_collector,
                 repo_root=Path(raw["proof_source_repository"]),
@@ -2286,9 +2308,13 @@ def _service_from_config(
                     # Control service and opens no Relay-only observation socket.
                     service._namespace_custody.bound_runtime(runtime)
                     authority = coo_factory(runtime)
+                    from control_plane.agentos_product_acceptance_basis import AgentOsProductAcceptanceBasisReader
                     return PrincipalDialogueAppReceiver(runtime, authority,
                         _CANONICAL_AGENT_RELAY_SOCKET,
-                        HostLocalDialogueObservationReader(service, runtime))
+                        HostLocalDialogueObservationReader(service, runtime),
+                        product_acceptance_reader=AgentOsProductAcceptanceBasisReader(
+                            macro_root=product_acceptance_macro_root,
+                            installed_context_owner=product_acceptance_context_owner))
 
                 coo_factories["principal_dialogue_provider_factory"] = principal_dialogue_factory
         session_factories = {}

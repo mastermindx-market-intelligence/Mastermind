@@ -257,7 +257,11 @@ def test_acquisition_derives_exact_inputs_and_refuses_drift(tmp_path, monkeypatc
                     arguments = framed.arguments
                 result = receiver_result if receiver_result is not None else await host.gateway.call("ruling", arguments)
                 events = runtime.events.list_events(aggregate_type=PRINCIPAL_RUNTIME_AGGREGATE_TYPE)
-                assert calls == [parent, parent]
+                # Revocation is now rejected by the current receiving/principal
+                # binding before a second source read or COMMIT is attempted.
+                assert calls == ([parent] if change in {
+                    "host_revoked", "host_request_revoked"
+                } else [parent, parent])
                 if change in {"host_rule", "host_ack", "host_framed_rule", "host_app_receiver", "host_app_receiver_local"} or change.startswith("host_recovery_"):
                     assert result["ok"] is True, result
                     assert len(events) == slack.post_call_count == 1
@@ -341,7 +345,9 @@ def test_acquisition_derives_exact_inputs_and_refuses_drift(tmp_path, monkeypatc
                         assert slack.post_call_count == 1
                 else:
                     assert result["ok"] is False, result
-                    assert result["error"]["code"] == "EFFECT_FENCE_UNAVAILABLE"
+                    assert result["error"]["code"] == ("BINDING_UNAVAILABLE" if change in {
+                        "host_revoked", "host_request_revoked"
+                    } else "EFFECT_FENCE_UNAVAILABLE")
                     assert events == [] and slack.post_call_count == 0
                 assert slack.parent_post_call_count == 0
                 return
