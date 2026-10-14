@@ -184,7 +184,7 @@
              )
              if flat:
                  per_account = [{
-@@ -698,7 +760,9 @@
+@@ -698,7 +760,32 @@
                  }]
          else:
              # W4-G9 multi-account path.
@@ -192,6 +192,29 @@
 +            per_account = glm_accounts_state(
 +                now_ts=now, cache_path=cache_path, allow_remote=allow_remote,
 +            )
++
++    if not allow_remote and per_account:
++        # Advisory cache-only ranking must not infer *all* GLM accounts are
++        # exhausted from a single observed account. Missing/expired/future
++        # entries, incomplete windows, and malformed percentages mean the
++        # pool-wide status is UNKNOWN, never provider-authoritative SPILL or
++        # PARKED. The normal explicit quota reader stays unchanged.
++        def _complete_observed_account(entry: Dict[str, Any]) -> bool:
++            if entry.get("source") != "PROVIDER_AUTHORITATIVE":
++                return False
++            states = entry.get("states") or []
++            for window in ("5h", "weekly"):
++                state = next((s for s in states if s.window == window), None)
++                if state is None:
++                    return False
++                remaining = _num(state.remaining_pct)
++                if remaining is None or not 0.0 <= remaining <= 100.0:
++                    return False
++            return True
++        if not all(_complete_observed_account(entry) for entry in per_account):
++            # Reuse the existing UNKNOWN/local-estimate behavior. Never turn
++            # partial quota knowledge into a synthetic provider authority.
++            per_account = []
  
      if not per_account or all(not entry.get("states") for entry in per_account):
          if local_estimate is None and fallback_reader is not None:
@@ -575,3 +598,84 @@
 +    assert [(v['name'],v['source']) for v in rows]==[
 +        ('a','UNKNOWN'),('b','PROVIDER_AUTHORITATIVE')]
 +    assert not rows[0]['states'] and len(rows[1]['states'])==1
+--- /dev/null
++++ b/ext/tests/test_advisory_glm_partial_unknown_v4.py
+@@ -0,0 +1,78 @@
++"""Advisory GLM pool-wide exhaustion requires ALL accounts to be known.
++
++Tests are synthetic cache reads; no live provider call, broker grant, task
++dispatch, cache publication, or mutable host source.
++"""
++from dataclasses import asdict
++from datetime import datetime,timedelta,timezone
++from pathlib import Path
++import json
++import pytest
++import quota_remote as qr
++
++NOW=datetime(2026,10,13,19,0,tzinfo=timezone.utc)
++TS=NOW.timestamp()
++REAL_DECISION=qr.glm_quota_decision
++
++def entry(window,rem,shift=0):
++    return asdict(qr.ProviderQuotaState(
++      provider='glm',window=window,
++      used=(None if rem is None else 100.0-rem),cap=100.0,remaining_pct=rem,
++      reset_at=(NOW+timedelta(hours=2)).isoformat().replace('+00:00','Z'),
++      source='PROVIDER_AUTHORITATIVE',
++      observed_at=(NOW+timedelta(seconds=shift)).isoformat().replace('+00:00','Z'),
++      confidence=1.0,detail='synthetic-no-network'))
++
++def rows(kind):
++    full=[entry('5h',2.0),entry('weekly',2.0)]
++    other={
++       'missing':[],
++       'stale':[entry('5h',2.0,-901),entry('weekly',2.0,-901)],
++       'future':[entry('5h',2.0,21),entry('weekly',2.0,21)],
++       'missing5h':[entry('weekly',2.0)],
++       'missing_weekly':[entry('5h',2.0)],
++       'unknown5h':[entry('5h',None),entry('weekly',2.0)],
++       'all_exhausted':full,
++       'has_spare':[entry('5h',90.0),entry('weekly',90.0)]
++    }[kind]
++    return full,other
++
++@pytest.mark.parametrize('kind',[
++ 'missing','stale','future','missing5h','missing_weekly','unknown5h'
++])
++def test_partial_glm_observation_is_unknown_not_authoritative(monkeypatch,tmp_path,kind):
++    full,other=rows(kind)
++    p=tmp_path/'quota.json'
++    doc={'glm':{'accounts':{
++      'a':{'refreshed_at':TS-1,'states':full},
++      'b':{'refreshed_at':TS-1,'states':other},
++    }}}
++    p.write_text(json.dumps(doc))
++    original=p.read_bytes()
++    def no_network(*args,**kwargs):raise AssertionError('UNEXPECTED_EXTERNAL_QUOTA_EFFECT')
++    monkeypatch.setattr(qr,'_atomic_write',no_network)
++    monkeypatch.setattr(qr,'_live_glm',no_network)
++    monkeypatch.setattr(qr,'_glm_accounts_dict',lambda:{
++      'a':{'api_key':'synthetic'},'b':{'api_key':'synthetic'}})
++    monkeypatch.setattr(qr,'glm_quota_decision',REAL_DECISION)
++    d=qr.glm_quota_decision(now_ts=TS,cache_path=str(p),allow_remote=False)
++    assert d['source'] == 'UNKNOWN',f"cannot assert account-wide exhaustion from partial observations: {kind}, {d['state']}"
++    assert d['state'] == 'UNKNOWN'
++    assert p.read_bytes()==original
++
++@pytest.mark.parametrize('kind,expected',[
++ ('all_exhausted','PARKED'),('has_spare','OK')
++])
++def test_wholly_observed_glm_pool_keeps_true_decision(monkeypatch,tmp_path,kind,expected):
++    full,other=rows(kind)
++    p=tmp_path/'quota.json'
++    p.write_text(json.dumps({'glm':{'accounts':{
++      'a':{'refreshed_at':TS-1,'states':full},
++      'b':{'refreshed_at':TS-1,'states':other}
++    }}}))
++    monkeypatch.setattr(qr,'_glm_accounts_dict',lambda:{
++      'a':{'api_key':'synthetic'},'b':{'api_key':'synthetic'}})
++    monkeypatch.setattr(qr,'glm_quota_decision',REAL_DECISION)
++    d=qr.glm_quota_decision(now_ts=TS,cache_path=str(p),allow_remote=False)
++    assert d['source']=='PROVIDER_AUTHORITATIVE'
++    assert d['state']==expected
