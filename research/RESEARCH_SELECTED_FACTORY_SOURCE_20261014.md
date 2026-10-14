@@ -14,8 +14,8 @@ and explicitly prepares the selected generation before constructing HTTP routes.
 Invalid preparation refuses; it cannot fall back to the ordinary reader. Macro's
 guarded result is translated by field name to the MCP envelope, preserving identity
 and final delivery checks. Readiness checks the prepared selection without a new
-census. Refresh is an explicit owner action; no new schedule or request-side
-preparation is introduced.
+census. The application lifecycle owns refresh; requests and readiness do not
+start preparation.
 
 The input ceilings preserve the current resource proposal: maximum source age3600s,
 reuse300s, corpus192MiB and aggregate image admission768MiB. Defaults remain32MiB
@@ -63,11 +63,23 @@ The factory also rejects a pinned provider without refresh support before store
 construction. A causal test reached the store on the earlier source and now
 refuses cleanly.
 
-Validation accounts for 564 distinct MCP tests: 562 initial broad-run passes,
-one environment-corrected Uvicorn child-import test, and the new capability test.
-The final 22 factory/lifecycle tests pass. The actual Macro-source synthetic HTTP
-probe covers expired selection refusal with zero source reads, automatic full
-requalification, restored search through one store/service, and drained shutdown.
-Its source overlay and synthetic authority are not production release proof.
-Independent lifecycle review remains on its original retained operation; no
-review acceptance or runtime installation is claimed.
+Validation accounts for 566 distinct MCP tests: 562 initial broad-run passes,
+one environment-corrected Uvicorn child-import test, the new capability test,
+and two review-driven ASGI shutdown cases. All 63 affected factory, lifecycle
+and transport tests pass in the qualified Python3.12 environment after repair.
+The same eight lifecycle tests also pass on Python3.14.
+
+The independent lifecycle review identified a worker-only cancellation being
+reported as application shutdown failure. The repair distinguishes cancellation
+of the shutdown task from cancellation of its child and still drains a started
+refresh. Both a normal parent and one with an earlier handled cancellation now
+emit ASGI shutdown.complete. Repeated enclosing-task cancellation still propagates
+after the work settles. The retained review is accepted after root adjudication;
+the later repair postimage is root-verified, not independently re-reviewed.
+
+The actual committed Macro48ca6a63f12cf341b02ada4f66a69d6c31fbc57c and
+Mastermind2f5a1fcf97e1af3f0d1ab013cdc411c0321fd6d7 synthetic HTTP probe passes
+expired-selection refusal with zero source reads, automatic full requalification,
+restored search through one store/service, and drained shutdown. It precedes the
+shutdown-reporting repair; its source archive and synthetic authority do not
+prove runtime installation, writer admission or client acceptance.

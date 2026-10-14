@@ -57,13 +57,19 @@ class SelectedRefreshLifecycle:
         finally:
             stop.set()
             cancelled = False
+            shutdown_task = asyncio.current_task()
+            pending_cancellations = shutdown_task.cancelling()
             try:
                 while not task.done():
                     try:
                         await asyncio.shield(task)
                     except asyncio.CancelledError:
-                        cancelled = True
-                task.result()
+                        # Shield also raises when only its child ends cancelled.
+                        # Preserve actual new cancellation of this shutdown even
+                        # if it arrives in the same turn as child completion.
+                        cancelled = cancelled or shutdown_task.cancelling() > pending_cancellations
+                if not task.cancelled():
+                    task.result()
             finally:
                 self._task = None
             if cancelled:
