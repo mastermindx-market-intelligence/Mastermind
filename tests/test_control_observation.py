@@ -375,3 +375,118 @@ def test_recovered_rollback_requires_prior_current_projection_before_live_proof(
     def absent(*args): raise owner.TransactionEffectUnknown()
     monkeypatch.setattr(publisher,'publish_for_transaction',absent)
     with pytest.raises(owner.TransactionEffectUnknown): publisher.verify_ceo_rollback_readback(host,tx,None)
+
+
+@pytest.fixture
+def publication_custody(monkeypatch):
+    """Real snapshot/publish logic; only trusted I/O is an inert fixture."""
+    raw = control()
+    parent = str(Path(c.OBSERVATION_PATH).parent)
+    ancestors = (('/', (7, 2, 0o40755, 0, 0, 20, 10, 11, 12)),
+                 (parent, (7, 3, 0o40755, 0, 0, 2, 10, 11, 12)))
+    state = dict(raw=raw, identity=identity(raw), ancestors=ancestors,
+                 sealed=None, writes=0, mutate=lambda: None)
+    monkeypatch.setattr(peer, '_observe_ancestors',
+                        lambda path, budget: state['ancestors'])
+    def read(path, **kwargs):
+        assert path == c.CONTROL_PATH
+        assert kwargs['expected_mode'] == 0o440
+        assert kwargs['expected_gid'] == c.CONTROL_UID
+        result = state['raw'], stat_value(state['identity'])
+        state.get('during_read', lambda: None)()
+        return result
+    monkeypatch.setattr(peer, '_read_trusted_bytes', read)
+    monkeypatch.setattr(publisher, '_retained', lambda: state['sealed'])
+    def write(path, value, **kwargs):
+        assert str(path) == c.OBSERVATION_PATH
+        assert kwargs == dict(mode=0o444, uid=0, gid=0,
+                              replace=state['sealed'] is not None)
+        state['writes'] += 1
+        state['sealed'] = value
+        state['mutate']()
+    monkeypatch.setattr(owner, '_atomic_file', write)
+    def change_ancestor(ancestor, index, delta=1):
+        changed = list(state['ancestors'])
+        path, values = changed[ancestor]
+        values = list(values); values[index] += delta
+        changed[ancestor] = path, tuple(values)
+        state['ancestors'] = tuple(changed)
+    state['change_ancestor'] = change_ancestor
+    return state
+
+
+@pytest.mark.parametrize('delta', [0, 1])
+def test_first_receipt_creation_accepts_its_own_directory_entry(publication_custody, delta):
+    state = publication_custody
+    def publish_changes():
+        for index in (5, 6, 7, 8):
+            state['change_ancestor'](1, index, delta if index == 5 else 1)
+    state['mutate'] = publish_changes
+    digest = publisher._publish(SHA, allow_publication=True)
+    assert digest == hashlib.sha256(state['sealed']).hexdigest()
+    assert state['writes'] == 1
+    assert publisher._publish(SHA, allow_publication=False) == digest
+    assert state['writes'] == 1
+
+
+@pytest.mark.parametrize('ancestor,index',
+    [(ancestor, index) for ancestor in (0, 1) for index in range(5)] + [(0, 5)])
+def test_publication_still_rejects_directory_custody_drift(publication_custody, ancestor, index):
+    state = publication_custody
+    state['mutate'] = lambda: state['change_ancestor'](ancestor, index)
+    with pytest.raises(owner.TransactionEffectUnknown):
+        publisher._publish(SHA, allow_publication=True)
+    assert state['writes'] == 1
+
+
+@pytest.mark.parametrize('old,delta', [(None, -1), (None, 2), (b'stale', 1)])
+def test_only_one_new_entry_for_first_publication_is_permitted(publication_custody, old, delta):
+    state = publication_custody; state['sealed'] = old
+    state['mutate'] = lambda: state['change_ancestor'](1, 5, delta)
+    with pytest.raises(owner.TransactionEffectUnknown):
+        publisher._publish(SHA, allow_publication=True)
+    assert state['writes'] == 1
+
+
+@pytest.mark.parametrize('index', range(9))
+def test_full_directory_identity_join_is_retained_during_read(publication_custody, index):
+    state = publication_custody
+    state['during_read'] = lambda: state['change_ancestor'](1, index)
+    with pytest.raises(c.ControlObservationError, match='publisher_ancestor_changed'):
+        publisher._publish(SHA, allow_publication=True)
+    assert state['writes'] == 0
+
+
+@pytest.mark.parametrize('index', range(9))
+def test_control_regular_file_identity_is_never_normalized(publication_custody, index):
+    state = publication_custody
+    def change_control():
+        values = list(state['identity']); values[index] += 1
+        state['identity'] = tuple(values)
+    state['mutate'] = change_control
+    with pytest.raises((owner.TransactionEffectUnknown, c.ControlObservationError)):
+        publisher._publish(SHA, allow_publication=True)
+    assert state['writes'] == 1
+
+
+def test_no_write_reconciliation_rejects_ancestor_drift(publication_custody, monkeypatch):
+    state = publication_custody
+    state['sealed'] = c.encode_observation(state['raw'], state['identity'], SHA)
+    def retained():
+        state['change_ancestor'](1, 5)
+        return state['sealed']
+    monkeypatch.setattr(publisher, '_retained', retained)
+    with pytest.raises(owner.TransactionEffectUnknown):
+        publisher._publish(SHA, allow_publication=False)
+    assert state['writes'] == 0
+
+
+def test_exact_receipt_is_still_required_after_directory_creation(publication_custody):
+    state = publication_custody
+    def lose_receipt():
+        state['change_ancestor'](1, 5)
+        state['sealed'] = None
+    state['mutate'] = lose_receipt
+    with pytest.raises(owner.TransactionEffectUnknown):
+        publisher._publish(SHA, allow_publication=True)
+    assert state['writes'] == 1
