@@ -715,10 +715,13 @@ def test_sdk_and_runtime_dependency_boundaries_are_exact():
     assert control_plane_imports == {
         "control_plane.executive_runtime",
         "control_plane.coo_principal_envelope",
+        "control_plane.principal_dialogue_obligation",
     }
     # The receiving authority guard requires this exact canonical value type.
     # Permit no envelope builder or other control-plane capability at the host
     # composition seam; a module-only allowlist would hide that expansion.
+    # Original-response recovery may read its canonical original Wake anchor;
+    # it gains no builder, fresh acquisition, retry or mutation capability.
     host_tree = ast.parse(
         (root / "integrations" / "mastermind_company_principal_runtime_fence.py")
         .read_text(encoding="utf-8")
@@ -733,6 +736,7 @@ def test_sdk_and_runtime_dependency_boundaries_are_exact():
     assert control_plane_symbols == {
         ("control_plane.executive_runtime", "Runtime"),
         ("control_plane.coo_principal_envelope", "PrincipalAdmissionContext"),
+        ("control_plane.principal_dialogue_obligation", "read_original_principal_dialogue_obligation"),
     }
     assert not any(
         alias.name in control_plane_imports
