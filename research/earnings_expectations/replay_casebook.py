@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal as D
 import json
 from pathlib import Path
@@ -33,6 +33,7 @@ def build_report(folder: Path = PACKETS, guidance_path: Path = GUIDANCE, media_p
             raise ValueError('UNEXPECTED_REPLAY_AUTHORITY')
         start = outcome.get('unaffected_last_close_session')
         end = outcome.get('first_affected_session')
+        closing_clock = next((ses['close_utc'] for ses in packet['sessions'] if ses['date'] == start), None)
         ret = outcome['reaction'].get('returns') if status == 'AVAILABLE' else None
         entries.append({
             'event_ref': outcome['event_ref'],
@@ -40,6 +41,7 @@ def build_report(folder: Path = PACKETS, guidance_path: Path = GUIDANCE, media_p
             'fiscal_target': outcome['fiscal_target'],
             'packet_ref': path.name,
             'unaffected_last_close_session': start,
+            'unaffected_last_close_utc': closing_clock,
             'first_affected_close_session': end,
             'market_ticker': packet['price_series']['market'].get('ticker'),
             'sector_ticker': packet['price_series']['sector'].get('ticker'),
@@ -125,6 +127,20 @@ def build_report(folder: Path = PACKETS, guidance_path: Path = GUIDANCE, media_p
                     or obs['issuer_ref'] != event['issuer_ref']
                     or obs['fiscal_target'] != event['fiscal_target']):
                 raise ValueError('MEDIA_WITNESS_EVENT_IDENTITY_MISMATCH')
+            source_url = obs.get('article_source_url')
+            if not isinstance(source_url, str) or not source_url.startswith('https://'):
+                raise ValueError('MEDIA_WITNESS_SOURCE_URL_REQUIRED')
+            article_time = obs.get('article_first_reported_utc')
+            if not isinstance(article_time, str) or not article_time.endswith('Z'):
+                raise ValueError('MEDIA_WITNESS_UTC_REQUIRED')
+            try:
+                published = datetime.fromisoformat(article_time.replace('Z', '+00:00'))
+                close_utc = datetime.fromisoformat(event['unaffected_last_close_utc'].replace('Z', '+00:00'))
+            except (ValueError, TypeError, AttributeError) as exc:
+                raise ValueError('MEDIA_WITNESS_CLOCK_MALFORMED') from exc
+            if (published.tzinfo is None or published.utcoffset() != timezone.utc.utcoffset(published)
+                    or published <= close_utc):
+                raise ValueError('MEDIA_WITNESS_NOT_AFTER_REGULAR_CLOSE')
             expected = D(str(obs['expected_yoy_growth_pct']))
             actual = D(str(obs['actual_yoy_growth_pct']))
             if not (-100 < expected < 1000 and -100 < actual < 1000):
