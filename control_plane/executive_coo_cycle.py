@@ -155,10 +155,18 @@ def _classify_invalid(exc: Exception) -> str:
 class CooCycle:
     """Choose and commit the first eligible mutation for one explicit root."""
 
-    def __init__(self, runtime: Runtime, *, dispatcher: Dispatch | None = None) -> None:
+    def __init__(self, runtime: Runtime, *, dispatcher: Dispatch | None = None,
+                 before_admission: Callable[[str], None] | None = None) -> None:
         self.runtime = runtime
+        if before_admission is not None and not callable(before_admission):
+            raise TypeError("before_admission must be a trusted callable")
+        self._before_admission = before_admission
         self._uses_inert_dispatcher = dispatcher is None
         self.dispatcher = dispatcher or self._dispatch_unavailable
+
+    def _require_fresh_admission(self, root_id):
+        if self._before_admission is not None:
+            self._before_admission(root_id)
 
     @staticmethod
     def _dispatch_unavailable(
@@ -444,6 +452,7 @@ class CooCycle:
             f"coo-cycle:{root_id}:dispatch:{selected.job_id}:attempt:"
             f"{selected.attempt_count + 1}"
         )
+        self._require_fresh_admission(root_id)
         try:
             receipt = self.dispatcher(selected.job_id, command)
         except Exception as exc:
@@ -1094,6 +1103,7 @@ class CooCycle:
                 selected.job_id,
                 expected_attempt_id=str(selected.current_attempt_id),
             )
+            self._require_fresh_admission(root_id)
             try:
                 committed = self.runtime.jobs.commit_coo_retry_decision(
                     root_id,
@@ -1277,6 +1287,7 @@ class CooCycle:
             if kind == "replace_review":
                 target = str(data["target"])
                 command = f"coo-cycle:{root_id}:create-review:{target}:{int(data['ordinal'])}"
+                self._require_fresh_admission(root_id)
                 try:
                     receipt = self.runtime.jobs.create_cycle_review(
                         root_id, target, command_id=command
@@ -1293,6 +1304,7 @@ class CooCycle:
                     f"coo-cycle:{root_id}:create-repair:{target}:{selected.job_id}:"
                     f"{data['review_result_digest']}:{next_round}"
                 )
+                self._require_fresh_admission(root_id)
                 try:
                     receipt = self.runtime.jobs.create_cycle_repair(
                         root_id, target, selected.job_id, command_id=command
@@ -1346,6 +1358,7 @@ class CooCycle:
                     f"coo-cycle:{root_id}:create-work:{step_id}:"
                     f"{manifest['dependency_manifest_digest']}"
                 )
+                self._require_fresh_admission(root_id)
                 try:
                     job = self.runtime.jobs.create_cycle_work(
                         root_id,
@@ -1363,6 +1376,7 @@ class CooCycle:
 
         # 5. Create exactly the sole planner.
         if not children and not admission_events:
+            self._require_fresh_admission(root_id)
             try:
                 planner = self.runtime.jobs.create_cycle_planner(
                     root_id,
@@ -1468,6 +1482,7 @@ class CooCycle:
             planner = planners[0]
             if planner.status == JobStatus.COMPLETED and planner.current_attempt_id:
                 command = f"coo-cycle:{root_id}:admit-plan:{planner.current_attempt_id}"
+                self._require_fresh_admission(root_id)
                 try:
                     members = self.runtime.jobs.admit_cycle_plan(root_id, command_id=command)
                 except StateConflict as exc:
@@ -1495,6 +1510,7 @@ class CooCycle:
             if missing:
                 target = sorted(missing, key=lambda job: _job_sort_key(job, ordinals))[0]
                 command = f"coo-cycle:{root_id}:create-review:{target.job_id}:1"
+                self._require_fresh_admission(root_id)
                 review = self.runtime.jobs.create_cycle_review(
                     root_id, target.job_id, command_id=command
                 )
@@ -1520,6 +1536,10 @@ class CooCycle:
                         _current_orchestration_tree_material(
                             connection, root_row, admission, plan_body
                         )
+                except StateConflict as exc:
+                    return self._block(root_id, root_id, _classify_invalid(exc))
+                self._require_fresh_admission(root_id)
+                try:
                     command = f"coo-cycle:{root_id}:aggregation-handoff:1"
                     handoff = self.runtime.jobs.create_cycle_handoff(
                         root_id, command_id=command

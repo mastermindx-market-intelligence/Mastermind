@@ -85,16 +85,13 @@ class RemoteWorkerGateway:
         )
 
     async def _dispatch_authenticated(self, request: Mapping[str, Any]) -> dict[str, Any]:
-        if (
-            request["broker_operation"] == "assignment-seal"
-            and self.config.broker_target != FABRIC_BROKER_TARGET
-        ):
-            # Sealing an original assignment is a WorkerBroker-side intercept.
-            # An attended Fabric target never takes it; its assignment-seal
-            # requests forward to the broker unchanged.
+        if request["broker_operation"] == "assignment-seal":
             binding = self.config.assignment_control
             if binding is None:
                 raise ValueError("gateway assignment Control is not configured")
+            if self.config.broker_target == FABRIC_BROKER_TARGET:
+                return await seal_original_assignment(binding, request, self.broker_call,
+                                                      fabric_target=True)
             return await seal_original_assignment(binding, request, self.broker_call)
         return await self.broker_call(str(request["broker_operation"]),
                                       dict(request["broker_request"]))

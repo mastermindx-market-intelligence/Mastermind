@@ -1,0 +1,15 @@
+E
+======================================================================
+ERROR: test_historical_binding_qualifies_using_exact_original_source (__main__.VersionBoundCollectorTests.test_historical_binding_qualifies_using_exact_original_source)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Volumes/Mastermind/evidence/research-vault-completion-20261012-01a13301/delivery/collector-validator-compat/test_collector_validator_compat.py", line 123, in test_historical_binding_qualifies_using_exact_original_source
+    loaded = collector.load_binding(self.binding_path, run_id=RUN, root=ROOT, parent=PARENT)
+  File "/Volumes/Mastermind/evidence/research-vault-completion-20261012-01a13301/delivery/collector-validator-compat/baseline/original_delivery_collector.py", line 135, in load_binding
+    raise ValueError('original_producer_validator_changed')
+ValueError: original_producer_validator_changed
+
+----------------------------------------------------------------------
+Ran 1 test in 0.018s
+
+FAILED (errors=1)

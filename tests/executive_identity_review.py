@@ -14,15 +14,58 @@ from __future__ import annotations
 import ast
 import hashlib
 import inspect
+from tests.executive_fabric_release_identity_review import REVIEWED_FILES
 
 REVIEWED_PATH = "control_plane/executive_installed_peer.py"
 REVIEWED_LITERAL_COUNT = 33
 
-# Exact reviewed private-directory modes, never process identities.
-# The complete fixed source and every literal site must match; source drift
-# restores normal D8 scanning. This is test evidence, not runtime permission.
-REVIEWED_PRIVATE_MODE_SOURCES = {'integrations/session_bridge/artifact_tool_framing/artifact_production.base.py': {'sha256': 'e126d6432135725a7a7846cbe9f9749305dfe9dd7cfe37037fc413a1136248bf',
-                                                                                   'anchors': ('            '
+# Source-only, fixed-mode review. These are directory chmod/inspection modes,
+# not user/group IDs or process identities. Original installed bytes remain
+# immutable; any changed source digest or site exposes every literal to D8.
+REVIEWED_PRIVATE_MODE_SOURCES = {'integrations/session_bridge/artifact_manifest_framing/artifact_production.base.py': {'anchors': ('            '
+                                                                                                   'os.mkdir(self.name, '
+                                                                                                   '0o700, '
+                                                                                                   'dir_fd=self.tmp)',
+                                                                                                   '                    '
+                                                                                                   'or '
+                                                                                                   's.st_uid '
+                                                                                                   '!= '
+                                                                                                   'os.getuid() '
+                                                                                                   'or '
+                                                                                                   'stat.S_IMODE(s.st_mode) '
+                                                                                                   '!= '
+                                                                                                   '0o700):',
+                                                                                                   '                '
+                                                                                                   'or '
+                                                                                                   'current.st_uid '
+                                                                                                   '!= '
+                                                                                                   'os.getuid() '
+                                                                                                   'or '
+                                                                                                   'stat.S_IMODE(current.st_mode) '
+                                                                                                   '!= '
+                                                                                                   '0o700):'),
+                                                                                       'sha256': 'c0f17c3e489c83bdb369d6c1ea9adc2757f4732f515cbc76e230fe154a61f67e'},
+ 'integrations/session_bridge/artifact_manifest_framing/artifact_production.py': {'anchors': ('            '
+                                                                                              'os.mkdir(self.name, '
+                                                                                              '0o700, '
+                                                                                              'dir_fd=self.tmp)',
+                                                                                              '                    '
+                                                                                              'or s.st_uid '
+                                                                                              '!= '
+                                                                                              'os.getuid() '
+                                                                                              'or '
+                                                                                              'stat.S_IMODE(s.st_mode) '
+                                                                                              '!= 0o700):',
+                                                                                              '                '
+                                                                                              'or '
+                                                                                              'current.st_uid '
+                                                                                              '!= '
+                                                                                              'os.getuid() '
+                                                                                              'or '
+                                                                                              'stat.S_IMODE(current.st_mode) '
+                                                                                              '!= 0o700):'),
+                                                                                  'sha256': 'e126d6432135725a7a7846cbe9f9749305dfe9dd7cfe37037fc413a1136248bf'},
+ 'integrations/session_bridge/artifact_tool_framing/artifact_production.base.py': {'anchors': ('            '
                                                                                                'os.mkdir(self.name, '
                                                                                                '0o700, '
                                                                                                'dir_fd=self.tmp)',
@@ -40,9 +83,9 @@ REVIEWED_PRIVATE_MODE_SOURCES = {'integrations/session_bridge/artifact_tool_fram
                                                                                                'os.getuid() '
                                                                                                'or '
                                                                                                'stat.S_IMODE(current.st_mode) '
-                                                                                               '!= 0o700):')},
- 'integrations/session_bridge/artifact_tool_framing/artifact_production.py': {'sha256': '0be15bd5d3304a65673576fd30386bcc977c02ed8ee28313a4cb1ed454f8c409',
-                                                                              'anchors': ('            '
+                                                                                               '!= 0o700):'),
+                                                                                   'sha256': 'e126d6432135725a7a7846cbe9f9749305dfe9dd7cfe37037fc413a1136248bf'},
+ 'integrations/session_bridge/artifact_tool_framing/artifact_production.py': {'anchors': ('            '
                                                                                           'os.mkdir(self.name, '
                                                                                           '0o700, '
                                                                                           'dir_fd=self.tmp)',
@@ -55,7 +98,11 @@ REVIEWED_PRIVATE_MODE_SOURCES = {'integrations/session_bridge/artifact_tool_fram
                                                                                           'or current.st_uid '
                                                                                           '!= os.getuid() or '
                                                                                           'stat.S_IMODE(current.st_mode) '
-                                                                                          '!= 0o700):')}}
+                                                                                          '!= 0o700):'),
+                                                                              'sha256': '0be15bd5d3304a65673576fd30386bcc977c02ed8ee28313a4cb1ed454f8c409'},
+ 'integrations/session_bridge/bound_launch_capture/lane_runtime.py.patch': {'anchors': ('+_OWNED_CAPTURE_DIR_MODE '
+                                                                                        '= 0o700',),
+                                                                            'sha256': '664002d7309779e69cd5f1b3e6a260215f1247526c813824e7e8f5897c8457be'}}
 
 REVIEWED_ANCHORS = {'_LAUNCHD_ROLES': {'node_type': 'Assign',
                     'ast_sha256': 'caa7c22754197370bf93733aec4cbcb1bc12ee23ef8cc30898be5327cfe8e49c',
@@ -211,6 +258,18 @@ def reviewed_literal_spans(path: str, source: str):
     """
     if type(source) is not str:
         return ()
+    file_review = REVIEWED_FILES.get(path)
+    if file_review is not None:
+        if hashlib.sha256(source.encode()).hexdigest() != file_review['sha256']:
+            return ()
+        lines = source.splitlines()
+        spans = []
+        for line, start, end, kind, spelling in file_review['sites']:
+            if (not 1 <= line <= len(lines) or not lines[line-1].isascii()
+                    or lines[line-1][start:end] != spelling):
+                return ()
+            spans.append((line, start, end, kind))
+        return tuple(sorted(spans))
     modes = REVIEWED_PRIVATE_MODE_SOURCES.get(path)
     if modes is not None:
         if hashlib.sha256(source.encode()).hexdigest() != modes["sha256"]:
@@ -268,6 +327,9 @@ def reviewed_literal_spans(path: str, source: str):
     elif path == "ops/executive_os/a2_agent_relay_enrollment.py":
         from tests.executive_a2_identity_review import REVIEWED_ANCHORS as a2_anchors
         reviewed_anchors = a2_anchors
+    elif path in {"ops/executive_os/attended_control_staging.py", "control_plane/fabric_attended_registration.py"}:
+        from tests.executive_finite_identity_review import REVIEWED_ANCHORS_BY_PATH
+        reviewed_anchors = REVIEWED_ANCHORS_BY_PATH[path]
     else:
         return ()
     # str.splitlines recognizes these separators, while Python source/AST
