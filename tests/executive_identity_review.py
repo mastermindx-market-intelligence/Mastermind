@@ -22,6 +22,15 @@ REVIEWED_LITERAL_COUNT = 33
 # not user/group IDs or process identities. Original installed bytes remain
 # immutable; any changed source digest or site exposes every literal to D8.
 REVIEWED_PRIVATE_MODE_SOURCES = {
+    # Original reviewed preimage retained as the separate artifact source base.
+    "integrations/session_bridge/artifact_manifest_framing/artifact_production.base.py": {
+        "sha256": "c0f17c3e489c83bdb369d6c1ea9adc2757f4732f515cbc76e230fe154a61f67e",
+        "anchors": (
+            "            os.mkdir(self.name, 0o700, dir_fd=self.tmp)",
+            "                    or s.st_uid != os.getuid() or stat.S_IMODE(s.st_mode) != 0o700):",
+            "                or current.st_uid != os.getuid() or stat.S_IMODE(current.st_mode) != 0o700):",
+        ),
+    },
     "integrations/session_bridge/artifact_manifest_framing/artifact_production.py": {
         "sha256": "e126d6432135725a7a7846cbe9f9749305dfe9dd7cfe37037fc413a1136248bf",
         "anchors": (
