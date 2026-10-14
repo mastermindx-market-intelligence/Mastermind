@@ -102,6 +102,18 @@ class PrincipalCommitObservation:
         }
 
 
+@dataclass(frozen=True)
+class PrincipalCommittedMessageRead:
+    """Exact original message, available only for a qualified committed read.
+
+    This is a carrier observation, not a product acceptance verdict. The
+    consumer must still join the issued request and the current result.
+    """
+
+    observation: PrincipalCommitObservation
+    message: dict[str, Any] | None
+
+
 def _digest(value: Any) -> str:
     return hashlib.sha256(canonical_principal_json(value)).hexdigest()
 
@@ -447,17 +459,42 @@ class PrincipalDialogueRuntimeCommitOwner:
     async def reconcile(self, message_key: str) -> PrincipalCommitObservation:
         """Read the original carrier; never admit or repeat a COMMIT."""
 
+        return (await self.read_committed_message(message_key)).observation
+
+    def _committed_read(
+        self,
+        state: PrincipalCommitObservationState,
+        *,
+        message_key: str,
+        intent: PrincipalCommitIntent | None,
+        event: Any | None,
+        message: dict[str, Any] | None = None,
+    ) -> PrincipalCommittedMessageRead:
+        if (state is PrincipalCommitObservationState.APPLIED) is not (message is not None):
+            raise PrincipalRuntimeFenceError("committed message read is inconsistent")
+        return PrincipalCommittedMessageRead(
+            observation=self._observation(state, message_key=message_key, intent=intent, event=event),
+            message=copy.deepcopy(message),
+        )
+
+    async def read_committed_message(self, message_key: str) -> PrincipalCommittedMessageRead:
+        """Acquire canonical body using the retained original COMMIT identity.
+
+        No replay, resolver reselection, or state write occurs. Unknown delivery
+        and a duplicate or changed message never produce a consumable body.
+        """
+
         try:
             stored = self._event_for_message_key(message_key)
         except PrincipalRuntimeFenceError:
-            return self._observation(
+            return self._committed_read(
                 PrincipalCommitObservationState.CONFLICT,
                 message_key=str(message_key),
                 intent=None,
                 event=None,
             )
         if stored is None:
-            return self._observation(
+            return self._committed_read(
                 PrincipalCommitObservationState.NOT_APPLIED,
                 message_key=message_key,
                 intent=None,
@@ -512,7 +549,7 @@ class PrincipalDialogueRuntimeCommitOwner:
             ]
             matches = [m for m in messages if m["message_key"] == message_key]
             if not matches:
-                return self._observation(
+                return self._committed_read(
                     PrincipalCommitObservationState.EFFECT_UNKNOWN,
                     message_key=message_key,
                     intent=intent,
@@ -523,27 +560,28 @@ class PrincipalDialogueRuntimeCommitOwner:
                 or matches[0]["fingerprint"] != intent.message_fingerprint
                 or matches[0]["message_type"] != intent.message_type
             ):
-                return self._observation(
+                return self._committed_read(
                     PrincipalCommitObservationState.CONFLICT,
                     message_key=message_key,
                     intent=intent,
                     event=event,
                 )
-            return self._observation(
+            return self._committed_read(
                 PrincipalCommitObservationState.APPLIED,
                 message_key=message_key,
                 intent=intent,
                 event=event,
+                message=matches[0],
             )
         except (DialogueContractError, DialogueServiceError, TypeError, ValueError):
-            return self._observation(
+            return self._committed_read(
                 PrincipalCommitObservationState.EFFECT_UNKNOWN,
                 message_key=message_key,
                 intent=intent,
                 event=event,
             )
         except Exception:
-            return self._observation(
+            return self._committed_read(
                 PrincipalCommitObservationState.EFFECT_UNKNOWN,
                 message_key=message_key,
                 intent=intent,

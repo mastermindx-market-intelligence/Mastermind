@@ -23836,6 +23836,26 @@ class BoundedAdmittedPlanSnapshot:
     observation_source_identity: str | None = None
 
 
+@dataclasses.dataclass(frozen=True)
+class BoundedProductAcceptanceSubject:
+    """Current live programme scope and two canonical terminal results.
+
+    This selection proves neither continuity completeness nor acceptance.
+    Its caller must separately acquire the existing Agent OS acceptance basis
+    and join the retained typed request to a canonical principal ruling.
+    """
+
+    root_job_id: str
+    issuer_job_id: str
+    issuer_attempt_id: str
+    issuer_worker_id: str
+    root_objective: str
+    subject: BoundedRoleResultSnapshot
+    reviewer: BoundedRoleResultSnapshot
+    dependency_manifest_digest: str
+    observation_source_identity: str | None = None
+
+
 class _BoundedRoleResultRows:
     """Row-accounted fetch surface over one guarded statement cursor."""
 
@@ -24185,6 +24205,108 @@ def _read_role_result_bounded(
         vm_guard.deactivate()
 
 
+def _read_product_acceptance_subject_bounded(
+    acquisition: BoundedRuntimeAcquisition,
+    vm_guard: _RuntimeReadProgressGuard,
+    *,
+    issuer_job_id: str,
+    issuer_attempt_id: str,
+    issuer_worker_id: str,
+    subject_job_id: str,
+    now_ms: int,
+) -> BoundedProductAcceptanceSubject:
+    """Select a live admitted dependent child and its exact accepted prerequisite.
+
+    The COO principal may rule for a child, never the programme root itself.
+    This method creates no child or acceptance stage: an existing V3/V4 plan
+    must already commission this consumer and name the reviewed prerequisite.
+    """
+    issuer = _bounded_acquisition_identifier(issuer_job_id, name="issuer Job")
+    attempt = _bounded_acquisition_identifier(issuer_attempt_id, name="issuer Attempt")
+    worker = _bounded_acquisition_identifier(issuer_worker_id, name="issuer Worker")
+    subject = _bounded_acquisition_identifier(subject_job_id, name="subject Job")
+    acquisition._require_open()
+    loader = _BoundedRoleResultLoader(acquisition._connection)
+    vm_guard.activate()
+    try:
+        issuer_row = loader.execute("SELECT * FROM jobs WHERE job_id=?", (issuer,)).fetchone()
+        if (issuer_row is None or issuer_row["orchestration_role"] != "work"
+            or issuer_row["parent_job_id"] is None or issuer_row["parent_job_id"] != issuer_row["root_job_id"]
+            or issuer_row["status"] not in {JobStatus.RUNNING.value, JobStatus.CHECKPOINTED.value}
+            or issuer_row["current_attempt_id"] != attempt or issuer_row["assigned_worker_id"] != worker):
+            raise StateConflict("product acceptance requires its current live commissioned child issuer")
+        root_token = str(issuer_row["root_job_id"])
+        root = loader.execute("SELECT * FROM jobs WHERE job_id=?", (root_token,)).fetchone()
+        if root is None:
+            raise StateConflict("product acceptance programme root is unavailable")
+        _assert_cycle_root_open_for_child_mutation(loader, root)
+        lease = loader.execute(
+            "SELECT a.job_id,a.worker_id,a.quota_class,a.status,a.lease_expires_at_ms,"
+            "q.status AS quota_status,q.held_attempt_id FROM attempts a "
+            "JOIN worker_quota_classes q ON q.worker_id=a.worker_id AND q.quota_class=a.quota_class "
+            "WHERE a.attempt_id=?", (attempt,),
+        ).fetchone()
+        if (lease is None or lease["job_id"] != issuer or lease["worker_id"] != worker
+            or lease["quota_class"] != issuer_row["assigned_quota_class"]
+            or lease["status"] not in {AttemptStatus.CLAIMED.value, AttemptStatus.RUNNING.value, AttemptStatus.CHECKPOINTED.value}
+            or int(lease["lease_expires_at_ms"]) <= now_ms
+            or lease["quota_status"] != "BUSY" or lease["held_attempt_id"] != attempt):
+            raise StateConflict("product acceptance issuer lease is not exact/current")
+        # Reuse canonical admission, current lineage and accepted dependency
+        # validators. A same-root public Job ID is insufficient association.
+        admission, plan = _validated_plan_admission(loader, root)
+        current = _current_orchestration_tree_material_for_dispatch(loader, root, admission, plan)
+        if len([row for row in current if row["current_job_id"] == issuer]) != 1:
+            raise StateConflict("product acceptance issuer is not a current plan revision")
+        manifest = _validated_job_dependency_manifest(loader, job_row=issuer_row)
+        if manifest is None or manifest != _work_dependency_manifest(loader,
+            root_row=root, admission=admission, plan_body=plan, plan_step_id=issuer_row["plan_step_id"]):
+            raise StateConflict("product acceptance requires current admitted dependency evidence")
+        revisions = [item for item in manifest["revisions"] if item["current_job_id"] == subject]
+        if len(revisions) != 1:
+            raise StateConflict("product acceptance subject is not an accepted commissioned prerequisite")
+        revision = revisions[0]
+        if (revision["review_required"] is not True
+            or revision["qualifying_review_job_id"] is None
+            or revision["qualifying_review_attempt_id"] is None
+            or revision["qualifying_review_result_digest"] is None):
+            raise StateConflict("product acceptance requires a canonical independent review")
+        metadata = _bounded_strict_root_metadata(loader, root, root_token)
+        # JOB_CREATED retains the source fingerprint, not objective text.
+        # This is the canonical Runtime Job objective; the issuance owner must
+        # independently join it to the Agent OS original/current intent basis.
+        objective = root["objective"]
+        if not isinstance(objective, str) or not objective:
+            raise StateConflict("product acceptance root objective is unavailable")
+        selected = _validated_role_completion_snapshot(loader, job_token=subject,
+            attempt_token=revision["current_attempt_id"])
+        reviewed = _validated_role_completion_snapshot(loader,
+            job_token=revision["qualifying_review_job_id"],
+            attempt_token=revision["qualifying_review_attempt_id"])
+        if (selected.job.orchestration_role not in {"work", "repair"}
+            or selected.role_result_digest != revision["current_result_digest"]
+            or reviewed.role_result_digest != revision["qualifying_review_result_digest"]
+            or not _review_attempt_is_independent(loader,
+                review_attempt_id=reviewed.attempt.attempt_id,
+                reviewed_attempt_id=selected.attempt.attempt_id)):
+            raise StateConflict("product acceptance reviewed revision is not independently qualified")
+        return BoundedProductAcceptanceSubject(
+            root_job_id=root_token, issuer_job_id=issuer, issuer_attempt_id=attempt,
+            issuer_worker_id=worker, root_objective=objective,
+            subject=BoundedRoleResultSnapshot(root_token, subject, selected.attempt.attempt_id,
+                selected.result_digest, selected, metadata),
+            reviewer=BoundedRoleResultSnapshot(root_token, reviewed.job.job_id, reviewed.attempt.attempt_id,
+                reviewed.result_digest, reviewed, metadata),
+            dependency_manifest_digest=manifest["dependency_manifest_digest"],
+        )
+    except sqlite3.OperationalError as exc:
+        if vm_guard.tripped:
+            raise RuntimeRoleResultOverBudget() from exc
+        raise
+    finally:
+        vm_guard.deactivate()
+
+
 def _read_admitted_plan_bounded(
     acquisition: BoundedRuntimeAcquisition,
     vm_guard: _RuntimeReadProgressGuard,
@@ -24504,6 +24626,31 @@ class BoundedRuntimeReadObservation:
             return dataclasses.replace(
                 result, observation_source_identity=self._identity
             )
+        except BaseException:
+            self._failed = True
+            raise
+
+    def read_product_acceptance_subject_bounded(
+        self, *, issuer_job_id: str, issuer_attempt_id: str,
+        issuer_worker_id: str, subject_job_id: str,
+    ) -> BoundedProductAcceptanceSubject:
+        """One bounded current-scope read, not issuance or a verdict.
+
+        The active issuer is an already admitted dependent work child; completed
+        subject and reviewer identities come from its current dependency manifest.
+        All closure reads share the ordinary role-result budgets.
+        """
+        self._select()
+        try:
+            selected = _read_product_acceptance_subject_bounded(
+                self._acquisition, self._vm_progress,
+                issuer_job_id=issuer_job_id, issuer_attempt_id=issuer_attempt_id,
+                issuer_worker_id=issuer_worker_id, subject_job_id=subject_job_id,
+                now_ms=self._store.now_ms(),
+            )
+            return dataclasses.replace(selected, observation_source_identity=self._identity,
+                subject=dataclasses.replace(selected.subject, observation_source_identity=self._identity),
+                reviewer=dataclasses.replace(selected.reviewer, observation_source_identity=self._identity))
         except BaseException:
             self._failed = True
             raise
