@@ -294,7 +294,18 @@ class AttendedFabricWorkerAdapter:
                 control_environment_attestation=snap[2])
             return physical, payload, snap, foreground
 
-        physical, payload, snapshot, foreground = current()
+        physical, payload, original_snapshot, foreground = current()
+        # The finite Supervisor allocated this Attempt's input once. Prepare
+        # only its credentialless workspace before any probe or START pin.
+        from control_plane.fabric_attended_assignment import prepare_assignment
+        if spec.run_id in self._control_recovery:
+            raise BrokerStateError('Finite assignment was already prepared; no replay permitted')
+        spec, context = prepare_assignment(original_snapshot[3].spec, original_snapshot[1], job)
+        self._control_recovery[spec.run_id] = context
+        check, payload, snapshot, check_foreground = current()
+        if (check != physical or snapshot[:3] != original_snapshot[:3]
+                or check_foreground is not foreground):
+            raise BrokerStateError('Finite assignment source changed during preparation')
         client = self._client_factory(physical, payload)
         result = await client.request(OPERATION, payload, timeout_seconds=30.0)
         check, check_payload, check_snapshot, check_foreground = current()

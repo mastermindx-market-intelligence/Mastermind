@@ -37,6 +37,22 @@ class ProviderRealmError(ValueError):
     """A provider realm or credential observation is unsafe or malformed."""
 
 
+def validate_provider_credential_format(value: str) -> str:
+    """Validate the one shared provider-neutral opaque credential format.
+
+    Exactly one non-empty, bounded UTF-8 line with no NUL. This is the only
+    credential-format boundary; every reviewed realm and every attended
+    profile authority shares it. It never interprets provider responses and
+    grants no readiness, capacity, or route authority.
+    """
+    if not isinstance(value, str):
+        raise ProviderRealmError("provider credential is unavailable")
+    credential = value.strip()
+    if not credential or len(credential) > 4096 or any(ch in credential for ch in "\r\n\x00"):
+        raise ProviderRealmError("provider credential is unavailable")
+    return credential
+
+
 @dataclasses.dataclass(frozen=True)
 class CodexProviderRealm:
     realm_id: str
@@ -101,12 +117,7 @@ class CodexProviderRealm:
         )
 
     def validate_credential(self, value: str) -> str:
-        if not isinstance(value, str):
-            raise ProviderRealmError("provider credential is unavailable")
-        credential = value.strip()
-        if not credential or len(credential) > 4096 or any(ch in credential for ch in "\r\n\x00"):
-            raise ProviderRealmError("provider credential is unavailable")
-        return credential
+        return validate_provider_credential_format(value)
 
 def _has_macos_acl(
     path: Path,
@@ -566,6 +577,7 @@ __all__ = [
     "load_private_provider_credential",
     "load_native_realm_owner",
     "provider_home_credential_loader",
+    "validate_provider_credential_format",
     "set_provider_realm_test_enrollment",
     "set_provider_realm_test_key",
     "verify_provider_realm_enrollment_receipt",

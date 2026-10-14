@@ -30,7 +30,11 @@ def case(tmp_path, monkeypatch, *, during=None):
            'control_environment_attestation_path': '/fixture/attestation',
            'proof_base_sha': 'a' * 40}
     attestation = {'config_sha256': 'a' * 64}
-    definition = {'worker_user': 'remote-worker', 'worker_uid': physical().worker_uid,
+    from tests.test_fabric_attended_probe_join import finite_definition
+    from control_plane import fabric_attended_assignment
+    monkeypatch.setattr(fabric_attended_assignment, 'prepare_assignment', lambda spec, worker, job: (spec, {
+        'source_workspace':str(spec.workspace_path), 'input_root':str(spec.run_dir / 'input')}))
+    definition = {**finite_definition(), 'worker_user': 'remote-worker', 'worker_uid': physical().worker_uid,
                   'worker_gid': physical().worker_gid}
     adapter._attended_probe_source = probe.AttendedControlProbeSource.from_startup(
         tmp_path / 'control.json', raw, attestation)

@@ -22,7 +22,7 @@ def finite_definition():
     value = dict(schema_version=worker.SUBSCRIPTION_CONFIG_SCHEMA_VERSION,
         control_uid=450, control_gid=450, worker_uid=460, worker_gid=460,
         allowed_supplementary_gids=[], worker_user='finite', worker_id='finite-1',
-        workspace_root='/srv/executive/jobs/workspaces', run_root='/srv/executive/jobs/runs',
+        workspace_root='/srv/executive/workers/finite-1/jobs/workspaces', run_root='/srv/executive/workers/finite-1/jobs/runs',
         provider_home='/srv/executive/workers/finite-1/provider-home',
         claude_binary='/opt/bin/claude', claude_attestation_receipt='/etc/finite/binary.json',
         claude_attestation_sha256='a'*64, allowed_claude_versions=['2.1.0'],
@@ -115,6 +115,9 @@ def adapter_case(tmp_path,monkeypatch,during=None):
             return dict(adapter_id='attended-fabric',binding=p['binding'],
                 physical_binding_sha256=p['physical_binding_sha256'],
                 probe_request_sha256=probe.digest(p),envelope={'fixture':'v2'})
+    from control_plane import fabric_attended_assignment
+    monkeypatch.setattr(fabric_attended_assignment, 'prepare_assignment', lambda spec, worker, job: (spec, {
+        'source_workspace':str(spec.workspace_path), 'input_root':str(Path(spec.run_dir)/'input')}))
     client=Client();rt,job,lease,a,s,p=_fixture(tmp_path,monkeypatch,client)
     original_get=rt.jobs.get_job
     monkeypatch.setattr(rt.jobs,'get_job',lambda ident:dataclasses.replace(original_get(ident),
@@ -212,7 +215,11 @@ def test_real_factory_v2_helper_and_coupled_validator_compose(tmp_path,monkeypat
     release,host,raw,att=boot_fixture(tmp_path)
     uid,gid=os.getuid(),os.getgid()
     assert uid > 0
-    raw.update(worker_uid=uid,worker_gid=gid,control_uid=uid+1,control_gid=gid+1)
+    raw.update(worker_uid=uid,worker_gid=gid,control_uid=uid+1,control_gid=gid+1,
+        attended_secret_canary=probe.PRESET)
+    for key,name in [('workspace_root','workspaces'),('run_root','runs')]:
+        path=host/'workers'/raw['worker_id']/'jobs'/name;path.mkdir(parents=True)
+        raw[key]=str(path)
     att['process_identity'].update(effective_uid=uid+1,real_uid=uid+1,effective_gid=gid+1,real_gid=gid+1)
     home=Path(raw['provider_home']);home.chmod(0o700)
     credential=home/'provider-credential';credential.write_bytes(b'harmless-test-only');credential.chmod(0o600)
@@ -319,11 +326,16 @@ def test_supervisor_retains_final_probe_in_start_pin_and_recovery(tmp_path,monke
         worker_uid=uid,worker_gid=gid,provider_home=str(tmp_path/'realm'))
     source=probe.AttendedControlProbeSource.from_startup(tmp_path/'fixture-control',{}, {'config_sha256':'a'*64})
     verdict={}
+    finite_root=tmp_path/'host/workers/worker-cycle'
+    workspaces=finite_root/'jobs/workspaces';runs=finite_root/'jobs/runs'
+    for path in (workspaces,runs):path.mkdir(parents=True,mode=0o710)
+    worker_raw=dict(worker_id='worker-cycle', worker_uid=uid, worker_gid=gid, control_uid=uid,
+        provider_home=str(finite_root/'provider-home'), workspace_root=str(workspaces), run_root=str(runs))
     def snapshot(self,host,spec):
         # Fixture definition issuer supplies the actual remote principal. The
         # adapter must carry this same spec through START and durable recovery.
         bound=dataclasses.replace(spec,worker_user=username,shared_run_gid=gid)
-        return {},{}, {'fixture':'environment'},probe.binding(bound,host)
+        return {},worker_raw, {'fixture':'environment'},probe.binding(bound,host)
     def validate(self,snap,response):
         return response['envelope']['secret_canary']
     monkeypatch.setattr(probe.AttendedControlProbeSource,'snapshot',snapshot)
@@ -366,10 +378,12 @@ def test_supervisor_retains_final_probe_in_start_pin_and_recovery(tmp_path,monke
         payload=dict(binding=dict(root_id=root.job_id,job_id=spec.job_id,attempt_id=spec.run_id,
             effective_grant_digest=attempt.effective_grant_digest,commission_sha256=hashlib.sha256(content).hexdigest()),
             physical_binding_sha256=physical.digest,launch_spec=_launch_spec_to_json(spec),validation_commands=[])
+        context=control_recovery or adapter._control_recovery.get(spec.run_id)
+        if context is not None:payload['control_recovery']=dict(context)
         return attempt,physical,payload
     monkeypatch.setattr(adapter,'_resolve',resolve)
-    supervisor=ExecutiveSupervisor(rt,adapter,runs_root=tmp_path/'runs',
-        isolation_roots=(tmp_path/'workspaces',tmp_path/'runs'),worker_uid=uid,worker_gid=gid,worker_user='control-only',
+    supervisor=ExecutiveSupervisor(rt,adapter,runs_root=runs,
+        isolation_roots=(tmp_path/'workspaces',runs),worker_uid=uid,worker_gid=gid,worker_user='control-only',shared_run_gid=gid,
         require_complete_launch_attestation=True,cleanup_policy=CleanupPolicy.FABRIC_PROCESS_GROUP,
         process_controller=adapter,instance_id='fixture-supervisor')
     # Profile admission and source provenance are separate fixture issuers.
@@ -387,7 +401,7 @@ def test_supervisor_retains_final_probe_in_start_pin_and_recovery(tmp_path,monke
     assert type(active.launch_spec) is OrchestrationLaunchSpec
     assert active.launch_spec.worker_user==username and active.launch_spec.shared_run_gid==gid
     assert captured['launch_spec']['worker_user']==username and captured['launch_spec']['shared_run_gid']==gid
-    assert supervisor.worker_user=='control-only' and supervisor.shared_run_gid is None
+    assert supervisor.worker_user=='control-only' and supervisor.shared_run_gid==gid
     attempt=rt.attempts.get_attempt(active.launch_spec.run_id);metadata=attempt.launch_metadata
     assert active.launch_spec.effective_grant_digest==attempt.effective_grant_digest
     assert active.launch_spec.secret_canary_verdict==captured['launch_spec']['secret_canary_verdict']==verdict
@@ -395,6 +409,10 @@ def test_supervisor_retains_final_probe_in_start_pin_and_recovery(tmp_path,monke
     recovery=WorkerRecoveryBinding.from_dict(metadata['worker_recovery_binding'])
     restored=recovery.recover_launch_spec(OrchestrationLaunchSpec)
     assert restored==active.launch_spec
+    assert Path(restored.workspace_path).parent==workspaces and Path(restored.run_dir).parent==runs
+    assert original_get(job.job_id).worktree==job.worktree
+    assert recovery.control_recovery['source_workspace']==job.worktree
+    supervisor._revalidate_recovery_inputs(attempt,restored)
     assert metadata[REMOTE_LAUNCH_IDENTITY_KEY]['sha256']==adapter._identity(physical,captured)
     assert attempt.pid==1234 and attempt.status.value=='CHECKPOINTED'
 
@@ -410,7 +428,7 @@ def test_actual_loaded_control_paths_pin_and_snapshot(tmp_path,monkeypatch,root_
     source=probe.AttendedControlProbeSource.from_startup(path,loaded,att)
     source.require_definition(control.load_control_config(path))
     monkeypatch.setattr(probe.sys,'platform','darwin')
-    fixture_worker={'fixture':'worker-definition','worker_user':'finite'}
+    fixture_worker={**finite_definition(), 'fixture':'worker-definition','worker_user':'finite'}
     monkeypatch.setattr(probe,'definition',lambda *a:fixture_worker)
     monkeypatch.setattr(probe,'binding',lambda *a:'fixture-binding')
     monkeypatch.setattr(control,'_load_control_environment_attestation',lambda *a,**kw:att)

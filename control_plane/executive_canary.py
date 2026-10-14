@@ -378,6 +378,16 @@ def validate_secret_canary_binding(
     return document
 
 
+def validate_initial_secret_canary_verdict(verdict: Mapping[str, Any]) -> dict[str, Any]:
+    """Use the incumbent worker canary validator through its owning canary module.
+
+    Control composes the attested initial receipt but must not import a worker
+    or provider execution module to validate it. This creates no new admission.
+    """
+    from control_plane.codex_worker import validate_secret_canary_verdict
+    return validate_secret_canary_verdict(verdict, require_passed=True)
+
+
 __all__ = [
     "REQUIRED_CHECKS",
     "WORKER_AUTH_EXCEPTION",
@@ -386,6 +396,7 @@ __all__ = [
     "SecretCanaryError",
     "run_secret_canary",
     "validate_secret_canary_binding",
+    "validate_initial_secret_canary_verdict",
 ]
 
 

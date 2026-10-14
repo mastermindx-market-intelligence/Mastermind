@@ -19,7 +19,16 @@ def selected():
     return AttendedWorkPlacement('minimax.attended', BINDING, 'minimax-read')
 
 
-def sources(tmp_path):
+def finite_configuration(tmp_path):
+    # Explicit protected-definition issuer fixture; real source/hash checks
+    # are covered by test_fabric_attended_probe_join.
+    def configuration(self, physical):
+        return {}, {'run_root':str(tmp_path/'finite'/physical.worker_id/'runs')}, {}
+    return configuration
+
+
+def sources(tmp_path, monkeypatch):
+    monkeypatch.setattr(AttendedControlProbeSource, 'configuration', finite_configuration(tmp_path))
     raw = _raw(tmp_path)
     raw.update(staged(tmp_path, raw))
     loaded = cli.load_control_config(_write(tmp_path, raw))
@@ -35,7 +44,7 @@ def forbid_clients(monkeypatch):
 
 
 def test_trusted_factory_reaches_existing_attended_union_and_mode(tmp_path, monkeypatch, root_stats, router):
-    raw, physical, probe = sources(tmp_path)
+    raw, physical, probe = sources(tmp_path, monkeypatch)
     raw['coo_autonomy_armed'] = True
     probe = AttendedControlProbeSource.from_startup(tmp_path / 'control.json', raw,
                                                   {'config_sha256': 'a' * 64})
@@ -48,6 +57,11 @@ def test_trusted_factory_reaches_existing_attended_union_and_mode(tmp_path, monk
     assert placement_member(router, selected()) in binding['work_placement_union']
     assert binding['provider'] == 'codex'
     assert mixed.primary is mixed.owners[service.config.worker_id]
+    assert mixed.primary.runs_root==raw['worker_runs_root']
+    for physical_binding in physical.bindings:
+        owner=mixed.owners[physical_binding.worker_id]
+        assert owner.runs_root==tmp_path/'finite'/physical_binding.worker_id/'runs'
+        assert owner.shared_run_gid==physical_binding.worker_gid
     assert ExecutiveControlService._foreground_execution_state(service, binding=binding).mode == 'ATTENDED_WORK'
 
 
@@ -60,7 +74,7 @@ def test_untyped_or_unbounded_refuses_before_client(monkeypatch, placements):
 
 @pytest.mark.parametrize('missing', ['physical', 'probe'])
 def test_placements_require_both_owner_sources(tmp_path, monkeypatch, root_stats, missing):
-    raw, physical, probe = sources(tmp_path)
+    raw, physical, probe = sources(tmp_path, monkeypatch)
     forbid_clients(monkeypatch)
     with pytest.raises(cli.ServiceError, match='binding and startup probe'):
         cli._service_from_config(raw, attended_work_placements=(selected(),),
@@ -69,7 +83,7 @@ def test_placements_require_both_owner_sources(tmp_path, monkeypatch, root_stats
 
 
 def test_current_disabled_paid_profile_stays_refused(tmp_path, monkeypatch, root_stats):
-    raw, physical, probe = sources(tmp_path)
+    raw, physical, probe = sources(tmp_path, monkeypatch)
     forbid_clients(monkeypatch)
     with pytest.raises(RoutingPolicyError, match='attended model alias refused'):
         cli._service_from_config(raw, attended_work_placements=(selected(),),

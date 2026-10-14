@@ -12,7 +12,7 @@ from tests.test_fabric_attended_routing import router
 
 def setup_startup(tmp_path, monkeypatch, *, probe=True):
     from ops.executive_os import coo_principal_host, dialogue_wake_canary_control
-    raw, physical, _ = sources(tmp_path)
+    raw, physical, _ = sources(tmp_path,monkeypatch)
     if probe:
         raw['fabric_attended_probe'] = {'worker_config_path': str(tmp_path/'worker.json')}
     captured = {}

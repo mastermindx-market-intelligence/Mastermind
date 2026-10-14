@@ -1754,8 +1754,8 @@ def _service_from_config(
                 raise FabricActivationRefused(
                     "A dedicated-worker canary does not qualify shared Fabric execution"
                 )
-            from control_plane.codex_worker import validate_secret_canary_verdict
-            validate_secret_canary_verdict(initial_canary, require_passed=True)
+            from control_plane.executive_canary import validate_initial_secret_canary_verdict
+            validate_initial_secret_canary_verdict(initial_canary)
         # Mixed ownership is keyed by worker_id, while physical lookup also
         # includes host. One logical owner may not silently change principal
         # according to binding-file order or the selected host.
@@ -2017,16 +2017,24 @@ def _service_from_config(
         for physical in fabric_worker_binding_source.bindings:
             if physical.worker_id in owners:
                 continue  # Principal conflicts were refused before clients.
+            finite_definition = (fabric_attended_probe_source.configuration(physical)[1]
+                if fabric_attended_probe_source is not None else None)
+            # Keep canonical Job worktrees on Control. Only this finite owner's
+            # new Attempt inputs use its protected, separately enrolled store.
+            runs_root = (finite_definition['run_root'] if finite_definition is not None
+                         else raw['worker_runs_root'])
             owners[physical.worker_id] = ExecutiveSupervisor(
                 runtime, fabric_adapter,
-                runs_root=raw["worker_runs_root"],
-                isolation_roots=(raw["proof_workspace_root"], raw["worker_runs_root"]),
+                runs_root=runs_root,
+                isolation_roots=(raw["proof_workspace_root"], runs_root),
                 receipts_root=raw["receipts_root"],
                 worker_user=raw["worker_user"], worker_uid=physical.worker_uid,
                 worker_gid=physical.worker_gid,
-                # This remains Control's local filesystem group. It is not
-                # remote policy enrollment or a substitute for its wire join.
-                shared_run_gid=raw["shared_run_gid"],
+                # Ordinary Fabric retains Control's original filesystem group.
+                # The separately enrolled finite store uses its exact worker
+                # group; actual Control membership is checked before allocation.
+                shared_run_gid=(physical.worker_gid if finite_definition is not None
+                                else raw["shared_run_gid"]),
                 secret_canary_verdict={}, require_complete_launch_attestation=True,
                 cleanup_policy=CleanupPolicy.FABRIC_PROCESS_GROUP,
                 process_controller=fabric_adapter, instance_id=primary.instance_id,

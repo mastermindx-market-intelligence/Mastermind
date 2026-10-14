@@ -6,7 +6,7 @@ import pytest
 from control_plane.executive_service import ExecutiveControlService
 from control_plane.model_router import ModelRouter
 from scripts import executive_os_phase1c as cli
-from tests.test_fabric_attended_factory_placement import sources, selected
+from tests.test_fabric_attended_factory_placement import sources, selected, finite_configuration, AttendedControlProbeSource
 from tests.test_executive_fabric_composition import root_stats
 from tests.test_fabric_attended_routing import router
 from tests.test_executive_fabric_phase1c import compose
@@ -22,7 +22,7 @@ def verdict():
 
 
 def test_boot_canary_qualifies_only_primary_owner(tmp_path,monkeypatch,root_stats,router):
-    raw,physical,probe=sources(tmp_path)
+    raw,physical,probe=sources(tmp_path,monkeypatch)
     monkeypatch.setattr(ModelRouter,'load',classmethod(lambda cls,*a,**kw:router))
     service,mixed,_=compose(tmp_path,monkeypatch,raw,initial_canary=verdict(),
         fabric_worker_binding_source=physical,fabric_attended_probe_source=probe,
@@ -36,7 +36,7 @@ def test_boot_canary_qualifies_only_primary_owner(tmp_path,monkeypatch,root_stat
 
 
 def test_quarantined_service_starts_then_activates_only_primary(tmp_path,monkeypatch,root_stats,router):
-    raw,physical,probe=sources(tmp_path)
+    raw,physical,probe=sources(tmp_path,monkeypatch)
     monkeypatch.setattr(ModelRouter,'load',classmethod(lambda cls,*a,**kw:router))
     # Capture the production supervisor factory, then exercise the real service
     # with its local inert Runtime/socket. No provider or host calls occur.
@@ -51,6 +51,7 @@ def test_quarantined_service_starts_then_activates_only_primary(tmp_path,monkeyp
     # Root-installed binding fixture is finished; actual local socket/Runtime
     # must use the real test user's filesystem ownership.
     monkeypatch.undo()
+    monkeypatch.setattr(AttendedControlProbeSource, "configuration", finite_configuration(tmp_path))
     async def run():
         with tempfile.TemporaryDirectory(prefix='mm-mixed-') as socket_dir:
             s=ExecutiveControlService(_config(tmp_path,socket_root=Path(socket_dir)),

@@ -57,13 +57,23 @@ def binding(spec, physical):
                                 Path(physical.provider_home))
 
 
-def probe_config(raw, *, release_sha, probe_sha256, control_gid):
-    workspace = Path(raw['workspace_root'])
-    host = workspace.parents[1]
+def host_root(raw):
+    """Finite assignments live separately; canary sentinels stay on the real host."""
     home = Path(raw['provider_home'])
-    if (workspace != host/'jobs/workspaces' or Path(raw['run_root']) != host/'jobs/runs'
+    host = home.parents[2]
+    jobs = host/'workers'/raw['worker_id']/'jobs'
+    if (Path(raw['workspace_root']) != jobs/'workspaces' or Path(raw['run_root']) != jobs/'runs'
             or home != host/'workers'/raw['worker_id']/'provider-home'
-            or raw.get('control_gid') != control_gid):
+            or any('..' in Path(raw[key]).parts or not Path(raw[key]).is_absolute()
+                   for key in ('workspace_root', 'run_root', 'provider_home'))):
+        _refuse()
+    return host
+
+
+def probe_config(raw, *, release_sha, probe_sha256, control_gid):
+    host = host_root(raw)
+    home = Path(raw['provider_home'])
+    if raw.get('control_gid') != control_gid:
         _refuse()
     return SecretCanaryConfig(expected_worker_uid=raw['worker_uid'],
         expected_worker_gid=raw['worker_gid'], control_uid=raw['control_uid'],
@@ -109,7 +119,7 @@ def produce(resources, payload):
     expected = probe_config(raw, release_sha=_ROOT.name,
         probe_sha256=envelope['control_environment_probe_sha256'], control_gid=raw['control_gid'])
     # Validate all actual environment checks before sending any positive result.
-    host = Path(raw['workspace_root']).parents[1]
+    host = host_root(raw)
     control = dict(raw, runtime_root=str(host/'control/db'),
         proof_source_repository=str(host/'control/admin-checkout'/_ROOT.name),
         worker_provider_home=raw['provider_home'])
@@ -139,7 +149,7 @@ class AttendedControlProbeSource:
         if digest(_jsonable(raw)) != self.definition_sha256:
             _refuse()
 
-    def snapshot(self, physical, spec):
+    def configuration(self, physical):
         from scripts.executive_os_phase1c import load_control_config, _load_control_environment_attestation
         if sys.platform != 'darwin':
             _refuse()
@@ -155,6 +165,11 @@ class AttendedControlProbeSource:
         if (attestation.get('config_sha256') != self.config_sha256
                 or digest(attestation) != self.control_attestation_sha256):
             _refuse()
+        host_root(worker)
+        return raw, worker, attestation
+
+    def snapshot(self, physical, spec):
+        raw, worker, attestation = self.configuration(physical)
         # Control's local schema/commission group is not the remote broker's
         # execution principal. Derive only these two fields from the protected
         # worker definition before the probe, launch pin or recovery seal.

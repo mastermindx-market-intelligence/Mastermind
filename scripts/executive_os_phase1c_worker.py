@@ -410,11 +410,17 @@ def _build_autonomy_canary_factory(
     workspace_root = Path(str(config["workspace_root"])).resolve(strict=True)
     run_root = Path(str(config["run_root"])).resolve(strict=True)
     provider_home = Path(str(config["provider_home"])).resolve(strict=True)
-    runtime_root = workspace_root.parents[1]
+    if config.get('attended_secret_canary') is not None:
+        from control_plane.fabric_attended_canary import host_root
+        runtime_root = host_root(config)
+        assignment_root = runtime_root / 'workers' / str(config['worker_id'])
+    else:
+        runtime_root = workspace_root.parents[1]
+        assignment_root = runtime_root
     worker_id = str(config["worker_id"])
     if (
-        workspace_root != runtime_root / "jobs" / "workspaces"
-        or run_root != runtime_root / "jobs" / "runs"
+        workspace_root != assignment_root / "jobs" / "workspaces"
+        or run_root != assignment_root / "jobs" / "runs"
         or provider_home
         != runtime_root / "workers" / worker_id / "provider-home"
     ):
