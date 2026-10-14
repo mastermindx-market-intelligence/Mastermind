@@ -1,0 +1,30 @@
+{
+  "operation": "vps-fabric-llm-convergence-20261001-sol-001",
+  "service_source_head": "be49c7ec453dac58f605e2eb18e4eedadefbe200",
+  "original_bot_remote_head": "1e127060b8a034b35853fd23c4be9ed55592728f",
+  "protected_parent": "1ffe6b566b9addb58d13893bfb78e8505dce1752",
+  "test_only_source_files_hashed": 1021,
+  "source_manifest_sha256": "eb272384b578084c6fd56fd4cc89d1c5105e79142cc4f020c4cb7f88331a388d",
+  "executed": {
+    "passed": 5,
+    "failures": [],
+    "errors": [],
+    "skipped": [],
+    "junit_sha256": "099ae9d68771c0158cf90f25b1d8df2e0c718c82245ca045110245ad45adba36",
+    "tests": [
+      "test_original_bot_candidate_to_authenticated_socket_and_back[extract]",
+      "test_original_bot_candidate_to_authenticated_socket_and_back[compare]",
+      "test_actual_service_job_claim_refuses_cross_provider_alias_then_selects_real_policy_match[evidence_extraction-fast.research]",
+      "test_actual_service_job_claim_refuses_cross_provider_alias_then_selects_real_policy_match[comparative_analysis-standard.research]",
+      "test_physical_adapter_cannot_claim_codex_alias_by_metadata_only"
+    ]
+  },
+  "first_attempt": "collection failed before execution because the test-only source export omitted the exact service test_vps_inference_task_fit fixture; that exact published service fixture was added and all source hashes rechecked before a single corrected run",
+  "actual_proof": "Original published Bot v2 source and current protected-merged service source compose; signed-JWT fixture App + AF_UNIX and synthetic terminal rows yield cited candidate-only claims and refuse physical provider spoof; no second job or provider start",
+  "limits": [
+    "synthetic JWT token, test-only UID substitution, synthetic SQLite terminal bytes",
+    "No installed service identity, actual worker or producer billing, original PM consumption or market trading",
+    "Bot branch remote push remains blocked; no alternate carrier/transport replay"
+  ],
+  "disposition": "SOURCE_ONLY_DRAFT_HOLD"
+}
