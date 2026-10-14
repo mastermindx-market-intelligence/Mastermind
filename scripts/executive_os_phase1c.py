@@ -2392,7 +2392,15 @@ def _service_from_config(
         }
     company_binding = None
     company_socket = company_consultation_launchd_entry(raw)
-    if raw.get("reply_events",{}).get("armed",False) and company_socket is None:
+    # A default-off event plugin cannot require the optional authenticated
+    # App peer or key-custody fields of the installed Company host. No default
+    # credential lookup, host factory or extra constructor argument is allowed.
+    reply_events_config = raw.get("reply_events")
+    reply_events_armed = (
+        type(reply_events_config) is dict
+        and reply_events_config.get("armed") is True
+    )
+    if reply_events_armed and company_socket is None:
         raise ServiceError("event host requires existing Company listener")
     if company_socket is not None:
         from control_plane.executive_service import CompanyConsultationBinding
@@ -2417,12 +2425,14 @@ def _service_from_config(
                 carrier_factory=_build_executive_dialogue_wake_carrier,
             )
         def event_host_factory(runtime):
+            if not reply_events_armed:
+                return None
             from integrations.session_bridge.reply_event_host_composition import build_installed_reply_event_host
-            return build_installed_reply_event_host(runtime,raw.get("reply_events"),
+            return build_installed_reply_event_host(runtime,reply_events_config,
                 release_sha=config.proof_base_sha,peer_uid=int(raw["ceo_ingress_app_peer_uid"]),control_uid=int(raw["control_uid"]),
                 dialogue_socket_path=_CANONICAL_AGENT_RELAY_SOCKET,
                 native_owner_configured=lambda: raw["company_consultation"].get("native_return_armed",False))
-        if raw.get("reply_events",{}).get("armed",False):
+        if reply_events_armed:
             app_binding = ceo_ingress_kwargs.get("ceo_ingress_app_binding")
             if app_binding is None or not app_binding.armed or raw["company_consultation"].get("native_return_armed",False) is not True:
                 raise ServiceError("event host requires existing armed App/native composition")
@@ -2441,7 +2451,7 @@ def _service_from_config(
                 workspace_id=SLACK_WORKSPACE_ID, channel_id=SLACK_CHANNEL_ID,
                 requester_answer_wake_dispatch=dispatch_answer,
                 native_return_armed=raw["company_consultation"].get("native_return_armed", False),
-                reply_event_host=event_host_factory(runtime))
+                **({"reply_event_host": event_host_factory(runtime)} if reply_events_armed else {}))
         company_listener = activate_launchd_socket(_COMPANY_CONSULTATION_SOCKET_NAME)
         activated_listeners.append(company_listener)
         company_binding = CompanyConsultationBinding(
