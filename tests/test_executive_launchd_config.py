@@ -774,6 +774,9 @@ def test_control_config_template_tracks_strict_service_schema() -> None:
         "workspace_acquisition",
         "workspace_resource_policy",
         "workspace_control_room",
+        # Trusted Fleet source binding is enrolled by the installed owner,
+        # never baked into an unconfigured control.json template.
+        "workspace_fleet_observer_root",
         "subscription_canary_realm",
         "privileged_readiness_armed",
         "privileged_broker_socket_path",
