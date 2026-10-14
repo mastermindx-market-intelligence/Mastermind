@@ -203,7 +203,7 @@ def _project_collection(observation, *, spec, schema, baseline, process_ref):
             _refuse('collection_capture_mismatch')
         hashes[name] = digest
     # This passing predicate is the original group/capture receipt, not UID sweep.
-    import lane_runtime
+    from .runtime import lane_runtime
     if not lane_runtime.cleanup_receipt_is_proven(observation.get('cleanup', {})):
         _refuse('collection_cleanup_unproven')
     status, error = WorkerRunStatus.FAILED, None
@@ -367,8 +367,8 @@ class FabricAttendedBackend:
             _refuse('original_request_changed')
         if expected['validation_commands']:
             _refuse('finite_profile_requires_empty_validations')
-        import remote_sub_exec
-        import lane_runtime
+        from .runtime import remote_sub_exec
+        from .runtime import lane_runtime
         from control_plane.executive_worker_broker import _launch_spec_from_wire
         from control_plane.codex_worker import _git_snapshot
         # Canonical compiler checks owner policy/profile/schema before the O_EXCL effect.
@@ -451,7 +451,7 @@ class FabricAttendedBackend:
             await asyncio.shield(slot.collection_task)
             return {**common, 'collection': json.loads(slot.collection)}
         if operation == 'cancel':
-            import lane_runtime
+            from .runtime import lane_runtime
             if slot.assignment_task is not None:
                 _refuse('assignment_settlement_already_entered')
             reason = payload.get('reason')
@@ -556,7 +556,7 @@ class FabricAttendedBackend:
             if slot.finalize_attempted:
                 _refuse('assignment_release_unconfirmed')
             release = getattr(slot.lease, 'release_after_assignment_ack', None)
-            import lane_runtime
+            from .runtime import lane_runtime
             receipt_type = getattr(lane_runtime, 'LaneReleaseReceipt', None)
             if release is None or receipt_type is None:
                 _refuse('assignment_verified_release_unavailable')
@@ -625,7 +625,7 @@ class FabricAttendedBackend:
 
     async def _collect(self):
         slot = self._retained()
-        import lane_runtime
+        from .runtime import lane_runtime
         try:
             await asyncio.shield(lane_runtime.collect_owned_process(slot.owner))
             observation = lane_runtime.owned_capture_collection(slot.owner)

@@ -279,7 +279,7 @@ def _require_control_authority(authority: Any, original_material: Mapping[str, A
 
 def _observe_original_image(owner: Any) -> dict[str, Any]:
     """Observe THIS owner handle with the real owned-image observer."""
-    lane_runtime = _import("lane_runtime")
+    lane_runtime = _import("integrations.session_bridge.bound_launch_capture.runtime.lane_runtime")
     try:
         image = lane_runtime.observe_owned_process_image(owner)
     except lane_runtime.LaneRuntimeError as exc:
@@ -446,6 +446,22 @@ def _capture_paths(capture_paths: Any, run_dir: str) -> dict[str, str]:
     }
 
 
+def _qualified_generation(image):
+    value = image.get('process_start_identity')
+    # Legacy Linux owned captures predate this explicit projection. Their
+    # observer must still prove an actual Linux image; never infer Darwin.
+    if value is None:
+        import sys
+        if sys.platform.startswith('linux'):
+            value = 'linux:' + image['start_identity']
+    if (type(value) is not str or
+            re.fullmatch(r'(?:linux:[0-9]+|darwin:[0-9]+\.[0-9]{6})', value) is None):
+        _refuse('owned_image_generation_unqualified')
+    if value.split(':', 1)[1] != image['start_identity']:
+        _refuse('owned_image_generation_unqualified')
+    return value
+
+
 def _build_receipt(
     *,
     spec: Mapping[str, Any],
@@ -472,7 +488,7 @@ def _build_receipt(
         run_id=spec["run_id"],
         pid=image["pid"],
         pgid=image["pgid"],
-        process_start_identity="linux:" + image["start_identity"],
+        process_start_identity=_qualified_generation(image),
         boot_session_id=image["boot_id"],
         launch_nonce=launch_nonce,
         provider_session_id=None,  # The provider supplies one later; never invented.
@@ -576,7 +592,7 @@ def _publish_owned_start(
     them grants authority.  On any refusal the caller keeps its existing
     cleanup, seal, denial and ACK path; nothing here is retried or released.
     """
-    lane_runtime = _import('lane_runtime')
+    lane_runtime = _import('integrations.session_bridge.bound_launch_capture.runtime.lane_runtime')
     # Fixed original owner primitive; a caller callback cannot stand in for
     # durable publication or mint a success result.
     descriptor = getattr(owner, '_original_preparation', None)
@@ -777,7 +793,7 @@ def publish_owned_start(*, original: Mapping[str, Any], owner: Any,
     lease. Recovery/status must consume the retained original record instead
     of invoking a second publication. No record recreates owner authority.
     """
-    lane = _import('lane_runtime')
+    lane = _import('integrations.session_bridge.bound_launch_capture.runtime.lane_runtime')
     lane._require_owned_execution(owner)
     if owner._start_assembly_attempted or owner._start_publication_attempted:
         _refuse('start_publication_already_attempted')

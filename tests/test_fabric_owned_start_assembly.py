@@ -273,6 +273,8 @@ def world(lr, tmp_path, monkeypatch):
     owner._finisher = value.finisher
     monkeypatch.setattr(lr, '_EXECUTION_OWNER', owner)
     monkeypatch.setitem(__import__('sys').modules, 'lane_runtime', lr)
+    monkeypatch.setitem(__import__('sys').modules, 'integrations.session_bridge.bound_launch_capture.runtime.lane_runtime', lr)
+    monkeypatch.setattr(__import__('integrations.session_bridge.bound_launch_capture.runtime',fromlist=['lane_runtime']), 'lane_runtime', lr, raising=False)
     monkeypatch.setattr(lr.sys, 'platform', 'linux')
     from control_plane import linux_process_identity
     value.observations = []

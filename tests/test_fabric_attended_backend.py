@@ -83,7 +83,7 @@ def harness(world, lr, tmp_path, monkeypatch, request):
         assert kw['prepared'] is prepared and callable(kw['credential_loader'])
     executor=SimpleNamespace(_begin_reserved_attended_under_lease=ns[node.name],
         _verify_reserved_realm_observation=verify_credentials)
-    monkeypatch.setitem(sys.modules, 'remote_sub_exec', executor)
+    monkeypatch.setattr(__import__('integrations.session_bridge.bound_launch_capture.runtime',fromlist=['remote_sub_exec']), 'remote_sub_exec', executor, raising=False)
     # Immutable actual fixed policy observation only needed by the fragment.
     policy_workspace=tmp_path.parent/(tmp_path.name+'-workspaces');policy_workspace.mkdir(mode=0o700)
     policy_home=tmp_path.parent/(tmp_path.name+'-provider');policy_home.mkdir(mode=0o700)
@@ -373,7 +373,7 @@ def test_actual_fd_capture_maps_canonical_result_and_real_wire_contract(lr,tmp_p
         'commit','-qm','inert empty baseline','--allow-empty')
     baseline=codex_worker._git_snapshot(workspace,require_clean=True)
     run_dir=tmp_path/'capture';run_dir.mkdir(mode=0o700)
-    monkeypatch.setitem(sys.modules,'lane_runtime',lr)
+    monkeypatch.setattr(__import__('integrations.session_bridge.bound_launch_capture.runtime',fromlist=['lane_runtime']), 'lane_runtime', lr, raising=False)
     owner=lr.begin_owned_process([sys.executable,'-c',
         'import sys;sys.stdout.buffer.write(bytes.fromhex(sys.argv[1]));sys.exit(int(sys.argv[2]))',
         raw.hex(),str(exit_code)],timeout=5,label='attempt-1',receipt_path=tmp_path/'terminal.jsonl',
