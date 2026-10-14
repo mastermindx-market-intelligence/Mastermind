@@ -52,6 +52,27 @@ describe("owner-backed Fabric interiors", () => {
     const d = doc(); d.mission.root_job_ambiguous = true;
     expect(missionInteriors(d).rows[0].problem).toBe("ROOT_NOT_QUALIFIED");
   });
+  it("does not report zero active workers when a supplied root is conflicted", () => {
+    const d = doc(); d.mission.runtime_root_state = "CONFLICT";
+    render(<FabricMissionInspector mission={d} />);
+    expect(screen.getByText("Observed running").querySelector("strong")?.textContent).toBe("Unknown");
+    expect(screen.getAllByText("With results").map(el => el.querySelector("strong")?.textContent).find(Boolean)).toBe("Unknown");
+    expect(screen.getByText(/Current activity counts are unknown/)).toBeTruthy();
+  });
+  it("reports totals only when source time, coverage and parent chains are qualified", () => {
+    const d = doc();
+    const view = render(<FabricMissionInspector mission={d} />);
+    expect(screen.getByText("Observed running").querySelector("strong")?.textContent).toBe("1");
+    const orphan = doc([child("JOB-2", { parent_job_id: "JOB-99" })]);
+    view.rerender(<FabricMissionInspector mission={orphan} />);
+    expect(screen.getByText("Observed running").querySelector("strong")?.textContent).toBe("Unknown");
+    const historical = doc(); historical.read_state.state = "HISTORICAL";
+    view.rerender(<FabricMissionInspector mission={historical} />);
+    expect(screen.getByText("Observed running").querySelector("strong")?.textContent).toBe("Unknown");
+    const partial = doc(); partial.children.coverage = "INCOMPLETE";
+    view.rerender(<FabricMissionInspector mission={partial} />);
+    expect(screen.getByText("Observed running").querySelector("strong")?.textContent).toBe("Unknown");
+  });
   it("bounds visible rows and exposes local truncation", () => {
     const d = doc(Array.from({ length: 270 }, (_, i) => child(`JOB-${i+2}`)));
     const m = missionInteriors(d); expect(m.rows).toHaveLength(MAX_INSPECTED_CHILDREN); expect(m.locallyOmitted).toBe(14);

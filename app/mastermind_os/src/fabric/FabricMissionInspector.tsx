@@ -22,7 +22,8 @@ const ZH = {
   "These receipts describe the mission, not acceptance of each child. A completed attempt or present result is not product acceptance.": "这些回执属于任务，不代表逐个子任务已通过验收。执行完成或存在结果不等于产品验收。",
   "Source observed": "来源观测时间", "Association needs reconciliation": "需要核对关联关系",
   "More supplied rows exceed this inspector’s display bound.": "另有来源记录超出此检查器的显示上限。",
-  "Attempt count": "执行尝试数", "Attempt limit": "执行尝试上限", "Owner coverage is incomplete; observed counts are not fleet totals.": "来源覆盖不完整，观测计数不代表工作代理池总量。"
+  "Attempt count": "执行尝试数", "Attempt limit": "执行尝试上限", "Owner coverage is incomplete; observed counts are not fleet totals.": "来源覆盖不完整，观测计数不代表工作代理池总量。",
+  "Current activity counts are unknown until the supplied root, relationships and coverage are fully qualified.": "只有在根任务、层级关系与数据覆盖全部核实后才能确认当前活动数量。"
 } as const;
 
 export function FabricMissionInspector({ mission, locale = "en" }: {
@@ -45,6 +46,11 @@ export function FabricMissionInspector({ mission, locale = "en" }: {
   const count = (v: number | null | undefined) => value(v);
   const filters: Array<[FabricFilter, keyof typeof ZH]> = [["all", "All"], ["running", "Running"], ["results", "With results"], ["problems", "Problems"]];
   const available = !!mission && mission.read_state.state !== "UNAVAILABLE" && mission.children.state !== "UNAVAILABLE";
+  // A zero in unassociated, truncated or historical records is not evidence of zero active work.
+  const qualifiedCounts = available && mission.read_state.state === "CURRENT" &&
+    mission.mission.runtime_root_state === "RESOLVED" && !mission.mission.root_job_ambiguous &&
+    mission.children.coverage === "COMPLETE" && mission.children.overflow_count === 0 &&
+    mission.children.unjoined_job_count === 0 && model.unassociated === 0 && model.locallyOmitted === 0;
   const detailFields: Array<[keyof typeof ZH, string | number | boolean | null | undefined]> = child ? [
     ["Job", child.job_id], ["Parent", child.parent_job_id], ["Job state", child.status],
     ["Worker", child.worker_id], ["Step", child.plan_step_id], ["Current attempt", child.current_attempt_id],
@@ -69,12 +75,13 @@ export function FabricMissionInspector({ mission, locale = "en" }: {
       </div><p>{t("Supplied mission only. Direct M2 Fabric workers and other missions are not included.")}</p>
         {mission.children.coverage !== "COMPLETE" && <p className="fi-warning">{t("Owner coverage is incomplete; observed counts are not fleet totals.")}</p>}
         {model.locallyOmitted > 0 && <p className="fi-warning">{model.locallyOmitted} · {t("More supplied rows exceed this inspector’s display bound.")}</p>}
+        {!qualifiedCounts && <p className="fi-warning">{t("Current activity counts are unknown until the supplied root, relationships and coverage are fully qualified.")}</p>}
         <small>{t("Source observed")} · {value(mission.source.fabric_view_generated_at)}</small>
       </div>
       <div className="fi-counts" aria-label={t("Subagent Fabric")}>
-        <span><strong>{available ? model.running : t("Unknown")}</strong>{t("Observed running")}</span>
-        <span><strong>{available ? model.results : t("Unknown")}</strong>{t("With results")}</span>
-        <span><strong>{available ? model.problems : t("Unknown")}</strong>{t("Needs inspection")}</span>
+        <span><strong>{qualifiedCounts ? model.running : t("Unknown")}</strong>{t("Observed running")}</span>
+        <span><strong>{qualifiedCounts ? model.results : t("Unknown")}</strong>{t("With results")}</span>
+        <span><strong>{qualifiedCounts ? model.problems : t("Unknown")}</strong>{t("Needs inspection")}</span>
       </div>
       <div className="fi-layout"><div className="fi-list-panel">
         <div className="fi-filters" role="group" aria-label={t("Filter workers")}>{filters.map(([key, label]) =>
