@@ -47,6 +47,7 @@ def build_principal_company_dialogue_host(
     socket_path: Path,
     service_call: ServiceCall = call_service,
     utc_now: UtcNow | None = None,
+    principal_authority_guard: Callable[..., None] | None = None,
 ) -> PrincipalCompanyDialogueHost:
     """Compose existing H6 owners without admitting or starting a principal.
 
@@ -68,6 +69,7 @@ def build_principal_company_dialogue_host(
         binding_resolver,
         socket_path=path,
         service_call=service_call,
+        principal_authority_guard=principal_authority_guard,
     )
     gateway_kwargs: dict[str, Any] = {
         "socket_path": path,
