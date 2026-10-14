@@ -1,0 +1,31 @@
+{
+  "schema": "mastermind.soxx.clock_review_verification.v1",
+  "research_head": "713f263dfc1dec4c7316df6420010cb6a6c38f6f",
+  "source_git_blob": "7e3f9d52cc85ad3236e388877ebd8131ece5c198",
+  "source_sha256": "92c8f202fc43ec173da966228a5b21668fe8abf47337deb8b190653750443362",
+  "original_root_and_parent": "soxx1338-web-resume-20261013",
+  "original_run": "soxx1338-v26-clock-falsifier-20261013d",
+  "review_stdout_sha256": "08b73b3a3f58e4d70ca867e7443bf4b28ed16ad4f1a8eab3e84761e282df40c9",
+  "program_sha256": "9e821bbff5037ea5ce1bfaa2c8d876e0d55ac305ea9592db92760ebebacab3d4",
+  "program_path": "tests/soxx_v26_clock_falsifiers.py",
+  "verification_host": "m2studio",
+  "verification_process": 63270,
+  "exact_source": {"rc": 0, "scenarios_executed": 6, "passed": 6, "failed": 0},
+  "negative_control": {
+    "change": "Only replace return value.astimezone(timezone.utc) with return value in a private copy; preserve awareness validation",
+    "rc": 1,
+    "scenarios_executed": 6,
+    "passed": 4,
+    "failed": ["decreasing_wall_strict_utc_accepted", "nonoverlap_utc_same_wall"]
+  },
+  "review_caveats": [
+    "Reviewer supplied a malformed non-hex source digest; that assertion was rejected and actual bytes independently hashed.",
+    "The case named future_feature_across_folds is an ordered valid-path check, not a future-information rejection test.",
+    "Four scenarios do not discriminate this mutant. Accept the narrow mutation result, not blanket module validation.",
+    "Synthetic scenarios are not independent SOXX episodes or strategy-performance evidence."
+  ],
+  "acceptance": {"state": "ACCEPTED", "accepted_by": "deterministic", "reason": "VALIDATED_OUTCOME", "same_run_readback_process": 74077},
+  "private_artifact_root": "m2studio:/private/tmp/soxx1338-review-d-verified-20261013",
+  "historical_backtests_rerun": false,
+  "live_trading": false
+}
