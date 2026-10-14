@@ -115,6 +115,14 @@ def _handler(state: _State):
                         pass
                     self.connection.close()
                     return
+                if state.mode == "malformed-submit":
+                    raw = b"{not-json"
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(raw)))
+                    self.end_headers()
+                    self.wfile.write(raw)
+                    return
                 self._json(200, {"task": state.task("queued")})
                 return
             if self.path == "/v1/tools/cancel_task":
@@ -451,7 +459,7 @@ def test_dot2api_submit_binds_queue_and_single_attempt(queue, max_attempts):
         token_loader=lambda: _SECRET,
         opener=_StaticOpener(_StaticResponse(raw)),
     )
-    with pytest.raises(Dot2ApiProtocolError):
+    with pytest.raises(Dot2ApiEffectUnknown) as raised:
         client.submit_chat_task(
             queue="dot",
             idempotency_key="request-binding",
@@ -459,6 +467,7 @@ def test_dot2api_submit_binds_queue_and_single_attempt(queue, max_attempts):
             ttl_seconds=60,
             max_attempts=1,
         )
+    assert raised.value.effect == "EFFECT_UNKNOWN"
 
 
 @pytest.mark.parametrize(
@@ -496,6 +505,26 @@ def test_dot2api_cancel_rebinds_exact_returned_task_identity():
             expected_queue="dot",
             expected_max_attempts=1,
         )
+
+
+def test_dot2api_worker_malformed_successful_submit_is_effect_unknown_without_resubmit(
+    tmp_path: Path,
+):
+    async def scenario():
+        spec = _spec(tmp_path)
+        with _Server("malformed-submit") as server:
+            adapter = Dot2ApiWorkerAdapter(
+                server.base_url,
+                credential_loader=lambda: _SECRET,
+                poll_seconds=0.2,
+                submission_timeout_seconds=5,
+            )
+            with pytest.raises(Exception) as raised:
+                await adapter.start(spec)
+            assert getattr(raised.value, "effect_unknown", None) is True
+            assert server.state.submissions == 1
+
+    asyncio.run(scenario())
 
 
 def test_dot2api_worker_retries_transient_status_read_without_resubmission(

@@ -4438,6 +4438,13 @@ class RemoteWorkerProcessController:
             if exc.code != "BrokerRunNotFound":
                 raise
             missing = True
+        if missing and self.expected_adapter_id == "dot2api":
+            # A run missing from the current broker generation cannot prove a
+            # Dot2API task was never accepted. Refuse cleanup rather than let a
+            # replacement broker turn local absence into retry permission.
+            raise BrokerStateError(
+                "Dot2API unbound cleanup requires provider reconciliation"
+            )
         if not missing:
             if (
                 not isinstance(status, Mapping)
@@ -4576,10 +4583,21 @@ class RemoteWorkerProcessController:
         try:
             status = self.client.request_sync("status", {"run_id": attempt.attempt_id})
         except RemoteBrokerError as exc:
-            if exc.code == "BrokerRunNotFound" and self._fresh_overall_absence(
-                attempt, require_current_broker_startup=True
-            ):
-                return ProcessPresence.MISSING
+            if exc.code == "BrokerRunNotFound":
+                if self.expected_adapter_id == "dot2api":
+                    # Dot2API can have a committed upstream task after the
+                    # local broker generation is gone. A replacement broker's
+                    # clean UID/startup sweep therefore proves only local
+                    # absence, never provider absence. Keep the Attempt
+                    # unresolved until the provider task is reconciled.
+                    self._fresh_overall_absence(
+                        attempt, require_current_broker_startup=True
+                    )
+                    return ProcessPresence.UNKNOWN
+                if self._fresh_overall_absence(
+                    attempt, require_current_broker_startup=True
+                ):
+                    return ProcessPresence.MISSING
             return ProcessPresence.UNKNOWN
         except (WorkerBrokerError, OSError):
             return ProcessPresence.UNKNOWN

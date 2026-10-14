@@ -55,7 +55,7 @@ from control_plane.worker_execution_contract import (
     WorkerResult,
     WorkerRunStatus,
 )
-from integrations.dot2api.client import (
+from common.dot2api_client import (
     Dot2ApiClient,
     Dot2ApiClientError,
     Dot2ApiEffectUnknown,

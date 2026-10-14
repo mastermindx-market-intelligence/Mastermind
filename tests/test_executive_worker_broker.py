@@ -1591,6 +1591,29 @@ def test_remote_unbound_cleanup_refuses_worker_side_effect_unknown_quarantine() 
     asyncio.run(scenario())
 
 
+def test_dot2api_unbound_cleanup_refuses_missing_run_after_broker_restart() -> None:
+    class Client:
+        def __init__(self):
+            self.calls = []
+
+        def request_sync(self, operation, payload):
+            self.calls.append((operation, dict(payload)))
+            if payload == {"run_id": "ATT-dot-unknown"}:
+                raise RemoteBrokerError("BrokerRunNotFound", "run unavailable")
+            raise AssertionError("Dot2API restart cleanup must stop at missing exact run")
+
+    controller = RemoteWorkerProcessController(
+        Client(), expected_adapter_id="dot2api"
+    )
+    with pytest.raises(
+        BrokerStateError, match="Dot2API unbound cleanup requires provider reconciliation"
+    ):
+        controller.cleanup_unbound_run("ATT-dot-unknown")
+    assert controller.client.calls == [
+        ("status", {"run_id": "ATT-dot-unknown"})
+    ]
+
+
 def test_fresh_status_uid_sweep_proves_idle_absence(tmp_path: Path) -> None:
     async def scenario() -> None:
         broker, _adapter, sweeper, peer, _spec = _fixture(tmp_path)
@@ -1647,6 +1670,18 @@ def _missing_owner_fixture():
                               started_at="2026-08-11T00:00:00+00:00")
     client = Client()
     return client, attempt, RemoteWorkerProcessController(client, expected_worker_uid=451)
+
+
+def test_dot2api_missing_owner_after_restart_remains_unknown():
+    from control_plane.executive_supervisor import ProcessPresence
+
+    client, attempt, _controller = _missing_owner_fixture()
+    client.status["adapter_id"] = "dot2api"
+    controller = RemoteWorkerProcessController(
+        client, expected_worker_uid=451, expected_adapter_id="dot2api"
+    )
+    assert controller.presence(attempt) is ProcessPresence.UNKNOWN
+    assert controller.absence_verified(attempt) is False
 
 
 def test_remote_controller_missing_owner_requires_fresh_startup_and_absence():
