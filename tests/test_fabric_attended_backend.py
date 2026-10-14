@@ -549,6 +549,10 @@ def test_real_original_lease_ack_requires_actual_durable_release(settled_assignm
             assert h.slot.control_acknowledged and h.slot.resource_released
             assert not lease.path.exists() and lease.fd is None
             receipt = json.loads(h.slot.release_receipt)
+            assert response['result']['physical_release'] == receipt
+            second = await h.service.execute(h.request('assignment-seal-finalize', ack),
+                                             peer=PeerCredentials(uid=450,gid=450))
+            assert second['result']['physical_release'] == receipt
             assert receipt['marker_absent'] is True and receipt['parent_synced'] is True
     run(scenario())
 

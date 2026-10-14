@@ -259,6 +259,7 @@ class AttendedFabricWorkerAdapter:
         self._control_recovery: dict[str, dict[str, str]] = {}
         self._cleanup_pairs: dict[tuple[str, str], tuple[dict, dict, dict]] = {}
         self._cleanup_not_before: dict[str, float] = {}
+        self._physical_release_receipts: dict[str, bytes] = {}
 
     async def prepare_attended_launch_spec(self, spec, *, lease):
         """Observe this claimed Attempt before START; no pin or task reservation."""
@@ -701,7 +702,32 @@ class AttendedFabricWorkerAdapter:
             retention_sha256=acknowledgement["retention_sha256"])
         if result.get("acknowledgement") != acknowledgement:
             raise BrokerProtocolError("Fabric retained assignment acknowledgement differs")
+        if 'physical_release' in result:
+            from control_plane.broker_assignment_seal import (
+                canonical, validate_physical_release, AssignmentObservationError,
+            )
+            try:
+                receipt = canonical(validate_physical_release(result['physical_release'], run_id=ref.run_id))
+            except AssignmentObservationError as exc:
+                raise BrokerProtocolError("Fabric physical release is unconfirmed") from exc
+            previous = self._physical_release_receipts.get(ref.run_id)
+            if previous is not None and previous != receipt:
+                raise BrokerProtocolError("Fabric original physical release changed")
+            self._physical_release_receipts[ref.run_id] = receipt
         return dict(acknowledgement)
+
+    def assignment_physical_release(self, ref):
+        """Retained authenticated readback, separate from Supervisor's ACK.
+
+        Legacy ACK-only backends cannot supply this evidence. No new release
+        is issued, and this receipt by itself cannot settle a native account.
+        """
+        self._known(ref)
+        self._validate_lease(ref.run_id)
+        raw = self._physical_release_receipts.get(ref.run_id)
+        if raw is None:
+            raise BrokerStateError("Fabric physical release has not been retained")
+        return json.loads(raw)
 
     async def collect_result(self, ref):
         spec = self._known(ref)[3]

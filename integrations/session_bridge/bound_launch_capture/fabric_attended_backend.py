@@ -581,7 +581,10 @@ class FabricAttendedBackend:
                 self._hold('assignment_release_unconfirmed')
                 raise
             slot.resource_released = True
-        return {**common, 'acknowledgement': dict(run_id=self._spec.run_id,
+        if slot.release_receipt is None:
+            _refuse('assignment_verified_release_unqualified')
+        return {**common, 'physical_release': json.loads(slot.release_receipt),
+                'acknowledgement': dict(run_id=self._spec.run_id,
                     observation_sha256=observed, retention_sha256=retained)}
 
     async def _prepare_assignment(self, policy):

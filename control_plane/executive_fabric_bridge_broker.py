@@ -498,11 +498,18 @@ class FabricBridgeBroker:
     def _assignment_result(self, operation, result, payload, common):
         from control_plane.broker_assignment_seal import validate_control_seal
         if operation == 'assignment-seal-finalize':
-            _object(result, common | {'acknowledgement'})
+            extra = {'physical_release'} if 'physical_release' in result else set()
+            _object(result, common | {'acknowledgement'} | extra)
             expected = {key: payload[key] for key in (
                 'run_id', 'observation_sha256', 'retention_sha256')}
             if result['acknowledgement'] != expected:
                 _refuse('EFFECT_UNKNOWN', 'Original assignment acknowledgement differs')
+            if extra:
+                from control_plane.broker_assignment_seal import validate_physical_release, AssignmentObservationError
+                try:
+                    validate_physical_release(result['physical_release'], run_id=payload['run_id'])
+                except AssignmentObservationError:
+                    _refuse('EFFECT_UNKNOWN', 'Original physical release differs')
             return
         if operation == 'assignment-seal-prepare':
             _object(result, common | {'snapshot', 'snapshot_sha256'})
