@@ -14,6 +14,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import inspect
+from tests.executive_fabric_release_identity_review import REVIEWED_FILES
 
 REVIEWED_PATH = "control_plane/executive_installed_peer.py"
 REVIEWED_LITERAL_COUNT = 33
@@ -199,6 +200,18 @@ def reviewed_literal_spans(path: str, source: str):
     """
     if type(source) is not str:
         return ()
+    file_review = REVIEWED_FILES.get(path)
+    if file_review is not None:
+        if hashlib.sha256(source.encode()).hexdigest() != file_review['sha256']:
+            return ()
+        lines = source.splitlines()
+        spans = []
+        for line, start, end, kind, spelling in file_review['sites']:
+            if (not 1 <= line <= len(lines) or not lines[line-1].isascii()
+                    or lines[line-1][start:end] != spelling):
+                return ()
+            spans.append((line, start, end, kind))
+        return tuple(sorted(spans))
     modes = REVIEWED_PRIVATE_MODE_SOURCES.get(path)
     if modes is not None:
         if hashlib.sha256(source.encode()).hexdigest() != modes["sha256"]:

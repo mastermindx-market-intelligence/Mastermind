@@ -8,7 +8,7 @@ No test learns replacement pins from current source.
 """
 
 REVIEWED_ANCHORS_BY_PATH = {'ops/executive_os/attended_control_staging.py': {'ProductionFiniteStagingHost': {'node_type': 'ClassDef',
-                                                                                  'ast_sha256': '0619c8b382d58adb749e085a5e8fa4e09f02a7b7ffbc3cfd47585d2eae829839',
+                                                                                  'ast_sha256': '0be2f0114d253d2af161c41095cf56528d2aab54f43b184c06a8a3eb85285b0c',
                                                                                   'sites': ((('body',
                                                                                               1,
                                                                                               'body',

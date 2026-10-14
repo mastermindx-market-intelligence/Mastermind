@@ -52,7 +52,7 @@ class ProductionFiniteStagingHost(owner.ProductionCeoSubmitHost):
                     or info.st_mode & 0o022 or owner._has_acl(path)):
                 raise ValueError('untrusted finite definition directory')
         artifacts = {name: owner._read_root_file(directory/name,
-            modes=frozenset({0o440}), uid=0)[0] for name in ('worker.json', 'bindings.json')}
+            modes=frozenset({0o444}), uid=0, gid=0)[0] for name in ('worker.json', 'bindings.json')}
         from control_plane.executive_fabric_composition import _bindings
         physical, = _bindings(artifacts['bindings.json'])
         manifest, _ = owner._read_root_file(

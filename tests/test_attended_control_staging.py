@@ -161,9 +161,13 @@ def test_real_definition_consumer_requires_selected_installed_generation(monkeyp
     host._finite_expected_sha = SHA
     monkeypatch.setattr(Path, 'lstat', lambda self: SimpleNamespace(st_mode=0o40755, st_uid=0))
     monkeypatch.setattr(owner, '_has_acl', lambda p: False)
-    monkeypatch.setattr(owner, '_read_root_file', lambda p, **kw:
-        ((b'drift' if edge == 'release-drift' else manifest)
-         if p.name == '.executive-release-manifest.json' else artifacts[p.name], None))
+    def published_file(p, **kw):
+        # The reviewed publisher's nonsecret definitions and installed manifest
+        # are root:wheel 0444. Binary attestation is a separate protected file.
+        assert kw == dict(modes=frozenset({0o444}), uid=0, gid=0)
+        return ((b'drift' if edge == 'release-drift' else manifest)
+            if p.name == '.executive-release-manifest.json' else artifacts[p.name], None)
+    monkeypatch.setattr(owner, '_read_root_file', published_file)
     monkeypatch.setattr(staging.pwd, 'getpwnam', lambda name:
         SimpleNamespace(pw_uid=471 if edge == 'principal-drift' else 470, pw_gid=470))
     monkeypatch.setattr(host, '_loaded_observe_only', lambda label: edge == 'loaded')
