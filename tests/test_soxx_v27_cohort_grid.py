@@ -159,6 +159,45 @@ class TestV27FrozenCohort(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unmatched filled-path label"):
             self.run_grid(arms=arms, filled_labels=labels)
 
+    def test_filled_intervention_cannot_outlast_matched_baseline(self):
+        labels = valid_filled_labels(episodes(), policies())
+        first, *rest = labels[("30m", 1)]
+        labels[("30m", 1)] = (replace(
+            first, intervention_end_at=first.baseline_end_at + timedelta(hours=3),
+            outcome_available_at=ASOF), *rest)
+        with self.assertRaisesRegex(ValueError, "intervention .* after baseline horizon"):
+            self.run_grid(filled_labels=labels)
+
+    def test_single_checkpoint_decision_cannot_change_with_execution_delay(self):
+        labels = valid_filled_labels(episodes(), policies())
+        first, *rest = labels[("30m", 4)]
+        labels[("30m", 4)] = (replace(
+            first, decision_at=first.decision_at + timedelta(minutes=15),
+            feature_available_at=first.feature_available_at + timedelta(minutes=15)
+        ), *rest)
+        with self.assertRaisesRegex(ValueError, "decision-clock drift"):
+            self.run_grid(filled_labels=labels)
+
+    def test_three_hour_decision_cannot_precede_thirty_minute_decision(self):
+        labels = valid_filled_labels(episodes(), policies())
+        for arm in (("3h", 1), ("3h", 2), ("3h", 4)):
+            first, *rest = labels[arm]
+            earlier = first.decision_at - timedelta(hours=2, minutes=45)
+            labels[arm] = (replace(first, decision_at=earlier,
+                                   feature_available_at=earlier), *rest)
+        with self.assertRaisesRegex(ValueError, "checkpoint order"):
+            self.run_grid(filled_labels=labels)
+
+    def test_filled_decision_at_exact_baseline_expiration_rejected(self):
+        labels = valid_filled_labels(episodes(), policies())
+        first, *rest = labels[("3h", 1)]
+        instant = first.baseline_end_at
+        labels[("3h", 1)] = (replace(
+            first, decision_at=instant, feature_available_at=instant,
+            intervention_end_at=instant), *rest)
+        with self.assertRaisesRegex(ValueError, "not before baseline horizon"):
+            self.run_grid(filled_labels=labels)
+
     def test_full_grid_has_all_prescribed_cells_with_no_selection(self):
         out = self.run_grid()
         self.assertEqual(out["status"], "STRUCTURAL_ECONOMICS_ONLY")

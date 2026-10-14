@@ -175,6 +175,7 @@ def evaluate_frozen_grid(
     sorted_ids = sorted(ids)
     by_arm: dict[tuple[str, int], dict[str, PairedOutcome]] = {}
     baselines: dict[str, float] = {}
+    decision_clocks: dict[tuple[str, str], datetime] = {}
     supplied_labels = {} if filled_labels is None else filled_labels
     if not isinstance(supplied_labels, Mapping) or not set(supplied_labels).issubset(set(ARMS)):
         raise ValueError("filled label proof must reference only frozen arms")
@@ -203,6 +204,16 @@ def evaluate_frozen_grid(
                 raise ValueError("paired label baseline end does not match original benchmark")
             if lab.decision_at < original_row.entry_at:
                 raise ValueError("paired label precedes actual original entry")
+            if lab.decision_at >= original_row.baseline_end_at:
+                raise ValueError("filled exit decision is not before baseline horizon")
+            if lab.intervention_end_at > original_row.baseline_end_at:
+                raise ValueError("intervention end after baseline horizon")
+            # Execution delay cannot change the original completed-candle
+            # checkpoint itself; it changes only the hypothetical sale timing.
+            time_key = (lab.episode, key[0])
+            previous_clock = decision_clocks.setdefault(time_key, lab.decision_at)
+            if previous_clock != lab.decision_at:
+                raise ValueError("decision-clock drift between delay arms")
             if lab.outcome_available_at is None or lab.outcome_available_at > evaluation_at:
                 raise ValueError("intervention outcome not yet available")
             if (original_row.outcome_known_at is None
@@ -222,6 +233,14 @@ def evaluate_frozen_grid(
                 if prev != r.baseline_pp:
                     raise ValueError("different baseline return across matched arms")
 
+    # When both fixed checkpoints produced an actual sale, the later 3h
+    # completed-candle decision must occur strictly after the earlier 30m one.
+    # Trading-hours calculation and the actual venue clock stay upstream-owned.
+    for episode in ids:
+        first = decision_clocks.get((episode, "30m"))
+        later = decision_clocks.get((episode, "3h"))
+        if first is not None and later is not None and later <= first:
+            raise ValueError("checkpoint order violated across policies")
     if missing_paired_labels:
         return {
             "status": "WITHHELD_PAIRED_PATH_EVIDENCE",
