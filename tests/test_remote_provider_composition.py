@@ -25,7 +25,7 @@ from test_native_claude_remote_fleet import _BrokerWire
 
 CERT = b'composition-fixture-certificate'
 WORKER = fx.WORKER  # Deliberately keep a Codex-looking name for the Claude proof.
-PAIRS = [('codex', 'codex-cli'), ('anthropic', 'claude-code')]
+PAIRS = [('codex', 'codex-cli'), ('anthropic', 'claude-code'), ('dot', 'dot2api')]
 
 
 class Wire:
@@ -137,7 +137,7 @@ def test_claim_to_real_client_launch_status_collect_keeps_parent_and_target(tmp_
     runtime,job,lease,bound,source,lookup,wire,adapter,spec=setup(tmp_path,monkeypatch,provider,adapter_id)
     async def exercise():
         ref=await adapter.start(spec, lease=lease)
-        assert ref.binary.path == ('/fixtures/claude' if provider=='anthropic' else '/fixtures/codex')
+        assert ref.binary.path == {'anthropic': '/fixtures/claude', 'dot': '/fixtures/dot2api'}.get(provider, '/fixtures/codex')
         assert await adapter.status(ref) is WorkerRunStatus.RUNNING
         result=await adapter.collect_result(ref)
         assert result.result.job_id==job.job_id
@@ -156,7 +156,7 @@ def test_claim_to_real_client_launch_status_collect_keeps_parent_and_target(tmp_
     assert adapter_descriptor('claude-code').implemented is False
 
 
-@pytest.mark.parametrize('provider,adapter_id',[('anthropic','codex-cli'),('codex','claude-code'),('other','codex-cli')])
+@pytest.mark.parametrize('provider,adapter_id',[('anthropic','codex-cli'),('codex','claude-code'),('dot','codex-cli'),('dot','claude-code'),('other','codex-cli')])
 def test_mismatched_claim_provider_refuses_before_client_creation(tmp_path,monkeypatch,provider,adapter_id):
     runtime,job,lease=claimed(tmp_path,provider);bound=binding(tmp_path,adapter_id)
     calls=[]

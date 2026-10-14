@@ -73,6 +73,11 @@ ADAPTER_DESCRIPTORS: dict[str, AdapterDescriptor] = {
         implemented=False,
         implementation="control_plane.claude_worker.ClaudeCodeWorkerAdapter",
     ),
+    "dot2api": AdapterDescriptor(
+        adapter_id="dot2api",
+        implemented=False,
+        implementation="control_plane.dot2api_worker.Dot2ApiWorkerAdapter",
+    ),
     # Clean, deliberately unarmed seams for later provider work.  A routing
     # policy cannot bind a live worker through an unimplemented descriptor.
     "openai-compatible": AdapterDescriptor(

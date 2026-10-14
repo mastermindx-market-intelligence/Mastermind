@@ -70,16 +70,25 @@ _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 CLAUDE_OPERATOR_PROVIDER = "claude"
 CLAUDE_OPERATOR_HARNESS_KIND = "claude-agent-sdk"
 CLAUDE_OPERATOR_EXECUTION_SURFACE = "claude-agent-sdk"
+DOT2API_EXECUTION_SURFACE = "dot2api"
+DOT2API_NETWORK_POLICY = "loopback-provider-only"
 _EXECUTION_SURFACES = frozenset({
-    "codex-exec", "codex-app-server", "claude-code", CLAUDE_OPERATOR_EXECUTION_SURFACE,
+    "codex-exec",
+    "codex-app-server",
+    "claude-code",
+    CLAUDE_OPERATOR_EXECUTION_SURFACE,
+    DOT2API_EXECUTION_SURFACE,
 })
 _AUTH_REALMS = frozenset({"dedicated-worker-account"})
 _ADAPTER_EXECUTION_SURFACES = {
     "codex-cli": frozenset({"codex-exec", "codex-app-server"}),
     "claude-code": frozenset({"claude-code"}),
+    "dot2api": frozenset({DOT2API_EXECUTION_SURFACE}),
     "attended-fabric": frozenset({"claude-code"}),
 }
-_SEALED_WORKER_EXECUTION_SURFACES = frozenset({"codex-exec", "claude-code"})
+_SEALED_WORKER_EXECUTION_SURFACES = frozenset({
+    "codex-exec", "claude-code", DOT2API_EXECUTION_SURFACE,
+})
 
 
 def adapter_supports_execution_surface(adapter_id: str, execution_surface: str) -> bool:
@@ -96,7 +105,9 @@ def is_sealed_worker_execution_surface(execution_surface: str) -> bool:
     return str(execution_surface or "").strip().lower() in _SEALED_WORKER_EXECUTION_SURFACES
 _SANDBOX_POLICIES = frozenset({"read-only", "workspace-write"})
 _APPROVAL_POLICIES = frozenset({"never"})
-_NETWORK_POLICIES = frozenset({"disabled", "loopback-browser-only"})
+_NETWORK_POLICIES = frozenset({
+    "disabled", "loopback-browser-only", DOT2API_NETWORK_POLICY,
+})
 
 
 def claude_security_config_projection(effective: Mapping[str, Any], *,
@@ -966,6 +977,16 @@ class ExecutionCapabilityProfile:
                 "sandbox": requested["sandbox"],
                 "permissions": {},
             }, launch_provenance={k: requested[k] for k in ("setting_sources", "strict_mcp_config", "skills")})
+        if self.execution_surface == DOT2API_EXECUTION_SURFACE:
+            return _digest({
+                "execution_surface": DOT2API_EXECUTION_SURFACE,
+                "sandbox_policy": self.sandbox_policy,
+                "network_policy": self.network_policy,
+                "write_capable": self.write_capable,
+                "provider_transport": "dot2api-task-api",
+                "provider_mutation_retries": 0,
+                "provider_max_attempts": 1,
+            })
         return _digest(self.app_server_config_projection())
 
     def claude_sdk_config_projection(self) -> dict[str, object]:
@@ -1846,6 +1867,7 @@ class ExecutionCapabilityRegistry:
                     "rich Claude principal profile requires disabled inert owner admission"
                 )
             is_browser_profile = profile_id == "operator.browser.local-review.v1"
+            is_dot2api_profile = execution_surface == DOT2API_EXECUTION_SURFACE
             if is_browser_profile:
                 if (
                     mcp_server_ids
@@ -1866,6 +1888,24 @@ class ExecutionCapabilityRegistry:
                   and (resource_ids or network_policy == "loopback-browser-only")):
                 raise CapabilityPolicyError(
                     f"profile {profile_id!r} cannot inherit browser resource authority"
+                )
+            if is_dot2api_profile:
+                if (
+                    network_policy != DOT2API_NETWORK_POLICY
+                    or write_capable
+                    or native_helper_policy is not NativeHelperPolicy.DISABLED
+                    or native_helper is not None
+                    or skills
+                    or mcp_server_ids
+                    or resource_ids
+                    or plugins
+                ):
+                    raise CapabilityPolicyError(
+                        "Dot2API profile must preserve the READ-only loopback provider ceiling"
+                    )
+            elif network_policy == DOT2API_NETWORK_POLICY:
+                raise CapabilityPolicyError(
+                    f"profile {profile_id!r} cannot inherit Dot2API provider network authority"
                 )
             if schema_version == CAPABILITY_POLICY_SCHEMA_V4:
                 skill_capability_ids = _identities(
@@ -2098,6 +2138,8 @@ __all__ = [
     "CAPABILITY_POLICY_SCHEMA_V4",
     "DEFAULT_CAPABILITY_POLICY_PATH",
     "DEFAULT_CAPABILITY_SOURCE_ROOT",
+    "DOT2API_EXECUTION_SURFACE",
+    "DOT2API_NETWORK_POLICY",
     "CapabilityPolicyError",
     "CompanyConsultationGrantProfile",
     "ExecutionCapabilityProfile",

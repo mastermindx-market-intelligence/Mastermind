@@ -14,6 +14,11 @@
       "enabled": false,
       "autonomous_allowed": false
     },
+    "dot": {
+      "adapter_id": "dot2api",
+      "enabled": false,
+      "autonomous_allowed": false
+    },
     "qwen": {
       "adapter_id": "openai-compatible",
       "enabled": false,
@@ -102,6 +107,15 @@
       "cost_class": "default",
       "capabilities": ["research"],
       "worker_eligible": true
+    },
+    "dot.research": {
+      "provider_alias": "dot",
+      "execution_profile_id": "sealed.worker.dot.readonly.no-extensions.v1",
+      "model": "dot",
+      "effort": "medium",
+      "cost_class": "subscription",
+      "capabilities": ["research"],
+      "worker_eligible": false
     },
     "standard.review": {
       "provider_alias": "codex",

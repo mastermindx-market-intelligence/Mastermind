@@ -693,6 +693,63 @@ def test_resolution_is_runtime_read_only(tmp_path: Path) -> None:
     assert counts() == before
 
 
+def test_dot_provider_resolves_only_to_dot2api_remote_fleet(tmp_path: Path) -> None:
+    runtime = Runtime.at(tmp_path / "runtime-dot")
+    runtime.workers.register_worker(
+        WORKER,
+        provider="dot",
+        account_label="fixture-dot",
+        worker_type="dot2api",
+        capabilities=["research"],
+        quota_classes={
+            QUOTA: {
+                "capabilities": ["research"],
+                "metadata": {"capacity_join": _join(HOST_A)},
+            }
+        },
+    )
+    job = runtime.jobs.create_job(
+        "bounded Dot2API transport proof",
+        requested_authorities=["READ", "RESEARCH"],
+        constraints={"eligible_quota_classes": [QUOTA]},
+        attempt_limit=1,
+    )
+    lease = runtime.attempts.claim_job(
+        job.job_id,
+        worker_id=WORKER,
+        quota_class=QUOTA,
+        lease_owner="dot2api-transport-test",
+    )
+    assert lease is not None
+    dot_binding = dataclasses.replace(
+        _host_binding(tmp_path, worker_id=WORKER),
+        adapter_id="dot2api",
+        worker_user="_mastermind_dot2api_01",
+    )
+    resolved = resolve_remote_attempt_transport(
+        runtime,
+        job_id=job.job_id,
+        attempt_id=lease.attempt.attempt_id,
+        binding_source=lambda host_ref, worker_id: dot_binding,
+    )
+    assert resolved.provider == "dot"
+    assert resolved.endpoint.adapter_id == "dot2api"
+    fleet = build_attempt_bound_worker_fleet(resolved)
+    assert fleet._adapters[WORKER].adapter_id == "dot2api"
+    assert fleet._controllers[WORKER].expected_adapter_id == "dot2api"
+
+    with pytest.raises(RemoteAttemptTransportError) as raised:
+        resolve_remote_attempt_transport(
+            runtime,
+            job_id=job.job_id,
+            attempt_id=lease.attempt.attempt_id,
+            binding_source=lambda host_ref, worker_id: dataclasses.replace(
+                dot_binding, adapter_id="codex-cli"
+            ),
+        )
+    assert raised.value.code == "PROVIDER_UNSUPPORTED"
+
+
 def test_current_fleet_consumer_refuses_unaccepted_provider_adapter(
     tmp_path: Path,
 ) -> None:

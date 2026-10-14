@@ -320,6 +320,7 @@ _CONFIG_OPTIONAL = frozenset(
         "privileged_readiness_armed",
         "privileged_broker_socket_path",
         "python_runtime_provenance_digest",
+        "remote_worker_bindings_path",
         "fabric_bindings_path",
         "fabric_bindings_sha256",
         "fabric_bridge_armed",
@@ -976,6 +977,11 @@ def load_control_config(
     if "content_observer_profile_path" in config:
         config["content_observer_profile_path"] = _content_profile_path(
             config["content_observer_profile_path"]
+        )
+    if "remote_worker_bindings_path" in config:
+        config["remote_worker_bindings_path"] = _path(
+            config["remote_worker_bindings_path"],
+            "remote_worker_bindings_path",
         )
     if ceo_ingress_present:
         config["ceo_ingress_socket_path"] = _path(
@@ -1662,6 +1668,33 @@ class _C1UnavailableGroundingProvider:
 
     def observe(self):
         raise RuntimeError("C1_GROUNDING_UNAVAILABLE")
+
+
+def _remote_worker_binding_source_from_config(
+    raw: Mapping[str, Any], *, factory=None,
+):
+    """Compose the incumbent Attempt-bound resolver from one root projection.
+
+    The returned callable owns no placement or discovery: Runtime/Capacity must
+    already select the exact host_ref and worker_id before it is consulted.
+    """
+
+    path = raw.get("remote_worker_bindings_path")
+    if path is None:
+        return None
+    if factory is None:
+        from ops.executive_os.remote_worker_binding_source import (
+            RootManagedRemoteWorkerBindingSource,
+        )
+        factory = RootManagedRemoteWorkerBindingSource
+    if not callable(factory):
+        raise ServiceError("remote worker binding source factory must be callable")
+    try:
+        return factory(
+            Path(path), expected_owner_uid=0, expected_group_gid=os.getegid()
+        )
+    except Exception as exc:
+        raise ServiceError("remote worker binding source is unavailable") from exc
 
 
 def _service_from_config(
@@ -2653,6 +2686,7 @@ async def _serve_from_config(config_path: Path) -> None:
     # existing root-owned receipt pair. Never read worker-codex.json as Control.
     require_ceo_admission = _ceo_admission_guard(raw, config_path, content_attestation_loader)
 
+    remote_worker_binding_source = _remote_worker_binding_source_from_config(raw)
     service = _service_from_config(
         raw,
         dialogue_canary_profile=dialogue_canary_profile,
@@ -2665,6 +2699,10 @@ async def _serve_from_config(config_path: Path) -> None:
         workspace_acquisition_loader=lambda: load_control_config(config_path)["workspace_acquisition"],
         **({"coo_source": coo_source} if coo_source is not None else {}),
         **({"exact_target_source": exact_target_source} if exact_target_source is not None else {}),
+        **(
+            {"remote_worker_binding_source": remote_worker_binding_source}
+            if remote_worker_binding_source is not None else {}
+        ),
     )
     await service.serve_until_stopped()
 

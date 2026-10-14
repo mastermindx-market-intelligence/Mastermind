@@ -40,7 +40,7 @@ class _BrokerWire:
             raise AssertionError(f"unexpected fixture operation: {operation}")
         spec = payload["launch_spec"]
         run_id = spec["run_id"]
-        binary_name = "claude" if self.adapter_id == "claude-code" else "codex"
+        binary_name = {"claude-code": "claude", "dot2api": "dot2api"}.get(self.adapter_id, "codex")
         binary = BinaryAttestation(
             path=f"/fixtures/{binary_name}",
             real_path=f"/fixtures/{binary_name}",

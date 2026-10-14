@@ -3287,12 +3287,26 @@ class ExecutiveWorkerBroker:
             attestation_reader = getattr(self.adapter, "launch_attestation", None)
             attestation = attestation_reader(process_ref) if callable(attestation_reader) else None
             started = True
-        except Exception:
+        except Exception as exc:
             try:
-                self.last_sweep = await asyncio.to_thread(self.sweeper.sweep, "start_failed")
+                self.last_sweep = await asyncio.to_thread(
+                    self.sweeper.sweep, "start_failed"
+                )
             except Exception as sweep_exc:
                 async with self._state_lock:
-                    self._quarantined_reason = f"start cleanup failed: {type(sweep_exc).__name__}"
+                    self._quarantined_reason = (
+                        f"start cleanup failed: {type(sweep_exc).__name__}"
+                    )
+            else:
+                # Local process absence cannot prove provider absence.  An
+                # adapter that explicitly reports an unknown provider effect
+                # must retain a broker-level fence so a later control-side
+                # "run not found" observation cannot authorize replay.
+                if getattr(exc, "effect_unknown", None) is True:
+                    async with self._state_lock:
+                        self._quarantined_reason = (
+                            f"start effect unknown: {type(exc).__name__}"
+                        )
             raise
         finally:
             async with self._state_lock:
@@ -4572,6 +4586,12 @@ class RemoteClaudeWorkerAdapter(RemoteCodexWorkerAdapter):
     adapter_id = "claude-code"
 
 
+class RemoteDot2ApiWorkerAdapter(RemoteCodexWorkerAdapter):
+    """Control-side Dot2API facade with immutable broker identity."""
+
+    adapter_id = "dot2api"
+
+
 class RemoteWorkerProcessController:
     """Synchronous restart-reconciliation facade over broker status/cancel."""
 
@@ -4584,7 +4604,7 @@ class RemoteWorkerProcessController:
         ):
             raise ValueError("expected worker UID must be a positive integer")
         if type(expected_adapter_id) is not str or expected_adapter_id not in {
-            "codex-cli", "claude-code",
+            "codex-cli", "claude-code", "dot2api",
         }:
             raise ValueError("expected worker adapter must be a supported identity")
         self.client = client
@@ -4613,6 +4633,13 @@ class RemoteWorkerProcessController:
             if exc.code != "BrokerRunNotFound":
                 raise
             missing = True
+        if missing and self.expected_adapter_id == "dot2api":
+            # A run missing from the current broker generation cannot prove a
+            # Dot2API task was never accepted. Refuse cleanup rather than let a
+            # replacement broker turn local absence into retry permission.
+            raise BrokerStateError(
+                "Dot2API unbound cleanup requires provider reconciliation"
+            )
         if not missing:
             if (
                 not isinstance(status, Mapping)
@@ -4751,10 +4778,21 @@ class RemoteWorkerProcessController:
         try:
             status = self.client.request_sync("status", {"run_id": attempt.attempt_id})
         except RemoteBrokerError as exc:
-            if exc.code == "BrokerRunNotFound" and self._fresh_overall_absence(
-                attempt, require_current_broker_startup=True
-            ):
-                return ProcessPresence.MISSING
+            if exc.code == "BrokerRunNotFound":
+                if self.expected_adapter_id == "dot2api":
+                    # Dot2API can have a committed upstream task after the
+                    # local broker generation is gone. A replacement broker's
+                    # clean UID/startup sweep therefore proves only local
+                    # absence, never provider absence. Keep the Attempt
+                    # unresolved until the provider task is reconciled.
+                    self._fresh_overall_absence(
+                        attempt, require_current_broker_startup=True
+                    )
+                    return ProcessPresence.UNKNOWN
+                if self._fresh_overall_absence(
+                    attempt, require_current_broker_startup=True
+                ):
+                    return ProcessPresence.MISSING
             return ProcessPresence.UNKNOWN
         except (WorkerBrokerError, OSError):
             return ProcessPresence.UNKNOWN
@@ -4823,7 +4861,7 @@ class RemoteWorkerBrokerEndpoint:
 
     def __post_init__(self) -> None:
         if type(self.adapter_id) is not str or self.adapter_id not in (
-            "codex-cli", "claude-code"
+            "codex-cli", "claude-code", "dot2api"
         ):
             raise WorkerBrokerError("remote worker endpoint has unsupported adapter_id")
         worker_id = str(self.worker_id or "").strip()
@@ -4987,6 +5025,8 @@ class RemoteWorkerBrokerFleet:
                     facade = RemoteCodexWorkerAdapter
                 elif row.adapter_id == "claude-code":
                     facade = RemoteClaudeWorkerAdapter
+                elif row.adapter_id == "dot2api":
+                    facade = RemoteDot2ApiWorkerAdapter
                 else:
                     raise WorkerBrokerError("remote worker endpoint has unsupported adapter_id")
                 return facade(
@@ -4994,7 +5034,9 @@ class RemoteWorkerBrokerFleet:
                     validation_commands_for_spec=validation_resolver,
                 )
         if controller_factory is None:
-            controller_factory = lambda row: RemoteWorkerProcessController(row.client)
+            controller_factory = lambda row: RemoteWorkerProcessController(
+                row.client, expected_adapter_id=row.adapter_id
+            )
         self._endpoints = {row.worker_id: row for row in rows}
         self._adapters = {row.worker_id: adapter_factory(row) for row in rows}
         self._controllers = {row.worker_id: controller_factory(row) for row in rows}
@@ -5220,6 +5262,7 @@ __all__ = [
     "RemoteBrokerError",
     "RemoteClaudeWorkerAdapter",
     "RemoteCodexWorkerAdapter",
+    "RemoteDot2ApiWorkerAdapter",
     "RemoteWorkerBrokerEndpoint",
     "RemoteWorkerBrokerFleet",
     "RemoteWorkerProcessController",

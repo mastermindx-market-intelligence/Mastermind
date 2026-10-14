@@ -1,0 +1,25 @@
+{
+  "schema": "mastermind.remote_worker_host_bindings/v1",
+  "bindings": [
+    {
+      "host_ref": "host-__CAPACITY_HOST_SHA256_64_HEX__",
+      "worker_id": "dot2api-01",
+      "adapter_id": "dot2api",
+      "worker_user": "__WORKER_USER__",
+      "worker_uid": "__WORKER_UID__",
+      "worker_gid": "__WORKER_GID__",
+      "endpoint_host": "__REMOTE_GATEWAY_PRIVATE_IP__",
+      "endpoint_port": 7443,
+      "ca_path": "/Library/Application Support/MastermindExecutive/remote-worker-control/ca.pem",
+      "client_cert_path": "/Library/Application Support/MastermindExecutive/remote-worker-control/control-client.pem",
+      "client_key_path": "/Library/Application Support/MastermindExecutive/remote-worker-control/control-client.key",
+      "expected_server_fingerprint": "__REMOTE_GATEWAY_CERT_SHA256_64_HEX__",
+      "timeout_seconds": 30.0,
+      "secret_canary_verdict": {
+        "passed": true,
+        "worker_id": "dot2api-01",
+        "receipt_sha256": "__SECRET_CANARY_RECEIPT_SHA256_64_HEX__"
+      }
+    }
+  ]
+}

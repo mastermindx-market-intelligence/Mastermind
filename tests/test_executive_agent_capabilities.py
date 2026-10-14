@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 
@@ -136,7 +137,7 @@ def test_default_policy_is_secret_free_unarmed_and_resolves_closed_profiles():
     registry = ExecutionCapabilityRegistry.load()
     assert registry.lifecycle_authority == "executive_os"
     assert registry.production_armed is False
-    assert registry.policy_version == "2026-10-11.native-return-host-selection"
+    assert registry.policy_version == "2026-10-13.dot2api-native-return-host-selection"
     assert len(registry.policy_digest) == 64
 
     sealed = registry.resolve("sealed.worker.write.no-extensions.v1")
@@ -719,6 +720,7 @@ def test_v3_ratified_generation_and_schema_constants_remain_exact(tmp_path):
     protected_raw = _raw_policy()
     del protected_raw["profiles"]["operator.appserver.interactive.native-return.v1"]
     del protected_raw["mcp_servers"]["native-return-mcp-v1"]
+    del protected_raw["profiles"]["sealed.worker.dot.readonly.no-extensions.v1"]
     protected_raw["policy_version"] = "2026-10-03.company-consultation-edge-p0"
     protected_previous = ExecutionCapabilityRegistry.load(_write(tmp_path, protected_raw))
     assert default.policy_digest != protected_previous.policy_digest
@@ -846,3 +848,40 @@ def test_wave3_partB_duplicate_key_refusal_reason_is_fixed_regardless_of_key(tmp
         messages.add(str(excinfo.value))
 
     assert messages == {_DUPLICATE_JSON_KEY_REASON}
+
+
+def test_dot2api_capability_profile_is_closed_and_nontransferable(tmp_path):
+    registry = ExecutionCapabilityRegistry.load()
+    profile = registry.resolve("sealed.worker.dot.readonly.no-extensions.v1")
+    assert profile.execution_surface == "dot2api"
+    assert profile.auth_realm == "dedicated-worker-account"
+    assert profile.sandbox_policy == "read-only"
+    assert profile.approval_policy == "never"
+    assert profile.network_policy == "loopback-provider-only"
+    assert profile.write_capable is False
+    assert profile.skills == ()
+    assert profile.mcp_servers == ()
+    assert profile.resource_grants == ()
+    assert profile.plugins == ()
+    digest = profile.expected_config_digest
+    assert len(digest) == 64
+    assert digest == profile.expected_config_digest
+
+    raw = _raw_policy()
+    dot = raw["profiles"]["sealed.worker.dot.readonly.no-extensions.v1"]
+    for field, value in (
+        ("network_policy", "disabled"),
+        ("write_capable", True),
+        ("mcp_servers", ["openai-developer-docs-v1"]),
+    ):
+        changed = copy.deepcopy(raw)
+        changed["profiles"]["sealed.worker.dot.readonly.no-extensions.v1"][field] = value
+        with pytest.raises(CapabilityPolicyError, match="Dot2API profile|cannot grant MCP"):
+            ExecutionCapabilityRegistry.load(_write(tmp_path, changed))
+
+    changed = copy.deepcopy(raw)
+    changed["profiles"]["sealed.worker.readonly.no-extensions.v1"][
+        "network_policy"
+    ] = "loopback-provider-only"
+    with pytest.raises(CapabilityPolicyError, match="cannot inherit Dot2API"):
+        ExecutionCapabilityRegistry.load(_write(tmp_path, changed))

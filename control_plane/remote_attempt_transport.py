@@ -142,7 +142,7 @@ class RemoteWorkerHostBinding:
     adapter_id: str = "codex-cli"
 
     def __post_init__(self) -> None:
-        if type(self.adapter_id) is not str or self.adapter_id not in {"codex-cli", "claude-code"}:
+        if type(self.adapter_id) is not str or self.adapter_id not in {"codex-cli", "claude-code", "dot2api"}:
             raise RemoteAttemptTransportError("HOST_BINDING_MISMATCH")
         try:
             host_ref = validate_host_ref(self.host_ref)
@@ -429,7 +429,7 @@ def resolve_remote_attempt_transport(
     # Validate canonical claim against a separately owned endpoint identity.
     # Do not infer provider from account/worker names or caller payload.
     if (join.provider, host_binding.adapter_id) not in {
-        ("codex", "codex-cli"), ("anthropic", "claude-code")
+        ("codex", "codex-cli"), ("anthropic", "claude-code"), ("dot", "dot2api")
     }:
         raise RemoteAttemptTransportError("PROVIDER_UNSUPPORTED")
 
@@ -531,7 +531,7 @@ def build_attempt_bound_worker_fleet(
     # is retained at consumption too; neither a resolution nor a model payload
     # may relabel the already-selected endpoint. This does not arm the provider.
     if (resolution.provider, getattr(resolution.endpoint, "adapter_id", None)) not in {
-        ("codex", "codex-cli"), ("anthropic", "claude-code")
+        ("codex", "codex-cli"), ("anthropic", "claude-code"), ("dot", "dot2api")
     }:
         raise RemoteAttemptTransportError("PROVIDER_UNSUPPORTED")
     return RemoteWorkerBrokerFleet(

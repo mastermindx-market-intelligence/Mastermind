@@ -777,6 +777,10 @@ def test_control_config_template_tracks_strict_service_schema() -> None:
         "subscription_canary_realm",
         "privileged_readiness_armed",
         "privileged_broker_socket_path",
+        # Physical binding sources are rendered only after their owning
+        # placement/admission paths are enrolled; the unconfigured template
+        # must not guess either remote-worker or Fabric state.
+        "remote_worker_bindings_path",
         "fabric_bridge_armed",
         "fabric_bindings_path",
         "fabric_bindings_sha256",

@@ -1561,6 +1561,59 @@ def test_remote_adapter_cleans_unbound_start_and_returns_fresh_absence_sweep() -
     asyncio.run(scenario())
 
 
+def test_remote_unbound_cleanup_refuses_worker_side_effect_unknown_quarantine() -> None:
+    fresh = FakeSweeper().sweep("status_absence").to_dict()
+
+    class Client:
+        async def request(self, operation, payload, *, timeout_seconds=None):
+            if operation == "cancel":
+                assert payload["run_id"] == "ATT-unbound-unknown"
+                raise RemoteBrokerError("BrokerRunNotFound", "run unavailable")
+            assert operation == "status"
+            assert payload == {"fresh_uid_sweep": True}
+            return {
+                "active_run_id": None,
+                "starting": False,
+                "validation_busy": False,
+                "status_sweep_busy": False,
+                "quarantined_reason": "start effect unknown: EffectUnknown",
+                "status_sweep": fresh,
+            }
+
+    async def scenario() -> None:
+        remote = RemoteCodexWorkerAdapter(Client())  # type: ignore[arg-type]
+        with pytest.raises(
+            BrokerStateError, match="ambiguous start cleanup did not prove broker absence"
+        ):
+            await remote.cleanup_unbound_run("ATT-unbound-unknown")
+        assert "ATT-unbound-unknown" not in remote._uid_sweeps
+
+    asyncio.run(scenario())
+
+
+def test_dot2api_unbound_cleanup_refuses_missing_run_after_broker_restart() -> None:
+    class Client:
+        def __init__(self):
+            self.calls = []
+
+        def request_sync(self, operation, payload):
+            self.calls.append((operation, dict(payload)))
+            if payload == {"run_id": "ATT-dot-unknown"}:
+                raise RemoteBrokerError("BrokerRunNotFound", "run unavailable")
+            raise AssertionError("Dot2API restart cleanup must stop at missing exact run")
+
+    controller = RemoteWorkerProcessController(
+        Client(), expected_adapter_id="dot2api"
+    )
+    with pytest.raises(
+        BrokerStateError, match="Dot2API unbound cleanup requires provider reconciliation"
+    ):
+        controller.cleanup_unbound_run("ATT-dot-unknown")
+    assert controller.client.calls == [
+        ("status", {"run_id": "ATT-dot-unknown"})
+    ]
+
+
 def test_fresh_status_uid_sweep_proves_idle_absence(tmp_path: Path) -> None:
     async def scenario() -> None:
         broker, _adapter, sweeper, peer, _spec = _fixture(tmp_path)
@@ -1617,6 +1670,18 @@ def _missing_owner_fixture():
                               started_at="2026-08-11T00:00:00+00:00")
     client = Client()
     return client, attempt, RemoteWorkerProcessController(client, expected_worker_uid=451)
+
+
+def test_dot2api_missing_owner_after_restart_remains_unknown():
+    from control_plane.executive_supervisor import ProcessPresence
+
+    client, attempt, _controller = _missing_owner_fixture()
+    client.status["adapter_id"] = "dot2api"
+    controller = RemoteWorkerProcessController(
+        client, expected_worker_uid=451, expected_adapter_id="dot2api"
+    )
+    assert controller.presence(attempt) is ProcessPresence.UNKNOWN
+    assert controller.absence_verified(attempt) is False
 
 
 def test_remote_controller_missing_owner_requires_fresh_startup_and_absence():
@@ -3261,6 +3326,40 @@ def test_broker_failed_start_never_publishes_success(
     asyncio.run(scenario())
 
 
+def test_broker_effect_unknown_start_quarantines_after_clean_local_sweep(
+    tmp_path: Path,
+) -> None:
+    async def scenario():
+        broker, _adapter, sweeper, peer, spec = _fixture(tmp_path)
+
+        class EffectUnknown(RuntimeError):
+            effect_unknown = True
+
+        class UncertainAdapter(FakeAdapter):
+            async def start(self, launch_spec):
+                raise EffectUnknown("provider submission may have begun")
+
+        broker.adapter = UncertainAdapter()
+        payload = {"launch_spec": spec, "validation_commands": []}
+        with pytest.raises(EffectUnknown):
+            await broker.execute(_request("start", payload), peer=peer)
+
+        assert sweeper.calls == ["start_failed"]
+        assert broker.last_sweep.reason == "start_failed"
+        assert broker._active_run_id is None and not broker._runs
+        assert broker._starting is False
+        assert broker._quarantined_reason == "start effect unknown: EffectUnknown"
+
+        broker.adapter = FakeAdapter()
+        with pytest.raises(BrokerStateError, match="quarantined"):
+            await broker.execute(
+                _request("start", payload, suffix="after-effect-unknown"),
+                peer=peer,
+            )
+
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize("failure", [asyncio.CancelledError(), BaseException("fixture shutdown")])
 def test_broker_start_base_exception_retains_original_finalization(tmp_path: Path, failure) -> None:
     async def scenario():
@@ -3451,15 +3550,18 @@ def test_claude_broker_refuses_non_codex_validation_adapter(tmp_path: Path) -> N
     assert "claude-compatible-subscription" not in str(refused.value)
 
 
-def test_remote_claude_worker_adapter_has_immutable_claude_identity() -> None:
+def test_remote_provider_worker_adapters_have_immutable_identities() -> None:
     from control_plane.executive_worker_broker import (
         RemoteClaudeWorkerAdapter,
         RemoteCodexWorkerAdapter,
+        RemoteDot2ApiWorkerAdapter,
     )
 
     assert RemoteClaudeWorkerAdapter.adapter_id == "claude-code"
     assert RemoteCodexWorkerAdapter.adapter_id == "codex-cli"
+    assert RemoteDot2ApiWorkerAdapter.adapter_id == "dot2api"
     assert issubclass(RemoteClaudeWorkerAdapter, RemoteCodexWorkerAdapter)
+    assert issubclass(RemoteDot2ApiWorkerAdapter, RemoteCodexWorkerAdapter)
 
 
 def test_codex_validation_byte_semantics_preserved(tmp_path: Path) -> None:
@@ -3493,7 +3595,7 @@ def test_codex_validation_byte_semantics_preserved(tmp_path: Path) -> None:
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("facade_name", ["codex", "claude"])
+@pytest.mark.parametrize("facade_name", ["codex", "claude", "dot2api"])
 @pytest.mark.parametrize("field", ["job_id", "run_id", "worker_id"])
 def test_remote_collection_refuses_foreign_result_identity(
     tmp_path: Path, facade_name: str, field: str
@@ -3503,6 +3605,7 @@ def test_remote_collection_refuses_foreign_result_identity(
         from control_plane.executive_worker_broker import (
             RemoteClaudeWorkerAdapter,
             RemoteCodexWorkerAdapter,
+            RemoteDot2ApiWorkerAdapter,
             _jsonable,
             _launch_spec_from_wire,
         )
@@ -3530,11 +3633,11 @@ def test_remote_collection_refuses_foreign_result_identity(
                     "uid_sweep": _jsonable(FakeSweeper().sweep("remote-test")),
                 }
 
-        facade_type = (
-            RemoteCodexWorkerAdapter
-            if facade_name == "codex"
-            else RemoteClaudeWorkerAdapter
-        )
+        facade_type = {
+            "codex": RemoteCodexWorkerAdapter,
+            "claude": RemoteClaudeWorkerAdapter,
+            "dot2api": RemoteDot2ApiWorkerAdapter,
+        }[facade_name]
         remote = facade_type(Client())  # type: ignore[arg-type]
         remote._refs[spec.run_id] = ref
         remote._specs[spec.run_id] = spec
