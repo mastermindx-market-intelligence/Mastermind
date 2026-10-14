@@ -12,7 +12,7 @@ python3 replay_casebook.py --format markdown
 python3 replay_casebook.py --format json
 ```
 
-Local: **110/110 tests passed** (Python 3.13, pytest 9). Implementation, tests and all nine public-source input packets were individually read back from GitHub with byte-matching Git blob hashes. This demonstrates reproducible arithmetic and typed input handling; not any production acceptance or predictive backtest.
+Local: **132/132 tests passed** (Python 3.13, pytest 9). Implementation, tests and all nine public-source input packets were individually read back from GitHub with byte-matching Git blob hashes. This demonstrates reproducible arithmetic and typed input handling; not any production acceptance or predictive backtest.
 
 For each event `R_issuer = adj_close(first affected regular session) / adj_close(last unaffected regular session) − 1`, likewise SPY and the named sector ETF. Report issuer minus SPY / sector in **percentage points**. Source inputs and public-release witness URLs reside in the nine `sourced_event_packets/*.json` files.
 
@@ -92,7 +92,7 @@ Sources: [Alphabet April Reuters](https://www.investing.com/news/stock-market-ne
 
 A **stronger challenge to simplistic recency bias** appears in [S&P Global's Alphabet Q2 preview](https://www.spglobal.com/market-intelligence/en/news-insights/research/2026/07/alphabet-earnings-preview-q2-2026). It reports that consolidated **revenue estimates ratcheted up $113.0B → $117.2B**, but **EPS estimates actually fell $3.43 → $3.32** while Q2 Google Cloud margin expectations were reduced to 30.8%. Forecast changes were multi-dimensional; “the market expected more earnings across every metric” is contradicted by this bounded S&P/Visible Alpha evidence. The preview date is July 22 with no verified intraday publication timestamp or original contributor vintages, therefore it remains illustrative, not a valid ex-ante trading feature.
 
-The research consumer and adversarial fixtures now pass **110/110 offline tests**; normal hosted CI and live user/Terminal acceptance are independent. No historical abnormal-return alpha or behavior-causation claim follows from these selected cases.
+The research consumer and adversarial fixtures now pass **132/132 offline tests**; normal hosted CI and live user/Terminal acceptance are independent. No historical abnormal-return alpha or behavior-causation claim follows from these selected cases.
 
 ### Deep case: Alphabet's July 2026 multi-channel beat and negative repricing
 

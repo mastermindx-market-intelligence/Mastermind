@@ -49,7 +49,7 @@ This is a **field-shape illustration**, deliberately too short to calculate a re
 
 ## Verified tests
 
-**110/110 offline tests passed** with Python 3.13 / pytest 9. Code and tests were verified by Git blob against tested local sources. Tests include after-close, premarket, intraday, weekend, UTC winter/summer clocks, missing benchmark, cutoff leakage, unsupported sources, and refusal to accept an SEC-only clock. Synthetic structural fixtures are supplemented with **nine actual retrospective adjusted-close source packets**, independently checked for arithmetic; this does not prove data licensing, current vendor freshness, a live backtest, causal attribution, or Terminal operation.
+**132/132 offline tests passed** with Python 3.13 / pytest 9. Code and tests were verified by Git blob against tested local sources. Tests include after-close, premarket, intraday, weekend, UTC winter/summer clocks, missing benchmark, cutoff leakage, unsupported sources, and refusal to accept an SEC-only clock. Synthetic structural fixtures are supplemented with **nine actual retrospective adjusted-close source packets**, independently checked for arithmetic; this does not prove data licensing, current vendor freshness, a live backtest, causal attribution, or Terminal operation.
 
 ## Nine SEC timestamps — not first-publication proof
 
@@ -99,7 +99,7 @@ The read-only `replay_casebook.py` consumer now joins the two Amazon first-party
 
 `media_reported_expectations.json` holds seven small, properly cited numerical excerpts from dated financial reporting (Reuters/LSEG or Visible Alpha), matched to seven of the nine underlying source events; the other two remain absent, not zero. The separate S&P Global/Visible Alpha July 22 Alphabet Q2 preview indicates Q2 revenue consensus increased **$113.0B in February → $117.2B by July**, while EPS consensus fell **$3.43 → $3.32** (the older EPS vintage date is unspecified). Article publication timing or contributor-level vintages are not established as pre-event machine observations.
 
-`replay_casebook.py --format json|markdown` now renders three distinct channels in one evidence response: (1) nine observed next-session adjusted returns; (2) two issuer management-guidance/actual comparisons; (3) seven article-quoted expected-versus-reported cloud-growth comparisons and one source-reported multi-metric revision narrative. The media channel is explicitly `PUBLIC_ARTICLE_WITNESSES_ONLY_NOT_ADMITTED_AS_PIT`, every `consensus_vintage_admitted` is `false`, and exact source links are included. It rejects wrong source authority, duplicate/mismatched fiscal targets, fake pre-event estimate timestamps and preview PIT promotion. **110/110 local research tests passed and the existing CI-discovery bridge exercised the full suite locally.** The article data cannot support backtest forecasting, redistribution beyond lawful quoted numerical facts or new market-belief authority without incumbent source acceptance.
+`replay_casebook.py --format json|markdown` now renders three distinct channels in one evidence response: (1) nine observed next-session adjusted returns; (2) two issuer management-guidance/actual comparisons; (3) seven article-quoted expected-versus-reported cloud-growth comparisons and one source-reported multi-metric revision narrative. The media channel is explicitly `PUBLIC_ARTICLE_WITNESSES_ONLY_NOT_ADMITTED_AS_PIT`, every `consensus_vintage_admitted` is `false`, and exact source links are included. It rejects wrong source authority, duplicate/mismatched fiscal targets, fake pre-event estimate timestamps and preview PIT promotion. **132/132 local research tests passed and the existing CI-discovery bridge exercised the full suite locally.** The article data cannot support backtest forecasting, redistribution beyond lawful quoted numerical facts or new market-belief authority without incumbent source acceptance.
 
 ## Read-only bridge to the incumbent EXP-1/K3E owner
 
@@ -114,4 +114,21 @@ python3 replay_casebook.py --format json --owner-inspection /path/to/native_k3e_
 
 The receipt is *optional*. With no receipt, `native_expectation_owner_inspection = null`, not fabricated empty consensus. A requested missing/invalid receipt refuses; a future non-null normalized baseline under the old owner contract also refuses until that new owner contract is deliberately requalified. The bridge intentionally does not map a `ticker_compat` to an issuer's economic identity or bind a free-standing inspection to an event. It cannot grant publication/trading rights, replace MAS-271 qualification, or cause any collector/job changes.
 
-Tests: `test_expectation_owner_adapter.py` exercises digest/input pin/cutoff/rights/refusal cases; `test_owner_inspection_consumer.py` proves Markdown and JSON output and fail-closed source handoff; the existing `tests/test_earnings_reaction_research.py` bridge executes all six research test modules in hosted CI. All **110 local research tests** passed in an isolated M2 Studio checkout of this PR after the bridge changes.
+Tests: `test_expectation_owner_adapter.py` exercises digest/input pin/cutoff/rights/refusal cases; `test_owner_inspection_consumer.py` proves Markdown and JSON output and fail-closed source handoff; the existing `tests/test_earnings_reaction_research.py` bridge executes all six research test modules in hosted CI. All **132 local research tests** passed in an isolated M2 Studio checkout of this PR after the bridge changes.
+
+## Tiingo archived-bar inspection — explicit non-admission
+
+An M2 Studio source-census located historical `adjClose` records for GOOGL, GOOG, MSFT, AMZN, SPY, XLC, XLK and XLY, spanning all nine target earnings dates. Their presence is a data-discovery result, **not a historical backtest/redistribution right**. The owner materialization receipt (schema `mastermind.tiingo.materialized_receipt.v1`) inspected during the 2026-10-13/14 research continuation contained these flags:
+
+- `pit_backtest_eligible: false`
+- `redistribution_admitted: false`
+- `dataos_identity_admitted: false`
+
+`tiingo_manifest_inspection.py` reads an existing receipt **without opening any price file** and returns only bounded, non-sensitive metadata and exact denial codes. It always says `historical_price_admission = NOT_ADMITTED`: even a hypothetical receipt with three true flags cannot silently grant research entitlement or license in a new application. No vendor bars, machine-local paths, blob hashes or source observations are included in GitHub. The rights and identity claims must first be qualified through the incumbent price-data owner.
+
+```sh
+python3 replay_casebook.py --format json --tiingo-manifest /path/to/owner_materialization_receipt.json
+python3 replay_casebook.py --format markdown --tiingo-manifest /path/to/owner_materialization_receipt.json
+```
+
+`test_tiingo_manifest_inspection.py` covers false/malformed/missing flags, a hypothetical three-true source receipt without owner acceptance, no-price-export guarantees and both casebook output formats. The CI bridge includes it. **132/132 research tests passed locally on the isolated M2 Studio checkout** after this addition. This is NOT 132 live-market regression tests and is not a source-license certification.

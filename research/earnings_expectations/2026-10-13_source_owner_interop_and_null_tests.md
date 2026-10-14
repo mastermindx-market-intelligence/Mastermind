@@ -34,3 +34,11 @@ Calculation reproducibility (standalone stdlib): take the seven pairs in `replay
 - Consumer bridge and research output are now executable, with all **110 local research tests** including CI discovery bridge passing on the M2. Hosted CI, independent review, cross-repo publication and entitled-user Terminal verification are separately owned.
 
 **Next action:** obtain one source-owner-supplied, rights-qualified historical EPS or revenue pair for the same issuer, period, basis and two truly prior vintages, *or* a typed `UNESTIMABLE` receipt; then link that evidence through the existing Earnings Intelligence OS event workspace rather than a new source store.
+
+## Historical price discovery and lawful-use boundary (M2 Studio)
+
+A bounded read-only inspection of the already-installed M2 Tiingo EOD archive found raw historical price arrays and daily `adjClose` fields for GOOGL/GOOG, MSFT, AMZN, SPY, XLC, XLK and XLY, spanning the nine 2026 earnings events. The materialization metadata is the governing evidence for source eligibility: an inspected `mastermind.tiingo.materialized_receipt.v1` record reports `pit_backtest_eligible=false`, `redistribution_admitted=false`, and `dataos_identity_admitted=false`. The sampling does **not** prove that every stored series has identical flags, nor is a cache a license.
+
+These data were used for **source discovery only**, not run through a production backtest, copied into GitHub, or used to overwrite the previously published Yahoo-based tiny retrospective research packets. `tiingo_manifest_inspection.py` now fail-closes the attempted promotion, and the casebook can present a source-admission refusal via optional `--tiingo-manifest` without exposing price data or a host-private local path. Both independent manifest and report consumer tests pass.
+
+Decision: the next study should use existing price owner interfaces **once data rights, identity, adjustment provenance and PIT eligibility are explicitly accepted**, rather than build another collector. The source rejection blocks this Tiingo backtesting lane only; existing research explanation, company guidance and article-witness lanes remain readable with their own evidence and labels.

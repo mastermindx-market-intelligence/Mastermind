@@ -18,6 +18,7 @@ import sys
 
 from reaction_replay import replay
 from expectation_owner_adapter import OwnerContractError, project_owner_inspection
+from tiingo_manifest_inspection import ManifestRefusal, inspect_file
 
 RESEARCH_AUTHORITY = 'RESEARCH_ONLY_NO_TRADING'
 PACKETS = Path(__file__).parent / 'sourced_event_packets'
@@ -26,7 +27,8 @@ MEDIA = Path(__file__).parent / 'media_reported_expectations.json'
 
 
 def build_report(folder: Path = PACKETS, guidance_path: Path = GUIDANCE, media_path: Path = MEDIA,
-                 owner_inspection_path: Path | None = None) -> dict:
+                 owner_inspection_path: Path | None = None,
+                 tiingo_manifest_path: Path | None = None) -> dict:
     entries = []
     for path in sorted(folder.glob('*.json')):
         packet = json.loads(path.read_text(encoding='utf-8'))
@@ -193,6 +195,9 @@ def build_report(folder: Path = PACKETS, guidance_path: Path = GUIDANCE, media_p
     if owner_inspection_path is not None:
         document = json.loads(owner_inspection_path.read_text(encoding='utf-8'))
         native_owner = project_owner_inspection(document)
+    price_inspection = None
+    if tiingo_manifest_path is not None:
+        price_inspection = inspect_file(tiingo_manifest_path)
     return {
         'schema': 'earnings.reaction_replay.casebook_report.research.v1',
         'authority': RESEARCH_AUTHORITY,
@@ -200,6 +205,7 @@ def build_report(folder: Path = PACKETS, guidance_path: Path = GUIDANCE, media_p
         'per_issuer_counts': dict(sorted(Counter(e['issuer_ref'] for e in entries).items())),
         'point_in_time_analyst_consensus': 'NOT_ADMITTED',
         'native_expectation_owner_inspection': native_owner,
+        'historical_price_materialization_inspection': price_inspection,
         'management_guidance_status': guidance_state,
         'management_guidance_comparisons': guidance,
         'media_reported_expectation_status': media_state,
@@ -286,6 +292,18 @@ def markdown(report: dict) -> str:
             'This is an owner-native raw capture inspection only. No baseline value, analyst vintage, issuer event binding, numeric gap or trade signal has been admitted.',
             '',
         ])
+    if report.get('historical_price_materialization_inspection'):
+        inspected = report['historical_price_materialization_inspection']
+        lines.extend([
+            '## Existing Tiingo materialization status (NOT source admission)',
+            '',
+            'Historical-price admission: **' + inspected['historical_price_admission'] + '**.',
+            '',
+            'Receipt reasons: ' + ', '.join(inspected['reason_codes']),
+            '',
+            'This read-only source inspection provides no vendor price values, rights grant, historical PIT verification or trading permission.',
+            '',
+        ])
     return '\n'.join(lines)
 
 
@@ -294,11 +312,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--format', choices=('json', 'markdown'), default='markdown')
     parser.add_argument('--packets', type=Path, default=PACKETS)
     parser.add_argument('--owner-inspection', type=Path, help='Existing Macro K3E declared-capture receipt (read-only)')
+    parser.add_argument('--tiingo-manifest', type=Path, help='Existing Tiingo materialization receipt (flags only, no bars)')
     args = parser.parse_args(argv)
     try:
-        report = build_report(args.packets, owner_inspection_path=args.owner_inspection)
-    except (OwnerContractError, ValueError, OSError, json.JSONDecodeError) as exc:
-        reason = exc.code if isinstance(exc, OwnerContractError) else 'RESEARCH_SOURCE_INPUT_INVALID'
+        report = build_report(args.packets, owner_inspection_path=args.owner_inspection,
+                              tiingo_manifest_path=args.tiingo_manifest)
+    except (OwnerContractError, ManifestRefusal, ValueError, OSError, json.JSONDecodeError) as exc:
+        reason = (exc.code if isinstance(exc, OwnerContractError) else
+                  exc.reason if isinstance(exc, ManifestRefusal) else 'RESEARCH_SOURCE_INPUT_INVALID')
         if args.format == 'json':
             print(json.dumps({'schema': 'earnings.reaction_replay.casebook_report.research.v1',
                               'authority': RESEARCH_AUTHORITY, 'status': 'REFUSED',
