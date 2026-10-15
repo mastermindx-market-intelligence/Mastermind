@@ -76,8 +76,9 @@ Control normalization, ranking, admission, freshness decision or Runtime write.
 The existing Bridge exposes the read-only `native-capacity-observation` query
 under its existing authenticated Control peer and current service identity.
 The only request field is a bounded nonce; the fixed backend calls the actual
-realm owner. It consumes no Attempt/assignment slot and starts no process or
-provider. Unconfigured enrollment, revocation or boot drift is unavailable.
+realm owner. It consumes no Attempt/assignment slot and starts no Worker,
+Operator or provider. Kernel observation uses the inspector's existing fixed OS
+read. Unconfigured enrollment, revocation or boot drift is unavailable.
 The response is an observation rather than a bearer grant; hashes establish
 content integrity, not origin authentication. Future Macro V2 acquisition must
 use the authenticated existing channel and current installed source bindings.

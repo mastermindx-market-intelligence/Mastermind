@@ -31,8 +31,12 @@ NEXT_BOOT = '8b09ce35-a820-4e61-b10d-ea22c57ec306'
 
 
 @pytest.fixture
-def native(bound, monkeypatch, tmp_path):
+def native(bound, monkeypatch, tmp_path, request):
     owner = bound.publish()
+    physical_host = bound.f.config['native_capacity_enrollment']['host_ref']
+    if getattr(request, 'param', None) == 'legacy':
+        del bound.f.config['native_capacity_enrollment']
+        owner = bound.f.load()
     kernels = []
     def kernel(_self):
         kernels.append(BOOT)
@@ -73,7 +77,7 @@ def native(bound, monkeypatch, tmp_path):
         workspace_root=workspaces, run_root=runs, provider_home=bound.f.home,
         require_assignment_seal=True)
     physical = FabricHostBinding(socket_path=str(config.socket_path),
-        host_ref=bound.f.config['native_capacity_enrollment']['host_ref'],
+        host_ref=physical_host,
         worker_id=policy.worker_id, worker_uid=470, worker_gid=470, bridge_uid=470,
         provider='minimax', model='MiniMax-M3', provider_home=str(policy.provider_home),
         worker_source_config_digest=owner._config_sha256, execution_profile_digest='a'*64,
@@ -162,6 +166,23 @@ def test_root_revocation_invalidates_real_collection(native):
     with pytest.raises(bridge.BridgeProtocolError, match='Current native observation is unavailable'):
         native.query()
     assert native.kernels == []
+
+
+@pytest.mark.parametrize('native', ['legacy'], indirect=True)
+def test_legacy_service_does_not_acquire_native_facts_without_opt_in(native):
+    with pytest.raises(bridge.BridgeProtocolError, match='Current native observation is unavailable'):
+        native.query()
+    assert native.kernels == [] and native.backend._attempted is False
+
+
+def test_root_change_after_first_source_read_is_not_returned(native, monkeypatch):
+    def changed(_self):
+        native.bound.f.path.write_text('{}')
+        return BOOT
+    monkeypatch.setattr(ProcessInspector, 'boot_session_id', changed)
+    with pytest.raises(bridge.BridgeProtocolError, match='Current native observation is unavailable'):
+        native.query()
+    assert native.backend._attempted is False
 
 
 @pytest.mark.parametrize('raw', ['adapter-1', 'not-a-uuid', '0'*32, BOOT+'\n', None])
