@@ -1,9 +1,19 @@
-# Clock-pause / censoring continuation
+# Verified clock-pause continuation frontier
 
-Current Chairman requests continued execution. Original PR1470/head8488442f8 clean and reconciled; all earlier workers terminal. Pin78388ac29f7e54c9dfe7799a8e4769fb46d4aed6 reused. No material writer collision or uncertain effect.
+MISSION: continue the original research toward earlier reliable latent-pressure awareness. Research/prototypes only; no purchases, production, live schemas, alerts, ranks, sizing or trades. Original root/parent `latent-pressure-research-20261014-chatgpt4-001`; carrier Mastermind PR1470, `research/latent-pressure-20261014`. Protected pin `78388ac29f7e54c9dfe7799a8e4769fb46d4aed6` reused.
 
-FullDEEP+booksemantics remain blocked by prior action-specific PDF refusal; no retry oralternate route. New independent questions: does filtered execution silence hide other displayed activity? Can a frozen fixed-clock two-part observation/direction model gain beyond a matched baseline? How does correct competing-risk/censoring arithmetic change synthetic recovery summaries?
+COMPLETED: LP-CLOCK-04 protocol60fd199e9 and source/testfreezed072e53e8 before new outcomes. 1511 training /2168 evaluation fixed-clock observations from the already qualified L extraction. Future-price observation is a separate outcome, not filled-forward flatprice. Candidate joint Brier gain+.005691 but conditional-direction gain-.001931; constanttrainingfrequenciesbeatbothfittedmodels. No promotion. 737/819 filteredquietorigins stillhaveotherLactivity; overlappingone-daydescriptivefactonly.
 
-Dataset already observed by the mission; fixednewprotocol is not pristine validation. No production/purchases/trading/source-admissionchange. Protectedroot retainedlatent-pressure-research-20261014-chatgpt4-001. GLM auditleaflp-clock04-design-review was admitted onUbuntu0; preserveoriginalrun,consumeexactresultbeforeacceptance. Parent remains sole source writer.
+BUILT_AND_EXECUTED: historicalclockreader at14:00NewYorkOctober5returns8records,4standardquietwithotherdisplayedactivity;allforecasts/inventory/quote-recoverynull. Censoring-awarecompeting-outcomessummaryimplementedonsyntheticRecoveryBook,notrealunverifiedbookfields. 45newfocusedtests passed(18clock/16incidence/11reader). Earlier44testreceiptsretained,notadvertisedasrerun.
 
-Next: implement/test/freeze -> run -> inspectfullmetricdecomposition -> build and testhistoricalreader -> publishsafeaggregatesandadjudicatedmathematics. Earliernegativeexperimentsandblockedbookadapterunchanged.
+TIMESTAMP_FINDING: untypedPythonintegerqueriesagainstuint64timestampsearchesfailed1nsboundaryfixtures. Allnewarrayqueriesexplicitlytypedbeforeempiricalrun;prefixandwindowtests pass. The olderhelper'slabelsearch may be affected. No claims of nolegacyimpact: proposedall-recordimpactauditwasblockedandNOTexecuted. NewpipelineimportsolderCSVloader/names/clockonly,notoldfeatures/labelsearch.
+
+BLOCKED_ACTIONS: priorselectedDEEP+PDFread/renderwasrefusedpre-dispatch; no retry/alternativeaccess. A newcompoundStudio_Direct.start_process call requestingoriginalworkerstatus/resultpluslegacytimestampimpactauditwasblockedpre-dispatch with safety-status-undetermined. EFFECT_NONE for thatcall,NOTretrypermission. Neither effectretried orrerouted. ExactdetailsinBOUNDARY_STATUS.json.
+
+WORKER: lp-clock04-design-reviewwasadmittedthroughinstalledFabriconGLM/Ubuntu0. LastsuccessfulobservationACTIVE_OR_WAITING/resultunavailable. ReturnverificationisUNRESOLVEDafterblockedcall;donotclaimterminal,approvalorindependentreview. Originalretainedreturnpath/rootkept;noduplicatelaunch. No inferredcustodytransfer.
+
+EFFECTS: researchfiles,one new modelrun,synthetictests andhistoricalreaderconfirmed. Earlierexperimentdata/resultsunmodified;currentmodelinputhashmatched. Privatepredictionsretainedunderprivate/run01andhashrecordedinPRIVATE_MANIFEST;no rawseriespublicexport. Source/bookadmissionflags unchanged;fullbookadapterstillfailclosed. No scheduling/background-chatpromise.
+
+NEXT: finish bounded research publication/readback onexistingPR1470. Furtherdependentactions needpermitted verifiedbooksemanticmapping,allowedoriginalworker-returnverification,andallowedlegacytimestamp-impactaudit. Thenrealorder-conservationandrecovery/fatigueexperimentsrequireindependentdaysandrealisticlatency/matchedfalse-alarmproof. More tuning on this already-studied day is not justified by these results.
+
+FINALIZATION: independentresearch/prototypephase complete; broaderrealbookearly-warningmission INCOMPLETE_AT_EXPLICIT_ACTION_AND_EVIDENCE_GATES. No fabricated fullproductacceptance.
