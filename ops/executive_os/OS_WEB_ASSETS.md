@@ -79,3 +79,64 @@ owner publishes the matching gateway generation, its existing launcher loads
 the packaged `/os/` mount at startup. Public-edge candidate staging remains the
 existing `python -m ops.executive_os.os_public_edge --source <qualified-root>
 --relay-port <real-port> --out <new-candidate>` command.
+
+## Inert two-phase public-edge transition planning
+
+`ops/executive_os/os_public_edge_transition.py` plans, without touching any
+host, the exact two-phase replacement that the installed-HTML switch incident
+required. Its inputs bind two distinct source SHAs (retired and candidate), the current observed full Caddy JSON config, both exact asset
+manifests and the reserved loopback relay port. The planner refuses unless the
+observed config has exactly one `mcp.mastermind-x.com` host route whose GET
+matcher already carries exactly the incumbent fixed routes plus the current
+manifest's asset paths (either the normalized set or the known fixed+index `/os/` duplicate is accepted;
+no other repeat is permitted), exactly the three POST paths, and exactly the two existing
+reverse_proxy upstreams at the loopback reserved port. Duplicate hosts, extra
+or ambiguous matchers, wildcards, extra paths and wrong upstreams refuse.
+
+`prepare-config` admits the sorted unique union of the retired and candidate
+asset routes plus the fixed GET routes, so the publisher can prepare both allowlists before the host switch; actual
+asset availability remains a separately verified host/publisher obligation; `final-config` admits only the candidate asset routes
+plus the fixed routes, so only retired asset paths are removed. Every other
+config field — POST handlers, header rewrites, body limits, TLS, unrelated
+sites, the relay — is preserved semantically; only the selected GET path list
+differs, and caller inputs are never mutated. For a shared non-index asset
+name, the planner compares manifest-declared SHA256, byte count and MIME;
+`shared_assets_verified` names only that comparison, and no asset bytes are
+read here. The existing host/preparer must verify actual bytes and availability.
+Hash-name reuse with changed declarations refuses; `index.html` is deliberately
+the switch. Receipts record both source ids and bind canonical JSON SHA256 of
+both manifests and the observed, prepare and final configs, with
+`installed=false` and `published=false`. Source ids are bindings only; this
+planning never asserts protected-source or authentication qualification — that
+remains the existing release-owner preparer's custody.
+
+Canonical config digests omit a trailing newline. Staged files contain canonical
+JSON followed by one LF; the staging receipt's `files` digests cover those exact
+file bytes. Compare like digest families rather than using a staged-file hash
+as a canonical config hash. `preparation_complete` compares supplied objects
+only: its `prepared` input must be the already-validated `prepare_config` result.
+Object equality alone neither validates an arbitrary config nor permits publication.
+
+Staging writes the plan and candidate configs only under an existing physical
+parent that is not group/other-writable, with exclusive `0600` creation, fsync,
+no symlink following and no overwrite. Partial files remain after any write
+failure for reconciliation; a subsequent call cannot overwrite or clean them up. The CLI reads
+supplied local JSON with duplicate-key and nonfinite rejection and a bounded
+input size, performs no network, SSH, subprocess, daemon, environment override,
+`caddy load`/reload or production write, and prints compact binding metadata
+only — never the shared config. It holds no live authority token, scheduler or
+parallel lifecycle ledger.
+
+A restart comparison here is a pure diagnostic over the observed live config,
+the autosave and the effective startup config. It reports mutual equality and
+per-config host-route counts, and never treats autosave equality alone as
+restart safety: startup uses the adapted `Caddyfile.combined` while `--resume`
+loads the autosave, so a startup file whose adapted JSON lacks the OS host
+routes is unsafe even with a matching autosave. Config equality is also not an
+actually tested restart; `restart_verified` stays false and the diagnostic
+suggests no service change. The external publisher and the host owner keep
+their existing separate custody of the conditional readback of the prepared
+config, the host switch, and the final cleanup, under full request equality,
+custody checks and no replay after uncertainty. This staging is preparation
+only: it does not compose, install or publish a production release, and it
+adds no new policy approval gate.
