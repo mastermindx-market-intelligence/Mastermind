@@ -150,6 +150,65 @@ describe("owner-authorized catalog host and view", () => {
     expect(c.statusRead).not.toHaveBeenCalled();
     expect(c.raw.readAttendedFabricCatalog).toHaveBeenCalledTimes(1);
   });
+  it("navigates observed parent and child in the loaded exact-run set without a new source read", async () => {
+    const c = client(async () => ownerNested);
+    const view = render(<FabricRunCatalog host={bindMissionHost(c.raw)} />);
+    fireEvent.click(screen.getByRole("button", { name: "Load runs" }));
+    await screen.findByRole("button", { name: /^fabric-grok-operator-return/ });
+    fireEvent.change(screen.getByLabelText("Search loaded run, root or parent"),
+      { target: { value: "fabric-grok-operator-return" } });
+    fireEvent.click(screen.getByRole("button", { name: /^fabric-grok-operator-return/ }));
+    const leafButton = screen.getByRole("button", { name: "View observed child: fabric-grok-operator-onboarding-leaf-01a11e90-v1" });
+    fireEvent.click(leafButton);
+    expect(screen.getByRole("group", { name: "Observed run ancestry" }).textContent)
+      .toContain("fabric-grok-operator-return-01a11e90-v1 → fabric-grok-operator-onboarding-leaf-01a11e90-v1");
+    const parentButton = screen.getByRole("button", { name: "View observed parent: fabric-grok-operator-return-01a11e90-v1" });
+    fireEvent.click(parentButton);
+    expect(screen.getByRole("group", { name: "Observed run ancestry" }).textContent)
+      .toContain("01a11e90-4b5d-7f53-b966-8aaaad38701f → fabric-grok-operator-return-01a11e90-v1");
+    expect(c.statusRead).not.toHaveBeenCalled();
+    expect(c.raw.readAttendedFabricCatalog).toHaveBeenCalledTimes(1);
+    view.unmount();
+  });
+  it("refuses navigation across conflicting roots even when identifiers look joined", async () => {
+    const main = row("run-one"); main.status!.parent_run_id = "original-root";
+    const sibling = row("run-two"); sibling.status!.root_id = "other-root";
+    sibling.status!.parent_run_id = "run-one";
+    const c = client(async () => catalog([main, sibling]));
+    render(<FabricRunCatalog host={bindMissionHost(c.raw)} />);
+    await load(); select("run-one");
+    expect(screen.queryByRole("button", { name: /^View observed child:/ })).toBeNull();
+    select("run-two");
+    expect(screen.queryByRole("button", { name: /^View observed parent:/ })).toBeNull();
+    expect(screen.getByRole("group", { name: "Observed run ancestry" }).textContent).toContain("Root identities conflict");
+    expect(c.statusRead).not.toHaveBeenCalled();
+  });
+  it("drops all local relationship controls on revocation without another M2 call", async () => {
+    const c = client(async () => ownerNested); const host = bindMissionHost(c.raw);
+    render(<FabricRunCatalog host={host} />);
+    fireEvent.click(screen.getByRole("button", { name: "Load runs" }));
+    await screen.findByRole("button", { name: /^fabric-grok-operator-return/ });
+    fireEvent.click(screen.getByRole("button", { name: /^fabric-grok-operator-return/ }));
+    expect(screen.getByRole("button", { name: /^View observed child:/ })).toBeTruthy();
+    act(() => c.change({ status: "signed_out", acquisition: false, content: false, reason: null }));
+    expect(screen.queryByRole("button", { name: /^View observed child:/ })).toBeNull();
+    expect(screen.queryByRole("group", { name: "Related observed runs" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^fabric-grok-operator-return/ })).toBeNull();
+    expect(c.statusRead).not.toHaveBeenCalled();
+    expect(c.raw.readAttendedFabricCatalog).toHaveBeenCalledTimes(1);
+  });
+  it("labels observed parent and child buttons in the selected Chinese locale", async () => {
+    const c = client(async () => ownerNested);
+    render(<FabricRunCatalog host={bindMissionHost(c.raw)} locale="zh-CN" />);
+    fireEvent.click(screen.getByRole("button", { name: "加载运行" }));
+    await screen.findByRole("button", { name: /^fabric-grok-operator-onboarding-leaf/ });
+    fireEvent.click(screen.getByRole("button", { name: /^fabric-grok-operator-onboarding-leaf/ }));
+    const parent = screen.getByRole("button", { name: "查看已观测父级: fabric-grok-operator-return-01a11e90-v1" });
+    fireEvent.click(parent);
+    expect(screen.getByRole("button", { name: "查看已观测子级: fabric-grok-operator-onboarding-leaf-01a11e90-v1" })).toBeTruthy();
+    expect(screen.getByRole("group", { name: "已观测的关联运行" })).toBeTruthy();
+    expect(c.statusRead).not.toHaveBeenCalled();
+  });
   it("supports localized lineage while preserving exact source labels", async () => {
     const direct = row(); direct.status!.parent_run_id = "original-root";
     const c = client(async () => catalog([direct]));
@@ -180,6 +239,21 @@ describe("owner-authorized catalog host and view", () => {
     fireEvent.click(screen.getByRole("button", { name: "Load runs" }));
     await act(async () => { c.change(); resolve(catalog()); });
     expect(screen.queryByRole("button", { name: /^run-one ·/ })).toBeNull();
+  });
+  it("clears prior principal search and filter text on same-value identity rotation", async () => {
+    const c = client(), host = bindMissionHost(c.raw);
+    render(<FabricRunCatalog host={host} />);
+    await load();
+    fireEvent.change(screen.getByLabelText("Search loaded run, root or parent"),
+      { target: { value: "prior-user-private-run" } });
+    fireEvent.click(screen.getByRole("button", { name: "Needs inspection" }));
+    act(() => c.change());
+    await waitFor(() => expect(screen.queryByRole("button", { name: /^run-one ·/ })).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Load runs" }));
+    await screen.findByRole("button", { name: /^run-one ·/ });
+    expect((screen.getByLabelText("Search loaded run, root or parent") as HTMLInputElement).value).toBe("");
+    expect((screen.getByRole("button", { name: "All" }) as HTMLButtonElement).getAttribute("aria-pressed")).toBe("true");
+    expect(c.raw.readAttendedFabricCatalog).toHaveBeenCalledTimes(2);
   });
   it("clears old host observations without briefly attributing them to the replacement", async () => {
     const c = client(), host = bindMissionHost(c.raw); const view = render(<FabricRunCatalog host={host} />); await load();

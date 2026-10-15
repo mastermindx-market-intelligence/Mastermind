@@ -47,7 +47,7 @@ export function FabricRunCatalog({ host, locale = "en", onInspect }: FabricRunCa
   const serial = useRef(0), request = useRef<AbortController | null>(null), currentHost = useRef(host);
   currentHost.current = host;
   const clear = () => { serial.current++; request.current?.abort(); request.current = null;
-    setObservation(null); select(null); setBusy(false); setError(null); };
+    setObservation(null); select(null); setFilter("all"); setQuery(""); setBusy(false); setError(null); };
   useEffect(() => {
     clear();
     if (!host?.readAttendedFabricCatalog || typeof host.invalidationGeneration !== "function") return;
@@ -66,6 +66,25 @@ export function FabricRunCatalog({ host, locale = "en", onInspect }: FabricRunCa
     .some(v => v?.toLocaleLowerCase().includes(needle)));
   const selected = filtered.find(row => row.run_id === selectedId);
   const selectedLineage = selected ? lineage.get(selected.run_id) : undefined;
+  const lineageAllowsObservedEdges = selectedLineage?.state === "ROOT_PARENT_LABEL" ||
+    selectedLineage?.state === "OBSERVED_ANCESTRY" || selectedLineage?.state === "PARENT_OUTSIDE_RESPONSE";
+  const selectedRoot = selected?.status?.root_id;
+  const selectedParent = selectedRoot && lineageAllowsObservedEdges &&
+    (selectedLineage?.state === "OBSERVED_ANCESTRY" || selectedLineage?.state === "PARENT_OUTSIDE_RESPONSE")
+    ? rows.find(row => row.run_id === selected?.status?.parent_run_id && row.run_id !== selected.run_id &&
+        row.status?.root_id === selectedRoot && row.reason_code === null) : undefined;
+  const observedChildren = selectedRoot && lineageAllowsObservedEdges
+    ? rows.filter(row => row.run_id !== selected?.run_id && row.status?.parent_run_id === selected?.run_id &&
+        row.status.root_id === selectedRoot && row.reason_code === null &&
+        ["OBSERVED_ANCESTRY", "PARENT_OUTSIDE_RESPONSE"].includes(lineage.get(row.run_id)?.state ?? "")) : [];
+  // Selection is local to one verified source generation; it never calls the status port.
+  const selectObserved = (targetId: string) => {
+    if (!ready || observation?.host !== host || observation.epoch !== host?.invalidationGeneration?.()) return;
+    if (targetId !== selectedParent?.run_id && !observedChildren.some(child => child.run_id === targetId)) return;
+    setFilter("all");
+    setQuery("");
+    select(targetId);
+  };
   const active = rows.filter(row => row.status?.state === "ACTIVE_OR_WAITING").length;
   const value = (v: unknown): string => v === null || v === undefined ? t("Unknown", "未知") :
     typeof v === "boolean" ? (v ? t("Yes", "是") : t("No", "否")) : String(v);
@@ -146,6 +165,23 @@ export function FabricRunCatalog({ host, locale = "en", onInspect }: FabricRunCa
                   ? `${t("Declared depth", "声明深度")} ${selectedLineage.observed_depth}`
                   : t("Full depth unknown", "完整深度未知")}</small>
                 <small>{t("Root labels identify correlation, not authority or verified worker START.", "根标签仅用于关联，不代表权限或工作代理已启动。")}</small>
+              </div>}
+              {(selectedParent || observedChildren.length > 0) && <div className="fc-relations" role="group"
+                aria-label={t("Related observed runs", "已观测的关联运行")}>
+                <strong>{t("Related runs in this response", "本次响应中的关联运行")}</strong>
+                {selectedParent && <button type="button"
+                  aria-label={`${t("View observed parent", "查看已观测父级")}: ${selectedParent.run_id}`}
+                  onClick={() => selectObserved(selectedParent.run_id)}>
+                  <span>{t("Parent", "父级")}</span><code>{selectedParent.run_id}</code>
+                </button>}
+                <small>{t("Observed children in loaded records", "已加载记录中的观测子级")} · {observedChildren.length}</small>
+                {observedChildren.map(item => <button type="button" key={item.run_id}
+                  aria-label={`${t("View observed child", "查看已观测子级")}: ${item.run_id}`}
+                  onClick={() => selectObserved(item.run_id)}>
+                  <span>{t("Child", "子级")}</span><code>{item.run_id}</code>
+                </button>)}
+                <small>{t("Navigation only selects an already-loaded record; it does not grant access or read a new run.",
+                  "导航仅选择已加载的记录，不授予权限，也不读取新的运行。")}</small>
               </div>}
               <dl>{fields.map(([label, v]) => <div key={label}><dt>{label}</dt><dd>{value(v)}</dd></div>)}</dl>
               <button className="fc-load" type="button" onClick={inspect} disabled={!onInspect || !selected.status?.root_id || !!selected.reason_code}>

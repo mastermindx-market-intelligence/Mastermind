@@ -23,7 +23,7 @@ export function AttendedFabricInspector({ host, locale = "en", selection }: {
   const cancel = () => { serial.current++; request.current?.abort(); request.current = null; setBusy(false); setResult(null); setError(null); };
   useEffect(() => {
     // Current host source generation, not a new session/identity. No retained private results.
-    cancel();
+    cancel(); setRoot(""); setRun("");
     // An unmounted source must not install an extra authentication observer.
     if (!host?.readAttendedFabric || typeof host.invalidationGeneration !== "function") return;
     const unsub = host.auth?.subscribe(() => { cancel(); setRoot(""); setRun(""); invalidate(n => n + 1); });

@@ -40,3 +40,10 @@
 .fc-lineage > p { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 .fc-lineage > small { display: block; overflow-wrap: anywhere; }
 .fc-lineage[data-state="PARENT_CYCLE"], .fc-lineage[data-state="ROOT_CONFLICT"], .fc-lineage[data-state="DUPLICATE_ID"] { border-color: color-mix(in srgb, #DEA4A5 65%, currentColor); }
+
+.fc-relations { display: flex; flex-direction: column; gap: 7px; margin-block: 12px 20px; padding: 12px; border: 1px solid var(--fc-line); background: var(--fc-fill); border-radius: 10px; min-width: 0; }
+.fc-relations > strong { font-size: 12.5px; line-height: 1.5; }
+.fc-relations > small { overflow-wrap: anywhere; }
+.fc-relations button { width: 100%; display: flex; gap: 8px 12px; flex-wrap: wrap; align-items: baseline; padding: 9px 10px; border-radius: 7px; text-align: start; min-height: 36px; min-width: 0; }
+.fc-relations button > span { font-size: 12px; color: var(--fc-muted); }
+.fc-relations button > code { max-width: 100%; overflow-wrap: anywhere; white-space: normal; font-size: 12.5px; font-variant-numeric: tabular-nums; }
