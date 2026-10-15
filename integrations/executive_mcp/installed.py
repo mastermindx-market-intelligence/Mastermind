@@ -32,6 +32,7 @@ from integrations.executive_mcp.adapter import (
 )
 from integrations.executive_mcp.schemas import (
     GatewayError, MODIFYING_TOOL, READ_TIMEOUT_SECONDS, ServerMode,
+    bound_document, bound_job_document, canonical_json, result_envelope,
     validate_tool_arguments,
 )
 
@@ -2326,6 +2327,29 @@ class InstalledExecutiveReaders(ExecutiveMcpGateway):
             with collector.physical_scope():
                 return super()._read(name, arguments, generated_at)
         return super()._read(name, arguments, generated_at)
+
+    def _read_envelope(self, name, generated_at, data, grounding, degraded):
+        """Use the actual remaining ingress budget, preserving its 32 KiB cap.
+
+        Grounding, warnings, bounding receipts, the outer success frame and its
+        newline all share that cap. The old half-budget rejected intact Inbox
+        rows even when their complete wire response fit. Unboundable topology
+        still refuses; no rows, identities or evidence are silently omitted.
+        """
+        envelope = result_envelope(
+            name, mode=self.config.mode, generated_at=generated_at,
+            data=None, grounding=grounding, degraded=degraded,
+        )
+        overhead = len(canonical_json({"ok": True, "result": envelope})) + 1
+        # bound_document counts receipt growth beyond the existing empty list.
+        available = executive_ceo_ingress.MAX_RESPONSE_BYTES - overhead + len(b"null")
+        if available < 0:
+            raise GatewayError("output_too_large", "read metadata exceeds the ingress byte limit")
+        bound = bound_job_document if name == "executive_job" else bound_document
+        envelope["data"], envelope["bounded"] = bound(data, limit=available)
+        if len(canonical_json({"ok": True, "result": envelope})) + 1 > executive_ceo_ingress.MAX_RESPONSE_BYTES:
+            raise GatewayError("output_too_large", "read response exceeds the ingress byte limit")
+        return envelope
 
     def _installed_packet(self, **kwargs: Any) -> dict[str, Any]:
         """Preserve #697's optional degraded path when no boot runtime is bound."""
