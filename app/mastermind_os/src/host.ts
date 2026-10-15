@@ -1,3 +1,4 @@
+import { decodeFabricCatalog, type FabricCatalog } from "./fabric/catalog-contract";
 import { attendedSelection, decodeAttendedStatus, type AttendedSelection, type AttendedStatus } from "./fabric/attended-status";
 import { createNativeExecutiveTransport } from "./native-executive-transport";
 import type { ExecutiveSessionTransport } from "./orchestration/executive-session-command-port";
@@ -54,6 +55,8 @@ export interface RawClient {
   signOut(): Promise<unknown>;
   /** Optional owner-authorized status-only Fabric port. No default browser/machine credential bridge. */
   readAttendedFabric?(request: AttendedSelection & { signal: AbortSignal }): Promise<unknown>;
+  /** Optional authorized recent-run metadata; no source endpoint is implied by this interface. */
+  readAttendedFabricCatalog?(request: { signal: AbortSignal }): Promise<unknown>;
   readPrograms(request: { signal: AbortSignal }): Promise<unknown>;
   readWork(request: { signal: AbortSignal }): Promise<unknown>;
   readMission(request: {
@@ -95,6 +98,7 @@ export interface MissionHost {
     request: MissionSelection & { signal: AbortSignal },
   ) => Promise<unknown>;
   readAttendedFabric?: (request: AttendedSelection & { signal: AbortSignal }) => Promise<AttendedStatus>;
+  readAttendedFabricCatalog?: (request: { signal: AbortSignal }) => Promise<FabricCatalog>;
   readPrograms?: ProgramRead;
   /** Same fixed Programs acquisition, retaining its collection owner receipt. */
   readProgramsObservation?: (request: { signal: AbortSignal }) => Promise<ProgramsObservation>;
@@ -171,6 +175,19 @@ export function bindMissionHost(
         const current = client.getState();
         if (current.status !== "signed_in" || !current.acquisition) throw new Error("FABRIC_READ_UNAUTHORIZED");
         return decodeAttendedStatus(raw, selected);
+      },
+    } : {}),
+    ...(client.readAttendedFabricCatalog && client.invalidationGeneration ? {
+      async readAttendedFabricCatalog({ signal }: { signal: AbortSignal }) {
+        const started = epoch;
+        check(signal, started);
+        const state = client.getState();
+        if (state.status !== "signed_in" || !state.acquisition) throw new Error("FABRIC_READ_UNAUTHORIZED");
+        const raw = await client.readAttendedFabricCatalog!({ signal });
+        check(signal, started);
+        const current = client.getState();
+        if (current.status !== "signed_in" || !current.acquisition) throw new Error("FABRIC_READ_UNAUTHORIZED");
+        return decodeFabricCatalog(raw);
       },
     } : {}),
     async readPrograms({ signal }) {

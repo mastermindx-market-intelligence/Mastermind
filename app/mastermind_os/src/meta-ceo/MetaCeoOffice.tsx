@@ -3,7 +3,7 @@ import { createDirectionPreview, previewIsCurrent, type DirectionPreview } from 
 import { sameTarget, type OfficeProjection, type ProjectionContext, type SourceClaim } from "./projection";
 import "./office.css";
 import { FabricMissionInspector } from "../fabric/FabricMissionInspector";
-import { AttendedFabricInspector } from "../fabric/AttendedFabricInspector";
+import { AttendedFabricWorkspace } from "../fabric/AttendedFabricWorkspace";
 
 /** Draft storage belongs to the existing shell. Inspection never rewrites or sends it. */
 export interface OfficeDraft { text: string; context: ProjectionContext }
@@ -170,7 +170,7 @@ export function MetaCeoOffice({ projection, draft, onDraftChange, locale = "en" 
       key={JSON.stringify([projection.context.authGeneration, projection.context.selection])}
       mission={mission} locale={locale}
     />
-    <AttendedFabricInspector
+    <AttendedFabricWorkspace
       key={`attended:${projection.context.authGeneration}`}
       host={typeof window === "undefined" ? undefined : window.MastermindMissionHost}
       locale={locale}

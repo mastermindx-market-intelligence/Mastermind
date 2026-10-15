@@ -52,6 +52,18 @@ describe("direct Fabric status-only boundary", () => {
     for (const extra of [{ run_id: "other-run" }, { rc: NaN }, { result_bytes: -1 }, { result_bytes: 1.5 }, { result_available: false, result_bytes: 100 }, { accepted_by: "CEO" }])
       expect(() => decodeAttendedStatus({ ...raw(), ...extra }, selected)).toThrow();
   });
+  it("clears manually entered original-run selectors when the host principal changes", () => {
+    const first = client(), second = client();
+    const view = render(<AttendedFabricInspector host={bindMissionHost(first.c)} />);
+    fireEvent.click(screen.getByText("Direct M2 Fabric · inspect an existing run"));
+    fireEvent.change(screen.getByLabelText("Original root"), { target: { value: "prior-root" } });
+    fireEvent.change(screen.getByLabelText("Existing run ID"), { target: { value: "prior-run" } });
+    view.rerender(<AttendedFabricInspector host={bindMissionHost(second.c)} />);
+    expect((screen.getByLabelText("Original root") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("Existing run ID") as HTMLInputElement).value).toBe("");
+    expect(first.read).not.toHaveBeenCalled();
+    expect(second.read).not.toHaveBeenCalled();
+  });
   it("does not expose a reader on unconfigured clients", () => {
     const a = client(); delete a.c.readAttendedFabric;
     expect(bindMissionHost(a.c).readAttendedFabric).toBeUndefined();

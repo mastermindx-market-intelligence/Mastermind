@@ -6,6 +6,7 @@ import type {
 import { observedMissionAssociation } from "./workspace-contract";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { MetaCeoOffice } from "./meta-ceo/MetaCeoOffice";
+import { AttendedFabricWorkspace } from "./fabric/AttendedFabricWorkspace";
 import { useOfficeProjection } from "./meta-ceo/useOfficeProjection";
 import { Projects } from "./projects/Projects";
 import { Inbox } from "./inbox/Inbox";
@@ -3289,6 +3290,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     );
   else if (active === "Fleet & Capacity")
     content = (
+      <>
       <section className="card source-gap">
         <div className="section-title">
           <div>
@@ -3310,6 +3312,12 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
           <code>CAPACITY_SOURCE_NOT_CONNECTED</code>
         </details>
       </section>
+      <AttendedFabricWorkspace
+        key={`fleet:${authRevision}`}
+        host={window.MastermindMissionHost}
+        locale={locale}
+      />
+      </>
     );
   else if (active === "Conversation")
     content = (

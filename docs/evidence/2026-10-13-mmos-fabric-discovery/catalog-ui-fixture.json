@@ -1,0 +1,105 @@
+{
+  "schema": "mastermind.attended_fabric_catalog.v1",
+  "availability": "PARTIAL",
+  "observed_at": "2026-10-13T20:01:00Z",
+  "source": {
+    "owner": "ATTENDED_FABRIC",
+    "observation_kind": "CONTROLLER_STATUS_SNAPSHOT",
+    "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "scope": "EXACT_RUN_SET",
+    "atomic": false,
+    "time_basis": "LOCAL_READ"
+  },
+  "coverage": {
+    "returned_count": 4,
+    "candidate_count": 18,
+    "omitted_count": 14,
+    "scan_complete": true,
+    "status_complete": true
+  },
+  "items": [
+    {
+      "run_id": "ui-component-review",
+      "controller_modified_at": "2026-10-13T20:00:00Z",
+      "status": {
+        "schema": "mastermind.fabric_task_status.v1",
+        "run_id": "ui-component-review",
+        "root_id": "fabric-visibility-program",
+        "parent_run_id": "bounded-coordinator",
+        "state": "TERMINAL",
+        "rc": 0,
+        "signal": "ok",
+        "result_available": true,
+        "result_bytes": 2048,
+        "accepted": false,
+        "accepted_by": null,
+        "acceptance_state": "NOT_ACCEPTED",
+        "acceptance_reason": "NO_OUTCOME"
+      },
+      "reason_code": null
+    },
+    {
+      "run_id": "catalog-security-review",
+      "controller_modified_at": "2026-10-13T20:00:00Z",
+      "status": {
+        "schema": "mastermind.fabric_task_status.v1",
+        "run_id": "catalog-security-review",
+        "root_id": "fabric-visibility-program",
+        "parent_run_id": "bounded-coordinator",
+        "state": "TERMINAL",
+        "rc": 0,
+        "signal": "ok",
+        "result_available": true,
+        "result_bytes": 2048,
+        "accepted": true,
+        "accepted_by": "reviewer",
+        "acceptance_state": "ACCEPTED",
+        "acceptance_reason": "VALIDATED_OUTCOME"
+      },
+      "reason_code": null
+    },
+    {
+      "run_id": "source-reader-build",
+      "controller_modified_at": "2026-10-13T20:00:00Z",
+      "status": {
+        "schema": "mastermind.fabric_task_status.v1",
+        "run_id": "source-reader-build",
+        "root_id": null,
+        "parent_run_id": null,
+        "state": "ACTIVE_OR_WAITING",
+        "rc": null,
+        "signal": null,
+        "result_available": false,
+        "result_bytes": null,
+        "accepted": null,
+        "accepted_by": null,
+        "acceptance_state": "UNVERIFIED",
+        "acceptance_reason": "EXECUTION_NOT_ELIGIBLE"
+      },
+      "reason_code": null
+    },
+    {
+      "run_id": "interrupted-source-observation",
+      "controller_modified_at": "2026-10-13T20:00:00Z",
+      "status": {
+        "schema": "mastermind.fabric_task_status.v1",
+        "run_id": "interrupted-source-observation",
+        "root_id": "data-program",
+        "parent_run_id": "bounded-coordinator",
+        "state": "EFFECT_UNKNOWN",
+        "rc": null,
+        "signal": null,
+        "result_available": false,
+        "result_bytes": null,
+        "accepted": null,
+        "accepted_by": null,
+        "acceptance_state": "UNVERIFIED",
+        "acceptance_reason": "EXECUTION_NOT_ELIGIBLE"
+      },
+      "reason_code": null
+    }
+  ],
+  "reason_codes": [
+    "ROWS_OMITTED"
+  ]
+}
