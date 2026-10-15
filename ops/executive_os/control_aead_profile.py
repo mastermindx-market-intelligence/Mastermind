@@ -32,9 +32,18 @@ class AeadProfileError(ValueError):
     pass
 
 def refuse(): raise AeadProfileError('sealed control AEAD profile unavailable')
-def digest(data): return hashlib.sha256(data).hexdigest()
+def _checkpoint(check):
+    if check is not None: check()
 
-def secure_data(path, *, uid=0, mode=0o444, maximum=2*MAX_BYTES):
+def digest(data, *, check=None):
+    value=hashlib.sha256()
+    for start in range(0,len(data),1024*1024):
+        _checkpoint(check);value.update(memoryview(data)[start:start+1024*1024])
+    _checkpoint(check)
+    return value.hexdigest()
+
+def secure_data(path, *, uid=0, mode=0o444, maximum=2*MAX_BYTES, check=None):
+    _checkpoint(check)
     path=Path(path);before=path.lstat()
     if (before.st_uid!=uid or not stat.S_ISREG(before.st_mode) or before.st_nlink!=1
             or stat.S_IMODE(before.st_mode)!=mode or not 0<=before.st_size<=maximum): refuse()
@@ -44,29 +53,48 @@ def secure_data(path, *, uid=0, mode=0o444, maximum=2*MAX_BYTES):
         if (before.st_dev,before.st_ino,before.st_uid,before.st_gid,before.st_mode,before.st_size,before.st_mtime_ns,before.st_ctime_ns)!=(opened.st_dev,opened.st_ino,opened.st_uid,opened.st_gid,opened.st_mode,opened.st_size,opened.st_mtime_ns,opened.st_ctime_ns) or has_macos_acl(path,expected_identity=before,descriptor=fd): refuse()
         data=bytearray()
         while len(data)<=maximum:
+            _checkpoint(check)
             chunk=os.read(fd,min(1024*1024,maximum+1-len(data)))
+            _checkpoint(check)
             if not chunk:break
             data.extend(chunk)
         after=os.fstat(fd)
         if len(data)>maximum or (opened.st_dev,opened.st_ino,opened.st_uid,opened.st_gid,opened.st_mode,opened.st_size,opened.st_mtime_ns,opened.st_ctime_ns)!=(after.st_dev,after.st_ino,after.st_uid,after.st_gid,after.st_mode,after.st_size,after.st_mtime_ns,after.st_ctime_ns): refuse()
+        _checkpoint(check)
         return bytes(data)
     finally:os.close(fd)
 
-def sealed_directory(path, *, mode=None):
+def sealed_directory(path, *, mode=None, check=None):
     path=Path(path)
     if not path.is_absolute(): refuse()
     for node in (path,*path.parents):
+        _checkpoint(check)
         info=node.lstat()
         if (info.st_uid!=0 or not stat.S_ISDIR(info.st_mode) or info.st_mode&0o022
                 or has_macos_acl(node,expected_identity=info)): refuse()
         if node==path and mode is not None and stat.S_IMODE(info.st_mode)!=mode: refuse()
+    _checkpoint(check)
 
-def wheel_files(name, data, lock):
+def _archive_data(archive, info, *, check=None):
+    """Bound each decompression step by the same caller budget."""
+    parts=[];size=0
+    with archive.open(info) as member:
+        while True:
+            _checkpoint(check)
+            block=member.read(1024*1024)
+            _checkpoint(check)
+            if not block:break
+            size+=len(block)
+            if size>MAX_BYTES:refuse()
+            parts.append(block)
+    return b''.join(parts)
+
+def wheel_files(name, data, lock, *, check=None):
     # Lock hashes authorize wheel bytes, never a caller-built package manifest.
     match=re.fullmatch(r'(cffi|cryptography|pycparser)-([0-9.]+)-(.+)\.whl',name)
     if match is None: refuse()
     distribution,version,tags=match.groups()
-    if version!=lock[distribution]['version'] or digest(data) not in lock[distribution]['hashes']: refuse()
+    if version!=lock[distribution]['version'] or digest(data,check=check) not in lock[distribution]['hashes']: refuse()
     if distribution=='pycparser':
         if tags!='py3-none-any': refuse()
     elif distribution=='cffi':
@@ -76,10 +104,11 @@ def wheel_files(name, data, lock):
         with zipfile.ZipFile(io.BytesIO(data)) as wheel:
             files={}
             for info in wheel.infolist():
+                _checkpoint(check)
                 if info.is_dir():continue
                 if (not allowed_profile_path(info.filename) or info.filename in files
                         or info.file_size>MAX_BYTES or stat.S_ISLNK(info.external_attr>>16)): refuse()
-                content=wheel.read(info)
+                content=_archive_data(wheel,info,check=check)
                 files[info.filename]=content
             metadata=f'{distribution}-{version}.dist-info/METADATA'
             if metadata not in files:refuse()
@@ -89,7 +118,8 @@ def wheel_files(name, data, lock):
             return distribution,files
     except (zipfile.BadZipFile,UnicodeError,RuntimeError):refuse()
 
-def bundle_files(data, lock_bytes):
+def bundle_files(data, lock_bytes, *, check=None):
+    _checkpoint(check)
     lock=parse_lock(lock_bytes)
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as bundle:
@@ -97,13 +127,14 @@ def bundle_files(data, lock_bytes):
             if len(infos)!=3 or any(i.is_dir() or i.file_size>MAX_BYTES or stat.S_ISLNK(i.external_attr>>16) for i in infos):refuse()
             wheels={};packages={};distributions=set()
             for info in infos:
+                _checkpoint(check)
                 if '/' in info.filename or '\\' in info.filename or info.filename in wheels:refuse()
-                payload=bundle.read(info)
-                distribution,files=wheel_files(info.filename,payload,lock)
+                payload=_archive_data(bundle,info,check=check)
+                distribution,files=wheel_files(info.filename,payload,lock,check=check)
                 if distribution in distributions or set(packages)&set(files):refuse()
                 distributions.add(distribution);packages.update(files);wheels[info.filename]=payload
             if distributions!=set(VERSIONS):refuse()
-            entries=[{'path':p,'bytes':len(b),'sha256':digest(b),'mode':0o555 if p.endswith('.so') else 0o444} for p,b in sorted(packages.items())]
+            entries=[{'path':p,'bytes':len(b),'sha256':digest(b,check=check),'mode':0o555 if p.endswith('.so') else 0o444} for p,b in sorted(packages.items())]
             return wheels,packages,manifest_bytes(digest(lock_bytes),entries)
     except (zipfile.BadZipFile,RuntimeError):refuse()
 
@@ -121,31 +152,36 @@ def build_bundle(wheels, lock_bytes):
 
 def profile_root(lock_bytes):return SYSTEM_ROOT/'control-dependencies'/digest(lock_bytes)
 
-def verify_profile(release_root):
+def verify_profile(release_root, *, check=None):
+    _checkpoint(check)
     release_root=Path(release_root)
-    sealed_directory(release_root)
-    sealed_directory((release_root/LOCK_RELATIVE).parent)
-    lock_bytes=secure_data(release_root/LOCK_RELATIVE,mode=0o644)
-    root=profile_root(lock_bytes);sealed_directory(root,mode=0o555)
-    sealed_directory(root/'packages',mode=0o555);sealed_directory(root/'wheels',mode=0o555)
+    sealed_directory(release_root,check=check)
+    sealed_directory((release_root/LOCK_RELATIVE).parent,check=check)
+    lock_bytes=secure_data(release_root/LOCK_RELATIVE,mode=0o644,check=check)
+    root=profile_root(lock_bytes);sealed_directory(root,mode=0o555,check=check)
+    sealed_directory(root/'packages',mode=0o555,check=check);sealed_directory(root/'wheels',mode=0o555,check=check)
     wheel_paths=sorted((root/'wheels').iterdir())
     if len(wheel_paths)!=3:refuse()
     contents=io.BytesIO()
     with zipfile.ZipFile(contents,'w',compression=zipfile.ZIP_STORED) as archive:
-        for path in wheel_paths:archive.writestr(path.name,secure_data(path,maximum=MAX_BYTES))
-    wheels,packages,expected=bundle_files(contents.getvalue(),lock_bytes)
-    manifest=secure_data(root/MANIFEST,maximum=32*1024*1024)
+        for path in wheel_paths:
+            _checkpoint(check)
+            archive.writestr(path.name,secure_data(path,maximum=MAX_BYTES,check=check))
+    wheels,packages,expected=bundle_files(contents.getvalue(),lock_bytes,check=check)
+    manifest=secure_data(root/MANIFEST,maximum=32*1024*1024,check=check)
     parse_manifest(manifest,digest(lock_bytes))
     if manifest!=expected:refuse()
     actual=set()
     for path in (root/'packages').rglob('*'):
+        _checkpoint(check)
         relative=path.relative_to(root/'packages').as_posix();info=path.lstat()
-        if stat.S_ISDIR(info.st_mode):sealed_directory(path,mode=0o555);continue
+        if stat.S_ISDIR(info.st_mode):sealed_directory(path,mode=0o555,check=check);continue
         if relative not in packages:refuse()
         actual.add(relative)
-        payload=secure_data(path,mode=0o555 if relative.endswith('.so') else 0o444,maximum=MAX_BYTES)
+        payload=secure_data(path,mode=0o555 if relative.endswith('.so') else 0o444,maximum=MAX_BYTES,check=check)
         if payload!=packages[relative]:refuse()
     if actual!=set(packages) or {p.name for p in root.iterdir()}!={'packages','wheels',MANIFEST}:refuse()
+    _checkpoint(check)
     return {'root':str(root),'packages':str(root/'packages'),'lock_sha256':digest(lock_bytes),'manifest_sha256':digest(manifest)}
 
 def materialize_bundle(bundle, release_root, *, operator_uid):
@@ -186,10 +222,10 @@ def enrolled(raw):
     value=raw.get('reply_events')
     return type(value) is dict and value.get('armed') is True
 
-def observe_if_enrolled(raw, release_root):
+def observe_if_enrolled(raw, release_root, *, check=None):
     if not enrolled(raw):return None
     if raw.get('proof_base_sha')!=Path(release_root).name or type(raw.get('control_uid')) is not int or raw['control_uid']!=450:refuse()
-    return verify_profile(release_root)
+    return verify_profile(release_root,check=check) if check is not None else verify_profile(release_root)
 
 def activate_if_enrolled(raw, release_root):
     observation=observe_if_enrolled(raw,release_root)

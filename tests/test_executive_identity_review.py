@@ -48,9 +48,9 @@ def _replace_span(source, span, replacement):
     return "".join(lines)
 
 
-def test_reviewed_topology_has_all_33_exact_literal_sites_and_no_other_masking():
+def test_reviewed_topology_has_all_34_exact_literal_sites_and_no_other_masking():
     spans = reviewed_literal_spans(REVIEWED_PATH, SOURCE)
-    assert len(spans) == REVIEWED_LITERAL_COUNT == 33
+    assert len(spans) == REVIEWED_LITERAL_COUNT == 34
     masked = mask_reviewed_identity_literals(REVIEWED_PATH, SOURCE)
     assert len(masked) == len(SOURCE)
     assert masked.count("\n") == SOURCE.count("\n")
@@ -61,7 +61,7 @@ def test_reviewed_topology_has_all_33_exact_literal_sites_and_no_other_masking()
     assert _scan(SOURCE) == []
 
 
-@pytest.mark.parametrize("index", range(33))
+@pytest.mark.parametrize("index", range(34))
 def test_every_reviewed_literal_mutation_returns_to_generic_guard(index):
     span = reviewed_literal_spans(REVIEWED_PATH, SOURCE)[index]
     replacement = '"_mastermind_intruder"' if span[3] == "str" else "999"
@@ -85,7 +85,7 @@ def test_same_line_trailing_identity_is_never_masked(uid):
     lines = SOURCE.splitlines(keepends=True)
     lines[anchor.end_lineno - 1] = lines[anchor.end_lineno - 1].rstrip("\n") + f"; extra_uid = {uid}\n"
     changed = "".join(lines)
-    assert len(reviewed_literal_spans(REVIEWED_PATH, changed)) == 33
+    assert len(reviewed_literal_spans(REVIEWED_PATH, changed)) == 34
     assert str(uid) in _scan(changed)
 
 
@@ -146,7 +146,7 @@ def test_nonascii_inline_content_cannot_shift_approved_token_columns(where):
     else:
         lines[node.end_lineno - 1] = lines[node.end_lineno - 1].rstrip('\n') + '; label = "é"; extra_uid = 459\n'
     changed = ''.join(lines)
-    assert len(reviewed_literal_spans(REVIEWED_PATH, changed)) < 33
+    assert len(reviewed_literal_spans(REVIEWED_PATH, changed)) < 34
     assert _scan(changed)
 
 
@@ -158,7 +158,7 @@ def test_equivalent_unreviewed_token_spelling_is_not_silently_approved():
 
 def test_unrelated_ascii_comments_and_whitespace_preserve_approved_ast():
     changed = '# unrelated comment\n\n' + SOURCE.replace('_CONTROL_SOCKETS = {', '_CONTROL_SOCKETS  =  {\n    # spacing only', 1)
-    assert len(reviewed_literal_spans(REVIEWED_PATH, changed)) == 33
+    assert len(reviewed_literal_spans(REVIEWED_PATH, changed)) == 34
     assert _scan(changed) == []
 
 
@@ -176,7 +176,7 @@ def test_non_python_line_separators_refuse_all_projection(separator, position):
 @pytest.mark.parametrize("newline", ["\r\n", "\r"])
 def test_python_universal_newlines_preserve_exact_tokens(newline):
     changed = SOURCE.replace("\n", newline)
-    assert len(reviewed_literal_spans(REVIEWED_PATH, changed)) == 33
+    assert len(reviewed_literal_spans(REVIEWED_PATH, changed)) == 34
     masked = mask_reviewed_identity_literals(REVIEWED_PATH, changed)
     assert len(masked) == len(changed)
     ast.parse(masked)

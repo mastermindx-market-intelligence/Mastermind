@@ -113,13 +113,13 @@ def test_existing_control_projection_joins_optional_profile_and_preserves_disabl
     monkeypatch.setattr(p,'verify_profile',lambda *a:pytest.fail('disabled profile IO'))
     assert peer._verify_control_projection(None).control_aead is None
     raw['reply_events']={'armed':True}
-    monkeypatch.setattr(p,'verify_profile',lambda *a:{'manifest_sha256':'a'*64})
+    monkeypatch.setattr(peer,'_observe_control_aead',lambda *a:peer._AeadObservation((('manifest_sha256','a'*64),),()))
     before=peer._verify_control_projection(None)
-    assert before.control_aead==(('manifest_sha256','a'*64),)
-    monkeypatch.setattr(p,'verify_profile',lambda *a:{'manifest_sha256':'c'*64})
+    assert before.control_aead.details==(('manifest_sha256','a'*64),)
+    monkeypatch.setattr(peer,'_observe_control_aead',lambda *a:peer._AeadObservation((('manifest_sha256','c'*64),),()))
     assert peer._verify_control_projection(None)!=before
     def failed(*a):raise p.AeadProfileError('fixture tamper')
-    monkeypatch.setattr(p,'verify_profile',failed)
+    monkeypatch.setattr(peer,'_observe_control_aead',failed)
     with pytest.raises(Exception,match='SERVICE_CONTROL_AEAD_CLOSURE_REFUSED'):peer._verify_control_projection(None)
 
 
