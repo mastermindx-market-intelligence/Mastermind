@@ -1700,6 +1700,8 @@ def test_ohf_real_chain_publishes_visible_items_while_controller_nonterminal(
         assert broker._operator_run is not None and broker._operator_run.busy
         item_gate.unlink()
         nonterminal_read = None
+        expected_items = ["LC1 real partial", "LC1 real final"]
+        lawful_prefixes = ([], ["LC1 real partial"], expected_items)
         for attempt in range(100):
             candidate_read = await broker.execute(
                 _request(
@@ -1709,15 +1711,24 @@ def test_ohf_real_chain_publishes_visible_items_while_controller_nonterminal(
                 ),
                 peer=peer,
             )
-            if candidate_read["result"]["items"]:
+            observed_items = [
+                item["text"] for item in candidate_read["result"]["items"]
+            ]
+            # The observer may lawfully expose the first streamed item before
+            # the second on a slower runner.  Preserve the ordering/completeness
+            # contract and wait for the exact complete prefix instead of treating
+            # the first nonempty snapshot as terminal observer evidence.
+            assert observed_items in lawful_prefixes
+            assert candidate_read["result"]["terminal"] is False
+            assert not collector.done()
+            if observed_items == expected_items:
                 nonterminal_read = candidate_read
                 break
-            assert not collector.done()
             await asyncio.sleep(0.01)
         assert nonterminal_read is not None
         assert [
             item["text"] for item in nonterminal_read["result"]["items"]
-        ] == ["LC1 real partial", "LC1 real final"]
+        ] == expected_items
         nonterminal_cursor = nonterminal_read["result"]["next_cursor"]
         assert nonterminal_read["result"]["terminal"] is False
         assert not collector.done()

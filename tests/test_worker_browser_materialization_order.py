@@ -12,15 +12,15 @@ from pathlib import Path
 from integrations.workbench_action_mcp.tunnel import create_runtime_channel
 from tests import test_worker_browser_admission as owner_fixture
 from tests.test_worker_browser_admission import _materialize
-from tests.test_workbench_browser_tunnel import _call, _error_code
+from tests.test_workbench_browser_tunnel import _call, _error_code, _tools
 
 
 def test_snapshot_only_private_channel_stays_dormant_until_exact_receipt(tmp_path, monkeypatch):
-    """The broker may prepare a channel before it persists a launch receipt.
+    """A fixture-bound channel refuses before receipt, admits, then revokes.
 
-    The channel must not gain Browser authority from its own construction;
-    only the original Runtime owner plus the exact durable receipt may allow
-    calls, and later Job cancellation must immediately revoke them.
+    This test does not invoke the real broker's resource factory, provider
+    start or receipt writer. It verifies the existing admission predicate
+    against a synthetic Runtime/receipt fixture without granting Browser use.
     """
     original_grant = owner_fixture._grant
     monkeypatch.setattr(
@@ -48,13 +48,19 @@ def test_snapshot_only_private_channel_stays_dormant_until_exact_receipt(tmp_pat
             server = api.create_worker_browser_server(
                 runtime, config.browser, admission,
             )
+            assert [t.name for t in await _tools(server)] == ["browser_snapshot"]
+            ungranted = await _call(server, "prepare_browser_resource", {
+                "project_ref": config.action.lease.project_ref,
+                "mode": "isolated",
+            })
+            assert _error_code(ungranted) == "TOOL_NOT_AVAILABLE"
             payload = {"browser_ref": "unsigned-not-an-admitted-browser-ref"}
             before = await _call(server, "browser_snapshot", payload)
             assert _error_code(before) == "CHANNEL_ADMISSION_REFUSED"
             assert list(Path(config.action.artifact_directory).iterdir()) == []
 
-            # Simulate only the broker's exact authenticated receipt persistence,
-            # not another lease, session, provider launch or Browser resource.
+            # Mirror the broker receipt field set with synthetic test identities.
+            # This is not a live broker, provider or Browser resource launch.
             _materialize(pending_root, executive, epoch, generation, requested)
             admitted = await _call(server, "browser_snapshot", payload)
             # The granted call reaches the original Browser port, which then
