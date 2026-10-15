@@ -34,3 +34,9 @@
 .fc-detail dt { color: var(--fc-muted); }
 .fc-detail dd { margin: 0; min-width: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 @media (max-width: 760px) { .fc-panel { padding: 16px; } .fc-layout { grid-template-columns: minmax(0, 1fr); } .fc-heading { flex-wrap: wrap; } .fc-detail .fc-load { white-space: normal; } }
+
+.fc-lineage { display: flex; flex-direction: column; gap: 6px; padding: 12px; margin-block: 12px; border: 1px solid var(--fc-line); border-radius: 10px; background: var(--fc-fill); min-width: 0; }
+.fc-lineage > strong { font-size: 12.5px; line-height: 1.5; }
+.fc-lineage > p { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.fc-lineage > small { display: block; overflow-wrap: anywhere; }
+.fc-lineage[data-state="PARENT_CYCLE"], .fc-lineage[data-state="ROOT_CONFLICT"], .fc-lineage[data-state="DUPLICATE_ID"] { border-color: color-mix(in srgb, #DEA4A5 65%, currentColor); }

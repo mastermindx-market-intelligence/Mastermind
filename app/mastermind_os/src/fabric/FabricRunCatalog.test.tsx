@@ -110,6 +110,43 @@ describe("owner-authorized catalog host and view", () => {
     fireEvent.change(screen.getByLabelText("Search loaded run, root or parent"), { target: { value: "immediate-parent" } });
     expect(c.raw.readAttendedFabricCatalog).toHaveBeenCalledTimes(1);
   });
+  it("shows only actual source-declared nested chains, not invented missing parents", async () => {
+    const direct = row(); direct.status!.parent_run_id = "original-root";
+    const nested = row("run-two"); nested.status!.parent_run_id = "run-one";
+    const outside = row("run-three"); outside.status!.parent_run_id = "outside-parent";
+    const c = client(async () => catalog([direct, nested, outside]));
+    render(<FabricRunCatalog host={bindMissionHost(c.raw)} />); await load();
+    expect(screen.getByText("2 declared nested parents in these rows")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Nested parents" }));
+    expect(screen.queryByRole("button", { name: /^run-one ·/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /^run-two ·/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^run-three ·/ })).toBeTruthy();
+    select("run-two");
+    const exact = screen.getByRole("group", { name: "Observed run ancestry" });
+    expect(exact.textContent).toContain("original-root → run-one → run-two");
+    expect(exact.textContent).toContain("Declared depth 2");
+    expect(exact.textContent).toContain("not authority or verified worker START");
+    select("run-three");
+    const partial = screen.getByRole("group", { name: "Observed run ancestry" });
+    expect(partial.textContent).toContain("outside-parent → run-three");
+    expect(partial.textContent).toContain("Parent not supplied in these records");
+    expect(partial.textContent).toContain("Full depth unknown");
+    expect(c.statusRead).not.toHaveBeenCalled();
+    expect(c.raw.readAttendedFabricCatalog).toHaveBeenCalledTimes(1);
+  });
+  it("supports localized lineage while preserving exact source labels", async () => {
+    const direct = row(); direct.status!.parent_run_id = "original-root";
+    const c = client(async () => catalog([direct]));
+    render(<FabricRunCatalog host={bindMissionHost(c.raw)} locale="zh-CN" />);
+    fireEvent.click(screen.getByRole("button", { name: "加载运行" }));
+    await screen.findByRole("button", { name: /^run-one ·/ });
+    select();
+    const relation = screen.getByRole("group", { name: "观测运行层级" });
+    expect(relation.textContent).toContain("original-root → run-one");
+    expect(relation.textContent).toContain("上级为原始根标签");
+    expect(relation.textContent).toContain("声明深度 1");
+    expect(c.statusRead).not.toHaveBeenCalled();
+  });
   it("selects an exact root/run without reading it automatically", async () => {
     const c = client(), inspect = vi.fn(); render(<FabricRunCatalog host={bindMissionHost(c.raw)} onInspect={inspect} />); await load(); select();
     fireEvent.click(screen.getByRole("button", { name: "Use in run inspector" }));

@@ -1,0 +1,23 @@
+# C3 Fabric transport and run ancestry — October 15, 2026 UTC
+
+## New verified upstream readiness
+
+The original C3 Fabric alias **`mastermind-subagent-fabric-c3`** exists under its original C3 workspace and is now **READY** according to its own supported `tunnel-client runtimes status ... --json` owner. `profile_exists`, `process_running`, `healthy`, and `ready` all returned true. It binds the original tunnel `tunnel_6aced2fc0d1481919ef1cf868cdc2720` to the already-running isolated `fabric-c3-570f6f34` gateway on loopback port 45280. The original existing runtime-key file is still referenced by the profile, and its contents were neither read nor changed. This corrects earlier conclusions based only on a *different* helper account (`subagent-fabric-c3`, port45119) whose separate managed tunnel is absent. The inactive `fabric-chatgpt3-w570f6f34` account is also distinct. Do not restart, restage, join accounts, rotate credentials, or create another tunnel as a result of this discovery.
+
+The active 45280 gateway is `fabricOnly=true`, its installed `fabric-backend.mjs` SHA256 `a34bd21065b64aef68af26fa3c37b310f861d7a5c4545adca52f5c07de5c56c6` matches the protected #1359 merge, and local MCP SDK initialized successfully. All seven Fabric tools were listed; a read-only capability call reported `adapter_available=true`. A read-only `fabric_status` on an *existing original run* returned `root_verified=true`, TERMINAL and NOT_ACCEPTED. **No new paid worker, admitted START, result contents, acceptance action or resource permission was involved.** This is local gateway + managed tunnel readiness, **not proof that the native ChatGPT account installed/consented to the tunnel app** or that Mastermind OS can authenticate a Fabric read.
+
+## New bounded product capability — parent/child source relationships
+
+The previously flat “Recent Fabric runs” consumer now includes a **Nested parents** filter and an inline **Observed ancestry** inspector using only sanitized `mastermind.attended_fabric_catalog.v1` records. A pure bounded helper `catalog-lineage.ts` walks each supplied immediate-parent reference only when the parent appears in the same response and the original-root labels agree. It shows a contiguous source-declared path and declared depth when that chain reaches the original root *label*, explicitly warning that this label is a correlation key, **not an authorization or confirmed running worker**.
+
+Absent parents, unavailable parent status, unknown root/parent, conflicting roots, duplicate identities, self-parenting and cycles are labeled distinctly rather than making up an edge or hiding the record. A parent outside the selected 32-row response is *not* classified as absent from Fabric. Historical/partial source coverage, exact run IDs, result-versus-acceptance states, and explicit click-before-read behavior are unchanged. Filtering does not dispatch new M2 requests or authorize user access. Existing English and zh-CN UIs now show qualified lineage explanations; no new dependencies or default source routes.
+
+## Proof and gaps
+
+- Pure ancestry tests: **9 passed**, including 32-row bounded depth, real M2 source fixture, missing parents, cycles, root conflicts and duplicate identities.
+- Mounted catalog UI: **2 new tests** for nested filtering, selected path, absent-parent warnings and Chinese translation, without implied status reads.
+- Focused suite: **34 passed across 3 files**; `tsc --noEmit` passes.
+- Complete current app suite: **1,487 passed, one existing skipped, zero failures across 66 files**; production Vite build passes. The existing chunk-size and mixed Tauri import warnings remain.
+- SHA256 of all changed code and local logs, exact running tunnel state and explicit nonclaims are in [C3_TUNNEL_AND_CATALOG_LINEAGE_20261015.json](C3_TUNNEL_AND_CATALOG_LINEAGE_20261015.json).
+
+**End-to-end mission still incomplete:** optional `readAttendedFabricCatalog` and `readAttendedFabric` are not connected to the authenticated OS web/native clients. A trusted machine-owner tunnel principal does not identify a user, and selection labels are not grants. The existing resource/authorization owner must supply the right-to-observe run set on its existing signed-in workspace read path, with pre/post permission checks and principal/revision consistency. Exact-head independent review and new visual/browser proof for the catalog remain held after earlier platform refusals; do not reroute refused actions. #1425's separate Fleet Health source is a pending coexisting capability with a documented App.tsx composition conflict; #1435's mission-lineage repair is separately owned. No Paper changes, backend writer edits, production release or account installation are claimed by this packet.

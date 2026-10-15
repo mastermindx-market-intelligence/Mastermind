@@ -1,15 +1,29 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { MissionHost } from "../host";
 import { decodeFabricCatalog, type CatalogRow, type FabricCatalog } from "./catalog-contract";
+import { observedRunLineage, type RunLineageState } from "./catalog-lineage";
 import "./fabric-catalog.css";
 
-type Filter = "all" | "active" | "results" | "review" | "attention";
+type Filter = "all" | "active" | "results" | "review" | "attention" | "nested";
+const relationCopy: Record<RunLineageState, [string, string]> = {
+  ROOT_PARENT_LABEL: ["Parent is the original root label (not necessarily a worker)", "上级为原始根标签（不一定是工作代理）"],
+  OBSERVED_ANCESTRY: ["Contiguous parent chain in these records", "本次记录中连续可见的父级链"],
+  PARENT_OUTSIDE_RESPONSE: ["Parent not supplied in these records", "本次记录中未包含父级"],
+  PARENT_STATUS_UNAVAILABLE: ["Parent status is unavailable", "父级状态不可用"],
+  ROOT_UNVERIFIED: ["Original root not verified", "原始根未核实"],
+  PARENT_UNVERIFIED: ["Immediate parent not verified", "直接父级未核实"],
+  ROOT_CONFLICT: ["Root identities conflict — not joined", "根身份不一致，未关联"],
+  PARENT_CYCLE: ["Parent cycle — relationship invalid", "父级循环，关系无效"],
+  DUPLICATE_ID: ["Duplicate run identity — not joined", "重复运行标识，未关联"],
+  STATUS_UNAVAILABLE: ["Source status is unavailable", "来源状态不可用"],
+};
 const needsReview = (r: CatalogRow) => r.status?.state === "TERMINAL" && r.status.rc === 0 &&
   r.status.signal === "ok" && r.status.result_available && r.status.accepted === false;
 const attention = (r: CatalogRow) => !!r.reason_code || !r.status ||
   ["EFFECT_UNKNOWN", "TERMINAL_FAILURE", "RESULT_UNAVAILABLE", "STATUS_UNREADABLE"].includes(r.status.state) ||
   r.status.state === "TERMINAL" && r.status.rc !== null && r.status.rc !== 0;
-const filterRow = (r: CatalogRow, filter: Filter) => filter === "all" ||
+const filterRow = (r: CatalogRow, filter: Filter, nested: boolean) => filter === "all" ||
+  filter === "nested" && nested ||
   filter === "active" && r.status?.state === "ACTIVE_OR_WAITING" ||
   filter === "results" && r.status?.result_available === true || filter === "review" && needsReview(r) ||
   filter === "attention" && attention(r);
@@ -45,10 +59,13 @@ export function FabricRunCatalog({ host, locale = "en", onInspect }: FabricRunCa
     Number.isSafeInteger(epoch) && auth?.status === "signed_in" && auth.acquisition;
   const document = ready && observation?.host === host && observation.epoch === epoch ? observation.document : null;
   const rows = document?.items ?? [];
+  const lineage = observedRunLineage(rows);
+  const nestedCount = rows.filter(row => lineage.get(row.run_id)?.declared_nested_parent === true).length;
   const needle = query.trim().toLocaleLowerCase();
-  const filtered = rows.filter(row => filterRow(row, filter) && [row.run_id, row.status?.root_id, row.status?.parent_run_id]
+  const filtered = rows.filter(row => filterRow(row, filter, lineage.get(row.run_id)?.declared_nested_parent === true) && [row.run_id, row.status?.root_id, row.status?.parent_run_id]
     .some(v => v?.toLocaleLowerCase().includes(needle)));
   const selected = filtered.find(row => row.run_id === selectedId);
+  const selectedLineage = selected ? lineage.get(selected.run_id) : undefined;
   const active = rows.filter(row => row.status?.state === "ACTIVE_OR_WAITING").length;
   const value = (v: unknown): string => v === null || v === undefined ? t("Unknown", "未知") :
     typeof v === "boolean" ? (v ? t("Yes", "是") : t("No", "否")) : String(v);
@@ -72,7 +89,7 @@ export function FabricRunCatalog({ host, locale = "en", onInspect }: FabricRunCa
     } finally { if (ticket === serial.current) setBusy(false); }
   }
   const filters: Array<[Filter, string, string]> = [["all", "All", "全部"], ["active", "Active or waiting", "活动或等待"],
-    ["results", "With results", "包含结果"], ["review", "Awaiting acceptance", "等待验收"], ["attention", "Needs inspection", "需要检查"]];
+    ["results", "With results", "包含结果"], ["review", "Awaiting acceptance", "等待验收"], ["attention", "Needs inspection", "需要检查"], ["nested", "Nested parents", "嵌套父级"]];
   const fields: Array<[string, unknown]> = selected ? [
     [t("Run", "运行标识"), selected.run_id], [t("Root", "根标识"), selected.status?.root_id],
     [t("Immediate parent", "直接父标识"), selected.status?.parent_run_id], [t("Controller state", "控制器状态"), selected.status?.state],
@@ -106,7 +123,8 @@ export function FabricRunCatalog({ host, locale = "en", onInspect }: FabricRunCa
         <div className="fc-summary"><span>{active} {t("active or waiting in these rows", "条活动或等待记录")}</span>
           <span>{rows.filter(r => !r.status).length} {t("unverified records", "条尚未核实记录")}</span>
           <span>{rows.filter(needsReview).length} {t("awaiting acceptance", "条等待验收记录")}</span>
-          <span>{rows.filter(attention).length} {t("need inspection", "条需要检查记录")}</span></div>
+          <span>{rows.filter(attention).length} {t("need inspection", "条需要检查记录")}</span>
+          <span>{nestedCount} {t("declared nested parents in these rows", "条记录声明了嵌套父级")}</span></div>
         <div className="fc-controls"><div className="fc-filters" role="group" aria-label={t("Filter recent runs", "筛选近期运行")}>
           {filters.map(([f, en, zh]) => <button type="button" key={f} aria-pressed={filter === f} onClick={() => { setFilter(f); select(null); }}>{t(en, zh)}</button>)}</div>
           <label htmlFor={`${id}-search`}>{t("Search loaded run, root or parent", "搜索已加载的运行、根或父标识")}</label>
@@ -115,11 +133,20 @@ export function FabricRunCatalog({ host, locale = "en", onInspect }: FabricRunCa
           aria-label={`${row.run_id} · ${row.status?.state ?? row.reason_code}`} aria-pressed={row.run_id === selectedId} onClick={() => select(row.run_id)}>
           <strong>{row.run_id}</strong><span>{row.status?.state ?? row.reason_code}</span>
           <small>{t("Root", "根标识")} · {value(row.status?.root_id)}</small>
+          <small>{t("Parent relation", "父级关系")} · {t(...relationCopy[lineage.get(row.run_id)?.state ?? "STATUS_UNAVAILABLE"])}</small>
           <span>{t("Acceptance", "验收")} · {value(row.status?.acceptance_state)}</span>
         </button>) : <p className="fc-notice">{t("No matching records in this response.", "本次响应中没有匹配记录。")}</p>}</div>
           <aside className="fc-detail" aria-label={t("Selected recent run", "所选近期运行")}><h3>{t("Selected run", "所选运行")}</h3>
             {!selected ? <p>{t("Choose a record to inspect its source-qualified metadata.", "选择记录以查看带来源限定的元数据。")}</p> : <>
               {selected.reason_code && <p className="fc-notice">{selected.reason_code}</p>}
+              {selectedLineage && <div className="fc-lineage" data-state={selectedLineage.state} role="group" aria-label={t("Observed run ancestry", "观测运行层级")}>
+                <strong>{t("Observed ancestry in this response", "本次响应中观测到的层级")}</strong>
+                <p>{selectedLineage.path.join(" → ")}</p>
+                <small>{t(...relationCopy[selectedLineage.state])} · {selectedLineage.contiguous_to_root_label
+                  ? `${t("Declared depth", "声明深度")} ${selectedLineage.observed_depth}`
+                  : t("Full depth unknown", "完整深度未知")}</small>
+                <small>{t("Root labels identify correlation, not authority or verified worker START.", "根标签仅用于关联，不代表权限或工作代理已启动。")}</small>
+              </div>}
               <dl>{fields.map(([label, v]) => <div key={label}><dt>{label}</dt><dd>{value(v)}</dd></div>)}</dl>
               <button className="fc-load" type="button" onClick={inspect} disabled={!onInspect || !selected.status?.root_id || !!selected.reason_code}>
                 {t("Use in run inspector", "在运行检查器中打开")}</button>

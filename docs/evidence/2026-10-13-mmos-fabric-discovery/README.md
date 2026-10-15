@@ -15,3 +15,7 @@ Optional authorized catalog port → strict metadata decoder → bounded recent-
 ## Remaining proof
 
 Independent exact-head source review, actual browser/layout qualification, source-produced catalog, existing OS principal/grant binding, live authenticated app proof and release/install remain distinct gates. Do not enable a default client or publish the synthetic fixture to work around them.
+
+## Subsequent source-backed execution
+
+[October 15 C3 ready-tunnel reconciliation and parent/child catalog lineage qualification](C3_TUNNEL_AND_CATALOG_LINEAGE_20261015.md). This is local managed tunnel/read-only MCP and frontend contract proof, **not** a native ChatGPT plugin-consent or live authenticated Mastermind OS acceptance.
