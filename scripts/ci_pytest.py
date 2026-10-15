@@ -201,12 +201,15 @@ def pytest_argv(included: Sequence[str], *, python: str | None = None) -> list[s
 
 
 _MEASURED_THREE_JOB_PLACEMENT = {
-    # Measured in the full protected CI gate: these two unusually expensive
-    # modules both hash to shard 1. Pin only them to the less-loaded shard 2.
-    # Keep the large capacity-host crash/replay module stationary and retain
-    # the ordinary stable hash for all other paths and job counts.
+    # Stable three-job placements, measured against actual hosted durations.
+    # The existing runtime/window-reader pins remain unchanged. On independent
+    # runners, the large capacity-host module dominates shard index 0, while
+    # index 1 has spare wall time. Exchange it with the bounded trend suite;
+    # the other modules retain the original SHA-256 placement.
     "tests/test_executive_runtime_bounded_acquisition.py": 1,
     "tests/test_mastermind_window_reader_static_fences.py": 1,
+    "tests/test_capacity_host_artifacts.py": 1,
+    "tests/test_trend_persistence_walkforward.py": 0,
 }
 
 
@@ -228,11 +231,11 @@ def partition_modules(
     same checkout would shard differently on every run and a failure would not
     reproduce.
 
-    For the production three-job gate, two independently measured, unusually
-    costly modules are pinned from the busiest shard to the less-loaded shard.
-    Every other path keeps its stable hash placement, including when a test
-    file is added. Four-job experiments retain the unmodified hash. This is
-    strictly placement, not exclusion: verify_partition checks total coverage.
+    For the three-job gate, four explicitly measured module placements
+    balance expensive test suites across workers. Every other path keeps
+    its stable hash placement, including when a test file is added.
+    Non-three-job experiments retain the unmodified hash. This is strictly
+    placement, not exclusion: verify_partition checks total coverage.
     Shard sizes remain visible in the plan line. (Do not introduce bare
     three-digit constants outside tests/: the identity guard forbids them.)
     """

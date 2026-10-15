@@ -961,17 +961,19 @@ def test_real_shard_plan_stays_reasonably_balanced():
     assert max(sizes) <= 1.25 * (len(gate["included"]) / 4)
 
 
-def test_measured_three_job_pins_move_only_two_hot_modules() -> None:
-    """Preserve all tests, hashes and insertion stability except two measured pins."""
+def test_measured_three_job_pins_preserve_exact_coverage_and_stability() -> None:
+    """Preserve every hash except the four explicit measured placements."""
     import hashlib
 
     gate = cip.resolve_gate(_ROOT)
     included = gate["included"]
     pins = {
-        "tests/test_executive_runtime_bounded_acquisition.py",
-        "tests/test_mastermind_window_reader_static_fences.py",
+        "tests/test_executive_runtime_bounded_acquisition.py": 1,
+        "tests/test_mastermind_window_reader_static_fences.py": 1,
+        "tests/test_capacity_host_artifacts.py": 1,
+        "tests/test_trend_persistence_walkforward.py": 0,
     }
-    assert pins.issubset(included)
+    assert set(pins).issubset(included)
     shards = cip.partition_modules(included, jobs=3)
     cip.verify_partition(included, shards)
     observed = {
@@ -984,8 +986,8 @@ def test_measured_three_job_pins_move_only_two_hot_modules() -> None:
         digest = hashlib.sha256(path.encode("utf-8")).digest()
         hashed = int.from_bytes(digest[:8], "big") % 3
         if path in pins:
-            assert hashed == 0  # Both were in the slowest shard before the pin.
-            assert observed[path] == 1
+            assert hashed != pins[path]  # Each pin is an intentional measured move.
+            assert observed[path] == pins[path]
         else:
             assert observed[path] == hashed
 
@@ -1002,7 +1004,7 @@ def test_measured_three_job_pins_do_not_affect_other_job_counts() -> None:
 
     gate = cip.resolve_gate(_ROOT)
     included = gate["included"]
-    for jobs in (2, 4):
+    for jobs in (2, 4, 5, 8):
         shards = cip.partition_modules(included, jobs=jobs)
         cip.verify_partition(included, shards)
         for index, shard in enumerate(shards):
