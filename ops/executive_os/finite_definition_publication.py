@@ -288,6 +288,25 @@ def publish_disarmed_definition(expected_release_sha: str, expected_control_sha2
         hashes_published = _write_exclusive(DESTINATION, artifacts, uid=0, gid=0)
         if hashes_published != hashes:
             raise FinitePublicationEffectUnknown("sealed bundle mismatch")
+        # Original config-owner publication is not itself a full autonomy
+        # transaction. A concurrent incumbent modifier must never convert
+        # these new files into a false clean receipt. The directory stays in
+        # place and the original effect stays UNKNOWN until reconciliation.
+        try:
+            host.require_exact_install(expected_release_sha)
+            host.require_transaction_absent()
+            host.require_services_already_stopped()
+            host.require_service_uids_quiescent()
+            current = host.load_unarmed_configs(expected_release_sha)
+            host.require_runtime_quiescent(current)
+            host._config_root_safe()
+            if (current.control_sha256 != prior.control_sha256
+                    or current.worker_sha256 != prior.worker_sha256
+                    or verified_capacity_binding(join) is not True):
+                raise FinitePublicationEffectUnknown("original postimage changed")
+        except Exception as exc:
+            raise FinitePublicationEffectUnknown(
+                "original config or Capacity changed after finite publication") from exc
         return {"state": "STAGED_DISARMED_DEFINITION", "release": expected_release_sha,
                 "control_preimage_sha256": expected_control_sha256,
                 "artifacts": hashes_published, "effect": "APPLIED",

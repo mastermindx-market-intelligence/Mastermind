@@ -84,7 +84,7 @@ REVIEWED_FILES = {'integrations/session_bridge/bound_launch_capture/runtime/lane
 # review: SHA and precise sites are frozen, not computed at runtime. This does
 # not authorize publication, merge, release or Capacity admission.
 REVIEWED_FILES['ops/executive_os/finite_definition_publication.py'] = {
-    'sha256': '1c651fb504c99b941cc803d33ab7a610793b4dcdd085ce67749ce7d4ba57fcb2',
+    'sha256': 'f421ad6d13464018f2eabedbf3b8ac696d3174d27d3d49b6c63f5a06febd0f2b',
     'sites': ((93, 28, 33, 'int', '0o700'),
  (95, 28, 33, 'int', '0o700'),
  (136, 75, 80, 'int', '0o700'),

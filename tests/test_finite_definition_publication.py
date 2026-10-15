@@ -143,7 +143,7 @@ def test_root_owner_publishes_only_after_same_locked_config_and_render(monkeypat
         verified_capacity_binding=capacity)
     assert x['state']=='STAGED_DISARMED_DEFINITION'
     assert x['admitted_worker'] is False and x['service_started'] is False
-    assert actions.count('capacity-checked')==2
+    assert actions.count('capacity-checked')==3
     assert actions.index('stopped')<actions.index('publish')
     assert actions.index('disarmed')<actions.index('publish')
     assert actions.index('render-rechecked')<actions.index('publish')
@@ -285,3 +285,36 @@ def test_installed_source_entry_joins_original_capacity_and_same_publisher(
         verified_capacity_binding=validate)=={'effect':'INERT_TEST'}
     assert calls==['release','marker','stopped','uids','configs','runtime',
         'capacity','renderer','original-publisher']
+
+def test_post_write_control_drift_is_uncertain_effect_never_success(
+        monkeypatch, qualified_host, tmp_path):
+    from types import SimpleNamespace
+    from control_plane.executive_capacity_join import CapacityJoin, PROVIDER_CAPACITY_SCHEMA
+    from control_plane.executive_fabric_composition import _bindings
+    _, prior, files, _ = qualified_host
+    physical, = _bindings(files["bindings.json"])
+    home=tmp_path/'control-config';home.mkdir()
+    monkeypatch.setattr(pub.owner,'CONFIG_ROOT',home)
+    monkeypatch.setattr(pub,'DESTINATION',home/'fabric-minimax-finite-01')
+    monkeypatch.setattr(pub.os,'geteuid',lambda:0)
+    reads=[0];writes=[]
+    class Host:
+        def require_exact_install(self,sha):return sha
+        def require_transaction_absent(self):return None
+        def _config_root_safe(self):return None
+        def require_services_already_stopped(self):return None
+        def require_service_uids_quiescent(self):return None
+        def load_unarmed_configs(self,sha):
+            reads[0]+=1
+            if reads[0]>1:
+                return SimpleNamespace(**dict(vars(prior), worker_sha256='f'*64))
+            return prior
+        def require_runtime_quiescent(self,prior):return None
+    monkeypatch.setattr(pub.owner,'ProductionCeoSubmitHost',Host)
+    monkeypatch.setattr(pub,'render_owner_definition',lambda *a:files.copy())
+    monkeypatch.setattr(pub,'_write_exclusive',
+        lambda *args,**kwargs:writes.append(True) or pub.verify_candidate(files))
+    with pytest.raises(pub.FinitePublicationEffectUnknown,match='original config'):
+        pub.publish_disarmed_definition('a'*40,prior.control_sha256,files,
+            verified_capacity_binding=lambda join:True)
+    assert writes==[True] and reads==[2]
