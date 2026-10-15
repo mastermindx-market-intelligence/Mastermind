@@ -742,3 +742,112 @@ def test_main_recomputes_effective_subject_delta_after_accepted_base_move(monkey
     assert observed["receipt_base"] == new_base
     assert observed["receipt_paths"] == (refreshed_path,)
     assert observed["entry_paths"] == (refreshed_path,)
+
+
+MULTI_FOREIGN_PRS = (991, 992)
+MULTI_FOREIGN_ROOT = "a" * 40
+MULTI_FOREIGN_ENGINE = "b" * 40
+
+
+def _multi_foreign_row(number: int) -> dict[str, object]:
+    return {
+        "number": number,
+        "state": "open",
+        "head": {
+            "sha": f"{number:040x}",
+            "repo": {"full_name": fx.REPOSITORY},
+        },
+        "base": {
+            "sha": FOREIGN_BASE_SHA,
+            "repo": {"full_name": fx.REPOSITORY},
+        },
+    }
+
+
+class MultipleCurrentBaseOverlapHTTP:
+    """Two historical overlaps must share one immutable target-base lookup."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def __call__(self, url: str, *, token: str, timeout: float) -> object:
+        assert token == fx.TOKEN and timeout > 0
+        self.calls.append(url)
+        parsed = urlparse(url)
+
+        if parsed.path.endswith("/pulls"):
+            return [
+                {"number": fx.PR_NUMBER, "state": "open"},
+                *[_multi_foreign_row(number) for number in MULTI_FOREIGN_PRS],
+            ]
+
+        for number in MULTI_FOREIGN_PRS:
+            if parsed.path.endswith(f"/pulls/{number}/files"):
+                return [{"filename": MATERIAL_OWNED[0], "status": "modified"}]
+            if parsed.path.endswith(f"/git/commits/{number:040x}"):
+                return {
+                    "sha": f"{number:040x}",
+                    "tree": {"sha": MULTI_FOREIGN_ROOT},
+                }
+
+        if parsed.path.endswith(f"/git/commits/{CURRENT_BASE_SHA}"):
+            return {
+                "sha": CURRENT_BASE_SHA,
+                "tree": {"sha": CURRENT_BASE_ROOT},
+            }
+        if parsed.path.endswith(f"/git/trees/{CURRENT_BASE_ROOT}"):
+            return _tree(
+                CURRENT_BASE_ROOT,
+                [{
+                    "path": "engine",
+                    "mode": "040000",
+                    "type": "tree",
+                    "sha": CURRENT_BASE_ENGINE,
+                }],
+            )
+        if parsed.path.endswith(f"/git/trees/{CURRENT_BASE_ENGINE}"):
+            return _tree(CURRENT_BASE_ENGINE, [_blob_entry()])
+        if parsed.path.endswith(f"/git/trees/{MULTI_FOREIGN_ROOT}"):
+            return _tree(
+                MULTI_FOREIGN_ROOT,
+                [{
+                    "path": "engine",
+                    "mode": "040000",
+                    "type": "tree",
+                    "sha": MULTI_FOREIGN_ENGINE,
+                }],
+            )
+        if parsed.path.endswith(f"/git/trees/{MULTI_FOREIGN_ENGINE}"):
+            return _tree(MULTI_FOREIGN_ENGINE, [_blob_entry()])
+
+        raise AssertionError(url)
+
+
+def test_current_target_base_entries_are_resolved_once_per_collision_census() -> None:
+    module = fx._cli_module()
+    http = MultipleCurrentBaseOverlapHTTP()
+
+    details = module._collision_census_details(
+        http,
+        fx.TOKEN,
+        fx.REPOSITORY,
+        fx.PR_NUMBER,
+        MATERIAL_OWNED,
+        current_base_head=CURRENT_BASE_SHA,
+    )
+
+    assert details.state is module.CollisionState.DISJOINT
+    assert details.colliding_pr_numbers == ()
+    assert len(details.foreign_records) == len(MULTI_FOREIGN_PRS)
+    assert sum(
+        urlparse(url).path.endswith(f"/git/commits/{CURRENT_BASE_SHA}")
+        for url in http.calls
+    ) == 1
+    assert sum(
+        urlparse(url).path.endswith(f"/git/trees/{CURRENT_BASE_ROOT}")
+        for url in http.calls
+    ) == 1
+    assert sum(
+        urlparse(url).path.endswith(f"/git/trees/{CURRENT_BASE_ENGINE}")
+        for url in http.calls
+    ) == 1

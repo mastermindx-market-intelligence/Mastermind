@@ -1207,6 +1207,64 @@ def _resolve_owned_path(
     raise _RemoteProbeError()
 
 
+class _CurrentBasePathResolver:
+    """Invocation-local immutable target-base path cache.
+
+    Foreign PR heads remain independently resolved. Only the target base commit
+    and its tree/path entries are shared across historical-overlap proofs for
+    the same observed base SHA.
+    """
+
+    def __init__(
+        self,
+        http_get: HTTPGet,
+        token: str,
+        repository: str,
+        current_base_head: str,
+    ) -> None:
+        if not _is_safe_repository(repository) or not _is_sha(current_base_head):
+            raise _RemoteProbeError()
+        self._http_get = http_get
+        self._token = token
+        self.repository = repository
+        self.current_base_head = current_base_head
+        self._lock = Lock()
+        self._root_tree_sha: str | None = None
+        self._tree_cache: dict[tuple[str, str], dict[str, _GitTreeEntry]] = {}
+        self._entries: dict[str, _GitTreeEntry | None] = {}
+
+    def resolve(
+        self,
+        paths: tuple[str, ...],
+    ) -> tuple[tuple[str, _GitTreeEntry | None], ...]:
+        ordered = tuple(sorted(paths))
+        if (
+            not ordered
+            or len(ordered) != len(set(ordered))
+            or not all(_is_safe_remote_path(path) for path in ordered)
+        ):
+            raise _RemoteProbeError()
+        with self._lock:
+            if self._root_tree_sha is None:
+                self._root_tree_sha = _commit_tree_sha(
+                    self._http_get,
+                    self._token,
+                    self.repository,
+                    self.current_base_head,
+                )
+            for path in ordered:
+                if path not in self._entries:
+                    self._entries[path] = _resolve_owned_path(
+                        self._http_get,
+                        self._token,
+                        self.repository,
+                        self._root_tree_sha,
+                        path,
+                        self._tree_cache,
+                    )
+            return tuple((path, self._entries[path]) for path in ordered)
+
+
 def _saturated_collision_evidence(
     http_get: HTTPGet,
     token: str,
@@ -1272,41 +1330,42 @@ def _current_base_collision_evidence(
     raw_pr: object,
     owned_paths: tuple[str, ...],
     current_base_head: str,
+    *,
+    target_base_resolver: _CurrentBasePathResolver | None = None,
 ) -> tuple[_CurrentBaseCollisionEvidence, bool]:
     identity = _foreign_pull_identity(raw_pr, repository)
     if not _is_sha(current_base_head):
         raise _RemoteProbeError()
-    target_root_tree = _commit_tree_sha(
+    resolver = target_base_resolver or _CurrentBasePathResolver(
         http_get,
         token,
         repository,
         current_base_head,
     )
+    if (
+        resolver.repository != repository
+        or resolver.current_base_head != current_base_head
+    ):
+        raise _RemoteProbeError()
+    target_entries = dict(resolver.resolve(owned_paths))
     head_root_tree = _commit_tree_sha(
         http_get,
         token,
         identity.head_repository,
         identity.head_sha,
     )
-    cache: dict[tuple[str, str], dict[str, _GitTreeEntry]] = {}
+    head_cache: dict[tuple[str, str], dict[str, _GitTreeEntry]] = {}
     pairs: list[tuple[str, _GitTreeEntry | None, _GitTreeEntry | None]] = []
     collision = False
     for path in sorted(owned_paths):
-        target_entry = _resolve_owned_path(
-            http_get,
-            token,
-            repository,
-            target_root_tree,
-            path,
-            cache,
-        )
+        target_entry = target_entries[path]
         head_entry = _resolve_owned_path(
             http_get,
             token,
             identity.head_repository,
             head_root_tree,
             path,
-            cache,
+            head_cache,
         )
         pairs.append((path, target_entry, head_entry))
         collision = (
@@ -1338,6 +1397,7 @@ def _foreign_collision_evidence(
     owned_paths: tuple[str, ...],
     *,
     current_base_head: str | None = None,
+    target_base_resolver: _CurrentBasePathResolver | None = None,
 ) -> tuple[
     tuple[str, ...] | _SaturatedCollisionEvidence | _CurrentBaseCollisionEvidence,
     bool,
@@ -1360,6 +1420,7 @@ def _foreign_collision_evidence(
                 raw_pr,
                 overlap_paths,
                 current_base_head,
+                target_base_resolver=target_base_resolver,
             )
         return _current_base_collision_evidence(
             http_get,
@@ -1368,6 +1429,7 @@ def _foreign_collision_evidence(
             raw_pr,
             owned_paths,
             current_base_head,
+            target_base_resolver=target_base_resolver,
         )
     if not files.saturated:
         return files.paths, bool(set(owned_paths).intersection(files.paths))
@@ -1505,6 +1567,12 @@ def _collision_census_details(
     if not target_seen:
         raise _RemoteProbeError()
 
+    target_base_resolver = (
+        _CurrentBasePathResolver(reader, token, repository, current_base_head)
+        if current_base_head is not None
+        else None
+    )
+
     def observe(item: tuple[int, object]) -> _ForeignCollisionRecord:
         number, raw_pr = item
         try:
@@ -1525,6 +1593,9 @@ def _collision_census_details(
             number,
             owned_paths,
             current_base_head=(current_base_head if identity is not None else None),
+            target_base_resolver=(
+                target_base_resolver if identity is not None else None
+            ),
         )
         return _ForeignCollisionRecord(number, identity, evidence, overlaps)
 
@@ -1852,6 +1923,11 @@ def _revalidate_collision_census(
     )) != tuple(sorted(first_colliding_pr_numbers)):
         raise _RemoteProbeError()
 
+    target_base_resolver = (
+        _CurrentBasePathResolver(reader, token, repository, current_base_head)
+        if current_base_head is not None
+        else None
+    )
     final_records: list[_ForeignCollisionRecord] = []
     for number, first_record in first_by_number.items():
         if first_record.identity is None:
@@ -1890,6 +1966,7 @@ def _revalidate_collision_census(
             number,
             owned_paths,
             current_base_head=current_base_head,
+            target_base_resolver=target_base_resolver,
         )
         second_record = _ForeignCollisionRecord(
             pr_number=number,
@@ -1932,6 +2009,7 @@ def _revalidate_collision_census(
             number,
             owned_paths,
             current_base_head=current_base_head,
+            target_base_resolver=target_base_resolver,
         )
         if second_overlaps:
             return False, True, ()
@@ -2219,6 +2297,43 @@ def _grafts_path_if_safe(runner: Runner, workspace: str) -> str | None:
     return grafts_path
 
 
+def _paths_have_no_filters(
+    runner: Runner,
+    workspace: str,
+    paths: tuple[str, ...],
+) -> bool:
+    """Refuse any path whose worktree conversion may invoke a Git filter."""
+
+    # Keep each argv comfortably below the platform limit even with maximum-size paths.
+    for offset in range(0, len(paths), 16):
+        batch = paths[offset:offset + 16]
+        result = _invoke_git(
+            runner,
+            workspace,
+            "check-attr",
+            "-z",
+            "filter",
+            "--",
+            *batch,
+        )
+        if result is None or result.returncode != 0:
+            return False
+        tokens = result.stdout.split("\0")
+        if tokens and tokens[-1] == "":
+            tokens.pop()
+        if len(tokens) != 3 * len(batch):
+            return False
+        for index, path in enumerate(batch):
+            observed, attribute, value = tokens[index * 3:index * 3 + 3]
+            if (
+                observed != path
+                or attribute != "filter"
+                or value not in {"unspecified", "unset"}
+            ):
+                return False
+    return True
+
+
 def _probe_local_and_entries(
     runner: Runner,
     workspace: str,
@@ -2329,34 +2444,7 @@ def _probe_local_and_entries(
         "--name-only",
         "-z",
     )
-    filter_attrs = _invoke_git(
-        runner,
-        workspace,
-        "check-attr",
-        "-z",
-        "filter",
-        "--",
-        *request.owned_paths,
-    )
-    if filter_attrs is None or filter_attrs.returncode != 0:
-        return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
-    filter_tokens = filter_attrs.stdout.split("\0")
-    if filter_tokens and filter_tokens[-1] == "":
-        filter_tokens.pop()
-    if len(filter_tokens) != 3 * len(request.owned_paths):
-        return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
-    observed_filter_paths: list[str] = []
-    for index in range(0, len(filter_tokens), 3):
-        path, attribute, value = filter_tokens[index:index + 3]
-        if (
-            attribute != "filter"
-            or path not in request.owned_paths
-            or path in observed_filter_paths
-            or value not in {"unspecified", "unset"}
-        ):
-            return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
-        observed_filter_paths.append(path)
-    if tuple(observed_filter_paths) != request.owned_paths:
+    if not _paths_have_no_filters(runner, workspace, request.owned_paths):
         return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
 
     protected_paths = set(request.owned_paths)
@@ -2369,6 +2457,19 @@ def _probe_local_and_entries(
         index_flags_before.stdout, workspace, protected_paths
     )
     if concealed_before is None or concealed_before:
+        return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
+
+    # The worktree diffs below inspect every materialized tracked path. Git may
+    # invoke clean/process filters while converting those paths even when
+    # --no-ext-diff and --no-textconv are set, so preflight every path they can touch.
+    other_materialized_paths = tuple(sorted({
+        record[2:]
+        for record in index_flags_before.stdout.split("\0")
+        if record and record[0] != "S" and record[2:] not in protected_paths
+    }))
+    if not _paths_have_no_filters(
+        runner, workspace, other_materialized_paths
+    ):
         return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
 
     unstaged = _invoke_git(runner, workspace, "diff", *diff_controls, "HEAD", "--")
