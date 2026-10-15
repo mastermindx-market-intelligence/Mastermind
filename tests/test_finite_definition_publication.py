@@ -188,3 +188,14 @@ def test_destination_symlink_is_never_adopted(monkeypatch,qualified_host,tmp_pat
     with pytest.raises(pub.FinitePublicationRefused,match='already exists'):
         pub._write_exclusive(destination,files,uid=os.getuid(),gid=os.getgid())
     assert list(outside.iterdir())==[]
+
+def test_protected_mode_review_is_exact_source_only():
+    from tests.executive_identity_review import reviewed_literal_spans
+    source=Path(__file__).parents[1]/'ops/executive_os/finite_definition_publication.py'
+    body=source.read_text()
+    spans=reviewed_literal_spans('ops/executive_os/finite_definition_publication.py',body)
+    assert len(spans)==3
+    assert all(body.splitlines()[line-1][start:end]=='0o700' for line,start,end,_ in spans)
+    assert reviewed_literal_spans('ops/executive_os/finite_definition_publication.py',
+        body+'\n# changed source')==()
+    assert reviewed_literal_spans('ops/executive_os/foreign.py',body)==()

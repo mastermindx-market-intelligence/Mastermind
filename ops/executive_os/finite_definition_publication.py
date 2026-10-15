@@ -107,12 +107,29 @@ def _write_exclusive(directory: Path, artifacts: Mapping[str, bytes], *,
                 os.fsync(fd)
             finally:
                 os.close(fd)
-        observed = {name: sha256((directory/name).read_bytes()) for name in FILES}
+        from control_plane.fs_security import has_macos_acl
+        observed = {}
+        for name in sorted(FILES):
+            path = directory/name
+            fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            try:
+                info, visible = os.fstat(fd), path.lstat()
+                if (not stat.S_ISREG(info.st_mode) or info.st_uid != uid
+                        or info.st_gid != gid or stat.S_IMODE(info.st_mode) != mode
+                        or info.st_nlink != 1
+                        or (info.st_dev, info.st_ino) != (visible.st_dev, visible.st_ino)
+                        or has_macos_acl(path, expected_identity=visible)):
+                    raise FinitePublicationEffectUnknown("artifact identity or ACL differs")
+                body = os.read(fd, MAX_FILE_BYTES + 1)
+                if len(body) > MAX_FILE_BYTES or os.read(fd, 1):
+                    raise FinitePublicationEffectUnknown("artifact length changed")
+                observed[name] = sha256(body)
+            finally:
+                os.close(fd)
         if observed != {name: sha256(artifacts[name]) for name in FILES}:
             raise FinitePublicationEffectUnknown("artifact postimage differs")
         descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0))
         try:
-            from control_plane.fs_security import has_macos_acl
             info, visible = os.fstat(descriptor), directory.lstat()
             if (not stat.S_ISDIR(info.st_mode) or info.st_uid != uid
                     or info.st_gid != gid or stat.S_IMODE(info.st_mode) != 0o700
@@ -172,6 +189,10 @@ def publish_disarmed_definition(expected_release_sha: str, expected_control_sha2
     lock_fd = os.open(owner.CONFIG_ROOT, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0))
     try:
         fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        held, visible = os.fstat(lock_fd), owner.CONFIG_ROOT.lstat()
+        if ((held.st_dev, held.st_ino) != (visible.st_dev, visible.st_ino)):
+            raise FinitePublicationRefused("incumbent config owner changed")
+        host.require_exact_install(expected_release_sha)
         host.require_transaction_absent()
         host.require_services_already_stopped()
         host.require_service_uids_quiescent()

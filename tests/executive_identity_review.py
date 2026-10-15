@@ -104,6 +104,13 @@ REVIEWED_PRIVATE_MODE_SOURCES = {'integrations/session_bridge/artifact_manifest_
                                                                                         '= 0o700',),
                                                                             'sha256': '664002d7309779e69cd5f1b3e6a260215f1247526c813824e7e8f5897c8457be'}}
 
+# Candidate review only: exact root-owned partial-directory modes; independent
+# semantic acceptance is required before this source change may be merged.
+REVIEWED_PRIVATE_MODE_SOURCES["ops/executive_os/finite_definition_publication.py"] = {
+    "sha256": '6215f99acbb6122dfbaeb0f181c072bd746b4ad73ee58dda417f399e226ffcce',
+    "anchors": ('        os.mkdir(directory, 0o700)', '        os.chmod(directory, 0o700)', '                    or info.st_gid != gid or stat.S_IMODE(info.st_mode) != 0o700'),
+}
+
 REVIEWED_ANCHORS = {'_LAUNCHD_ROLES': {'node_type': 'Assign',
                     'ast_sha256': 'caa7c22754197370bf93733aec4cbcb1bc12ee23ef8cc30898be5327cfe8e49c',
                     'sites': ((('value', 'values', 0, 'keywords', 3, 'value'),
