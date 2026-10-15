@@ -146,7 +146,14 @@ class ResearchPortAdapter:
                     # selection runner may introduce a private guard refusal.
                     _fail()
             return self._operation_runner(call) if self._operation_runner is not None else call()
-        result = await self._bounded_sync(produce, before_start=_before_start)
+        try:
+            result = await self._bounded_sync(produce, before_start=_before_start)
+        except ContractViolation as exc:
+            # A selected runner refusal invalidates the whole response. Ordinary
+            # per-report negative envelopes are handled after retain below.
+            if capture is not None and exc.code == "SOURCE_UNAVAILABLE":
+                capture.invalidate()
+            raise
         if capture is not None:
             result = capture.retain(result)
         if not isinstance(result, Mapping) or type(result.get("ok")) is not bool:
@@ -342,6 +349,20 @@ class ResearchPortAdapter:
 
 
 def compose_macro_service(release, commit, tree, *, release_verifier):
+    return _compose_macro_service(release, commit, tree, release_verifier=release_verifier)
+
+
+def compose_selected_macro_service(release, commit, tree, *, release_verifier, options, clock):
+    from .selected_factory import SelectedReadOptions
+    if type(options) is not SelectedReadOptions or not callable(clock):
+        _fail("SOURCE_UNAVAILABLE")
+    options.validate()
+    return _compose_macro_service(release, commit, tree, release_verifier=release_verifier,
+                                  selected_options=options, selected_clock=clock)
+
+
+def _compose_macro_service(release, commit, tree, *, release_verifier,
+                           selected_options=None, selected_clock=None):
     """Explicit single-process import of the qualified immutable Macro release.
 
     The source owner verifies exact bytes before any import. A foreign existing
@@ -389,20 +410,40 @@ def compose_macro_service(release, commit, tree, *, release_verifier):
                     _fail()
             if any(name.split(".")[0] == "app" for name in set(sys.modules) - initial_modules):
                 _fail()
-        provenance()
-        service = runtime.build_read_service()
+        selected = None
+        if selected_options is not None:
+            reader = importlib.import_module("engine.research_vault.qualified_reader")
+            store = importlib.import_module("engine.research_vault.r2_store")
+            provenance()
+            from .selected_factory import build_selected
+            selected = build_selected(runtime, service_module, reader, store,
+                                      selected_options, selected_clock)
+            service = selected.service
+        else:
+            provenance()
+            service = runtime.build_read_service()
         provenance()
         if type(service) is not service_module.ResearchReadService:
             _fail()
-        return service, service_module.ServerReadContext, {
+        receipt = {
             "state":"PINNED_MACRO_FACTORY_COMPOSED", "commit":commit, "tree":tree,
             "factory_module":"engine.research_vault.read_runtime", "factory_file":str(Path(runtime.__file__).resolve()),
             "read_port_contract":port.READ_SCHEMA, "production_readiness":False,
         }
-    except Exception:
+        if selected is not None:
+            selected.receipt = dict(receipt, state="PINNED_SELECTED_MACRO_FACTORY_COMPOSED",
+                                    expected_producer_commit=selected_options.expected_producer_commit)
+            # Complete preparation before any listener or request is constructed.
+            selected.prepare()
+            provenance()
+            return selected
+        return service, service_module.ServerReadContext, receipt
+    except Exception as exc:
         for name in set(sys.modules) - initial_modules:
             if name.split(".")[0] in owned:
                 sys.modules.pop(name, None)
+        if isinstance(exc, ContractViolation):
+            raise
         _fail()
     finally:
         sys.path[:] = initial_path
