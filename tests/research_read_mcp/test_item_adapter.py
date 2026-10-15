@@ -220,6 +220,14 @@ async def test_shared_four_slots_and_cancelled_worker_retains_slot():
         await asyncio.gather(*workers[1:], status)
         assert fifth_started.is_set()
         assert peak[0] == 4
+        # Waiting for the other callers does not join the canceled caller's
+        # shielded producer. Its completion callback releases the slot only
+        # after that background thread actually finishes. The slot must
+        # become free eventually, not necessarily in this very event-loop tick.
+        async def slots_returned():
+            while adapter._slots._value != 4:
+                await asyncio.sleep(0.01)
+        await asyncio.wait_for(slots_returned(), 5)
         assert adapter._slots._value == 4
     finally:
         release.set()
