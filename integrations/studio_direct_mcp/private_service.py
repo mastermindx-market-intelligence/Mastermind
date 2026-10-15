@@ -76,6 +76,7 @@ RESERVED_ACCOUNT_LABELS = frozenset(
 # Files staged from source directory. gateway.mjs is the engine library.
 STAGE_FILES = (
     "gateway.mjs",
+    "modern-fabric-http.mjs",
     "output-budget.mjs",
     "git-publish.mjs",
     "workspace-access.mjs",
@@ -93,7 +94,8 @@ STAGE_FILES = (
 # immediately preceding v0.1.6 install has every current file except the new
 # read-only fleet-status consumer; earlier generations also predate Paper,
 # output paging, and typed Git.
-LEGACY_STAGE_FILES_V6 = tuple(name for name in STAGE_FILES if name not in {"commission-prepare.mjs", "commission-service.mjs"})
+LEGACY_STAGE_FILES_V7 = tuple(name for name in STAGE_FILES if name != "modern-fabric-http.mjs")
+LEGACY_STAGE_FILES_V6 = tuple(name for name in LEGACY_STAGE_FILES_V7 if name not in {"commission-prepare.mjs", "commission-service.mjs"})
 LEGACY_STAGE_FILES_V5 = tuple(name for name in LEGACY_STAGE_FILES_V6 if name != "workspace-access.mjs")
 LEGACY_STAGE_FILES_V4 = tuple(name for name in LEGACY_STAGE_FILES_V5 if name != "fleet-status.mjs")
 LEGACY_STAGE_FILES_V3 = tuple(name for name in LEGACY_STAGE_FILES_V4 if name != "paper-design.mjs")
@@ -102,6 +104,7 @@ LEGACY_STAGE_FILES_V1 = tuple(name for name in LEGACY_STAGE_FILES_V2 if name != 
 KNOWN_MANIFEST_FILESETS = frozenset(
     (
         frozenset(STAGE_FILES),
+        frozenset(LEGACY_STAGE_FILES_V7),
         frozenset(LEGACY_STAGE_FILES_V6),
         frozenset(LEGACY_STAGE_FILES_V5),
         frozenset(LEGACY_STAGE_FILES_V4),
@@ -539,7 +542,10 @@ def _build_config(
     repository_workspaces: bool = False,
     commission_digest: str | None = None,
     fabric_only: bool = False,
+    modern_fabric: bool = False,
 ) -> dict:
+    if type(modern_fabric) is not bool or (modern_fabric and (not fabric_only or host != "127.0.0.1")):
+        raise ValueError("modern Fabric requires the closed private Fabric-only profile")
     if type(fabric_only) is not bool or (fabric_only and (repository_workspaces or commission_digest is not None)):
         raise ValueError("Fabric-only profile cannot enable unrelated capabilities")
     if type(repository_workspaces) is not bool:
@@ -565,6 +571,9 @@ def _build_config(
     if fabric_only:
         config["fabricOnly"] = True
         config["childEnv"]["MMX_FABRIC_SDK_PACKAGE"] = str(state_dir.parent / "package.json")
+    if modern_fabric:
+        config["modernFabricProtocol"] = True
+        config["backendMode"] = "shared-account"
     if repository_workspaces:
         config["repositoryWorkspaces"] = {
             "enabled": True, "allowedRepositories": ["mastermind", "macro", "terminal"]
@@ -923,6 +932,7 @@ def _write_install(
     repository_workspaces: bool = False,
     commission_digest: str | None = None,
     fabric_only: bool = False,
+    modern_fabric: bool = False,
 ) -> int:
     user_root = _user_root()
     _ensure_secure_dir(roots["base"])
@@ -949,6 +959,7 @@ def _write_install(
                 repository_workspaces=repository_workspaces,
                 commission_digest=commission_digest,
                 fabric_only=fabric_only,
+                modern_fabric=modern_fabric,
             ),
             indent=2,
             sort_keys=True,
@@ -1043,6 +1054,34 @@ def _fabric_profile_setting(args, roots: dict, prior: dict | None) -> bool:
     return enabled
 
 
+def _modern_fabric_setting(args, roots: dict, prior: dict | None, fabric_only: bool) -> bool:
+    """Explicit opt-in or verified retention in the same restricted installation."""
+    requested = getattr(args, "modern_fabric_protocol", None)
+    if requested is not None and type(requested) is not bool:
+        raise SystemExit("invalid modern Fabric protocol setting")
+    previous = False
+    if prior is not None:
+        if _sha256_file(roots["config"]) != prior.get("configHash"):
+            raise SystemExit("modern Fabric configuration changed during preflight")
+        config = json.loads(roots["config"].read_text(encoding="utf-8"))
+        value = config.get("modernFabricProtocol", False)
+        if type(value) is not bool:
+            raise SystemExit("invalid retained modern Fabric protocol setting")
+        if value:
+            if (not fabric_only or config.get("fabricOnly") is not True
+                    or config.get("backendMode") != "shared-account"
+                    or config.get("host") != "127.0.0.1"
+                    or config.get("gitPublish") is not False
+                    or config.get("paperDesign") is not False
+                    or any(key in config for key in ("repositoryWorkspaces", "commissionPublication", "fleetStatus", "publicUrl"))):
+                raise SystemExit("invalid retained modern Fabric-only profile")
+            previous = True
+    enabled = previous if requested is None else requested
+    if enabled and not fabric_only:
+        raise SystemExit("modern protocol requires the existing Fabric-only profile")
+    return enabled
+
+
 OS_COMMISSION_CONFIG = Path("/Library/Application Support/MastermindExecutive/config/os-commission-publication.json")
 
 
@@ -1131,6 +1170,7 @@ def cmd_stage(args) -> int:
         repository_workspaces=_repository_workspace_setting(args, roots, prior),
         commission_digest=_commission_setting(args, roots, prior),
         fabric_only=fabric_only,
+        modern_fabric=_modern_fabric_setting(args, roots, prior, fabric_only),
     )
 
 def _verify_staged_install(
@@ -1254,6 +1294,7 @@ def cmd_upgrade(args) -> int:
         repository_workspaces=_repository_workspace_setting(args, roots, prior),
         commission_digest=_commission_setting(args, roots, prior),
         fabric_only=fabric_only,
+        modern_fabric=_modern_fabric_setting(args, roots, prior, fabric_only),
     )
 
 
@@ -1390,6 +1431,8 @@ def build_parser() -> argparse.ArgumentParser:
         s.add_argument("--source", required=True)
         s.add_argument("--node", required=True)
         s.add_argument("--backend", required=True)
+        s.add_argument("--modern-fabric-protocol", action=argparse.BooleanOptionalAction, default=None,
+                       help="opt into stateless MCP for the private Fabric-only shared backend; otherwise preserve verified selection")
         s.add_argument("--fabric-only", action="store_true", help="new Fabric-only installation; no Git, Paper or repository tools")
         s.add_argument("--os-commission-config-sha256", help="opt into the exact root-sealed OS publication grant")
         s.add_argument("--enable-repository-workspaces", action="store_true",
