@@ -53,7 +53,9 @@ _ORIGIN_COMMANDS = (_ENABLE_ARGV, _BOOTSTRAP_ARGV, _PRINT_BROKER_ARGV)
 # The one fixed direct-child launch shape.  No caller argv, path, uid, fd or
 # callback is ever accepted; the pinned signed interpreter runs exactly one
 # fixed root-owned sealed entrypoint from the exact installed release.
-_CHILD_ARGV_PREFIX = (peer._PYTHON_LAUNCHER, "-I", "-S", "-B")
+# Launch the already-qualified signed main image directly: the pythonw wrapper
+# performs another exec, which cannot be adopted after first-generation binding.
+_CHILD_ARGV_PREFIX = (peer._PYTHON_MAIN_EXECUTABLE, "-I", "-S", "-B")
 _CHILD_ENVIRONMENT = {
     "HOME": "/var/empty",
     "LANG": "C",
