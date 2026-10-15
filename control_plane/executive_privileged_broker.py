@@ -2198,6 +2198,9 @@ def serve_connection(
                     "FORWARD_REFUSED", "forward protocol module is unavailable"
                 ))
                 return
+            except _forward_error() as exc:
+                _send_wire(connection, _wire_error("FORWARD_REFUSED", str(exc)))
+                return
             _send_wire(connection, _wire_forward_status(projection))
         elif raw.get("schema") == _forward_schemas()[1]:
             try:
@@ -2208,6 +2211,9 @@ def serve_connection(
                 _send_wire(connection, _wire_error(
                     "FORWARD_REFUSED", "forward protocol module is unavailable"
                 ))
+                return
+            except _forward_error() as exc:
+                _send_wire(connection, _wire_error("FORWARD_REFUSED", str(exc)))
                 return
             _send_wire(connection, _wire_success(receipt, replayed=replayed))
         else:
@@ -2226,11 +2232,6 @@ def serve_connection(
         _send_wire(connection, _wire_error("REQUEST_ID_CONFLICT", str(exc)))
     except (PrivilegedBrokerError, ValueError) as exc:
         _send_wire(connection, _wire_error("REFUSED", str(exc)))
-    except _forward_error() as exc:
-        # Only a forward-protocol refusal can reach this clause: every ordinary
-        # refusal class above has already been excluded, so no v1 route ever
-        # resolves (or imports) the optional forward module.
-        _send_wire(connection, _wire_error("FORWARD_REFUSED", str(exc)))
 
 
 def run_broker(
