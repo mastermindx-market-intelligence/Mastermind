@@ -43,7 +43,7 @@ Do not wrap every nonzero exit in a generic retry. `material_return`, the decisi
 
 ## Supported evidence and limitations
 
-V1 supports open, same-repository PRs whose required status checks have an unambiguous GitHub Actions producer identity. It reads branch protection and active inherited branch rules, all bounded pages of check runs, the bound workflow and the exact current attempt's job membership. It rechecks the candidate, check policy and workflow generation after collection. A successful old check absent from the current attempt cannot qualify that newer attempt.
+V1 supports open, same-repository PRs whose required status checks have an unambiguous GitHub Actions producer identity. It reads branch protection and active inherited branch rules, all bounded pages of check runs, the bound workflow and the exact current attempt's job membership. It rechecks the candidate, check policy and workflow generation after collection. A successful old check absent from the current attempt cannot qualify that newer attempt. When both workflow reads positively establish an active attempt whose current job is not yet present, the required check remains PENDING rather than interrupting the native wait. Completed/unknown workflows with missing membership, permission errors and generation changes still refuse; no old success is synthesized into a current result.
 
 GitHub Actions `queued`, `waiting`, `pending`, and `requested` map to the existing nonterminal QUEUED state. IN_PROGRESS remains nonterminal. SKIPPED or NEUTRAL do not silently satisfy a required check. Unsupported producers, required-workflow rules, fork candidates, ambiguous latest generations, partial pages and changed identities are explicit errors, not policy waivers.
 

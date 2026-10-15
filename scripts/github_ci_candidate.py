@@ -36,7 +36,7 @@ _PROJECTIONS = (
     (rf"{_REPOSITORY_PATH}/branches/{_BRANCH}", "{name,protected,protection}"),
     (rf"{_REPOSITORY_PATH}/rules/branches/{_BRANCH}\?per_page=100&page=[1-9][0-9]?", "."),
     (rf"{_REPOSITORY_PATH}/commits/[0-9a-f]{{40}}/check-runs\?filter=latest&per_page=100&page=[1-9][0-9]?", "{total_count,check_runs:[.check_runs[]|{id,name,head_sha,status,conclusion,app:{id:.app.id},check_suite:{id:.check_suite.id},details_url}]}"),
-    (rf"{_REPOSITORY_PATH}/actions/runs/[1-9][0-9]*", "{id,head_sha,check_suite_id,run_attempt}"),
+    (rf"{_REPOSITORY_PATH}/actions/runs/[1-9][0-9]*", "{id,head_sha,check_suite_id,run_attempt,status}"),
     (rf"{_REPOSITORY_PATH}/actions/runs/[1-9][0-9]*/attempts/[1-9][0-9]*/jobs\?per_page=100&page=[1-9][0-9]?", "{total_count,jobs:[.jobs[]|{id,run_id,run_attempt,head_sha,check_run_url}]}"),
 )
 

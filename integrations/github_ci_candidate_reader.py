@@ -25,6 +25,7 @@ _PAGE_SIZE = 100
 _REPOSITORY = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
 _SHA = re.compile(r"[0-9a-f]{40}\Z")
 _ACTIONS_APP = 15368
+_ACTIVE_WORKFLOW_STATES = frozenset({"queued", "in_progress", "waiting", "pending", "requested"})
 
 
 class CandidateReadError(ValueError):
@@ -201,6 +202,7 @@ class GitHubCandidateReader:
         workflows: dict[int, dict] = {}
         workflow_jobs: dict[int, list[dict]] = {}
         workflow_checks: dict[int, set[int]] = {}
+        pending_membership: set[int] = set()
         selected: list[tuple[CheckIdentity, dict, int, dict]] = []
         for identity in required_checks:
             matching = [row for row in raw_checks if row.get("name") == identity.context and _object(row.get("app"), "check producer").get("id") == identity.app_id]
@@ -227,6 +229,12 @@ class GitHubCandidateReader:
                 workflow_jobs[workflow_id] = job_rows
                 workflow_checks[workflow_id] = check_ids
             if row["id"] not in workflow_checks[workflow_id]:
+                if workflow.get("status") in _ACTIVE_WORKFLOW_STATES:
+                    # An active attempt may not have materialized its jobs yet.
+                    # Omit the unqualified old check, not the required identity:
+                    # the existing classifier then reports CHECK_MISSING/PENDING.
+                    pending_membership.add(workflow_id)
+                    continue
                 raise CandidateReadError("check is not in current workflow attempt")
             selected.append((identity, row, workflow_id, workflow))
         # Revalidate candidate and policy after pagination, not just before it.
@@ -253,6 +261,8 @@ class GitHubCandidateReader:
             current = _object(self._read(f"{prefix}/actions/runs/{workflow_id}"), "workflow revalidation")
             if any(current.get(key) != original.get(key) for key in ("id", "head_sha", "check_suite_id", "run_attempt")):
                 raise CandidateReadError("workflow generation changed during sample")
+            if workflow_id in pending_membership and current.get("status") not in _ACTIVE_WORKFLOW_STATES:
+                raise CandidateReadError("check is not in current workflow attempt")
         now = int(self._clock())
 
         def ref(kind: str, resource: str, revision: str, content: object) -> SourceReference:
