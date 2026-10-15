@@ -24,3 +24,21 @@ python3 <installed-fabric_task.py> collection-result <original-run-id> --root <o
 ```
 
 These are a future contract, not commands executed here or permission to clear an effect. A COMPLETE collection enables original-parent content review; it does not settle an accounting lease or record a quality verdict. No live collection, acceptance, controller recovery or native Wake is claimed by this source qualification.
+
+## Local collection failure correction, October 15
+
+The #1520 collector was protected-merged and installed at `efc8aff1`. Its original
+assigning parent then invoked each scoped collection once. Both returned the
+catch-all `original_delivery_unconfirmed`; neither produced a destination or result.
+Local source and metadata diagnosis identified the first binding-read guard: the
+actual `/Volumes/Mastermind 2` ancestor is UID501, mode0775. Private directories
+beneath it do not satisfy the existing entire-directory-chain guard. Inert source
+checks had missed this actual deployment condition. Both refusals remain preserved;
+no rehome, chmod, alternate reader or collection retry is authorized by this change.
+
+The follow-up wraps only the initial, local-only `load_binding` call. A small
+allowlist reports directory/caller causes and marks that failure phase as before
+destination reservation and remote transport. Other errors stay sanitized. Later
+failures cannot acquire these pre-transport claims. The path guards, closed scopes,
+original identities, receipt publication and `retry_authorized:false` are unchanged.
+These diagnostics do not make collection or native integration operational.
