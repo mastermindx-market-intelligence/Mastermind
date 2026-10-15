@@ -351,6 +351,22 @@ def create_browser_tunnel_server(
             except (AuditSinkPoisoned, RuntimeClosed, SyncExecutionTimeout):
                 return _error("CHANNEL_AUDIT_UNAVAILABLE")
             return _error("CHANNEL_ADMISSION_REFUSED")
+        # A worker's read-only tool grant is never an implicit artifact-write
+        # authority. Snapshot, console and network reads may accept a filename;
+        # screenshots also write a default image even without that argument.
+        # The separately governed attended Browser port remains unchanged.
+        if (mcp_grant is not None
+                and name in READ_ONLY_BROWSER_TOOLS
+                and (name == "browser_take_screenshot"
+                     or "filename" in request)):
+            try:
+                await emit_channel_audit(
+                    code="request_refused", accepted=False,
+                    tool=name, digest=digest,
+                )
+            except (AuditSinkPoisoned, RuntimeClosed, SyncExecutionTimeout):
+                return _error("CHANNEL_AUDIT_UNAVAILABLE")
+            return _error("BROWSER_ARTIFACT_NOT_GRANTED")
         # run_browser_action is a generic dispatcher. Merely filtering its
         # name would let a token prepared under a broader grant bypass the
         # worker's native-tool ceiling. Reconciliation remains read-only.
