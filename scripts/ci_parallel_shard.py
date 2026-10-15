@@ -83,14 +83,27 @@ def validate_parallel_workflow(text: str) -> None:
     if len(test_steps) != 1:
         raise ci_pytest.PolicyError("required fan-in gate step is missing")
     final = test_steps[0]
-    code = final.get("run", "")
+    code = final.get("run")
+    # The control-flow guard must be executable and ordered. A substring
+    # search would falsely accept a commented-out `exit 1` or an exit placed
+    # after `fi`, allowing a failed matrix to report a successful `test`.
+    expected_lines = [
+        'if [ "$SHARDS_STATUS" != success ]; then',
+        'echo "required pytest shard matrix did not fully succeed"',
+        "exit 1",
+        "fi",
+        "# Same discovery/exclusion/total-cover plan, never a test skip.",
+        "python scripts/ci_pytest.py --plan-only --jobs 3",
+    ]
+    actual_lines = [line.strip() for line in code.splitlines() if line.strip()] if isinstance(code, str) else []
+    env = final.get("env")
     if (
-        final.get("env", {}).get("SHARDS_STATUS") != "${{ needs.pytest_shards.result }}"
-        or 'if [ "$SHARDS_STATUS" != success ]; then' not in code
-        or "exit 1" not in code
-        or "python scripts/ci_pytest.py --plan-only --jobs 3" not in code
+        not isinstance(env, dict)
+        or env.get("SHARDS_STATUS") != "${{ needs.pytest_shards.result }}"
+        or actual_lines != expected_lines
+        or final.get("shell") not in (None, "bash")
     ):
-        raise ci_pytest.PolicyError("required fan-in check must refuse non-success")
+        raise ci_pytest.PolicyError("required fan-in guard must reject non-success before parsing the plan")
     if any(
         isinstance(step, dict) and step.get("continue-on-error") is not None
         for step in (*shard_steps, *gate_steps)

@@ -46,6 +46,8 @@ def test_live_ci_workflow_fan_in_is_fail_closed_and_uses_three_full_shards() -> 
         ("SHARDS_STATUS: ${{ needs.pytest_shards.result }}", "SHARDS_STATUS: wrong"),
         ('if [ "$SHARDS_STATUS" != success ]; then', "if [ \"$SHARDS_STATUS\" = failure ]; then"),
         ("exit 1", "exit 0"),
+        ("exit 1", "# exit 1"),
+        ("exit 1\n          fi", "echo \"not stopping\"\n          fi\n          exit 1"),
         (
             "python -m scripts.ci_parallel_shard --jobs 3 --index ${{ matrix.index }}",
             "python -m scripts.ci_parallel_shard --jobs 3 --index 0",

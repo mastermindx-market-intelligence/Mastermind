@@ -34,8 +34,17 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Preserve the existing pinned Macro import source and read-only token
-      # boundary; no runtime data or unrelated workspace is copied into CI.
+      # `vendor/macro` is a tracked developer symlink to `vendor/macro_src`.
+      # A clean hosted runner lacks the local sibling checkout; pin exactly
+      # the importable Macro engine revision, not VPS-owned runtime data.
+      # DEC:B1-MACRO-PRIVATE-CUTOVER -- github.token is scoped to THIS repo
+      # and can currently read Macro only because Macro is public. When the
+      # upstream repository becomes private, the owner must first install a
+      # read-only MACRO_CI_READ_TOKEN (fine-grained PAT or GitHub App token
+      # with Contents: Read on mastermindx-market-intelligence/macro).
+      # The `secrets.MACRO_CI_READ_TOKEN || github.token` fallback keeps CI
+      # working before that admission; no privilege expansion or anonymous
+      # fallback is allowed after private cutover.
       - name: Checkout pinned Macro engine
         uses: actions/checkout@v4
         with:

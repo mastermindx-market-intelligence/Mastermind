@@ -11,11 +11,12 @@ partition is verified to be a total, disjoint cover of that exact set before
 any process starts. The gate therefore executes the same modules whatever
 ``--jobs`` is, and a nonzero exit from any shard fails the whole gate.
 
-Sharding deliberately stays *inside* one job. The branch-protection required
-check for this repository is the single context ``test``; turning the gate
-into a workflow matrix would rename it to ``test (0)``/``test (1)``/... and
-silently make the required check unsatisfiable. Parallelism belongs here,
-where the check name is untouched.
+The default ``--jobs`` command runs concurrent subprocesses inside one job.
+A separately qualified workflow may instead dispatch the same verified
+partition to distinct hosted runners. In that arrangement a fail-closed fan-in
+job named ``test`` must require every matrix member to succeed and must
+reverify the canonical complete plan. The branch-protection context remains
+exactly ``test``; dynamic ``pytest shard N`` contexts alone cannot replace it.
 """
 from __future__ import annotations
 
