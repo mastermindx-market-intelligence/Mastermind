@@ -468,7 +468,7 @@ fn parse_token(value: Value, resource: Resource) -> Result<Token> {
         let scopes = object.get("scope").and_then(Value::as_str).ok_or("TOKEN_RESPONSE_INVALID")?;
         let mut scopes: Vec<_> = scopes.split_whitespace().collect();
         scopes.sort_unstable();
-        if scopes != ["mastermind.executive.intent.submit", "mastermind.executive.read"] {
+        if scopes != ["mastermind.executive.intent.submit", "mastermind.executive.read"] && scopes != ["mastermind.executive.read"] {
             return Err("TOKEN_RESPONSE_INVALID".into());
         }
     }
@@ -1359,11 +1359,11 @@ mod tests {
     }
     #[test]
     fn executive_scope_is_an_exact_set_and_never_accepts_duplicates() {
-        for scope in [EXECUTIVE_SCOPE, "mastermind.executive.intent.submit mastermind.executive.read"] {
+        for scope in [EXECUTIVE_SCOPE, "mastermind.executive.intent.submit mastermind.executive.read", "mastermind.executive.read"] {
             assert!(parse_token(serde_json::json!({"access_token":"opaque", "token_type":"Bearer",
                 "expires_in":60, "scope":scope}), Resource::Executive).is_ok());
         }
-        for scope in [Value::Null, Value::String("mastermind.executive.read".into()),
+        for scope in [Value::Null, Value::String("mastermind.executive.intent.submit".into()),
             Value::String(format!("{EXECUTIVE_SCOPE} extra")), Value::String(format!("{EXECUTIVE_SCOPE} mastermind.executive.read"))] {
             assert!(parse_token(serde_json::json!({"access_token":"opaque", "token_type":"Bearer",
                 "expires_in":60, "scope":scope}), Resource::Executive).is_err());
