@@ -1,0 +1,28 @@
+{
+  "base_sha256": "0781977b0f5f6b7c493211e4a2f7e03d6938fb2ac53c65788f5afc5937dca3a7",
+  "candidate_sha256": "d9093e882c6347b9286959e34a7e419c965566ed320148374f49d390cb5bb8a8",
+  "state": "SOURCE_PREPARATION_UNREVIEWED_UNINSTALLED",
+  "original_root": "01a1333c-a475-7052-95a8-72a88eb8c17b",
+  "no_remote_reads": true,
+  "dependencies": {
+    "artifact_delivery.py": "28af21eba16fa54ee47b29c6848ae5ec0f3d5f6052ac59746e3e35254cf60eea",
+    "artifact_reader.py": "e2b08b7967df0e4193ba668cf6f72225429138a9361322c42db6ec84150e3469",
+    "artifact_production.py": "0be15bd5d3304a65673576fd30386bcc977c02ed8ee28313a4cb1ed454f8c409",
+    "fabric_task.py": "ca2eda17c76fb7af899501c40f2fa0450391079612d6d56c7d138eb2914624c2",
+    "remote_sub.sh": "fdb50974e37852c8024135ddf4bf021e6c6a67d1a0418cd5675cc24dc4ad5a17",
+    "lane_runtime.py": "966869a4137545203faa2269faeed15cd0a096b5611161d242e2fb13b7c27937"
+  },
+  "checks": {
+    "baseline_red": 3,
+    "candidate": 105,
+    "failures": 0,
+    "skips": 0
+  },
+  "historical_source_qualification": "e126 and 0be qualified using existing installed original_validator_context; both original packets parse as plaintext; no collect invoked",
+  "review": {
+    "run": "fabric-qwen-plain-recovery-review-01a11e90-v1",
+    "state": "PENDING",
+    "reviewed_candidate": "cce1cb6837f6fc4efddccd0f9037d9b2ac139365a4a0875f8f212adc2aaca9da",
+    "subsequent_delta": "reuse existing closed historical validator for two Qwen scopes; leave legacy MiniMax check unchanged"
+  }
+}
