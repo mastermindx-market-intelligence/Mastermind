@@ -19,7 +19,9 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    # All three shards can finish at the old 40-minute cancellation boundary
+    # after setup. Keep a finite outer budget with five minutes of headroom.
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v4

@@ -188,6 +188,7 @@ def _stage_args(source, node, backend, account: str = "test-account", port: int 
         source=str(source),
         node=str(node),
         backend=str(backend),
+        fabric_only=False,
         enable_repository_workspaces=False,
         os_commission_config_sha256=None,
     )

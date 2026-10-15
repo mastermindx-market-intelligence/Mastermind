@@ -53,6 +53,14 @@ needs actual creation and current delivery/admission before it is a receiver. Re
 its mission from the existing durable frontier, not an imagined persistent Web parent.
 A historical author, department or owner label is not evidence of an active writer.
 
+An architectural owner is not a live session. Data OS and other system names identify
+existing contracts and implementation boundaries, not an approver to find in another
+chat. The current assigned session performs authorized source-contract work itself:
+inspect the native producer, resolve the proposed binding, document actual clocks and
+provenance, and implement/test the existing interfaces. A null owner/adoption field is
+an unresolved contract, not a command to wait. Do not invent ownership, rights, clocks,
+or a parallel registry; hold only the specific effect needing ungranted authority.
+
 This does not transfer a live lease, bypass an exact-session protocol, or clear
 EFFECT_UNKNOWN. Reconcile real active writers and pending effects through their existing
 owners. When the original session is itself the target of a proof, retain that precise
@@ -74,6 +82,22 @@ Use discriminating tests and one proportionate review. Reuse accepted evidence u
 relevant source, input, dependency or acceptance requirement changes. Run the affected
 checks after a real repair, not the same suite repeatedly to appear busy. Two equivalent
 no-progress cycles require a changed diagnosis, tactic or independent lane.
+
+Before reporting a blocker, identify the exact blocked action, actual missing evidence
+or permission, and a reachable resolution. This is not a new approval form: use the
+existing frontier. A department name, absent optional registry, old reviewer request,
+or unavailable worker backend is not sufficient. Technical pre-dispatch unavailability
+blocks that dispatch, not independent edits/tests. Preserve a real denial or uncertain
+effect; never use another route to evade it. Required independent review holds its
+release, not all preparation; self-review must never be relabeled independent.
+
+Missing implementation is engineering work, not a permission wait. Before naming
+service enrollment as the next action, inspect the actual enabling path: an
+unimplemented adapter or unconditional activation refusal cannot be fixed by
+enrollment alone. Complete the authorized missing composition and its negative
+tests through existing interfaces; separate source readiness, human-only enrollment,
+a bounded admitted canary and production release. Do not remove refusal guards or
+invent an admission receipt to make a dormant path appear live.
 
 Pending CI blocks the gated release, not unrelated implementation or diagnosis. An
 observer request is not a running observer. Verify its successful launch and real return

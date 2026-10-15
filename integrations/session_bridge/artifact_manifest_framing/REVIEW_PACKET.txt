@@ -1,0 +1,128 @@
+OBJECTIVE: independent bounded code review of a future-run artifact-manifest framing repair, using ONLY the source supplied below. No filesystem exploration, tool execution, new files, descendants or provider actions. This is review work, not implementation.
+SCOPE: Existing Fabric artifact executor. Preserve original failed run rc65, raw stdout, missing completion seal and NOT_ACCEPTED. The historical run may not be recovered/accepted by this parser change. This review has a different ID and is not a replacement of that worker.
+CHANGE: Existing parser accepted plain FABRIC_ARTIFACTS_V1 JSON or **whole line**. New branch accepts exactly **FABRIC_ARTIFACTS_V1** `JSON` as a single complete line, then applies all existing strict JSON/schema/root/parent/run/host/path/size/digest checks. The original stdout string is never rewritten for receipt/digest. New request instructions explicitly forbid Markdown decoration. Duplicate manifests across allowed representations must refuse.
+CONTEXT: reader.strict_json rejects duplicate keys; reader.validate_path confines paths. RESULT_PREFIX='FABRIC_ARTIFACTS_V1 '; RESULT_SCHEMA='mastermind.fabric_artifact_manifest.v1'. HEX is exactly64lowercasehex; directory hashes originalroot,parent,run; reader.MAX_REQUEST and file bounds remain unchanged. verify_completion compares actual owned file snapshot to parsed manifest. Original ordinary export still requires executor completion seal AND collector rc0; neither is relaxed.
+ACCEPTANCE: identify any concrete correctness/security regression from exact marker wrapper support; especially duplicate mixed frames, malformed wrappers, altered JSON scope/files, byte provenance, old failed-run inadmissibility. If no finding, explain bounded approval. Return plain text <=3500characters including explicit SOURCE_REVIEW_ONLY, candidate hash, findings and scope limitations. Do not invent runtime/test evidence. Parent already observed relevant old parser failures and24candidate inert passes. No markdown artifacts required.
+CANDIDATE_SHA256: e126d6432135725a7a7846cbe9f9749305dfe9dd7cfe37037fc413a1136248bf
+
+def manifest_from_stdout(stdout, *, root, parent, run_id, host):
+    if not isinstance(stdout, str):
+        raise ValueError('artifact_manifest_text')
+    matches = []
+    for line in stdout.splitlines():
+        # Permit only the exact full-line Markdown emphasis wrapper. Preserve
+        # original stdout bytes for all digests and count wrapped/plain duplicates.
+        marker_wrapper = '**' + RESULT_PREFIX.rstrip() + '**'
+        if line.startswith(marker_wrapper):
+            prefix = marker_wrapper + ' `'
+            if (not line.startswith(prefix) or not line.endswith('`')
+                    or len(line.encode()) > reader.MAX_REQUEST):
+                raise ValueError('artifact_manifest_wrapper')
+            line = RESULT_PREFIX + line[len(prefix):-1]
+        elif line.startswith('**' + RESULT_PREFIX):
+            if not line.endswith('**') or len(line.encode()) > reader.MAX_REQUEST:
+                raise ValueError('artifact_manifest_wrapper')
+            line = line[2:-2]
+        if line.startswith(RESULT_PREFIX):
+            matches.append(line)
+    if len(matches) != 1 or len(matches[0].encode()) > reader.MAX_REQUEST:
+        raise ValueError('artifact_manifest_missing_or_duplicate')
+    value = reader.strict_json(matches[0][len(RESULT_PREFIX):])
+    if (not isinstance(value, dict) or set(value) != {'schema','request_sha256','root','parent','run_id','host','files'}
+            or value['schema'] != RESULT_SCHEMA or not isinstance(value['request_sha256'], str)
+            or not HEX.fullmatch(value['request_sha256'])
+            or any(value[k] != v for k,v in dict(root=root,parent=parent,run_id=run_id,host=host).items())):
+        raise ValueError('artifact_manifest_scope')
+    files = value['files']
+    if not isinstance(files,list) or not 1 <= len(files) <= reader.MAX_FILES:
+        raise ValueError('artifact_manifest_files')
+    expected_directory = directory(dict(root=root,parent=parent,run_id=run_id))
+    seen = set(); total = 0
+    for item in files:
+        if not isinstance(item,dict) or set(item) != {'path','bytes','sha256'}:
+            raise ValueError('artifact_manifest_entry')
+        reader.validate_path(item['path'])
+        if (item['path'].rsplit('/',1)[0] != expected_directory or item['path'] in seen
+                or item['path'].rsplit('/',1)[1] in RESERVED_NAMES):
+            raise ValueError('artifact_manifest_path')
+        if type(item['bytes']) is not int or not 0 < item['bytes'] <= reader.MAX_FILE:
+            raise ValueError('artifact_manifest_size')
+        if not isinstance(item['sha256'], str) or not HEX.fullmatch(item['sha256']):
+            raise ValueError('artifact_manifest_digest')
+        seen.add(item['path']); total += item['bytes']
+    if total > reader.MAX_TOTAL:
+        raise ValueError('artifact_manifest_total')
+    return value
+
+def verify_completion(contract, owner, stdout, host):
+    owner.verify()
+    expected = observed_manifest(contract, host, owner=owner)
+    actual = manifest_from_stdout(stdout,root=contract['root'],parent=contract['parent'],run_id=contract['run_id'],host=host)
+    if actual != expected:
+        raise ValueError('artifact_manifest_mismatch')
+    owner.verify()
+    return actual
+
+def record_ordinary_completion(receipt_path, contract, manifest, stdout, *, mode):
+    """Add verified production evidence to the executor's existing receipt.
+
+    Ordinary attended GLM/Qwen has no native/Go settlement envelope. Do not invent one or a
+    lease join: retain the exact opt-in contract in the existing process receipt
+    only after successful cleanup and file verification. Old runs stay ineligible.
+    A failed publication makes the executor fail; it never retries the child.
+    """
+    from lane_runtime import cleanup_receipt_is_proven
+    if mode not in ORDINARY_MODES:
+        raise ValueError("artifact_completion_mode_unavailable")
+    validate_contract(contract)
+    actual = manifest_from_stdout(stdout, root=contract['root'], parent=contract['parent'],
+                                  run_id=contract['run_id'], host=manifest['host'])
+    if actual != manifest or actual['request_sha256'] != sha(reader.canonical(contract)):
+        raise ValueError('artifact_completion_manifest_mismatch')
+    if [item['path'] for item in actual['files']] != paths(contract):
+        raise ValueError('artifact_completion_file_scope')
+    fd = os.open(receipt_path, os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        before = os.fstat(fd)
+        if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.getuid()
+                or before.st_mode & 0o002 or not 0 < before.st_size <= 65536):
+            raise ValueError('artifact_process_receipt_unsafe')
+        raw = os.read(fd, 65537)
+        if len(raw) != before.st_size or reader.identity(before) != reader.identity(os.fstat(fd)):
+            raise ValueError('artifact_process_receipt_changed')
+        row = reader.strict_json(raw)
+        if (type(row) is not dict or row.get('schema') != 'mastermind.local_owned_process_receipt.v1'
+                or row.get('label') != contract['run_id']
+                or type(row.get('returncode')) is not int or row['returncode'] != 0
+                or row.get('timed_out') is not False or row.get('runtime_failure_code') is not None
+                or row.get('stdout_truncated') is not False or row.get('stderr_truncated') is not False
+                or type(row.get('stdout_bytes')) is not int or row['stdout_bytes'] != len(stdout.encode('utf-8'))
+                or not cleanup_receipt_is_proven(row.get('cleanup', {}))):
+            raise ValueError('artifact_process_receipt_unqualified')
+        if 'artifact_production' in row:
+            raise ValueError('artifact_process_already_sealed')
+        row['artifact_production'] = dict(schema='mastermind.fabric_artifact_completion.v1',
+            mode=mode, contract=contract, manifest=manifest, stdout_sha256=sha(stdout.encode('utf-8')))
+        encoded = reader.canonical(row) + b'\n'
+        if len(encoded) > 65536:
+            raise ValueError('artifact_process_receipt_limit')
+        # Hold the original inode; never overwrite a pathname replacement.
+        if reader.identity(before) != reader.identity(os.stat(receipt_path, follow_symlinks=False)):
+            raise ValueError('artifact_process_receipt_changed')
+        os.lseek(fd, 0, os.SEEK_SET)
+        remaining = encoded
+        while remaining:
+            count = os.write(fd, remaining)
+            if count <= 0:
+                raise OSError('artifact_process_short_write')
+            remaining = remaining[count:]
+        os.ftruncate(fd, len(encoded))
+        os.fsync(fd)
+        after = os.fstat(fd)
+        os.lseek(fd, 0, os.SEEK_SET)
+        if (os.read(fd, 65537) != encoded
+                or reader.identity(after) != reader.identity(os.stat(receipt_path, follow_symlinks=False))
+                or reader.identity(after) != reader.identity(os.fstat(fd))):
+            raise ValueError('artifact_process_publication_unconfirmed')
+    finally:
+        os.close(fd)

@@ -25,6 +25,14 @@ The watcher is transport and attention behavior only. It **never creates or muta
 
 Read the carrier and operation identity encoded in the watcher prompt. Only a newer valid semantic edge for that exact operation is material. An unchanged wake returns `NO_MATERIAL_CHANGE`; it does not manufacture work.
 
+Apply `ACTIVE_EXECUTION.md` **CI observation liveness** to native CI/heartbeat
+attention: the last checkpoint is not the external carrier, and PreToolUse admission
+does not prove an observer launched. Verify the real return path before depending on
+it. A finite `REDUNDANT POLL` cooldown must not become an indefinite permission ban;
+genuine permission and uncertain-effect holds remain binding. Two receipt-only wakes
+require diagnosis and Class-M backoff, not a third identical loop. This does not
+extend or change the canonical Slack watcher renderer below.
+
 ### Watcher lifetime invariant — nonterminal events do not end the watch
 
 A continuation watcher spans the entire child dialogue cycle.

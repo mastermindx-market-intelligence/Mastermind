@@ -1,0 +1,62 @@
+{
+  "at": "2026-10-14T05:23:25.786684+00:00",
+  "candidate_broker_sha256": "4cac678defac9116c2324a651a7cd90c5144822d8cd1c2aa64e20c299a2a9267",
+  "independent_review": {
+    "path": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/original-parent-host-selection-20261013/owner-resource-composition/broker-native-admission/NATIVE_BROKER_SOURCE_ADJUDICATION_01a138a2.json",
+    "sha256": "8cc64871be3a5a6bd7516649da2df202d18cd49531e4d8b2772136a11d93658d",
+    "verdict": "SOURCE_PASS"
+  },
+  "ordinary_distinct_pass": 48,
+  "reports": {
+    "NATIVE_BROKER_COMPAT_FEEDER.xml": {
+      "errors": "0",
+      "failures": "0",
+      "hostname": "m2studio",
+      "name": "pytest",
+      "path": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/original-parent-host-selection-20261013/owner-resource-composition/broker-native-admission/NATIVE_BROKER_COMPAT_FEEDER.xml",
+      "sha256": "b3e518f9bc5b8762ef24f9501863f77cbbd18410a585ce065f46429c9a0ddd03",
+      "skipped": "0",
+      "tests": "1",
+      "time": "0.141",
+      "timestamp": "2026-10-13T22:13:06.085168-07:00"
+    },
+    "NATIVE_BROKER_COMPAT_RESOLVED.xml": {
+      "errors": "0",
+      "failures": "1",
+      "hostname": "m2studio",
+      "name": "pytest",
+      "path": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/original-parent-host-selection-20261013/owner-resource-composition/broker-native-admission/NATIVE_BROKER_COMPAT_RESOLVED.xml",
+      "sha256": "01a1923579710415be77277ac6648d62b0af4e50967d3143af8a179d5b550f6c",
+      "skipped": "0",
+      "tests": "48",
+      "time": "37.031",
+      "timestamp": "2026-10-13T22:09:36.809996-07:00"
+    },
+    "NATIVE_BROKER_FINAL.xml": {
+      "errors": "0",
+      "failures": "0",
+      "hostname": "m2studio",
+      "name": "pytest",
+      "path": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/original-parent-host-selection-20261013/owner-resource-composition/broker-native-admission/NATIVE_BROKER_FINAL.xml",
+      "sha256": "379092f687034bb912e9c9eb1adb05bbaa41f881c84b78ed7ae7ceda7691b5f6",
+      "skipped": "0",
+      "tests": "26",
+      "time": "0.937",
+      "timestamp": "2026-10-13T22:08:50.414037-07:00"
+    }
+  },
+  "required_enablement_gates": [
+    "Exact reviewed Broker and module bytes must be composed by existing owner and all old Broker mutators quiesced/version-qualified before any native row is admitted; old source can otherwise GC or release native rows. Migration/install is not proven here.",
+    "Authenticated actual Unix peer capture/installed Control qualification and original Runtime request, realm/profile/configuration, fixed account/model/host mapping remain caller prerequisites. Digest shape and this module grant no authentication or proof authority.",
+    "Fixed owner must verify actual process, cleanup, assignment, Control retention and physical release evidence before invoking settlement; hashes alone are not proof.",
+    "Existing Studio lifecycle local-fd composition and control.json observation/install gate remain outside this review. No supported native CLI or public caller is established."
+  ],
+  "schema": "mastermind.native_broker_source_qualification.v1",
+  "sources": {
+    "integrations/session_bridge/native_broker_admission/fixtures/lease_broker.base.py": "a72bc031ddb81e559e0cf48fcbf824a959edfcf445c1d3d2d89348c3c66c6f0c",
+    "integrations/session_bridge/native_broker_admission/lease_broker.py.patch": "c98d2ffebd87c18177067d1b69146d0979c571019d57e1b3697c400669f7448e",
+    "integrations/session_bridge/native_broker_admission/native_broker_admission.py": "b47b3861e6c4384fc7ca9a70c49c1dace12993a4a6e29afa855953af587b2b48",
+    "tests/test_fabric_native_account_admission.py": "b5cb0fda6c3cc8e3981f92d990def26633a3e7065dc7da4d92621103eda11681"
+  },
+  "state": "SOURCE_REVIEWED_UNINSTALLED"
+}
