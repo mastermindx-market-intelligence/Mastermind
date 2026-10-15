@@ -883,6 +883,8 @@ def _frontmatter_lists(payload: bytes) -> dict[str, list[str]]:
             text = raw
             cursor = 0
             finished = False
+            node_start = True
+            previous_nonspace = ""
             while not finished:
                 while cursor < len(text):
                     character = text[cursor]
@@ -905,11 +907,11 @@ def _frontmatter_lists(payload: bytes) -> dict[str, list[str]]:
                         newline = text.find("\n", cursor)
                         cursor = len(text) if newline == -1 else newline + 1
                         continue
-                    elif character in "!%@`" and boundary:
+                    elif character in "!%@`" and node_start:
                         refuse()
-                    elif boundary and re.match(r"<<[ \t]*:", text[cursor:]):
+                    elif node_start and re.match(r"<<[ \t]*:", text[cursor:]):
                         refuse()
-                    elif character in "&*" and boundary:
+                    elif character in "&*" and node_start:
                         match = property_pattern.match(text, cursor)
                         if match is None:
                             refuse()
@@ -928,6 +930,7 @@ def _frontmatter_lists(payload: bytes) -> dict[str, list[str]]:
                             refuse()
                         if kind == "*" and tail and tail[0] not in ",]}#":
                             refuse()
+                        node_start = kind == "&"
                         continue
                     elif character in "\"'":
                         quote = character
@@ -937,6 +940,22 @@ def _frontmatter_lists(payload: bytes) -> dict[str, list[str]]:
                     elif character in "]}":
                         if not stack or stack.pop() != ("[" if character == "]" else "{"):
                             refuse()
+                    if quote is None:
+                        # Whitespace within a plain scalar does not start a new
+                        # node. A non-separating colon (urn:&name) is prose too.
+                        if character in "[{,":
+                            node_start = True
+                        elif character == ":" and (
+                            previous_nonspace in {"\"", "'"}
+                            or cursor + 1 == len(text)
+                            or text[cursor + 1].isspace()
+                            or text[cursor + 1] in "[]{},"
+                        ):
+                            node_start = True
+                        elif not character.isspace():
+                            node_start = False
+                    if not character.isspace():
+                        previous_nonspace = character
                     cursor += 1
                     if quote is None and not stack:
                         if text[cursor:].strip() and not text[cursor:].lstrip().startswith("#"):
@@ -968,10 +987,13 @@ def _frontmatter_lists(payload: bytes) -> dict[str, list[str]]:
                 continue
             prose_indent = None
             sequence_item = text.startswith("- ")
+            sequence_column = indent
             if sequence_item:
-                text = text[2:].strip()
+                after_dash = text[1:]
+                sequence_column += 1 + len(after_dash) - len(after_dash.lstrip(" "))
+                text = after_dash.strip()
             nested = entry_pattern.fullmatch(text)
-            node_indent = indent + (2 if sequence_item and nested else 0)
+            node_indent = sequence_column if sequence_item and nested else indent
             if ((nested and _frontmatter_scalar(nested.group(1)) == "<<")
                     or re.match(r"<<[ \t]*:", text)):
                 refuse()

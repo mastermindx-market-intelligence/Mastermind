@@ -95,3 +95,58 @@ def test_metadata_anchor_name_count_is_bounded():
     document = "".join(f"note_{i}: &a{i} value\n" for i in range(257))
     with pytest.raises(ValueError, match="unsupported"):
         parse(document + PATHS)
+
+
+@pytest.mark.parametrize("indent", [0, 2])
+@pytest.mark.parametrize("padding", [3, 5])
+@pytest.mark.parametrize("value", ['"x"', '{k: 1}', '[q]', '*m'])
+def test_review_f1_padded_sequence_mapping_siblings(indent, padding, value):
+    column = indent + 1 + padding
+    metadata = (
+        "anchor: &m retained\nmetadata:\n"
+        + " " * indent + "-" + " " * padding + "first: " + value + "\n"
+        + " " * column + "sibling: retained\n"
+    )
+    canonical = yaml.safe_load(metadata + PATHS)
+    assert {key: canonical[key] for key in EXPECTED} == EXPECTED
+    assert parse(metadata + PATHS) == EXPECTED
+
+
+@pytest.mark.parametrize("metadata", [
+    "metadata: {note: A & B}\n",
+    "metadata: {note: 3 * 4}\n",
+    "metadata: {note: a @ b}\n",
+    "metadata: {note: use `x` here}\n",
+    "metadata: {note: hi ! there}\n",
+    "metadata: {note: 50 % off}\n",
+    "metadata: [R&D & QA]\n",
+    "metadata: {note: [a & b]}\n",
+    "waves:\n  - {id: W1, title: R&D & QA}\n",
+    "metadata: {note: urn:&identifier}\n",
+    "metadata: {note: urn:*identifier}\n",
+    "metadata: {note: urn:!identifier}\n",
+    "metadata: {note: continued\n  A & B}\n",
+])
+def test_review_f2_flow_plain_scalar_characters_are_not_node_properties(metadata):
+    canonical = yaml.safe_load(metadata + PATHS)
+    assert {key: canonical[key] for key in EXPECTED} == EXPECTED
+    assert parse(metadata + PATHS) == EXPECTED
+
+
+@pytest.mark.parametrize("document", [
+    "anchor: &m retained\nmetadata:\n-   first: *m\n      artifacts: [hidden]\n",
+    "metadata:\n-   first: {k: 1}\n      artifacts: [hidden]\n",
+    "metadata:\n-   first: \"x\"\n      artifacts: [hidden]\n",
+    "metadata: {note: !custom value}\n",
+    "metadata: {note: @value}\n",
+    "metadata: {note: `value`}\n",
+    "metadata: {note: %value}\n",
+    "metadata: {note: # retained\n  !custom value}\n",
+    "metadata: {note: # retained\n  *missing}\n",
+    "metadata: [A & phantom, *phantom]\n",
+    "metadata: {note: urn:&phantom, copy: *phantom}\n",
+    "metadata: {note: &m retained, copy: !custom value}\n",
+])
+def test_review_repairs_preserve_node_and_continuation_refusals(document):
+    with pytest.raises(ValueError, match="unsupported"):
+        parse(document + PATHS)
