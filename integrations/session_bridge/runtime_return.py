@@ -75,6 +75,29 @@ def _principal(principal: NeutralPrincipalProjection, *, submit: bool = False) -
     return identity
 
 
+def _read_matches_original(original: dict, current: dict,
+                           principal: NeutralPrincipalProjection) -> bool:
+    """Preserve original SEND provenance while allowing independently verified READ.
+
+    Policy IDs identify the verifier policy, not the human/client identity. Only
+    the exact READ-only scope permits a policy-ID transition. The original
+    immutable request was admitted under a submit-capable principal, and all
+    issuer/resource/subject/client fields must remain identical. A foreign
+    policy with unchanged combined capabilities is *not* a read downgrade.
+    """
+    if original == current:
+        return True
+    return (
+        type(principal) is NeutralPrincipalProjection
+        and tuple(principal.scopes) == (READ_SCOPE,)
+        and isinstance(original, dict)
+        and set(original) == set(_IDENTITY)
+        and original.get("policy_id") != current.get("policy_id")
+        and all(original.get(key) == current.get(key)
+                for key in _IDENTITY if key != "policy_id")
+    )
+
+
 class RuntimeSessionReturn:
     """Stateless joins over immutable request events and the current writer."""
 
@@ -506,7 +529,7 @@ class RuntimeSessionReturn:
                 raise ValueError("invalid original operation")
             read_ref = "session-reply-" + _request_key(operation_key)
             _, value = self._stored_request(read_ref)
-            if value["principal"] != identity or value["operation_key"] != operation_key:
+            if not _read_matches_original(value["principal"], identity, principal) or value["operation_key"] != operation_key:
                 raise ValueError("foreign original operation")
             return value["read_ref"]
         except Exception:
@@ -569,7 +592,7 @@ class RuntimeSessionReturn:
         try:
             identity = _principal(principal)
             event, value, admission = self._read_request(read_ref)
-            if value["principal"] != identity:
+            if not _read_matches_original(value["principal"], identity, principal):
                 raise ValueError("foreign principal")
             response = await self.service_call(self.socket_path, {
                 "version": CONTROL_VERSION_V2, "operation": "read_thread",
@@ -602,7 +625,7 @@ class RuntimeSessionReturn:
             if (after.to_dict() != event.to_dict()
                     or (None if admission is None else admission.to_dict())
                     != (None if after_admission is None else after_admission.to_dict())
-                    or after_value["principal"] != _principal(principal)):
+                    or not _read_matches_original(after_value["principal"], _principal(principal), principal)):
                 raise ValueError("authorization changed")
             if after_admission is not None and not self._commit_started(after, request):
                 raise ValueError("original continuation COMMIT changed during read")

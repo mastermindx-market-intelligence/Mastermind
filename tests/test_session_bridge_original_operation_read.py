@@ -37,6 +37,56 @@ def test_lost_read_ref_recovers_exact_reply_using_original_operation_only(setup)
     assert events(s) == before
 
 
+def test_original_send_remains_readable_under_same_principal_read_only_policy(setup):
+    s = setup
+    read_ref = populate(s)  # Original request was admitted with READ + SEND.
+    before = events(s)
+    reader = dataclasses.replace(
+        s.principal, policy_id='test-read', scopes=('mastermind.executive.read',))
+    s.enabled[0] = False  # No current target is needed to read original return.
+    s.service.calls.clear()
+
+    result = asyncio.run(tool(s).handle(
+        reader, 'session_reply_read', {'operation_key': s.args['operation_key']}))
+    assert result['ok'] is True
+    assert result['data']['read_ref'] == read_ref
+    assert result['data']['reply_committed'] is True
+    assert result['data']['parent_consumed'] is False
+    assert [c['operation'] for c in s.service.calls] and all(
+        c['operation'] == 'read_thread' for c in s.service.calls)
+    assert events(s) == before
+
+
+@pytest.mark.parametrize('change', [
+    {'subject_digest': 'f' * 64}, {'client_ref': 'foreign'},
+    {'issuer_digest': 'f' * 64}, {'resource': 'https://foreign.invalid'},
+])
+def test_read_only_policy_transition_does_not_cross_principal_identity(setup, change):
+    s = setup
+    populate(s)
+    before = events(s)
+    reader = dataclasses.replace(s.principal,
+        policy_id='test-read', scopes=('mastermind.executive.read',), **change)
+    s.service.calls.clear()
+    result = asyncio.run(tool(s).handle(
+        reader, 'session_reply_read', {'operation_key': s.args['operation_key']}))
+    assert result['ok'] is False
+    assert result['error']['code'] == 'reply_unavailable'
+    assert not s.service.calls
+    assert events(s) == before
+
+
+def test_changed_policy_without_read_only_scope_does_not_recover_original(setup):
+    s = setup
+    populate(s)
+    before = events(s)
+    foreign = dataclasses.replace(s.principal, policy_id='test-foreign')
+    result = asyncio.run(tool(s).handle(
+        foreign, 'session_reply_read', {'operation_key': s.args['operation_key']}))
+    assert result['ok'] is False
+    assert events(s) == before
+
+
 def test_reference_resolution_uses_original_provenance_without_target_revival(setup):
     s = setup
     expected_ref = populate(s)
