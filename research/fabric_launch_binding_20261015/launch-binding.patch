@@ -1,0 +1,171 @@
+--- a/remote_sub.sh
++++ b/remote_sub.sh
+@@ -372 +372,8 @@
+-  LEASE_OUTPUT_FILE="$(mktemp "${TMPDIR:-/tmp}/remote_sub_lease.XXXXXX")"
++  # Keep the original acquire response in the existing private run directory
++  # for new ordinary GLM/Qwen bindings. Cleanup still owns this scratch file.
++  if [ "$OPERATOR_CHILD_BUDGET" = 0 ] && [ -n "${POOL_PARENT_RUN_ID:-}" ] &&
++     { [ "$MODE" = glm ] || [ "$MODE" = qwen ]; }; then
++    LEASE_OUTPUT_FILE="$(mktemp "$LOG_DIR/${ID}.lease.XXXXXX")" || exit 78
++  else
++    LEASE_OUTPUT_FILE="$(mktemp "${TMPDIR:-/tmp}/remote_sub_lease.XXXXXX")" || exit 78
++  fi
+@@ -997,0 +1005,12 @@
++# Retain original lease/account correlation for new ordinary artifact runs.
++# This is evidence in the existing log, not a second lifecycle or retry grant.
++if [ "$DRY_RUN" -eq 0 ] && [ "$OPERATOR_CHILD_BUDGET" = "0" ] &&
++   { [ "$MODE" = glm ] || [ "$MODE" = qwen ]; } &&
++   [ -n "${POOL_PARENT_RUN_ID:-}" ]; then
++  "$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" launch-binding \
++    "$LOG_FILE" "$PACKET" "$LEASE_OUTPUT_FILE" "$ID" "$ROUTING_ROOT" \
++    "$POOL_PARENT_RUN_ID" "$HOST_ARG" "$MODE" "$MODEL" "$SUPPORT_DIGEST" \
++    "$LEASE_ID" "$ACCOUNT_ARG" >&2 || {
++      RC=78; log "LAUNCH_BINDING_UNCONFIRMED rc=$RC before_launch=1"; exit "$RC";
++    }
++fi
+--- a/remote_sub_helpers.py
++++ b/remote_sub_helpers.py
+@@ -146,0 +147,141 @@
++def record_launch_binding(log_path, packet_path, lease_output_path, *, run_id,
++                          root, parent, host, mode, model, support_digest,
++                          launch_lease_id, launch_account):
++    """Retain the existing acquire return before a NEW artifact worker starts.
++
++    Correlation evidence only: no authentication, new admission, settlement,
++    acceptance or retry. Never applies to an already launched/legacy run.
++    """
++    import fcntl
++    import hashlib
++    import json
++    import os
++    from pathlib import Path
++    import re
++    import stat
++    from datetime import datetime, timezone
++    import artifact_production as production
++
++    # Plain legacy packets do not opt into the new artifact evidence contract.
++    # Inspect only the fixed prefix before applying its stricter private-chain
++    # rules; the original launcher continues to own ordinary packet transport.
++    probe_fd = os.open(packet_path, os.O_RDONLY | os.O_NONBLOCK)
++    try:
++        if not stat.S_ISREG(os.fstat(probe_fd).st_mode):
++            raise ValueError('launch_binding_packet_type')
++        prefix = production.REQUEST_PREFIX.encode('ascii')
++        opted_in = os.read(probe_fd, len(prefix)) == prefix
++    finally:
++        os.close(probe_fd)
++    if not opted_in:
++        return {'state': 'NOT_ARTIFACT_RUN'}
++    import artifact_delivery as delivery
++
++    ident = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z')
++    values = (run_id, root, parent, host, model)
++    if (any(type(v) is not str or not ident.fullmatch(v) for v in values)
++            or mode not in {'glm', 'qwen'}
++            or type(support_digest) is not str
++            or not re.fullmatch('[a-f0-9]{64}', support_digest)):
++        raise ValueError('launch_binding_scope')
++    packet = delivery.local_file(Path(packet_path), 2 * 1024 * 1024)
++    contract = production.parse_packet(packet.decode('utf-8'))
++    if contract is None:
++        return {'state': 'NOT_ARTIFACT_RUN'}
++    if any(contract.get(k) != v for k, v in {
++            'run_id': run_id, 'root': root, 'parent': parent,
++            'support_digest': support_digest}.items()):
++        raise ValueError('launch_binding_packet_mismatch')
++    # The controller passes its actual mktemp acquire response; never scan for
++    # a likely lease or substitute a current broker row after the fact.
++    acquired = delivery.local_file(Path(lease_output_path), 1024)
++    match = re.fullmatch(rb'LEASE=([a-f0-9]{12}) ACCOUNT=([A-Za-z0-9_.:-]{1,128})\n?', acquired)
++    if not match:
++        raise ValueError('launch_binding_acquire_response')
++    lease_id, account = (x.decode('ascii') for x in match.groups())
++    if lease_id != launch_lease_id or account != launch_account:
++        raise ValueError('launch_binding_launch_mismatch')
++    pool = {'glm': 'glm', 'qwen': 'bailian'}[mode]
++    record = {
++        'schema': 'mastermind.fabric_launch_binding.v1',
++        'run_id': run_id, 'root': root, 'parent': parent, 'host': host,
++        'mode': mode, 'requested_model': model, 'pool': pool,
++        'lease_id': lease_id, 'account': account,
++        'packet_sha256': hashlib.sha256(packet).hexdigest(),
++        'support_digest': support_digest,
++        'acquire_response_sha256': hashlib.sha256(acquired).hexdigest(),
++        'source': 'controller_original_acquire_return',
++        'phase': 'PRE_LAUNCH',
++    }
++    path = Path(log_path)
++    if path.name != run_id + '.log':
++        raise ValueError('launch_binding_log_name')
++    with delivery.DirectoryChain(path.parent) as chain:
++        fd = os.open(path.name, os.O_RDWR | os.O_APPEND | os.O_NOFOLLOW | os.O_NONBLOCK,
++                     dir_fd=chain.fd)
++        try:
++            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
++            before = os.fstat(fd)
++            identity = lambda s: (s.st_dev, s.st_ino, s.st_uid, s.st_mode, s.st_nlink)
++            if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.getuid()
++                    or before.st_nlink != 1 or before.st_mode & 0o022
++                    or not 0 < before.st_size <= 1024 * 1024):
++                raise ValueError('launch_binding_log_unsafe')
++            raw = os.read(fd, 1024 * 1024 + 1)
++            if len(raw) != before.st_size or not raw.endswith(b'\n'):
++                raise ValueError('launch_binding_log_incomplete')
++            prefix = r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z \[remote_sub id=' + re.escape(run_id) + r' host=' + re.escape(host) + r'\] '
++            events = []
++            for line in raw.decode('utf-8').splitlines():
++                event = re.fullmatch(prefix + '(.*)', line)
++                if not event:
++                    raise ValueError('launch_binding_foreign_log')
++                events.append(event[1])
++            if (sum(e == 'RUN_RESERVED explicit=1' for e in events) != 1
++                    or [e for e in events if e.startswith('LEASE_OK ')] != ['LEASE_OK pool=' + pool]
++                    or len([e for e in events if e.startswith('SUPPORT_VERSION_READY ')]) != 1
++                    or not any(re.fullmatch(
++                        'SUPPORT_VERSION_READY digest=' + support_digest + r' policy=[a-f0-9]{64}', e) for e in events)
++                    or any(e.startswith(('LAUNCH', 'DONE', 'REMOTE_DONE', 'LEASE_PRESERVED')) for e in events)
++                    or any(t in e for e in events for t in ('REFUSED', 'FAILED', 'EFFECT_UNKNOWN'))):
++                raise ValueError('launch_binding_not_fresh_prelaunch')
++            if (delivery.local_file(Path(packet_path), 2 * 1024 * 1024) != packet
++                    or delivery.local_file(Path(lease_output_path), 1024) != acquired):
++                raise ValueError('launch_binding_input_changed')
++            chain.verify()
++            visible = os.stat(path.name, dir_fd=chain.fd, follow_symlinks=False)
++            if (identity(visible) != identity(before) or visible.st_size != before.st_size
++                    or os.pread(fd, before.st_size + 1, 0) != raw):
++                raise ValueError('launch_binding_log_changed')
++            now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%MZ')
++            payload = json.dumps(record, sort_keys=True, separators=(',', ':'))
++            appended = f'{now} [remote_sub id={run_id} host={host}] LAUNCH_BINDING {payload}\n'.encode()
++            if os.write(fd, appended) != len(appended):
++                raise OSError('launch_binding_short_write')
++            os.fsync(fd)
++            os.fsync(chain.fd)
++            chain.verify()
++            after = os.fstat(fd)
++            visible = os.stat(path.name, dir_fd=chain.fd, follow_symlinks=False)
++            if (identity(after) != identity(before) or identity(visible) != identity(before)
++                    or after.st_size != len(raw) + len(appended)
++                    or visible.st_size != after.st_size
++                    or os.pread(fd, after.st_size, 0) != raw + appended):
++                raise ValueError('launch_binding_publication_unconfirmed')
++        finally:
++            os.close(fd)
++    return {'state': 'RETAINED_PRE_LAUNCH', 'run_id': run_id,
++            'binding_sha256': hashlib.sha256(payload.encode()).hexdigest()}
++
++
++def launch_binding():
++    import json
++    (log, packet, acquired, run, root, parent, host, mode, model, support,
++     launch_lease_id, launch_account) = sys.argv[1:]
++    result = record_launch_binding(log, packet, acquired, run_id=run, root=root,
++                                  parent=parent, host=host, mode=mode,
++                                  model=model, support_digest=support,
++                                  launch_lease_id=launch_lease_id, launch_account=launch_account)
++    print(json.dumps(result, sort_keys=True))
++
++
+@@ -152,0 +294 @@
++        'launch-binding': launch_binding,

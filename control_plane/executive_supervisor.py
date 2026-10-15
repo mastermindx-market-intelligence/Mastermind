@@ -1199,15 +1199,24 @@ class ExecutiveSupervisor:
         ] | None = None,
         subscription_canary_binding_id: str | None = None,
         product_acceptance_macro_root: str | Path | None = None,
+        product_acceptance_context_reader: Any | None = None,
     ) -> None:
         self.runtime = runtime
         self._product_acceptance_review_owner = None
+        if product_acceptance_context_reader is not None and product_acceptance_macro_root is None:
+            raise SupervisorError("installed acceptance Context requires its source root")
         if product_acceptance_macro_root is not None:
             from control_plane.agentos_product_acceptance_basis import AgentOsProductAcceptanceBasisReader
             from control_plane.product_acceptance_review_owner import ProductAcceptanceReviewBasisOwner
-            self._product_acceptance_review_owner = ProductAcceptanceReviewBasisOwner(
-                runtime, AgentOsProductAcceptanceBasisReader(macro_root=Path(product_acceptance_macro_root))
-            )
+            reader = product_acceptance_context_reader
+            if reader is None:
+                reader = AgentOsProductAcceptanceBasisReader(macro_root=Path(product_acceptance_macro_root))
+            elif (type(reader) is not AgentOsProductAcceptanceBasisReader
+                    or reader._macro_root.resolve() != Path(product_acceptance_macro_root).resolve()
+                    or reader._installed_context_owner is None
+                    or reader._installed_context_binding is None):
+                raise SupervisorError("installed acceptance Context requires its qualified reader")
+            self._product_acceptance_review_owner = ProductAcceptanceReviewBasisOwner(runtime, reader)
         if type(cleanup_policy) is not CleanupPolicy:
             raise SupervisorError("cleanup policy requires a typed trusted composition")
         if cleanup_policy is CleanupPolicy.FABRIC_PROCESS_GROUP:

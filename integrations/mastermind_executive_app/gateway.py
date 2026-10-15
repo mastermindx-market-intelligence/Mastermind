@@ -412,9 +412,9 @@ class CeoIngressClient:
         )
         if isinstance(frame, Mapping) and frame.get("schema") == APP_REQUEST_SCHEMA:
             from integrations.company_dialogue_principal_host_contract import encode_json_frame
-            from common.company_dialogue_principal_limits import (
+            from common.company_dialogue_principal_app_protocol import (
                 MAX_REQUEST_BYTES as principal_request_limit,
-                MAX_RESPONSE_BYTES as principal_response_limit,
+                MAX_APP_RESPONSE_BYTES as principal_response_limit,
             )
             try:
                 canonical_frame = encode_json_frame(dict(frame), limit=principal_request_limit)
