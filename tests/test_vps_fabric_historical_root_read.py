@@ -136,11 +136,21 @@ def test_signed_installed_v2_app_reads_partial_historical_root_without_503(
                     transport=httpx.ASGITransport(app=app),
                     base_url="http://127.0.0.1",
                 ) as client:
+                    _job_wire,job_body=await call(
+                        client,fixture._read_token(rsa_key),
+                        "executive_job",{"job_id":original.job_id},
+                    )
                     _raw,body=await call(
                         client,fixture._read_token(rsa_key),
                         "executive_fabric",
                         {"view":"root","root_job_id":original.job_id},
                     )
+            # The historical queued Job detail is checked by its existing
+            # strict owner, separately from the bounded PARTIAL Fabric root.
+            assert job_body["ok"] is True,job_body.get("error")
+            assert job_body["data"]["job"]["job_id"]==original.job_id
+            assert job_body["data"]["job"]["status"]=="QUEUED"
+            assert job_body["data"]["attempt_count"]==0
             assert body["ok"] is True,body.get("error")
             data=body["data"]
             assert data["root"]["job_id"]==original.job_id

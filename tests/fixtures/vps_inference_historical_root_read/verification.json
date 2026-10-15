@@ -5,7 +5,7 @@
   "source_sha256": {
     "integrations/mastermind_executive_app/gateway.py": "8a1f6934c236a0dde45f44e0276d16304e8e4d407987f18a0811f7b499ea13a4",
     "control_plane/fabric_job_view.py": "c2e1ec7a7378e7cb2cc5dec9d0ae7c0f8e328a7f22d141497dde7df47ce970f5",
-    "tests/test_vps_fabric_historical_root_read.py": "5fd5a9e85e383cd4f9ca5ef89f1f8d2d0d1430827c9b8cecbed6558a5c0b1133"
+    "tests/test_vps_fabric_historical_root_read.py": "0c6cc49aad1d85f429a7cd05afd86bb2f070cc64c043bfa1104759b6a3140696"
   },
   "red_before": {
     "failed": 2,
@@ -67,5 +67,18 @@
     "observed": "PASS",
     "defense": "Unauthorized/foreign/changed missingness remains rejected; no additional source alias or user-controlled result acceptance"
   },
-  "release_state": "DRAFT_HOLD_SOURCE_ONLY_NOT_INSTALLED"
+  "release_state": "DRAFT_HOLD_SOURCE_ONLY_NOT_INSTALLED",
+  "signed_queued_job_detail_separation": {
+    "verification": "Same synthetic signed WebCEO V2 app and original Exec Unix ingress returns ok=true for executive_job queued zero-attempt generic Job, AND ok=true for the bounded PARTIAL executive_fabric root from that same original Job.",
+    "test_source_sha256": "0c6cc49aad1d85f429a7cd05afd86bb2f070cc64c043bfa1104759b6a3140696",
+    "full_focused": {
+      "passed": 5,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "junit_sha256": "fb760217c8413448158da3fa1a47abc1cb248df4f609f0a025e52c773167796a"
+    },
+    "installed_executive_job_failure_diagnosis": "Live installed Executive job detail previously returned backend_unavailable. This test excludes a universal failure of the new source for normal queued Jobs but does not identify which protected, historical or installed-only condition caused that live error.",
+    "source_boundary": "No production runtime/service/JWT/provider/portfolio reads or writes; original underlying installed result remains unresolved."
+  }
 }
