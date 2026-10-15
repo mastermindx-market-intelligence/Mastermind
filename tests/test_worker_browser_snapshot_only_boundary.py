@@ -106,3 +106,78 @@ def test_snapshot_only_grant_does_not_silently_authorize_resource_start(tmp_path
             await runtime.aclose(timeout=5)
 
     asyncio.run(exercise())
+
+
+def test_runtime_bound_attempt_still_refuses_snapshot_only_mutation(tmp_path, monkeypatch):
+    """Existing SQLite Attempt/fence checks and exact tool grant compose.
+
+    The source fixture uses fake process attestations and a test-local lease.
+    No actual BrowserResourceRef or provider session is created; this is a
+    stronger OWNER-INTEGRATION negative than a mere tools/list projection.
+    """
+    import os
+    from tests import test_worker_browser_admission as owner_fixture
+
+    original_grant = owner_fixture._grant
+    monkeypatch.setattr(
+        owner_fixture, "_grant",
+        lambda config: original_grant(config, ("browser_snapshot",)),
+    )
+    (api, executive, lease, epoch, generation, profile, requested, config,
+     run_root) = owner_fixture._setup(tmp_path)
+    assert tuple(profile.mcp_server_grants[0].enabled_tools) == ("browser_snapshot",)
+    assert requested.capabilities == profile.capability_manifest(
+        harness_binary_digest=requested.harness_binary_digest,
+    )
+
+    async def exercise():
+        runtime = await create_runtime_channel(config.action)
+        try:
+            admission = api.WorkerBrowserAdmission(
+                executive.store, lease, epoch, generation, requested, profile,
+                "worker-browser-isolated", runtime,
+                run_root=run_root, expected_owner_uid=os.getuid(),
+            )
+            server = api.create_worker_browser_server(
+                runtime, config.browser, admission,
+            )
+            assert [t.name for t in await _tools(server)] == ["browser_snapshot"]
+
+            # The actual owner-bound transport refuses preparation and effects
+            # even when the requesting worker has a live synthetic Attempt.
+            for name, payload in (
+                ("prepare_browser_resource", {
+                    "project_ref": config.action.lease.project_ref,
+                    "mode": "isolated",
+                }),
+                ("start_browser_resource", {"start_ref": "unsigned"}),
+                ("run_browser_action", {
+                    "browser_ref": "unsigned", "action_ref": "unsigned",
+                }),
+            ):
+                result = await _call(server, name, payload)
+                assert _error_code(result) == "TOOL_NOT_AVAILABLE", name
+
+            invalid = await _call(server, "browser_snapshot", {
+                "browser_ref": "unsigned-not-a-real-browser-resource",
+            })
+            assert invalid.isError is True
+            assert _error_code(invalid) in {
+                "BROWSER_REF_INVALID", "BROWSER_BINDING_CHANGED",
+                "CHANNEL_ADMISSION_REFUSED",
+            }
+            assert list(Path(config.action.artifact_directory).iterdir()) == []
+
+            # Revoke the authoritative Job; a formerly selected read tool must
+            # be denied at the trusted Runtime owner, before Browser actuation.
+            executive.jobs.cancel_job(lease.attempt.job_id)
+            revoked = await _call(server, "browser_snapshot", {
+                "browser_ref": "unsigned-not-a-real-browser-resource",
+            })
+            assert _error_code(revoked) == "CHANNEL_ADMISSION_REFUSED"
+            assert list(Path(config.action.artifact_directory).iterdir()) == []
+        finally:
+            runtime.revoke()
+            await runtime.aclose(timeout=5)
+
+    asyncio.run(exercise())
