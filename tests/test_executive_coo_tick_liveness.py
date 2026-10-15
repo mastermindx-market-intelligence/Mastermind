@@ -146,8 +146,18 @@ def test_ambiguous_claimed_start_quarantines_instead_of_draining_another_root(tm
     async def exercise():
         async with _prepared_pair(tmp_path) as (config, seed, ids, _):
             await seed.close()
+            # The source fixture defaults to a 0.1s shutdown grace but this
+            # test explicitly enables a 1.0s background tick. Linux CI may
+            # legitimately retain that physical tick past 0.1s; the service
+            # must not lie that its process/cycle custody drained. Give THIS
+            # synthetic test enough grace for one wake/settlement, without
+            # changing the production shutdown guard or retry policy.
+            tick_interval = 1.0
+            shutdown_grace = 3.0
+            assert shutdown_grace > tick_interval
             running = ExecutiveControlService(dataclasses.replace(
-                config, coo_tick_interval_seconds=1.0),
+                config, coo_tick_interval_seconds=tick_interval,
+                shutdown_grace_seconds=shutdown_grace),
                 supervisor_factory=LostStartReceipt, autonomy_guard=lambda: None)
             await running.start()
             try:
