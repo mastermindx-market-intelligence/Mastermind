@@ -47,3 +47,45 @@ does not touch physical host limits or free disk admission.
 The separate V8 Ubuntu elastic physical max installation is HELD_PLATFORM_REFUSAL
 under original effect fabric-ubuntu-elastic-max-20261010-web-003. This source
 proposal never retries or broadens that denied release.
+
+
+## October 15 reset-window correction (source-only)
+Current V5 source patch now incorporates the reset-window semantic correction
+from independent routing PR #1443 at the existing `ext/quota_remote.py`
+`_advisory_fresh_states` boundary. A recently observed, provider-authoritative
+quota row with a present expired/equal/malformed `reset_at` is UNKNOWN, not a
+continuing PARKED or asserted OK allowance after reset. Missing reset metadata
+retains the original compatibility contract. This changes advisory ranking
+only; hard provider account admission, explicit refreshes and live ledger/
+broker are unchanged.
+
+Exact evidence: previous V5 patch Git blob
+`fb853e50690f1c1bf538aa1500f100a5198677dd`, revised patch Git blob
+`d34b6b15bf7ab074d911d3d05128e2cbf1f74100`, deterministic revised
+patch SHA-256 `6b368b720ded00ce6dddcbd02195163777ead91c2644cf82b0c2c4c68ef4cd52`.
+The isolated exact quota preimage `a1dab11da10264836e6271955b375b8e6508c23f23d0444c99d96464deb70f2b`
+replays with `patch --fuzz=0` through prior V5 postimage
+`42f3a5f9b4d820ab5fafd9b739944a685dab4ebe254fb9c190f9ab75129ebfab`
+to the independent #1443 tested reset-aware postimage
+`06a10fecbc60ed30d43bcfd933d2aea0dbf234f32c16f8a2c65ce2da95648e8c`.
+Eight additional isolated AST/case checks passed; #1443's independent
+25-case original test suite is existing supporting evidence, not a claimed
+new CI result on this PR's complete source package. Stage receipt:
+`~/.mastermind/agent-evidence/fabric-advisory-reset-v5-20261015/integration-receipt.json`.
+
+**Release hold remains.** At 2026-10-15 10:35 UTC, M2 installed
+`ext/pick.py` was `0f5cbc32504680e09055b77cffdea81adea734388b7b061fcf77d017b7715cb2`,
+not this V5's pinned `3120d99aa3bc4c9224b61ab3d593c284dcc11f4a2df0e657f401125b2651f188`.
+The installed quota reader and pool ledger still matched original preimages.
+**Never overlay the full V5 patch on a drifting picker**; the complete
+current-live picker + quota + ledger composition, source-writer custody,
+full compatibility suite, hosted CI on exact head, independent review,
+support-generation publication, placement and worker acceptance remain
+unproven. The earlier 331-pass suites and sealed archive qualify the
+previous V5 patch, not an installed reset-aware release. Current protected
+`master` has already corrected the unrelated Research Read CI test; the
+previous red #1441 run is not a new pass. This PR stays DRAFT and uninstalled.
+
+No Ubuntu capacity configuration, CPU cutoff, workers, provider quota,
+lease, host profile or other V8 physical install was touched. The original
+elastic V8 effect remains HELD_PLATFORM_REFUSAL / DO_NOT_RETRY.
