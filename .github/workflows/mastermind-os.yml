@@ -41,6 +41,25 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      - name: Build isolated browser source fixture
+        run: npx vite build --config vite.browser-proof.config.ts
+      - name: Record exact compiled source identity
+        run: |
+          node --input-type=module -e 'import fs from "node:fs"; const receipt = JSON.stringify({schema: "mastermind.os.compiled_test_receipt.v1", source_revision: process.env.GITHUB_SHA, run_id: process.env.GITHUB_RUN_ID, run_attempt: process.env.GITHUB_RUN_ATTEMPT, live_acceptance: false}) + "\n"; for (const dir of ["dist", "dist-browser-proof"]) fs.writeFileSync(`${dir}/build-receipt.json`, receipt);'
+      - name: Retain compiled web candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: mastermind-os-web-${{ github.sha }}
+          path: app/mastermind_os/dist
+          if-no-files-found: error
+          retention-days: 7
+      - name: Retain isolated browser source fixture
+        uses: actions/upload-artifact@v4
+        with:
+          name: mastermind-os-browser-proof-${{ github.sha }}
+          path: app/mastermind_os/dist-browser-proof
+          if-no-files-found: error
+          retention-days: 7
 
   # Compilation and unsigned packageability only; this is not beta acceptance.
   native-macos:
