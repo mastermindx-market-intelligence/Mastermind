@@ -30,9 +30,15 @@ The original v13 resampler properly tests whether all 30 minute rows are present
 
 ## Verification
 
-**Sixteen** targeted, self-contained synthetic unittest checks pass using the existing unmodified original v13 calendar/resampler. They cover full-night but all-zero-volume source, moving OHLC with zero shares, known/unknown volume, overlapping zero and unknown within a single 30m bucket, missing time slots, duplicate timestamps, ordering, symbol/venue/basis violations, off-minute clocks, absent or duplicate requested nights and always-false execution claims.
+**Nineteen** targeted, self-contained synthetic unittest checks pass using the existing unmodified original v13 calendar/resampler. They cover full-night but all-zero-volume source, moving OHLC with zero shares, known/unknown volume, overlapping zero and unknown within a single 30m bucket, missing time slots, duplicate timestamps, ordering, symbol/venue/basis violations, off-minute clocks, absent or duplicate requested nights and always-false execution claims.
 
 The exact new V29 code was also executed against the real, original **720-row SOXX receipt** through the incumbent Macro reader plus byte-matching original v13 \`l1_to_bars\` and the updated quality function. **All material Oct 12 source numbers above independently reproduced**. No new Tiingo request, archive write, licensed price export, backtest, changed strategy, broker call or implicit producer schedule was involved. The original collector's manual HTTP 200 response and earlier accepted 20,000/2,000,000 message audits were reused, not repeated.
+
+### Weekday-closure gate and the second real SOXX source
+
+The second source acquired October 15 for the **October 5–11** requested range yielded 2,148 original, receipt-verified 1-minute rows, 64 strictly complete 30m timestamp buckets, **716 zero-volume minutes**, and **657 zero-volume minutes with positive high/low range**. **Every one of the 64 complete-clock 30m buckets had a zero-volume constituent minute**. Four nearly complete nights had 12 total missing source-minute timestamps. See [the second-week verified receipt report](SOXX_SECOND_BOATS_WEEK_VERIFIED_2026-10-15.md).
+
+V29 now explicitly refuses an asserted Friday/Saturday **20:00 ET night start**, instead of interpreting a *closed* BOATS session as 480 missing market-data minutes. It calls the unchanged owner fullsession.classify_session for this weekday classification, not a newly invented holiday/venue calendar. The result marks night_session_gate=ORIGINAL_FULLSESSION_WEEKDAY_NOT_HOLIDAY_PROOF. Two new tests caught the false-missing classification red before repair; Sunday night remains an eligible original-session date. A later true market holiday still needs separately qualified venue/calendar evidence.
 
 ## Where the mission goes next
 

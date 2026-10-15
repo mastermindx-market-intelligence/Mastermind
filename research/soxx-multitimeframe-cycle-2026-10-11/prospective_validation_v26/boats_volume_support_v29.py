@@ -8,10 +8,10 @@ alternative calendar, return forecast, model fitting, fill assumptions or tradin
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from datetime import timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Sequence
 
-from fullsession import Bar, classify_session, trade_date
+from fullsession import Bar, ET, classify_session, trade_date
 from tiingo_l1_v13 import audit_overnight_nights, resample_complete_30m
 
 
@@ -45,6 +45,16 @@ def audit_volume_support(bars: Sequence[Bar], *, night_starts_et: Sequence[str])
         raise ValueError("duplicate source minute instant")
 
     coverage = audit_overnight_nights(bars, night_starts_et=night_starts_et)
+    # The existing v13 completeness reader treats every requested date as an
+    # eight-hour slot. Refuse plainly closed Friday/Saturday evenings instead
+    # of incorrectly reporting 480 "missing" tradable source minutes.
+    # Reuse ORIGINAL session authority; it does not certify holidays or TRF
+    # special hours. Such exceptions still require a qualified venue calendar.
+    for window in coverage:
+        local_open = datetime.combine(
+            date.fromisoformat(window["night_start_et"]), time(20, 0), ET)
+        if classify_session(local_open) != "overnight":
+            raise ValueError("nontrading overnight start: no expected source night")
     completed, rollup = resample_complete_30m(bars)
     by_night = defaultdict(Counter)
     selected = {r["night_start_et"] for r in coverage}
@@ -133,6 +143,7 @@ def audit_volume_support(bars: Sequence[Bar], *, night_starts_et: Sequence[str])
     return {
         "schema": "mastermind.soxx.boats_volume_support.v29",
         "status": "SOURCE_CADENCE_AND_VOLUME_DESCRIPTIVE_ONLY",
+        "night_session_gate": "ORIGINAL_FULLSESSION_WEEKDAY_NOT_HOLIDAY_PROOF",
         "original_v13_source_rows": len(bars),
         "original_v13_30m_buckets": rollup["complete_30m"],
         "nights": per_night,

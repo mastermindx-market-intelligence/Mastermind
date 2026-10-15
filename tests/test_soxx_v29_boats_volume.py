@@ -160,6 +160,20 @@ class TestV29TradeSupport(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,"duplicate overnight date"):
             m.audit_volume_support(originals(),night_starts_et=["2026-10-12","2026-10-12"])
 
+    def test_friday_night_closed_session_not_called_missing_data(self):
+        with self.assertRaisesRegex(ValueError, "nontrading overnight start"):
+            m.audit_volume_support([], night_starts_et=["2026-10-09"])
+
+    def test_saturday_night_closed_session_not_called_missing_data(self):
+        with self.assertRaisesRegex(ValueError, "nontrading overnight start"):
+            m.audit_volume_support([], night_starts_et=["2026-10-10"])
+
+    def test_sunday_night_is_eligible_but_still_unknown_without_source(self):
+        out=m.audit_volume_support([], night_starts_et=["2026-10-11"])
+        self.assertEqual(out["nights"][0]["observed_source_minute_slots"],0)
+        self.assertEqual(out["nights"][0]["missing_source_minute_slots"],480)
+        self.assertFalse(out["nights"][0]["complete_clock_lattice"])
+
     def test_empty_source_is_missing_not_zero_return(self):
         result=self.run_night([])
         self.assertEqual(result["nights"][0]["observed_source_minute_slots"],0)
