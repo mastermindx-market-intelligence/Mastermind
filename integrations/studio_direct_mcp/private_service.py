@@ -46,6 +46,16 @@ TYPED_GIT_WORKSPACE_CLI_REL = Path(".local/bin/mmx-workspace")
 TYPED_GIT_SOURCE_REPOSITORY_REL = Path("Documents/GitHub/Mastermind")
 TYPED_GIT_BINARY = "/usr/bin/git"
 TYPED_GIT_REMOTE_URL = "https://github.com/mastermindx-market-intelligence/Mastermind.git"
+# Host-owned identities; these match the existing mmx-workspace repository catalog.
+# No caller-supplied path, remote, repository or credential is admitted.
+TYPED_GIT_CLOSED_PROFILES = (
+    ("mastermind", TYPED_GIT_SOURCE_REPOSITORY_REL, TYPED_GIT_REMOTE_URL),
+    ("macro", Path("Documents/Cluade/macro-main"),
+     "https://github.com/mastermindx-market-intelligence/macro.git"),
+    ("terminal", Path("Documents/Cluade/charting-app"),
+     "https://github.com/mastermindx-market-intelligence/mastermind-terminal.git"),
+)
+
 
 # Paper Desktop capability is a gateway-local consumer of the separately reviewed
 # guarded adapter in PR #585. The private gateway never accepts these paths or
@@ -444,15 +454,30 @@ def _build_runtime_roots(account: str) -> dict:
     }
 
 
-def _typed_git_config(user_root: Path) -> dict:
-    return {
+def _typed_git_config(user_root: Path, *, closed_repositories: bool = False) -> dict:
+    common = {
         "enabled": True,
         "workspaceCli": str(user_root / TYPED_GIT_WORKSPACE_CLI_REL),
         "gitBinary": TYPED_GIT_BINARY,
-        "sourceRepository": str(user_root / TYPED_GIT_SOURCE_REPOSITORY_REL),
-        "allowedRemoteUrls": [TYPED_GIT_REMOTE_URL],
         "commandTimeoutMs": 15_000,
         "pushTimeoutMs": 60_000,
+    }
+    if closed_repositories:
+        return {
+            **common,
+            "repositories": [
+                {
+                    "repository": alias,
+                    "sourceRepository": str(user_root / source),
+                    "allowedRemoteUrls": [remote],
+                }
+                for alias, source, remote in TYPED_GIT_CLOSED_PROFILES
+            ],
+        }
+    return {
+        **common,
+        "sourceRepository": str(user_root / TYPED_GIT_SOURCE_REPOSITORY_REL),
+        "allowedRemoteUrls": [TYPED_GIT_REMOTE_URL],
     }
 
 
@@ -559,7 +584,8 @@ def _build_config(
         "requestTimeoutMs": REQUEST_TIMEOUT_MS,
         "idleTimeoutMs": IDLE_TIMEOUT_MS,
         "reclaimIdleGraceMs": 30_000,
-        "gitPublish": False if fabric_only else _typed_git_config(user_root),
+        "gitPublish": False if fabric_only else _typed_git_config(
+            user_root, closed_repositories=repository_workspaces),
         "paperDesign": False if fabric_only else _paper_design_config(user_root),
     }
     if fabric_only:
