@@ -2,6 +2,19 @@
 
 **Status:** Installed and observed on the existing M2 Fabric controller; independent source-record draft. NOT proof of sustained physical cooling. This is **not** the separate, held Ubuntu 0/3 host telemetry deployment in PR #1363. No denied host-side activation was retried, and no existing worker, lease, or provider was migrated.
 
+## Verified current-policy fence — 2026-10-15 23:44 UTC
+
+**HISTORICAL_POLICY_ONLY_DO_NOT_APPLY**. The October 13-14 original installation, emergency thermal derates and rollback digests below are incident history, **not** instructions to reinstall old `hosts.json` bytes.
+
+Current ORIGINAL M2 `hosts.json` SHA-256: `726ce27f38ecc8ce407cc0496e61ea66db3e731eb4ce3a60f9ae291a0321e048`. Verified configured `max_active` values: Ubuntu0 **12**, Ubuntu1 **18**, Ubuntu2 **12**, Ubuntu3 **12** (12/18/12/12). Ubuntu2/3 still have `load_gate=4` and an **80°C new-job thermal admission limit**. The previous Ubuntu2/Ubuntu3 `1/1` derate has already been removed; **DO_NOT_REDO_STATIC_RESTORE**. These values are historical observed pins, **not** an automatic restoration target: if the incumbent thermal owner has deliberately re-derated a hot host since this snapshot, preserve the newer lower limit. Never silently raise capacity, freeze emergency derates, or infer twelve sustainable heavy-CPU workers.
+
+The only combined sparse/cgroup **prospective release candidate** here is `FABRIC_COMBINED_SPARSE_AND_CPU_SCOPE_20261015.patch`; the separate accepted-worktree reclaim plan is `FABRIC_ACCEPTED_WORKTREE_RECLAIM_PLAN_20261015.patch`. Neither is a registry policy installer. The following older source snapshots **contain `hosts.json` hunks and are not release candidates**:
+
+- `intel_package_thermal_admission.patch` — **HISTORICAL ONLY / DO NOT APPLY TO LIVE REGISTRY**
+- `precheckout_disk_admission.patch` — **HISTORICAL ONLY / DO NOT APPLY TO LIVE REGISTRY**
+
+The owner of the actual M2 controller must compare the latest original host registry, policy/temperature gates and the exact source preimage, preserve concurrent writers and worker custody, and use authorized exact-hash CAS for any separately justified policy change. **No published source patch, passing CI or stale file digest authorizes a policy replay or overrides an emergency thermal reduction.** The 9950X cooling/BIOS check and matched CPU-heavy throughput acceptance remain outstanding.
+
 ## Why and owner
 
 The Chairman observed bursts around 95–97°C on the Ryzen 9 9950X Ubuntu 2/3 machines and roughly 90–94°C on Ubuntu 0. The installed Fabric already had one host telemetry puller, a 90°C temperature admission check for Ubuntu 0/2/3, cache-aware host selection, and an atomic live last-mile check inside `lane_runtime.LaneLease.acquire`. Existing CPU-heavy jobs can still boost while in flight. This change conservatively reduces **new** worker pressure and routes toward cooler eligible hosts without inventing another scheduler or worker-process controller.
