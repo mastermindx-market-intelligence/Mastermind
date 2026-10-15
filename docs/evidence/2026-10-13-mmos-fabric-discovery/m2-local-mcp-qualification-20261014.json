@@ -1,0 +1,67 @@
+{
+  "schema": "mastermind.mmos_fabric_live_source_metadata_proof.v1",
+  "observed_at": "2026-10-15T03:06:04.126135+00:00",
+  "source_parent": "62d5e842fb4609702e3c78b009a41a47b0297019",
+  "upstream_fabric_merge": "76576d8680bb70cdb9e1cfe7016aefec0fb3286f",
+  "backend_installed_source_sha256": "a34bd21065b64aef68af26fa3c37b310f861d7a5c4545adca52f5c07de5c56c6",
+  "service": {
+    "host": "m2studio",
+    "installed_account": "subagent-fabric-c3",
+    "local_port": 45119,
+    "profile_fabric_only": true,
+    "local_sdk_connected": true,
+    "expected_fabric_tools": 7,
+    "tool_catalog_complete": true,
+    "adapter_available": true,
+    "worker_admission": "UNPROBED",
+    "worker_start": "UNPROBED",
+    "managed_c3_tunnel_ready": false,
+    "authenticated_os_producer": false
+  },
+  "fixture_source_scope": "EXACT_RUN_SET_NOT_FLEET_CENSUS",
+  "run_semantics": [
+    {
+      "run_id": "mmos-fabric-interiors-review-20261013-c4-02",
+      "root_id": "mmos-fabric-interiors-20261013-c4",
+      "state": "TERMINAL",
+      "accepted": true,
+      "result_available": true
+    },
+    {
+      "run_id": "fabric-mcp-web-20261011-c3-check-01",
+      "root_id": "fabric-mcp-web-20261011-c3",
+      "state": "TERMINAL",
+      "accepted": false,
+      "result_available": true
+    }
+  ],
+  "source_file_sha256": {
+    "app/mastermind_os/src/fixtures/fabric-catalog-m2-status-observation-20261014.json": "90cb2862f2d3a6d73f6d1c77b27b116a8b11bde19cf053ac799947d695f51e62",
+    "app/mastermind_os/src/fabric/catalog-m2-status-observation.test.ts": "0d178c25a762bcf7dc3ace931b22ec8ea15cabf1a20c146e1a379e346ddee4dd",
+    "docs/evidence/2026-10-13-mmos-fabric-discovery/m2-local-mcp-qualification-20261014.md": "d0aa61445c7c1383a1c22b301173be476f19c6ec19461f9362c310c2d1521a93"
+  },
+  "test_log_sha256": {
+    "m2-live-status-consumer-focused.log": "5470fe06630fe64d45226f288aa2d490e3b35f51764e0dcdccc3d8455acc0acf",
+    "m2-live-status-types.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "test_outcome": {
+    "focused_passed": 23,
+    "files": 2,
+    "failed": 0,
+    "typescript_rc": 0
+  },
+  "effects": {
+    "worker_requests": 0,
+    "results_fetched": 0,
+    "acceptance_writes": 0,
+    "tunnel_or_auth_changes": 0,
+    "browser_calls": 0,
+    "app_runtime_mutations": 0
+  },
+  "nonclaims": [
+    "not web/OS user authentication",
+    "not global run discovery",
+    "not remote tunnel readiness",
+    "not production browser proof"
+  ]
+}
