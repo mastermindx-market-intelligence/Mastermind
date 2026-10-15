@@ -80,6 +80,22 @@ REVIEWED_FILES = {'integrations/session_bridge/bound_launch_capture/runtime/lane
                                                   (778, 97, 120, 'str', '_mastermind_agent_relay'),
                                                   (784, 89, 92, 'int', '457'))}}
 
+# Candidate-only fixed finite publisher principal/mode postimage for independent
+# review: SHA and precise sites are frozen, not computed at runtime. This does
+# not authorize publication, merge, release or Capacity admission.
+REVIEWED_FILES['ops/executive_os/finite_definition_publication.py'] = {
+    'sha256': '1c651fb504c99b941cc803d33ab7a610793b4dcdd085ce67749ce7d4ba57fcb2',
+    'sites': ((93, 28, 33, 'int', '0o700'),
+ (95, 28, 33, 'int', '0o700'),
+ (136, 75, 80, 'int', '0o700'),
+ (193, 59, 62, 'int', '470'),
+ (205, 55, 76, 'str', '"_mastermind_minimax"'),
+ (206, 25, 46, 'str', '"_mastermind_minimax"'),
+ (206, 59, 62, 'int', '470'),
+ (206, 75, 78, 'int', '470'),
+ (207, 24, 27, 'int', '450')),
+}
+
 # Exact lifecycle v2 postimage accepted by independent receipt5fdb0cd9.
 # These are its fixed Control/finite principal and socket/directory modes.
 REVIEWED_FILES['ops/executive_os/finite_service_lifecycle.py'] = {'sha256': 'a74afda6c98cac8e0ebc8a1403a6e828f200c826082c523502e52776f08ba539',
