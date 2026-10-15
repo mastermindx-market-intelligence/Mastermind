@@ -7,6 +7,8 @@ MCP SDK remain outside the Control process.
 from __future__ import annotations
 import json
 import os
+import hashlib
+import stat
 from pathlib import Path
 from common.executive_workspace_contract import _check_work_ref
 from control_plane.coo_principal_host import _refuse, _authority, validate_missions
@@ -16,12 +18,66 @@ from control_plane.executive_agent_capabilities import ExecutionCapabilityRegist
 DEFAULT_INSTALL_PATH = Path("/Library/Application Support/MastermindExecutive/config/executive-mcp.json")
 
 
+def _fixed_original_target_reader(path, source, initial, *, expected_uid):
+    """Bind the incumbent sealed target to this process and file generation.
+
+    This is deliberately not a rotatable registry. Replacement or ABA writes
+    require fresh host qualification, even when the JSON returns to old bytes.
+    Ordinary COO projection rotation continues through its existing loader.
+    """
+    from ops.executive_os import executive_mcp_entry as entry
+    target = entry.build_installed_principal_ruling_target(initial)
+    if target is None:
+        return None
+    pid = os.getpid()
+
+    def identity(info):
+        return (info.st_dev, info.st_ino, info.st_mode, info.st_uid,
+                info.st_gid)
+
+    def file_identity(info):
+        return (*identity(info), info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+    def observe():
+        if os.getpid() != pid or os.geteuid() != expected_uid:
+            _refuse()
+        entry.require_sealed_path(source, directory=True)
+        entry.require_sealed_path(path)
+        nodes = tuple(dict.fromkeys((source, *source.parents, *path.parents)))
+        namespace = tuple(identity(node.lstat()) for node in nodes)
+        with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC), "rb") as handle:
+            before = os.fstat(handle.fileno())
+            if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+                _refuse()
+            contents = handle.read()
+            after = os.fstat(handle.fileno())
+            entry.require_sealed_path(source, directory=True)
+            entry.require_sealed_path(path)
+            if (file_identity(before) != file_identity(after)
+                    or file_identity(after) != file_identity(path.lstat())
+                    or namespace != tuple(identity(node.lstat()) for node in nodes)):
+                _refuse()
+        current = entry.validate_document(json.loads(contents))
+        if current != initial or source.name != current["release_sha"]:
+            _refuse()
+        return namespace, file_identity(after), hashlib.sha256(contents).digest()
+
+    generation = observe()
+
+    def read():
+        if observe() != generation:
+            _refuse()
+        return target
+    return read
+
+
 class CooInstalledSource:
     def __init__(self, load_coo, registry_loader):
         if not callable(load_coo) or not callable(registry_loader):
             _refuse()
         self._load_coo = load_coo
         self._registry_loader = registry_loader
+        self._original_acceptance_target_reader = None
 
     @classmethod
     def from_path(cls, path, source, *, expected_uid):
@@ -38,7 +94,15 @@ class CooInstalledSource:
             policy = source / "config/executive_agent_capabilities.json"
             entry.require_sealed_path(policy)
             return ExecutionCapabilityRegistry.load(policy, source_root=source)
-        return cls(loader, registry)
+        owner = cls(loader, registry)
+        owner._original_acceptance_target_reader = _fixed_original_target_reader(
+            path, source, initial, expected_uid=expected_uid)
+        return owner
+
+    def original_acceptance_target(self):
+        """Only the genuine installed producer can supply this fixed target."""
+        reader = self._original_acceptance_target_reader
+        return reader() if reader is not None else None
 
     def snapshot(self, work_ref):
         from integrations.business_mcp_auth.contracts import load_resource_policy
