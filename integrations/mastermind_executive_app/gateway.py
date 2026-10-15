@@ -2496,7 +2496,11 @@ class CeoIngressReadGateway:
                     "MISSING_PRODUCER",
                     "runtime.acquisition.provenance",
                     "executive_runtime",
-                    "durable CEO-intent workstream join unavailable for included Jobs",
+                    # Match the incumbent bounded Fabric v2 producer's exact
+                    # MISSING_PRODUCER fact. Historical roots can legitimately
+                    # have no orchestration/CEO-intent join. Do not convert
+                    # this explicit PARTIAL truth into backend_unavailable.
+                    "durable orchestration-root workstream join unavailable for included Jobs",
                 )
             )
         if truncation.get("jobs") or truncation.get("attempt_job_ids"):
