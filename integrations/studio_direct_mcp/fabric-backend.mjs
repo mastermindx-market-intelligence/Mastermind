@@ -16,7 +16,7 @@ const ID_PATTERN = '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$';
 const ID_RE = new RegExp(ID_PATTERN);
 const MAX_RESPONSE_BYTES = 65536;
 const MAX_RETAINED_BYTES = 8_388_608; // incumbent fabric_task.py's bounded result ceiling
-const MAX_PAGE_BYTES = 8192; // base64 and envelope remain below the 16-KiB tool output budget
+const MAX_PAGE_BYTES = 4096; // base64 and envelope remain below the 16-KiB tool output budget
 const MAX_PACKET_BYTES = 32768;
 const MAX_CONTROLLERS = 512;
 // Capture and hash the actual adapter stdout on M2, before a process transport can

@@ -37,13 +37,13 @@ test('synthetic 100979- and 196317-byte retained results are paged exactly; part
    assert.equal(expected.length,total);
    let output=[], expectedDigest=null, next=0, pages=0;
    while(next<total) {
-    const page=unwrap(await f.call('fabric_result_page',{...identity,offset:next,max_bytes:8192,
+    const page=unwrap(await f.call('fabric_result_page',{...identity,offset:next,max_bytes:4096,
       ...(expectedDigest?{expected_response_sha256:expectedDigest}:{})}));
     assert.equal(page.error,undefined,JSON.stringify(page));
     assert.equal(page.root_id,identity.root_id);
     assert.equal(page.response_bytes,total);
     assert.equal(page.offset,next);
-    assert.ok(page.page_bytes>0 && page.page_bytes<=8192);
+    assert.ok(page.page_bytes>0 && page.page_bytes<=4096);
     assert.equal(page.response_sha256,digest(expected));
     expectedDigest=page.response_sha256;
     const bytes=Buffer.from(page.page_base64,'base64');
@@ -75,7 +75,7 @@ test('paged result parameters and root must be verified before adapter access', 
  const engine={async callTool(req){calls.push(req);
   return {content:[{type:'text',text:`Process started with PID 99 (shell: /bin/zsh)\nInitial output:\n${JSON.stringify({schema:'mastermind.fabric_task_status.v1',...identity,state:'TERMINAL',result_available:true,result_bytes:196317,accepted:false})}\nMMX_FABRIC_EXIT=0\n`}]};}};
  const f=createFabricFacade(engine,{adapterPath:'/fixed/fixture.py',python:'python3',workerCwd:'~'});
- for(const fields of [{offset:-1},{max_bytes:8193},{expected_response_sha256:'not-a-digest'}]){
+ for(const fields of [{offset:-1},{max_bytes:4097},{expected_response_sha256:'not-a-digest'}]){
   const out=unwrap(await f.call('fabric_result_page',{...identity,...fields}));
   assert.equal(out.error,'INVALID_ARGUMENT');
  }
@@ -98,19 +98,19 @@ test('synthetic changed retained bytes with the same length cannot extend delive
   }};
   const f=createFabricFacade(engine,{adapterPath:fixture,python:'python3',workerCwd:'~'});
   assert.equal(unwrap(await f.call('fabric_request',packet)).action,'fabric_request');
-  const page=unwrap(await f.call('fabric_result_page',{...identity,offset:0,max_bytes:8192}));
-  assert.equal(page.page_bytes,8192);
+  const page=unwrap(await f.call('fabric_result_page',{...identity,offset:0,max_bytes:4096}));
+  assert.equal(page.page_bytes,4096);
   const changed=Buffer.from('CHANGED!'.padEnd(100979,'R'));
   await writeFile(join(dir,identity.run_id+'.result'),changed);
-  const follow=unwrap(await f.call('fabric_result_page',{...identity,offset:8192,
-    max_bytes:8192,expected_response_sha256:page.response_sha256}));
+  const follow=unwrap(await f.call('fabric_result_page',{...identity,offset:4096,
+    max_bytes:4096,expected_response_sha256:page.response_sha256}));
   assert.equal(follow.error,'RESULT_CHANGED');
   const accept=unwrap(await f.call('fabric_accept',{...identity,by:'deterministic',
     expected_response_sha256:page.response_sha256,verification_summary:'Mutated fixture is not valid.'}));
   assert.equal(accept.error,'RESULT_NOT_FULLY_DELIVERED');
   changed[50]=0xff;
   await writeFile(join(dir,identity.run_id+'.result'),changed);
-  const badUtf8=unwrap(await f.call('fabric_result_page',{...identity,offset:0,max_bytes:8192}));
+  const badUtf8=unwrap(await f.call('fabric_result_page',{...identity,offset:0,max_bytes:4096}));
   assert.equal(badUtf8.error,'RESULT_NOT_UTF8');
  }finally{await rm(dir,{recursive:true,force:true});}
 });
