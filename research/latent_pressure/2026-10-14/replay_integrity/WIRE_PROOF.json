@@ -1,0 +1,10 @@
+{
+  "status": "PASSED_PYTHON_TO_JAVASCRIPT_JSON_ROUNDTRIP",
+  "node_version": "v26.5.0",
+  "exact_large_integer_clocks_and_sequences": true,
+  "completed_outcomes_match_committed_snapshot": true,
+  "lagged_coverage_not_extrapolated": true,
+  "forecast_probabilities_null": true,
+  "all_action_authorities_false": true,
+  "origin": "SYNTHETIC_FIXTURE_NOT_REAL_MARKET_VALIDATION"
+}

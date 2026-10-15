@@ -1,5 +1,9 @@
 # Latent Pressure & Predictive Rotation research
 
+## Latest continuation: recovery replay integrity
+
+See [replay_integrity/REPORT.md](replay_integrity/REPORT.md) and [replay_integrity/FRONTIER.md](replay_integrity/FRONTIER.md). The normalized synthetic recovery engine now uses transactional atomic observations, explicit coverage and lossless clock/identity output. 48 new tests, 34 affected regression tests, four CLI cutoffs and a JavaScript round-trip were verified. These are research correctness results, not validated market forecasts. The real DEEP+ mapping, prior worker-return verification and legacy timestamp-label impact audit remain unresolved at their recorded boundaries. Earlier research reports below are immutable phase evidence, not a claim that the broader early-warning capability is complete.
+
 **Research verdict: NO-GO for promotion of the tested daily proxies; CONDITIONAL for genuinely new information. No production changes or trade authority.**
 
 Start with [DECISION_DOSSIER.md](DECISION_DOSSIER.md), which covers all six commission deliverables and H1–H9. The expanded user-facing dossier contains the longer discussion and presentation; these research files own the executable pilot, safe aggregate evidence and durable decision.

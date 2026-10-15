@@ -10,7 +10,6 @@ from copy import deepcopy
 from dataclasses import dataclass, asdict
 from fractions import Fraction
 import math
-from statistics import median
 from typing import Any, Iterable
 
 MAX_SIGNED = 2**63 - 1
@@ -33,6 +32,22 @@ def _wire(value: Any) -> Any:
     if isinstance(value, (tuple, list)):
         return [_wire(v) for v in value]
     return value
+
+
+def median_duration_ns(values: list[int]) -> int | float | str | None:
+    """Exact median duration, including large half-nanosecond averages."""
+    if not values:
+        return None
+    a = sorted(values)
+    n = len(a)
+    if n % 2:
+        return a[n // 2]
+    twice = a[n // 2 - 1] + a[n // 2]
+    if twice % 2 == 0:
+        return twice // 2
+    if twice > 2 * MAX_JSON_SAFE:
+        return f'{twice // 2}.5'
+    return twice / 2
 
 
 @dataclass(frozen=True)
@@ -236,7 +251,7 @@ class RecoveryBook:
                 'past_recoveries': len(recovered),
                 'past_level_depletions': sum(x.state == 'LEVEL_DEPLETED' for x in done),
                 'right_censored': sum(x.state in ('HORIZON_ENDED_UNRECOVERED', 'SOURCE_GAP_CENSORED') for x in done),
-                'median_completed_recovery_ns': median([x.completed_ns - x.start_ns for x in recovered]) if recovered else None,
+                'median_completed_recovery_ns': median_duration_ns([x.completed_ns - x.start_ns for x in recovered]),
             }
         return _wire({
             'schema': 'research_snapshot_not_production', 'cutoff_ns': str(cutoff_ns),

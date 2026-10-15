@@ -5,8 +5,20 @@ Displayed-level depletion is not a trade-price breakdown. No real-book adapter.
 """
 from __future__ import annotations
 from dataclasses import dataclass
-import statistics
 from typing import Any, Iterable
+
+def _median_duration(values: list[int]):
+    # Integer order statistics; do not round a large half-integer through float.
+    if not values:
+        return None
+    a = sorted(values); n = len(a)
+    if n % 2:
+        return a[n // 2]
+    twice = a[n // 2 - 1] + a[n // 2]
+    if twice % 2 == 0:
+        return twice // 2
+    return f'{twice // 2}.5' if twice > 2 * (2**53 - 1) else twice / 2
+
 
 EVENTS = {'RECOVERED', 'LEVEL_DEPLETED'}
 CENSORS = {'PENDING', 'HORIZON_ENDED_UNRECOVERED', 'SOURCE_GAP_CENSORED'}
@@ -71,7 +83,7 @@ def competing_incidence(episodes: Iterable[Episode]) -> dict[str, Any]:
         'n': n, 'curve': curve,
         'terminal_estimate': {'recovery_incidence': recovered, 'depletion_incidence': depleted,
                               'unresolved_survival_estimate': survival},
-        'median_completed_recovery_ns': statistics.median(done) if done else None,
+        'median_completed_recovery_ns': _median_duration(done),
         'median_recovery_incidence_ns': crossing, 'followup_end_ns': max(groups),
         'observed_counts': {'recovered': len(done),
                             'depleted': sum(e.status == 'LEVEL_DEPLETED' for e in data),
