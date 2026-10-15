@@ -42,6 +42,18 @@ read-only preflight and emits an `INERT_PRODUCER_PLAN`. Only an explicit
 and attempt; these argument strings do not authenticate the caller or confer
 writer authority. The repository identity is fixed to the existing Macro repo.
 
+Run the file directly with the qualified interpreter, independent of the runner's
+working directory or `PYTHONPATH`:
+
+```sh
+"$PINNED_PYTHON" -I -B "$MASTERMIND_RELEASE/ops/research_producer/launch.py" \
+  --config "$OWNER_CONFIG" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT"
+```
+
+The standalone entry point adds only its own resolved release root before
+importing its verifier. This does not replace archive verification or host
+installation qualification. The same command remains inert without `--execute`.
+
 Before an effectful invocation, the existing owner must qualify protected source,
 dependencies, active/pending/manual writers, original unknown effects and the
 supported recovery path. Neither a ready plan nor the execute flag supplies
@@ -103,11 +115,14 @@ stream-captured digest, and created no public mirror. Reusing the original run
 was refused before child execution. This is actual launcher/CLI integration on
 the no-Store path; it does not prove a live generation or dependency installation.
 
-Normal Fabric review `rv-producer-launch-review-01a13301-r1` reserved MiniMax on
-Ubuntu2 but exhausted host lane admission before model execution, endingrc75.
-The same-run diagnostic was retained without acceptance or replacement. No
-independent reviewer ran. Protected merge, independent review, installed
-host/dependency proof and live writer adoption remain separate gates.
+Normal Fabric review `rv-producer-launch-review-01a13301-r1` exhausted host lane
+admission before model execution, endingrc75. A later admitted bounded review,
+`rv-producer-launch-review-01a13301-r2`, returned no actionable defect and was
+accepted after correcting report overstatements about run-ID bounds, same-owner
+filesystem races and reservation error handling. It reviewed the original module
+placement. The relocation and standalone bootstrap are root-verified deltas;
+they are not represented as independently reviewed final bytes. Protected merge,
+installed host/dependency proof and live writer adoption remain separate gates.
 
 
 ## Qualified offline dependency candidate
@@ -146,5 +161,15 @@ the manifest while preserving the default reader-only archive. The original
 no-write fence is unchanged. Focused packaging and actual child-process checks
 cover the new import and archive paths: 114 affected cases passed in the
 qualified Python 3.12 environment, including the unchanged static fence. Earlier
-no-Store integration evidence
-applies to the prior module path and is not claimed as proof of the relocation.
+no-Store integration evidence applies to the prior module path. Separate exact
+44f1c6b relocation probes verified the actual CLI's no-Store refusal, a four-member
+COMPLETE generation through actual boto3 against a loopback synthetic S3 service,
+and refusal after a lost conditional-write acknowledgement. Those probes do not
+prove live R2 or installed writer admission.
+
+The direct `-I -B` entry point initially failed with `ModuleNotFoundError` because
+the earlier probes supplied its import root. Three causal standalone cases failed
+on44f1c6b. After the bounded bootstrap repair, all36 launcher/static-fence cases
+pass. From an unrelated directory with a hostile `PYTHONPATH`, the actual file
+performs inert preflight, runs its synthetic child, and rejects changed producer
+source before reservation. No foreign module executes and no bytecode is written.

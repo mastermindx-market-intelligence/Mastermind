@@ -3,6 +3,8 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 
@@ -72,6 +74,46 @@ def test_default_preflight_is_readonly_and_not_admission(tmp_path, monkeypatch, 
     assert result["state"] == "INERT_PRODUCER_PLAN" and result["writer_admission"] is False
     assert set(tmp_path.rglob("*")) == before
     assert str(tmp_path) not in json.dumps(result)
+
+
+@pytest.mark.parametrize("mode", ["preflight", "execute", "changed_source"])
+def test_standalone_isolated_entry_uses_own_release_from_foreign_cwd(tmp_path, mode):
+    config = fixture(tmp_path)
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps(config))
+    config_path.chmod(0o600)
+    foreign = tmp_path / "foreign-cwd"
+    foreign.mkdir()
+    hostile = foreign / "integrations"
+    hostile.mkdir()
+    (hostile / "__init__.py").write_text("raise RuntimeError('FOREIGN_IMPORT_EXECUTED')\n")
+    environment = dict(os.environ, PYTHONPATH=str(foreign))
+    environment.pop("RESEARCH_LOCAL_STORE", None)
+    entry = Path(config["mastermind_release"]) / launch.MODULE
+    if mode == "changed_source":
+        (Path(config["macro_release"]) / "scripts/ingest_research.py").write_text(
+            "raise RuntimeError('CHANGED_PRODUCER_EXECUTED')\n")
+    command = [sys.executable, "-I", "-B", str(entry), "--config", str(config_path),
+               "--run-id", "456", "--attempt", "1"]
+    if mode != "preflight":
+        command.append("--execute")
+    before = set(tmp_path.rglob("*"))
+    result = subprocess.run(command, cwd=foreign, env=environment, capture_output=True,
+                            text=True, timeout=30)
+    assert result.stderr == ""
+    body = json.loads(result.stdout)
+    assert "PRIVATE_SYNTHETIC_BODY" not in result.stdout
+    assert "FOREIGN_IMPORT_EXECUTED" not in result.stdout
+    if mode == "execute":
+        assert result.returncode == 0 and body["state"] == "ORIGINAL_PROCESS_EXITED"
+        assert body["original_capture_sha256"] == "c" * 64
+        assert body["publication_complete"] is None
+        assert (Path(config["retention_root"]) / "macro-456-1/observed.json").is_file()
+    else:
+        assert set(tmp_path.rglob("*")) == before
+        assert result.returncode == (1 if mode == "changed_source" else 0)
+        assert body["state"] == ("REFUSED" if mode == "changed_source" else "INERT_PRODUCER_PLAN")
+    assert not list(tmp_path.rglob("*.pyc"))
 
 
 @pytest.mark.parametrize("run,attempt", [("../x", "1"), ("1", "0"), (" 1", "1"),

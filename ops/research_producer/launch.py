@@ -18,6 +18,12 @@ import stat
 import subprocess
 import sys
 
+# Direct ``python -I -B /release/ops/research_producer/launch.py`` has no
+# checkout/PYTHONPATH import root. Bootstrap only this entry point's release;
+# preflight still verifies the configured archives before reserving a run.
+if __name__ == "__main__" and not __package__:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
 from integrations.research_read_mcp.release_identity import verify_archive_release
 from integrations.research_read_mcp.runtime import RuntimeRefused, _json, read_secure_json
 
