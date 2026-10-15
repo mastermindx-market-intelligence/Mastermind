@@ -202,3 +202,42 @@ def test_owner_only_reports_receipt_even_if_source_hash_shape_passes():
     assert out['owner_verified_by_this_helper'] is False
     assert out['source_owner_identity_admitted'] is False
     assert out['status'] == 'IDENTITY_MATCHED_OWNER_READER_RECEIPT_DECLARED'
+
+def test_later_owner_generation_cannot_be_recast_as_historical_event_evidence():
+    p = _packet('googl_2026q2')
+    r = bind_native_event(p, _owner(p))
+    assert r['owner_generation_postdates_research_asof'] is True
+    assert r['historical_event_availability_verified'] is False
+    assert r['source_owner_identity_admitted'] is False
+
+
+def test_older_owner_generation_still_does_not_grant_historical_availability():
+    p = _packet()
+    owner = _owner(p)
+    owner['workspace']['generated_at'] = '2026-07-01T20:00:00Z'
+    r = bind_native_event(p, owner)
+    assert r['owner_generation_postdates_research_asof'] is False
+    assert r['historical_event_availability_verified'] is False
+
+
+def test_without_research_cutoff_owner_availability_stays_unknown():
+    p = _packet()
+    p.pop('evaluated_asof_utc')
+    r = bind_native_event(p, _owner(p))
+    assert r['owner_generation_postdates_research_asof'] is None
+    assert r['historical_event_availability_verified'] is False
+
+
+@pytest.mark.parametrize('clock', ['2026-07-01T10:00:00', 'invalid', False])
+def test_invalid_asof_cannot_create_a_historical_owner_join(clock):
+    p = _packet()
+    p['evaluated_asof_utc'] = clock
+    with pytest.raises(NativeEventBindingError, match='RESEARCH_ASOF_UTC_INVALID'):
+        bind_native_event(p, _owner(_packet()))
+
+
+def test_unpublished_owner_is_not_historical_proof():
+    p = _packet()
+    unavailable = bind_native_event(p, {'available': False})
+    assert unavailable['historical_event_availability_verified'] is False
+    assert unavailable['owner_generation_postdates_research_asof'] is None

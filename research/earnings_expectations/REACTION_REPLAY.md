@@ -49,7 +49,7 @@ This is a **field-shape illustration**, deliberately too short to calculate a re
 
 ## Verified tests
 
-**223/223 offline tests passed** with Python 3.13 / pytest 9. Code and tests were verified by Git blob against tested local sources. Tests include after-close, premarket, intraday, weekend, UTC winter/summer clocks, missing benchmark, cutoff leakage, unsupported sources, and refusal to accept an SEC-only clock. Synthetic structural fixtures are supplemented with **nine actual retrospective adjusted-close source packets**, independently checked for arithmetic; this does not prove data licensing, current vendor freshness, a live backtest, causal attribution, or Terminal operation.
+**230/230 offline tests passed** with Python 3.13 / pytest 9. Code and tests were verified by Git blob against tested local sources. Tests include after-close, premarket, intraday, weekend, UTC winter/summer clocks, missing benchmark, cutoff leakage, unsupported sources, and refusal to accept an SEC-only clock. Synthetic structural fixtures are supplemented with **nine actual retrospective adjusted-close source packets**, independently checked for arithmetic; this does not prove data licensing, current vendor freshness, a live backtest, causal attribution, or Terminal operation.
 
 ## Nine SEC timestamps — not first-publication proof
 
@@ -99,7 +99,7 @@ The read-only `replay_casebook.py` consumer now joins the two Amazon first-party
 
 `media_reported_expectations.json` holds seven small, properly cited numerical excerpts from dated financial reporting (Reuters/LSEG or Visible Alpha), matched to seven of the nine underlying source events; the other two remain absent, not zero. The separate S&P Global/Visible Alpha July 22 Alphabet Q2 preview indicates Q2 revenue consensus increased **$113.0B in February → $117.2B by July**, while EPS consensus fell **$3.43 → $3.32** (the older EPS vintage date is unspecified). Article publication timing or contributor-level vintages are not established as pre-event machine observations.
 
-`replay_casebook.py --format json|markdown` now renders three distinct channels in one evidence response: (1) nine observed next-session adjusted returns; (2) two issuer management-guidance/actual comparisons; (3) seven article-quoted expected-versus-reported cloud-growth comparisons and one source-reported multi-metric revision narrative. The media channel is explicitly `PUBLIC_ARTICLE_WITNESSES_ONLY_NOT_ADMITTED_AS_PIT`, every `consensus_vintage_admitted` is `false`, and exact source links are included. It rejects wrong source authority, duplicate/mismatched fiscal targets, fake pre-event estimate timestamps and preview PIT promotion. **223/223 local research tests passed and the existing CI-discovery bridge exercised the full suite locally.** The article data cannot support backtest forecasting, redistribution beyond lawful quoted numerical facts or new market-belief authority without incumbent source acceptance.
+`replay_casebook.py --format json|markdown` now renders three distinct channels in one evidence response: (1) nine observed next-session adjusted returns; (2) two issuer management-guidance/actual comparisons; (3) seven article-quoted expected-versus-reported cloud-growth comparisons and one source-reported multi-metric revision narrative. The media channel is explicitly `PUBLIC_ARTICLE_WITNESSES_ONLY_NOT_ADMITTED_AS_PIT`, every `consensus_vintage_admitted` is `false`, and exact source links are included. It rejects wrong source authority, duplicate/mismatched fiscal targets, fake pre-event estimate timestamps and preview PIT promotion. **230/230 local research tests passed and the existing CI-discovery bridge exercised the full suite locally.** The article data cannot support backtest forecasting, redistribution beyond lawful quoted numerical facts or new market-belief authority without incumbent source acceptance.
 
 ## Read-only bridge to the incumbent EXP-1/K3E owner
 
@@ -131,7 +131,7 @@ python3 replay_casebook.py --format json --tiingo-manifest /path/to/owner_materi
 python3 replay_casebook.py --format markdown --tiingo-manifest /path/to/owner_materialization_receipt.json
 ```
 
-`test_tiingo_manifest_inspection.py` covers false/malformed/missing flags, a hypothetical three-true source receipt without owner acceptance, no-price-export guarantees and both casebook output formats. The CI bridge includes it. **223/223 research tests passed locally on the isolated M2 Studio checkout** after this addition. This is NOT 132 live-market regression tests and is not a source-license certification.
+`test_tiingo_manifest_inspection.py` covers false/malformed/missing flags, a hypothetical three-true source receipt without owner acceptance, no-price-export guarantees and both casebook output formats. The CI bridge includes it. **230/230 research tests passed locally on the isolated M2 Studio checkout** after this addition. This is NOT 132 live-market regression tests and is not a source-license certification.
 
 ## Research-ready pre-event windows (source sessions, not market calendar authority)
 
@@ -145,7 +145,7 @@ python3 replay_casebook.py --format markdown --tiingo-manifest /path/to/owner_ma
 
 Sources: [Alphabet Q4 SEC release](https://www.sec.gov/Archives/edgar/data/1652044/000165204426000012/googexhibit991q42025.htm), [Alphabet Q1 call reported transcript](https://www.fool.com/earnings/call-transcripts/2026/04/29/alphabet-googl-q1-2026-earnings-call-transcript/), [Alphabet Q2 call reported transcript](https://stockanalysis.com/stocks/googl/transcripts/657320-q2-2026/). Separate earnings-press-release versus earnings-call publication clocks remain typed and unknown to the second.
 
-With these two new research families, **223/223 local tests pass**, and the repository's `tests/test_earnings_reaction_research.py` CI bridge runs all twelve in-place suites without introducing a second test scheduler. Hosted CI/review/production adoption are separate proof obligations.
+With these two new research families, **230/230 local tests pass**, and the repository's `tests/test_earnings_reaction_research.py` CI bridge runs all twelve in-place suites without introducing a second test scheduler. Hosted CI/review/production adoption are separate proof obligations.
 
 ## As-of price visibility: post-cutoff mutations cannot rewrite an earlier replay
 
@@ -153,7 +153,7 @@ Before the October 14 continuation, the replay checked *all* supplied adjusted-c
 
 `reaction_replay._bars` now accepts the externally supplied session-calendar close times and `evaluated_asof_utc`. It excludes bars whose regular-session close exceeds that cutoff **before** inspecting their adjusted price values or duplicate records. An unfamiliar bar dated strictly after the cutoff's New York calendar date is likewise ignored; an unmatched past bar remains a hard `BAR_OUTSIDE_EXCHANGE_SESSIONS` refusal. Missingness and invalidity for *observable* sessions are still refused or reported by the original logic. No earlier as-of result can be changed by merely appending an invalid, duplicate or arbitrarily high price to an unobserved future session.
 
-The new `test_future_bar_cutoff.py` adds 21 adversarial regression cases. Their original run failed in 17 cases, demonstrating real code exposure, then passed after the fix; the **223/223 complete offline research suite** and existing `tests/test_earnings_reaction_research.py` CI bridge passed on the isolated M2 worktree. The nine checked-in two-day public casebook packets produced byte-equivalent semantic results before versus after the change.
+The new `test_future_bar_cutoff.py` adds 21 adversarial regression cases. Their original run failed in 17 cases, demonstrating real code exposure, then passed after the fix; the **230/230 complete offline research suite** and existing `tests/test_earnings_reaction_research.py` CI bridge passed on the isolated M2 worktree. The nine checked-in two-day public casebook packets produced byte-equivalent semantic results before versus after the change.
 
 **Scope:** as-of close visibility is not a license or a guarantee that adjusted prices would have been historically knowable under later dividends/splits. The supplied session calendar is still externally unverified; actual analyst consensus and Tiingo backtest rights are still not admitted. This is a research-label integrity repair, not an alpha validation or live Terminal change.
 
@@ -176,10 +176,12 @@ python3 replay_casebook.py --format json --native-event-ref 'earnings:CIK:165204
 
 A missing event selection, ambiguous/missing cohort event, or mismatched owner payload is a typed refusal, not a best-effort ticker join. `native_event_workspace_binding` is `null` if no owner document is provided. The nine casebook events, source rights, performance labels and existing non-admitted analyst baseline remain unchanged. No live published event workspace was successfully read through the current sparse Macro checkout in this phase; consequently native end-user publication proof remains **unproven**.
 
-`test_event_workspace_binding.py` and `test_event_workspace_consumer.py` add 45 synthetic/contract tests (issuer/quarter collisions, fiscal prefix, dual-class listing, bad generation, non-HTTPS/altered receipt paths, forbidden Prophet authority, wrong event and missing owner). The CI bridge exercises all twelve research suites. **223/223 total offline research tests passed** on the isolated M2 Studio worktree.
+`test_event_workspace_binding.py` and `test_event_workspace_consumer.py` add 52 synthetic/contract tests (issuer/quarter collisions, fiscal prefix, dual-class listing, bad generation, non-HTTPS/altered receipt paths, forbidden Prophet authority, wrong event and missing owner). The CI bridge exercises all twelve research suites. **230/230 total offline research tests passed** on the isolated M2 Studio worktree.
 
 ### One bounded live-public identity binding check
 
 In a separate October 14 read-only network probe, the public Earnings OS AAPL `event_workspace_manifest.v3` marker was compared to its immutable generation manifest, and the exact AAPL event object was byte-size/SHA-256 checked against its manifest file entry. A minimal research identity packet (`CIK:320193`, `2026Q3`, `AAPL`) was then bound to that verified source payload using `bind_native_event`: status `IDENTITY_MATCHED_OWNER_READER_RECEIPT_DECLARED`, canonical `evt_cik0000320193_2026q3_results`, generation `6ab0665a0783750f665b1b25`. The *probe script* checked bytes, but the offline binder itself correctly continued to set `owner_verified_by_this_helper=false` and `source_owner_identity_admitted=false`. No source owner permission, product install or trade authority was added.
 
 The same immutable generation contains no GOOGL/MSFT/AMZN workspace keys; their public `/api/event-workspace/{ticker}` current-glance queries returned explicit `event_workspace_not_covered` (404). Therefore no live research-target binding or GOOGL Terminal workflow is claimed. This evidence is a bounded owner-compatibility proof, not end-to-end product acceptance.
+
+**Historical owner generation distinction:** the canonical identity adapter now separately reports `historical_event_availability_verified=false` in all cases, and `owner_generation_postdates_research_asof=true|false|null` when an as-of clock can be compared. Even if the current immutable owner generation predates a requested backtest cutoff, the existence of its current marker does *not* verify its historical public availability at that cutoff. Seven new adversarial clock/refusal fixtures extend the offline suite to **230/230** local tests. This prevents a valid current event identity from silently becoming a point-in-time research feature.

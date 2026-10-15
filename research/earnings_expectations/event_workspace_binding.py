@@ -7,7 +7,7 @@ It never publishes a new event, writes a crosswalk or grants prediction rights.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 import re
 from urllib.parse import urlsplit
 
@@ -75,6 +75,18 @@ def bind_native_event(packet: dict, native_read: dict) -> dict:
     candidate = candidate_identity(packet)
     if not _EVENT_RE.fullmatch(candidate["candidate_event_id"]):
         raise NativeEventBindingError("INVALID_CANONICAL_EVENT_CANDIDATE")
+    cutoff = packet.get("evaluated_asof_utc")
+    research_asof = None
+    if cutoff is not None:
+        if not isinstance(cutoff, str):
+            raise NativeEventBindingError("RESEARCH_ASOF_UTC_INVALID")
+        try:
+            research_asof = datetime.fromisoformat(cutoff.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise NativeEventBindingError("RESEARCH_ASOF_UTC_INVALID") from exc
+        if research_asof.tzinfo is None or research_asof.utcoffset() is None:
+            raise NativeEventBindingError("RESEARCH_ASOF_UTC_INVALID")
+        research_asof = research_asof.astimezone(timezone.utc)
     if not isinstance(native_read, dict):
         raise NativeEventBindingError("NATIVE_OWNER_READER_ENVELOPE_REQUIRED")
     if native_read.get("available") is False:
@@ -84,6 +96,8 @@ def bind_native_event(packet: dict, native_read: dict) -> dict:
             "research_event_ref": candidate["research_event_ref"],
             "owner_verified_by_this_helper": False,
             "source_owner_identity_admitted": False,
+            "historical_event_availability_verified": False,
+            "owner_generation_postdates_research_asof": None,
             "authority": "RESEARCH_DISPLAY_ONLY_NO_TRADING",
         }
     if (native_read.get("available") is not True
@@ -162,6 +176,11 @@ def bind_native_event(packet: dict, native_read: dict) -> dict:
         "owner_marker_sha256": receipt["marker_sha256"],
         "owner_verified_by_this_helper": False,
         "source_owner_identity_admitted": False,
+        "historical_event_availability_verified": False,
+        "owner_generation_postdates_research_asof": (
+            clock.astimezone(timezone.utc) > research_asof
+            if research_asof is not None else None
+        ),
         "provenance_note": (
             "Reader envelope claims canonical marker/hash verification, but this "
             "offline adapter cannot independently re-fetch or verify the bytes."
