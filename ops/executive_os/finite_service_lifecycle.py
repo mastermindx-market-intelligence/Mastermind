@@ -401,7 +401,8 @@ class ProductionHost:
             release_tree=document['tree_sha'], release_manifest_sha256=self.manifest_digest,
             python_binary=PYTHON, host_ref=physical.host_ref, model_class='routine',
             execution_profile_digest=profile.profile_digest, routing_root_id=ROOT_ID,
-            routing_parent_run_id=ROOT_ID, max_turns=2, capacity_capability_id=worker['capacity_capability_id'])
+            routing_parent_run_id=ROOT_ID, max_turns=2, capacity_capability_id=worker['capacity_capability_id'],
+            native_capacity_enrollment=worker.get('native_capacity_enrollment'))
         if artifacts != expected:
             raise LifecycleError('canonical_definition_changed')
         from ops.executive_os.attended_worker_definition import build_finite_control_delta

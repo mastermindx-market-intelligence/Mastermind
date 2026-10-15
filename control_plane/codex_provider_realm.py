@@ -903,6 +903,57 @@ class SubscriptionRealmOwner:
     _config_sha256: str
     _seal: object
 
+    def observe_capacity_enrollment(self) -> dict[str, Any]:
+        """Bind the current finite MiniMax realm to its actual source registration.
+
+        This opt-in observation owns no claim, availability, auth-health verdict
+        or credential enrollment. Existing observe() still enforces the worker
+        principal, root config, private credential metadata and attested binary.
+        Current source and realm are both revalidated; a serialized receipt alone
+        is never accepted as a current owner or a launch proof.
+        """
+        from control_plane.executive_host_pressure import HOST_REF_RE
+        from ops.executive_os.capacity_source_contract import acquire_native_registration
+
+        if self._seal is not _SUBSCRIPTION_REALM_OWNER_SEAL:
+            _native_refuse()
+        config = _native_read_config(self._config_path, self._config_sha256)
+        stanza = config.get("native_capacity_enrollment")
+        fields = {"schema_version", "host_ref", "os_principal_ref", "config_custody_ref",
+                  "enrollment_state", "registration_source"}
+        if (type(stanza) is not dict or set(stanza) != fields
+                or stanza["schema_version"] != "mastermind.native_subscription_capacity_enrollment/v1"
+                or stanza["enrollment_state"] != "enrolled"
+                or config.get("worker_id") != "minimax-finite-01"
+                or config.get("harness_binding_id") != "minimax-token-plan.claude-code-anthropic"):
+            _native_refuse()
+        for key, pattern in (("host_ref", HOST_REF_RE), ("os_principal_ref", _NATIVE_PRINCIPAL),
+                             ("config_custody_ref", _NATIVE_CUSTODY)):
+            if type(stanza[key]) is not str or pattern.fullmatch(stanza[key]) is None:
+                _native_refuse()
+        registration = acquire_native_registration(self)
+        if (registration["provider"] != "minimax" or registration["credential_kind"] != "api_key"):
+            _native_refuse()
+        observed = self.observe()
+        value = {
+            "schema": "mastermind.provider_realm_enrollment/v2",
+            "capacity_capability_id": registration["capacity_capability_id"],
+            "capability_generation": registration["capability_generation"],
+            "realm_generation": observed["realm_generation"],
+            "provider_family": "minimax", "product": "claude-code", "execution_surface": "native_cli",
+            "auth_family": "minimax_subscription_api_key",
+            **{key: stanza[key] for key in ("host_ref", "os_principal_ref", "config_custody_ref", "enrollment_state")},
+            "registration_receipt_digest": registration["registration_receipt_digest"],
+            "source_receipt_digest": registration["source_receipt_digest"],
+            "receipt_id": "realm-" + hashlib.sha256((self._config_sha256 + registration["registration_receipt_digest"]).encode()).hexdigest(),
+        }
+        value["receipt_digest"] = hashlib.sha256(json.dumps(value, sort_keys=True,
+            separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode()).hexdigest()
+        if (acquire_native_registration(self) != registration or self.observe() != observed
+                or _native_read_config(self._config_path, self._config_sha256) != config):
+            _native_refuse()
+        return value
+
     def observe(self) -> dict[str, Any]:
         from control_plane.subscription_catalog import get_binding, compose_catalog_digest
         from control_plane.codex_worker import load_codex_attestation_receipt, CodexWorkerError
