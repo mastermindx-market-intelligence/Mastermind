@@ -67,13 +67,13 @@ def test_is_material_tripwire():
 
 
 def test_tape_degrades_offline():
-    # conftest stubs yfinance off → the tape degrades to empty groups + a valid calm read, never raises
+    # Offline data is UNKNOWN, never a reassuring calm signal; no network required.
     from data_layer import overnight
     overnight.clear_cache()
     t = overnight.tape(force=True)
     assert t["live"] is False
     assert isinstance(t["groups"], dict) and "us_futures" in t["groups"]
-    assert t["risk"]["state"] == "calm"
+    assert t["risk"]["state"] == "unknown"
     assert "Overnight tape" in overnight.brief(t)
 
 

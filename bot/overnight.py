@@ -112,6 +112,13 @@ def watch(pid: str, asof: str | None = None, *, force: bool = False) -> dict:
         t = overnight.tape(force=force)
         out["overnight_risk"] = (t.get("risk") or {}).get("state")
         out["tape_brief"] = overnight.brief(t)
+        # An absent/unsupported risk observation is NOT a calm market vote.
+        # Even an operator's forced reconsideration must not present an empty
+        # or crypto-only feed as a "LIVE overnight tape has moved materially".
+        # Preserve the existing queued paper target; neither submit nor spend
+        # a model turn when the risk signals are unqualified.
+        if t.get("live") is False or out["overnight_risk"] not in ("calm", "elevated", "stressed"):
+            return {**out, "skipped": "tape_unavailable"}
         if not (force or overnight.is_material(t)):
             return {**out, "skipped": "tape_calm"}          # deterministic tripwire → free, no LLM
         # MATERIAL overnight move → re-prompt the Brain (Opus) to refine the queued target
