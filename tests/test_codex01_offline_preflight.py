@@ -26,7 +26,8 @@ def test_policy_keeps_deny_default_and_no_network_or_ambient_home():
 
 
 @pytest.mark.parametrize("bad", [
-    Path("/"), Path("relative"),
+    Path("/"), Path("relative"), Path("/private/tmp/unowned-workspace"),
+    Path("/Users/chriswong/mmx_codex01_offline_fake"),
 ])
 def test_invalid_scratch_refused(bad):
     with pytest.raises(ValueError):
@@ -64,6 +65,17 @@ def test_credential_free_child_environment_has_no_ambient_authority(monkeypatch)
     assert env["HOME"] == "/private/tmp/test-isolation/home"
     assert env["CODEX_HOME"] == "/private/tmp/test-isolation/codex-home"
     assert env["PYTHONNOUSERSITE"] == "1"
+
+
+def test_negative_write_probe_cannot_create_a_host_file_even_if_denial_fails():
+    source = Path(subject.__file__).read_text(encoding="utf-8")
+    probe = source.split('checks["outside_write_denied"] = _probe(', 1)[1].split(
+        'checks["loopback_network_denied"]', 1
+    )[0]
+    assert "/dev/null" in probe and "os.O_WRONLY" in probe
+    assert all(word not in probe for word in (
+        "os.O_CREAT", "os.O_TRUNC", "os.write", ".write_text(", "os.remove("
+    ))
 
 
 def test_no_generic_command_or_candidate_invocation_interface():

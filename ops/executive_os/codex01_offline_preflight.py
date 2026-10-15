@@ -177,9 +177,9 @@ def preflight() -> dict[str, object]:
             (scratch / name).mkdir(mode=0o700)
         candidate = scratch / "candidate"
         candidate.write_text("public_test_only", encoding="ascii")
-        outside = scratch.parent / (scratch.name + "-blocked")
-        # No outside file is created. This test attempts a write and checks
-        # errno while the file-write policy allows only the private scratch.
+        # All probes stay inert even if the sandbox unexpectedly fails open.
+        # A writable open on /dev/null requires write authority, but cannot
+        # create a host file or change persistent state; never write to it.
         profile = scratch / "sandbox.sb"
         profile.write_text(policy(scratch), encoding="utf-8")
         profile.chmod(0o600)
@@ -204,9 +204,8 @@ def preflight() -> dict[str, object]:
                 "\ntry: os.listdir(p)\nexcept OSError as x: e=x.errno"
                 "\nprint('DENIED' if e==errno.EPERM else 'FAIL')")
         checks["outside_write_denied"] = _probe(profile, scratch,
-            f"import os,errno; p={str(outside)!r};"
-            "e=0;"
-            "\ntry: os.open(p,os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)"
+            "import os,errno; e=0;"
+            "\ntry: fd=os.open('/dev/null',os.O_WRONLY);os.close(fd)"
             "\nexcept OSError as x: e=x.errno"
             "\nprint('DENIED' if e==errno.EPERM else 'FAIL')")
         checks["loopback_network_denied"] = _probe(profile, scratch,
