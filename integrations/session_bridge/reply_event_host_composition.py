@@ -39,16 +39,23 @@ def _provisioned_cipher(path, key_id, *, control_uid):
         raise ValueError("existing Executive control identity required")
     path = Path(path)
     require_sealed_path(path.parent, directory=True)
+    from control_plane.fs_security import has_macos_acl
+    for parent in (path.parent,*path.parent.parents):
+        if has_macos_acl(parent,expected_identity=parent.lstat()):
+            raise ValueError("Executive key parent ACL custody unavailable")
     fd = os.open(path,os.O_RDONLY | os.O_NOFOLLOW)
     try:
         before = os.fstat(fd)
         if (before.st_uid != control_uid or not stat.S_ISREG(before.st_mode) or before.st_nlink != 1
                 or stat.S_IMODE(before.st_mode) != 0o600 or before.st_size != 32):
             raise ValueError("provisioned Executive key custody unavailable")
+        if has_macos_acl(path,expected_identity=before,descriptor=fd):
+            raise ValueError("Executive key ACL custody unavailable")
         key = os.read(fd,33)
         after = os.fstat(fd)
-        if (len(key) != 32 or (before.st_dev,before.st_ino,before.st_mtime_ns,before.st_size) !=
-                (after.st_dev,after.st_ino,after.st_mtime_ns,after.st_size)):
+        if (len(key) != 32 or (before.st_dev,before.st_ino,before.st_uid,before.st_gid,before.st_mode,before.st_ctime_ns,before.st_mtime_ns,before.st_size) !=
+                (after.st_dev,after.st_ino,after.st_uid,after.st_gid,after.st_mode,after.st_ctime_ns,after.st_mtime_ns,after.st_size)
+                or has_macos_acl(path,expected_identity=after,descriptor=fd)):
             raise ValueError("provisioned Executive key changed")
         return ExecutiveReplyCipher(key_id,key)
     finally:

@@ -1837,6 +1837,7 @@ class _ConfigObservation:
     release: str
     identity: tuple
     ancestor_identities: tuple
+    control_aead: tuple | None = None
 
 
 def _require_document_text(document: dict, name: str, *, code: str) -> str:
@@ -1896,9 +1897,20 @@ def _verify_control_projection(budget: _Budget) -> _ConfigObservation:
         "python_runtime_provenance_digest",
         code="SERVICE_PYTHON_PROVENANCE_MISSING",
     )
+    control_aead = None
+    event_config = document.get("reply_events")
+    if type(event_config) is dict and event_config.get("armed") is True:
+        from ops.executive_os.control_aead_profile import observe_if_enrolled
+        try:
+            observed = observe_if_enrolled(document,_release_directory(release))
+            control_aead = tuple(sorted(observed.items()))
+        except Exception:
+            raise _refuse("SERVICE_CONTROL_AEAD_CLOSURE_REFUSED") from None
+        _deadline_fence(budget)
     return _ConfigObservation(
         digest=hashlib.sha256(raw).hexdigest(),
         provenance_digest=projection,
+        control_aead=control_aead,
         release=release,
         identity=_object_identity(identity),
         ancestor_identities=_joined(_observe_ancestors(_CONTROL_CONFIG_PATH, budget), ancestors, "SERVICE_ANCESTOR_CHANGED"),

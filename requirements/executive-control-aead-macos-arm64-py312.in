@@ -1,0 +1,2 @@
+# Event-only AEAD dependency closure; no MCP/network SDK or account credentials.
+cryptography==50.0.1
