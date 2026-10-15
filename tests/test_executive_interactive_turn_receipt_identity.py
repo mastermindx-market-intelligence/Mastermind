@@ -57,6 +57,27 @@ def _applied():
                 turn_id=TURN,provider_native_turn_id="native-1",acknowledged=True)
 
 
+def _candidate():
+    return {
+        "schema_version": "mastermind.operator_harness_candidate_evidence/v1",
+        "turn": {
+            "turn_id": TURN, "session_epoch_id": EPOCH,
+            "process_generation_id": GEN, "attempt_id": ATT,
+        },
+        "candidate": {
+            "attempt_id": ATT, "session_epoch_id": EPOCH,
+            "process_generation_id": GEN, "artifact_digest": None,
+            "summary": "ok", "complete_job_permitted": False,
+        },
+        "events": [],
+        "cursor": {
+            "attempt_id": ATT, "session_epoch_id": EPOCH,
+            "process_generation_id": GEN, "local_sequence": 1,
+            "turn_id": TURN, "provider_replay_cursor": None,
+        },
+    }
+
+
 def _write(db,kind,payload,*,op=OP,command=None):
     oid=OperationId(op)
     suffix = {
@@ -170,9 +191,9 @@ def test_completed_acknowledged_turn_with_real_candidate_is_not_in_flight():
         _write(db,"OPERATOR_OPERATION_APPLIED",_applied())
         db.execute(
            "INSERT INTO events VALUES(?,?,?,?,?,?,?,?,?,?)",
-           ("OHF_CANDIDATE_RESULT_RECORDED","operator_turn",TURN,"candidate",
-            "supervisor",JOB,ATT,WORKER,QUOTA,
-            json.dumps({"turn":{"turn_id":TURN}})))
+           ("OHF_CANDIDATE_RESULT_RECORDED","operator_turn",TURN,
+            f"ohf-candidate:{TURN}","supervisor",JOB,ATT,WORKER,QUOTA,
+            json.dumps(_candidate(),sort_keys=True,separators=(",",":"))))
         assert _read(db) is None
     finally:db.close()
 

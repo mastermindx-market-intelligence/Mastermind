@@ -60,7 +60,8 @@ def _fixture(*, intent_command=OP, applied_command=OP + ":applied"):
         );
         CREATE TABLE events(
             event_type TEXT,aggregate_type TEXT,aggregate_id TEXT,command_id TEXT,
-            actor TEXT,attempt_id TEXT,payload_json TEXT,worker_id TEXT
+            actor TEXT,job_id TEXT,attempt_id TEXT,worker_id TEXT,
+            quota_class TEXT,payload_json TEXT
         );
     """)
     con.execute("INSERT INTO attempts VALUES(?,?,?,?,?,?,?,?)",
@@ -99,10 +100,10 @@ def _fixture(*, intent_command=OP, applied_command=OP + ":applied"):
     )
     for event_type, command, payload in payloads:
         con.execute(
-            "INSERT INTO events VALUES(?,?,?,?,?,?,?,?)",
+            "INSERT INTO events VALUES(?,?,?,?,?,?,?,?,?,?)",
             (event_type, "operator_operation", OP, command, "supervisor",
-             ATT, json.dumps(payload, sort_keys=True, separators=(",", ":")),
-             WORKER),
+             JOB, ATT, WORKER, "default",
+             json.dumps(payload, sort_keys=True, separators=(",", ":"))),
         )
     profile = SimpleNamespace(
         job_id=JOB, attempt_id=ATT, session_epoch_id=EPOCH,
