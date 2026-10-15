@@ -18,7 +18,7 @@ from collections.abc import Mapping
 from ops.executive_os import autonomy_control as owner
 from ops.executive_os.attended_worker_definition import build_finite_control_delta
 from control_plane.executive_fabric_composition import _bindings
-from control_plane.executive_capacity_join import CapacityJoin, PROVIDER_CAPACITY_SCHEMA
+from control_plane.executive_capacity_join import CapacityJoin, CapacityJoinError, PROVIDER_CAPACITY_SCHEMA
 from control_plane.executive_host_pressure import HOST_REF_RE
 from control_plane.fabric_attended_routing import FINITE_DEFINITION_DIR
 
@@ -57,6 +57,9 @@ def verify_candidate(artifacts: Mapping[str, bytes]) -> dict[str, str]:
         import json
         from control_plane.fabric_attended_routing import FINITE_SOCKET_PATH
         worker = json.loads(artifacts["worker.json"])
+        # Validate the full registered Capacity token schema before any effect.
+        CapacityJoin(physical.host_ref, worker["capacity_capability_id"],
+            PROVIDER_CAPACITY_SCHEMA, physical.worker_source_config_digest)
         if (type(worker.get("capacity_capability_id")) is not str
                 or not worker["capacity_capability_id"]
                 or HOST_REF_RE.fullmatch(physical.host_ref) is None
@@ -126,8 +129,24 @@ def _discard_definitely_private(parent_fd: int, stage_fd: int,
         return False
 
 
+def _trusted_control_root(lock_fd: int) -> os.stat_result:
+    """Reprove trust on the original CONFIG_ROOT lock descriptor itself."""
+    from control_plane.fs_security import has_macos_acl
+
+    held, visible = os.fstat(lock_fd), owner.CONFIG_ROOT.lstat()
+    if (not stat.S_ISDIR(held.st_mode)
+            or held.st_uid != 0 or held.st_gid != 0
+            or stat.S_IMODE(held.st_mode) != 0o755
+            or (held.st_dev, held.st_ino) != (visible.st_dev, visible.st_ino)
+            or has_macos_acl(owner.CONFIG_ROOT, expected_identity=visible,
+                             descriptor=lock_fd)):
+        raise FinitePublicationRefused("incumbent Control config root is untrusted")
+    return held
+
+
 def _write_exclusive(directory: Path, artifacts: Mapping[str, bytes], *,
-                     uid: int, gid: int, mode: int = 0o444) -> dict[str, str]:
+                     uid: int, gid: int, mode: int = 0o444,
+                     parent_fd: int | None = None) -> dict[str, str]:
     """Build privately, then publish one verified directory atomically.
 
     This is a helper called only after the original Control config directory
@@ -140,12 +159,25 @@ def _write_exclusive(directory: Path, artifacts: Mapping[str, bytes], *,
     expected = verify_candidate(sealed)
     from control_plane.fs_security import has_macos_acl
     from ops.executive_os.capacity_host_artifacts import _rename_exclusive
-    parent_fd = os.open(directory.parent,
-        os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0))
+    owns_parent_fd = parent_fd is None
+    if owns_parent_fd:
+        parent_fd = os.open(directory.parent,
+            os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0))
+    if not isinstance(parent_fd, int):
+        raise FinitePublicationRefused("original locked parent is unavailable")
     stage_fd = -1
     stage_name = "." + directory.name + "." + str(os.getpid()) + "." + secrets.token_hex(8) + ".stage"
     stage_created = False
     try:
+        # In production, parent_fd IS the trusted CONFIG_ROOT lock FD.
+        # Never open a second path after the owner has already qualified it.
+        held_parent, visible_parent = os.fstat(parent_fd), directory.parent.lstat()
+        if (not _same_inode(visible_parent, held_parent)
+                or (held_parent.st_uid, held_parent.st_gid,
+                    stat.S_IMODE(held_parent.st_mode))
+                != (visible_parent.st_uid, visible_parent.st_gid,
+                    stat.S_IMODE(visible_parent.st_mode))):
+            raise FinitePublicationRefused("original locked parent directory moved")
         if _object_at(parent_fd, directory.name) is not None:
             raise FinitePublicationRefused("definition already exists, inspect original")
         # A prior crash can leave an unpublished private inode. That is an
@@ -205,9 +237,10 @@ def _write_exclusive(directory: Path, artifacts: Mapping[str, bytes], *,
                     if count > MAX_FILE_BYTES:
                         raise FinitePublicationEffectUnknown("private artifact exceeds bound")
                     chunks.append(part)
-                if b"".join(chunks) != sealed[name]:
+                observed = b"".join(chunks)
+                if observed != sealed[name]:
                     raise FinitePublicationEffectUnknown("private artifact bytes differ")
-                hashes[name] = sha256(sealed[name])
+                hashes[name] = sha256(observed)
             finally:
                 os.close(descriptor)
         if hashes != expected or set(os.listdir(stage_fd)) != FILES:
@@ -235,8 +268,23 @@ def _write_exclusive(directory: Path, artifacts: Mapping[str, bytes], *,
                 or actual.st_gid != gid or stat.S_IMODE(actual.st_mode) != 0o755
                 or _object_at(parent_fd, stage_name) is not None):
             raise FinitePublicationEffectUnknown("published exact inode unconfirmed")
-        return expected
+        return hashes
     except Exception as exc:
+        # An FD-limit failure after mkdir but before opening the private
+        # stage cannot have issued the canonical rename. Prove the target
+        # absent, then remove only this exact still-empty stage.
+        if stage_created and stage_fd < 0:
+            try:
+                staged = _object_at(parent_fd, stage_name)
+                if (staged is not None and stat.S_ISDIR(staged.st_mode)
+                        and stat.S_IMODE(staged.st_mode) == 0o700
+                        and _object_at(parent_fd, directory.name) is None):
+                    os.rmdir(stage_name, dir_fd=parent_fd)
+                    os.fsync(parent_fd)
+                    raise FinitePublicationRefused(
+                        "original empty private stage removed before publication") from exc
+            except OSError:
+                pass
         if stage_created and stage_fd >= 0 and _discard_definitely_private(
                 parent_fd, stage_fd, stage_name, directory.name, uid, gid):
             raise FinitePublicationRefused(
@@ -248,9 +296,17 @@ def _write_exclusive(directory: Path, artifacts: Mapping[str, bytes], *,
         raise FinitePublicationEffectUnknown(
             "original finite directory publication effect unconfirmed") from exc
     finally:
+        # Final close errors must not mask APPLIED or EFFECT_UNKNOWN.
         if stage_fd >= 0:
-            os.close(stage_fd)
-        os.close(parent_fd)
+            try:
+                os.close(stage_fd)
+            except OSError:
+                pass
+        if owns_parent_fd:
+            try:
+                os.close(parent_fd)
+            except OSError:
+                pass
 
 
 def render_owner_definition(prior, expected_release_sha: str, join: CapacityJoin) -> dict[str, bytes]:
@@ -348,8 +404,11 @@ def publish_disarmed_definition(expected_release_sha: str, expected_control_sha2
     import json
     physical, = _bindings(sealed["bindings.json"])
     worker = json.loads(sealed["worker.json"])
-    join = CapacityJoin(physical.host_ref, worker["capacity_capability_id"],
-                        PROVIDER_CAPACITY_SCHEMA, physical.worker_source_config_digest)
+    try:
+        join = CapacityJoin(physical.host_ref, worker["capacity_capability_id"],
+                            PROVIDER_CAPACITY_SCHEMA, physical.worker_source_config_digest)
+    except CapacityJoinError as exc:
+        raise FinitePublicationRefused("Capacity identity is not admissible") from exc
     host = owner.ProductionCeoSubmitHost()
     lock_fd = -1
     effect_possible = False
@@ -364,9 +423,7 @@ def publish_disarmed_definition(expected_release_sha: str, expected_control_sha2
         except BlockingIOError as exc:
             raise FinitePublicationRefused(
                 "incumbent Control publication mutex occupied") from exc
-        held, visible = os.fstat(lock_fd), owner.CONFIG_ROOT.lstat()
-        if ((held.st_dev, held.st_ino) != (visible.st_dev, visible.st_ino)):
-            raise FinitePublicationRefused("incumbent config owner changed")
+        _trusted_control_root(lock_fd)
         host.require_exact_install(expected_release_sha)
         host.require_transaction_absent()
         host.require_services_already_stopped()
@@ -387,9 +444,10 @@ def publish_disarmed_definition(expected_release_sha: str, expected_control_sha2
         if expected != sealed:
             raise FinitePublicationRefused("source-rendered finite definition differs")
         effect_possible = True
-        hashes_published = _write_exclusive(DESTINATION, sealed, uid=0, gid=0)
+        hashes_published = _write_exclusive(DESTINATION, sealed, uid=0, gid=0,
+                                            parent_fd=lock_fd)
         if hashes_published != hashes:
-            raise FinitePublicationEffectUnknown("sealed bundle mismatch")
+            raise FinitePublicationEffectUnknown("published disk digest differs")
         # Preserve the original effect state on any post-publication drift.
         host.require_exact_install(expected_release_sha)
         host.require_transaction_absent()
@@ -417,7 +475,10 @@ def publish_disarmed_definition(expected_release_sha: str, expected_control_sha2
         raise FinitePublicationRefused("original Control/Capacity qualification refused") from exc
     finally:
         if lock_fd >= 0:
-            os.close(lock_fd)
+            try:
+                os.close(lock_fd)
+            except OSError:
+                pass
 
 
 def publish_from_installed_sources(expected_release_sha: str,

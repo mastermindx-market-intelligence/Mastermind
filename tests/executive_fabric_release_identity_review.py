@@ -83,24 +83,26 @@ REVIEWED_FILES = {'integrations/session_bridge/bound_launch_capture/runtime/lane
 # Candidate-only fixed finite publisher principal/mode postimage for independent
 # review: SHA and precise sites are frozen, not computed at runtime. This does
 # not authorize publication, merge, release or Capacity admission.
-REVIEWED_FILES['ops/executive_os/finite_definition_publication.py'] = {'sha256': '29604d81f80b42e370380a041e23b69c718c877e45523e545c6ee91bce0e65b7',
- 'sites': ((109, 54, 59, 'int', '0o700'),
- (109, 61, 66, 'int', '0o755'),
- (130, 53, 58, 'int', '0o444'),
- (157, 29, 34, 'int', '0o700'),
- (163, 28, 33, 'int', '0o700'),
- (166, 88, 93, 'int', '0o700'),
- (218, 71, 76, 'int', '0o700'),
- (227, 28, 33, 'int', '0o755'),
- (235, 75, 80, 'int', '0o755'),
- (281, 25, 30, 'int', '0o444'),
- (289, 39, 44, 'int', '0o440'),
- (289, 59, 62, 'int', '470'),
- (301, 55, 76, 'str', '"_mastermind_minimax"'),
- (302, 25, 46, 'str', '"_mastermind_minimax"'),
- (302, 59, 62, 'int', '470'),
- (302, 75, 78, 'int', '470'),
- (303, 24, 27, 'int', '450'))}
+REVIEWED_FILES['ops/executive_os/finite_definition_publication.py'] = {'sha256': '580134e478b7ff954302a1ec0f4780a8fad92b7e31071107260c87d70fa6cd6f',
+ 'sites': ((112, 54, 59, 'int', '0o700'),
+ (112, 61, 66, 'int', '0o755'),
+ (139, 45, 50, 'int', '0o755'),
+ (148, 53, 58, 'int', '0o444'),
+ (189, 29, 34, 'int', '0o700'),
+ (195, 28, 33, 'int', '0o700'),
+ (198, 88, 93, 'int', '0o700'),
+ (251, 71, 76, 'int', '0o700'),
+ (260, 28, 33, 'int', '0o755'),
+ (268, 75, 80, 'int', '0o755'),
+ (280, 60, 65, 'int', '0o700'),
+ (337, 25, 30, 'int', '0o444'),
+ (345, 39, 44, 'int', '0o440'),
+ (345, 59, 62, 'int', '470'),
+ (357, 55, 76, 'str', '"_mastermind_minimax"'),
+ (358, 25, 46, 'str', '"_mastermind_minimax"'),
+ (358, 59, 62, 'int', '470'),
+ (358, 75, 78, 'int', '470'),
+ (359, 24, 27, 'int', '450'))}
 
 # Exact finite lifecycle successor postimage. The production delta changes only
 # socket ACL observation/currentness; the same 37 reviewed principal/mode literals

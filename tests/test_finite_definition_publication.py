@@ -82,6 +82,9 @@ def test_capacity_owner_refusal_blocks_root_publication_before_effect(monkeypatc
     _,prior,files,_=qualified_host
     home=tmp_path/'control-config';home.mkdir()
     monkeypatch.setattr(pub.owner,'CONFIG_ROOT',home)
+    # These fake-host unit fixtures do not impersonate the root-owned
+    # production CONFIG_ROOT. The separate guard tests exercise real trust.
+    monkeypatch.setattr(pub,'_trusted_control_root',lambda fd: os.fstat(fd))
     monkeypatch.setattr(pub,'DESTINATION',home/'fabric-minimax-finite-01')
     monkeypatch.setattr(pub.os,'geteuid',lambda:0)
     class Owner:
@@ -128,6 +131,9 @@ def test_root_owner_publishes_only_after_same_locked_config_and_render(monkeypat
     home=tmp_path/'control-config'
     home.mkdir()
     monkeypatch.setattr(pub.owner,'CONFIG_ROOT',home)
+    # These fake-host unit fixtures do not impersonate the root-owned
+    # production CONFIG_ROOT. The separate guard tests exercise real trust.
+    monkeypatch.setattr(pub,'_trusted_control_root',lambda fd: os.fstat(fd))
     monkeypatch.setattr(pub,'DESTINATION',home/'fabric-minimax-finite-01')
     monkeypatch.setattr(pub.os,'geteuid',lambda:0)
     prior.control_sha256='e'*64
@@ -141,7 +147,7 @@ def test_root_owner_publishes_only_after_same_locked_config_and_render(monkeypat
         def load_unarmed_configs(self,sha):actions.append('disarmed');return prior
         def require_runtime_quiescent(self,prior):actions.append('runtime-idle')
     monkeypatch.setattr(pub.owner,'ProductionCeoSubmitHost',FakeHost)
-    monkeypatch.setattr(pub,'_write_exclusive',lambda path, payload, uid,gid:
+    monkeypatch.setattr(pub,'_write_exclusive',lambda path, payload, uid,gid,parent_fd=None:
         actions.append('publish') or pub.verify_candidate(payload))
     def capacity(join):
         actions.append('capacity-checked')
@@ -169,6 +175,9 @@ def test_runtime_source_drift_refuses_before_any_effect(monkeypatch,qualified_ho
     home=tmp_path/'control-config'
     home.mkdir()
     monkeypatch.setattr(pub.owner,'CONFIG_ROOT',home)
+    # These fake-host unit fixtures do not impersonate the root-owned
+    # production CONFIG_ROOT. The separate guard tests exercise real trust.
+    monkeypatch.setattr(pub,'_trusted_control_root',lambda fd: os.fstat(fd))
     monkeypatch.setattr(pub,'DESTINATION',home/'fabric-minimax-finite-01')
     monkeypatch.setattr(pub.os,'geteuid',lambda:0)
     calls=[]
@@ -215,13 +224,13 @@ def test_protected_mode_review_is_exact_source_only():
     source=Path(__file__).parents[1]/'ops/executive_os/finite_definition_publication.py'
     body=source.read_text()
     spans=reviewed_literal_spans('ops/executive_os/finite_definition_publication.py',body)
-    assert len(spans)==17
+    assert len(spans)==19
     spellings=[body.splitlines()[line-1][start:end] for line,start,end,_ in spans]
     assert spellings.count('"_mastermind_minimax"')==2
     assert spellings.count('0o440')==1
     assert spellings.count('0o444')==2
-    assert spellings.count('0o700')==5
-    assert spellings.count('0o755')==3
+    assert spellings.count('0o700')==6
+    assert spellings.count('0o755')==4
     assert spellings.count('450')==1
     assert spellings.count('470')==3
     assert reviewed_literal_spans('ops/executive_os/finite_definition_publication.py',
@@ -312,6 +321,9 @@ def test_post_write_control_drift_is_uncertain_effect_never_success(
     physical, = _bindings(files["bindings.json"])
     home=tmp_path/'control-config';home.mkdir()
     monkeypatch.setattr(pub.owner,'CONFIG_ROOT',home)
+    # These fake-host unit fixtures do not impersonate the root-owned
+    # production CONFIG_ROOT. The separate guard tests exercise real trust.
+    monkeypatch.setattr(pub,'_trusted_control_root',lambda fd: os.fstat(fd))
     monkeypatch.setattr(pub,'DESTINATION',home/'fabric-minimax-finite-01')
     monkeypatch.setattr(pub.os,'geteuid',lambda:0)
     reads=[0];writes=[]
@@ -390,6 +402,9 @@ def test_lock_busy_is_definite_refusal_before_any_directory_effect(
     _, prior, files, _ = qualified_host
     home=tmp_path/'control-config';home.mkdir()
     monkeypatch.setattr(pub.owner,'CONFIG_ROOT',home)
+    # These fake-host unit fixtures do not impersonate the root-owned
+    # production CONFIG_ROOT. The separate guard tests exercise real trust.
+    monkeypatch.setattr(pub,'_trusted_control_root',lambda fd: os.fstat(fd))
     monkeypatch.setattr(pub,'DESTINATION',home/'fabric-minimax-finite-01')
     monkeypatch.setattr(pub.os,'geteuid',lambda:0)
     class Owner:
@@ -446,3 +461,134 @@ def test_late_canonical_collision_is_preserved_and_never_replaced(
         pub._write_exclusive(destination,files,uid=os.getuid(),gid=os.getgid())
     assert destination.exists() and list(destination.iterdir())==[]
     assert not list(tmp_path.glob('.fabric-minimax-finite-01.*.stage'))
+
+def test_invalid_capacity_token_pre_effect_refused(qualified_host):
+    import json
+    from ops.executive_os.attended_worker_definition import _json
+    _,_,files,_=qualified_host
+    worker=json.loads(files['worker.json'])
+    worker['capacity_capability_id']='not a valid token!'
+    candidate=dict(files, **{'worker.json':_json(worker)})
+    binding=json.loads(files['bindings.json'])
+    binding['bindings'][0]['worker_source_config_digest']=pub.sha256(candidate['worker.json'])
+    candidate['bindings.json']=_json(binding)
+    with pytest.raises(pub.FinitePublicationRefused,match='finite definition validation'):
+        pub.verify_candidate(candidate)
+
+
+def test_untrusted_control_directory_refuses_after_opening_exact_fd(
+        monkeypatch,tmp_path):
+    import stat
+    path=tmp_path/'unsafe-config'
+    path.mkdir(mode=0o777)
+    path.chmod(0o777)
+    monkeypatch.setattr(pub.owner,'CONFIG_ROOT',path)
+    fd=os.open(path,os.O_RDONLY | os.O_DIRECTORY | getattr(os,'O_NOFOLLOW',0))
+    try:
+        with pytest.raises(pub.FinitePublicationRefused,match='config root is untrusted'):
+            pub._trusted_control_root(fd)
+    finally:
+        os.close(fd)
+
+
+def test_original_locked_parent_fd_cannot_be_retargeted(
+        qualified_host,tmp_path):
+    _,_,files,_=qualified_host
+    home=tmp_path/'config';home.mkdir()
+    destination=home/'fabric-minimax-finite-01'
+    fd=os.open(home,os.O_RDONLY | os.O_DIRECTORY)
+    old_path=tmp_path/'config-original'
+    try:
+        home.rename(old_path)
+        home.mkdir()
+        with pytest.raises(pub.FinitePublicationRefused,match='locked parent directory moved'):
+            pub._write_exclusive(destination,files,uid=os.getuid(),gid=os.getgid(),
+                                  parent_fd=fd)
+        assert list(home.iterdir())==[]
+        assert list(old_path.iterdir())==[]
+    finally:
+        os.close(fd)
+
+
+def test_close_failure_after_native_publish_does_not_erase_result(
+        monkeypatch,qualified_host,tmp_path):
+    import stat
+    _,_,files,_=qualified_host
+    destination=tmp_path/'fabric-minimax-finite-01'
+    close_original=pub.os.close
+    changed=[False]
+    def fail_after_actual_close(fd):
+        if not changed[0] and destination.exists():
+            try:
+                opened=os.fstat(fd)
+                canonical=destination.stat()
+                same=(stat.S_ISDIR(opened.st_mode) and
+                      (opened.st_dev,opened.st_ino)==(canonical.st_dev,canonical.st_ino))
+            except OSError:
+                same=False
+            if same:
+                changed[0]=True
+                close_original(fd)
+                raise OSError('lost close acknowledgement after committed rename')
+        return close_original(fd)
+    monkeypatch.setattr(pub.os,'close',fail_after_actual_close)
+    digests=pub._write_exclusive(destination,files,uid=os.getuid(),gid=os.getgid())
+    assert changed==[True]
+    assert destination.is_dir() and digests==pub.verify_candidate(files)
+
+
+def test_stage_open_fd_exhaustion_has_no_canonical_effect(
+        monkeypatch,qualified_host,tmp_path):
+    import errno
+    _,_,files,_=qualified_host
+    destination=tmp_path/'fabric-minimax-finite-01'
+    actual_open=pub.os.open
+    triggered=[False]
+    def simulated_fd_limit(path, flags, mode=0o777, *, dir_fd=None):
+        if dir_fd is not None and str(path).endswith('.stage') and not triggered[0]:
+            triggered[0]=True
+            raise OSError(errno.EMFILE,'simulated file descriptor exhaustion')
+        return actual_open(path,flags,mode,dir_fd=dir_fd)
+    monkeypatch.setattr(pub.os,'open',simulated_fd_limit)
+    with pytest.raises(pub.FinitePublicationRefused,match='empty private stage removed'):
+        pub._write_exclusive(destination,files,uid=os.getuid(),gid=os.getgid())
+    assert triggered==[True] and not destination.exists()
+    assert not list(tmp_path.glob('.fabric-minimax-finite-01.*.stage'))
+
+
+def test_root_publisher_close_error_preserves_applied_receipt(
+        monkeypatch,qualified_host,tmp_path):
+    _,prior,files,_=qualified_host
+    home=tmp_path/'control-config';home.mkdir()
+    monkeypatch.setattr(pub.owner,'CONFIG_ROOT',home)
+    monkeypatch.setattr(pub,'DESTINATION',home/'fabric-minimax-finite-01')
+    monkeypatch.setattr(pub.os,'geteuid',lambda:0)
+    monkeypatch.setattr(pub,'_trusted_control_root',lambda fd:os.fstat(fd))
+    class FakeHost:
+        def require_exact_install(self,sha):pass
+        def require_transaction_absent(self):pass
+        def _config_root_safe(self):pass
+        def require_services_already_stopped(self):pass
+        def require_service_uids_quiescent(self):pass
+        def load_unarmed_configs(self,sha):return prior
+        def require_runtime_quiescent(self,p):pass
+    monkeypatch.setattr(pub.owner,'ProductionCeoSubmitHost',FakeHost)
+    monkeypatch.setattr(pub,'render_owner_definition',lambda *a:files.copy())
+    monkeypatch.setattr(pub,'_write_exclusive',
+        lambda path, data, *,uid,gid,parent_fd:pub.verify_candidate(data))
+    actual_close=pub.os.close
+    injected=[False]
+    def bad_close(fd):
+        try:
+            info=os.fstat(fd); check=home.stat()
+            is_lock=(info.st_dev,info.st_ino)==(check.st_dev,check.st_ino)
+        except OSError:
+            is_lock=False
+        actual_close(fd)
+        if is_lock and not injected[0]:
+            injected[0]=True
+            raise OSError('original lock released, acknowledgement lost')
+    monkeypatch.setattr(pub.os,'close',bad_close)
+    result=pub.publish_disarmed_definition('a'*40,prior.control_sha256,files,
+            verified_capacity_binding=lambda *a:True)
+    assert injected==[True] and result['effect']=='APPLIED'
