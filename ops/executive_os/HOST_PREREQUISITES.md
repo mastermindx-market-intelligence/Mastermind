@@ -804,6 +804,28 @@ terminal nor in-flight/reconciled evidence exists (`NOT_FOUND`, which is not
 license to resubmit). Malformed or mismatched reconciliation evidence is
 refused rather than downgraded to a clean state.
 
+### Privileged broker maintenance stop
+
+For the assigned root maintenance owner, the installed
+`service-control.sh stop-incident-broker` command disables and unloads only the
+fixed privileged broker. First stop Control, worker and Relay through the existing
+`stop-readside` and `stop` commands. The new command takes no arguments and is
+not exposed as a broker action: a broker must not stop itself while returning a
+privileged-action result.
+
+The command requires the current sealed release, closed intake arms, stopped
+consumers, an idle or already-unloaded broker and no other pinned root interpreter.
+It uses one disable and one bootout at most, followed by typed disabled/unloaded
+and socket-absence observations. It never unlinks a socket, repairs permissions,
+edits configuration or touches incident evidence. An active broker, ambiguous
+command result, residual socket or cleanup failure refuses; reconcile the retained
+partial state rather than repeating a modifying command.
+
+Success reports a sampled stopped state only. It neither grants recovery authority
+nor supplies an origin context; the separately authorized forward entry must
+acquire its own current context. A dormant forward policy stays dormant. This
+maintenance stop does not invoke the original issuer or its qualification.
+
 ### Three isolated Personal Pro readiness slots
 
 The company worker above remains the only installed Executive worker service.

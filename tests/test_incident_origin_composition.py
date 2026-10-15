@@ -426,7 +426,11 @@ def test_fixed_spawn_owns_uid_drop_and_isolated_args(world,monkeypatch):
     child=o._spawn_origin_client(v,forward_args())
     assert child.instance==CHILD and child.origin is v and v.child is child
     call=popen.call_args
-    assert call.args[0]==o._CHILD_ARGV_PREFIX+('/fixed/entry.py',)
+    # Independently bind the observed spawn to the qualified signed main image,
+    # not the pythonw launcher which performs another exec after Popen returns.
+    assert call.args[0]==(o.peer._PYTHON_MAIN_EXECUTABLE,'-I','-S','-B','/fixed/entry.py')
+    assert call.args[0][0] != o.peer._PYTHON_LAUNCHER
+    assert 'executable' not in call.kwargs
     assert call.kwargs['user']==call.kwargs['group']==450
     assert call.kwargs['extra_groups']==[] and call.kwargs['close_fds'] and call.kwargs['bufsize']==0
     assert call.kwargs['env']==o._CHILD_ENVIRONMENT

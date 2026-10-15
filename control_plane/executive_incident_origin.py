@@ -53,7 +53,9 @@ _ORIGIN_COMMANDS = (_ENABLE_ARGV, _BOOTSTRAP_ARGV, _PRINT_BROKER_ARGV)
 # The one fixed direct-child launch shape.  No caller argv, path, uid, fd or
 # callback is ever accepted; the pinned signed interpreter runs exactly one
 # fixed root-owned sealed entrypoint from the exact installed release.
-_CHILD_ARGV_PREFIX = (peer._PYTHON_LAUNCHER, "-I", "-S", "-B")
+# Launch the already-qualified signed main image directly: the pythonw wrapper
+# performs another exec, which cannot be adopted after first-generation binding.
+_CHILD_ARGV_PREFIX = (peer._PYTHON_MAIN_EXECUTABLE, "-I", "-S", "-B")
 _CHILD_ENVIRONMENT = {
     "HOME": "/var/empty",
     "LANG": "C",
@@ -143,6 +145,15 @@ def _run_origin_command(argv: tuple, budget: release._Budget) -> tuple:
     """Closed owned launcher readback; bounded pipes and complete cleanup."""
     if type(argv) is not tuple or argv not in _ORIGIN_COMMANDS:
         _refuse("ORIGIN_COMMAND_REFUSED")
+    return _run_owned_native_command(argv, budget)
+
+
+def _run_owned_native_command(argv: tuple, budget: release._Budget) -> tuple:
+    """Internal process mechanic; trusted callers own their fixed verb lists.
+
+    No request, environment or public CLI selects this callable or its argv.
+    The original origin entry retains its narrower command fence above.
+    """
     budget.check(force=True)
     end = min(budget.endpoint, time.monotonic_ns() + 3_000_000_000)
     process = None
