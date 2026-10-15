@@ -1,0 +1,68 @@
+{
+  "schema": "mastermind.fabric_routing_reset_join_evidence.v1",
+  "operation": "fabric-routing-deep-audit-20261013-c2-001",
+  "input_head": "69f5767fda0fe8c41efc50f2e8881ec58b288ace",
+  "procedure_pin": "2cc4942e136ad4fb544fd5c72ab1856608a5dac1",
+  "upstream_v5_head": "fee58a0aad8a996b2df0d9222502e0c4c8a610e6",
+  "upstream_patch_blob": "fb853e50690f1c1bf538aa1500f100a5198677dd",
+  "files": {
+    "tests/test_native_fabric_quota_pinned_reclaim_composition.py": {
+      "sha256": "6c8c1a443f8f72a0c98567bf5451685dbbef999f15e90f51ab97a51e0c46a772",
+      "git_blob": "2ce8caed27c8ab383b7297e8f567cf65834581b0",
+      "bytes": 5121
+    },
+    "tests/test_native_fabric_advisory_reset_boundary.py": {
+      "sha256": "fec7ab7914fd15947d886d6462e8660978d4b798374d04d8e182d2782ce45475",
+      "git_blob": "e24724bef4e124a302e66e136a58cf5625489867",
+      "bytes": 11229
+    },
+    "tests/fixtures/native_fabric_protected_20261014/advisory_quota_v5_section.patch": {
+      "sha256": "b35b466d7a4b19073c19a774e84cb369a7911993e85634ba269379f3add092eb",
+      "git_blob": "c192caea4f2230c95898e9090dec71be29be97c7",
+      "bytes": 7412
+    },
+    "ops/native_fabric/routing_audit_20261013/quota_reset/advisory_reset_boundary.patch": {
+      "sha256": "b7b62f4fd147ff95d69fa2d81b1603b15f13508e6b645cb6b23af1c5543c1e42",
+      "git_blob": "b68978f2e8cbd092cefc721ab644b6598b6d7aad",
+      "bytes": 931
+    }
+  },
+  "verification": {
+    "reset_before": {
+      "failed": 15,
+      "passed": 10
+    },
+    "reset_after": {
+      "failed": 0,
+      "passed": 25
+    },
+    "quota_pin_reclaim_join": {
+      "failed": 0,
+      "passed": 15
+    },
+    "joined_run": {
+      "failed": 0,
+      "passed": 40,
+      "unit": "pytest cases, includes reused source assertions on a new component composition"
+    },
+    "published_quota_suite_passed": 5,
+    "production_proof": false,
+    "independent_review": false,
+    "original_native_suite_unchanged": {
+      "passed": 49,
+      "failed": 1
+    }
+  },
+  "postimages": {
+    "full_broker_with_quota_pin_reclaim": "7b185deb7a0a3a8c557a9dc04ad52127a11777479793e5316a34698c83e628cb",
+    "quota_v5_before": "42f3a5f9b4d820ab5fafd9b739944a685dab4ebe254fb9c190f9ab75129ebfab",
+    "quota_v5_after": "06a10fecbc60ed30d43bcfd933d2aea0dbf234f32c16f8a2c65ce2da95648e8c"
+  },
+  "effects": {
+    "live_source_modified": false,
+    "original_denied_actions_retried": false,
+    "provider_called": false,
+    "installed_database_opened": false,
+    "native_worker_launched": false
+  }
+}
