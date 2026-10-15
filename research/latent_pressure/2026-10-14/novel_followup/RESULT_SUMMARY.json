@@ -1,0 +1,72 @@
+{
+  "experiment": "LP-NOVEL-02",
+  "status": "FAILED_POSITIVE_FORECAST_GATE_EXPLORATORY_LATER_VINTAGE_ONLY",
+  "evaluation": {
+    "constant": {
+      "n": 1494,
+      "base_rate": 0.500669344042838,
+      "auc": 0.4613795859557569,
+      "brier": 0.25225564080641444
+    },
+    "baseline": {
+      "n": 1494,
+      "base_rate": 0.500669344042838,
+      "auc": 0.4576941549225101,
+      "brier": 0.2557875691112467
+    },
+    "components": {
+      "n": 1494,
+      "base_rate": 0.500669344042838,
+      "auc": 0.4470043440237416,
+      "brier": 0.25671691396352136
+    },
+    "sequence": {
+      "n": 1494,
+      "base_rate": 0.500669344042838,
+      "auc": 0.4434040372181044,
+      "brier": 0.25698647027243693
+    }
+  },
+  "evaluation_inference": {
+    "components": {
+      "gain": -0.000929344852274578,
+      "ci95": [
+        -0.0018259776246723435,
+        1.13539481320151e-05
+      ],
+      "p": 0.04595404595404595,
+      "n_dates": 747,
+      "holm_p": 0.04595404595404595
+    },
+    "sequence": {
+      "gain": -0.0011989011611902127,
+      "ci95": [
+        -0.002157119792541376,
+        -0.0003092972970636459
+      ],
+      "p": 0.01098901098901099,
+      "n_dates": 747,
+      "holm_p": 0.02197802197802198
+    }
+  },
+  "descriptive_cancellation": {
+    "n": 1494,
+    "observed_windows": 239,
+    "fraction": 0.15997322623828647,
+    "definition": "20sessionresidualday/nightcomponentscancel>=80percent;gross>=2logpercent;overlappingdescriptivewindows"
+  },
+  "checks": {
+    "prefix_invariance": true,
+    "actual_return_decomposition": true,
+    "same_day_adjustment_multiplier": true,
+    "strict_label_purge": true
+  },
+  "limitations": [
+    "two convenience stocks; not representative",
+    "source-rights/DataOS/PIT admission flags allfalse, unchanged",
+    "later-vintage vendor adjusted prices",
+    "overlapping five-session outcomes; date-block inference",
+    "no claim of actual inventory or validated forecasting",
+    "raw per-date predictions kept private"
+  ]
+}
