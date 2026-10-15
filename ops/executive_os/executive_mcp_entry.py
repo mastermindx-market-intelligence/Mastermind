@@ -282,11 +282,39 @@ def installed_os_session_policy_source(config_path, source, *, expected_uid):
     are unavailable, never an inferred permission grant.
     """
     from integrations.mastermind_executive_app.gateway import load_app_policies
+    from integrations.business_mcp_auth.contracts import AuthError
+    from integrations.session_bridge.runtime_return import _trusted_read_pair
+    from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
 
     path, source = Path(config_path), Path(source)
-    require_sealed_path(source, directory=True)
-    require_sealed_path(path)
-    raw = validate_document(json.loads(path.read_text()))
+
+    def require_policy_seal():
+        # POSIX mode alone is not an ownership seal on macOS: a non-root
+        # inherited ACL can grant directory-entry replacement privileges.
+        # Reuse the incumbent descriptor-bound ACL observer on both the
+        # installed gateway file and every ancestor of both sealed roots.
+        require_sealed_path(source, directory=True)
+        require_sealed_path(path)
+        seen = set()
+        for root in (source, path):
+            for node in (root, *root.parents):
+                if node in seen:
+                    continue
+                seen.add(node)
+                try:
+                    if has_macos_acl(node):
+                        raise ValueError("installed OS policy seal unavailable")
+                except FilesystemSecurityError:
+                    raise ValueError("installed OS policy seal unavailable") from None
+
+    require_policy_seal()
+    try:
+        raw = validate_document(json.loads(path.read_text()))
+    except AuthError:
+        # Optional mounted policies are parsed during validate_document and
+        # must obey the same bounded Control-factory refusal contract.
+        raise ValueError("installed OS policy pair unavailable") from None
+    require_policy_seal()
     if (type(expected_uid) is not int or expected_uid < 0
             or os.geteuid() != expected_uid
             or source.name != raw["release_sha"]
@@ -294,12 +322,24 @@ def installed_os_session_policy_source(config_path, source, *, expected_uid):
         raise ValueError("installed OS policy source unavailable")
 
     def os_pair(base_policies):
-        additional = build_additional_policies(raw, load_app_policies(base_policies))
+        try:
+            additional = build_additional_policies(raw, load_app_policies(base_policies))
+        except AuthError:
+            # The closed OAuth parser uses AuthError(RuntimeError), which the
+            # Control factory's fail-dark ValueError guard cannot otherwise
+            # catch. A malformed root-sealed policy must not kill Control.
+            raise ValueError("installed OS policy pair unavailable") from None
         paired = [pair for pair in additional
                   if pair.read.resource == OS_EXECUTIVE_RESOURCE
                   and pair.submit.resource == OS_EXECUTIVE_RESOURCE]
         if len(paired) != 1:
             raise ValueError("installed OS policy pair unavailable")
+        try:
+            # Reuse the Runtime owner's exact pairing discriminator, not a
+            # second policy-ID/issuer/subject invariant that could drift.
+            _trusted_read_pair(paired[0])
+        except (ValueError, TypeError, AuthError):
+            raise ValueError("installed OS policy pair unavailable") from None
         return paired[0]
 
     initial = os_pair(raw["policies"])
@@ -307,7 +347,15 @@ def installed_os_session_policy_source(config_path, source, *, expected_uid):
         path, source, raw, "policies", None, expected_uid=expected_uid)
 
     def current():
-        pair = os_pair(read_sealed_policies())
+        require_policy_seal()
+        try:
+            # The incumbent projection loader can also parse optional mounted
+            # policies during a drift check; normalize that closed AuthError
+            # instead of taking down the entire Session Bridge at read time.
+            pair = os_pair(read_sealed_policies())
+        except AuthError:
+            raise ValueError("installed OS policy pair unavailable") from None
+        require_policy_seal()
         if pair != initial:
             raise ValueError("installed OS policy pair changed")
         return pair

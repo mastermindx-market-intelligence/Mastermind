@@ -2201,6 +2201,7 @@ def _service_from_config(
             from integrations.session_bridge.schemas import BridgeError
             from integrations.mastermind_executive_app.gateway import READ_SCOPE, SUBMIT_SCOPE
             from control_plane import executive_ceo_ingress as session_ingress, ceo_request
+            from ops.executive_os.coo_principal_host import DEFAULT_INSTALL_PATH
 
             # Reuse the network gateway's root-sealed OAuth policy installation;
             # Control neither owns OAuth nor trusts policy IDs supplied by an App
@@ -2211,13 +2212,12 @@ def _service_from_config(
             if installed_profile == WEB_CEO_V3_PROFILE:
                 from ops.executive_os.executive_mcp_entry import (
                     installed_os_session_policy_source)
-                gateway_policy_path = Path(
-                    "/Library/Application Support/MastermindExecutive/config/executive-mcp.json")
+                gateway_policy_path = DEFAULT_INSTALL_PATH
                 if gateway_policy_path.exists() or gateway_policy_path.is_symlink():
                     try:
                         session_read_policy_loader = installed_os_session_policy_source(
                             gateway_policy_path, Path(__file__).resolve().parents[1],
-                            expected_uid=os.geteuid())
+                            expected_uid=int(raw["control_uid"]))
                     except (OSError, ValueError):
                         session_read_policy_loader = None
 

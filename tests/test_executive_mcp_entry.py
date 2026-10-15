@@ -390,7 +390,11 @@ def test_installed_os_policy_source_reads_one_sealed_current_gateway_pair(tmp_pa
         loader()
 
 
-@pytest.mark.parametrize("fault", ["disabled", "wrong_release", "wrong_uid", "wrong_resource"])
+@pytest.mark.parametrize("fault", [
+    "disabled", "wrong_release", "wrong_uid", "wrong_resource",
+    "malformed_read_policy", "policy_id_collision", "issuer_mismatch",
+    "subject_mismatch",
+])
 def test_installed_os_policy_source_refuses_unapproved_pair(tmp_path, monkeypatch, fault):
     from ops.executive_os import executive_mcp_entry as entry
     from tests.test_gateway_refresh_preflight import _config
@@ -408,11 +412,117 @@ def test_installed_os_policy_source_refuses_unapproved_pair(tmp_path, monkeypatc
         raw["release_sha"] = "b" * 40
     elif fault == "wrong_resource":
         raw["os_executive_resource"] = "https://foreign.invalid/os/executive"
+    elif fault == "malformed_read_policy":
+        del raw["policies"]["read"]["jwks_uri"]
+    elif fault == "policy_id_collision":
+        raw["policies"]["read"]["policy_id"] = raw["policies"]["submit"]["policy_id"]
+    elif fault == "issuer_mismatch":
+        raw["policies"]["submit"]["issuer"] = "https://other-issuer.example.test/"
+    elif fault == "subject_mismatch":
+        raw["policies"]["submit"]["allowed_subject_digests"] = ["f" * 64]
     path.write_text(json.dumps(raw))
     monkeypatch.setattr(entry, "require_sealed_path", lambda *_a, **_k: None)
     with pytest.raises(ValueError):
         entry.installed_os_session_policy_source(
             path, source, expected_uid=os.geteuid() + int(fault == "wrong_uid"))
+
+
+def test_installed_os_policy_source_normalizes_optional_policy_parse_at_boot(
+    tmp_path, monkeypatch,
+):
+    from integrations.business_mcp_auth.contracts import AuthError, AuthErrorCode
+    from ops.executive_os import executive_mcp_entry as entry
+    from tests.test_gateway_refresh_preflight import _config
+    source = tmp_path / ("a" * 40)
+    source.mkdir()
+    path = tmp_path / "executive-mcp.json"
+    raw = _config()
+    raw.update(os_executive_transport=True,
+        os_executive_resource=entry.OS_EXECUTIVE_RESOURCE, os_commission_port=45025)
+    path.write_text(json.dumps(raw))
+    monkeypatch.setattr(entry, "require_sealed_path", lambda *_a, **_k: None)
+    def refuse_mounted_policy(_raw):
+        raise AuthError(AuthErrorCode.INVALID_POLICY)
+    monkeypatch.setattr(entry, "validate_document", refuse_mounted_policy)
+    with pytest.raises(ValueError, match="installed OS policy pair unavailable"):
+        entry.installed_os_session_policy_source(
+            path, source, expected_uid=os.geteuid())
+
+
+def test_installed_os_policy_source_normalizes_late_optional_policy_refusal(
+    tmp_path, monkeypatch,
+):
+    from integrations.business_mcp_auth.contracts import AuthError, AuthErrorCode
+    from ops.executive_os import executive_mcp_entry as entry
+    from tests.test_gateway_refresh_preflight import _config
+    source = tmp_path / ("a" * 40)
+    source.mkdir()
+    path = tmp_path / "executive-mcp.json"
+    raw = _config()
+    raw.update(os_executive_transport=True,
+        os_executive_resource=entry.OS_EXECUTIVE_RESOURCE, os_commission_port=45025)
+    path.write_text(json.dumps(raw))
+    monkeypatch.setattr(entry, "require_sealed_path", lambda *_a, **_k: None)
+    def changed_optional_policy(*_a, **_k):
+        def reread():
+            raise AuthError(AuthErrorCode.INVALID_POLICY)
+        return reread
+    monkeypatch.setattr(entry, "current_projection_loader", changed_optional_policy)
+    loader = entry.installed_os_session_policy_source(
+        path, source, expected_uid=os.geteuid())
+    with pytest.raises(ValueError, match="installed OS policy pair unavailable"):
+        loader()
+
+
+@pytest.mark.parametrize("phase", ["startup", "late_read"])
+@pytest.mark.parametrize("acl_node", ["gateway_file", "config_directory"])
+def test_installed_os_policy_source_refuses_mac_acl_on_every_read(
+    tmp_path, monkeypatch, phase, acl_node,
+):
+    """A malicious directory ACL cannot substitute a new approved policy."""
+    from control_plane import fs_security
+    from ops.executive_os import executive_mcp_entry as entry
+    from tests.test_gateway_refresh_preflight import _config
+    source = tmp_path / ("a" * 40)
+    source.mkdir()
+    path = tmp_path / "executive-mcp.json"
+    raw = _config()
+    raw.update(os_executive_transport=True,
+        os_executive_resource=entry.OS_EXECUTIVE_RESOURCE, os_commission_port=45025)
+    path.write_text(json.dumps(raw))
+    monkeypatch.setattr(entry, "require_sealed_path", lambda *_a, **_k: None)
+    compromised = path if acl_node == "gateway_file" else path.parent
+    blocked = [phase == "startup"]
+    observed = []
+    def acl(value):
+        observed.append(Path(value))
+        return blocked[0] and Path(value) == compromised
+    monkeypatch.setattr(fs_security, "has_macos_acl", acl)
+    if phase == "startup":
+        with pytest.raises(ValueError, match="installed OS policy seal unavailable"):
+            entry.installed_os_session_policy_source(
+                path, source, expected_uid=os.geteuid())
+    else:
+        loader = entry.installed_os_session_policy_source(
+            path, source, expected_uid=os.geteuid())
+        blocked[0] = True
+        with pytest.raises(ValueError, match="installed OS policy seal unavailable"):
+            loader()
+    assert compromised in observed
+
+
+def test_installed_os_policy_source_rejects_real_unsealed_symlink(tmp_path):
+    """Exercise the real POSIX/symlink seal, not a monkeypatched no-op."""
+    from ops.executive_os import executive_mcp_entry as entry
+    source = tmp_path / ("a" * 40)
+    source.mkdir()
+    path = tmp_path / "executive-mcp.json"
+    path.write_text("{}")
+    link = tmp_path / "linked-executive-mcp.json"
+    link.symlink_to(path)
+    with pytest.raises(ValueError, match="sealed path"):
+        entry.installed_os_session_policy_source(
+            link, source, expected_uid=os.geteuid())
 
 
 def test_os_audience_preserves_existing_tunnels_and_all_policy_grants():
