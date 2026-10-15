@@ -36,13 +36,22 @@ def _command_output(rc, out, err):
 
 
 def normalize_disabled(rc, out, err):
-    """Closed fixture-qualified print-disabled grammar; no live format claim."""
+    """Closed flat and observed macOS print-disabled document grammars."""
     _command_output(rc, out, err)
     _require(rc == 0 and not err and out.endswith(b"\n"), "DISABLED_UNAVAILABLE")
     try:
         lines = out.decode("ascii").split("\n")[:-1]
     except UnicodeError:
         raise ObservationRejected("DISABLED_ENCODING") from None
+    _require(2 <= len(lines) <= MAX_ROWS, "DISABLED_DOCUMENT")
+    # The native macOS document has one leading blank line, a tab-indented
+    # header/brace, and two-tab rows. Accept that exact envelope, not arbitrary
+    # strip/lstrip that could silently discard diagnostic text or extra data.
+    if lines[:2] == ["", "\tdisabled services = {"]:
+        _require(lines[-1] == "\t}" and
+                 all(line.startswith("\t\t") for line in lines[2:-1]),
+                 "DISABLED_DOCUMENT")
+        lines = ["disabled services = {"] + [line[1:] for line in lines[2:-1]] + ["}"]
     _require(2 <= len(lines) <= MAX_ROWS and lines[0] == "disabled services = {"
              and lines[-1] == "}", "DISABLED_DOCUMENT")
     rows = {}
