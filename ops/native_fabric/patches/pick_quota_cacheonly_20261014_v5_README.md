@@ -127,3 +127,24 @@ approve exact updated live-source preimage and full qualified support bundle,
 obtain full CI and independent review, and prove an original routed accepted
 worker/result before production acceptance. The denied V8 installation
 remains untouched.
+
+
+### October 15 10:48 UTC — additional physical-admission compatibility
+
+In the same isolated full-current-source stage, nine original host,
+placement, Intel/AMD physical-temperature and remote selection test modules
+were exercised against the revised V5 source. The first pass had exactly
+one **test-fixture missing-file** issue: the stage omitted the current original
+`remote_sub.sh`. A byte-identical copy of installed reviewed launcher
+SHA-256 `fdb50974e37852c8024135ddf4bf021e6c6a67d1a0418cd5675cc24dc4ad5a17`
+was added *to the isolated test stage only*. Rerunning the nine affected
+modules gave **114 passed, zero failed** in 1.75 seconds. Combined with
+the separate 269-pass router suite, this is **383 passing cases across two
+non-overlapping suites** on the revised full-source candidate, in addition
+to eight isolated reset-age/expiry checks. One unrelated pytest old-browser
+temporary-cleanup warning does not change those results. Log:
+`~/.mastermind/agent-evidence/fabric-advisory-reset-v5-20261015/full-current-v5-host-policy-extra-v2.log`.
+
+These tests do **not** imply current hosted CI success, real provider latency,
+qualified runtime support publication, deployment or CPU-heavy concurrency
+acceptance. V5 remains DRAFT, original M2 production code unchanged.
