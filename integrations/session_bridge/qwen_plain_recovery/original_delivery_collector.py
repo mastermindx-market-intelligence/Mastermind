@@ -368,8 +368,15 @@ def validate_response(raw,request,mode,*,original_validator=None):
     return blobs,artifacts,manifest
 
 
+class LocalBindingRefused(ValueError):
+    """A local-only validation failure before destination reservation/transport."""
+
+
 def collect(path,*,run_id,root,parent,destination):
-    value,binding_raw,source,contract,alias,registry,original_validator=load_binding(path,run_id=run_id,root=root,parent=parent)
+    try:
+        value,binding_raw,source,contract,alias,registry,original_validator=load_binding(path,run_id=run_id,root=root,parent=parent)
+    except (OSError,ValueError,TypeError,KeyError,RecursionError) as error:
+        raise LocalBindingRefused(str(error)) from error
     if run_id in PLAIN_SCOPES and str(destination)!=PLAIN_SCOPES[run_id]['destination']:
         raise ValueError('plain_original_destination_changed')
     request={'schema':SCHEMA,**{k:value[k] for k in ('run_id','root','parent','host')},'contract':contract}
@@ -496,6 +503,15 @@ def main(argv=None):
         if not args.binding or not args.destination or args.receipt_sha256:raise ValueError('collection_arguments')
         receipt=collect(args.binding,run_id=args.run_id,root=args.root,parent=args.parent,destination=args.destination)
         print(canonical(receipt).decode());return 0 if receipt['state']=='COMPLETE' else 76
+    except LocalBindingRefused as error:
+        allowed={'directory_owner_or_mode','directory_chain_changed','directory_path_invalid',
+                 'original_native_root_required'}
+        reason=str(error) if str(error) in allowed else 'original_binding_unconfirmed'
+        print(canonical({'state':'REFUSED','reason':reason,
+            'failure_phase':'original_local_binding','remote_read_started':False,
+            'destination_reserved':False,'retry_authorized':False,
+            'worker_terminal_proof':False,'delivery_verified':False}).decode())
+        return 75
     except OriginalDeliveryRefused as error:
         print(canonical({'state':'REFUSED','reason':error.reason,
             'failure_phase':'original_remote_read','retry_authorized':False,

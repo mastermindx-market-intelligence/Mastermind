@@ -1,7 +1,7 @@
 {
   "base_sha256": "0781977b0f5f6b7c493211e4a2f7e03d6938fb2ac53c65788f5afc5937dca3a7",
-  "candidate_sha256": "efc8aff10458a57d92c649e4785b95704f5092af0268b2d1a8ab66ce4fba4e56",
-  "state": "SOURCE_QUALIFIED_UNINSTALLED",
+  "candidate_sha256": "89b9acd36608742b62baa4e2366f810f8c1071a51510c3d17d14cdb64dc6e534",
+  "state": "LOCAL_DIAGNOSTIC_CORRECTION_UNINSTALLED",
   "original_root": "01a1333c-a475-7052-95a8-72a88eb8c17b",
   "no_remote_reads": true,
   "dependencies": {
@@ -13,10 +13,9 @@
     "lane_runtime.py": "966869a4137545203faa2269faeed15cd0a096b5611161d242e2fb13b7c27937"
   },
   "checks": {
-    "baseline_red": 3,
-    "candidate": 106,
-    "failures": 0,
-    "skips": 0
+    "local_integration_and_ci_guidance": 36,
+    "baseline_failures": 5,
+    "source_only": true
   },
   "historical_source_qualification": "e126 and 0be qualified using existing installed original_validator_context; both original packets parse as plaintext; no collect invoked",
   "review": {
@@ -52,5 +51,18 @@
     "rf-archive-order-review-01a1333c-v1.binding.json": "46f6ba41973dc9b7185fc489a057fa8aa0c36dc89d3ce43ec1dfea2d720cb899",
     "rf-mountinfo-review-01a1333c-v1.binding.json": "04a7d7a80ebc90b153a67fa8501786c3bc309b0326a3401ef4efca5061cf6eba"
   },
-  "qualified_at": "2026-10-15T11:02:46.831220+00:00"
+  "qualified_at": "2026-10-15T11:02:46.831220+00:00",
+  "historical_1520_qualification": {
+    "candidate_sha256": "efc8aff10458a57d92c649e4785b95704f5092af0268b2d1a8ab66ce4fba4e56",
+    "checks": {
+      "baseline_red": 3,
+      "candidate": 106,
+      "failures": 0,
+      "skips": 0
+    },
+    "protected_merge": "170241b2f878d521db075fad1d00d505852989db",
+    "installed_at": "2026-10-15T12:24:05.588763Z",
+    "original_parent_collection": "two original calls refused local binding; no result consumed"
+  },
+  "diagnostic_correction": "Only first load_binding errors get sanitized phase original_local_binding; false retry/terminal/delivery flags preserved. Shared0775 ancestor remains refused. No retry authority or historical remote effect inferred."
 }
