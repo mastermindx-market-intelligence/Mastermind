@@ -73,7 +73,7 @@ def world(monkeypatch):
         return 113, b"", b'Bad request.\nCould not find service "com.mastermind.executive.privileged" in domain for system\n'
 
     def acquire(*, deadline_monotonic_ns):
-        handle = object()
+        handle = S(boot="same-boot", owner="own")
         state.handles.append(handle)
         return handle
 
@@ -89,7 +89,10 @@ def world(monkeypatch):
     monkeypatch.setattr(m.namespace, "_acquire_namespace", acquire)
     monkeypatch.setattr(m.namespace, "_release_namespace", release)
     monkeypatch.setattr(m.namespace, "_require_socket_absent", Mock())
-    monkeypatch.setattr(m.host, "_observe_old_owner_exclusion", Mock())
+    monkeypatch.setattr(m.host, "_observe_old_owner_exclusion", Mock(
+        return_value=S(boot_id="same-boot", census=S(observer="own"))))
+    monkeypatch.setattr(m.retirement, "_candidate", Mock(return_value=None))
+    monkeypatch.setattr(m.retirement, "_require_retained_absent", Mock())
     return state
 
 
@@ -127,7 +130,8 @@ def test_ambiguous_disable_never_proceeds_to_bootout(world, reply):
     with pytest.raises(m.BrokerMaintenanceError) as failure:
         m._stop_incident_broker()
     assert failure.value.disable_attempted and not failure.value.bootout_attempted
-    assert world.commands == [m._DISABLE] and world.handles == []
+    assert world.commands == [m._DISABLE] and world.cleanup == world.handles
+    assert len(world.handles) == 1
 
 
 def test_disabled_readback_failure_never_proceeds_to_bootout(world):
@@ -143,14 +147,16 @@ def test_failed_bootout_is_never_repeated_or_reported_stopped(world, reply):
     with pytest.raises(m.BrokerMaintenanceError) as failure:
         m._stop_incident_broker()
     assert failure.value.disable_attempted and failure.value.bootout_attempted
-    assert world.commands == [m._DISABLE, m._BOOTOUT] and world.handles == []
+    assert world.commands == [m._DISABLE, m._BOOTOUT] and world.cleanup == world.handles
+    assert len(world.handles) == 1
 
 
 def test_noncanonical_absence_is_not_success(world):
     world.absent_reply = False
     with pytest.raises(m.BrokerMaintenanceError, match="ABSENCE_UNAVAILABLE"):
         m._stop_incident_broker()
-    assert world.commands == [m._DISABLE, m._BOOTOUT] and world.handles == []
+    assert world.commands == [m._DISABLE, m._BOOTOUT] and world.cleanup == world.handles
+    assert len(world.handles) == 1
 
 
 @pytest.mark.parametrize("case", ["socket", "old_owner", "source_drift", "post_content_drift", "cleanup"])

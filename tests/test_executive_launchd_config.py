@@ -1762,17 +1762,25 @@ def test_release_manifest_rejects_ownership_and_group_write_drift() -> None:
 
 def test_installer_stops_old_daemons_before_first_release_or_policy_mutation() -> None:
     source = (OPS / "install.sh").read_text(encoding="utf-8")
-    stop = source.index('/bin/launchctl disable "system/$CONTROL_LABEL"')
+    mutation_start = source.index("trap leave_installed_services_stopped EXIT")
+    stop = source.index('/bin/launchctl disable "system/$CONTROL_LABEL"', mutation_start)
     control_absent = source.index(
         'wait_for_launchd_absent "$CONTROL_LABEL" control', stop
     )
     worker_absent = source.index(
         'wait_for_launchd_absent "$WORKER_LABEL" worker', control_absent
     )
-    archive = source.index('/usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" -C "$SOURCE_REPO" archive')
-    config_write = source.index('temporary.write_text(', archive)
+    # Archive/seal/publication now live in one shared function. Its ordinary
+    # invocation, rather than its definition, must follow the daemon fences.
+    shared = source.split("# --- BEGIN shared sealed release staging ---", 1)[1].split(
+        "# --- END shared sealed release staging ---", 1
+    )[0]
+    archive_command = '/usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" -C "$SOURCE_REPO" archive'
+    assert shared.count(archive_command) == source.count(archive_command) == 1
+    publication = source.index("\nstage_sealed_release || exit 65", mutation_start)
+    config_write = source.index('temporary.write_text(', publication)
     plist_install = source.index('/usr/bin/install -o root -g wheel -m 0644')
-    assert stop < control_absent < worker_absent < archive < config_write < plist_install
+    assert mutation_start < stop < control_absent < worker_absent < publication < config_write < plist_install
     assert "trap leave_installed_services_stopped EXIT" in source
     tail_after_plists = source[plist_install:]
     # Normal Executive daemons stay inert. The only bootstrap is the explicitly
@@ -1819,8 +1827,8 @@ exit "$HELPER_RC"
             assert "absence was not proven after bootout" in result.stderr
 
     mutation_start = source.index("trap leave_installed_services_stopped EXIT")
-    archive = source.index('/usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" -C "$SOURCE_REPO" archive', mutation_start)
-    mutation = source[mutation_start:archive]
+    publication = source.index("\nstage_sealed_release || exit 65", mutation_start)
+    mutation = source[mutation_start:publication]
     for label, description in (
         ("RELAY_LABEL", "relay"),
         ("CONTROL_LABEL", "control"),

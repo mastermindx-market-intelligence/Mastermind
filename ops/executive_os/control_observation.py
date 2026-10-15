@@ -174,6 +174,11 @@ def _publish_for_transaction(host, transaction):
             or host._active_transaction is not transaction
             or host._transaction_owner_fd is None):
         raise owner.TransactionEffectUnknown()
+    if getattr(host, '_disarm_closeout_qualification', None) is not None:
+        # Separately admitted original DISARM recovery. This branch can only
+        # read back its completed observation; it cannot grant publication.
+        from ops.executive_os.disarm_closeout import verify_admitted_readback
+        return verify_admitted_readback(host, transaction)
     _source(transaction.expected_sha)
     host._config_root_safe()
     host._verify_published_inode(host._transaction_owner_fd)

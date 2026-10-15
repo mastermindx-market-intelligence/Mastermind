@@ -948,6 +948,106 @@ def validate_host_receipt_v2(
     return expected
 
 
+def validate_native_subscription_capacity_enrollment(value: object) -> dict[str, Any]:
+    """Closed inert stanza for the incumbent finite root-config publisher.
+
+    Validation is syntax only. Publication must bind the actual qualified
+    immutable source export and host/principal/custody owners; no input is an
+    enrollment grant, readiness result or accepted-source proof by itself.
+    """
+    fields = {"schema_version", "host_ref", "os_principal_ref", "config_custody_ref",
+              "enrollment_state", "registration_source"}
+    if (type(value) is not dict or set(value) != fields
+            or value["schema_version"] != "mastermind.native_subscription_capacity_enrollment/v1"
+            or value["enrollment_state"] not in ("enrolled", "unenrolled")):
+        raise CapacitySourceContractError("NATIVE_ENROLLMENT_INVALID")
+    for key, prefix in (("host_ref", "host"), ("os_principal_ref", "principal"),
+                        ("config_custody_ref", "custody")):
+        if type(value[key]) is not str or re.fullmatch(prefix + r"-[0-9a-f]{64}", value[key]) is None:
+            raise CapacitySourceContractError("NATIVE_ENROLLMENT_INVALID")
+    source = value["registration_source"]
+    if (type(source) is not dict or set(source) != {"release_commit", "previous_release_commit", "material_source_digest", "export_sha256"}
+            or any(type(source[key]) is not str or _COMMIT_RE.fullmatch(source[key]) is None
+                   for key in ("release_commit", "previous_release_commit"))
+            or source["release_commit"] == source["previous_release_commit"]
+            or any(type(source[key]) is not str or _DIGEST_RE.fullmatch(source[key]) is None
+                   for key in ("material_source_digest", "export_sha256"))):
+        raise CapacitySourceContractError("NATIVE_REGISTRATION_SOURCE_INVALID")
+    return {**value, "registration_source": dict(source)}
+
+
+def acquire_native_registration(realm_owner: object) -> dict[str, Any]:
+    """Read a source-owner-published immutable Macro export for one root realm.
+
+    The existing root Worker config pins an already-qualified Macro release,
+    its accepted predecessor, material identity and exact exported bytes. The
+    publication owner must acquire that export from the actual accepted source
+    CLI, never a model/request document. This reader cannot qualify a Git branch
+    or infer release acceptance from a public hash. There is no default stanza.
+
+    The export is an immutable projection in Capacity configuration, never an
+    extra file inside a sealed Macro checkout or a second capability registry.
+    No credential or provider is read.
+    Return values are observations, not bearer authentication or availability.
+    """
+    from control_plane import codex_provider_realm as realm
+
+    if (type(realm_owner) is not realm.SubscriptionRealmOwner
+            or realm_owner._seal is not realm._SUBSCRIPTION_REALM_OWNER_SEAL):
+        raise CapacitySourceContractError("NATIVE_REGISTRATION_OWNER_REQUIRED")
+    path, config_sha = realm_owner._config_path, realm_owner._config_sha256
+    config = realm._native_read_config(path, config_sha)
+    if "native_capacity_enrollment" not in config:
+        raise CapacitySourceContractError("NATIVE_REGISTRATION_UNBOUND")
+    enrollment = validate_native_subscription_capacity_enrollment(config["native_capacity_enrollment"])
+    if enrollment["enrollment_state"] != "enrolled":
+        raise CapacitySourceContractError("NATIVE_REGISTRATION_UNBOUND")
+    source = enrollment["registration_source"]
+    export_path = SYSTEM_ROOT / "config" / "capacity-source-components-native-v2" / (source["release_commit"] + ".json")
+    document = realm._native_read_config(export_path, source["export_sha256"])
+    if (set(document) != {"repository_commit", "previous_repository_commit", "material_source_digest", "registrations"}
+            or document["repository_commit"] != source["release_commit"]
+            or document["previous_repository_commit"] != source["previous_release_commit"]
+            or document["material_source_digest"] != source["material_source_digest"]
+            or type(document["registrations"]) is not list or len(document["registrations"]) > 32):
+        raise CapacitySourceContractError("NATIVE_REGISTRATION_SOURCE_MISMATCH")
+    row_fields = {"schema", "capacity_capability_id", "capability_generation", "provider", "billing_mode",
+                  "credential_kind", "execution_surface", "registration_state", "material_source_digest",
+                  "registration_receipt_digest"}
+    selected = None
+    identities: set[str] = set()
+    for row in document["registrations"]:
+        if (type(row) is not dict or set(row) != row_fields
+                or row["schema"] != "mastermind.provider_native_capability_registration/v1"
+                or type(row["capacity_capability_id"]) is not str
+                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", row["capacity_capability_id"]) is None
+                or row["capacity_capability_id"] in identities
+                or type(row["capability_generation"]) is not int or not 1 <= row["capability_generation"] < 2**63
+                or any(type(row[key]) is not str for key in ("provider", "credential_kind", "registration_state"))
+                or row["billing_mode"] != "subscription" or row["execution_surface"] != "native_cli"
+                or (row["provider"], row["credential_kind"]) not in {("claude", "attached_login"), ("minimax", "api_key")}
+                or row["registration_state"] not in {"registered", "revoked"}
+                or row["material_source_digest"] != source["material_source_digest"]):
+            raise CapacitySourceContractError("NATIVE_REGISTRATION_INVALID")
+        unsigned = {key: value for key, value in row.items() if key != "registration_receipt_digest"}
+        expected = hashlib.sha256(json.dumps(unsigned, sort_keys=True, separators=(",", ":"),
+                    ensure_ascii=False, allow_nan=False).encode("utf-8")).hexdigest()
+        if row["registration_receipt_digest"] != expected:
+            raise CapacitySourceContractError("NATIVE_REGISTRATION_DIGEST_MISMATCH")
+        identities.add(row["capacity_capability_id"])
+        if row["capacity_capability_id"] == config.get("capacity_capability_id"):
+            selected = row
+    if selected is None or selected["registration_state"] != "registered":
+        raise CapacitySourceContractError("NATIVE_REGISTRATION_NOT_CURRENT")
+    # A root publication/revocation during collection invalidates the whole read.
+    if (realm._native_read_config(export_path, source["export_sha256"]) != document
+            or realm._native_read_config(path, config_sha) != config):
+        raise CapacitySourceContractError("NATIVE_REGISTRATION_CHANGED")
+    return dict(selected, source_release_commit=source["release_commit"],
+                previous_release_commit=source["previous_release_commit"],
+                source_receipt_digest=source["export_sha256"])
+
+
 def _read_json(source: Path) -> Any:
     try:
         return json.loads(source.read_text(encoding="utf-8"))
