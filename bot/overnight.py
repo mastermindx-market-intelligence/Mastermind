@@ -26,14 +26,24 @@ _RUNNERS = {
 }
 
 
-def _overnight_directive(pid: str, t: dict) -> str:
-    """Build the Brain's overnight reconsideration prompt from the live tape."""
-    groups = t.get("groups") or {}
-    risk = t.get("risk") or {}
+def _overnight_directive(pid: str, t: dict, *, forced: bool = False) -> str:
+    """Build a truthful, qualified reconsideration prompt from the source read."""
+    from data_layer import overnight as observed_source
+    if not observed_source.qualifies_live_risk(t):
+        raise ValueError("unqualified overnight evidence cannot build a Brain directive")
+    groups = t["groups"]
+    risk = t["risk"]
 
-    def _fmt(g):
-        return ", ".join(f"{r['name']} {r['change_pct']:+.2f}%"
-                         for r in groups.get(g, []) if r.get("change_pct") is not None) or "n/a"
+    def _fmt(group):
+        # Display labels must come from the reviewed instrument universe, not
+        # untrusted optional provider fields. The qualified risk gate has
+        # already checked every value the prompt may display for finiteness.
+        labels = dict(observed_source.GROUPS[group])
+        return ", ".join(
+            f"{labels[row['ticker']]} {float(row['change_pct']):+.2f}%"
+            for row in groups.get(group, [])
+            if row.get("change_pct") is not None
+        ) or "n/a"
 
     # MACRO RISK OFFICER brief (best-effort) — the top-down DEFENSE read + driver-aware defensive tilt,
     # so the Brain's overnight reconsideration knows the risk state, the hard gross cap, and WHERE
@@ -51,9 +61,16 @@ def _overnight_directive(pid: str, t: dict) -> str:
     except Exception:  # noqa: BLE001
         macro_line = ""
 
+    introduction = (
+        "OVERNIGHT REVIEW — manually requested reconsideration of a source-qualified LIVE overnight tape; "
+        "no materiality threshold was required for this request. "
+        if forced else
+        "OVERNIGHT REVIEW — source-qualified LIVE overnight tape moved materially by the "
+        "current risk tripwire threshold. "
+    )
     return (
-        "OVERNIGHT REVIEW — the LIVE overnight tape has moved materially since you last decided, and the "
-        f"in-house dashboard is STALE and can't see it. Live tape now — risk_state {risk.get('state')}: "
+        introduction
+        + f"Current qualified risk_state {risk.get('state')}: "
         f"US index futures [{_fmt('us_futures')}]; international [{_fmt('international')}]; "
         f"vol [{_fmt('vol')}]; FX/rates [{_fmt('fx_rates')}].{macro_line}"
         "You currently have a target QUEUED to settle at the next open. Review your current book (get_my_book) "
@@ -117,7 +134,7 @@ def watch(pid: str, asof: str | None = None, *, force: bool = False) -> dict:
         # or crypto-only feed as a "LIVE overnight tape has moved materially".
         # Preserve the existing queued paper target; neither submit nor spend
         # a model turn when the risk signals are unqualified.
-        if t.get("live") is False or out["overnight_risk"] not in ("calm", "elevated", "stressed"):
+        if not overnight.qualifies_live_risk(t):
             return {**out, "skipped": "tape_unavailable"}
         if not (force or overnight.is_material(t)):
             return {**out, "skipped": "tape_calm"}          # deterministic tripwire → free, no LLM
@@ -126,7 +143,7 @@ def watch(pid: str, asof: str | None = None, *, force: bool = False) -> dict:
         if not mod_name:
             return {**out, "skipped": "unknown_book"}
         fn = getattr(importlib.import_module(mod_name), fn_name)
-        res = fn(asof=asof, directive=_overnight_directive(pid, t)) or {}
+        res = fn(asof=asof, directive=_overnight_directive(pid, t, forced=force)) or {}
         out["refined"] = {k: res.get(k) for k in ("decided", "queued_for_open", "holdings", "brain")}
         return out
     except Exception as e:                                   # noqa: BLE001 — a watch miss must never kill the scheduler

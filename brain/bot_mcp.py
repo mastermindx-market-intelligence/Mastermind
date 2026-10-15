@@ -217,18 +217,23 @@ async def get_regime(args):
 
 
 @tool("get_overnight_tape",
-      "The LIVE overnight cross-asset tape — what's moving RIGHT NOW while the US cash market is shut, "
-      "which the EOD macro dashboard CANNOT see. US index futures (ES/NQ/YM/RTY), international indices "
-      "(Nikkei, Hang Seng, Shanghai, KOSPI, Euro Stoxx, DAX, FTSE), USD/JPY/DXY, the 10Y yield, VIX, oil, "
-      "gold and BTC — each with its overnight % change — plus a distilled risk read (calm / elevated / "
-      "stressed). Use this to position for the open the way a human trader watches the overnight tape; do "
-      "NOT rely on the stale dashboard for the current risk.", {})
+      "An indicative cross-asset session-change overview, NOT a verified live overnight quote. "
+      "The current Yahoo provider supplies five days of DAILY closes, not intraday timestamps. "
+      "Risk is UNKNOWN and live=false until an independently admitted intraday source with "
+      "verified rights, venue and observation time exists. Do NOT infer fresh overnight "
+      "moves or submit/revise trading targets from this historical read.", {})
 async def get_overnight_tape(args):
     try:
         from data_layer import overnight
-        return _json(overnight.tape())
-    except Exception as e:  # noqa: BLE001
-        return _json({"error": repr(e)[:200], "note": "overnight tape unavailable"})
+        return _json(overnight.public_tape(overnight.tape()))
+    except Exception:  # noqa: BLE001 — external provider errors must not leak to model context
+        return _json({
+            "error": "overnight_source_unavailable",
+            "live": False,
+            "risk": {"state": "unknown",
+                     "reasons": ["no qualified overnight risk signals"]},
+            "groups": {},
+        })
 
 
 @tool("get_themes", "Narrative baskets with recent relative performance (the theme universe).",

@@ -16,7 +16,9 @@ unchanged five-minute read cache for historical indicative prices."""
 from __future__ import annotations
 
 import math
+import re
 import time
+from datetime import datetime, timezone
 
 # The overnight universe, grouped (Yahoo symbols + display names).
 GROUPS: dict[str, list[tuple[str, str]]] = {
@@ -76,7 +78,10 @@ def risk_read(groups: dict) -> dict:
     def finite_change(value):
         if type(value) not in (int, float):
             return None
-        parsed = float(value)
+        try:
+            parsed = float(value)
+        except (OverflowError, ValueError):
+            return None
         return parsed if math.isfinite(parsed) else None
 
     def observed(group):
@@ -168,21 +173,140 @@ def tape(force: bool = False) -> dict:
     return out
 
 
+_LIVE_QUALITY_KEYS = frozenset({
+    "classification", "source_vendor", "source_receipt_id",
+    "source_observed_at_utc", "dataos_identity_admitted",
+    "source_rights_admitted", "realtime_venue_admitted", "risk_qualified",
+})
+_QUALIFIED_RISK_GROUPS = ("us_futures", "international", "vol")
+
+
+def _host_live_source_admitted(_observation: dict) -> bool:
+    """Default deny until the EXISTING Data OS authority binds the true source.
+
+    The verifier MUST bind the COMPLETE observation (venue symbols, returns,
+    risk values, source time and receipt), not only claimed quality metadata.
+    A JSON risk_qualified or live flag is not an attested grant. Production
+    has no enrolled intraday source or rights owner for this consumer yet.
+    Do not replace this with an environment toggle, model-provided metadata,
+    unchecked local files, or a duplicate data-licensing authority.
+    """
+    return False
+
+
+def qualifies_live_risk(t: dict | None) -> bool:
+    """One fail-closed admission decision shared by Brain watch and materiality.
+
+    Unlike the pure risk classifier, this concerns data provenance and permitted
+    use. A future installed upstream must furnish a separately verified,
+    admitted source receipt; until then all real provider packets refuse. Even
+    under a synthetic test-owned host verdict, clock and exact risk/venue
+    content must satisfy this contract.
+    """
+    if not isinstance(t, dict) or t.get("live") is not True:
+        return False
+    quality = t.get("source_quality")
+    if not isinstance(quality, dict) or frozenset(quality) != _LIVE_QUALITY_KEYS:
+        return False
+    if quality.get("classification") != "LIVE_QUALIFIED":
+        return False
+    for key in ("dataos_identity_admitted", "source_rights_admitted",
+                "realtime_venue_admitted", "risk_qualified"):
+        if quality.get(key) is not True:
+            return False
+    vendor = quality.get("source_vendor")
+    receipt = quality.get("source_receipt_id")
+    if (not isinstance(vendor, str)
+            or re.fullmatch(r"[A-Za-z][A-Za-z0-9._-]{3,79}", vendor) is None
+            or not isinstance(receipt, str)
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{15,127}", receipt) is None):
+        return False
+    observed = quality.get("source_observed_at_utc")
+    if not isinstance(observed, str) or len(observed) > 40:
+        return False
+    try:
+        source_clock = datetime.fromisoformat(observed.replace("Z", "+00:00"))
+        if source_clock.tzinfo is None or source_clock.utcoffset() is None:
+            return False
+        age_s = (datetime.now(timezone.utc)
+                 - source_clock.astimezone(timezone.utc)).total_seconds()
+        if not -30 <= age_s <= _TTL:
+            return False
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+    groups = t.get("groups")
+    if not isinstance(groups, dict) or not set(groups) <= set(GROUPS):
+        return False
+    observed_risk_rows = 0
+    for group, rows in groups.items():
+        if not isinstance(rows, list):
+            return False
+        permitted = {symbol for symbol, _label in GROUPS[group]}
+        seen: set[str] = set()
+        for row in rows:
+            if not isinstance(row, dict):
+                return False
+            ticker = row.get("ticker")
+            if not isinstance(ticker, str) or ticker not in permitted or ticker in seen:
+                return False
+            seen.add(ticker)
+            change = row.get("change_pct")
+            if change is None and group not in _QUALIFIED_RISK_GROUPS:
+                # Supplemental display-only observations can be absent; the
+                # formatter must then omit them rather than claiming a move.
+                continue
+            if type(change) not in (int, float):
+                return False
+            try:
+                percentage = float(change)
+            except (OverflowError, ValueError):
+                return False
+            # The same input may be presented in the Brain prompt (FX,
+            # commodities and crypto included). Never format NaN/Inf or a
+            # physically impossible return as a verified real-time move.
+            if not math.isfinite(percentage) or not -100 <= percentage <= 1000:
+                return False
+            if group in _QUALIFIED_RISK_GROUPS:
+                if group == "vol" and ticker != "^VIX":
+                    return False
+                observed_risk_rows += 1
+    if not observed_risk_rows:
+        return False
+    expected = risk_read(groups)
+    if (expected["state"] == "unknown" or
+            any(type(value) in (int, float) and not math.isfinite(value)
+                for value in (expected["futures_avg_pct"],
+                              expected["intl_avg_pct"],
+                              expected["vix_change_pct"])) or
+            t.get("risk") != expected):
+        return False
+
+    # Existing, currently unimplemented host owner must authenticate the
+    # COMPLETE observed body against its independently retained source/usage
+    # receipt. Checking metadata alone would permit substituted prices with
+    # the same receipt. Synthetic tests can inject this host verdict only.
+    try:
+        return _host_live_source_admitted(t) is True
+    except Exception:
+        return False
+
+
 def is_material(t: dict | None = None) -> bool:
     """Deterministic tripwire (free — no LLM): is the overnight tape moving enough to warrant a Brain
     reconsideration? True when the distilled risk read is 'elevated' or 'stressed'."""
     t = t if t is not None else tape()
-    # A confirmed non-live source may carry indicative historical changes.
-    # Those changes must never become an actionable overnight tripwire.
-    return (t.get("live") is not False
-            and (t.get("risk") or {}).get("state") in ("elevated", "stressed"))
+    # Materiality is evaluated only AFTER host source/rights admission.
+    # Even an asserted live=True from a caller cannot trigger a Brain.
+    return (qualifies_live_risk(t)
+            and t["risk"]["state"] in ("elevated", "stressed"))
 
 
 def brief(t: dict | None = None) -> str:
     """A one-line human/Brain summary of the overnight tape (for prompts + logs)."""
     t = t if t is not None else tape()
-    if not t.get("live"):
-        return "Overnight tape unavailable (historical closes are not qualified live risk)."
+    if not qualifies_live_risk(t):
+        return "Overnight tape unavailable (historical closes or unqualified evidence are not live risk)."
     risk = t.get("risk") or {}
     return f"Overnight tape: risk {risk.get('state')} — " + "; ".join(risk.get("reasons") or [])
 
@@ -191,3 +315,93 @@ def clear_cache() -> None:
     """Drop the memo (tests / a forced refresh)."""
     global _cache, _cache_ts
     _cache, _cache_ts = None, 0.0
+
+
+def public_tape(observation: dict | None) -> dict:
+    """Bound model/dashboard output to the SAME admission used by decisions.
+
+    A future replacement feed cannot label its own data live merely by
+    supplying matching quality flags. Original Yahoo daily orientation may
+    remain visible as historical-only, with its risk forced to UNKNOWN.
+    A rejected claimed-live packet exposes no unqualified prices or receipts.
+    """
+    if qualifies_live_risk(observation):
+        return observation
+
+    risk = risk_read({})
+    quality = (observation or {}).get("source_quality") if isinstance(observation, dict) else None
+    daily = (
+        isinstance(observation, dict)
+        and observation.get("live") is False
+        and observation.get("as_of_kind") == "retrieved_at_not_source_observed_at"
+        and quality == {
+            "classification": "EOD_NOT_LIVE",
+            "source": "yahoo_daily_history",
+            "interval": "1d",
+            "risk_qualified": False,
+        }
+    )
+    if daily:
+        groups = {}
+        for group, rows in (observation.get("groups") or {}).items():
+            if group not in GROUPS or not isinstance(rows, list):
+                continue
+            names = dict(GROUPS[group])
+            sanitized = []
+            seen = set()
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                ticker = row.get("ticker")
+                if not isinstance(ticker, str) or ticker not in names or ticker in seen:
+                    continue
+                seen.add(ticker)
+                change = row.get("change_pct")
+                if change is not None:
+                    if type(change) not in (int, float):
+                        continue
+                    try:
+                        value = float(change)
+                    except (OverflowError, ValueError):
+                        continue
+                    if not math.isfinite(value) or not -100 <= value <= 1000:
+                        continue
+                price = row.get("price")
+                if type(price) not in (int, float):
+                    price = None
+                else:
+                    try:
+                        price = float(price)
+                    except (OverflowError, ValueError):
+                        price = None
+                    if price is not None and not math.isfinite(price):
+                        price = None
+                sanitized.append({
+                    "ticker": ticker, "name": names[ticker],
+                    "price": price, "change_pct": change,
+                })
+            groups[group] = sanitized
+        as_of = observation.get("as_of")
+        return {
+            "as_of": as_of if isinstance(as_of, str) and len(as_of) <= 48 else None,
+            "as_of_kind": "retrieved_at_not_source_observed_at",
+            "groups": groups,
+            "risk": risk,
+            "n_symbols": sum(len(rows) for rows in groups.values()),
+            "live": False,
+            "source_quality": {
+                "classification": "EOD_NOT_LIVE",
+                "source": "yahoo_daily_history",
+                "interval": "1d",
+                "risk_qualified": False,
+            },
+        }
+    return {
+        "as_of": None,
+        "as_of_kind": "unqualified_no_observation",
+        "groups": {}, "risk": risk, "n_symbols": 0, "live": False,
+        "source_quality": {
+            "classification": "UNQUALIFIED_FOR_RISK",
+            "risk_qualified": False,
+        },
+    }

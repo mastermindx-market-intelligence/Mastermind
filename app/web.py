@@ -1845,7 +1845,10 @@ def api_overnight_tape() -> JSONResponse:
     """
     try:
         from data_layer import overnight
-        return JSONResponse(overnight.tape())
+        return JSONResponse(
+            overnight.public_tape(overnight.tape()),
+            headers={"Cache-Control": "no-store"},
+        )
     except Exception:  # noqa: BLE001 — never leak provider/network error details
         return JSONResponse(
             {"groups": {}, "risk": {"state": "unknown",

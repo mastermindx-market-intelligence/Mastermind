@@ -43,5 +43,29 @@
   },
   "effect": "SOURCE_ONLY; no production deployment/provider/account/order/position or released data changes",
   "runtime_eligibility": "NO_QUALIFIED_LIVE_OVERNIGHT_SOURCE",
-  "disposition": "DRAFT_HOLD_BEFORE_LIVE_DATA_CUTOVER"
+  "disposition": "DRAFT_HOLD_BEFORE_LIVE_DATA_CUTOVER",
+  "source_review_followup": {
+    "original_independent_review": "REQUEST_CHANGES P1 asserted-live, missing-live, force bypass and stale model-tool wording",
+    "test_scope": "144 targeted overnight, web, risk-governor, derisk, MCP and malformed-source tests, zero failures/skips",
+    "passed": 144,
+    "junit_sha256": "44dc0612a510efb5c31f8513a6f974510b95118124f07c371e71f531ebb611c0",
+    "source_sha256": {
+      "data_layer/overnight.py": "a203c5e8ae1bb46c47cebb96fa61cb602d5ecbbac94171e02fb41217dd1ce335",
+      "bot/overnight.py": "626a0689a7df2ad5224f19edc5917a0e5ccf9b45691efcbf861b8a7cc1772fa3",
+      "bot/derisk.py": "556ef0132503e0e9615f647d934f99ad552d5ccc8c542b3009a37425f024ea0a",
+      "app/web.py": "5ac8fd0e60c07d5e9379c472ba487115531b4ea5f1dee84fb466d1cb07eadc73",
+      "brain/bot_mcp.py": "838abcdcc8e2bdd13070b4489518ed1498dae3b762ba3bb1c175c124695b0603",
+      "brain/risk_lens.py": "472a492c53452633840f5027ddb8fe15527656591439152f8fc980f5db06c37b",
+      "tests/test_overnight.py": "2c51c7e12b63669d8accd3908d429767d26c7e9b993af30fb486847cdb5ec35e",
+      "tests/test_overnight_source_admission.py": "cef601374814336edc32ced9a544e0b1cd99ff883850f746e7874917ca2ee75c",
+      "tests/test_overnight_derisk_source_gate.py": "804492106592f6d4651527cd3706b5ffb2cc99a335edeb82a679a734c91c4669",
+      "tests/test_overnight_forced_prompt_truth.py": "d9382bcd3128e5245338e004a6a40b29928daa96e489778f0113ef6e4a3f45d4",
+      "tests/test_overnight_mcp_source_truth.py": "94af0a1b887f37f3b2ca02a703f193db7bebbf894fe34cded82096c163516484",
+      "tests/test_overnight_public_projection.py": "7f8eaf3f823f973d8756250cc86ff94e2a8beeadd7c0604acac42fdae958bff3",
+      "docs/runbooks/overnight-risk-source-truth.md": "f3fbce7eed251623e3118679abbd0ad8f7c5e26e7a993b97b3b3841d9592fc7e"
+    },
+    "producer_admission": "_host_live_source_admitted default FALSE in production, synthetic positive test injection only",
+    "capital_effect": "NONE",
+    "remaining": "actual Data OS source/usage proof before live automated redecision"
+  }
 }
