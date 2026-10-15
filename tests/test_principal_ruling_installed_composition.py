@@ -179,6 +179,7 @@ def test_control_launcher_selects_same_service_runtime_without_observation_socke
     def activated(name):
         value = sockets.enter_context(socket.socket(socket.AF_UNIX))
         value.bind(str(raw["control_socket_path" if name == "Operator" else "ceo_ingress_socket_path"]))
+        value.listen()
         return value
     monkeypatch.setattr(cli, "activate_launchd_socket", activated)
     monkeypatch.setattr(executive_worker_broker, "WorkerBrokerClient", lambda *a, **kw: object())

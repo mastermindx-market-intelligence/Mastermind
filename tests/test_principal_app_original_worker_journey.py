@@ -192,6 +192,9 @@ def run_signed_app_journey(tmp_path, monkeypatch, rsa_key, lose_response, host_l
             await server.wait_closed()
             pending = tuple(service._ceo_ingress_tasks)
             if pending: await asyncio.gather(*pending)
+            if qualification_fault == "stable":
+                with pytest.raises(foreground.ForegroundOperationClosed):
+                    guards[0]()
 
     monkeypatch.setattr(PrincipalDialogueAppReceiver, "ruling", through_app_and_service)
     # Reuse the canonical source/Relay scenario and its one-COMMIT, one-post,

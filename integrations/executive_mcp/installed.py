@@ -1994,6 +1994,21 @@ class InstalledBootPacketCollector:
             future.set_result(shared_packet)
         return packet
 
+    def product_acceptance_basis_reader(self, *, macro_root: Path):
+        """Compose the core consumer at its existing installed-owner boundary."""
+        from control_plane import agentos_product_acceptance_basis as basis
+
+        root = Path(macro_root)
+        if (not root.is_absolute() or type(self) is not InstalledBootPacketCollector
+                or self._macro_root != root.resolve()
+                or self._code_root != basis._SOURCE_ROOT.resolve()
+                or self._expected_source_sha is None or self._allow_synthetic_fixture):
+            raise ValueError("installed Context requires the exact sealed source collector")
+        reader = basis.AgentOsProductAcceptanceBasisReader(macro_root=root)
+        reader._installed_context_owner = self
+        reader._installed_context_binding = reader._context_binding(self)
+        return reader
+
     def read_product_acceptance_basis(
         self, *, work_ref: str, execution_commission_ref: Any,
         root_objective: str, timeout: float = 15.0,
