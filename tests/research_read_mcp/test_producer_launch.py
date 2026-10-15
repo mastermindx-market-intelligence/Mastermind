@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from integrations.research_read_mcp import producer_launch as launch
+from ops.research_producer import launch
 from integrations.research_read_mcp.runtime import RuntimeRefused
 
 
@@ -15,9 +15,10 @@ def fixture(tmp_path, *, output=None, rc=0):
     mm, macro = root / ("a" * 40), root / ("b" * 40)
     source = Path(launch.__file__).parents[2]
     files = {"integrations/__init__.py": b""}
-    for name in ("__init__.py", "runtime.py", "release_identity.py", "producer_launch.py"):
+    for name in ("__init__.py", "runtime.py", "release_identity.py"):
         rel = "integrations/research_read_mcp/" + name
         files[rel] = (source / rel).read_bytes()
+    files[launch.MODULE] = (source / launch.MODULE).read_bytes()
     if output is None:
         output = "PRIVATE_SYNTHETIC_BODY\ningest_research: original_capture_sha256=" + "c" * 64 + "\n"
     script = ("import json,pathlib,sys,tempfile\n"

@@ -18,11 +18,11 @@ import stat
 import subprocess
 import sys
 
-from .release_identity import verify_archive_release
-from .runtime import RuntimeRefused, _json, read_secure_json
+from integrations.research_read_mcp.release_identity import verify_archive_release
+from integrations.research_read_mcp.runtime import RuntimeRefused, _json, read_secure_json
 
 SCHEMA = "mastermind.research_producer_launch.v1"
-MODULE = "integrations/research_read_mcp/producer_launch.py"
+MODULE = "ops/research_producer/launch.py"
 REPOSITORY = "mastermindx-market-intelligence/macro"
 MIN_FREE_BYTES = 2 * 1024**3
 MAX_LOG_BYTES = 32 * 1024**2
@@ -173,7 +173,7 @@ def _child(config, identity, run_dir):
 _BOOTSTRAP = """import json,sys
 c,i,p=json.loads(sys.argv[1])
 sys.path.insert(0,c['mastermind_release'])
-from integrations.research_read_mcp.producer_launch import _child
+from ops.research_producer.launch import _child
 raise SystemExit(_child(c,i,p))
 """
 

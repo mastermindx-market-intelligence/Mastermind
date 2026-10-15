@@ -5,7 +5,7 @@ The selected reader expects one exact producer commit. A constant declared SHA
 while executing changing code would be false provenance. Original private
 journals and the working corpus must also survive runner checkout cleanup.
 
-`integrations.research_read_mcp.producer_launch` supplies the invocation mechanism.
+`ops.research_producer.launch` supplies the invocation mechanism.
 It reuses the existing archive manifest and `verify_archive_release`; it creates
 no release authority, scheduler, queue, writer lease, deployment or retry engine.
 There is no workflow change in this candidate.
@@ -24,9 +24,10 @@ retention_root, public_checkout, runner_work_root
 
 The release/manifest fields use the existing staged archive contract. Both
 release roots and the manifest belong to the invoking UID. The expected manifest
-digest must be obtained from the actual authorized release owner. The staged
-Mastermind closure includes this module through its existing `integrations`
-root. The Macro closure must include `engine`, `lib`, and
+digest must be obtained from the actual authorized release owner. The existing stager includes this operations module only when
+`include_producer=True` (CLI `--include-producer`) is explicitly selected.
+The default reader archive excludes it, and the read-only MCP package retains
+its existing no-write fence. The Macro closure must include `engine`, `lib`, and
 `scripts/ingest_research.py`; metadata-only fixtures previously missed `lib` and
 failed actual PDF extraction. Dependency qualification remains a separate duty.
 
@@ -134,3 +135,16 @@ it does not test live R2, the production launcher with a live Store, or arbitrar
 optional producer features. Interpreter and Poppler byte observations do not
 prove an immutable host installation. Selecting and qualifying the separate
 venv remains part of the held concrete deployment action.
+
+## CI boundary repair (2026-10-15)
+
+Hosted run38604579228 correctly rejected the original placement because the
+read-only MCP package contained the producer's private journal writes. The
+launcher now lives in `ops/research_producer/launch.py`; it is never imported by
+the reader. The stager's explicit producer option includes that exact file in
+the manifest while preserving the default reader-only archive. The original
+no-write fence is unchanged. Focused packaging and actual child-process checks
+cover the new import and archive paths: 114 affected cases passed in the
+qualified Python 3.12 environment, including the unchanged static fence. Earlier
+no-Store integration evidence
+applies to the prior module path and is not claimed as proof of the relocation.
