@@ -1048,10 +1048,10 @@ class PrivilegedActionBroker:
         self._executor = executor
         self._require_root = require_root
         self._reconciliation_observer = reconciliation_observer
-        # Production composes NO forward host-guard producer.  Only an
-        # explicitly injected private factory may acquire a held custody
-        # context for the dormant protocol. Expected values or a saved report
-        # are not that context; no production interface can select a fixture.
+        # Production remains uncomposed while its code-bound policy is None.
+        # run_broker can select only the fixed reviewed private producer after
+        # that policy is activated in source. Expected values or a saved report
+        # are not a held context; no production interface can select a fixture.
         if forward_host_guard is not None and not callable(forward_host_guard):
             raise TypeError("forward host guard producer must be callable")
         self._forward_host_guard = forward_host_guard
@@ -2231,8 +2231,14 @@ def run_broker(
     activated_socket: socket.socket | None = None,
     release_owner: Any | None = None,
 ) -> None:
-    broker = (PrivilegedActionBroker(config) if release_owner is None
-              else PrivilegedActionBroker(config, release_owner=release_owner))
+    from control_plane.executive_incident_composition import _resolve_production_forward_host_guard
+    guard = _resolve_production_forward_host_guard(config)
+    composition = {}
+    if release_owner is not None:
+        composition['release_owner'] = release_owner
+    if guard is not None:
+        composition['forward_host_guard'] = guard
+    broker = PrivilegedActionBroker(config, **composition)
     listener = activated_socket if activated_socket is not None else activate_launchd_socket()
     listener.settimeout(_BROKER_IDLE_TIMEOUT_SECONDS)
     while True:
