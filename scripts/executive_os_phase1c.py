@@ -275,6 +275,7 @@ _CONFIG_OPTIONAL = frozenset(
         "content_observer",
         "content_observer_profile_path",
         "company_consultation",
+        "reply_events",
         "workspace_acquisition",
         "workspace_resource_policy",
         "workspace_control_room",
@@ -932,6 +933,8 @@ def load_control_config(
         )
     _staged_fabric_binding_source(config)
     company_consultation_launchd_entry(config)
+    from integrations.session_bridge.reply_event_host_composition import validate_reply_event_host_config
+    validate_reply_event_host_config(config.get("reply_events"))
     arm = config.get("privileged_readiness_armed", False)
     broker_socket = config.get("privileged_broker_socket_path")
     if type(arm) is not bool:
@@ -1731,6 +1734,14 @@ def _service_from_config(
         dialogue_canary_profile = DialogueWakeCanaryProfile(None)
     if type(dialogue_canary_profile) is not DialogueWakeCanaryProfile:
         raise ServiceError("dialogue canary profile requires trusted composition")
+    # Qualify optional event custody before activating any existing listeners.
+    from integrations.session_bridge.reply_event_host_composition import validate_reply_event_host_config
+    event_config = validate_reply_event_host_config(raw.get("reply_events"))
+    if event_config is not None and (
+            company_consultation_launchd_entry(raw) is None
+            or raw.get("ceo_ingress_app_armed") is not True
+            or raw["company_consultation"].get("native_return_armed", False) is not True):
+        raise ServiceError("event host requires existing armed App/native Company composition")
     # This is trusted host composition, never a JSON/model-selected factory.
     _validate_fabric_bridge_config(raw)
     from control_plane.fabric_attended_routing import AttendedWorkPlacement, placement_member, qualification_for
@@ -2545,6 +2556,16 @@ def _service_from_config(
         }
     company_binding = None
     company_socket = company_consultation_launchd_entry(raw)
+    # A default-off event plugin cannot require the optional authenticated
+    # App peer or key-custody fields of the installed Company host. No default
+    # credential lookup, host factory or extra constructor argument is allowed.
+    reply_events_config = raw.get("reply_events")
+    reply_events_armed = (
+        type(reply_events_config) is dict
+        and reply_events_config.get("armed") is True
+    )
+    if reply_events_armed and company_socket is None:
+        raise ServiceError("event host requires existing Company listener")
     if company_socket is not None:
         from control_plane.executive_service import CompanyConsultationBinding
         from integrations.company_consultation_host import CompanyConsultationHost
@@ -2573,6 +2594,21 @@ def _service_from_config(
                 ),
                 carrier_factory=_build_executive_dialogue_wake_carrier,
             )
+        def event_host_factory(runtime):
+            if not reply_events_armed:
+                return None
+            from integrations.session_bridge.reply_event_host_composition import build_installed_reply_event_host
+            return build_installed_reply_event_host(runtime,reply_events_config,
+                release_sha=config.proof_base_sha,peer_uid=int(raw["ceo_ingress_app_peer_uid"]),control_uid=int(raw["control_uid"]),
+                dialogue_socket_path=_CANONICAL_AGENT_RELAY_SOCKET,
+                native_owner_configured=lambda: raw["company_consultation"].get("native_return_armed",False))
+        if reply_events_armed:
+            app_binding = ceo_ingress_kwargs.get("ceo_ingress_app_binding")
+            if app_binding is None or not app_binding.armed or raw["company_consultation"].get("native_return_armed",False) is not True:
+                raise ServiceError("event host requires existing armed App/native composition")
+            import dataclasses
+            ceo_ingress_kwargs["ceo_ingress_app_binding"] = dataclasses.replace(app_binding,
+                reply_event_provider_factory=lambda runtime: event_host_factory(runtime).ingress)
         def company_host_factory(runtime):
             async def dispatch_answer(projection):
                 service._require_company_answer_attention()
@@ -2594,7 +2630,8 @@ def _service_from_config(
                 workspace_id=SLACK_WORKSPACE_ID, channel_id=SLACK_CHANNEL_ID,
                 requester_answer_wake_dispatch=dispatch_answer,
                 product_acceptance_host=acceptance_host,
-                native_return_armed=raw["company_consultation"].get("native_return_armed", False))
+                native_return_armed=raw["company_consultation"].get("native_return_armed", False),
+                **({"reply_event_host": event_host_factory(runtime)} if reply_events_armed else {}))
         company_listener = activate_launchd_socket(_COMPANY_CONSULTATION_SOCKET_NAME)
         activated_listeners.append(company_listener)
         company_binding = CompanyConsultationBinding(
