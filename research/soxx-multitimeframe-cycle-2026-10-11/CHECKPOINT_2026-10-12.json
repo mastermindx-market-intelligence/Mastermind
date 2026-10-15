@@ -11,10 +11,10 @@
   "PR": 1338,
   "branch": "sol/research-soxx-cycle-boats-20261011",
   "inspected_precheckpoint_head": "713f263dfc1dec4c7316df6420010cb6a6c38f6f",
-  "publication_effect": "Direct original user-operated SOXX REST 2148-row disjoint second historical receipt L0→L1, 4 near-full nights and original receipt integrity verified. Reusable V29 Fri/Sat nontrading-session guard, 19 targeted tests red/green, zero new trading or vendor calls. New branch candidate CI not inherited.",
+  "publication_effect": "Research-only V30 2H/3H/4H source-input readiness counts proved on both existing SOXX original L1 receipts with 14 synthetic checks; core five nights have 13/4/4 complete source time blocks and zero complete HTF blocks with all-positive reported volume. New code/test/source summary, no archive/vendor/trading effects; CI for new head separately required.",
   "full_prior_handoff_commit": "7ec0207a5870e8c467b7185afbdcde97c38ef314",
   "repo_research_root": "research/soxx-multitimeframe-cycle-2026-10-11",
-  "current_delta_path": "research/soxx-multitimeframe-cycle-2026-10-11/prospective_validation_v26/SOXX_SECOND_BOATS_WEEK_VERIFIED_2026-10-15.md",
+  "current_delta_path": "research/soxx-multitimeframe-cycle-2026-10-11/prospective_validation_v26/SOXX_HTF_SOURCE_READINESS_V30.md",
   "analysis_contract_path": "research/soxx-multitimeframe-cycle-2026-10-11/prospective_validation_v26/PROSPECTIVE_ANALYSIS_CONTRACT.md",
   "preserved_evidence": {
     "all_v2_v24_source_results_unchanged": true,
@@ -164,6 +164,21 @@
       "status": "SECOND_REAL_RECEIPT_AND_L1_RESEARCH_INSPECTION_ACCEPTED_NOT_TRADING"
     },
     "overnight_venue_weekend_guard": "V29 weekday Fri/Sat 20:00 ET nightly starts refused using original fullsession clock; venue holidays not proven",
+    "higher_timeframe_input_readiness_v30": {
+      "actual_l1_soxx_unique_minute_rows": 2868,
+      "source_receipts_accepted": 2,
+      "nights_ET": ["2026-10-04","2026-10-05","2026-10-06","2026-10-07","2026-10-08","2026-10-11","2026-10-12"],
+      "five_core_nights_ET": ["2026-10-05","2026-10-06","2026-10-07","2026-10-08","2026-10-12"],
+      "core_candidate_full_input_blocks": {"120m":20,"180m":10,"240m":10},
+      "core_complete_timestamp_input_blocks": {"120m":13,"180m":4,"240m":4},
+      "core_time_complete_input_blocks_all_positive_reported_volume": {"120m":0,"180m":0,"240m":0},
+      "three_hour_overnight_trailing_two_hours_not_promoted": true,
+      "actual_indicators_computed": false,
+      "RTH_3hour_trading_decision_proven": false,
+      "PIT_or_historical_bid_ask_admitted": false,
+      "source_report": "research/soxx-multitimeframe-cycle-2026-10-11/prospective_validation_v26/SOXX_HTF_SOURCE_READINESS_V30.md",
+      "tests": "14 local synthetic unit tests passed; actual two-source original L1 read-only proof matches all night counts"
+    },
     "full_overnight_coverage": false,
     "historical_marketability_qualified": false,
     "provider_requests_this_continuation": 0,
@@ -209,6 +224,6 @@
     "No raw licensed data, credentials, live trading, model sizing, merge or production activation.",
     "Synthetic tests and review acceptance are not independent market-performance evidence; OHLC is not fill proof."
   ],
-  "exact_next_action": "Verified original source branch and prior green CI; do not repeat either original SOXX HTTP200 request. First SOXX REST: 720 rows / one complete Oct12 overnight clock; second: 2148 rows / four nearly complete Oct05-Oct08 nights with 12 missing minutes, 716 zero-volume minute bars and NO all-positive-volume 30m buckets. V29 weekend guard rejects Fri/Sat nights, but venue holidays remain unproven. Next disjoint research-source acquisition if already authorized operator admission/quota permits: SOXX Sep28-Oct04 single existing 1min boats-bars request, planner SHA256 a38824e577de04ff91771866efa1611385de7c2849b6c08448ef59a03a8c772f. After actual receipt, use the original materialize_one/read_research_view/v13/V29 and source-collision checks. Historical OHLC is not PIT, NBBO or executable fill evidence; prospective Oct14-Apr13 cohort not yet mature. Preserve 91 original inspected development episodes and unresolved accounting child; no live trading.",
+  "exact_next_action": "Verify exact new-head CI; reuse both accepted original SOXX historical REST receipts without re-request/rematerialization. V29/V30 direct-source proofs now cover 2868 disjoint 1m source timestamps across seven overnight starts, four near-full nights and one full night, 12 missing 1m slots among Oct5-8, and only 13/20 2H, 4/10 3H, 4/10 4H full source-input windows across the five core nights; zero have all-positive reported volume. For disjoint warmup the original SOXX Sep28-Oct04 one-request offline plan SHA a38824e577de04ff91771866efa1611385de7c2849b6c08448ef59a03a8c772f remains NOT DISPATCHED; authorize only through existing original operator quota/source rights. All future original receipts consume incumbent L0→L1→v13→V29→V30 and source collision checks. The overnight 3H counts are not the original 3 RTH-hour decision, and BOATS OHLC lacks quote marketability/PIT admission. Preserve original 91-episode development sample, unresolved original accounting child, and no live trading.",
   "no_unattended_continuation_promised": true
 }
