@@ -52,11 +52,19 @@ class CanonicalReadContext(Mapping):
 
 
 class ResearchPortAdapter:
-    def __init__(self, service, quote_limit, mastermind_commit, *, context_type=CanonicalReadContext):
+    def __init__(self, service, quote_limit, mastermind_commit, *, context_type=CanonicalReadContext,
+                 operation_runner=None):
         if (not callable(quote_limit) or not callable(context_type)
                 or type(mastermind_commit) is not str
                 or re.fullmatch(r"[0-9a-f]{40}", mastermind_commit) is None):
             _fail()
+        if operation_runner is not None and not callable(operation_runner):
+            _fail()
+        self._operation_runner = operation_runner
+        self._selection_scopes = None
+        if operation_runner is not None:
+            from .selected_delivery import SelectionScopes
+            self._selection_scopes = SelectionScopes(self._bounded_sync)
         self.service = service
         self.quote_limit = quote_limit
         self.mastermind_commit = mastermind_commit
@@ -89,13 +97,25 @@ class ResearchPortAdapter:
                 or operation not in context.scopes):
             _fail("NOT_ENTITLED")
 
-    async def _call(self, operation, context, **kwargs):
-        self._context(context, operation)
-        try:
-            await self._slots.acquire()
+    def capture_selection(self):
+        if self._selection_scopes is None:
+            from contextlib import nullcontext
+            return nullcontext(None)
+        return self._selection_scopes.capture()
+
+    async def _bounded_sync(self, function, *, before_start=None):
+        await self._slots.acquire()
+        if before_start is not None:
             try:
-                pending = asyncio.create_task(asyncio.to_thread(getattr(self.service, operation),
-                                                               caller_context=context, **kwargs))
+                admitted = before_start() is True
+            except Exception:
+                admitted = False
+            if not admitted:
+                self._slots.release()
+                _fail("NOT_ENTITLED")
+        try:
+            try:
+                pending = asyncio.create_task(asyncio.to_thread(function))
             except BaseException:
                 self._slots.release()
                 raise
@@ -107,13 +127,79 @@ class ResearchPortAdapter:
                     done.exception()
             pending.add_done_callback(settled)
             result = await asyncio.shield(pending)
+        except ContractViolation:
+            raise
         except Exception:
             _fail()
+        return result
+
+    async def _call(self, operation, context, *, _authorization_operation=None,
+                    _before_start=None, **kwargs):
+        self._context(context, _authorization_operation or operation)
+        capture = self._selection_scopes.active() if self._selection_scopes is not None else None
+        def produce():
+            def call():
+                try:
+                    return getattr(self.service, operation)(caller_context=context, **kwargs)
+                except Exception:
+                    # Preserve the incumbent exception boundary. Only the explicit
+                    # selection runner may introduce a private guard refusal.
+                    _fail()
+            return self._operation_runner(call) if self._operation_runner is not None else call()
+        result = await self._bounded_sync(produce, before_start=_before_start)
+        if capture is not None:
+            result = capture.retain(result)
         if not isinstance(result, Mapping) or type(result.get("ok")) is not bool:
             _fail()
         if result["ok"] is False:
             _fail(FAILURES.get(result.get("code"), "INTERNAL_ERROR"))
         return result
+
+    async def resolve_evidence_item(self, *, caller_context, item_id):
+        """Bridge the incumbent synchronous item owner through the shared limiter.
+
+        The service seam returns {"ok": True, "item": complete_display_dto} or
+        its existing negative read envelope. It owns descriptor replay/current
+        source visibility. This adapter cannot create or substitute that owner.
+        """
+        import json
+        from .bounded_item_v1 import ITEM_ID_REGEX, evidence_wire
+
+        self._context(caller_context, "find_evidence")
+        if type(item_id) is not str or ITEM_ID_REGEX.fullmatch(item_id) is None:
+            _fail("INVALID_REQUEST")
+        try:
+            cap = self.quote_limit(caller_context.principal_id)
+        except Exception:
+            _fail("NOT_ENTITLED")
+        if type(cap) is not int or not 1 <= cap <= 12000:
+            _fail("NOT_ENTITLED")
+        if not callable(getattr(self.service, "resolve_evidence_item", None)):
+            _fail("SOURCE_UNAVAILABLE")
+        def current_grant():
+            observed = self.quote_limit(caller_context.principal_id)
+            return type(observed) is int and observed == cap
+
+        result = await self._call("resolve_evidence_item", caller_context,
+                                  _authorization_operation="find_evidence",
+                                  _before_start=current_grant, item_id=item_id)
+        try:
+            if set(result) != {"ok", "item"}:
+                _fail()
+            # Snapshot the closed bounded DTO before final grant recheck.
+            raw = evidence_wire(result["item"], item_id, 1000)
+            value = json.loads(raw)
+        except ContractViolation:
+            raise
+        except Exception:
+            _fail()
+        try:
+            current_cap = self.quote_limit(caller_context.principal_id)
+        except Exception:
+            _fail("NOT_ENTITLED")
+        if type(current_cap) is not int or current_cap != cap or len(value["text"]) > cap:
+            _fail("NOT_ENTITLED")
+        return value
 
     @staticmethod
     def _source(result):

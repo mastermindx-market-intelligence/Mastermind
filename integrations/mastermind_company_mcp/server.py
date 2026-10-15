@@ -33,11 +33,13 @@ from integrations.mastermind_company_mcp.schemas import (
     SERVER_NAME,
     SERVER_VERSION,
     TOOL_SPECS,
+    PRODUCT_ACCEPTANCE_TOOL_SPECS,
+    PRODUCT_ACCEPTANCE_SERVER_VERSION,
     canonical_json,
 )
 
 
-def build_tools() -> list[mcp_types.Tool]:
+def build_tools(*, product_acceptance: bool = False) -> list[mcp_types.Tool]:
     """Build the static six-tool advertisement from the reviewed table."""
 
     return [
@@ -47,15 +49,21 @@ def build_tools() -> list[mcp_types.Tool]:
             inputSchema=spec.input_schema,
             annotations=mcp_types.ToolAnnotations(**spec.annotations),
         )
-        for spec in TOOL_SPECS
+        for spec in (PRODUCT_ACCEPTANCE_TOOL_SPECS if product_acceptance else TOOL_SPECS)
     ]
 
 
 def build_mcp_server(gateway: CompanyDialogueGateway) -> Server:
     """Register only list/call handlers over one injected bounded gateway."""
 
-    server: Server = Server(SERVER_NAME, version=SERVER_VERSION)
-    tools = build_tools()
+    # Older bounded gateways implement only call(); absence keeps their frozen
+    # catalogue. Only explicit trusted host composition enables generation 1.1.
+    product_acceptance = getattr(gateway, "product_acceptance_enabled", False) is True
+    server: Server = Server(
+        SERVER_NAME,
+        version=PRODUCT_ACCEPTANCE_SERVER_VERSION if product_acceptance else SERVER_VERSION,
+    )
+    tools = build_tools(product_acceptance=product_acceptance)
 
     @server.list_tools()
     async def list_tools() -> list[mcp_types.Tool]:

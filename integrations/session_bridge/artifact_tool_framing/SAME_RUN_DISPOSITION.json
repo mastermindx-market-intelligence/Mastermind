@@ -1,0 +1,34 @@
+{
+  "schema": "mastermind.artifact_protocol_disposition.v1",
+  "root": "01a13315-332b-7102-b7c8-0c7fc01fa92c",
+  "parent": "01a13315-332b-7102-b7c8-0c7fc01fa92c",
+  "evidence_directory": "/Volumes/Mastermind/evidence/meta-ceo-r2-20261012-01a13315/continuation-ci-20261013/principal-app-receiver",
+  "runs": [
+    {
+      "run_id": "r2-principal-control-local-review2-01a13315",
+      "retained_stdout": "fresh-review-retained-stdout.txt",
+      "bytes": 63839,
+      "sha256": "97a51a528ee08961d0a282016b4ae5b7b3a2d06ec52b646b8d9b350801ec52e0",
+      "terminal_manifest_count": 2,
+      "unique_terminal_manifest_count": 1,
+      "manifest_line_sha256": "7cbd1eadb90ff737ec9600c66c5bedc8a232521e82914bbfbe5e4fa85adfa2e0"
+    },
+    {
+      "run_id": "r2-principal-producer-review-01a13315",
+      "retained_stdout": "producer-review-retained-stdout.txt",
+      "bytes": 30284,
+      "sha256": "37be8740a61d5619b382c27c9ad89ebb5989d3240d7027ff963a23a7db0e5377",
+      "terminal_manifest_count": 2,
+      "unique_terminal_manifest_count": 1,
+      "manifest_line_sha256": "b95f97934c16f73c3b9181e367fe9b764a9f258b9b627ba7f76fd022da5a2bbd"
+    }
+  ],
+  "retained_verdict": "TERMINAL rc65 / EXECUTION_NOT_ELIGIBLE / NOT_ACCEPTED",
+  "installed_parser_failure": "artifact_manifest_missing_or_duplicate",
+  "disposition": "Untrusted retained text may inform source repairs. No eligible successful producer seal exists for supported artifact export or acceptance. Preserve raw evidence; do not normalize, restamp acceptance, export through another path, or replay.",
+  "old_unresolved_run": "r2-principal-control-local-review-01a13315",
+  "old_run_effect": "UNCHANGED_UNKNOWN_REFUSAL_LEASE",
+  "new_collection_attempts": 0,
+  "replays": 0,
+  "acceptance_operations": 0
+}

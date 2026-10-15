@@ -1548,6 +1548,9 @@ class ServiceConfig:
     effort: str = "xhigh"
     cost_class: str = "standard"
     coo_autonomy_armed: bool = False
+    # Persistent reviewed host mode: only the actual live assigning request
+    # can drive fresh cycles. Open roots never become background work in it.
+    coo_foreground_only: bool = False
     ceo_submit_armed: bool = False
     coo_operator_harness_armed: bool = False
     coo_tick_interval_seconds: float = 15.0
@@ -1618,6 +1621,11 @@ class ServiceConfig:
                 raise ValueError(f"invalid {field_name}")
         if not isinstance(self.coo_autonomy_armed, bool):
             raise ValueError("coo_autonomy_armed must be boolean")
+        if type(self.coo_foreground_only) is not bool:
+            raise ValueError("coo_foreground_only must be boolean")
+        if self.coo_foreground_only and (not self.coo_autonomy_armed
+                or self.coo_operator_model_alias == "coo.operator.native-return"):
+            raise ValueError("foreground-only mode requires armed ordinary foreground execution")
         if not isinstance(self.ceo_submit_armed, bool):
             raise ValueError("ceo_submit_armed must be boolean")
         if type(self.release_control_armed) is not bool:
@@ -1650,12 +1658,14 @@ class ServiceConfig:
             if _ID_RE.fullmatch(alias) is None:
                 raise ValueError(f"invalid {field_name}")
             object.__setattr__(self, field_name, alias)
-        from control_plane.fabric_attended_routing import AttendedWorkPlacement
+        from control_plane.fabric_attended_routing import AttendedWorkPlacement, qualification_for
         if (not isinstance(self.coo_attended_work_placements, tuple)
                 or len(self.coo_attended_work_placements) > 6
                 or any(type(item) is not AttendedWorkPlacement
                        for item in self.coo_attended_work_placements)):
             raise ValueError("attended work placements require bounded host configuration")
+        if qualification_for(self.coo_attended_work_placements) is not None and not self.coo_foreground_only:
+            raise ValueError("finite qualification requires foreground-only host configuration")
         quota_names = {
             self.quota_class,
             self.coo_quota_class,
@@ -2216,8 +2226,12 @@ class ExecutiveControlService:
         release_control_consumer_factory: (
             Callable[[Runtime], "ReleaseControlConsumer"] | None
         ) = None,
+        attended_worker_registration: Callable[[Runtime], Any] | None = None,
     ) -> None:
         self.config = config
+        if attended_worker_registration is not None and not callable(attended_worker_registration):
+            raise ValueError('attended registration requires fixed host composition')
+        self._attended_worker_registration = attended_worker_registration
         self._runtime_factory = runtime_factory
         self._workspace_control_room = workspace_control_room
         self._supervisor_factory = supervisor_factory
@@ -2324,6 +2338,7 @@ class ExecutiveControlService:
         self._coo_action_tasks: set[asyncio.Task[Any]] = set()
         # Request-local exclusion, not another queue or durable authority.
         self._foreground_cycle_owner: tuple[asyncio.Task[Any], Any] | None = None
+        self._foreground_cycle_qualification = None
         self._coo_last_outcome: dict[str, Any] | None = None
         self._coo_last_error: str | None = None
         self._coo_last_tick_at: str | None = None
@@ -2771,6 +2786,14 @@ class ExecutiveControlService:
             raise ServiceError("installed COO routing/capability policy drifted")
         return dict(current)
 
+    def _require_coo_admission_binding(self) -> dict[str, Any]:
+        """Fresh admission cannot export a qualification to an unrelated root."""
+        qualification = self._require_attended_qualification()
+        binding = self._require_current_coo_binding()
+        if self._require_attended_qualification() != qualification:
+            raise StateConflict("foreground qualification changed")
+        return binding
+
     @property
     def ceo_ingress_socket_path(self) -> Path | None:
         return self._ceo_ingress_socket_path
@@ -2892,17 +2915,22 @@ class ExecutiveControlService:
 
         validated = validate_secret_canary_verdict(verdict, require_passed=True)
         supervisor = self._require_supervisor()
-        if not hasattr(supervisor, "secret_canary_verdict") or not hasattr(
+        from control_plane.mixed_worker_supervisor import MixedExecutionOwnerSupervisor
+        mixed = type(supervisor) is MixedExecutionOwnerSupervisor
+        if not mixed and (not hasattr(supervisor, "secret_canary_verdict") or not hasattr(
             supervisor, "require_complete_launch_attestation"
-        ):
+        )):
             raise ServiceError("Executive supervisor cannot activate a complete canary")
         if self.config.release_control_armed:
             # Claim this activation before the first suspension. A sibling
             # must not re-enter closure or overwrite a later quarantine.
             self._service_state = "ACTIVATING_CANARY"
         try:
-            supervisor.secret_canary_verdict = validated
-            supervisor.require_complete_launch_attestation = True
+            if mixed:
+                supervisor.activate_primary_canary(validated)
+            else:
+                supervisor.secret_canary_verdict = validated
+                supervisor.require_complete_launch_attestation = True
             self._startup_reconciliation = await self._run_physical(
                 supervisor.reconcile_restart,
                 requeue_lost=False,
@@ -3816,6 +3844,7 @@ class ExecutiveControlService:
             await self._reconcile_company_answer_wakes()
             if (
                 self.config.coo_autonomy_armed
+                and not self.config.coo_foreground_only
                 and self._service_state == "READY"
             ):
                 self._coo_shutdown_event = asyncio.Event()
@@ -5524,7 +5553,7 @@ class ExecutiveControlService:
                         self.config.terminal_return_armed
                         or self._ceo_ingress_dialogue_source_provider is not None
                     ),
-                    execution_binding_provider=self._require_current_coo_binding,
+                    execution_binding_provider=self._require_coo_admission_binding,
                     dialogue_source_provider=(
                         self._ceo_ingress_dialogue_source_provider
                     ),
@@ -6339,6 +6368,7 @@ class ExecutiveControlService:
                 "scope": "CURRENT_ONLY", "phase": phase}
 
     def _require_ceo_submit_admission(self) -> None:
+        self._require_attended_qualification()
         guard = self._ceo_submit_admission_guard
         if guard is None and not self._is_production_control_socket():
             return
@@ -6367,7 +6397,7 @@ class ExecutiveControlService:
                 raise ceo_intent.CeoIntentError(
                     "v2 intent grounding.mastermind_sha differs from the installed reviewed release"
                 )
-            binding = self._require_current_coo_binding()
+            binding = self._require_coo_admission_binding()
             provider = self._ceo_ingress_dialogue_source_provider
             if self.config.terminal_return_armed and provider is None:
                 raise ceo_intent.CeoIntentError(
@@ -6824,6 +6854,7 @@ class ExecutiveControlService:
                         job_id, expected_attempt_id=terminal.attempt.attempt_id
                     )
                     return terminal
+                self._require_foreground_only_source(root.job_id)
                 if job.status is JobStatus.QUEUED:
                     self._require_coo_workspace(job)
                 if runtime.operator_harness.is_interactive_job(job.job_id):
@@ -6839,8 +6870,15 @@ class ExecutiveControlService:
                     else self._require_supervisor()
                 )
                 try:
+                    async def start_current_cycle_job():
+                        # The physical cycle schedules a different callback
+                        # task. Recheck its inherited exact source immediately
+                        # before the synchronous canonical claim, not task-id
+                        # equality with the original request.
+                        self._require_foreground_only_source(root.job_id)
+                        return await supervisor.start_cycle_job(job_id, command_id=command_id)
                     started = await self._run_owned_coroutine(
-                        supervisor.start_cycle_job(job_id, command_id=command_id)
+                        start_current_cycle_job()
                     )
                 except Exception as exc:
                     current = runtime.jobs.get_job(job_id)
@@ -7031,6 +7069,7 @@ class ExecutiveControlService:
         return _ForegroundExecution(mode, _canonical_json(binding))
 
     def _require_foreground_execution(self, expectation):
+        qualification = self._require_attended_qualification()
         binding = self._require_current_coo_binding()
         if self._foreground_execution_state(binding=binding) != expectation:
             raise StateConflict("foreground eligibility changed")
@@ -7039,6 +7078,19 @@ class ExecutiveControlService:
                 raise StateConflict("foreground execution is unavailable")
             self._require_current_autonomy()
             self._require_coo_worker_composed()
+        if self._require_attended_qualification() != qualification:
+            raise StateConflict("foreground qualification changed")
+
+    def _require_attended_qualification(self):
+        from control_plane.fabric_attended_routing import qualification_for
+        from control_plane.foreground_operation import current_foreground_operation
+        selected = qualification_for(self.config.coo_attended_work_placements)
+        if selected is not None:
+            current_foreground_operation().require_qualification_request(
+                selected.operation_key, selected.arguments_sha256)
+        if qualification_for(self.config.coo_attended_work_placements) != selected:
+            raise StateConflict("foreground qualification changed")
+        return selected
 
     @asynccontextmanager
     async def _foreground_cycle_scope(self, operation):
@@ -7050,6 +7102,7 @@ class ExecutiveControlService:
         configurations retain queued admission; qualified ordinary Operators
         use the existing broker/OHF path with no attended placements.
         """
+        qualification = self._require_attended_qualification()
         if operation is None:
             yield False
             return
@@ -7061,13 +7114,17 @@ class ExecutiveControlService:
         async with self._coo_cycle_lock:
             if self._foreground_cycle_owner is not None:
                 raise StateConflict("another original request owns the finite cycle")
+            if self._require_attended_qualification() != qualification:
+                raise StateConflict("foreground qualification changed")
             self._foreground_cycle_owner = (task, operation)
+            self._foreground_cycle_qualification = qualification
             self._coo_action_tasks.add(task)
         try:
             yield bool(self._foreground_execution_state())
         finally:
             if self._foreground_cycle_owner == (task, operation):
                 self._foreground_cycle_owner = None
+                self._foreground_cycle_qualification = None
             self._coo_action_tasks.discard(task)
 
     async def _await_foreground_dispatch(self, operation, root_id, outcome):
@@ -7130,6 +7187,7 @@ class ExecutiveControlService:
         custody and policy checks. A no-progress outcome ends this call; it is
         never a polling loop, retry scheduler or alternative collection owner.
         """
+        self._require_attended_qualification()
         if self._foreground_cycle_owner != (asyncio.current_task(), operation):
             raise StateConflict("foreground cycle is not owned by this request")
         root_id = self._id(root_job_id, "root_job_id")
@@ -7251,6 +7309,24 @@ class ExecutiveControlService:
             }
         return value
 
+    def _require_foreground_only_source(self, root_id, *, cycle_entry=False):
+        qualification = self._require_attended_qualification()
+        owner = self._foreground_cycle_owner
+        if owner is not None and qualification != self._foreground_cycle_qualification:
+            raise StateConflict("foreground qualification changed")
+        if not self.config.coo_foreground_only and owner is None:
+            return
+        if owner is None or owner[0].done() or (cycle_entry and owner[0] is not asyncio.current_task()):
+            raise StateConflict("foreground-only execution requires its live original request owner")
+        from control_plane.foreground_operation import current_foreground_operation
+        operation = current_foreground_operation()
+        if operation is not owner[1]:
+            raise StateConflict("foreground-only execution source differs from its reserved owner")
+        operation.require_root(root_id)
+        if (self._foreground_cycle_owner != owner
+                or self._require_attended_qualification() != self._foreground_cycle_qualification):
+            raise StateConflict("foreground qualification changed")
+
     async def _run_coo_cycle_once(self, root_job_id: str) -> CooCycleOutcome:
         if self._closing:
             raise StateConflict("Executive control service is closing")
@@ -7261,6 +7337,7 @@ class ExecutiveControlService:
             raise StateConflict(f"Executive control service is {self._service_state}")
         root_id = self._id(root_job_id, "root_job_id")
         async with self._coo_cycle_lock:
+            self._require_foreground_only_source(root_id, cycle_entry=True)
             owner = self._foreground_cycle_owner
             if owner is not None:
                 if owner[0] is not asyncio.current_task():
@@ -7302,10 +7379,14 @@ class ExecutiveControlService:
                 )
                 return future.result()
 
-            outcome = await self._run_physical(
-                CooCycle(self._require_runtime(), dispatcher=dispatch).run_once,
-                root_id,
-            )
+            def run_current_cycle():
+                # The executor thread may begin after its originating request closes.
+                self._require_foreground_only_source(root_id)
+                return CooCycle(self._require_runtime(), dispatcher=dispatch,
+                    before_admission=(self._require_foreground_only_source
+                                      if self.config.coo_foreground_only or self._foreground_cycle_owner is not None
+                                      else None)).run_once(root_id)
+            outcome = await self._run_physical(run_current_cycle)
             self._coo_last_tick_at = datetime.now(timezone.utc).isoformat(
                 timespec="seconds"
             )
@@ -7334,6 +7415,8 @@ class ExecutiveControlService:
         Existing work and ambiguous effects retain their reconciliation path.
         No persistent exclusion, new queue or retry state is introduced.
         """
+        if self.config.coo_foreground_only:
+            return None
         runtime = self._require_runtime()
         with runtime.store.read() as connection:
             rows = connection.execute(
@@ -7454,6 +7537,8 @@ class ExecutiveControlService:
                 )
 
     async def _coo_tick_loop(self) -> None:
+        if self.config.coo_foreground_only:
+            return
         assert self._coo_shutdown_event is not None
         while not self._coo_shutdown_event.is_set():
             try:
@@ -8329,6 +8414,8 @@ class ExecutiveControlService:
                 preserve_pre_write_refusal(code)
 
     async def _dispatch_job(self, job_id: str) -> dict[str, Any]:
+        if self.config.coo_foreground_only:
+            raise StateConflict("foreground-only mode refuses standalone proof dispatch")
         runtime = self._require_runtime()
         supervisor = self._require_supervisor()
         async with self._dispatch_lock:
@@ -8415,6 +8502,7 @@ class ExecutiveControlService:
                    if self._company_consultation_binding is not None else {}),
                 "coo_autonomy": {
                     "armed": self.config.coo_autonomy_armed,
+                    "foreground_only": self.config.coo_foreground_only,
                     "tick_interval_seconds": self.config.coo_tick_interval_seconds,
                     "model_alias": self.config.coo_model_alias,
                     "quota_classes": list(
@@ -8477,7 +8565,10 @@ class ExecutiveControlService:
             return _jsonable(attempt)
         if command == "register-worker":
             self._exact_args(args, set())
-            return _jsonable(self._register_worker())
+            primary = self._register_worker()
+            if self._attended_worker_registration is not None:
+                self._attended_worker_registration(runtime)
+            return _jsonable(primary)
         if command == "create-proof-job":
             self._exact_args(args, set())
             return _jsonable(await self._create_proof_job())

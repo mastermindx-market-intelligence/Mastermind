@@ -2,6 +2,8 @@ import { useEffect, useId, useRef, useState } from "react";
 import { createDirectionPreview, previewIsCurrent, type DirectionPreview } from "./preview";
 import { sameTarget, type OfficeProjection, type ProjectionContext, type SourceClaim } from "./projection";
 import "./office.css";
+import { FabricMissionInspector } from "../fabric/FabricMissionInspector";
+import { AttendedFabricInspector } from "../fabric/AttendedFabricInspector";
 
 /** Draft storage belongs to the existing shell. Inspection never rewrites or sends it. */
 export interface OfficeDraft { text: string; context: ProjectionContext }
@@ -161,6 +163,19 @@ export function MetaCeoOffice({ projection, draft, onDraftChange, locale = "en" 
     {unknownEffect && <div className="office-effect-alert" role="alert">
       <strong>EFFECT_UNKNOWN</strong><p>{t("Reconcile the original operation. Resend, failover and target change remain held.")}</p>
     </div>}
+
+    <details className="fi-disclosure">
+      <summary>{locale === "zh-CN" ? "子代理 Fabric · 查看执行内部状态" : "Subagent Fabric · inspect execution"}</summary>
+    <FabricMissionInspector
+      key={JSON.stringify([projection.context.authGeneration, projection.context.selection])}
+      mission={mission} locale={locale}
+    />
+    <AttendedFabricInspector
+      key={`attended:${projection.context.authGeneration}`}
+      host={typeof window === "undefined" ? undefined : window.MastermindMissionHost}
+      locale={locale}
+    />
+    </details>
 
     <div className="office-top-grid">
       <section className="office-panel office-answer" aria-label={t("Meta-CEO answer")}>
