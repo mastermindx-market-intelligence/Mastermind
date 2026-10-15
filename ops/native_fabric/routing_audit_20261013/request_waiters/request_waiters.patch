@@ -29,7 +29,7 @@
                  (pool,),
              ).fetchall()
          )
-@@ -56,15 +70,28 @@
+@@ -56,15 +70,36 @@
          job_class: Optional[str] = None,
      ) -> str:
          now = self.now()
@@ -48,14 +48,22 @@
 +                "SELECT * FROM waiters WHERE orchestrator_id=? AND pool=? "
 +                "AND id NOT LIKE 'rq-%'", (orch, pool),
 +            ).fetchone()
-         if existing:
-             wid = existing["id"]
++        if existing and scoped:
 +            priority = _class_priority(task_class, job_class)
 +            old_shape = (existing["priority"], existing["account"], existing["task_class"],
 +                         existing["host"], existing["need"])
 +            new_shape = (priority, account, task_class, host, int(need))
-+            # A changed scoped demand requeues; it cannot inherit an earlier position.
-+            enqueued_at = now if scoped and old_shape != new_shape else existing["enqueued_at"]
++            if old_shape != new_shape:
++                # Reinsert this exact demand under the incumbent lock so a
++                # repeated clock tick cannot preserve its old rowid/FIFO rank.
++                conn.execute(
++                    "DELETE FROM waiters WHERE id=? AND orchestrator_id=? AND pool=?",
++                    (existing["id"], orch, pool),
++                )
++                existing = None
+         if existing:
+             wid = existing["id"]
++            enqueued_at = existing["enqueued_at"]
              conn.execute(
                  "UPDATE waiters SET last_heartbeat=?, task_class=?, priority=?, "
 -                "account=?, host=?, need=? WHERE id=?",
@@ -63,7 +71,7 @@
                  (
                      now,
                      task_class,
-@@ -72,6 +99,7 @@
+@@ -72,6 +107,7 @@
                      account,
                      host,
                      int(need),
@@ -71,7 +79,7 @@
                      wid,
                  ),
              )
-@@ -79,7 +107,7 @@
+@@ -79,7 +115,7 @@
              return wid
          wid = waiter_id or uuid.uuid4().hex[:12]
          conn.execute(
@@ -80,7 +88,7 @@
              "(id, orchestrator_id, pool, account, task_class, host, "
              "enqueued_at, priority, need, last_heartbeat) "
              "VALUES (?,?,?,?,?,?,?,?,?,?)",
-@@ -121,26 +149,42 @@
+@@ -121,26 +157,42 @@
              conn.commit()
          return wid
  
