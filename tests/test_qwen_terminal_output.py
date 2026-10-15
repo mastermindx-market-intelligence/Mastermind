@@ -16,8 +16,9 @@ PACKAGE = ROOT / 'integrations/session_bridge/qwen_terminal_output'
 SOURCE = PACKAGE / ('base' if os.environ.get('QWEN_FRAMING_BASE') else 'candidate')
 
 
-def module():
-    spec = importlib.util.spec_from_file_location('inert_keys', SOURCE / 'bailian_keys.py')
+def module(legacy=False):
+    path = PACKAGE/'base/legacy_stream.py' if legacy or os.environ.get('QWEN_FRAMING_BASE') else PACKAGE/'final_response_stream.py'
+    spec = importlib.util.spec_from_file_location('inert_keys', path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -36,7 +37,7 @@ def project(tmp_path, rows):
     raw = ''.join(json.dumps(row, ensure_ascii=False) + '\n' for row in rows)
     out = io.StringIO()
     mod = module()
-    fn = getattr(mod, 'stream_final_jsonl', mod.stream_jsonl)
+    fn = (getattr(mod, 'stream_final_jsonl', None) or mod.stream_jsonl)
     fn(io.StringIO(raw), out, str(tmp_path / 'thread'), str(tmp_path / 'raw'))
     assert (tmp_path / 'raw').read_text() == raw
     assert (tmp_path / 'thread').read_text() == 'inert-thread\n'
@@ -73,7 +74,7 @@ def test_incomplete_or_ambiguous_stream_never_publishes(tmp_path, bad):
     elif bad == 'invalid_item': rows.insert(-1, {'type': 'item.completed', 'item': []})
     elif bad == 'invalid_text': rows.insert(-1, message({'untrusted': 'text'}))
     elif bad == 'non_object': rows.insert(-1, ['not an event'])
-    out = io.StringIO(); mod = module(); fn = getattr(mod, 'stream_final_jsonl', mod.stream_jsonl)
+    out = io.StringIO(); mod = module(); fn = (getattr(mod, 'stream_final_jsonl', None) or mod.stream_jsonl)
     with pytest.raises((ValueError, AttributeError), match='UNCONFIRMED|rstrip'):
         fn(io.StringIO(''.join(json.dumps(r)+'\n' for r in rows)), out,
            str(tmp_path/'thread'), str(tmp_path/'raw'))
@@ -81,7 +82,7 @@ def test_incomplete_or_ambiguous_stream_never_publishes(tmp_path, bad):
 
 
 def test_unstructured_input_is_not_published(tmp_path):
-    mod = module(); fn = getattr(mod, 'stream_final_jsonl', mod.stream_jsonl); out = io.StringIO()
+    mod = module(); fn = (getattr(mod, 'stream_final_jsonl', None) or mod.stream_jsonl); out = io.StringIO()
     with pytest.raises(ValueError, match='UNCONFIRMED'):
         fn(io.StringIO('STATUS: COMPLETE\n'), out, str(tmp_path/'thread'), str(tmp_path/'raw'))
     assert out.getvalue() == ''
@@ -99,7 +100,7 @@ def test_explicit_commentary_after_final_is_not_the_result(tmp_path):
 
 
 def test_legacy_stream_mode_keeps_its_original_transcript_contract(tmp_path):
-    mod = module(); out = io.StringIO()
+    mod = module(legacy=True); out = io.StringIO()
     mod.stream_jsonl(io.StringIO(json.dumps({'type': 'item.completed', 'item': {
         'type': 'command_execution', 'command': 'echo fixture',
         'aggregated_output': 'fixture', 'exit_code': 0}})+'\n'), out, '', None)
@@ -139,7 +140,7 @@ sys.exit(7 if mode=='provider_failure' else 0)
                                           ('truncated',77,1),('provider_failure',7,1)])
 def test_wrapper_publishes_only_once_after_final_success(tmp_path, case, rc, calls):
     ext=tmp_path/'ext';ext.mkdir();shutil.copyfile(SOURCE/'qwen_exec.sh',ext/'qwen_exec.sh')
-    shutil.copyfile(SOURCE/'bailian_keys.py',ext/'framing.py')
+    shutil.copyfile(PACKAGE/'base/legacy_stream.py',ext/'framing.py')
     (ext/'bailian_keys.py').write_text(KEY_STUB);(ext/'pool_ledger.py').write_text('pass\n')
     projection=ext/'studio_mcp_projection.sh';projection.write_text('#!/bin/sh\nexit 0\n');projection.chmod(0o700)
     binary=tmp_path/'bin';binary.mkdir();(binary/'python3').symlink_to(sys.executable)
@@ -155,3 +156,11 @@ def test_wrapper_publishes_only_once_after_final_success(tmp_path, case, rc, cal
     assert int((tmp_path/'calls').read_text()) == calls
     assert result.stdout == ('STATUS: COMPLETE\nVERIFIED\n' if rc==0 else '')
     assert 'SYNTHETIC_FIXTURE_ONLY' not in result.stdout+result.stderr
+
+
+def test_embedded_formatter_is_exact_scanned_python_source():
+    wrapper=(PACKAGE/'candidate/qwen_exec.sh').read_text()
+    start="cat > \"$FINAL_STREAM_FILE\" <<'QWEN_FINAL_RESPONSE_STREAM_PY' || exit 78\n"
+    embedded=wrapper.split(start,1)[1].split('QWEN_FINAL_RESPONSE_STREAM_PY\n',1)[0]
+    assert embedded == (PACKAGE/'final_response_stream.py').read_text()
+    assert 'chmod 600 "$FINAL_STREAM_FILE"' in wrapper

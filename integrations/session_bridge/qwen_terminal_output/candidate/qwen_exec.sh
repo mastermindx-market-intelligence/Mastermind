@@ -108,6 +108,103 @@ RAW_FILE="$WORKDIR/raw.jsonl"
 ERR_FILE="$WORKDIR/err.txt"
 TEXT_FILE="$WORKDIR/text.txt"
 SCAN_FILE="$WORKDIR/scan.txt"
+# This credential-free helper is part of the immutable wrapper, copied only
+# into the existing private run directory. No support/dispatch surface changes.
+FINAL_STREAM_FILE="$WORKDIR/final_response_stream.py"
+cat > "$FINAL_STREAM_FILE" <<'QWEN_FINAL_RESPONSE_STREAM_PY' || exit 78
+"""Credential-free complete-turn projection used by the Qwen run wrapper."""
+import json
+import os
+import sys
+from typing import IO, Optional
+
+
+def stream_final_jsonl(in_f: IO[str], out_f: IO[str], thread_path: str,
+                       raw_path: str) -> Optional[str]:
+    """One completed Codex exec turn, projected to its last assistant message.
+
+    The raw stream remains available to the existing diagnostic/limit scanner.
+    Tool output and progress are never a final response, even when they contain
+    terminal-looking text. No partial response is published on framing failure.
+    This projection does not accept the worker's answer or truncate its content.
+    """
+    thread_id = None
+    last_text = None
+    completed = False
+    failed = False
+    started = False
+    with open(raw_path, "w", encoding="utf-8") as raw:
+        for line in in_f:
+            raw.write(line)
+            raw.flush()
+            if not line.strip():
+                continue
+            try:
+                ev = json.loads(line)
+            except json.JSONDecodeError:
+                failed = True
+                continue
+            if not isinstance(ev, dict):
+                failed = True
+                continue
+            kind = ev.get("type")
+            if kind == "thread.started":
+                tid = ev.get("thread_id")
+                if (not isinstance(tid, str) or not tid.strip()
+                        or thread_id is not None or completed):
+                    failed = True
+                    continue
+                thread_id = tid
+                with open(thread_path + ".tmp", "w", encoding="utf-8") as target:
+                    target.write(tid + "\n")
+                os.replace(thread_path + ".tmp", thread_path)
+            elif kind == "turn.started":
+                if started or completed:
+                    failed = True
+                started = True
+            elif kind in ("error", "turn.failed"):
+                failed = True
+            elif kind == "item.completed":
+                item = ev.get("item")
+                if not isinstance(item, dict):
+                    failed = True
+                    continue
+                if item.get("type") == "agent_message":
+                    text = item.get("text")
+                    if not isinstance(text, str) or completed:
+                        failed = True
+                    elif item.get("phase") != "commentary":
+                        last_text = text
+            elif kind == "turn.completed":
+                if completed:
+                    failed = True
+                completed = True
+    if failed or not completed or not thread_id or not last_text:
+        raise ValueError("QWEN_FINAL_RESPONSE_UNCONFIRMED")
+    out_f.write(last_text)
+    if not last_text.endswith("\n"):
+        out_f.write("\n")
+    out_f.flush()
+    return thread_id
+
+
+def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    if len(argv) != 2:
+        print("QWEN_FINAL_RESPONSE_ARGUMENTS_INVALID", file=sys.stderr)
+        return 77
+    try:
+        stream_final_jsonl(sys.stdin, sys.stdout, argv[0], argv[1])
+    except (ValueError, OSError, UnicodeError):
+        print("QWEN_FINAL_RESPONSE_UNCONFIRMED", file=sys.stderr)
+        return 77
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+QWEN_FINAL_RESPONSE_STREAM_PY
+chmod 600 "$FINAL_STREAM_FILE" || exit 78
 NAME=""
 MAX_KEYS=3
 [ "${LANE_LEASED:-0}" != "1" ] || MAX_KEYS=1
@@ -511,7 +608,7 @@ QWEN_TERMINAL_CONTRACT_EOF
 
 run_codex() {
   # $1 = mode: new | resume
-  # Captures Codex's rc via PIPESTATUS[0] (tee would otherwise hide it).
+  # Capture both the provider and the credential-free response projection.
   _mode="$1"
   # Build only the flags applicable to this provider; avoid Bash 3.2 empty
   # array expansion under set -u. The catalog never changes authorization.
@@ -533,7 +630,7 @@ run_codex() {
       --skip-git-repo-check \
       -m "$MODEL" \
       "$_prompt" </dev/null 2>"$ERR_FILE" \
-      | python3 "$KEYS" stream "$THREAD_FILE" "$RAW_FILE" --final-response > "$TEXT_FILE"
+      | python3 "$FINAL_STREAM_FILE" "$THREAD_FILE" "$RAW_FILE" > "$TEXT_FILE"
   else
     # Refuse before provider execution if the private prompt cannot be built.
     if ! build_initial_prompt; then
@@ -548,7 +645,7 @@ run_codex() {
       -C "$CWD" \
       -m "$MODEL" \
       - < "$INITIAL_PROMPT_FILE" 2>"$ERR_FILE" \
-      | python3 "$KEYS" stream "$THREAD_FILE" "$RAW_FILE" --final-response > "$TEXT_FILE"
+      | python3 "$FINAL_STREAM_FILE" "$THREAD_FILE" "$RAW_FILE" > "$TEXT_FILE"
   fi
   # Capture both statuses in one assignment before Bash overwrites PIPESTATUS.
   # A zero provider exit cannot hide an incomplete/invalid response stream.
