@@ -148,3 +148,10 @@ REVIEWED_FILES['app/mastermind_os/src/product-acceptance/owner-observation.ts'] 
     'sha256': 'a914fa318b2a96d4d9d01ee5f378becac222e3750725de99416dff6b463a257a',
     'sites': ((34, 132, 135, 'int', '512'),),
 }
+
+# Retained producer: existing private-directory permissions, not native UIDs.
+# Runtime bytes and both comparisons are unchanged; exact source and sites only.
+REVIEWED_FILES["integrations/session_bridge/r2_plain_review_scopes/candidate/artifact_production.py"] = {
+    "sha256": "0be15bd5d3304a65673576fd30386bcc977c02ed8ee28313a4cb1ed454f8c409",
+    "sites": ((149, 77, 82, "int", "0o700"), (170, 85, 90, "int", "0o700")),
+}
