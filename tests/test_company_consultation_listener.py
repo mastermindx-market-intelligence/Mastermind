@@ -107,7 +107,7 @@ def test_installed_company_factory_has_one_runtime_and_canonical_relay_scope(
         assert hosts == [dict(runtime=runtime, repository_root=raw["proof_source_repository"],
                              worker_uid=451, relay_socket_path=cli._CANONICAL_AGENT_RELAY_SOCKET,
                              workspace_id=SLACK_WORKSPACE_ID, channel_id=SLACK_CHANNEL_ID,
-                             native_return_armed=native_armed)]
+                             native_return_armed=native_armed, product_acceptance_host=None)]
         assert binding.worker_uid == binding.group_gid == 451
         assert activated.count("CompanyConsultation") == 1
 

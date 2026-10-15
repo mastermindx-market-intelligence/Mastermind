@@ -252,6 +252,13 @@ NATIVE_RETURN_CONFIG_NAME = "mastermind-native-return"
 NATIVE_RETURN_SERVER_IDENTITY = "mastermind-native-return-mcp"
 NATIVE_RETURN_SERVER_VERSION = "1.0.0"
 NATIVE_RETURN_TOOL_SCHEMA_DIGEST = "b2ed6841f5693bd3f2fcd91b036ba1bae529ea9a8472e524b61648c1ced8fb40"
+PRODUCT_ACCEPTANCE_MCP_ARGS = (*COMPANY_MCP_ARGS[:-1], COMPANY_MCP_BOOTSTRAP.replace(
+    'str(P),"stdio"', 'str(P),"acceptance-stdio"'))
+PRODUCT_ACCEPTANCE_EXECUTION_PROFILE = "operator.appserver.interactive.product-acceptance.v1"
+PRODUCT_ACCEPTANCE_CONFIG_NAME = "mastermind-product-acceptance"
+PRODUCT_ACCEPTANCE_SERVER_IDENTITY = "mastermind-product-acceptance-mcp"
+PRODUCT_ACCEPTANCE_SERVER_VERSION = "1.0.0"
+PRODUCT_ACCEPTANCE_TOOL_SCHEMA_DIGEST = "a8a86ebfc59820efafe0810e08f3897583ab104817596c2d4e94f8f80c93e84d"
 _RESOURCE_KEYS = frozenset(
     {
         "artifact_root",
@@ -1357,6 +1364,7 @@ class ExecutionCapabilityRegistry:
                         PRINCIPAL_COMPANY_MCP_ARGS,
                     ),
                     "native-return-mcp-v1": (COMPANY_MCP_COMMAND, NATIVE_RETURN_MCP_ARGS),
+                    "product-acceptance-mcp-v1": (COMPANY_MCP_COMMAND, PRODUCT_ACCEPTANCE_MCP_ARGS),
                 }.get(capability_id)
                 if reviewed is None or command_value != reviewed[0]:
                     raise CapabilityPolicyError(
@@ -1463,6 +1471,16 @@ class ExecutionCapabilityRegistry:
                 or tool_schema_digest != NATIVE_RETURN_TOOL_SCHEMA_DIGEST
             ):
                 raise CapabilityPolicyError("Native return MCP grant differs from its reviewed binding")
+            if capability_id == "product-acceptance-mcp-v1" and (
+                config_name != PRODUCT_ACCEPTANCE_CONFIG_NAME or transport != "stdio"
+                or auth_status != "unsupported"
+                or server_identity != PRODUCT_ACCEPTANCE_SERVER_IDENTITY
+                or server_version != PRODUCT_ACCEPTANCE_SERVER_VERSION
+                or enabled_tools != ("request_decision",)
+                or approval_mode != "approve"
+                or tool_schema_digest != PRODUCT_ACCEPTANCE_TOOL_SCHEMA_DIGEST
+            ):
+                raise CapabilityPolicyError("Product acceptance MCP grant differs from its reviewed binding")
             normalized_grant = {
                 "capability_id": capability_id,
                 "config_name": config_name,

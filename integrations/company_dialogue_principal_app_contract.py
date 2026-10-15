@@ -1,8 +1,8 @@
 """Candidate App-peer framing for one exact principal decision request.
 
 Validation does not authenticate the frame or enroll a principal. This schema
-is intentionally absent from the existing ingress allowlist until the receiving
-owner composes actual App-peer authentication and the current COMMIT guard.
+stays absent from the ordinary ingress allowlist. A receiving host may explicitly
+select its separate App-peer provider and compose the current COMMIT guard.
 No listener, token, Runtime handle, registry, source observation or retry lives
 here. Caller facts originate in the authenticated App helper and are rechecked
 by Control against the existing installed authority and mission owners.
@@ -13,6 +13,7 @@ import dataclasses
 import re
 from typing import Any
 
+from common.company_dialogue_principal_app_protocol import APP_REQUEST_SCHEMA
 from control_plane.coo_principal_envelope import PrincipalAdmissionContext
 from control_plane.coo_principal_mandate import NewEffectGate
 from control_plane.wake_events import JOB_ID_RE, WAKE_ID_RE
@@ -23,7 +24,6 @@ from integrations.mastermind_company_mcp.principal_schemas import validate_princ
 from integrations.slack_agent_dialogue.company_dialogue_runtime_binding import CooPrincipalDialogueCaller
 
 
-APP_REQUEST_SCHEMA = "mastermind.ceo_ingress.principal_dialogue.v1"
 _KEYS = frozenset({"schema", "caller", "obligation_id", "tool", "arguments"})
 _CALLER_KEYS = frozenset({"admission_context", "root_job_id", "reasoning_surface",
     "capability_profile_digest", "new_effect_gate", "accountable_seat", "owed_seat"})
