@@ -15,10 +15,10 @@
   "PR": 1338,
   "branch": "sol/research-soxx-cycle-boats-20261011",
   "inspected_precheckpoint_head": "713f263dfc1dec4c7316df6420010cb6a6c38f6f",
-  "publication_effect": "The third human-operated, original SOXX historical BOATS REST request returned 2136 source minutes; original L0 receipt and single existing L1 materialization are hash-verified. Four near-full weekday nights have 24 missing minutes and 54 complete 30m source buckets, with 574 zero-volume 1m rows and 4 30m buckets with positive volume in every minute. Three original receipts hold 5004 disjoint 1m times. This evidence-only commit does not repeat a vendor request, rerun old strategy tests or authorize trading.",
+  "publication_effect": "Four original user-operated seven-day Tiingo BOATS SOXX HTTP200 sources and exact original L0→L1 materializer postimages were verified: 8075 new 1m source rows across four receipts; seven accepted source contexts now 13079 disjoint source minute timestamps. 25 Mon-Thu night starts have 11666/12000 original minutes; holiday Sep6 excluded from false missing claims and Sunday first four hours systematically absent in six otherwise eligible sessions. Metadata and source-quality evidence only; no assistant vendor call, PIT, marketable quote fill or trading.",
   "full_prior_handoff_commit": "7ec0207a5870e8c467b7185afbdcde97c38ef314",
   "repo_research_root": "research/soxx-multitimeframe-cycle-2026-10-11",
-  "current_delta_path": "research/soxx-multitimeframe-cycle-2026-10-11/prospective_validation_v26/SOXX_THIRD_BOATS_WEEK_VERIFIED_2026-10-15.md",
+  "current_delta_path": "research/soxx-multitimeframe-cycle-2026-10-11/prospective_validation_v26/SOXX_FOUR_WEEK_BATCH_7_RECEIPT_CENSUS_2026-10-15.md",
   "analysis_contract_path": "research/soxx-multitimeframe-cycle-2026-10-11/prospective_validation_v26/PROSPECTIVE_ANALYSIS_CONTRACT.md",
   "preserved_evidence": {
     "all_v2_v24_source_results_unchanged": true,
@@ -112,15 +112,15 @@
     "isolated_integration_workspace": "m2studio:/private/tmp/soxx1338-integration-20261013"
   },
   "source_gates": {
-    "last_qualified_historical_bar_census_UTC": "2026-10-15T07:39:51Z",
+    "last_qualified_historical_bar_census_UTC": "2026-10-15T08:13:32Z",
     "qualified_historical_bar_symbols": [
       "AAPL",
       "AMD",
       "SOXX"
     ],
-    "qualified_historical_SOXX_receipts": 3,
+    "qualified_historical_SOXX_receipts": 7,
     "fresh_pathname_check_UTC": "2026-10-14T01:04:55.804461+00:00",
-    "historical_receipt_paths": 5,
+    "historical_receipt_paths": 9,
     "new_paths": 0,
     "path_census_truncated": false,
     "fresh_check_requalified_raw_contents": false,
@@ -329,6 +329,167 @@
       },
       "original_PIT_and_executable_fills_admitted": false,
       "independent_strategy_economics_proven": false
+    },
+    "four_week_SOXX_BOATS_source_receipts": [
+      {
+        "original_request_bounds": [
+          "2026-08-31",
+          "2026-09-06"
+        ],
+        "rows": 2047,
+        "raw_response_bytes": 218032,
+        "captured_UTC": "2026-10-15T07:55:37.357813+00:00",
+        "raw_SHA256": "cb9445702f8bd2ddf23c76b58fb0223af2897650bf7eb78dce045895a609a79b",
+        "original_receipt_ID": "e3b72d7d321be9bd07e84672d1f943a3d99f78106bcdaed07a62173f8ca606b9",
+        "original_Parquet_SHA256": "63b052183edad5375ba5f88674b45d147ef76e200e41986c35902f7b880f89df",
+        "original_manifest_SHA256": "26d005fbc732249b270fffce5cf29a312e61b8d2059b26036dac7c01fd594a17",
+        "HTTP_status": 200,
+        "L1_effect": "ORIGINAL_WRITTEN_ONCE_AND_READER_VERIFIED",
+        "PIT_backtest_eligible": false,
+        "dataos_identity_admitted": false,
+        "redistribution_admitted": false
+      },
+      {
+        "original_request_bounds": [
+          "2026-09-07",
+          "2026-09-13"
+        ],
+        "rows": 1898,
+        "raw_response_bytes": 202929,
+        "captured_UTC": "2026-10-15T07:55:39.229842+00:00",
+        "raw_SHA256": "f71d2228017a210ce3fffd9e9b4c9548efb12b1f28d6a0c5181cf82e6c6611d2",
+        "original_receipt_ID": "ab84c447d13565c0f67282853d36213f9ac6817df12190ecd7e29c3c639a99f6",
+        "original_Parquet_SHA256": "e158dac8390edfe9b8ace78e333db92a1256587e23188bb52cb11aa1002bc36d",
+        "original_manifest_SHA256": "5d22b16d72c025435220c32050c34b4467914633b125dfa93762da58feeb10b3",
+        "HTTP_status": 200,
+        "L1_effect": "ORIGINAL_WRITTEN_ONCE_AND_READER_VERIFIED",
+        "PIT_backtest_eligible": false,
+        "dataos_identity_admitted": false,
+        "redistribution_admitted": false
+      },
+      {
+        "original_request_bounds": [
+          "2026-09-14",
+          "2026-09-20"
+        ],
+        "rows": 2130,
+        "raw_response_bytes": 227649,
+        "captured_UTC": "2026-10-15T07:55:41.379314+00:00",
+        "raw_SHA256": "c2bab8702ed3a6b061427fbff4b96b54e042016e2617b9366eafb7268da815c2",
+        "original_receipt_ID": "82031eb55d1cdc0fae71c26268f7e85c5d350591643048298c8744e074bbe548",
+        "original_Parquet_SHA256": "b8b8a460a74863d32fd24576ae42b28c0ad1e7dbf973dcb184aafa9df701abb3",
+        "original_manifest_SHA256": "cece4f64cc74dba2833c33ee3e9b062ba598fec96a2af9e166c17e3e49fd86bf",
+        "HTTP_status": 200,
+        "L1_effect": "ORIGINAL_WRITTEN_ONCE_AND_READER_VERIFIED",
+        "PIT_backtest_eligible": false,
+        "dataos_identity_admitted": false,
+        "redistribution_admitted": false
+      },
+      {
+        "original_request_bounds": [
+          "2026-09-21",
+          "2026-09-27"
+        ],
+        "rows": 2000,
+        "raw_response_bytes": 213646,
+        "captured_UTC": "2026-10-15T07:55:43.244794+00:00",
+        "raw_SHA256": "ba80ee49d175b5c66ea0330897b5a9f65a56226e2eb85a8f677a6a89597f2850",
+        "original_receipt_ID": "596fce5e565dcb7acb071e630a4dfffb1c0a148c83e2544b9f6fe39eca5ba766",
+        "original_Parquet_SHA256": "40b4206fc4cd2e2dc96f6f003575c2c97ff5c5dd69e177954300da5ef499e279",
+        "original_manifest_SHA256": "ae1dd4b424ea8c885c36f27bbb0b2d9ae63092e40a4b0324b0aa3b2806ab03f4",
+        "HTTP_status": 200,
+        "L1_effect": "ORIGINAL_WRITTEN_ONCE_AND_READER_VERIFIED",
+        "PIT_backtest_eligible": false,
+        "dataos_identity_admitted": false,
+        "redistribution_admitted": false
+      }
+    ],
+    "seven_SOXX_source_receipt_census": {
+      "source_receipts": 7,
+      "rows_all_original": 13079,
+      "unique_UTC_minute_start_count": 13079,
+      "cross_receipt_minute_overlap_count": 0,
+      "core_Mon_Thu_overnight_night_count": 25,
+      "core_expected_one_minute_slots": 12000,
+      "core_observed_one_minute_slots": 11666,
+      "core_missing_one_minute_slots": 334,
+      "core_nights_with_complete_480_minute_grid": 2,
+      "core_positive_vendor_volume_minute_bars": 8191,
+      "core_zero_vendor_volume_minute_bars": 3475,
+      "core_zero_volume_nonflat_OHLC_bars": 3067,
+      "core_30m_time_complete_windows": 291,
+      "core_30m_with_all_positive_volume_inputs": 17,
+      "core_HTF_candidate": {
+        "120m": 100,
+        "180m": 50,
+        "240m": 50
+      },
+      "core_HTF_time_complete": {
+        "120m": 39,
+        "180m": 12,
+        "240m": 12
+      },
+      "core_HTF_complete_and_all_minute_volume_positive": {
+        "120m": 1,
+        "180m": 0,
+        "240m": 0
+      },
+      "real_vendor_market_quotes_proven": false,
+      "point_in_time_eligible": false,
+      "independent_strategy_performance_accepted": false
+    },
+    "official_Sep6_2026_BOATS_holiday": {
+      "night_start_ET": "2026-09-06",
+      "session_status": "OFFICIAL_CLOSED_LABOR_DAY_NOT_DATA_MISSING",
+      "venue_holiday_source": "https://boats-pub-website-wordpress-prod.azurewebsites.net/trading-updates/",
+      "broader_holiday_calendar_admitted": false
+    },
+    "Sep22_2026_source_gap": {
+      "night_start_ET": "2026-09-22",
+      "minute_source_rows": 332,
+      "source_absent_minutes": 148,
+      "separate_missing_runs": 93,
+      "longest_missing_run_minutes": 6,
+      "missing_spread_over_entire_eight_hours": true,
+      "response_2000_row_cap_proven": false,
+      "source_outage_proven": false
+    },
+    "normal_Sunday_evening_source_gap": {
+      "dates": [
+        "2026-08-30",
+        "2026-09-13",
+        "2026-09-20",
+        "2026-09-27",
+        "2026-10-04",
+        "2026-10-11"
+      ],
+      "Sunday_20_to_23_59_minute_rows_each": 0,
+      "Monday_00_to_03_59_original_minute_rows": [
+        218,
+        239,
+        236,
+        240,
+        240,
+        240
+      ],
+      "source_date_filter_cause_proven": false,
+      "target_original_one_request_bounds": [
+        "2026-09-27",
+        "2026-09-28"
+      ],
+      "target_original_offline_plan_sha256": "186eee89dee9e3ecec666a22cde909785ba345df63bf1896ae15cdfde59aacd0",
+      "provider_request_dispatched": false,
+      "overlap_with_old_Monday_history_deliberate": true,
+      "validate_context_separately_and_quarantine_source_conflicts": true
+    },
+    "older_Aug3_30_source_plan": {
+      "original_request_bounds": [
+        "2026-08-03",
+        "2026-08-30"
+      ],
+      "expected_original_task_count": 4,
+      "source_plan_sha256": "b7b786b19d5870fdce89aac2f164586b96d0595608f5e9d35d3db71551469415",
+      "dispatched": false
     }
   },
   "independent_validation": {
@@ -364,7 +525,11 @@
     "second_SOXX_L1_materialization": "ORIGINAL materialize_one WRITTEN exactly once after dry-run WOULD_WRITE; source→Parquet/manifest digests and original source reader verified, no uncertain write",
     "third_SOXX_historical_acquisition": "Original human collector HTTP200/APPLIED once, 2136 source rows and immutable original receipt independently verified; never repeat",
     "third_SOXX_L1_materialization": "Original materialize_one WRITTEN once after WOULD_WRITE; L1 Parquet, manifest, receipt and read_research_view SHA and source row equivalence accepted",
-    "third_SOXX_assistant_external_vendor_calls": 0
+    "third_SOXX_assistant_external_vendor_calls": 0,
+    "four_week_user_operator_acquisition": "Four real original Tiingo BOATS SOXX HTTP200 source receipts APPLIED; 8075 raw one-minute rows; do not repeat",
+    "four_week_original_L1_materialization": "Four original materialize_one WRITTEN operations executed sequentially once each after each WOULD_WRITE dry run; all four original Parquet/manifest hashes and read_research_view equivalence verified",
+    "four_week_assistant_authenticated_vendor_calls": 0,
+    "Sunday_boundary_target_request": "OFFLINE PLAN ONLY, NOT DISPATCHED"
   },
   "DO_NOT_REDO": [
     "Do not rerun or retune inspected v2-v24 historical studies or call the original year untouched.",
@@ -377,8 +542,9 @@
     "No second collector, Data OS, Quote Hub, calendar, scheduler or control plane.",
     "No raw licensed data, credentials, live trading, model sizing, merge or production activation.",
     "Synthetic tests and review acceptance are not independent market-performance evidence; OHLC is not fill proof.",
-    "Do not repeat the successful original SOXX 2026-09-28..2026-10-04 REST call or accepted single L1 materialization; preserve exact third source raw/receipt/L1 digests above. All THREE original SOXX source effects have been reconciled."
+    "Do not repeat the successful original SOXX 2026-09-28..2026-10-04 REST call or accepted single L1 materialization; preserve exact third source raw/receipt/L1 digests above. All THREE original SOXX source effects have been reconciled.",
+    "Do not repeat FOUR original SOXX boats-bars seven-day requests spanning 2026-08-31 to 2026-09-27 or their four accepted canonical L1 materializations. All SEVEN accepted original SOXX receipts are immutable DO_NOT_REDO. A targeted 2026-09-27..28 Sunday time-boundary test is a separate NEW provider request with deliberate source overlap requiring new-context comparison, not a replay of an accepted source."
   ],
-  "exact_next_action": "Verify current exact-head CI, preserve all THREE accepted historical SOXX original REST L0/L1 sources without reacquisition. Direct original receipts now include 5004 disjoint minute stamps, nine near/full nights with 4284/4320 minute slots, 36 gaps, and only 17/36 2H, 5/18 3H, 5/18 4H complete overnight source-input blocks; zero fully positive-volume source HTF blocks and no marketable historical quote fills. The next separate original-operator BOATS SOXX historical request is 2026-09-21..2026-09-27 one 7-day request with existing offline plan SHA aec4567db37217c405e999a4b8f85b54f07c7754b933de1bbbc9b1cbdfe0c5c6, NOT DISPATCHED; existing account rights/quota, original-source writer/effect admission apply. Keep V13/V29/V30 read-only receipt integrity checks, prior 91-episode inspected research and frozen original accounting child; no new trading, independent-profit claim or order sizing.",
+  "exact_next_action": "Verify enclosing PR CI and preserve all SEVEN original SOXX historical source receipts (13079 disjoint minute timestamps), no repeat vendor calls or writes. New four-week source evidence 8075 rows, 16 weekday nights, 298 gaps plus 3 Sunday boundary fragments; core 25 Mon-Thu nights 11666/12000 source minutes, 334 gaps and 39/100 2H, 12/50 3H, 12/50 4H complete source windows. Blue Ocean 2026 Sep6 holiday OFFICIALLY CLOSED; not a missing night. Six normal Sunday 20:00–23:59 ET source first halves systematically absent, cause NOT PROVEN. First perform one original-operator qualified targeted SOXX Sep27–Sep28 REST request if quota/writer/right permits, current offline plan SHA 186eee89dee9e3ecec666a22cde909785ba345df63bf1896ae15cdfde59aacd0; inspect distinct original receipt, whether Sunday 20:00–23:59 appears, and privately compare overlapping Monday row vintage values before any stitch. Do not run already accepted 7-day calls. Only after gap attribution consider disjoint Aug3–Aug30 four weekly source requests planned as b7b786b19d5870fdce89aac2f164586b96d0595608f5e9d35d3db71551469415. Original source PIT/historical NBBO/order-fills and frozen independent SOXX outcome not yet proved. Preserve 91-episode historical development, unresolved original accounting child, no trading.",
   "no_unattended_continuation_promised": true
 }
