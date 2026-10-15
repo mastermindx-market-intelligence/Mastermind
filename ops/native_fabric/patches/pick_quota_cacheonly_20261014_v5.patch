@@ -40,7 +40,7 @@
              and quota_remote._age_seconds(state, quota_remote._utc_now().timestamp()) <= quota_remote.FRESH_S
 --- a/ext/quota_remote.py
 +++ b/ext/quota_remote.py
-@@ -397,6 +397,31 @@
+@@ -397,6 +397,41 @@
      return state
  
  
@@ -63,6 +63,16 @@
 +            stamp = datetime.fromisoformat(observed[:-1] + "+00:00").timestamp()
 +            age = now_ts - stamp
 +            if 0.0 <= age <= FRESH_S:
++                # A recent observation belongs to its measured window, not to
++                # the new allowance after that window's reset. Unknown remains
++                # unknown; never refresh or synthesize post-reset capacity here.
++                if state.reset_at is not None:
++                    reset = _iso(state.reset_at)
++                    if not reset:
++                        continue
++                    reset_ts = datetime.fromisoformat(reset[:-1] + "+00:00").timestamp()
++                    if reset_ts <= now_ts:
++                        continue
 +                accepted.append(state)
 +        except (OSError, OverflowError, ValueError, TypeError):
 +            continue
@@ -72,7 +82,7 @@
  def _cache_states(entry: Any, reason: str,
                    keep_authoritative: bool = False) -> List[ProviderQuotaState]:
      rows = entry.get("states") if isinstance(entry, dict) else None
-@@ -436,7 +461,11 @@
+@@ -436,7 +471,11 @@
  
  def read_provider(provider: str, force: bool = False,
                    now_ts: Optional[float] = None,
@@ -85,7 +95,7 @@
      provider = provider.lower()
      if provider not in {"glm", "minimax", "bailian"}:
          raise ValueError("unknown provider")
-@@ -462,7 +491,13 @@
+@@ -462,7 +501,13 @@
                  not force and refreshed_at
                  and now - refreshed_at < REFRESH_INTERVAL_S
              ):
@@ -99,7 +109,7 @@
              try:
                  live = READERS["glm"]()
                  cache = _load_cache(path)
-@@ -484,6 +519,7 @@
+@@ -484,6 +529,7 @@
                  return []
          per_account = glm_accounts_state(
              now_ts=now, cache_path=path, force=force,
@@ -107,7 +117,7 @@
          )
          flat: List[ProviderQuotaState] = []
          for entry in per_account:
-@@ -494,7 +530,13 @@
+@@ -494,7 +540,13 @@
      refreshed_at = float((entry or {}).get("refreshed_at") or 0) if isinstance(entry, dict) else 0.0
      cached_states = _cache_states(entry, "cached", keep_authoritative=True)
      if not force and refreshed_at and now - refreshed_at < REFRESH_INTERVAL_S:
@@ -121,7 +131,7 @@
      live: List[ProviderQuotaState]
      if provider == "bailian":
          try:
-@@ -580,9 +622,11 @@
+@@ -580,9 +632,11 @@
      now_ts: Optional[float] = None,
      cache_path: Optional[str] = None,
      force: bool = False,
@@ -133,7 +143,7 @@
      Returns one entry per account in ``glm_keys.accounts()``:
  
          {
-@@ -597,6 +641,8 @@
+@@ -597,6 +651,8 @@
      falls back to ``_live_glm(name, key)`` and writes the result back.
      Stale-cache entries are preserved on live-read failure.
      """
@@ -142,7 +152,7 @@
      now = _utc_now().timestamp() if now_ts is None else float(now_ts)
      path = cache_path or CACHE_PATH
      cache = _load_cache(path)
-@@ -637,11 +683,20 @@
+@@ -637,11 +693,20 @@
          )
          if fresh_cache:
              cached_states = _cache_states(cached, "cached", keep_authoritative=True)
@@ -164,7 +174,7 @@
          if not states:
              try:
                  states = _live_glm(name, key)
-@@ -712,7 +767,8 @@
+@@ -712,7 +777,8 @@
                         local_estimate: Optional[Dict[str, Any]] = None,
                         cache_path: Optional[str] = None,
                         fallback_reader: Optional[Callable[[Optional[float]], Dict[str, Any]]] = None,
@@ -174,7 +184,7 @@
      """R29 GLM quota decision (W4-G9 multi-account).
  
      State rules:
-@@ -737,6 +793,7 @@
+@@ -737,6 +803,7 @@
              # logic drives both code paths.
              flat = read_provider(
                  "glm", now_ts=now, cache_path=cache_path,
@@ -182,7 +192,7 @@
              )
              if flat:
                  per_account = [{
-@@ -748,7 +805,27 @@
+@@ -748,7 +815,27 @@
                  }]
          else:
              # W4-G9 multi-account path.
