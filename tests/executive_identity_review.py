@@ -8,6 +8,10 @@ permission modes and the 512 MiB inventory bound, not new runtime authority.
 A source change requires review; tests never learn replacement pins from source.
 Only exact reviewed Constant tokens are suppressed; identifiers and alias/call
 structure remain visible to the generic D8 scanner.
+
+The R2 AEAD projection candidate retains the same two identity literal sites.
+Its body fingerprint is frozen below; a matching candidate is not independent
+review acceptance or release authority.
 """
 from __future__ import annotations
 
@@ -179,7 +183,7 @@ REVIEWED_ANCHORS = {'_LAUNCHD_ROLES': {'node_type': 'Assign',
                         'ast_sha256': 'b6ae4e618fbd7a678ff7cc558882de291e9420c75661613f1b1d270fba4cebf3',
                         'sites': ((('body', 4, 'value', 'keywords', 2, 'value'), 'int', 420, '0o644'),)},
  '_verify_control_projection': {'node_type': 'FunctionDef',
-                                'ast_sha256': '3a834919a6a967ef9bb612b9d57502cbe524b8052639b583cb703f0934310b52',
+                                'ast_sha256': '3453d81cc50ca0189d12637b6a10b3afd9e4ae261160381a18ebc46d2f4e7923',
                                 'sites': ((('body', 2, 'value', 'keywords', 3, 'value'), 'int', 450, '450'),
                                           (('body', 5, 'test', 'comparators', 0), 'int', 450, '450'))},
  '_verify_role_config': {'node_type': 'FunctionDef',
