@@ -2,11 +2,13 @@ import {
   createExecutiveSessionBinding,
   type ExecutiveSessionBinding,
   type ExecutiveSessionTransport,
+  type QualifiedSessionAnswerRead,
 } from "./executive-session-command-port";
 import type { MissionSelection } from "../mission";
 import type {
   FiniteCommandPort,
   PendingPointerStore,
+  OperationPointer,
 } from "./operation-controller";
 
 /**
@@ -26,9 +28,12 @@ import type {
  */
 export type SessionCommandPort = FiniteCommandPort & {
   readonly currentTargetRef: () => string | null;
+  /** Existing native READ operation; optional only for older injected hosts. */
+  readonly readQualifiedAnswer?: (pointer: OperationPointer, signal: AbortSignal) =>
+    Promise<QualifiedSessionAnswerRead>;
 };
 
-export type MountedExecutiveSessionBinding = ExecutiveSessionBinding & {
+export type MountedExecutiveSessionBinding = Omit<ExecutiveSessionBinding, "port"> & {
   readonly port: SessionCommandPort;
 };
 
@@ -62,6 +67,7 @@ export function createOsExecutiveSessionHost(
       prepare: (intent) => original.prepare(intent),
       submit: (pointer, intent, signal) => original.submit(pointer, intent, signal),
       readOperation: (pointer, signal) => original.readOperation(pointer, signal),
+      readQualifiedAnswer: (pointer, signal) => original.readQualifiedAnswer(pointer, signal),
       currentTargetRef: () => {
         const state = handle.sessionState();
         return state?.capabilities.send ? state.target?.target_ref ?? null : null;
@@ -124,6 +130,7 @@ export function completeExecutiveSessionBinding(
     !isFn(store.clearIfEqual)
   )
     return null;
+  if (port.readQualifiedAnswer !== undefined && !isFn(port.readQualifiedAnswer)) return null;
   if (isFn((store as Record<string, unknown>).write)) return null;
   if (isFn((store as Record<string, unknown>).clear)) return null;
   if (
