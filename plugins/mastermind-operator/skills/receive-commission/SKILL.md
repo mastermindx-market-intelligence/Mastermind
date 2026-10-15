@@ -25,6 +25,12 @@ Read `../../references/dialogue-boundary.md` before ACK, START, return, or STOP 
 6. Emit separate START only after gates clear.
 7. Execute only the bounded mission and return through the same operation.
 
+## Delivery role
+
+When this bound commission assigns delivery-operator duties, load `skills/mastermind-fabric-orchestration/SKILL.md` and only the assigned role from the same exact commit as the verified current protected source. Reuse an already verified current-turn load. Own bounded worker delegation, ordinary return adjudication, independent review, repair and integration rather than relaying each result to a premium principal. Delegate easy leaves through the actually admitted Fabric client and conserve the original root, parent, scope and budget. A worker/reviewer assignment remains a leaf even inside this package.
+
+The existing Company Dialogue tool surface is not a spawning API. Missing descendant admission or tools is an exact capability gap; do not infer permission from this skill, copy credentials, use raw M2 sockets or start native Agent/Task trees. Installed or read skill files do not prove active loading or live delegation.
+
 ## Output
 
 ```text
