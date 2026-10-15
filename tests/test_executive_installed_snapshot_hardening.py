@@ -2018,8 +2018,12 @@ def test_clean_snapshot_inventory_failure_blocks_object_use(
             include_seal=True, snapshot_capture=captures,
         )
 
-    # The concurrent object proof still settled before the refusal surfaced.
-    assert len(state["object_maps"]) == 2
+    # Current-blob proof is the independent branch and still settles before
+    # the inventory refusal. Ancestry/history closure now runs on the inventory
+    # worker after inventory succeeds, so it must not start after this failure.
+    assert len(state["object_maps"]) == 1
+    assert state["completed_object_maps"] == state["object_maps"]
+    assert set(state["object_maps"][0].values()) == {"blob"}
     assert state["inventories"] == []
     assert captures == []
 
