@@ -558,6 +558,7 @@ class _ExecutivePathFence:
                 "/workspace/work/current",
                 "/workspace/mission/current",
                 "/workspace/mission/v3/current",
+                "/workspace/mission/v4/current",
                 "/workspace/result/current",
                 "/workspace/plan/current",
             ))
@@ -565,6 +566,7 @@ class _ExecutivePathFence:
             self._query_routes.update((
                 "/workspace/mission/current",
                 "/workspace/mission/v3/current",
+                "/workspace/mission/v4/current",
                 "/workspace/result/current",
                 "/workspace/plan/current",
             ))
@@ -1254,6 +1256,7 @@ def _build_profile_mcp_app(
                              "/workspace/work/current",
                              "/workspace/mission/current",
                              "/workspace/mission/v3/current",
+                             "/workspace/mission/v4/current",
                              "/workspace/result/current",
                              "/workspace/plan/current"))
     if content_app is not None:

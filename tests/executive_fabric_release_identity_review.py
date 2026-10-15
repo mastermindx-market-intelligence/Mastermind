@@ -6,7 +6,14 @@ bound or a reviewed primary/secondary identity exclusion. Shell and retained
 these pins are not learned or refreshed by the tests.
 """
 
-REVIEWED_FILES = {'integrations/session_bridge/bound_launch_capture/runtime/lane_runtime.py': {'sha256': 'cfb18bd9381fae4af1d13a257a8fa5986d903571f64b2aa5dc900439759e9b91',
+REVIEWED_FILES = {
+    # Existing ten-minute telemetry age, not a UID. Full reviewed source and
+    # exact token only; drift exposes the source to ordinary D8 again.
+    "research/fabric_bailian_host_eligibility_20261015/candidate/glm_host_account_readiness.py": {
+        "sha256": "00fdbdf5422904a349a8cf09ffdd05f63ab716d8f712d8c28cf9a60708cfca21",
+        "sites": ((31, 18, 21, "int", "600"),),
+    },
+    'integrations/session_bridge/bound_launch_capture/runtime/lane_runtime.py': {'sha256': 'cfb18bd9381fae4af1d13a257a8fa5986d903571f64b2aa5dc900439759e9b91',
                                                                               'sites': ((1277,
                                                                                          50,
                                                                                          55,
@@ -136,3 +143,8 @@ REVIEWED_FILES['integrations/mastermind_executive_app/principal_ruling_http.py']
            (51, 28, 31, 'int', '401'),
            (75, 77, 80, 'int', '413'),
            (80, 28, 31, 'int', '400'))}
+
+REVIEWED_FILES['app/mastermind_os/src/product-acceptance/owner-observation.ts'] = {
+    'sha256': 'a914fa318b2a96d4d9d01ee5f378becac222e3750725de99416dff6b463a257a',
+    'sites': ((34, 132, 135, 'int', '512'),),
+}

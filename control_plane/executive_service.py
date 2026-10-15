@@ -5290,12 +5290,29 @@ class ExecutiveControlService:
                 error as workspace_error,
                 bounded_canonical as workspace_encode,
             )
-            if app_peer and isinstance(parsed, dict) and parsed.get("schema") in {FRAME_SCHEMA, FRAME_SCHEMA_V2, FRAME_SCHEMA_V3}:
+            from common.product_acceptance_read_contract import (
+                FRAME_SCHEMA as ACCEPTANCE_FRAME_SCHEMA, validate_frame as validate_acceptance_frame,
+            )
+            if app_peer and isinstance(parsed, dict) and parsed.get("schema") in {FRAME_SCHEMA, FRAME_SCHEMA_V2, FRAME_SCHEMA_V3, ACCEPTANCE_FRAME_SCHEMA}:
                 factory = app_binding.workspace_read_provider_factory
                 # Pick the operation-specific ceiling BEFORE any work so an
                 # unknown or malformed frame never widens to a larger ceiling.
                 operation = parsed.get("operation") if isinstance(parsed, dict) else None
-                if parsed.get("schema") == FRAME_SCHEMA_V3:
+                if parsed.get("schema") == ACCEPTANCE_FRAME_SCHEMA:
+                    ceiling = WORKSPACE_MAX_RESPONSE_BYTES
+                    try:
+                        from common.product_acceptance_acquisition_contract import (
+                            OPERATION as ORIGINAL_OPERATION, validate_frame as validate_original_frame,
+                        )
+                        if operation == ORIGINAL_OPERATION:
+                            validate_original_frame(parsed)
+                        else:
+                            validate_acceptance_frame(parsed)
+                    except (TypeError, ValueError):
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400),
+                                                             response_ceiling=ceiling)
+                        return
+                elif parsed.get("schema") == FRAME_SCHEMA_V3:
                     ceiling = MAX_PLAN_RESPONSE_BYTES
                     try:
                         validate_v3_frame(parsed)
