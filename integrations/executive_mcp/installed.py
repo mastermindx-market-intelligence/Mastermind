@@ -837,33 +837,101 @@ def _frontmatter_lists(payload: bytes) -> dict[str, list[str]]:
             refuse()
         return value
 
-    def metadata_value_end(index: int, raw: str) -> int:
-        # Quoted/flow metadata may continue only on indented lines. Track its
-        # delimiters so a colon in prose or a root-looking continuation cannot
-        # become an independently interpreted consumed field. No metadata
-        # values are reconstructed or used to choose materialized paths.
-        if raw and raw[0] in "&*!%@`":
+    # Metadata aliases are never expanded or used as path fields. Remember only
+    # names declared by metadata so undefined/forward aliases and duplicate
+    # properties cannot turn malformed YAML into an accepted path projection.
+    metadata_anchors: set[str] = set()
+    property_pattern = re.compile(r"([&*])([A-Za-z0-9_-]{1,128})(?=[ \t\n,\[\]{}]|$)")
+
+    def metadata_property(text: str) -> tuple[str, bool]:
+        if not text or text[0] not in "&*":
+            if text and text[0] in "!%@`":
+                refuse()
+            return text, False
+        match = property_pattern.match(text)
+        if match is None:
             refuse()
+        kind, name = match.groups()
+        rest = text[match.end():].lstrip()
+        if kind == "*":
+            if name not in metadata_anchors or (rest and not rest.startswith("#")):
+                refuse()
+            return "", True
+        if name in metadata_anchors or len(metadata_anchors) >= 256:
+            refuse()
+        metadata_anchors.add(name)
+        if rest.startswith("#"):
+            rest = ""
+        if rest and rest[0] in "&*!%@`":
+            refuse()
+        return rest, False
+
+    def metadata_value_end(index: int, raw: str, *, owner_indent: int = 0) -> tuple[int, str]:
+        # Properties belong to the following node, not to a whole opaque line.
+        # Continue checking quoted/flow boundaries after an anchor prefix. An
+        # alias is one complete metadata node; it never supplies materialized
+        # paths, and consumed fields still use their original closed grammar.
+        raw, alias = metadata_property(raw)
+        if alias:
+            if index < len(tokens) and tokens[index][0] > owner_indent:
+                refuse()
+            return index, "*"
         if raw and raw[0] in "\"'[{":
             stack: list[str] = []
             quote: str | None = None
+            quote_start = 0
             text = raw
             cursor = 0
             finished = False
             while not finished:
                 while cursor < len(text):
                     character = text[cursor]
+                    boundary = cursor == 0 or text[cursor - 1] in " \t\n[{,:"
                     if quote is not None:
-                        if quote == '"' and character == "\\":
+                        if quote == '\"' and character == "\\":
                             cursor += 2
                             continue
                         if character == quote:
                             if quote == "'" and cursor + 1 < len(text) and text[cursor + 1] == "'":
                                 cursor += 2
                                 continue
+                            quoted = text[quote_start:cursor + 1]
+                            if (text[cursor + 1:].lstrip().startswith(":")
+                                    and _frontmatter_scalar(quoted) == "<<"):
+                                refuse()
                             quote = None
+                    elif character == "#" and boundary:
+                        # Comments cannot close an unfinished flow/quoted node.
+                        newline = text.find("\n", cursor)
+                        cursor = len(text) if newline == -1 else newline + 1
+                        continue
+                    elif character in "!%@`" and boundary:
+                        refuse()
+                    elif boundary and re.match(r"<<[ \t]*:", text[cursor:]):
+                        refuse()
+                    elif character in "&*" and boundary:
+                        match = property_pattern.match(text, cursor)
+                        if match is None:
+                            refuse()
+                        kind, name = match.groups()
+                        if kind == "&":
+                            if name in metadata_anchors or len(metadata_anchors) >= 256:
+                                refuse()
+                            metadata_anchors.add(name)
+                        elif name not in metadata_anchors:
+                            refuse()
+                        cursor = match.end()
+                        # Alias keys and chained node properties are outside
+                        # this metadata subset, even though no alias is expanded.
+                        tail = text[cursor:].lstrip()
+                        if tail.startswith(("&", "*", "!", "%", "@", "`")):
+                            refuse()
+                        if kind == "*" and tail and tail[0] not in ",]}#":
+                            refuse()
+                        continue
                     elif character in "\"'":
                         quote = character
+                        quote_start = cursor
                     elif character in "[{":
                         stack.append(character)
                     elif character in "]}":
@@ -880,10 +948,12 @@ def _frontmatter_lists(payload: bytes) -> dict[str, list[str]]:
                         refuse()
                     text += "\n" + tokens[index][1]
                     index += 1
-        return index
+            if index < len(tokens) and tokens[index][0] > owner_indent:
+                refuse()
+        return index, raw
 
     def metadata_end(index: int, raw: str) -> int:
-        index = metadata_value_end(index, raw)
+        index, raw = metadata_value_end(index, raw)
         # Every remaining continuation is explicitly owned by this unconsumed
         # root entry. Indentless sequences belong only to a block-valued entry.
         prose_indent: int | None = 0 if raw.startswith(("|", ">")) else None
@@ -891,21 +961,24 @@ def _frontmatter_lists(payload: bytes) -> dict[str, list[str]]:
             indent, text = tokens[index]
             if not (indent > 0 or (not raw and (text == "-" or text.startswith("- ")))):
                 break
+            if raw == "*":
+                refuse()  # a complete alias cannot own a continuation block
             index += 1
             if prose_indent is not None and indent > prose_indent:
                 continue
             prose_indent = None
-            # A nested quoted/flow metadata value also must close before a new
-            # root entry. Otherwise root-looking text inside that value could
-            # be misinterpreted as a real consumed field.
-            if text.startswith("- "):
+            sequence_item = text.startswith("- ")
+            if sequence_item:
                 text = text[2:].strip()
             nested = entry_pattern.fullmatch(text)
+            node_indent = indent + (2 if sequence_item and nested else 0)
+            if ((nested and _frontmatter_scalar(nested.group(1)) == "<<")
+                    or re.match(r"<<[ \t]*:", text)):
+                refuse()
             nested_value = (nested.group(2) or "").strip() if nested else text
+            index, nested_value = metadata_value_end(index, nested_value, owner_indent=node_indent)
             if nested_value.startswith(("|", ">")):
-                prose_indent = indent
-            else:
-                index = metadata_value_end(index, nested_value)
+                prose_indent = node_indent
         return index
 
     if not tokens:
