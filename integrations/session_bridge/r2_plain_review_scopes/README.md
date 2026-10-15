@@ -35,3 +35,10 @@ not launch or collect. The checked candidate includes the subsequent small lease
 witness guard; do not regenerate the scaffold over that reviewed candidate.
 
 Test result: `/Volumes/Mastermind/evidence/meta-ceo-r2-20261012-01a13315/r2-plain-scopes-checks.xml`.
+
+Independent source review: MiniMax/Ubuntu3 returned scoped PASS at exact collector
+`deb6a0cf463a66bd6a47a8aae345a9ab8c48cf7fc5db7d61bff9d4537e918342`.
+The assigning parent checked its concrete findings and original record pins.
+The child returned 3945 characters against a 3500-character bound, so its worker
+outcome remains NOT_ACCEPTED; the scoped source finding is retained separately.
+No installed collection, result acceptance, native authentication or readiness is claimed.

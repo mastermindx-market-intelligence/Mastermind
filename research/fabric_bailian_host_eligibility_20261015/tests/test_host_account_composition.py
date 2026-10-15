@@ -32,7 +32,7 @@ def module(stage,name):
     m=importlib.util.module_from_spec(spec);sys.modules[name]=m;spec.loader.exec_module(m);return m
 
 def envelope(stage,host='h1',flags=None):
-    return {'schema':'mastermind.bailian_local_account_readiness.v1','host':host,'transport_alias':host+'-ssh','mode':'qwen','config_scope':'launcher_bailian_config.v1','validator_sha256':hashlib.sha256((stage/'bailian_keys.py').read_bytes()).hexdigest(),'observed_at':1000,'status':'known','accounts':flags if flags is not None else {'Kris':False,'Ryan':True}}
+    return {'schema':'mastermind.bailian_local_account_readiness.v1','host':host,'transport_alias':host+'-ssh','mode':'qwen','config_scope':'launcher_bailian_config.v1','validator_sha256':hashlib.sha256((stage/'bailian_keys.py').read_bytes()).hexdigest(),'observed_at':1000,'status':'known','cooldown_checked':True,'accounts':flags if flags is not None else {'Kris':False,'Ryan':True}}
 
 def setup_state(stage,hosts=None):
     hosts=hosts or ['h1']

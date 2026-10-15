@@ -17,7 +17,7 @@ REVIEWED_FILES = {
     # Existing ten-minute telemetry age, not a UID. Full reviewed source and
     # exact token only; drift exposes the source to ordinary D8 again.
     "research/fabric_bailian_host_eligibility_20261015/candidate/glm_host_account_readiness.py": {
-        "sha256": "00fdbdf5422904a349a8cf09ffdd05f63ab716d8f712d8c28cf9a60708cfca21",
+        "sha256": "b8921960e7e46a472b536895b5a6491096627d1c8fd58ea0baf283ff34accc07",
         "sites": ((31, 18, 21, "int", "600"),),
     },
     'integrations/session_bridge/bound_launch_capture/runtime/lane_runtime.py': {'sha256': 'cfb18bd9381fae4af1d13a257a8fa5986d903571f64b2aa5dc900439759e9b91',
@@ -154,4 +154,11 @@ REVIEWED_FILES['integrations/mastermind_executive_app/principal_ruling_http.py']
 REVIEWED_FILES['app/mastermind_os/src/product-acceptance/owner-observation.ts'] = {
     'sha256': 'a914fa318b2a96d4d9d01ee5f378becac222e3750725de99416dff6b463a257a',
     'sites': ((34, 132, 135, 'int', '512'),),
+}
+
+# Retained producer: existing private-directory permissions, not native UIDs.
+# Runtime bytes and both comparisons are unchanged; exact source and sites only.
+REVIEWED_FILES["integrations/session_bridge/r2_plain_review_scopes/candidate/artifact_production.py"] = {
+    "sha256": "0be15bd5d3304a65673576fd30386bcc977c02ed8ee28313a4cb1ed454f8c409",
+    "sites": ((149, 77, 82, "int", "0o700"), (170, 85, 90, "int", "0o700")),
 }

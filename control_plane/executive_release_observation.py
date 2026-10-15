@@ -522,7 +522,8 @@ def _service(spec, content, argv, budget):
                            pid, unique, version)
 
 
-def _validate_roles(roles):
+def _validate_role_records(roles):
+    """Validate complete role records without assigning a release purpose."""
     if type(roles) is not tuple or tuple(x.role for x in roles) != _ROLES:
         _refuse("RELEASE_OBSERVATION_ROLE_SET_REFUSED")
     contexts = set()
@@ -558,7 +559,12 @@ def _validate_roles(roles):
         expected_evidence = "launchctl-exact-not-found-113" if record.state == "UNLOADED" else "launchctl-qualified-loaded-job"
         if record.evidence != expected_evidence:
             _refuse("RELEASE_OBSERVATION_SERVICE_STATE_REFUSED")
-    if len(contexts) != 1:
+    return contexts
+
+
+def _validate_roles(roles):
+    # Generic release convergence remains exactly one five-role cohort.
+    if len(_validate_role_records(roles)) != 1:
         _refuse("RELEASE_OBSERVATION_MIXED_CONTENT")
 
 

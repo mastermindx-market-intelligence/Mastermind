@@ -81,18 +81,21 @@ def test_git_symlink_member_refuses(tmp_path):
         stage.source_archive(root, commit, tree, ["engine"])
 
 
-def test_bundle_is_inert_scoped_and_cannot_overwrite(tmp_path):
+@pytest.mark.parametrize("include_producer", [False, True])
+def test_bundle_is_inert_scoped_and_cannot_overwrite(tmp_path, include_producer):
     root = tmp_path.resolve()
     mm, mm_commit, mm_tree = repository(root / "mastermind", {
         "common/__init__.py": "", "control_plane/__init__.py": "", "integrations/__init__.py": "",
         stage.SERVER_PATH: "# synthetic launcher fixture only\n", stage.LOCK_PATH: "# synthetic lock fixture\n",
         stage.UNIT_PATH: UNIT,
+        stage.PRODUCER_PATH: "raise AssertionError('STAGING_EXECUTED_PRODUCER')\n",
     })
     macro, macro_commit, macro_tree = repository(root / "macro", {"engine/source.py": "SYNTHETIC = 1\n"})
     kwargs = dict(mastermind_source=mm, mastermind_commit=mm_commit, mastermind_tree=mm_tree,
                   macro_source=macro, macro_commit=macro_commit, macro_tree=macro_tree,
-                  macro_roots=["engine"], output=root / "candidate")
+                  macro_roots=["engine"], output=root / "candidate", include_producer=include_producer)
     manifest = stage.prepare_bundle(**kwargs)
+    assert (stage.PRODUCER_PATH in {row["path"] for row in manifest["members"]["mastermind"]}) is include_producer
     assert manifest["state"] == "INERT_CANDIDATE"
     assert manifest["macro_import_closure"] == "OWNER_QUALIFICATION_REQUIRED"
     assert json.loads((kwargs["output"] / "manifest.json").read_text()) == manifest
@@ -120,3 +123,13 @@ def test_archive_cannot_silently_drop_or_substitute_source_bytes(tmp_path, attri
     })
     with pytest.raises(stage.StageRefused, match="STAGE_ARCHIVE_IDENTITY_REFUSED"):
         stage.source_archive(root, commit, tree, ["engine"])
+
+
+@pytest.mark.parametrize("option", ["true", 1, None])
+def test_producer_packaging_option_cannot_coerce_truthy_inputs(tmp_path, option):
+    with pytest.raises(stage.StageRefused, match="STAGE_PRODUCER_OPTION_REFUSED"):
+        stage.prepare_bundle(mastermind_source=tmp_path, mastermind_commit="a" * 40,
+            mastermind_tree="b" * 40, macro_source=tmp_path, macro_commit="c" * 40,
+            macro_tree="d" * 40, macro_roots=["engine"], output=tmp_path / "candidate",
+            include_producer=option)
+    assert not (tmp_path / "candidate").exists()

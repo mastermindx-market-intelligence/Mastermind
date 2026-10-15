@@ -347,6 +347,78 @@ class WorkbenchBrowserAppTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(unavailable["isError"])
         self.assertIn("TOOL_NOT_AVAILABLE", unavailable["content"][0]["text"])
 
+    async def test_worker_signed_resource_ref_cannot_authorize_attended_http_mutation(self):
+        """BrowserRef HMAC and a JWT missing workbench.action are not HTTP access.
+
+        Matching the signed ref's subject/client with the attended fixture
+        identity does not turn resource-possession into an OAuth bearer grant.
+        This is transport authentication only, not physical Worker host proof.
+        """
+        from control_plane.browser_resource_contract import (
+            WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST,
+        )
+        from integrations.workbench_browser_mcp.contracts import (
+            BrowserRefCodec, BrowserResourceRef, RESOURCE_SCHEMA,
+        )
+
+        now = self.clock * 1000
+        signed_ref = BrowserRefCodec(b"browser-ref-fixture-secret-32bytes!!").encode_resource(
+            BrowserResourceRef(
+                schema=RESOURCE_SCHEMA,
+                start_action_id="a" * 32,
+                subject_digest=self.subject,
+                client_ref="fixture-client",
+                resource=RESOURCE,
+                project_ref="project:browser",
+                context_ref="context:browser",
+                responsibility_ref="responsibility:browser",
+                operation_ref="operation:browser",
+                owner_ref="owner:browser",
+                generation="generation:browser",
+                host_id="b" * 64,
+                boot_session_id="fixture-boot",
+                relay_pid=4321,
+                relay_start_identity="fixture-start",
+                relay_pgid=4321,
+                relay_session_id=4321,
+                mode="isolated",
+                profile_ref=None,
+                tool_schema_digest=WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST,
+                issued_at_ms=now - 1000,
+                expires_at_ms=now + 60_000,
+            )
+        )
+
+        # Source-selected Worker possession of an authentic signed BrowserRef
+        # cannot supply the unrelated RS256 OAuth JWT required by the
+        # separately governed attended HTTP Browser endpoint.
+        worker_only_credentials = (
+            signed_ref,
+            self.token(scope="workbench.browser.snapshot"),
+        )
+        forbidden_operations = (
+            (PREPARE_RESOURCE_TOOL, {
+                "project_ref": "project:browser", "mode": "isolated",
+            }),
+            ("prepare_browser_click", {
+                "browser_ref": signed_ref, "target": "Toggle",
+            }),
+            (RUN_ACTION_TOOL, {
+                "browser_ref": signed_ref, "action_ref": "a" * 32,
+            }),
+        )
+        for bearer in worker_only_credentials:
+            for tool_name, args in forbidden_operations:
+                response = await self.rpc(
+                    "tools/call",
+                    {"name": tool_name, "arguments": args},
+                    token=bearer,
+                )
+                self.assertIn(response.status_code, (401, 403), response.text[:200])
+
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.receipts, [])
+
     async def test_schema_drift_refuses_server_creation(self):
         catalog = json.loads(
             (

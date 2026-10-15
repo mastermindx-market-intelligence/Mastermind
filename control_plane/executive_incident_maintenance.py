@@ -18,6 +18,7 @@ from control_plane import executive_incident_origin as origin
 from control_plane import executive_recovery_host_observation as host
 from control_plane import executive_recovery_namespace as namespace
 from control_plane import executive_release_observation as release
+from control_plane import executive_incident_release_observation as incident_release
 
 __all__ = ()
 _LABEL = "com.mastermind.executive.privileged"
@@ -56,12 +57,13 @@ def _source():
 
 
 def _observe(source, budget):
-    value = release._observe_release(deadline_monotonic_ns=budget.endpoint)
+    value = incident_release._observe_incident_release(deadline_monotonic_ns=budget.endpoint)
+    incident_release._validate_observation(value)
     if tuple(row.role for row in value.roles) != _ROLES:
         _refuse("BROKER_MAINTENANCE_ROLE_MISMATCH")
     if any(row.content.release_commit != source["release_sha"] or
            row.content.installed_manifest_digest != source["manifest_sha256"]
-           for row in value.roles):
+           for row in value.roles if row.role != "relay"):
         _refuse("BROKER_MAINTENANCE_SOURCE_MISMATCH")
     if any(row.state != "UNLOADED" for row in value.roles[:3]):
         _refuse("BROKER_MAINTENANCE_CONSUMERS_NOT_STOPPED")
@@ -152,6 +154,8 @@ def _stop_incident_broker():
             _refuse("BROKER_MAINTENANCE_SOURCE_DRIFT")
         result = {"maintenance_state": "BROKER_STOPPED_OBSERVED",
                   "release_sha": source["release_sha"],
+                  "observation_purpose": after.purpose,
+                  "cohort_content_sha256": after.cohort_content_sha256,
                   "disable_attempted": disable_attempted,
                   "bootout_attempted": bootout_attempted,
                   "origin_custody": False, "provider_called": False}
