@@ -15,7 +15,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-from integrations.mastermind_executive_app.gateway import READ_SCOPE, SUBMIT_SCOPE
+from integrations.mastermind_executive_app.gateway import READ_SCOPE, SUBMIT_SCOPE, AppPolicies
+from integrations.business_mcp_auth.contracts import validate_resource_policy
 from control_plane.executive_runtime import Runtime
 from control_plane.native_continuation import (
     _ACTOR,
@@ -75,24 +76,54 @@ def _principal(principal: NeutralPrincipalProjection, *, submit: bool = False) -
     return identity
 
 
-def _read_matches_original(original: dict, current: dict,
-                           principal: NeutralPrincipalProjection) -> bool:
-    """Preserve original SEND provenance while allowing independently verified READ.
+def _trusted_read_pair(policies: AppPolicies | None):
+    """Validate exactly one owner-supplied OAuth read/submit policy pair.
 
-    Policy IDs identify the verifier policy, not the human/client identity. Only
-    the exact READ-only scope permits a policy-ID transition. The original
-    immutable request was admitted under a submit-capable principal, and all
-    issuer/resource/subject/client fields must remain identical. A foreign
-    policy with unchanged combined capabilities is *not* a read downgrade.
+    The private caller may provide a verified principal, NEVER the pairing
+    authority. Without a trusted pair only exact-policy original reads work.
+    No new durable identity/authorization registry is introduced.
+    """
+    if policies is None:
+        return None
+    if type(policies) is not AppPolicies:
+        raise TypeError("trusted read and submit policy pair required")
+    try:
+        read = validate_resource_policy(policies.read)
+        submit = validate_resource_policy(policies.submit)
+        if (tuple(read.required_scopes) != (READ_SCOPE,)
+                or tuple(submit.required_scopes) != tuple(sorted((READ_SCOPE, SUBMIT_SCOPE)))
+                or read.policy_id == submit.policy_id
+                or read.resource != submit.resource
+                or read.issuer != submit.issuer
+                or read.allowed_subject_digests != submit.allowed_subject_digests):
+            raise ValueError
+    except Exception:
+        raise ValueError("trusted read and submit policy pair invalid") from None
+    return read, submit
+
+
+def _read_matches_original(original: dict, current: dict,
+                           principal: NeutralPrincipalProjection, *, trusted_pair) -> bool:
+    """Preserve SEND provenance; admit only its explicitly paired READ policy.
+
+    The original immutable request identifies its admitted submit policy; an
+    independent READ grant may be exercised only when the *current trusted host*
+    explicitly configures that same submit policy and its exact read counterpart.
+    No caller-supplied policy, scope, or identity can manufacture this pairing.
     """
     if original == current:
         return True
+    if trusted_pair is None or type(principal) is not NeutralPrincipalProjection:
+        return False
+    read, submit = trusted_pair
     return (
-        type(principal) is NeutralPrincipalProjection
-        and tuple(principal.scopes) == (READ_SCOPE,)
-        and isinstance(original, dict)
-        and set(original) == set(_IDENTITY)
-        and original.get("policy_id") != current.get("policy_id")
+        tuple(principal.scopes) == (READ_SCOPE,)
+        and isinstance(original, dict) and set(original) == set(_IDENTITY)
+        and original.get("policy_id") == submit.policy_id
+        and current.get("policy_id") == read.policy_id
+        and original.get("resource") == read.resource
+        and original.get("issuer_digest") == hashlib.sha256(read.issuer.encode("utf-8")).hexdigest()
+        and original.get("subject_digest") in read.allowed_subject_digests
         and all(original.get(key) == current.get(key)
                 for key in _IDENTITY if key != "policy_id")
     )
@@ -103,13 +134,14 @@ class RuntimeSessionReturn:
 
     def __init__(self, runtime: Runtime, *, fabric: RuntimeFabricTargetProjector,
                  codex: RuntimeCodexTargetProjector, socket_path: Path,
-                 service_call=call_service):
+                 service_call=call_service, authorized_policies: AppPolicies | None = None):
         if (type(runtime) is not Runtime or type(fabric) is not RuntimeFabricTargetProjector
                 or type(codex) is not RuntimeCodexTargetProjector
                 or not Path(socket_path).is_absolute() or not callable(service_call)):
             raise TypeError("existing Runtime and canonical owners are required")
         self.runtime, self.fabric, self.codex = runtime, fabric, codex
         self.socket_path, self.service_call = Path(socket_path), service_call
+        self._trusted_read_pair = _trusted_read_pair(authorized_policies)
 
     def _target(self, target_ref):
         if target_ref.startswith("codex:"):
@@ -529,7 +561,8 @@ class RuntimeSessionReturn:
                 raise ValueError("invalid original operation")
             read_ref = "session-reply-" + _request_key(operation_key)
             _, value = self._stored_request(read_ref)
-            if not _read_matches_original(value["principal"], identity, principal) or value["operation_key"] != operation_key:
+            if not _read_matches_original(value["principal"], identity, principal,
+                    trusted_pair=self._trusted_read_pair) or value["operation_key"] != operation_key:
                 raise ValueError("foreign original operation")
             return value["read_ref"]
         except Exception:
@@ -592,7 +625,8 @@ class RuntimeSessionReturn:
         try:
             identity = _principal(principal)
             event, value, admission = self._read_request(read_ref)
-            if not _read_matches_original(value["principal"], identity, principal):
+            if not _read_matches_original(value["principal"], identity, principal,
+                    trusted_pair=self._trusted_read_pair):
                 raise ValueError("foreign principal")
             response = await self.service_call(self.socket_path, {
                 "version": CONTROL_VERSION_V2, "operation": "read_thread",
@@ -625,7 +659,8 @@ class RuntimeSessionReturn:
             if (after.to_dict() != event.to_dict()
                     or (None if admission is None else admission.to_dict())
                     != (None if after_admission is None else after_admission.to_dict())
-                    or not _read_matches_original(after_value["principal"], _principal(principal), principal)):
+                    or not _read_matches_original(after_value["principal"], _principal(principal),
+                        principal, trusted_pair=self._trusted_read_pair)):
                 raise ValueError("authorization changed")
             if after_admission is not None and not self._commit_started(after, request):
                 raise ValueError("original continuation COMMIT changed during read")

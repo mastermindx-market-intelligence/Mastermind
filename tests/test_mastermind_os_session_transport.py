@@ -280,8 +280,12 @@ def test_verified_read_only_token_recovers_submit_policy_request_across_private_
     from pathlib import Path
 
     from integrations.business_mcp_auth.principal_projection import principal_projection
-    from integrations.session_bridge.installed import InstalledSessionBridgeProvider
+    from integrations.mastermind_executive_app.gateway import AppPolicies
+    from common.session_bridge_private_contract import PRIVATE_SCHEMA
+    from integrations.session_bridge.installed import (
+        InstalledSessionBridgeProvider, principal_frame)
     from integrations.session_bridge.native_read import NativeReplyReader
+    from integrations.session_bridge.runtime_return import RuntimeSessionReturn
     from tests.test_session_bridge_runtime_return import populate
 
     s = setup
@@ -296,6 +300,14 @@ def test_verified_read_only_token_recovers_submit_policy_request_across_private_
         app._submit_pair[1].verify_token(send_token, now=now))
     s.principal = submit_principal
     s.projection = principal_projection(submit_principal)
+    # This is host-owned policy pairing, not an attribute supplied by the
+    # caller's private principal frame.
+    s.owner = RuntimeSessionReturn(
+        s.runtime, fabric=s.owner.fabric, codex=s.owner.codex,
+        socket_path=s.owner.socket_path, service_call=s.service,
+        authorized_policies=AppPolicies(
+            read=app._read_pair[1].policy,
+            submit=app._submit_pair[1].policy))
     read_ref = populate(s)
     before = [e.to_dict() for e in s.runtime.events.list_events(job_id=s.epoch.job_id)]
     s.enabled[0] = False
@@ -329,6 +341,20 @@ def test_verified_read_only_token_recovers_submit_policy_request_across_private_
     assert [x["tool"] for x in frames] == ["session_reply_read"]
     assert frames[0]["principal"]["policy_id"] == "bsc-e1-test-read"
     assert s.service.calls and all(c["operation"] == "read_thread" for c in s.service.calls)
+
+    # A separately valid, signed READ policy for the same subject/resource
+    # must NOT claim this operation unless it is the approved counterpart.
+    other_policy = auth_fixture._read_policy(policy_id="unpaired-read-policy")
+    other_auth = JwtAuthenticator(
+        policy=other_policy, jwks_cache=auth_fixture._FakeJwksCache(rsa_key))
+    other_principal = asyncio.run(other_auth.verify_token(read_token, now=now))
+    previous_reads = len(s.service.calls)
+    foreign = asyncio.run(provider.handle_frame({
+        "schema": PRIVATE_SCHEMA, "tool": "session_reply_read",
+        "principal": principal_frame(other_principal),
+        "arguments": {"operation_key": s.args["operation_key"]}}))
+    assert foreign["ok"] is False and foreign["error"]["code"] == "reply_unavailable"
+    assert len(s.service.calls) == previous_reads
 
     denied_status, denied = request(app, read_token, "send")
     assert denied_status in (401, 403) and not denied["ok"]
