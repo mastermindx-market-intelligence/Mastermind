@@ -1938,6 +1938,15 @@ def _service_from_config(
     # no worker/model can choose or rotate a Macro root through its request.
     product_acceptance_macro_root = None
     product_acceptance_context_owner = None
+
+    def product_acceptance_basis_reader():
+        from control_plane.agentos_product_acceptance_basis import AgentOsProductAcceptanceBasisReader
+        if product_acceptance_macro_root is None:
+            raise ServiceError("Product acceptance requires its bound Macro source")
+        if product_acceptance_context_owner is not None:
+            return product_acceptance_context_owner.product_acceptance_basis_reader(
+                macro_root=product_acceptance_macro_root)
+        return AgentOsProductAcceptanceBasisReader(macro_root=product_acceptance_macro_root)
     if raw.get("coo_principal_dialogue_armed", False) is True:
         from ops.executive_os.coo_principal_host import CooInstalledSource, validate_control_coo
         try:
@@ -2027,7 +2036,8 @@ def _service_from_config(
             subscription_canary_claim_provider=claim_provider,
             subscription_canary_binding_id=claim_binding_id,
             product_acceptance_macro_root=product_acceptance_macro_root,
-            product_acceptance_context_owner=product_acceptance_context_owner,
+            product_acceptance_context_reader=(product_acceptance_basis_reader()
+                if product_acceptance_context_owner is not None else None),
         )
         if fabric_worker_binding_source is None:
             return primary
@@ -2062,7 +2072,8 @@ def _service_from_config(
                 cleanup_policy=CleanupPolicy.FABRIC_PROCESS_GROUP,
                 process_controller=fabric_adapter, instance_id=primary.instance_id,
                 product_acceptance_macro_root=product_acceptance_macro_root,
-                product_acceptance_context_owner=product_acceptance_context_owner,
+                product_acceptance_context_reader=(product_acceptance_basis_reader()
+                    if product_acceptance_context_owner is not None else None),
             )
         mixed = MixedExecutionOwnerSupervisor(primary, owners)
         recovery_controller["owners"] = mixed.owners
@@ -2329,13 +2340,10 @@ def _service_from_config(
                     # Control service and opens no Relay-only observation socket.
                     service._namespace_custody.bound_runtime(runtime)
                     authority = coo_factory(runtime)
-                    from control_plane.agentos_product_acceptance_basis import AgentOsProductAcceptanceBasisReader
                     return PrincipalDialogueAppReceiver(runtime, authority,
                         _CANONICAL_AGENT_RELAY_SOCKET,
                         HostLocalDialogueObservationReader(service, runtime),
-                        product_acceptance_reader=AgentOsProductAcceptanceBasisReader(
-                            macro_root=product_acceptance_macro_root,
-                            installed_context_owner=product_acceptance_context_owner))
+                        product_acceptance_reader=product_acceptance_basis_reader())
 
                 coo_factories["principal_dialogue_provider_factory"] = principal_dialogue_factory
         session_factories = {}
@@ -2545,12 +2553,9 @@ def _service_from_config(
         acceptance_selected = raw["company_consultation"].get("product_acceptance_armed", False)
         acceptance_reader = None
         if acceptance_selected:
-            from control_plane.agentos_product_acceptance_basis import AgentOsProductAcceptanceBasisReader
             if product_acceptance_context_owner is None or product_acceptance_macro_root is None:
                 raise ServiceError("Product acceptance requires the sealed Context and Workspace owners")
-            acceptance_reader = AgentOsProductAcceptanceBasisReader(
-                macro_root=product_acceptance_macro_root,
-                installed_context_owner=product_acceptance_context_owner)
+            acceptance_reader = product_acceptance_basis_reader()
         answer_bridge = dialogue_observation_kwargs.get("dialogue_wake_handler")
         if answer_bridge is None or answer_bridge.canary_profile is not None:
             # Company answer obligations keep their incumbent generic owner;

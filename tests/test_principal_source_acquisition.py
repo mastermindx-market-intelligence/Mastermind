@@ -265,11 +265,13 @@ def test_acquisition_derives_exact_inputs_and_refuses_drift(tmp_path, monkeypatc
                 if change in {"host_rule", "host_ack", "host_framed_rule", "host_app_receiver", "host_app_receiver_local"} or change.startswith("host_recovery_"):
                     assert result["ok"] is True, result
                     assert len(events) == slack.post_call_count == 1
-                    binding = host.commit_owner.binding_resolver.resolve()
-                    worker_context = DialogueContextV2(work_ref=binding.work_ref,
-                        commission_ref=binding.commission_ref, session_ref=binding.session_ref,
-                        operation_key=binding.operation_key, watch_mode=binding.watch_mode,
-                        actor_ref=message["actor_ref"], applies_to=binding.applies_to)
+                    # The original worker consumes using its retained parent
+                    # context. A completed App request cannot lend its expired
+                    # foreground authority to this later worker read.
+                    worker_context = DialogueContextV2(work_ref=parent["work_ref"],
+                        commission_ref=parent["commission_ref"], session_ref=parent["session_ref"],
+                        operation_key=parent["operation_key"], watch_mode=parent["watch_mode"],
+                        actor_ref=message["actor_ref"], applies_to=message["applies_to"])
                     consumed = await service.engine_v2.wait_for_reply(thread_ts=relay.THREAD,
                         context=worker_context, request_message_key=message["message_key"],
                         expected_types=("RULING",), max_attempts=1)

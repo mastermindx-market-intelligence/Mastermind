@@ -125,9 +125,9 @@ def test_basis_reader_refuses_unbound_installed_collector(tmp_path, drift):
         python_executable=tmp_path / "python", expected_source_sha=None if drift == "unbound_sha" else "a" * 40,
         _allow_synthetic_fixture=drift == "synthetic")
     with pytest.raises(ValueError, match="exact sealed source collector"):
-        basis.AgentOsProductAcceptanceBasisReader(
-            macro_root=tmp_path / "foreign" if drift == "macro" else macro,
-            installed_context_owner=(lambda **kw: {}) if drift == "callback" else collector)
+        InstalledBootPacketCollector.product_acceptance_basis_reader(
+            (lambda **kw: {}) if drift == "callback" else collector,
+            macro_root=tmp_path / "foreign" if drift == "macro" else macro)
 
 
 def test_isolated_basis_reader_uses_only_the_host_composed_collector(tmp_path, monkeypatch):
@@ -139,7 +139,7 @@ def test_isolated_basis_reader_uses_only_the_host_composed_collector(tmp_path, m
         pytest.fail("isolated consumer reached the unqualified source acquisition")
     monkeypatch.setattr(basis, "git_sha", unqualified)
     monkeypatch.setattr(basis, "bounded_subprocess_runner", unqualified)
-    reader = basis.AgentOsProductAcceptanceBasisReader(macro_root=seen["macro"], installed_context_owner=collector)
+    reader = collector.product_acceptance_basis_reader(macro_root=seen["macro"])
     result = reader.read(work_ref="WS:CHAIRMAN-CONTROL-ROOM", execution_commission_ref=execution_ref(),
                          root_objective="The actual objective")
     assert result.entry == packet["acceptance_basis"]["by_commission"]["r2-test"]
@@ -163,7 +163,7 @@ def test_installed_source_refusal_keeps_the_basis_owner_error_contract(tmp_path,
     def refused(**kwargs):
         raise GatewayError("backend_unavailable", "installed source changed")
     monkeypatch.setattr(collector, "read_product_acceptance_basis", refused)
-    reader = basis.AgentOsProductAcceptanceBasisReader(macro_root=tmp_path / "macro", installed_context_owner=collector)
+    reader = collector.product_acceptance_basis_reader(macro_root=tmp_path / "macro")
     with pytest.raises(basis.ProductAcceptanceBasisUnavailable, match="CONTEXT_OWNER_UNAVAILABLE"):
         reader.read(work_ref="WS:CHAIRMAN-CONTROL-ROOM", execution_commission_ref=execution_ref(),
                     root_objective="The actual objective")
@@ -186,7 +186,7 @@ def test_record_acquisition_failure_is_unavailability_not_changed_source(tmp_pat
             return result
         return runner(argv, **kwargs)
     collector._runner = failed
-    reader = basis.AgentOsProductAcceptanceBasisReader(macro_root=seen['macro'], installed_context_owner=collector)
+    reader = collector.product_acceptance_basis_reader(macro_root=seen['macro'])
     with pytest.raises(basis.ProductAcceptanceBasisUnavailable, match='^CONTEXT_OWNER_UNAVAILABLE$') as error:
         reader.read(work_ref='WS:CHAIRMAN-CONTROL-ROOM', execution_commission_ref=execution_ref(),
                     root_objective='The actual objective')
@@ -199,7 +199,7 @@ def test_record_acquisition_failure_is_unavailability_not_changed_source(tmp_pat
 def test_bound_collector_cannot_retarget_after_reader_construction(tmp_path, monkeypatch, field, value):
     collector, _, seen = fixture(tmp_path)
     monkeypatch.setattr(basis, '_SOURCE_ROOT', seen['code'])
-    reader = basis.AgentOsProductAcceptanceBasisReader(macro_root=seen['macro'], installed_context_owner=collector)
+    reader = collector.product_acceptance_basis_reader(macro_root=seen['macro'])
     setattr(collector, field, value)
     with pytest.raises(basis.ProductAcceptanceBasisUnavailable, match='^CONTEXT_OWNER_UNAVAILABLE$'):
         reader.read(work_ref='WS:CHAIRMAN-CONTROL-ROOM', execution_commission_ref=execution_ref(),
