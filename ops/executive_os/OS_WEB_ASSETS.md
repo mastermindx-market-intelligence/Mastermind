@@ -99,13 +99,23 @@ asset availability remains a separately verified host/publisher obligation; `fin
 plus the fixed routes, so only retired asset paths are removed. Every other
 config field — POST handlers, header rewrites, body limits, TLS, unrelated
 sites, the relay — is preserved semantically; only the selected GET path list
-differs, and caller inputs are never mutated. A shared non-index asset name
-must keep its exact bytes, size and MIME (hash-name reuse with changed bytes
-refuses); `index.html` is deliberately the switch. Receipts bind canonical
-SHA256 of source ids, manifests and the observed config, with `installed=false`
-and `published=false`. Source ids are recorded as bindings only; this planning
-never asserts protected-source or authentication qualification — that remains
-the existing release-owner preparer's custody.
+differs, and caller inputs are never mutated. For a shared non-index asset
+name, the planner compares manifest-declared SHA256, byte count and MIME;
+`shared_assets_verified` names only that comparison, and no asset bytes are
+read here. The existing host/preparer must verify actual bytes and availability.
+Hash-name reuse with changed declarations refuses; `index.html` is deliberately
+the switch. Receipts record both source ids and bind canonical JSON SHA256 of
+both manifests and the observed, prepare and final configs, with
+`installed=false` and `published=false`. Source ids are bindings only; this
+planning never asserts protected-source or authentication qualification — that
+remains the existing release-owner preparer's custody.
+
+Canonical config digests omit a trailing newline. Staged files contain canonical
+JSON followed by one LF; the staging receipt's `files` digests cover those exact
+file bytes. Compare like digest families rather than using a staged-file hash
+as a canonical config hash. `preparation_complete` compares supplied objects
+only: its `prepared` input must be the already-validated `prepare_config` result.
+Object equality alone neither validates an arbitrary config nor permits publication.
 
 Staging writes the plan and candidate configs only under an existing physical
 parent that is not group/other-writable, with exclusive `0600` creation, fsync,
