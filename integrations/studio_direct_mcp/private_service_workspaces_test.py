@@ -24,7 +24,18 @@ class RepositoryWorkspaceInstallTests(unittest.TestCase):
         value = self.configuration(True)
         self.assertEqual(value["repositoryWorkspaces"], {
             "enabled": True, "allowedRepositories": ["mastermind", "macro", "terminal"]})
-        self.assertEqual(value["gitPublish"]["sourceRepository"], "/owned/home/Documents/GitHub/Mastermind")
+        self.assertNotIn("sourceRepository", value["gitPublish"])
+        self.assertEqual(
+            [row["repository"] for row in value["gitPublish"]["repositories"]],
+            ["mastermind", "macro", "terminal"],
+        )
+        self.assertEqual(
+            [row["sourceRepository"] for row in value["gitPublish"]["repositories"]],
+            ["/owned/home/Documents/GitHub/Mastermind",
+             "/owned/home/Documents/Cluade/macro-main",
+             "/owned/home/Documents/Cluade/charting-app"],
+        )
+        self.assertNotIn("repositories", self.configuration(False)["gitPublish"])
         with self.assertRaises((ValueError, SystemExit)):
             self.configuration("true")
 
@@ -50,8 +61,13 @@ class RepositoryWorkspaceInstallTests(unittest.TestCase):
             ["https://github.com/mastermindx-market-intelligence/macro.git"],
             ["https://github.com/mastermindx-market-intelligence/mastermind-terminal.git"],
         ])
-        # The three-repository publisher is never silently enabled on another seat.
-        self.assertNotIn("repositories", self.configuration(True)["gitPublish"])
+        # Seat identity is not the grant: a different explicitly enrolled seat
+        # has the same closed registry-controlled profile; default stays legacy.
+        self.assertEqual(
+            self.configuration(True)["gitPublish"]["repositories"],
+            publication["repositories"],
+        )
+        self.assertNotIn("repositories", self.configuration(False)["gitPublish"])
 
     def test_source_manifest_includes_consumer_and_preserves_legacy_generations(self):
         self.assertIn("workspace-access.mjs", service.STAGE_FILES)
@@ -103,13 +119,22 @@ class RepositoryWorkspaceLifecycleTests(unittest.TestCase):
                 paths = native._build_runtime_roots("test-account")
                 fixtures._seed_node_modules(paths)
                 enabled = {"enabled": True, "allowedRepositories": ["mastermind", "macro", "terminal"]}
-                self.assertEqual(json.loads(paths["config"].read_text())["repositoryWorkspaces"], enabled)
+                staged = json.loads(paths["config"].read_text())
+                self.assertEqual(staged["repositoryWorkspaces"], enabled)
+                self.assertEqual(
+                    [row["repository"] for row in staged["gitPublish"]["repositories"]],
+                    ["mastermind", "macro", "terminal"],
+                )
                 args.enable_repository_workspaces = False
                 fixtures._capture_stdout(lambda: native.cmd_stage(args))
-                self.assertEqual(json.loads(paths["config"].read_text())["repositoryWorkspaces"], enabled)
+                restaged = json.loads(paths["config"].read_text())
+                self.assertEqual(restaged["repositoryWorkspaces"], enabled)
+                self.assertEqual(restaged["gitPublish"], staged["gitPublish"])
                 upgraded = fixtures._make_upgrade_source(root)
                 fixtures._capture_stdout(lambda: native.cmd_upgrade(fixtures._stage_args(upgraded, node, backend)))
-                self.assertEqual(json.loads(paths["config"].read_text())["repositoryWorkspaces"], enabled)
+                current = json.loads(paths["config"].read_text())
+                self.assertEqual(current["repositoryWorkspaces"], enabled)
+                self.assertEqual(current["gitPublish"], staged["gitPublish"])
                 manifest = json.loads(paths["manifest"].read_text())
                 self.assertEqual(manifest["configHash"], native._sha256_file(paths["config"]))
                 self.assertIn("workspace-access.mjs", manifest["files"])

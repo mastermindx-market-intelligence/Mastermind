@@ -756,12 +756,14 @@ def _build_config(
     # deliberately carries no Paper or typed-Git local capability dependency;
     # those remain on the attended/local Studio seat that owns them.
     if account != FLEET_HOST_ACCOUNT:
-        # Only the explicitly opted-in ChatGPT1 account has this governed,
-        # registry-resolved three-repository publishing profile. Other seats
-        # retain their exact legacy Mastermind-only publisher.
+        # Only an explicitly enrolled repository-workspace seat receives this
+        # governed, registry-resolved three-repository publisher. Other seats
+        # retain the exact legacy Mastermind-only publishing configuration.
+        # Account names do not grant access: the verified per-seat opt-in and
+        # closed alias/registration validation remain the access boundary.
         config["gitPublish"] = _typed_git_config(
             user_root,
-            closed_repositories=(account == "chatgpt1" and repository_workspaces),
+            closed_repositories=repository_workspaces,
         )
         config["paperDesign"] = _paper_design_config(user_root)
     if public_url is not None:
