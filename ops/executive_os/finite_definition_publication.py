@@ -16,7 +16,9 @@ from collections.abc import Mapping
 
 from ops.executive_os import autonomy_control as owner
 from ops.executive_os.attended_worker_definition import build_finite_control_delta
-from control_plane.executive_fabric_composition import _bindings, FabricCompositionError
+from control_plane.executive_fabric_composition import _bindings
+from control_plane.executive_capacity_join import CapacityJoin, PROVIDER_CAPACITY_SCHEMA
+from control_plane.executive_host_pressure import HOST_REF_RE
 from control_plane.fabric_attended_routing import FINITE_DEFINITION_DIR
 
 FILES = frozenset({
@@ -56,9 +58,8 @@ def verify_candidate(artifacts: Mapping[str, bytes]) -> dict[str, str]:
         worker = json.loads(artifacts["worker.json"])
         if (type(worker.get("capacity_capability_id")) is not str
                 or not worker["capacity_capability_id"]
-                or physical.host_ref in {"local-unbound", "placeholder"}
+                or HOST_REF_RE.fullmatch(physical.host_ref) is None
                 or physical.socket_path != FINITE_SOCKET_PATH
-                or not physical.host_ref
                 or physical.worker_source_config_digest != sha256(artifacts["worker.json"])
                 or not delta or delta["fabric_bridge_armed"] is not False):
             raise FinitePublicationRefused("Capacity-selected finite owner is incomplete")
@@ -162,9 +163,10 @@ def publish_disarmed_definition(expected_release_sha: str, expected_control_sha2
 
     Both callbacks are host-selected, in-process incumbent owners, never JSON,
     command-line or model input. verified_capacity_binding must confirm the
-    original current Capacity identity, without issuing it. trusted_render_again
-    must reproduce all five bytes from the installed signed source and current
-    selected Capacity fact while the original config mutex is held. Neither
+    original current CapacityJoin (host, capability and worker source digest),
+    without issuing it. trusted_render_again must reproduce all five bytes
+    from the installed signed source and current Capacity fact under the
+    original config mutex. Neither
     callback is a new dispatcher or Capacity authority.
     """
     hashes = verify_candidate(artifacts)
@@ -180,7 +182,9 @@ def publish_disarmed_definition(expected_release_sha: str, expected_control_sha2
     import json
     physical, = _bindings(artifacts["bindings.json"])
     worker = json.loads(artifacts["worker.json"])
-    if verified_capacity_binding(physical.host_ref, worker["capacity_capability_id"]) is not True:
+    join = CapacityJoin(physical.host_ref, worker["capacity_capability_id"],
+        PROVIDER_CAPACITY_SCHEMA, physical.worker_source_config_digest)
+    if verified_capacity_binding(join) is not True:
         raise FinitePublicationRefused("Capacity owner refused fixed finite identity")
     host = owner.ProductionCeoSubmitHost()
     host.require_exact_install(expected_release_sha)
@@ -204,7 +208,7 @@ def publish_disarmed_definition(expected_release_sha: str, expected_control_sha2
                         "coo_operator_harness_armed", "fabric_bridge_armed", "coo_foreground_only"))
                 or prior.worker.get("operator_harness_armed") is not False):
             raise FinitePublicationRefused("Control and primary Worker must remain disarmed")
-        if (verified_capacity_binding(physical.host_ref, worker["capacity_capability_id"]) is not True
+        if (verified_capacity_binding(join) is not True
                 or DESTINATION.parent != owner.CONFIG_ROOT):
             raise FinitePublicationRefused("publisher Capacity/config ownership differs")
         # Re-render from incumbent trusted release/Capacity input while its

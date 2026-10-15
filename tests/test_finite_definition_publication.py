@@ -80,12 +80,14 @@ def test_capacity_owner_refusal_blocks_root_publication_before_effect(monkeypatc
     _,_,files,_=qualified_host
     calls=[]
     monkeypatch.setattr(pub.os, "geteuid", lambda: 0)
-    def refuse(host,cap):
-        calls.append((host,cap))
+    def refuse(join):
+        calls.append(join.to_dict())
         return False
     with pytest.raises(pub.FinitePublicationRefused,match='Capacity owner refused'):
         pub.publish_disarmed_definition('a'*40,'a'*64,files,verified_capacity_binding=refuse, trusted_render_again=lambda *a: files)
-    assert calls==[('fixture-host','fixture-capacity')]
+    assert len(calls)==1 and calls[0]['host_ref']=='host-'+'a'*64
+    assert calls[0]['capacity_capability_id']=='fixture-capacity'
+    assert len(calls[0]['worker_source_config_digest'])==64
     assert not (tmp_path/'fabric-minimax-finite-01').exists()
 
 
@@ -126,12 +128,14 @@ def test_root_owner_publishes_only_after_same_locked_config_and_render(monkeypat
     monkeypatch.setattr(pub.owner,'ProductionCeoSubmitHost',FakeHost)
     monkeypatch.setattr(pub,'_write_exclusive',lambda path, payload, uid,gid:
         actions.append('publish') or pub.verify_candidate(payload))
-    def capacity(host,cap):
+    def capacity(join):
         actions.append('capacity-checked')
-        assert (host,cap)==('fixture-host','fixture-capacity')
+        assert join.host_ref=='host-'+'a'*64 and join.capacity_capability_id=='fixture-capacity'
+        assert len(join.worker_source_config_digest)==64
         return True
     def renderer(host,cap):
         actions.append('render-rechecked')
+        assert (host,cap)==('host-'+'a'*64,'fixture-capacity')
         return files.copy()
     x=pub.publish_disarmed_definition('a'*40,'e'*64,files,
         verified_capacity_binding=capacity,trusted_render_again=renderer)
@@ -199,3 +203,13 @@ def test_protected_mode_review_is_exact_source_only():
     assert reviewed_literal_spans('ops/executive_os/finite_definition_publication.py',
         body+'\n# changed source')==()
     assert reviewed_literal_spans('ops/executive_os/foreign.py',body)==()
+
+def test_capacity_identity_requires_canonical_host_reference(qualified_host):
+    import json
+    from ops.executive_os.attended_worker_definition import _json
+    _,_,files,_=qualified_host
+    original=json.loads(files['bindings.json'])
+    for bad in ('m2studio','fixture-host','local-unbound','host-'+'b'*63):
+        body=dict(original,bindings=[dict(original['bindings'][0], host_ref=bad)])
+        with pytest.raises(pub.FinitePublicationRefused):
+            pub.verify_candidate(dict(files, **{'bindings.json':_json(body)}))

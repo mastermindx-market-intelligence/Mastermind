@@ -107,7 +107,7 @@ REVIEWED_PRIVATE_MODE_SOURCES = {'integrations/session_bridge/artifact_manifest_
 # Candidate review only: exact root-owned partial-directory modes; independent
 # semantic acceptance is required before this source change may be merged.
 REVIEWED_PRIVATE_MODE_SOURCES["ops/executive_os/finite_definition_publication.py"] = {
-    "sha256": '6215f99acbb6122dfbaeb0f181c072bd746b4ad73ee58dda417f399e226ffcce',
+    "sha256": 'fbd9692f06b570be84e62d6add71b4b4849f3bcb0a076f646af4e2ab945d24e7',
     "anchors": ('        os.mkdir(directory, 0o700)', '        os.chmod(directory, 0o700)', '                    or info.st_gid != gid or stat.S_IMODE(info.st_mode) != 0o700'),
 }
 
