@@ -47,3 +47,9 @@ Raw source archives and per-date predictions are ignored/private. Publication co
 The study must beat the strong baseline, its prespecified ranking-error and correlation thresholds, multiple-testing correction and era/early-warning checks. Directed links must also beat the strongest fixed relabeled-network control. Short2026 data remain descriptive; earlier tests already examined broad historical periods, so this is adaptive research rather than untouched global validation.
 
 A permitted review of the retained original output is the next scientific dependency. The full quote-recovery hypothesis additionally retains its separate source-semantic and independent-day requirements. No result of this study is asserted to settle that different question.
+
+## Method review completed
+
+The original independent design-review worker returned and was adjudicated in `REVIEW_ADJUDICATION.json`. It confirms the stated graph orientation, permutation invariants and causal time ordering at the design level, not source execution or empirical performance. Useful cautions about common-factor explanations, graph staleness and reversal controls were retained. Incorrect claims about equal edge weights, lack of training standardization and ambiguous primary-test selection were corrected against the frozen source. No review is treated as proof of a signal.
+
+A positive result, if eventually available for permitted review, could at most support incremental peer-set prediction under this test. Demonstrating directional transmission would require a separately qualified direction-reversal comparison; actual capital migration or institutional ownership remains unobserved.

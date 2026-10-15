@@ -15,8 +15,9 @@
   "method_review": {
     "run_id": "lp-network08-method-review",
     "original_root": "latent-pressure-research-20261014-chatgpt4-001",
-    "last_verified": "RESULT_NOT_AVAILABLE",
-    "quality_acceptance": "NONE"
+    "last_verified": "TERMINAL_RC0_RETURN_CONSUMED",
+    "quality_acceptance": "ADJUDICATED_NOT_ACCEPTED_AS_AN_UNQUALIFIED_VERDICT",
+    "adjudication": "REVIEW_ADJUDICATION.json"
   },
   "previous_work": "Earlier unpublished industry/shock worktree and restricted operations untouched; no duplicate shock experiment or oldresultpublication",
   "publication_scope": "Only new protocol/source/tests/method references and explicit execution boundary; no uninspected outputs or source data"
