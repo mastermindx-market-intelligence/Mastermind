@@ -1,0 +1,33 @@
+{
+  "schema": "mastermind.source_package.v1",
+  "files": {
+    "DEPENDENCIES.json": {
+      "sha256": "5ff30384975dc0022ed6d272523ad04f332adcb695151d7b16f56a4a20110696",
+      "bytes": 4585
+    },
+    "QUALIFICATION.json": {
+      "sha256": "b96496fb4e0c9c5a4f943aaf01b56a2c663af220d5624485d196f6c1882fc8b6",
+      "bytes": 2162
+    },
+    "README.md": {
+      "sha256": "72136f7c03f9ad1778c2db6b7f9e9e3d41a505299149234f865703275eeb60fb",
+      "bytes": 4043
+    },
+    "SOURCE_REVIEW.json": {
+      "sha256": "a984ca5cd2d822580cd7e083b2902badaf3e08799a75000607276b5d6229eafc",
+      "bytes": 5286
+    },
+    "artifact_delivery.py.patch": {
+      "sha256": "e0856139b76cfd157ef475187f1a633a1fbc38f44a85bb7ce8140f472545c9bd",
+      "bytes": 2893
+    },
+    "test_three_generations.py": {
+      "sha256": "5e0fdb08cf88599fb0e23ae3efccd7d18d3e205e6f670739bd9cee78f70b5eb0",
+      "bytes": 7391
+    }
+  },
+  "installed": false,
+  "source_scope": "closed three-generation selector patch only",
+  "protected_carrier": 1460,
+  "preserved_parent_head": "19a5bc5f27e67275e0f4533f4138a87fee53838f"
+}

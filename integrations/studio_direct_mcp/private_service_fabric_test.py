@@ -16,11 +16,13 @@ class FabricProfileTests(unittest.TestCase):
 
     def test_fabric_profile_does_not_add_git_paper_or_workspace_capabilities(self):
         with mock.patch.object(service, '_typed_git_config', side_effect=AssertionError('unrelated Git')), \
-             mock.patch.object(service, '_paper_design_config', side_effect=AssertionError('unrelated Paper')):
+             mock.patch.object(service, '_paper_design_config', side_effect=AssertionError('unrelated Paper')), \
+             mock.patch.object(service, '_fleet_status_config', side_effect=AssertionError('unrelated Fleet')):
             config = self.config(fabric_only=True)
         self.assertIs(config['fabricOnly'], True)
         self.assertIs(config['gitPublish'], False)
         self.assertIs(config['paperDesign'], False)
+        self.assertNotIn('fleetStatus', config)
         self.assertEqual(config['childEnv']['MMX_FABRIC_SDK_PACKAGE'], '/owned/package.json')
         self.assertNotIn('repositoryWorkspaces', config)
         self.assertNotIn('commissionPublication', config)

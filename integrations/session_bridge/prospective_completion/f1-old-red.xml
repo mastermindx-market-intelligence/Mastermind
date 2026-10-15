@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="4" skipped="0" tests="4" time="1.049" timestamp="2026-10-14T02:05:18.600479-07:00" hostname="m2studio"><testcase classname="integrations.session_bridge.prospective_completion.test_prospective_completion" name="test_f1_validator_change_after_binding_refuses_before_transport" time="0.269"><failure message="Failed: DID NOT RAISE ValueError">capsule = namespace(here=PosixPath('/private/var/folders/sb/h3rq5rvj1b3_r18p6w9swyp80000gn/T/pytest-of-chriswong/pytest-2698/tes...MODEL': 'glm-5.3-flash', 'HOST': 'ubuntu1'}, digest='dee1d322e3b93801e94df5ef433315a683b0fbca49ebe4b5c68996e7f1e5352c')
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x108a0a3f0&gt;
+
+    def test_f1_validator_change_after_binding_refuses_before_transport(capsule,monkeypatch):
+        x=capsule
+        dependency=x.here/'remote_sub_exec.py'
+        assert dependency.read_bytes()==(BASE/'candidate/remote_sub_exec.py').read_bytes()
+        publish(x);x.store.close();calls=[];transport_fixture(monkeypatch,calls)
+        dependency.write_bytes(dependency.read_bytes()+b'\n# F1 inert post-binding drift\n')
+&gt;       with pytest.raises(ValueError,match='source|dependency'):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE ValueError
+
+test_prospective_completion.py:361: Failed</failure></testcase><testcase classname="integrations.session_bridge.prospective_completion.test_prospective_completion" name="test_f1_validator_change_before_launch_seal_refuses" time="0.028"><failure message="Failed: DID NOT RAISE ValueError">capsule = namespace(here=PosixPath('/private/var/folders/sb/h3rq5rvj1b3_r18p6w9swyp80000gn/T/pytest-of-chriswong/pytest-2698/tes...MODEL': 'glm-5.3-flash', 'HOST': 'ubuntu1'}, digest='dee1d322e3b93801e94df5ef433315a683b0fbca49ebe4b5c68996e7f1e5352c')
+
+    def test_f1_validator_change_before_launch_seal_refuses(capsule):
+        x=capsule;run='f1-seal-'+uuid.uuid4().hex
+        (x.here/'state/remote_sub'/f'{run}.support.json').write_bytes((x.store.path/'support.json').read_bytes())
+        with c.begin_completion(run,x.root,x.parent,x.route,x.packet,'~',x.digest) as owner:
+            dep=x.here/'remote_sub_exec.py';dep.write_bytes(dep.read_bytes()+b'\n# F1 before seal\n')
+&gt;           with pytest.raises(ValueError,match='source'):
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           Failed: DID NOT RAISE ValueError
+
+test_prospective_completion.py:372: Failed</failure></testcase><testcase classname="integrations.session_bridge.prospective_completion.test_prospective_completion" name="test_f1_validator_change_during_collection_prevents_publication[after-transport]" time="0.051"><failure message="Failed: DID NOT RAISE ValueError">capsule = namespace(here=PosixPath('/private/var/folders/sb/h3rq5rvj1b3_r18p6w9swyp80000gn/T/pytest-of-chriswong/pytest-2698/tes...MODEL': 'glm-5.3-flash', 'HOST': 'ubuntu1'}, digest='dee1d322e3b93801e94df5ef433315a683b0fbca49ebe4b5c68996e7f1e5352c')
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x1090d3890&gt;
+phase = 'after-transport'
+
+    @pytest.mark.parametrize('phase',['after-transport','publication'])
+    def test_f1_validator_change_during_collection_prevents_publication(capsule,monkeypatch,phase):
+        x=capsule;publish(x);x.store.close();calls=[];transport_fixture(monkeypatch,calls)
+        dep=x.here/'remote_sub_exec.py'
+        def drift():dep.write_bytes(dep.read_bytes()+b'\n# F1 during collection\n')
+        if phase=='after-transport':
+            original=delivery.transport
+            def transfer(*args):
+                result=original(*args);drift();return result
+            monkeypatch.setattr(delivery,'transport',transfer)
+        else:
+            original=delivery.publish_receipt
+            def publication(*args,**kwargs):
+                drift();return original(*args,**kwargs)
+            monkeypatch.setattr(delivery,'publish_receipt',publication)
+&gt;       with pytest.raises(ValueError):collect(x)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE ValueError
+
+test_prospective_completion.py:393: Failed</failure></testcase><testcase classname="integrations.session_bridge.prospective_completion.test_prospective_completion" name="test_f1_validator_change_during_collection_prevents_publication[publication]" time="0.044"><failure message="Failed: DID NOT RAISE ValueError">capsule = namespace(here=PosixPath('/private/var/folders/sb/h3rq5rvj1b3_r18p6w9swyp80000gn/T/pytest-of-chriswong/pytest-2698/tes...MODEL': 'glm-5.3-flash', 'HOST': 'ubuntu1'}, digest='dee1d322e3b93801e94df5ef433315a683b0fbca49ebe4b5c68996e7f1e5352c')
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x1090f2690&gt;
+phase = 'publication'
+
+    @pytest.mark.parametrize('phase',['after-transport','publication'])
+    def test_f1_validator_change_during_collection_prevents_publication(capsule,monkeypatch,phase):
+        x=capsule;publish(x);x.store.close();calls=[];transport_fixture(monkeypatch,calls)
+        dep=x.here/'remote_sub_exec.py'
+        def drift():dep.write_bytes(dep.read_bytes()+b'\n# F1 during collection\n')
+        if phase=='after-transport':
+            original=delivery.transport
+            def transfer(*args):
+                result=original(*args);drift();return result
+            monkeypatch.setattr(delivery,'transport',transfer)
+        else:
+            original=delivery.publish_receipt
+            def publication(*args,**kwargs):
+                drift();return original(*args,**kwargs)
+            monkeypatch.setattr(delivery,'publish_receipt',publication)
+&gt;       with pytest.raises(ValueError):collect(x)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE ValueError
+
+test_prospective_completion.py:393: Failed</failure></testcase></testsuite></testsuites>
