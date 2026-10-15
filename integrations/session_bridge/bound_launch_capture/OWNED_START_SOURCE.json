@@ -1,0 +1,37 @@
+{
+  "schema": "mastermind.fabric_owned_start_source.v1",
+  "classification": "SOURCE_ONLY_UNINSTALLED",
+  "original_worker_id": "fabric-complete-start-build-01a11e90-v1",
+  "original_result_sha256": "73d7de2d8b72a202a333443c1f30883d569c45c7ace2d7acbb9c45c319f3d5f3",
+  "original_candidate_sha256": "ea9552eb128372fc47563ac4f23fc6dfa79e014bf687f7f0eac2125cd6071e51",
+  "integrated_candidate_sha256": "8454896ec5810d605e23e999640d57caed8a9d045e8bf6f49b864052f32c2856",
+  "w4_dependency": "5d5293aeebc91976031155350d9c5235983f5f2a",
+  "original_handle_delta": "1596c53ee29076994dd7bc4671508b32331319f4",
+  "validation": {
+    "receipt": "CAPTURE_ASSEMBLY_FINAL_v3.xml",
+    "outer_pytest_nodes": 171,
+    "errors": 0,
+    "failures": 0,
+    "skipped": 0,
+    "nested_early_receipt_nodes": 76,
+    "counting": "One of171 outer nodes runs76 nested nodes; do not add76 to the outer count."
+  },
+  "limits": [
+    "No factory, public bound CLI, profile, credential, enrollment, service or host activation",
+    "Named qualification records are structural inputs, not grants",
+    "Existing original lease/exclusion must remain through Control seal, worker denial and Supervisor ACK",
+    "Actual original capture producer implemented; fresh file/FD identity is required before and after START validation. No production qualification or factory activation."
+  ],
+  "coordinator_repairs": [
+    "Actual lane_runtime and parent_pid",
+    "Original descriptor, invocation, nonce and Popen timestamp",
+    "Exact40-hex Git base rather than64-hex evidence digest",
+    "Fresh original image and unexpired command at publication",
+    "Fixed actual original retainer and once-only boundary",
+    "Failure/cancellation retains original lease and finisher",
+    "Once-only assembly entry before validation, distinct from retention write fence",
+    "Actual fixed capture FD/path/inode validation before and after canonical START validators"
+  ],
+  "finite_permission_digest_repair": "Actual compiled --settings SHA256, independently equal to installed expected profile; pre-lease backend check. See attended_qualification/FINITE_DIGEST_BINDING.json. Historical checks retained, not rerun or relabeled.",
+  "sealed_runtime_darwin_repair": "Namespaced sealed runtime, actual platform generation; see attended_qualification/FINITE_DARWIN_PACKAGE.json. Historical patch sources remain unchanged and are not installed over live ext."
+}

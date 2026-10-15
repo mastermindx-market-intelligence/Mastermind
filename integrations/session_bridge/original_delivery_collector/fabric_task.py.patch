@@ -1,0 +1,31 @@
+--- a/fabric_task.py
++++ b/fabric_task.py
+@@ -580,6 +580,14 @@
+     p_mac_return.add_argument("--root", required=True)
+     p_mac_return.add_argument("--destination", required=True)
+ 
++    for command in ("collect", "collection-result"):
++        collect_parser = sub.add_parser(command)
++        collect_parser.add_argument("run_id")
++        for name in ("root", "parent"):
++            collect_parser.add_argument("--"+name, required=True)
++        for name in (("binding", "destination") if command == "collect" else ("collection", "receipt-sha256")):
++            collect_parser.add_argument("--"+name, required=True)
++
+     p_status = sub.add_parser("status")
+     p_status.add_argument("run_id")
+ 
+@@ -658,6 +666,13 @@
+     p_completed.add_argument("--apply", action="store_true")
+ 
+     args = parser.parse_args(argv)
++    if args.cmd in {"collect", "collection-result"}:
++        command = ["/bin/bash", str(HERE/"remote_sub.sh"), "--collect-existing", args.run_id,
++                   "--root", args.root, "--parent", args.parent]
++        names = ("binding", "destination") if args.cmd == "collect" else ("collection", "receipt-sha256")
++        for name in names:
++            command.extend(["--"+name, getattr(args, name.replace("-", "_"))])
++        return subprocess.run(command).returncode
+     if args.cmd == "read-native-host-review-source":
+         import artifact_delivery
+         if artifact_delivery.digest(artifact_delivery.local_file(HERE / "native_host_review_source_delivery.py", 65536)) != '3ec53fa0be3c69c28e265a1bb5b1cab3cc0ee3f6f6c03b93908d6c2685f2e902':

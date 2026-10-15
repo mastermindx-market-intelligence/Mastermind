@@ -1,0 +1,11 @@
+--- a/native_remote.py
++++ b/native_remote.py
+@@ -34,7 +34,7 @@
+ SCHEMA = "mastermind.native.remote-terminal.v1"
+ MODELS = {
+     "grok": {"grok-4.6"},
+-    "cursor": {"composer-2.5"},
++    "cursor": {"composer-2.5", "cursor-grok-4.6-high"},
+     "codex-native": {"gpt-6-sol", "gpt-6.1-sol", "gpt-6-astra", "gpt-6-luna"},
+     "claude-native": {"opus", "sonnet"},
+     "oc-free": {"mimo-v2.5-free", "mimo-v2.6-flash-free", "ling-3.0-flash-fin-free"},

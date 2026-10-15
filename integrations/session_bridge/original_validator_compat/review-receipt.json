@@ -1,0 +1,55 @@
+{
+  "schema": "research.collector-validator-compat-review.v1",
+  "state": "ARTIFACT_READY_FOR_ROOT_REVIEW",
+  "original_root": "01a13301-995f-7631-8cee-d675d7de5671",
+  "immediate_parent": "01a13303-a92b-7b43-9bf6-20a895ac15e4",
+  "fabric_run_id": "rv-delivery-01a13301-collector-compat-r1",
+  "fabric_state": "PRELAUNCH_REFUSAL",
+  "reason": "artifact_contract_reserved_marker",
+  "execution_started": false,
+  "retry_performed": false,
+  "implementation": "direct principal artifact-only after refusal",
+  "patch": {
+    "path": "COLLECTOR_VALIDATOR_COMPAT.patch",
+    "sha256": "5ab29de43f84bcd9ed68d2d3ee8552c2212c1e9af5d89f8d0665071b39467345",
+    "bytes": 11325
+  },
+  "source_members": {
+    "artifact_delivery.py": {
+      "preimage_sha256": "7c86494e58707d7d8f5f9d72e11e2eb84055caad6a14727ada27a6b0d5e1a1a6",
+      "postimage_sha256": "2e0a03387f78bf98dba5c1fe42b7ee2ee99d99888624eea79c7f0f889683c3a6",
+      "bytes": 72373
+    },
+    "original_delivery_collector.py": {
+      "preimage_sha256": "a866741df19d6fad5a4bf4dbdfcf8bdeb67e158723dee37c23bc6390cbd78f95",
+      "postimage_sha256": "0781977b0f5f6b7c493211e4a2f7e03d6938fb2ac53c65788f5afc5937dca3a7",
+      "bytes": 29434
+    }
+  },
+  "unchanged": {
+    "artifact_production.py": "e126d6432135725a7a7846cbe9f9749305dfe9dd7cfe37037fc413a1136248bf",
+    "artifact_reader.py": "e2b08b7967df0e4193ba668cf6f72225429138a9361322c42db6ec84150e3469"
+  },
+  "tests": {
+    "path": "test_collector_validator_compat.py",
+    "sha256": "c8ad65366baab24a160918856629d1e86eb6ac06d5a50fd6f5e670b449a78762",
+    "result": "16 PASS",
+    "green_log_sha256": "2f5f234f2d71cb9c3f3685995c479e3b79521b9ada1300fcca74b0e39c4dbd56",
+    "original_red_log_sha256": "eaac3c92d8b8c2abe4ff7fecc5932b770404da80f7ccda80efa1bc061950654d",
+    "focused_red_log_sha256": "6f9709b47ac2fde2606d9fd2e7c3dc67debffacc064eac95415d4491005476e0"
+  },
+  "ast_review_sha256": "2519b3e030eb0581a0426cfa2099ff82ac805db5a9f2aac5ae340880661e9382",
+  "effects": {
+    "installed_files_mutated": false,
+    "owner_carrier_mutated": false,
+    "root_tracked_files_mutated": false,
+    "remote_reads": false,
+    "unknown_runs_replayed": false,
+    "worker_acceptance_recorded": false
+  },
+  "acceptance_limits": [
+    "source candidate only; root independent review pending",
+    "Fabric owner owns actual install/fresh-load",
+    "original collect/acquisition/settlement remains separately unknown and not authorized here"
+  ]
+}

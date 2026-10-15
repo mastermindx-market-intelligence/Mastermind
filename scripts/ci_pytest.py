@@ -24,6 +24,7 @@ import hashlib
 import re
 import subprocess
 import sys
+import time
 import tomllib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -193,7 +194,19 @@ def format_plan(plan: Mapping[str, int], *, shards: Sequence[Sequence[str]] | No
 
 
 def pytest_argv(included: Sequence[str], *, python: str | None = None) -> list[str]:
-    return [python or sys.executable, "-m", "pytest", "-q", *included]
+    # Observability only: report bounded slowest setup/call/teardown durations
+    # without dropping a test, changing its order, or creating new CI contexts.
+    return [python or sys.executable, "-m", "pytest", "--durations=25", "-q", *included]
+
+
+_MEASURED_THREE_JOB_PLACEMENT = {
+    # Measured in the full protected CI gate: these two unusually expensive
+    # modules both hash to shard 1. Pin only them to the less-loaded shard 2.
+    # Keep the large capacity-host crash/replay module stationary and retain
+    # the ordinary stable hash for all other paths and job counts.
+    "tests/test_executive_runtime_bounded_acquisition.py": 1,
+    "tests/test_mastermind_window_reader_static_fences.py": 1,
+}
 
 
 def partition_modules(
@@ -214,12 +227,13 @@ def partition_modules(
     same checkout would shard differently on every run and a failure would not
     reproduce.
 
-    Balance is close enough without a committed timing file that could go
-    stale: this repository's module count over four shards lands within a few
-    percent of even, and the shard sizes are printed in the plan line so drift
-    stays visible. (Deliberately written without bare integer literals: the
-    identity guard in tests/test_ceo_submit_armed_composition.py flags any
-    three-digit literal in that range added outside tests/.)
+    For the production three-job gate, two independently measured, unusually
+    costly modules are pinned from the busiest shard to the less-loaded shard.
+    Every other path keeps its stable hash placement, including when a test
+    file is added. Four-job experiments retain the unmodified hash. This is
+    strictly placement, not exclusion: verify_partition checks total coverage.
+    Shard sizes remain visible in the plan line. (Do not introduce bare
+    three-digit constants outside tests/: the identity guard forbids them.)
     """
 
     if jobs < 1:
@@ -232,7 +246,9 @@ def partition_modules(
     buckets: list[list[str]] = [[] for _ in range(jobs)]
     for path in included:
         digest = hashlib.sha256(path.encode("utf-8")).digest()
-        buckets[int.from_bytes(digest[:8], "big") % jobs].append(path)
+        hashed = int.from_bytes(digest[:8], "big") % jobs
+        target = _MEASURED_THREE_JOB_PLACEMENT.get(path, hashed) if jobs == 3 else hashed
+        buckets[target].append(path)
     shards = tuple(tuple(bucket) for bucket in buckets)
     verify_partition(included, shards)
     return shards
@@ -281,7 +297,8 @@ def run_shards(
     which a single serial process could not do.
     """
 
-    def _run(index: int) -> tuple[int, int, str]:
+    def _run(index: int) -> tuple[int, int, str, float]:
+        started = time.monotonic()
         completed = subprocess.run(
             pytest_argv(shards[index], python=python),
             cwd=root,
@@ -289,17 +306,18 @@ def run_shards(
             capture_output=True,
             text=True,
         )
-        return index, completed.returncode, completed.stdout + completed.stderr
+        elapsed = max(0.0, time.monotonic() - started)
+        return index, completed.returncode, completed.stdout + completed.stderr, elapsed
 
     codes: dict[int, int] = {}
     with ThreadPoolExecutor(max_workers=len(shards)) as pool:
         futures = [pool.submit(_run, index) for index in range(len(shards))]
         for future in as_completed(futures):
-            index, returncode, output = future.result()
+            index, returncode, output, elapsed = future.result()
             codes[index] = returncode
             print(
                 f"--- shard {index + 1}/{len(shards)} "
-                f"({len(shards[index])} modules) exit={returncode} ---",
+                f"({len(shards[index])} modules) exit={returncode} elapsed_s={elapsed:.2f} ---",
                 flush=True,
             )
             print(output, end="" if output.endswith("\n") else "\n", flush=True)

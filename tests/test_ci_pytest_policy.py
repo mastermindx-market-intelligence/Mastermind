@@ -859,8 +859,10 @@ def test_all_discovered_tests_are_accounted_for():
     assert discovered
     assert included
     argv = cip.pytest_argv(gate["included"])
-    assert argv[:4] == [cip.sys.executable, "-m", "pytest", "-q"]
-    assert argv[4:] == list(gate["included"])
+    assert argv[:5] == [cip.sys.executable, "-m", "pytest", "--durations=25", "-q"]
+    assert argv[5:] == list(gate["included"])
+    # Duration reporting is bounded diagnostics, not filtering or a new test step.
+    assert argv.count("--durations=25") == 1
 
 
 def test_hosted_full_gate_has_a_bounded_completion_window():
@@ -930,6 +932,56 @@ def test_real_shard_plan_stays_reasonably_balanced():
     sizes = [len(shard) for shard in cip.partition_modules(gate["included"], jobs=4)]
     assert min(sizes) >= 0.75 * (len(gate["included"]) / 4)
     assert max(sizes) <= 1.25 * (len(gate["included"]) / 4)
+
+
+def test_measured_three_job_pins_move_only_two_hot_modules() -> None:
+    """Preserve all tests, hashes and insertion stability except two measured pins."""
+    import hashlib
+
+    gate = cip.resolve_gate(_ROOT)
+    included = gate["included"]
+    pins = {
+        "tests/test_executive_runtime_bounded_acquisition.py",
+        "tests/test_mastermind_window_reader_static_fences.py",
+    }
+    assert pins.issubset(included)
+    shards = cip.partition_modules(included, jobs=3)
+    cip.verify_partition(included, shards)
+    observed = {
+        path: index
+        for index, shard in enumerate(shards)
+        for path in shard
+    }
+    assert len(observed) == len(included)
+    for path in included:
+        digest = hashlib.sha256(path.encode("utf-8")).digest()
+        hashed = int.from_bytes(digest[:8], "big") % 3
+        if path in pins:
+            assert hashed == 0  # Both were in the slowest shard before the pin.
+            assert observed[path] == 1
+        else:
+            assert observed[path] == hashed
+
+    augmented = tuple(sorted((*included, "tests/test_future_added_module.py")))
+    after = cip.partition_modules(augmented, jobs=3)
+    placement_after = {
+        path: index for index, shard in enumerate(after) for path in shard
+    }
+    assert all(placement_after[path] == observed[path] for path in included)
+
+
+def test_measured_three_job_pins_do_not_affect_other_job_counts() -> None:
+    import hashlib
+
+    gate = cip.resolve_gate(_ROOT)
+    included = gate["included"]
+    for jobs in (2, 4):
+        shards = cip.partition_modules(included, jobs=jobs)
+        cip.verify_partition(included, shards)
+        for index, shard in enumerate(shards):
+            for path in shard:
+                digest = hashlib.sha256(path.encode("utf-8")).digest()
+                assert int.from_bytes(digest[:8], "big") % jobs == index
 
 
 def test_shard_plan_is_deterministic_across_processes():
@@ -1090,6 +1142,7 @@ def test_shard_output_is_reported_under_an_attributable_banner(tmp_path, monkeyp
     cip.run_shards(shards, root=tmp_path)
     out = capsys.readouterr().out
     assert "shard 1/2" in out and "shard 2/2" in out
+    assert out.count("elapsed_s=") == 2
     assert "result for tests/test_a.py" in out
     assert "result for tests/test_b.py" in out
 
