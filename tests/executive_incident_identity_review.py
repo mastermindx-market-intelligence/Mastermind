@@ -12,14 +12,14 @@ REVIEWED_FILES = {
         "sites": ((45, 15, 18, "int", "450"),),
     },
     "control_plane/executive_incident_origin.py": {
-        "sha256": "11bf9f53321daac9de6bb0dde4fedaa347e9228ba5dc08a6932ca92464b502b7",
+        "sha256": "23e98f05f4a4da23d21561d9c8577250b0d4ecbb487badbc4e6407941f510518",
         "sites": (
             (43, 15, 18, "int", "450"),
             (44, 15, 18, "int", "450"),
-            (130, 26, 29, "int", "450"),
-            (131, 26, 29, "int", "453"),
-            (474, 22, 27, "int", "0o644"),
-            (482, 69, 74, "int", "0o644"),
+            (132, 26, 29, "int", "450"),
+            (133, 26, 29, "int", "453"),
+            (476, 22, 27, "int", "0o644"),
+            (484, 69, 74, "int", "0o644"),
         ),
     },
     "control_plane/executive_recovery_namespace.py": {
