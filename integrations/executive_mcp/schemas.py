@@ -1007,7 +1007,8 @@ def bound_document(
     def size() -> int:
         return len(canonical_json(current)) + len(canonical_json(receipts)) - 2
 
-    if size() <= limit:
+    current_size = size()
+    if current_size <= limit:
         return current, receipts
 
     sizes: list[tuple[int, tuple[str | int, ...]]] = []
@@ -1015,7 +1016,7 @@ def bound_document(
     sizes.sort(key=lambda item: (-item[0], _display_path(item[1])))
 
     for original_bytes, parts in sizes:
-        if size() <= limit:
+        if current_size <= limit:
             break
         node: Any = current
         reachable = True
@@ -1047,6 +1048,9 @@ def bound_document(
             continue
         current = _replace_at(current, parts, replacement)
         receipts.append(receipt)
+        # Leaf replacement and receipt append have exact canonical byte deltas.
+        # Do not re-encode a wide unboundable document for every small leaf.
+        current_size -= saving - cost
 
     if size() > limit:
         raise GatewayError(

@@ -115,6 +115,23 @@ def test_small_leaves_are_not_enlarged_into_bounding_objects():
     assert "bounding 0 field(s)" in exc.value.message
 
 
+def test_unboundable_small_leaves_do_not_reencode_whole_document_per_leaf(monkeypatch):
+    from integrations.executive_mcp import schemas
+    actual = schemas.canonical_json
+    whole_documents = []
+
+    def counted(value):
+        if isinstance(value, dict) and "rows" in value:
+            whole_documents.append(len(value["rows"]))
+        return actual(value)
+
+    monkeypatch.setattr(schemas, "canonical_json", counted)
+    with pytest.raises(GatewayError, match="ceiling"):
+        bound_document({"rows": ["small"] * 500}, limit=100)
+    # A refused wide document must not cause quadratic whole-frame encoding.
+    assert len(whole_documents) <= 2
+
+
 def test_bounding_budget_includes_receipts():
     data = {"a": "x" * 10_000, "b": "y" * 10_000}
     bounded, receipts = bound_document(data, limit=1_350)
@@ -135,6 +152,8 @@ def test_size_failure_remains_distinct_from_permission_failure(code):
 @pytest.mark.parametrize("count", [25, 100])
 def test_installed_inbox_crosses_real_private_socket_once(tmp_path, monkeypatch, count):
     result = read_inbox(tmp_path, monkeypatch, inbox_rows(count))
+    if count == 100:
+        assert result["error"]["code"] == "output_too_large", result
     wire = canonical_json({"ok": True, "result": result}) + b"\n"
 
     async def exercise():
