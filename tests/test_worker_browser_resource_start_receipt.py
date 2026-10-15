@@ -15,6 +15,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+import pytest
+
 from control_plane.browser_resource_contract import WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST
 from integrations.workbench_action_mcp.tunnel import create_runtime_channel
 from integrations.workbench_browser_mcp import tunnel as browser_tunnel
@@ -24,13 +26,16 @@ from tests.test_workbench_browser_resource_port import _fake_relay
 from tests.test_workbench_browser_tunnel import _call, _error_code
 
 
+@pytest.mark.parametrize("mutation_tools", [False, True])
 def test_original_browser_resource_start_receipt_serves_worker_read_and_revoke(
-    tmp_path, monkeypatch,
+    tmp_path, monkeypatch, mutation_tools,
 ):
     original_grant = owner_fixture._grant
+    names = (("browser_snapshot", "prepare_browser_click", "run_browser_action")
+             if mutation_tools else ("browser_snapshot",))
     monkeypatch.setattr(
         owner_fixture, "_grant",
-        lambda config: original_grant(config, ("browser_snapshot",)),
+        lambda config: original_grant(config, names),
     )
     (api, executive, lease, epoch, generation, profile, requested, config,
      run_root) = owner_fixture._setup(tmp_path)
@@ -46,6 +51,12 @@ def test_original_browser_resource_start_receipt_serves_worker_read_and_revoke(
         '"tool_schema_digest":"d"*64,',
         f'"tool_schema_digest":"{WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST}",',
     )
+    if mutation_tools:
+        assert body.count('"allowed_tools":["browser_snapshot"],') == 1
+        body = body.replace(
+            '"allowed_tools":["browser_snapshot"],',
+            '"allowed_tools":["browser_snapshot","browser_click"],',
+        )
     body = body.replace(needle, '''            if req.get("kind") == "tool":
                 out["result"] = {
                     "content": [{"type": "text", "text": "RESOURCE-START-FIXTURE"}],
@@ -133,6 +144,29 @@ def test_original_browser_resource_start_receipt_serves_worker_read_and_revoke(
             )
             assert _error_code(refused_unclaimed) == "BROWSER_RECOVERY_BINDING_CHANGED"
 
+            if mutation_tools:
+                valid_prepare = await _call(worker, "prepare_browser_click", {
+                    "browser_ref": ref, "target": "fixture-target",
+                })
+                assert valid_prepare.structuredContent["status"] == "PREPARED"
+                action_ref = valid_prepare.structuredContent["action_ref"]
+                first_action = await _call(worker, "run_browser_action", {
+                    "browser_ref": ref, "action_ref": action_ref,
+                })
+                assert first_action.structuredContent["effect_state"] == "APPLIED"
+                assert first_action.structuredContent["reconciled"] is False
+                replay_action = await _call(worker, "run_browser_action", {
+                    "browser_ref": ref, "action_ref": action_ref,
+                })
+                assert replay_action.structuredContent["effect_state"] == "APPLIED"
+                assert replay_action.structuredContent["reconciled"] is True
+                # A signed ref with real process identity but no original
+                # ResourcePort APPLIED start claim must never mint an action.
+                bad_prepare = await _call(worker, "prepare_browser_click", {
+                    "browser_ref": unclaimed, "target": "fixture-target",
+                })
+                assert _error_code(bad_prepare) == "BROWSER_RECOVERY_BINDING_CHANGED"
+
             filename = await _call(worker, "browser_snapshot", {
                 "browser_ref": ref, "filename": "not-authorized.md",
             })
@@ -141,6 +175,11 @@ def test_original_browser_resource_start_receipt_serves_worker_read_and_revoke(
             executive.jobs.cancel_job(lease.attempt.job_id)
             denied = await _call(worker, "browser_snapshot", {"browser_ref": ref})
             assert _error_code(denied) == "CHANNEL_ADMISSION_REFUSED"
+            if mutation_tools:
+                revoked_action = await _call(worker, "run_browser_action", {
+                    "browser_ref": ref, "action_ref": action_ref,
+                })
+                assert _error_code(revoked_action) == "CHANNEL_ADMISSION_REFUSED"
             assert not (tmp_path / "not-authorized.md").exists()
             assert list(Path(config.action.artifact_directory).glob("*.md")) == []
         finally:
@@ -156,3 +195,29 @@ def test_original_browser_resource_start_receipt_serves_worker_read_and_revoke(
         asyncio.run(exercise())
     finally:
         shutil.rmtree(relay_root, ignore_errors=True)
+
+
+@pytest.mark.parametrize("flag,resolver", [
+    (True, None),
+    ("true", lambda *_args: None),
+    (1, lambda *_args: None),
+])
+def test_private_fresh_resource_claim_requires_exact_flag_and_resolver(
+    flag, resolver,
+):
+    """A truthy or resolverless security selection cannot silently downgrade."""
+    from integrations.workbench_browser_mcp.deployment import create_browser_ports
+
+    with pytest.raises(ValueError, match="BROWSER_FRESH_RESOURCE_CLAIM_INVALID"):
+        create_browser_ports(
+            resolve_binding=lambda *_args: None,
+            resolve_recovery_binding=resolver,
+            require_resource_claim_for_fresh=flag,
+            clock_ms=lambda: 0,
+            action_token_key=b"k" * 32,
+            artifact_store=object(),
+            host_binding=object(),
+            action_ttl_ms=3000,
+            host_config=object(),
+            profile_resolver=lambda _ref: None,
+        )

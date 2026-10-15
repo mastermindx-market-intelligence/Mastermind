@@ -10,7 +10,7 @@ REVIEWED_FILES = {
     # Existing ten-minute telemetry age, not a UID. Full reviewed source and
     # exact token only; drift exposes the source to ordinary D8 again.
     "research/fabric_bailian_host_eligibility_20261015/candidate/glm_host_account_readiness.py": {
-        "sha256": "00fdbdf5422904a349a8cf09ffdd05f63ab716d8f712d8c28cf9a60708cfca21",
+        "sha256": "b8921960e7e46a472b536895b5a6491096627d1c8fd58ea0baf283ff34accc07",
         "sites": ((31, 18, 21, "int", "600"),),
     },
     'integrations/session_bridge/bound_launch_capture/runtime/lane_runtime.py': {'sha256': 'cfb18bd9381fae4af1d13a257a8fa5986d903571f64b2aa5dc900439759e9b91',
@@ -79,9 +79,8 @@ REVIEWED_FILES = {
                                               (1043, 90, 93, 'int', '454'),
                                               (1043, 95, 98, 'int', '455'),
                                               (1043, 100, 103, 'int', '456'))},
- 'ops/executive_os/attended_worker_definition.py': {'sha256': '494c24eebd25dce82568bbb9069ffb1be4ecdc8c038e5d0e6abc7990ef29570b',
-                                                    'sites': ((241, 31, 51, 'str', "'_mastermind_worker'"),
-                                                              (329, 95, 100, 'int', '0o660'))},
+ 'ops/executive_os/attended_worker_definition.py': {'sha256': '0cbe76b615344a5511dd9eb5ba82c0672f16193fd33c1ef4ec15be4d3f81b2b3',
+ 'sites': ((241, 31, 51, 'str', "'_mastermind_worker'"), (337, 95, 100, 'int', '0o660'))},
  'ops/executive_os/bootstrap-host.sh': {'sha256': '805279ecceb16965ded44f94ab62aa882090accf45edf8a2e7ab86487bca04ce',
                                         'sites': ((776, 21, 43, 'str', '_mastermind_[a-z0-9_]*'),
                                                   (778, 97, 120, 'str', '_mastermind_agent_relay'),
@@ -90,7 +89,7 @@ REVIEWED_FILES = {
 # Exact finite lifecycle successor postimage. The production delta changes only
 # socket ACL observation/currentness; the same 37 reviewed principal/mode literals
 # remain fixed. Any other byte or token movement exposes the complete source to D8.
-REVIEWED_FILES['ops/executive_os/finite_service_lifecycle.py'] = {'sha256': '115f02b6dbbf1046d7cfd8d7b1b6e8cd528e29887172a89332efb5ab8ce3fc5f',
+REVIEWED_FILES['ops/executive_os/finite_service_lifecycle.py'] = {'sha256': '17d247d0917f79e1b7e382df98f7515b76a26481e5561e58904ef4a2fc61d4da',
  'sites': ((297, 36, 39, 'int', '470'),
            (297, 65, 68, 'int', '450'),
            (300, 74, 77, 'int', '470'),
@@ -111,23 +110,23 @@ REVIEWED_FILES['ops/executive_os/finite_service_lifecycle.py'] = {'sha256': '115
            (397, 23, 26, 'int', '470'),
            (397, 39, 42, 'int', '470'),
            (397, 56, 59, 'int', '450'),
-           (413, 105, 108, 'int', '470'),
-           (413, 110, 113, 'int', '470'),
-           (413, 115, 120, 'int', '0o700'),
-           (476, 32, 35, 'int', '470'),
-           (487, 57, 75, 'str', "'_mastermind_exec'"),
-           (498, 51, 54, 'int', '470'),
-           (502, 37, 40, 'int', '470'),
-           (502, 59, 62, 'int', '470'),
-           (503, 60, 63, 'int', '470'),
-           (520, 28, 31, 'int', '470'),
-           (568, 66, 69, 'int', '450'),
-           (568, 71, 74, 'int', '450'),
-           (568, 76, 79, 'int', '450'),
-           (568, 81, 84, 'int', '450'),
-           (573, 97, 100, 'int', '450'),
-           (573, 102, 107, 'int', '0o660'),
-           (623, 28, 31, 'int', '450'))}
+           (414, 105, 108, 'int', '470'),
+           (414, 110, 113, 'int', '470'),
+           (414, 115, 120, 'int', '0o700'),
+           (477, 32, 35, 'int', '470'),
+           (488, 57, 75, 'str', "'_mastermind_exec'"),
+           (499, 51, 54, 'int', '470'),
+           (503, 37, 40, 'int', '470'),
+           (503, 59, 62, 'int', '470'),
+           (504, 60, 63, 'int', '470'),
+           (521, 28, 31, 'int', '470'),
+           (569, 66, 69, 'int', '450'),
+           (569, 71, 74, 'int', '450'),
+           (569, 76, 79, 'int', '450'),
+           (569, 81, 84, 'int', '450'),
+           (574, 97, 100, 'int', '450'),
+           (574, 102, 107, 'int', '0o660'),
+           (624, 28, 31, 'int', '450'))}
 
 # Exact accepted R2 HTTP response statuses, not process identities.
 # Source83f2 is unchanged; full source hash and all token spans are required.
@@ -148,3 +147,14 @@ REVIEWED_FILES['app/mastermind_os/src/product-acceptance/owner-observation.ts'] 
     'sha256': 'a914fa318b2a96d4d9d01ee5f378becac222e3750725de99416dff6b463a257a',
     'sites': ((34, 132, 135, 'int', '512'),),
 }
+
+# Retained producer: existing private-directory permissions, not native UIDs.
+# Runtime bytes and both comparisons are unchanged; exact source and sites only.
+REVIEWED_FILES["integrations/session_bridge/r2_plain_review_scopes/candidate/artifact_production.py"] = {
+    "sha256": "0be15bd5d3304a65673576fd30386bcc977c02ed8ee28313a4cb1ed454f8c409",
+    "sites": ((149, 77, 82, "int", "0o700"), (170, 85, 90, "int", "0o700")),
+}
+
+# Scoped independent native-finite-capacity-owner-review-01a12a08-v1 PASS
+# on 4c24b21bcc96ea2215e7c3bbc9782b59b9ff46ed approves only the unchanged
+# two renderer and 37 lifecycle literal sites above; no new identity exemption.

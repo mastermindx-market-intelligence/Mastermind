@@ -815,16 +815,47 @@ privileged-action result.
 
 The command requires the current sealed release, closed intake arms, stopped
 consumers, an idle or already-unloaded broker and no other pinned root interpreter.
-It uses one disable and one bootout at most, followed by typed disabled/unloaded
-and socket-absence observations. It never unlinks a socket, repairs permissions,
-edits configuration or touches incident evidence. An active broker, ambiguous
-command result, residual socket or cleanup failure refuses; reconcile the retained
-partial state rather than repeating a modifying command.
+It checks the fixed retained socket slot before any modifying broker verb, then
+uses one disable and one bootout at most. If launchd leaves the canonical socket
+node behind, the same maintenance owner may preserve that exact qualified inode
+at `.privileged-retired.sock` in the existing pinned socket directory. This uses
+the native descriptor-relative no-replace rename, bracketed by complete source,
+closed-arm, disabled/unloaded, strict old-owner, boot and namespace observations.
+It verifies the retained inode, metadata and native ACL absence and requires the
+canonical socket path to be absent. The original absolute budget remains in force.
+
+It never unlinks a socket, repairs permissions, overwrites or adopts a retained
+node, edits configuration or touches incident evidence. An occupied retained slot
+blocks another maintenance operation before disable/bootout, including when the
+canonical path is already absent. The slot is intentionally retained after
+success too; this command provides no cleanup or reuse authority. An active broker,
+ambiguous command result, changed socket generation or cleanup failure refuses.
+`socket_retirement_attempted` remains true after any attempted move, so a failure
+returns exit75 even if the broker was already unloaded and no launchctl verb ran.
+Preserve the original operation and both paths for owner reconciliation; do not
+unlink, roll back the move, or retry it. A sampled lsof absence is not old-owner
+exclusion. Held namespace descriptors are not a global lock against trusted root.
 
 Success reports a sampled stopped state only. It neither grants recovery authority
 nor supplies an origin context; the separately authorized forward entry must
 acquire its own current context. A dormant forward policy stays dormant. This
 maintenance stop does not invoke the original issuer or its qualification.
+
+The incident path uses a private v2 observation purpose. Control, worker,
+gateway and broker must match the current sealed source. The frozen C1 Relay
+must remain exactly unloaded on release
+`326c8469a21d7f50fc9ecb1848196bf1c6e66685`, with its own fully verified manifest
+and wrapper provenance. A loaded Relay, another historical release, unreadable
+closure or content drift refuses. This neither rebinds nor restarts C1.
+
+The parent, fixed client and broker use closed v2 witness frames and compare the
+same cohort-content digest at acquisition and every stage. Version 1 is not a
+fallback for this purpose. The original budget, complete root-process census,
+socket and peer generation checks, one-use reservation, UNKNOWN handling and
+source-owned dormant policy remain unchanged. Generic release observation and
+release-factory convergence still require all five roles on one release; they
+do not accept the incident observation type. Source tests and installation do
+not qualify a physical recovery or authorize another maintenance attempt.
 
 ### Three isolated Personal Pro readiness slots
 

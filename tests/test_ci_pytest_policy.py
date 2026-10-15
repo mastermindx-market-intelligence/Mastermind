@@ -898,6 +898,7 @@ def test_hosted_full_gate_has_a_bounded_completion_window():
     assert all(step.get("continue-on-error", False) is False for step in shard_steps)
     for name in (
         "Verify Paper direct pinned MCP SDK",
+        "Verify private Fabric HTTP compatibility and incumbent backend lifetime",
         "Compile source",
         "Validate shell scripts",
     ):

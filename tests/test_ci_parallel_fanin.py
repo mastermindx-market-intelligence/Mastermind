@@ -62,6 +62,14 @@ def test_live_ci_workflow_fan_in_is_fail_closed_and_uses_three_full_shards() -> 
         ),
         ("if: matrix.index == 0", "if: matrix.index == 1"),
         (
+            "      - name: Verify private Fabric HTTP compatibility and incumbent backend lifetime\n        if: matrix.index == 0",
+            "      - name: Verify private Fabric HTTP compatibility and incumbent backend lifetime\n        if: matrix.index == 2",
+        ),
+        (
+            "      - name: Verify private Fabric HTTP compatibility and incumbent backend lifetime\n        if: matrix.index == 0",
+            "      - name: Verify private Fabric HTTP compatibility and incumbent backend lifetime\n        if: false",
+        ),
+        (
             "python scripts/ci_pytest.py --plan-only --jobs 3",
             "python scripts/ci_pytest.py --jobs 1",
         ),
@@ -131,7 +139,7 @@ def test_worker_executes_only_its_exact_canonical_shard_and_preserves_status(
     assert code == 17  # A failed shard cannot become a green matrix leg.
     expected = cip.partition_modules(included, jobs=3)[1]
     assert recorded == [
-        (cip.pytest_argv(expected), tmp_path.resolve(), False),
+        (cip.pytest_argv(expected, progress=True), tmp_path.resolve(), False),
     ]
 
 

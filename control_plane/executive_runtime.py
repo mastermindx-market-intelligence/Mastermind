@@ -14638,6 +14638,7 @@ class JobRegistry:
         _v2_root_capability: object | None = None,
         _coo_cycle_planner_capability: object | None = None,
         _coo_cycle_child_capability: object | None = None,
+        _principal_commit_guard: Callable[[], None] | None = None,
     ) -> Job:
         """Insert one QUEUED Job and its ``JOB_CREATED`` receipt in one transaction.
 
@@ -14851,8 +14852,31 @@ class JobRegistry:
             raise StateConflict(
                 "review orchestration Job grant requires READ plus optional RUN_TESTS and empty writes"
             )
+        def recheck_principal():
+            if _principal_commit_guard is None:
+                return
+            if (not callable(_principal_commit_guard)
+                    or inspect.iscoroutinefunction(_principal_commit_guard)
+                    or inspect.iscoroutinefunction(getattr(_principal_commit_guard, "__call__", None))):
+                raise StateConflict("principal commit guard must be synchronous")
+            result = _principal_commit_guard()
+            if inspect.isawaitable(result):
+                if inspect.iscoroutine(result):
+                    result.close()
+                raise StateConflict("principal commit guard refused")
+            if result is not None:
+                raise StateConflict("principal commit guard refused")
+
         timestamp = self.store.now_ms()
         with self.store.transaction() as connection:
+            # A command accepted while this creator waited must reconcile before
+            # dynamic currentness. The existing sink checks its full fingerprint.
+            if (_principal_commit_guard is not None and command_id is not None
+                    and connection.execute(
+                        "SELECT 1 FROM events WHERE command_id=?", (command_id,)
+                    ).fetchone() is not None):
+                raise StateConflict("job creation command already exists")
+            recheck_principal()
             if (
                 orchestration_role == "plan"
                 and _coo_cycle_planner_capability
@@ -15114,6 +15138,8 @@ class JobRegistry:
                     timestamp_ms=timestamp,
                 ),
             )
+            # Refusal rolls back both the Job and its JOB_CREATED event.
+            recheck_principal()
         return job
 
     def get_job(self, job_id: str) -> Job | None:

@@ -29,7 +29,7 @@ def test_installer_fences_relay_before_any_release_mutation() -> None:
     mutation = _slice(
         source,
         "trap leave_installed_services_stopped EXIT",
-        'if [ ! -d "$RELEASE_ROOT" ]; then',
+        'stage_sealed_release || exit 65',
     )
     relay_disable = '/bin/launchctl disable "system/$RELAY_LABEL"'
     control_disable = '/bin/launchctl disable "system/$CONTROL_LABEL"'
@@ -49,7 +49,11 @@ def test_installer_fences_relay_before_any_release_mutation() -> None:
     assert '"$description LaunchDaemon absence was not proven after bootout"' in source
 
     archive = '/usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" -C "$SOURCE_REPO" archive'
-    assert source.index(relay_loaded) < source.index(archive)
+    assert archive in source
+    # Definitions are inert. The ordinary call follows the complete Relay fence;
+    # only explicit unselected stage-only mode calls it before service effects.
+    ordinary_call = source.index("stage_sealed_release || exit 65", source.index("trap leave_installed_services_stopped EXIT"))
+    assert source.index(relay_loaded) < ordinary_call
     assert 'RELAY_PLIST=' not in source
     assert '/bin/launchctl bootstrap "system/$RELAY_LABEL"' not in source
 

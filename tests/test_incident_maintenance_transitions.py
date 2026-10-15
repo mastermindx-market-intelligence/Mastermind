@@ -35,15 +35,21 @@ def world(monkeypatch):
 
     def observe(*, deadline_monotonic_ns):
         state.observations += 1
+        from dataclasses import replace
+        from tests.incident_release_fixtures import make_observation
+        result = make_observation(source=SOURCE, boot="same-boot", states={
+            "broker": state.broker, "control": state.consumer,
+            "worker": state.consumer})
         rows = []
-        for i, role in enumerate(m._ROLES):
-            digest = configs.roles[i].content.configuration_digest if i < 2 else "d" * 64
-            content = S(release_commit=SOURCE["release_sha"], installed_manifest_digest=SOURCE["manifest_sha256"],
-                        configuration_digest=digest,
-                        plist_digest="e" * 64 if state.content_drift_at == state.observations else "f" * 64)
-            status = state.broker if role == "broker" else ("RUNNING" if role == "gateway" else state.consumer)
-            rows.append(S(role=role, state=status, content=content))
-        return S(roles=tuple(rows), boot_id="same-boot")
+        for i, row in enumerate(result.roles):
+            content = replace(row.content,
+                configuration_digest=configs.roles[i].content.configuration_digest if i < 2 else "d" * 64,
+                plist_digest="e" * 64 if state.content_drift_at == state.observations else "f" * 64)
+            rows.append(replace(row, content=content,
+                service_generation_digest=m.release._digest(m.release._CONTENT_DOMAIN, __import__('dataclasses').asdict(content))))
+        rows = tuple(rows)
+        return replace(result, roles=rows, cohort_content_sha256=m.incident_release._cohort_digest(rows))
+
 
     def census(budget):
         return S(observer="own", matching_runtime_instances=("own", "other") if state.other_owner else ("own",))
@@ -67,7 +73,7 @@ def world(monkeypatch):
         return 113, b"", b'Bad request.\nCould not find service "com.mastermind.executive.privileged" in domain for system\n'
 
     def acquire(*, deadline_monotonic_ns):
-        handle = object()
+        handle = S(boot="same-boot", owner="own")
         state.handles.append(handle)
         return handle
 
@@ -76,14 +82,17 @@ def world(monkeypatch):
         state.cleanup.append(handle)
 
     monkeypatch.setattr(m, "_source", source)
-    monkeypatch.setattr(m.release, "_observe_release", observe)
+    monkeypatch.setattr(m.incident_release, "_observe_incident_release", observe)
     monkeypatch.setattr(m.host, "_root_census", census)
     monkeypatch.setattr(m.origin, "_run_owned_native_command", modify)
     monkeypatch.setattr(m.release, "_command", read)
     monkeypatch.setattr(m.namespace, "_acquire_namespace", acquire)
     monkeypatch.setattr(m.namespace, "_release_namespace", release)
     monkeypatch.setattr(m.namespace, "_require_socket_absent", Mock())
-    monkeypatch.setattr(m.host, "_observe_old_owner_exclusion", Mock())
+    monkeypatch.setattr(m.host, "_observe_old_owner_exclusion", Mock(
+        return_value=S(boot_id="same-boot", census=S(observer="own"))))
+    monkeypatch.setattr(m.retirement, "_candidate", Mock(return_value=None))
+    monkeypatch.setattr(m.retirement, "_require_retained_absent", Mock())
     return state
 
 
@@ -121,7 +130,8 @@ def test_ambiguous_disable_never_proceeds_to_bootout(world, reply):
     with pytest.raises(m.BrokerMaintenanceError) as failure:
         m._stop_incident_broker()
     assert failure.value.disable_attempted and not failure.value.bootout_attempted
-    assert world.commands == [m._DISABLE] and world.handles == []
+    assert world.commands == [m._DISABLE] and world.cleanup == world.handles
+    assert len(world.handles) == 1
 
 
 def test_disabled_readback_failure_never_proceeds_to_bootout(world):
@@ -137,14 +147,16 @@ def test_failed_bootout_is_never_repeated_or_reported_stopped(world, reply):
     with pytest.raises(m.BrokerMaintenanceError) as failure:
         m._stop_incident_broker()
     assert failure.value.disable_attempted and failure.value.bootout_attempted
-    assert world.commands == [m._DISABLE, m._BOOTOUT] and world.handles == []
+    assert world.commands == [m._DISABLE, m._BOOTOUT] and world.cleanup == world.handles
+    assert len(world.handles) == 1
 
 
 def test_noncanonical_absence_is_not_success(world):
     world.absent_reply = False
     with pytest.raises(m.BrokerMaintenanceError, match="ABSENCE_UNAVAILABLE"):
         m._stop_incident_broker()
-    assert world.commands == [m._DISABLE, m._BOOTOUT] and world.handles == []
+    assert world.commands == [m._DISABLE, m._BOOTOUT] and world.cleanup == world.handles
+    assert len(world.handles) == 1
 
 
 @pytest.mark.parametrize("case", ["socket", "old_owner", "source_drift", "post_content_drift", "cleanup"])

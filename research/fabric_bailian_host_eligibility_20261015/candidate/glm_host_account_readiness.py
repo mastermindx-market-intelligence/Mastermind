@@ -182,6 +182,10 @@ def _filter_host_accounts(
     sha = envelope.get("validator_sha256")
     if not _valid_sha256(sha) or sha != validator_sha256:
         return [], REASON_ENVELOPE_INVALID
+    # Old configured-key-only observations cannot qualify a remote Qwen
+    # account whose host-local hard cooldown was never inspected.
+    if mode == "qwen" and envelope.get("cooldown_checked") is not True:
+        return [], REASON_ENVELOPE_INVALID
     flags = _readiness_flags(envelope)
     if flags is None:
         return [], REASON_ENVELOPE_INVALID

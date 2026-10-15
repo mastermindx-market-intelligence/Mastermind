@@ -67,8 +67,9 @@ def validate_parallel_workflow(text: str) -> None:
     ):
         raise ci_pytest.PolicyError("each matrix member must run its canonical shard")
     for name in (
-        "Verify Paper direct pinned MCP SDK", "Compile source",
-        "Validate shell scripts",
+        "Verify Paper direct pinned MCP SDK",
+        "Verify private Fabric HTTP compatibility and incumbent backend lifetime",
+        "Compile source", "Validate shell scripts",
     ):
         matches = [
             step for step in shard_steps
@@ -160,7 +161,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     # No hand-written selectors, mutating retry, positive allowlist or shell.
     completed = subprocess.run(
-        ci_pytest.pytest_argv(selected),
+        ci_pytest.pytest_argv(selected, progress=True),
         cwd=root,
         check=False,
     )
