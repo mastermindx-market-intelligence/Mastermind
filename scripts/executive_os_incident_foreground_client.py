@@ -54,14 +54,14 @@ _MAX_WITNESS_EXCHANGES = 16
 _LOCAL_TIMEOUT_CAP_SECONDS = 30.0
 _INTERVAL_KEYS = frozenset({
     "kind", "v", "boot_id", "release_commit", "origin",
-    "deadline_monotonic_ns", "request", "socket",
+    "deadline_monotonic_ns", "request", "socket", "purpose", "cohort_content_sha256",
 })
 _PRECHECK_KEYS = frozenset({
-    "kind", "v", "boot_id", "release_commit", "broker", "socket_sha256",
+    "kind", "v", "boot_id", "release_commit", "broker", "socket_sha256", "purpose", "cohort_content_sha256",
 })
 _OBSERVATION_KEYS = frozenset({
     "kind", "v", "stage", "ordinal", "boot_id", "release_commit",
-    "origin", "broker", "socket_sha256",
+    "origin", "broker", "socket_sha256", "purpose", "cohort_content_sha256",
 })
 _CHALLENGE_KEYS = frozenset({
     "kind", "v", "stage", "ordinal", "nonce", "reservation_sha256",
@@ -192,6 +192,9 @@ def _run_origin_client(*, stdin=None, stdout=None) -> int:
     protocol._shape(interval, _INTERVAL_KEYS, "origin-interval")
     if interval["socket"] != _BROKER_SOCKET or not protocol._hex(interval["release_commit"], 40):
         _refuse("CLIENT_INTERVAL_MALFORMED")
+    if (interval["purpose"] != protocol.incident_release._PURPOSE
+            or not protocol._hex(interval["cohort_content_sha256"])):
+        _refuse("CLIENT_INTERVAL_PURPOSE_REFUSED")
     protocol._tighten(budget, interval["deadline_monotonic_ns"])
     origin_instance = _instance_fields(interval["origin"])
     request, forward_digest = forward.validate_forward_request(interval["request"])
@@ -222,16 +225,18 @@ def _run_origin_client(*, stdin=None, stdout=None) -> int:
         if captured.euid != 0 or captured.pid != 1:
             _refuse("CLIENT_SERVER_PEER_NOT_LAUNCHD")
         live()
-        precheck = parent({"kind": "need-precheck", "v": 1})
+        precheck = parent({"kind": "need-precheck", "v": protocol._WIRE_VERSION})
         protocol._shape(precheck, _PRECHECK_KEYS, "precheck")
         if (precheck["boot_id"] != interval["boot_id"] or
                 precheck["release_commit"] != interval["release_commit"] or
+                precheck["purpose"] != interval["purpose"] or
+                precheck["cohort_content_sha256"] != interval["cohort_content_sha256"] or
                 not protocol._hex(precheck["socket_sha256"])):
             _refuse("CLIENT_PRECHECK_MISMATCH")
         _instance_fields(precheck["broker"])
         # Parent records the attempt before acknowledging. Every partial or
         # uncertain write after this edge remains UNKNOWN in the parent.
-        ack = parent({"kind": "sent", "v": 1, "forward_request_sha256": forward_digest})
+        ack = parent({"kind": "sent", "v": protocol._WIRE_VERSION, "forward_request_sha256": forward_digest})
         protocol._shape(ack, {"kind", "v", "forward_request_sha256"}, "attempt-ack")
         if ack["forward_request_sha256"] != forward_digest: _refuse("CLIENT_ATTEMPT_MISMATCH")
         live()
@@ -246,7 +251,8 @@ def _run_origin_client(*, stdin=None, stdout=None) -> int:
                 if acquired or not protocol._hex(frame["nonce"], 32): _refuse("CLIENT_ACQUIRE_REPLAY")
                 expected_digest = protocol.hashlib.sha256(_canonical(frame["binding"])).hexdigest()
                 if (frame["binding_sha256"] != expected_digest or frame["binding"].get("F") != forward_digest
-                        or frame["binding"].get("nonce") != frame["nonce"]):
+                        or frame["binding"].get("nonce") != frame["nonce"]
+                        or frame["binding"].get("observation_purpose") != interval["purpose"]):
                     _refuse("CLIENT_BINDING_MISMATCH")
                 protocol._tighten(budget, frame["deadline_monotonic_ns"])
                 # Relay our earlier retained ceiling; the trusted parent will
@@ -286,13 +292,15 @@ def _run_origin_client(*, stdin=None, stdout=None) -> int:
                 response = validate_forward_recovery_response(frame, request.to_dict(),
                     expected_release_sha=interval["release_commit"])
                 if response["ok"] and not closed: _refuse("CLIENT_SUCCESS_BEFORE_CLEANUP")
-                _write_stream_frame(stdout, {"kind": "response", "v": 1, "response": response}, budget)
+                _write_stream_frame(stdout, {"kind": "response", "v": protocol._WIRE_VERSION, "response": response}, budget)
                 return 0
             if (observation["stage"] != expected_stage or type(observation["ordinal"]) is not int
                     or observation["ordinal"] != expected_ordinal or observation["binding_sha256"] != binding_digest
                     or observation["deadline_monotonic_ns"] != budget.endpoint
                     or observation["origin"] != origin_instance or observation["boot_id"] != interval["boot_id"]
                     or observation["release_commit"] != interval["release_commit"]
+                    or observation["purpose"] != interval["purpose"]
+                    or observation["cohort_content_sha256"] != interval["cohort_content_sha256"]
                     or observation["broker"] != precheck["broker"] or observation["socket_sha256"] != precheck["socket_sha256"]):
                 _refuse("CLIENT_OBSERVATION_MISMATCH")
             live()

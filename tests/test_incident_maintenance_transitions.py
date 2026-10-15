@@ -35,15 +35,21 @@ def world(monkeypatch):
 
     def observe(*, deadline_monotonic_ns):
         state.observations += 1
+        from dataclasses import replace
+        from tests.incident_release_fixtures import make_observation
+        result = make_observation(source=SOURCE, boot="same-boot", states={
+            "broker": state.broker, "control": state.consumer,
+            "worker": state.consumer})
         rows = []
-        for i, role in enumerate(m._ROLES):
-            digest = configs.roles[i].content.configuration_digest if i < 2 else "d" * 64
-            content = S(release_commit=SOURCE["release_sha"], installed_manifest_digest=SOURCE["manifest_sha256"],
-                        configuration_digest=digest,
-                        plist_digest="e" * 64 if state.content_drift_at == state.observations else "f" * 64)
-            status = state.broker if role == "broker" else ("RUNNING" if role == "gateway" else state.consumer)
-            rows.append(S(role=role, state=status, content=content))
-        return S(roles=tuple(rows), boot_id="same-boot")
+        for i, row in enumerate(result.roles):
+            content = replace(row.content,
+                configuration_digest=configs.roles[i].content.configuration_digest if i < 2 else "d" * 64,
+                plist_digest="e" * 64 if state.content_drift_at == state.observations else "f" * 64)
+            rows.append(replace(row, content=content,
+                service_generation_digest=m.release._digest(m.release._CONTENT_DOMAIN, __import__('dataclasses').asdict(content))))
+        rows = tuple(rows)
+        return replace(result, roles=rows, cohort_content_sha256=m.incident_release._cohort_digest(rows))
+
 
     def census(budget):
         return S(observer="own", matching_runtime_instances=("own", "other") if state.other_owner else ("own",))
@@ -76,7 +82,7 @@ def world(monkeypatch):
         state.cleanup.append(handle)
 
     monkeypatch.setattr(m, "_source", source)
-    monkeypatch.setattr(m.release, "_observe_release", observe)
+    monkeypatch.setattr(m.incident_release, "_observe_incident_release", observe)
     monkeypatch.setattr(m.host, "_root_census", census)
     monkeypatch.setattr(m.origin, "_run_owned_native_command", modify)
     monkeypatch.setattr(m.release, "_command", read)
