@@ -58,37 +58,52 @@ def test_single_exclusive_publication_preserves_bytes_and_refuses_replay(qualifi
     assert set(p.name for p in destination.iterdir())==pub.FILES
 
 
-def test_partial_error_preserves_original_directory_without_replay(monkeypatch,qualified_host,tmp_path):
+def test_private_stage_write_error_never_creates_partial_canonical(monkeypatch,qualified_host,tmp_path):
     _,_,files,_=qualified_host
     destination=tmp_path/'fabric-minimax-finite-01'
     original=pub.os.fchown
     count=[0]
     def deny_second(fd,uid,gid):
         count[0]+=1
+        assert not destination.exists()
         if count[0]==2: raise OSError('test-only simulated incomplete write')
         return original(fd,uid,gid)
     monkeypatch.setattr(pub.os,'fchown',deny_second)
-    with pytest.raises(pub.FinitePublicationEffectUnknown):
+    with pytest.raises(pub.FinitePublicationRefused,match='without canonical'):
         pub._write_exclusive(destination,files,uid=os.getuid(),gid=os.getgid())
-    assert destination.is_dir()
-    assert (destination.stat().st_mode&0o777)==0o700
-    with pytest.raises(pub.FinitePublicationRefused):
-        pub._write_exclusive(destination,files,uid=os.getuid(),gid=os.getgid())
+    assert not destination.exists()
+    assert not list(tmp_path.glob('.fabric-minimax-finite-01.*.stage'))
+    monkeypatch.setattr(pub.os,'fchown',original)
+    assert pub._write_exclusive(destination,files,uid=os.getuid(),gid=os.getgid())==pub.verify_candidate(files)
+    assert set(path.name for path in destination.iterdir())==pub.FILES
 
 
 def test_capacity_owner_refusal_blocks_root_publication_before_effect(monkeypatch,qualified_host,tmp_path):
-    _,_,files,_=qualified_host
+    _,prior,files,_=qualified_host
+    home=tmp_path/'control-config';home.mkdir()
+    monkeypatch.setattr(pub.owner,'CONFIG_ROOT',home)
+    monkeypatch.setattr(pub,'DESTINATION',home/'fabric-minimax-finite-01')
+    monkeypatch.setattr(pub.os,'geteuid',lambda:0)
+    class Owner:
+        def require_exact_install(self,sha):return sha
+        def require_transaction_absent(self):return None
+        def _config_root_safe(self):return None
+        def require_services_already_stopped(self):return None
+        def require_service_uids_quiescent(self):return None
+        def load_unarmed_configs(self,sha):return prior
+        def require_runtime_quiescent(self,prior):return None
+    monkeypatch.setattr(pub.owner,'ProductionCeoSubmitHost',Owner)
     calls=[]
-    monkeypatch.setattr(pub.os, "geteuid", lambda: 0)
     def refuse(join):
         calls.append(join.to_dict())
         return False
-    with pytest.raises(pub.FinitePublicationRefused,match='Capacity owner refused'):
-        pub.publish_disarmed_definition('a'*40,'a'*64,files,verified_capacity_binding=refuse)
+    with pytest.raises(pub.FinitePublicationRefused,match='Capacity/config binding differs'):
+        pub.publish_disarmed_definition('a'*40,prior.control_sha256,files,
+            verified_capacity_binding=refuse)
     assert len(calls)==1 and calls[0]['host_ref']=='host-'+'a'*64
     assert calls[0]['capacity_capability_id']=='fixture-capacity'
     assert len(calls[0]['worker_source_config_digest'])==64
-    assert not (tmp_path/'fabric-minimax-finite-01').exists()
+    assert not pub.DESTINATION.exists()
 
 
 def test_no_owner_capacity_callback_blocks_before_root_preflight(monkeypatch,qualified_host):
@@ -143,7 +158,7 @@ def test_root_owner_publishes_only_after_same_locked_config_and_render(monkeypat
         verified_capacity_binding=capacity)
     assert x['state']=='STAGED_DISARMED_DEFINITION'
     assert x['admitted_worker'] is False and x['service_started'] is False
-    assert actions.count('capacity-checked')==3
+    assert actions.count('capacity-checked')==2
     assert actions.index('stopped')<actions.index('publish')
     assert actions.index('disarmed')<actions.index('publish')
     assert actions.index('render-rechecked')<actions.index('publish')
@@ -176,16 +191,15 @@ def test_runtime_source_drift_refuses_before_any_effect(monkeypatch,qualified_ho
             verified_capacity_binding=lambda *a:True)
     assert not pub.DESTINATION.exists()
 
-def test_native_acl_drift_fails_closed_and_preserves_partial_state(monkeypatch,qualified_host,tmp_path):
+def test_native_acl_drift_prevents_canonical_publication(monkeypatch,qualified_host,tmp_path):
     _,_,files,_=qualified_host
     from control_plane import fs_security
     directory=tmp_path/'fabric-minimax-finite-01'
     monkeypatch.setattr(fs_security, 'has_macos_acl', lambda *a,**kw: True)
-    with pytest.raises(pub.FinitePublicationEffectUnknown):
+    with pytest.raises(pub.FinitePublicationRefused,match='without canonical'):
         pub._write_exclusive(directory,files,uid=os.getuid(),gid=os.getgid())
-    assert directory.exists() and (directory.stat().st_mode & 0o777)==0o700
-    with pytest.raises(pub.FinitePublicationRefused):
-        pub._write_exclusive(directory,files,uid=os.getuid(),gid=os.getgid())
+    assert not directory.exists()
+    assert not list(tmp_path.glob('.fabric-minimax-finite-01.*.stage'))
 
 
 def test_destination_symlink_is_never_adopted(monkeypatch,qualified_host,tmp_path):
@@ -201,12 +215,15 @@ def test_protected_mode_review_is_exact_source_only():
     source=Path(__file__).parents[1]/'ops/executive_os/finite_definition_publication.py'
     body=source.read_text()
     spans=reviewed_literal_spans('ops/executive_os/finite_definition_publication.py',body)
-    assert len(spans)==9
+    assert len(spans)==17
     spellings=[body.splitlines()[line-1][start:end] for line,start,end,_ in spans]
-    assert spellings.count('0o700')==3
-    assert spellings.count('470')==3
-    assert spellings.count('450')==1
     assert spellings.count('"_mastermind_minimax"')==2
+    assert spellings.count('0o440')==1
+    assert spellings.count('0o444')==2
+    assert spellings.count('0o700')==5
+    assert spellings.count('0o755')==3
+    assert spellings.count('450')==1
+    assert spellings.count('470')==3
     assert reviewed_literal_spans('ops/executive_os/finite_definition_publication.py',
         body+'\n# changed source')==()
     assert reviewed_literal_spans('ops/executive_os/foreign.py',body)==()
@@ -243,7 +260,7 @@ def test_installed_source_entry_never_skips_original_stopped_service_gate(
         lambda *args: pytest.fail('render must not run during live service'))
     monkeypatch.setattr(pub,'publish_disarmed_definition',
         lambda *args,**kwargs: pytest.fail('publication never bypasses stopped service'))
-    with pytest.raises(ValueError,match='Control still running'):
+    with pytest.raises(pub.FinitePublicationRefused,match='root/Capacity source preflight'):
         pub.publish_from_installed_sources('a'*40, 'e'*64, join,
             verified_capacity_binding=lambda j: True)
     assert calls==['release','marker','service-running']
@@ -318,3 +335,114 @@ def test_post_write_control_drift_is_uncertain_effect_never_success(
         pub.publish_disarmed_definition('a'*40,prior.control_sha256,files,
             verified_capacity_binding=lambda join:True)
     assert writes==[True] and reads==[2]
+
+def test_rename_ack_lost_preserves_original_canonical_and_unknown_effect(
+        monkeypatch, qualified_host,tmp_path):
+    _,_,files,_=qualified_host
+    destination=tmp_path/'fabric-minimax-finite-01'
+    from ops.executive_os import capacity_host_artifacts as owner_rename
+    def issued_then_lost(src_fd,source,dst_fd,target):
+        os.rename(source,target,src_dir_fd=src_fd,dst_dir_fd=dst_fd)
+        raise OSError('simulated native ack lost after rename')
+    monkeypatch.setattr(owner_rename,'_rename_exclusive',issued_then_lost)
+    with pytest.raises(pub.FinitePublicationEffectUnknown):
+        pub._write_exclusive(destination,files,uid=os.getuid(),gid=os.getgid())
+    assert destination.exists()
+    assert set(p.name for p in destination.iterdir())==pub.FILES
+    assert all((destination/name).read_bytes()==data for name,data in files.items())
+    assert not list(tmp_path.glob('.fabric-minimax-finite-01.*.stage'))
+    with pytest.raises(pub.FinitePublicationRefused,match='already exists'):
+        pub._write_exclusive(destination,files,uid=os.getuid(),gid=os.getgid())
+
+
+def test_failed_native_no_replace_before_effect_discards_own_private_stage(
+        monkeypatch,qualified_host,tmp_path):
+    _,_,files,_=qualified_host
+    destination=tmp_path/'fabric-minimax-finite-01'
+    from ops.executive_os import capacity_host_artifacts as owner_rename
+    monkeypatch.setattr(owner_rename,'_rename_exclusive',
+        lambda *args:(_ for _ in ()).throw(OSError('atomic no-replace refused')))
+    with pytest.raises(pub.FinitePublicationRefused,match='without canonical'):
+        pub._write_exclusive(destination,files,uid=os.getuid(),gid=os.getgid())
+    assert not destination.exists() and not list(tmp_path.glob('.fabric-minimax-finite-01.*.stage'))
+
+
+def test_private_snapshot_remains_exact_after_mutating_original_mapping(
+        monkeypatch,qualified_host,tmp_path):
+    _,_,files,_=qualified_host
+    destination=tmp_path/'fabric-minimax-finite-01'
+    frozen=dict(files)
+    original_write=pub.os.write
+    changed=[False]
+    def mutate_after_first_write(fd,data):
+        if not changed[0]:
+            files['owner_entry.py']=b'NOT_THE_REVIEWED_ENTRY'
+            changed[0]=True
+        return original_write(fd,data)
+    monkeypatch.setattr(pub.os,'write',mutate_after_first_write)
+    digests=pub._write_exclusive(destination,files,uid=os.getuid(),gid=os.getgid())
+    assert changed[0]
+    assert digests==pub.verify_candidate(frozen)
+    assert all((destination/name).read_bytes()==raw for name,raw in frozen.items())
+
+def test_lock_busy_is_definite_refusal_before_any_directory_effect(
+        monkeypatch,qualified_host,tmp_path):
+    _, prior, files, _ = qualified_host
+    home=tmp_path/'control-config';home.mkdir()
+    monkeypatch.setattr(pub.owner,'CONFIG_ROOT',home)
+    monkeypatch.setattr(pub,'DESTINATION',home/'fabric-minimax-finite-01')
+    monkeypatch.setattr(pub.os,'geteuid',lambda:0)
+    class Owner:
+        def require_exact_install(self,sha):return sha
+        def require_transaction_absent(self):return None
+        def _config_root_safe(self):return None
+    monkeypatch.setattr(pub.owner,'ProductionCeoSubmitHost',Owner)
+    monkeypatch.setattr(pub.fcntl,'flock',
+        lambda *a: (_ for _ in ()).throw(BlockingIOError('other owner writing')))
+    called=[]
+    with pytest.raises(pub.FinitePublicationRefused,match='mutex occupied'):
+        pub.publish_disarmed_definition('a'*40,prior.control_sha256,files,
+            verified_capacity_binding=lambda join:called.append(join))
+    assert called==[] and not pub.DESTINATION.exists()
+
+
+def test_installed_release_refusal_never_invokes_capacity(monkeypatch,qualified_host,tmp_path):
+    _, prior, files, _ = qualified_host
+    monkeypatch.setattr(pub.os,'geteuid',lambda:0)
+    class Owner:
+        def require_exact_install(self,sha):
+            raise ValueError('stale release')
+        def require_transaction_absent(self):
+            raise AssertionError('not reached')
+    monkeypatch.setattr(pub.owner,'ProductionCeoSubmitHost',Owner)
+    called=[]
+    with pytest.raises(pub.FinitePublicationRefused,match='original Control/Capacity qualification'):
+        pub.publish_disarmed_definition('a'*40,prior.control_sha256,files,
+            verified_capacity_binding=lambda join:called.append(join) or True)
+    assert called==[]
+
+def test_original_private_stage_refuses_new_generation_without_cleanup(
+        qualified_host,tmp_path):
+    _,_,files,_=qualified_host
+    name='.fabric-minimax-finite-01.original.1234.stage'
+    orphan=tmp_path/name;orphan.mkdir(mode=0o700)
+    destination=tmp_path/'fabric-minimax-finite-01'
+    with pytest.raises(pub.FinitePublicationRefused,match='prior finite private stage'):
+        pub._write_exclusive(destination,files,uid=os.getuid(),gid=os.getgid())
+    assert orphan.exists() and not destination.exists()
+    assert [p.name for p in tmp_path.glob('.fabric-minimax-finite-01.*.stage')]==[name]
+
+
+def test_late_canonical_collision_is_preserved_and_never_replaced(
+        monkeypatch,qualified_host,tmp_path):
+    _,_,files,_=qualified_host
+    destination=tmp_path/'fabric-minimax-finite-01'
+    from ops.executive_os import capacity_host_artifacts as owner_rename
+    def late_foreign_name(src_fd,source,dst_fd,target):
+        os.mkdir(target,0o700,dir_fd=dst_fd)
+        raise FileExistsError('test foreign canonical appeared')
+    monkeypatch.setattr(owner_rename,'_rename_exclusive',late_foreign_name)
+    with pytest.raises(pub.FinitePublicationRefused,match='without canonical'):
+        pub._write_exclusive(destination,files,uid=os.getuid(),gid=os.getgid())
+    assert destination.exists() and list(destination.iterdir())==[]
+    assert not list(tmp_path.glob('.fabric-minimax-finite-01.*.stage'))
