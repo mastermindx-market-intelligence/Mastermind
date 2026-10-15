@@ -67,5 +67,14 @@
     "producer_admission": "_host_live_source_admitted default FALSE in production, synthetic positive test injection only",
     "capital_effect": "NONE",
     "remaining": "actual Data OS source/usage proof before live automated redecision"
+  },
+  "protected_master_merge": {
+    "original_source": "379600f69538bc3232af8399138bc31384f8881e",
+    "protected_parent": "a53062ff18df71869a1363d35a99347f06d9a3fb",
+    "passed": 144,
+    "failed": 0,
+    "skipped": 0,
+    "junit_sha256": "e42f4503966e6d303351150983994445588bbcd4188641def99b6d44ef085ee3",
+    "status": "SOURCE_ONLY_HOLD"
   }
 }

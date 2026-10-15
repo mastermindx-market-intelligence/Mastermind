@@ -1184,6 +1184,14 @@ if ! /usr/bin/id -Gn "$OPERATOR_USER" | /usr/bin/tr ' ' '\n' | /usr/bin/grep -qx
 fi
 OPERATOR_UID="$(/usr/bin/id -u "$OPERATOR_USER")"
 
+# Ordinary installation also binds the early readback helper to the same
+# exact clean source checkout. Frozen mode separately qualifies the installer
+# checkout through install_source_policy.py below.
+if [ "$ALLOW_FROZEN_ACCEPTED_ANCESTOR" != "1" ] \
+  && [ "$SCRIPT_DIR" != "$SOURCE_REPO/ops/executive_os" ]; then
+  /bin/echo "ordinary installer helpers must belong to the selected source checkout" >&2
+  exit 65
+fi
 SOURCE_POLICY="$SCRIPT_DIR/install_source_policy.py"
 [ -f "$SOURCE_POLICY" ] && [ ! -L "$SOURCE_POLICY" ] || {
   /bin/echo "installer source policy helper is unavailable or unsafe" >&2
@@ -1326,17 +1334,13 @@ CODEX_CODE_MODE_HOST_TEMP=""
 wait_for_launchd_absent() {
   local label="$1"
   local description="$2"
-  local attempt
-  for attempt in 1 2 3 4 5; do
-    if ! /bin/launchctl print "system/$label" >/dev/null 2>&1; then
-      return 0
-    fi
-    if [ "$attempt" -lt 5 ]; then
-      /bin/sleep 1
-    fi
-  done
-  /bin/echo "$description LaunchDaemon remained loaded after bootout" >&2
-  return 1
+  # This exact source is covered by the installer's prior source preflight.
+  # One canonical parser and one bounded readback budget; an arbitrary native
+  # error never becomes absence. This is not a recovery-origin receipt.
+  "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/recovery_install_observation.py" "$label" || {
+    /bin/echo "$description LaunchDaemon absence was not proven after bootout" >&2
+    return 1
+  }
 }
 leave_installed_services_stopped() {
   if [ -n "${CODEX_CODE_MODE_HOST_TEMP:-}" ]; then
@@ -1372,7 +1376,7 @@ trap leave_installed_services_stopped EXIT
 /bin/launchctl disable "system/$CONTROL_LABEL"
 /bin/launchctl disable "system/$WORKER_LABEL"
 /bin/launchctl disable "system/$BACKUP_LABEL"
-/bin/launchctl disable "system/$PRIVILEGED_LABEL" >/dev/null 2>&1 || true
+/bin/launchctl disable "system/$PRIVILEGED_LABEL"
 /bin/launchctl bootout "system/$PRIVILEGED_LABEL" >/dev/null 2>&1 || true
 /bin/launchctl bootout "system/$RELAY_LABEL" >/dev/null 2>&1 || true
 /bin/launchctl bootout "system/$CONTROL_LABEL" >/dev/null 2>&1 || true

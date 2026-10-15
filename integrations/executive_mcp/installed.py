@@ -1994,8 +1994,49 @@ class InstalledBootPacketCollector:
             future.set_result(shared_packet)
         return packet
 
+    def product_acceptance_basis_reader(self, *, macro_root: Path):
+        """Compose the core consumer at its existing installed-owner boundary."""
+        from control_plane import agentos_product_acceptance_basis as basis
+
+        root = Path(macro_root)
+        if (not root.is_absolute() or type(self) is not InstalledBootPacketCollector
+                or self._macro_root != root.resolve()
+                or self._code_root != basis._SOURCE_ROOT.resolve()
+                or self._expected_source_sha is None or self._allow_synthetic_fixture):
+            raise ValueError("installed Context requires the exact sealed source collector")
+        reader = basis.AgentOsProductAcceptanceBasisReader(macro_root=root)
+        reader._installed_context_owner = self
+        reader._installed_context_binding = reader._context_binding(self)
+        return reader
+
+    def read_product_acceptance_basis(
+        self, *, work_ref: str, execution_commission_ref: Any,
+        root_objective: str, timeout: float = 15.0,
+    ):
+        """Read one workstream through the same sealed physical source owner.
+
+        Only the trusted host supplies these Runtime-derived identities. This
+        is not an MCP tool or authority grant, and cannot share the global
+        boot-packet collection key. The protected workstream CLI must exist.
+        """
+        import math
+        from common.commission_ref import CommissionRef
+        from control_plane.agentos_product_acceptance_basis import ProductAcceptanceBasisUnavailable
+        if (type(work_ref) is not str
+                or re.fullmatch(r"WS:[A-Z0-9][A-Z0-9-]{1,63}", work_ref) is None
+                or type(execution_commission_ref) is not CommissionRef
+                or type(root_objective) is not str
+                or type(timeout) not in (int, float)
+                or not math.isfinite(timeout) or not 0 < timeout <= 15.0
+                or self._expected_source_sha is None):
+            raise ProductAcceptanceBasisUnavailable("BASIS_BINDING_UNAVAILABLE")
+        return self._collect_packet(
+            repo=self._source_root, now=None, timeout=float(timeout),
+            acceptance_request=(work_ref, execution_commission_ref, root_objective),
+        )
+
     def _collect_packet(self, *, repo: Path, now: str | None,
-                        timeout: float) -> dict[str, Any]:
+                        timeout: float, acceptance_request: tuple | None = None) -> Any:
         deadline = time.monotonic() + timeout
 
         def remaining() -> float:
@@ -2070,13 +2111,97 @@ class InstalledBootPacketCollector:
                     "--timeout", f"{inner_timeout:g}"]
             if now is not None:
                 argv.extend(["--now", now])
+            if acceptance_request is not None:
+                argv.extend(["--workstream", acceptance_request[0][3:],
+                             "--expected-macro-sha", pre_macro_sha])
+            output_limit = (262144 if acceptance_request is not None
+                            else ceo_boot_packet.DEFAULT_MAX_OUTPUT_BYTES)
             try:
                 result = self._runner(
                     argv, cwd=self._code_root, timeout=remaining(),
-                    max_bytes=ceo_boot_packet.DEFAULT_MAX_OUTPUT_BYTES, env=child_env,
+                    max_bytes=output_limit, env=child_env,
                 )
             except Exception as exc:
                 raise GatewayError("backend_unavailable", "installed boot-packet collector failed") from exc
+            if not isinstance(result, Mapping) or result.get("code") != 0:
+                raise GatewayError("backend_unavailable", "installed boot-packet collector failed")
+            if any(result.get(flag) is True for flag in ("timed_out", "limit_exceeded", "invalid_utf8")):
+                raise GatewayError("backend_unavailable", "installed boot-packet collector failed")
+            stdout = result.get("stdout")
+            if type(stdout) is not str:
+                raise GatewayError("backend_unavailable", "installed boot-packet collector failed")
+            if acceptance_request is not None:
+                from common.commission_ref import normalize_commission_ref
+                from control_plane.agentos_product_acceptance_basis import (
+                    AgentOsProductAcceptanceBasisReader, ProductAcceptanceBasisUnavailable,
+                )
+
+                def unique_object(pairs):
+                    value = {}
+                    for key, item in pairs:
+                        if key in value:
+                            raise ValueError("duplicate Context key")
+                        value[key] = item
+                    return value
+
+                def nonfinite(_value):
+                    raise ValueError("nonfinite Context value")
+
+                try:
+                    bundle = json.loads(stdout, object_pairs_hook=unique_object,
+                                        parse_constant=nonfinite)
+                    work_ref, execution_ref, root_objective = acceptance_request
+                    packet = AgentOsProductAcceptanceBasisReader._select(
+                        bundle, expected_sha=pre_macro_sha, work_ref=work_ref,
+                        execution_ref=execution_ref, root_objective=root_objective,
+                    )
+                    source = normalize_commission_ref(packet.entry["source_record_ref"])
+                    try:
+                        record = self._runner(
+                            ["git", "-C", os.fspath(packet_macro_root), "show",
+                             f"{source.commit}:{source.path}"],
+                            cwd=packet_macro_root, timeout=remaining(),
+                            max_bytes=output_limit, env=child_env,
+                        )
+                    except Exception:
+                        raise GatewayError("backend_unavailable", "installed Context record unavailable") from None
+                    if (not isinstance(record, Mapping) or record.get("code") != 0
+                            or type(record.get("stdout")) is not str
+                            or any(record.get(flag) is True for flag in
+                                   ("timed_out", "limit_exceeded", "invalid_utf8"))):
+                        raise GatewayError("backend_unavailable", "installed Context record unavailable")
+                    if (hashlib.sha256(record["stdout"].encode("utf-8")).hexdigest()
+                            != source.content_sha256):
+                        raise ProductAcceptanceBasisUnavailable("CONTEXT_SOURCE_CHANGED")
+                except (ValueError, TypeError, KeyError, RecursionError):
+                    raise ProductAcceptanceBasisUnavailable("BASIS_UNAVAILABLE") from None
+            else:
+                try:
+                    packet = json.loads(stdout)
+                except ValueError as exc:
+                    raise GatewayError("backend_unavailable", "installed boot-packet collector emitted invalid JSON") from exc
+                if not isinstance(packet, dict) or packet.get("schema") != ceo_boot_packet.SCHEMA:
+                    raise GatewayError("backend_unavailable", "installed boot-packet collector emitted the wrong schema")
+                mastermind = packet.get("mastermind")
+                macro_doc = packet.get("macro")
+                try:
+                    packet_repo = (
+                        Path(mastermind["root"]).resolve()
+                        if isinstance(mastermind, Mapping) else None
+                    )
+                    packet_macro = (
+                        Path(macro_doc["root"]).resolve()
+                        if isinstance(macro_doc, Mapping) else None
+                    )
+                    packet_source_sha = mastermind.get("sha") if isinstance(mastermind, Mapping) else None
+                    packet_macro_sha = macro_doc.get("sha") if isinstance(macro_doc, Mapping) else None
+                except (KeyError, TypeError, OSError):
+                    packet_repo = packet_macro = None
+                    packet_source_sha = packet_macro_sha = None
+                if packet_repo != self._source_root or packet_macro != packet_macro_root:
+                    raise GatewayError("backend_unavailable", "installed boot-packet roots differ")
+                if packet_source_sha != pre_source_sha or packet_macro_sha != pre_macro_sha:
+                    raise GatewayError("backend_unavailable", "installed boot-packet SHA binding differs")
             if materialized_observation is not None:
                 try:
                     post_materialized = _snapshot_generation_observation(
@@ -2097,39 +2222,6 @@ class InstalledBootPacketCollector:
                         "backend_unavailable",
                         "installed materialized Macro changed during boot-packet read",
                     )
-            if not isinstance(result, Mapping) or result.get("code") != 0:
-                raise GatewayError("backend_unavailable", "installed boot-packet collector failed")
-            if any(result.get(flag) is True for flag in ("timed_out", "limit_exceeded", "invalid_utf8")):
-                raise GatewayError("backend_unavailable", "installed boot-packet collector failed")
-            stdout = result.get("stdout")
-            if type(stdout) is not str:
-                raise GatewayError("backend_unavailable", "installed boot-packet collector failed")
-            try:
-                packet = json.loads(stdout)
-            except ValueError as exc:
-                raise GatewayError("backend_unavailable", "installed boot-packet collector emitted invalid JSON") from exc
-            if not isinstance(packet, dict) or packet.get("schema") != ceo_boot_packet.SCHEMA:
-                raise GatewayError("backend_unavailable", "installed boot-packet collector emitted the wrong schema")
-            mastermind = packet.get("mastermind")
-            macro_doc = packet.get("macro")
-            try:
-                packet_repo = (
-                    Path(mastermind["root"]).resolve()
-                    if isinstance(mastermind, Mapping) else None
-                )
-                packet_macro = (
-                    Path(macro_doc["root"]).resolve()
-                    if isinstance(macro_doc, Mapping) else None
-                )
-                packet_source_sha = mastermind.get("sha") if isinstance(mastermind, Mapping) else None
-                packet_macro_sha = macro_doc.get("sha") if isinstance(macro_doc, Mapping) else None
-            except (KeyError, TypeError, OSError):
-                packet_repo = packet_macro = None
-                packet_source_sha = packet_macro_sha = None
-            if packet_repo != self._source_root or packet_macro != packet_macro_root:
-                raise GatewayError("backend_unavailable", "installed boot-packet roots differ")
-            if packet_source_sha != pre_source_sha or packet_macro_sha != pre_macro_sha:
-                raise GatewayError("backend_unavailable", "installed boot-packet SHA binding differs")
 
             try:
                 post_source_sha, post_macro_sha, post_source_seal, post_macro_seal = (
@@ -2162,9 +2254,10 @@ class InstalledBootPacketCollector:
                 or post_macro_seal != pre_macro_seal
             ):
                 raise GatewayError("backend_unavailable", "installed source changed during boot-packet read")
-            packet = _project_macro_identity(
-                packet, materialized_root=packet_macro_root, canonical_root=self._macro_root,
-            )
+            if acceptance_request is None:
+                packet = _project_macro_identity(
+                    packet, materialized_root=packet_macro_root, canonical_root=self._macro_root,
+                )
         remaining()
         return packet
 
