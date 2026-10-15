@@ -143,6 +143,15 @@ def _run_origin_command(argv: tuple, budget: release._Budget) -> tuple:
     """Closed owned launcher readback; bounded pipes and complete cleanup."""
     if type(argv) is not tuple or argv not in _ORIGIN_COMMANDS:
         _refuse("ORIGIN_COMMAND_REFUSED")
+    return _run_owned_native_command(argv, budget)
+
+
+def _run_owned_native_command(argv: tuple, budget: release._Budget) -> tuple:
+    """Internal process mechanic; trusted callers own their fixed verb lists.
+
+    No request, environment or public CLI selects this callable or its argv.
+    The original origin entry retains its narrower command fence above.
+    """
     budget.check(force=True)
     end = min(budget.endpoint, time.monotonic_ns() + 3_000_000_000)
     process = None
