@@ -163,7 +163,7 @@ def main(argv=None):
             # composition here, after qualify and before any listener exists.
             # A v1 owner (selected_options None) keeps the exact legacy call, and
             # a failed selected preparation refuses without legacy fallback.
-            selected = getattr(verifier,'selected_options',None)
+            selected = verifier.selected_options
             if selected is None:
                 app = create_runtime(deployment,verifier,policy,audit_sink=audit)
             else:

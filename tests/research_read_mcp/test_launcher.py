@@ -63,7 +63,7 @@ def test_serving_entry_opens_secure_durable_audit_before_runtime(tmp_path, monke
         selected.symlink_to(target, target_is_directory=True)
     policy = Harness().policy
     deployment = parsed(policy_id=policy.policy_id)
-    monkeypatch.setattr(m, 'qualify', lambda *args: (deployment, None, policy))
+    monkeypatch.setattr(m, 'qualify', lambda *args: (deployment, SelectedOwnerVerifier(None), policy))
     composed = []
     served = []
     def create(*args, audit_sink):
@@ -155,8 +155,11 @@ def test_serving_main_v1_owner_keeps_exact_legacy_factory_call(tmp_path,monkeypa
     captured={}
     def create(*args,audit_sink,**kwargs):
         captured['args']=args;captured['kwargs']=kwargs;return object()
-    result,served=serve_with(tmp_path,monkeypatch,m,deployment,policy,object(),create)
-    # A v1 owner (or absent attribute) supplies nothing: no default-selected call.
+    from integrations.research_read_mcp import release_identity
+    from tests.research_read_mcp.test_release_identity import owner_config
+    verifier=release_identity.load_archive_verifier(str(owner_config(tmp_path)), deployment, owner_uid=os.geteuid())
+    result,served=serve_with(tmp_path,monkeypatch,m,deployment,policy,verifier,create)
+    # A real v1 bound owner supplies no selected options.
     assert result==0 and len(served)==1
     assert 'selected_options' not in captured['kwargs']
 
@@ -178,7 +181,8 @@ def test_selected_preparation_failure_refuses_without_fallback(tmp_path,monkeypa
     assert result==1 and len(attempts)==1 and not legacy and not served
 
 
-def test_invalid_selected_owner_refuses_before_runtime_or_audit(tmp_path,monkeypatch):
+@pytest.mark.parametrize("writer_declaration", [1, True])
+def test_invalid_selected_owner_refuses_before_runtime_or_audit(tmp_path,monkeypatch,writer_declaration):
     from integrations.research_read_mcp import release_identity,runtime
     m=launcher()
     owner=tmp_path.resolve()/'owner.json'
@@ -188,8 +192,10 @@ def test_invalid_selected_owner_refuses_before_runtime_or_audit(tmp_path,monkeyp
         'selected_read':{'expected_producer_commit':'b'*40,'max_age_seconds':3600,
             'max_reuse_seconds':300,'corpus_byte_budget':32*1024*1024,
             'image_admission_bytes':256*1024*1024,'refresh_interval_seconds':30,
-            'writer_protocol_qualified':1,'valid_until':int(time.time())+3600}}
+            'writer_protocol_qualified':writer_declaration,'valid_until':int(time.time())+3600}}
     owner.write_text(json.dumps(value));owner.chmod(0o600)
+    archive_checks=[]
+    monkeypatch.setattr(release_identity,'verify_archive_release',lambda *a,**k:archive_checks.append(a))
     monkeypatch.setattr(runtime,'load_deployment',lambda *a,**k:parsed())
     composed=[]
     monkeypatch.setattr(m,'create_runtime',lambda *a,**k:composed.append(a))
@@ -198,6 +204,10 @@ def test_invalid_selected_owner_refuses_before_runtime_or_audit(tmp_path,monkeyp
     result=m.main(['--config','/synthetic/deployment.json','--archive-owner',str(owner),
                    '--audit-directory',str(target)])
     assert result==1 and not composed and not target.exists()
+    # A valid declaration reaches both archive checks before this deliberately
+    # foreign launcher identity refuses. An invalid declaration reaches none;
+    # missing manifest or later gates cannot make the negative case vacuous.
+    assert len(archive_checks)==(2 if writer_declaration is True else 0)
 
 
 def test_admitted_options_run_selected_path_with_owner_and_refresh(tmp_path,monkeypatch):
@@ -236,7 +246,8 @@ async def selected_composition(tmp_path,monkeypatch):
                            selected_options=options)
     assert h.app.state.research_selection_owner is selected
     assert h.app.state.research_refresh_owner is not None
-    # Binding never prepares; preparation stays an explicit owner action.
+    # This test substitutes the entire composition factory, including prepare.
+    # Real startup preparation is pinned by test_selected_factory.
     assert prepared==[]
     await h.start()
     try:
@@ -248,3 +259,11 @@ async def selected_composition(tmp_path,monkeypatch):
         assert ready.headers['cache-control']=='no-store'
     finally:
         await h.stop()
+
+
+def test_unexpected_owner_shape_refuses_without_legacy_factory(tmp_path,monkeypatch):
+    m=launcher();policy=Harness().policy;deployment=parsed(policy_id=policy.policy_id)
+    calls=[]
+    result,served=serve_with(tmp_path,monkeypatch,m,deployment,policy,object(),
+        lambda *a,**k:calls.append(k))
+    assert result==1 and not calls and not served

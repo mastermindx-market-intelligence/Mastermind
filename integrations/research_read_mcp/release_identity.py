@@ -34,6 +34,7 @@ ARCHIVE_OWNER_SCHEMA = "mastermind.research_read_archive_owner.v1"
 # qualification. No default-true or default-selected behavior exists: a v1
 # owner file admits no selected options at all.
 SELECTED_ARCHIVE_OWNER_SCHEMA = "mastermind.research_read_archive_owner.v2"
+MAX_SELECTED_OWNER_VALIDITY_SECONDS = 24 * 60 * 60
 _OWNER_MANIFEST_FIELDS = frozenset({"schema", "manifest_path", "manifest_sha256"})
 _SELECTED_OWNER_FIELDS = _OWNER_MANIFEST_FIELDS | {"selected_read"}
 _SELECTED_READ_FIELDS = frozenset({
@@ -245,17 +246,20 @@ def _selected_owner_options(selected, *, path, owner_uid, admitted):
     """Validate one explicit closed selected_read object into SelectedReadOptions.
 
     Every field must be present, no extra field may exist, the owner must have
-    declared a currently qualified writer protocol and a future finite int
-    valid_until, and the numeric bounds are the existing SelectedReadOptions
+    declared a currently qualified writer protocol and a future int
+    valid_until no more than 24 hours away, and the numeric bounds are the existing SelectedReadOptions
     bounds. The producer commit is independent of the reader release commit.
     """
     try:
         if type(selected) is not dict or set(selected) != _SELECTED_READ_FIELDS:
             _refuse()
         valid_until = selected["valid_until"]
+        now = int(_wall_now())
+        # A finite horizon also rejects milliseconds mistaken for epoch seconds.
         # ``is True`` rejects JSON 1/1.0; a past or non-int valid_until never binds.
         if (selected["writer_protocol_qualified"] is not True
-                or type(valid_until) is not int or valid_until <= int(_wall_now())):
+                or type(valid_until) is not int
+                or not now < valid_until <= now + MAX_SELECTED_OWNER_VALIDITY_SECONDS):
             _refuse()
         from .selected_factory import SelectedReadOptions
         options = SelectedReadOptions(

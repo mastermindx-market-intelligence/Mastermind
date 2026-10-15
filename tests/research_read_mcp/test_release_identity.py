@@ -269,7 +269,7 @@ def test_v2_owner_admits_exact_options_with_live_fresh_reread_policy(tmp_path, m
                                     "missing_field", "bool_int", "wrong_policy", "bool_expiry",
                                     "malformed_producer", "past_expiry", "float_expiry",
                                     "nonfinite", "bad_bounds_age", "bad_bounds_zero",
-                                    "bad_bounds_refresh", "v1_with_read", "unknown_schema"])
+                                    "bad_bounds_refresh", "v1_with_read", "unknown_schema", "millisecond_expiry", "excessive_expiry"])
 def test_selected_owner_closed_schema_and_values_refuse(tmp_path, change):
     from tests.research_read_mcp.test_runtime import parsed
     deployment = parsed()
@@ -301,6 +301,10 @@ def test_selected_owner_closed_schema_and_values_refuse(tmp_path, change):
         read = {"expected_producer_commit": "B" * 40}
     elif change == "past_expiry":
         valid_until = int(identity._wall_now()) - 1
+    elif change == "millisecond_expiry":
+        valid_until = int(identity._wall_now()) * 1000
+    elif change == "excessive_expiry":
+        valid_until = 2 ** 62
     elif change == "float_expiry":
         valid_until = float(int(identity._wall_now())) + 3600.0
     elif change == "nonfinite":
@@ -332,7 +336,7 @@ def test_selected_owner_binding_refuses_past_valid_until(tmp_path, monkeypatch):
         identity.load_archive_verifier(str(path), parsed(), owner_uid=os.geteuid())
 
 
-@pytest.mark.parametrize("change", ["deleted", "insecure", "mutated", "expired", "restored"])
+@pytest.mark.parametrize("change", ["deleted", "insecure", "mutated", "reformatted", "expiry_boundary", "expired", "restored"])
 def test_owner_file_lifecycle_denies_writer_policy(tmp_path, monkeypatch, change):
     from tests.research_read_mcp.test_runtime import parsed
     path = selected_owner_config(tmp_path)
@@ -347,6 +351,11 @@ def test_owner_file_lifecycle_denies_writer_policy(tmp_path, monkeypatch, change
         path.chmod(0o644)
     elif change == "mutated":
         selected_owner_config(tmp_path, read={"max_age_seconds": 1800})
+    elif change == "reformatted":
+        path.write_text(json.dumps(json.loads(path.read_text()), indent=2))
+    elif change == "expiry_boundary":
+        expiry = json.loads(path.read_text())["selected_read"]["valid_until"]
+        monkeypatch.setattr(identity, "_wall_now", lambda: expiry)
     elif change == "expired":
         monkeypatch.setattr(identity, "_wall_now", lambda: 2 ** 40)
     elif change == "restored":
@@ -359,3 +368,15 @@ def test_owner_file_lifecycle_denies_writer_policy(tmp_path, monkeypatch, change
         assert policy() is False
     # Observed withdrawal is final for this process, even for identical bytes.
     assert policy() is False
+
+
+@pytest.mark.parametrize("seconds, admitted", [(86400, True), (86401, False)])
+def test_selected_owner_expiry_horizon(tmp_path, monkeypatch, seconds, admitted):
+    from tests.research_read_mcp.test_runtime import parsed
+    monkeypatch.setattr(identity, "_wall_now", lambda: 2_000_000_000)
+    path = selected_owner_config(tmp_path, valid_until=2_000_000_000 + seconds)
+    if admitted:
+        assert identity.load_archive_verifier(str(path), parsed(), owner_uid=os.geteuid()).selected_options.writer_policy()
+    else:
+        with pytest.raises(RuntimeRefused):
+            identity.load_archive_verifier(str(path), parsed(), owner_uid=os.geteuid())
