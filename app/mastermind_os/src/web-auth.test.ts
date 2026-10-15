@@ -622,3 +622,38 @@ describe("optional Executive authentication in the existing web owner", () => {
     expect(e.client.getState().status).toBe("signed_in");
   });
 });
+
+
+describe("fixed Fleet browser read", () => {
+  it("uses the existing acquisition bearer and the canonical bounded window URL", async () => {
+    const e = setup(); await e.login();
+    expect(e.client.readFleet, "Fleet browser read absent").toBeTypeOf("function");
+    e.fetcher.mockResolvedValue(response({fixture: true}));
+    await e.client.readFleet!({window: "7d", signal: new AbortController().signal});
+    const [url, init] = e.fetcher.mock.calls.at(-1)!;
+    expect(url).toBe(`${ORIGIN}/workspace/fleet/current?window=7d`);
+    expect(init).toMatchObject({method: "GET", cache: "no-store", credentials: "omit", redirect: "error"});
+    expect(init?.headers).toMatchObject({Authorization: "Bearer private-token"});
+  });
+  it("allows only Fleet's typed unavailable body, never arbitrary error JSON", async () => {
+    const e = setup(); await e.login();
+    expect(e.client.readFleet, "Fleet browser read absent").toBeTypeOf("function");
+    const unavailable = {schema: "mastermind.fleet_health.v1", availability: "UNAVAILABLE"};
+    e.fetcher.mockResolvedValue(new Response(JSON.stringify(unavailable), {status: 503, headers: {"content-type": "application/json"}}));
+    expect(await e.client.readFleet!({window: "24h", signal: new AbortController().signal})).toEqual(unavailable);
+    e.fetcher.mockResolvedValue(new Response('{"private_path":"/secret"}', {status: 503, headers: {"content-type": "application/json"}}));
+    await expect(e.client.readFleet!({window: "24h", signal: new AbortController().signal})).rejects.toThrow("RESPONSE_INVALID");
+  });
+  it("rejects invalid windows before fetch and suppresses a response after sign-out", async () => {
+    const e = setup(); await e.login();
+    expect(e.client.readFleet, "Fleet browser read absent").toBeTypeOf("function");
+    const count = e.fetcher.mock.calls.length;
+    await expect(e.client.readFleet!({window: "../secret" as "24h", signal: new AbortController().signal})).rejects.toThrow("SELECTION_INVALID");
+    expect(e.fetcher.mock.calls).toHaveLength(count);
+    const late = deferred<Response>(); e.fetcher.mockReturnValue(late.promise);
+    const read = e.client.readFleet!({window: "24h", signal: new AbortController().signal});
+    const refused = expect(read).rejects.toThrow("READ_CANCELLED");
+    await e.client.signOut(); late.resolve(response({fixture: true}));
+    await refused;
+  });
+});

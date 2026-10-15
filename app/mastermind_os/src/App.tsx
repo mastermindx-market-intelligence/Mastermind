@@ -1,3 +1,4 @@
+import { FleetHealth } from "./fleet/FleetHealth";
 import type { AuthState, MissionHost } from "./host";
 import type {
   ObservedMissionAssociation,
@@ -2259,7 +2260,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
                   ? workState.document.availability
                   : "UNAVAILABLE"
               : active === "Fleet & Capacity"
-                ? "NOT_PROJECTED"
+                ? "OBSERVATION_ONLY"
                 : (d?.read_state.state ?? "UNAVAILABLE"),
     headerSummary =
       active === "Conversations"
@@ -2302,7 +2303,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
                           : "Work owner returned a typed unavailable observation; no empty queue is inferred."
                         : "Work source unavailable; no empty queue is inferred."
                     : active === "Fleet & Capacity"
-                      ? "Fleet health and placement require their canonical Capacity source."
+                      ? "Hardware diagnostics from the existing Fleet observer; placement authority remains with Capacity."
                       : d
                         ? d.mission.root_job_id &&
                           d.read_state.state === "CURRENT"
@@ -2336,7 +2337,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
                   : "Work projection unavailable; zero work is not inferred."
                 : "Work source unavailable; zero work is not inferred."
             : active === "Fleet & Capacity"
-              ? "Capacity source not connected. No host readiness was inferred."
+              ? "Fleet readings retain sensor and subagent coverage limits. This view does not authorize placement."
               : notice,
     open = (w: string, r: string | null) => {
       if (r) {
@@ -3289,27 +3290,11 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     );
   else if (active === "Fleet & Capacity")
     content = (
-      <section className="card source-gap">
-        <div className="section-title">
-          <div>
-            <h2>Fleet & Capacity</h2>
-            <p className="muted">
-              Resource health and placement are separate from Mission lifecycle
-              and require their canonical Capacity source.
-            </p>
-          </div>
-          <State value="NOT_PROJECTED" />
-        </div>
-        <p>
-          This read-only app does not infer host readiness from browser,
-          provider, or Mission state. Capacity will appear here only when the
-          qualified fleet/placement feed is connected.
-        </p>
-        <details className="reason-details">
-          <summary>Technical details</summary>
-          <code>CAPACITY_SOURCE_NOT_CONNECTED</code>
-        </details>
-      </section>
+      <FleetHealth
+        key={authRevision}
+        read={authState?.acquisition ? window.MastermindMissionHost?.readFleet : undefined}
+        generation={authRevision}
+      />
     );
   else if (active === "Conversation")
     content = (

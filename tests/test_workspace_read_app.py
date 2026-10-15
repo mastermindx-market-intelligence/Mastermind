@@ -1340,3 +1340,87 @@ def test_configured_permission_stamp_unavailable_refuses(rsa_key, route, stage):
     response = client.get(route, headers={"Authorization": "Bearer " + _workspace_token(rsa_key)})
     assert response.status_code == 403 and _body_code(response) == "access_denied"
     assert len(fake.calls) == (stage == "after")
+
+
+# Fleet uses the same enrolled-viewer edge; no new bearer or host-command route.
+@pytest.mark.parametrize("window", ["1h", "24h", "7d", "30d"])
+def test_fleet_fixed_route_returns_validated_observation(rsa_key, window):
+    from control_plane.fleet_health import compose_fleet_health
+    body = compose_fleet_health({"m2": {"platform": "darwin"}},
+        {"m2": {"host": "m2", "ts": NOW, "reachable": True, "load1": 3}},
+        "", window=window, now=NOW)
+    fake = _FakeWorkspaceClient(envelope={"ok": True, "result": body})
+    client, _ = _make_app(rsa_key, client=fake)
+    response = client.get("/workspace/fleet/current?window=" + window,
+                          headers={"Authorization": "Bearer " + _workspace_token(rsa_key)})
+    assert response.status_code == 200
+    assert response.json() == body
+    assert response.headers["cache-control"] == "no-store"
+    assert len(fake.calls) == 1
+    assert fake.calls[0]["operation"] == "fleet"
+    assert fake.calls[0]["selection"] == {"window": window}
+
+
+@pytest.mark.parametrize("query", ["", "?window=all", "?window=1h&window=24h",
+                                   "?window=1h&path=/private", "?%77indow=1h", "?window=%31h"])
+def test_fleet_rejects_noncanonical_or_extra_query_before_source(rsa_key, query):
+    client, fake = _make_app(rsa_key)
+    response = client.get("/workspace/fleet/current" + query,
+                          headers={"Authorization": "Bearer " + _workspace_token(rsa_key)})
+    assert response.status_code == 400
+    assert fake.calls == []
+
+
+def test_fleet_requires_auth_and_rejects_body_or_post(rsa_key):
+    client, fake = _make_app(rsa_key)
+    path = "/workspace/fleet/current?window=24h"
+    assert client.get(path).status_code == 401
+    assert client.post(path).status_code == 405
+    response = client.request("GET", path, content=b"x",
+        headers={"Authorization": "Bearer " + _workspace_token(rsa_key)})
+    assert response.status_code == 400
+    assert fake.calls == []
+
+
+def test_fleet_absent_producer_returns_explicit_503_and_not_cacheable(rsa_key):
+    from control_plane.fleet_health import unavailable_fleet
+    fake = _FakeWorkspaceClient(envelope={"ok": True, "result": unavailable_fleet("24h", NOW)})
+    client, _ = _make_app(rsa_key, client=fake)
+    response = client.get("/workspace/fleet/current?window=24h",
+        headers={"Authorization": "Bearer " + _workspace_token(rsa_key)})
+    assert response.status_code == 503
+    assert response.json()["availability"] == "UNAVAILABLE"
+    assert response.headers["cache-control"] == "no-store"
+
+
+def test_fleet_rechecks_revocation_and_never_discloses_malformed_owner_payload(rsa_key):
+    permitted = [True]
+    fake = _FakeWorkspaceClient(envelope={"ok": True, "result": {"private_path": "/secret"}},
+                               on_call=lambda _: permitted.__setitem__(0, False))
+    client, _ = _make_app(rsa_key, client=fake, authorize=lambda _: permitted[0])
+    response = client.get("/workspace/fleet/current?window=24h",
+        headers={"Authorization": "Bearer " + _workspace_token(rsa_key)})
+    assert response.status_code == 403
+    assert "/secret" not in response.text
+    client, _ = _make_app(rsa_key, client=_FakeWorkspaceClient(envelope={"ok": True, "result": {"private_path": "/secret"}}))
+    response = client.get("/workspace/fleet/current?window=24h",
+        headers={"Authorization": "Bearer " + _workspace_token(rsa_key)})
+    assert response.status_code == 503
+    assert "/secret" not in response.text
+
+
+@pytest.mark.parametrize("path", ["/workspace/work/current", "/workspace/fleet/current?window=24h"])
+def test_fleet_work_permission_stamp_failure_keeps_existing_403(rsa_key, path):
+    calls = [0]
+    def authorize(_):
+        return True
+    def stamp(_):
+        calls[0] += 1
+        if calls[0] > 1:
+            raise ValueError("private permission source unavailable")
+        return "a" * 64
+    authorize.binding_digest = stamp
+    client, _ = _make_app(rsa_key, authorize=authorize)
+    response = client.get(path, headers={"Authorization": "Bearer " + _workspace_token(rsa_key)})
+    assert response.status_code == 403
+    assert "private permission" not in response.text

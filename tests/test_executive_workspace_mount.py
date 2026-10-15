@@ -567,3 +567,25 @@ def test_static_owner_independently_refuses_partial_or_foreign_layouts():
     wrong_mime = dict(valid)
     wrong_mime['/os/licenses/fonts/Inter-OFL.txt'] = (b'x', 'text/html; charset=utf-8')
     with pytest.raises(ValueError): server.OsStaticApp(wrong_mime)
+
+
+def test_fleet_outer_mount_query_and_public_edge_are_fixed(settings):
+    from ops.executive_os.os_public_edge import GET_ROUTES
+    workspace = Mount()
+    app = server.build_executive_mcp_app(settings, audit_sink=existing.Sink(), workspace_app=workspace)
+    absent = server.build_executive_mcp_app(settings, audit_sink=existing.Sink())
+    async def check():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=entry.PUBLIC_ORIGIN) as client:
+            reply = await client.get('/workspace/fleet/current?window=24h')
+            assert reply.status_code == 200
+            assert workspace.calls == [('/workspace/fleet/current', b'window=24h')]
+            for method, path in [('POST', '/workspace/fleet/current'), ('HEAD', '/workspace/fleet/current'),
+                                 ('GET', '/workspace/fleet/current/'), ('GET', '/workspace%2Ffleet/current')]:
+                assert (await client.request(method, path)).status_code == 404
+            assert len(workspace.calls) == 1
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=absent), base_url=entry.PUBLIC_ORIGIN) as client:
+            assert (await client.get('/workspace/fleet/current?window=24h')).status_code == 404
+    asyncio.run(check())
+    assert '/workspace/fleet/current' in GET_ROUTES
+    template = Path(__file__).resolve().parents[1] / 'ops/executive_os/os_public_edge.caddy.template'
+    assert '/workspace/fleet/current' in template.read_text().split()

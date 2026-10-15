@@ -494,8 +494,10 @@ describe("Executive OS convergence surfaces", () => {
     expect(
       screen.getByRole("heading", { name: "Fleet & Capacity", level: 1 }),
     ).toBeTruthy();
-    expect(screen.getByText("CAPACITY_SOURCE_NOT_CONNECTED")).toBeTruthy();
-    expect(screen.queryByText("Missingness and source state")).toBeNull();
+    expect(screen.getByRole("heading", {name: "Your machines, in view."})).toBeTruthy();
+    expect(screen.getByText("Source not connected")).toBeTruthy();
+    expect(screen.getByRole("heading", {name: "Connect the existing Fleet source."})).toBeTruthy();
+    expect(screen.queryByText(/0 registered hosts/)).toBeNull();
   });
 
   it("renders Activity from the admitted Mission without another source read", async () => {

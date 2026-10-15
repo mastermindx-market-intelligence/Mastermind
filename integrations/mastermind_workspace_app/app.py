@@ -59,6 +59,7 @@ _ENVELOPE_STATUS_TO_HTTP: dict[int, int] = {400: 400, 403: 403, 404: 404, 503: 5
 #: mounting at any depth.  No path parameters, no template substitution.
 _PROGRAMS_ROUTE = "/workspace/programs/current"
 _WORK_ROUTE = "/workspace/work/current"
+_FLEET_ROUTE = "/workspace/fleet/current"
 _MISSION_ROUTE = "/workspace/mission/current"
 _MISSION_V3_ROUTE = "/workspace/mission/v3/current"
 _RESULT_ROUTE = "/workspace/result/current"
@@ -91,7 +92,7 @@ def _envelope_response(envelope: Mapping[str, Any]) -> JSONResponse:
             body = contract.bounded_canonical(dict(result))
         except (TypeError, ValueError):
             return _refuse_json(503, "source_unavailable")
-        status = 503 if (result.get("schema") in (contract.PROGRAMS_SCHEMA, contract.WORK_SCHEMA)
+        status = 503 if (result.get("schema") in (contract.PROGRAMS_SCHEMA, contract.WORK_SCHEMA, contract.FLEET_SCHEMA)
                          and result.get("availability") == "UNAVAILABLE") else 200
         return Response(body, status_code=status, media_type="application/json", headers={"Cache-Control": "no-store"})
     if ok is False:
@@ -494,71 +495,72 @@ async def programs_current(
 
 
 async def work_current(
-    request: Request, *, config: WorkspaceAppConfig,
+    request: Request, *, config: WorkspaceAppConfig, operation: str = "work",
 ) -> JSONResponse:
-    """Handle ``GET /workspace/work/current``.
+    """Existing permission-fenced acquisition for Work or the fixed Fleet read.
 
-    Same envelope as :func:`programs_current`; no selection, no query
-    string, no body.  Operates on the closed ``operation: "work"`` frame
-    that the read service turns into a work-queue projection through the
-    existing workspace read seam.
+    Work retains its query-free grammar. Fleet accepts exactly one canonical
+    window enum, never a path, host command, arbitrary selector or URL. The
+    operation is selected by a fixed sibling route, not request data.
     """
+    if operation not in ("work", "fleet"):
+        return _refuse_json(400, "invalid_input")
     principal_or_response = await _authenticate(
         request, config.authenticator, clock=config.now,
     )
     if isinstance(principal_or_response, JSONResponse):
         return _with_no_store(principal_or_response)
     principal = principal_or_response
-
     body_response = await _reject_any_body(request)
     if body_response is not None:
         return body_response
-
     raw_query = request.scope.get("query_string") or b""
-    if raw_query:
+    selected = None
+    if operation == "fleet":
+        windows = {("window=" + value).encode("ascii"): value for value in contract.FLEET_WINDOWS}
+        if type(raw_query) is not bytes or raw_query not in windows:
+            return _refuse_json(400, "invalid_input")
+        selected = {"window": windows[raw_query]}
+    elif raw_query:
         return _refuse_json(400, "invalid_input")
-
     permit = _check_authorize(config.authorize_principal, principal)
     if permit is not None:
         return permit
-
     try:
         permission_before = contract.permission_stamp(config.authorize_principal, principal)
         principal_frame = contract.principal_frame(principal)
     except ValueError:
         return _refuse_json(403, "access_denied")
-
     try:
         frame = contract.validate_frame({
-            "schema": contract.FRAME_SCHEMA,
-            "operation": "work",
-            "selection": None,
-            "principal": principal_frame,
+            "schema": contract.FRAME_SCHEMA, "operation": operation,
+            "selection": selected, "principal": principal_frame,
         })
     except ValueError:
         return _refuse_json(400, "invalid_input")
-
     try:
         envelope = await config.client.request(frame)
     except Exception:
         return _refuse_json(503, "internal_error")
-
     try:
         instant = config.now()
         if type(instant) is not int or instant >= principal.expires_at:
             return _refuse_json(403, "access_denied")
     except Exception:
         return _refuse_json(503, "internal_error")
-
     permit_after = _check_authorize(config.authorize_principal, principal)
     if permit_after is not None:
         return permit_after
-
     try:
         if contract.permission_stamp(config.authorize_principal, principal) != permission_before:
             return _refuse_json(403, "access_denied")
     except Exception:
         return _refuse_json(403, "access_denied")
+    if operation == "fleet" and type(envelope) is dict and envelope.get("ok") is True:
+        try:
+            contract.validate_fleet_document(envelope.get("result"), expected_window=selected["window"])
+        except Exception:
+            return _refuse_json(503, "source_unavailable")
     return _envelope_response(envelope)
 
 
@@ -831,6 +833,7 @@ class _RawPathFence:
     _KNOWN_ROUTES = (
         _PROGRAMS_ROUTE,
         _WORK_ROUTE,
+        _FLEET_ROUTE,
         _MISSION_ROUTE,
         _MISSION_V3_ROUTE,
         _RESULT_ROUTE,
@@ -878,6 +881,9 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
     async def work_endpoint(request: Request) -> JSONResponse:
         return await work_current(request, config=config)
 
+    async def fleet_endpoint(request: Request) -> JSONResponse:
+        return await work_current(request, config=config, operation="fleet")
+
     async def mission_endpoint(request: Request) -> JSONResponse:
         return await mission_current(request, config=config)
 
@@ -893,6 +899,7 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
     routes = [
         Route(_PROGRAMS_ROUTE, programs_endpoint, methods=["GET"]),
         Route(_WORK_ROUTE, work_endpoint, methods=["GET"]),
+        Route(_FLEET_ROUTE, fleet_endpoint, methods=["GET"]),
         Route(_MISSION_ROUTE, mission_endpoint, methods=["GET"]),
         Route(_MISSION_V3_ROUTE, mission_v3_endpoint, methods=["GET"]),
         Route(_RESULT_ROUTE, result_endpoint, methods=["GET"]),

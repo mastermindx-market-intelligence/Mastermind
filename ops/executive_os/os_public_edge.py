@@ -15,7 +15,7 @@ HOST = "mcp.mastermind-x.com"
 POST_ROUTES = ("/os/executive/context", "/os/executive/submit", "/os/executive/status")
 GET_ROUTES = (
     "/os/", "/os/auth/callback", "/workspace/programs/current",
-    "/workspace/work/current", "/workspace/mission/current",
+    "/workspace/work/current", "/workspace/fleet/current", "/workspace/mission/current",
     "/workspace/mission/v3/current", "/workspace/result/current",
     "/workspace/window/current",
 )

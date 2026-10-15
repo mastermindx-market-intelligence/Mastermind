@@ -278,6 +278,8 @@ _CONFIG_OPTIONAL = frozenset(
         "workspace_acquisition",
         "workspace_resource_policy",
         "workspace_control_room",
+        # Optional trusted read-only Fabric observer root. No public path selector.
+        "workspace_fleet_observer_root",
         "coo_principal_armed",
         "proof_branch",
         "exact_worker_claim_target",
@@ -357,6 +359,28 @@ _CONFIG_DISABLED_EXTENSIONS = frozenset()
 
 class FabricActivationRefused(ServiceError):
     """Shared Fabric execution has no admitted backend and isolation profile."""
+
+
+def _workspace_fleet_reader_from_config(config: Mapping[str, Any]):
+    """Optional existing Fabric observer reader under the installed workspace owner.
+
+    This is a trusted installer-selected local filesystem binding, not a
+    client-selected pathname or another telemetry/worker service. The source
+    must already be readable by this exact service OS principal.
+    """
+    if "workspace_fleet_observer_root" not in config:
+        return None
+    if "workspace_acquisition" not in config:
+        raise ValueError("Fleet observer requires enrolled Workspace acquisition")
+    root = config["workspace_fleet_observer_root"]
+    if not isinstance(root, (str, Path)):
+        raise ValueError("invalid Fleet observer root")
+    path = Path(root)
+    if (not path.is_absolute() or ".." in path.parts
+            or "\x00" in str(path) or path.is_symlink()):
+        raise ValueError("invalid Fleet observer root")
+    from control_plane.fleet_health import read_fleet_health
+    return lambda *, window: read_fleet_health(path, window=window)
 
 
 def _validate_fabric_bridge_config(raw: Mapping[str, Any]) -> bool:
@@ -1056,6 +1080,12 @@ def load_control_config(
             config["workspace_acquisition"] = validate_workspace_bindings(config["workspace_acquisition"], workspace_policy)
         except Exception:
             raise ServiceError("workspace acquisition policy or binding refused") from None
+    if "workspace_fleet_observer_root" in keys:
+        try:
+            _workspace_fleet_reader_from_config(config)
+        except ValueError:
+            raise ServiceError("Workspace Fleet observer root or enrollment refused") from None
+        config["workspace_fleet_observer_root"] = Path(config["workspace_fleet_observer_root"])
     if content_sources:
         if not app_present:
             raise ServiceError("content observer requires installed App peer")
@@ -2264,7 +2294,8 @@ def _service_from_config(
                 # The factory is inert until the actual service has started.
                 # Namespace custody belongs to that service and validates the
                 # exact Runtime supplied by its App request handler.
-                bounded_runtime=lambda runtime: service._namespace_custody.bound_runtime(runtime))
+                bounded_runtime=lambda runtime: service._namespace_custody.bound_runtime(runtime),
+                fleet_read=_workspace_fleet_reader_from_config(raw))
         coo_factories = {}
         from ops.executive_os.coo_principal_host import CooInstalledSource, validate_control_coo
         from control_plane.coo_principal_host import CooHostProvider
