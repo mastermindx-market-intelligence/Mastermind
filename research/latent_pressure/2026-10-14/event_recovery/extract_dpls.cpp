@@ -17,6 +17,7 @@ using namespace std;
 uint16_t u16(const unsigned char*p){return uint16_t(p[0])|(uint16_t(p[1])<<8);}
 uint32_t u32(const unsigned char*p){return uint32_t(u16(p))|(uint32_t(u16(p+2))<<16);}
 uint64_t u64(const unsigned char*p){return uint64_t(u32(p))|(uint64_t(u32(p+4))<<32);}
+string json_byte_key(int k){if(k>=32&&k<=126&&k!=34&&k!=92)return string(1,char(k));char b[7];snprintf(b,7,"\\u%04x",k);return string(b);}
 void write_le(ostream&out,uint64_t v,unsigned n){unsigned char b[8];for(unsigned i=0;i<n;i++)b[i]=(v>>(8*i))&255;out.write((char*)b,n);}
 uint16_t be16(const unsigned char*p){return (uint16_t(p[0])<<8)|p[1];}
 struct Reader{gzFile f;uint64_t bytes=0;explicit Reader(const char*p){f=gzopen(p,"rb");if(!f)throw runtime_error("input open");gzbuffer(f,4<<20);}~Reader(){gzclose(f);}bool read(void*p,size_t n,bool eof=false){size_t got=0;while(got<n){int k=gzread(f,(char*)p+got,n-got);if(k<0){int e;throw runtime_error(gzerror(f,&e));}if(!k){if(eof&&!got&&gzeof(f))return false;throw runtime_error("truncated input");}got+=k;}bytes+=n;return true;}};
@@ -43,7 +44,7 @@ int main(int argc,char**argv){try{
   size_t ip=14;if(cap<14)throw runtime_error("short ethernet");uint16_t et=be16(e+12);while(et==0x8100||et==0x88a8){if(cap<ip+4)throw runtime_error("short vlan");et=be16(e+ip+2);ip+=4;}
   if(et!=0x0800||cap<ip+20||e[ip+9]!=17){nonudp++;continue;}
   size_t ihl=(e[ip]&15)*4;uint16_t iplen=be16(e+ip+2);if((e[ip]>>4)!=4||ihl<20||cap<ip+iplen||iplen<ihl+8)throw runtime_error("invalid IPv4 length");
-  if(be16(e+ip+6)&0x3fff){fragments++;throw runtime_error("IP fragments unsupported");}size_t udp=ip+ihl;auto udplen=be16(e+udp+4);if(udplen<48||udp+udplen>cap)throw runtime_error("invalid UDP length");auto t=e+udp+8;size_t tn=udplen-8;
+  if(be16(e+ip+6)&0x3fff){fragments++;throw runtime_error("IP fragments unsupported");}size_t udp=ip+ihl;auto udplen=be16(e+udp+4);if(udplen<48||udp+udplen>cap||udplen!=iplen-ihl)throw runtime_error("invalid UDP length");auto t=e+udp+8;size_t tn=udplen-8;
   if(t[0]!=1||u16(t+2)!=0x8005)throw runtime_error("wrong IEX-TP protocol");auto ch=u32(t+4),sess=u32(t+8);auto pl=u16(t+12),cnt=u16(t+14);auto off=u64(t+16),seq=u64(t+24),send=u64(t+32);if(tn!=40u+pl)throw runtime_error("IEX payload length mismatch");
   auto&st=streams[{ch,sess}];st.packets++;if(send<st.lastsend)st.send_backwards++;st.lastsend=send;
   if(!cnt)continue;if(!st.next){st.first=seq;st.next=seq;st.offset=off;}
@@ -66,7 +67,7 @@ int main(int argc,char**argv){try{
   if(limit&&packets>=limit)break;
  }
  int zrc=gzclose(csv);if(zrc!=Z_OK)throw runtime_error("output compression failure");raw.close();if(!raw)throw runtime_error("output write error");
- ofstream q(out/"scan.json");q<<"{\"complete_archive\":"<<(full?"true":"false")<<",\"packets\":"<<packets<<",\"messages\":"<<messages<<",\"selected_messages\":"<<selected<<",\"executions\":"<<executions<<",\"uncompressed_bytes\":"<<f.bytes<<",\"sections\":"<<sections<<",\"other_blocks\":"<<unknown_blocks<<",\"non_udp\":"<<nonudp<<",\"fragments\":"<<fragments<<",\"streams\":[";bool first=true;
+ ofstream q(out/"scan.json");if(!q)throw runtime_error("scan report open failed");q<<"{\"complete_archive\":"<<(full?"true":"false")<<",\"packets\":"<<packets<<",\"messages\":"<<messages<<",\"selected_messages\":"<<selected<<",\"executions\":"<<executions<<",\"uncompressed_bytes\":"<<f.bytes<<",\"sections\":"<<sections<<",\"other_blocks\":"<<unknown_blocks<<",\"non_udp\":"<<nonudp<<",\"fragments\":"<<fragments<<",\"streams\":[";bool first=true;
  for(auto&[key,st]:streams){if(!first)q<<",";first=false;q<<"{\"channel\":"<<key.first<<",\"session\":"<<key.second<<",\"first\":"<<st.first<<",\"last\":"<<st.last<<",\"messages\":"<<st.msgs<<",\"gaps\":"<<st.gaps<<",\"duplicate_messages\":"<<st.duplicates<<",\"send_time_backsteps\":"<<st.send_backwards<<"}";}
- q<<"],\"type_counts\":{";first=true;for(auto[k,v]:kinds){if(!first)q<<",";first=false;q<<"\""<<char(k)<<"\":"<<v;}q<<"},\"selected_by_ticker\":{";first=true;for(auto&[k,v]:byname){if(!first)q<<",";first=false;q<<"\""<<k<<"\":"<<v;}q<<"},\"execution_flags\":{";first=true;for(auto[k,v]:flags){if(!first)q<<",";first=false;q<<"\""<<k<<"\":"<<v;}q<<"},\"interface_timestamp_resolutions\":[";first=true;for(auto x:resolutions){if(!first)q<<",";first=false;q<<x;}q<<"]}\n";q.close();cout<<"DONE packets="<<packets<<" messages="<<messages<<" executions="<<executions<<" full="<<full<<"\n";return 0;
+ q<<"],\"type_counts\":{";first=true;for(auto[k,v]:kinds){if(!first)q<<",";first=false;q<<"\""<<json_byte_key(k)<<"\":"<<v;}q<<"},\"selected_by_ticker\":{";first=true;for(auto&[k,v]:byname){if(!first)q<<",";first=false;q<<"\""<<k<<"\":"<<v;}q<<"},\"execution_flags\":{";first=true;for(auto[k,v]:flags){if(!first)q<<",";first=false;q<<"\""<<k<<"\":"<<v;}q<<"},\"interface_timestamp_resolutions\":[";first=true;for(auto x:resolutions){if(!first)q<<",";first=false;q<<x;}q<<"]}\n";q.close();if(!q)throw runtime_error("scan report write failed");cout<<"DONE packets="<<packets<<" messages="<<messages<<" executions="<<executions<<" full="<<full<<"\n";return 0;
 }catch(const exception&e){cerr<<"FAIL "<<e.what()<<"\n";return 2;}}

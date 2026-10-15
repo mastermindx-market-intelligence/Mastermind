@@ -19,10 +19,10 @@ def packet(messages,seq=1,offset=0,proto=0x8005,frag=0,declared_delta=0):
  return block(6,struct.pack('<IIIII',0,1,3,len(eth),len(eth))+eth)
 
 class TestExtractor(unittest.TestCase):
- def call(self,data,ok=True):
+ def call(self,data,ok=True,limit=None):
   with tempfile.TemporaryDirectory() as d:
    root=Path(d);p=root/'fixture.gz';p.write_bytes(gzip.compress(data));out=root/'out'
-   r=subprocess.run([str(O/'extract_dpls'),str(p),str(out)],capture_output=True,text=True)
+   r=subprocess.run([str(O/'extract_dpls'),str(p),str(out)]+([str(limit)] if limit is not None else []),capture_output=True,text=True)
    if ok:
     self.assertEqual(r.returncode,0,r.stderr);s=json.loads((out/'scan.json').read_text());txt=gzip.decompress((out/'executions.csv.gz').read_bytes()).decode();return s,txt,(out/'selected_messages.bin').read_bytes()
    self.assertNotEqual(r.returncode,0);self.assertFalse((out/'scan.json').exists());return r.stderr
@@ -48,6 +48,14 @@ class TestExtractor(unittest.TestCase):
   m=bytearray(execution());struct.pack_into('<q',m,30,-1);self.assertIn('invalid execution',self.call(header()+packet([bytes(m)]),False))
  def test_event_after_send(self):
   self.assertIn('invalid execution',self.call(header()+packet([execution(TS+2000)]),False))
+ def test_udp_must_fit_declared_ipv4(self):
+  b=bytearray(packet([execution()]));ip=8+20+14;old=struct.unpack_from('!H',b,ip+2)[0];struct.pack_into('!H',b,ip+2,old-1)
+  self.assertIn('UDP length',self.call(header()+bytes(b),False))
+ def test_json_safe_unknown_types(self):
+  for typ in [0,34,92,255]:
+   m=bytearray(execution());m[0]=typ;s,_,_=self.call(header()+packet([bytes(m)]));self.assertEqual(s['selected_messages'],1)
+ def test_packet_limit_applies_to_heartbeats(self):
+  s,_,_=self.call(header()+packet([])*5+packet([execution()]),limit=3);self.assertEqual(s['packets'],3);self.assertFalse(s['complete_archive'])
  def test_growth_tolerated(self):
   s,_,_=self.call(header()+packet([execution()+b'extra']));self.assertEqual(s['executions'],1)
 if __name__=='__main__':unittest.main(verbosity=2)
