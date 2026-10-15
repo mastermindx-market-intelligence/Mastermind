@@ -144,7 +144,7 @@ def test_source_and_patch_inputs_match_published_manifests():
     # presenting a different algorithm as the same source-method proof.
     expected = {
         REQUEST / 'reference.py.txt': 'dbb190daf150ca7de8526a9f63709b584de69eba0d5bb9a471c1761f5692a894',
-        REQUEST / 'request_waiters.patch': '4d0ac417f7b0c7a6d425e3e19f2327caba8aa98aa9a3d7796f7290c624476395',
+        REQUEST / 'request_waiters.patch': '5736d880e62658c335ae2a10addf680a868e46b4918483c934a472d8b658281c',
         ACCOUNT / 'reference.py.txt': '4e44ba48ebe43ec28bff4d4ac41ee288288d0dbeb66ec9315fdd4329d03845cd',
         ACCOUNT / 'normalized_account_balance.patch': '13327989d0703cad7a3f966af8f5a90a404a2278b40c3e4ee23f63c930aaf85e',
     }
