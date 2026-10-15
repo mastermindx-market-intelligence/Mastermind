@@ -2529,3 +2529,25 @@ def test_d8_exact_reviewed_pairing_age_keeps_all_other_patch_bytes_guarded():
                     source+'\n+peer_uid = 600\n',source+'\n+DEFAULT_MAX_AGE = 600\n',
                     source+'\n+# unrelated drift\n']:
         assert scan(changed)
+
+
+def test_d8_exact_reviewed_bailian_age_keeps_all_other_source_guarded():
+    path = "research/fabric_bailian_host_eligibility_20261015/candidate/glm_host_account_readiness.py"
+    source = (ROOT / path).read_text()
+
+    def scan(content, *, actual_path=path, postimage=True):
+        diff = _d8_frozen_source_diff(actual_path, content)
+        return _scan_added_identity_diff(
+            diff, source_postimages={actual_path: content} if postimage else None,
+        )
+
+    assert scan(source) == []
+    assert scan(source, postimage=False) == ["600"]
+    assert scan(source, actual_path="research/other_account/readiness.py") == ["600"]
+    for changed in (
+        source.replace("DEFAULT_MAX_AGE = 600", "DEFAULT_MAX_AGE = 601"),
+        source + "\npeer_uid = 600\n",
+        source + "\nDEFAULT_MAX_AGE = 600\n",
+        source + "\n# unrelated byte drift\n",
+    ):
+        assert scan(changed)
