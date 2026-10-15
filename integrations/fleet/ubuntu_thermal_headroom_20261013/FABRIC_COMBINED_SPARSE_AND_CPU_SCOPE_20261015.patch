@@ -242,7 +242,7 @@
 +# The exact reviewed Macro sparse-owner blob from draft #9194. This is a
 +# deployment fence, not permission to install that draft into an old host.
 +# Any source revision requires new review/test and an explicit hash update.
-+_MACRO_FABRIC_SPARSE_BLOB = "620927823770362b5c1d1e0dec6584612624d848"
++_MACRO_FABRIC_SPARSE_BLOB = "75297acb10d0cef4d01730a59fdcad19c7cfd3e6"
 +
 +
 +class SparseWorkspaceRefused(ValueError):
