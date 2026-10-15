@@ -94,6 +94,7 @@ class BrowserActionPort:
         *,
         resolve_binding: ResolveBinding,
         resolve_recovery_binding: ResolveBinding | None = None,
+        require_resource_claim_for_fresh: bool = False,
         clock_ms: ClockMs,
         codec: BrowserRefCodec,
         artifact_store: ActionArtifactStore,
@@ -108,6 +109,9 @@ class BrowserActionPort:
             raise TypeError("browser port callbacks must be callable")
         if resolve_recovery_binding is not None and not callable(resolve_recovery_binding):
             raise TypeError("browser recovery binding must be callable")
+        if (type(require_resource_claim_for_fresh) is not bool
+                or (require_resource_claim_for_fresh and resolve_recovery_binding is None)):
+            raise TypeError("fresh browser resource claim requires a recovery resolver")
         if not isinstance(codec, BrowserRefCodec):
             raise TypeError("browser codec is required")
         if not isinstance(artifact_store, ActionArtifactStore):
@@ -135,6 +139,7 @@ class BrowserActionPort:
             raise TypeError("browser relay timeout is invalid")
         self._resolve_binding = resolve_binding
         self._resolve_recovery_binding = resolve_recovery_binding
+        self._require_resource_claim_for_fresh = require_resource_claim_for_fresh
         self._clock_ms = clock_ms
         self._codec = codec
         self._store = artifact_store
@@ -208,10 +213,12 @@ class BrowserActionPort:
         except BrowserContractError as error:
             raise BrowserPortRefused("BROWSER_REF_INVALID") from error
         binding = self._binding(caller, browser, recovery=not require_fresh)
-        if not require_fresh and self._resolve_recovery_binding is not None:
+        if (self._resolve_recovery_binding is not None
+                and (not require_fresh or self._require_resource_claim_for_fresh)):
             # The signed browser ref omits the project root's device/inode.
-            # Join it to the original durable resource-start claim and process
-            # under this runtime's current root before recovering across expiry.
+            # For a private worker, join every resource read AND fresh mutation
+            # to the same original APPLIED start/process claim. The attended
+            # port retains its prior recovery-only behavior by default.
             store = revalidate_artifact_store(self._store)
             identity = ActionArtifactIdentity(
                 action_id=browser.start_action_id,
