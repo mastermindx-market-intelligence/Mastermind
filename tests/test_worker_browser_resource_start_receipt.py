@@ -123,6 +123,16 @@ def test_original_browser_resource_start_receipt_serves_worker_read_and_revoke(
             assert snapshot.isError is False
             assert snapshot.content[0].text == "RESOURCE-START-FIXTURE"
 
+            # Re-signing the same observed process under a different resource
+            # start ID must not borrow the real resource's durable APPLIED claim.
+            unclaimed = signed.encode_resource(
+                dataclasses.replace(observed, start_action_id="f" * 32),
+            )
+            refused_unclaimed = await _call(
+                worker, "browser_snapshot", {"browser_ref": unclaimed},
+            )
+            assert _error_code(refused_unclaimed) == "BROWSER_RECOVERY_BINDING_CHANGED"
+
             filename = await _call(worker, "browser_snapshot", {
                 "browser_ref": ref, "filename": "not-authorized.md",
             })

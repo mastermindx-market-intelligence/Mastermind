@@ -1,9 +1,8 @@
-"""Source-only signed BrowserRef path through real WorkerBrowserAdmission.
+"""Source-only signed BrowserRef must also have a durable resource-start claim.
 
-The token is signed with an isolated fixture key, and the Runtime Attempt,
-lease, writer observation and OperatorMaterializationReceipt use the existing
-SQLite owner. Process observation and Browser relay are TEST DOUBLES. This is
-neither a resource-start receipt nor a real Chrome/Playwright/host canary.
+A valid HMAC and SQLite Worker Attempt/materialization receipt alone must
+not authorize Browser read without the original BrowserResourcePort start
+claim. Process inspection and relay are test doubles; this is not Chrome.
 """
 from __future__ import annotations
 
@@ -25,7 +24,7 @@ from tests import test_worker_browser_admission as owner_fixture
 from tests.test_workbench_browser_tunnel import _call, _error_code, _tools
 
 
-def test_signed_fixture_browser_read_respects_original_attempt_and_revocation(
+def test_signed_ref_without_resource_start_claim_is_denied_even_with_live_attempt(
     tmp_path, monkeypatch,
 ):
     original_grant = owner_fixture._grant
@@ -113,9 +112,8 @@ def test_signed_fixture_browser_read_respects_original_attempt_and_revocation(
                 services.action_token_key,
             ).encode_resource(fixture_ref)
             inline = await _call(server, "browser_snapshot", {"browser_ref": token})
-            assert inline.isError is False
-            assert inline.content[0].text == "SIGNED-FIXTURE-INLINE-DOM"
-            assert seen == [("browser_snapshot", "c" * 32, {})]
+            assert _error_code(inline) == "BROWSER_RECOVERY_BINDING_CHANGED"
+            assert seen == [], "a valid HMAC alone must not dispatch Browser work"
 
             # A validly signed token must still be bound to this exact live
             # Runtime generation and host, never merely to the HMAC key.
@@ -130,25 +128,25 @@ def test_signed_fixture_browser_read_respects_original_attempt_and_revocation(
                     "browser_ref": altered,
                 })
                 assert _error_code(refused) == "BROWSER_BINDING_CHANGED"
-                assert len(seen) == 1
+                assert seen == []
 
             denied_filename = await _call(server, "browser_snapshot", {
                 "browser_ref": token, "filename": str(tmp_path / "denied.md"),
             })
             assert _error_code(denied_filename) == "BROWSER_ARTIFACT_NOT_GRANTED"
-            assert len(seen) == 1
+            assert seen == []
             mutation = await _call(server, "start_browser_resource", {
                 "start_ref": "invalid",
             })
             assert _error_code(mutation) == "TOOL_NOT_AVAILABLE"
-            assert len(seen) == 1
+            assert seen == []
 
             executive.jobs.cancel_job(lease.attempt.job_id)
             revoked = await _call(server, "browser_snapshot", {
                 "browser_ref": token,
             })
             assert _error_code(revoked) == "CHANNEL_ADMISSION_REFUSED"
-            assert len(seen) == 1
+            assert seen == []
             assert not (tmp_path / "denied.md").exists()
             assert list(Path(config.browser.output_root).iterdir()) == []
             assert list(Path(config.action.artifact_directory).iterdir()) == []
