@@ -15,10 +15,10 @@
   "PR": 1338,
   "branch": "sol/research-soxx-cycle-boats-20261011",
   "inspected_precheckpoint_head": "713f263dfc1dec4c7316df6420010cb6a6c38f6f",
-  "publication_effect": "The user acquired one unique SOXX BOATS Sep27-Sep28 historical receipt; canonical original materialize/read consumed 479 rows, rescued 239 Sunday evening minutes, and verified all 240 overlapping Monday original OHLCV rows equal. Added research-only V31 collision/fill-guard with 16 synthetic tests; no new vendor calls by assistant, no historical strategy re-fit, PIT or trading.",
+  "publication_effect": "Original human-operated Oct11-Oct12 SOXX BOATS one-request HTTP200 480 source bars verified with one existing canonical L1 materialize WRITE and hash-verified original Data OS read. 240/240 Sunday 20:00-23:59 recovered, 240/240 Monday 00:00-03:59 overlap matches all original OHLCV values; 16/16 half-hour and 4/4 2H, 2/2 3H, 2/2 4H overnight original input windows complete. Nine source contexts now 14038 raw minute rows with 480 source overlaps and 13558 unique timestamps; no vendor requests by research agent, PIT/fill/trading not accepted.",
   "full_prior_handoff_commit": "7ec0207a5870e8c467b7185afbdcde97c38ef314",
   "repo_research_root": "research/soxx-multitimeframe-cycle-2026-10-11",
-  "current_delta_path": "research/soxx-multitimeframe-cycle-2026-10-11/prospective_validation_v26/SOXX_SUNDAY_DATE_BOUNDARY_VERIFIED_V31_2026-10-15.md",
+  "current_delta_path": "research/soxx-multitimeframe-cycle-2026-10-11/prospective_validation_v26/SOXX_OCT11_SUNDAY_BOUNDARY_VERIFIED_V32_2026-10-15.md",
   "analysis_contract_path": "research/soxx-multitimeframe-cycle-2026-10-11/prospective_validation_v26/PROSPECTIVE_ANALYSIS_CONTRACT.md",
   "preserved_evidence": {
     "all_v2_v24_source_results_unchanged": true,
@@ -35,8 +35,8 @@
   },
   "release": {
     "PR_open_not_merged": true,
-    "last_completed_CI_head": "af9837db35af864534f60c74420cddbb8315d689",
-    "last_completed_CI_run": 38704680934,
+    "last_completed_CI_head": "402cdda1a629e1b522f36ca3afe42ee81e77e935",
+    "last_completed_CI_run": 38711773568,
     "last_completed_CI_conclusion": "SUCCESS",
     "current_master_for_conflict_probe": "9a8e9b50b6158eb38af78a5b867eedba1719b908",
     "conflict_probe_tree": "69a4a70e1c330c96e8b105af801efd58da7eedf2",
@@ -112,15 +112,15 @@
     "isolated_integration_workspace": "m2studio:/private/tmp/soxx1338-integration-20261013"
   },
   "source_gates": {
-    "last_qualified_historical_bar_census_UTC": "2026-10-15T08:13:32Z",
+    "last_qualified_historical_bar_census_UTC": "2026-10-15T10:32:06Z",
     "qualified_historical_bar_symbols": [
       "AAPL",
       "AMD",
       "SOXX"
     ],
-    "qualified_historical_SOXX_receipts": 8,
+    "qualified_historical_SOXX_receipts": 9,
     "fresh_pathname_check_UTC": "2026-10-14T01:04:55.804461+00:00",
-    "historical_receipt_paths": 10,
+    "historical_receipt_paths": 11,
     "new_paths": 0,
     "path_census_truncated": false,
     "fresh_check_requalified_raw_contents": false,
@@ -487,9 +487,17 @@
         "2026-08-30",
         "2026-09-13",
         "2026-09-20",
-        "2026-10-04",
+        "2026-10-04"
+      ],
+      "recovered_additional_Sunday_2026_10_11_evening_1m_rows": 240,
+      "recovered_Oct11_overlapping_Mon_source_1m_rows": 240,
+      "recovered_Oct11_original_overlap_price_and_volume_disagreements": 0,
+      "confirmed_targeted_Sunday_date_starts": [
+        "2026-09-27",
         "2026-10-11"
-      ]
+      ],
+      "likely_issue": "DATE_RANGE_BOUNDARY_OMITS_SUNDAY_FIRST_HALF_IN_MONDAY_TO_SUNDAY_WEEK_CONTEXTS; two original targeted source requests confirm data served for Sep27 and Oct11",
+      "provider_universal_date_semantics_proven": false
     },
     "older_Aug3_30_source_plan": {
       "original_request_bounds": [
@@ -556,8 +564,95 @@
       "tasks": 1,
       "original_planner_sha256": "a1adfb0186c501f749640353896a6e8009b1715630574cfc78062d0b8cb6e61d",
       "network_requests_issued": 0,
-      "overlap_must_be_reconciled_with_original_receipt": true
-    }
+      "overlap_must_be_reconciled_with_original_receipt": true,
+      "provider_requests_dispatched": 1,
+      "original_response_accepted": true,
+      "monday_overlap_strict_OHLCV_exact": 240
+    },
+    "ninth_SOXX_Oct11_Sunday_original_receipt": {
+      "raw_source_sha256": "eea3d5109dd92ce5e93aa2de91e7635615a12d9f035e4836a316465eae8b879e",
+      "original_receipt_id": "c92b2b1a039980237fd2a421b6a2cd5405f06d50e31338975e01d7c50ee3c2cf",
+      "original_capture_UTC": "2026-10-15T10:25:28.017190+00:00",
+      "requested_dates": [
+        "2026-10-11",
+        "2026-10-12"
+      ],
+      "original_HTTP_status": 200,
+      "original_raw_bytes": 51401,
+      "original_source_rows": 480,
+      "original_L1_parquet_sha256": "35f2bcbc0d04b9d5ae5c8a73ed9b42a182ab1441606859b55acb644b1a5b2d83",
+      "original_L1_parquet_bytes": 16984,
+      "original_L1_manifest_sha256": "6e3b5ea61517e591b448c83e90699bad474e6f534ab0d3435eb22d0fadbf30e1",
+      "exact_Sunday_evening_new_source_minute_starts": 240,
+      "overlapping_Monday_morning_source_minute_starts": 240,
+      "matching_OHLCV_overlaps": 240,
+      "conflicting_OHLCV_overlaps": 0,
+      "full_ET_overnight_minute_starts": 480,
+      "original_v29_positive_vendor_volume_1m_rows": 276,
+      "original_v29_zero_vendor_volume_1m_rows": 204,
+      "original_v29_zero_volume_nonflat_OHLC_1m_rows": 193,
+      "original_v29_complete_30m_source_buckets": 16,
+      "original_v30_complete_source_input_windows": {
+        "120m": 4,
+        "180m": 2,
+        "240m": 2
+      },
+      "original_v30_any_all_positive_volume_HTF_buckets": false,
+      "source_PIT_qualified": false,
+      "original_redistribution_admitted": false,
+      "quote_marketability_or_order_execution_proven": false,
+      "independent_trading_economics_accepted": false,
+      "report_path": "research/soxx-multitimeframe-cycle-2026-10-11/prospective_validation_v26/SOXX_OCT11_SUNDAY_BOUNDARY_VERIFIED_V32_2026-10-15.md",
+      "status": "ORIGINAL_BOATS_FULL_SUNDAY_CLOCK_ACCEPTED_NO_PRICE_VINTAGE_STITCH"
+    },
+    "nine_original_SOXX_source_vintages_census": {
+      "original_source_receipt_contexts": 9,
+      "original_source_rows_including_duplicate_source_minutes": 14038,
+      "overlapping_original_UTC_minute_starts": 480,
+      "original_source_minute_starts_unique": 13558,
+      "independent_prospective_economic_episodes_scored": 0,
+      "original_research_price_vintage_join_performed": false,
+      "source_PIT_admitted": false,
+      "source_executable_bid_ask_and_size_proven": false
+    },
+    "remaining_Sunday_Monday_single_request_plans": [
+      {
+        "dates": [
+          "2026-10-04",
+          "2026-10-05"
+        ],
+        "sha256": "cc523faefb25fda12ec558c2087cc66aba0768cea000044ba7eb52d0c3d5bf7c",
+        "dispatched": false,
+        "existing_original_receipt_count": 0
+      },
+      {
+        "dates": [
+          "2026-09-20",
+          "2026-09-21"
+        ],
+        "sha256": "889c0e7c27619abd7e2df04e4931db2c77a551bb3be2d785c3b1ddae2d07edf1",
+        "dispatched": false,
+        "existing_original_receipt_count": 0
+      },
+      {
+        "dates": [
+          "2026-09-13",
+          "2026-09-14"
+        ],
+        "sha256": "7eb4fbbe8da64eda64ebe832451e07afc25983afc001b1d99ecda1c57d6404d7",
+        "dispatched": false,
+        "existing_original_receipt_count": 0
+      },
+      {
+        "dates": [
+          "2026-08-30",
+          "2026-08-31"
+        ],
+        "sha256": "3a774777d2b822e99981febc4f3a13afd329fa079286fb7c01047da8b7df1459",
+        "dispatched": false,
+        "existing_original_receipt_count": 0
+      }
+    ]
   },
   "independent_validation": {
     "new_market_episodes_scored": 0,
@@ -600,7 +695,11 @@
     "sunday_boundary_rest_acquisition": "Original user-operated ONE new Sep27-Sep28 SOXX BOATS REST HTTP200 request APPLIED; original raw source and receipt identity verified, never repeat",
     "sunday_boundary_L1_materialization": "Original materialize_one WRITTEN once after dry-run WOULD_WRITE; 479 rows and original L1/manifest digests verified",
     "v31_overlap_reconciliation": "240 overlapping original UTC minute OHLCV records exactly equal; 239 new minute timestamps; original source price vintages NOT merged",
-    "v31_assistant_authenticated_vendor_calls": 0
+    "v31_assistant_authenticated_vendor_calls": 0,
+    "user_original_Oct11_Oct12_SOXX_acquisition": "ONE human-operated original BOATS REST request HTTP200/APPLIED, 480 source minute bars and immutable receipt verified. DO_NOT_REDO.",
+    "Oct11_Oct12_original_L1_materialization": "Original incumbent materialize_one WRITTEN ONCE to previously absent 480-row L1 Parquet and manifest, independent original read_research_view SOURCE_INSPECTION hash accepted",
+    "Oct11_overlap_V31_strict_OHLCV_compare": "240 of 240 original overlapping source OHLCV minute records exactly equal; 240 genuinely new Sunday source minutes. NO price series stitched or PIT admission.",
+    "assistant_authenticated_vendor_calls_this_Oct11_phase": 0
   },
   "DO_NOT_REDO": [
     "Do not rerun or retune inspected v2-v24 historical studies or call the original year untouched.",
@@ -615,8 +714,9 @@
     "Synthetic tests and review acceptance are not independent market-performance evidence; OHLC is not fill proof.",
     "Do not repeat the successful original SOXX 2026-09-28..2026-10-04 REST call or accepted single L1 materialization; preserve exact third source raw/receipt/L1 digests above. All THREE original SOXX source effects have been reconciled.",
     "Do not repeat FOUR original SOXX boats-bars seven-day requests spanning 2026-08-31 to 2026-09-27 or their four accepted canonical L1 materializations. All SEVEN accepted original SOXX receipts are immutable DO_NOT_REDO. A targeted 2026-09-27..28 Sunday time-boundary test is a separate NEW provider request with deliberate source overlap requiring new-context comparison, not a replay of an accepted source.",
-    "Do not repeat already accepted human-operated Sep27-Sep28 SOXX BOATS source request or its once-only original L1 materialization. EIGHT original SOXX BOATS receipts retained, 13558 source rows including 240 duplicate minute timestamps and 13318 DISTINCT original source timestamps; never treat overlap as 240 additional independent events or automatically splice source vintages."
+    "Do not repeat already accepted human-operated Sep27-Sep28 SOXX BOATS source request or its once-only original L1 materialization. EIGHT original SOXX BOATS receipts retained, 13558 source rows including 240 duplicate minute timestamps and 13318 DISTINCT original source timestamps; never treat overlap as 240 additional independent events or automatically splice source vintages.",
+    "Do not repeat the user-operated original SOXX boats-bars 2026-10-11..2026-10-12 Sunday-boundary request or its one-time canonical L1 write. The 480-row source SHA eea3d5109dd92ce5e93aa2de91e7635615a12d9f035e4836a316465eae8b879e is ACCEPTED; 240 original Monday OHLCV overlaps matched existing Oct12..13 source exactly, so 240 new Sunday source minutes, not 480 new independent time observations. NINE accepted SOXX original REST source receipts are DO_NOT_REDO."
   ],
-  "exact_next_action": "Verify exact V31 enclosing commit/CI. The new original Sep27-Sep28 BOATS request recovered 239/240 Sunday evening minutes while 240 overlapping Monday minute OHLCV rows matched prior Sept28-Oct4 source exactly; source-vintage conflict checker V31 passed 16 synthetic tests and actual reader replay. EIGHT original SOXX receipts now have 13318 DISTINCT minute stamps (13558 rows counting 240 overlaps), none PIT/executable fill. Do not repeat accepted requests or re-materialize. Five other Sunday evening first halves remain missing. Next admitted original-user single request Oct11-Oct12 has offline original plan SHA a1adfb0186c501f749640353896a6e8009b1715630574cfc78062d0b8cb6e61d (NOT YET DISPATCHED); privately reconcile Monday Oct12 overlap before any price joining. Before further older history, favor original Sunday-aligned Aug2-Aug29 four 7-day source requests plan SHA adce4ddf294f52be94445019f5a3fc0ad33ecf3455b9deedeac2f8ce5a4d74c5 (NOT DISPATCHED) over Monday-Sunday requests with recurring first-half holes. Preserve original 91-episode v2-v24 inspected research, unresolved original accounting-review child, PIT/source rights/quote marketability and unseen 52 observed RTH-hour future economic acceptance gates. No trading/production/merge.",
+  "exact_next_action": "Verify exact new GitHub PR head CI. NINE original SOXX BOATS source receipts now have 14038 raw 1m records including 480 duplicate UTC minute starts (two equal 240-bar targeted Sunday overlaps) = 13558 distinct original minute starts. Both Sunday Sep27 and Sunday Oct11 first halves were recovered using original Sunday-start request contexts, Oct11 now a full 480-minute source clock (204 zero-volume bars, not marketability). DO_NOT_REPEAT any accepted source request or L1 effect. Four older ordinary Sunday first-half source gaps remain Aug30, Sep13, Sep20, Oct4; the next cautious original-user operator request Oct4..Oct5 is one source plan SHA cc523faefb25fda12ec558c2087cc66aba0768cea000044ba7eb52d0c3d5bf7c, NOT DISPATCHED, if current entitlement/quota/writer admission permit. Compare exact Monday overlap via original V31 and quarantine different source vintages; no source price stitching. Earlier Sunday-aligned Aug2..Aug29 four-week plan SHA adce4ddf294f52be94445019f5a3fc0ad33ecf3455b9deedeac2f8ce5a4d74c5 remains NOT DISPATCHED. Preserve original source rights/PIT/venue quote marketability, frozen prospective 52-observed-RTH-hour paired economic label maturity, original 91-episode inspected development result and unresolved original accounting-review worker; no automated trading/production deployment.",
   "no_unattended_continuation_promised": true
 }
