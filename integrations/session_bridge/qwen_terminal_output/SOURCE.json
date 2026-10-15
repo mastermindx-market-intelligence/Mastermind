@@ -1,0 +1,30 @@
+{
+  "protected_base": "022e5f46a0095c911e00450c7046ea90ca9949fa",
+  "root": "01a11e90-4b5d-7f53-b966-8aaaad38701f",
+  "scope": "Prospective Qwen final-response framing only; original runs unchanged",
+  "files": {
+    "bailian_keys.py": {
+      "pre_sha256": "435dad2bcde27384c4c47edaea5afdf7f248d10229558193414b105664a9759c",
+      "post_sha256": "3af964b1ce9fa2127d1b2b8c3e1a50788002fd38d46c1d4e01daaa920a807c96"
+    },
+    "qwen_exec.sh": {
+      "pre_sha256": "0c55d7ea9d330d5a55722ed32629da1a09bc70f0599af27c4a7602356fa06015",
+      "post_sha256": "e151637acc658390c6bf9c2ef868c2dc3571d94e1bd7d4b751b0cf5f969fb5da"
+    }
+  },
+  "tests": {
+    "baseline": "17 FAIL, 1 PASS",
+    "focused": "18 PASS",
+    "existing_wrapper_contracts": "26 PASS",
+    "live_new_run": "NOT_RUN"
+  },
+  "review": {
+    "run_id": "fabric-qwen-terminal-output-review-01a11e90-v1",
+    "state": "PENDING",
+    "pool": "minimax",
+    "host": "ubuntu0",
+    "exec_session": 91190
+  },
+  "installed": false,
+  "unchanged_key_account_policy_ast": true
+}
