@@ -279,6 +279,7 @@ _CONFIG_OPTIONAL = frozenset(
         "workspace_resource_policy",
         "workspace_control_room",
         "coo_principal_armed",
+        "coo_principal_dialogue_armed",
         "proof_branch",
         "exact_worker_claim_target",
         "worker_id",
@@ -869,13 +870,17 @@ def company_consultation_launchd_entry(config: Mapping[str, Any]) -> dict[str, A
     if "company_consultation" not in config:
         return None
     if (type(value) is not dict
-            or set(value) not in ({"armed", "socket_path", "launchd_socket_name"},
-                                  {"armed", "socket_path", "launchd_socket_name", "native_return_armed"})
+            or not {"armed", "socket_path", "launchd_socket_name"} <= set(value)
+            or set(value) - {"armed", "socket_path", "launchd_socket_name", "native_return_armed", "product_acceptance_armed"}
             or type(value.get("native_return_armed", False)) is not bool
+            or type(value.get("product_acceptance_armed", False)) is not bool
             or type(value["armed"]) is not bool
             or value["socket_path"] != _CANONICAL_COMPANY_CONSULTATION_SOCKET
             or value["launchd_socket_name"] != _COMPANY_CONSULTATION_SOCKET_NAME):
         raise ServiceError("Company consultation control binding is invalid")
+    if value.get("product_acceptance_armed", False) and (
+            value["armed"] is not True or config.get("coo_principal_dialogue_armed") is not True):
+        raise ServiceError("Product acceptance requires the Company socket and principal dialogue owner")
     if not value["armed"]:
         return None
     for key in ("control_uid", "worker_uid", "worker_gid"):
@@ -1928,6 +1933,31 @@ def _service_from_config(
             raise ServiceError("proof capacity has no recovery controller")
         return controller.expected_worker_uid(attempt)
 
+    # The existing R2 selection carries original-intent review on every actual
+    # worker owner. Freeze the host-owned source before constructing a supervisor;
+    # no worker/model can choose or rotate a Macro root through its request.
+    product_acceptance_macro_root = None
+    product_acceptance_context_owner = None
+
+    def product_acceptance_basis_reader():
+        from control_plane.agentos_product_acceptance_basis import AgentOsProductAcceptanceBasisReader
+        if product_acceptance_macro_root is None:
+            raise ServiceError("Product acceptance requires its bound Macro source")
+        if product_acceptance_context_owner is not None:
+            return product_acceptance_context_owner.product_acceptance_basis_reader(
+                macro_root=product_acceptance_macro_root)
+        return AgentOsProductAcceptanceBasisReader(macro_root=product_acceptance_macro_root)
+    if raw.get("coo_principal_dialogue_armed", False) is True:
+        from ops.executive_os.coo_principal_host import CooInstalledSource, validate_control_coo
+        try:
+            if (not validate_control_coo(raw)
+                    or not _CEO_INGRESS_APP_CONFIG_KEYS <= set(raw)
+                    or type(coo_source) is not CooInstalledSource):
+                raise ValueError("incomplete principal binding")
+        except ValueError:
+            raise ServiceError("product acceptance review requires the sealed COO and complete App binding") from None
+        product_acceptance_macro_root = Path(raw["ceo_ingress_app_macro_root"])
+
     def supervisor_factory(runtime):
         def validations(spec):
             job = runtime.jobs.get_job(spec.job_id)
@@ -2005,6 +2035,9 @@ def _service_from_config(
             ),
             subscription_canary_claim_provider=claim_provider,
             subscription_canary_binding_id=claim_binding_id,
+            product_acceptance_macro_root=product_acceptance_macro_root,
+            product_acceptance_context_reader=(product_acceptance_basis_reader()
+                if product_acceptance_context_owner is not None else None),
         )
         if fabric_worker_binding_source is None:
             return primary
@@ -2038,6 +2071,9 @@ def _service_from_config(
                 secret_canary_verdict={}, require_complete_launch_attestation=True,
                 cleanup_policy=CleanupPolicy.FABRIC_PROCESS_GROUP,
                 process_controller=fabric_adapter, instance_id=primary.instance_id,
+                product_acceptance_macro_root=product_acceptance_macro_root,
+                product_acceptance_context_reader=(product_acceptance_basis_reader()
+                    if product_acceptance_context_owner is not None else None),
             )
         mixed = MixedExecutionOwnerSupervisor(primary, owners)
         recovery_controller["owners"] = mixed.owners
@@ -2241,6 +2277,8 @@ def _service_from_config(
                     Path(raw["ceo_ingress_app_boot_python"])),
                 expected_source_sha=str(raw["proof_base_sha"]),
             )
+            if product_acceptance_macro_root is not None:
+                product_acceptance_context_owner = packet_collector
             compose_inputs = build_workspace_composer(
                 packet_collector=packet_collector,
                 repo_root=Path(raw["proof_source_repository"]),
@@ -2257,6 +2295,19 @@ def _service_from_config(
                 macro_root=str(raw["ceo_ingress_app_macro_root"]), bindings_path=workspace_bindings_path,
                 token=secrets.token_urlsafe(32), origin=f"http://127.0.0.1:{port}", port=port,
                 compose_inputs=compose_inputs))
+            from integrations.product_acceptance_read import read_acceptance
+            from integrations.product_acceptance_selector import read_original_acceptance_observation
+            from ops.executive_os.coo_principal_host import CooInstalledSource, validate_control_coo
+            original_target = original_target_guard = None
+            if validate_control_coo(raw) and type(coo_source) is CooInstalledSource:
+                # Same installed source already selected by _serve_from_config.
+                # HTTP and Runtime rows cannot nominate or rotate this target.
+                target_reader = coo_source.original_acceptance_target
+                original_target = target_reader()
+                if original_target is not None:
+                    def original_target_guard():
+                        if target_reader() is not original_target:
+                            raise ServiceError("installed acceptance target changed")
             workspace_factories["workspace_read_provider_factory"] = workspace_provider_factory(
                 control_room=workspace_control_room, authorize=authorize,
                 armed={**{key: raw.get(key) if type(raw.get(key)) is bool else None for key in ARM_KEYS}, "source": "control.json"},
@@ -2264,7 +2315,13 @@ def _service_from_config(
                 # The factory is inert until the actual service has started.
                 # Namespace custody belongs to that service and validates the
                 # exact Runtime supplied by its App request handler.
-                bounded_runtime=lambda runtime: service._namespace_custody.bound_runtime(runtime))
+                bounded_runtime=lambda runtime: service._namespace_custody.bound_runtime(runtime),
+                product_acceptance_basis_reader=packet_collector.product_acceptance_basis_reader(
+                    macro_root=Path(raw["ceo_ingress_app_macro_root"])),
+                product_acceptance_owner_target=original_target,
+                product_acceptance_owner_guard=original_target_guard,
+                product_acceptance_read=read_acceptance,
+                product_acceptance_observe=read_original_acceptance_observation)
         coo_factories = {}
         from ops.executive_os.coo_principal_host import CooInstalledSource, validate_control_coo
         from control_plane.coo_principal_host import CooHostProvider
@@ -2275,6 +2332,22 @@ def _service_from_config(
                 return CooHostProvider(coo_source, workspace_factories["workspace_read_provider_factory"](runtime))
             coo_factories = dict(principal_facts_factory=coo_factory, principal_admission_armed=True,
                 principal_admission_guard=lambda envelope: coo_factory(service._require_runtime()).guard(envelope))
+            if raw.get("coo_principal_dialogue_armed", False) is True:
+                from integrations.mastermind_company_principal_app_receiver import PrincipalDialogueAppReceiver
+                from integrations.slack_agent_dialogue.host_local_observation import HostLocalDialogueObservationReader
+
+                def principal_dialogue_factory(runtime):
+                    # The incumbent namespace/Workspace owner validates this
+                    # Runtime; the reader additionally requires this exact
+                    # Control service and opens no Relay-only observation socket.
+                    service._namespace_custody.bound_runtime(runtime)
+                    authority = coo_factory(runtime)
+                    return PrincipalDialogueAppReceiver(runtime, authority,
+                        _CANONICAL_AGENT_RELAY_SOCKET,
+                        HostLocalDialogueObservationReader(service, runtime),
+                        product_acceptance_reader=product_acceptance_basis_reader())
+
+                coo_factories["principal_dialogue_provider_factory"] = principal_dialogue_factory
         session_factories = {}
         if installed_profile in {WEB_CEO_SESSIONS_PROFILE, WEB_CEO_V3_PROFILE}:
             from integrations.session_bridge.installed import build_runtime_session_bridge
@@ -2507,6 +2580,12 @@ def _service_from_config(
 
         company_repository = Path(raw["proof_source_repository"])
         company_worker_uid = int(raw["worker_uid"])
+        acceptance_selected = raw["company_consultation"].get("product_acceptance_armed", False)
+        acceptance_reader = None
+        if acceptance_selected:
+            if product_acceptance_context_owner is None or product_acceptance_macro_root is None:
+                raise ServiceError("Product acceptance requires the sealed Context and Workspace owners")
+            acceptance_reader = product_acceptance_basis_reader()
         answer_bridge = dialogue_observation_kwargs.get("dialogue_wake_handler")
         if answer_bridge is None or answer_bridge.canary_profile is not None:
             # Company answer obligations keep their incumbent generic owner;
@@ -2528,11 +2607,21 @@ def _service_from_config(
                 return await answer_bridge.dispatch_requester_answer(
                     runtime, projection, before_effect=service._require_company_answer_attention,
                 )
+            acceptance_host = None
+            if acceptance_selected:
+                from integrations.product_acceptance_request_host import ProductAcceptanceRequestHost
+                service._namespace_custody.bound_runtime(runtime)
+                acceptance_host = ProductAcceptanceRequestHost(
+                    runtime=runtime, reader=acceptance_reader, worker_uid=company_worker_uid,
+                    relay_socket_path=_CANONICAL_AGENT_RELAY_SOCKET,
+                    workspace_id=SLACK_WORKSPACE_ID, channel_id=SLACK_CHANNEL_ID,
+                    armed=True, principal_authority=coo_factory(runtime))
             return CompanyConsultationHost(
                 runtime=runtime, repository_root=company_repository,
                 worker_uid=company_worker_uid, relay_socket_path=_CANONICAL_AGENT_RELAY_SOCKET,
                 workspace_id=SLACK_WORKSPACE_ID, channel_id=SLACK_CHANNEL_ID,
                 requester_answer_wake_dispatch=dispatch_answer,
+                product_acceptance_host=acceptance_host,
                 native_return_armed=raw["company_consultation"].get("native_return_armed", False))
         company_listener = activate_launchd_socket(_COMPANY_CONSULTATION_SOCKET_NAME)
         activated_listeners.append(company_listener)

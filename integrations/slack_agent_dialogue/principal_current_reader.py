@@ -65,9 +65,10 @@ async def read_current_principal_source(
 
     Caller/context come from trusted host composition after request admission.
     The physical identity must be acquired from its canonical source owner;
-    constructing a DTO is never a grant. The actual observation client's normal
-    authenticated socket exchange remains responsible for acquiring Runtime
-    facts. No global mission enumeration or timestamp selection is performed.
+    constructing a DTO is never a grant. The selected observation reader uses
+    either the authenticated Relay socket exchange or the Control service's
+    existing host-local Runtime snapshot. Both share the canonical reducer and
+    closed decoder. No global mission enumeration or timestamp selection occurs.
     """
     try:
         if (type(caller) is not CooPrincipalDialogueCaller
