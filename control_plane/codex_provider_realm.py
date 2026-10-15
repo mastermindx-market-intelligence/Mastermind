@@ -903,64 +903,43 @@ class SubscriptionRealmOwner:
     _config_sha256: str
     _seal: object
 
-    def observe_current_identity(self, *, bindings_path: Path,
-                                 bindings_sha256: str, host_ref: str):
-        """Join the real worker context to its root-installed physical route.
+    def observe_native_capacity(self) -> dict[str, Any]:
+        """Produce current, secret-free native evidence, never availability.
 
-        The fixed installation entry supplies the approved binding path/hash;
-        request data, a receipt, or a FabricHostBinding value cannot substitute
-        for reading that source. Opaque host/principal/custody references remain
-        assignments of the existing root configuration owner. This method issues
-        no reference, boot generation, auth verdict or Capacity admission.
+        There are no caller inputs. Enrollment/source identity comes from this
+        existing worker-local owner; the FP1B observer owns kernel boot
+        provenance. Private credential custody does not establish provider
+        authentication, health, cooling or remaining quota: those stay unknown
+        until their actual owners supply evidence. No Runtime state is changed.
         """
-        from control_plane.executive_fabric_composition import (
-            FabricBindingSource, FabricCompositionError,
-        )
-        from ops.executive_os.provider_realm_facts import NativeRealmIdentityObservation
+        from datetime import UTC, datetime
+        from ops.executive_os.host_capacity_probe import current_boot_reference
+        from ops.executive_os.capacity_source_contract import validate_native_identity_observation
 
         if self._seal is not _SUBSCRIPTION_REALM_OWNER_SEAL:
             _native_refuse()
-        config = _native_read_config(self._config_path, self._config_sha256)
         enrollment = self.observe_capacity_enrollment()
-        if host_ref != enrollment["host_ref"]:
+        boot_ref = current_boot_reference()
+        value = {
+            "schema": "mastermind.provider_native_realm_observation/v1",
+            "capacity_capability_id": enrollment["capacity_capability_id"],
+            "capability_generation": enrollment["capability_generation"],
+            "host_ref": enrollment["host_ref"], "boot_ref": boot_ref,
+            "realm_generation": enrollment["realm_generation"],
+            "enrollment_receipt_digest": enrollment["receipt_digest"],
+            "observed_at": datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+            "realm_auth": {"state": "unknown", "method": "unknown", "source_quality": "unknown"},
+            "provider_health": {"state": "unknown", "error_class": None,
+                                "scope": "unknown", "observed_at": None},
+            "cooling": {"active": None, "kind": None, "reset_at": None, "evidence": "unknown",
+                        "scope": "unknown", "observed_at": None},
+            "quota_horizons": [],
+            "last_provider_outcome": {"class": "unknown", "observed_at": None, "scope": "unknown"},
+            "source_receipt_digest": enrollment["source_receipt_digest"],
+        }
+        if self.observe_capacity_enrollment() != enrollment or current_boot_reference() != boot_ref:
             _native_refuse()
-        try:
-            source = FabricBindingSource.from_path(bindings_path, bindings_sha256)
-            physical = source(host_ref, config["worker_id"])
-            binary = _observe_attended_claude_binary(config, config["worker_gid"])
-            if (physical.worker_source_config_digest != self._config_sha256
-                    or physical.worker_uid != config["worker_uid"]
-                    or physical.worker_gid != config["worker_gid"]
-                    or physical.bridge_uid != config["worker_uid"]
-                    or physical.provider_home != config["provider_home"]
-                    or physical.provider != "minimax"
-                    or physical.binary_sha256 != binary.sha256):
-                _native_refuse()
-            value = NativeRealmIdentityObservation(
-                slot_id=config["worker_id"], host_ref=enrollment["host_ref"],
-                os_principal_ref=enrollment["os_principal_ref"],
-                config_custody_ref=enrollment["config_custody_ref"],
-                generation=enrollment["realm_generation"],
-                source_config_sha256=self._config_sha256,
-                provider_binary_sha256=binary.sha256,
-            )
-            if (source(host_ref, config["worker_id"]) != physical
-                    or _observe_attended_claude_binary(config, config["worker_gid"]) != binary
-                    or self.observe_capacity_enrollment() != enrollment
-                    or _native_read_config(self._config_path, self._config_sha256) != config):
-                _native_refuse()
-        except (FabricCompositionError, KeyError, TypeError, AttributeError):
-            raise ProviderRealmError("NATIVE_REALM_IDENTITY_UNAVAILABLE") from None
-        return value
-
-    def require_current_identity(self, host_ref: str, os_principal_ref: str, *,
-                                 bindings_path: Path, bindings_sha256: str) -> None:
-        """Trusted Python composition callback; never a CLI identity assertion."""
-        observed = self.observe_current_identity(bindings_path=bindings_path,
-            bindings_sha256=bindings_sha256, host_ref=host_ref)
-        if os_principal_ref != observed.os_principal_ref:
-            _native_refuse()
-        return None
+        return validate_native_identity_observation(value)
 
     def observe_capacity_enrollment(self) -> dict[str, Any]:
         """Bind the current finite MiniMax realm to its actual source registration.

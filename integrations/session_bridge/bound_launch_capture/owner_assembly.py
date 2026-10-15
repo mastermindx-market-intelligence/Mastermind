@@ -96,17 +96,11 @@ def compose_owner_resources(config, *, config_path, bindings_path, bindings_sha2
         expected_config_sha256=physical.worker_source_config_digest)
     observation = owner.observe()
     native_enrollment = None
-    native_identity = None
     if 'native_capacity_enrollment' in raw:
         native_enrollment = owner.observe_capacity_enrollment()
-        native_identity = owner.observe_current_identity(bindings_path=bindings_path,
-            bindings_sha256=bindings_sha256, host_ref=physical.host_ref)
         if (native_enrollment['host_ref'] != physical.host_ref
                 or native_enrollment['capacity_capability_id'] != raw.get('capacity_capability_id')
-                or native_enrollment['realm_generation'] != observation['realm_generation']
-                or native_identity.os_principal_ref != native_enrollment['os_principal_ref']
-                or native_identity.config_custody_ref != native_enrollment['config_custody_ref']
-                or native_identity.generation != observation['realm_generation']):
+                or native_enrollment['realm_generation'] != observation['realm_generation']):
             _refuse()
     if (observation['worker_id'] != physical.worker_id
             or observation['control_uid'] != config.control_uid
@@ -132,9 +126,6 @@ def compose_owner_resources(config, *, config_path, bindings_path, bindings_sha2
     if (source(host_ref, worker_id) != physical
             or canary.definition(realm_config_path, physical) != raw
             or (native_enrollment is not None and owner.observe_capacity_enrollment() != native_enrollment)
-            or (native_identity is not None and owner.observe_current_identity(
-                bindings_path=bindings_path, bindings_sha256=bindings_sha256,
-                host_ref=physical.host_ref) != native_identity)
             or owner.observe() != observation
             or realm._observe_attended_claude_binary(raw, physical.worker_gid) != binary
             or compose_catalog_digest() != catalog_sha

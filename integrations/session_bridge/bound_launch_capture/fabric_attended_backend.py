@@ -792,6 +792,15 @@ class _SingleAssignmentComposition:
         return await value.start_owned(payload, authority=authority)
 
     async def execute(self, operation, payload):
+        if operation == 'native-capacity-observation':
+            # Queried only after the existing Bridge authenticates Control and
+            # its current service identity. No per-Attempt slot is consumed.
+            if payload or self._probe_busy:
+                _refuse('native_observation_unavailable')
+            owner = self._resources.credential_realm_owner
+            if type(owner) is not SubscriptionRealmOwner:
+                _refuse('native_observation_owner_unavailable')
+            return {'observation': await asyncio.to_thread(owner.observe_native_capacity)}
         if operation == 'attended-secret-canary':
             if self._attempted or self._backend is not None or self._probe_busy:
                 _refuse('original_assignment_already_attempted')
