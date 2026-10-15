@@ -1,0 +1,28 @@
+{
+  "run_id": "lp-event03-framing-review",
+  "root_and_parent": "latent-pressure-research-20261014-chatgpt4-001",
+  "state": "TERMINAL_RC0_RESULT_CONSUMED",
+  "quality_verdict": "NOT_ACCEPTED_AS_OVERALL_APPROVAL",
+  "exact_return_sha256": "cc42701e437505d6d4f47a39b47a7c86e6d2ff521febe18a20a886149cd16fdb",
+  "reviewed_packet_sha256": "e9bdfb2d2c5ee2a91088d7933f6cc0fa4e5b9f1e8104263d1b35f5c3de44d540",
+  "false_claim": "Reviewer alleges tide identifier compile error; regex verifies no such identifier in exact packet or original code; actual source compiled and tests executed before dispatch.",
+  "accepted_after_parent_verification": [
+    "Negative signedprice acceptance inoriginalsource; corrected withred/greenfixture",
+    "Nativeendian retainedheader portability; madeexplicitlittleendian",
+    "Unknown message-byte JSON encoding; parent redfixture showedinvalidJSON, thenrepaired"
+  ],
+  "rejected": [
+    "Unsupported blanket no-malformed-input finding conflicts with negativeprice observation and missesIPv4/UDP containment",
+    "Claims of source-equivalent independent build/probes cannot be treated as authenticated evidence after nonexistenttypo claim"
+  ],
+  "additional_parent_repairs": [
+    "IPv4total-length must containUDPdatagram; demonstratedred/green",
+    "Executionevent cannotpostdate sourcesend",
+    "Packetlimit nowcoversheartbeats",
+    "Scanreport open/close failureschecked"
+  ],
+  "actual_qualification": "19decoder +18syntheticrecovery +7eventstudytests; full stricterrealarchive replayproducedidenticalraw,CSVandscanmetadata;39763LexecutionsmatchedindependentPythonparser",
+  "market_alpha_review": "NONE; candidate failed, realbookadapterunverified",
+  "current_output_diagnostic": "REFUSED original_current_output_unconfirmed; no retry. Later original retainedterminal result consumed normally.",
+  "active_child_obligations": []
+}

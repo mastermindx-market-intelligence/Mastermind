@@ -1,9 +1,19 @@
-# Event-level continuation
+# Event-level continuation — verified frontier
 
-Current assignment authorizes continued research/prototypes, not production/trading. Original PR1470/head6e628a3be/rootlatent-pressure-research-20261014-chatgpt4-001 retained. Compatible protected pin78388ac29f7e54c9dfe7799a8e4769fb46d4aed6. No prior negative pilot rerun.
+MISSION: continue originalresearch toward earlier reliablelatent-pressureawareness. Currentassignment permitsresearch/prototypes, notproduction/trading. Originalrootlatent-pressure-research-20261014-chatgpt4-001; originalcarrierMastermindPR1470, research/latent-pressure-20261014. Protectedpin78388ac29f7e54c9dfe7799a8e4769fb46d4aed6 reused.
 
-Capability delta: full existing 20261005 IEX DEEP+ archive scanned as PCAPNG/IPv4/UDP/IEX-TP0x8005; 351610550 contiguous messages; 39763 selectedL records; eightfixedtickers. Raw book messages retainedbut notsemanticallydecoded. No networkvendoracquisition.
+RESULT: existing20261005IEX DEEP+archivefullyframed;351610550contiguousmessages,39763selectedLexecutions independentlymatched. Rawbookmessages retainedprivate, notsemanticallyinterpreted. FrozenLP-EVENT-03A execution-historycandidate failsincrementalforecastgate; originaldailynegativepilotsunchanged.
 
-One Studio Direct selectedPDFread/render request was explicitly blocked before dispatch. EFFECT_NONE; no retry/alternatecarriertoobtainthateffect. Fullquote-recoverysemanticqualificationheld. Independent documented L-only executionhistory experiment advances now; no quote-recoveryclaim.
+BUILD: syntheticrecovery/censoringengine implementedandtested; actualas-ofexecutionresearchreaderproduces8observationswithnullforecastsandallproductionauthoritiesfalse. Fullbookadapterfailsclosedpendingverifiedsemantics. 44focusedtests pass.
 
-OriginalPID2391 extractioncompleted. ArchivehashPID6599 inprogress/readoriginalreturn, no replacement. Privatefull_scan retained. Next implement fixturetesting and causaleventhistory analysis under PROTOCOL beforeoutcomes,thenverifyandpublishonoriginalPR.
+SOURCEQUALIFICATION: originalscancommit e5981d709; studyfreeze a314e91bf; stricterdecoder3b08dd90f fullreplayjustifiedbynewmalformedUDPframingfinding. Threeoutputs(raw/CSV/scanJSON)byte-identical; no modelrefit. REQUALIFICATION/QUALIFICATION/privateevidencemanifest preserveidentities.
+
+REVIEW: lp-event03-framing-reviewterminalrc0 resultconsumed, notacceptedoverallapproval becauseinventedcompiletypo andunsupportedclaims. Usefulfindingsparent-verified/repaired; noactivechildorreturn. Current-outputdiagnosticrefusedoriginal_current_output_unconfirmed, not retried. Terminalresultlaterreadontheoriginalcarrier.
+
+EFFECTS: confirmedresearchfiles/commitsonly; no unresolvedmodifyingeffect. ExplicitselectedPDFread/renderblockwaspre-dispatchEFFECT_NONE; noalternatecarrier/retry. This is theactualremaininggateforfullDEEP+bookfieldqualificationinthisturn.
+
+DO_NOT_REDO: originaltwo dailyexperiments; byte-identical fullarchive/requalifiedsource andfutureprefixchecks withoutrelevantchange; no datasetpurchase/newlivesocket; no rawper-event/per-forecastpublicexport; no guessedsideflags/orderupdate/resetsemantics; noforecast/rank/sizingpromotion. Preserveprivateworktreeartifactsuntilsafelyrelocatedwithhashes.
+
+NEXT: verified permitted mapping ofadd/modify/delete/priority/reset/atomicboundaries, thenbindguardedadapterandvalidateraworderconservation. Onlyafterthat evaluatefullrecovery/fatiguewithmultipleindependentdaysandmatchedfalsealarms. Donot substitutetheexecution-onlynegativeforatestofthefullhypothesis.
+
+STATE: execution-onlyresearchverticalcomplete; fullquote-recoveryempiricalmissionincomplete/heldatdocumentedsourcequalification. No autonomouscontinuation orwakesclaimed. ExistingStudioM2toolsworking;servedUI/modelmodeunverifiedandnoautomatedProadmissionfabricated.
