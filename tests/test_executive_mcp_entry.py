@@ -358,6 +358,63 @@ def test_os_audience_requires_explicit_opt_in_and_rejects_missing_value():
             module.validate_os_executive_resource(raw)
 
 
+def test_installed_os_policy_source_reads_one_sealed_current_gateway_pair(tmp_path, monkeypatch):
+    """Control projects the exact network gateway's existing approved pair."""
+    from ops.executive_os import executive_mcp_entry as entry
+    from tests.test_gateway_refresh_preflight import _config
+    source = tmp_path / ("a" * 40)
+    source.mkdir()
+    path = tmp_path / "executive-mcp.json"
+    initial = _config()
+    initial.update(os_executive_transport=True,
+        os_executive_resource=entry.OS_EXECUTIVE_RESOURCE, os_commission_port=45025)
+    path.write_text(json.dumps(initial))
+    observed = []
+    monkeypatch.setattr(entry, "require_sealed_path",
+        lambda value, **kwargs: observed.append((Path(value), kwargs)))
+    uid = os.geteuid()
+    loader = entry.installed_os_session_policy_source(
+        path, source, expected_uid=uid)
+    pair = loader()
+    assert pair.read.resource == pair.submit.resource == entry.OS_EXECUTIVE_RESOURCE
+    assert pair.read.policy_id == initial["policies"]["read"]["policy_id"]
+    assert pair.submit.policy_id == initial["policies"]["submit"]["policy_id"]
+    assert {source, path} <= {value for value, _ in observed}
+    # No caller-provided policy ID enters this source; the network
+    # gateway's root-sealed installation alone determines both policy IDs.
+    # Gateway policy rotation cannot silently authorize a different principal.
+    changed = json.loads(json.dumps(initial))
+    changed["policies"]["read"]["policy_id"] = "foreign-new-read-policy"
+    path.write_text(json.dumps(changed))
+    with pytest.raises(ValueError, match="installed policy or configuration changed"):
+        loader()
+
+
+@pytest.mark.parametrize("fault", ["disabled", "wrong_release", "wrong_uid", "wrong_resource"])
+def test_installed_os_policy_source_refuses_unapproved_pair(tmp_path, monkeypatch, fault):
+    from ops.executive_os import executive_mcp_entry as entry
+    from tests.test_gateway_refresh_preflight import _config
+    source = tmp_path / ("a" * 40)
+    source.mkdir()
+    path = tmp_path / "executive-mcp.json"
+    raw = _config()
+    raw.update(os_executive_transport=True,
+        os_executive_resource=entry.OS_EXECUTIVE_RESOURCE, os_commission_port=45025)
+    if fault == "disabled":
+        del raw["os_executive_transport"]
+        del raw["os_executive_resource"]
+        del raw["os_commission_port"]
+    elif fault == "wrong_release":
+        raw["release_sha"] = "b" * 40
+    elif fault == "wrong_resource":
+        raw["os_executive_resource"] = "https://foreign.invalid/os/executive"
+    path.write_text(json.dumps(raw))
+    monkeypatch.setattr(entry, "require_sealed_path", lambda *_a, **_k: None)
+    with pytest.raises(ValueError):
+        entry.installed_os_session_policy_source(
+            path, source, expected_uid=os.geteuid() + int(fault == "wrong_uid"))
+
+
 def test_os_audience_preserves_existing_tunnels_and_all_policy_grants():
     from tests.test_executive_mcp_app_composition import fixture
     from integrations.mastermind_executive_app.gateway import AppPolicies

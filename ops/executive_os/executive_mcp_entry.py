@@ -272,6 +272,49 @@ def build_coo_principal_authorizer(raw, source, config_path):
     return coo_authorizer(policy=policies['coo'], load_binding=loader)
 
 
+def installed_os_session_policy_source(config_path, source, *, expected_uid):
+    """Bind the current root-sealed OS OAuth policy pair to the Runtime reader.
+
+    The incumbent network gateway installation is the sole authority for the
+    policy IDs and resource. Runtime may inspect that *same* sealed installation
+    under its own trusted uid, not derive pairing from a caller's bearer/frame
+    or add a second policy configuration. Missing/disabled/moved installations
+    are unavailable, never an inferred permission grant.
+    """
+    from integrations.mastermind_executive_app.gateway import load_app_policies
+
+    path, source = Path(config_path), Path(source)
+    require_sealed_path(source, directory=True)
+    require_sealed_path(path)
+    raw = validate_document(json.loads(path.read_text()))
+    if (type(expected_uid) is not int or expected_uid < 0
+            or os.geteuid() != expected_uid
+            or source.name != raw["release_sha"]
+            or raw.get("os_executive_transport") is not True):
+        raise ValueError("installed OS policy source unavailable")
+
+    def os_pair(base_policies):
+        additional = build_additional_policies(raw, load_app_policies(base_policies))
+        paired = [pair for pair in additional
+                  if pair.read.resource == OS_EXECUTIVE_RESOURCE
+                  and pair.submit.resource == OS_EXECUTIVE_RESOURCE]
+        if len(paired) != 1:
+            raise ValueError("installed OS policy pair unavailable")
+        return paired[0]
+
+    initial = os_pair(raw["policies"])
+    read_sealed_policies = current_projection_loader(
+        path, source, raw, "policies", None, expected_uid=expected_uid)
+
+    def current():
+        pair = os_pair(read_sealed_policies())
+        if pair != initial:
+            raise ValueError("installed OS policy pair changed")
+        return pair
+
+    return current
+
+
 def build_os_asset_manifest(source):
     """Deterministic build law; returns data, never writes or installs assets."""
     root = Path(source) / 'app/mastermind_os/dist'
