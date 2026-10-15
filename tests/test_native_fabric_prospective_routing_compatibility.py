@@ -83,3 +83,22 @@ def test_prospective_candidate_and_routing_share_original_transport_baseline():
     assert qualified["remote_sub.sh"] == routed["files"]["remote_sub.sh"]["sha256"]
     assert qualified["fabric_task.py"] == routed["files"]["fabric_task.py"]["sha256"]
     # Matching historical preimages do not imply current installed bytes or writer custody.
+
+
+def test_native_support_bundle_qualified_with_prospective_launcher(tmp_path):
+    """Publishing the new native dependency requires its matching bundle generation."""
+    native = ROOT / "integrations/session_bridge/native_broker_admission"
+    closure = json.loads((native / "SUPPORT_CLOSURE.json").read_text())
+    binding = closure["files"]["support_bundle.py"]
+    base = native / "fixtures/support_bundle.py.base"
+    assert hashlib.sha256(base.read_bytes()).hexdigest() == binding["pre_sha256"]
+    target = tmp_path / "support_bundle.py"
+    shutil.copyfile(base, target)
+    # The original native patch is zero-context and exact-preimage-bound.
+    _apply(tmp_path, native / "support_bundle.py.patch", "--unidiff-zero")
+    postimage = target.read_bytes()
+    assert hashlib.sha256(postimage).hexdigest() == binding["candidate_sha256"]
+    source = postimage.decode()
+    assert 'SOURCE_FILES = PRE_NATIVE_BROKER_SOURCE_FILES | {"native_broker_admission.py"}' in source
+    assert 'PRE_NATIVE_BROKER_SOURCE_FILES = SOURCE_FILES' in source
+    assert 'SOURCE_GENERATIONS = (SOURCE_FILES, PRE_NATIVE_BROKER_SOURCE_FILES,' in source
