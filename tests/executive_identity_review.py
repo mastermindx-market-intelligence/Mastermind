@@ -15,6 +15,7 @@ import ast
 import hashlib
 import inspect
 from tests.executive_fabric_release_identity_review import REVIEWED_FILES
+from tests.executive_incident_identity_review import REVIEWED_FILES as INCIDENT_REVIEWED_FILES
 
 REVIEWED_PATH = "control_plane/executive_installed_peer.py"
 REVIEWED_LITERAL_COUNT = 33
@@ -259,7 +260,7 @@ def reviewed_literal_spans(path: str, source: str):
     """
     if type(source) is not str:
         return ()
-    file_review = REVIEWED_FILES.get(path)
+    file_review = REVIEWED_FILES.get(path) or INCIDENT_REVIEWED_FILES.get(path)
     if file_review is not None:
         if hashlib.sha256(source.encode()).hexdigest() != file_review['sha256']:
             return ()
