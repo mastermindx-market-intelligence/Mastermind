@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mastermind Worker Bootstrap"
+  short_description: "Prepare scoped tools, methods and project context"
+  default_prompt: "Prepare this bounded Mastermind worker assignment using existing Craft, Agent OS and Fabric owners. Verify required input/tool evidence and preserve the exact return path."
