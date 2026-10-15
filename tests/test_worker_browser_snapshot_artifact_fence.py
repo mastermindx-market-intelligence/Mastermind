@@ -1,4 +1,4 @@
-"""The snapshot-only worker tool cannot silently acquire a filename write.
+"""Read-only worker tools cannot silently acquire artifact-write authority.
 
 A source-selected read tool is not an artifact-write authority. These checks
 exercise the existing private Workbench MCP tunnel with synthetic caller scope,
@@ -52,8 +52,8 @@ def test_snapshot_only_worker_refuses_filename_before_browser_port(tmp_path):
             assert not filename.exists()
             assert list(Path(config.action.artifact_directory).iterdir()) == []
 
-            # The attended/unrestricted Workbench Browser port is a separate
-            # original owner: this narrow worker-only fence changes no API.
+            # This ungranted private STDIO tunnel is not the authenticated
+            # attended HTTP endpoint. Its original permissive port remains.
             general = create_browser_tunnel_server(runtime, config.browser)
             unrestricted_invalid = await _call(general, "browser_snapshot", {
                 "browser_ref": forged_ref, "filename": str(filename),
@@ -110,6 +110,66 @@ def test_bound_worker_snapshot_artifact_refused_before_port_and_after_revoke(
                 "browser_ref": ref, "filename": str(filename),
             })
             assert _error_code(after_revoke) == "CHANNEL_ADMISSION_REFUSED"
+            assert list(Path(config.action.artifact_directory).iterdir()) == []
+        finally:
+            runtime.revoke()
+            await runtime.aclose(timeout=5)
+
+    asyncio.run(exercise())
+
+
+def test_multi_read_tool_worker_grant_cannot_write_artifacts(tmp_path):
+    """Every private worker read grant needs separate output-file authority.
+
+    Screenshot uses a default output filename even when none is supplied.
+    This source-only fixture checks dispatch policy, not a real browser session.
+    """
+    path, _, _ = _config_file(tmp_path)
+    config = load_browser_tunnel_config(str(path))
+
+    async def exercise():
+        runtime = await create_runtime_channel(config.action)
+        try:
+            names = (
+                "browser_snapshot",
+                "browser_take_screenshot",
+                "browser_console_messages",
+                "browser_network_requests",
+            )
+            server = create_browser_tunnel_server(
+                runtime, config.browser, mcp_grant=_grant(config, names),
+            )
+            invalid_ref = "unsigned-not-an-admitted-browser-ref"
+            for name, payload in (
+                ("browser_snapshot", {
+                    "browser_ref": invalid_ref,
+                    "filename": str(tmp_path / "page.md"),
+                }),
+                ("browser_take_screenshot", {
+                    "browser_ref": invalid_ref,
+                    "scale": "css",
+                }),
+                ("browser_console_messages", {
+                    "browser_ref": invalid_ref,
+                    "level": "info",
+                    "filename": str(tmp_path / "console.txt"),
+                }),
+                ("browser_network_requests", {
+                    "browser_ref": invalid_ref,
+                    "static": False,
+                    "filename": str(tmp_path / "network.txt"),
+                }),
+            ):
+                result = await _call(server, name, payload)
+                assert _error_code(result) == "BROWSER_ARTIFACT_NOT_GRANTED", name
+
+            without_filename = await _call(server, "browser_snapshot", {
+                "browser_ref": invalid_ref,
+            })
+            assert _error_code(without_filename) == "BROWSER_REF_INVALID"
+            assert not list(tmp_path.glob("*.txt"))
+            assert not list(tmp_path.glob("*.md"))
+            assert list(Path(config.browser.output_root).iterdir()) == []
             assert list(Path(config.action.artifact_directory).iterdir()) == []
         finally:
             runtime.revoke()
