@@ -33,9 +33,37 @@ Parameters have closed schemas. IDs use `[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}`. Pac
 
 Any lost modifying response is `EFFECT_UNKNOWN` with no retry permission. Preserve the original child and process; do not create a replacement child, change carriers, kill a worker or manually release a lease. Missing result delivery is a same-run recovery problem, not a reason to rerun paid work. Read-only observations may continue without moving the operation. There is no facade cancellation or recursive spawn tool. A tool timeout, provider admission error, explicit permission denial and process exit are different evidence.
 
+## Opt-in stateless protocol compatibility
+
+The private Fabric profile may explicitly enable `modernFabricProtocol: true` through
+`private_service.py stage` or `upgrade --modern-fabric-protocol`. It is off by default.
+The setting requires the restricted loopback Fabric profile and the incumbent
+`shared-account` BackendOwner. An unspecified upgrade preserves a manifest-verified
+selection; `--no-modern-fabric-protocol` explicitly returns to the legacy profile.
+Neither operation changes the account, port, backend entry, tunnel, credentials or
+another installed account. Stop the existing account before upgrading, then install
+its exact lockfile, seal and start through the same private service owner.
+
+The pinned MCP v2 server and Node adapter validate the 2026-07-28 envelope, mirrored
+headers, discovery and result encoding. The SDK era predicate preserves the existing
+sessionful legacy handler while sending malformed modern claims to the modern
+validator. Request-scoped views use the same backend owner and limiter, so completing
+an HTTP request detaches its view without closing retained Fabric controllers or
+results. Client metadata never supplies authentication; the existing private tunnel
+principal is checked on each request. Only the seven Fabric tools and the existing
+ping/output-page tools are available on this path. This does not supply individual
+conversation authentication or the Executive v5 current-writer COMMIT fence.
+
+`/readyz` reports the selected modern protocol only after its handler is constructed.
+A modern `studio_ping` reports the protocol and backend generation; its `sessionId`
+is null because this exchange does not create an MCP protocol session. These are
+installation/selection observations, not worker execution or exact-parent acceptance.
+Qualification still requires the actual originating parent to dispatch, consume,
+adjudicate and act on its result through its native tool connection.
+
 ## Source and local tests
 
-The module uses the existing `integrations/studio_direct_mcp/package-lock.json`; it adds no dependencies. It can run behind the existing private gateway's configured backend entry. Backend code and its SDK dependency resolution must come from an immutable reviewed release, not a mutable authoring worktree.
+The Fabric facade continues to use the existing pinned SDK v1. The opt-in HTTP entry adds pinned MCP v2 server/Node packages in the same lockfile; the v2 client is a test-only dependency. It can run behind the existing private gateway's configured backend entry. Backend code and its SDK dependency resolution must come from an immutable reviewed release, not a mutable authoring worktree.
 
 ```sh
 cd integrations/studio_direct_mcp
