@@ -351,14 +351,14 @@ def create_browser_tunnel_server(
             except (AuditSinkPoisoned, RuntimeClosed, SyncExecutionTimeout):
                 return _error("CHANNEL_AUDIT_UNAVAILABLE")
             return _error("CHANNEL_ADMISSION_REFUSED")
-        # A snapshot-only worker grant is a read authorization, not permission
-        # to write the returned snapshot to an arbitrary filename. This
-        # first-canary restriction is specific to the exact one-tool grant;
-        # the separately governed attended Browser port remains unchanged.
+        # A worker's read-only tool grant is never an implicit artifact-write
+        # authority. Snapshot, console and network reads may accept a filename;
+        # screenshots also write a default image even without that argument.
+        # The separately governed attended Browser port remains unchanged.
         if (mcp_grant is not None
-                and mcp_grant.enabled_tools == ("browser_snapshot",)
-                and name == "browser_snapshot"
-                and "filename" in request):
+                and name in READ_ONLY_BROWSER_TOOLS
+                and (name == "browser_take_screenshot"
+                     or "filename" in request)):
             try:
                 await emit_channel_audit(
                     code="request_refused", accepted=False,
