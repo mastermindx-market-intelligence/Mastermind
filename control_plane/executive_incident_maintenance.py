@@ -2,8 +2,9 @@
 
 The ordinary service owner first stops Control, worker and Relay through their
 existing lifecycle commands. This final bounded step disables/unloads only the
-idle privileged broker and observes launchd-owned socket removal. It never
-unlinks a node or edits configuration, Runtime, grants, markers or receipts.
+idle privileged broker. A residual socket is preserved by native no-replace
+rename only across the complete stopped-source and old-owner observations.
+It never unlinks a node or edits configuration, Runtime, grants or receipts.
 
 A successful return is a sampled stopped state, not an OriginInterval. The
 separately authorized forward entry must acquire its own fresh genuine context.
@@ -19,6 +20,7 @@ from control_plane import executive_recovery_host_observation as host
 from control_plane import executive_recovery_namespace as namespace
 from control_plane import executive_release_observation as release
 from control_plane import executive_incident_release_observation as incident_release
+from control_plane import executive_incident_socket_retirement as retirement
 
 __all__ = ()
 _LABEL = "com.mastermind.executive.privileged"
@@ -31,10 +33,12 @@ _ROLES = ("control", "worker", "relay", "gateway", "broker")
 
 
 class BrokerMaintenanceError(RuntimeError):
-    def __init__(self, code, *, disable_attempted=False, bootout_attempted=False):
+    def __init__(self, code, *, disable_attempted=False, bootout_attempted=False,
+                 socket_retirement_attempted=False):
         self.code = code
         self.disable_attempted = disable_attempted
         self.bootout_attempted = bootout_attempted
+        self.socket_retirement_attempted = socket_retirement_attempted
         super().__init__(code)
 
 
@@ -102,6 +106,7 @@ def _stop_incident_broker():
     grant. A dormant forward policy remains dormant throughout this operation.
     """
     disable_attempted = bootout_attempted = False
+    socket_retirement_attempted = False
     handles = None
     error = None
     cleanup_failed = False
@@ -122,6 +127,12 @@ def _stop_incident_broker():
         _same_content(before, qualified)
         if qualified.roles[-1].state != before.roles[-1].state:
             _refuse("BROKER_MAINTENANCE_BROKER_CHANGED")
+        # A retained prior move blocks this operation before even disable.
+        # Register handles before the return-side deadline fence so cleanup
+        # remains owned on every pre-effect refusal.
+        handles = namespace._acquire_namespace(deadline_monotonic_ns=budget.endpoint)
+        budget.check(force=True)
+        budget.call(retirement._require_retained_absent, handles)
         if before.roles[-1].state == "LOADED_IDLE":
             disable_attempted = True
             rc, out, err = _run_stop_command(_DISABLE, budget)
@@ -141,13 +152,34 @@ def _stop_incident_broker():
         # Reuse the exact installer readback; no second modifying command.
         host._wait_installer_unloaded(_LABEL, deadline_monotonic_ns=budget.endpoint)
         budget.check(force=True)
-        # Register the returned handles before any subsequent deadline fence.
-        handles = namespace._acquire_namespace(deadline_monotonic_ns=budget.endpoint)
-        budget.check(force=True)
+        candidate = budget.call(retirement._candidate, handles)
+        retained = None
+        if candidate is not None:
+            excluded = budget.call(host._observe_old_owner_exclusion,
+                                   deadline_monotonic_ns=budget.endpoint)
+            stopped = budget.call(_observe, source, budget)
+            _same_content(before, stopped)
+            if (stopped.roles[-1].state != "UNLOADED"
+                    or excluded.boot_id != stopped.boot_id
+                    or excluded.boot_id != handles.boot
+                    or excluded.census.observer != handles.owner):
+                _refuse("BROKER_MAINTENANCE_RETIREMENT_OWNER_DRIFT")
+            budget.call(_require_closed_arms, stopped, budget)
+            if budget.call(_source) != source:
+                _refuse("BROKER_MAINTENANCE_SOURCE_DRIFT")
+            socket_retirement_attempted = True
+            retained = retirement._retire(handles, candidate)
+            budget.check(force=True)
         budget.call(namespace._require_socket_absent, handles)
-        budget.call(host._observe_old_owner_exclusion, deadline_monotonic_ns=budget.endpoint)
+        excluded_after = budget.call(host._observe_old_owner_exclusion,
+                                     deadline_monotonic_ns=budget.endpoint)
         after = budget.call(_observe, source, budget)
         _same_content(before, after)
+        if candidate is not None:
+            if (excluded_after.boot_id != excluded.boot_id
+                    or excluded_after.census.observer != excluded.census.observer):
+                _refuse("BROKER_MAINTENANCE_RETIREMENT_OWNER_DRIFT")
+            budget.call(retirement._recheck_retained, handles, retained)
         if after.roles[-1].state != "UNLOADED":
             _refuse("BROKER_MAINTENANCE_UNLOAD_UNPROVEN")
         if budget.call(_source) != source:
@@ -158,6 +190,7 @@ def _stop_incident_broker():
                   "cohort_content_sha256": after.cohort_content_sha256,
                   "disable_attempted": disable_attempted,
                   "bootout_attempted": bootout_attempted,
+                   "socket_retirement_attempted": socket_retirement_attempted,
                   "origin_custody": False, "provider_called": False}
     except BaseException as failure:
         error = failure
@@ -177,5 +210,6 @@ def _stop_incident_broker():
             "BROKER_MAINTENANCE_CLEANUP_UNPROVEN" if cleanup_failed else
             getattr(error, "code", "BROKER_MAINTENANCE_UNAVAILABLE"),
             disable_attempted=disable_attempted, bootout_attempted=bootout_attempted,
+            socket_retirement_attempted=socket_retirement_attempted,
         ) from error
     return result
