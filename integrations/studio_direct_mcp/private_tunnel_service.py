@@ -36,6 +36,9 @@ TRANSPORT_TTL = "5h"
 STARTUP_WAIT = "30s"
 MAX_CONCURRENT_REQUESTS = 4
 CONTROL_PLANE_BASE_URL = "https://api.openai.com"
+# A historical successful poll is not evidence of a connected transport.
+# Allow two 30-second polls plus scheduling slack; never extend this on reads.
+MAX_CONTROL_PLANE_POLL_AGE_SECONDS = 90
 
 # Known loopback mapping. Other safe accounts take port from the gateway manifest.
 ACCOUNT_PORTS = {"chatgpt1": 45018}
@@ -634,7 +637,14 @@ def _strict_tunnel_health(
     poll = payload.get("control_plane_poll")
     healthy = isinstance(healthz, dict) and healthz.get("ok") is True
     local_ready = isinstance(readyz, dict) and readyz.get("ok") is True
-    poll_ready = isinstance(poll, dict) and poll.get("ok") is True
+    polled_at = poll.get("value") if isinstance(poll, dict) else None
+    now = time.time()
+    poll_ready = (
+        isinstance(poll, dict)
+        and poll.get("ok") is True
+        and type(polled_at) in (int, float)
+        and now - MAX_CONTROL_PLANE_POLL_AGE_SECONDS <= polled_at <= now
+    )
     return healthy, local_ready and poll_ready, poll_ready
 
 
