@@ -687,3 +687,131 @@ test('selected publisher refuses a foreign or unversioned owner receipt before G
     }
   } finally { await f.cleanup(); }
 });
+
+
+function closedProfileFor(f) {
+  return {
+    enabled: true, workspaceCli: f.cli, gitBinary: GIT,
+    commandTimeoutMs: 10_000, pushTimeoutMs: 10_000,
+    repositories: [
+      { repository: 'mastermind', sourceRepository: path.join(f.root, 'mastermind-source'),
+        allowedRemoteUrls: [path.join(f.root, 'mastermind-remote.git')] },
+      { repository: 'macro', sourceRepository: path.join(f.root, 'macro-source'),
+        allowedRemoteUrls: [path.join(f.root, 'macro-remote.git')] },
+      { repository: 'terminal', sourceRepository: f.sourceRepo, allowedRemoteUrls: [f.remote] },
+    ],
+  };
+}
+
+test('closed three-repository publication profile is explicit, immutable and rejects aliases/remotes', async () => {
+  const f = await fixture();
+  try {
+    const profile = closedProfileFor(f);
+    const frozen = resolveGitPublishConfig(profile);
+    assert.equal(resolveGitPublishConfig(frozen), frozen);
+    assert.deepEqual(frozen.repositories.map((p) => p.repository), ['mastermind', 'macro', 'terminal']);
+    assert.equal(frozen.repositories[2].sourceRepository, f.sourceRepo);
+    assert.throws(() => resolveGitPublishConfig({ ...profile, repository: 'terminal' }), /not supported/);
+    assert.throws(() => resolveGitPublishConfig({ ...profile, repositories: profile.repositories.slice(0, 2) }), /exact closed/);
+    assert.throws(() => resolveGitPublishConfig({ ...profile,
+      repositories: [profile.repositories[0], profile.repositories[1], profile.repositories[1]] }), /unique/);
+    assert.throws(() => resolveGitPublishConfig({ ...profile,
+      repositories: [profile.repositories[0], profile.repositories[1],
+        { ...profile.repositories[2], sourceRepository: profile.repositories[0].sourceRepository }] }), /distinct/);
+    assert.throws(() => resolveGitPublishConfig({ ...profile,
+      repositories: [profile.repositories[0], profile.repositories[1],
+        { ...profile.repositories[2], allowedRemoteUrls: profile.repositories[0].allowedRemoteUrls }] }), /distinct/);
+    assert.throws(() => resolveGitPublishConfig({ ...profile,
+      repositories: [profile.repositories[0], profile.repositories[1],
+        { ...profile.repositories[2], allowedRemoteUrls: [f.remote, 'another'] }] }), /distinct/);
+  } finally { await f.cleanup(); }
+});
+
+test('closed publisher routes only the uniquely registered Terminal operation and retains exact commit/push fencing', async () => {
+  const f = await fixture();
+  try {
+    const seen = [];
+    const exec = async (file, args, options) => {
+      if (file !== f.cli) return execFile(file, args, options);
+      const alias = args.at(-1);
+      assert.deepEqual(args, ['status', '--operation-id', f.operationId,
+        '--lane', 'web', '--repository', alias]);
+      seen.push(alias);
+      if (alias !== 'terminal') {
+        const error = new Error('workspace registration absent');
+        error.code = 2;
+        error.stdout = '';
+        error.stderr = JSON.stringify({
+          schema_version: 'mastermind.workspace_cli/v2',
+          action: 'status', effect: 'NOT_APPLIED', repository: alias,
+          error: 'workspace is not registered to the source repository',
+        });
+        throw error;
+      }
+      return { stdout: JSON.stringify({
+        schema_version: 'mastermind.workspace_cli/v2',
+        action: 'status', effect: 'NOT_APPLIED', repository: alias,
+        receipt: { source_repository: f.sourceRepo, workspace_path: f.workspace,
+          branch: f.branch, dirty: false, head_sha: f.head },
+      }), stderr: '' };
+    };
+    const publisher = createGitPublisher(closedProfileFor(f), { execFile: exec });
+    const before = await publisher.status({ operation_id: f.operationId });
+    assert.equal(before.local_head_sha, f.head);
+    assert.equal(before.remote_head_sha, null);
+    await writeFile(path.join(f.workspace, 'proof.txt'), 'terminal repair\n');
+    const committed = await publisher.commit({
+      operation_id: f.operationId, expected_head_sha: f.head, message: 'fix: closed publisher routing',
+    });
+    assert.equal(committed.effect_state, 'APPLIED');
+    const pushed = await publisher.push({
+      operation_id: f.operationId, expected_head_sha: committed.commit_head_sha,
+    });
+    assert.equal(pushed.effect_state, 'APPLIED');
+    assert.equal(pushed.remote_head_sha, committed.commit_head_sha);
+    // The delegated publisher independently rereads its exact Terminal binding
+    // during commit/push, so its extra Terminal observations are intentional.
+    assert.equal(seen.filter((alias) => alias === 'mastermind').length, 3);
+    assert.equal(seen.filter((alias) => alias === 'macro').length, 3);
+    assert.ok(seen.filter((alias) => alias === 'terminal').length >= 3);
+    assert.ok(seen.every((alias) => ['mastermind', 'macro', 'terminal'].includes(alias)));
+    const {stdout} = await git(f.workspace, 'ls-remote', '--heads', 'origin', `refs/heads/${f.branch}`);
+    assert.equal(stdout.trim().split(/\s+/)[0], committed.commit_head_sha);
+  } finally { await f.cleanup(); }
+});
+
+test('closed publisher refuses duplicate operation ownership or bad registry receipts before Git', async () => {
+  const f = await fixture();
+  try {
+    for (const caseName of ['ambiguous', 'unversioned', 'foreign', 'unregistered']) {
+      let gitCalls = 0;
+      const exec = async (file, args) => {
+        if (file !== f.cli) { gitCalls++; throw new Error('Git must remain untouched'); }
+        const alias = args.at(-1);
+        const registered = alias === 'terminal' || (caseName === 'ambiguous' && alias === 'macro');
+        const result = registered ? {
+          schema_version: 'mastermind.workspace_cli/v2', action: 'status',
+          effect: 'NOT_APPLIED', repository: alias,
+          receipt: { source_repository: f.sourceRepo, workspace_path: f.workspace,
+            branch: f.branch, dirty: false, head_sha: f.head },
+        } : {
+          schema_version: 'mastermind.workspace_cli/v2', action: 'status',
+          effect: 'NOT_APPLIED', repository: alias,
+          error: 'workspace is not registered to the source repository',
+        };
+        if (caseName === 'unregistered') {
+          delete result.receipt;
+          result.error = 'workspace is not registered to the source repository';
+        }
+        if (caseName === 'unversioned' && alias === 'macro') result.schema_version = 'mastermind.workspace_cli/v1';
+        if (caseName === 'foreign' && alias === 'macro') result.repository = 'terminal';
+        return { stdout: JSON.stringify(result), stderr: '' };
+      };
+      const publisher = createGitPublisher(closedProfileFor(f), { execFile: exec });
+      await assert.rejects(publisher.commit({
+        operation_id: f.operationId, expected_head_sha: f.head, message: 'test: no effects',
+      }), /more than one repository|invalid repository receipt|not registered/);
+      assert.equal(gitCalls, 0, caseName);
+    }
+  } finally { await f.cleanup(); }
+});

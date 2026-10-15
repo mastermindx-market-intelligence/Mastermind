@@ -28,6 +28,31 @@ class RepositoryWorkspaceInstallTests(unittest.TestCase):
         with self.assertRaises((ValueError, SystemExit)):
             self.configuration("true")
 
+    def test_chatgpt1_closed_profile_routes_git_to_three_fixed_owners(self):
+        value = service._build_config(
+            "chatgpt1", "127.0.0.1", 45018,
+            Path("/owned/node"), Path("/owned/backend"),
+            Path("/owned/state"), Path("/owned/home"),
+            repository_workspaces=True,
+        )
+        publication = value["gitPublish"]
+        self.assertNotIn("sourceRepository", publication)
+        self.assertNotIn("allowedRemoteUrls", publication)
+        self.assertEqual([row["repository"] for row in publication["repositories"]],
+                         ["mastermind", "macro", "terminal"])
+        self.assertEqual([row["sourceRepository"] for row in publication["repositories"]], [
+            "/owned/home/Documents/GitHub/Mastermind",
+            "/owned/home/Documents/Cluade/macro-main",
+            "/owned/home/Documents/Cluade/charting-app",
+        ])
+        self.assertEqual([row["allowedRemoteUrls"] for row in publication["repositories"]], [
+            ["https://github.com/mastermindx-market-intelligence/Mastermind.git"],
+            ["https://github.com/mastermindx-market-intelligence/macro.git"],
+            ["https://github.com/mastermindx-market-intelligence/mastermind-terminal.git"],
+        ])
+        # The three-repository publisher is never silently enabled on another seat.
+        self.assertNotIn("repositories", self.configuration(True)["gitPublish"])
+
     def test_source_manifest_includes_consumer_and_preserves_legacy_generations(self):
         self.assertIn("workspace-access.mjs", service.STAGE_FILES)
         prior = frozenset(service.STAGE_FILES) - {"workspace-access.mjs"}
@@ -98,6 +123,44 @@ class RepositoryWorkspaceLifecycleTests(unittest.TestCase):
             prior = {"configHash": service._sha256_file(config)}
             with self.assertRaises(SystemExit):
                 service._repository_workspace_setting(SimpleNamespace(), {"config": config}, prior)
+
+    def test_chatgpt1_upgrade_retains_closed_publisher_with_sealed_manifest(self):
+        import tempfile
+        from unittest import mock
+        import private_service_test as fixtures
+        native = fixtures.svc
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            home = root / "home"
+            home.mkdir()
+            source = fixtures._make_source(root)
+            node = fixtures._make_node(root)
+            backend = fixtures._make_backend(root)
+            paper_sha = fixtures._seed_paper_runtime(home)
+            args = fixtures._stage_args(source, node, backend)
+            args.account = "chatgpt1"
+            args.enable_repository_workspaces = True
+            with mock.patch.dict("os.environ", {"HOME": str(home)}), \
+                 mock.patch.object(native, "PAPER_BRIDGE_SHA256", paper_sha), \
+                 mock.patch.object(native, "_run", fixtures.CmdRecorder()):
+                fixtures._capture_stdout(lambda: native.cmd_stage(args))
+                roots = native._build_runtime_roots("chatgpt1")
+                fixtures._seed_node_modules(roots)
+                original = json.loads(roots["config"].read_text())
+                self.assertEqual(
+                    [p["repository"] for p in original["gitPublish"]["repositories"]],
+                    ["mastermind", "macro", "terminal"],
+                )
+                newer = fixtures._make_upgrade_source(root)
+                upgrade = fixtures._stage_args(newer, node, backend)
+                upgrade.account = "chatgpt1"
+                upgrade.enable_repository_workspaces = False
+                fixtures._capture_stdout(lambda: native.cmd_upgrade(upgrade))
+                installed = json.loads(roots["config"].read_text())
+                self.assertEqual(installed["gitPublish"], original["gitPublish"])
+                self.assertEqual(installed["repositoryWorkspaces"], original["repositoryWorkspaces"])
+                self.assertEqual(native._sha256_file(roots["config"]),
+                                 json.loads(roots["manifest"].read_text())["configHash"])
 
 
 if __name__ == "__main__":
