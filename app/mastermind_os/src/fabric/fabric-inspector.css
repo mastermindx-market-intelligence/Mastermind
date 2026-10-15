@@ -52,3 +52,10 @@
 .fi-disclosure { margin-block: 16px; border-block: 1px solid color-mix(in srgb, currentColor 16%, transparent); padding: 14px 0; min-width: 0; }
 .fi-disclosure > summary { cursor: pointer; font-size: 14px; line-height: 1.6; font-weight: 600; }
 .fi-disclosure > summary:focus-visible { outline: 2px solid currentColor; outline-offset: 4px; }
+
+.fi-relations { display: flex; flex-direction: column; gap: 7px; min-width: 0; padding: 12px; margin-block: 12px 16px; border: 1px solid var(--fi-line); border-radius: 10px; background: var(--fi-fill); }
+.fi-relations > strong { font-size: 12.5px; }
+.fi-relations > small { display: block; overflow-wrap: anywhere; }
+.fi-relations button { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; width: 100%; min-width: 0; min-height: 36px; padding: 8px 10px; border-radius: 8px; text-align: left; }
+.fi-relations button > span { font-size: 12px; color: var(--fi-muted); }
+.fi-relations button > code { overflow-wrap: anywhere; white-space: normal; max-width: 100%; font-size: 12.5px; }

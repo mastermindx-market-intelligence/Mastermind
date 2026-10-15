@@ -128,6 +128,62 @@ describe("owner-backed Fabric interiors", () => {
     expect(screen.getByText("NOT_PROJECTED")).toBeTruthy();
     expect(screen.getByText(/not acceptance of each child/)).toBeTruthy();
   });
+  it("navigates source-qualified immediate parent and children inside the supplied mission only", () => {
+    const rootChild = child("JOB-2", { worker_id: "worker-parent" });
+    const grandChild = child("JOB-3", { parent_job_id: "JOB-2", worker_id: "worker-leaf" });
+    render(<FabricMissionInspector mission={doc([grandChild, rootChild])} />);
+    pick("JOB-2");
+    expect(detail().getByRole("button", { name: "View observed child: JOB-3" })).toBeTruthy();
+    fireEvent.click(detail().getByRole("button", { name: "View observed child: JOB-3" }));
+    expect(detail().getByText("worker-leaf")).toBeTruthy();
+    expect(detail().getByText("JOB-1 → JOB-2 → JOB-3")).toBeTruthy();
+    fireEvent.click(detail().getByRole("button", { name: "View observed parent: JOB-2" }));
+    expect(detail().getByText("worker-parent")).toBeTruthy();
+    expect(detail().queryByRole("button", { name: "View observed parent: JOB-1" })).toBeNull();
+  });
+  it("resets a restrictive worker filter to reach a verified relative but does not dispatch", () => {
+    const one = child("JOB-2", { status: "FAILED" });
+    const two = child("JOB-3", { parent_job_id: "JOB-2", status: "RUNNING" });
+    render(<FabricMissionInspector mission={doc([one, two])} />);
+    fireEvent.click(screen.getByRole("button", { name: "Problems" }));
+    pick("JOB-2");
+    fireEvent.click(detail().getByRole("button", { name: "View observed child: JOB-3" }));
+    expect(screen.getByRole("button", { name: "All" }).getAttribute("aria-pressed")).toBe("true");
+    expect(detail().getByText("JOB-1 → JOB-2 → JOB-3")).toBeTruthy();
+  });
+  it("does not navigate through unavailable or conflicted lineage", () => {
+    const d = doc([child("JOB-2", { parent_job_id: "JOB-3" }), child("JOB-3", { parent_job_id: "JOB-2" })]);
+    const view = render(<FabricMissionInspector mission={d} />);
+    pick("JOB-2");
+    expect(detail().queryByRole("button", { name: /^View observed (parent|child)/ })).toBeNull();
+    const conflict = doc([child("JOB-2"), child("JOB-3", { parent_job_id: "JOB-2" })]);
+    conflict.mission.root_job_ambiguous = true;
+    view.rerender(<FabricMissionInspector mission={conflict} />);
+    pick("JOB-2");
+    expect(detail().queryByRole("button", { name: /^View observed (parent|child)/ })).toBeNull();
+  });
+  it("clears previously selected worker and filter on a different mission root", () => {
+    const rootOne = doc([child("JOB-2", { status: "FAILED" })]);
+    const view = render(<FabricMissionInspector mission={rootOne} />);
+    fireEvent.click(screen.getByRole("button", { name: "Problems" }));
+    pick("JOB-2");
+    const rootTwo = doc([child("JOB-8", { parent_job_id: "JOB-9", status: "RUNNING" })]);
+    rootTwo.mission.root_job_id = "JOB-9";
+    view.rerender(<FabricMissionInspector mission={rootTwo} />);
+    expect(detail().queryByText("worker-observed-1")).toBeNull();
+    expect(screen.getByRole("button", { name: "All" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: /^JOB-8 / })).toBeTruthy();
+  });
+  it("does not treat a validated parent after the display cap as a displayed navigation target", () => {
+    const members = Array.from({length:270},(_,index)=>child("JOB-"+(index+2)));
+    members[0].parent_job_id = "JOB-260";
+    const d=doc(members);
+    const view=render(<FabricMissionInspector mission={d} />);
+    pick("JOB-2");
+    // The companion #1435 decoder repair may prove ancestry using the full
+    // supplied source. It must not produce an invisible/off-cap action.
+    expect(detail().queryByRole("button",{name:"View observed parent: JOB-260"})).toBeNull();
+  });
   it("keeps unknown attempt fields unknown and supports the current app locale", () => {
     const c = child(); c.latest_attempt = null;
     render(<FabricMissionInspector mission={doc([c])} locale="zh-CN" />); pick();
