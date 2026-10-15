@@ -89,3 +89,41 @@ previous red #1441 run is not a new pass. This PR stays DRAFT and uninstalled.
 No Ubuntu capacity configuration, CPU cutoff, workers, provider quota,
 lease, host profile or other V8 physical install was touched. The original
 elastic V8 effect remains HELD_PLATFORM_REFUSAL / DO_NOT_RETRY.
+
+
+### October 15 10:44 UTC — newer-picker isolated full integration
+
+The newer installed M2 picker `0f5cbc32504680e09055b77cffdea81adea734388b7b061fcf77d017b7715cb2`
+is **not** byte-identical to V5's original pin, but the existing four
+V5 picker hunks apply with `patch --fuzz=0` and produce
+`dbdd1ada7e4933acf36f6c2e7b32b0c546126c30e6603f32f3784b0daf98fb1e`.
+A fresh `difflib.unified_diff` against the latest live picker yields a
+**byte-identical 40-line picker section** (SHA-256
+`fc631a26b9e00af51245468ac82c3d0811914a4cf29ae2f57b0a64861ace5b0c`),
+so no redundant rebase commit is warranted. The complete reset-corrected
+12-file V5 patch applied with zero fuzz to isolated exact current copies of
+picker, quota, ledger and five original tests; all four new tests were created.
+All staged Python compiled. The three source postimage SHA-256s:
+picker `dbdd1ada7e4933acf36f6c2e7b32b0c546126c30e6603f32f3784b0daf98fb1e`;
+quota `06a10fecbc60ed30d43bcfd933d2aea0dbf234f32c16f8a2c65ce2da95648e8c`;
+ledger `07970a0859557dcaa77b9133c1f7edc4a363fd1281f82cc8f5141304a1fd811c`.
+
+An initial hermetic test attempt could not import the staged dependency
+`test_placement_view` and, once importable, lacked the staged
+`orch/fabric/pools.yaml`; those were **fixture construction failures**, not
+V5 routing regressions. After adding only current policy/host snapshots to
+the isolated stage and the original sibling test search path, all **269
+relevant staged routing tests PASSED** in 6.41 seconds (one unrelated pytest
+garbage-collection warning regarding a different private browser fixture).
+Exact logs: `~/.mastermind/agent-evidence/fabric-advisory-reset-v5-20261015/full-current-v5-scoped-tests-v3.log`,
+with staged 12-source application receipt `full-current-stage-receipt.json`.
+This supersedes the prior untested newer-picker *composition* assumption,
+not the hard production preimage/source-owner/review/CI gate. The other 104
+original V5 scoped regressions have not been claimed rerun by this phase.
+There were **no live router/provider/broker/host/lease changes**.
+
+**Still DRAFT / NOT INSTALLED:** Preserve current source independently,
+approve exact updated live-source preimage and full qualified support bundle,
+obtain full CI and independent review, and prove an original routed accepted
+worker/result before production acceptance. The denied V8 installation
+remains untouched.
