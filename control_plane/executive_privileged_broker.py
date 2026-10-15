@@ -2122,7 +2122,10 @@ def _read_request_frame(connection: socket.socket) -> Mapping[str, Any]:
                 raise PrivilegedBrokerError("privileged protocol accepts exactly one JSON frame")
             break
     duplicates = []
+    root_pairs = ()
     def release_pairs(items):
+        nonlocal root_pairs
+        root_pairs = items
         result = {}
         for key, item in items:
             if key in result:
@@ -2138,6 +2141,11 @@ def _read_request_frame(connection: socket.socket) -> Mapping[str, Any]:
         raise PrivilegedBrokerError("privileged request frame must contain a mapping")
     if duplicates and value.get("schema") == "mastermind.executive_release_broker/v1":
         raise PrivilegedBrokerError("release frame has duplicate fields")
+    if duplicates and any(
+        key == "schema" and item in (FORWARD_STATUS_REQUEST_SCHEMA, FORWARD_ACTION_REQUEST_SCHEMA)
+        for key, item in root_pairs
+    ):
+        raise PrivilegedBrokerError("forward frame has duplicate fields")
     return value
 
 
