@@ -112,6 +112,18 @@ def test_qwen_generated_reader_is_the_same_guarded_reader(qwen):
     with pytest.raises(ValueError): c.validate_response(c.canonical(response), w.request, 'minimax')
 
 
+def test_qwen_generated_reader_omits_local_only_scope_metadata(qwen):
+    w = qwen
+    code = c.code_for_request(w.request)
+    assert w.scope['packet_path'] not in code
+    assert w.scope['destination'] not in code
+    assert 'source_pins' not in code
+    namespace = {}
+    exec(code.split('\ntry:\n raw=sys.stdin.buffer.read(65537)')[0], namespace)
+    assert set(namespace['PLAIN_SCOPES'][w.rid]) == {
+        'root', 'parent', 'host', 'packet_sha256', 'support_digest'}
+
+
 @pytest.mark.parametrize('available', [True, False])
 def test_qwen_reuses_existing_qualified_historical_validator(qwen, monkeypatch, available):
     w = qwen
