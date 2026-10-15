@@ -11,8 +11,8 @@ REVIEWED_FILES = {
     # single exact site. Independent source acceptance remains a release gate;
     # these static test pins do not establish it or grant a new identity.
     "ops/executive_os/control_aead_profile.py": {
-        "sha256": "91c62b4403a2bca32dc425c9903396701dd7d0cb3bc39bbe3d82769b1980bf75",
-        "sites": ((191, 124, 127, "int", "450"),),
+        "sha256": "78f89ff4f0b6db2d6e5c2d832dfa207c60283ab218271bbec2ed85100095e85e",
+        "sites": ((277, 124, 127, "int", "450"),),
     },
     # Existing ten-minute telemetry age, not a UID. Full reviewed source and
     # exact token only; drift exposes the source to ordinary D8 again.

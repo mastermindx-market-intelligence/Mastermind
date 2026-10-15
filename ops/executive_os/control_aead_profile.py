@@ -89,6 +89,45 @@ def _archive_data(archive, info, *, check=None):
             parts.append(block)
     return b''.join(parts)
 
+def _directory_identity(info):
+    return tuple(getattr(info,key) for key in ('st_dev','st_ino','st_uid','st_gid',
+                 'st_mode','st_nlink','st_size','st_mtime_ns','st_ctime_ns'))
+
+def _require_root_directory(info):
+    if info.st_uid!=0 or not stat.S_ISDIR(info.st_mode):refuse()
+
+def create_profile_parent(parent):
+    # Keep the installer's restrictive umask. Only an exclusively created,
+    # root-owned, ACL-free descriptor may be widened; existing occupants are
+    # untouched and must pass the caller's exact sealed-directory guard.
+    parent=Path(parent)
+    before=parent.parent.lstat()
+    grandparent=os.open(parent.parent,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+    try:
+        opened=os.fstat(grandparent);_require_root_directory(opened)
+        if (opened.st_mode&0o022 or _directory_identity(before)!=_directory_identity(opened)
+                or has_macos_acl(parent.parent,expected_identity=before,descriptor=grandparent)):refuse()
+        try:
+            os.mkdir(parent.name,mode=0o700,dir_fd=grandparent)
+        except FileExistsError:return
+        created=os.stat(parent.name,dir_fd=grandparent,follow_symlinks=False)
+        _require_root_directory(created)
+        if stat.S_IMODE(created.st_mode)&~0o700:refuse()
+        fresh=os.open(parent.name,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=grandparent)
+        try:
+            if (_directory_identity(created)!=_directory_identity(os.fstat(fresh))
+                    or has_macos_acl(parent,expected_identity=created,descriptor=fresh)
+                    or _directory_identity(created)!=_directory_identity(os.stat(parent.name,dir_fd=grandparent,follow_symlinks=False))):refuse()
+            os.fchmod(fresh,0o755)
+            info=os.fstat(fresh);_require_root_directory(info)
+            if (stat.S_IMODE(info.st_mode)!=0o755
+                    or _directory_identity(info)!=_directory_identity(os.stat(parent.name,dir_fd=grandparent,follow_symlinks=False))
+                    or has_macos_acl(parent,expected_identity=info,descriptor=fresh)):refuse()
+            os.fsync(fresh)
+        finally:os.close(fresh)
+        os.fsync(grandparent)
+    finally:os.close(grandparent)
+
 def wheel_files(name, data, lock, *, check=None):
     # Lock hashes authorize wheel bytes, never a caller-built package manifest.
     match=re.fullmatch(r'(cffi|cryptography|pycparser)-([0-9.]+)-(.+)\.whl',name)
@@ -110,6 +149,17 @@ def wheel_files(name, data, lock, *, check=None):
                         or info.file_size>MAX_BYTES or stat.S_ISLNK(info.external_attr>>16)): refuse()
                 content=_archive_data(wheel,info,check=check)
                 files[info.filename]=content
+            # The lock authorizes every locked platform's bytes, so only the
+            # internal WHEEL tags bind those bytes to the filename's platform.
+            wheel_metadata=f'{distribution}-{version}.dist-info/WHEEL'
+            if wheel_metadata not in files:refuse()
+            observed=[]
+            for line in files[wheel_metadata].decode('utf-8').splitlines():
+                if re.match(r'\s*tag(?:\s|:|$)',line,re.IGNORECASE) is None:continue
+                tag=re.fullmatch(r'Tag: (\S+)',line)
+                if tag is None:refuse()
+                observed.append(tag.group(1))
+            if len(observed)!=1 or observed[0]!=tags:refuse()
             metadata=f'{distribution}-{version}.dist-info/METADATA'
             if metadata not in files:refuse()
             lines=files[metadata].decode('utf-8').splitlines()
@@ -194,7 +244,7 @@ def materialize_bundle(bundle, release_root, *, operator_uid):
     root=profile_root(lock_bytes)
     if root.exists():return verify_profile(release_root) # Never replace a same-profile occupant.
     sealed_directory(root.parent.parent)
-    root.parent.mkdir(mode=0o755,exist_ok=True);sealed_directory(root.parent,mode=0o755)
+    create_profile_parent(root.parent);sealed_directory(root.parent,mode=0o755)
     stage=root.parent/('.stage-'+os.urandom(16).hex());stage.mkdir(mode=0o700)
     try:
         (stage/'wheels').mkdir();(stage/'packages').mkdir()
