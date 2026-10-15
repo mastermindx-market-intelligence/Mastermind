@@ -7,7 +7,7 @@ import { Client as LegacyClient } from '@modelcontextprotocol/sdk/client/index.j
 import { StreamableHTTPClientTransport as LegacyTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { PROTOCOL_VERSION_META_KEY, CLIENT_INFO_META_KEY, CLIENT_CAPABILITIES_META_KEY } from '@modelcontextprotocol/server';
 import { startGateway, resolveConfig } from './gateway.mjs';
-import { createTunnelAuth } from './private-tunnel-auth.mjs';
+import { startPrivateGateway } from './private-tunnel-gateway.mjs';
 
 const profile = { host: '127.0.0.1', port: 0, accountLabel: 'fabric-test',
   fabricOnly: true, backendMode: 'shared-account', modernFabricProtocol: true,
@@ -41,8 +41,23 @@ test('modern selection is strict, private, restricted and off by default', async
   await assert.rejects(startGateway(profile, {}), /installed private tunnel principal/);
 });
 
+test('the actual private entry keeps legacy serving when modern mode is absent', async () => {
+  const config = { ...profile }; delete config.modernFabricProtocol; delete config.backendMode;
+  const gw = await startPrivateGateway(config);
+  const client = new LegacyClient({ name: 'legacy-private-entry', version: '0.0.0' });
+  try {
+    assert.equal(gw.accountLabel, 'fabric-test');
+    assert.equal(gw.principal, 'tunnel:fabric-test');
+    const ready = await (await fetch(new URL('/readyz', gw.url))).json();
+    assert.equal(ready.modernFabricProtocol, undefined);
+    await client.connect(new LegacyTransport(new URL(gw.url)));
+    assert.equal((await client.listTools()).tools.length, 9);
+    assert.equal(value(await client.callTool({ name: 'fabric_status', arguments: {} })).name, 'fabric_status');
+  } finally { await client.close(); await gw.close(); }
+});
+
 test('pinned modern client lists/calls through real HTTP and retains the existing backend generation', async () => {
-  const gw = await startGateway(profile, createTunnelAuth({ accountLabel: 'fabric-test' }));
+  const gw = await startPrivateGateway(profile);
   let first, second, legacy;
   try {
     first = await connect(gw);
@@ -72,7 +87,7 @@ test('pinned modern client lists/calls through real HTTP and retains the existin
 });
 
 test('malformed modern claims are rejected before backend acquisition; metadata cannot grant identity', async () => {
-  const gw = await startGateway(profile, createTunnelAuth({ accountLabel: 'fabric-test' }));
+  const gw = await startPrivateGateway(profile);
   try {
     const response = await raw(gw, body('tools/call', { name: 'fabric_request', arguments: {} }),
       { 'mcp-protocol-version': '2025-11-25' });
@@ -91,8 +106,7 @@ test('malformed modern claims are rejected before backend acquisition; metadata 
 
 test('modern calls cannot reach unrelated tools, and catalog drift fails closed', async () => {
   for (const unrelated of [false, true]) {
-    const gw = await startGateway({ ...profile, childEnv: { FIXTURE_UNRELATED: String(unrelated) } },
-      createTunnelAuth({ accountLabel: 'fabric-test' }));
+    const gw = await startPrivateGateway({ ...profile, childEnv: { FIXTURE_UNRELATED: String(unrelated) } });
     let client;
     try {
       client = await connect(gw);
@@ -106,8 +120,8 @@ test('modern calls cannot reach unrelated tools, and catalog drift fails closed'
 });
 
 test('an effectful timeout preserves UNKNOWN and the real facade refuses replay on the next exchange', async () => {
-  const gw = await startGateway({ ...profile, requestTimeoutMs: 300,
-    childEnv: { FIXTURE_FACADE_TIMEOUT: 'true' } }, createTunnelAuth({ accountLabel: 'fabric-test' }));
+  const gw = await startPrivateGateway({ ...profile, requestTimeoutMs: 300,
+    childEnv: { FIXTURE_FACADE_TIMEOUT: 'true' } });
   let client;
   const args = { run_id: 'fixture-timeout', root_id: 'fixture-root', parent_id: 'fixture-root',
     task_class: 'mechanical', task_complexity: 'C0_MECHANICAL', work_packet: 'Disposable fixture only.' };
@@ -171,8 +185,7 @@ test('retained output survives exchanges and cannot be read under another authen
 });
 
 test('HTTP disconnect after dispatch never closes the shared owner or replays the real facade run', async () => {
-  const gw = await startGateway({ ...profile, childEnv: { FIXTURE_FACADE_TIMEOUT: 'true' } },
-    createTunnelAuth({ accountLabel: 'fabric-test' }));
+  const gw = await startPrivateGateway({ ...profile, childEnv: { FIXTURE_FACADE_TIMEOUT: 'true' } });
   let client;
   const args = { run_id: 'fixture-timeout', root_id: 'fixture-root', parent_id: 'fixture-root',
     task_class: 'mechanical', task_complexity: 'C0_MECHANICAL', work_packet: 'Disposable disconnect fixture.' };

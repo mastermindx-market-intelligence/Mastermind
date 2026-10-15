@@ -90,7 +90,7 @@ jobs:
         working-directory: integrations/studio_direct_mcp
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
-          node --test gateway-modern-fabric.test.mjs gateway.test.mjs gateway-shared-backend.test.mjs gateway-owner-lifecycle-regression.test.mjs gateway-output-budget.test.mjs fabric-backend.test.mjs
+          node --test gateway-modern-fabric.test.mjs gateway.test.mjs gateway-shared-backend.test.mjs gateway-owner-lifecycle-regression.test.mjs gateway-output-budget.test.mjs fabric-backend.test.mjs private-cli.test.mjs private-tunnel-auth.test.mjs
           python -m unittest discover -s . -p 'private_service*test.py'
 
       - name: Compile source
