@@ -1,0 +1,71 @@
+--- a/lease_broker.py
++++ b/lease_broker.py
+@@ -25,6 +25,8 @@
+ import time
+ from dataclasses import dataclass
+ import uuid
++from native_broker_admission import (NativeBrokerAdmissions, ensure_native_schema,
++                                     retain_native_grant, hold_native_uncertain)
+ from dataclasses import dataclass
+ from datetime import datetime, timezone
+ from typing import Any, Callable, Dict, List, Optional, Tuple
+@@ -131,7 +133,7 @@
+         return self.ok
+ 
+ 
+-class Broker:
++class Broker(NativeBrokerAdmissions):
+     """Single-writer lease broker. All mutating methods take the file lock."""
+ 
+     def __init__(
+@@ -221,6 +223,7 @@
+         return POOL_ALIASES.get(p, p)
+ 
+     def _ensure_schema(self, conn: sqlite3.Connection) -> None:
++        ensure_native_schema(conn)
+         lcols = {r[1] for r in conn.execute("PRAGMA table_info(leases)")}
+         if "renewable" not in lcols:
+             conn.execute(
+@@ -573,6 +576,8 @@
+                     and not _pid_alive(int(row["pid"]))
+                 ):
+                     dead = True
++                if dead and hold_native_uncertain(conn, row):
++                    continue
+                 if dead:
+                     conn.execute(
+                         "UPDATE leases SET state='expired' WHERE id=?", (row["id"],)
+@@ -828,6 +833,7 @@
+         waiter_id: Optional[str],
+         model: str = "",
+         operator_child_id: Optional[str] = None,
++        native_binding: Optional[dict] = None,
+     ) -> Tuple[AcquireResult, Optional[str], str]:
+         spec = self.provider(pool)
+         if spec.get("enabled") is False:
+@@ -950,6 +956,7 @@
+                 "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                 (lid, orch, pool, picked, task_class, model, host, pid, now, use_ttl, now, state, 1),
+             )
++            retain_native_grant(conn, lid, native_binding)
+             if operator_child_id is not None:
+                 conn.execute("UPDATE operator_child_authorizations SET admitted_lease_id=? WHERE run_id=? AND root=? AND admitted_lease_id IS NULL",
+                              (lid, operator_child_id, orch))
+@@ -981,6 +988,8 @@
+             pre = self._conn()
+             try:
+                 row = pre.execute("SELECT * FROM leases WHERE id=?", (lease_id,)).fetchone()
++                if row and row["native_key"] is not None:
++                    return HeartbeatResult(False, "native_owner_required")
+                 if row and row["state"] in HELD_STATES:
+                     now = self.now()
+                     if int(row["renewable"]) == 0 and (now - float(row["granted_at"])) > float(row["ttl"]):
+@@ -1031,6 +1040,8 @@
+                 if not row:
+                     return False
+                 if row["state"] not in HELD_STATES:
++                    return False
++                if row["native_key"] is not None:
+                     return False
+                 if row["orchestrator_id"] != oid:
+                     return False
