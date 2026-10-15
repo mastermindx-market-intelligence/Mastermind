@@ -37,6 +37,22 @@ class ProviderRealmError(ValueError):
     """A provider realm or credential observation is unsafe or malformed."""
 
 
+def validate_provider_credential_format(value: str) -> str:
+    """Validate the one shared provider-neutral opaque credential format.
+
+    Exactly one non-empty, bounded UTF-8 line with no NUL. This is the only
+    credential-format boundary; every reviewed realm and every attended
+    profile authority shares it. It never interprets provider responses and
+    grants no readiness, capacity, or route authority.
+    """
+    if not isinstance(value, str):
+        raise ProviderRealmError("provider credential is unavailable")
+    credential = value.strip()
+    if not credential or len(credential) > 4096 or any(ch in credential for ch in "\r\n\x00"):
+        raise ProviderRealmError("provider credential is unavailable")
+    return credential
+
+
 @dataclasses.dataclass(frozen=True)
 class CodexProviderRealm:
     realm_id: str
@@ -101,12 +117,7 @@ class CodexProviderRealm:
         )
 
     def validate_credential(self, value: str) -> str:
-        if not isinstance(value, str):
-            raise ProviderRealmError("provider credential is unavailable")
-        credential = value.strip()
-        if not credential or len(credential) > 4096 or any(ch in credential for ch in "\r\n\x00"):
-            raise ProviderRealmError("provider credential is unavailable")
-        return credential
+        return validate_provider_credential_format(value)
 
 def _has_macos_acl(
     path: Path,
@@ -566,6 +577,7 @@ __all__ = [
     "load_private_provider_credential",
     "load_native_realm_owner",
     "provider_home_credential_loader",
+    "validate_provider_credential_format",
     "set_provider_realm_test_enrollment",
     "set_provider_realm_test_key",
     "verify_provider_realm_enrollment_receipt",
@@ -833,6 +845,52 @@ _SUBSCRIPTION_REALM_OWNER_SEAL = object()
 _SUBSCRIPTION_REALM_SCHEMA = "mastermind.executive_worker_broker_config/v5"
 
 
+
+def _observe_attended_claude_binary(config, gid):
+    """Read an installer-owned canonical BinaryAttestation, never run a CLI.
+
+    The installation owner must attest the actual Claude executable using the
+    existing attester and publish this closed receipt. Its digest is pinned by
+    the original root worker definition; this reader does not publish it.
+    Nothing here creates, updates or substitutes that installation evidence.
+    """
+    from control_plane.worker_execution_contract import BinaryAttestation
+    from control_plane.codex_worker import _assert_binary_unchanged, BinaryAttestationError
+    binary = _native_path(config.get("claude_binary"))
+    receipt = _native_path(config.get("claude_attestation_receipt"))
+    digest = config.get("claude_attestation_sha256")
+    row = _native_read_config(receipt, digest)
+    versions = config.get("allowed_claude_versions")
+    fields = {field.name for field in dataclasses.fields(BinaryAttestation)}
+    if (set(row) != {"schema_version", "binary"}
+            or row["schema_version"] != "mastermind.attended_claude_binary/v1"
+            or type(row["binary"]) is not dict or set(row["binary"]) != fields
+            or type(versions) is not list or not 1 <= len(versions) <= 4
+            or any(type(v) is not str or not v or len(v)>64 for v in versions)):
+        _native_refuse()
+    values = row["binary"]
+    if (values["path"] != str(binary) or values["real_path"] != str(binary)
+            or values["version"] not in versions or values["uid"] != 0
+            or type(values["sha256"]) is not str or not _NATIVE_SHA.fullmatch(values["sha256"])
+            or any(type(values[k]) is not int or values[k] < 0
+                   for k in ("size","device","inode","mode","uid","gid","mtime_ns"))
+            or not 0 < values["size"] <= 256 * 1024 * 1024
+            or values["mode"] > 0o7777 or values["mode"] & 0o6022 or not values["mode"] & 0o111
+            or (values["team_identifier"] is not None and
+                (type(values["team_identifier"]) is not str or not values["team_identifier"]))):
+        _native_refuse()
+    try:
+        with _native_open(receipt) as (_, info), _native_open(binary):
+            if info.st_gid != gid or stat.S_IMODE(info.st_mode) != 0o440:
+                _native_refuse()
+            attestation = BinaryAttestation(**values)
+            _assert_binary_unchanged(attestation)
+    except (OSError, BinaryAttestationError):
+        raise ProviderRealmError("SUBSCRIPTION_REALM_UNAVAILABLE") from None
+    _native_read_config(receipt, digest)
+    return attestation
+
+
 @dataclasses.dataclass(frozen=True, repr=False)
 class SubscriptionRealmOwner:
     """Worker-local identity observer over the existing root broker config.
@@ -866,8 +924,11 @@ class SubscriptionRealmOwner:
                   if realm.provider_alias == binding.provider
                   and realm.base_url == binding.effective_base_url
                   and realm.wire_api == binding.protocol]
-        if (binding.adapter_id != "codex-cli" or len(realms) != 1
-                or binding.implementation_state == "SPEC_ONLY" or binding.autonomous_allowed):
+        attended = binding.binding_id == "minimax-token-plan.claude-code-anthropic"
+        if (binding.implementation_state == "SPEC_ONLY" or binding.autonomous_allowed
+                or (attended and (binding.provider != "minimax" or binding.harness_id != "claude-code"
+                    or binding.adapter_id != "claude-compatible-subscription" or binding.protocol != "anthropic"))
+                or (not attended and (binding.adapter_id != "codex-cli" or len(realms) != 1))):
             _native_refuse()
         worker_id = config.get("worker_id")
         uid, gid, control_uid = (config.get(key) for key in ("worker_uid", "worker_gid", "control_uid"))
@@ -881,14 +942,21 @@ class SubscriptionRealmOwner:
             principal = pwd.getpwuid(os.geteuid())
         except KeyError:
             _native_refuse()
-        if (home != expected_home
+        if ((not attended and home != expected_home)
                 or os.getuid() != uid or os.geteuid() != uid
                 or os.getgid() != gid or os.getegid() != gid
                 or principal.pw_name != config.get("worker_user") or principal.pw_gid != gid
                 or _native_canonical_home(_native_path(principal.pw_dir)) != home
                 or _native_canonical_home(_native_path(os.environ.get("HOME"))) != home
-                or _native_canonical_home(_native_path(os.environ.get("CODEX_HOME"))) != home):
+                or (not attended and _native_canonical_home(_native_path(os.environ.get("CODEX_HOME"))) != home)):
             _native_refuse()
+        if attended:
+            control_gid = config.get("control_gid")
+            claude_home = os.environ.get("CLAUDE_CONFIG_DIR")
+            if (type(control_gid) is not int or control_gid <= 0 or control_gid == gid
+                    or (claude_home is not None and
+                        _native_canonical_home(_native_path(claude_home)) != home / ".claude")):
+                _native_refuse()
         groups = config.get("allowed_supplementary_gids")
         if (type(groups) is not list or any(type(group) is not int or group <= 0 for group in groups)
                 or not set(os.getgroups()).issubset(set(groups) | {gid})):
@@ -910,21 +978,24 @@ class SubscriptionRealmOwner:
                     os.close(descriptor)
             except (OSError, ProviderRealmError):
                 raise ProviderRealmError("SUBSCRIPTION_REALM_UNAVAILABLE") from None
-        binary = _native_path(config.get("codex_binary"))
-        receipt = _native_path(config.get("codex_attestation_receipt"))
-        try:
-            with _native_open(binary), _native_open(receipt):
-                attestation = load_codex_attestation_receipt(
-                    receipt, expected_binary_path=binary, expected_owner_gid=gid)
-        except (OSError, CodexWorkerError):
-            raise ProviderRealmError("SUBSCRIPTION_REALM_UNAVAILABLE") from None
-        versions = config.get("allowed_codex_versions")
-        if (type(versions) is not list or not versions or len(versions) > 4
-                or any(type(version) is not str or not version for version in versions)
-                or attestation.version not in versions
-                or config.get("required_team_identifier") != "2DC432GLL2"
-                or attestation.team_identifier != "2DC432GLL2"):
-            _native_refuse()
+        if attended:
+            _observe_attended_claude_binary(config, gid)
+        else:
+            binary = _native_path(config.get("codex_binary"))
+            receipt = _native_path(config.get("codex_attestation_receipt"))
+            try:
+                with _native_open(binary), _native_open(receipt):
+                    attestation = load_codex_attestation_receipt(
+                        receipt, expected_binary_path=binary, expected_owner_gid=gid)
+            except (OSError, CodexWorkerError):
+                raise ProviderRealmError("SUBSCRIPTION_REALM_UNAVAILABLE") from None
+            versions = config.get("allowed_codex_versions")
+            if (type(versions) is not list or not versions or len(versions) > 4
+                    or any(type(version) is not str or not version for version in versions)
+                    or attestation.version not in versions
+                    or config.get("required_team_identifier") != "2DC432GLL2"
+                    or attestation.team_identifier != "2DC432GLL2"):
+                _native_refuse()
         _native_read_config(self._config_path, self._config_sha256)
         return {
             "worker_id": worker_id, "control_uid": control_uid,

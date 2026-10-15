@@ -1,0 +1,9 @@
+2026-10-13T21:01Z [remote_sub id=mm-os-incident-issuer-custody-preflight-20261013-01a104e6 host=ubuntu2] RUN_RESERVED explicit=1
+2026-10-13T21:01Z [remote_sub id=mm-os-incident-issuer-custody-preflight-20261013-01a104e6 host=ubuntu2] ECONOMIC_POLICY {"allowed":true,"reason":"cheap_glm_executor","requested_model":"glm-5.3-flash","task_class":"fix_build","task_complexity":"C2_COMPLEX_BOUNDED","tier":"leaf-labor"}
+2026-10-13T21:01Z [remote_sub id=mm-os-incident-issuer-custody-preflight-20261013-01a104e6 host=ubuntu2] LEASE_WAIT pool=glm wait=3600
+2026-10-13T21:01Z [remote_sub id=mm-os-incident-issuer-custody-preflight-20261013-01a104e6 host=ubuntu2] LEASE_OK pool=glm
+2026-10-13T21:01Z [remote_sub id=mm-os-incident-issuer-custody-preflight-20261013-01a104e6 host=ubuntu2] SCP packet=mm-os-incident-issuer-custody-preflight-20261013-01a104e6.packet.16qpaved support=executor-surface
+2026-10-13T21:01Z [remote_sub id=mm-os-incident-issuer-custody-preflight-20261013-01a104e6 host=ubuntu2] SUPPORT_VERSION_READY digest=4014714eb8865585f11b2a0120975479c10f0567cad968c5a57e5101f8c8f114 policy=987a1237c6d93ab02bc2ac6a3be2ca2a771daf5eca135799cd3c4a8bace8e60c
+2026-10-13T21:01Z [remote_sub id=mm-os-incident-issuer-custody-preflight-20261013-01a104e6 host=ubuntu2] GLM_EXACT_ACCOUNT_READY
+2026-10-13T21:01Z [remote_sub id=mm-os-incident-issuer-custody-preflight-20261013-01a104e6 host=ubuntu2] LAUNCH stdout=lanes_mm-os-incident-issuer-custody-preflight-20261013-01a104e6.stdout rc_file=ext/lanes_mm-os-incident-issuer-custody-preflight-20261013-01a104e6.rc cwd=~
+2026-10-13T21:01Z [remote_sub id=mm-os-incident-issuer-custody-preflight-20261013-01a104e6 host=ubuntu2] LAUNCH_ATTEMPT attempt=1

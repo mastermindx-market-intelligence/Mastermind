@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import hashlib
 import importlib
 import io
 import json
@@ -18,6 +19,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from tests.executive_identity_review import mask_reviewed_identity_literals
+from tests.executive_fabric_release_identity_review import REVIEWED_FILES
 
 
 ROOT = Path(__file__).parents[1]
@@ -763,7 +765,14 @@ def _is_mkdir_mode_literal(line: str, token_text: str) -> bool:
 
     Do not exempt a whole line containing arbitrary identity arguments, additional
     statements or another numeric argument that merely shares the same spelling.
-    The caller still rejects every line with an explicit identity-bearing name.
+    The caller still rejects every line with an explicit identity-bearing name,
+    and any alias-tainted binding named on the line keeps every non-exempt token
+    guarded above. Both admitted shapes are one closed expression: the
+    keyword-only directory-mode form, and the low-level
+    ``name/mode/dir_fd`` form whose single positional operand is a plain path
+    expression and whose dir_fd is a plain binding name. The admitted shape can
+    contain at most one numeric token, so no second identity-range literal can
+    ride along under this exemption.
     """
     source = line.strip()
     try:
@@ -773,8 +782,15 @@ def _is_mkdir_mode_literal(line: str, token_text: str) -> bool:
     if len(tree.body) != 1 or not isinstance(tree.body[0], ast.Expr):
         return False
     call = tree.body[0].value
-    if (not isinstance(call, ast.Call) or call.args
+    if (not isinstance(call, ast.Call) or len(call.args) > 1
             or not isinstance(call.func, ast.Attribute) or call.func.attr != "mkdir"):
+        return False
+    # The low-level os.mkdir(name, mode=..., dir_fd=...) form takes exactly one
+    # plain path operand (names and attribute chains); anything callable,
+    # subscripted or spread stays guarded.
+    if call.args and not all(
+            isinstance(node, (ast.Name, ast.Attribute, ast.expr_context))
+            for node in ast.walk(call.args[0])):
         return False
     modes = 0
     for keyword in call.keywords:
@@ -784,6 +800,9 @@ def _is_mkdir_mode_literal(line: str, token_text: str) -> bool:
                     or ast.get_source_segment(source, keyword.value) != token_text):
                 return False
             modes += 1
+        elif keyword.arg == "dir_fd":
+            if not isinstance(keyword.value, ast.Name):
+                return False
         elif (keyword.arg not in {"parents", "exist_ok"}
               or not isinstance(keyword.value, ast.Constant)
               or type(keyword.value.value) is not bool):
@@ -957,7 +976,7 @@ def _scan_added_identity_diff(
 
     string_accounts: dict[str, list[list[str]]] = {}
     for path, lines in production.items():
-        if (_scope_language(path) != "py" and not path.endswith((".patch", ".diff"))) or source_postimages is None or path not in source_postimages:
+        if (_scope_language(path) != "py" and not path.endswith((".patch", ".diff")) and path not in REVIEWED_FILES) or source_postimages is None or path not in source_postimages:
             continue
         source_lines = source_postimages[path].splitlines()
         numbers = added_numbers.get(path, [])
@@ -1371,6 +1390,25 @@ def test_d6_no_new_transport_and_all_arm_defaults_are_false():
     assert not any(isinstance(node, (ast.Import, ast.ImportFrom)) and any(alias.name == "socket" for alias in node.names) for node in tree.body)
 
 
+def _d7_reviewed_installed_event_loop(path, source, tree, node):
+    # Exact source review of the canonical installed wrapper. This does not
+    # exempt other run calls or imports, even inside the same function.
+    from tests.executive_identity_review import _reviewed_ast_dump
+    if (path != 'scripts/executive_os_phase1c.py'
+            or hashlib.sha256(source.encode()).hexdigest() !=
+            '749377f23da20864439edc3bc8b8c5810a047bbf833599a5856c103f7261fead'):
+        return False
+    anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
+               and n.name == 'serve_installed_control']
+    if (len(anchors) != 1 or hashlib.sha256(_reviewed_ast_dump(anchors[0]).encode()).hexdigest()
+            != '060525ac61b01452e7a84397f0e68ab4be9c0a05f6dac560113bce8180adc819'):
+        return False
+    expected = ast.parse('asyncio.run(_serve_from_config(config_path, _installed_control=True))',
+                         mode='eval').body
+    return (any(n is node for n in ast.walk(anchors[0]))
+            and ast.dump(node, include_attributes=False) == ast.dump(expected, include_attributes=False))
+
+
 def test_d7_diff_and_module_have_no_dispatch_or_provider_import():
     base = subprocess.run(
         ["git", "merge-base", "origin/master", "HEAD"], cwd=ROOT,
@@ -1398,7 +1436,45 @@ def test_d7_diff_and_module_have_no_dispatch_or_provider_import():
                 else node.func.attr if isinstance(node.func, ast.Attribute)
                 else None
             )
-            assert name not in calls
+            assert name not in calls or _d7_reviewed_installed_event_loop(
+                PHASE1C.relative_to(ROOT).as_posix(), source, tree, node)
+
+
+@pytest.mark.parametrize('before,after', [
+    ('asyncio.run(_serve_from_config', 'subprocess.run(_serve_from_config'),
+    ('asyncio.run(_serve_from_config', 'run(_serve_from_config'),
+    ('asyncio.run(_serve_from_config', 'foreign.run(_serve_from_config'),
+    ('asyncio.run(_serve_from_config', 'asyncio.run(_other_coroutine'),
+    ('_serve_from_config(config_path, _installed_control=True)',
+     '_serve_from_config(other_path, _installed_control=True)'),
+    ('_installed_control=True)', '_installed_control=False)'),
+    ('_installed_control=True))', '_installed_control=True), debug=True)'),
+    ('def serve_installed_control(', 'def moved_control('),
+    ('import asyncio', 'import foreign as asyncio'),
+    ('', '\nimport subprocess\nsubprocess.run([])\n'),
+])
+def test_d7_reviewed_event_loop_never_adopts_modified_source(before, after):
+    source = PHASE1C.read_text()
+    changed = source.replace(before, after) if before else source + after
+    assert changed != source
+    tree = ast.parse(changed)
+    assert not any(_d7_reviewed_installed_event_loop(
+        PHASE1C.relative_to(ROOT).as_posix(), changed, tree, n) for n in ast.walk(tree)
+        if isinstance(n, ast.Call))
+
+
+def test_d7_exact_event_loop_only_and_foreign_scope_refused():
+    source = PHASE1C.read_text()
+    tree = ast.parse(source)
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)]
+    path = PHASE1C.relative_to(ROOT).as_posix()
+    assert sum(_d7_reviewed_installed_event_loop(path, source, tree, n) for n in calls) == 1
+    assert not any(_d7_reviewed_installed_event_loop('foreign.py', source, tree, n) for n in calls)
+    foreign = ast.parse('asyncio.run(_serve_from_config(config_path, _installed_control=True))').body[0].value
+    assert not _d7_reviewed_installed_event_loop(path, source, tree, foreign)
+    anchor = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'serve_installed_control')
+    tree.body.append(anchor)
+    assert not any(_d7_reviewed_installed_event_loop(path, source, tree, n) for n in calls)
 
 
 @pytest.mark.parametrize("app_uid", [452, 501])
@@ -2020,6 +2096,96 @@ def test_d8_shell_mode_exemption_is_one_closed_operand(line, allowed):
     ]))
     assert (findings == []) is allowed
 
+
+def _d8_lowlevel_mkdir_chain_source(mkdir_line: str) -> str:
+    """Freeze the f904 custody-chain context that puts the mkdir line in
+    identity context.
+
+    Frozen from the f904 production postimage of
+    ops/executive_os/provider_recovery.py: the identity-bearing
+    ``identities.append(...)`` call taints the bound ``descriptor``, the fixpoint
+    then propagates that alias through
+    ``descriptor = reopen(..., dir_fd=parent_descriptor)``, so the mkdir line
+    below carries the tainted ``parent_descriptor`` exactly as the real
+    production diff does.
+    """
+    return "\n".join([
+        "import os",
+        "def _recovery_directory_chain(create_missing):",
+        "    records: list[tuple[str, int, bool]] = []",
+        "    identities: list[tuple[int, ...]] = []",
+        "    descriptor = prepare()",
+        "    records.append((\"state\", descriptor, False))",
+        "    identities.append(observe(descriptor))",
+        "    revalidate()",
+        "    parent_descriptor = records[-1][1]",
+        "    descriptor = reopen(descriptor, dir_fd=parent_descriptor)",
+        "    " + mkdir_line,
+    ])
+
+
+def test_d8_lowlevel_mkdir_mode_slot_with_dir_fd_is_not_identity():
+    """RED before the repair: the f904 os.mkdir mode slot was misclassified.
+
+    Frozen from the actual f904 production statement
+    ``os.mkdir(path.name, mode=0o700, dir_fd=parent_descriptor)`` in
+    ops/executive_os/provider_recovery.py. Alias taint from the surrounding
+    custody chain puts the line in identity context; its ``mode=`` slot is a
+    directory permission mode, not an identity literal.
+    """
+    chain = _d8_frozen_source_diff(
+        "ops/executive_os/provider_recovery.py",
+        _d8_lowlevel_mkdir_chain_source(
+            "os.mkdir(path.name, mode=0o700, dir_fd=parent_descriptor)",
+        ),
+    )
+    assert _scan_added_identity_diff(chain) == []
+    # Outside an alias chain the same closed statement was already admitted.
+    plain = _d8_frozen_source_diff(
+        "ops/executive_os/provider_recovery.py",
+        "os.mkdir(path.name, mode=0o700, dir_fd=parent_descriptor)\n",
+    )
+    assert _scan_added_identity_diff(plain) == []
+    # The keyword-only directory-mode form keeps its existing exemption.
+    keyword_only = _d8_frozen_source_diff(
+        "ops/executive_os/provider_recovery.py",
+        _d8_lowlevel_mkdir_chain_source(
+            "target.mkdir(mode=0o700, parents=True, exist_ok=True)",
+        ),
+    )
+    assert _scan_added_identity_diff(keyword_only) == []
+
+
+@pytest.mark.parametrize("line,expected", [
+    # A positional wrong-slot literal is not the keyword mode slot.
+    ("os.mkdir(path.name, 0o700, dir_fd=parent_descriptor)", ["0o700"]),
+    # A different callee is not the reviewed mkdir statement.
+    ("os.makedirs(path.name, mode=0o700, dir_fd=parent_descriptor)", ["0o700"]),
+    # dir_fd must be a plain binding name, not an arbitrary expression.
+    ("os.mkdir(descriptor, mode=0o700, dir_fd=slots[-1])", ["0o700"]),
+    # The path operand must be plain; callable operands stay guarded.
+    ("os.mkdir(entry.resolve(), mode=0o700, dir_fd=parent_descriptor)", ["0o700"]),
+    # Unreviewed keywords keep the whole statement guarded.
+    ("os.mkdir(path.name, mode=0o700, dir_fd=parent_descriptor, follow_symlinks=False)",
+     ["0o700"]),
+    # Additional statements are never exempted together with the mode slot.
+    ("os.mkdir(path.name, mode=0o700, dir_fd=parent_descriptor); worker_uid = 501",
+     ["0o700", "501"]),
+    # Identity-bearing argument names stay flagged.
+    ("os.mkdir(peer.name, mode=0o700, dir_fd=parent_descriptor)", ["0o700"]),
+    ("os.mkdir(path.name, mode=0o700, dir_fd=worker_uid)", ["0o700"]),
+    # Reserved account literals stay flagged at their token boundary.
+    ('os.mkdir("_mastermind_worker", mode=0o700, dir_fd=parent_descriptor)',
+     ["_mastermind_worker", "0o700"]),
+])
+def test_d8_lowlevel_mkdir_near_misses_stay_guarded(line, expected):
+    """Boundary pins: each near miss stays red under the repaired exemption."""
+    chain = _d8_frozen_source_diff(
+        "ops/executive_os/provider_recovery.py",
+        _d8_lowlevel_mkdir_chain_source(line),
+    )
+    assert _scan_added_identity_diff(chain) == expected
+
 def test_d8_template_topology_and_protected_defaults():
     value = json.loads(TEMPLATE.read_text(encoding="utf-8"))
     assert value["allowed_peer_uids"] == [450, 501]
@@ -2054,7 +2220,7 @@ def test_d8_template_topology_and_protected_defaults():
             check=True, capture_output=True, text=True,
         ).stdout
         source_diffs.append(diff)
-        if _scope_language(path) == "py" or path.endswith((".patch", ".diff")):
+        if _scope_language(path) == "py" or path.endswith((".patch", ".diff")) or path in REVIEWED_FILES:
             source_postimages[path] = subprocess.run(
                 ["git", "show", f"HEAD:{path}"], cwd=ROOT,
                 check=True, capture_output=True, text=True,

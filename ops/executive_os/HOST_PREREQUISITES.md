@@ -1035,6 +1035,128 @@ credential identity still validate, and no readiness lock/process remains.
 Any changed receipt or reservation keeps the effect unknown. Reconciliation
 preserves the original marker and never replays the request.
 
+### Bounded current-pin recovery is implemented but closed on the current pin
+
+The same `executive.worker_auth.verify_ready` action also accepts the explicit,
+mutually exclusive `--recover-current-pin-grant-sha256 SHA256
+--successor-request-id ID` pair. This is a separately governed recovery of one
+retained terminal failure on the **currently pinned** binary. It is not an
+automatic retry, not a deadline extension and not a second canary budget.
+
+**The current production admission is closed and this runbook cannot open it.**
+Ordinary cause must come from a producer whose exact installed source was
+reviewed and found to emit complete, bounded, structured failure evidence. The
+pinned `codex` 0.159.2 release cannot: its `exec_events.rs` reduces every
+stream failure to `ThreadErrorEvent { message: String }`, and
+`event_processor_with_jsonl_output.rs` discards the structured error before
+emitting, so the JSONL cannot distinguish an ordinary provider failure from a
+denial, a cancellation or any other terminal state. The reviewed producer table
+shipped in `ops/executive_os/provider_recovery.py` is therefore **empty**. A
+structurally valid current-producer submission — current-exec output, legacy `provider_turn_failed` or
+`rate_limited` wording, capacity or model vocabulary, or a caller-declared
+ordinary class — refuses with `recovery_failure_cause_unproven` before any
+claim, archive, reservation or provider call. No flag, config key, environment
+value, receipt field or raw JSON attribute can extend that table, and this
+release ships **no ordinary grant creator**, so qualified ordinary evidence
+cannot be minted on the host. The separate exact-incident policy below does not
+extend ordinary admission.
+
+The grant is a separate root-owned document at the fixed internal path
+`/var/db/mastermind-executive/provider-recovery/current-pin/grant.json`,
+requiring a separately qualified authority/producer installation procedure;
+this release provides no such issuer or installation authorization. It must
+carry the immutable authority reference, the exact sealed Executive release
+and manifest digest separately from the pinned Codex binary, the fixed
+company worker identity, the pinned credential metadata, the production model,
+the full sanitized cause evidence, the **designated successor request ID**, an
+exact budget of one, and a 30-to-60-minute window that has actually begun.
+The digest is a custody fence, never authority. Mode is root-only `0400` with
+one link, no ACL, and duplicate JSON keys are refused.
+
+The target Executive identity is derived from the loaded installed path and
+the existing whole-release manifest verifier, never from a caller's release
+selector. Reservation, its observation and its durable allocation bind that
+same identity. The original failed broker request must be read from its fixed
+root-owned terminal store with the exact request, release and byte digest,
+without contradictory inflight or reconciliation records. Its wrapper exit
+code is distinct from the canary's exit code: the closed cause fields
+`original_broker_exit_code` and `original_canary_exit_code` each join their own
+canonical record. The outer CLI exit status is neither of those records.
+A terminal record plus nearby
+timestamps still does not establish causation: the separately reviewed producer
+must verify the exact terminal-request/readiness/canary linkage. No production
+link verifier ships; a vocabulary or an asserted ordinary flag cannot replace it.
+
+If — and only if — cause, grant custody, unchanged predecessor preimage, fresh
+identity policy and the transaction-bound observation all pass, the readiness
+transaction durably consumes one allocation at
+`.../current-pin/allocation.json` keyed by the **original predecessor receipt
+digest and scope**, then archives the old bytes under the digest-named
+`.superseded-*.json` sibling and atomically installs one fresh reservation.
+There is no refund path: a crash, a lost response, a failed canary and a
+passing canary all leave the budget consumed. A concurrent claim, a different
+predecessor key or a regrant refuse. The new adverse receipt can never chain
+into another allocation, and the original request and its bytes are preserved.
+Only then does the existing fixed inert canary and unchanged finalization run;
+a real provider result plus exact post-call identity is still required for
+`READY`, and unknown effects stay unknown.
+
+Historical request reconstruction and `NOT_APPLIED` reconciliation retain the
+immutable grant's custody, digest, strict fields and finite window structure
+after its window expires. Those read paths do not admit a new qualification or
+refund its allocation. Live reuse and reservation still require the grant to
+be within its actual current window; there is no caller-selectable expiry bypass.
+
+**Because the producer table is empty, no current Due10 or same-generation
+failure is recoverable today.** This section documents a capability whose
+admission is closed, not an available procedure. Enabling it requires a new
+source review that adds a qualified producer to the table plus an
+authority-installed grant; both are out of scope for this runbook.
+
+### Source-authorized exact incident exception is distinct from ordinary recovery
+
+The internal broker action `executive.worker_auth.issue_due10_incident_grant`
+accepts only a designated successor ID and an explicit original issuer request
+ID. It has no shell executor or policy override. `PRODUCTION_INCIDENT_POLICY`
+now binds the actual separate human authorization for exactly the designated
+Due10 terminal/readiness pair despite both historical unknowns. It carries the
+reviewed question, answer and retained provenance digests; hashes reference
+those private retained records and are not cryptographic proof of a chat decision.
+
+This source binding creates no grant, commitment, successor, time window or
+allocation. Protected landing, installation of this exact policy and all fresh
+host gates remain necessary before invoking the existing authenticated issuer.
+Ordinary-only authorization remains insufficient for other unknown incidents;
+there is no caller flag, environment, JSON policy or general retry permission.
+The one non-refundable attempt has no retry after failure or uncertainty. The
+separately refused C1 Mission remains frozen.
+
+This schema preserves the designated incident's cause as `UNKNOWN` and its
+request-to-readiness attribution as `NOT_ESTABLISHED`. It records that raw
+provider messages were not retained, without asserting absence of a denial.
+Known relevant denial evidence excludes use; the separately refused C1 Mission
+remains frozen. No incident record enters the ordinary producer/cause table.
+
+After this exact reviewed policy is protected and installed, the authenticated
+existing broker derives current source and identity, verifies the exact
+designated historical
+terminal/readiness evidence, current markers, lock and process guards, then
+creates an immutable grant and commitment. The commitment binds grant, policy,
+issuer and successor; the successful broker terminal's stdout digest binds the
+actual commitment bytes. Consumption requires that join, absent issuer inflight
+markers, the same installed policy and current revalidation of the designated
+evidence, plus the existing live window, permission, source, identity and CAS
+predicates. A handwritten grant alone is insufficient.
+
+Both recovery classes share the fixed exclusive allocation and one nonrefundable
+budget. Partial issuance preserves the original operation and evidence as
+uncertain; it has no replacement, refund or issuer `NOT_APPLIED` route. Historical
+successor status and reconciliation can read the immutable issued records after
+expiry or policy deactivation, without opening a new readiness effect. The issuer
+derives its finite window at actual issuance, not source activation.
+The test-only positive fixture exercises issuance through finalization; it is
+not a production grant, permission, allocation or recovered readiness result.
+
 This install-before-readiness order is deliberate, not circular: `install.sh`
 requires strong structural auth metadata (exact worker UID/GID, mode `0600`,
 nonempty regular non-symlink single-link file with no ACL) and leaves services

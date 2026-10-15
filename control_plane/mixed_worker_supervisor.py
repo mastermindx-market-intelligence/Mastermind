@@ -94,6 +94,13 @@ class MixedExecutionOwnerSupervisor:
         self._unsettled: dict[str, tuple[ExecutiveSupervisor, ActiveRun]] = {}
         self._pending_recovery: dict[str, tuple[ExecutiveSupervisor, ActiveRun]] = {}
 
+    def activate_primary_canary(self, verdict):
+        """Qualify only the dedicated primary; Fabric probes remain per Attempt."""
+        from control_plane.codex_worker import validate_secret_canary_verdict
+        validated = validate_secret_canary_verdict(verdict, require_passed=True)
+        self.primary.secret_canary_verdict = validated
+        self.primary.require_complete_launch_attestation = True
+
     def _select(self, attempt) -> ExecutiveSupervisor:
         owner = self.owners.get(attempt.worker_id)
         worker = self.runtime.workers.get_worker(attempt.worker_id)

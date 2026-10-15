@@ -35,7 +35,7 @@ function mount(overrides: Partial<Parameters<typeof SelectedSessionContinuation>
 const type = (label: string, value: string) => {
   fireEvent.change(screen.getByLabelText(label), { target: { value } });
 };
-const submit = () => fireEvent.click(screen.getByRole("button", { name: /continue session/i }));
+const submit = () => fireEvent.click(screen.getByRole("button", { name: /^Send$/i }));
 
 afterEach(cleanup);
 
@@ -44,56 +44,56 @@ describe("selected session continuation panel", () => {
     const { onRecover } = mount({ sessionKey: null, unavailableReason: "SESSION_UNAVAILABLE", retainedPointer: POINTER });
     fireEvent.click(screen.getByRole("button", { name: /check status/i }));
     expect(onRecover).toHaveBeenCalledTimes(1);
-    expect(screen.queryByLabelText("Instruction")).toBeNull();
+    expect(screen.queryByLabelText("What would you like done?")).toBeNull();
   });
   it.each([{ name: "retained pointer", state: { retainedPointer: POINTER } }, { name: "pointer discovery", state: { reading: true } }])("blocks a new continuation during $name", ({ state }) => {
     mount(state);
-    type("Instruction", "Continue"); type("Completion condition", "done");
-    expect((screen.getByRole("button", { name: /continue session/i }) as HTMLButtonElement).disabled).toBe(true);
+    type("What would you like done?", "Continue"); type("How will we know it is done?", "done");
+    expect((screen.getByRole("button", { name: /^Send$/i }) as HTMLButtonElement).disabled).toBe(true);
   });
   it("shows only the truthful unavailable state and no form when unavailable", () => {
     mount({ sessionKey: null, unavailableReason: "SESSION_UNAVAILABLE" });
     expect(screen.getByText("SESSION_UNAVAILABLE")).toBeTruthy();
-    expect(screen.queryByLabelText("Instruction")).toBeNull();
-    expect(screen.queryByRole("button", { name: /continue session/i })).toBeNull();
+    expect(screen.queryByLabelText("What would you like done?")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Send$/i })).toBeNull();
   });
 
   it("presents the verified target and offers no stop control", () => {
     mount();
     expect(screen.getByText(POINTER.targetKey!)).toBeTruthy();
-    expect(screen.getByLabelText("Instruction")).toBeTruthy();
+    expect(screen.getByLabelText("What would you like done?")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /stop|interrupt/i })).toBeNull();
   });
 
   it.each([
-    { name: "empty instruction", field: "Instruction", value: "" },
-    { name: "blank instruction", field: "Instruction", value: "   " },
-    { name: "long instruction", field: "Instruction", value: "x".repeat(MAX_CONDITION_CODEPOINTS + 1) },
-    { name: "empty completion", field: "Completion condition", value: "" },
-    { name: "blank completion", field: "Completion condition", value: "   " },
-    { name: "long Unicode completion", field: "Completion condition", value: "\u{1D11E}".repeat(MAX_CONDITION_CODEPOINTS + 1) },
+    { name: "empty instruction", field: "What would you like done?", value: "" },
+    { name: "blank instruction", field: "What would you like done?", value: "   " },
+    { name: "long instruction", field: "What would you like done?", value: "x".repeat(MAX_CONDITION_CODEPOINTS + 1) },
+    { name: "empty completion", field: "How will we know it is done?", value: "" },
+    { name: "blank completion", field: "How will we know it is done?", value: "   " },
+    { name: "long Unicode completion", field: "How will we know it is done?", value: "\u{1D11E}".repeat(MAX_CONDITION_CODEPOINTS + 1) },
   ])("refuses $name", ({ field, value }) => {
     mount();
     // Both fields valid first, then the offending value: only that field may
     // block the dispatch.
-    type(field === "Instruction" ? "Completion condition" : "Instruction", "CI green");
+    type(field === "What would you like done?" ? "How will we know it is done?" : "What would you like done?", "CI green");
     type(field, value);
-    const button = screen.getByRole("button", { name: /continue session/i }) as HTMLButtonElement;
+    const button = screen.getByRole("button", { name: /^Send$/i }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
   });
 
   it("accepts exactly 700 astral code points by code-point counting", () => {
     mount();
-    type("Instruction", "\u{1D11E}".repeat(MAX_CONDITION_CODEPOINTS));
-    type("Completion condition", "CI green");
-    const button = screen.getByRole("button", { name: /continue session/i }) as HTMLButtonElement;
+    type("What would you like done?", "\u{1D11E}".repeat(MAX_CONDITION_CODEPOINTS));
+    type("How will we know it is done?", "CI green");
+    const button = screen.getByRole("button", { name: /^Send$/i }) as HTMLButtonElement;
     expect(button.disabled).toBe(false);
   });
 
   it("dispatches once per submit and never invents a condition re-evaluation", () => {
     const { onContinue } = mount();
-    type("Instruction", "Continue");
-    type("Completion condition", "CI green");
+    type("What would you like done?", "Continue");
+    type("How will we know it is done?", "CI green");
     submit();
     fireEvent.submit(document.querySelector("form")!);
     expect(onContinue).toHaveBeenCalledTimes(1);
@@ -109,17 +109,17 @@ describe("selected session continuation panel", () => {
         complete = onComplete;
       },
     });
-    type("Instruction", "Continue");
-    type("Completion condition", "CI green");
+    type("What would you like done?", "Continue");
+    type("How will we know it is done?", "CI green");
     submit();
     act(() => complete({ status: "accepted" }));
-    expect((screen.getByLabelText("Instruction") as HTMLTextAreaElement).value).toBe("");
-    expect((screen.getByLabelText("Completion condition") as HTMLTextAreaElement).value).toBe("");
+    expect((screen.getByLabelText("What would you like done?") as HTMLTextAreaElement).value).toBe("");
+    expect((screen.getByLabelText("How will we know it is done?") as HTMLTextAreaElement).value).toBe("");
     // The user retypes after the terminal receipt; the settled dispatch's
     // completion is spent and cannot clear the new text.
-    type("Instruction", "Continue more");
+    type("What would you like done?", "Continue more");
     act(() => complete({ status: "accepted" }));
-    expect((screen.getByLabelText("Instruction") as HTMLTextAreaElement).value).toBe("Continue more");
+    expect((screen.getByLabelText("What would you like done?") as HTMLTextAreaElement).value).toBe("Continue more");
     expect(onContinue).toHaveBeenCalledTimes(1);
   });
 
@@ -130,11 +130,11 @@ describe("selected session continuation panel", () => {
         complete = onComplete;
       },
     });
-    type("Instruction", "Continue");
-    type("Completion condition", "CI green");
+    type("What would you like done?", "Continue");
+    type("How will we know it is done?", "CI green");
     submit();
     act(() => complete({ status: "refused" }));
-    expect((screen.getByLabelText("Instruction") as HTMLTextAreaElement).value).toBe("Continue");
+    expect((screen.getByLabelText("What would you like done?") as HTMLTextAreaElement).value).toBe("Continue");
     const refused: OperationState = { status: "refused", pointer: null, reason: "REFUSED" };
     mount({ status: refused });
     expect(screen.getByText("REFUSED")).toBeTruthy();
@@ -169,8 +169,8 @@ describe("selected session continuation panel", () => {
         onRecover={() => {}}
       />,
     );
-    fireEvent.change(screen.getByLabelText("Instruction"), { target: { value: "First" } });
-    fireEvent.change(screen.getByLabelText("Completion condition"), { target: { value: "done" } });
+    fireEvent.change(screen.getByLabelText("What would you like done?"), { target: { value: "First" } });
+    fireEvent.change(screen.getByLabelText("How will we know it is done?"), { target: { value: "done" } });
     submit();
     first.unmount();
     const second = render(
@@ -187,7 +187,49 @@ describe("selected session continuation panel", () => {
       />,
     );
     expect(() => complete({ status: "accepted" })).not.toThrow();
-    expect((screen.getByLabelText("Instruction") as HTMLTextAreaElement).value).toBe("");
+    expect((screen.getByLabelText("What would you like done?") as HTMLTextAreaElement).value).toBe("");
     second.unmount();
+  });
+});
+
+
+describe("FE-01 outcome-first continuation chrome", () => {
+  it("requires explicit Unicode-bounded fields and never sends on textarea Enter or IME", () => {
+    const { onContinue } = mount();
+    const instruction = screen.getByLabelText("What would you like done?");
+    const condition = screen.getByLabelText("How will we know it is done?");
+    fireEvent.change(instruction, { target: { value: "🧭".repeat(700) } });
+    expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(condition, { target: { value: "Explicit original criterion" } });
+    fireEvent.keyDown(instruction, { key: "Enter" });
+    fireEvent.keyDown(condition, { key: "Enter", isComposing: true, keyCode: 229 });
+    expect(onContinue).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(onContinue).toHaveBeenCalledTimes(1);
+    expect(onContinue.mock.calls[0].slice(0,2)).toEqual(["🧭".repeat(700), "Explicit original criterion"]);
+  });
+  it("localizes only static chrome and preserves explicit payload across locale change", () => {
+    const onContinue = vi.fn(); const props = { sessionKey: POINTER.targetKey, status: null, retainedPointer: null, reading: false, recovering: false, sending: false, onContinue, onRecover: vi.fn() };
+    const { rerender } = render(<SelectedSessionContinuation {...props} />);
+    fireEvent.change(screen.getByLabelText("What would you like done?"), { target: { value: "Keep English payload 继续" } });
+    expect((screen.getByLabelText("How will we know it is done?") as HTMLTextAreaElement).value).toBe("");
+    rerender(<SelectedSessionContinuation {...props} locale="zh-CN" />);
+    expect((screen.getByLabelText("你希望完成什么？") as HTMLTextAreaElement).value).toBe("Keep English payload 继续");
+    fireEvent.change(screen.getByLabelText("达到什么条件才算完成？"), { target: { value: "Exact DONE criterion" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    expect(onContinue.mock.calls[0].slice(0,2)).toEqual(["Keep English payload 继续", "Exact DONE criterion"]);
+  });
+  it("shows committed receipt without success/progress and retains original-key status-only recovery in ZH", () => {
+    const committed = mount({ locale: "zh-CN", status: { status: "accepted" } as OperationState });
+    expect(screen.getByText("消息已提交。")).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/worker success|working|执行成功/i);
+    committed.unmount();
+    const onRecover = vi.fn();
+    mount({ locale: "zh-CN", retainedPointer: POINTER, onRecover, unavailableReason: "OWNER_REASON_UNCHANGED" });
+    expect(screen.getByText(POINTER.operationKey)).toBeTruthy();
+    expect(screen.getByText("OWNER_REASON_UNCHANGED")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "查看状态" }));
+    expect(onRecover).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "发送" })).toBeNull();
   });
 });

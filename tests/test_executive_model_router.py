@@ -40,7 +40,7 @@ _V1_EQUIVALENT_FIRST_TIERS = {
     ("review", "elevated"): ("standard.review",),
 }
 
-_CURRENT_ROUTING_POLICY_VERSION = "2026-10-11.native-return-host-selection"
+_CURRENT_ROUTING_POLICY_VERSION = "2026-10-14.attended-qualification"
 
 _JOB_CONSTRAINT_KEYS = {
     "task_kind",
@@ -93,7 +93,7 @@ def test_economical_workers_handle_bounded_work_and_frontier_keeps_judgment():
     assert implementation.required_capabilities == ("code",)
     assert implementation.execution_profile_id == "sealed.worker.write.no-extensions.v1"
     assert len(implementation.execution_profile_digest) == 64
-    assert implementation.capability_policy_version == "2026-10-11.native-return-host-selection"
+    assert implementation.capability_policy_version == "2026-10-14.attended-qualification"
     assert len(implementation.capability_policy_digest) == 64
 
     elevated = router.route(WorkRequest("implementation", risk="elevated"))

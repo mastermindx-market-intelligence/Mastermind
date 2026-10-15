@@ -61,7 +61,7 @@ def test_pre_admission_owner_excludes_other_cycle_before_any_mutation(tmp_path, 
             async with s._foreground_cycle_scope(op):
                 assert op._root is None
                 task = asyncio.current_task()
-                with pytest.raises(StateConflict, match="original foreground"):
+                with pytest.raises(StateConflict, match="original"):
                     await asyncio.create_task(s._run_coo_cycle("not-yet-admitted"))
                 assert task in s._coo_action_tasks
                 assert not s.runtime.jobs.list_jobs()

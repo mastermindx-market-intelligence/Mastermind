@@ -1,0 +1,31 @@
+{
+  "schema": "mastermind.operator_stdout_source.v1",
+  "state": "INSTALLED_OWNER_RETRIEVAL_PENDING",
+  "run_id": "rf-codegen-contracts-impl-01a1333c-v1",
+  "preimages": {
+    "artifact_delivery.py": "b776fbd04015d04c6e97516b5baec2e1a39462f266837b48d6eed6b02498a572",
+    "fabric_operator_owner.py": "2225276cc3e52886b1c1a8b706800cb47d6c2d4d924eadb6fe3dd839123e1445",
+    "original_delivery_collector.py": "07edb1095f1673fe8aab987b2660ceea250631a93ef6c08efd296ee02843a0c8"
+  },
+  "candidate": {
+    "artifact_delivery.py": "7c86494e58707d7d8f5f9d72e11e2eb84055caad6a14727ada27a6b0d5e1a1a6",
+    "fabric_operator_owner.py": "a9d5adfa90d081b460a6ad751a705add7ca0387e66266d9cea37eb99c8c09d04",
+    "original_delivery_collector.py": "f4c03c18c443e39114e2eaec07401aad1f619519323f2bd265a5c025a56d8f44",
+    "operator_stdout_delivery.py": "1f32bf396ebdbe3fee289f7cb6ff323b37f461343a243e3ec2a76a21886768ab"
+  },
+  "evidence": {
+    "BINDING_TESTS.xml": "7154f577878ed7894b1b297c6d13cad1ba79025da9dea49c871978abac95ba7b",
+    "PROFILE_TESTS.xml": "48169cd0a0e7b3389866c1ab8d5a81ec955675ef158f865602e65bb67a7f63e8",
+    "ACTUAL_OPERATOR_BINDING.json": "4760d2dd24b96c961eabb731949ff47b247209d62c33ee16ba713f00b5811e4e",
+    "ACTUAL_PROFILE_QUALIFICATION.json": "b0a8fcdc888df4befbc2a05a57e360932d94b999a0f08aaf2c17c738343030bb"
+  },
+  "remote_attempted": false,
+  "original_operation_mutated": false,
+  "reviews": [
+    "/root/composition_adjudication",
+    "/root/operator_return_adjudication"
+  ],
+  "installation_receipt_sha256": "1fd789c32d2ae09388f02bc3c4db774439b18583475fdbaaeb44fda74720c64a",
+  "source_review_sha256": "1205e209725a2d436d5838963f32414a33a890ae182389cce1fc0caa3e5def05",
+  "installation_at": "2026-10-13T08:27:02.836382+00:00"
+}

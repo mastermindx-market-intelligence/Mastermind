@@ -859,8 +859,10 @@ def test_all_discovered_tests_are_accounted_for():
     assert discovered
     assert included
     argv = cip.pytest_argv(gate["included"])
-    assert argv[:4] == [cip.sys.executable, "-m", "pytest", "-q"]
-    assert argv[4:] == list(gate["included"])
+    assert argv[:5] == [cip.sys.executable, "-m", "pytest", "--durations=25", "-q"]
+    assert argv[5:] == list(gate["included"])
+    # Duration reporting is bounded diagnostics, not filtering or a new test step.
+    assert argv.count("--durations=25") == 1
 
 
 def test_hosted_full_gate_has_a_bounded_completion_window():
@@ -1090,6 +1092,7 @@ def test_shard_output_is_reported_under_an_attributable_banner(tmp_path, monkeyp
     cip.run_shards(shards, root=tmp_path)
     out = capsys.readouterr().out
     assert "shard 1/2" in out and "shard 2/2" in out
+    assert out.count("elapsed_s=") == 2
     assert "result for tests/test_a.py" in out
     assert "result for tests/test_b.py" in out
 

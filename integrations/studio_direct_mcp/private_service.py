@@ -538,7 +538,10 @@ def _build_config(
     *,
     repository_workspaces: bool = False,
     commission_digest: str | None = None,
+    fabric_only: bool = False,
 ) -> dict:
+    if type(fabric_only) is not bool or (fabric_only and (repository_workspaces or commission_digest is not None)):
+        raise ValueError("Fabric-only profile cannot enable unrelated capabilities")
     if type(repository_workspaces) is not bool:
         raise ValueError("repository workspace setting must be boolean")
     # publicUrl is omitted: the private adapter rejects a public origin.
@@ -556,9 +559,12 @@ def _build_config(
         "requestTimeoutMs": REQUEST_TIMEOUT_MS,
         "idleTimeoutMs": IDLE_TIMEOUT_MS,
         "reclaimIdleGraceMs": 30_000,
-        "gitPublish": _typed_git_config(user_root),
-        "paperDesign": _paper_design_config(user_root),
+        "gitPublish": False if fabric_only else _typed_git_config(user_root),
+        "paperDesign": False if fabric_only else _paper_design_config(user_root),
     }
+    if fabric_only:
+        config["fabricOnly"] = True
+        config["childEnv"]["MMX_FABRIC_SDK_PACKAGE"] = str(state_dir.parent / "package.json")
     if repository_workspaces:
         config["repositoryWorkspaces"] = {
             "enabled": True, "allowedRepositories": ["mastermind", "macro", "terminal"]
@@ -914,6 +920,7 @@ def _write_install(
     dependency_tree_hash: str | None = None,
     repository_workspaces: bool = False,
     commission_digest: str | None = None,
+    fabric_only: bool = False,
 ) -> int:
     user_root = _user_root()
     _ensure_secure_dir(roots["base"])
@@ -939,6 +946,7 @@ def _write_install(
                 user_root,
                 repository_workspaces=repository_workspaces,
                 commission_digest=commission_digest,
+                fabric_only=fabric_only,
             ),
             indent=2,
             sort_keys=True,
@@ -1006,6 +1014,31 @@ def _repository_workspace_setting(args, roots: dict, prior: dict | None) -> bool
                 raise SystemExit("existing repository workspace setting is not the installed closed profile")
             previous = True
     return requested or previous
+
+
+def _fabric_profile_setting(args, roots: dict, prior: dict | None) -> bool:
+    """Retain the manifest-verified restricted profile; never repurpose Studio."""
+    requested = getattr(args, "fabric_only", False)
+    if type(requested) is not bool:
+        raise SystemExit("invalid Fabric profile setting")
+    previous = False
+    if prior is not None:
+        if _sha256_file(roots["config"]) != prior.get("configHash"):
+            raise SystemExit("Fabric profile changed during preflight")
+        config = json.loads(roots["config"].read_text(encoding="utf-8"))
+        if "fabricOnly" in config:
+            if (config["fabricOnly"] is not True or config.get("gitPublish") is not False
+                    or config.get("paperDesign") is not False
+                    or "repositoryWorkspaces" in config or "commissionPublication" in config):
+                raise SystemExit("invalid retained Fabric-only profile")
+            previous = True
+        if requested and not previous:
+            raise SystemExit("create a separate Fabric installation; do not repurpose Studio")
+    enabled = requested or previous
+    if enabled and (getattr(args, "enable_repository_workspaces", False)
+                    or getattr(args, "os_commission_config_sha256", None) is not None):
+        raise SystemExit("Fabric-only profile cannot enable unrelated capabilities")
+    return enabled
 
 
 OS_COMMISSION_CONFIG = Path("/Library/Application Support/MastermindExecutive/config/os-commission-publication.json")
@@ -1079,9 +1112,10 @@ def cmd_stage(args) -> int:
     prior = _preflight_stage(
         source, node_abs, backend_abs, account, label, host, port, roots
     )
-    # The Paper-owned immutable runtime must exist and match before this
-    # lifecycle writes a config/plist that advertises the Paper capability.
-    _verify_paper_runtime(_user_root())
+    fabric_only = _fabric_profile_setting(args, roots, prior)
+    # Paper remains mandatory only for a profile that actually exposes Paper.
+    if not fabric_only:
+        _verify_paper_runtime(_user_root())
     retained_dependency_hash = (
         prior.get("dependencyTreeHash")
         if isinstance(prior, dict) and prior.get("version") == MANIFEST_VERSION
@@ -1094,6 +1128,7 @@ def cmd_stage(args) -> int:
         dependency_tree_hash=retained_dependency_hash,
         repository_workspaces=_repository_workspace_setting(args, roots, prior),
         commission_digest=_commission_setting(args, roots, prior),
+        fabric_only=fabric_only,
     )
 
 def _verify_staged_install(
@@ -1206,15 +1241,17 @@ def cmd_upgrade(args) -> int:
         )
     for path in _stage_dest_files(roots):
         _assert_dest_safe(path)
-    # Upgrade is still pre-effect here. Refuse before replacing any staged
-    # source/config if the Paper generation is missing or no longer exact.
-    _verify_paper_runtime(_user_root())
+    fabric_only = _fabric_profile_setting(args, roots, prior)
+    # Preserve the existing restricted profile; do not silently restore tools.
+    if not fabric_only:
+        _verify_paper_runtime(_user_root())
 
     return _write_install(
         source, node_abs, backend_abs, account, label, host, port, roots,
         result_key="upgraded", previous_source=str(prior.get("source") or ""),
         repository_workspaces=_repository_workspace_setting(args, roots, prior),
         commission_digest=_commission_setting(args, roots, prior),
+        fabric_only=fabric_only,
     )
 
 
@@ -1351,6 +1388,7 @@ def build_parser() -> argparse.ArgumentParser:
         s.add_argument("--source", required=True)
         s.add_argument("--node", required=True)
         s.add_argument("--backend", required=True)
+        s.add_argument("--fabric-only", action="store_true", help="new Fabric-only installation; no Git, Paper or repository tools")
         s.add_argument("--os-commission-config-sha256", help="opt into the exact root-sealed OS publication grant")
         s.add_argument("--enable-repository-workspaces", action="store_true",
                        help="enable the closed installed repository-workspace consumer")

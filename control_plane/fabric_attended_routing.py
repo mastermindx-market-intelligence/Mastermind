@@ -22,6 +22,8 @@ if TYPE_CHECKING:
     from control_plane.executive_runtime import WorkerQuotaClass
 
 SCHEMA = "mastermind.fabric_attended_route/v1"
+FINITE_DEFINITION_DIR = '/Library/Application Support/MastermindExecutive/config/fabric-minimax-finite-01'
+FINITE_SOCKET_PATH = '/var/run/mastermind-executive/fabric-minimax-finite-01.sock'
 _IDENTIFIER = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 _DIGEST = re.compile(r"^[a-f0-9]{64}$")
 _KEYS = frozenset({
@@ -36,17 +38,76 @@ _DIGEST_KEYS = frozenset({
 
 
 @dataclasses.dataclass(frozen=True)
+class AttendedQualification:
+    """Fixed-host restriction to one exact request, never an admission grant.
+
+    This may select the prepromotion finite path. The original authenticated
+    foreground owner must match it before admission and every driven cycle.
+    No JSON, environment or RPC field can select this host configuration.
+    """
+
+    operation_key: str
+    arguments_sha256: str
+
+    def __post_init__(self):
+        from control_plane.ceo_request import app_request_ref
+        app_request_ref(self.operation_key)
+        if type(self.arguments_sha256) is not str or _DIGEST.fullmatch(self.arguments_sha256) is None:
+            raise ValueError("qualification requires exact normalized request digest")
+
+
+@dataclasses.dataclass(frozen=True)
 class AttendedWorkPlacement:
     """Host configuration only; no Worker or capacity row is created here."""
 
     model_alias: str
     harness_binding_id: str
     quota_class: str
+    qualification: AttendedQualification | None = None
 
     def __post_init__(self) -> None:
-        for value in dataclasses.astuple(self):
+        for value in (self.model_alias, self.harness_binding_id, self.quota_class):
             if not isinstance(value, str) or _IDENTIFIER.fullmatch(value) is None:
                 raise ValueError("attended placement requires exact bounded identifiers")
+        if self.qualification is not None and type(self.qualification) is not AttendedQualification:
+            raise ValueError("qualification requires fixed typed host configuration")
+
+
+def qualification_for(placements):
+    """One finite qualification cannot be mixed with ordinary placements."""
+    selected = [p.qualification for p in placements if p.qualification is not None]
+    if selected and (len(selected) != 1 or len(placements) != 1):
+        raise ValueError("qualification requires exactly one attended placement")
+    return selected[0] if selected else None
+
+
+def installed_control_placements(raw):
+    """Fixed source composition for the one original-parent finite proof.
+
+    Called only by the installed Control wrapper. Existing protected config
+    and its owner-produced autonomy receipt govern activation; no JSON, argv,
+    environment or model output supplies a placement or operation selector.
+    Merely staging definitions while disarmed retains ordinary startup.
+    This does not register a worker/quota or qualify any host resource.
+    """
+    if 'fabric_attended_probe' not in raw:
+        return ()
+    from scripts.executive_os_phase1c import _validate_fabric_bridge_config
+    _validate_fabric_bridge_config(raw)
+    if (raw.get('coo_autonomy_armed', False) is False
+            and raw.get('coo_foreground_only', False) is False):
+        return ()
+    if (raw.get('coo_autonomy_armed') is not True
+            or raw.get('coo_foreground_only') is not True
+            or raw.get('coo_operator_model_alias') != 'coo.operator.readonly'
+            or raw.get('fabric_bindings_path') != FINITE_DEFINITION_DIR + '/bindings.json'
+            or raw['fabric_attended_probe']['worker_config_path'] != FINITE_DEFINITION_DIR + '/worker.json'):
+        raise ValueError('installed finite composition requires original foreground-only owner')
+    return (AttendedWorkPlacement(
+        'minimax.attended', 'minimax-token-plan.claude-code-anthropic', 'minimax-finite-read',
+        qualification=AttendedQualification(
+            'fabric-parent-native-operator-proof-01a11e90-v1',
+            '36678c742b06b0ce04aa2b6acc46cb8aba9eba82c322ca960611e2cbb2580f56')),)
 
 
 def normalize_attended_route(value: Any) -> dict[str, str]:
@@ -75,6 +136,10 @@ def normalize_attended_route(value: Any) -> dict[str, str]:
 
 def resolve_attended_alias(router: ModelRouter, alias_name: str,
                            binding_id: str) -> tuple[ModelAlias, dict[str, str]]:
+    return _resolve_attended_alias(router, alias_name, binding_id)
+
+
+def _resolve_attended_alias(router, alias_name, binding_id, *, qualification=None):
     from control_plane.model_router import RoutingPolicyError
 
     try:
@@ -88,8 +153,17 @@ def resolve_attended_alias(router: ModelRouter, alias_name: str,
         bindings = load_bindings(profiles_document=profiles)
         binding = get_binding(binding_id, document=bindings, profiles_document=profiles)
         profile = get_profile(binding.profile_id, document=profiles)
-        if (alias.worker_eligible or not provider.enabled or provider.autonomous_allowed
-                or alias.adapter_id != "attended-fabric" or not descriptor.implemented
+        if qualification is None:
+            if not provider.enabled or not descriptor.implemented:
+                raise ValueError("attended alias requires an implemented nonautonomous provider")
+        elif (type(qualification) is not AttendedQualification
+                or alias_name != "minimax.attended" or alias.provider_alias != "minimax"
+                or binding_id != "minimax-token-plan.claude-code-anthropic"
+                or alias.model != "MiniMax-M3" or provider.enabled
+                or descriptor.implemented or binding.implementation_state != "BUILT_NOT_PROVEN"):
+            raise ValueError("qualification requires the exact unpromoted finite catalogue")
+        if (alias.worker_eligible or provider.autonomous_allowed
+                or alias.adapter_id != "attended-fabric"
                 or binding.autonomous_allowed or profile.autonomous_allowed):
             raise ValueError("attended alias requires an implemented nonautonomous provider")
         if (execution.profile_id != CONTRACT_NAME
@@ -130,7 +204,8 @@ def resolve_attended_alias(router: ModelRouter, alias_name: str,
 def placement_member(router: ModelRouter, placement: AttendedWorkPlacement) -> dict[str, Any]:
     if type(placement) is not AttendedWorkPlacement:
         raise ValueError("attended work placement must be host configuration")
-    alias, route = resolve_attended_alias(router, placement.model_alias, placement.harness_binding_id)
+    alias, route = _resolve_attended_alias(router, placement.model_alias,
+        placement.harness_binding_id, qualification=placement.qualification)
     return {"provider_realm": alias.provider_alias, "quota_class": placement.quota_class,
             "attended_route": route}
 

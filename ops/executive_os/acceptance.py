@@ -788,6 +788,87 @@ def _directory_values(record: str, attribute: str) -> tuple[str, ...]:
     return tuple(first + continuation)
 
 
+def _protected_control_definition(path: Path, control_gid: int) -> tuple[dict[str, Any], str]:
+    """Read the same protected bytes before considering any finite group exception."""
+    from control_plane.codex_provider_realm import _native_open, _native_read_config
+
+    with _native_open(path) as (descriptor, info):
+        if (info.st_gid != control_gid or stat.S_IMODE(info.st_mode) != 0o440
+                or not 0 < info.st_size <= 65536):
+            raise AcceptanceError("Control definition custody drifted")
+        chunks = []
+        remaining = 65537
+        while remaining:
+            chunk = os.read(descriptor, min(8192, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        raw = b"".join(chunks)
+        if len(raw) != info.st_size:
+            raise AcceptanceError("Control definition changed during read")
+        digest = hashlib.sha256(raw).hexdigest()
+        document = _native_read_config(path, digest)
+    return document, digest
+
+
+def _attended_worker_membership(
+    config: Mapping[str, Any], *, control_uid: int, control_gid: int,
+    primary_worker_uid: int, primary_worker_gid: int, ops_gid: int,
+) -> dict[str, Any] | None:
+    """Derive one group from the protected current finite composition, never CLI input."""
+    from control_plane.executive_fabric_composition import FabricBindingSource
+    from control_plane.fabric_attended_canary import definition
+
+    stanza = config.get("fabric_attended_probe")
+    if stanza is None:
+        return None
+    if type(stanza) is not dict or set(stanza) != {"worker_config_path"}:
+        raise AcceptanceError("finite worker probe definition is malformed")
+    source = FabricBindingSource.from_path(config.get("fabric_bindings_path"),
+                                           config.get("fabric_bindings_sha256"))
+    candidates = [item for item in source.bindings if item.provider == "minimax"]
+    if len(candidates) != 1:
+        raise AcceptanceError("exactly one finite worker binding is required")
+    physical = candidates[0]
+    path = stanza["worker_config_path"]
+    if type(path) is not str or not Path(path).is_absolute():
+        raise AcceptanceError("finite worker definition path is invalid")
+    raw = definition(Path(path), physical)
+    if source(physical.host_ref, physical.worker_id) != physical:
+        raise AcceptanceError("finite worker binding changed")
+    uid, gid = raw.get("worker_uid"), raw.get("worker_gid")
+    reserved = {control_uid, control_gid, primary_worker_uid, primary_worker_gid,
+                ops_gid, AGENT_RELAY_UID, AGENT_RELAY_GID, 454, 455, 456}
+    if (control_uid != 450 or control_gid != 450
+            or any(type(value) is not int or not 400 <= value < 500 or value in reserved
+                   for value in (uid, gid))
+            or raw.get("control_uid") != control_uid or raw.get("control_gid") != control_gid
+            or raw.get("allowed_supplementary_gids") != []):
+        raise AcceptanceError("finite worker principal or group contract drifted")
+    user = raw.get("worker_user")
+    if (type(user) is not str or len(user) > 31
+            or re.fullmatch(r"_mastermind_[a-z0-9_]+", user) is None
+            or user in {CONTROL_USER, WORKER_USER, OPS_GROUP, AGENT_RELAY_USER}):
+        raise AcceptanceError("finite worker account name is invalid")
+    try:
+        group = grp.getgrgid(gid)
+    except KeyError as exc:
+        raise AcceptanceError("finite worker group is absent") from exc
+    name = group.gr_name
+    if (len(name) > 31 or re.fullmatch(r"_mastermind_[a-z0-9_]+", name) is None
+            or name in {CONTROL_GROUP, WORKER_GROUP, OPS_GROUP, AGENT_RELAY_GROUP}):
+        raise AcceptanceError("finite worker group name is invalid")
+    home = Path(raw["provider_home"])
+    expected_home = Path("/private/var/db/mastermind-executive/workers") / physical.worker_id / "provider-home"
+    if home != expected_home or str(home) != raw["provider_home"]:
+        raise AcceptanceError("finite worker HOME is outside the selected host")
+    return {"worker_user": user, "worker_uid": uid, "worker_group": name, "worker_gid": gid,
+            "provider_home": str(home), "worker_id": physical.worker_id,
+            "worker_config_path": path, "worker_config_sha256": physical.worker_source_config_digest,
+            "bindings_sha256": source.expected_sha256, "physical_binding_sha256": physical.digest}
+
+
 def _validate_protected_membership_snapshot(
     snapshot: Mapping[str, Any],
     *,
@@ -801,6 +882,7 @@ def _validate_protected_membership_snapshot(
     worker_gid: int,
     ops_gid: int,
     agent_relay_present: bool = False,
+    attended_worker: Mapping[str, Any] | None = None,
 ) -> dict[str, list[str]]:
     """Prove all four macOS membership representations are exact."""
 
@@ -829,6 +911,19 @@ def _validate_protected_membership_snapshot(
         WORKER_GROUP: worker_gid,
         OPS_GROUP: ops_gid,
     }
+    if attended_worker is not None:
+        name = attended_worker["worker_user"]
+        group = attended_worker["worker_group"]
+        uid, gid = attended_worker["worker_uid"], attended_worker["worker_gid"]
+        if (name in reviewed_users or group in protected_group_ids
+                or uid in reviewed_user_ids.values() or gid in protected_group_ids.values()
+                or uid in {AGENT_RELAY_UID, 454, 455, 456}
+                or gid in {AGENT_RELAY_GID, 454, 455, 456}):
+            raise AcceptanceError("finite worker identity collides with protected principals")
+        expected[group] = (gid, {name}, {control_user})
+        reviewed_users.add(name)
+        reviewed_user_ids[name] = uid
+        protected_group_ids[group] = gid
     if agent_relay_present:
         expected[AGENT_RELAY_GROUP] = (
             AGENT_RELAY_GID,
@@ -926,6 +1021,7 @@ def _validate_service_directory_group_sets(
     control_gid: int,
     worker_gid: int,
     agent_relay_gid: int | None = None,
+    attended_worker_gid: int | None = None,
 ) -> set[int]:
     if dict(system_group_gids) != _REVIEWED_MACOS_ACCOUNT_GROUPS:
         raise AcceptanceError("reviewed macOS system group identities drifted")
@@ -942,6 +1038,11 @@ def _validate_service_directory_group_sets(
         if agent_relay_gid != AGENT_RELAY_GID:
             raise AcceptanceError("agent relay group identity drifted")
         expected_control.add(agent_relay_gid)
+    if attended_worker_gid is not None:
+        if (type(attended_worker_gid) is not int or not 400 <= attended_worker_gid < 500
+                or attended_worker_gid in {control_gid, worker_gid, AGENT_RELAY_GID, 453, 454, 455, 456}):
+            raise AcceptanceError("finite worker group identity drifted")
+        expected_control.add(attended_worker_gid)
     expected_worker = common | {worker_gid}
     observed_control = set(control_groups)
     observed_worker = set(worker_groups)
@@ -981,7 +1082,8 @@ def _numeric_directory_census(
 
 
 def _live_directory_membership_snapshot(
-    *, operator_user: str, agent_relay_present: bool = False
+    *, operator_user: str, agent_relay_present: bool = False,
+    attended_worker: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     user_primary_gids = _numeric_directory_census(
         "Users", "PrimaryGroupID", label="local user primary-GID census"
@@ -997,6 +1099,8 @@ def _live_directory_membership_snapshot(
         for name in set(user_primary_gids) | set(user_unique_uids)
     }
     reviewed_users = [CONTROL_USER, WORKER_USER, operator_user]
+    if attended_worker is not None:
+        reviewed_users.append(attended_worker["worker_user"])
     if agent_relay_present:
         reviewed_users.append(AGENT_RELAY_USER)
     for name in reviewed_users:
@@ -1007,6 +1111,8 @@ def _live_directory_membership_snapshot(
         )
     groups: dict[str, dict[str, Any]] = {}
     reviewed_groups = [CONTROL_GROUP, WORKER_GROUP, OPS_GROUP]
+    if attended_worker is not None:
+        reviewed_groups.append(attended_worker["worker_group"])
     if agent_relay_present:
         reviewed_groups.append(AGENT_RELAY_GROUP)
     for name in reviewed_groups:
@@ -1662,6 +1768,13 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             ):
                 raise AcceptanceError("agent relay principal identity drifted")
 
+        early_control, early_control_sha256 = _protected_control_definition(
+            CONTROL_CONFIG, self.control_group.gr_gid)
+        attended = _attended_worker_membership(early_control,
+            control_uid=self.control_identity.pw_uid, control_gid=self.control_group.gr_gid,
+            primary_worker_uid=self.worker_identity.pw_uid, primary_worker_gid=self.worker_group.gr_gid,
+            ops_gid=self.ops_group.gr_gid)
+        self.attended_worker_membership = attended
         expected_accounts = {
             CONTROL_USER: (
                 self.control_identity.pw_uid,
@@ -1680,6 +1793,9 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
                 AGENT_RELAY_GID,
                 os.fspath(AGENT_RELAY_HOME),
             )
+        if attended is not None:
+            expected_accounts[attended["worker_user"]] = (
+                attended["worker_uid"], attended["worker_gid"], attended["provider_home"])
         for account, (uid, gid, home) in expected_accounts.items():
             expected_attributes = {
                 "UniqueID": str(uid),
@@ -1725,10 +1841,12 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             control_gid=self.control_group.gr_gid,
             worker_gid=self.worker_group.gr_gid,
             agent_relay_gid=AGENT_RELAY_GID if agent_relay_present else None,
+            attended_worker_gid=attended["worker_gid"] if attended is not None else None,
         )
         membership_snapshot = _live_directory_membership_snapshot(
             operator_user=self.operator_user,
             agent_relay_present=agent_relay_present,
+            attended_worker=attended,
         )
         self.protected_group_effective = _validate_protected_membership_snapshot(
             membership_snapshot,
@@ -1742,6 +1860,7 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             worker_gid=self.worker_group.gr_gid,
             ops_gid=self.ops_group.gr_gid,
             agent_relay_present=agent_relay_present,
+            attended_worker=attended,
         )
 
         tree_sha = self._source_tree_sha()
@@ -1763,7 +1882,14 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             label="installed release manifest",
         )
 
-        self.config = _safe_json(CONTROL_CONFIG)
+        self.config, current_control_sha256 = _protected_control_definition(
+            CONTROL_CONFIG, self.control_group.gr_gid)
+        if (self.config != early_control or current_control_sha256 != early_control_sha256
+                or _attended_worker_membership(self.config,
+                    control_uid=self.control_identity.pw_uid, control_gid=self.control_group.gr_gid,
+                    primary_worker_uid=self.worker_identity.pw_uid, primary_worker_gid=self.worker_group.gr_gid,
+                    ops_gid=self.ops_group.gr_gid) != attended):
+            raise AcceptanceError("protected finite composition changed during group acceptance")
         self.worker_config = _safe_json(WORKER_CONFIG)
         for config_path, group_gid in (
             (CONTROL_CONFIG, self.control_group.gr_gid),
@@ -2008,6 +2134,8 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             {
                 "passed": True,
                 "effective_members": self.protected_group_effective,
+                "attended_worker_membership": self.attended_worker_membership,
+                "control_definition_sha256": early_control_sha256,
                 "primary_gid_census": "COMPLETE",
                 "name_members": "EXACT",
                 "uuid_members": "EXACT",
