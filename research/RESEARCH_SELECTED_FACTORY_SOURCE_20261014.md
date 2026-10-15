@@ -83,3 +83,26 @@ expired-selection refusal with zero source reads, automatic full requalification
 restored search through one store/service, and drained shutdown. It precedes the
 shutdown-reporting repair; its source archive and synthetic authority do not
 prove runtime installation, writer admission or client acceptance.
+
+## Whole-response refusal and the final authority deadline
+
+The retained C3 findings on #1453/#1458 also reproduce against the current
+protected reader source. A bad guard, mixed selection identity, or selected
+runner refusal on a later evidence report previously left the earlier capture
+usable, allowing a partial body response. Capture invalidation is now terminal:
+later fan-out calls cannot revive it or start another source operation. Ordinary
+per-report negative envelopes and unavailable evidence still permit partial
+results when their selected-source guards remain valid.
+
+The final ordinary-tool decision now samples the clock after the last synchronous
+grant resolver call. Both token and grant deadlines must remain current before
+returning the body. This closes expiry during owner I/O without claiming validity
+after ASGI transmission or changing the independent compatibility-tool path.
+
+Five authenticated HTTP cases fail on the prior source and pass after repair:
+three selected-capture failure modes and token/grant expiry during the last owner
+read. The affected 110-case reader/app/adapter/compatibility/factory run passes.
+A subsequent two-case test proves both ordinary per-report unavailability shapes,
+including a negative service envelope, remain partial; this adds one distinct case.
+Hosted checks and the focused security-delta review remain release gates. No
+production installation, writer policy or account grant changes with this repair.

@@ -146,7 +146,14 @@ class ResearchPortAdapter:
                     # selection runner may introduce a private guard refusal.
                     _fail()
             return self._operation_runner(call) if self._operation_runner is not None else call()
-        result = await self._bounded_sync(produce, before_start=_before_start)
+        try:
+            result = await self._bounded_sync(produce, before_start=_before_start)
+        except ContractViolation as exc:
+            # A selected runner refusal invalidates the whole response. Ordinary
+            # per-report negative envelopes are handled after retain below.
+            if capture is not None and exc.code == "SOURCE_UNAVAILABLE":
+                capture.invalidate()
+            raise
         if capture is not None:
             result = capture.retain(result)
         if not isinstance(result, Mapping) or type(result.get("ok")) is not bool:
