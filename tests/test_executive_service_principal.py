@@ -837,7 +837,7 @@ def test_service_stamp_does_not_satisfy_the_ceo_seat_gate(tmp_path: Path):
 
 
 def test_registry_is_closed_and_look_alikes_confer_nothing():
-    assert list(REGISTRY) == ["svc-site-maintenance"]
+    assert list(REGISTRY) == ["svc-site-maintenance", "svc-vps-inference"]
     registered = _principal()
     assert service_principal("svc-site-maintenance") == registered
     assert REGISTRY["svc-site-maintenance"] == registered

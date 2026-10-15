@@ -1,0 +1,76 @@
+{
+  "operation": "vps-fabric-llm-convergence-20261001-sol-001",
+  "base_head": "b14d1c0e515778c71af291df7f7a93408a01cfbd",
+  "kind": "source-only Runtime read/status owner composition",
+  "changed_source_files": {
+    "control_plane/executive_runtime.py": "bcbed9c1213e16c319e7b20e08b9f2acba300afa75165c25737948c0969ecadd",
+    "control_plane/executive_inference_runtime_view.py": "adcb6d325722212a7d1ab2c36699461f9a0f954b4ffc53d6bd4be10399174b39",
+    "control_plane/executive_inference_ingress.py": "cb6131410bc6075d2a912420054336b5401189c4df201dca9420594ea6f74c4f",
+    "tests/test_vps_inference_runtime_read.py": "75cfe694c214a43c71e21bfc70eac4bd23b3bf8f16aa3b8f0bba8405d8031045",
+    "tests/test_vps_inference_runtime_projection.py": "a5c8ee4749f50e6afcac178cbb1071200306a155012bdb056a709a9bc9444aaf",
+    "tests/test_vps_inference_status_runtime_read.py": "ac98cafc74c954b3a11a335e2c764e7e062ea10e540d48333ba630f54c494d14"
+  },
+  "executed_suite": {
+    "passed": 400,
+    "failed": 9,
+    "errors": 0,
+    "skipped": 0,
+    "failed_test_identities": [
+      "tests.test_vps_inference_service::test_direct_emitter_cannot_bypass_sink_guard",
+      "tests.test_vps_inference_supervisor_io::test_admitted_input_reaches_worker_prompt_without_objective_truncation",
+      "tests.test_vps_inference_supervisor_io::test_dedicated_worker_schema_carries_answer_and_original_attempt_identity",
+      "tests.test_vps_inference_supervisor_io::test_bad_service_provenance_refuses_before_schema_materialization[missing_request]",
+      "tests.test_vps_inference_supervisor_io::test_bad_service_provenance_refuses_before_schema_materialization[foreign_actor]",
+      "tests.test_vps_inference_supervisor_io::test_bad_service_provenance_refuses_before_schema_materialization[foreign_principal]",
+      "tests.test_vps_inference_supervisor_io::test_bad_service_provenance_refuses_before_schema_materialization[write_authority]",
+      "tests.test_vps_inference_supervisor_io::test_bad_service_provenance_refuses_before_schema_materialization[wrong_schema]",
+      "tests.test_vps_inference_supervisor_io::test_wrong_attempt_cannot_receive_the_service_payload"
+    ],
+    "junit_sha256": "ecec9711f45c5ce58df248ad9dd6b5bcc8a79ebf5637a102bf583c715e292e83"
+  },
+  "review_findings_addressed": [
+    "bound returned material to finalized SAME observation source identity",
+    "one-source receipt+terminal selection from existing bounded Runtime instead of stitching two Runtime reads",
+    "use existing 256KiB full-view budget while maintaining 192KiB document budget"
+  ],
+  "review_final_state": "NO_ACTIONABLE_FINDING_WITHIN_FROZEN_SIX_FILE_SLICE",
+  "materialization": "SYNTHETIC SQLite completion fixtures only; not authentic worker/provider result",
+  "permission_gates": [
+    "supervisor_request_reader_PLATFORM_REFUSED_NOT_APPLIED",
+    "live_completion_writer_UNBUILT",
+    "installed_service_read_transport_UNVERIFIED",
+    "production_model_provider_NOT_EXECUTED"
+  ],
+  "production_changed": false,
+  "reviews": {
+    "initial_review.md": {
+      "raw_sha256": "66bcc8a933a5db4ce85f8c31d93b5b1f2167883d8ae21283d0cef77f47cf9825",
+      "published_sha256": "2759341991c8bc521ad502c1171bbae86f63e1d6dc289590d8ade6fcbc791616",
+      "scope": "read-only source/injected probes, not installed service proof"
+    },
+    "intermediate_review.md": {
+      "raw_sha256": "7f68f3ef53c58757a1fbcd27207b6b05d27928519734a751f0c28566b75cecbd",
+      "published_sha256": "edf69c63bc2781a5a4fe7518ea2d5fcce1059af8c9fb575d52032c214896d3ff",
+      "scope": "read-only source/injected probes, not installed service proof"
+    },
+    "source_consistency_review.md": {
+      "raw_sha256": "63e5846baa11cf1e13969e1e5098ca1d6f6850bb552ecc19e34f39f549816d89",
+      "published_sha256": "113550134f2bd386b93ce1ef22a8cbebcb7114f3ffdbaa6010db3a92d26f3a40",
+      "scope": "read-only source/injected probes, not installed service proof"
+    },
+    "final_review.md": {
+      "raw_sha256": "184bd98036d30f4bba494200e6d2fb1fbfc64740fc87537eb592a4ded5058aee",
+      "published_sha256": "75dd0bad7043cf964c951dd9f636ac129e836ea8012a784411dc1d6bdd7b1e6b",
+      "scope": "read-only source/injected probes, not installed service proof"
+    }
+  },
+  "reviewed_source_sha256": {
+    "control_plane/executive_runtime.py": "bcbed9c1213e16c319e7b20e08b9f2acba300afa75165c25737948c0969ecadd",
+    "control_plane/executive_inference_runtime_view.py": "adcb6d325722212a7d1ab2c36699461f9a0f954b4ffc53d6bd4be10399174b39",
+    "control_plane/executive_inference_ingress.py": "cb6131410bc6075d2a912420054336b5401189c4df201dca9420594ea6f74c4f",
+    "tests/test_vps_inference_runtime_read.py": "75cfe694c214a43c71e21bfc70eac4bd23b3bf8f16aa3b8f0bba8405d8031045",
+    "tests/test_vps_inference_runtime_projection.py": "a5c8ee4749f50e6afcac178cbb1071200306a155012bdb056a709a9bc9444aaf",
+    "tests/test_vps_inference_status_runtime_read.py": "ac98cafc74c954b3a11a335e2c764e7e062ea10e540d48333ba630f54c494d14"
+  },
+  "review_notes": "same-observation receipt/terminal ref, authoritative content identity and full 256KiB view boundary; reviewer used 17 pure and 3 SQL in-memory probes; did not run write-producing pytest"
+}

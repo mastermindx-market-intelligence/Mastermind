@@ -253,3 +253,123 @@ def test_strict_creation_shape_conflict_is_unresolved(actual, change):
     corrupt_creation(writer, first, payload=lambda body: body.update(change))
     result = unavailable(bound, namespace)
     assert "reviewed DDL" not in result[4][0]
+
+
+def _admit_registered_inference_fixture(writer, tmp_path, *, operation, size=0):
+    """Admit through the existing canonical sink into disposable SQLite only."""
+    import asyncio
+    from control_plane import executive_inference_ingress as service
+    from tests.test_vps_inference_service import GROUND,host_execution_binding,service_request,inference_request
+    class Grounding:
+        def observe(self):return GROUND
+    wire=inference_request(input_text="SYNTHETIC source-bound text "+("x"*size))
+    frame={"schema":service.SUBMIT_SCHEMA,
+           "request":service_request(operation,request=wire),
+           "observed_grounding":GROUND}
+    return asyncio.run(service.handle_frame(
+        frame,runtime=writer,grounding_provider=Grounding(),
+        workspace_root=tmp_path,
+        admission_guard=lambda _:None,
+        execution_binding_provider=lambda identity:host_execution_binding(tmp_path,identity),
+    ))["job_id"]
+
+
+def test_registered_inference_root_does_not_poison_ceo_mapping(actual,tmp_path):
+    writer,bound,namespace,first=actual
+    second=submit_intent(writer,intent(2))["job_id"]
+    service_id=_admit_registered_inference_fixture(
+        writer,tmp_path,operation="workspace-service-origin")
+    for i in range(21):
+        writer.jobs.create_job(f"unrelated regular fixture {i}")
+    result=join._bounded_runtime_inputs(bound())
+    assert result[0] is not None,result[4]
+    assert {row["job_id"] for row in result[0]}=={first,second}
+    assert service_id not in {row["job_id"] for row in result[0]}
+    assert result[4]==[] and result[5] is True
+    assert namespace.entries==namespace.exits and not namespace.active
+
+
+def test_near_limit_registered_service_request_does_not_poison_ceo_mapping(actual,tmp_path):
+    writer,bound,namespace,first=actual
+    service_id=_admit_registered_inference_fixture(
+        writer,tmp_path,operation="workspace-service-large-origin",size=40000)
+    result=join._bounded_runtime_inputs(bound())
+    assert result[0] is not None,result[4]
+    assert {row["job_id"] for row in result[0]}=={first}
+    assert result[5] is True and service_id!=first
+
+
+def test_enrolled_site_maintenance_root_is_not_a_ceo_root(actual):
+    from control_plane import executive_service_principal as esp
+    from tests.test_executive_service_principal import _request
+    writer,bound,namespace,first=actual
+    maintenance=esp.submit(
+        esp.service_principal("svc-site-maintenance"),
+        _request(operation_key="origin-maintenance-fixture"),writer,
+    )
+    result=join._bounded_runtime_inputs(bound())
+    assert result[0] is not None,result[4]
+    assert {row["job_id"] for row in result[0]}=={first}
+    assert maintenance["job_id"]!=first
+
+
+@pytest.mark.parametrize("field,value",[
+    ("principal_id","svc-unregistered"),
+    ("actor","ceo-sol"),
+    ("write_authorities",["EXECUTE"]),
+    ("requested_authorities",["READ","RESEARCH","WRITE"]),
+    ("effective_authorities",["READ"]),
+    ("schema","mastermind.fake_service_intent.v1"),
+    ("fingerprint","F"*64),
+    ("inference_request",{"schema":"wrong"}),
+])
+def test_forged_service_origin_still_blocks_mapping(actual,tmp_path,field,value):
+    writer,bound,namespace,first=actual
+    service_id=_admit_registered_inference_fixture(
+        writer,tmp_path,operation="forged-origin-"+field.replace("_","-"))
+    corrupt_creation(writer,service_id,
+        payload=lambda body:body["provenance"].update({field:value}))
+    result=unavailable(bound,namespace)
+    assert "bounded root mapping unavailable" in result[4][0]
+
+
+def test_missing_required_inference_request_refuses_origin(actual,tmp_path):
+    writer,bound,namespace,first=actual
+    service_id=_admit_registered_inference_fixture(
+        writer,tmp_path,operation="missing-inference-source")
+    corrupt_creation(writer,service_id,
+        payload=lambda body:body["provenance"].pop("inference_request"))
+    unavailable(bound,namespace)
+
+
+def test_optional_boot_packet_is_valid_for_registered_maintenance_root(actual):
+    from control_plane import executive_service_principal as esp
+    from tests.test_executive_service_principal import _request
+    writer,bound,namespace,first=actual
+    grounding={"mastermind_sha":"1"*40,"macro_sha":"2"*40,
+               "boot_packet_schema":"mastermind.ceo_boot_packet.v1"}
+    created=esp.submit(esp.service_principal("svc-site-maintenance"),
+        _request(operation_key="maintenance-with-boot-schema",grounding=grounding),writer)
+    result=join._bounded_runtime_inputs(bound())
+    assert result[0] is not None,result[4]
+    assert {v["job_id"] for v in result[0]}=={first}
+    assert created["job_id"]!=first
+
+
+@pytest.mark.parametrize("grant",[["READ"],["RESEARCH"]])
+def test_narrower_canonical_service_grant_still_is_not_ceo(actual,grant):
+    from control_plane import executive_service_principal as esp
+    from tests.test_executive_service_principal import _derived
+    writer,bound,namespace,first=actual
+    original=_derived()
+    envelope=json.loads(json.dumps(original["envelope"]))
+    envelope["intent_id"]="svc-narrow-"+grant[0].lower()
+    # Direct canonical sink law accepts narrower READ-only subsets even
+    # though the convenience service principal emitter always requests both.
+    envelope["execution_contract"]["requested_authorities"]=list(grant)
+    created=submit_intent(writer,envelope)
+    assert writer.jobs.get_job(created["job_id"]).requested_authorities==grant
+    result=join._bounded_runtime_inputs(bound())
+    assert result[0] is not None,result[4]
+    assert {v["job_id"] for v in result[0]}=={first}
+    assert created["job_id"]!=first

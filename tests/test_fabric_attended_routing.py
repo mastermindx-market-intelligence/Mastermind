@@ -90,7 +90,12 @@ def test_capacity_cannot_match_another_attended_catalogue(router, field):
         {"provider_realm": "minimax", "quota_class": "minimax-read"}, raw_root_constraints=root)
     metadata = {k: v for k, v in constraints.items() if k not in ("provider", "eligible_quota_classes")}
     metadata["model_alias"] = "minimax.attended"
-    row = dict(worker_id="fixture-worker", metadata_json=json.dumps(metadata))
+    # Model a full physical quota row, not only untrusted catalogue
+    # metadata. The broker must refuse mismatched registered worker identity.
+    row = dict(worker_id="fixture-worker", metadata_json=json.dumps(metadata),
+               provider="minimax", worker_provider="minimax",
+               worker_type="attended-fabric", model="minimax-m3",
+               effort="medium", cost_class="small")
     assert _capacity_matches_route(row, constraints)
     metadata["attended_route"] = dict(metadata["attended_route"], **{field: "foreign"})
     row["metadata_json"] = json.dumps(metadata)

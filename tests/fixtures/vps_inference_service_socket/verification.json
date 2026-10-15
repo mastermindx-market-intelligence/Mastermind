@@ -1,0 +1,85 @@
+{
+  "operation": "vps-fabric-llm-convergence-20261001-sol-001",
+  "source_base": "85f34140f3f68c73b046263f1308fef48e4bd8a7",
+  "source_sha256": {
+    "control_plane/executive_inference_ingress.py": "e82b7ba51aeeb9b9ab957345d859d6ff7a6a0c991698bd15d8a028d6e9b3212d",
+    "control_plane/executive_service.py": "413b2180858b1b478fe41a9670a25deef48cacc0546267cb8d7f0e103af501fb",
+    "integrations/mastermind_executive_app/gateway.py": "a7b5c4cea1c3e84fcada0f35b7b5885c30401acaeb5bb7b58c5638948c49fe53",
+    "integrations/mastermind_executive_app/inference.py": "4be1744bd278191593bdb580e31b8e7822741eb6f06f41839e05566cf05c6b1e",
+    "tests/test_vps_inference_direct_profile.py": "da3583b4a9cec895d792631093f81ccf464b36a57ad689a3c415750af385c7a1",
+    "tests/test_vps_inference_status_runtime_read.py": "b9dcedd3ffafbe9c0000976f38b512e02cc8050429859d875f2f3eedbb8a6a9c",
+    "tests/test_vps_inference_installed_socket.py": "1194e6785825b943544211cfffcbada276f4cc440f8b9679fde518461f9d8842"
+  },
+  "test_receipts": [
+    {
+      "file": "inference-security-broad-tests.xml",
+      "sha256": "0300e6ed725c768bc9adf87a96c02e836cd4dc0dfc0d7f0ad39add95f5345519",
+      "passed": 599,
+      "failures": [
+        "tests.test_vps_inference_service::test_direct_emitter_cannot_bypass_sink_guard"
+      ],
+      "errors": [],
+      "skipped": []
+    },
+    {
+      "file": "service-inference-final-security-junit.xml",
+      "sha256": "74a72965d637b8f63db5411d3fbc809c5952c50462490b0af4119e08ca335514",
+      "passed": 145,
+      "failures": [],
+      "errors": [],
+      "skipped": []
+    }
+  ],
+  "prior_reviewer": "REQUEST_CHANGES: five initial findings; two follow-up",
+  "causal_repairs": [
+    "admission guard retains only synchronous None verdicts",
+    "direct and status verify same qualified Runtime source",
+    "48KiB release envelope cannot shadow valid 60KiB inference frame",
+    "service UID is distinct from Operator/C1/Web and non-root",
+    "incomplete peer is bounded pre-submit",
+    "named-user ACL extends existing socket without broad permissions",
+    "post-operation response drain and teardown are bounded"
+  ],
+  "final_reviewer": "SCOPED_CLEAR_TWO_FINAL_DEFECTS_RESOLVED",
+  "source_acceptance": "DRAFT_HOLD",
+  "production_effects": "NONE",
+  "actual_model_worker_execution": false,
+  "runtime_completed_rows": "SYNTHETIC_SQLITE_FIXTURES",
+  "installed_oauth_proof": false,
+  "denied_supervisor_reader": "NOT_RETRIED",
+  "denied_bot_snapshot_repairs": "NOT_RETRIED",
+  "known_latest_protected_source_merge_conflicts": [
+    "control_plane/ceo_intent.py",
+    "control_plane/executive_ceo_ingress.py",
+    "control_plane/executive_runtime.py",
+    "control_plane/executive_service_principal.py",
+    "tests/test_executive_service_principal.py"
+  ],
+  "reviews": {
+    "initial_security_review.md": {
+      "original_sha256": "040ff1bb291ce47c342c8a01ff4303b3ec601c3f08a1f3bee89becc001604445",
+      "published_sha256": "ebd58b0bd42f7680a04dba33246e484504dfb4e0ce7400aa56cc21b9d94d1ea0",
+      "publication_transform": "local working root replaced with repo-relative paths; trailing Markdown whitespace normalized"
+    },
+    "followup_security_review.md": {
+      "original_sha256": "a9f7b729a7b32bd74e15268dc92d95216ca9653ddc7b87d8439c2d76391e3c6f",
+      "published_sha256": "10a1653c427b1376af7d370c1c9b4cf86fe18c892a4d94c5409fff2733151014",
+      "publication_transform": "local working root replaced with repo-relative paths; trailing Markdown whitespace normalized"
+    },
+    "final_security_review.md": {
+      "original_sha256": "41a0fea2ff3b97cdcbb800b7338d4dc3a2382645671578fc39ff2dd58e50ff0d",
+      "published_sha256": "be39c0b389f27728b99463f4608c92de4348fb7ce933e884b45fe451be34cc49",
+      "publication_transform": "local working root replaced with repo-relative paths; trailing Markdown whitespace normalized"
+    }
+  },
+  "final_source_sha256": {
+    "control_plane/executive_inference_ingress.py": "e82b7ba51aeeb9b9ab957345d859d6ff7a6a0c991698bd15d8a028d6e9b3212d",
+    "control_plane/executive_service.py": "413b2180858b1b478fe41a9670a25deef48cacc0546267cb8d7f0e103af501fb",
+    "integrations/mastermind_executive_app/gateway.py": "a7b5c4cea1c3e84fcada0f35b7b5885c30401acaeb5bb7b58c5638948c49fe53",
+    "integrations/mastermind_executive_app/inference.py": "4be1744bd278191593bdb580e31b8e7822741eb6f06f41839e05566cf05c6b1e",
+    "tests/test_vps_inference_direct_profile.py": "da3583b4a9cec895d792631093f81ccf464b36a57ad689a3c415750af385c7a1",
+    "tests/test_vps_inference_status_runtime_read.py": "b9dcedd3ffafbe9c0000976f38b512e02cc8050429859d875f2f3eedbb8a6a9c",
+    "tests/test_vps_inference_installed_socket.py": "1194e6785825b943544211cfffcbada276f4cc440f8b9679fde518461f9d8842"
+  },
+  "review_scope": "native independent read-only final; source/in-memory probes, not installed UID/ACL/kernel backpressure or provider execution"
+}

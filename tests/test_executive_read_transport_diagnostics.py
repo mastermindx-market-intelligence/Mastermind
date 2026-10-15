@@ -1291,7 +1291,9 @@ def test_v2_fabric_partial_acquisition_requires_partial_capability_and_missingne
         "missingness_class": "MISSING_PRODUCER",
         "target_field": "runtime.acquisition.provenance",
         "producer_owner": "executive_runtime",
-        "reason": "durable CEO-intent workstream join unavailable for included Jobs",
+        # Use the *current canonical producer's* exact PARTIAL provenance
+        # fact, not the obsolete CEO-intent-only description.
+        "reason": "durable orchestration-root workstream join unavailable for included Jobs",
     })
     canonical["missingness"] = sorted(
         canonical["missingness"],

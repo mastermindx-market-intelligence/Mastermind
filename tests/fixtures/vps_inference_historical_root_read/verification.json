@@ -1,0 +1,84 @@
+{
+  "operation": "vps-fabric-llm-convergence-20261001-sol-001",
+  "base_commit": "c91d838bcaa90304efa12a11fc7cc3ff33ac635f",
+  "kind": "exact bounded Fabric V2 producer / installed WebCEO reader PARTIAL provenance contract repair",
+  "source_sha256": {
+    "integrations/mastermind_executive_app/gateway.py": "8a1f6934c236a0dde45f44e0276d16304e8e4d407987f18a0811f7b499ea13a4",
+    "control_plane/fabric_job_view.py": "c2e1ec7a7378e7cb2cc5dec9d0ae7c0f8e328a7f22d141497dde7df47ce970f5",
+    "tests/test_vps_fabric_historical_root_read.py": "0c6cc49aad1d85f429a7cd05afd86bb2f070cc64c043bfa1104759b6a3140696"
+  },
+  "red_before": {
+    "failed": 2,
+    "cause": "installed V2 root-detail validator required obsolete CEO-intent-only missingness reason; producer emits orchestration-root missingness",
+    "log_sha256": "24b799a4f70d425caf1826022edf784458614b9e32e3bb26c2a6dc70abee418a"
+  },
+  "fixed_contract": "reader requires exact canonical producer MISSING_PRODUCER reason and does not authenticate omitted, altered, or obsolete provenance labels",
+  "focused_after": {
+    "passed": 4,
+    "failures": [],
+    "errors": [],
+    "skips": [],
+    "junit_sha256": "18c28d62b5d9ef101ceb996711e2a6a8fbc077eca22fd602252d91d905cb4201",
+    "cases": [
+      "test_existing_unjoined_generic_root_yields_partial_not_backend_unavailable",
+      "test_changed_or_removed_historical_missingness_is_not_authenticated",
+      "test_old_ceo_only_missingness_phrase_is_not_an_accepted_alias",
+      "test_known_durable_ceo_provenance_retains_full_read_contract"
+    ]
+  },
+  "broader_selection": {
+    "passed": 141,
+    "failed": [],
+    "errors": [
+      "tests.test_fabric_job_view_bounded::test_v3_sealed_worker_same_observation_and_selected_detail"
+    ],
+    "skipped": [],
+    "junit_sha256": "c0c3f64fe0a821f77f04eeb4c943323f7d1f38976b82b87ff43cb53721ea0af6",
+    "error_scope": "test-owned sealed-worker launch OS/process identity failure from unchanged protected Supervisor/worker fixture; not a source change in this narrow fix"
+  },
+  "producer_changed": false,
+  "installed_runtime_changed": false,
+  "real_installed_plugin_root_detail_read_after_fix": false,
+  "releasable": false,
+  "source_state": "SOURCE_ONLY_DRAFT_HOLD",
+  "external_effect": "NONE",
+  "protected_source_merge": {
+    "historical-merged-installed-v2-junit.xml": {
+      "passed": 5,
+      "failed": [],
+      "errors": [],
+      "skipped": [],
+      "junit_sha256": "33ab9e80b19105fb838de3cbaee53c78925230ef1457141557c442359631c300"
+    },
+    "historical-root-master-merge-junit.xml": {
+      "passed": 182,
+      "failed": [],
+      "errors": [],
+      "skipped": [],
+      "junit_sha256": "aa908944ddd4a72b8a155b35e9771e8c034032aacbfd25f591a7c3e296ed9ff3"
+    },
+    "source_parent": "68d99c249579d5a2e00179047f05e2d556cb47fe",
+    "protected_parent": "2cc4942e136ad4fb544fd5c72ab1856608a5dac1"
+  },
+  "installed_v2_authenticated_test": {
+    "test": "test_signed_installed_v2_app_reads_partial_historical_root_without_503",
+    "scope": "Signed test JWT, real in-process installed Web-CEO App, actual temporary Unix socket, source-qualified bounded Runtime and historical unjoined Job; no production install/model/capital operation",
+    "expected": "ok=True, capability=PARTIAL, unjoined original Job, authenticated SAME source generation, canonical missing-producer fact",
+    "observed": "PASS",
+    "defense": "Unauthorized/foreign/changed missingness remains rejected; no additional source alias or user-controlled result acceptance"
+  },
+  "release_state": "DRAFT_HOLD_SOURCE_ONLY_NOT_INSTALLED",
+  "signed_queued_job_detail_separation": {
+    "verification": "Same synthetic signed WebCEO V2 app and original Exec Unix ingress returns ok=true for executive_job queued zero-attempt generic Job, AND ok=true for the bounded PARTIAL executive_fabric root from that same original Job.",
+    "test_source_sha256": "0c6cc49aad1d85f429a7cd05afd86bb2f070cc64c043bfa1104759b6a3140696",
+    "full_focused": {
+      "passed": 5,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "junit_sha256": "fb760217c8413448158da3fa1a47abc1cb248df4f609f0a025e52c773167796a"
+    },
+    "installed_executive_job_failure_diagnosis": "Live installed Executive job detail previously returned backend_unavailable. This test excludes a universal failure of the new source for normal queued Jobs but does not identify which protected, historical or installed-only condition caused that live error.",
+    "source_boundary": "No production runtime/service/JWT/provider/portfolio reads or writes; original underlying installed result remains unresolved."
+  }
+}

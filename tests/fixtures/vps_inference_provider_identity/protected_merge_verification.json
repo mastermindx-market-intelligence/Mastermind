@@ -1,0 +1,23 @@
+{
+  "operation": "vps-fabric-llm-convergence-20261001-sol-001",
+  "source_parent": "8a66c8b774152cc677424d241e6f4fa7adc89658",
+  "protected_parent": "1ffe6b566b9addb58d13893bfb78e8505dce1752",
+  "protected_feature": "Original intent and consumed rulings product acceptance owner #1414",
+  "scope": "source-only protected master merge; no trade/provider/installation changes",
+  "test_scope": {
+    "cases": 268,
+    "passed": 268,
+    "failed": [],
+    "skipped": [],
+    "errors": [],
+    "junit_sha256": "3469f718eeb943f29a9cb593adb1bde5da442a8a6af268124f7f98454008d91e"
+  },
+  "independent_provider_review": "SCOPED_CLEAR reviewed five source files before protected merge",
+  "unchanged_service_release_gates": [
+    "8 Supervisor prompt/schema failures and original direct-emitter held fixture",
+    "2 stale registered-service adversarial expectations platform edit refused",
+    "Bot immutable snapshot 11 and zero-evidence 1 failures",
+    "No installed heterogeneous Fabric provider authorization or actual worker answer"
+  ],
+  "release": "DRAFT_HOLD"
+}
