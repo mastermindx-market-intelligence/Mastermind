@@ -19,9 +19,11 @@ construction -- see test_supabase_sdk_url_is_not_flagged below.
 Known, deliberately reasoned exceptions are allowlisted only by exact
 (file, matched-string) pair, never by weakening a pattern. They cover the production
 `_REMOTE` compatibility default, its direct unit-test constant, and a synthetic local-Git
-workspace-origin fixture that never performs a network read. See _ALLOWLIST below; every
-entry is asserted to still exist and match so exceptions stay reviewable instead of
-silently widening into blanket exemptions.
+workspace-origin fixture that never performs a network read. The two additional
+exact pairs are a host-pinned authenticated Git publication destination and its
+no-network installer test assertion, not a new Macro research reader.
+See _ALLOWLIST below; every entry is asserted to still exist and match so
+exceptions stay reviewable instead of silently widening into blanket exemptions.
 
 A SECOND, structural fence lives at the bottom of this file
 (find_unauthenticated_macro_checkouts): the URL-regex fence above cannot see a
@@ -94,6 +96,20 @@ _ALLOWLIST: dict[tuple[str, str], str] = {
         "prove the installed workspace owner accepts only the canonical Macro fetch/push "
         "origin. The fixture creates local repositories and writes this URL into local "
         "Git config for identity comparison; it never performs an anonymous clone/fetch."
+    ),
+    ("integrations/studio_direct_mcp/private_service.py",
+     "https://github.com/mastermindx-market-intelligence/macro.git"): (
+        "DEC:B1-MACRO-PRIVATE-CUTOVER -- TYPED_GIT_CLOSED_PROFILES pins the exact "
+        "authenticated Git destination for the existing host-owned mmx-workspace Macro "
+        "source operation. The Git publisher delegates to the inherited credential "
+        "owner; it cannot clone, fetch, rewrite destinations, or perform anonymous "
+        "cross-repository research reads. No caller can select a different URL."
+    ),
+    ("integrations/studio_direct_mcp/private_service_workspaces_test.py",
+     "https://github.com/mastermindx-market-intelligence/macro.git"): (
+        "DEC:B1-MACRO-PRIVATE-CUTOVER -- installer fixture compares the fixed Macro "
+        "publisher destination, without invoking any Git network operation; it is "
+        "a contract assertion for the narrow host-owned publication profile."
     ),
 }
 
@@ -194,12 +210,14 @@ def test_allowlist_entry_is_visible_and_still_matches():
     cover the production public-HTTPS default and its direct unit-test constant.
     The third is a synthetic local-Git workspace fixture that stores the same URL
     only to assert canonical-origin matching and performs no network clone/fetch.
+    The fourth and fifth are the typed Git publisher's fixed destination and
+    its no-network installer comparison, constrained to one URL use per file.
     Each exception remains keyed by exact file and matched text so none silently
     covers drift in another file."""
-    assert len(_ALLOWLIST) == 3, (
-        f"expected exactly three allowlist entries (production _REMOTE, its direct "
-        f"test constant, and the synthetic workspace-origin fixture), found "
-        f"{len(_ALLOWLIST)}: {list(_ALLOWLIST)}")
+    assert len(_ALLOWLIST) == 5, (
+        f"expected exactly five reasoned allowlist pairs: the three existing "
+        f"private-cutover exceptions and two exact typed publisher destinations; "
+        f"found {len(_ALLOWLIST)}: {list(_ALLOWLIST)}")
     for (rel, matched), reason in _ALLOWLIST.items():
         path = _ROOT / rel
         assert path.exists(), f"allowlisted file {rel} no longer exists"
@@ -212,6 +230,11 @@ def test_allowlist_entry_is_visible_and_still_matches():
             "exempted from")
         assert "DEC:B1-MACRO-PRIVATE-CUTOVER" in reason, (
             "allowlist entry must cite its authorizing decision")
+        if rel.startswith("integrations/studio_direct_mcp/"):
+            # The new typed publication exemptions are single immutable config
+            # bindings, not permission to add another URL use in either file.
+            assert text.count(matched) == 1, (
+                f"publisher exception has gained another URL use in {rel}")
 
 
 def test_supabase_sdk_url_is_not_flagged():
