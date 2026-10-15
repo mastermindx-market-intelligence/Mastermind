@@ -866,44 +866,71 @@ def test_all_discovered_tests_are_accounted_for():
 
 
 def test_hosted_full_gate_has_a_bounded_completion_window():
-    """PR544 reached 98% when its old 25-minute job ceiling cancelled the gate."""
+    """Every non-pytest gate still executes; fan-in preserves completion bounds."""
     import yaml
 
-    workflow = yaml.safe_load(
-        (_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
-    job = workflow["jobs"]["test"]
-    assert job["timeout-minutes"] == 40
+    workflow = yaml.load(
+        (_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"),
+        Loader=cip._WorkflowYAMLLoader,
+    )
+    jobs = workflow["jobs"]
+    shards = jobs["pytest_shards"]
+    gate = jobs["test"]
     assert workflow["permissions"] == {"contents": "read"}
-    assert job.get("continue-on-error", False) is False
-    gate_steps = [step for step in job["steps"]
-                  if step.get("name") == "Run repository test gate"]
-    assert len(gate_steps) == 1
-    # The gate is still one job producing the single required check `test`
-    # (branch protection on master requires exactly that context, with
-    # enforce_admins true). `--jobs` shards inside the job; it is the only
-    # argument the hosted gate may carry, and its value must be a positive
-    # integer the runner can actually run in parallel.
-    command = gate_steps[0]["run"].split()
-    assert command[:2] == ["python", "scripts/ci_pytest.py"]
-    assert command[2:3] == ["--jobs"], "the hosted gate takes no other argument"
-    assert command[3].isdigit() and int(command[3]) >= 1
-    assert len(command) == 4
-    assert all(step.get("continue-on-error", False) is False for step in job["steps"])
+    assert shards["timeout-minutes"] == 40
+    assert gate["timeout-minutes"] == 8
+    assert shards["strategy"]["fail-fast"] is False
+    assert shards["strategy"]["max-parallel"] == 3
+    assert shards["strategy"]["matrix"]["index"] == [0, 1, 2]
+    assert shards.get("continue-on-error", False) is False
+    assert gate.get("continue-on-error", False) is False
+
+    shard_steps = shards["steps"]
+    test_steps = [
+        step for step in shard_steps
+        if step.get("name") == "Run repository test shard"
+    ]
+    assert len(test_steps) == 1
+    assert test_steps[0]["run"] == (
+        "python -m scripts.ci_parallel_shard --jobs 3 --index "
+        "${{ matrix.index }}"
+    )
+    assert all(step.get("continue-on-error", False) is False for step in shard_steps)
+    for name in (
+        "Verify Paper direct pinned MCP SDK",
+        "Compile source",
+        "Validate shell scripts",
+    ):
+        steps = [step for step in shard_steps if step.get("name") == name]
+        assert len(steps) == 1 and steps[0]["if"] == "matrix.index == 0"
 
 
 def test_hosted_gate_stays_a_single_required_check_job():
-    """A matrix here would rename the check to `test (0)`..., which branch
-    protection on master (required context `test`, enforce_admins true) would
-    never see satisfied -- blocking every merge. Parallelism must stay inside
-    the job."""
+    """A fail-closed fan-in produces the sole stable required context test."""
     import yaml
 
-    workflow = yaml.safe_load(
-        (_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
-    assert list(workflow["jobs"]) == ["test"]
+    workflow = yaml.load(
+        (_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"),
+        Loader=cip._WorkflowYAMLLoader,
+    )
+    assert list(workflow["jobs"]) == ["pytest_shards", "test"]
     job = workflow["jobs"]["test"]
-    assert "strategy" not in job, "a matrix would rename the required check"
+    assert "strategy" not in job
+    assert job["name"] == "test"
     assert job["runs-on"] == "ubuntu-latest"
+    assert job["if"] == "${{ always() }}"
+    assert job["needs"] == ["pytest_shards"]
+    gate_steps = [
+        step for step in job["steps"]
+        if step.get("name") == "Run repository test gate"
+    ]
+    assert len(gate_steps) == 1
+    gate = gate_steps[0]
+    assert gate["env"]["SHARDS_STATUS"] == "${{ needs.pytest_shards.result }}"
+    assert 'if [ "$SHARDS_STATUS" != success ]; then' in gate["run"]
+    assert "exit 1" in gate["run"]
+    assert "python scripts/ci_pytest.py --plan-only --jobs 3" in gate["run"]
+    assert all(step.get("continue-on-error", False) is False for step in job["steps"])
 
 
 # --- `--jobs` sharding: placement only, never a coverage reduction -----------
