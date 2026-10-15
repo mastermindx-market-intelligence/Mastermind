@@ -69,7 +69,7 @@ def _sessions(rows: object) -> list[dict]:
     return out
 
 
-def _bars(bundle: object, dates: set[date]) -> dict[date, float]:
+def _bars(bundle: object, dates: set[date], visible_dates: set[date], cutoff_date: date) -> dict[date, float]:
     if not isinstance(bundle, dict) or bundle.get("adjustment") != ADJUSTMENT:
         raise ReplayError("ADJUSTMENT_PROVENANCE_REQUIRED")
     source = bundle.get("source_ref")
@@ -83,10 +83,17 @@ def _bars(bundle: object, dates: set[date]) -> dict[date, float]:
         if not isinstance(row, dict):
             raise ReplayError("INVALID_BAR")
         day = _day(row.get("date"))
-        if day in out:
-            raise ReplayError("DUPLICATE_PRICE_BAR")
+        # A source packet may include later bars. Their values, duplicates and
+        # missingness must not affect an earlier as-of replay: those future
+        # records were unobservable at the evaluation cutoff.
+        if day not in dates and day > cutoff_date:
+            continue
         if day not in dates:
             raise ReplayError("BAR_OUTSIDE_EXCHANGE_SESSIONS")
+        if day not in visible_dates:
+            continue
+        if day in out:
+            raise ReplayError("DUPLICATE_PRICE_BAR")
         value = row.get("adjusted_close")
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
             raise ReplayError("INVALID_ADJUSTED_CLOSE")
@@ -128,7 +135,8 @@ def replay(packet: dict) -> dict:
     Release is earliest verified public time, NOT SEC acceptance when a press
     release preceded it. Intraday reactions are explicitly non-estimable using
     close-only series; H5/H20 begin at the first affected *close* and are not
-    labeled as executable entry fills.
+    labeled as executable entry fills. As-of gating on session closes does NOT
+    make retrospectively adjusted vendor prices historical PIT-admitted prices.
     """
     if not isinstance(packet, dict):
         raise ReplayError("PACKET_OBJECT_REQUIRED")
@@ -181,7 +189,10 @@ def replay(packet: dict) -> dict:
     if not isinstance(prices_in, dict) or any(k not in prices_in for k in ("issuer", "market", "sector")):
         raise ReplayError("THREE_PRICE_SERIES_REQUIRED")
     dates = {s["date"] for s in sessions}
-    prices = {role: _bars(prices_in[role], dates) for role in ("issuer", "market", "sector")}
+    visible_dates = {s["date"] for s in sessions if s["close"] <= asof}
+    cutoff_date = asof.astimezone(ET).date()
+    prices = {role: _bars(prices_in[role], dates, visible_dates, cutoff_date)
+              for role in ("issuer", "market", "sector")}
     out = {
         "schema": SCHEMA,
         "event_ref": event["event_ref"],
