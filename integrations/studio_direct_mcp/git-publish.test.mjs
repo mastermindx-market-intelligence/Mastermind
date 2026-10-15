@@ -800,6 +800,8 @@ test('closed publisher refuses duplicate operation ownership or bad registry rec
           error: 'workspace is not registered to the source repository',
         };
         if (caseName === 'unregistered') {
+          // A stdout success can never claim registration absence; this is
+          // malformed evidence, not the canonical exit-code-2 refusal.
           delete result.receipt;
           result.error = 'workspace is not registered to the source repository';
         }
@@ -810,9 +812,101 @@ test('closed publisher refuses duplicate operation ownership or bad registry rec
       const publisher = createGitPublisher(closedProfileFor(f), { execFile: exec });
       await assert.rejects(publisher.commit({
         operation_id: f.operationId, expected_head_sha: f.head, message: 'test: no effects',
-      }), /more than one repository|invalid repository receipt|not registered/);
+      }), /more than one repository|invalid repository receipt|unexpected result/);
       assert.equal(gitCalls, 0, caseName);
     }
+  } finally { await f.cleanup(); }
+});
+
+test('closed publisher fails closed on stdout absence even when another repository is registered', async () => {
+  const f = await fixture();
+  try {
+    for (const caseName of ['malformed stdout absence', 'stdout absence beside a clean registration']) {
+      let gitCalls = 0;
+      const exec = async (file, args) => {
+        if (file !== f.cli) { gitCalls++; throw new Error('Git must remain untouched'); }
+        const alias = args.at(-1);
+        if (caseName === 'stdout absence beside a clean registration' && alias === 'macro') {
+          const error = new Error('workspace registration absent');
+          error.code = 2;
+          error.stdout = '';
+          error.stderr = JSON.stringify({
+            schema_version: 'mastermind.workspace_cli/v2', action: 'status',
+            effect: 'NOT_APPLIED', repository: alias,
+            error: 'workspace is not registered to the source repository',
+          });
+          throw error;
+        }
+        if (caseName === 'stdout absence beside a clean registration' && alias === 'terminal') {
+          return { stdout: JSON.stringify({
+            schema_version: 'mastermind.workspace_cli/v2', action: 'status',
+            effect: 'NOT_APPLIED', repository: alias,
+            receipt: { source_repository: f.sourceRepo, workspace_path: f.workspace,
+              branch: f.branch, dirty: false, head_sha: f.head },
+          }), stderr: '' };
+        }
+        return { stdout: JSON.stringify({
+          schema_version: 'mastermind.workspace_cli/v2', action: 'status',
+          effect: 'NOT_APPLIED', repository: alias,
+          error: 'workspace is not registered to the source repository',
+        }), stderr: '' };
+      };
+      const publisher = createGitPublisher(closedProfileFor(f), { execFile: exec });
+      await assert.rejects(publisher.commit({
+        operation_id: f.operationId, expected_head_sha: 'b'.repeat(40), message: 'test: no effects',
+      }), /unexpected result/, caseName);
+      assert.equal(gitCalls, 0, caseName);
+    }
+  } finally { await f.cleanup(); }
+});
+
+test('closed publisher keeps canonical exit-code-2 absence as the only non-registration evidence', async () => {
+  const f = await fixture();
+  try {
+    const canonicalAbsence = (alias) => {
+      const error = new Error('workspace registration absent');
+      error.code = 2;
+      error.stdout = '';
+      error.stderr = JSON.stringify({
+        schema_version: 'mastermind.workspace_cli/v2', action: 'status',
+        effect: 'NOT_APPLIED', repository: alias,
+        error: 'workspace is not registered to the source repository',
+      });
+      return error;
+    };
+    let gitCalls = 0;
+    const exec = async (file, args, options) => {
+      if (file !== f.cli) return execFile(file, args, options);
+      const alias = args.at(-1);
+      if (alias === 'terminal') {
+        return { stdout: JSON.stringify({
+          schema_version: 'mastermind.workspace_cli/v2', action: 'status',
+          effect: 'NOT_APPLIED', repository: alias,
+          receipt: { source_repository: f.sourceRepo, workspace_path: f.workspace,
+            branch: f.branch, dirty: false, head_sha: f.head },
+        }), stderr: '' };
+      }
+      throw canonicalAbsence(alias);
+    };
+
+    const absent = createGitPublisher(closedProfileFor(f), {
+      execFile: (file, args) => {
+        if (file !== f.cli) { gitCalls++; throw new Error('Git must remain untouched'); }
+        throw canonicalAbsence(args.at(-1));
+      },
+    });
+    await assert.rejects(absent.commit({
+      operation_id: f.operationId, expected_head_sha: f.head, message: 'test: no effects',
+    }), /not registered in the closed repository profile/);
+    assert.equal(gitCalls, 0);
+
+    const routed = createGitPublisher(closedProfileFor(f), { execFile: exec });
+    const refused = await routed.commit({
+      operation_id: f.operationId, expected_head_sha: 'b'.repeat(40), message: 'test: no effects',
+    });
+    assert.equal(refused.status, 'REFUSED');
+    assert.equal(refused.effect_state, 'NOT_APPLIED');
+    assert.equal(refused.code, 'EXPECTED_HEAD_MISMATCH');
   } finally { await f.cleanup(); }
 });
 

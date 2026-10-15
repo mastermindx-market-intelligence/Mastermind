@@ -378,7 +378,9 @@ function createClosedRepositoryPublisher(cfg, dependencies) {
           result.effect !== 'NOT_APPLIED' || result.repository !== profile.repository) {
         throw new Error('closed workspace registry returned an invalid repository receipt');
       }
-      if (result.error === NOT_REGISTERED && !result.receipt) continue;
+      // A successful stdout response can never report absence: only the exit
+      // code 2 typed stderr refusal above is canonical non-registration. Any
+      // error field here is malformed evidence and fails closed.
       if (result.error !== undefined || !result.receipt || typeof result.receipt !== 'object') {
         throw new Error('closed workspace registry returned an unexpected result');
       }
