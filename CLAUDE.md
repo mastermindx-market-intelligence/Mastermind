@@ -77,6 +77,12 @@ an unrelated application deployment. An instruction rollout needs installation a
 proof; a product/runtime change retains its required real-path proof. After each verified phase,
 save the material delta and continue the next safe ready phase in the same healthy turn.
 
+An architectural owner is not a live session. Data OS names a contract boundary, not
+an AI approver. The current assigned session resolves authorized source-contract work
+using existing interfaces instead of waiting for an unaddressable owner. Missing rights,
+actual active writers, uncertain effects and required release approvals retain their
+specific gates; no invented ownership, duplicate registry or permission bypass.
+
 ### Reciprocal dialogue and watcher invariant
 
 For any watcher-enabled Sol↔worker/COO loop, `docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md` is the

@@ -56,5 +56,27 @@ class ExecutionPolicyContractTests(unittest.TestCase):
             self.assertIn(invariant, text)
 
 
+    def test_system_boundary_is_not_a_callable_approver(self):
+        for path in ['docs/SOL_CEO_ACCOUNT_INSTRUCTIONS.md', 'AGENTS.md', 'CLAUDE.md']:
+            with self.subTest(path=path):
+                source = ' '.join(self.read(path).split())
+                self.assertIn('An architectural owner is not a live session', source)
+                self.assertIn('Data OS', source)
+                self.assertIn('current assigned session', source)
+
+    def test_blocker_has_an_action_not_a_department_name(self):
+        source = ' '.join(self.read('docs/SOL_CEO_ACCOUNT_INSTRUCTIONS.md').split())
+        self.assertIn('exact blocked action', source)
+        self.assertIn('source-contract work', source)
+        self.assertIn('not a new approval form', source)
+
+    def test_web_kernel_removes_nonexistent_owner_dependency_within_budget(self):
+        source = self.read('docs/sol_skills/BOOTSTRAP_KERNEL.md')
+        kernel = source.split('```text\n', 1)[1].split('```', 1)[0]
+        self.assertLessEqual(len(kernel), 8000)
+        self.assertIn('system names are not live approvers', kernel)
+        self.assertIn('actual missing evidence', kernel)
+
+
 if __name__ == '__main__':
     unittest.main()
