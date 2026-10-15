@@ -1,0 +1,56 @@
+{
+  "AMAT_Terminal_15m_ext0.json": {
+    "rows": 8856,
+    "bytes": 433888,
+    "sha256": "65f9d1db393a796c3a24c6514acf06ffe49d4792090cbe3c31b7dc2d7d700671",
+    "origin": "M1 public Terminal read, gzip/base64 transported by authorized Desktop Commander"
+  },
+  "AMAT_Terminal_5m_ext0.json": {
+    "rows": 20000,
+    "bytes": 961819,
+    "sha256": "1bf4dc87dd4b717b4880eca3d4abab21966441ffcd986db1a8769ca583678657",
+    "origin": "M1 public Terminal read, gzip/base64 transported by authorized Desktop Commander"
+  },
+  "LRCX_Terminal_5m_ext0.json": {
+    "rows": 20000,
+    "bytes": 965410,
+    "sha256": "8cecf61b86124e8373be3594044210025ba401e157b0a1a0c6fec977b9c87b79",
+    "origin": "M1 public Terminal read, gzip/base64 transported by authorized Desktop Commander"
+  },
+  "KLAC_Terminal_5m_ext0.json": {
+    "rows": 20000,
+    "bytes": 1009053,
+    "sha256": "fa7cda5fc3210243399b11e197e0a8955492fc265f505d8f7e55b807cc6ba8fd",
+    "origin": "M1 public Terminal read, gzip/base64 transported by authorized Desktop Commander"
+  },
+  "XLV_Terminal_15m_ext0.json": {
+    "rows": 8596,
+    "bytes": 425559,
+    "sha256": "6fc2397a6cff804771e291e296ccb1cd5b549d7bf96f9f45fa7203b8a5e2266a",
+    "origin": "M1 public Terminal read, gzip/base64 transported by authorized Desktop Commander"
+  },
+  "XLV_Terminal_5m_ext0.json": {
+    "rows": 20000,
+    "bytes": 971978,
+    "sha256": "4c60db2a668fa0d77fce3b117edc9f2cd524e5137b658e76ae4906e2c99e7195",
+    "origin": "M1 public Terminal read, gzip/base64 transported by authorized Desktop Commander"
+  },
+  "XLE_Terminal_15m_ext0.json": {
+    "rows": 8596,
+    "bytes": 408783,
+    "sha256": "038437a2c55598b3219b60e95bf5e99c47e3e247137d8de0eb619253fbc11cdb",
+    "origin": "M1 public Terminal read, gzip/base64 transported by authorized Desktop Commander"
+  },
+  "XLE_Terminal_5m_ext0.json": {
+    "rows": 20000,
+    "bytes": 930493,
+    "sha256": "34799b1948dc40ae185c138ef37486f7f802f011f1e11b1aa091e8eb3d1e30c9",
+    "origin": "M1 public Terminal read, gzip/base64 transported by authorized Desktop Commander"
+  },
+  "AVGO_Terminal_5m_ext0.json": {
+    "rows": 20000,
+    "bytes": 977218,
+    "sha256": "fafecc26488f0b77180b618ddb8af10d477bff4ea32a4a297137e493887f822f",
+    "origin": "M1 public Terminal read, gzip/base64 transported by authorized Desktop Commander"
+  }
+}

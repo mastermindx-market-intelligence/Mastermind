@@ -1,0 +1,722 @@
+{
+  "schema": "mastermind.soxx.next_session_checkpoint.v1",
+  "last_reconciliation_date_ET": "2026-10-15",
+  "mission": "SOXX multitimeframe reversal and cycle-failure economics with source-qualified independent time evidence and incumbent-owner BOATS history",
+  "DONE_WHEN": "Licensed full-session data, causal equal-horizon comparisons and independent economic evidence including winner harm, risk, adverse execution and censoring; separate production acceptance",
+  "MISSION_COMPLETE": false,
+  "state": "RESEARCH_INCOMPLETE_DATA_AND_ORIGINAL_EFFECT_GATES",
+  "protected_law_sha": "dcafbf7eb4b2159cfbb4fd14f82fdccd209b2525",
+  "protected_skillpack": {
+    "version": "1.0.1",
+    "bootstrap_major": 1,
+    "same_commit": true
+  },
+  "repository": "mastermindx-market-intelligence/Mastermind",
+  "PR": 1338,
+  "branch": "sol/research-soxx-cycle-boats-20261011",
+  "inspected_precheckpoint_head": "713f263dfc1dec4c7316df6420010cb6a6c38f6f",
+  "publication_effect": "Original human-operated Oct11-Oct12 SOXX BOATS one-request HTTP200 480 source bars verified with one existing canonical L1 materialize WRITE and hash-verified original Data OS read. 240/240 Sunday 20:00-23:59 recovered, 240/240 Monday 00:00-03:59 overlap matches all original OHLCV values; 16/16 half-hour and 4/4 2H, 2/2 3H, 2/2 4H overnight original input windows complete. Nine source contexts now 14038 raw minute rows with 480 source overlaps and 13558 unique timestamps; no vendor requests by research agent, PIT/fill/trading not accepted.",
+  "full_prior_handoff_commit": "7ec0207a5870e8c467b7185afbdcde97c38ef314",
+  "repo_research_root": "research/soxx-multitimeframe-cycle-2026-10-11",
+  "current_delta_path": "research/soxx-multitimeframe-cycle-2026-10-11/prospective_validation_v26/SOXX_OCT11_SUNDAY_BOUNDARY_VERIFIED_V32_2026-10-15.md",
+  "analysis_contract_path": "research/soxx-multitimeframe-cycle-2026-10-11/prospective_validation_v26/PROSPECTIVE_ANALYSIS_CONTRACT.md",
+  "preserved_evidence": {
+    "all_v2_v24_source_results_unchanged": true,
+    "historical_tests_rerun_or_parameters_retuned": false,
+    "total_original_development_episodes": 91,
+    "prior_hash_manifest_commit": "713f263dfc1dec4c7316df6420010cb6a6c38f6f",
+    "V25_repair_commit": "a914583df5272b28037ed5230bce4b9e69c93c59",
+    "V25_CI": "38343549349 SUCCESS; D8 semantics unchanged",
+    "V26_repaired_code_commit": "5379fa54570ecfb7120e6bcfa65e5d583b81fb20",
+    "V26_utility_git_blob": "7e3f9d52cc85ad3236e388877ebd8131ece5c198",
+    "V26_utility_sha256": "92c8f202fc43ec173da966228a5b21668fe8abf47337deb8b190653750443362",
+    "V26_prior_synthetic_checks": "Thirty-nine passes reused without rerun",
+    "V22_maturity_caveat": "Entry-week ordering lacks paired-label maturity guarantee. Actual affected count unmeasured; original negative results retained, not corrected or called causal independent validation."
+  },
+  "release": {
+    "PR_open_not_merged": true,
+    "last_completed_CI_head": "402cdda1a629e1b522f36ca3afe42ee81e77e935",
+    "last_completed_CI_run": 38711773568,
+    "last_completed_CI_conclusion": "SUCCESS",
+    "current_master_for_conflict_probe": "9a8e9b50b6158eb38af78a5b867eedba1719b908",
+    "conflict_probe_tree": "69a4a70e1c330c96e8b105af801efd58da7eedf2",
+    "conflict_probe_rc": 0,
+    "conflict_paths": [],
+    "PR_API_readback_UTC": "2026-10-14T01:08:17.548911+00:00",
+    "PR_API_mergeable": true,
+    "PR_API_mergeable_state": "clean",
+    "serialized_API_base_differs_from_current_master": true,
+    "no_needless_base_join_or_merge": true,
+    "enclosing_commit_CI": "NOT_INHERITED; observe exact newly published head separately",
+    "no_safety_guard_change": true
+  },
+  "workers": {
+    "original_root": "soxx1338-web-resume-20261013",
+    "original_parent": "soxx1338-web-resume-20261013",
+    "adapter": "m2studio:/Users/chriswong/.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext/fabric_task.py",
+    "soxx1338-ci-review-20261013a": {
+      "state": "TERMINAL",
+      "acceptance": "PREVIOUSLY_ACCEPTED_REUSED"
+    },
+    "soxx1338-cycle-review-20261013a": {
+      "state": "TERMINAL",
+      "disposition": "Mixed review consumed, not accepted wholesale; original V26 README adjudication preserved"
+    },
+    "soxx1338-accounting-review-20261013a": {
+      "state": "UNKNOWN_ORIGINAL_TASK_FROZEN",
+      "pool": "bailian",
+      "requested_model": "qwen3.8-max",
+      "host": "ubuntu0",
+      "original_lease_and_launch_recorded": true,
+      "prior_observation": "REFUSED: original_run_observation_unconfirmed",
+      "effect": "UNRESOLVED_ORIGINAL_TASK",
+      "replay_authorized": false,
+      "not_retried_in_this_continuation": true
+    },
+    "soxx1338-v26-code-review-20261013b": {
+      "state": "TERMINAL",
+      "disposition": "Rejected broad PASS; prior DST/overflow counterexamples preserved"
+    },
+    "soxx1338-v26-repair-review-20261013c": {
+      "state": "TERMINAL",
+      "disposition": "Eighteen target predicates passed; two non-target checks. Did not kill UTC-removal mutant; no wholesale acceptance"
+    },
+    "soxx1338-v26-clock-falsifier-20261013d": {
+      "state": "TERMINAL",
+      "rc": 0,
+      "accepted": true,
+      "accepted_by": "deterministic",
+      "acceptance_reason": "VALIDATED_OUTCOME",
+      "retained_result_bytes": 4859,
+      "retained_stdout_sha256": "08b73b3a3f58e4d70ca867e7443bf4b28ed16ad4f1a8eab3e84761e282df40c9",
+      "program_sha256": "9e821bbff5037ea5ce1bfaa2c8d876e0d55ac305ea9592db92760ebebacab3d4",
+      "program_path": "tests/soxx_v26_clock_falsifiers.py",
+      "exact_source_result": "Six scenarios pass, rc zero",
+      "UTC_removal_mutant_result": "Two named discriminating failures, rc one",
+      "caveats": "Malformed reviewer digest rejected. Misnamed future-feature case is a valid-path check. Only narrow mutation objective accepted, not strategy performance.",
+      "same_run_acceptance_readback_PID": 74077
+    }
+  },
+  "source_refs": {
+    "original_private_rth": "mini4:/private/tmp/soxx_terminal_finepivot_20261011_v14",
+    "early_failure_private": "mini4:/private/tmp/soxx_early_failure_frontier_v21_20261012",
+    "core_private": "mini4:/private/tmp/soxx_coherent_cycle_20261010_v10",
+    "private_RTH_availability": "Not rechecked after original refused census",
+    "archive_owner": "m2studio:/Volumes/Mastermind/market-data/tiingo",
+    "owner_source_root": "m2studio:/Volumes/Mastermind/agent-workspaces/sol/tiingo-ingestion-20261009",
+    "owner_source_head_observed": "2a08250fe61aa59ad3e1581149f0b93e9d5a17cf",
+    "owner_tracked_changes": [],
+    "owner_request": "https://github.com/mastermindx-market-intelligence/macro/pull/8698#issuecomment-6137771857",
+    "owner_request_response": "No newer comment after 2026-10-13T07:22:42Z at this read; delivery is not owner execution",
+    "new_review_artifacts": "m2studio:/private/tmp/soxx1338-review-d-verified-20261013",
+    "isolated_integration_workspace": "m2studio:/private/tmp/soxx1338-integration-20261013"
+  },
+  "source_gates": {
+    "last_qualified_historical_bar_census_UTC": "2026-10-15T10:32:06Z",
+    "qualified_historical_bar_symbols": [
+      "AAPL",
+      "AMD",
+      "SOXX"
+    ],
+    "qualified_historical_SOXX_receipts": 9,
+    "fresh_pathname_check_UTC": "2026-10-14T01:04:55.804461+00:00",
+    "historical_receipt_paths": 11,
+    "new_paths": 0,
+    "path_census_truncated": false,
+    "fresh_check_requalified_raw_contents": false,
+    "broader_RTH_receipt_family_inventory": "BLOCKED_BEFORE_DISPATCH: OpenAI could not determine safety status; not retried through another route",
+    "untouched_RTH_history_elsewhere": "UNKNOWN_NOT_PROVEN_ABSENT",
+    "complete_short_capture_audit": "Prior two-thousand-receipt audit reused; no unchanged rerun",
+    "SOXX_Q_message_observations": 2926,
+    "SOXX_T_message_observations": 142,
+    "capture_interval_UTC": [
+      "2026-10-13T00:00:19.596058+00:00",
+      "2026-10-13T00:09:30.354887+00:00"
+    ],
+    "prior_full_metadata_sha256": "10a38dfb96d485feda8745016ec12f6b7e6f8c62d19ab6baeff2b0db8d92ee17",
+    "historical_SOXX_full_year_qualified": false,
+    "real_SOXX_BOATS_rest_research_receipt": {
+      "raw_source_sha256": "ea6392763b0ea148084c10bd1e98d42273a2479a7625993d5a87e6cad691486e",
+      "raw_source_receipt_id": "a90016abfd49a712215bdea2d08a8fe81bb8c4f398e803472082d8289534c8df",
+      "source_capture_utc": "2026-10-15T05:19:25.281764+00:00",
+      "response_http": 200,
+      "requested_dates": [
+        "2026-10-12",
+        "2026-10-13"
+      ],
+      "raw_bytes": 77271,
+      "L1_output_sha256": "30164abb1df917373b09db54418ad4052c3598f9716c8c985c96984faa775cfa",
+      "L1_manifest_sha256": "c2be8fcf977f8322488d32cec159bee0ae52e28167e0cabc15e9c5916b9ed8fc",
+      "canonical_read_rows": 720,
+      "qualified_overnight_date_ET": "2026-10-12",
+      "qualified_clock_minutes": 480,
+      "positive_volume_minutes": 428,
+      "zero_volume_minutes": 52,
+      "zero_volume_nonflat_OHLC_minutes": 49,
+      "complete_30m_timestamp_buckets": 16,
+      "buckets_with_any_zero_volume_minute": 13,
+      "partial_2026_10_11_ET_minutes": 240,
+      "PIT_backtest_eligible": false,
+      "historical_quote_marketability_proven": false,
+      "one_night_is_independent_prospective_holdout": false,
+      "right_to_redistribute": false,
+      "evidence_path": "research/soxx-multitimeframe-cycle-2026-10-11/prospective_validation_v26/SOXX_REAL_BOATS_FIRST_NIGHT_VERIFIED_2026-10-15.md",
+      "status": "REAL_RECEIPT_AND_L1_RESEARCH_INSPECTION_ACCEPTED_NOT_TRADING"
+    },
+    "second_SOXX_BOATS_rest_research_receipt": {
+      "raw_source_sha256": "1c2a544683a9c270183b52213bdf1445655b237957003ae2e47f40772fcde885",
+      "raw_source_receipt_id": "7dca959c29ee6735307523c40f6d52aa30412473ebbb757ad40cbbda6eb93a11",
+      "source_capture_utc": "2026-10-15T06:23:10.923021+00:00",
+      "response_http": 200,
+      "requested_dates": [
+        "2026-10-05",
+        "2026-10-11"
+      ],
+      "raw_bytes": 229953,
+      "L1_output_sha256": "ef487963685b57b873d13716c9b80452d039beff793b2d1164db363fa4b7cf9e",
+      "L1_manifest_sha256": "4ee28a91a5b410b8a9e364d25df06ab963c79cb93bbf3c75910a1c839318ab28",
+      "canonical_read_rows": 2148,
+      "nightly_ET_source_minutes": {
+        "2026-10-04": 240,
+        "2026-10-05": 479,
+        "2026-10-06": 474,
+        "2026-10-07": 477,
+        "2026-10-08": 478
+      },
+      "normally_scheduled_weeknight_absent_rows": 12,
+      "positive_volume_minutes": 1432,
+      "zero_volume_minutes": 716,
+      "zero_volume_nonflat_OHLC_minutes": 657,
+      "complete_30m_timestamp_buckets": 64,
+      "complete_30m_buckets_all_positive_volume": 0,
+      "original_two_receipt_timestamp_overlap": 0,
+      "total_original_SOXX_source_minutes_across_two_receipts": 2868,
+      "PIT_backtest_eligible": false,
+      "historical_quote_marketability_proven": false,
+      "one_week_is_independent_prospective_holdout": false,
+      "right_to_redistribute": false,
+      "evidence_path": "research/soxx-multitimeframe-cycle-2026-10-11/prospective_validation_v26/SOXX_SECOND_BOATS_WEEK_VERIFIED_2026-10-15.md",
+      "status": "SECOND_REAL_RECEIPT_AND_L1_RESEARCH_INSPECTION_ACCEPTED_NOT_TRADING"
+    },
+    "overnight_venue_weekend_guard": "V29 weekday Fri/Sat 20:00 ET nightly starts refused using original fullsession clock; venue holidays not proven",
+    "higher_timeframe_input_readiness_v30": {
+      "actual_l1_soxx_unique_minute_rows": 2868,
+      "source_receipts_accepted": 2,
+      "nights_ET": [
+        "2026-10-04",
+        "2026-10-05",
+        "2026-10-06",
+        "2026-10-07",
+        "2026-10-08",
+        "2026-10-11",
+        "2026-10-12"
+      ],
+      "five_core_nights_ET": [
+        "2026-10-05",
+        "2026-10-06",
+        "2026-10-07",
+        "2026-10-08",
+        "2026-10-12"
+      ],
+      "core_candidate_full_input_blocks": {
+        "120m": 20,
+        "180m": 10,
+        "240m": 10
+      },
+      "core_complete_timestamp_input_blocks": {
+        "120m": 13,
+        "180m": 4,
+        "240m": 4
+      },
+      "core_time_complete_input_blocks_all_positive_reported_volume": {
+        "120m": 0,
+        "180m": 0,
+        "240m": 0
+      },
+      "three_hour_overnight_trailing_two_hours_not_promoted": true,
+      "actual_indicators_computed": false,
+      "RTH_3hour_trading_decision_proven": false,
+      "PIT_or_historical_bid_ask_admitted": false,
+      "source_report": "research/soxx-multitimeframe-cycle-2026-10-11/prospective_validation_v26/SOXX_HTF_SOURCE_READINESS_V30.md",
+      "tests": "14 local synthetic unit tests passed; actual two-source original L1 read-only proof matches all night counts"
+    },
+    "full_overnight_coverage": false,
+    "historical_marketability_qualified": false,
+    "provider_requests_this_continuation": 0,
+    "archive_writes_this_continuation": 0,
+    "licensed_raw_rows_published": 0,
+    "credentials_read": false,
+    "third_SOXX_BOATS_rest_research_receipt": {
+      "raw_source_sha256": "f01d2d4ada743310eacc1b0b557342371e62351584d388dbf813d1543a4415e6",
+      "raw_source_receipt_id": "caaa9e4ab4cf1f040dd2bb972e25959bce60bc9716058dd8b9edb0eb3f429822",
+      "source_capture_utc": "2026-10-15T07:29:32.102009+00:00",
+      "response_http": 200,
+      "requested_dates": [
+        "2026-09-28",
+        "2026-10-04"
+      ],
+      "raw_bytes": 228741,
+      "L1_output_sha256": "a2ab8c769a700f3f4bd5c75ddce8516b2ed99655e7d53818b72d9b4f5a459ce7",
+      "L1_manifest_sha256": "9ebf258a467c3c0f359c8d26fd4e95a0c0de4d046611b7afb05c0c0f151ffe46",
+      "canonical_read_rows": 2136,
+      "source_night_ET_minutes": {
+        "2026-09-27": 240,
+        "2026-09-28": 478,
+        "2026-09-29": 470,
+        "2026-09-30": 473,
+        "2026-10-01": 475
+      },
+      "core_four_nights_missing_minute_starts": 24,
+      "positive_reported_volume_minutes": 1562,
+      "zero_volume_minutes": 574,
+      "zero_volume_nonflat_OHLC_minutes": 475,
+      "strict_complete_30m_clock_buckets": 54,
+      "strict_30m_buckets_all_positive_volume": 4,
+      "core_four_nights_HTF_complete": {
+        "120m": 4,
+        "180m": 1,
+        "240m": 1
+      },
+      "core_four_nights_HTF_all_positive_volume": {
+        "120m": 0,
+        "180m": 0,
+        "240m": 0
+      },
+      "PIT_backtest_eligible": false,
+      "historical_quote_marketability_proven": false,
+      "right_to_redistribute": false,
+      "independent_prospective_holdout": false,
+      "evidence_path": "research/soxx-multitimeframe-cycle-2026-10-11/prospective_validation_v26/SOXX_THIRD_BOATS_WEEK_VERIFIED_2026-10-15.md",
+      "status": "THIRD_REAL_REST_BOATS_ORIGINAL_RECEIPT_AND_L1_RESEARCH_INSPECTION_ACCEPTED"
+    },
+    "three_SOXX_receipt_source_readiness_combined": {
+      "original_source_receipts": 3,
+      "distinct_source_minute_times": 5004,
+      "overlapping_original_source_minute_stamps": 0,
+      "nine_core_nights": [
+        "2026-09-28",
+        "2026-09-29",
+        "2026-09-30",
+        "2026-10-01",
+        "2026-10-05",
+        "2026-10-06",
+        "2026-10-07",
+        "2026-10-08",
+        "2026-10-12"
+      ],
+      "expected_minute_slots": 4320,
+      "observed_minute_slots": 4284,
+      "missing_minute_slots": 36,
+      "positive_reported_volume_minutes": 3061,
+      "zero_volume_minutes": 1223,
+      "zero_volume_nonflat_OHLC_minutes": 1082,
+      "strict_complete_30m_clock_buckets": 118,
+      "strict_30m_buckets_all_positive_volume": 7,
+      "candidate_HTF": {
+        "120m": 36,
+        "180m": 18,
+        "240m": 18
+      },
+      "complete_timestamp_HTF": {
+        "120m": 17,
+        "180m": 5,
+        "240m": 5
+      },
+      "HTF_all_positive_volume": {
+        "120m": 0,
+        "180m": 0,
+        "240m": 0
+      },
+      "original_PIT_and_executable_fills_admitted": false,
+      "independent_strategy_economics_proven": false
+    },
+    "four_week_SOXX_BOATS_source_receipts": [
+      {
+        "original_request_bounds": [
+          "2026-08-31",
+          "2026-09-06"
+        ],
+        "rows": 2047,
+        "raw_response_bytes": 218032,
+        "captured_UTC": "2026-10-15T07:55:37.357813+00:00",
+        "raw_SHA256": "cb9445702f8bd2ddf23c76b58fb0223af2897650bf7eb78dce045895a609a79b",
+        "original_receipt_ID": "e3b72d7d321be9bd07e84672d1f943a3d99f78106bcdaed07a62173f8ca606b9",
+        "original_Parquet_SHA256": "63b052183edad5375ba5f88674b45d147ef76e200e41986c35902f7b880f89df",
+        "original_manifest_SHA256": "26d005fbc732249b270fffce5cf29a312e61b8d2059b26036dac7c01fd594a17",
+        "HTTP_status": 200,
+        "L1_effect": "ORIGINAL_WRITTEN_ONCE_AND_READER_VERIFIED",
+        "PIT_backtest_eligible": false,
+        "dataos_identity_admitted": false,
+        "redistribution_admitted": false
+      },
+      {
+        "original_request_bounds": [
+          "2026-09-07",
+          "2026-09-13"
+        ],
+        "rows": 1898,
+        "raw_response_bytes": 202929,
+        "captured_UTC": "2026-10-15T07:55:39.229842+00:00",
+        "raw_SHA256": "f71d2228017a210ce3fffd9e9b4c9548efb12b1f28d6a0c5181cf82e6c6611d2",
+        "original_receipt_ID": "ab84c447d13565c0f67282853d36213f9ac6817df12190ecd7e29c3c639a99f6",
+        "original_Parquet_SHA256": "e158dac8390edfe9b8ace78e333db92a1256587e23188bb52cb11aa1002bc36d",
+        "original_manifest_SHA256": "5d22b16d72c025435220c32050c34b4467914633b125dfa93762da58feeb10b3",
+        "HTTP_status": 200,
+        "L1_effect": "ORIGINAL_WRITTEN_ONCE_AND_READER_VERIFIED",
+        "PIT_backtest_eligible": false,
+        "dataos_identity_admitted": false,
+        "redistribution_admitted": false
+      },
+      {
+        "original_request_bounds": [
+          "2026-09-14",
+          "2026-09-20"
+        ],
+        "rows": 2130,
+        "raw_response_bytes": 227649,
+        "captured_UTC": "2026-10-15T07:55:41.379314+00:00",
+        "raw_SHA256": "c2bab8702ed3a6b061427fbff4b96b54e042016e2617b9366eafb7268da815c2",
+        "original_receipt_ID": "82031eb55d1cdc0fae71c26268f7e85c5d350591643048298c8744e074bbe548",
+        "original_Parquet_SHA256": "b8b8a460a74863d32fd24576ae42b28c0ad1e7dbf973dcb184aafa9df701abb3",
+        "original_manifest_SHA256": "cece4f64cc74dba2833c33ee3e9b062ba598fec96a2af9e166c17e3e49fd86bf",
+        "HTTP_status": 200,
+        "L1_effect": "ORIGINAL_WRITTEN_ONCE_AND_READER_VERIFIED",
+        "PIT_backtest_eligible": false,
+        "dataos_identity_admitted": false,
+        "redistribution_admitted": false
+      },
+      {
+        "original_request_bounds": [
+          "2026-09-21",
+          "2026-09-27"
+        ],
+        "rows": 2000,
+        "raw_response_bytes": 213646,
+        "captured_UTC": "2026-10-15T07:55:43.244794+00:00",
+        "raw_SHA256": "ba80ee49d175b5c66ea0330897b5a9f65a56226e2eb85a8f677a6a89597f2850",
+        "original_receipt_ID": "596fce5e565dcb7acb071e630a4dfffb1c0a148c83e2544b9f6fe39eca5ba766",
+        "original_Parquet_SHA256": "40b4206fc4cd2e2dc96f6f003575c2c97ff5c5dd69e177954300da5ef499e279",
+        "original_manifest_SHA256": "ae1dd4b424ea8c885c36f27bbb0b2d9ae63092e40a4b0324b0aa3b2806ab03f4",
+        "HTTP_status": 200,
+        "L1_effect": "ORIGINAL_WRITTEN_ONCE_AND_READER_VERIFIED",
+        "PIT_backtest_eligible": false,
+        "dataos_identity_admitted": false,
+        "redistribution_admitted": false
+      }
+    ],
+    "seven_SOXX_source_receipt_census": {
+      "source_receipts": 7,
+      "rows_all_original": 13079,
+      "unique_UTC_minute_start_count": 13079,
+      "cross_receipt_minute_overlap_count": 0,
+      "core_Mon_Thu_overnight_night_count": 25,
+      "core_expected_one_minute_slots": 12000,
+      "core_observed_one_minute_slots": 11666,
+      "core_missing_one_minute_slots": 334,
+      "core_nights_with_complete_480_minute_grid": 2,
+      "core_positive_vendor_volume_minute_bars": 8191,
+      "core_zero_vendor_volume_minute_bars": 3475,
+      "core_zero_volume_nonflat_OHLC_bars": 3067,
+      "core_30m_time_complete_windows": 291,
+      "core_30m_with_all_positive_volume_inputs": 17,
+      "core_HTF_candidate": {
+        "120m": 100,
+        "180m": 50,
+        "240m": 50
+      },
+      "core_HTF_time_complete": {
+        "120m": 39,
+        "180m": 12,
+        "240m": 12
+      },
+      "core_HTF_complete_and_all_minute_volume_positive": {
+        "120m": 1,
+        "180m": 0,
+        "240m": 0
+      },
+      "real_vendor_market_quotes_proven": false,
+      "point_in_time_eligible": false,
+      "independent_strategy_performance_accepted": false
+    },
+    "official_Sep6_2026_BOATS_holiday": {
+      "night_start_ET": "2026-09-06",
+      "session_status": "OFFICIAL_CLOSED_LABOR_DAY_NOT_DATA_MISSING",
+      "venue_holiday_source": "https://boats-pub-website-wordpress-prod.azurewebsites.net/trading-updates/",
+      "broader_holiday_calendar_admitted": false
+    },
+    "Sep22_2026_source_gap": {
+      "night_start_ET": "2026-09-22",
+      "minute_source_rows": 332,
+      "source_absent_minutes": 148,
+      "separate_missing_runs": 93,
+      "longest_missing_run_minutes": 6,
+      "missing_spread_over_entire_eight_hours": true,
+      "response_2000_row_cap_proven": false,
+      "source_outage_proven": false
+    },
+    "normal_Sunday_evening_source_gap": {
+      "dates": [
+        "2026-08-30",
+        "2026-09-13",
+        "2026-09-20",
+        "2026-09-27",
+        "2026-10-04",
+        "2026-10-11"
+      ],
+      "Sunday_20_to_23_59_minute_rows_each": 0,
+      "Monday_00_to_03_59_original_minute_rows": [
+        218,
+        239,
+        236,
+        240,
+        240,
+        240
+      ],
+      "source_date_filter_cause_proven": false,
+      "target_original_one_request_bounds": [
+        "2026-09-27",
+        "2026-09-28"
+      ],
+      "target_original_offline_plan_sha256": "186eee89dee9e3ecec666a22cde909785ba345df63bf1896ae15cdfde59aacd0",
+      "provider_request_dispatched": false,
+      "overlap_with_old_Monday_history_deliberate": true,
+      "validate_context_separately_and_quarantine_source_conflicts": true,
+      "targeted_request_dispatched": true,
+      "targeted_request_result": "HTTP200 Sep27-Sep28 produced Sunday 239/240 plus Monday 240/240, all overlapping OHLCV 240/240 exact; source date-boundary limitation supported for Sep27, cause not proven for all provider cases.",
+      "remaining_nonholiday_sundays_without_first_half": [
+        "2026-08-30",
+        "2026-09-13",
+        "2026-09-20",
+        "2026-10-04"
+      ],
+      "recovered_additional_Sunday_2026_10_11_evening_1m_rows": 240,
+      "recovered_Oct11_overlapping_Mon_source_1m_rows": 240,
+      "recovered_Oct11_original_overlap_price_and_volume_disagreements": 0,
+      "confirmed_targeted_Sunday_date_starts": [
+        "2026-09-27",
+        "2026-10-11"
+      ],
+      "likely_issue": "DATE_RANGE_BOUNDARY_OMITS_SUNDAY_FIRST_HALF_IN_MONDAY_TO_SUNDAY_WEEK_CONTEXTS; two original targeted source requests confirm data served for Sep27 and Oct11",
+      "provider_universal_date_semantics_proven": false
+    },
+    "older_Aug3_30_source_plan": {
+      "original_request_bounds": [
+        "2026-08-03",
+        "2026-08-30"
+      ],
+      "expected_original_task_count": 4,
+      "source_plan_sha256": "b7b786b19d5870fdce89aac2f164586b96d0595608f5e9d35d3db71551469415",
+      "dispatched": false
+    },
+    "sunday_sep27_request_v31": {
+      "raw_sha256": "b1a6d6d7796b5d472dfc75cfbd65ded3dc7af148330af158640757e187de685c",
+      "receipt_id": "e813dc9b4bb547c4d9b66064dfe870ed5341cf4f75903fd5a15b7e8e130479e8",
+      "source_capture_UTC": "2026-10-15T09:00:39.144128Z",
+      "request_dates": [
+        "2026-09-27",
+        "2026-09-28"
+      ],
+      "HTTP_status": 200,
+      "source_rows": 479,
+      "raw_bytes": 51200,
+      "L1_parquet_SHA256": "458bd1924b7a8af17922b7113a22488368c8d3dbd00c8f117ea317ef0a584aaa",
+      "L1_manifest_SHA256": "7b763acbafc35fca6c4bd19646e8b4bbada8e7de401c70547123f89ed162a868",
+      "newly_recovered_Sunday_evening_minutes": 239,
+      "overlapping_Monday_morning_minutes": 240,
+      "overlapping_OHLCV_rows_equal": 240,
+      "overlapping_OHLCV_rows_conflicting": 0,
+      "missing_Sunday_minute_ET": "2026-09-27 22:28",
+      "original_30m_complete_source_windows": 15,
+      "original_2h_3h_4h_complete_source_windows": {
+        "120m": 3,
+        "180m": 1,
+        "240m": 1
+      },
+      "venue_quote_execution_proven": false,
+      "PIT_eligible": false,
+      "redistribution_admitted": false,
+      "evidence_path": "research/soxx-multitimeframe-cycle-2026-10-11/prospective_validation_v26/SOXX_SUNDAY_DATE_BOUNDARY_VERIFIED_V31_2026-10-15.md",
+      "status": "ORIGINAL_SOURCE_ACCEPTED_MATCHED_VINTAGES_NOT_MERGED"
+    },
+    "eight_original_SOXX_receipt_time_census": {
+      "source_receipts": 8,
+      "source_rows_including_overlaps": 13558,
+      "duplicate_original_minute_timestamps_across_original_sources": 240,
+      "new_Sunday_source_minute_timestamps": 239,
+      "unique_original_UTC_minute_timestamps": 13318,
+      "mixed_vintage_price_series_created": false,
+      "independently_validated_trading_outcomes": 0
+    },
+    "sunday_aligned_disjoint_backfill_plan": {
+      "source_date_range": [
+        "2026-08-02",
+        "2026-08-29"
+      ],
+      "source_week_tasks": 4,
+      "original_planner_sha256": "adce4ddf294f52be94445019f5a3fc0ad33ecf3455b9deedeac2f8ce5a4d74c5",
+      "network_requests_issued": 0
+    },
+    "next_sunday_overlap_test_plan": {
+      "source_dates": [
+        "2026-10-11",
+        "2026-10-12"
+      ],
+      "tasks": 1,
+      "original_planner_sha256": "a1adfb0186c501f749640353896a6e8009b1715630574cfc78062d0b8cb6e61d",
+      "network_requests_issued": 0,
+      "overlap_must_be_reconciled_with_original_receipt": true,
+      "provider_requests_dispatched": 1,
+      "original_response_accepted": true,
+      "monday_overlap_strict_OHLCV_exact": 240
+    },
+    "ninth_SOXX_Oct11_Sunday_original_receipt": {
+      "raw_source_sha256": "eea3d5109dd92ce5e93aa2de91e7635615a12d9f035e4836a316465eae8b879e",
+      "original_receipt_id": "c92b2b1a039980237fd2a421b6a2cd5405f06d50e31338975e01d7c50ee3c2cf",
+      "original_capture_UTC": "2026-10-15T10:25:28.017190+00:00",
+      "requested_dates": [
+        "2026-10-11",
+        "2026-10-12"
+      ],
+      "original_HTTP_status": 200,
+      "original_raw_bytes": 51401,
+      "original_source_rows": 480,
+      "original_L1_parquet_sha256": "35f2bcbc0d04b9d5ae5c8a73ed9b42a182ab1441606859b55acb644b1a5b2d83",
+      "original_L1_parquet_bytes": 16984,
+      "original_L1_manifest_sha256": "6e3b5ea61517e591b448c83e90699bad474e6f534ab0d3435eb22d0fadbf30e1",
+      "exact_Sunday_evening_new_source_minute_starts": 240,
+      "overlapping_Monday_morning_source_minute_starts": 240,
+      "matching_OHLCV_overlaps": 240,
+      "conflicting_OHLCV_overlaps": 0,
+      "full_ET_overnight_minute_starts": 480,
+      "original_v29_positive_vendor_volume_1m_rows": 276,
+      "original_v29_zero_vendor_volume_1m_rows": 204,
+      "original_v29_zero_volume_nonflat_OHLC_1m_rows": 193,
+      "original_v29_complete_30m_source_buckets": 16,
+      "original_v30_complete_source_input_windows": {
+        "120m": 4,
+        "180m": 2,
+        "240m": 2
+      },
+      "original_v30_any_all_positive_volume_HTF_buckets": false,
+      "source_PIT_qualified": false,
+      "original_redistribution_admitted": false,
+      "quote_marketability_or_order_execution_proven": false,
+      "independent_trading_economics_accepted": false,
+      "report_path": "research/soxx-multitimeframe-cycle-2026-10-11/prospective_validation_v26/SOXX_OCT11_SUNDAY_BOUNDARY_VERIFIED_V32_2026-10-15.md",
+      "status": "ORIGINAL_BOATS_FULL_SUNDAY_CLOCK_ACCEPTED_NO_PRICE_VINTAGE_STITCH"
+    },
+    "nine_original_SOXX_source_vintages_census": {
+      "original_source_receipt_contexts": 9,
+      "original_source_rows_including_duplicate_source_minutes": 14038,
+      "overlapping_original_UTC_minute_starts": 480,
+      "original_source_minute_starts_unique": 13558,
+      "independent_prospective_economic_episodes_scored": 0,
+      "original_research_price_vintage_join_performed": false,
+      "source_PIT_admitted": false,
+      "source_executable_bid_ask_and_size_proven": false
+    },
+    "remaining_Sunday_Monday_single_request_plans": [
+      {
+        "dates": [
+          "2026-10-04",
+          "2026-10-05"
+        ],
+        "sha256": "cc523faefb25fda12ec558c2087cc66aba0768cea000044ba7eb52d0c3d5bf7c",
+        "dispatched": false,
+        "existing_original_receipt_count": 0
+      },
+      {
+        "dates": [
+          "2026-09-20",
+          "2026-09-21"
+        ],
+        "sha256": "889c0e7c27619abd7e2df04e4931db2c77a551bb3be2d785c3b1ddae2d07edf1",
+        "dispatched": false,
+        "existing_original_receipt_count": 0
+      },
+      {
+        "dates": [
+          "2026-09-13",
+          "2026-09-14"
+        ],
+        "sha256": "7eb4fbbe8da64eda64ebe832451e07afc25983afc001b1d99ecda1c57d6404d7",
+        "dispatched": false,
+        "existing_original_receipt_count": 0
+      },
+      {
+        "dates": [
+          "2026-08-30",
+          "2026-08-31"
+        ],
+        "sha256": "3a774777d2b822e99981febc4f3a13afd329fa079286fb7c01047da8b7df1459",
+        "dispatched": false,
+        "existing_original_receipt_count": 0
+      }
+    ]
+  },
+  "independent_validation": {
+    "new_market_episodes_scored": 0,
+    "performance_accepted": false,
+    "frozen_benchmark": "Original 3H parent-turn, 1.5 percent stop, quarter partial at plus 2 percent, 52 RTH hours",
+    "checkpoint_claims": [
+      "thirty-minute below-entry exit",
+      "three-hour below-entry exit"
+    ],
+    "prospective_entry_window_ET": [
+      "2026-10-14",
+      "2027-04-13"
+    ],
+    "capture_scheduled": false,
+    "power_or_confidence_procedure_proven": false,
+    "funded_portfolio_or_trade_sizing_accepted": false
+  },
+  "effect_state": {
+    "source_write_carrier": "GitHub original PR branch with expected-head guarded fast-forward",
+    "original_clone": "mini4 PID84436 EXIT128 network failure, no source change; reconciled",
+    "current_owner_path_audit_PID": 71294,
+    "current_owner_path_audit_result": "EXIT0, metadata only",
+    "integration_probe_PID": 79112,
+    "integration_probe_result": "EXIT0, private objects only, no branch join",
+    "current_denied_RTH_inventory_effect": "NONE_BEFORE_DISPATCH; refusal preserved",
+    "unresolved_prior_effect": "Original accounting-review task only; frozen and not duplicated",
+    "other_writer_liveness": "Not proven globally; original user-operated source collector completed one response before this session, no overlapping same-source operator observed locally, original branch uses expected-head guarded fast forward",
+    "new_SOXX_historical_acquisition": "ORIGINAL_USER_COLLECTOR_APPLIED, receipt hash and HTTP200 independently verified; do not repeat",
+    "new_SOXX_L1_materialization": "ORIGINAL materialize_one APPLIED once to exact new source; Parquet+manifest hash-verified, no uncertain effect",
+    "new_source_credential_handling": "Original user-run incumbent collector privately loaded existing credential; assistant never read or exposed credential value",
+    "second_SOXX_historical_acquisition": "ORIGINAL_USER_COLLECTOR_APPLIED ONCE; 2148 source rows and immutable L0/L1 receipt verified; do not retry",
+    "second_SOXX_L1_materialization": "ORIGINAL materialize_one WRITTEN exactly once after dry-run WOULD_WRITE; source→Parquet/manifest digests and original source reader verified, no uncertain write",
+    "third_SOXX_historical_acquisition": "Original human collector HTTP200/APPLIED once, 2136 source rows and immutable original receipt independently verified; never repeat",
+    "third_SOXX_L1_materialization": "Original materialize_one WRITTEN once after WOULD_WRITE; L1 Parquet, manifest, receipt and read_research_view SHA and source row equivalence accepted",
+    "third_SOXX_assistant_external_vendor_calls": 0,
+    "four_week_user_operator_acquisition": "Four real original Tiingo BOATS SOXX HTTP200 source receipts APPLIED; 8075 raw one-minute rows; do not repeat",
+    "four_week_original_L1_materialization": "Four original materialize_one WRITTEN operations executed sequentially once each after each WOULD_WRITE dry run; all four original Parquet/manifest hashes and read_research_view equivalence verified",
+    "four_week_assistant_authenticated_vendor_calls": 0,
+    "Sunday_boundary_target_request": "OFFLINE PLAN ONLY, NOT DISPATCHED",
+    "sunday_boundary_rest_acquisition": "Original user-operated ONE new Sep27-Sep28 SOXX BOATS REST HTTP200 request APPLIED; original raw source and receipt identity verified, never repeat",
+    "sunday_boundary_L1_materialization": "Original materialize_one WRITTEN once after dry-run WOULD_WRITE; 479 rows and original L1/manifest digests verified",
+    "v31_overlap_reconciliation": "240 overlapping original UTC minute OHLCV records exactly equal; 239 new minute timestamps; original source price vintages NOT merged",
+    "v31_assistant_authenticated_vendor_calls": 0,
+    "user_original_Oct11_Oct12_SOXX_acquisition": "ONE human-operated original BOATS REST request HTTP200/APPLIED, 480 source minute bars and immutable receipt verified. DO_NOT_REDO.",
+    "Oct11_Oct12_original_L1_materialization": "Original incumbent materialize_one WRITTEN ONCE to previously absent 480-row L1 Parquet and manifest, independent original read_research_view SOURCE_INSPECTION hash accepted",
+    "Oct11_overlap_V31_strict_OHLCV_compare": "240 of 240 original overlapping source OHLCV minute records exactly equal; 240 genuinely new Sunday source minutes. NO price series stitched or PIT admission.",
+    "assistant_authenticated_vendor_calls_this_Oct11_phase": 0
+  },
+  "DO_NOT_REDO": [
+    "Do not rerun or retune inspected v2-v24 historical studies or call the original year untouched.",
+    "Reuse fixed D8, green recovered-head CI, thirty-nine prior synthetic checks, and exact clock-review mutation proof unless materially invalidated.",
+    "Do not repeat the unchanged two-thousand-receipt short-capture audit or infer overnight completeness from it.",
+    "Do not repeat the user-operated SOXX boats-bars 2026-10-12..2026-10-13 original request; exact raw SHA and L1 receipt are accepted and must be reused.",
+    "Do not repeat the successful 2026-10-05..2026-10-11 SOXX original REST request or re-materialize its accepted raw and L1 source. Current original two SOXX receipt hashes are retained above.",
+    "Keep the original accounting task frozen; no replacement ID, host, cancellation or refused-observation retry.",
+    "Do not retry denied private census, broader RTH inventory, provider authentication, raw reads or producer rewrites through other routes.",
+    "No second collector, Data OS, Quote Hub, calendar, scheduler or control plane.",
+    "No raw licensed data, credentials, live trading, model sizing, merge or production activation.",
+    "Synthetic tests and review acceptance are not independent market-performance evidence; OHLC is not fill proof.",
+    "Do not repeat the successful original SOXX 2026-09-28..2026-10-04 REST call or accepted single L1 materialization; preserve exact third source raw/receipt/L1 digests above. All THREE original SOXX source effects have been reconciled.",
+    "Do not repeat FOUR original SOXX boats-bars seven-day requests spanning 2026-08-31 to 2026-09-27 or their four accepted canonical L1 materializations. All SEVEN accepted original SOXX receipts are immutable DO_NOT_REDO. A targeted 2026-09-27..28 Sunday time-boundary test is a separate NEW provider request with deliberate source overlap requiring new-context comparison, not a replay of an accepted source.",
+    "Do not repeat already accepted human-operated Sep27-Sep28 SOXX BOATS source request or its once-only original L1 materialization. EIGHT original SOXX BOATS receipts retained, 13558 source rows including 240 duplicate minute timestamps and 13318 DISTINCT original source timestamps; never treat overlap as 240 additional independent events or automatically splice source vintages.",
+    "Do not repeat the user-operated original SOXX boats-bars 2026-10-11..2026-10-12 Sunday-boundary request or its one-time canonical L1 write. The 480-row source SHA eea3d5109dd92ce5e93aa2de91e7635615a12d9f035e4836a316465eae8b879e is ACCEPTED; 240 original Monday OHLCV overlaps matched existing Oct12..13 source exactly, so 240 new Sunday source minutes, not 480 new independent time observations. NINE accepted SOXX original REST source receipts are DO_NOT_REDO."
+  ],
+  "exact_next_action": "Verify exact new GitHub PR head CI. NINE original SOXX BOATS source receipts now have 14038 raw 1m records including 480 duplicate UTC minute starts (two equal 240-bar targeted Sunday overlaps) = 13558 distinct original minute starts. Both Sunday Sep27 and Sunday Oct11 first halves were recovered using original Sunday-start request contexts, Oct11 now a full 480-minute source clock (204 zero-volume bars, not marketability). DO_NOT_REPEAT any accepted source request or L1 effect. Four older ordinary Sunday first-half source gaps remain Aug30, Sep13, Sep20, Oct4; the next cautious original-user operator request Oct4..Oct5 is one source plan SHA cc523faefb25fda12ec558c2087cc66aba0768cea000044ba7eb52d0c3d5bf7c, NOT DISPATCHED, if current entitlement/quota/writer admission permit. Compare exact Monday overlap via original V31 and quarantine different source vintages; no source price stitching. Earlier Sunday-aligned Aug2..Aug29 four-week plan SHA adce4ddf294f52be94445019f5a3fc0ad33ecf3455b9deedeac2f8ce5a4d74c5 remains NOT DISPATCHED. Preserve original source rights/PIT/venue quote marketability, frozen prospective 52-observed-RTH-hour paired economic label maturity, original 91-episode inspected development result and unresolved original accounting-review worker; no automated trading/production deployment.",
+  "no_unattended_continuation_promised": true
+}

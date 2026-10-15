@@ -1,0 +1,11 @@
+# Tiingo BOATS: verified current capture truth
+
+**Research-side source read: October 11, 2026 ET / October 12 UTC.** The canonical owner is Macro Data OS. This is a read-only metadata summary, not a new collector or a redistribution of licensed bars or quotes.
+
+- Macro PR [#8698](https://github.com/mastermindx-market-intelligence/macro/pull/8698) was **merged** by the time of this inspection; the previously published research note calling that PR open is now stale.
+- Signed-in Tiingo account: BOATS add-on **ACTIVE**; key matched the canonical collector without disclosing its value. The business plan alone is not proof of consumer/non-display and resale rights.
+- Immutable `boats-bars` captures on M2: AAPL 687 genuine 1-minute bars and AMD 720, sourced from Oct 8–9. Checksum-verified locally. **AMD night of Oct 8 20:00 ET through Oct 9 04:00 ET contains 480/480 observed minute bars.** AAPL same night contains 462/480, missing 18 minutes. The preceding Oct 7 nights are partial (AAPL 225/480; AMD 240/480). No existing SOXX historical `boats-bars` receipt was found in that archive snapshot.
+- Archived BOATS-firehose segments inspected from Oct 12 UTC: 20 checksum-verified receipts containing 19,651 Q and 347 T events, zero B. Across those segments, **SOXX** had 7 T and **0 Q**, clustered within milliseconds just after the October 11 ET evening session opened; there was no continuous historical SOXX book for execution replay. The feed is a *single ATS*, not NBBO or SIP. Receipt continuity is `NOT_PROVEN`.
+- All inspected raw receipts carry `PER_PRODUCT_REDISTRIBUTION_NOT_VERIFIED` or `BOATS_REDISTRIBUTION_NOT_VERIFIED`; no raw licensed vendor rows are published in GitHub. Internal retrospective research eligibility does not establish point-in-time backtesting rights or full venue-session continuity.
+
+**Next named consumer capability:** read receipt-verified rows via existing Macro Data OS research reader and feed the read-only `fullsession_v12` importer without creating a second store or collector. A legitimate SOXX history source and historical quote availability remain required for the frozen four-arm RTH/full-session backtest. Never rerun a previously denied credential probe through another account or transport.

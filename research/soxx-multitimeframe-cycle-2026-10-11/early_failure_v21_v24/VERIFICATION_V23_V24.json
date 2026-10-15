@@ -1,0 +1,15 @@
+{
+  "schema": "soxx.v23_v24.price_risk_sensitivity_accounting_proof",
+  "v23_rows": 24,
+  "v24_aggregate_rows": 120,
+  "v24_per_episode_stress_rows": 2730,
+  "v21_reference_mean_deltas_reproduced": true,
+  "all_120_stress_sequences_monotone": true,
+  "break_even_precision_reproduced": true,
+  "per_original_opportunity_arithmetic_verified": true,
+  "code_price_fills_are_not_actual_quote_marketability": true,
+  "test_thresholds_were_not_reoptimized": true,
+  "source_v21_sha256": "09154bc94d685cf11b9a7bd37570c2a5d7f517663f808da857f01db231b492d9",
+  "output_v23_sha256": "d0213d92453003418e05b460b8984566ea7b59537f68d80eb49333909320f62a",
+  "output_v24_sha256": "070be15b276b052029c5d6dbb86029899ddab0c4b65138c91bc6f4b759ad5030"
+}

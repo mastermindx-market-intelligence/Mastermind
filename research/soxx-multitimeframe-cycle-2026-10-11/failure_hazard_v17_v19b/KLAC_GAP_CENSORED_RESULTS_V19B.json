@@ -1,0 +1,58 @@
+{
+  "schema": "soxx.klac.gap-censored.addendum.v19b",
+  "total_original_arms": 10,
+  "resolved": 10,
+  "unknown": 0,
+  "source_quality": {
+    "symbol": "KLAC",
+    "source15_sha256": "4855943aa69188bfb7cebf321d47ce29d709571fe9ae69aec8505d0155dbb3b3",
+    "source15_rows": 8856,
+    "study_days": 251,
+    "excluded_partial_warmup": [],
+    "source5_sha256": "fa7cda5fc3210243399b11e197e0a8955492fc265f505d8f7e55b807cc6ba8fd",
+    "missing_source5_slots": 7,
+    "evaluated_15m_source_triplets": 6495,
+    "source_volume_precision_drift_count": 286,
+    "missing_display_ET": [
+      "2025-10-13T13:35:00-04:00",
+      "2025-10-17T13:55:00-04:00",
+      "2025-10-21T12:45:00-04:00",
+      "2025-10-21T13:35:00-04:00",
+      "2025-10-23T14:45:00-04:00",
+      "2025-10-28T14:05:00-04:00",
+      "2025-12-04T13:20:00-05:00"
+    ]
+  },
+  "summary": {
+    "label": "KLAC_gap_censored",
+    "symbols": [
+      "KLAC"
+    ],
+    "resolved": 10,
+    "source_episodes": 10,
+    "mean_base": 0.8019,
+    "mean_no_ignition": 0.96964,
+    "mean_difference": 0.16775,
+    "median_base": -1.59925,
+    "average_lift_without_best": 0.09611,
+    "check_eligible": 5,
+    "stopped_before_3h": 5,
+    "no_ignition_exits": 3,
+    "earlier_losses_helped": 3,
+    "earlier_winners_harmed": 0,
+    "new_winners": 1,
+    "lost_winners": 0,
+    "winner_sacrifice_total": 0,
+    "losers_avoided_total": 1.67747,
+    "week_blocks": 10,
+    "block_bootstrap95": [
+      0.01742,
+      0.37498
+    ]
+  },
+  "unresolved_statuses": {},
+  "covered_gap_trade_count": 0,
+  "conservatively_does_not_impute_trades": true,
+  "no_overnight_quote_proof": true,
+  "original_setup_not_tuned": true
+}

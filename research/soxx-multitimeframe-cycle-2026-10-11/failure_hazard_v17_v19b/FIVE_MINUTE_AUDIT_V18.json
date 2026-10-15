@@ -1,0 +1,175 @@
+{
+  "schema": "soxx.five_minute_failure_hazard.v18",
+  "read_only_audit": true,
+  "source_producer_independent": false,
+  "source_state": {
+    "SOXX": {
+      "symbol": "SOXX",
+      "source_5m": 20000,
+      "source_15m": 8596,
+      "days_5m_complete_source": 258,
+      "daily_5m_count_hist": {
+        "26": 1,
+        "78": 255,
+        "42": 2
+      },
+      "pair_5m_15m_match": 6666,
+      "bars15m_not_covered_by_5m": 1930,
+      "volume_drift_candle_count": 286,
+      "volume_drift_by_date": {
+        "2026-09-17": 26,
+        "2026-09-18": 26,
+        "2026-09-21": 26,
+        "2026-09-22": 26,
+        "2026-09-23": 26,
+        "2026-09-24": 26,
+        "2026-09-25": 26,
+        "2026-09-28": 26,
+        "2026-09-29": 26,
+        "2026-09-30": 26,
+        "2026-10-01": 26
+      },
+      "volume_drift_max_relative_pct": 0.0047605,
+      "price_OHLC_matched_exactly": true,
+      "volume_matched_exactly": false,
+      "source_first_date": "2025-10-01",
+      "source_last_date": "2026-10-09",
+      "unverified_warmup_missing_opens": [
+        "2025-10-01"
+      ],
+      "missing_5m_internal_intervals": 0,
+      "year_missing_intraday": 0,
+      "source_sha5m": "96c230426f6be2900011d861d4596b3b5857045f8a3f4aa7b3d2342db9a4a7f6",
+      "shared_5m_store_content_sha": "823ad0c9c0b0e4c67234a8bd417a075b648043ed416a51caa46b26d50c9abbe1",
+      "source_adjustment_status": "not_verified",
+      "source_point_in_time_status": "not_verified"
+    },
+    "SMH": {
+      "symbol": "SMH",
+      "source_5m": 20000,
+      "source_15m": 8596,
+      "days_5m_complete_source": 258,
+      "daily_5m_count_hist": {
+        "26": 1,
+        "78": 255,
+        "42": 2
+      },
+      "pair_5m_15m_match": 6666,
+      "bars15m_not_covered_by_5m": 1930,
+      "volume_drift_candle_count": 286,
+      "volume_drift_by_date": {
+        "2026-09-17": 26,
+        "2026-09-18": 26,
+        "2026-09-21": 26,
+        "2026-09-22": 26,
+        "2026-09-23": 26,
+        "2026-09-24": 26,
+        "2026-09-25": 26,
+        "2026-09-28": 26,
+        "2026-09-29": 26,
+        "2026-09-30": 26,
+        "2026-10-01": 26
+      },
+      "volume_drift_max_relative_pct": 0.0042681,
+      "price_OHLC_matched_exactly": true,
+      "volume_matched_exactly": false,
+      "source_first_date": "2025-10-01",
+      "source_last_date": "2026-10-09",
+      "unverified_warmup_missing_opens": [
+        "2025-10-01"
+      ],
+      "missing_5m_internal_intervals": 0,
+      "year_missing_intraday": 0,
+      "source_sha5m": "225312fa6480c79436eaa30d5407831237b9b466eb2c093b42f601559ac4b363",
+      "shared_5m_store_content_sha": "1541d55da68e5963f605578c5f08e371f48d0e5b71cf1987d322bb3d9b3d8781",
+      "source_adjustment_status": "not_verified",
+      "source_point_in_time_status": "not_verified"
+    },
+    "QQQ": {
+      "symbol": "QQQ",
+      "source_5m": 20000,
+      "source_15m": 8138,
+      "days_5m_complete_source": 258,
+      "daily_5m_count_hist": {
+        "26": 1,
+        "78": 255,
+        "42": 2
+      },
+      "pair_5m_15m_match": 6666,
+      "bars15m_not_covered_by_5m": 1472,
+      "volume_drift_candle_count": 285,
+      "volume_drift_by_date": {
+        "2026-09-17": 26,
+        "2026-09-18": 25,
+        "2026-09-21": 26,
+        "2026-09-22": 26,
+        "2026-09-23": 26,
+        "2026-09-24": 26,
+        "2026-09-25": 26,
+        "2026-09-28": 26,
+        "2026-09-29": 26,
+        "2026-09-30": 26,
+        "2026-10-01": 26
+      },
+      "volume_drift_max_relative_pct": 0.0009698,
+      "price_OHLC_matched_exactly": true,
+      "volume_matched_exactly": false,
+      "source_first_date": "2025-10-01",
+      "source_last_date": "2026-10-09",
+      "unverified_warmup_missing_opens": [
+        "2025-10-01"
+      ],
+      "missing_5m_internal_intervals": 0,
+      "year_missing_intraday": 0,
+      "source_sha5m": "55a2d5cecd115aee6bad691bfa07c46531c55a7e6f73144da508c51f9920d8e2",
+      "shared_5m_store_content_sha": "871e9d96447b58e7ff52aa68b88bec86c3c130d4a9d454ea42ec40bf5df38648",
+      "source_adjustment_status": "not_verified",
+      "source_point_in_time_status": "not_verified"
+    },
+    "AMD": {
+      "symbol": "AMD",
+      "source_5m": 20000,
+      "source_15m": 8270,
+      "days_5m_complete_source": 258,
+      "daily_5m_count_hist": {
+        "26": 1,
+        "78": 255,
+        "42": 2
+      },
+      "pair_5m_15m_match": 6666,
+      "bars15m_not_covered_by_5m": 1604,
+      "volume_drift_candle_count": 286,
+      "volume_drift_by_date": {
+        "2026-09-17": 26,
+        "2026-09-18": 26,
+        "2026-09-21": 26,
+        "2026-09-22": 26,
+        "2026-09-23": 26,
+        "2026-09-24": 26,
+        "2026-09-25": 26,
+        "2026-09-28": 26,
+        "2026-09-29": 26,
+        "2026-09-30": 26,
+        "2026-10-01": 26
+      },
+      "volume_drift_max_relative_pct": 0.0012439,
+      "price_OHLC_matched_exactly": true,
+      "volume_matched_exactly": false,
+      "source_first_date": "2025-10-01",
+      "source_last_date": "2026-10-09",
+      "unverified_warmup_missing_opens": [
+        "2025-10-01"
+      ],
+      "missing_5m_internal_intervals": 0,
+      "year_missing_intraday": 0,
+      "source_sha5m": "f84884c3ccb1439519dfb2f4669696316bfa4f21b0ddfa3d38d4a76911d95f28",
+      "shared_5m_store_content_sha": "31d54c9b3a8e66ed137bf68d4a0f3e8a36498357f395603d570a6c4e343cfec8",
+      "source_adjustment_status": "not_verified",
+      "source_point_in_time_status": "not_verified"
+    }
+  },
+  "total_verified_15m_candles_rebuilt_from_5m": 26664,
+  "venue_quote_fills_proven": false,
+  "BOATS_overnight_source_proven": false,
+  "point_in_time_market_data_proven": false
+}
