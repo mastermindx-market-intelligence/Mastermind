@@ -113,3 +113,65 @@ def test_control_daemon_v3_profile_mounts_existing_session_bridge_provider(tmp_p
     module._service_from_config(raw)
     binding = captured["ceo_ingress_app_binding"]
     assert callable(binding.session_bridge_provider_factory)
+
+
+@pytest.mark.parametrize("policy_source", ["approved", "revoked", "absent"])
+def test_real_control_service_factory_binds_exact_installed_os_read_pair(
+    tmp_path, short_socket_root, monkeypatch, policy_source,
+):
+    """The real Control factory, not a hand-built RuntimeReturn, supplies pairing.
+
+    This is source-composition proof only: no installed production service,
+    gateway token, native provider or parent consumption is exercised.
+    """
+    import asyncio
+    import os
+    from pathlib import Path
+    from common.session_bridge_private_contract import SessionBridgeIngressOwner
+    from integrations.mastermind_executive_app.gateway import AppPolicies
+    from integrations.session_bridge import installed as bridge
+    from tests import test_mastermind_executive_app_asgi as auth
+    from tests.test_executive_mcp_installed_fabric_composition import factory_service
+
+    canonical = Path("/Library/Application Support/MastermindExecutive/config/executive-mcp.json")
+    root_policies = AppPolicies(read=auth._read_policy(), submit=auth._submit_policy())
+    pair = entry.build_additional_policies({
+        "executive_mcp_profile": WEB_CEO_V3_PROFILE,
+        "os_executive_transport": True,
+        "os_executive_resource": entry.OS_EXECUTIVE_RESOURCE,
+    }, root_policies)[0]
+    original_exists = Path.exists
+    def exists(path):
+        return policy_source != "absent" if path == canonical else original_exists(path)
+    monkeypatch.setattr(Path, "exists", exists)
+
+    selections, supplied = [], []
+    def sealed_source(path, source, *, expected_uid):
+        assert path == canonical
+        assert source.is_absolute()
+        assert expected_uid == os.geteuid()
+        selections.append(path)
+        if policy_source == "revoked":
+            def withdrawn():
+                raise ValueError("sealed gateway pair withdrawn")
+            return withdrawn
+        return lambda: pair
+    monkeypatch.setattr(entry, "installed_os_session_policy_source", sealed_source)
+
+    actual_build = bridge.build_runtime_session_bridge
+    def capture_factory(runtime, **kwargs):
+        supplied.append(kwargs["authorized_policies"])
+        return actual_build(runtime, **kwargs)
+    monkeypatch.setattr(bridge, "build_runtime_session_bridge", capture_factory)
+
+    async def run():
+        async with factory_service(tmp_path, short_socket_root, monkeypatch,
+                profile=WEB_CEO_V3_PROFILE) as (service, _raw, _):
+            await service.start()
+            runtime = service._require_runtime()
+            owner = service._ceo_ingress_app_binding.session_bridge_provider_factory(runtime)
+            assert type(owner) is SessionBridgeIngressOwner
+            assert len(supplied) == 1
+            assert supplied[0] == (pair if policy_source == "approved" else None)
+    asyncio.run(run())
+    assert len(selections) == (0 if policy_source == "absent" else 1)
