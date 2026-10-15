@@ -1,0 +1,60 @@
+{
+  "classification": "INSTALLED_SOURCE_SNAPSHOT_NO_REPLAY_AUTHORITY",
+  "files": {
+    "original_delivery_collector.py": {
+      "bytes": 20918,
+      "sha256": "07edb1095f1673fe8aab987b2660ceea250631a93ef6c08efd296ee02843a0c8"
+    },
+    "test_original_delivery_collector.py": {
+      "bytes": 10708,
+      "sha256": "261b886976dac38d8caa1ca6c51929c64ee873a9aca0a2e859f300ca0124ff07"
+    },
+    "fabric_task.py": {
+      "bytes": 36983,
+      "sha256": "bfa5fcdc3df04d76d6c3b0b2dda2dac17ab4539253ec3ffb86fca4e2c4c13207"
+    },
+    "fabric_task.py.patch": {
+      "bytes": 1588,
+      "sha256": "4cb64f957bbaf063910ed90c9cd6e63951c9c8d4389a6c3cc3e5a208c47275b7"
+    },
+    "remote_sub.sh": {
+      "bytes": 55119,
+      "sha256": "b86f8e7ed9770782cbf8e44e6c84a3f5bf52c66dc305f1c9817b855b80017f57"
+    },
+    "remote_sub.sh.patch": {
+      "bytes": 422,
+      "sha256": "d559cd0469d8792c5f8ecab21b8f28d7cc2cbd41d433b9cfe9f02316b11631b7"
+    },
+    "artifact_delivery.py": {
+      "bytes": 67090,
+      "sha256": "2ec0bf05691c808af14e7e2bdb3abe4a1b4ef1a9fc1b9a6bbb3f97d9762c948c"
+    },
+    "artifact_delivery.py.patch": {
+      "bytes": 4682,
+      "sha256": "43c38c487ad13b6b38a2015e85e2d8912e121b205340eb706a1a6bbe7a5db02e"
+    },
+    "IMPLEMENTATION.md": {
+      "bytes": 2859,
+      "sha256": "ec6543ba0331b146e6a64b7d154600fc56c5043ca4a56ff3d9471d0aedb48156"
+    }
+  },
+  "tests": {
+    "path": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/restart-collector-20261013/COLLECTOR_RETAINED_REFUSALS.xml",
+    "sha256": "8122cc58b3f149ea9a3cc1e6db53d332667609686f1102fc5a17f2655318fce6",
+    "tests": 31,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "installation_receipt_sha256": "2767985b996dfce18cc6548ecc397559bc3725c35964df8ff069edc7bad30f25",
+  "future_private_publication": {
+    "pre_sha256": "b86f8e7ed9770782cbf8e44e6c84a3f5bf52c66dc305f1c9817b855b80017f57",
+    "installed_sha256": "cb7dd75a63f639a6087cb560615dcee36956a5a92a504bfe9619f79a98db3cae",
+    "receipt_sha256": "35b2788dd741e2602cca115a49b25bcef71cb2d454325096adaafe5058aecc37",
+    "tests": "4 RED/1 PASS before; 5 PASS after; inherited worker mask077",
+    "live_proof": "NOT_RUN"
+  },
+  "source_only_review": "92e14c97fbe1c3601d5c0298461b709cbac25496b120783370b59b49f915b2d4",
+  "installed_full_files_not_vendored": "file hashes refer to the retained source qualification packet; only collector source and exact integration patches are committed here",
+  "frozen_original_reads": "UNAVAILABLE original_file_owner_mode_type_or_size; no retry, chmod, guard relaxation, alternate read, lease release or absence inference"
+}

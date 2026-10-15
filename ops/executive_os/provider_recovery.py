@@ -40,6 +40,7 @@ broker reconciliation; it never replaces either.
 from __future__ import annotations
 
 import dataclasses
+import contextlib
 import hashlib
 import json
 import os
@@ -781,6 +782,114 @@ def validate_grant_document(
     if expires_at <= current:
         raise RecoveryError("recovery_grant_expired")
     return grant
+
+
+def _directory_identity(info: os.stat_result) -> tuple[int, ...]:
+    # Directory size/timestamps/link count change when this installer creates
+    # its child. Ownership, permissions and inode identity must never change.
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid)
+
+
+def _check_recovery_directory(path: Path, descriptor: int, *, private: bool) -> None:
+    before = os.fstat(descriptor)
+    if (not stat.S_ISDIR(before.st_mode)
+            or before.st_uid != CUSTODY_UID or before.st_gid != CUSTODY_GID
+            or (stat.S_IMODE(before.st_mode) != 0o700 if private
+                else bool(stat.S_IMODE(before.st_mode) & 0o022))):
+        raise RecoveryError("recovery_custody_parent_unsafe")
+    if _directory_identity(path.lstat()) != _directory_identity(before):
+        raise RecoveryError("recovery_custody_parent_changed")
+    _readiness._assert_no_macos_acl(path)
+    if (_directory_identity(path.lstat()) != _directory_identity(before)
+            or _directory_identity(os.fstat(descriptor)) != _directory_identity(before)):
+        raise RecoveryError("recovery_custody_parent_changed")
+
+
+@contextlib.contextmanager
+def _recovery_directory_chain(*, create_missing: bool = False):
+    """Hold the fixed chain below the already-qualified Executive state root.
+
+    Only the installer may create missing private directories. Existing
+    directories are checked, never normalized; no custody document is touched.
+    Darwin's system-owned /var alias is outside this existing state-root join.
+    """
+    records: list[tuple[Path, int, bool]] = []
+    identities: list[tuple[int, ...]] = []
+
+    def revalidate() -> None:
+        for (path, descriptor, private), identity in zip(records, identities):
+            _check_recovery_directory(path, descriptor, private=private)
+            if _directory_identity(os.fstat(descriptor)) != identity:
+                raise RecoveryError("recovery_custody_parent_changed")
+
+    try:
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+        root = RECOVERY_STATE_ROOT.parent.parent
+        descriptor = os.open(root, flags)
+        records.append((root, descriptor, False))
+        identities.append(_directory_identity(os.fstat(descriptor)))
+        revalidate()
+        for path in (RECOVERY_STATE_ROOT.parent, RECOVERY_STATE_ROOT):
+            revalidate()
+            parent_descriptor = records[-1][1]
+            created = False
+            try:
+                os.stat(path.name, dir_fd=parent_descriptor, follow_symlinks=False)
+            except FileNotFoundError:
+                if not create_missing:
+                    raise RecoveryError("recovery_custody_parent_missing") from None
+                # A concurrent occupant must refuse rather than be adopted.
+                os.mkdir(path.name, mode=0o700, dir_fd=parent_descriptor)
+                created = True
+            descriptor = os.open(path.name, flags, dir_fd=parent_descriptor)
+            records.append((path, descriptor, True))
+            identities.append(_directory_identity(os.fstat(descriptor)))
+            revalidate()
+            if created:
+                os.fsync(descriptor)
+                os.fsync(parent_descriptor)
+                revalidate()
+        yield records[-1][1]
+        revalidate()
+    except FileNotFoundError as exc:
+        raise RecoveryError("recovery_custody_parent_missing") from exc
+    except (OSError, _readiness.ReadinessError) as exc:
+        raise RecoveryError("recovery_custody_unreadable") from exc
+    finally:
+        for _path, descriptor, _private in reversed(records):
+            os.close(descriptor)
+
+
+def prepare_recovery_custody() -> None:
+    """Installer-only creation of the two fixed missing custody directories.
+
+    This does not admit an issuer, alter an existing marker, or authorize
+    recovery of any earlier unknown operation.
+    """
+    if os.geteuid() != CUSTODY_UID:
+        raise RecoveryError("recovery_custody_installer_owner_mismatch")
+    with _recovery_directory_chain(create_missing=True):
+        pass
+
+
+def preflight_recovery_custody() -> None:
+    """Read-only custody and empty-slot check before a fresh issuer marker.
+
+    Missing parents are not empty records. Any occupant blocks fresh issuance;
+    a matching grant is not a terminal replay receipt or a resume capability.
+    Post-preflight races still meet the unchanged create-only write path.
+    """
+    slots = (RECOVERY_GRANT_PATH, RECOVERY_INCIDENT_GRANT_PATH,
+             RECOVERY_INCIDENT_COMMITMENT_PATH, RECOVERY_ALLOCATION_PATH)
+    with _recovery_directory_chain() as descriptor:
+        for path in slots:
+            if path.parent != RECOVERY_STATE_ROOT:
+                raise RecoveryError("recovery_custody_path_unreviewed")
+            try:
+                os.stat(path.name, dir_fd=descriptor, follow_symlinks=False)
+            except FileNotFoundError:
+                continue
+            raise RecoveryError("recovery_custody_slot_occupied")
 
 
 def _validate_state_directory(path: Path) -> None:

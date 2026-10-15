@@ -1,0 +1,5 @@
+--- a/remote_sub.sh
++++ b/remote_sub.sh
+@@ -695 +695 @@
+-  mm_feeder_lib.py pool_ledger.py lease_broker.py glm_keys.py bailian_keys.py
++  mm_feeder_lib.py pool_ledger.py lease_broker.py native_broker_admission.py glm_keys.py bailian_keys.py

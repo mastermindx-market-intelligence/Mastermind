@@ -1,0 +1,25 @@
+{
+  "kind": "local_original_evidence_qualification_only",
+  "request": {
+    "schema": "mastermind.fabric_run_observation_request.v1",
+    "run_id": "mm-os-incident-issuer-custody-preflight-20261013-01a104e6",
+    "root": "01a104e6-58f8-76d3-8d99-1302a1cca072",
+    "host": "ubuntu2",
+    "support_digest": "4014714eb8865585f11b2a0120975479c10f0567cad968c5a57e5101f8c8f114",
+    "observe_pid": false,
+    "parent": "01a104e6-58f8-76d3-8d99-1302a1cca072"
+  },
+  "evidence": {
+    "ssh_alias": "ubuntu2",
+    "evidence_sha256": {
+      "log": "cb5b9ec957b240025a62b5e090967909fb18df00ea65dab58076a51143a9a9dd",
+      "packet": "7c9ec569638e276a47bb311a748b5bdcb3b905e253f031c74bd91676c3078e61",
+      "registry": "7688ae6c7a713f48e1eaf78c7111bc176e0df718f3d52c897b4249674c5ed92b",
+      "observer": "1292043bc05fd8e41e40a6f1e2194b80959f934e727fd002e585ef5d6af8a59b"
+    },
+    "log_binding": "launch_prefix_1693_bytes",
+    "authority": "current original-parent bounded observation request; not historical execution attestation"
+  },
+  "transport_called": false,
+  "installed": false
+}

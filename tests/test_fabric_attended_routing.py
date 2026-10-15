@@ -57,7 +57,11 @@ def test_attended_resolution_never_enters_autonomous_alias_resolver(router):
 
 def test_real_descriptor_and_active_registry_stay_unarmed():
     assert worker_adapter.ADAPTER_DESCRIPTORS["attended-fabric"].implemented is False
-    assert attended.CONTRACT_NAME not in ModelRouter.load().capability_registry.profiles
+    real = ModelRouter.load()
+    assert real.capability_registry.resolve(attended.CONTRACT_NAME).write_capable is False
+    assert real.providers["minimax"].enabled is False
+    with pytest.raises(RoutingPolicyError):
+        real.resolve_attended_model_alias("minimax.attended", BINDING)
 
 
 def test_closed_member_replaces_inherited_codex_identity(router):

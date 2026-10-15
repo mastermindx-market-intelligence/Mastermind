@@ -609,3 +609,38 @@ def test_large_service_result_backpressure_aborts_delivery_after_transaction():
     asyncio.run(exercise())
     assert peer.transport.aborted
     assert peer.buffer is not None and len(peer.buffer)>100000
+
+
+def test_quarantine_during_inflight_direct_read_refuses_publication(
+    tmp_path, short_socket_root, monkeypatch,
+):
+    from control_plane import executive_inference_ingress as owner
+    async def exercise():
+        service,client,_=await source_harness(tmp_path,short_socket_root,armed=True)
+        entered=asyncio.Event();release=asyncio.Event()
+        secret="SYNTHETIC_CONFIDENTIAL_DIRECT_ANSWER"
+        async def held_read(*args,**kwargs):
+            entered.set()
+            await release.wait()
+            # A completed internal result under the pre-quarantine generation
+            # cannot be published if canonical service state changed.
+            return {"document":{"answer":secret},"reference":"synthetic"}
+        try:
+            with monkeypatch.context() as patch:
+                patch.setattr(owner,"handle_frame",held_read)
+                task=asyncio.create_task(client.send_frame(
+                    service._ceo_ingress_socket_path,{
+                        "schema":owner.STATUS_SCHEMA,
+                        "operation_key":"stale-quarantine-read",
+                    }))
+                await asyncio.wait_for(entered.wait(),timeout=2.0)
+                service._service_state="QUARANTINED"
+                release.set()
+                result=await asyncio.wait_for(task,timeout=3.0)
+            assert result.ok is False
+            assert (result.error or {}).get("code")=="backend_unavailable"
+            assert secret not in repr(result)
+        finally:
+            release.set()
+            await service.close()
+    asyncio.run(exercise())

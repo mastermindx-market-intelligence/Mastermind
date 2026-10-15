@@ -45,7 +45,7 @@ def declaration(*, associated=True):
     return {
         "schema": "context_bundle.v1",
         "repo_sha": "c" * 40,
-        "source_records_digest": "e" * 64,
+        "source_records_digest": "sha256:" + "e" * 64,
         "target": {"workstream": "WS:CHAIRMAN-CONTROL-ROOM"},
         "acceptance_basis": {
             "schema": "agentos.acceptance_basis.v1",

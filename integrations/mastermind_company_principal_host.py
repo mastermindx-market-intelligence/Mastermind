@@ -30,6 +30,9 @@ from integrations.mastermind_company_principal_runtime_fence import (
     PrincipalDialogueRuntimeCommitOwner,
 )
 from integrations.slack_agent_dialogue.service import call_service
+from integrations.slack_agent_dialogue.principal_decision_source_fence import (
+    PrincipalDecisionSource, PrincipalDecisionSourceFence,
+)
 
 ServiceCall = Callable[..., Awaitable[dict[str, Any]]]
 UtcNow = Callable[[], str]
@@ -67,8 +70,10 @@ def build_principal_company_dialogue_host(
     socket_path: Path,
     service_call: ServiceCall = call_service,
     utc_now: UtcNow | None = None,
+    principal_authority_guard: Callable[..., None] | None = None,
     request_binding_resolver: DialogueBindingResolver | None = None,
     product_acceptance_macro_root: Path | None = None,
+    principal_decision_source: PrincipalDecisionSource | None = None,
 ) -> PrincipalCompanyDialogueHost:
     """Compose existing H6 owners without admitting or starting a principal.
 
@@ -89,16 +94,20 @@ def build_principal_company_dialogue_host(
         raise ValueError(
             "product acceptance requires both its source root and assigning-parent resolver"
         )
+    if principal_decision_source is not None and principal_authority_guard is None:
+        raise ValueError("decision source requires the receiving principal authority guard")
 
     commit_owner = PrincipalDialogueRuntimeCommitOwner(
         runtime,
         binding_resolver,
         socket_path=path,
         service_call=service_call,
+        principal_authority_guard=principal_authority_guard,
     )
     gateway_kwargs: dict[str, Any] = {
         "socket_path": path,
-        "before_commit": commit_owner.before_commit,
+        "before_commit": (commit_owner.before_commit if principal_decision_source is None
+            else PrincipalDecisionSourceFence(principal_decision_source, commit_owner).before_commit),
         "service_call": service_call,
     }
     if utc_now is not None:

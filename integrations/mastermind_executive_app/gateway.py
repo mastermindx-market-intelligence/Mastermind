@@ -404,8 +404,32 @@ class CeoIngressClient:
         request_ceiling = MAX_REQUEST_BYTES
         response_ceiling = MAX_RESPONSE_BYTES
         stream_limit = _STREAM_LIMIT
-        # Only separately versioned, closed frame families can use larger
-        # envelopes; every historical CEO schema retains its 8 KiB limit.
+        # Independently closed frame families use their original owners'
+        # limits. Every legacy CEO schema retains its 8 KiB ceiling.
+        principal_encoded = None
+        # This closed source-only frame has its own canonical byte bounds.
+        # Selecting transport limits grants no receiving-side admission.
+        from integrations.company_dialogue_principal_app_contract import (
+            APP_REQUEST_SCHEMA, decode_app_request,
+        )
+        if isinstance(frame, Mapping) and frame.get("schema") == APP_REQUEST_SCHEMA:
+            from integrations.company_dialogue_principal_host_contract import encode_json_frame
+            from common.company_dialogue_principal_limits import (
+                MAX_REQUEST_BYTES as principal_request_limit,
+                MAX_RESPONSE_BYTES as principal_response_limit,
+            )
+            try:
+                canonical_frame = encode_json_frame(dict(frame), limit=principal_request_limit)
+                decode_app_request(canonical_frame)
+            except Exception:
+                return CeoIngressResponse(transport=TRANSPORT_NOT_SENT,
+                    detail="principal dialogue frame is invalid")
+            principal_encoded = canonical_frame[:-1]
+            request_ceiling = principal_request_limit
+            response_ceiling = principal_response_limit
+            stream_limit = response_ceiling + 4096
+        # Release and service-inference envelopes below keep their separate
+        # canonical validation/size gates; dialogue never grants service UID.
         from control_plane import executive_release_ingress as release_ingress
         from control_plane import executive_inference_ingress as inference_ingress
         if isinstance(frame, Mapping) and frame.get("schema") == release_ingress.FRAME_SCHEMA:
@@ -425,9 +449,8 @@ class CeoIngressClient:
                 response_ceiling = INFERENCE_VIEW_MAX_BYTES
                 stream_limit = response_ceiling + 4096
         try:
-            encoded = json.dumps(frame, ensure_ascii=False, sort_keys=True).encode(
-                "utf-8"
-            )
+            encoded = principal_encoded if principal_encoded is not None else json.dumps(
+                frame, ensure_ascii=False, sort_keys=True).encode("utf-8")
         except (TypeError, ValueError) as exc:
             return CeoIngressResponse(
                 transport=TRANSPORT_NOT_SENT, detail=f"frame is not JSON-serializable: {exc}"
