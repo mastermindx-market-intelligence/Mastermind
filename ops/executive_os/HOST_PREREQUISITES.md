@@ -826,6 +826,22 @@ nor supplies an origin context; the separately authorized forward entry must
 acquire its own current context. A dormant forward policy stays dormant. This
 maintenance stop does not invoke the original issuer or its qualification.
 
+The incident path uses a private v2 observation purpose. Control, worker,
+gateway and broker must match the current sealed source. The frozen C1 Relay
+must remain exactly unloaded on release
+`326c8469a21d7f50fc9ecb1848196bf1c6e66685`, with its own fully verified manifest
+and wrapper provenance. A loaded Relay, another historical release, unreadable
+closure or content drift refuses. This neither rebinds nor restarts C1.
+
+The parent, fixed client and broker use closed v2 witness frames and compare the
+same cohort-content digest at acquisition and every stage. Version 1 is not a
+fallback for this purpose. The original budget, complete root-process census,
+socket and peer generation checks, one-use reservation, UNKNOWN handling and
+source-owned dormant policy remain unchanged. Generic release observation and
+release-factory convergence still require all five roles on one release; they
+do not accept the incident observation type. Source tests and installation do
+not qualify a physical recovery or authorize another maintenance attempt.
+
 ### Three isolated Personal Pro readiness slots
 
 The company worker above remains the only installed Executive worker service.

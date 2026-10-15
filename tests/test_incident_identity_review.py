@@ -8,6 +8,7 @@ from tests.test_ceo_submit_armed_composition import _scan_added_identity_diff
 
 ROOT = Path(__file__).parents[1]
 CASES = (
+    ("control_plane/executive_incident_release_observation.py", 1),
     ("control_plane/executive_incident_forward_host.py", 1),
     ("control_plane/executive_incident_origin.py", 6),
     ("control_plane/executive_recovery_namespace.py", 3),
@@ -28,7 +29,7 @@ def _scan(path, source, *, postimage=True):
 
 
 @pytest.mark.parametrize("path,count", CASES)
-def test_exact_sources_mask_only_the_eleven_qualified_tokens(path, count):
+def test_exact_sources_mask_only_the_qualified_tokens(path, count):
     source = (ROOT / path).read_text()
     spans = reviewed_literal_spans(path, source)
     assert len(spans) == count
