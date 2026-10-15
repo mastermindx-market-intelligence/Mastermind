@@ -156,18 +156,86 @@ def _write_exclusive(directory: Path, artifacts: Mapping[str, bytes], *,
         raise
 
 
+
+def render_owner_definition(prior, expected_release_sha: str, join: CapacityJoin) -> dict[str, bytes]:
+    """Reproduce the sealed installed worker from the incumbent root source.
+
+    The caller already holds the one original config lock and has verified
+    services are stopped, Control/Worker are disarmed and release is selected.
+    This function never reads provider credentials, mints Capacity or writes.
+    """
+    import json
+    from control_plane.codex_worker import _assert_binary_unchanged
+    from control_plane.model_router import ModelRouter
+    from control_plane.worker_execution_contract import BinaryAttestation
+    from ops.executive_os.attended_worker_definition import build_finite_worker_artifacts
+    from ops.executive_os.finite_service_lifecycle import (
+        SYSTEM, PYTHON, ROOT_ID, SOCKET,
+    )
+    from ops.executive_os.release_manifest import verify
+
+    if (os.geteuid() != 0 or type(join) is not CapacityJoin
+            or HOST_REF_RE.fullmatch(join.host_ref) is None
+            or type(expected_release_sha) is not str or len(expected_release_sha) != 40
+            or any(c not in "0123456789abcdef" for c in expected_release_sha)):
+        raise FinitePublicationRefused("sealed root source identity required")
+    release = SYSTEM / "releases" / expected_release_sha
+    manifest_bytes, _ = owner._read_root_file(
+        release / ".executive-release-manifest.json",
+        modes=frozenset({0o444}), uid=0, gid=0)
+    manifest = json.loads(manifest_bytes)
+    if manifest.get("commit_sha") != expected_release_sha:
+        raise FinitePublicationRefused("installed release manifest differs")
+    verify(release, expected_release_sha, manifest["tree_sha"])
+
+    receipt_path = SYSTEM / "config/claude-minimax-finite-01-attestation.json"
+    receipt_bytes, _ = owner._read_root_file(
+        receipt_path, modes=frozenset({0o440}), uid=0, gid=470)
+    receipt = json.loads(receipt_bytes)
+    if (set(receipt) != {"schema_version", "binary"}
+            or receipt["schema_version"] != "mastermind.attended_claude_binary/v1"):
+        raise FinitePublicationRefused("original binary attestation unavailable")
+    binary = BinaryAttestation(**receipt["binary"])
+    _assert_binary_unchanged(binary)
+    profile = ModelRouter.load().capability_registry.resolve(
+        "fabric.attended.claude.bounded.v1")
+    try:
+        artifacts = build_finite_worker_artifacts(
+            primary_config=dict(prior.worker),
+            worker_id="minimax-finite-01", worker_user="_mastermind_minimax",
+            worker_group="_mastermind_minimax", worker_uid=470, worker_gid=470,
+            control_gid=450, runtime_root="/private/var/db/mastermind-executive",
+            definition_dir=FINITE_DEFINITION_DIR, socket_path=SOCKET,
+            binary=binary, binary_receipt_path=str(receipt_path),
+            binary_receipt_sha256=sha256(receipt_bytes), realm_generation=1,
+            release_root=str(release), release_commit=expected_release_sha,
+            release_tree=manifest["tree_sha"],
+            release_manifest_sha256=sha256(manifest_bytes),
+            python_binary=PYTHON, host_ref=join.host_ref, model_class="routine",
+            execution_profile_digest=profile.profile_digest,
+            routing_root_id=ROOT_ID, routing_parent_run_id=ROOT_ID,
+            max_turns=2, capacity_capability_id=join.capacity_capability_id)
+        if (sha256(artifacts["worker.json"]) != join.worker_source_config_digest
+                or set(artifacts) != FILES):
+            raise FinitePublicationRefused("Capacity-bound source digest changed")
+        verify_candidate(artifacts)
+        return artifacts
+    except FinitePublicationRefused:
+        raise
+    except Exception as exc:
+        raise FinitePublicationRefused("incumbent sealed renderer refused") from exc
+
+
 def publish_disarmed_definition(expected_release_sha: str, expected_control_sha256: str,
                                 artifacts: dict[str, bytes], *,
-                                verified_capacity_binding, trusted_render_again) -> dict[str, object]:
+                                verified_capacity_binding) -> dict[str, object]:
     """Root-only publication after incumbent Capacity owner binds the proposed identity.
 
-    Both callbacks are host-selected, in-process incumbent owners, never JSON,
-    command-line or model input. verified_capacity_binding must confirm the
-    original current CapacityJoin (host, capability and worker source digest),
-    without issuing it. trusted_render_again must reproduce all five bytes
-    from the installed signed source and current Capacity fact under the
-    original config mutex. Neither
-    callback is a new dispatcher or Capacity authority.
+    The callback is an in-process incumbent Capacity owner, never JSON,
+    command-line or model input. It confirms the exact original CapacityJoin
+    (host, capability and worker source digest), without issuing it.
+    Sealed release reproduction is implemented here, not supplied by a caller
+    or an external plugin. No new dispatcher or Capacity authority is made.
     """
     hashes = verify_candidate(artifacts)
     if (os.geteuid() != 0 or type(expected_release_sha) is not str
@@ -177,8 +245,8 @@ def publish_disarmed_definition(expected_release_sha: str, expected_control_sha2
             or len(expected_control_sha256) != 64
             or any(c not in "0123456789abcdef" for c in expected_control_sha256)):
         raise FinitePublicationRefused("exact root installed release and config preimage required")
-    if not callable(verified_capacity_binding) or not callable(trusted_render_again):
-        raise FinitePublicationRefused("incumbent Capacity owner and renderer are required")
+    if not callable(verified_capacity_binding):
+        raise FinitePublicationRefused("incumbent Capacity owner is required")
     import json
     physical, = _bindings(artifacts["bindings.json"])
     worker = json.loads(artifacts["worker.json"])
@@ -211,12 +279,11 @@ def publish_disarmed_definition(expected_release_sha: str, expected_control_sha2
         if (verified_capacity_binding(join) is not True
                 or DESTINATION.parent != owner.CONFIG_ROOT):
             raise FinitePublicationRefused("publisher Capacity/config ownership differs")
-        # Re-render from incumbent trusted release/Capacity input while its
-        # config-owner lock is held; arbitrary proposed JSON or generated entry
-        # bytes never qualify just by satisfying a schema and matching their
-        # own public digest.
-        expected = trusted_render_again(physical.host_ref, worker["capacity_capability_id"])
-        if type(expected) is not dict or set(expected) != FILES or expected != artifacts:
+        # Re-render from the fixed, root-installed release/Capacity identity
+        # while the original config-owner lock is held. Caller-supplied bytes
+        # do not qualify by satisfying schemas or self-declared hashes.
+        expected = render_owner_definition(prior, expected_release_sha, join)
+        if expected != artifacts:
             raise FinitePublicationRefused("source-rendered finite definition differs")
         hashes_published = _write_exclusive(DESTINATION, artifacts, uid=0, gid=0)
         if hashes_published != hashes:
@@ -227,3 +294,34 @@ def publish_disarmed_definition(expected_release_sha: str, expected_control_sha2
                 "admitted_worker": False, "service_started": False}
     finally:
         os.close(lock_fd)
+
+
+def publish_from_installed_sources(expected_release_sha: str,
+                                   expected_control_sha256: str,
+                                   join: CapacityJoin, *,
+                                   verified_capacity_binding) -> dict[str, object]:
+    """Single root-owner entry for source-derived, *disarmed* publication.
+
+    The prior-owner checks are intentionally repeated under CONFIG_ROOT lock by
+    publish_disarmed_definition. The first phase renders inert bytes only;
+    nothing changes until the latter exact-preimage exclusive directory write.
+    No imported source may create a CapacityJoin or register a worker.
+    """
+    if (os.geteuid() != 0 or type(join) is not CapacityJoin
+            or not callable(verified_capacity_binding)):
+        raise FinitePublicationRefused("root and incumbent Capacity owner required")
+    host = owner.ProductionCeoSubmitHost()
+    host.require_exact_install(expected_release_sha)
+    host.require_transaction_absent()
+    host.require_services_already_stopped()
+    host.require_service_uids_quiescent()
+    prior = host.load_unarmed_configs(expected_release_sha)
+    host.require_runtime_quiescent(prior)
+    if prior.control_sha256 != expected_control_sha256:
+        raise FinitePublicationRefused("Control source preimage changed")
+    if verified_capacity_binding(join) is not True:
+        raise FinitePublicationRefused("current Capacity join not admitted")
+    prepared = render_owner_definition(prior, expected_release_sha, join)
+    return publish_disarmed_definition(expected_release_sha,
+        expected_control_sha256, prepared,
+        verified_capacity_binding=verified_capacity_binding)

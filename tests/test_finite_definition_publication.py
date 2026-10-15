@@ -84,7 +84,7 @@ def test_capacity_owner_refusal_blocks_root_publication_before_effect(monkeypatc
         calls.append(join.to_dict())
         return False
     with pytest.raises(pub.FinitePublicationRefused,match='Capacity owner refused'):
-        pub.publish_disarmed_definition('a'*40,'a'*64,files,verified_capacity_binding=refuse, trusted_render_again=lambda *a: files)
+        pub.publish_disarmed_definition('a'*40,'a'*64,files,verified_capacity_binding=refuse)
     assert len(calls)==1 and calls[0]['host_ref']=='host-'+'a'*64
     assert calls[0]['capacity_capability_id']=='fixture-capacity'
     assert len(calls[0]['worker_source_config_digest'])==64
@@ -94,8 +94,8 @@ def test_capacity_owner_refusal_blocks_root_publication_before_effect(monkeypatc
 def test_no_owner_capacity_callback_blocks_before_root_preflight(monkeypatch,qualified_host):
     monkeypatch.setattr(pub.os, "geteuid", lambda: 0)
     _,_,files,_=qualified_host
-    with pytest.raises(pub.FinitePublicationRefused,match='Capacity owner and renderer are required'):
-        pub.publish_disarmed_definition('a'*40,'a'*64,files,verified_capacity_binding=None, trusted_render_again=lambda *a: files)
+    with pytest.raises(pub.FinitePublicationRefused,match='Capacity owner is required'):
+        pub.publish_disarmed_definition('a'*40,'a'*64,files,verified_capacity_binding=None)
 
 def test_non_root_cannot_invoke_capacity_owner_or_write(monkeypatch,qualified_host):
     _,_,files,_=qualified_host
@@ -104,7 +104,7 @@ def test_non_root_cannot_invoke_capacity_owner_or_write(monkeypatch,qualified_ho
     with pytest.raises(pub.FinitePublicationRefused,match="exact root"):
         pub.publish_disarmed_definition('a'*40,'a'*64,files,
             verified_capacity_binding=lambda *args: invoked.append(args) or True,
-            trusted_render_again=lambda *args: files)
+            )
     assert invoked==[]
 
 def test_root_owner_publishes_only_after_same_locked_config_and_render(monkeypatch, qualified_host, tmp_path):
@@ -133,12 +133,14 @@ def test_root_owner_publishes_only_after_same_locked_config_and_render(monkeypat
         assert join.host_ref=='host-'+'a'*64 and join.capacity_capability_id=='fixture-capacity'
         assert len(join.worker_source_config_digest)==64
         return True
-    def renderer(host,cap):
+    def renderer(prior_value, release_sha, join):
         actions.append('render-rechecked')
-        assert (host,cap)==('host-'+'a'*64,'fixture-capacity')
+        assert release_sha=='a'*40 and join.host_ref=='host-'+'a'*64
+        assert prior_value is prior
         return files.copy()
+    monkeypatch.setattr(pub, 'render_owner_definition', renderer)
     x=pub.publish_disarmed_definition('a'*40,'e'*64,files,
-        verified_capacity_binding=capacity,trusted_render_again=renderer)
+        verified_capacity_binding=capacity)
     assert x['state']=='STAGED_DISARMED_DEFINITION'
     assert x['admitted_worker'] is False and x['service_started'] is False
     assert actions.count('capacity-checked')==2
@@ -167,10 +169,11 @@ def test_runtime_source_drift_refuses_before_any_effect(monkeypatch,qualified_ho
     def forbidden(*args,**kwargs):
         raise AssertionError('untrusted bytes must never publish')
     monkeypatch.setattr(pub,'_write_exclusive',forbidden)
+    monkeypatch.setattr(pub,'render_owner_definition',
+        lambda *a:dict(files, **{'owner_entry.py':b'separate entry bytes'}))
     with pytest.raises(pub.FinitePublicationRefused,match='source-rendered'):
         pub.publish_disarmed_definition('a'*40,prior.control_sha256,files,
-            verified_capacity_binding=lambda *a:True,
-            trusted_render_again=lambda *a:dict(files, **{'owner_entry.py':b'separate entry bytes'}))
+            verified_capacity_binding=lambda *a:True)
     assert not pub.DESTINATION.exists()
 
 def test_native_acl_drift_fails_closed_and_preserves_partial_state(monkeypatch,qualified_host,tmp_path):
@@ -213,3 +216,68 @@ def test_capacity_identity_requires_canonical_host_reference(qualified_host):
         body=dict(original,bindings=[dict(original['bindings'][0], host_ref=bad)])
         with pytest.raises(pub.FinitePublicationRefused):
             pub.verify_candidate(dict(files, **{'bindings.json':_json(body)}))
+
+def test_installed_source_entry_never_skips_original_stopped_service_gate(
+        monkeypatch, qualified_host):
+    from control_plane.executive_capacity_join import CapacityJoin, PROVIDER_CAPACITY_SCHEMA
+    from control_plane.executive_fabric_composition import _bindings
+    host, prior, files, _ = qualified_host
+    physical, = _bindings(files["bindings.json"])
+    join = CapacityJoin(physical.host_ref, 'fixture-capacity',
+        PROVIDER_CAPACITY_SCHEMA, physical.worker_source_config_digest)
+    calls=[]
+    monkeypatch.setattr(pub.os, 'geteuid', lambda:0)
+    class FakeOwner:
+        def require_exact_install(self,sha):
+            calls.append('release');return sha
+        def require_transaction_absent(self):calls.append('marker')
+        def require_services_already_stopped(self):
+            calls.append('service-running');raise ValueError('Control still running')
+        def require_service_uids_quiescent(self):raise AssertionError('not reached')
+    monkeypatch.setattr(pub.owner, 'ProductionCeoSubmitHost', FakeOwner)
+    monkeypatch.setattr(pub,'render_owner_definition',
+        lambda *args: pytest.fail('render must not run during live service'))
+    monkeypatch.setattr(pub,'publish_disarmed_definition',
+        lambda *args,**kwargs: pytest.fail('publication never bypasses stopped service'))
+    with pytest.raises(ValueError,match='Control still running'):
+        pub.publish_from_installed_sources('a'*40, 'e'*64, join,
+            verified_capacity_binding=lambda j: True)
+    assert calls==['release','marker','service-running']
+
+
+def test_installed_source_entry_joins_original_capacity_and_same_publisher(
+        monkeypatch, qualified_host):
+    from control_plane.executive_capacity_join import CapacityJoin, PROVIDER_CAPACITY_SCHEMA
+    from control_plane.executive_fabric_composition import _bindings
+    _, prior, files, _ = qualified_host
+    physical, = _bindings(files["bindings.json"])
+    join = CapacityJoin(physical.host_ref, 'fixture-capacity',
+        PROVIDER_CAPACITY_SCHEMA, physical.worker_source_config_digest)
+    calls=[]
+    monkeypatch.setattr(pub.os, 'geteuid', lambda:0)
+    class FakeOwner:
+        def require_exact_install(self,sha):calls.append('release');return sha
+        def require_transaction_absent(self):calls.append('marker')
+        def require_services_already_stopped(self):calls.append('stopped')
+        def require_service_uids_quiescent(self):calls.append('uids')
+        def load_unarmed_configs(self,sha):calls.append('configs');return prior
+        def require_runtime_quiescent(self,x):calls.append('runtime')
+    monkeypatch.setattr(pub.owner,'ProductionCeoSubmitHost',FakeOwner)
+    def validate(j):
+        calls.append('capacity')
+        return j==join
+    def render(p,sha,j):
+        calls.append('renderer')
+        assert (p,sha,j)==(prior,'a'*40,join)
+        return files.copy()
+    def publish(sha,control_sha,artifacts,*,verified_capacity_binding):
+        calls.append('original-publisher')
+        assert (sha,control_sha)==('a'*40,prior.control_sha256)
+        assert artifacts==files and verified_capacity_binding is validate
+        return {'effect':'INERT_TEST'}
+    monkeypatch.setattr(pub,'render_owner_definition',render)
+    monkeypatch.setattr(pub,'publish_disarmed_definition',publish)
+    assert pub.publish_from_installed_sources('a'*40,prior.control_sha256,join,
+        verified_capacity_binding=validate)=={'effect':'INERT_TEST'}
+    assert calls==['release','marker','stopped','uids','configs','runtime',
+        'capacity','renderer','original-publisher']
