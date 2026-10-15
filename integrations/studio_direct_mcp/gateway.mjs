@@ -385,6 +385,13 @@ export function resolveConfig(partial = {}) {
   }
   cfg.paperDesign = resolvePaperDesignConfig(cfg.paperDesign);
   cfg.fleetStatus = resolveFleetStatusConfig(cfg.fleetStatus);
+  if (cfg.fabricOnly !== undefined && typeof cfg.fabricOnly !== "boolean") {
+    throw new TypeError("config.fabricOnly must be boolean when supplied");
+  }
+  if (cfg.fabricOnly === true && (cfg.gitPublish || cfg.repositoryWorkspaces ||
+      cfg.commissionPublication || cfg.paperDesign || cfg.fleetStatus)) {
+    throw new TypeError("Fabric-only gateway refuses unrelated host capabilities");
+  }
 
   return cfg;
 }
