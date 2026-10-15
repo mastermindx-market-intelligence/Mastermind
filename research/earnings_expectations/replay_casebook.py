@@ -19,6 +19,7 @@ import sys
 from reaction_replay import replay
 from expectation_owner_adapter import OwnerContractError, project_owner_inspection
 from tiingo_manifest_inspection import ManifestRefusal, inspect_file
+from event_workspace_binding import NativeEventBindingError, bind_native_event
 
 RESEARCH_AUTHORITY = 'RESEARCH_ONLY_NO_TRADING'
 PACKETS = Path(__file__).parent / 'sourced_event_packets'
@@ -30,7 +31,9 @@ CAPEX = Path(__file__).parent / 'alphabet_capex_guidance.json'
 def build_report(folder: Path = PACKETS, guidance_path: Path = GUIDANCE, media_path: Path = MEDIA,
                  owner_inspection_path: Path | None = None,
                  tiingo_manifest_path: Path | None = None,
-                 capex_path: Path = CAPEX) -> dict:
+                 capex_path: Path = CAPEX,
+                 native_event_workspace_path: Path | None = None,
+                 native_event_ref: str | None = None) -> dict:
     entries = []
     for path in sorted(folder.glob('*.json')):
         packet = json.loads(path.read_text(encoding='utf-8'))
@@ -264,6 +267,16 @@ def build_report(folder: Path = PACKETS, guidance_path: Path = GUIDANCE, media_p
     price_inspection = None
     if tiingo_manifest_path is not None:
         price_inspection = inspect_file(tiingo_manifest_path)
+    native_event_binding = None
+    if native_event_workspace_path is not None or native_event_ref is not None:
+        if native_event_workspace_path is None or not isinstance(native_event_ref, str):
+            raise NativeEventBindingError("NATIVE_WORKSPACE_AND_EXPLICIT_EVENT_REF_REQUIRED")
+        matched = [item for item in entries if item["event_ref"] == native_event_ref]
+        if len(matched) != 1:
+            raise NativeEventBindingError("RESEARCH_EVENT_UNAVAILABLE_OR_AMBIGUOUS")
+        packet = json.loads((folder / matched[0]["packet_ref"]).read_text(encoding="utf-8"))
+        owner_envelope = json.loads(native_event_workspace_path.read_text(encoding="utf-8"))
+        native_event_binding = bind_native_event(packet, owner_envelope)
     return {
         'schema': 'earnings.reaction_replay.casebook_report.research.v1',
         'authority': RESEARCH_AUTHORITY,
@@ -271,6 +284,7 @@ def build_report(folder: Path = PACKETS, guidance_path: Path = GUIDANCE, media_p
         'per_issuer_counts': dict(sorted(Counter(e['issuer_ref'] for e in entries).items())),
         'point_in_time_analyst_consensus': 'NOT_ADMITTED',
         'native_expectation_owner_inspection': native_owner,
+        'native_event_workspace_binding': native_event_binding,
         'historical_price_materialization_inspection': price_inspection,
         'capex_guidance_status': capex_state,
         'capex_guidance_sequence': capex,
@@ -409,6 +423,18 @@ def markdown(report: dict) -> str:
             'This read-only source inspection provides no vendor price values, rights grant, historical PIT verification or trading permission.',
             '',
         ])
+    if report.get('native_event_workspace_binding'):
+        bound = report['native_event_workspace_binding']
+        lines.extend([
+            '## Existing Earnings Intelligence event identity (owner receipt only)',
+            '',
+            f"Research event `{bound['research_event_ref']}` → canonical candidate `{bound['candidate_event_id']}`.",
+            '',
+            f"Owner reader receipt status: **{bound['status']}**.",
+            '',
+            'The research helper does not re-fetch or hash-verify source-owner bytes. No issuer/source event is independently admitted by this helper, and no predictive/trading authority is granted.',
+            '',
+        ])
     return '\n'.join(lines)
 
 
@@ -418,12 +444,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--packets', type=Path, default=PACKETS)
     parser.add_argument('--owner-inspection', type=Path, help='Existing Macro K3E declared-capture receipt (read-only)')
     parser.add_argument('--tiingo-manifest', type=Path, help='Existing Tiingo materialization receipt (flags only, no bars)')
+    parser.add_argument('--native-event-workspace', type=Path, help='Existing Earnings OS read_event_workspace JSON envelope')
+    parser.add_argument('--native-event-ref', help='Exactly one research event ref to bind (never a ticker lookup)')
     args = parser.parse_args(argv)
     try:
         report = build_report(args.packets, owner_inspection_path=args.owner_inspection,
-                              tiingo_manifest_path=args.tiingo_manifest)
-    except (OwnerContractError, ManifestRefusal, ValueError, OSError, json.JSONDecodeError) as exc:
-        reason = (exc.code if isinstance(exc, OwnerContractError) else
+                              tiingo_manifest_path=args.tiingo_manifest,
+                              native_event_workspace_path=args.native_event_workspace,
+                              native_event_ref=args.native_event_ref)
+    except (OwnerContractError, ManifestRefusal, NativeEventBindingError, ValueError, OSError, json.JSONDecodeError) as exc:
+        reason = (exc.code if isinstance(exc, (OwnerContractError, NativeEventBindingError)) else
                   exc.reason if isinstance(exc, ManifestRefusal) else 'RESEARCH_SOURCE_INPUT_INVALID')
         if args.format == 'json':
             print(json.dumps({'schema': 'earnings.reaction_replay.casebook_report.research.v1',
