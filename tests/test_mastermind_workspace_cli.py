@@ -694,3 +694,27 @@ def test_installation_profile_keeps_required_mount_without_fallback(storage_cli,
     selected = cli.installation_storage_profile(home)
     assert selected["root"] == str(root.resolve())
     assert selected["mount_point"] == data["mount_point"]
+
+
+def test_cli_release_explains_ignored_cache_when_git_status_looks_clean(tmp_path: Path):
+    source, _base = _repository(tmp_path)
+    (source / ".gitignore").write_text(".pytest_cache/\n", encoding="utf-8")
+    _git(source, "add", ".gitignore")
+    _git(source, "commit", "-qm", "ignore generated test cache")
+    base = _git(source, "rev-parse", "HEAD")
+    root = tmp_path / "workspaces"
+    code, acquired = _run_cli(source, root, "acquire", "--operation-id", "cli-dirty-explanation", "--base-sha", base)
+    assert code == 0
+    workspace = Path(acquired["receipt"]["workspace_path"])
+    payload = workspace / ".pytest_cache" / "keep-until-qualified"
+    payload.parent.mkdir()
+    payload.write_text("do not automatically delete ignored evidence", encoding="utf-8")
+    assert _git(workspace, "status", "--porcelain=v1") == ""
+    code, observed = _run_cli(source, root, "release", "--operation-id", "cli-dirty-explanation")
+    assert code == 0 and observed["effect"] == "NOT_APPLIED"
+    assert observed["receipt"]["state"] == "PRESERVED_DIRTY"
+    assert "tracked_changes=absent" in observed["receipt"]["reason"]
+    assert "all_untracked=present" in observed["receipt"]["reason"]
+    assert "including ignored files" in observed["receipt"]["reason"]
+    assert "git ls-files --others -z" in observed["receipt"]["reason"]
+    assert payload.read_text(encoding="utf-8") == "do not automatically delete ignored evidence"
