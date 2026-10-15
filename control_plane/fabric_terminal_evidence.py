@@ -77,13 +77,20 @@ def _validate(evidence, binding, ref, worker, host, launch_sha, manifest):
         ("collection_receipt", "collection", {"schema_version", "collection", "fabric_cleanup", "effective_grant_digest"}),
         ("validation_receipts", "validation", {"attempt_id", "job_id", "commands", "fabric_cleanup", "effective_grant_digest"}),
     ):
-        receipt = _shape(evidence[name], keys)
+        empty_validation = (operation == "validation"
+            and request["validation_commands"] == []
+            and type(evidence[name]) is dict
+            and evidence[name].get("commands") == []
+            and "fabric_cleanup" not in evidence[name])
+        receipt = _shape(evidence[name], keys - {"fabric_cleanup"} if empty_validation else keys)
         _require(digest(receipt) == evidence[name + "_digest"]
             and receipt["effective_grant_digest"] == binding["effective_grant_digest"])
         if operation == "collection":
             _require(receipt["schema_version"] == "mastermind.executive_collection_evidence/v1")
         else:
             _require(receipt["attempt_id"] == binding["attempt_id"] and receipt["job_id"] == binding["job_id"])
+        if empty_validation:
+            continue
         package = _shape(receipt["fabric_cleanup"], {"schema_version", "operation", "observed_at",
             "worker_uid", "worker_gid", "receipt", "lane_receipt_utf8"})
         _require(package["schema_version"] == "mastermind.executive_fabric_cleanup_evidence/v1"

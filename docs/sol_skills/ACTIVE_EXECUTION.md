@@ -111,6 +111,33 @@ Do not bypass required checks or independent review, and do not generate empty p
 status turns. When changing the candidate is necessary, invalidate only evidence affected by that
 change and bind subsequent observation to the new head. Do not duplicate a worker's assigned work.
 
+<!-- mastermind-ci-observation-liveness-v1 -->
+**CI observation liveness.** A checkpoint records the last observation; it is not a
+completion-event source. A watcher request or PreToolUse admission is not a launched
+observer. Before relying on it, verify the successful tool return, exact repository,
+PR/head/run, retained handle and supported result-consumption path. If no idle wake is
+supported, consume that same handle at a useful foreground boundary; do not wait for
+an event that cannot arrive. Never duplicate a live or uncertain observer.
+
+The installed CI guard's `REDUNDANT POLL` is a finite read-frequency cooldown, not a
+permanent permission denial. Do not sleep/retry, reset its state, switch readers or
+mutate a PR merely to clear it. Continue useful work. At the next real integration
+boundary or existing scheduled wake after expiry, one bounded same-carrier read is
+eligible when no verified observer supplies completion. Permission, safety, custody
+and effect-unknown refusals remain binding; elapsed time does not clear them.
+
+After two equivalent no-progress wakes, diagnose the missing external observation or
+return path once and change tactic. Re-reading a self-written receipt is not progress
+and cannot prove the dependency remains pending. Reuse the existing observer and
+Class-M backoff (15m -> 30m -> 60m; default 60m) in
+`docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md`; do not create another watcher or a new
+lifecycle ledger. If a human action is the only remaining path, name it once and keep
+its answer pending. Do not repeatedly ask, manufacture busywork or imply completion.
+Keep aggregate mission attention only under its existing lifetime rule; a blocked
+child does not authorize stopping it. Notify only on a material result or required
+action, and preserve original owners, roots, grants and unresolved effects.
+<!-- /mastermind-ci-observation-liveness-v1 -->
+
 **Problem-solve before escalating.** Reuse the current checkpoint and minimum relevant source; do
 not reload unrelated history. Inspect the exact failure, try the bounded lawful repair, or change to
 an independent lane. Two equivalent failures without new evidence require a changed hypothesis or

@@ -1,0 +1,25 @@
+{
+  "at": "2026-10-13T07:44:29.943080+00:00",
+  "receipt": "/Volumes/Mastermind/evidence/research-factory-codegen-20261012-01a1333c/static-current-evidence-v1/receipt.json",
+  "receipt_sha256": "a860d40cb8a4d1c7f83ef8d4bce899ae076147a28804b2de56649e7362220be7",
+  "guarded_current_retrieval": "COMPLETE",
+  "original_assigning_parent_consumption": "Owner actual chat acknowledged both files, verified lengths and digests, independent source review now active",
+  "owner_thread": "01a1333c-a475-7052-95a8-72a88eb8c17b",
+  "owner_evidence_cursor": "4b1b531c-b639-4bfa-8f47-b2cff4e1a714:3",
+  "independent_local_content_check": [
+    {
+      "name": "static_checks.py",
+      "bytes": 29756,
+      "sha256": "7c54af50b531e428ef9f7576daffe146bc470e9eed7ec25531612e2638723224"
+    },
+    {
+      "name": "test_research_codegen_static_checks.py",
+      "bytes": 11206,
+      "sha256": "9686ee2ee165426861fc0e54d3645f3ae3c0bc4eb90a905a02e7fc02571470d3"
+    }
+  ],
+  "original_execution_rc": 65,
+  "original_worker_accepted": false,
+  "historical_producer_attestation": false,
+  "native_authenticated_mission_completed": false
+}

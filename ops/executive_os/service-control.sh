@@ -23,8 +23,9 @@ SCRIPT_PATH="$SCRIPT_DIR/$(/usr/bin/basename "$SCRIPT_SOURCE")"
 GATEWAY_PREFLIGHT_PYTHON="/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12"
 
 usage() {
-  /bin/echo "usage: $0 {start|stop|restart|restart-gateway|start-readside|stop-readside|start-agent-relay|stop-agent-relay|status-agent-relay|status}" >&2
+  /bin/echo "usage: $0 {start|stop|restart|restart-gateway|start-finite|stop-finite|status-finite|start-readside|stop-readside|stop-incident-broker|start-agent-relay|stop-agent-relay|status-agent-relay|status}" >&2
   /bin/echo "restart-gateway requires --expected-sha <40 lowercase hex characters>" >&2
+  /bin/echo "finite actions require --expected-sha <40 lowercase hex> --expected-manifest-sha256 <64 lowercase hex>" >&2
   exit 64
 }
 
@@ -585,6 +586,10 @@ readside_postflight() {
 
 [ "$#" -ge 1 ] || usage
 case "$1" in
+  start-finite|stop-finite|status-finite)
+    [ "$#" -eq 5 ] && [ "$2" = "--expected-sha" ] && [ "$4" = "--expected-manifest-sha256" ] || usage
+    [[ "$3" =~ ^[0-9a-f]{40}$ ]] && [[ "$5" =~ ^[0-9a-f]{64}$ ]] || usage
+    ;;
   restart-gateway)
     [ "$#" -eq 3 ] && [ "$2" = "--expected-sha" ] || usage
     [[ "$3" =~ ^[0-9a-f]{40}$ ]] || usage
@@ -592,6 +597,17 @@ case "$1" in
   *) [ "$#" -eq 1 ] || usage ;;
 esac
 case "$1" in
+  stop-incident-broker)
+    require_root
+    exec "$GATEWAY_PREFLIGHT_PYTHON" -I -S -B "$SCRIPT_DIR/../../scripts/executive_os_incident_maintenance.py"
+    ;;
+  start-finite|stop-finite|status-finite)
+    require_root
+    finite_dir="$MCP_RELEASE_ROOT/$3/ops/executive_os"
+    [[ "$SCRIPT_SOURCE" == "$finite_dir/service-control.sh" ]] || exit 65
+    [[ "$SCRIPT_DIR" == "$finite_dir" ]] && [[ "$SCRIPT_PATH" == "$finite_dir/service-control.sh" ]] || exit 65
+    exec "$GATEWAY_PREFLIGHT_PYTHON" -I -S -B "$finite_dir/finite_service_lifecycle.py" "$@"
+    ;;
   start)
     require_root
     validate_plist "$WORKER_PLIST"

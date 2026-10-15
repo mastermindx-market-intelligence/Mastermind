@@ -62,19 +62,23 @@ def create_runtime(deployment, verifier, policy, *, audit_sink):
     from integrations.research_read_mcp.port_adapter import compose_macro_service,ResearchPortAdapter
     from starlette.responses import JSONResponse
     from starlette.routing import Route
+    from integrations.research_read_mcp.citation_transport import RuntimeBindings
     owned = {}
+    clock = lambda:int(time.time())
     def read_factory(_deployment):
         service,context_type,receipt = compose_macro_service(deployment.macro_release,deployment.macro_commit,
                                                             deployment.macro_tree,release_verifier=verifier)
-        owned.update(context_type=context_type,factory_receipt=receipt)
+        owned.update(service=service,context_type=context_type,factory_receipt=receipt)
         return service
     def adapter_factory(service,quote_limit,_deployment):
         adapter = ResearchPortAdapter(service,quote_limit,deployment.mastermind_commit,context_type=owned['context_type'])
         owned['adapter'] = adapter
         return adapter
     def authenticator_factory(selected):
-        return JwtAuthenticator(policy=selected,jwks_cache=BoundedJwksCache(
+        authenticator = JwtAuthenticator(policy=selected,jwks_cache=BoundedJwksCache(
             policy=selected,fetcher=HttpxJwksFetcher(selected),monotonic=time.monotonic))
+        owned["authenticator"] = authenticator
+        return authenticator
     def readiness(service):
         # F10 status ratios do not bind inventory to a canonical source generation.
         # No qualified same-generation production census owner is wired yet.
@@ -93,10 +97,12 @@ def create_runtime(deployment, verifier, policy, *, audit_sink):
                           authenticator_factory=authenticator_factory,read_service_factory=read_factory,
                           adapter_factory=adapter_factory,context_factory=lambda ent:owned['adapter'].context_builder(ent),
                           readiness=readiness,mount_health_routes=mount_health,audit_sink=audit_sink,
-                          clock=lambda:int(time.time()),owner_uid=os.geteuid())
+                          clock=clock,owner_uid=os.geteuid())
     owned['app'] = app
     app.state.research_factory_receipt = owned['factory_receipt']
     app.state.research_release_receipts = verifier.receipts
+    app.state.research_bindings = RuntimeBindings(owned["service"],owned["adapter"],
+        owned["authenticator"],app.state.research_grant_owner,clock,audit_sink)
     return app
 
 
@@ -107,6 +113,9 @@ def main(argv=None):
     parser.add_argument('--config')
     parser.add_argument('--archive-owner',default='/etc/mastermind/research-read-archive-owner.json')
     parser.add_argument('--audit-directory',default='/var/lib/mastermind-research/audit')
+    parser.add_argument('--citation-unix',action='store_true')
+    parser.add_argument('--citation-socket-user',type=int)
+    parser.add_argument('--citation-socket-group',type=int)
     args = parser.parse_args(argv)
     if args.describe:
         print(json.dumps(describe(),sort_keys=True));return 0
@@ -136,9 +145,20 @@ def main(argv=None):
             os.close(descriptor)
         try:
             app = create_runtime(deployment,verifier,policy,audit_sink=audit)
-            import uvicorn
-            uvicorn.run(app,host=deployment.bind_host,port=deployment.bind_port,access_log=False,
-                        log_level='warning',proxy_headers=False)
+            if args.citation_unix:
+                from integrations.research_read_mcp.citation_transport import (
+                    UnixSocketPolicy, acquire_listeners, build_citation_consumer, run_dual_server, MCP_ADDRESS)
+                if (deployment.bind_host,deployment.bind_port) != MCP_ADDRESS:
+                    raise RuntimeRefused('CITATION_TRANSPORT_REFUSED')
+                # Refuse before listener acquisition until the incumbent service/
+                # adapter has its reviewed exact-item seam and limiter discipline.
+                citation = build_citation_consumer(policy,app.state.research_bindings)
+                socket_policy = UnixSocketPolicy.production(args.citation_socket_user,args.citation_socket_group)
+                listeners = acquire_listeners(socket_policy)
+                run_dual_server(mcp_app=app,citation_app=citation,listeners=listeners)
+            else:
+                from integrations.research_read_mcp.citation_transport import run_mcp_server
+                run_mcp_server(app=app,host=deployment.bind_host,port=deployment.bind_port)
         finally:
             audit.close()
         return 0

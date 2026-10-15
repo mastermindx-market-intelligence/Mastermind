@@ -115,6 +115,7 @@ class CompanyDialogueGateway:
         service_call: ServiceCall = call_service,
         uuid_source: UuidSource = uuid.uuid4,
         utc_now: UtcNow = _default_utc_now,
+        product_acceptance_owner: Any | None = None,
     ) -> None:
         path = Path(socket_path)
         if not path.is_absolute():
@@ -124,6 +125,15 @@ class CompanyDialogueGateway:
         self._service_call = service_call
         self._uuid_source = uuid_source
         self._utc_now = utc_now
+        if product_acceptance_owner is not None:
+            from integrations.product_acceptance_request_owner import ProductAcceptanceRequestOwner
+            if type(product_acceptance_owner) is not ProductAcceptanceRequestOwner:
+                raise TypeError("product acceptance requires the exact host-composed owner")
+        self._product_acceptance_owner = product_acceptance_owner
+
+    @property
+    def product_acceptance_enabled(self) -> bool:
+        return self._product_acceptance_owner is not None
 
     @staticmethod
     def _binding_context(binding: DialogueBinding) -> dict[str, Any]:
@@ -257,10 +267,20 @@ class CompanyDialogueGateway:
         )
 
     async def call(self, tool_name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        """Expose only the explicitly composed catalogue generation."""
+        envelope = await self._call(tool_name, arguments)
+        if self.product_acceptance_enabled:
+            from integrations.mastermind_company_mcp.schemas import PRODUCT_ACCEPTANCE_SERVER_VERSION
+            envelope["server_version"] = PRODUCT_ACCEPTANCE_SERVER_VERSION
+        return envelope
+
+    async def _call(self, tool_name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
         """Perform exactly one resolved Dialogue V2 operation with no retry."""
 
         try:
-            normalized_arguments = validate_tool_arguments(tool_name, arguments)
+            normalized_arguments = validate_tool_arguments(
+                tool_name, arguments, allow_product_acceptance=self.product_acceptance_enabled
+            )
         except GatewayError as exc:
             return _error(tool_name, exc.code)
 
@@ -281,7 +301,60 @@ class CompanyDialogueGateway:
                 args = {"context": context, "thread_ts": binding.thread_ts}
             else:
                 operation = "send_message"
-                message = self._message(tool_name, normalized_arguments, binding, context)
+                if normalized_arguments.get("purpose") == "PRODUCT_ACCEPTANCE":
+                    from integrations.product_acceptance_request_owner import ProductAcceptanceRequestUnavailable
+                    from control_plane.agentos_product_acceptance_basis import ProductAcceptanceBasisUnavailable
+                    try:
+                        prepared = self._product_acceptance_owner.prepare(
+                            binding=binding, subject_job_id=normalized_arguments["subject_job_id"],
+                            created_at=self._utc_now(),
+                        )
+                        message = prepared.message
+                    except ProductAcceptanceRequestUnavailable as exc:
+                        if exc.code == "PRODUCT_REQUEST_RECONCILIATION_REQUIRED":
+                            try:
+                                ruling_owner = self._product_acceptance_owner.ruling_owner
+                                if ruling_owner is not None:
+                                    qualified = await ruling_owner.qualify(
+                                        binding=binding, message_key=exc.message_key
+                                    )
+                                else:
+                                    from integrations.product_acceptance_ruling_owner import (
+                                        ProductAcceptanceRulingReceiptReader,
+                                    )
+                                    qualified = ProductAcceptanceRulingReceiptReader(
+                                        self._product_acceptance_owner
+                                    ).observe_qualified(binding=binding, message_key=exc.message_key)
+                                return result_envelope(tool_name, data=qualified)
+                            except (ProductAcceptanceRequestUnavailable, ProductAcceptanceBasisUnavailable) as unavailable:
+                                detail = unavailable.code
+                                if ruling_owner is None and detail == "PRODUCT_RULING_UNQUALIFIED":
+                                    # Absence of a qualified receipt says nothing
+                                    # about the original send's delivery state.
+                                    detail = "PRODUCT_REQUEST_RECONCILIATION_REQUIRED"
+                                return _error(tool_name, "DIALOGUE_REFUSED", detail_code=detail,
+                                    reconciliation_message_key=exc.message_key)
+                            except Exception:
+                                return _error(tool_name, "DIALOGUE_REFUSED", detail_code="PRODUCT_RULING_UNAVAILABLE",
+                                    reconciliation_message_key=exc.message_key)
+                        envelope = _error(tool_name, "DIALOGUE_REFUSED", detail_code=exc.code,
+                            reconciliation_message_key=exc.message_key)
+                        # Return only the source-bound row identity and closed
+                        # repair category, so the actual worker can repair it.
+                        if (exc.code == "PRODUCT_PROOF_INCOMPLETE"
+                            and exc.repair_kind in {"UNSATISFIED", "UNPROVEN", "MISSING_REQUIRED_PROOF",
+                                "UNEXPECTED_PROOF", "PROOF_ORDER_CHANGED"}
+                            and isinstance(exc.repair_identity, str)
+                            and re.fullmatch(r"[0-9a-f]{64}", exc.repair_identity)):
+                            envelope["data"] = {"repair_identity": exc.repair_identity,
+                                "repair_kind": exc.repair_kind}
+                        return envelope
+                    except ProductAcceptanceBasisUnavailable as exc:
+                        return _error(tool_name, "DIALOGUE_REFUSED", detail_code=exc.code)
+                    except Exception:
+                        return _error(tool_name, "DIALOGUE_REFUSED", detail_code="PRODUCT_REQUEST_UNAVAILABLE")
+                else:
+                    message = self._message(tool_name, normalized_arguments, binding, context)
                 reconciliation_message_key = message["message_key"]
                 args = {
                     "context": context,

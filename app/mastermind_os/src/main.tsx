@@ -7,10 +7,20 @@ import { createNativeClient } from "./host";
 import { composeMissionHost } from "./compose-mission-host";
 import { createWebAuth, handleWebAuthCallback } from "./web-auth";
 import "./styles.css";
+import { EVIDENCE_PATH, evidenceRoute } from "./research/evidence-contract";
+import { ResearchEvidenceEntry } from "./research/ResearchEvidenceEntry";
 
 async function mount() {
   // The exact callback completes and cleans up before the product can mount.
   if (!isTauri() && handleWebAuthCallback()) return;
+  if (!isTauri() && location.pathname.startsWith(EVIDENCE_PATH)) {
+    const itemId = evidenceRoute(location);
+    const client = itemId ? createWebAuth() : null;
+    createRoot(document.getElementById("root")!).render(
+      <StrictMode><ResearchEvidenceEntry itemId={itemId} transport={client?.research} signOut={() => client?.signOut() ?? Promise.resolve()} /></StrictMode>,
+    );
+    return;
+  }
   try {
     const client = isTauri()
       ? await createNativeClient(invoke, listen)
