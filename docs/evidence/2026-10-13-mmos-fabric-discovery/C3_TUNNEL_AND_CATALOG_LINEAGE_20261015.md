@@ -14,10 +14,16 @@ Absent parents, unavailable parent status, unknown root/parent, conflicting root
 
 ## Proof and gaps
 
-- Pure ancestry tests: **9 passed**, including 32-row bounded depth, real M2 source fixture, missing parents, cycles, root conflicts and duplicate identities.
-- Mounted catalog UI: **2 new tests** for nested filtering, selected path, absent-parent warnings and Chinese translation, without implied status reads.
-- Focused suite: **34 passed across 3 files**; `tsc --noEmit` passes.
-- Complete current app suite: **1,487 passed, one existing skipped, zero failures across 66 files**; production Vite build passes. The existing chunk-size and mixed Tauri import warnings remain.
+- Pure ancestry tests: **10 passed**, including 32-row bounded depth, real M2 source fixture, missing parents, cycles, root conflicts and duplicate identities.
+- Mounted catalog UI: **3 new tests** for nested filtering, selected path, absent-parent warnings and Chinese translation, without implied status reads.
+- Focused latest nested-source suite: **33 passed across 2 files**; `tsc --noEmit` passes. The older focused three-file suite passed 34 cases before this additional real-source fixture.
+- Complete current app suite: **1,489 passed, one existing skipped, zero failures across 66 files**; production Vite build passes. The existing chunk-size and mixed Tauri import warnings remain.
 - SHA256 of all changed code and local logs, exact running tunnel state and explicit nonclaims are in [C3_TUNNEL_AND_CATALOG_LINEAGE_20261015.json](C3_TUNNEL_AND_CATALOG_LINEAGE_20261015.json).
 
 **End-to-end mission still incomplete:** optional `readAttendedFabricCatalog` and `readAttendedFabric` are not connected to the authenticated OS web/native clients. A trusted machine-owner tunnel principal does not identify a user, and selection labels are not grants. The existing resource/authorization owner must supply the right-to-observe run set on its existing signed-in workspace read path, with pre/post permission checks and principal/revision consistency. Exact-head independent review and new visual/browser proof for the catalog remain held after earlier platform refusals; do not reroute refused actions. #1425's separate Fleet Health source is a pending coexisting capability with a documented App.tsx composition conflict; #1435's mission-lineage repair is separately owned. No Paper changes, backend writer edits, production release or account installation are claimed by this packet.
+
+## Real original-parent / child observations (additional proof)
+
+The running C3 managed gateway returned four read-only existing `fabric_status` records, all with root identity checked by that tool. They form two source-observed same-root parent/child pairs. In the first, `fabric-grok-operator-return-01a11e90-v1` has its immediate parent equal to the original root label, while `fabric-grok-operator-onboarding-leaf-01a11e90-v1` declares that operator run as its immediate parent. The catalog helper correctly renders the **root label → operator → leaf** chain with declared depth two. In the second, `iw2-o3-screen-contract-20261013-01a13701` declares an upstream parent *not present* in the bounded sample; its child `o3iw2-unverified-audit-01` is therefore classified `PARENT_OUTSIDE_RESPONSE`, not assigned an invented complete root path. All four are historical terminal results; their observed acceptance is not evidence of current activity.
+
+The new [metadata-only nested sample](../../../app/mastermind_os/src/fixtures/fabric-catalog-m2-nested-observation-20261015.json) remains `PARTIAL`, `EXACT_RUN_SET`, `atomic=false`, with unknown candidate and omitted denominators. No provider outputs, hidden reasoning, logs, credentials or authorization grants were included. A new pure test and mounted UI test use that exact sample; the complete application suite passed **1,489 tests**, one skip, 66 files. Neither this fixture nor the healthy C3 tunnel makes a signed-in Mastermind OS browser read authorized.

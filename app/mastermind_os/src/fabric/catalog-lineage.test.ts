@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CatalogRow } from "./catalog-contract";
 import ownerSample from "../fixtures/fabric-catalog-m2-status-observation-20261014.json";
+import ownerNested from "../fixtures/fabric-catalog-m2-nested-observation-20261015.json";
 import { decodeFabricCatalog } from "./catalog-contract";
 import { observedRunLineage } from "./catalog-lineage";
 
@@ -33,6 +34,29 @@ describe("strict, bounded attended-run lineage", () => {
     expect(fixture.coverage.scan_complete).toBe(false);
   });
 
+  it("replays actual M2 nested operator returns without fabricating an unobserved ancestor", () => {
+    const source = decodeFabricCatalog(ownerNested);
+    expect(source.source.scope).toBe("EXACT_RUN_SET");
+    expect(source.coverage.scan_complete).toBe(false);
+    expect(source.coverage.candidate_count).toBeNull();
+    const lineage = observedRunLineage(source.items);
+    const operator = lineage.get("fabric-grok-operator-return-01a11e90-v1")!;
+    const child = lineage.get("fabric-grok-operator-onboarding-leaf-01a11e90-v1")!;
+    expect(operator).toMatchObject({ state: "ROOT_PARENT_LABEL", observed_depth: 1 });
+    expect(child).toMatchObject({ state: "OBSERVED_ANCESTRY", observed_depth: 2,
+      path: ["01a11e90-4b5d-7f53-b966-8aaaad38701f",
+        "fabric-grok-operator-return-01a11e90-v1",
+        "fabric-grok-operator-onboarding-leaf-01a11e90-v1"] });
+    const otherParent = lineage.get("iw2-o3-screen-contract-20261013-01a13701")!;
+    const otherChild = lineage.get("o3iw2-unverified-audit-01")!;
+    expect(otherParent.state).toBe("PARENT_OUTSIDE_RESPONSE");
+    expect(otherChild).toMatchObject({ state: "PARENT_OUTSIDE_RESPONSE",
+      path: ["01a13701-c4f4-7b22-b891-5dc3469aa246",
+        "iw2-o3-screen-contract-20261013-01a13701",
+        "o3iw2-unverified-audit-01"], observed_depth: null,
+      contiguous_to_root_label: false });
+    expect(source.items.every(row => row.status?.accepted === true && row.status.state === "TERMINAL")).toBe(true);
+  });
   it("proves only contiguous source-declared parent chains within the supplied run set", () => {
     const rows = [run("child", "middle"), run("root-worker", "root-label"), run("middle", "root-worker")];
     const tree = observedRunLineage(rows);

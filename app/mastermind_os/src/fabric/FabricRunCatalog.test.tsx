@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { bindMissionHost, type AuthState, type RawClient } from "../host";
 import { FabricRunCatalog } from "./FabricRunCatalog";
 import { AttendedFabricWorkspace } from "./AttendedFabricWorkspace";
+import ownerNested from "../fixtures/fabric-catalog-m2-nested-observation-20261015.json";
 import { CATALOG_LIMIT, decodeFabricCatalog, type CatalogRow, type FabricCatalog } from "./catalog-contract";
 
 afterEach(cleanup);
@@ -131,6 +132,21 @@ describe("owner-authorized catalog host and view", () => {
     expect(partial.textContent).toContain("outside-parent → run-three");
     expect(partial.textContent).toContain("Parent not supplied in these records");
     expect(partial.textContent).toContain("Full depth unknown");
+    expect(c.statusRead).not.toHaveBeenCalled();
+    expect(c.raw.readAttendedFabricCatalog).toHaveBeenCalledTimes(1);
+  });
+  it("inspects an actual M2 nested operator/leaf snapshot with no implicit read", async () => {
+    const c = client(async () => ownerNested);
+    render(<FabricRunCatalog host={bindMissionHost(c.raw)} />);
+    fireEvent.click(screen.getByRole("button", { name: "Load runs" }));
+    await screen.findByRole("button", { name: /^fabric-grok-operator-onboarding-leaf/ });
+    expect(screen.getByText("3 declared nested parents in these rows")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Nested parents" }));
+    expect(screen.queryByRole("button", { name: /^fabric-grok-operator-return/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /^fabric-grok-operator-onboarding-leaf/ }));
+    const ancestry = screen.getByRole("group", { name: "Observed run ancestry" });
+    expect(ancestry.textContent).toContain("fabric-grok-operator-return-01a11e90-v1 → fabric-grok-operator-onboarding-leaf-01a11e90-v1");
+    expect(ancestry.textContent).toContain("Declared depth 2");
     expect(c.statusRead).not.toHaveBeenCalled();
     expect(c.raw.readAttendedFabricCatalog).toHaveBeenCalledTimes(1);
   });

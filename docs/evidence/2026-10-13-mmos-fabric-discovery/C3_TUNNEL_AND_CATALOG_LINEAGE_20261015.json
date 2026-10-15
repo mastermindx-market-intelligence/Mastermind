@@ -26,24 +26,28 @@
   },
   "source_sha256": {
     "app/mastermind_os/src/fabric/catalog-lineage.ts": "e9b4050c01c272fbe4a18e2a94ae643548fa8d5b07c72cc95fc98a5d97decd6c",
-    "app/mastermind_os/src/fabric/catalog-lineage.test.ts": "dab72be68cc77c66439be6ddf5345ae7b3ea4d10ae3a12c575b9d2f08972a940",
+    "app/mastermind_os/src/fabric/catalog-lineage.test.ts": "1703a1bd38527d0d31c722e0df4c5cda36a982832f95279cbc478a93ed5857a1",
     "app/mastermind_os/src/fabric/FabricRunCatalog.tsx": "0a8c42266f72fde6d21d0dc03018bf72f24512f2159eca625e4b63cf546bca77",
-    "app/mastermind_os/src/fabric/FabricRunCatalog.test.tsx": "e8a7366f35ccf43555e39e48a1c5aeca2ae795039ae0ccb0121512a3f6507f8e",
-    "app/mastermind_os/src/fabric/fabric-catalog.css": "dae5c0798367a4c09c54cf5827592f4d66dfc167438c4e1f57b237bb9608fe9c"
+    "app/mastermind_os/src/fabric/FabricRunCatalog.test.tsx": "2e58349a67653ba6853ce41c780a6fe86632f64bbea83094623514e0f38da422",
+    "app/mastermind_os/src/fabric/fabric-catalog.css": "dae5c0798367a4c09c54cf5827592f4d66dfc167438c4e1f57b237bb9608fe9c",
+    "app/mastermind_os/src/fixtures/fabric-catalog-m2-nested-observation-20261015.json": "ba04270ef95658c381750f90ff9a82d3cf4f7d0ff8088115b01ae0b0c1812c87"
   },
   "test_logs_sha256": {
     "catalog-lineage-unit.log": "f24b2b0d0c3bb9ab13b87a14d8e4ae2043017c7b3e581b69c3f22441d4df6f91",
     "catalog-lineage-focused.log": "0020f20bf4aec3bb0ac26a4207501ca246e8471a2ba1e158f794fc60626eaf30",
     "catalog-lineage-full-suite.log": "364b198911470aeb53e06f9475524fdb2517dfe17eb95c94a891b6cd4f7dae92",
     "catalog-lineage-frozen-typecheck.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "catalog-lineage-build.log": "8fb74e47d4b6932dec3e4d605d5e3c213d96f36df085954e63a0fd6daad7bbea"
+    "catalog-lineage-build.log": "8fb74e47d4b6932dec3e4d605d5e3c213d96f36df085954e63a0fd6daad7bbea",
+    "catalog-real-nested-focused.log": "c646650ca1723b30fd11e5bee58872d5d24ee8976f109affe7b4f1f43888748e",
+    "catalog-real-nested-types.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "catalog-real-nested-full-suite.log": "51264ff96abddeaf85a5722e1459159bdd5563f8f5236013814c5531ff2d8aa0"
   },
   "test_outcome": {
-    "pure_lineage_cases": 9,
-    "new_dom_cases": 2,
-    "focused_passes": 34,
-    "focused_files": 3,
-    "full_passes": 1487,
+    "pure_lineage_cases": 10,
+    "new_dom_cases": 3,
+    "focused_passes": 33,
+    "focused_files": 2,
+    "full_passes": 1489,
     "full_skipped": 1,
     "full_failed": 0,
     "full_files": 66,
@@ -52,7 +56,8 @@
     "warnings": [
       "ineffective dynamic Tauri import",
       "large chunk"
-    ]
+    ],
+    "new_m2_nested_metadata_cases": 2
   },
   "new_product_behavior": {
     "nested_parent_filter": true,
@@ -80,5 +85,17 @@
     "not ChatGPT user-plugin enrollment or account selection",
     "not complete M2 fleet discovery",
     "not production app/browser proof"
-  ]
+  ],
+  "real_nested_source": {
+    "source_gateway_account": "fabric-c3-570f6f34",
+    "run_count": 4,
+    "original_root_labels": 2,
+    "observed_parent_links": 2,
+    "fully_root_correlated_chain_count": 1,
+    "incomplete_upstream_chain_count": 1,
+    "result_contents_acquired": false,
+    "global_run_inventory_claim": false,
+    "sample_sha256": "ba04270ef95658c381750f90ff9a82d3cf4f7d0ff8088115b01ae0b0c1812c87"
+  },
+  "evidence_extension_at": "2026-10-15T05:11:06.724072+00:00"
 }
