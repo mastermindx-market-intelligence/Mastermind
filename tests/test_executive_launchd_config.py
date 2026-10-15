@@ -789,6 +789,7 @@ def test_control_config_template_tracks_strict_service_schema() -> None:
         "fabric_bindings_sha256",
         "fabric_attended_probe",
         "coo_foreground_only",
+        "coo_principal_dialogue_armed",
         # Provenance is injected only after the installer validates the live
         # receipt; the static template intentionally has no host digest.
         "python_runtime_provenance_digest",
@@ -1783,16 +1784,36 @@ def test_installer_stops_old_daemons_before_first_release_or_policy_mutation() -
     assert manifest_verify < arm < bootstrap
 
 
-def test_installer_waits_boundedly_for_asynchronous_launchd_bootout() -> None:
+def test_installer_waits_boundedly_for_asynchronous_launchd_bootout(tmp_path) -> None:
     source = (OPS / "install.sh").read_text(encoding="utf-8")
     helper_start = source.index("wait_for_launchd_absent() {")
     helper_end = source.index("\n}\nleave_installed_services_stopped()", helper_start)
     helper = source[helper_start:helper_end]
-    assert "for attempt in 1 2 3 4 5; do" in helper
-    assert 'launchctl print "system/$label"' in helper
-    assert 'if [ "$attempt" -lt 5 ]; then' in helper
-    assert "/bin/sleep 1" in helper
-    assert "return 1" in helper
+    # Exercise the actual shell wrapper with an inert helper process. The
+    # Python boundary's absolute budget and native absence decisions are
+    # covered by the native-acquisition behavioral tests.
+    import subprocess
+    fake_python = tmp_path / "python"
+    fake_python.write_text('''#!/bin/sh
+printf '%s\\n' "$@" > "$CALL_LOG"
+exit "$HELPER_RC"
+''')
+    fake_python.chmod(0o700)
+    call_log = tmp_path / "called"
+    for helper_rc in ("0", "65"):
+        result = subprocess.run(
+            ["/bin/bash", "-c", helper + '\n}\nwait_for_launchd_absent "com.mastermind.executive.privileged" privileged'],
+            env={"PYTHON_BINARY": str(fake_python), "SCRIPT_DIR": str(OPS),
+                 "CALL_LOG": str(call_log), "HELPER_RC": helper_rc},
+            capture_output=True, text=True, timeout=5,
+        )
+        assert result.returncode == (0 if helper_rc == "0" else 1)
+        assert call_log.read_text().splitlines() == [
+            "-I", "-S", "-B", str(OPS / "recovery_install_observation.py"),
+            "com.mastermind.executive.privileged",
+        ]
+        if helper_rc != "0":
+            assert "absence was not proven after bootout" in result.stderr
 
     mutation_start = source.index("trap leave_installed_services_stopped EXIT")
     archive = source.index('/usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" -C "$SOURCE_REPO" archive', mutation_start)

@@ -1,3 +1,4 @@
+import { decodeOriginalAcceptanceBody, guardAcceptanceRead, missionV4Selection, type MissionV4Selection, type ProductAcceptanceOwner } from "./product-acceptance/owner-observation";
 import { attendedSelection, decodeAttendedStatus, type AttendedSelection, type AttendedStatus } from "./fabric/attended-status";
 import { createNativeExecutiveTransport } from "./native-executive-transport";
 import type { ExecutiveSessionTransport } from "./orchestration/executive-session-command-port";
@@ -5,6 +6,7 @@ import type { OsExecutiveTransport } from "./orchestration/os-executive-host";
 import {
   decodeMission,
   decodeMissionv3,
+  decodeMissionv4,
   normalizeSelection,
   normalizeWorkspaceSelection,
   type MissionDocument,
@@ -41,6 +43,11 @@ export interface AuthState {
 import type { ResearchEvidenceTransport } from "./research/evidence-contract";
 
 export interface RawClient {
+  /** Existing authenticated original-owner acquisition; no caller-supplied request key. */
+  readOriginalMissionV4?(request: MissionSelection & { signal: AbortSignal }): Promise<unknown>;
+  /** Optional private owner publication; never reconstructed from browser input. */
+  readonly productAcceptanceOwner?: ProductAcceptanceOwner;
+  readMissionV4?(request: MissionV4Selection & { signal: AbortSignal }): Promise<unknown>;
   /** Optional fixed Research capability; private Auth0 token stays with its owner. */
   readonly research?: ResearchEvidenceTransport;
   readonly executive?: OsExecutiveTransport;
@@ -88,6 +95,10 @@ export interface MissionResultRead {
   (request: ResultSelection & { signal: AbortSignal }): Promise<unknown>;
 }
 export interface MissionHost {
+  /** Existing authenticated original-owner acquisition; no caller-supplied request key. */
+  readOriginalMissionV4?(request: MissionSelection & { signal: AbortSignal }): Promise<unknown>;
+  readonly productAcceptanceOwner?: ProductAcceptanceOwner;
+  readMissionV4?(request: MissionV4Selection & { signal: AbortSignal }): Promise<unknown>;
   readMission?: (
     request: MissionSelection & { signal: AbortSignal },
   ) => Promise<unknown>;
@@ -171,6 +182,55 @@ export function bindMissionHost(
         const current = client.getState();
         if (current.status !== "signed_in" || !current.acquisition) throw new Error("FABRIC_READ_UNAUTHORIZED");
         return decodeAttendedStatus(raw, selected);
+      },
+    } : {}),
+    ...(client.readOriginalMissionV4 ? {
+      async readOriginalMissionV4(request: MissionSelection & { signal: AbortSignal }) {
+        const { signal, ...input } = request;
+        const selected = normalizeWorkspaceSelection(input);
+        if (!selected) throw new Error("SELECTION_INVALID");
+        const started = epoch, sourceGeneration = client.invalidationGeneration?.();
+        const read = client.readOriginalMissionV4;
+        let invalidated = false;
+        const verify = () => {
+          const state = client.getState();
+          if (invalidated || signal.aborted || started !== epoch || sourceGeneration !== client.invalidationGeneration?.()
+            || read !== client.readOriginalMissionV4 || state.status !== "signed_in" || !state.acquisition)
+            throw new Error("READ_CANCELLED");
+        };
+        verify();
+        const release = client.subscribe(() => { invalidated = true; });
+        try {
+          verify();
+          const raw = await read!.call(client, { ...selected, signal });
+          verify();
+          const decoded = decodeOriginalAcceptanceBody(raw, selected);
+          if (!decoded) throw new Error("MISSION_V4_RESPONSE_INVALID");
+          return decoded;
+        } finally { release(); }
+      },
+    } : {}),
+    ...(client.productAcceptanceOwner && client.readMissionV4 ? {
+      productAcceptanceOwner: client.productAcceptanceOwner,
+      async readMissionV4(request: MissionV4Selection & { signal: AbortSignal }) {
+        const { signal, ...input } = request;
+        const selected = missionV4Selection(input);
+        if (!selected) throw new Error("SELECTION_INVALID");
+        const started = epoch, sourceGeneration = client.invalidationGeneration?.(), owner = client.productAcceptanceOwner;
+        const authorized = () => {
+          const state = client.getState();
+          return !signal.aborted && started === epoch && sourceGeneration === client.invalidationGeneration?.()
+            && owner === client.productAcceptanceOwner && state.status === "signed_in" && state.acquisition;
+        };
+        const guard = guardAcceptanceRead(owner, selected, authorized);
+        try {
+          guard.check();
+          const raw = await client.readMissionV4!({ ...selected, signal });
+          guard.check();
+          const decoded = decodeMissionv4(raw, { workRef: selected.workRef, rootJobId: selected.rootJobId }, selected.requestMessageKey);
+          if (!decoded) throw new Error("MISSION_V4_RESPONSE_INVALID");
+          return decoded;
+        } finally { guard.dispose(); }
       },
     } : {}),
     async readPrograms({ signal }) {
