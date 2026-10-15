@@ -61,6 +61,7 @@ _PROGRAMS_ROUTE = "/workspace/programs/current"
 _WORK_ROUTE = "/workspace/work/current"
 _MISSION_ROUTE = "/workspace/mission/current"
 _MISSION_V3_ROUTE = "/workspace/mission/v3/current"
+_MISSION_V4_ROUTE = "/workspace/mission/v4/current"
 _RESULT_ROUTE = "/workspace/result/current"
 _PLAN_ROUTE = "/workspace/plan/current"
 _MISSION_QUERY_KEYS = frozenset({"work_ref", "root_job_id"})
@@ -322,10 +323,25 @@ def _mission_selection(query: Mapping[str, str]) -> tuple[dict[str, str] | None,
 
 def _dispatch_v2_selection(operation: str, query: Mapping[str, str]) -> dict[str, str] | None:
     """Dispatch the v2 selection validator by frozen operation."""
+    if operation == "mission_v4_original":
+        from common.product_acceptance_acquisition_contract import selection
+        try:
+            if (set(query) != {"work_ref", "root_job_id", "read_mode"}
+                    or query["read_mode"] != "original_owner"):
+                return None
+            return selection({k: query[k] for k in ("work_ref", "root_job_id")})
+        except (TypeError, ValueError):
+            return None
     if operation == "result":
         return _v2_selection(query)
     if operation in ("mission_v3", "admitted_plan"):
         return _mission_v3_selection(query)
+    if operation == "mission_v4":
+        from common.product_acceptance_read_contract import selection
+        try:
+            return selection(dict(query))
+        except (TypeError, ValueError):
+            return None
     return None
 
 
@@ -693,7 +709,19 @@ async def _dispatch_v2(
         return _refuse_json(403, "access_denied")
 
     try:
-        if operation == "admitted_plan":
+        if operation == "mission_v4_original":
+            from common import product_acceptance_acquisition_contract as acquisition_contract
+            frame = acquisition_contract.validate_frame({
+                "schema": acquisition_contract.FRAME_SCHEMA, "operation": operation,
+                "selection": selection_value, "principal": principal_frame,
+            })
+        elif operation == "mission_v4":
+            from common import product_acceptance_read_contract as acceptance_contract
+            frame = acceptance_contract.validate_frame({
+                "schema": acceptance_contract.FRAME_SCHEMA, "operation": operation,
+                "selection": selection_value, "principal": principal_frame,
+            })
+        elif operation == "admitted_plan":
             frame = contract.validate_v3_frame({
                 "schema": contract.FRAME_SCHEMA_V3, "operation": operation,
                 "selection": contract.v3_selection(selection_value), "principal": principal_frame,
@@ -735,7 +763,60 @@ async def _dispatch_v2(
         body = envelope.get("result")
         if type(body) is not dict or body.get("selection") != selection_value:
             return _refuse_json(503, "source_unavailable")
+    if operation == "mission_v4":
+        return _mission_v4_envelope_response(envelope, selection_value)
+    if operation == "mission_v4_original":
+        return _mission_v4_original_envelope_response(envelope, selection_value)
     return response_fn(envelope)
+
+
+def _mission_v4_envelope_response(envelope, selected):
+    from common import product_acceptance_read_contract as acceptance_contract
+    if type(envelope) is dict and envelope.get("ok") is True:
+        try:
+            body = envelope["result"]
+            if (type(body) is not dict or set(body) != {"schema", "mission", "product_acceptance"}
+                    or body["schema"] != acceptance_contract.MISSION_SCHEMA):
+                raise ValueError("source_unavailable")
+            mission = body["mission"]
+            if (type(mission) is not dict or mission.get("schema") != "mastermind.mission_workspace.v3"
+                    or mission["program"]["work_ref"] != selected["work_ref"]
+                    or mission["mission"]["root_job_id"] != selected["root_job_id"]):
+                raise ValueError("source_unavailable")
+            view = acceptance_contract.validate_view(body["product_acceptance"], selected=selected)
+            if view["state"] == "ACCEPTED" and mission["read_state"]["state"] != "CURRENT":
+                raise ValueError("source_unavailable")
+        except (TypeError, ValueError, KeyError):
+            return _refuse_json(503, "source_unavailable")
+    # Same existing Mission ceiling and closed refusal projection.
+    return _v2_envelope_response(envelope, operation="mission_v3")
+
+
+def _mission_v4_original_envelope_response(envelope, selected):
+    from common import product_acceptance_read_contract as acceptance_contract
+    if type(envelope) is dict and envelope.get("ok") is True:
+        try:
+            canonical_selection = acceptance_contract.selection(
+                envelope["result"]["product_acceptance"]["selection"])
+            if {k: canonical_selection[k] for k in ("work_ref", "root_job_id")} != selected:
+                raise ValueError("source_unavailable")
+        except (TypeError, ValueError, KeyError):
+            return _refuse_json(503, "source_unavailable")
+        # The exact key came from the authenticated installed owner response,
+        # never the query. Reuse all original Mission/receipt/body validation.
+        return _mission_v4_envelope_response(envelope, canonical_selection)
+    return _v2_envelope_response(envelope, operation="mission_v3")
+
+
+async def mission_v4_current(request: Request, *, config: WorkspaceAppConfig) -> JSONResponse:
+    # Only the explicit canonical mode key selects acquisition. Encoded aliases,
+    # duplicates and mixed modes still fail the strict decoder before the owner.
+    raw_query = request.scope.get("query_string") or b""
+    if b"read_mode" in {part.partition(b"=")[0] for part in raw_query.split(b"&")}:
+        return await _dispatch_v2(request, config=config, operation="mission_v4_original",
+            required_keys=frozenset({"work_ref", "root_job_id", "read_mode"}), response_fn=None)
+    return await _dispatch_v2(request, config=config, operation="mission_v4",
+        required_keys=frozenset({"work_ref", "root_job_id", "request_message_key"}), response_fn=None)
 
 
 async def mission_v3_current(
@@ -833,6 +914,7 @@ class _RawPathFence:
         _WORK_ROUTE,
         _MISSION_ROUTE,
         _MISSION_V3_ROUTE,
+        _MISSION_V4_ROUTE,
         _RESULT_ROUTE,
         _PLAN_ROUTE,
     )
@@ -884,6 +966,9 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
     async def mission_v3_endpoint(request: Request) -> JSONResponse:
         return await mission_v3_current(request, config=config)
 
+    async def mission_v4_endpoint(request: Request) -> JSONResponse:
+        return await mission_v4_current(request, config=config)
+
     async def result_endpoint(request: Request) -> JSONResponse:
         return await result_current(request, config=config)
 
@@ -895,6 +980,7 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
         Route(_WORK_ROUTE, work_endpoint, methods=["GET"]),
         Route(_MISSION_ROUTE, mission_endpoint, methods=["GET"]),
         Route(_MISSION_V3_ROUTE, mission_v3_endpoint, methods=["GET"]),
+        Route(_MISSION_V4_ROUTE, mission_v4_endpoint, methods=["GET"]),
         Route(_RESULT_ROUTE, result_endpoint, methods=["GET"]),
         Route(_PLAN_ROUTE, plan_endpoint, methods=["GET"]),
     ]

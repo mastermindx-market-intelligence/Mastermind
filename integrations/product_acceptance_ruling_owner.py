@@ -56,21 +56,23 @@ def _unavailable(code: str) -> ProductAcceptanceRequestUnavailable:
     return ProductAcceptanceRequestUnavailable(code)
 
 
-class ProductAcceptanceRulingOwner:
-    def __init__(
-        self,
-        request_owner: ProductAcceptanceRequestOwner,
-        principal_owner: PrincipalDialogueRuntimeCommitOwner,
-    ) -> None:
-        if (
-            type(request_owner) is not ProductAcceptanceRequestOwner
-            or type(principal_owner) is not PrincipalDialogueRuntimeCommitOwner
-            or request_owner.runtime is not principal_owner.runtime
-        ):
-            raise TypeError(
-                "product acceptance requires the same exact Runtime and existing principal owner"
-            )
-        self.request_owner, self.principal_owner = request_owner, principal_owner
+def _qualified_result(message_key: str, ruling_key: str, digest: str) -> dict[str, Any]:
+    return {
+        "state": "RULING_QUALIFIED_PARENT_RETURN_PENDING",
+        "request_message_key": message_key,
+        "ruling_message_key": ruling_key,
+        "evidence_digest": digest,
+        "next": "Preserve this digest in the existing evidence_digests of this commissioned work result, and return it to the original parent for inclusion in its aggregate evidence_digests. Acceptance remains pending until both exact terminal returns are validated.",
+    }
+
+
+class ProductAcceptanceRulingReceiptReader:
+    """Read owner-issued receipts without holding any principal COMMIT authority."""
+
+    def __init__(self, request_owner: ProductAcceptanceRequestOwner) -> None:
+        if type(request_owner) is not ProductAcceptanceRequestOwner:
+            raise TypeError("product receipt requires the exact request owner")
+        self.request_owner = request_owner
         self.runtime = request_owner.runtime
 
     def _request(self, message_key: str) -> dict[str, Any]:
@@ -134,6 +136,221 @@ class ProductAcceptanceRulingOwner:
             raise _unavailable("PRODUCT_REQUEST_CONFLICT")
         return raw
 
+    def _current_request(
+        self, *, binding: DialogueBinding, message_key: str
+    ):
+        raw = self._request(message_key)
+        if (
+            CompanyDialogueGateway._binding_context(binding) != raw["context"]
+            or binding.thread_ts != raw["thread_ts"]
+        ):
+            raise _unavailable("PRODUCT_PARENT_BINDING_CHANGED")
+        selected = _select(
+            self.runtime, raw["context"]["applies_to"], raw["subject"]["subject_job_id"]
+        )
+        if _subject_identity(selected) != raw["subject"]:
+            raise _unavailable("PRODUCT_RUNTIME_CHANGED")
+        retained = _decode(raw["review_input"])
+        current = self.request_owner.reader.read(
+            work_ref=retained.work_ref,
+            execution_commission_ref=selected.subject.completion.dialogue_source.commission_ref,
+            root_objective=selected.root_objective,
+        )
+        continuity = reconcile_unchanged_acceptance_basis(retained.basis, current)
+        expected = retained.expected
+        proof = require_complete_product_acceptance_review_proof(
+            selected.reviewer.completion.result_envelope["role_result"].get(
+                "product_acceptance_proof"
+            ),
+            expected_basis_digest=expected.basis_digest,
+            expected_criterion_digests=expected.criterion_digests,
+            expected_obligation_digests=expected.obligation_digests,
+        )
+        if _canonical_digest(proof) != raw["proof_digest"]:
+            raise _unavailable("PRODUCT_REVIEW_CHANGED")
+        return raw, selected, expected, continuity
+
+    def _qualified_receipt(self, message_key: str):
+        raw = self._request(message_key)
+        subject = raw["subject"]
+        with self.runtime.store.read() as connection:
+            event = self.runtime.store.get_event_by_command_id(
+                COMMAND_PREFIX + message_key, connection=connection
+            )
+            rows = self.runtime.store.list_events(
+                aggregate_type=AGGREGATE,
+                aggregate_id=message_key,
+                connection=connection,
+            )
+        if (
+            event is None
+            or len(rows) != 1
+            or rows[0].event_id != event.event_id
+            or event.event_type != EVENT_TYPE
+            or event.aggregate_type != AGGREGATE
+            or event.aggregate_id != message_key
+            or event.actor != "product-acceptance-ruling-owner"
+            or event.job_id != subject["issuer_job_id"]
+            or event.attempt_id != subject["issuer_attempt_id"]
+            or event.worker_id != subject["issuer_worker_id"]
+            or type(event.payload) is not dict
+            or set(event.payload) != {"receipt", "receipt_digest", "source_continuity"}
+            or type(event.payload["receipt"]) is not dict
+            or set(event.payload["receipt"])
+            != {
+                "schema",
+                "request_message_key",
+                "request_fingerprint",
+                "subject",
+                "ruling_message_key",
+                "ruling_fingerprint",
+                "principal_actor",
+                "commit_observation",
+                "acceptance_basis_digest",
+                "proof_digest",
+            }
+            or event.payload["receipt"].get("schema") != SCHEMA
+            or event.payload["receipt"].get("request_message_key") != message_key
+            or event.payload["receipt"].get("request_fingerprint")
+            != raw["message"]["fingerprint"]
+            or event.payload["receipt"].get("acceptance_basis_digest")
+            != raw["review_input"]["expected"]["basis_digest"]
+            or event.payload["receipt"].get("proof_digest") != raw["proof_digest"]
+            or event.payload.get("receipt_digest")
+            != _canonical_digest(event.payload.get("receipt"))
+            or event.payload["receipt"].get("subject") != subject
+        ):
+            raise _unavailable("PRODUCT_RULING_UNQUALIFIED")
+        return raw, event
+
+    def observe_qualified(self, *, binding: DialogueBinding, message_key: str) -> dict[str, Any]:
+        # Revalidate this live requester, terminal subject/review, retained basis
+        # and complete current proof before exposing the existing receipt digest.
+        # This reader never observes Relay, creates a ruling or appends an event.
+        current, _selected, _expected, _continuity = self._current_request(
+            binding=binding, message_key=message_key,
+        )
+        raw, event = self._qualified_receipt(message_key)
+        if raw != current or _subject_identity(_select(
+            self.runtime, raw["context"]["applies_to"], raw["subject"]["subject_job_id"]
+        )) != raw["subject"]:
+            raise _unavailable("PRODUCT_REQUEST_CONFLICT")
+        return _qualified_result(message_key,
+            event.payload["receipt"]["ruling_message_key"], event.payload["receipt_digest"])
+
+    def observe_acceptance(self, message_key: str) -> dict[str, Any]:
+        """Read-only projection; only a canonical parent terminal return consumes."""
+        raw, event = self._qualified_receipt(message_key)
+        subject = raw["subject"]
+        digest = event.payload["receipt_digest"]
+        try:
+            issuer = self.runtime.validated_role_completion(
+                subject["issuer_job_id"],
+                expected_attempt_id=subject["issuer_attempt_id"],
+            )
+            root = self.runtime.jobs.get_job(subject["root_job_id"])
+            if root is None or root.current_attempt_id is None:
+                raise _unavailable("PRODUCT_PARENT_RETURN_UNVERIFIED")
+            parent = self.runtime.validated_role_completion(
+                root.job_id, expected_attempt_id=root.current_attempt_id
+            )
+        except RuntimeProofError as exc:
+            raise _unavailable("PRODUCT_PARENT_RETURN_UNVERIFIED") from exc
+        body = parent.result_envelope["role_result"]
+        revisions = [
+            row
+            for row in body["revisions"]
+            if row["current_job_id"] == subject["subject_job_id"]
+        ]
+        consumers = [
+            row
+            for row in body["revisions"]
+            if row["current_job_id"] == subject["issuer_job_id"]
+        ]
+        if (
+            issuer.job.orchestration_role != "work"
+            or issuer.job.parent_job_id != parent.job.job_id
+            or issuer.attempt.worker_id != subject["issuer_worker_id"]
+            or digest not in issuer.result_envelope["role_result"]["evidence_digests"]
+            or parent.job.orchestration_role != "aggregation"
+            or parent.job.job_id != subject["root_job_id"]
+            or parent.job.objective != subject["root_objective"]
+            or digest not in body["evidence_digests"]
+            or len(consumers) != 1
+            or consumers[0]["current_attempt_id"] != issuer.attempt.attempt_id
+            or consumers[0]["current_result_digest"] != issuer.role_result_digest
+            or len(revisions) != 1
+            or any(
+                revisions[0][key] != subject[value]
+                for key, value in (
+                    ("current_attempt_id", "subject_attempt_id"),
+                    ("current_result_digest", "subject_role_result_digest"),
+                    ("qualifying_review_job_id", "reviewer_job_id"),
+                    ("qualifying_review_attempt_id", "reviewer_attempt_id"),
+                    ("qualifying_review_result_digest", "reviewer_role_result_digest"),
+                )
+            )
+        ):
+            raise _unavailable("PRODUCT_PARENT_CONSUMPTION_UNPROVEN")
+        retained = _decode(raw["review_input"])
+        source = parent.dialogue_source
+        if (
+            source is None
+            or source.commission_ref.to_dict() != retained.execution_commission_ref
+        ):
+            raise _unavailable("PRODUCT_PARENT_CONSUMPTION_UNPROVEN")
+        current = self.request_owner.reader.read(
+            work_ref=retained.work_ref,
+            execution_commission_ref=source.commission_ref,
+            root_objective=parent.job.objective,
+        )
+        continuity = reconcile_unchanged_acceptance_basis(retained.basis, current)
+        return {
+            "state": "PRODUCT_ACCEPTED",
+            "subject_job_id": subject["subject_job_id"],
+            "subject_result_envelope_digest": subject["subject_result_envelope_digest"],
+            "ruling_message_key": event.payload["receipt"]["ruling_message_key"],
+            "qualified_ruling_digest": digest,
+            "parent_job_id": parent.job.job_id,
+            "parent_attempt_id": parent.attempt.attempt_id,
+            "parent_result_envelope_digest": parent.result_digest,
+            "source_continuity": dataclasses.asdict(continuity),
+        }
+
+
+class ProductAcceptanceRulingOwner(ProductAcceptanceRulingReceiptReader):
+    def __init__(
+        self,
+        request_owner: ProductAcceptanceRequestOwner,
+        principal_owner: PrincipalDialogueRuntimeCommitOwner,
+    ) -> None:
+        if (
+            type(request_owner) is not ProductAcceptanceRequestOwner
+            or type(principal_owner) is not PrincipalDialogueRuntimeCommitOwner
+            or request_owner.runtime is not principal_owner.runtime
+        ):
+            raise TypeError(
+                "product acceptance requires the same exact Runtime and existing principal owner"
+            )
+        super().__init__(request_owner)
+        self.principal_owner = principal_owner
+
+    async def qualify_committed_request(self) -> dict[str, Any]:
+        """Join this actual principal reply to its already-issued worker request.
+
+        The reply target comes from the host's current principal binding. The
+        retained worker context is used only for qualification reads, with no
+        message grant. It cannot originate or replay a worker request.
+        """
+        principal = self.principal_owner.binding_resolver.resolve()
+        message_key = principal.reply_to_message_key
+        raw = self._request(message_key)
+        context = raw["context"]
+        binding = DialogueBinding(
+            **context, thread_ts=raw["thread_ts"], allowed_message_types=(),
+        )
+        return await self.qualify(binding=binding, message_key=message_key)
+
     async def _service(self, operation: str, args: dict[str, Any]) -> dict[str, Any]:
         response = await self.principal_owner.service_call(
             self.principal_owner.socket_path,
@@ -173,35 +390,9 @@ class ProductAcceptanceRulingOwner:
     async def qualify(
         self, *, binding: DialogueBinding, message_key: str
     ) -> dict[str, Any]:
-        raw = self._request(message_key)
-        if (
-            CompanyDialogueGateway._binding_context(binding) != raw["context"]
-            or binding.thread_ts != raw["thread_ts"]
-        ):
-            raise _unavailable("PRODUCT_PARENT_BINDING_CHANGED")
-        selected = _select(
-            self.runtime, raw["context"]["applies_to"], raw["subject"]["subject_job_id"]
+        raw, selected, expected, continuity = self._current_request(
+            binding=binding, message_key=message_key
         )
-        if _subject_identity(selected) != raw["subject"]:
-            raise _unavailable("PRODUCT_RUNTIME_CHANGED")
-        retained = _decode(raw["review_input"])
-        current = self.request_owner.reader.read(
-            work_ref=retained.work_ref,
-            execution_commission_ref=selected.subject.completion.dialogue_source.commission_ref,
-            root_objective=selected.root_objective,
-        )
-        continuity = reconcile_unchanged_acceptance_basis(retained.basis, current)
-        expected = retained.expected
-        proof = require_complete_product_acceptance_review_proof(
-            selected.reviewer.completion.result_envelope["role_result"].get(
-                "product_acceptance_proof"
-            ),
-            expected_basis_digest=expected.basis_digest,
-            expected_criterion_digests=expected.criterion_digests,
-            expected_obligation_digests=expected.obligation_digests,
-        )
-        if _canonical_digest(proof) != raw["proof_digest"]:
-            raise _unavailable("PRODUCT_REVIEW_CHANGED")
         # Verify the exact request bytes were present, including a previously
         # lost send response. This read never retries the original send.
         history = await self._service(
@@ -330,137 +521,4 @@ class ProductAcceptanceRulingOwner:
                         "source_continuity": dataclasses.asdict(continuity),
                     },
                 )
-        return {
-            "state": "RULING_QUALIFIED_PARENT_RETURN_PENDING",
-            "request_message_key": message_key,
-            "ruling_message_key": reply["message_key"],
-            "evidence_digest": digest,
-            "next": "Preserve this digest in the existing evidence_digests of this commissioned work result, and return it to the original parent for inclusion in its aggregate evidence_digests. Acceptance remains pending until both exact terminal returns are validated.",
-        }
-
-    def observe_acceptance(self, message_key: str) -> dict[str, Any]:
-        """Read-only projection; only a canonical parent terminal return consumes."""
-        raw = self._request(message_key)
-        subject = raw["subject"]
-        with self.runtime.store.read() as connection:
-            event = self.runtime.store.get_event_by_command_id(
-                COMMAND_PREFIX + message_key, connection=connection
-            )
-            rows = self.runtime.store.list_events(
-                aggregate_type=AGGREGATE,
-                aggregate_id=message_key,
-                connection=connection,
-            )
-        if (
-            event is None
-            or len(rows) != 1
-            or rows[0].event_id != event.event_id
-            or event.event_type != EVENT_TYPE
-            or event.aggregate_type != AGGREGATE
-            or event.aggregate_id != message_key
-            or event.actor != "product-acceptance-ruling-owner"
-            or event.job_id != subject["issuer_job_id"]
-            or event.attempt_id != subject["issuer_attempt_id"]
-            or event.worker_id != subject["issuer_worker_id"]
-            or type(event.payload) is not dict
-            or set(event.payload) != {"receipt", "receipt_digest", "source_continuity"}
-            or type(event.payload["receipt"]) is not dict
-            or set(event.payload["receipt"])
-            != {
-                "schema",
-                "request_message_key",
-                "request_fingerprint",
-                "subject",
-                "ruling_message_key",
-                "ruling_fingerprint",
-                "principal_actor",
-                "commit_observation",
-                "acceptance_basis_digest",
-                "proof_digest",
-            }
-            or event.payload["receipt"].get("schema") != SCHEMA
-            or event.payload["receipt"].get("request_message_key") != message_key
-            or event.payload["receipt"].get("request_fingerprint")
-            != raw["message"]["fingerprint"]
-            or event.payload["receipt"].get("acceptance_basis_digest")
-            != raw["review_input"]["expected"]["basis_digest"]
-            or event.payload["receipt"].get("proof_digest") != raw["proof_digest"]
-            or event.payload.get("receipt_digest")
-            != _canonical_digest(event.payload.get("receipt"))
-            or event.payload["receipt"].get("subject") != subject
-        ):
-            raise _unavailable("PRODUCT_RULING_UNQUALIFIED")
-        digest = event.payload["receipt_digest"]
-        try:
-            issuer = self.runtime.validated_role_completion(
-                subject["issuer_job_id"],
-                expected_attempt_id=subject["issuer_attempt_id"],
-            )
-            root = self.runtime.jobs.get_job(subject["root_job_id"])
-            if root is None or root.current_attempt_id is None:
-                raise _unavailable("PRODUCT_PARENT_RETURN_UNVERIFIED")
-            parent = self.runtime.validated_role_completion(
-                root.job_id, expected_attempt_id=root.current_attempt_id
-            )
-        except RuntimeProofError as exc:
-            raise _unavailable("PRODUCT_PARENT_RETURN_UNVERIFIED") from exc
-        body = parent.result_envelope["role_result"]
-        revisions = [
-            row
-            for row in body["revisions"]
-            if row["current_job_id"] == subject["subject_job_id"]
-        ]
-        consumers = [
-            row
-            for row in body["revisions"]
-            if row["current_job_id"] == subject["issuer_job_id"]
-        ]
-        if (
-            issuer.job.orchestration_role != "work"
-            or issuer.job.parent_job_id != parent.job.job_id
-            or issuer.attempt.worker_id != subject["issuer_worker_id"]
-            or digest not in issuer.result_envelope["role_result"]["evidence_digests"]
-            or parent.job.orchestration_role != "aggregation"
-            or parent.job.job_id != subject["root_job_id"]
-            or parent.job.objective != subject["root_objective"]
-            or digest not in body["evidence_digests"]
-            or len(consumers) != 1
-            or consumers[0]["current_attempt_id"] != issuer.attempt.attempt_id
-            or consumers[0]["current_result_digest"] != issuer.role_result_digest
-            or len(revisions) != 1
-            or any(
-                revisions[0][key] != subject[value]
-                for key, value in (
-                    ("current_attempt_id", "subject_attempt_id"),
-                    ("current_result_digest", "subject_role_result_digest"),
-                    ("qualifying_review_job_id", "reviewer_job_id"),
-                    ("qualifying_review_attempt_id", "reviewer_attempt_id"),
-                    ("qualifying_review_result_digest", "reviewer_role_result_digest"),
-                )
-            )
-        ):
-            raise _unavailable("PRODUCT_PARENT_CONSUMPTION_UNPROVEN")
-        retained = _decode(raw["review_input"])
-        source = parent.dialogue_source
-        if (
-            source is None
-            or source.commission_ref.to_dict() != retained.execution_commission_ref
-        ):
-            raise _unavailable("PRODUCT_PARENT_CONSUMPTION_UNPROVEN")
-        current = self.request_owner.reader.read(
-            work_ref=retained.work_ref,
-            execution_commission_ref=source.commission_ref,
-            root_objective=parent.job.objective,
-        )
-        continuity = reconcile_unchanged_acceptance_basis(retained.basis, current)
-        return {
-            "state": "PRODUCT_ACCEPTED",
-            "subject_job_id": subject["subject_job_id"],
-            "subject_result_envelope_digest": subject["subject_result_envelope_digest"],
-            "ruling_message_key": event.payload["receipt"]["ruling_message_key"],
-            "qualified_ruling_digest": digest,
-            "parent_job_id": parent.job.job_id,
-            "parent_attempt_id": parent.attempt.attempt_id,
-            "parent_result_envelope_digest": parent.result_digest,
-            "source_continuity": dataclasses.asdict(continuity),
-        }
+        return _qualified_result(message_key, reply["message_key"], digest)

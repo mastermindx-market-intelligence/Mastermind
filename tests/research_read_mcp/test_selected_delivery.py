@@ -121,36 +121,64 @@ async def test_malformed_selection_identity_refuses(key):
 @pytest.mark.anyio
 async def test_cancelled_final_guard_keeps_its_shared_producer_slot_until_settled():
     release = threading.Event()
+    release_cancelled = threading.Event()
+    loop = asyncio.get_running_loop()
+    first_started, four_started = asyncio.Event(), asyncio.Event()
     started = []
     lock = threading.Lock()
     def guard():
         with lock:
+            ordinal = len(started)
             started.append(threading.get_ident())
+            if ordinal == 0:
+                loop.call_soon_threadsafe(first_started.set)
+            if ordinal == 3:
+                loop.call_soon_threadsafe(four_started.set)
         assert release.wait(10)
+        if ordinal == 0:
+            assert release_cancelled.wait(10)
     h, service, adapter, ctx = setup(guard)
     async def invoke():
         with adapter.capture_selection() as frame:
             result = await adapter("research_status", {}, ctx)
         await frame.check()
         return result
-    tasks = [asyncio.create_task(invoke()) for _ in range(4)]
+    tasks = [asyncio.create_task(invoke())]
     try:
-        for _ in range(500):
-            if len(started) == 4:
-                break
-            await asyncio.sleep(.01)
+        # Bind the cancelled caller to the deliberately retained first producer.
+        await asyncio.wait_for(first_started.wait(), 5)
+        tasks.extend(asyncio.create_task(invoke()) for _ in range(3))
+        await asyncio.wait_for(four_started.wait(), 5)
         assert len(started) == 4 and adapter._slots._value == 0
         tasks[0].cancel()
         with pytest.raises(asyncio.CancelledError):
             await tasks[0]
+        assert adapter._slots._value == 0  # cancelled producer is still held
         fifth = asyncio.create_task(invoke())
         tasks.append(fifth)
-        await asyncio.sleep(.05)
+        async with asyncio.timeout(5):
+            while not adapter._slots._waiters:
+                await asyncio.sleep(0)
         assert len(service.calls) == 4 and adapter._slots._value == 0
+        release.set()
+        await asyncio.gather(*tasks[1:])
+        # Joining cancelled callers does not join their shielded producer.
+        assert adapter._slots._value == 3
+        release_cancelled.set()
+        acquired = 0
+        try:
+            # Join the real settlement callback, not an assumed scheduling turn.
+            for _ in range(4):
+                await asyncio.wait_for(adapter._slots.acquire(), 5)
+                acquired += 1
+        finally:
+            for _ in range(acquired):
+                adapter._slots.release()
+        assert adapter._slots._value == 4
     finally:
         release.set()
+        release_cancelled.set()
         await asyncio.gather(*tasks, return_exceptions=True)
-    assert adapter._slots._value == 4
 
 
 @pytest.mark.anyio

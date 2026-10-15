@@ -1,0 +1,111 @@
+--- a/bailian_keys.py
++++ b/bailian_keys.py
+@@ -22,6 +22,7 @@
+ import fcntl
+ import json
+ import os
++import re
+ import shlex
+ import sys
+ import time
+@@ -454,14 +455,17 @@
+     pid: Optional[int] = None,
+     skip: Optional[List[str]] = None,
+     prefer: Optional[str] = None,
++    require: Optional[str] = None,
+ ) -> str:
+     """Least-loaded key under its effective per-key cap. Records <pid>.
+ 
+-    `prefer` (or $POOL_ACCOUNT / $BAILIAN_PREFER) is the broker-granted account:
+-    if that name is usable it is taken, otherwise the least-loaded fallback
+-    (failover rotation). Never prints a key value.
++    `prefer` is a soft preference for unleased callers. `require` restricts
++    selection to the exact outer-lease account; an unavailable account fails
++    before any other account slot is touched. Never prints a key value.
+     """
+     pid = int(pid if pid is not None else os.getppid())
++    if require is not None and not re.fullmatch(r"[A-Za-z0-9._-]+", require):
++        _die("required Bailian account is invalid", 2)
+     skip_set = set(skip or [])
+     extra = os.environ.get("BAILIAN_PICK_SKIP") or ""
+     if extra.strip():
+@@ -473,7 +477,15 @@
+     lock = _with_lock()
+     try:
+         candidates: List[Tuple[int, str]] = []
+-        for name in key_names():
++        names = key_names()
++        if require is not None:
++            if require not in names:
++                _die(f"REQUIRED_ACCOUNT_UNAVAILABLE account={require} reason=not_configured", 3)
++            if require in skip_set:
++                _die(f"REQUIRED_ACCOUNT_UNAVAILABLE account={require} reason=excluded", 3)
++            names = [require]
++        unavailable_reason = "at_capacity"
++        for name in names:
+             if name in skip_set:
+                 continue
+             cd = cooldown_info(name)
+@@ -485,6 +497,7 @@
+                 reason = cd[1] if len(cd) > 1 else ""
+                 if reason != "http_429":
+                     # Non-429 cooldown: key is not available.
++                    unavailable_reason = "cooldown"
+                     continue
+                 # 429-cooldown key: use soft cap, key stays in the pool.
+                 eff_cap = _effective_cap_for_key(name)
+@@ -493,6 +506,8 @@
+                 continue
+             candidates.append((n, name))
+         if not candidates:
++            if require is not None:
++                _die(f"REQUIRED_ACCOUNT_UNAVAILABLE account={require} reason={unavailable_reason}", 3)
+             _die("no usable Bailian key (all cooling or at cap)", 3)
+         preferred = [c for c in candidates if prefer and c[1] == prefer]
+         if preferred:
+@@ -742,9 +757,16 @@
+ 
+ def cmd_pick(argv: List[str]) -> int:
+     prefer = None
++    require = None
+     rest: List[str] = []
+     i = 0
+     while i < len(argv):
++        if argv[i] == "--require":
++            if i + 1 >= len(argv) or require is not None:
++                _die("usage: pick [--prefer NAME | --require NAME]", 2)
++            require = argv[i + 1]
++            i += 2
++            continue
+         if argv[i] == "--prefer" and i + 1 < len(argv):
+             prefer = argv[i + 1]
+             i += 2
+@@ -753,7 +775,9 @@
+         i += 1
+     if rest and prefer is None:
+         prefer = rest[0]
+-    name = pick(prefer=prefer)
++    if require is not None and (prefer is not None or rest):
++        _die("usage: pick [--prefer NAME | --require NAME]", 2)
++    name = pick(prefer=prefer, require=require)
+     print(name)
+     return 0
+ 
+--- a/qwen_exec.sh
++++ b/qwen_exec.sh
+@@ -320,10 +320,12 @@
+   NAME=""
+   PICK_ERR=""
+   unset BAILIAN_API_KEY 2>/dev/null || true
+-  # Broker-granted account (POOL_ACCOUNT) is preferred; rotation still
+-  # failovers to another usable key if that account is cooling.
++  # An outer lease binds one account. Local selection must not reserve a
++  # different account even temporarily. Unleased calls retain soft preference.
+   _pick_args="pick"
+-  if [ -n "${POOL_ACCOUNT:-}" ]; then
++  if [ "${LANE_LEASED:-0}" = "1" ]; then
++    _pick_args="pick --require $POOL_ACCOUNT"
++  elif [ -n "${POOL_ACCOUNT:-}" ]; then
+     case "$POOL_ACCOUNT" in
+       *[!A-Za-z0-9._-]*) ;;
+       *) _pick_args="pick --prefer $POOL_ACCOUNT" ;;

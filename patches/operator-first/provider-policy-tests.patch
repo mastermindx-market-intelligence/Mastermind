@@ -1,0 +1,37 @@
+--- a/tests/test_provider_orchestrator_policy.py
++++ b/tests/test_provider_orchestrator_policy.py
+@@ -189,12 +189,12 @@
+ 
+ 
+ def test_managed_policy_retains_efficiency_and_hierarchy_laws() -> None:
+-    text = policy.POLICY_BODY
++    text = policy._managed_text("")
+     required = (
+         "accepted capability delta per root budget",
+-        "Sol is the default day-to-day project executive",
+-        "Do not force a ceremonial hierarchy",
+-        "compact frozen mission/frontier capsule",
++        "operator owns",
++        "Omit a layer that adds only relay overhead",
++        "compact capsules",
+         "FRONTIER_WITNESS",
+         "Capacity is a ceiling, not a target",
+         "NO_DELTA_LOOP",
+@@ -296,7 +296,7 @@
+         assert "A CEO cycle is event/phase-scoped, not tool/turn-scoped." in text
+         assert "Finalization ceremony is pre-yield only." in text
+         assert "Capacity is a ceiling, not a target." in text
+-        assert "Sol is the default day-to-day project executive" in text
++        assert "operator owns" in text
+         assert text.count(BEGIN) == text.count(END) == 1
+ 
+ 
+@@ -379,7 +379,7 @@
+     assert "A CEO cycle is event/phase-scoped, not tool/turn-scoped." in text
+     assert "Finalization ceremony is pre-yield only." in text
+     assert "Capacity is a ceiling, not a target." in text
+-    assert "Sol is the default day-to-day project executive" in text
++    assert "operator owns" in text
+     assert "# Existing Codex policy" in text
+ 
+ 

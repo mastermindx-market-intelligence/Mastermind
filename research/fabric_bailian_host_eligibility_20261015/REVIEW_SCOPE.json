@@ -1,0 +1,15 @@
+{
+  "hashes": {
+    "glm_host_account_probe.py": "0fdefaef0449b68a686f1b44ac589f3ae07d6789e4a46bc61540bb4367f8e404",
+    "glm_host_account_source.py": "1ec07bd756e8b3edc66f39218b69876f2e9aa898b0b539319e93d8c2ff68587c",
+    "glm_host_account_readiness.py": "00fdbdf5422904a349a8cf09ffdd05f63ab716d8f712d8c28cf9a60708cfca21",
+    "host_pull_backend.py": "41608e90a501149a8eae4e77c8bf4933f30ac78ad13dc0bfd1b4f421a9e750f2",
+    "pick.py": "0f5cbc32504680e09055b77cffdea81adea734388b7b061fcf77d017b7715cb2",
+    "lease_broker.py": "dae3e58324289d57fd7bebc01163cbd185771082bcc7c1d84dea1e879e19b240"
+  },
+  "scope": "existing collector produces policy-listed configured-alias booleans, same private telemetry; same host router and broker intersect before demand/lease. No capacity/credentials or replay authority. GLM original public contract unchanged.",
+  "checks": "53 new qualified across affected runs;33 original GLM predicate PASS;59 existing composition PASS;1 GLM fixture mismatch reproduced unchanged baseline.",
+  "installation": "not started; producer-first adoption must be verified before router/broker consumers",
+  "review_repair": "Two findings reproduced 9RED/2PASS then19affectedPASS. Current mode/role/hold checked before observation/lease; Qwen emitted model bound to observed model.",
+  "review_verdict": "PASS: NativeCore01a12a08 closed the two findings using independent actual-function probes at exact current source hashes. Other four reviewed sources unchanged."
+}
