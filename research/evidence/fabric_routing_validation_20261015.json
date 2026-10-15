@@ -1,0 +1,60 @@
+{
+  "schema": "mastermind.fabric_routing_validation_evidence/v1",
+  "operation": "fabric-routing-deep-audit-20261013-c2-001",
+  "source_head": "d47c54a46e7e20baa42d18c0a12f8eef09c2a0db",
+  "subject": "Request-local queues and model-aware account balancing source tests",
+  "provenance": {
+    "report": "research/FABRIC_ROUTING_ACCOUNT_BALANCE_2026_10_14.md",
+    "original_manifest_blob": "432dfb6ccbf166de95e70c4d6ef470961ccb116c",
+    "matrix_field_in_source_manifest": "verification.account_capacity_cases_inside_suite",
+    "relocation_only": true,
+    "new_test_execution_claimed": false
+  },
+  "measurements": {
+    "capacity_selection_suite": {
+      "before": {
+        "failed": 15,
+        "passed": 15
+      },
+      "after": {
+        "passed": 30,
+        "failed": 0
+      }
+    },
+    "capacity_matrix": {
+      "cases": 400,
+      "unit": "synthetic eligible-capacity combinations",
+      "included_in_suite_count": true
+    },
+    "combined_source_suite": {
+      "passed": 89,
+      "failed": 0,
+      "breakdown": {
+        "request_waiters": 49,
+        "requeue_clock_ties": 2,
+        "account_balance": 30,
+        "legacy_queue_compatibility": 1,
+        "patch_composition": 7
+      }
+    },
+    "legacy_fifo_matrix": {
+      "cases": 3750,
+      "included_in_suite_count": true
+    }
+  },
+  "runtime": {
+    "python": "3.13.5",
+    "pytest": "9.0.2"
+  },
+  "scope": {
+    "composition": "Both raw patches apply to one source-backed Broker method fragment in either order with identical output; root fair_share, active_orchestrators and register_demand AST bodies remain unchanged. Not a full broker or install proof.",
+    "independent_review": false,
+    "full_native_regression": false,
+    "production_proof": false,
+    "original_native_suite": {
+      "passed": 49,
+      "failed": 1
+    },
+    "original_native_limitation": "The original GLM fixture and native preparation/host inspection remain held; this measurement record does not clear those gates."
+  }
+}

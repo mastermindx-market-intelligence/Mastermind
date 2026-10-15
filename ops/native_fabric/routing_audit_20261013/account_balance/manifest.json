@@ -30,18 +30,11 @@
   "combined_method_fragment_sha256": "a0a2068ee050c806307f50f5f92646eb2ec28acc11c2d8f637e647504ea6309a",
   "verified_remote_head": "a41433291ba4a006c13826b5b3aef06743cb8cc8",
   "verification": {
-    "account_before_failed": 15,
-    "account_before_passed": 15,
-    "account_after_passed": 30,
-    "account_after_failed": 0,
-    "account_capacity_cases_inside_suite": 400,
-    "combined_new_source_tests_passed": 89,
-    "combined_new_source_tests_failed": 0,
-    "combined_breakdown": {"request_waiters": 49, "requeue_clock_ties": 2, "account_balance": 30, "legacy_queue_compatibility": 1, "patch_composition": 7},
-    "legacy_fifo_cases_inside_compatibility_test": 3750,
+    "measurement_evidence": {
+      "path": "research/evidence/fabric_routing_validation_20261015.json",
+      "sha256": "6ae28362d47f719b982439269edca93500992686b8102ae737c4ad4e11f28e15"
+    },
     "composition_scope": "Both raw patches apply to one source-backed Broker method fragment in either order with identical output; root fair_share, active_orchestrators and register_demand AST bodies remain unchanged. Not a full broker or install proof.",
-    "python": "3.13.5",
-    "pytest": "9.0.2",
     "independent_review": false,
     "full_native_regression": false,
     "production_proof": false
