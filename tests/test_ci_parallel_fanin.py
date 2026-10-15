@@ -47,6 +47,14 @@ def test_live_ci_workflow_fan_in_is_fail_closed_and_uses_three_full_shards() -> 
         ('if [ "$SHARDS_STATUS" != success ]; then', "if [ \"$SHARDS_STATUS\" = failure ]; then"),
         ("exit 1", "exit 0"),
         ("exit 1", "# exit 1"),
+        (
+            "      - name: Run repository test gate\n        env:",
+            "      - name: Run repository test gate\n        if: false\n        env:",
+        ),
+        (
+            "      - name: Run repository test gate\n        env:",
+            "      - name: Run repository test gate\n        if: ${{ github.event_name == 'pull_request' }}\n        env:",
+        ),
         ("exit 1\n          fi", "echo \"not stopping\"\n          fi\n          exit 1"),
         (
             "python -m scripts.ci_parallel_shard --jobs 3 --index ${{ matrix.index }}",

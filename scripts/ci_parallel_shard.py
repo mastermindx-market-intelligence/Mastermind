@@ -102,6 +102,9 @@ def validate_parallel_workflow(text: str) -> None:
         or env.get("SHARDS_STATUS") != "${{ needs.pytest_shards.result }}"
         or actual_lines != expected_lines
         or final.get("shell") not in (None, "bash")
+        # A skipped required step can make the whole `test` job green while
+        # its matrix failed, even when its shell body is otherwise correct.
+        or final.get("if") is not None
     ):
         raise ci_pytest.PolicyError("required fan-in guard must reject non-success before parsing the plan")
     if any(
