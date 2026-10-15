@@ -121,3 +121,12 @@ REVIEWED_FILES['ops/executive_os/finite_service_lifecycle.py'] = {'sha256': '115
            (573, 97, 100, 'int', '450'),
            (573, 102, 107, 'int', '0o660'),
            (623, 28, 31, 'int', '450'))}
+
+
+# Existing ten-minute telemetry freshness bound, not a UID. Pin only this token
+# in the exact independently reviewed Qwen-readiness source. Byte, path or site
+# drift exposes the source to the ordinary D8 scanner again.
+REVIEWED_FILES["research/fabric_bailian_host_eligibility_20261015/candidate/glm_host_account_readiness.py"] = {
+    "sha256": "00fdbdf5422904a349a8cf09ffdd05f63ab716d8f712d8c28cf9a60708cfca21",
+    "sites": ((31, 18, 21, "int", "600"),),
+}

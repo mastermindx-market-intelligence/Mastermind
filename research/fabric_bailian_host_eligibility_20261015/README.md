@@ -22,3 +22,9 @@ Run the focused suite with `python -m pytest -q research/fabric_bailian_host_eli
 Producer first: install the reviewed shared reader/predicate, probe builder and collector backend against exact preimages. Reuse the existing collector and verify fresh local telemetry carrying the current validator digest. Then install the reviewed router/broker consumers. Existing holds, grants and account selection remain binding. No failed review or prelaunch-refused test operation is retried. Retain source/install/adoption outcomes separately in the existing programme checkpoint.
 
 Native original-parent f75 admission and production proof are separate and remain pending with the existing release/host owners.
+
+## Exact-head CI correction
+
+The first hosted run at `c079516ff01431725c5e8815606b32a5748f6de0` found one D8 false positive: the unchanged `DEFAULT_MAX_AGE = 600` duration in the account-named predicate was classified as an identity literal. The correction uses the existing static reviewed-literal mechanism to identify only that token in the exact independently reviewed predicate (`00fdbdf5…`). It does not change runtime source. A regression reproduced the failure before repair; 150 affected D8 checks pass afterward, including missing postimage, different path, changed value, added UID, duplicate constant and unrelated byte drift. The full hosted suite remains a required release check.
+
+Independent paid Qwen review returned scoped PASS for the exact two-file guard correction. Parent verified the source hash, token site, unique registry entry and actual scanner integration through the 150 affected tests. The worker echoed its in-memory source probe and exceeded the 3500-character return contract, so the child is recorded NOT_ACCEPTED and no worker acceptance command is issued; the concrete source assessment was separately adjudicated. The reviewed runtime files are unchanged.
