@@ -1,0 +1,49 @@
+{
+  "scope": "CONSTRUCTED_ESTIMATOR_IDENTIFICATION_TEST_NOT_MARKET_BACKTEST",
+  "source_under_review": "Mastermind@566e0db2f3ef3913c8645ce93d2d8ed62f2b3f71/research/latent_network/2026-10-15/network_study.py",
+  "original_market_result_accessed": false,
+  "original_market_model_refitted": false,
+  "construction": {
+    "seed": 90151026,
+    "training_rows": 4018,
+    "test_rows": 5096,
+    "subjects_per_date": 49,
+    "correlation": 0.99,
+    "target": "Date-centered midrank of x-0.8z",
+    "graph_weights": "ALL_ZERO",
+    "new_information_in_candidate": false,
+    "selection": "Existence example selected from a deterministic covariance/coefficient grid; no significance assertion"
+  },
+  "metrics": {
+    "baseline": {"mean_rank_ic": 0.9582721742543169, "rank_mse": 0.04832749057331794},
+    "redundant_zero_graph": {"mean_rank_ic": 0.9706554160125589, "rank_mse": 0.04162525655189755},
+    "orthogonal_control": {"mean_rank_ic": 0.9582721742543169, "rank_mse": 0.04832749057331794}
+  },
+  "apparent_gains": {"rank_ic": 0.012383241758242014, "rank_mse": 0.006702234021420395},
+  "full_original_acceptance_gate_tested": false,
+  "control": {
+    "max_prediction_difference_from_baseline": 0.0,
+    "candidate_columns": 8,
+    "kept_residual_columns": 0,
+    "residual_rms": [0.0, 0.0, 0.0, 0.0, 6.540376440731402e-16, 0.0, 0.0, 0.0],
+    "discarded_columns": [0, 1, 2, 3, 4, 5, 6, 7],
+    "max_training_base_residual_cross_moment": 6.522174875871062e-16,
+    "projection_scope": "TRAINING_ONLY_TRANSFORMED_LINEAR_SPAN",
+    "forecast_authority": "NONE; CONSTRUCTED_METHOD_CHECK_ONLY"
+  },
+  "rank_sign_counterexample": {
+    "common_shift": 0.05,
+    "targets_identical": true,
+    "positive_returns_before": 2,
+    "positive_returns_after": 5,
+    "note": "Identical ranking target does not specify benchmark-relative direction or a pivot probability"
+  },
+  "versions": {"python": "3.13.5", "numpy": "2.3.5", "scipy": "1.17.0"},
+  "source_sha256": {
+    "demonstrate.py": "217ce2056d29cbfd8978be6b13ed1dcd0cecca095a50e947b0ecda8166c25611",
+    "ridge_identification.py": "65677952a9e54723b294d2313601810beafc5188ec9bc319733c8ed280f531b8",
+    "test_ridge_identification.py": "baed3c8f7a8894422ac32080fc260d0923ef3e738452c4cd912d2c1151854fd7"
+  },
+  "test_result": {"test_cases": 15, "passed": 15, "external_independent_review": false},
+  "publication_note": "Formatting and this test/publication metadata are added to the local demonstration output; numerical values and tested Python source hashes are unchanged."
+}
