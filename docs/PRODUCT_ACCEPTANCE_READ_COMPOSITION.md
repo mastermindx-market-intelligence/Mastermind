@@ -54,8 +54,10 @@ Relay and namespace custody in that fixture are test-owned observations.
 Qualification includes real JWT validation, local Unix/Control dispatch, the
 UID458 outer route, namespace invalidation, cancellation settlement, wrong
 selection, stale source and missing worker/parent consumption. These are local
-source tests. The main app `host.ts`, `web-auth.ts`, `App.tsx` and plan helpers
-remain with their unresolved original writer; this patch does not select or
-render the new read in those held files. Installed endpoint selection, real
-account permissions, live Context acquisition and original-parent consumption
-remain separate acceptance obligations. No old uncertain operation is replayed.
+source tests. The App host and authenticated web transport now select this read
+and render its closed observation in the product-acceptance panel. Auth changes,
+selection changes and stale responses cannot carry a prior accepted result into
+the current view. Existing plan behavior remains separate. Installed endpoint
+selection, real account permissions, live Context acquisition and original-parent
+consumption remain separate acceptance obligations. No old uncertain operation
+is replayed.
