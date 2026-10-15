@@ -10,7 +10,7 @@ REVIEWED_FILES = {
     # Existing ten-minute telemetry age, not a UID. Full reviewed source and
     # exact token only; drift exposes the source to ordinary D8 again.
     "research/fabric_bailian_host_eligibility_20261015/candidate/glm_host_account_readiness.py": {
-        "sha256": "00fdbdf5422904a349a8cf09ffdd05f63ab716d8f712d8c28cf9a60708cfca21",
+        "sha256": "b8921960e7e46a472b536895b5a6491096627d1c8fd58ea0baf283ff34accc07",
         "sites": ((31, 18, 21, "int", "600"),),
     },
     'integrations/session_bridge/bound_launch_capture/runtime/lane_runtime.py': {'sha256': 'cfb18bd9381fae4af1d13a257a8fa5986d903571f64b2aa5dc900439759e9b91',
