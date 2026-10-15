@@ -117,7 +117,7 @@
 +  # actual mint; this line is NOT a claim the checkout was created.
 +  if [[ ! "$POOL_ORCHESTRATOR_ID" =~ ^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$ ]] ||
 +     [[ ! "$POOL_PARENT_RUN_ID" =~ ^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$ ]]; then
-+    log "FABRIC_NEW_MACRO_LINEAGE_REFUSED before_launch=1"; exit 78
++    RC=78; log "FABRIC_NEW_MACRO_LINEAGE_REFUSED rc=$RC before_launch=1"; exit "$RC"
 +  fi
 +  log "FABRIC_NEW_MACRO_WORKTREE run=$ID commit=$NEW_MACRO_COMMIT root=$POOL_ORCHESTRATOR_ID parent=$POOL_PARENT_RUN_ID"
 +fi
