@@ -40,7 +40,13 @@ class CeoIngressWorkspaceClient:
         from common.product_acceptance_read_contract import FRAME_SCHEMA as ACCEPTANCE_FRAME_SCHEMA, validate_frame as validate_acceptance_frame
         timeout = self.timeout_seconds
         if isinstance(frame, dict) and frame.get("schema") == ACCEPTANCE_FRAME_SCHEMA:
-            validate_acceptance_frame(frame)
+            from common.product_acceptance_acquisition_contract import (
+                OPERATION as ORIGINAL_OPERATION, validate_frame as validate_original_frame,
+            )
+            if frame.get("operation") == ORIGINAL_OPERATION:
+                validate_original_frame(frame)
+            else:
+                validate_acceptance_frame(frame)
             ceiling = MAX_RESPONSE_BYTES
             # This read includes the sealed source owner's existing 15-second
             # observation, in addition to bounded Runtime proof reads. Keep it

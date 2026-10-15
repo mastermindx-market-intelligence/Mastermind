@@ -5301,7 +5301,13 @@ class ExecutiveControlService:
                 if parsed.get("schema") == ACCEPTANCE_FRAME_SCHEMA:
                     ceiling = WORKSPACE_MAX_RESPONSE_BYTES
                     try:
-                        validate_acceptance_frame(parsed)
+                        from common.product_acceptance_acquisition_contract import (
+                            OPERATION as ORIGINAL_OPERATION, validate_frame as validate_original_frame,
+                        )
+                        if operation == ORIGINAL_OPERATION:
+                            validate_original_frame(parsed)
+                        else:
+                            validate_acceptance_frame(parsed)
                     except (TypeError, ValueError):
                         await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400),
                                                              response_ceiling=ceiling)

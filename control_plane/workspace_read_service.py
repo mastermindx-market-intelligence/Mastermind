@@ -396,7 +396,8 @@ class WorkspaceReadService:
                  acquire=None, compose=None, bounded_runtime=None,
                  result_acquire=None, result_project=None, mission_v3_acquire=None,
                  mission_v3_compose=None, work_acquire=None, work_compose=None,
-                 product_acceptance_basis_reader=None):
+                 product_acceptance_basis_reader=None, product_acceptance_owner_target=None,
+                 product_acceptance_owner_guard=None):
         self.cache = cache
         self.runtime = runtime
         self.authorize = authorize
@@ -424,6 +425,78 @@ class WorkspaceReadService:
                 and type(product_acceptance_basis_reader) is not AgentOsProductAcceptanceBasisReader):
             raise ValueError("acceptance reader must be the existing source owner")
         self._product_acceptance_basis_reader = product_acceptance_basis_reader
+        from control_plane.principal_ruling_target import PrincipalRulingTarget
+        if product_acceptance_owner_target is not None:
+            if type(product_acceptance_owner_target) is not PrincipalRulingTarget:
+                raise ValueError("exact host-owned acceptance target required")
+            product_acceptance_owner_target.__post_init__()
+        # Only trusted host composition supplies this frozen original target.
+        # No target is discovered from HTTP selectors or the latest Runtime row.
+        self._product_acceptance_owner_target = product_acceptance_owner_target
+        if (product_acceptance_owner_guard is not None
+                and (not callable(product_acceptance_owner_guard)
+                     or product_acceptance_owner_target is None)):
+            raise ValueError("acceptance source guard requires a trusted fixed target")
+        self._product_acceptance_owner_guard = product_acceptance_owner_guard
+
+    async def _handle_original_acceptance_frame(self, frame):
+        from common.product_acceptance_acquisition_contract import mission_frame
+        from control_plane.principal_ruling_target import PrincipalRulingTarget
+        from integrations.product_acceptance_selector import read_original_acceptance_observation
+        try:
+            original_frame = mission_frame(frame)
+        except (TypeError, ValueError):
+            return error("invalid_input", 400)
+        principal = original_frame["principal"]
+        try:
+            if self.authorize(principal) is not True:
+                return error("access_denied", 403)
+            before = permission_stamp(self.authorize, principal)
+        except Exception:
+            return error("access_denied", 403)
+        target = self._product_acceptance_owner_target
+        guard = self._product_acceptance_owner_guard
+        def check_source():
+            if self._product_acceptance_owner_guard is not guard:
+                raise ValueError("acceptance source guard changed")
+            if guard is not None:
+                outcome = guard()
+                if outcome is not None:
+                    import inspect
+                    if inspect.iscoroutine(outcome):
+                        outcome.close()
+                    raise ValueError("acceptance source guard must settle synchronously")
+        try:
+            if type(target) is not PrincipalRulingTarget:
+                raise ValueError("source_unavailable")
+            target.__post_init__()
+            target_fields = (target.work_ref, target.obligation_id, target.reasoning_surface)
+            if target.work_ref != original_frame["selection"]["work_ref"]:
+                raise ValueError("source_unavailable")
+            check_source()
+        except Exception:
+            return error("source_unavailable", 503)
+        try:
+            body = await read_original_acceptance_observation(
+                self, original_frame, owner_target=target)
+            result = {"ok": True, "result": body}
+            bounded_canonical(result, limit=MAX_RESPONSE_BYTES - 1)
+        except Exception:
+            result = error("source_unavailable", 503)
+        # The R2 reader settles cancellation and brackets Runtime/source/owner
+        # observations. This composition additionally pins its selected target
+        # through the await; neither replacement nor mutation may disclose data.
+        try:
+            if (self.authorize(principal) is not True
+                    or permission_stamp(self.authorize, principal) != before):
+                return error("access_denied", 403)
+            if (self._product_acceptance_owner_target is not target
+                    or (target.work_ref, target.obligation_id, target.reasoning_surface) != target_fields):
+                return error("source_unavailable", 503)
+            check_source()
+        except Exception:
+            return error("source_unavailable", 503)
+        return result
 
     def _read_mission_v4(self, frame):
         from common import product_acceptance_read_contract as contract
@@ -1065,6 +1138,9 @@ class WorkspaceReadService:
     async def handle_frame(self, frame):
         from common.product_acceptance_read_contract import FRAME_SCHEMA as ACCEPTANCE_FRAME_SCHEMA
         if isinstance(frame, dict) and frame.get("schema") == ACCEPTANCE_FRAME_SCHEMA:
+            from common.product_acceptance_acquisition_contract import OPERATION as ORIGINAL_OPERATION
+            if frame.get("operation") == ORIGINAL_OPERATION:
+                return await self._handle_original_acceptance_frame(frame)
             return await self._handle_v4_frame(frame)
         if isinstance(frame, dict) and frame.get("schema") == FRAME_SCHEMA_V3:
             return await self._handle_v3_frame(frame)
@@ -1241,7 +1317,8 @@ class _WorkRefusal(Exception):
 
 
 def workspace_provider_factory(*, control_room, authorize, armed, runtime_identity, bounded_runtime=None,
-                               product_acceptance_basis_reader=None):
+                               product_acceptance_basis_reader=None, product_acceptance_owner_target=None,
+                               product_acceptance_owner_guard=None):
     """Compose a sibling factory from the existing hosted owner and permissions.
 
     Installers pass this to CeoIngressAppBinding.workspace_read_provider_factory.
@@ -1260,5 +1337,7 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
     def provide(runtime):
         return WorkspaceReadService(cache=cache, runtime=runtime, authorize=authorize,
                                     armed=armed, runtime_identity=runtime_identity, bounded_runtime=bounded_runtime,
-                                    product_acceptance_basis_reader=product_acceptance_basis_reader)
+                                    product_acceptance_basis_reader=product_acceptance_basis_reader,
+                                    product_acceptance_owner_target=product_acceptance_owner_target,
+                                    product_acceptance_owner_guard=product_acceptance_owner_guard)
     return provide

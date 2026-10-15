@@ -2285,6 +2285,17 @@ def _service_from_config(
                 token=secrets.token_urlsafe(32), origin=f"http://127.0.0.1:{port}", port=port,
                 compose_inputs=compose_inputs))
             from control_plane.agentos_product_acceptance_basis import AgentOsProductAcceptanceBasisReader
+            from ops.executive_os.coo_principal_host import CooInstalledSource, validate_control_coo
+            original_target = original_target_guard = None
+            if validate_control_coo(raw) and type(coo_source) is CooInstalledSource:
+                # Same installed source already selected by _serve_from_config.
+                # HTTP and Runtime rows cannot nominate or rotate this target.
+                target_reader = coo_source.original_acceptance_target
+                original_target = target_reader()
+                if original_target is not None:
+                    def original_target_guard():
+                        if target_reader() is not original_target:
+                            raise ServiceError("installed acceptance target changed")
             workspace_factories["workspace_read_provider_factory"] = workspace_provider_factory(
                 control_room=workspace_control_room, authorize=authorize,
                 armed={**{key: raw.get(key) if type(raw.get(key)) is bool else None for key in ARM_KEYS}, "source": "control.json"},
@@ -2295,7 +2306,9 @@ def _service_from_config(
                 bounded_runtime=lambda runtime: service._namespace_custody.bound_runtime(runtime),
                 product_acceptance_basis_reader=AgentOsProductAcceptanceBasisReader(
                     macro_root=Path(raw["ceo_ingress_app_macro_root"]),
-                    installed_context_owner=packet_collector))
+                    installed_context_owner=packet_collector),
+                product_acceptance_owner_target=original_target,
+                product_acceptance_owner_guard=original_target_guard)
         coo_factories = {}
         from ops.executive_os.coo_principal_host import CooInstalledSource, validate_control_coo
         from control_plane.coo_principal_host import CooHostProvider

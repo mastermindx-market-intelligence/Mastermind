@@ -1,3 +1,4 @@
+import { guardAcceptanceRead, missionV4Selection, type MissionV4Selection, type ProductAcceptanceOwner } from "./product-acceptance/owner-observation";
 import {
   RESEARCH_SCOPE,
   validateResearchResource,
@@ -20,7 +21,7 @@ import {
   readWebAuthConfig,
   type WebAuthConfig,
 } from "./public-config";
-import { normalizeSelection, normalizeWorkspaceSelection } from "./mission";
+import { normalizeSelection, normalizeWorkspaceSelection, type MissionSelection } from "./mission";
 import { normalizeResultSelection, RESULT_HTTP_BODY_BYTES } from "./result";
 import type { ExecutiveSessionTransport } from "./orchestration/executive-session-command-port";
 import type { AuthState, RawClient } from "./host";
@@ -32,6 +33,8 @@ export interface WebPopup {
   set location(value: string);
 }
 export interface WebAuthDeps {
+  /** Internal host composition only. The production default is uncomposed. */
+  productAcceptanceOwner?: ProductAcceptanceOwner;
   config?: Partial<WebAuthConfig>;
   crypto?: Crypto;
   fetchFn?: typeof fetch;
@@ -717,6 +720,34 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
         signal,
       );
     },
+    async readOriginalMissionV4(request: MissionSelection & { signal: AbortSignal }) {
+      const { signal, ...input } = request;
+      const selected = normalizeWorkspaceSelection(input);
+      if (!selected) throw new Error("SELECTION_INVALID");
+      return read("acquisition", `${ORIGIN}/workspace/mission/v4/current?${new URLSearchParams({
+        work_ref: selected.workRef, root_job_id: selected.rootJobId, read_mode: "original_owner",
+      })}`, signal);
+    },
+    ...(deps.productAcceptanceOwner ? {
+      productAcceptanceOwner: deps.productAcceptanceOwner,
+      async readMissionV4(request: MissionV4Selection & { signal: AbortSignal }) {
+        const { signal, ...input } = request;
+        const selected = missionV4Selection(input);
+        if (!selected) throw new Error("SELECTION_INVALID");
+        const started = generation, owner = deps.productAcceptanceOwner;
+        const authorized = () => !signal.aborted && generation === started && owner === deps.productAcceptanceOwner
+          && getState().status === "signed_in" && getState().acquisition;
+        const guard = guardAcceptanceRead(owner, selected, authorized);
+        try {
+          guard.check();
+          const raw = await read("acquisition", `${ORIGIN}/workspace/mission/v4/current?${new URLSearchParams({
+            work_ref: selected.workRef, root_job_id: selected.rootJobId, request_message_key: selected.requestMessageKey,
+          })}`, signal);
+          guard.check();
+          return raw;
+        } finally { guard.dispose(); }
+      },
+    } : {}),
     readMissionV3: ({ workRef, rootJobId, signal }) => {
       if (!normalizeWorkspaceSelection({ workRef, rootJobId }))
         return Promise.reject(new Error("SELECTION_INVALID"));
