@@ -280,23 +280,44 @@ def _status_rows(workspace: Path) -> list[tuple[str, str]]:
 
 
 def _stable_content_digest(workspace: Path, path: str) -> tuple[str | None, str]:
-    full = workspace / path
-    try:
-        info = full.lstat()
-    except FileNotFoundError:
-        return None, "DELETED"
-    except OSError:
-        return None, "UNAVAILABLE"
-    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
-        return None, "NON_REGULAR"
-    if info.st_size > _MAX_WORKING_FILE_BYTES:
-        return None, "TOO_LARGE"
+    """Hash only through no-follow directory descriptors inside the workspace.
 
-    descriptor = -1
+    A final O_NOFOLLOW alone is insufficient: `safe/link/file.py` could hash a
+    file from a symlinked parent OUTSIDE the admitted workspace. Traverse each
+    component using the already owned directory fd with O_DIRECTORY/O_NOFOLLOW.
+    No fallback to pathname resolution or realpath-then-open is permitted.
+    """
+    if (type(path) is not str or not path or path.startswith("/")
+            or "\x00" in path or any(part in {"", ".", ".."} for part in path.split("/"))):
+        return None, "UNAVAILABLE"
+    if not all(hasattr(os, flag) for flag in ("O_DIRECTORY", "O_NOFOLLOW")):
+        return None, "UNAVAILABLE"
+
+    directory_flags = (
+        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    file_flags = (
+        os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NONBLOCK", 0)
+    )
+    descriptors: list[int] = []
+    parts = path.split("/")
     try:
-        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
-        descriptor = os.open(full, flags)
-        before = os.fstat(descriptor)
+        descriptors.append(os.open(workspace, directory_flags))
+        for directory in parts[:-1]:
+            descriptors.append(
+                os.open(directory, directory_flags, dir_fd=descriptors[-1])
+            )
+        parent_fd = descriptors[-1]
+        info = os.stat(parts[-1], dir_fd=parent_fd, follow_symlinks=False)
+        if not stat.S_ISREG(info.st_mode):
+            return None, "NON_REGULAR"
+        if info.st_size > _MAX_WORKING_FILE_BYTES:
+            return None, "TOO_LARGE"
+        fd = os.open(parts[-1], file_flags, dir_fd=parent_fd)
+        descriptors.append(fd)
+        before = os.fstat(fd)
         if (
             not stat.S_ISREG(before.st_mode)
             or before.st_size > _MAX_WORKING_FILE_BYTES
@@ -307,32 +328,28 @@ def _stable_content_digest(workspace: Path, path: str) -> tuple[str | None, str]
         digest = hashlib.sha256()
         remaining = _MAX_WORKING_FILE_BYTES + 1
         while remaining:
-            chunk = os.read(descriptor, min(1024 * 1024, remaining))
+            chunk = os.read(fd, min(1024 * 1024, remaining))
             if not chunk:
                 break
             digest.update(chunk)
             remaining -= len(chunk)
-        after = os.fstat(descriptor)
+        after = os.fstat(fd)
         stable = (
-            before.st_dev,
-            before.st_ino,
-            before.st_size,
-            before.st_mtime_ns,
-            before.st_ctime_ns,
+            before.st_dev, before.st_ino, before.st_size,
+            before.st_mtime_ns, before.st_ctime_ns,
         ) == (
-            after.st_dev,
-            after.st_ino,
-            after.st_size,
-            after.st_mtime_ns,
-            after.st_ctime_ns,
+            after.st_dev, after.st_ino, after.st_size,
+            after.st_mtime_ns, after.st_ctime_ns,
         )
         if not stable or remaining <= 0:
             return None, "UNAVAILABLE"
         return digest.hexdigest(), "HASHED"
-    except OSError:
+    except FileNotFoundError:
+        return None, "DELETED"
+    except (OSError, ValueError, TypeError):
         return None, "UNAVAILABLE"
     finally:
-        if descriptor >= 0:
+        for descriptor in reversed(descriptors):
             os.close(descriptor)
 
 
