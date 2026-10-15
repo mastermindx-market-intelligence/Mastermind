@@ -2,7 +2,7 @@
 
 ## Purpose and ownership
 
-Reviewable, **non-release** source record for already-installed M2 Subagent Fabric repairs, published separately from the original fleet release writer to prevent an overlapping source mutation. The governing release remains [Mastermind PR #1404](https://github.com/mastermindx-market-intelligence/Mastermind/pull/1404); the pending sparse-worktree source dependency is [Macro PR #9194](https://github.com/mastermindx-market-intelligence/macro/pull/9194). This record does not authorize a merge, a host rollout, a forced restart, or a high-concurrency benchmark.
+Reviewable, **non-release** source record for already-installed M2 Subagent Fabric repairs, published separately from the original fleet release writer to prevent an overlapping source mutation. The governing release remains [Mastermind PR #1404](https://github.com/mastermindx-market-intelligence/Mastermind/pull/1404); [Macro PR #9194](https://github.com/mastermindx-market-intelligence/macro/pull/9194) is **SOURCE-MERGED** (2026-10-15, merge commit `40abd9bd2291997cc066f30b408a1e670124cec4`), but its reviewed helper has not been proven installed on the donor hosts. The separate [accepted-worker cleanup PR #9430](https://github.com/mastermindx-market-intelligence/macro/pull/9430) remains OPEN. This record does not authorize a merge, a host rollout, a forced restart, or a high-concurrency benchmark.
 
 ## Actual installed delta
 
@@ -35,7 +35,7 @@ The September 19 `HOST_ROUTING_SEAL.sha256` was inspected, not re-signed: **7 ha
 ## Integration and release gates
 
 1. The #1404 incumbent source writer compares exact before/after source hashes and reconciles patch overlap with thermal, disk, sparse-worktree and launcher changes. A new owner may not silently overwrite it.
-2. Approved source must pass exact-tree hosted CI, maintain denial and resource guards, and satisfy the existing protected review/release controls. #9194 must be reconciled and made available on the actual donor hosts before opt-in sparse mint is enabled.
+2. Approved source must pass exact-tree hosted CI, maintain denial and resource guards, and satisfy the existing protected review/release controls. The merged #9194 helper must be independently read back and installed on the intended donor hosts before opt-in sparse mint is enabled; source merge alone is insufficient.
 3. Use an *attended, bounded* real-host workload qualification and physical cooling proof with the original admission authority. Respect prior power-profile `AccessDenied`; no sudo, BIOS, worker-kill, or thermal override is justified by this record.
 4. Keep this source record distinct from `INSTALLED`, `RELEASED`, `PRODUCTION_ACCEPTED` and `ALL_ACCOUNTS_SELECTED`. Original 13-file M2 installation is evidenced in the M2 evidence directory, not retroactively delivered to other hosts.
 
