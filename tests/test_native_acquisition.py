@@ -19,6 +19,7 @@ def _load_fixture_world():
         PKG.__path__ = [str(ROOT / 'control_plane')]
         sys.modules['control_plane'] = PKG
         PEER = types.ModuleType('control_plane.executive_installed_peer')
+        PEER._GATEWAY_MCP_PROFILES = ('release_control_v1', 'web_ceo_release_v1')
         PEER._SYSCTL_OSRELEASE_ARGV = ('/usr/sbin/sysctl', '-n', 'kern.osrelease')
         PEER._SYSCTL_BOOT_ID_ARGV = ('/usr/sbin/sysctl', '-n', 'kern.bootsessionuuid')
         PEER._LAUNCHD_ENVIRONMENT = {'PATH': '/usr/bin:/bin:/usr/sbin:/sbin'}

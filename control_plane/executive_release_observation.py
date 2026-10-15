@@ -150,6 +150,10 @@ _SPECS = (
     _Spec("gateway", "com.mastermind.executive.mcp", "_mastermind_executive_mcp", "_mastermind_executive_mcp", 458, _ROOT + "/config/executive-mcp.json", 0, 0o644, "ops/executive_os/executive_mcp_entry.py"),
     _Spec("broker", "com.mastermind.executive.privileged", "root", "wheel", 0, _ROOT + "/config/privileged-broker.json", 0, 0o400, "scripts/executive_os_privileged_broker.py"),
 )
+# Reading installed content does not admit a privileged release-control caller.
+# Keep the peer qualifier's narrower profile list unchanged.
+_OBSERVED_GATEWAY_MCP_PROFILES = (*peer._GATEWAY_MCP_PROFILES, "web_ceo_v3")
+
 _ROOT_PID_UID_ARGV = ("/bin/ps", "-axo", "pid=,uid=")
 _PRINT_DISABLED_ARGV = ("/bin/launchctl", "print-disabled", "system")
 _INSTALLER_BACKUP_PRINT_ARGV = ("/bin/launchctl", "print", "system/com.mastermind.executive.backup")
@@ -337,7 +341,7 @@ def _config_join(spec, document, release):
     elif spec.role == "gateway":
         valid = (document.get("schema") == peer._GATEWAY_CONFIG_SCHEMA and document.get("release_sha") == release
                  and type(document.get("service_uid")) is int and document["service_uid"] == 458
-                 and document.get("executive_mcp_profile") in peer._GATEWAY_MCP_PROFILES)
+                 and document.get("executive_mcp_profile") in _OBSERVED_GATEWAY_MCP_PROFILES)
     else:
         valid = document.get("schema") == "mastermind.executive_privileged_broker_config.v1" and document.get("release_root") == _RELEASES + release
     if not valid:
