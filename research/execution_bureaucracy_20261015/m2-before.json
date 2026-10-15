@@ -1,0 +1,96 @@
+{
+  "additional_markdown": [
+    {
+      "assigned_execution_marker": true,
+      "bytes": 15812,
+      "content_scan_truncated": false,
+      "execution_brief": {
+        "body_sha256": "8d36998bc06ad9bb1351b89297b3661db6a29eff7856f34c3cd81934050331ea",
+        "end_byte": 6891,
+        "expected_body_sha256": "864f34e2bfe5cdc67220aca7cff8fcbb86829c884d25a7add5776ba5d0eaf2b6",
+        "normalization": "outer whitespace stripped",
+        "start_byte": 0,
+        "state": "CONTENT_MISMATCH"
+      },
+      "is_symlink": false,
+      "legacy_signals": [],
+      "line_count": 151,
+      "path": "/Users/chriswong/.claude/CLAUDE.md",
+      "scanned_prefix_sha256": "755312c2ae537160d59b416a06c2893f9a586bae634ad17179ae9b71493922df",
+      "sha256": "755312c2ae537160d59b416a06c2893f9a586bae634ad17179ae9b71493922df",
+      "signal_interpretation": "Literal presence requires contextual review; not an execution verdict."
+    }
+  ],
+  "chain": [
+    {
+      "assigned_execution_marker": true,
+      "assigned_execution_marker_eligible": true,
+      "bytes": 18528,
+      "content_scan_truncated": false,
+      "eligible_bytes": 18528,
+      "execution_brief": {
+        "body_sha256": "8d36998bc06ad9bb1351b89297b3661db6a29eff7856f34c3cd81934050331ea",
+        "end_byte": 6891,
+        "expected_body_sha256": "864f34e2bfe5cdc67220aca7cff8fcbb86829c884d25a7add5776ba5d0eaf2b6",
+        "normalization": "outer whitespace stripped",
+        "start_byte": 0,
+        "state": "CONTENT_MISMATCH"
+      },
+      "execution_brief_fully_eligible": true,
+      "expected_brief_eligible": false,
+      "is_symlink": false,
+      "legacy_signals": [],
+      "line_count": 193,
+      "path": "/Users/chriswong/.codex/AGENTS.md",
+      "scanned_prefix_sha256": "1c8b0ea87227c3844817d51e0b9753011f12fa26ef930e2c6b424626351f7ebb",
+      "scope": "global",
+      "sha256": "1c8b0ea87227c3844817d51e0b9753011f12fa26ef930e2c6b424626351f7ebb",
+      "signal_interpretation": "Literal presence requires contextual review; not an execution verdict.",
+      "truncated_by_project_budget": false
+    },
+    {
+      "assigned_execution_marker": false,
+      "assigned_execution_marker_eligible": false,
+      "bytes": 17512,
+      "content_scan_truncated": false,
+      "eligible_bytes": 17512,
+      "execution_brief": {
+        "body_sha256": null,
+        "end_byte": null,
+        "normalization": "outer whitespace stripped",
+        "start_byte": null,
+        "state": "ABSENT"
+      },
+      "execution_brief_fully_eligible": false,
+      "expected_brief_eligible": false,
+      "is_symlink": false,
+      "legacy_signals": [],
+      "line_count": 238,
+      "path": "/Volumes/Mastermind 2/agent-workspaces/web/execution-bureaucracy-20261015-astra-001/AGENTS.md",
+      "scanned_prefix_sha256": "306786ba5e29c080f15e3231835353147e260d5fafafb00af0e95cfdb11f93d6",
+      "scope": "project",
+      "sha256": "306786ba5e29c080f15e3231835353147e260d5fafafb00af0e95cfdb11f93d6",
+      "signal_interpretation": "Literal presence requires contextual review; not an execution verdict.",
+      "truncated_by_project_budget": false
+    }
+  ],
+  "codex_home": "/Users/chriswong/.codex",
+  "cwd": "/Volumes/Mastermind 2/agent-workspaces/web/execution-bureaucracy-20261015-astra-001",
+  "effect": "READ_ONLY",
+  "expected_brief_selected": false,
+  "method": "Static file discovery; no provider session was launched or inspected.",
+  "not_observed": [
+    "injected project instructions",
+    "active-session context",
+    "managed provider policy",
+    "plugin selection",
+    "hook execution",
+    "remote accounts and other hosts"
+  ],
+  "project_max_bytes": 32768,
+  "project_remaining_bytes": 15256,
+  "repo_root": "/Volumes/Mastermind 2/agent-workspaces/web/execution-bureaucracy-20261015-astra-001",
+  "runtime_verified": false,
+  "selection_interpretation": "Static eligibility only; not semantic precedence, runtime trust, or served-session proof.",
+  "shadowed_files": []
+}

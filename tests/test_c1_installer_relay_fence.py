@@ -46,7 +46,7 @@ def test_installer_fences_relay_before_any_release_mutation() -> None:
     control_loaded = 'wait_for_launchd_absent "$CONTROL_LABEL" control'
     assert relay_loaded in mutation
     assert mutation.index(relay_loaded) < mutation.index(control_loaded)
-    assert '"$description LaunchDaemon remained loaded after bootout"' in source
+    assert '"$description LaunchDaemon absence was not proven after bootout"' in source
 
     archive = '/usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" -C "$SOURCE_REPO" archive'
     assert source.index(relay_loaded) < source.index(archive)

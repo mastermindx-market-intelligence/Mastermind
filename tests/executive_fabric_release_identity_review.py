@@ -122,6 +122,21 @@ REVIEWED_FILES['ops/executive_os/finite_service_lifecycle.py'] = {'sha256': '115
            (573, 102, 107, 'int', '0o660'),
            (623, 28, 31, 'int', '450'))}
 
+# Exact accepted R2 HTTP response statuses, not process identities.
+# Source83f2 is unchanged; full source hash and all token spans are required.
+# Drift, another path, a changed literal or a new UID restores ordinary D8.
+REVIEWED_FILES['integrations/mastermind_executive_app/principal_dialogue.py'] = {'sha256': '9403d9ae5f44c3f07ef5f6d4a80b0e30883a9267d6a41e987b5c76f6ef3b64cd',
+ 'sites': ((95, 45, 48, 'int', '500'),
+           (104, 41, 44, 'int', '500'),
+           (109, 40, 43, 'int', '400'),
+           (115, 41, 44, 'int', '500'))}
+
+REVIEWED_FILES['integrations/mastermind_executive_app/principal_ruling_http.py'] = {'sha256': '1bf02f595c09c9bfde890425ac767cf1160d688b41d5c1ea5020f9b4f3890600',
+ 'sites': ((45, 120, 123, 'int', '404'),
+           (51, 28, 31, 'int', '401'),
+           (75, 77, 80, 'int', '413'),
+           (80, 28, 31, 'int', '400'))}
+
 
 # Existing ten-minute telemetry freshness bound, not a UID. Pin only this token
 # in the exact independently reviewed Qwen-readiness source. Byte, path or site

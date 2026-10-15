@@ -916,11 +916,13 @@ def test_no_projected_result_value_can_be_read_as_a_ready_claim():
 
 
 def test_broker_reason_domain_is_derived_from_the_merged_broker_source():
-    """The reused domain must break if the merged broker owner adds a code.
+    """Readiness keeps its v1 broker domain closed beside forward recovery.
 
     Read as source text rather than importing: the broker module is a merged
     root actuator and must not be imported, loaded or exercised by this pure
-    contract test.
+    contract test. Forward recovery extends the same wire module with its own
+    optional protocol, but those refusal codes must never become readiness
+    result states merely because they share the transport.
     """
 
     broker_source = (
@@ -930,9 +932,21 @@ def test_broker_reason_domain_is_derived_from_the_merged_broker_source():
     ).read_text(encoding="utf-8")
     emitted = set(re.findall(r'_wire_error\(\s*"([A-Z_]+)"', broker_source))
     assert emitted, "no broker wire error codes were located"
-    assert emitted == epa.BROKER_REFUSAL_REASON_CODES | {epa.BROKER_EFFECT_UNKNOWN_ERROR}
-    for code in emitted:
-        assert isinstance(epa.result_state_for_broker_error(code), epa.ReadinessResultState)
+
+    forward_only = {"FORWARD_REFUSED", "FORWARD_HOST_GUARD_UNAVAILABLE"}
+    ordinary = emitted - forward_only
+    assert ordinary == (
+        epa.BROKER_REFUSAL_REASON_CODES | {epa.BROKER_EFFECT_UNKNOWN_ERROR}
+    )
+    assert emitted & forward_only == forward_only
+
+    for code in ordinary:
+        assert isinstance(
+            epa.result_state_for_broker_error(code), epa.ReadinessResultState
+        )
+    for code in forward_only:
+        with pytest.raises(epa.PrivilegedReadinessError):
+            epa.result_state_for_broker_error(code)
 
 
 

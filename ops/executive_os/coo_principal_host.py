@@ -92,9 +92,11 @@ def validate_control_coo(raw):
     from integrations.executive_mcp.web_ceo import WEB_CEO_V2_PROFILE
     from integrations.executive_mcp.web_ceo_v3 import WEB_CEO_V3_PROFILE
     arm = raw.get("coo_principal_armed", False)
+    dialogue_arm = raw.get("coo_principal_dialogue_armed", False)
     supported_profiles = {WEB_CEO_V2_PROFILE, WEB_CEO_V3_PROFILE}
-    if type(arm) is not bool or (arm and (raw.get("executive_mcp_profile") not in supported_profiles
-            or not {"workspace_acquisition", "workspace_resource_policy", "workspace_control_room", "ceo_ingress_app_peer_uid"} <= set(raw))):
+    if (type(dialogue_arm) is not bool or (dialogue_arm and arm is not True)
+            or type(arm) is not bool or (arm and (raw.get("executive_mcp_profile") not in supported_profiles
+            or not {"workspace_acquisition", "workspace_resource_policy", "workspace_control_room", "ceo_ingress_app_peer_uid"} <= set(raw)))):
         _refuse()
     return arm
 
