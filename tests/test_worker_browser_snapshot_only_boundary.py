@@ -23,7 +23,7 @@ from tests.test_workbench_browser_worker_grant import _grant
 
 
 def test_snapshot_only_worker_transport_refuses_other_tools_and_unsigned_resource(tmp_path):
-    path, _document, _audit_dir = _config_file(tmp_path)
+    path, _outer, _audit_dir = _config_file(tmp_path)
     config = load_browser_tunnel_config(str(path))
 
     async def exercise():
@@ -51,11 +51,22 @@ def test_snapshot_only_worker_transport_refuses_other_tools_and_unsigned_resourc
                 ("prepare_browser_click", {
                     "browser_ref": "unsigned", "target": "button",
                 }),
-                ("browser_evaluate", {"browser_ref": "unsigned", "function": "() => 1"}),
+                # This is an actual catalog tool, ungranted for this worker.
+                ("browser_take_screenshot", {
+                    "browser_ref": "unsigned-not-an-admitted-resource",
+                    "filename": str(tmp_path / "ungranted-screenshot.png"),
+                    "scale": "css",
+                }),
             )
             for name, payload in forbidden:
                 refused = await _call(server, name, payload)
                 assert _error_code(refused) == "TOOL_NOT_AVAILABLE", name
+            # Evaluate is not in the existing Browser surface at all. This
+            # demonstrates unknown-tool refusal, NOT grant-based narrowing.
+            unsupported = await _call(server, "browser_evaluate", {
+                "browser_ref": "unsigned", "function": "() => 1",
+            })
+            assert _error_code(unsupported) == "TOOL_NOT_AVAILABLE"
 
             # A catalog grant is not a Browser resource grant: no handler may
             # materialize a resource from a worker-supplied opaque string.
@@ -63,10 +74,7 @@ def test_snapshot_only_worker_transport_refuses_other_tools_and_unsigned_resourc
                 "browser_ref": "unsigned-not-an-admitted-resource",
             })
             assert requested.isError is True
-            assert _error_code(requested) in {
-                "BROWSER_REF_INVALID", "BROWSER_BINDING_CHANGED",
-                "CHANNEL_ADMISSION_REFUSED",
-            }
+            assert _error_code(requested) == "BROWSER_REF_INVALID"
 
             # Read-only decoration is not an artifact grant. No source file or
             # Browser process may be produced by a forged read with filename.
@@ -75,7 +83,7 @@ def test_snapshot_only_worker_transport_refuses_other_tools_and_unsigned_resourc
                 "browser_ref": "unsigned-not-an-admitted-resource",
                 "filename": str(destination),
             })
-            assert refused_file.isError is True
+            assert _error_code(refused_file) == "BROWSER_REF_INVALID"
             assert not destination.exists()
             assert list(Path(config.action.artifact_directory).iterdir()) == []
         finally:
@@ -85,7 +93,7 @@ def test_snapshot_only_worker_transport_refuses_other_tools_and_unsigned_resourc
     asyncio.run(exercise())
 
 
-def test_snapshot_only_grant_does_not_silently_authorize_resource_start(tmp_path):
+def test_snapshot_only_grant_denies_start_and_revoked_read(tmp_path):
     path, _, _ = _config_file(tmp_path)
     config = load_browser_tunnel_config(str(path))
 
@@ -96,11 +104,17 @@ def test_snapshot_only_grant_does_not_silently_authorize_resource_start(tmp_path
                 runtime, config.browser,
                 mcp_grant=_grant(config, ("browser_snapshot",)),
             )
-            runtime.revoke()
+            # Denial first, while the worker channel is still admitted.
             result = await _call(server, "start_browser_resource", {
                 "start_ref": "unsigned",
             })
             assert _error_code(result) == "TOOL_NOT_AVAILABLE"
+            # Revocation now has a causal assertion against the GRANTED tool.
+            runtime.revoke()
+            revoked = await _call(server, "browser_snapshot", {
+                "browser_ref": "unsigned-not-an-admitted-resource",
+            })
+            assert _error_code(revoked) == "CHANNEL_ADMISSION_REFUSED"
             assert list(Path(config.action.artifact_directory).iterdir()) == []
         finally:
             await runtime.aclose(timeout=5)
@@ -162,10 +176,10 @@ def test_runtime_bound_attempt_still_refuses_snapshot_only_mutation(tmp_path, mo
                 "browser_ref": "unsigned-not-a-real-browser-resource",
             })
             assert invalid.isError is True
-            assert _error_code(invalid) in {
-                "BROWSER_REF_INVALID", "BROWSER_BINDING_CHANGED",
-                "CHANNEL_ADMISSION_REFUSED",
-            }
+            # Before cancellation, admission must succeed far enough to
+            # reach the resource-ref owner; channel refusal would be a false
+            # positive in this test.
+            assert _error_code(invalid) == "BROWSER_REF_INVALID"
             assert list(Path(config.action.artifact_directory).iterdir()) == []
 
             # Revoke the authoritative Job; a formerly selected read tool must
