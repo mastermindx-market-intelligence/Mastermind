@@ -44,6 +44,10 @@ class TestExtractor(unittest.TestCase):
  def test_truncated_packet(self):self.assertIn('truncated',self.call((header()+packet([execution()]))[:-6],False))
  def test_heartbeat(self):
   s,_,_=self.call(header()+packet([],seq=1)+packet([execution()]));self.assertEqual(s['messages'],1)
+ def test_negative_price(self):
+  m=bytearray(execution());struct.pack_into('<q',m,30,-1);self.assertIn('invalid execution',self.call(header()+packet([bytes(m)]),False))
+ def test_event_after_send(self):
+  self.assertIn('invalid execution',self.call(header()+packet([execution(TS+2000)]),False))
  def test_growth_tolerated(self):
   s,_,_=self.call(header()+packet([execution()+b'extra']));self.assertEqual(s['executions'],1)
 if __name__=='__main__':unittest.main(verbosity=2)

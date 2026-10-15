@@ -17,6 +17,7 @@ using namespace std;
 uint16_t u16(const unsigned char*p){return uint16_t(p[0])|(uint16_t(p[1])<<8);}
 uint32_t u32(const unsigned char*p){return uint32_t(u16(p))|(uint32_t(u16(p+2))<<16);}
 uint64_t u64(const unsigned char*p){return uint64_t(u32(p))|(uint64_t(u32(p+4))<<32);}
+void write_le(ostream&out,uint64_t v,unsigned n){unsigned char b[8];for(unsigned i=0;i<n;i++)b[i]=(v>>(8*i))&255;out.write((char*)b,n);}
 uint16_t be16(const unsigned char*p){return (uint16_t(p[0])<<8)|p[1];}
 struct Reader{gzFile f;uint64_t bytes=0;explicit Reader(const char*p){f=gzopen(p,"rb");if(!f)throw runtime_error("input open");gzbuffer(f,4<<20);}~Reader(){gzclose(f);}bool read(void*p,size_t n,bool eof=false){size_t got=0;while(got<n){int k=gzread(f,(char*)p+got,n-got);if(k<0){int e;throw runtime_error(gzerror(f,&e));}if(!k){if(eof&&!got&&gzeof(f))return false;throw runtime_error("truncated input");}got+=k;}bytes+=n;return true;}};
 struct Stream{uint64_t next=0,offset=0,first=0,last=0,packets=0,msgs=0,gaps=0,duplicates=0,overlaps=0,offset_errors=0,lastsend=0,send_backwards=0;};
@@ -30,7 +31,9 @@ int main(int argc,char**argv){try{
  gzputs(csv,"ticker,timestamp_ns,sequence,send_ns,capture_ticks,channel,session,order_id,size,price_1e4,trade_id,sale_flags\n");
  map<pair<uint32_t,uint32_t>,Stream> streams;map<int,uint64_t> kinds,flags;map<string,uint64_t> byname;vector<int> links;vector<unsigned> resolutions;
  Reader f(argv[1]);unsigned char h[8];bool full=false;
- while(f.read(h,8,true)){
+ while(true){
+  if(limit&&packets>=limit)break;
+  if(!f.read(h,8,true)){full=true;break;}
   uint32_t type=u32(h),n=u32(h+4);if(n<12||n>(16u<<20)||n%4)throw runtime_error("invalid PCAPNG block length");vector<unsigned char>b(n-8);f.read(b.data(),b.size());if(u32(b.data()+b.size()-4)!=n)throw runtime_error("PCAPNG trailer mismatch");
   if(type==0x0a0d0d0a){if(u32(b.data())!=0x1a2b3c4d)throw runtime_error("unsupported PCAPNG endianness");links.clear();resolutions.clear();sections++;continue;}
   if(type==1){if(b.size()<12)throw runtime_error("short IDB");links.push_back(u16(b.data()));unsigned res=6;for(size_t z=8;z+4<=b.size()-4;){auto code=u16(&b[z]),len=u16(&b[z+2]);z+=4;if(z+len>b.size()-4)throw runtime_error("bad IDB option");if(code==9&&len==1)res=b[z];if(!code)break;z+=(len+3)&~3u;}resolutions.push_back(res);continue;}
@@ -52,9 +55,9 @@ int main(int argc,char**argv){try{
    if(pos+2>tn)throw runtime_error("short message prefix");auto len=u16(t+pos);pos+=2;if(!len||pos+len>tn)throw runtime_error("bad message length");auto m=t+pos;pos+=len;messages++;kinds[m[0]]++;st.msgs++;
    if(len<18)continue;string sym((char*)m+10,8);while(!sym.empty()&&sym.back()==' ')sym.pop_back();auto it=wanted.find(sym);if(it==wanted.end())continue;selected++;byname[sym]++;
    // Raw source bytes; no inference of order side/modify semantics here.
-   uint64_t fields[3]={seq+j,send,capture};uint32_t ids[2]={ch,sess};raw.write((char*)fields,24);raw.write((char*)ids,8);raw.write((char*)&len,2);raw.write((char*)m,len);
+   write_le(raw,seq+j,8);write_le(raw,send,8);write_le(raw,capture,8);write_le(raw,ch,4);write_le(raw,sess,4);write_le(raw,len,2);raw.write((char*)m,len);
    if(m[0]=='L'){
-    if(len<46)throw runtime_error("short Order Executed");auto ts=u64(m+2),oid=u64(m+18),price=u64(m+30),tid=u64(m+38);auto qty=u32(m+26);if(!qty||!price)throw runtime_error("invalid execution");flags[m[1]]++;
+    if(len<46)throw runtime_error("short Order Executed");auto ts=u64(m+2),oid=u64(m+18),price=u64(m+30),tid=u64(m+38);auto qty=u32(m+26);if(!qty||!price||price>uint64_t(INT64_MAX)||ts>send)throw runtime_error("invalid execution");flags[m[1]]++;
     gzprintf(csv,"%s,%llu,%llu,%llu,%llu,%u,%u,%llu,%u,%llu,%llu,%u\n",sym.c_str(),(unsigned long long)ts,(unsigned long long)(seq+j),(unsigned long long)send,(unsigned long long)capture,ch,sess,(unsigned long long)oid,qty,(unsigned long long)price,(unsigned long long)tid,m[1]);executions++;
    }
   }
@@ -62,7 +65,7 @@ int main(int argc,char**argv){try{
   if(packets%5000000==0)cerr<<"PROGRESS packets="<<packets<<" messages="<<messages<<" selected="<<selected<<" executions="<<executions<<" uncompressed_bytes="<<f.bytes<<"\n";
   if(limit&&packets>=limit)break;
  }
- full=!limit||packets<limit;int zrc=gzclose(csv);if(zrc!=Z_OK)throw runtime_error("output compression failure");raw.close();if(!raw)throw runtime_error("output write error");
+ int zrc=gzclose(csv);if(zrc!=Z_OK)throw runtime_error("output compression failure");raw.close();if(!raw)throw runtime_error("output write error");
  ofstream q(out/"scan.json");q<<"{\"complete_archive\":"<<(full?"true":"false")<<",\"packets\":"<<packets<<",\"messages\":"<<messages<<",\"selected_messages\":"<<selected<<",\"executions\":"<<executions<<",\"uncompressed_bytes\":"<<f.bytes<<",\"sections\":"<<sections<<",\"other_blocks\":"<<unknown_blocks<<",\"non_udp\":"<<nonudp<<",\"fragments\":"<<fragments<<",\"streams\":[";bool first=true;
  for(auto&[key,st]:streams){if(!first)q<<",";first=false;q<<"{\"channel\":"<<key.first<<",\"session\":"<<key.second<<",\"first\":"<<st.first<<",\"last\":"<<st.last<<",\"messages\":"<<st.msgs<<",\"gaps\":"<<st.gaps<<",\"duplicate_messages\":"<<st.duplicates<<",\"send_time_backsteps\":"<<st.send_backwards<<"}";}
  q<<"],\"type_counts\":{";first=true;for(auto[k,v]:kinds){if(!first)q<<",";first=false;q<<"\""<<char(k)<<"\":"<<v;}q<<"},\"selected_by_ticker\":{";first=true;for(auto&[k,v]:byname){if(!first)q<<",";first=false;q<<"\""<<k<<"\":"<<v;}q<<"},\"execution_flags\":{";first=true;for(auto[k,v]:flags){if(!first)q<<",";first=false;q<<"\""<<k<<"\":"<<v;}q<<"},\"interface_timestamp_resolutions\":[";first=true;for(auto x:resolutions){if(!first)q<<",";first=false;q<<x;}q<<"]}\n";q.close();cout<<"DONE packets="<<packets<<" messages="<<messages<<" executions="<<executions<<" full="<<full<<"\n";return 0;
