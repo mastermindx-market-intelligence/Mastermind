@@ -644,3 +644,101 @@ def test_quarantine_during_inflight_direct_read_refuses_publication(
             release.set()
             await service.close()
     asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("read_kind", ["status", "direct"])
+def test_canonical_completed_inference_read_quarantine_refuses_result_publication(
+    tmp_path, short_socket_root, monkeypatch, read_kind,
+):
+    """Real qualified Runtime read with synthetic sealed terminal fixture.
+
+    The backend finishes the existing content-bound read before the test
+    changes service state. This exercises the actual source-qualified reader
+    and exact direct-result frame, not only the prior mocked status response.
+    It never starts a provider, creates a second Runtime or moves capital.
+    """
+    import dataclasses
+    from control_plane import executive_inference_ingress as owner
+    from tests.test_vps_inference_runtime_read import synthetic_complete
+    from tests.test_vps_inference_runtime_projection import qualified_reader, cleanup
+
+    async def exercise():
+        service, client, _ = await source_harness(
+            tmp_path, short_socket_root, armed=True
+        )
+        read_binding = None
+        entered = asyncio.Event()
+        resume = asyncio.Event()
+        secret = "SYNTHETIC_ONLY_QUARANTINE_CONTENT_NEVER_RELEASE"
+        operation = "quarantine-qualified-" + read_kind
+        try:
+            admitted = await client.send_frame(
+                service._ceo_ingress_socket_path,
+                {
+                    "schema": owner.SUBMIT_SCHEMA,
+                    "request": service_request(operation),
+                    "observed_grounding": GROUND,
+                },
+            )
+            assert admitted.ok is True, admitted.error
+            original_job = admitted.result["job_id"]
+            ref, document, _ = synthetic_complete(
+                service.runtime, original_job, answer=secret
+            )
+            read_runtime, read_binding = qualified_reader(
+                service.runtime, service.config.runtime_root.parent
+            )
+            service._ceo_ingress_inference_binding = dataclasses.replace(
+                service._ceo_ingress_inference_binding,
+                result_read_runtime_factory=lambda _original: read_runtime,
+            )
+            original_read = owner.handle_frame
+            confirmed = []
+
+            async def pause_after_real_read(*args, **kwargs):
+                selected = await original_read(*args, **kwargs)
+                if read_kind == "direct":
+                    assert selected["document"] == document
+                    assert selected["reference"] == ref
+                    assert selected["generation"]["state"] == "SAME"
+                else:
+                    assert selected["terminal_result_ref"] == ref
+                confirmed.append(selected)
+                entered.set()
+                await resume.wait()
+                return selected
+
+            read_frame = {
+                "schema": (
+                    owner.DIRECT_RESULT_SCHEMA
+                    if read_kind == "direct" else owner.STATUS_SCHEMA
+                ),
+                "operation_key": operation,
+            }
+            if read_kind == "direct":
+                read_frame["reference"] = ref
+
+            with monkeypatch.context() as patch:
+                patch.setattr(owner, "handle_frame", pause_after_real_read)
+                pending = asyncio.create_task(
+                    client.send_frame(service._ceo_ingress_socket_path, read_frame)
+                )
+                await asyncio.wait_for(entered.wait(), timeout=2.0)
+                service._service_state = "QUARANTINED"
+                resume.set()
+                response = await asyncio.wait_for(pending, timeout=3.0)
+            assert len(confirmed) == 1
+            assert response.transport == "sent_ok"
+            assert response.ok is False
+            assert (response.error or {}).get("code") == "backend_unavailable"
+            assert secret not in repr(response)
+            assert original_job not in repr(response)
+            assert len(service.runtime.jobs.list_jobs()) == 1
+            assert service.runtime.jobs.get_job(original_job).status.value == "COMPLETED"
+        finally:
+            resume.set()
+            if read_binding is not None:
+                cleanup(read_binding)
+            await service.close()
+
+    asyncio.run(exercise())

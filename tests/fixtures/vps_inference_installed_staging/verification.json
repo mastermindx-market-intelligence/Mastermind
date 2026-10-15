@@ -6,7 +6,7 @@
     "scripts/executive_os_phase1c.py": "accf4a5039b4edce733055ba4cc83a1c4e3f2181b0e12c6fe36a9ccaa568c9e1",
     "control_plane/executive_service.py": "16029e950a5c4b584f55a0f876111d2da48551d9716fd77c5921bd79381fa94c",
     "tests/test_vps_inference_installed_dormant.py": "589cc32bab33d58413189f644c1ae84accd274e22d4090ca10effd0e21700c6a",
-    "tests/test_vps_inference_installed_socket.py": "d778ecc947f321bb784b5e64afe573b561cae21d63993742da54e6c9c0f3123b",
+    "tests/test_vps_inference_installed_socket.py": "a3a38ff20f34dff344018b4e94ea8335d732ac3aec1750b38630dff5e1d261e0",
     "integrations/mastermind_executive_app/gateway.py": "5630bb8d2159ef02f3eb4a8d7c7dce8fc650c814d78d00e8d0cd71e153df449f"
   },
   "new_capability": "Source-only optional dormant numeric service UID configuration validation; NO binding/ACL/status/direct read/fresh admission established solely by config. Existing host binding remains an uninstalled separate authority.",
@@ -125,5 +125,24 @@
     },
     "production_effect": "NONE",
     "source_write_boundary": "source tests and evidence only, no launcher/installed config/identity/credential/provider/trading writes"
+  },
+  "postreview_direct_result_regression": {
+    "historical_readonly_reviewer_test_sha256": "d778ecc947f321bb784b5e64afe573b561cae21d63993742da54e6c9c0f3123b",
+    "new_test_sha256": "a3a38ff20f34dff344018b4e94ea8335d732ac3aec1750b38630dff5e1d261e0",
+    "production_reviewed_code_files_unchanged": true,
+    "reason": "Prior reviewer correctly flagged synthetic status-only quarantine test. Added two real source-qualified terminal-result variants after that scoped review without modifying any production code or previously reviewed policy.",
+    "source_only_fixture": "Already admitted canonical Job, future-writer-simulated completed Attempt, exact qualified bounded Runtime, actual service ingress, real AF_UNIX socket. Not a live provider, service identity, or market operation.",
+    "cases": [
+      "test_canonical_completed_inference_read_quarantine_refuses_result_publication[status]",
+      "test_canonical_completed_inference_read_quarantine_refuses_result_publication[direct]"
+    ],
+    "verified_result": {
+      "passed": 46,
+      "failed": 0,
+      "skipped": 0,
+      "junit_sha256": "5039d0d9dfb902758fa73bb5a14f90ab1bd1173b7af662a5a198c67ded225204"
+    },
+    "protected_outcome": "Both STATUS and DIRECT_RESULT produce a completed content-bound answer internally, then a QUARANTINED transition before publication refuses the socket reply with no output content disclosure.",
+    "test_only_edit_no_increased_service_authority": true
   }
 }
