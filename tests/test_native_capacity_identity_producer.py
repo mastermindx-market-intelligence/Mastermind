@@ -58,6 +58,16 @@ def native(bound, monkeypatch, tmp_path):
     config = bridge.load_config(path)
     workspaces, runs = tmp_path/'workspaces', tmp_path/'runs'
     workspaces.mkdir(); runs.mkdir()
+    # The real policy constructor also reads the private HOME ownership. Keep
+    # this one OS metadata boundary consistent with the dedicated UID fixture.
+    original_lstat = Path.lstat
+    def worker_home_stat(path, *args, **kwargs):
+        s = original_lstat(path, *args, **kwargs)
+        if path == bound.f.home:
+            values = {key: getattr(s, key) for key in dir(s) if key.startswith('st_')}
+            return SimpleNamespace(**{**values, 'st_uid': 470, 'st_gid': 470})
+        return s
+    monkeypatch.setattr(Path, 'lstat', worker_home_stat)
     policy = BrokerPolicy(control_uid=450, worker_uid=470, worker_gid=470,
         worker_id='minimax-finite-01', worker_user='_mastermind_minimax',
         workspace_root=workspaces, run_root=runs, provider_home=bound.f.home,
