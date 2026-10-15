@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 RELEASE = ROOT / "integrations/session_bridge/prospective_completion"
 PATCHES = ROOT / "ops/native_fabric/routing_audit_20261013"
 NATIVE_SUPPORT = ROOT / "integrations/session_bridge/native_broker_admission/remote_sub.sh.patch"
+NATIVE_SUPPORT_CURRENT = PATCHES / "protected_composition/native_support_after_prospective.patch"
 
 
 def _apply(root: Path, patch: Path, *args: str) -> None:
@@ -39,8 +40,19 @@ def test_latest_protected_prospective_launcher_accepts_route_flags_and_native_de
            "--include=ext/remote_sub.sh")
     _apply(tmp_path, PATCHES / "request_waiters/request_waiters_wiring.patch",
            "--include=ext/remote_sub.sh")
-    _apply(tmp_path, NATIVE_SUPPORT, "--directory=ext")
+    # The original native support patch has a zero-context line-695 hunk.
+    # The protected prospective return revision moved that same line to 696;
+    # use an exact-source, context-anchored variant instead of weakening the
+    # native dependency or changing the collection/launch paths.
+    historical = NATIVE_SUPPORT.read_text()
+    old_support = "  mm_feeder_lib.py pool_ledger.py lease_broker.py glm_keys.py bailian_keys.py"
+    new_support = "  mm_feeder_lib.py pool_ledger.py lease_broker.py native_broker_admission.py glm_keys.py bailian_keys.py"
+    assert ("-" + old_support + "\\n+" + new_support + "\\n").replace("\\n", "\n") in historical
+    before_support = target.read_text()
+    assert before_support.count(old_support) == 1
+    _apply(tmp_path, NATIVE_SUPPORT_CURRENT)
     proposed = target.read_text()
+    assert proposed == before_support.replace(old_support, new_support, 1)
     commands = [line for line in proposed.splitlines()
                 if 'broker acquire ' in line or 'show_args "<broker>" acquire' in line]
     assert len(commands) == 3

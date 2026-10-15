@@ -1,0 +1,11 @@
+--- a/ext/remote_sub.sh
++++ b/ext/remote_sub.sh
+@@ -693,7 +693,7 @@
+   codex_usage.py go_remote_codex.py go_remote_capsule.py
+   mm_codex_exec.sh glm_codex_exec.sh go_codex_exec.sh qwen_exec.sh
+   fabric_client_projection.py studio_mcp_projection.sh
+-  mm_feeder_lib.py pool_ledger.py lease_broker.py glm_keys.py bailian_keys.py
++  mm_feeder_lib.py pool_ledger.py lease_broker.py native_broker_admission.py glm_keys.py bailian_keys.py
+ )
+ SUPPORT_MANIFEST="$LOG_DIR/${ID}.support.json"
+ REMOTE_SUPPORT_SOURCE="~/lanes/tmp/${ID}.support-src"
