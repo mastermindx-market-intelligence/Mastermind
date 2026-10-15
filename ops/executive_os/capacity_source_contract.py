@@ -985,8 +985,9 @@ def acquire_native_registration(realm_owner: object) -> dict[str, Any]:
     CLI, never a model/request document. This reader cannot qualify a Git branch
     or infer release acceptance from a public hash. There is no default stanza.
 
-    The export is an immutable projection below the existing capacity source
-    root, not a second capability registry. No credential or provider is read.
+    The export is an immutable projection in Capacity configuration, never an
+    extra file inside a sealed Macro checkout or a second capability registry.
+    No credential or provider is read.
     Return values are observations, not bearer authentication or availability.
     """
     from control_plane import codex_provider_realm as realm
@@ -1002,7 +1003,7 @@ def acquire_native_registration(realm_owner: object) -> dict[str, Any]:
     if enrollment["enrollment_state"] != "enrolled":
         raise CapacitySourceContractError("NATIVE_REGISTRATION_UNBOUND")
     source = enrollment["registration_source"]
-    export_path = SYSTEM_ROOT / "capacity-sources" / "macro" / source["release_commit"] / "native-registrations.json"
+    export_path = SYSTEM_ROOT / "config" / "capacity-source-components-native-v2" / (source["release_commit"] + ".json")
     document = realm._native_read_config(export_path, source["export_sha256"])
     if (set(document) != {"repository_commit", "previous_repository_commit", "material_source_digest", "registrations"}
             or document["repository_commit"] != source["release_commit"]

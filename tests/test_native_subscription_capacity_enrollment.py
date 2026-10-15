@@ -59,7 +59,7 @@ def bound(enrolled, monkeypatch, tmp_path):
     row["registration_receipt_digest"] = sha(encode(row))
     document = {"repository_commit": "b"*40, "previous_repository_commit": "c"*40,
                 "material_source_digest": "a"*64, "registrations": [row]}
-    export = source.SYSTEM_ROOT / "capacity-sources/macro" / ("b"*40) / "native-registrations.json"
+    export = source.SYSTEM_ROOT / "config/capacity-source-components-native-v2" / (("b"*40) + ".json")
     export.parent.mkdir(parents=True)
     f.config["capacity_capability_id"] = "cap.fixture"
     f.config["native_capacity_enrollment"] = {
@@ -156,6 +156,17 @@ def test_root_config_revocation_invalidates_collected_owner(bound):
     owner = bound.publish()
     bound.f.path.write_text("{}")
     with pytest.raises(realm.ProviderRealmError): owner.observe_capacity_enrollment()
+
+
+def test_macro_checkout_location_is_never_used_as_projection_fallback(bound):
+    owner = bound.publish()
+    raw = bound.export.read_bytes()
+    old = source.SYSTEM_ROOT / 'capacity-sources/macro' / ('b'*40) / 'native-registrations.json'
+    old.parent.mkdir(parents=True)
+    bound.export.rename(old)
+    with pytest.raises(realm.ProviderRealmError):
+        owner.observe_capacity_enrollment()
+    assert old.read_bytes() == raw and not bound.export.exists()
 
 
 def test_stanza_parser_detaches_source_and_rejects_overrides(bound):

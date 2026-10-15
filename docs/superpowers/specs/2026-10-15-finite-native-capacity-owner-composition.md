@@ -10,8 +10,10 @@ V2 material identity. The existing Capacity source publication owner must
 qualify the actual immutable Macro release and acquire its CLI output, binding
 both accepted commits, the material digest and exact export bytes. The root
 Worker configuration pins that identity. Its immutable projection is read from
-the existing `capacity-sources/macro/<commit>/native-registrations.json` root.
-This file is a source projection, not a mutable registry or an auth database.
+the Capacity configuration area at
+`config/capacity-source-components-native-v2/<commit>.json`, outside the sealed
+Macro source checkouts. This file is a source projection, not a mutable registry
+or an auth database; the existing V1 component inventory remains unchanged.
 
 `capacity_source_contract.acquire_native_registration` accepts the existing
 sealed SubscriptionRealmOwner, re-reads its exact root config, acquires only
