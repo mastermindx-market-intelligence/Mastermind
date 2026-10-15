@@ -23,7 +23,7 @@ from tests.test_workbench_browser_worker_grant import _grant
 
 
 def test_snapshot_only_worker_transport_refuses_other_tools_and_unsigned_resource(tmp_path):
-    path, _document, _audit_dir = _config_file(tmp_path)
+    path, _outer, _audit_dir = _config_file(tmp_path)
     config = load_browser_tunnel_config(str(path))
 
     async def exercise():
@@ -51,7 +51,13 @@ def test_snapshot_only_worker_transport_refuses_other_tools_and_unsigned_resourc
                 ("prepare_browser_click", {
                     "browser_ref": "unsigned", "target": "button",
                 }),
-                ("browser_evaluate", {"browser_ref": "unsigned", "function": "() => 1"}),
+                # Actual ungranted read-side surface tool, not an unknown
+                # Playwright tool; its optional filename can write artifacts.
+                ("browser_take_screenshot", {
+                    "browser_ref": "unsigned",
+                    "filename": str(tmp_path / "ungranted-screenshot.png"),
+                    "scale": "css",
+                }),
             )
             for name, payload in forbidden:
                 refused = await _call(server, name, payload)
@@ -63,10 +69,9 @@ def test_snapshot_only_worker_transport_refuses_other_tools_and_unsigned_resourc
                 "browser_ref": "unsigned-not-an-admitted-resource",
             })
             assert requested.isError is True
-            assert _error_code(requested) in {
-                "BROWSER_REF_INVALID", "BROWSER_BINDING_CHANGED",
-                "CHANNEL_ADMISSION_REFUSED",
-            }
+            # This live fixture channel must reach the downstream owner port
+            # and refuse the unsigned ref, not merely fail channel admission.
+            assert _error_code(requested) == "BROWSER_REF_INVALID"
 
             # Read-only decoration is not an artifact grant. No source file or
             # Browser process may be produced by a forged read with filename.
@@ -75,8 +80,15 @@ def test_snapshot_only_worker_transport_refuses_other_tools_and_unsigned_resourc
                 "browser_ref": "unsigned-not-an-admitted-resource",
                 "filename": str(destination),
             })
-            assert refused_file.isError is True
+            assert _error_code(refused_file) == "BROWSER_REF_INVALID"
             assert not destination.exists()
+            assert not (tmp_path / "ungranted-screenshot.png").exists()
+            # A tool not in the *source catalog* is separately out of surface,
+            # not evidence of narrowing an available tool's rights.
+            outside = await _call(server, "browser_evaluate", {
+                "browser_ref": "unsigned", "function": "() => 1",
+            })
+            assert _error_code(outside) == "TOOL_NOT_AVAILABLE"
             assert list(Path(config.action.artifact_directory).iterdir()) == []
         finally:
             runtime.revoke()
@@ -101,6 +113,13 @@ def test_snapshot_only_grant_does_not_silently_authorize_resource_start(tmp_path
                 "start_ref": "unsigned",
             })
             assert _error_code(result) == "TOOL_NOT_AVAILABLE"
+            # Unlike start_resource, snapshot IS a granted tool. The same
+            # unsigned resource ref must now be refused at channel custody
+            # after revocation, rather than even reaching its port decoder.
+            revoked = await _call(server, "browser_snapshot", {
+                "browser_ref": "unsigned-not-an-admitted-resource",
+            })
+            assert _error_code(revoked) == "CHANNEL_ADMISSION_REFUSED"
             assert list(Path(config.action.artifact_directory).iterdir()) == []
         finally:
             await runtime.aclose(timeout=5)
@@ -162,10 +181,7 @@ def test_runtime_bound_attempt_still_refuses_snapshot_only_mutation(tmp_path, mo
                 "browser_ref": "unsigned-not-a-real-browser-resource",
             })
             assert invalid.isError is True
-            assert _error_code(invalid) in {
-                "BROWSER_REF_INVALID", "BROWSER_BINDING_CHANGED",
-                "CHANNEL_ADMISSION_REFUSED",
-            }
+            assert _error_code(invalid) == "BROWSER_REF_INVALID"
             assert list(Path(config.action.artifact_directory).iterdir()) == []
 
             # Revoke the authoritative Job; a formerly selected read tool must
