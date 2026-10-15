@@ -1,0 +1,62 @@
+{
+  "id": "LP-CLOCK-04",
+  "frozen_at": "2026-10-15T05:01:55.091372+00:00",
+  "status": "FROZEN_BEFORE_NEW_RUN_NOT_PRISTINE_HOLDOUT",
+  "mission": "Research-only continuation of latent-pressure commission; source qualification and next observable response; no deployment or trading",
+  "original_root": "latent-pressure-research-20261014-chatgpt4-001",
+  "original_carrier": "Mastermind PR1470 / research/latent-pressure-20261014",
+  "protected_pin": "78388ac29f7e54c9dfe7799a8e4769fb46d4aed6",
+  "input": "../event_recovery/private/full_scan/executions.csv.gz",
+  "input_sha256": "d967e15a6148b96d155f733b64154c2256df07cfb3443c62c2df3be8ca54afe1",
+  "source_capture_date": "2026-10-05",
+  "names": [
+    "AAPL",
+    "MSFT",
+    "NVDA",
+    "AMD",
+    "MU",
+    "INTC",
+    "SPY",
+    "XLV"
+  ],
+  "knowledge_status": "Source day and morning/afternoon have already been used in LP-EVENT-03A. New estimand, origins and model frozen now; not fresh independent validation or control of all mission-wide trials.",
+  "allowed_source_fields": "Previously qualified L execution fields only. All L flags counted as observed displayed execution records; only flag==0 used for price features and price outcomes. No reading or guessing blocked PDF/book fields.",
+  "origin": "Fixed30secondgrid10:00-15:30NewYork; not event-selected. Use onlysend_ns<=cutoff.",
+  "eligibility": ">=20flag0records since09:45, lastflag0<=300secondsold. Future observations never decide origin inclusion. Empty/no-history origins counted separately.",
+  "outcome": "Fixedfuturewindow[t+60seconds,t+120seconds], inclusive. If noflag0record: NO_STANDARD_OBSERVATION(class0). Otherwise compare medianfutureflag0price to medianlatest5flag0prices;class1DOWN,class2SAME,class3UP. Median uses exacttwiceintegerprice to avoid floattieloss. No future waiting beyondwindow, no fillforward.",
+  "models": {
+    "baseline": "ticker,clock,flag0recentmomentum/volatility,volume,printage,flag0counts60/300,allLcounts60/300,allLage;fixedtwo-partmodel",
+    "pause": "baseline plus prior-gapnormalizedelapsedtime, completedgap trend, recentratechange and gaps/filter-divergence interactions, repeated-order fraction;noinstantaneoustradeorigin or futuretotalgaps"
+  },
+  "fit": "Two-part ridge logisticavailability and ridge3classsoftmaxdirectiononA=1. FixedmeanlossL2lambda.01; interceptunpenalized;trainonlystandardizationclip+-5. Laplace-smoothedconstanttraining4classbaseline. Onecandidate,nohyperparamsearch.",
+  "split": "Trainorigins10:00+ with t+120seconds strictlybefore12:00; evaluation13:00-15:30inclusive. Allfuturewindows endby15:32. One calendar day, eight selectednames, variablecoverage.",
+  "primary_metrics": [
+    "fourclassBrierandlogloss",
+    "availabilityBrier",
+    "threeclassdirectionBrierconditionalonobservedfuture",
+    "directionaccuracyandcalibration",
+    "per-tickerandhalf-hourgain",
+    "coverageeligibilityandreasoncounts"
+  ],
+  "uncertainty": "1000pairedresamplesof30minuteoriginblocks withcounts;seed2026101504. Same-dayconditionaldescriptiveintervals only, notpopulationconfidence or pvalue. No statisticalalphaclaim.",
+  "candidate_to_replicate_only_gate": "JointBriergain>=.002 and conditionaldirectionBriergain>=.002 and bothdescriptiveintervalsabove0, anddirectionpositive>=5nameswith>=30observedoutcomes. Evenpass leaves forecastauthorityNONE untilindependentmultiday/quote/executionproof.",
+  "diagnostic": "Atfixedeligibleorigins agedflag0>=60seconds, countwhether anyotherLexecutionoccurred in[t-60s,t]. Such origins demonstratefilteredquietnessnotall-displayedinactivity; no claim aboutaggressors or offvenue.",
+  "unit_checks": [
+    "prefixinvarianceatbothtradingandquietorigins",
+    "futurewindowendpointsexact",
+    "no-futureprintremainsdistinctclass",
+    "tieprecisionlargeintegers",
+    "batchingandsend-timeordering",
+    "traininglabelsembargo",
+    "probabilitysimplexandproper-lossdecomposition",
+    "inputhashunchanged"
+  ],
+  "consumer": "Provideas-ofhistoricalclockobservationwithexplicitSTANDARD_QUIET_WITH_OTHER_DISPLAYED_ACTIVITY vsDISPLAYED_EXECUTION_QUIET vsSTANDARD_PRINT_ACTIVE. All inferredinventory,quote-recoveryandforecastprobabilitiesnull. Quiet meansobservedLchannel only, not market-widesellingabsence.",
+  "independent_phase": "AddpurePythoncompeting-riskdescriptivesforsyntheticRecoveryBookepisodehistory; no binding to unverifiedrealorderadapter. Preserve oldcompletedrecoverymedian and appendcensoring-aware descriptivefields withmassconservation. Not calibratedrisk forecasts.",
+  "do_not_redo": [
+    "LP-ETF-01,LP-NOVEL-02andLP-EVENT-03A unchanged",
+    "No fullarchive re-extraction/hash or blockedPDFretry",
+    "No source/schema/rightsflagchange, live sockets orrawseriespublicexport"
+  ],
+  "reproduction": "Sourceandtestcommands documented; privateforecastsignored; aggregateandhashespublic"
+}
