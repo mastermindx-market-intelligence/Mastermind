@@ -82,9 +82,15 @@ def normalize_root_inventory(rc, out, err):
     _require(0 < len(lines) <= MAX_ROWS, "INVENTORY_BOUND")
     rows = {}
     for line in lines:
-        match = re.fullmatch(r'[ \t]*([1-9][0-9]{0,9})[ \t]+(0|[1-9][0-9]{0,9})[ \t]*', line)
+        match = re.fullmatch(r'[ \t]*([1-9][0-9]{0,9})[ \t]+(0|-?[1-9][0-9]{0,9})[ \t]*', line)
         _require(match is not None, "INVENTORY_ROW")
         pid, uid = map(int, match.groups())
+        # Apple ps prints uint32 uid_t with signed UIDFMT "d" (e.g. -2).
+        # Bound the signed representation before converting; no negative value
+        # can wrap to root, and every row still participates in validation.
+        if uid < 0:
+            _require(uid >= -(2**31), "INVENTORY_RANGE")
+            uid += 2**32
         _require(_integer(pid, 2**31 - 1) and _integer(uid, 2**32 - 1, zero=True),
                  "INVENTORY_RANGE")
         _require(pid not in rows, "INVENTORY_DUPLICATE")
