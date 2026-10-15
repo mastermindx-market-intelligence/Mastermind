@@ -32,3 +32,33 @@ Independent paid Qwen review returned scoped PASS for the exact two-file guard c
 The `befec11ef` push had no repository-test run. Local merge diagnosis independently found a conflict with protected `89ab904e0` in the reviewed-literal table. The merge resolution preserves the upstream HTTP-status pins byte-for-byte and appends the unchanged reviewed telemetry-age entry. All 150 affected D8 checks pass on the combined source. No runtime or installed-source change was introduced by the resolution.
 
 Protected `a53062ff1` then landed another accepted entry in the same append location. The second merge preserves its complete AST and moves our unchanged exact token entry into the existing initial dictionary. This avoids repeated end-of-file conflicts without adding a registry or changing any guard. Removing our one entry from the resolved AST reproduces upstream exactly.
+
+## Remote hard-cooldown admission correction
+
+Two later reviews received a central lease for a configured account that was
+already in a non-429 cooldown on the selected remote host. The original
+configured-key observation did not represent this host-local restriction.
+
+The existing probe now reads only each requested account's bounded cooldown
+metadata and combines it with configured-key readiness. It emits only
+true/false/unknown, never the marker reason, expiry, path or credentials. A
+non-429 active cooldown excludes that account; missing or expired markers allow
+normal admission, and the existing 429 soft-cap policy is unchanged. Expired
+files are left untouched. Malformed, replaced, unsafe or unreadable markers
+produce unknown and cannot qualify the account. No marker is cleared, no lease
+or account is changed, and neither original failed review is retried.
+
+The existing Qwen predicate additionally requires literal `cooldown_checked:
+true`, so old configuration-only telemetry cannot qualify a new lease. GLM's
+contract is unchanged. This is a freshness-bounded observation, not atomic
+provider admission: a later cooldown still causes the strict remote launcher to
+refuse the original grant. The two changed installed files are the existing
+probe builder and predicate; broker, router, validator and launcher stay intact.
+
+Fifteen new cases failed on the preceding implementation; all 68 affected
+producer/consumer/collector/router/broker cases pass after the correction. The
+new cases include the original mismatch with a controller that sees no cooldown,
+old positive telemetry, expired-file nonmutation and unsafe metadata. Rollout is
+producer first, then the existing collector's fresh observations, then consumer;
+no manual probe, daemon restart or cooldown reset is needed. Earlier source and
+review receipts above remain historical evidence for the configured-key phase.

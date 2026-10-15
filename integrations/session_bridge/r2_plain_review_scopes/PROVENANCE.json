@@ -1,0 +1,40 @@
+{
+  "state": "PATCH_ONLY",
+  "installed_preimage_sha256": "89b9acd36608742b62baa4e2366f810f8c1071a51510c3d17d14cdb64dc6e534",
+  "runs": [
+    {
+      "run_id": "r2-events-composition-review-20261015-01a13315",
+      "source_commit": "03b063a3b4864b04e0f86d4ce563e00db535c464",
+      "packet_bytes": 76983,
+      "reconstructed_packet_sha256": "9289b43965dca0d11a8e38f8a112124b0bf990515bf4dc717d4e22bd38647f7a",
+      "current_packet_matches": true,
+      "native_rollout": "/Users/chriswong/.codex/sessions/2026/10/12/rollout-2026-10-12T19-26-29-01a13315-332b-7102-b7c8-0c7fc01fa92c.jsonl",
+      "creation_line": 25004,
+      "creation_record_sha256": "c2a8f1f454e8507c7a1f6f8e98abb27cae57c9b7b87375d050c04b57aea2923d",
+      "creation_timestamp": "2026-10-15T10:51:51.009Z",
+      "dispatch_line": 25009,
+      "dispatch_record_sha256": "a9a43418de2827603da49c63c4450764e1cbcbcb60bfe898a7a03b5e2b18e81b",
+      "dispatch_timestamp": "2026-10-15T10:52:04.113Z",
+      "construction_command_sha256": "2f6cdb1dedfed7e07e7d1758d2760edc2987e462dd20c2133a525f012d50cd84",
+      "dispatch_command_sha256": "fc6609f83155756844020290249258ea1ec5e4ca97fd854ff5cdef8591f94ab4",
+      "limitations": "Native construction and retained capture correlation; not producer root authentication, causal consumption, served-model attestation, or terminal proof."
+    },
+    {
+      "run_id": "r2-events-aead-current-review-20261015-01a13315",
+      "source_commit": "f8ae20d52b2676617d2eecdec70c2cf0bba3da49",
+      "packet_bytes": 57337,
+      "reconstructed_packet_sha256": "ec671493af948e49d8e4ceca5d91c64b8084e31c525be0bf948a51d455fc8c56",
+      "current_packet_matches": true,
+      "native_rollout": "/Users/chriswong/.codex/sessions/2026/10/12/rollout-2026-10-12T19-26-29-01a13315-332b-7102-b7c8-0c7fc01fa92c.jsonl",
+      "creation_line": 25217,
+      "creation_record_sha256": "8ff81301d5d1e423c8eee58484f69068e5e4838bfd27aca8287c58f78db56f53",
+      "creation_timestamp": "2026-10-15T11:00:56.238Z",
+      "dispatch_line": 25224,
+      "dispatch_record_sha256": "1d14a1f5c00a6e8e8acbc3f766beb36e4f299c32f0741e5aeb30696e1db41ac9",
+      "dispatch_timestamp": "2026-10-15T11:01:18.008Z",
+      "construction_command_sha256": "6adcc1451768377e79a1b52c64982ce137c597aabe793f610bdc3a44f7f121b0",
+      "dispatch_command_sha256": "087c5884f2ca1f3393d16cb727890db326118c3cbead3e4c557ab9907fb591fc",
+      "limitations": "Native construction and retained capture correlation; not producer root authentication, causal consumption, served-model attestation, or terminal proof."
+    }
+  ]
+}

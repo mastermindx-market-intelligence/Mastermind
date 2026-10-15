@@ -24,7 +24,7 @@ def build_probe(host, transport_alias, names, validator_bytes, *, mode="glm"):
                     validator_sha256=digest, validator=base64.b64encode(validator_bytes).decode())
     # Execute only the exact reviewed validator bytes. Config stays on its host;
     # no credential values, config paths, exception text or inventory is emitted.
-    program = '''import base64,hashlib,json,os,sys,time,types
+    program = '''import base64,hashlib,json,math,os,stat,sys,time,types
 p=json.loads(base64.b64decode(sys.argv[1]))
 provider='glm' if p['mode']=='glm' else 'bailian'
 r={'schema':'mastermind.'+provider+'_local_account_readiness.v1','host':p['host'],
@@ -52,7 +52,31 @@ try:
   if not isinstance(raw,dict) or not isinstance(raw.get('token-plan'),dict): raise ValueError()
   module._load_config=lambda: raw
   names=set(module.key_names())
-  r['accounts']={name:name in names for name in p['accounts']}
+  def cooldown_available(name):
+   # The launcher's cooldown_info deletes expired files. Observation must not.
+   if name in ('.','..') or '/' in name or chr(92) in name: return None
+   path=module._cooldown_path(name)
+   try: fd=os.open(path,os.O_RDONLY|os.O_CLOEXEC|os.O_NOFOLLOW|os.O_NONBLOCK)
+   except FileNotFoundError: return True
+   except OSError: return None
+   try:
+    before=os.fstat(fd)
+    if (not stat.S_ISREG(before.st_mode) or before.st_uid!=os.geteuid()
+        or before.st_mode & 0o002 or before.st_size>4096): return None
+    raw=os.read(fd,4097)
+    identity=lambda st:(st.st_dev,st.st_ino,st.st_size,st.st_mode,st.st_uid,st.st_mtime_ns,st.st_ctime_ns)
+    if (len(raw)!=before.st_size or identity(before)!=identity(os.fstat(fd))
+        or identity(before)!=identity(os.stat(path,follow_symlinks=False))): return None
+    parts=raw.decode('utf-8').strip().split(None,1)
+    value=float(parts[0])
+    if not math.isfinite(value): return None
+    expiry=int(value)
+    if expiry<=int(r['observed_at']): return True
+    return len(parts)==2 and parts[1]=='http_429'
+   except (OSError,ValueError,IndexError,OverflowError): return None
+   finally: os.close(fd)
+  r['accounts']={name:cooldown_available(name) if name in names else False for name in p['accounts']}
+  r['cooldown_checked']=True
  r['status']='known'
 except Exception:
  r['accounts']={}
