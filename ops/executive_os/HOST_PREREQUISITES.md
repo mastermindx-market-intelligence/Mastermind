@@ -815,11 +815,26 @@ privileged-action result.
 
 The command requires the current sealed release, closed intake arms, stopped
 consumers, an idle or already-unloaded broker and no other pinned root interpreter.
-It uses one disable and one bootout at most, followed by typed disabled/unloaded
-and socket-absence observations. It never unlinks a socket, repairs permissions,
-edits configuration or touches incident evidence. An active broker, ambiguous
-command result, residual socket or cleanup failure refuses; reconcile the retained
-partial state rather than repeating a modifying command.
+It checks the fixed retained socket slot before any modifying broker verb, then
+uses one disable and one bootout at most. If launchd leaves the canonical socket
+node behind, the same maintenance owner may preserve that exact qualified inode
+at `.privileged-retired.sock` in the existing pinned socket directory. This uses
+the native descriptor-relative no-replace rename, bracketed by complete source,
+closed-arm, disabled/unloaded, strict old-owner, boot and namespace observations.
+It verifies the retained inode, metadata and native ACL absence and requires the
+canonical socket path to be absent. The original absolute budget remains in force.
+
+It never unlinks a socket, repairs permissions, overwrites or adopts a retained
+node, edits configuration or touches incident evidence. An occupied retained slot
+blocks another maintenance operation before disable/bootout, including when the
+canonical path is already absent. The slot is intentionally retained after
+success too; this command provides no cleanup or reuse authority. An active broker,
+ambiguous command result, changed socket generation or cleanup failure refuses.
+`socket_retirement_attempted` remains true after any attempted move, so a failure
+returns exit75 even if the broker was already unloaded and no launchctl verb ran.
+Preserve the original operation and both paths for owner reconciliation; do not
+unlink, roll back the move, or retry it. A sampled lsof absence is not old-owner
+exclusion. Held namespace descriptors are not a global lock against trusted root.
 
 Success reports a sampled stopped state only. It neither grants recovery authority
 nor supplies an origin context; the separately authorized forward entry must
