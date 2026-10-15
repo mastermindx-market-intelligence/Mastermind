@@ -11,7 +11,7 @@ REVIEWED_FILES = {
     # single exact site. Independent source acceptance remains a release gate;
     # these static test pins do not establish it or grant a new identity.
     "ops/executive_os/control_aead_profile.py": {
-        "sha256": "78f89ff4f0b6db2d6e5c2d832dfa207c60283ab218271bbec2ed85100095e85e",
+        "sha256": "08595b2ecf5b4d5841a85532062e01cd560ae1afe4af3adfe4c7e6eaf22eb2b0",
         "sites": ((277, 124, 127, "int", "450"),),
     },
     # Existing ten-minute telemetry age, not a UID. Full reviewed source and

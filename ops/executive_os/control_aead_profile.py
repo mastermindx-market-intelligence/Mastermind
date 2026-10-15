@@ -207,7 +207,7 @@ def verify_profile(release_root, *, check=None):
     release_root=Path(release_root)
     sealed_directory(release_root,check=check)
     sealed_directory((release_root/LOCK_RELATIVE).parent,check=check)
-    lock_bytes=secure_data(release_root/LOCK_RELATIVE,mode=0o644,check=check)
+    lock_bytes=secure_data(release_root/LOCK_RELATIVE,mode=0o644,maximum=32768,check=check)
     root=profile_root(lock_bytes);sealed_directory(root,mode=0o555,check=check)
     sealed_directory(root/'packages',mode=0o555,check=check);sealed_directory(root/'wheels',mode=0o555,check=check)
     wheel_paths=sorted((root/'wheels').iterdir())

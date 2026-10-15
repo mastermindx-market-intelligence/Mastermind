@@ -106,6 +106,14 @@ def test_existing_profile_occupant_never_replaced_or_cleaned(tmp_path,monkeypatc
     assert marker.read_text()=='preserve'
 
 
+def test_direct_verify_refuses_oversized_lock_before_hashing(tmp_path,monkeypatch):
+    release,artifact,uid=simulated_custody(tmp_path,monkeypatch)
+    lock=release/p.LOCK_RELATIVE
+    lock.write_bytes(b'#'+b' ' * 32768);lock.chmod(0o644)
+    monkeypatch.setattr(p,'profile_root',lambda *a:pytest.fail('oversized lock was hashed'))
+    with pytest.raises(p.AeadProfileError):p.verify_profile(release)
+
+
 def simulated_sealed_directory(actual_uid):
     # Ownership is explicitly simulated as the fixture user; modes stay real.
     def sealed(path,*,mode=None,check=None):

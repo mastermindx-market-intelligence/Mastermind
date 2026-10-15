@@ -13,7 +13,8 @@ reviewed production lock's exact cryptography 50.0.1, cffi 2.1.1 and pycparser 3
 versions and hashes. Public bundle preparation uses the matching macOS arm64
 CPython 3.12/native ABI wheels and contains exactly three original wheel archives.
 A caller-built manifest cannot substitute for wheel provenance: preflight validates
-original wheel SHA-256 against the committed lock, validates platform/version and
+original wheel SHA-256 against the committed lock, matches each internal WHEEL tag
+to the allowed filename platform/version, validates
 closed package paths, then derives the package manifest from those accepted bytes.
 Startup hooks, arbitrary top-level modules, symlinks and traversal are refused.
 
@@ -26,6 +27,10 @@ its derived lock-digest address under the existing System root. It reuses the
 existing descriptor-relative exclusive rename. A same-profile occupant must verify
 exactly; it is never replaced or cleaned. Failure preserves partial staging for the
 existing installing owner to reconcile. No separate service or installer owns it.
+The installer's restrictive umask is preserved. Only a freshly created dependency
+parent with verified ownership, descriptor identity and no ACL is widened to 0755;
+an existing parent must already satisfy that mode. `--stage-release-only` exits
+after release sealing and does not materialize or activate the dependency profile.
 
 The profile retains its original wheel archives, exact derived manifest and extracted
 files. Verification rechecks all original hashes, all file bodies, closed inventory,
@@ -37,8 +42,12 @@ and authentication-failure self-test. It rechecks the same profile after import.
 The disabled configuration performs no dependency I/O. No actual host storage key
 is used in this dependency qualification.
 
-Installed-peer control qualification observes this same optional closure and rejoins
-it before issuing its existing owner observation. Gateway/network qualification
+Installed-peer control qualification verifies this optional closure's contents once
+per connection. Both subsequent race checks freshly observe its descriptors, ACLs,
+file identities, lock and manifest; no observation is reused across connections.
+Reads, hashing and decompression obey the same original qualification budget.
+Direct profile verification also caps the lock read at its 32 KiB contract limit.
+Gateway/network qualification
 remains separate; the event flag does not reinterpret a release-controller profile
 or native worker grant. The new key reader also reuses the existing descriptor-bound
 `control_plane.fs_security.has_macos_acl` observer for the open key and its parent
