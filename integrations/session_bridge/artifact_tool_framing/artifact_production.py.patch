@@ -1,0 +1,51 @@
+--- a/ext/artifact_production.py
++++ b/ext/artifact_production.py
+@@ -16,6 +16,7 @@
+
+ REQUEST_PREFIX = 'FABRIC_ARTIFACT_REQUEST_V1 '
+ RESULT_PREFIX = 'FABRIC_ARTIFACTS_V1 '
++TOOL_PREFIX = 'FABRIC_ARTIFACT_SEAL_V1 '
+ SCHEMA = 'mastermind.fabric_artifact_production.v1'
+ RESULT_SCHEMA = 'mastermind.fabric_artifact_manifest.v1'
+ MODES = {'grok', 'go-codex', 'glm', 'qwen'}
+@@ -79,7 +80,7 @@
+ def encode_packet(body, *, root, parent, run_id, names, support_digest):
+     if not isinstance(body, str):
+         raise ValueError('artifact_contract_body')
+-    if REQUEST_PREFIX in body or RESULT_PREFIX in body:
++    if any(prefix in body for prefix in (REQUEST_PREFIX, RESULT_PREFIX, TOOL_PREFIX)):
+         raise ValueError('artifact_contract_reserved_marker')
+     value = dict(schema=SCHEMA, root=root, parent=parent, run_id=run_id,
+                  names=names, body_sha256='0'*64, support_digest=support_digest)
+@@ -92,9 +93,11 @@
+         + '\nUse ordinary permitted file/terminal tools. If an absolute path is refused or remapped, stop and report it; never change permissions or use another carrier. '
+         'Do not recreate, chmod, rename, or delete the directory. Create files with mode0600 (for example os.open with O_WRONLY|O_CREAT|O_EXCL and0o600). Files must be regular, owned and nonempty; no symlinks or chmod of existing files. '
+         'After writing, run the installed pure local seal helper:\n'
+-        'python3 "$HOME/lanes/support-releases/' + support_digest + '/ext/artifact_production.py" seal --packet "$HOME/lanes/tmp/'
++        'python3 "$HOME/lanes/support-releases/' + support_digest + '/ext/artifact_production.py" seal --tool-output --packet "$HOME/lanes/tmp/'
+         + run_id + '.txt"\n'
+-        'Include its ONE complete FABRIC_ARTIFACTS_V1 JSON line verbatim in the final result, including every path, byte count and SHA-256. '
++        'The helper emits a FABRIC_ARTIFACT_SEAL_V1 diagnostic line. Change only the prefix to FABRIC_ARTIFACTS_V1 '
++        'and include that ONE complete FABRIC_ARTIFACTS_V1 JSON line in the final result. '
++        'Copy its JSON verbatim, including every path, byte count and SHA-256. Do not emit a terminal manifest from a tool. '
+         'Do not add emphasis, backticks, code fences or prose to that line. '
+         'This advertises verified delivery only; it does not grant business acceptance. Missing files, missing/changed manifest or digest mismatch makes completion fail even if the model exits0. '
+         'No descendants, retries or old-worker replay are authorized by this contract.\n'
+@@ -383,13 +386,16 @@
+     parser=argparse.ArgumentParser(description=__doc__)
+     parser.add_argument('command',choices=['seal'])
+     parser.add_argument('--packet',required=True)
++    parser.add_argument('--tool-output',action='store_true',
++                        help='Emit a distinct tool diagnostic; the final answer owns the terminal manifest.')
+     args=parser.parse_args()
+     # No directory creation/adoption here; the incumbent executor already owns it.
+     contract=parse_packet(Path(args.packet).read_text())
+     if contract is None:
+         raise ValueError('artifact_contract_missing')
+     bind(contract,os.environ.get('REMOTE_SUB_RUN_ID'),os.environ.get('MODE', 'go-codex'),os.environ,Path(__file__).resolve().parent)
+-    print(RESULT_PREFIX+reader.canonical(observed_manifest(contract,os.environ['LANE_REMOTE_HOST'])).decode())
++    prefix = TOOL_PREFIX if args.tool_output else RESULT_PREFIX
++    print(prefix+reader.canonical(observed_manifest(contract,os.environ['LANE_REMOTE_HOST'])).decode())
+
+
+ if __name__ == '__main__':
