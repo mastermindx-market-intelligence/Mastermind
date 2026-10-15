@@ -903,6 +903,65 @@ class SubscriptionRealmOwner:
     _config_sha256: str
     _seal: object
 
+    def observe_current_identity(self, *, bindings_path: Path,
+                                 bindings_sha256: str, host_ref: str):
+        """Join the real worker context to its root-installed physical route.
+
+        The fixed installation entry supplies the approved binding path/hash;
+        request data, a receipt, or a FabricHostBinding value cannot substitute
+        for reading that source. Opaque host/principal/custody references remain
+        assignments of the existing root configuration owner. This method issues
+        no reference, boot generation, auth verdict or Capacity admission.
+        """
+        from control_plane.executive_fabric_composition import (
+            FabricBindingSource, FabricCompositionError,
+        )
+        from ops.executive_os.provider_realm_facts import NativeRealmIdentityObservation
+
+        if self._seal is not _SUBSCRIPTION_REALM_OWNER_SEAL:
+            _native_refuse()
+        config = _native_read_config(self._config_path, self._config_sha256)
+        enrollment = self.observe_capacity_enrollment()
+        if host_ref != enrollment["host_ref"]:
+            _native_refuse()
+        try:
+            source = FabricBindingSource.from_path(bindings_path, bindings_sha256)
+            physical = source(host_ref, config["worker_id"])
+            binary = _observe_attended_claude_binary(config, config["worker_gid"])
+            if (physical.worker_source_config_digest != self._config_sha256
+                    or physical.worker_uid != config["worker_uid"]
+                    or physical.worker_gid != config["worker_gid"]
+                    or physical.bridge_uid != config["worker_uid"]
+                    or physical.provider_home != config["provider_home"]
+                    or physical.provider != "minimax"
+                    or physical.binary_sha256 != binary.sha256):
+                _native_refuse()
+            value = NativeRealmIdentityObservation(
+                slot_id=config["worker_id"], host_ref=enrollment["host_ref"],
+                os_principal_ref=enrollment["os_principal_ref"],
+                config_custody_ref=enrollment["config_custody_ref"],
+                generation=enrollment["realm_generation"],
+                source_config_sha256=self._config_sha256,
+                provider_binary_sha256=binary.sha256,
+            )
+            if (source(host_ref, config["worker_id"]) != physical
+                    or _observe_attended_claude_binary(config, config["worker_gid"]) != binary
+                    or self.observe_capacity_enrollment() != enrollment
+                    or _native_read_config(self._config_path, self._config_sha256) != config):
+                _native_refuse()
+        except (FabricCompositionError, KeyError, TypeError, AttributeError):
+            raise ProviderRealmError("NATIVE_REALM_IDENTITY_UNAVAILABLE") from None
+        return value
+
+    def require_current_identity(self, host_ref: str, os_principal_ref: str, *,
+                                 bindings_path: Path, bindings_sha256: str) -> None:
+        """Trusted Python composition callback; never a CLI identity assertion."""
+        observed = self.observe_current_identity(bindings_path=bindings_path,
+            bindings_sha256=bindings_sha256, host_ref=host_ref)
+        if os_principal_ref != observed.os_principal_ref:
+            _native_refuse()
+        return None
+
     def observe_capacity_enrollment(self) -> dict[str, Any]:
         """Bind the current finite MiniMax realm to its actual source registration.
 

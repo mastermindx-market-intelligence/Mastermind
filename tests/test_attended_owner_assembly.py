@@ -144,13 +144,15 @@ def test_typed_resources_reach_real_fixed_factory_without_start(fixed):
     assert set(fixed.owner.observe())=={'worker_id','control_uid','binding_id','profile_id','adapter_id','realm_config_sha256','realm_generation','catalog_digest'}
 
 
-@pytest.mark.parametrize('fault', [None, 'host', 'capability', 'generation', 'revoke'])
+@pytest.mark.parametrize('fault', [None, 'host', 'capability', 'generation', 'revoke',
+    'principal', 'custody', 'identity-generation', 'identity-drift'])
 def test_opted_in_owner_assembly_rechecks_source_enrollment_before_any_secret(fixed, monkeypatch, fault):
     fixed.raw.update(native_capacity_enrollment={}, capacity_capability_id='cap.fixture')
     reads = []
     def native(self):
         reads.append(1)
         value = {'host_ref': fixed.physical.host_ref, 'capacity_capability_id': 'cap.fixture',
+                 'os_principal_ref': 'principal-'+'1'*64, 'config_custody_ref': 'custody-'+'2'*64,
                  'realm_generation': fixed.observation['realm_generation']}
         if fault == 'host': value['host_ref'] = 'foreign'
         if fault == 'capability': value['capacity_capability_id'] = 'foreign'
@@ -159,11 +161,29 @@ def test_opted_in_owner_assembly_rechecks_source_enrollment_before_any_secret(fi
             raise realm.ProviderRealmError('revoked current source')
         return value
     monkeypatch.setattr(realm.SubscriptionRealmOwner, 'observe_capacity_enrollment', native)
+    identities = []
+    def identity(self, **kwargs):
+        from ops.executive_os.provider_realm_facts import NativeRealmIdentityObservation
+        assert kwargs == dict(bindings_path=fixed.args['bindings_path'],
+            bindings_sha256=fixed.args['bindings_sha256'], host_ref=fixed.physical.host_ref)
+        identities.append(1)
+        value = NativeRealmIdentityObservation(slot_id=fixed.raw['worker_id'],
+            host_ref=fixed.physical.host_ref, os_principal_ref='principal-'+'1'*64,
+            config_custody_ref='custody-'+'2'*64, generation=fixed.observation['realm_generation'],
+            source_config_sha256='a'*64, provider_binary_sha256='d'*64)
+        if fault == 'principal': value = dataclasses.replace(value, os_principal_ref='foreign')
+        if fault == 'custody': value = dataclasses.replace(value, config_custody_ref='foreign')
+        if fault == 'identity-generation': value = dataclasses.replace(value, generation=value.generation+1)
+        if fault == 'identity-drift' and len(identities)>1:
+            value = dataclasses.replace(value, config_custody_ref='successor')
+        return value
+    monkeypatch.setattr(realm.SubscriptionRealmOwner, 'observe_current_identity', identity)
     if fault:
         with pytest.raises((bridge.BridgeProtocolError, realm.ProviderRealmError)): compose(fixed)
     else:
         assert compose(fixed).credential_realm_owner is fixed.owner
         assert len(reads) == 2
+        assert len(identities) == 2
     assert fixed.calls == []
 
 

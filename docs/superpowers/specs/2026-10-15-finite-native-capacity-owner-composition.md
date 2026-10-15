@@ -46,7 +46,27 @@ current owner acquisition and the existing authenticated broker/physical route
 may consume it. It asserts no provider auth success, health, quota, availability,
 admission or launch. No registration is added and no source artifact, realm,
 credential, service or Runtime state is published by this source slice. The
-registry is currently empty, so the path refuses real selection.
+initial source registry was empty; the separate Macro source domain must land
+and be published by its existing owner before real selection can succeed.
+
+The finite worker identity composition also reopens the approved physical
+binding through `FabricBindingSource`, independently of any supplied receipt or
+`FabricHostBinding` object. `SubscriptionRealmOwner.observe_current_identity`
+joins that route to the actual current dedicated worker UID/GID, supplementary
+groups, principal HOME, private credential metadata, root config and attested
+binary already observed by the same owner. It returns the existing secret-free
+`NativeRealmIdentityObservation`. Its Python-only `require_current_identity`
+callback rejects a different principal reference. The actual opted-in attended
+factory consumes this observation and rechecks it before returning resources.
+Old workers without the optional stanza keep their existing path.
+
+Neither method issues a host/principal/custody reference or a boot generation.
+Those references must be assigned once by the existing root configuration and
+physical owners. A caller hash, hostname, UID, HOME, arbitrary path or receipt
+cannot create that assignment. The installed physical policy is currently
+unqualified with null host/boot identity; this code does not activate it or
+claim boot-bound readiness. MiniMax private API-key custody remains distinct
+from Claude.ai native-login authentication and from provider auth success.
 
 Next composition stays with the same owners: actual accepted source export and
 one source-issued domain; current host/boot and worker-context preflight;
