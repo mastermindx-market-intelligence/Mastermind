@@ -135,3 +135,11 @@ REVIEWED_FILES['integrations/mastermind_executive_app/principal_ruling_http.py']
            (51, 28, 31, 'int', '401'),
            (75, 77, 80, 'int', '413'),
            (80, 28, 31, 'int', '400'))}
+
+# The accepted App owner-observation source bounds a string to 512 characters.
+# This is not a UID or authority value. Only that token in these complete source
+# bytes qualifies; any drift or a different path restores the generic guard.
+REVIEWED_FILES['app/mastermind_os/src/product-acceptance/owner-observation.ts'] = {
+    'sha256': 'a914fa318b2a96d4d9d01ee5f378becac222e3750725de99416dff6b463a257a',
+    'sites': ((34, 132, 135, 'int', '512'),),
+}
