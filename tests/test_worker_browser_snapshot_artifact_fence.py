@@ -176,3 +176,91 @@ def test_multi_read_tool_worker_grant_cannot_write_artifacts(tmp_path):
             await runtime.aclose(timeout=5)
 
     asyncio.run(exercise())
+
+
+def test_private_worker_artifact_refusal_precedes_observable_port_dispatch(
+    tmp_path, monkeypatch,
+):
+    """An inline read reaches a controlled spy; file-output reads do not.
+
+    This spy deliberately replaces only BrowserActionPort.call_read_tool.
+    It is NOT a real BrowserRef, Playwright relay, Chrome process or Worker
+    signing receipt; it distinguishes MCP dispatch from an invalid-ref refusal.
+    """
+    from integrations.workbench_browser_mcp import tunnel as tunnel_module
+
+    path, _, audit_dir = _config_file(tmp_path)
+    config = load_browser_tunnel_config(str(path))
+    calls = []
+    real_factory = tunnel_module.create_browser_ports
+
+    def instrumented_factory(**kwargs):
+        ports = real_factory(**kwargs)
+
+        def spy_read(caller, browser_ref, name, arguments):
+            calls.append((browser_ref, name, dict(arguments)))
+            return {
+                "content": [{"type": "text", "text": "controlled inline snapshot"}],
+                "isError": False,
+            }
+
+        monkeypatch.setattr(ports.action_port, "call_read_tool", spy_read)
+        return ports
+
+    monkeypatch.setattr(tunnel_module, "create_browser_ports", instrumented_factory)
+
+    async def exercise():
+        runtime = await create_runtime_channel(config.action)
+        try:
+            names = (
+                "browser_snapshot", "browser_take_screenshot",
+                "browser_console_messages", "browser_network_requests",
+            )
+            server = create_browser_tunnel_server(
+                runtime, config.browser, mcp_grant=_grant(config, names),
+            )
+            opaque = "deliberately-unsigned-ref-for-spy"
+            allowed = await _call(server, "browser_snapshot", {"browser_ref": opaque})
+            assert allowed.isError is False
+            assert allowed.content[0].text == "controlled inline snapshot"
+            assert calls == [(opaque, "browser_snapshot", {})]
+
+            for name, args in (
+                ("browser_snapshot", {"filename": "snapshot.md"}),
+                ("browser_take_screenshot", {"scale": "css"}),
+                ("browser_console_messages", {
+                    "level": "info", "filename": "console.txt",
+                }),
+                ("browser_network_requests", {
+                    "static": False, "filename": "requests.txt",
+                }),
+            ):
+                denied = await _call(
+                    server, name, {"browser_ref": opaque, **args},
+                )
+                assert _error_code(denied) == "BROWSER_ARTIFACT_NOT_GRANTED"
+                assert calls == [(opaque, "browser_snapshot", {})]
+
+            records = [
+                json.loads(line)
+                for line in (audit_dir / "auth-audit.jsonl").read_text().splitlines()
+            ]
+            assert [row["code"] for row in records] == (
+                ["accepted"] + ["request_refused"] * 4
+            )
+            assert [row["accepted"] for row in records] == (
+                [True] + [False] * 4
+            )
+            runtime.revoke()
+            after_revoke = await _call(
+                server, "browser_snapshot", {"browser_ref": opaque},
+            )
+            assert _error_code(after_revoke) == "CHANNEL_ADMISSION_REFUSED"
+            assert calls == [(opaque, "browser_snapshot", {})]
+            assert list(Path(config.browser.output_root).iterdir()) == []
+            assert list(Path(config.action.artifact_directory).iterdir()) == []
+        finally:
+            runtime.revoke()
+            await runtime.aclose(timeout=5)
+
+    asyncio.run(exercise())
