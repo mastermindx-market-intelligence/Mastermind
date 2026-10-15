@@ -91,6 +91,14 @@ blocks that dispatch, not independent edits/tests. Preserve a real denial or unc
 effect; never use another route to evade it. Required independent review holds its
 release, not all preparation; self-review must never be relabeled independent.
 
+Missing implementation is engineering work, not a permission wait. Before naming
+service enrollment as the next action, inspect the actual enabling path: an
+unimplemented adapter or unconditional activation refusal cannot be fixed by
+enrollment alone. Complete the authorized missing composition and its negative
+tests through existing interfaces; separate source readiness, human-only enrollment,
+a bounded admitted canary and production release. Do not remove refusal guards or
+invent an admission receipt to make a dormant path appear live.
+
 Pending CI blocks the gated release, not unrelated implementation or diagnosis. An
 observer request is not a running observer. Verify its successful launch and real return
 path before relying on it; never promise that a finished Web turn keeps working.

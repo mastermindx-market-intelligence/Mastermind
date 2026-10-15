@@ -104,6 +104,14 @@ using existing interfaces instead of waiting for an unaddressable owner. Missing
 actual active writers, uncertain effects and required release approvals retain their
 specific gates; no invented ownership, duplicate registry or permission bypass.
 
+Missing implementation is engineering work, not a permission wait. Before naming
+service enrollment as the next action, inspect the actual enabling path: an
+unimplemented adapter or unconditional activation refusal cannot be fixed by
+enrollment alone. Complete the authorized missing composition and its negative
+tests through existing interfaces; separate source readiness, human-only enrollment,
+a bounded admitted canary and production release. Do not remove refusal guards or
+invent an admission receipt to make a dormant path appear live.
+
 ### Reciprocal dialogue and watcher invariant
 
 For any watcher-enabled Sol↔worker/COO loop, `docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md` is the

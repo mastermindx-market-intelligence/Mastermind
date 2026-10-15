@@ -78,5 +78,17 @@ class ExecutionPolicyContractTests(unittest.TestCase):
         self.assertIn('actual missing evidence', kernel)
 
 
+    def test_missing_implementation_is_not_mislabeled_permission_wait(self):
+        for name in ('docs/SOL_CEO_ACCOUNT_INSTRUCTIONS.md', 'AGENTS.md', 'CLAUDE.md'):
+            with self.subTest(path=name):
+                text = ' '.join(self.read(name).split())
+                self.assertTrue('Missing implementation is engineering work' in text,
+                                name + ': distinguish unfinished code from human permission')
+                self.assertTrue('enrollment alone' in text,
+                                name + ': confirm the enabling path exists before enrollment is the next step')
+                self.assertTrue('Do not remove refusal guards' in text,
+                                name + ': repair the implementation, never counterfeit admission')
+
+
 if __name__ == '__main__':
     unittest.main()
