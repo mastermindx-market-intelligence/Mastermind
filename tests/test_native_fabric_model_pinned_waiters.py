@@ -172,3 +172,28 @@ def test_native_and_root_accounting_methods_unchanged(optimized_module, model_mo
         "_try_acquire", "_waiter_skips_ready_queue", "_front_of_queue",
         "_below_share_waiters",
     }
+
+
+def test_native_retained_model_capacity_is_not_released_to_help_other_account(
+    model_module, tmp_path
+):
+    # An original native grant on a model-saturated account may make a waiter
+    # yield in the READY queue, but never grants ordinary release authority.
+    from tests.test_native_fabric_protected_broker_composition import native_binding
+    br = broker(model_module, tmp_path)
+    binding = {**native_binding(),
+               "pool": "glm", "account": "a", "model": "glm-5.3",
+               "host": "synthetic", "task_class": "review"}
+    original = br.acquire_native_admission(binding)
+    assert original["state"] == "RETAINED"
+    lid = original["grant"]["lease_id"]
+    blocked = br.acquire("waiting", "glm", account="a", task_class="review",
+                         job_class="heal", request_id="blocked", model="glm-5.3")
+    ready = br.acquire("ready", "glm", account="b", task_class="review",
+                       job_class="review", request_id="ready", model="glm-5.3")
+    assert blocked.reason == "account_unavailable" and ready.ok
+    assert br.release(lid, "native-root") is False
+    with br._conn() as conn:
+        row = conn.execute("SELECT state,native_key FROM leases WHERE id=?", (lid,)).fetchone()
+        assert row["state"] in ("held", "rented") and row["native_key"]
+    assert br.read_native_admission(binding)["state"] == "RETAINED"
