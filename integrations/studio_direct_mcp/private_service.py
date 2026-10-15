@@ -574,9 +574,11 @@ def _build_config(
                 or type(commission_digest) is not str or not re.fullmatch(r"[0-9a-f]{64}", commission_digest)):
             raise ValueError("commission publication requires closed private workspace profile")
         config["commissionPublication"] = {"enabled": True, "configurationDigest": commission_digest}
-    fleet_status = _fleet_status_config(user_root)
-    if fleet_status is not None:
-        config["fleetStatus"] = fleet_status
+    # An attended Fabric-only channel exposes no unrelated host telemetry.
+    if not fabric_only:
+        fleet_status = _fleet_status_config(user_root)
+        if fleet_status is not None:
+            config["fleetStatus"] = fleet_status
     return config
 
 
