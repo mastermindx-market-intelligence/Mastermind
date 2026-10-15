@@ -128,7 +128,8 @@ async def read_original_acceptance_observation(provider, frame, *, owner_target)
         if provider.authorize(principal) is not True:
             raise ProductAcceptanceSelectionUnavailable()
         permission = permission_stamp(provider.authorize, principal)
-        owner_fields = ('cache', 'runtime', 'authorize', '_bounded_runtime', '_product_acceptance_basis_reader')
+        owner_fields = ('cache', 'runtime', 'authorize', '_bounded_runtime', '_product_acceptance_basis_reader',
+                        '_product_acceptance_read', '_product_acceptance_observe')
         owner_values = tuple(getattr(provider, field) for field in owner_fields)
 
         def guard():

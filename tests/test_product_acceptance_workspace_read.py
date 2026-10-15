@@ -16,6 +16,8 @@ from scripts import chairman_control_room as ccr
 
 
 def provider(tmp_path, runtime, basis_reader, selected, bound, *, authorize=lambda _: True):
+    from integrations.product_acceptance_read import read_acceptance
+    from integrations.product_acceptance_selector import read_original_acceptance_observation
     owners, clock, cache = cache_fixture(tmp_path)
     doc = _owner_observation_inputs()['control_room']
     doc = json.loads(json.dumps(doc).replace('JOB-1', selected['root_job_id'])
@@ -32,7 +34,9 @@ def provider(tmp_path, runtime, basis_reader, selected, bound, *, authorize=lamb
         ccr._publish_source_validity(owners[0], doc, tuple(clock), tuple(clock))
     svc = WorkspaceReadService(cache=cache, runtime=runtime, authorize=authorize, armed={},
         runtime_identity={'db_present': True}, bounded_runtime=lambda _: bound,
-        product_acceptance_basis_reader=basis_reader)
+        product_acceptance_basis_reader=basis_reader,
+        product_acceptance_read=read_acceptance,
+        product_acceptance_observe=read_original_acceptance_observation)
     request = {**frame(), 'schema': contract.FRAME_SCHEMA, 'operation': contract.OPERATION, 'selection': selected}
     return svc, request, owners
 

@@ -43,7 +43,9 @@ def test_real_mounted_original_owner_acquisition(tmp_path, monkeypatch, short_so
                 authorize=original.authorize, armed=original.armed,
                 runtime_identity=original.runtime_identity, bounded_runtime=original._bounded_runtime,
                 product_acceptance_basis_reader=owner.reader,
-                product_acceptance_owner_target=target)
+                product_acceptance_owner_target=target,
+                product_acceptance_read=original._product_acceptance_read,
+                product_acceptance_observe=original._product_acceptance_observe)
             seen.append(actual_runtime)
             return value
 

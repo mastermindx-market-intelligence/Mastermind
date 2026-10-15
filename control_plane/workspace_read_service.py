@@ -397,7 +397,8 @@ class WorkspaceReadService:
                  result_acquire=None, result_project=None, mission_v3_acquire=None,
                  mission_v3_compose=None, work_acquire=None, work_compose=None,
                  product_acceptance_basis_reader=None, product_acceptance_owner_target=None,
-                 product_acceptance_owner_guard=None):
+                 product_acceptance_owner_guard=None, product_acceptance_read=None,
+                 product_acceptance_observe=None):
         self.cache = cache
         self.runtime = runtime
         self.authorize = authorize
@@ -438,11 +439,17 @@ class WorkspaceReadService:
                      or product_acceptance_owner_target is None)):
             raise ValueError("acceptance source guard requires a trusted fixed target")
         self._product_acceptance_owner_guard = product_acceptance_owner_guard
+        # The trusted outer host supplies its existing integration readers.
+        # Core must not import the transport owner; absence stays unavailable.
+        if any(reader is not None and not callable(reader)
+               for reader in (product_acceptance_read, product_acceptance_observe)):
+            raise ValueError("acceptance read composition requires callable readers")
+        self._product_acceptance_read = product_acceptance_read
+        self._product_acceptance_observe = product_acceptance_observe
 
     async def _handle_original_acceptance_frame(self, frame):
         from common.product_acceptance_acquisition_contract import mission_frame
         from control_plane.principal_ruling_target import PrincipalRulingTarget
-        from integrations.product_acceptance_selector import read_original_acceptance_observation
         try:
             original_frame = mission_frame(frame)
         except (TypeError, ValueError):
@@ -456,8 +463,12 @@ class WorkspaceReadService:
             return error("access_denied", 403)
         target = self._product_acceptance_owner_target
         guard = self._product_acceptance_owner_guard
+        observe = self._product_acceptance_observe
+        read = self._product_acceptance_read
         def check_source():
-            if self._product_acceptance_owner_guard is not guard:
+            if (self._product_acceptance_owner_guard is not guard
+                    or self._product_acceptance_observe is not observe
+                    or self._product_acceptance_read is not read):
                 raise ValueError("acceptance source guard changed")
             if guard is not None:
                 outcome = guard()
@@ -467,7 +478,8 @@ class WorkspaceReadService:
                         outcome.close()
                     raise ValueError("acceptance source guard must settle synchronously")
         try:
-            if type(target) is not PrincipalRulingTarget:
+            if (type(target) is not PrincipalRulingTarget
+                    or not callable(observe) or not callable(read)):
                 raise ValueError("source_unavailable")
             target.__post_init__()
             target_fields = (target.work_ref, target.obligation_id, target.reasoning_surface)
@@ -477,7 +489,7 @@ class WorkspaceReadService:
         except Exception:
             return error("source_unavailable", 503)
         try:
-            body = await read_original_acceptance_observation(
+            body = await observe(
                 self, original_frame, owner_target=target)
             result = {"ok": True, "result": body}
             bounded_canonical(result, limit=MAX_RESPONSE_BYTES - 1)
@@ -500,7 +512,6 @@ class WorkspaceReadService:
 
     def _read_mission_v4(self, frame):
         from common import product_acceptance_read_contract as contract
-        from integrations.product_acceptance_read import read_acceptance
         from control_plane.fabric_job_view import read_fabric_view_v3_from_runtime, compose_fabric_view_v4
         from control_plane.mission_workspace import compose_mission_workspace_v4
         selected = contract.selection(frame["selection"])
@@ -512,7 +523,12 @@ class WorkspaceReadService:
         runtime = self._bounded_runtime(self.runtime) if self._bounded_runtime else self.runtime
         first = read_fabric_view_v3_from_runtime(runtime, selected["root_job_id"],
             armed=self.armed, runtime_identity=self.runtime_identity)
-        accepted = read_acceptance(runtime, self._product_acceptance_basis_reader, selected)
+        read = self._product_acceptance_read
+        if not callable(read):
+            raise ValueError("source_unavailable")
+        accepted = read(runtime, self._product_acceptance_basis_reader, selected)
+        if self._product_acceptance_read is not read:
+            raise ValueError("source_unavailable")
         last = read_fabric_view_v3_from_runtime(runtime, selected["root_job_id"],
             armed=self.armed, runtime_identity=self.runtime_identity)
         companion = compose_fabric_view_v4(before=first, after=last, acceptance=accepted)
@@ -1318,7 +1334,8 @@ class _WorkRefusal(Exception):
 
 def workspace_provider_factory(*, control_room, authorize, armed, runtime_identity, bounded_runtime=None,
                                product_acceptance_basis_reader=None, product_acceptance_owner_target=None,
-                               product_acceptance_owner_guard=None):
+                               product_acceptance_owner_guard=None, product_acceptance_read=None,
+                               product_acceptance_observe=None):
     """Compose a sibling factory from the existing hosted owner and permissions.
 
     Installers pass this to CeoIngressAppBinding.workspace_read_provider_factory.
@@ -1339,5 +1356,7 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
                                     armed=armed, runtime_identity=runtime_identity, bounded_runtime=bounded_runtime,
                                     product_acceptance_basis_reader=product_acceptance_basis_reader,
                                     product_acceptance_owner_target=product_acceptance_owner_target,
-                                    product_acceptance_owner_guard=product_acceptance_owner_guard)
+                                    product_acceptance_owner_guard=product_acceptance_owner_guard,
+                                    product_acceptance_read=product_acceptance_read,
+                                    product_acceptance_observe=product_acceptance_observe)
     return provide

@@ -82,6 +82,38 @@ def test_default_target_is_absent():
     assert service._product_acceptance_owner_target is None
 
 
+@pytest.mark.parametrize("reader", ["_product_acceptance_read", "_product_acceptance_observe"])
+@pytest.mark.parametrize("change", ["missing", "rotated"])
+def test_missing_or_rotated_outer_reader_withholds_original_result(tmp_path, monkeypatch, reader, change):
+    bind_actual_issuer(monkeypatch)
+    with case(tmp_path, monkeypatch) as (runtime, owner, _, _, selected, run):
+        obligation = anchor(runtime, owner, selected)
+        target = PrincipalRulingTarget(selected["work_ref"], obligation.obligation_id, "test-owner")
+        events = runtime.events.list_events()
+
+        def execute(bound):
+            svc, frame, _ = provider(tmp_path, runtime, owner.reader, selected, bound)
+            svc._product_acceptance_owner_target = target
+            if change == "missing":
+                setattr(svc, reader, None)
+            else:
+                original = svc._product_acceptance_observe
+
+                async def rotated(*args, **kwargs):
+                    result = await original(*args, **kwargs)
+                    setattr(svc, reader, lambda *a, **kw: None)
+                    return result
+
+                svc._product_acceptance_observe = rotated
+            return asyncio.run(svc.handle_frame(acquisition_frame(frame)))
+
+        # Missing composition refuses before acquiring a Runtime read binding.
+        response = execute(None) if change == "missing" else run(execute)
+        assert response == {"ok": False, "status": 503,
+            "error": {"code": "source_unavailable", "message": "workspace read refused"}}
+        assert runtime.events.list_events() == events
+
+
 def test_acquisition_cancellation_settles_original_read_without_disclosure(tmp_path, monkeypatch):
     bind_actual_issuer(monkeypatch)
     with case(tmp_path, monkeypatch) as (runtime, owner, _, _, selected, run):
