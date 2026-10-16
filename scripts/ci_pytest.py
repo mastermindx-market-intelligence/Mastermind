@@ -210,15 +210,18 @@ def pytest_argv(
 
 
 _MEASURED_THREE_JOB_PLACEMENT = {
-    # Stable three-job placements, measured against actual hosted durations.
-    # The existing runtime/window-reader pins remain unchanged. On independent
-    # runners, the large capacity-host module dominates shard index 0, while
-    # index 1 has spare wall time. Exchange it with the bounded trend suite;
-    # the other modules retain the original SHA-256 placement.
+    # Union of independently measured hosted placements: preserve the three
+    # protected-master hot-module pins and the accepted separate-runner
+    # capacity-host/trend balance. Every unlisted module retains SHA-256
+    # placement and every test still runs exactly once.
     "tests/test_executive_runtime_bounded_acquisition.py": 1,
     "tests/test_mastermind_window_reader_static_fences.py": 1,
     "tests/test_capacity_host_artifacts.py": 1,
     "tests/test_trend_persistence_walkforward.py": 0,
+    # The protected one-runner CI gate measured these further slow modules.
+    "tests/test_market_view.py": 1,
+    "tests/test_product_acceptance_original_selector.py": 1,
+    "tests/test_executive_os_phase1fc.py": 2,
 }
 
 
@@ -240,11 +243,11 @@ def partition_modules(
     same checkout would shard differently on every run and a failure would not
     reproduce.
 
-    For the three-job gate, four explicitly measured module placements
-    balance expensive test suites across workers. Every other path keeps
-    its stable hash placement, including when a test file is added.
-    Non-three-job experiments retain the unmodified hash. This is strictly
-    placement, not exclusion: verify_partition checks total coverage.
+    For the production three-job gate, the explicitly measured hot modules
+    are pinned to less-loaded shards. Every other path keeps stable hash
+    placement, including when a new test is added. Other job counts retain
+    unmodified hashes. This is placement, not exclusion: verify_partition
+    checks the exact complete test coverage.
     Shard sizes remain visible in the plan line. (Do not introduce bare
     three-digit constants outside tests/: the identity guard forbids them.)
     """

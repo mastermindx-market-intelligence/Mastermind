@@ -963,7 +963,7 @@ def test_real_shard_plan_stays_reasonably_balanced():
 
 
 def test_measured_three_job_pins_preserve_exact_coverage_and_stability() -> None:
-    """Preserve every hash except the four explicit measured placements."""
+    """Preserve every hash except the measured protected and runner pins."""
     import hashlib
 
     gate = cip.resolve_gate(_ROOT)
@@ -973,6 +973,9 @@ def test_measured_three_job_pins_preserve_exact_coverage_and_stability() -> None
         "tests/test_mastermind_window_reader_static_fences.py": 1,
         "tests/test_capacity_host_artifacts.py": 1,
         "tests/test_trend_persistence_walkforward.py": 0,
+        "tests/test_market_view.py": 1,
+        "tests/test_product_acceptance_original_selector.py": 1,
+        "tests/test_executive_os_phase1fc.py": 2,
     }
     assert set(pins).issubset(included)
     shards = cip.partition_modules(included, jobs=3)
@@ -987,7 +990,7 @@ def test_measured_three_job_pins_preserve_exact_coverage_and_stability() -> None
         digest = hashlib.sha256(path.encode("utf-8")).digest()
         hashed = int.from_bytes(digest[:8], "big") % 3
         if path in pins:
-            assert hashed != pins[path]  # Each pin is an intentional measured move.
+            assert hashed != pins[path]  # Every pin intentionally moves its module.
             assert observed[path] == pins[path]
         else:
             assert observed[path] == hashed

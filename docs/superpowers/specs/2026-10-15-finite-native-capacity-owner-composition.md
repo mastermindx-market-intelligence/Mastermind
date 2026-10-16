@@ -46,7 +46,48 @@ current owner acquisition and the existing authenticated broker/physical route
 may consume it. It asserts no provider auth success, health, quota, availability,
 admission or launch. No registration is added and no source artifact, realm,
 credential, service or Runtime state is published by this source slice. The
-registry is currently empty, so the path refuses real selection.
+initial registry was empty. The separately accepted source domain and its
+exact export still require publication by the existing host owner; registration
+alone never qualifies a worker or makes it available.
+
+## Current native observation source
+
+The existing `SubscriptionRealmOwner.observe_native_capacity()` now produces
+the closed `mastermind.provider_native_realm_observation/v1` wire. It accepts
+no identity, clock, path, generation, provider status or callback from a caller.
+Its current enrollment/source comes from the accepted B2 owner, including the
+actual dedicated worker context and private credential metadata. It brackets
+that acquisition and the current kernel boot observation before returning.
+
+The existing FP1B host probe owns `current_boot_reference()`: it normalizes a
+real OS boot UUID from the existing process inspector into a domain-separated
+`boot-<sha256>` reference. An invalid UUID, zero UUID, or process-local inspector
+fallback refuses. Equivalent UUID representations identify one boot; a reboot
+changes this reference without changing capability or realm generation. This
+observes boot provenance; it assigns no host or principal identity and changes
+no existing physical policy, qualification, V1 probe inputs or schema migration.
+
+Private credential custody does not prove provider auth success or headroom.
+The initial projection therefore permits only unknown auth/health/outcome,
+unknown cooling, and no quota horizons. A closed shape validator rejects extra
+fields, raw paths and invented positive provider facts. It performs no Provider
+Control normalization, ranking, admission, freshness decision or Runtime write.
+
+The existing Bridge exposes the read-only `native-capacity-observation` query
+under its existing authenticated Control peer and current service identity.
+The only request field is a bounded nonce; the fixed backend calls the actual
+realm owner. It consumes no Attempt/assignment slot and starts no Worker,
+Operator or provider. Kernel observation uses the inspector's existing fixed OS
+read. Unconfigured enrollment, revocation or boot drift is unavailable.
+The response is an observation rather than a bearer grant; hashes establish
+content integrity, not origin authentication. Future Macro V2 acquisition must
+use the authenticated existing channel and current installed source bindings.
+
+No production availability or claim consumer is enabled by this source slice.
+The source registry, installed source projection and real worker enrollment are
+separate. Physical schema-v6 remains dormant. This worker observation is also
+separate from the existing GUI Desktop parent's unavailable current-writer
+fence; it cannot enroll a saved personal conversation or supply that authority.
 
 Next composition stays with the same owners: actual accepted source export and
 one source-issued domain; current host/boot and worker-context preflight;
