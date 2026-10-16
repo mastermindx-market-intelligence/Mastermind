@@ -158,3 +158,7 @@ REVIEWED_FILES["integrations/session_bridge/r2_plain_review_scopes/candidate/art
 # Scoped independent native-finite-capacity-owner-review-01a12a08-v1 PASS
 # on 4c24b21bcc96ea2215e7c3bbc9782b59b9ff46ed approves only the unchanged
 # two renderer and 37 lifecycle literal sites above; no new identity exemption.
+
+# Scoped SourceOS initial-reference review, 2026-10-16: fixed predecessor
+# validation only. Any changed byte or token restores the generic D8 guard.
+REVIEWED_FILES['ops/executive_os/finite_reference_assignment.py'] = {'sha256': '7d2cc97ab91900804f2755b5f11edbd40fa3cca36b6d973ba3e87c5e9a55dc4a', 'sites': ((103, 49, 70, 'str', "'_mastermind_minimax'"), (104, 26, 29, 'int', '470'), (104, 45, 48, 'int', '470'), (104, 65, 68, 'int', '450'), (105, 27, 30, 'int', '450'))}
