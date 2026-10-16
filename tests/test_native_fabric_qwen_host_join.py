@@ -37,11 +37,15 @@ MODEL_JOIN_PREIMAGE = "4df8e2b56554b0b5ffc98a851bd40ed86d2387ca8f6872c14bf6638f6
 def qwen_module(model_module, tmp_path, monkeypatch):
     original = Path(model_module.__file__).read_bytes()
     assert hashlib.sha256(original).hexdigest() == MODEL_JOIN_PREIMAGE
-    ext = tmp_path / "ext"
-    ext.mkdir()
+    # Upstream joined_candidate uses tmp_path/ext. Keep this dependent
+    # composition in its own working root so pytest can run the full
+    # fixture chain in one isolated CI shard without colliding directories.
+    stage = tmp_path / "qwen-host-join"
+    ext = stage / "ext"
+    ext.mkdir(parents=True)
     target = ext / "lease_broker.py"
     target.write_bytes(original)
-    _apply(tmp_path, BUNDLE / "qwen_compat/qwen_host_after_model_waiters.patch")
+    _apply(stage, BUNDLE / "qwen_compat/qwen_host_after_model_waiters.patch")
     modified = target.read_bytes()
     assert modified != original
 
