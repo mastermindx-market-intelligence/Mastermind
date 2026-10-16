@@ -78,6 +78,15 @@ def test_negative_write_probe_cannot_create_a_host_file_even_if_denial_fails():
     ))
 
 
+def test_unix_ipc_probe_uses_only_private_dummy_socket():
+    source = Path(subject.__file__).read_text(encoding="utf-8")
+    assert 'socket_path = scratch / "local-socket-only.sock"' in source
+    assert "listener.bind(str(socket_path))" in source
+    assert 'checks["unix_socket_denied"]' in source
+    # No production/private service socket is touched by the preflight.
+    assert "com.mastermind.executive." not in source
+
+
 def test_no_generic_command_or_candidate_invocation_interface():
     module = Path(subject.__file__)
     p = subprocess.run(
@@ -105,7 +114,7 @@ def test_real_darwin_sandbox_isolation_no_codex_or_network():
     assert receipt["schema"] == subject.SCHEMA
     assert receipt["state"] == "PASS", receipt["checks"]
     assert all(receipt["checks"].values())
-    assert len(receipt["checks"]) == 15
+    assert len(receipt["checks"]) == 16
     assert receipt["candidate_invoked"] is False
     assert receipt["provider_invoked"] is False
     assert receipt["installation_changed"] is False

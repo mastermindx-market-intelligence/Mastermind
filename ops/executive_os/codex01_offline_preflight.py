@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import platform
+import socket
 import subprocess
 import sys
 import tempfile
@@ -213,6 +214,18 @@ def preflight() -> dict[str, object]:
             "s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);"
             "e=s.connect_ex(('127.0.0.1',9));s.close();"
             "print('DENIED' if e==errno.EPERM else 'FAIL')")
+        # AF_UNIX is a separate local-IPC threat boundary. Use ONLY a dummy
+        # ephemeral listener in this controlled scratch; no installed socket
+        # or privileged Control/Worker endpoint is ever approached.
+        socket_path = scratch / "local-socket-only.sock"
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+            listener.bind(str(socket_path))
+            listener.listen(1)
+            checks["unix_socket_denied"] = _probe(profile, scratch,
+                f"import socket,errno; p={str(socket_path)!r};"
+                "s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);"
+                "e=s.connect_ex(p);s.close();"
+                "print('DENIED' if e==errno.EPERM else 'FAIL')")
         # Prove exact literal read exception without reading any real binary
         # or loosening its forbidden sibling directory.
         fixture_root = scratch / "fixture-deny"
