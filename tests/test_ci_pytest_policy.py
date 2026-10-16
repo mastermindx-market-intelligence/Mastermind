@@ -866,13 +866,13 @@ def test_all_discovered_tests_are_accounted_for():
 
 
 def test_hosted_full_gate_has_a_bounded_completion_window():
-    """PR544 reached 98% when its old 25-minute job ceiling cancelled the gate."""
+    """Keep full coverage while allowing setup headroom for the observed gate."""
     import yaml
 
     workflow = yaml.safe_load(
         (_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
     job = workflow["jobs"]["test"]
-    assert job["timeout-minutes"] == 40
+    assert job["timeout-minutes"] == 45
     assert workflow["permissions"] == {"contents": "read"}
     assert job.get("continue-on-error", False) is False
     gate_steps = [step for step in job["steps"]
@@ -934,17 +934,20 @@ def test_real_shard_plan_stays_reasonably_balanced():
     assert max(sizes) <= 1.25 * (len(gate["included"]) / 4)
 
 
-def test_measured_three_job_pins_move_only_two_hot_modules() -> None:
-    """Preserve all tests, hashes and insertion stability except two measured pins."""
+def test_measured_three_job_pins_move_only_observed_hot_modules() -> None:
+    """Preserve coverage, hashes and insertion stability except measured pins."""
     import hashlib
 
     gate = cip.resolve_gate(_ROOT)
     included = gate["included"]
     pins = {
-        "tests/test_executive_runtime_bounded_acquisition.py",
-        "tests/test_mastermind_window_reader_static_fences.py",
+        "tests/test_executive_runtime_bounded_acquisition.py": 1,
+        "tests/test_mastermind_window_reader_static_fences.py": 1,
+        "tests/test_market_view.py": 1,
+        "tests/test_product_acceptance_original_selector.py": 1,
+        "tests/test_executive_os_phase1fc.py": 2,
     }
-    assert pins.issubset(included)
+    assert set(pins).issubset(included)
     shards = cip.partition_modules(included, jobs=3)
     cip.verify_partition(included, shards)
     observed = {
@@ -957,8 +960,8 @@ def test_measured_three_job_pins_move_only_two_hot_modules() -> None:
         digest = hashlib.sha256(path.encode("utf-8")).digest()
         hashed = int.from_bytes(digest[:8], "big") % 3
         if path in pins:
-            assert hashed == 0  # Both were in the slowest shard before the pin.
-            assert observed[path] == 1
+            assert hashed == 0  # Each was in the slowest shard before its pin.
+            assert observed[path] == pins[path]
         else:
             assert observed[path] == hashed
 
@@ -1091,11 +1094,11 @@ def test_sharded_gate_runs_every_resolved_module_once(tmp_path, monkeypatch):
     shards = cip.partition_modules(included, jobs=3)
     seen: list[str] = []
 
-    def fake_run(argv, cwd=None, check=False, capture_output=False, text=False):
+    def fake_popen(argv, **kwargs):
         seen.extend(argv[argv.index("-q") + 1 :])
         return _Completed(0, "")
 
-    monkeypatch.setattr(cip.subprocess, "run", fake_run)
+    monkeypatch.setattr(cip.subprocess, "Popen", fake_popen)
     assert cip.run_shards(shards, root=tmp_path) == 0
     assert sorted(seen) == sorted(included)
 
@@ -1103,18 +1106,28 @@ def test_sharded_gate_runs_every_resolved_module_once(tmp_path, monkeypatch):
 class _Completed:
     def __init__(self, returncode: int, stdout: str) -> None:
         self.returncode = returncode
-        self.stdout = stdout
-        self.stderr = ""
+        import io
+
+        self.stdout = io.StringIO(stdout)
+
+    def wait(self):
+        return self.returncode
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.stdout.close()
 
 
 def test_one_failing_shard_fails_the_whole_gate(tmp_path, monkeypatch):
     shards = (("tests/test_a.py",), ("tests/test_b.py",), ("tests/test_c.py",))
 
-    def fake_run(argv, cwd=None, check=False, capture_output=False, text=False):
+    def fake_popen(argv, **kwargs):
         failing = "tests/test_b.py" in argv
         return _Completed(1 if failing else 0, "boom" if failing else "ok")
 
-    monkeypatch.setattr(cip.subprocess, "run", fake_run)
+    monkeypatch.setattr(cip.subprocess, "Popen", fake_popen)
     assert cip.run_shards(shards, root=tmp_path) != 0
 
 
@@ -1122,12 +1135,12 @@ def test_every_shard_runs_even_after_an_earlier_one_fails(tmp_path, monkeypatch)
     shards = (("tests/test_a.py",), ("tests/test_b.py",), ("tests/test_c.py",))
     ran: list[str] = []
 
-    def fake_run(argv, cwd=None, check=False, capture_output=False, text=False):
+    def fake_popen(argv, **kwargs):
         module = argv[-1]
         ran.append(module)
         return _Completed(1 if module == "tests/test_a.py" else 0, "")
 
-    monkeypatch.setattr(cip.subprocess, "run", fake_run)
+    monkeypatch.setattr(cip.subprocess, "Popen", fake_popen)
     cip.run_shards(shards, root=tmp_path)
     assert sorted(ran) == ["tests/test_a.py", "tests/test_b.py", "tests/test_c.py"]
 
@@ -1135,10 +1148,10 @@ def test_every_shard_runs_even_after_an_earlier_one_fails(tmp_path, monkeypatch)
 def test_shard_output_is_reported_under_an_attributable_banner(tmp_path, monkeypatch, capsys):
     shards = (("tests/test_a.py",), ("tests/test_b.py",))
 
-    def fake_run(argv, cwd=None, check=False, capture_output=False, text=False):
+    def fake_popen(argv, **kwargs):
         return _Completed(0, f"result for {argv[-1]}")
 
-    monkeypatch.setattr(cip.subprocess, "run", fake_run)
+    monkeypatch.setattr(cip.subprocess, "Popen", fake_popen)
     cip.run_shards(shards, root=tmp_path)
     out = capsys.readouterr().out
     assert "shard 1/2" in out and "shard 2/2" in out
@@ -1165,7 +1178,7 @@ def test_exit_code_is_the_lowest_failing_shard_not_the_first_to_finish(
 
     shards = (("tests/test_a.py",), ("tests/test_b.py",), ("tests/test_c.py",))
 
-    def fake_run(argv, cwd=None, check=False, capture_output=False, text=False):
+    def fake_popen(argv, **kwargs):
         module = argv[-1]
         if module == "tests/test_a.py":
             time.sleep(0.15)
@@ -1174,5 +1187,5 @@ def test_exit_code_is_the_lowest_failing_shard_not_the_first_to_finish(
             return _Completed(4, "fast failure")
         return _Completed(0, "")
 
-    monkeypatch.setattr(cip.subprocess, "run", fake_run)
+    monkeypatch.setattr(cip.subprocess, "Popen", fake_popen)
     assert cip.run_shards(shards, root=tmp_path) == 3

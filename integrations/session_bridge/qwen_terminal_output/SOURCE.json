@@ -1,0 +1,36 @@
+{
+  "protected_base": "022e5f46a0095c911e00450c7046ea90ca9949fa",
+  "root": "01a11e90-4b5d-7f53-b966-8aaaad38701f",
+  "scope": "Prospective Qwen wrapper final-response framing only; key manager and original runs unchanged",
+  "files": {
+    "qwen_exec.sh": {
+      "pre_sha256": "0c55d7ea9d330d5a55722ed32629da1a09bc70f0599af27c4a7602356fa06015",
+      "post_sha256": "9173abf57c81e1b53cb555f92fc01a0942396b744ae10f3a652014e5b69306c1"
+    }
+  },
+  "tests": {
+    "baseline": "17 FAIL, 1 PASS",
+    "focused": "19 PASS",
+    "existing_wrapper_contracts": "26 PASS with unchanged assertions and inert CLI JSONL protocol adaptation",
+    "live_new_run": "NOT_RUN"
+  },
+  "review": {
+    "run_id": "fabric-qwen-terminal-output-review-01a11e90-v1",
+    "state": "CONSUMED_ADJUDICATED_ACCEPTED",
+    "pool": "minimax",
+    "host": "ubuntu0",
+    "exec_session": 91190,
+    "verdict": "PASS_NO_FINDINGS",
+    "result_bytes": 5,
+    "result_sha256": "c26de83abdc9496cd1301470918ec39ecca1cf389ef0ae1c6504da1800d1c431",
+    "accept_calls": 1,
+    "acceptance_readback": "ACCEPTED/VALIDATED_OUTCOME",
+    "adjudication": "Exact candidate postimages unchanged from reviewed packet;18 framing and26 unchanged wrapper checks accepted. No additional independent tests claimed.",
+    "reuse_scope": "Final framing function AST unchanged from reviewed exact patch; credential manager no longer copied or modified. New private helper assembly requires affected integration checks; no new review verdict is fabricated."
+  },
+  "installed": false,
+  "preserved_installed_key_manager_sha256": "435dad2bcde27384c4c47edaea5afdf7f248d10229558193414b105664a9759c",
+  "framer_sha256": "3af18c4f631c68671e6ebdb3d3e320d99db0aac6e65ca79cd406bbb40e2922f0",
+  "codeql_correction": "Removed unnecessary credential-manager copies; one runtime wrapper change only. Pure formatter remains scanned Python and is byte-identical to embedded helper.",
+  "key_manager_unchanged": true
+}

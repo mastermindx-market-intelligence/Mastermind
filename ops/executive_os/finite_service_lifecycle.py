@@ -9,6 +9,8 @@ refuse partial states rather than repeating an earlier modifying call.
 from __future__ import annotations
 
 from contextlib import contextmanager
+import ctypes
+import errno
 import hashlib
 import json
 import os
@@ -399,7 +401,8 @@ class ProductionHost:
             release_tree=document['tree_sha'], release_manifest_sha256=self.manifest_digest,
             python_binary=PYTHON, host_ref=physical.host_ref, model_class='routine',
             execution_profile_digest=profile.profile_digest, routing_root_id=ROOT_ID,
-            routing_parent_run_id=ROOT_ID, max_turns=2, capacity_capability_id=worker['capacity_capability_id'])
+            routing_parent_run_id=ROOT_ID, max_turns=2, capacity_capability_id=worker['capacity_capability_id'],
+            native_capacity_enrollment=worker.get('native_capacity_enrollment'))
         if artifacts != expected:
             raise LifecycleError('canonical_definition_changed')
         from ops.executive_os.attended_worker_definition import build_finite_control_delta
@@ -522,6 +525,40 @@ def bind_live_peer(connection, reply):
     return peer
 
 
+def _socket_require(condition, code):
+    if not condition:
+        raise LifecycleError(code)
+
+
+def socket_identity(info):
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid,
+            info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
+def socket_acl_absent(path, before):
+    """Observe this socket's own ACL without opening or connecting to it.
+
+    Only native NULL+ENOENT with an unchanged full socket identity proves no
+    allocated extended ACL. Any allocated ACL or other API result fails closed.
+    """
+    _socket_require(sys.platform == 'darwin' and stat.S_ISSOCK(before.st_mode), 'socket_acl_platform_or_type')
+    _socket_require(socket_identity(path.lstat()) == socket_identity(before), 'socket_acl_identity_changed')
+    lib = ctypes.CDLL('/usr/lib/libSystem.B.dylib', use_errno=True)
+    get_acl, free_acl = lib.acl_get_link_np, lib.acl_free
+    get_acl.argtypes = [ctypes.c_char_p, ctypes.c_int]
+    get_acl.restype = ctypes.c_void_p
+    free_acl.argtypes = [ctypes.c_void_p]
+    free_acl.restype = ctypes.c_int
+    ctypes.set_errno(0)
+    acl = get_acl(os.fsencode(path), 0x100)
+    observed_errno = ctypes.get_errno()
+    if acl:
+        _socket_require(free_acl(acl) == 0, 'socket_acl_free_failed')
+        raise LifecycleError('socket_allocated_acl')
+    _socket_require(observed_errno == errno.ENOENT, 'socket_acl_observation_unknown')
+    _socket_require(socket_identity(path.lstat()) == socket_identity(before), 'socket_acl_identity_changed')
+
+
 def probe_socket():
     """One authenticated Control read, with no Runtime or backend operation."""
     import socket
@@ -529,14 +566,14 @@ def probe_socket():
         BROKER_REQUEST_SCHEMA_VERSION, BROKER_RESPONSE_SCHEMA_VERSION)
     from control_plane.executive_peer_identity import _current_capture
     from control_plane.executive_fabric_bridge_broker import _strict_json
-    from control_plane.fs_security import has_macos_acl
     if (os.getuid(), os.geteuid(), os.getgid(), os.getegid()) != (450, 450, 450, 450):
         raise LifecycleError('control_probe_principal_invalid')
     path = Path(SOCKET)
     before = path.lstat()
-    if (not stat.S_ISSOCK(before.st_mode) or (before.st_uid, before.st_gid, stat.S_IMODE(before.st_mode)) != (0, 450, 0o660)
-            or has_macos_acl(path, expected_identity=before)):
+    if (not stat.S_ISSOCK(before.st_mode) or
+            (before.st_uid, before.st_gid, stat.S_IMODE(before.st_mode), before.st_nlink) != (0, 450, 0o660, 1)):
         raise LifecycleError('activated_socket_invalid')
+    socket_acl_absent(path, before)
     nonce = secrets.token_hex(16)
     request = dict(schema_version=BROKER_REQUEST_SCHEMA_VERSION, request_id='finite-readiness-'+nonce,
                    operation='service-readiness', payload={'nonce': nonce})
@@ -565,9 +602,9 @@ def probe_socket():
         # the peer socket's last process, unlike cached listen credentials.
         peer = bind_live_peer(connection, reply)
         after = path.lstat()
-        coordinates = lambda x: (x.st_dev, x.st_ino, x.st_uid, x.st_gid, x.st_mode, x.st_ctime_ns)
-        if coordinates(before) != coordinates(after) or has_macos_acl(path, expected_identity=after):
+        if socket_identity(before) != socket_identity(after):
             raise LifecycleError('socket_generation_changed')
+        socket_acl_absent(path, after)
         _current_capture(peer)
         reply['kernel_peer'] = dict(euid=peer.euid, pid=peer.pid, pidversion=peer.pidversion,
                                     audit_identity_digest=peer.audit_identity_digest)
