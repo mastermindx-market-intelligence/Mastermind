@@ -123,6 +123,27 @@ V2_CHATGPT1_FLEET_TAILNET_PREDECESSOR = frozenset((
     "package.json", "package-lock.json",
 ))
 
+# Exact 0.1.10 ChatGPT1 fleet bundle signed into the existing V2 manifest.
+# This is an owner-bound compatibility update, NOT a generic legacy bundle
+# upgrade or permission grant. Unchanged modules retain their original bytes.
+FLEET_V10_PRESERVED_GIT_BLOBS = {
+    "gateway.mjs": "f87ac012339e82fe46bce5ddc70d1d04183d1b6e",
+    "output-budget.mjs": "6d4680a357dc5780e1b09ae32c9ebc908c94353b",
+    "paper-design.mjs": "82b35d150433f5128b83a089b581873ad5d73daa",
+    "fleet-status.mjs": "ef7ab489ca5134fc6f5d825977ab43a21aab3078",
+    "fleet-routing.mjs": "63c47d73ae7b73a61c95cee1803c549ecd6df9c8",
+    "private-tunnel-auth.mjs": "cd7ec9fc38ae10cefe8e472246aaf9c6221b0281",
+    "private-tunnel-gateway.mjs": "6ea4b75a0ce76995cde4c7f090ad4e28a183f3db",
+    "tailnet-gateway.mjs": "d654200a417d5a4dadfcc4e0f6141ef9adda6a04",
+    "package.json": "e983917ada1a9da715cedd1acce7559f26a2a932",
+    "package-lock.json": "d119580040b0edc59cf0e239922b54a023f899c5",
+}
+FLEET_V10_PUBLISHER_PATCH_SHA256 = {
+    "git-publish.mjs": "72faf293d9c0a90c45ab442821e26f199f5ea406a091a7aed7ebce3519e55f69",
+    "workspace-access.mjs": "9c4c20dd4edbc426c8561801708ee205e19bb47b48134ec8f5654a10f1cb7cf3",
+}
+
+
 KNOWN_MANIFEST_FILESETS = frozenset(
     (
         frozenset(STAGE_FILES),
@@ -1300,6 +1321,172 @@ def _verify_upgrade_preserves_installed_fleet_capabilities(
             )
 
 
+def _upgrade_fleet_v10_publisher_only(
+    args, source: Path, node_abs: Path, backend_abs: Path,
+    account: str, label: str, port: int, roots: dict,
+) -> int:
+    """Replace only the two reviewed publisher modules on the sealed fleet 0.1.10.
+
+    The canonical private_service installer owns this transaction. Never
+    replace a live gateway with protected-master's different runtime bundle.
+    The administrator supplies the exact observed manifest digest (CAS).
+    """
+    expected = getattr(args, "publisher_expected_manifest_sha256", None)
+    preview = getattr(args, "publisher_preflight_only", False)
+    if (account != "chatgpt1" or type(preview) is not bool
+            or not _sha256_hex(expected)
+            or getattr(args, "fabric_only", False)
+            or getattr(args, "enable_repository_workspaces", False)
+            or getattr(args, "os_commission_config_sha256", None)):
+        raise SystemExit("fleet publisher compatibility requires exact existing chatgpt1 owner and manifest CAS")
+    path = roots["manifest"]
+    if _stable_regular_file_hash(path, label="installed manifest") != expected:
+        raise SystemExit("fleet publisher compatibility: installed manifest CAS mismatch")
+    prior = _verify_staged_install(account, label, roots, require_runtime_seal=True)
+    if (prior.get("version") != MANIFEST_VERSION
+            or frozenset(prior["files"]) != V2_CHATGPT1_FLEET_TAILNET_PREDECESSOR
+            or not prior.get("dependencyTreeHash")
+            or prior.get("node") != str(node_abs)
+            or prior.get("backend") != str(backend_abs)
+            or prior.get("host") != "127.0.0.1"
+            or prior.get("port") != port):
+        raise SystemExit("fleet publisher compatibility: original sealed identity does not match")
+    for name, expected_blob in FLEET_V10_PRESERVED_GIT_BLOBS.items():
+        candidate = roots["base"] / name
+        _assert_dest_safe(candidate)
+        data = candidate.read_bytes()
+        actual = hashlib.sha1(
+            b"blob " + str(len(data)).encode("ascii") + b"\0" + data
+        ).hexdigest()
+        if actual != expected_blob:
+            raise SystemExit("fleet publisher compatibility: preserved fleet generation changed")
+    config_path = roots["config"]
+    manifest_path = roots["manifest"]
+    for candidate in (config_path, manifest_path):
+        _assert_dest_safe(candidate)
+    old_config_bytes = config_path.read_bytes()
+    old_manifest_bytes = manifest_path.read_bytes()
+    if (hashlib.sha256(old_config_bytes).hexdigest() != prior["configHash"]
+            or hashlib.sha256(old_manifest_bytes).hexdigest() != expected):
+        raise SystemExit("fleet publisher compatibility: verified snapshot changed during preflight")
+    try:
+        old_config = json.loads(old_config_bytes)
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise SystemExit("fleet publisher compatibility: original config invalid") from exc
+    user_root = _user_root()
+    if (type(old_config) is not dict
+            or old_config.get("repositoryWorkspaces") != {
+                "enabled": True, "allowedRepositories": ["mastermind", "macro", "terminal"]}
+            or old_config.get("gitPublish") != _typed_git_config(user_root)
+            or old_config.get("fleetRouting", {}).get("enabled") is not True
+            or len(old_config["fleetRouting"].get("routes", [])) != 2
+            or old_config.get("maxPerSessionConcurrency") != 8
+            or old_config.get("maxQueuedPerSession") != 16
+            or type(old_config.get("fleetStatus")) is not dict
+            or old_config.get("fabricOnly") is True
+            or "commissionPublication" in old_config
+            or "modernFabricProtocol" in old_config):
+        raise SystemExit("fleet publisher compatibility: original scoped capabilities changed")
+    new_config = dict(old_config)
+    new_config["gitPublish"] = _typed_git_config(user_root, closed_repositories=True)
+    if ({k: v for k, v in new_config.items() if k != "gitPublish"}
+            != {k: v for k, v in old_config.items() if k != "gitPublish"}):
+        raise SystemExit("fleet publisher compatibility: unrelated config change")
+    config_bytes = json.dumps(new_config, indent=2, sort_keys=True).encode("utf-8")
+    names = tuple(FLEET_V10_PUBLISHER_PATCH_SHA256)
+    old_files = {}
+    new_files = {}
+    for name in names:
+        installed = roots["base"] / name
+        incoming = source / name
+        _assert_dest_safe(installed)
+        if incoming.is_symlink() or not incoming.is_file():
+            raise SystemExit("fleet publisher compatibility: source module unavailable")
+        original = installed.read_bytes()
+        modified = incoming.read_bytes()
+        if (hashlib.sha256(original).hexdigest() != prior["files"][name]
+                or hashlib.sha256(modified).hexdigest() != FLEET_V10_PUBLISHER_PATCH_SHA256[name]):
+            raise SystemExit("fleet publisher compatibility: source or installed module hash mismatch")
+        old_files[name] = original
+        new_files[name] = modified
+    future = dict(prior)
+    future["files"] = dict(prior["files"])
+    for name in names:
+        future["files"][name] = hashlib.sha256(new_files[name]).hexdigest()
+    future["configHash"] = hashlib.sha256(config_bytes).hexdigest()
+    if not _valid_manifest(future, account, label):
+        raise SystemExit("fleet publisher compatibility: prospective manifest invalid")
+    if _stable_regular_file_hash(manifest_path, label="installed manifest") != expected:
+        raise SystemExit("fleet publisher compatibility: installed state changed during planning")
+    if preview:
+        print(json.dumps({
+            "preflight": True, "effect": "NOT_APPLIED", "account": account,
+            "originalManifestSha256": expected,
+            "publisherModules": list(names),
+            "fleetRoutesPreserved": len(old_config["fleetRouting"]["routes"]),
+            "concurrencyPreserved": [8, 16],
+            "existingBundleRetained": True,
+        }, sort_keys=True))
+        return 0
+    if _launchd_inspect(label) is not None:
+        raise SystemExit("refusing fleet publisher upgrade while service is loaded; stop first")
+    # Reconfirm all observed bytes immediately before the first effect.
+    if (_stable_regular_file_hash(manifest_path, label="installed manifest") != expected
+            or _stable_regular_file_hash(config_path, label="installed config") != prior["configHash"]
+            or any(_sha256_file(roots["base"] / n) != prior["files"][n] for n in names)):
+        raise SystemExit("fleet publisher compatibility: original installation changed")
+    # All new source was hash-pinned before entry. Manifest is written LAST:
+    # interrupted installation fails the existing manifest/hash gate closed.
+    old_bytes = {**{roots["base"] / n: old_files[n] for n in names},
+                 config_path: old_config_bytes, manifest_path: old_manifest_bytes}
+    planned = {**{roots["base"] / n: new_files[n] for n in names},
+               config_path: config_bytes,
+               manifest_path: json.dumps(future, indent=2, sort_keys=True).encode("utf-8")}
+    committed = False
+    try:
+        for target, payload in planned.items():
+            _atomic_write_bytes(target, payload)
+        committed = True
+        _verify_staged_install(account, label, roots, require_runtime_seal=True)
+    except BaseException as exc:
+        if committed:
+            raise SystemExit(
+                "fleet publisher compatibility: EFFECT_UNKNOWN after manifest commit; "
+                "inspect original service before attempting recovery"
+            ) from exc
+        try:
+            # os.replace may have succeeded even when a later fsync failed.
+            # Thus a return-code ledger cannot prove which files changed.
+            # Reconcile *every* planned path by bytes before safe rollback.
+            if _launchd_inspect(label) is not None:
+                raise RuntimeError("service became loaded during transaction")
+            observed = {target: target.read_bytes() for target in planned}
+            if any(observed[t] not in (old_bytes[t], planned[t]) for t in planned):
+                raise RuntimeError("non-owned concurrent mutation while recovering")
+            for target in reversed(tuple(planned)):
+                if observed[target] != old_bytes[target]:
+                    _atomic_write_bytes(target, old_bytes[target])
+            if (any(target.read_bytes() != old_bytes[target] for target in planned)
+                    or _stable_regular_file_hash(manifest_path, label="installed manifest") != expected):
+                raise RuntimeError("rollback byte identity differs")
+            _verify_staged_install(
+                account, label, roots, require_runtime_seal=True)
+        except BaseException as rollback_exc:
+            raise SystemExit(
+                "fleet publisher compatibility: EFFECT_UNKNOWN during rollback; "
+                "do not restart or replay until original state is reconciled"
+            ) from rollback_exc
+        raise SystemExit("fleet publisher compatibility: NOT_APPLIED; original state restored") from exc
+    print(json.dumps({
+        "publisherFleetCompatibility": True, "account": account, "effect": "APPLIED",
+        "manifestSha256": _sha256_file(manifest_path),
+        "gatewayAndFleetModulesPreserved": True,
+        "repositoryWorkspacesPreserved": True,
+        "serviceStarted": False,
+    }, sort_keys=True))
+    return 0
+
+
 def cmd_upgrade(args) -> int:
     account = args.account
     _validate_account_label(account)
@@ -1318,6 +1505,14 @@ def cmd_upgrade(args) -> int:
     _validate_port(port)
 
     roots = _build_runtime_roots(account)
+    if getattr(args, "publisher_only_fleet_v10", False) is True:
+        return _upgrade_fleet_v10_publisher_only(
+            args, source, node_abs, backend_abs, account, label, port, roots)
+    # Legacy call sites carry mock objects with no new CLI attributes.
+    # Reject only actual explicit option values, not arbitrary Mock values.
+    if (getattr(args, "publisher_preflight_only", False) is True
+            or type(getattr(args, "publisher_expected_manifest_sha256", None)) is str):
+        raise SystemExit("publisher preflight and CAS options require --publisher-only-fleet-v10")
     if _launchd_inspect(label) is not None:
         raise SystemExit("refusing upgrade while service is running; stop first")
     prior = _verify_staged_install(
@@ -1500,6 +1695,13 @@ def build_parser() -> argparse.ArgumentParser:
         s.add_argument("--os-commission-config-sha256", help="opt into the exact root-sealed OS publication grant")
         s.add_argument("--enable-repository-workspaces", action="store_true",
                        help="enable the closed installed repository-workspace consumer")
+        if name == "upgrade":
+            s.add_argument("--publisher-only-fleet-v10", action="store_true",
+                           help="preserve the exact sealed ChatGPT1 fleet v0.1.10 runtime; patch only two publisher modules")
+            s.add_argument("--publisher-expected-manifest-sha256",
+                           help="CAS pin for the original sealed, approved fleet manifest")
+            s.add_argument("--publisher-preflight-only", action="store_true",
+                           help="read-only exact fleet publisher upgrade preflight, even while service is running")
         s.set_defaults(func=globals()[f"cmd_{name}"])
 
     for name in ("seal-runtime", "start", "status", "stop"):

@@ -1853,5 +1853,258 @@ class TestSymlinkRejection(unittest.TestCase):
             self.assertFalse((evil / "share").exists())
 
 
+class TestFleetV10PublisherCompatibility(unittest.TestCase):
+    """One original manifest/installer owner, no new publisher or permission plane."""
+
+    @contextmanager
+    def _installed_fleet_fixture(self):
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            home = tmp / "home"
+            home.mkdir()
+            (home / "Library" / "LaunchAgents").mkdir(parents=True)
+            account = "chatgpt1"
+            with mock.patch.dict(os.environ, {"HOME": str(home)}):
+                source, node, backend, _ = _do_stage(tmp, home, account=account)
+                roots = svc._build_runtime_roots(account)
+                _seed_node_modules(roots)
+                names = svc.V2_CHATGPT1_FLEET_TAILNET_PREDECESSOR
+                for name in set(svc.STAGE_FILES) - names:
+                    (roots["base"] / name).unlink()
+                for name in names - set(svc.STAGE_FILES):
+                    (roots["base"] / name).write_text(
+                        f"// fleet v0.1.10 {name}\n", encoding="utf-8")
+                # Simulate old publisher modules; reviewed source holds replacements.
+                for name in svc.FLEET_V10_PUBLISHER_PATCH_SHA256:
+                    (roots["base"] / name).write_text(
+                        f"// historical publisher {name}\n", encoding="utf-8")
+                old = json.loads(roots["manifest"].read_text())
+                old["files"] = {
+                    name: svc._sha256_file(roots["base"] / name)
+                    for name in sorted(names)
+                }
+                cfg = json.loads(roots["config"].read_text())
+                cfg["repositoryWorkspaces"] = {
+                    "enabled": True,
+                    "allowedRepositories": ["mastermind", "macro", "terminal"],
+                }
+                cfg["fleetRouting"] = {
+                    "enabled": True,
+                    "requestTimeoutMs": svc.REQUEST_TIMEOUT_MS,
+                    "routes": [
+                        {"hostRef": "ubuntu1", "url": "https://ubuntu1.example.ts.net/mcp"},
+                        {"hostRef": "ubuntu2", "url": "https://ubuntu2.example.ts.net/mcp"},
+                    ],
+                }
+                cfg["maxPerSessionConcurrency"] = 8
+                cfg["maxQueuedPerSession"] = 16
+                cfg["fleetStatus"] = {
+                    "enabled": True,
+                    "launcherPath": str(home / ".local/bin/studio-direct"),
+                    "launcherSha256": "a" * 64,
+                    "timeoutMs": 15000,
+                    "fabricLauncherPath": str(home / ".local/bin/fabric-pool"),
+                    "fabricLauncherSha256": "b" * 64,
+                    "fabricTimeoutMs": 8000,
+                }
+                roots["config"].write_text(
+                    json.dumps(cfg, indent=2, sort_keys=True), encoding="utf-8")
+                old["configHash"] = svc._sha256_file(roots["config"])
+                roots["manifest"].write_text(
+                    json.dumps(old, indent=2, sort_keys=True), encoding="utf-8")
+                _seal_runtime(account)
+                args = _stage_args(source, node, backend, account=account)
+                args.publisher_only_fleet_v10 = True
+                args.publisher_preflight_only = False
+                args.publisher_expected_manifest_sha256 = svc._sha256_file(
+                    roots["manifest"])
+                installed_blobs = {}
+                for name in svc.FLEET_V10_PRESERVED_GIT_BLOBS:
+                    data = (roots["base"] / name).read_bytes()
+                    installed_blobs[name] = hashlib.sha1(
+                        b"blob " + str(len(data)).encode("ascii") + b"\0" + data
+                    ).hexdigest()
+                source_hashes = {
+                    name: svc._sha256_file(source / name)
+                    for name in svc.FLEET_V10_PUBLISHER_PATCH_SHA256
+                }
+                with mock.patch.object(
+                    svc, "FLEET_V10_PRESERVED_GIT_BLOBS", installed_blobs
+                ), mock.patch.object(
+                    svc, "FLEET_V10_PUBLISHER_PATCH_SHA256", source_hashes
+                ), mock.patch.object(
+                    svc, "PAPER_BRIDGE_SHA256", PAPER_BRIDGE_FIXTURE_SHA
+                ):
+                    yield args, roots, cfg
+
+    @staticmethod
+    def _all_files(roots):
+        return {
+            name: (roots["base"] / name).read_bytes()
+            for name in svc.V2_CHATGPT1_FLEET_TAILNET_PREDECESSOR
+        }
+
+    def test_readonly_preflight_even_while_live_requires_no_install_writes(self):
+        with self._installed_fleet_fixture() as (args, roots, _cfg):
+            before = (
+                roots["manifest"].read_bytes(), roots["config"].read_bytes(),
+                self._all_files(roots),
+            )
+            args.publisher_preflight_only = True
+            result = CmdRecorder(handler=lambda c: FakeResult(
+                0, _print_running(str(roots["plist"]), _label_for("chatgpt1")), "")
+                if c[:2] == ["launchctl", "print"] else None)
+            with mock.patch.object(svc, "_run", result):
+                rc, printed = _capture_stdout(lambda: svc.cmd_upgrade(args))
+            self.assertEqual(rc, 0)
+            observed = json.loads(printed)
+            self.assertEqual(observed["effect"], "NOT_APPLIED")
+            self.assertEqual(observed["fleetRoutesPreserved"], 2)
+            self.assertEqual(observed["concurrencyPreserved"], [8, 16])
+            self.assertEqual(
+                before,
+                (roots["manifest"].read_bytes(),
+                 roots["config"].read_bytes(), self._all_files(roots)),
+            )
+            self.assertTrue(all(call[:2] == ["launchctl", "print"]
+                                for call in result.calls))
+            args.publisher_preflight_only = False
+            with mock.patch.object(svc, "_run", result):
+                with self.assertRaisesRegex(SystemExit, "while service is loaded"):
+                    svc.cmd_upgrade(args)
+            self.assertEqual(before[0], roots["manifest"].read_bytes())
+
+    def test_stopped_exact_compat_update_preserves_all_other_bundle_bytes(self):
+        with self._installed_fleet_fixture() as (args, roots, cfg):
+            before = self._all_files(roots)
+            old_manifest = json.loads(roots["manifest"].read_text())
+            with mock.patch.object(svc, "_run", CmdRecorder()):
+                rc, printed = _capture_stdout(lambda: svc.cmd_upgrade(args))
+            self.assertEqual(rc, 0)
+            result = json.loads(printed)
+            self.assertEqual(result["effect"], "APPLIED")
+            self.assertTrue(result["gatewayAndFleetModulesPreserved"])
+            after = self._all_files(roots)
+            changed = {
+                name for name in before if before[name] != after[name]
+            }
+            self.assertEqual(
+                changed, set(svc.FLEET_V10_PUBLISHER_PATCH_SHA256))
+            manifest = svc._verify_staged_install(
+                "chatgpt1", _label_for("chatgpt1"), roots)
+            self.assertEqual(set(manifest["files"]), set(old_manifest["files"]))
+            self.assertEqual(manifest["dependencyTreeHash"],
+                             old_manifest["dependencyTreeHash"])
+            after_cfg = json.loads(roots["config"].read_text())
+            self.assertEqual(
+                {k:v for k,v in after_cfg.items() if k != "gitPublish"},
+                {k:v for k,v in cfg.items() if k != "gitPublish"})
+            self.assertEqual(
+                [v["repository"] for v in after_cfg["gitPublish"]["repositories"]],
+                ["mastermind", "macro", "terminal"])
+            self.assertNotIn("commission-prepare.mjs", after)
+            self.assertNotIn("modern-fabric-http.mjs", after)
+
+    def test_wrong_cas_tamper_and_wrong_scope_fail_without_writes(self):
+        with self._installed_fleet_fixture() as (args, roots, _cfg):
+            before = (roots["manifest"].read_bytes(), self._all_files(roots))
+            args.publisher_expected_manifest_sha256 = "b" * 64
+            with self.assertRaisesRegex(SystemExit, "CAS mismatch"):
+                svc.cmd_upgrade(args)
+            args.publisher_expected_manifest_sha256 = svc._sha256_file(
+                roots["manifest"])
+            args.enable_repository_workspaces = True
+            with self.assertRaisesRegex(SystemExit, "exact existing chatgpt1"):
+                svc.cmd_upgrade(args)
+            args.enable_repository_workspaces = False
+            old_source = svc.FLEET_V10_PRESERVED_GIT_BLOBS
+            with mock.patch.object(svc, "FLEET_V10_PRESERVED_GIT_BLOBS",
+                                   {**old_source, "gateway.mjs": "0" * 40}):
+                with self.assertRaisesRegex(SystemExit, "generation changed"):
+                    svc.cmd_upgrade(args)
+            self.assertEqual(before, (
+                roots["manifest"].read_bytes(), self._all_files(roots)))
+
+    def test_write_failure_after_atomic_replace_does_not_claim_false_rollback(self):
+        with self._installed_fleet_fixture() as (args, roots, _cfg):
+            before = (
+                roots["manifest"].read_bytes(), roots["config"].read_bytes(),
+                self._all_files(roots),
+            )
+            real = svc._atomic_write_bytes
+            fired = [False]
+            def fail_after_replace(path, data, mode=svc.FILE_MODE):
+                real(path, data, mode)
+                if Path(path).name == "workspace-access.mjs" and not fired[0]:
+                    fired[0] = True
+                    raise OSError("simulated failure after atomic rename")
+            with mock.patch.object(svc, "_run", CmdRecorder()), \
+                 mock.patch.object(svc, "_atomic_write_bytes", fail_after_replace):
+                with self.assertRaisesRegex(SystemExit, "NOT_APPLIED"):
+                    svc.cmd_upgrade(args)
+            self.assertTrue(fired[0])
+            self.assertEqual(before, (
+                roots["manifest"].read_bytes(), roots["config"].read_bytes(),
+                self._all_files(roots),
+            ))
+            svc._verify_staged_install("chatgpt1", _label_for("chatgpt1"), roots)
+
+    def test_changed_reviewed_source_refuses_before_any_installed_write(self):
+        with self._installed_fleet_fixture() as (args, roots, _cfg):
+            before = (roots["manifest"].read_bytes(), self._all_files(roots))
+            incoming = Path(args.source) / "workspace-access.mjs"
+            incoming.write_text("// unauthorized publisher module\n", encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "source or installed module hash mismatch"):
+                svc.cmd_upgrade(args)
+            self.assertEqual(before, (
+                roots["manifest"].read_bytes(), self._all_files(roots)))
+
+    def test_rollback_write_failure_preserves_effect_unknown_and_never_replays(self):
+        with self._installed_fleet_fixture() as (args, roots, _cfg):
+            real = svc._atomic_write_bytes
+            written = [0]
+            def inject(path, data, mode=svc.FILE_MODE):
+                if Path(path).name == "workspace-access.mjs":
+                    raise OSError("second planned write refused")
+                if Path(path).name == "git-publish.mjs":
+                    written[0] += 1
+                    if written[0] > 1:
+                        raise OSError("rollback could not restore publisher")
+                return real(path, data, mode)
+            with mock.patch.object(svc, "_run", CmdRecorder()), \
+                 mock.patch.object(svc, "_atomic_write_bytes", inject):
+                with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN"):
+                    svc.cmd_upgrade(args)
+            self.assertEqual(written[0], 2)
+            self.assertEqual(
+                svc._sha256_file(roots["manifest"]),
+                args.publisher_expected_manifest_sha256,
+                "manifest not falsely committed after rollback failure")
+
+    def test_precommit_write_failure_restores_original_bytes(self):
+        with self._installed_fleet_fixture() as (args, roots, _cfg):
+            before = (
+                roots["manifest"].read_bytes(), roots["config"].read_bytes(),
+                self._all_files(roots),
+            )
+            real = svc._atomic_write_bytes
+            failed = [False]
+            def inject(path, data, mode=svc.FILE_MODE):
+                if Path(path).name == "workspace-access.mjs" and not failed[0]:
+                    failed[0] = True
+                    raise OSError("simulated second-write failure")
+                return real(path, data, mode)
+            with mock.patch.object(svc, "_run", CmdRecorder()), \
+                 mock.patch.object(svc, "_atomic_write_bytes", inject):
+                with self.assertRaisesRegex(SystemExit, "NOT_APPLIED"):
+                    svc.cmd_upgrade(args)
+            self.assertTrue(failed[0])
+            self.assertEqual(before, (
+                roots["manifest"].read_bytes(), roots["config"].read_bytes(),
+                self._all_files(roots),
+            ))
+            svc._verify_staged_install(
+                "chatgpt1", _label_for("chatgpt1"), roots)
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
