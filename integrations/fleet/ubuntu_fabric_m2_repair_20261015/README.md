@@ -32,6 +32,14 @@ Ubuntu1 exceeded its configured 80°C admission cutoff in **four** recorded samp
 
 The September 19 `HOST_ROUTING_SEAL.sha256` was inspected, not re-signed: **7 hashes match, 19 differ** after intervening production changes. No mass re-sealing or operator release attestation is claimed.
 
+## Additional installed fix — M2 broker operator liveness (October 16)
+
+The **historical 13-file** manifest above captures the original M2 installation at its verified snapshot. A subsequent read-only operator-status improvement changed M2 `lease_broker.py` from SHA-256 `9766f7c445ab430ea5a516e56602baec00a998129395ab85aa04853716d0853f` to `d2eb24f6a87c006f6b65098cb1336ae749481745e8bc8ff3e31f7c964d88aa3a`. The original replay manifest remains historical; the current installed source supersession is recorded in `ADVISORY_INSTALL_ADDENDUM.json`.
+
+- `broker_controller_pid_advisory.patch` and `test_broker_controller_pid_advisory.py` are staged independently in this source-record PR. On M2 they are **installed and tested**: isolated 23 PASS and installed-integrated **79 PASS**, with two unrelated old temporary Chromium pytest cleanup warnings.
+- Only the existing broker's **read-only operator display** changed: when a remote worker's acquiring *broker-host controller* PID is absent in the same PID namespace, print `CONTROLLER_PID_ABSENT`, not worker failure. Remote worker state stays unknown, and the broker still does **not** auto-release that lease.
+- Five remote provider leases were observed held despite missing controller PIDs. Three had remote RC0 markers but no verified M2 controller return; two still had running remote workers. **No lease was released**, no worker cancelled, and no timed-out run repeated. See `LEASE_RECONCILIATION_AND_DIAGNOSTIC.md` for original run/root/host evidence and the lawful recovery frontier.
+
 ## Integration and release gates
 
 1. The #1404 incumbent source writer compares exact before/after source hashes and reconciles patch overlap with thermal, disk, sparse-worktree and launcher changes. A new owner may not silently overwrite it.
