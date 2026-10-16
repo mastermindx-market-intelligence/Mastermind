@@ -1,0 +1,114 @@
+{
+  "id": "LP-HIERARCHY-09",
+  "frozen_at": "2026-10-15T23:58:10.052024+00:00",
+  "scope": "Chairman continuation: research and isolated prototypes only, no production deployment, trading, alerts, ranking, sizing, new persistent plane or purchases. Independent from original blocked network/shock/DEEP+ result access.",
+  "source_pin": "78388ac29f7e54c9dfe7799a8e4769fb46d4aed6",
+  "parent_commission": "latent-pressure-research-20261014-chatgpt4-001",
+  "base_mastermind_commit": "16152f1819256a702817d3b298511dff4a1d1845",
+  "source_vintage": "Official French August2026 CRSP full-reconstruction files 10/49 Industry Portfolios Daily + FF 3factor daily; historical June SIC classifications but later-vintage reconstructed returns, not real-time source vintages or directly tradable ETF prices.",
+  "universe": {
+    "parents": [
+      "NoDur",
+      "Manuf",
+      "Enrgy",
+      "HiTec",
+      "Shops",
+      "Hlth",
+      "Other"
+    ],
+    "n_parents": 7,
+    "pure_child_counts": {
+      "NoDur": 7,
+      "Manuf": 8,
+      "Enrgy": 2,
+      "HiTec": 4,
+      "Shops": 2,
+      "Hlth": 3,
+      "Other": 10
+    },
+    "mixed_49_groups_excluded": 11,
+    "other_catchall": "Official 10-way Other is default for unlisted SIC codes.",
+    "minimum_pure_children": 2,
+    "minimum_past_parent_and_child_valid_sessions": 504,
+    "selection": "Classification/code coverage and past-only availability; not selected by future returns. A parent with a pure child not representing all company weights must not be called an exact aggregation.",
+    "mixed_children": "NEVER fractionally allocate without firm composition/weights."
+  },
+  "origin": "Actual Fridays from2000 to2026 with complete baseline/candidate asof close t. Entry convention is t+1 close; no origin determined by future label.",
+  "forecast_target": "Binary meaningful RS21 benchmark-relative sign change: if current21-session log relative sum RS_t has abs >=0.005, label YES when future RS21 has opposite sign with abs >=0.005 on 3 consecutive complete sessions ending by t+21; earliest confirmation time is end of third day. Entire future t+1..t+21 observed, else censored/excluded with reason. Initial small abs<.005 not admitted (prefix-only). Both positive-to-negative and negative-to-positive included.",
+  "time": "Daily logreturn to t close, hypothetical t+1 close entry, train full label ends strictly before start of test calendar year, rolling20year annual expanding/rolling fits. No future return in a feature, no target label that confirms after horizon.",
+  "baseline": {
+    "price": [
+      "rs5",
+      "rs21",
+      "rs63",
+      "rs126",
+      "mom5",
+      "mom21",
+      "mom63",
+      "vol21",
+      "vol63",
+      "rs_accel5",
+      "trend63",
+      "drawdown63",
+      "market_rs21",
+      "market_vol63",
+      "SMB21",
+      "HML21",
+      "parent_EW_minus_VW_5",
+      "parent_EW_minus_VW_21",
+      "parent_EW_minus_VW_63",
+      "rankparent21"
+    ],
+    "rollover": [
+      "known_rollover_next5",
+      "known_rollover_margin",
+      "known_rollover_confirmed",
+      "known_rollover_first_day"
+    ],
+    "sector_identity": "Parent dummies or categorical effects fitted on training only, retained same across models.",
+    "constant": "Train-window event prevalence calibration baseline."
+  },
+  "candidate_child_features": [
+    "child_breadth_rs5_positive",
+    "child_breadth_rs21_positive",
+    "child_accel_fraction_positive",
+    "child_bottom_recover_fraction",
+    "child_top_fade_fraction",
+    "child_rs21_mean_minus_parent",
+    "child_rs21_dispersion",
+    "child_opposite_parent5_fraction",
+    "child_count_fraction"
+  ],
+  "model": "Baseline fixed ridge logistic L2=.01 mean loss with training-only zscore/clipping +-5, intercept unpenalized. Primary calibrated baseline adds a single train-only intercept correction. Candidate uses same fixed baseline logit offset and train-only residualized child features projected off baseline transformed columns; candidate coefficients ridge .01 without intercept. This prevents duplicated baseline columns from changing its shrinkage. No candidate re-estimation of baseline coefficients.",
+  "controls": "Four independently fixed seed child-to-parent reassignment maps preserving group counts, using all selected pure children but scrambling identities; each uses the same feature vector, common-origin panel, fitting/penalty, and evaluated on same dates. This is identity-specificity only, not proof of causal migration.",
+  "periods": {
+    "train_start": "1980-01-01",
+    "development": "2000-2009",
+    "primary": "2010-2025",
+    "reserve": "2026 through fully observed last target, descriptive only"
+  },
+  "primary_metrics": [
+    "paired Brier gain across date-cross-section means vs calibrated baseline",
+    "logloss and ROC AUC for event vs non-event",
+    "calibration bins",
+    "event precision at matched top20pct weekly alert budget (ceiling, same eligible parents)",
+    "conditional median lead to 3-day confirmation with event denominator",
+    "declustered by parent21tradingday cooldown and lost alert count",
+    "subgroup by positive/negative current RS sign",
+    "2010-2014/2015-2019/2020-2025 positive gain counts"
+  ],
+  "inference": "1000 circular26-week-date block resamples on paired daily/weekly group meanBrier gain seed910152026. A one-day/date group is the uncertainty unit, not each child/parent. Reserve suppressed for confidence if fewer104dates; estimates descriptive.",
+  "gate": "Research-promising-only if primary Brier gain >=.002, lower95pctblockbound>0, 2of3primaryeras gain positive, equalalertprecision improvement >=.02 and no logloss degradation, and real-map Brier gain higher than all four scrambled-map gains. No production/rank/trade unless later PIT independent replication with costs and real consumer/provenance.",
+  "constraints": [
+    "This study is independent of denied original IEX/source/result read and old unresolved Fabric return; neither is retried or rerouted.",
+    "No hidden capital-flow/ownership identification from portfolio returns.",
+    "SIC codes are not a source of firm-level weights; pure subset nonexhaustive.",
+    "This is adaptive research after prior failures; avoid claims of globally pristine discovery holdout.",
+    "No output vendor raw data/per-origin predictions to public repo."
+  ],
+  "do_not_redo": [
+    "Original LP-ETF-01/02/03/04, prior industry reverse/shock, and network original experiments are not rerun or overwritten.",
+    "No direct old blocked-result access.",
+    "No newly invented production/service ownership."
+  ]
+}
