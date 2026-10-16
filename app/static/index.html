@@ -3719,9 +3719,9 @@ var DECISION_PREVIEW_COUNT = 5, _decisionsExpanded = false;
 var _runLogCache = {};
 
 // ── collapsible panels (Brain Activity / Evaluated): default collapsed, click to toggle, persisted ──
-var _collapsed = { runs: true, rejected: true, brainlog: false, research: false, 'shadow-books': true, 'xsec': true, 'engine-bt': true, 'factor-zoo': true, 'fundamentals': true };
+var _collapsed = { runs: true, rejected: true, brainlog: false, research: false, 'shadow-books': true, 'xsec': true, 'engine-bt': true, 'factor-zoo': true, 'fundamentals': true, 'learning-models': true };
 try {
-  ['runs', 'rejected', 'brainlog', 'research', 'shadow-books', 'xsec', 'engine-bt', 'factor-zoo', 'fundamentals'].forEach(function (id) {
+  ['runs', 'rejected', 'brainlog', 'research', 'shadow-books', 'xsec', 'engine-bt', 'factor-zoo', 'fundamentals', 'learning-models'].forEach(function (id) {
     var v = localStorage.getItem('mm_coll_' + id);
     if (v !== null) _collapsed[id] = (v === '1');
   });
@@ -3738,6 +3738,7 @@ window.toggleCollapse = function (id) {
   try { localStorage.setItem('mm_coll_' + id, _collapsed[id] ? '1' : '0'); } catch (e) {}
   applyColl(id);
   if (id === 'runs' && !_collapsed[id]) _ensureRuns();
+  if (!_collapsed[id]) _ensureDeferredPanel(id);
 };
 // collapsible panel header (chevron + bilingual title + optional sub) — rebuilt on every render,
 // so the click handler + chevron survive innerHTML replacement (panel keeps the .mm-collapsed class)
@@ -7368,13 +7369,16 @@ function _renderScoped() {
 
 function _renderAll() {
   _renderScoped();
-  var steps = [
-    ['brainLog', renderBrainLog], ['research', renderResearch], ['runs', renderRuns],
-    ['shadowBooks', renderShadowBooks], ['xsec', renderXsec], ['engineBacktest', renderEngineBacktest],
-    ['factorZoo', renderFactorZoo], ['fundamentals', renderFundamentals],
-    ['learningModels', renderLearningModels],
-  ];
+  var steps = [['brainLog', renderBrainLog], ['research', renderResearch], ['runs', renderRuns]];
   for (var i = 0; i < steps.length; i++) _safeRender(steps[i][0], steps[i][1]);
+  var deferred = {
+    'shadow-books': renderShadowBooks, 'xsec': renderXsec, 'engine-bt': renderEngineBacktest,
+    'factor-zoo': renderFactorZoo, 'fundamentals': renderFundamentals,
+    'learning-models': renderLearningModels
+  };
+  Object.keys(deferred).forEach(function(id) {
+    if (_deferredSharedLoaded[id]) _safeRender(id, deferred[id]);
+  });
   // Research is a separate view. Do not build its hidden tables into the Dashboard DOM.
   if (_currentView === 'research') {
     _safeRender('researchPapers', renderResearchPapers);
@@ -7706,36 +7710,70 @@ function _scheduleWorkspacePrefetch() {
   }, 5000);
 }
 
+var _deferredSharedLoads = {};
+var _deferredSharedLoaded = {};
+
+function _fetchJsonOrNull(url) {
+  return fetch(url).then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; });
+}
+
+function _ensureDeferredPanel(id) {
+  if (_deferredSharedLoaded[id]) return Promise.resolve();
+  if (_deferredSharedLoads[id]) return _deferredSharedLoads[id];
+  var request = null;
+  if (id === 'shadow-books') {
+    request = _fetchJsonOrNull('/api/shadow_books').then(function(v) { _shadowBooks = v; });
+  } else if (id === 'xsec') {
+    request = _fetchJsonOrNull('/api/predictions').then(function(v) { _predictions = v; });
+  } else if (id === 'engine-bt') {
+    request = _fetchJsonOrNull('/api/engine_backtest').then(function(v) { _engineBacktest = v; });
+  } else if (id === 'factor-zoo') {
+    request = _fetchJsonOrNull('/api/factor_zoo').then(function(v) { _factorZoo = v; });
+  } else if (id === 'fundamentals') {
+    request = _fetchJsonOrNull('/api/fundamentals').then(function(v) { _fundamentals = v; });
+  } else if (id === 'learning-models') {
+    request = Promise.allSettled([
+      _fetchJsonOrNull('/api/student'), _fetchJsonOrNull('/api/distill')
+    ]).then(function(s) {
+      _student = s[0].status === 'fulfilled' ? s[0].value : null;
+      _distill = s[1].status === 'fulfilled' ? s[1].value : null;
+    });
+  }
+  if (!request) return Promise.resolve();
+  _deferredSharedLoads[id] = request.then(function() {
+    _deferredSharedLoaded[id] = true;
+    _safeRender(id, {
+      'shadow-books': renderShadowBooks, 'xsec': renderXsec,
+      'engine-bt': renderEngineBacktest, 'factor-zoo': renderFactorZoo,
+      'fundamentals': renderFundamentals, 'learning-models': renderLearningModels
+    }[id]);
+    delete _deferredSharedLoads[id];
+  }, function() {
+    delete _deferredSharedLoads[id];
+  });
+  return _deferredSharedLoads[id];
+}
+
+function _ensureExpandedDeferredPanels() {
+  ['shadow-books', 'xsec', 'engine-bt', 'factor-zoo', 'fundamentals', 'learning-models']
+    .forEach(function(id) { if (!_collapsed[id]) _ensureDeferredPanel(id); });
+}
+
 function _hydrateShared() {
   if (_sharedLoaded) return Promise.resolve();
   if (_sharedLoad) return _sharedLoad;
   _sharedLoad = loadPortfolios().then(function() {
     return Promise.allSettled([
-      fetch('/api/activity').then(function(r)  { return r.ok ? r.json() : [];   }).catch(function() { return []; }),
-      fetch('/api/research').then(function(r)  { return r.ok ? r.json() : [];   }).catch(function() { return []; }),
-      fetch('/api/shadow_books').then(function(r){ return r.ok ? r.json() : null; }).catch(function() { return null; }),
-      fetch('/api/predictions').then(function(r){ return r.ok ? r.json() : null; }).catch(function() { return null; }),
-      fetch('/api/engine_backtest').then(function(r){ return r.ok ? r.json() : null; }).catch(function() { return null; }),
-      fetch('/api/factor_zoo').then(function(r){ return r.ok ? r.json() : null; }).catch(function() { return null; }),
-      fetch('/api/fundamentals').then(function(r){ return r.ok ? r.json() : null; }).catch(function() { return null; }),
-      fetch('/api/student').then(function(r){ return r.ok ? r.json() : null; }).catch(function() { return null; }),
-      fetch('/api/distill').then(function(r){ return r.ok ? r.json() : null; }).catch(function() { return null; }),
+      fetch('/api/activity').then(function(r)  { return r.ok ? r.json() : []; }).catch(function() { return []; }),
+      fetch('/api/research').then(function(r)  { return r.ok ? r.json() : []; }).catch(function() { return []; }),
     ]);
   }).then(function(s) {
-    var actRes = s[0], researchRes = s[1], shadowRes = s[2], predRes = s[3],
-        ebtRes = s[4], fzRes = s[5], fundRes = s[6],
-        studentRes = s[7], distillRes = s[8];
-    _activity    = (actRes.status    === 'fulfilled' ? actRes.value     : null) || [];
-    _research    = (researchRes.status === 'fulfilled' ? researchRes.value : null) || [];
-    _shadowBooks    = shadowRes.status === 'fulfilled' ? shadowRes.value : null;
-    _predictions    = predRes.status   === 'fulfilled' ? predRes.value   : null;
-    _engineBacktest = ebtRes.status    === 'fulfilled' ? ebtRes.value    : null;
-    _factorZoo      = fzRes.status     === 'fulfilled' ? fzRes.value     : null;
-    _fundamentals   = fundRes.status   === 'fulfilled' ? fundRes.value   : null;
-    _student        = studentRes.status === 'fulfilled' ? studentRes.value : null;
-    _distill        = distillRes.status === 'fulfilled' ? distillRes.value : null;
+    var actRes = s[0], researchRes = s[1];
+    _activity = (actRes.status === 'fulfilled' ? actRes.value : null) || [];
+    _research = (researchRes.status === 'fulfilled' ? researchRes.value : null) || [];
     _sharedLoaded = true;
     _renderAll();
+    _ensureExpandedDeferredPanels();
     _schedulePortfolioPrefetch();
     _scheduleWorkspacePrefetch();
     if (!_collapsed.runs) _ensureRuns();
@@ -7787,6 +7825,7 @@ async function fetchAll(opts) {
     applyColl('engine-bt');
     applyColl('factor-zoo');
     applyColl('fundamentals');
+    applyColl('learning-models');
   } finally {
     // only the owning (newest) fetch clears the bar; a superseded call leaving early must not
     if (opts.showBar && !barFinished && mySeq === _pfFetchSeq) loadBarDone();
