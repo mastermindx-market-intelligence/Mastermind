@@ -19,9 +19,13 @@ from control_plane import native_capacity_v2 as v2
 from control_plane.executive_fabric_composition import FabricBindingSource
 from tests.test_control_native_capacity_reader import reader, native, bound, enrolled
 
-# Cross-repository integration is explicit; never vendor a second producer.
-MACRO=Path(os.environ.get('MASTERMIND_TEST_MACRO_SOURCE',
-    str(Path(__file__).resolve().parents[2]/'macro')))/'engine'/'provider_capacity_v2.py'
+# The default suite uses frozen test-only Macro bytes, never an installed producer.
+# Explicit cross-repository qualification points at the actual Macro checkout.
+_MACRO_ROOT=os.environ.get('MASTERMIND_TEST_MACRO_SOURCE')
+MACRO=(Path(_MACRO_ROOT)/'engine'/'provider_capacity_v2.py' if _MACRO_ROOT else
+       Path(__file__).parent/'fixtures'/'native_capacity_v2'/'macro_producer.py')
+_PRODUCER_SHA256='946537a8abf54715d5ba98d21ada007bb535f1c12a45ccb69915eb5db19ed9ab'
+assert hashlib.sha256(MACRO.read_bytes()).hexdigest()==_PRODUCER_SHA256, 'Macro test input changed'
 
 @pytest.fixture
 def composed(reader, monkeypatch):
