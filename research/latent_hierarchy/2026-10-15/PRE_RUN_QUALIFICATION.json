@@ -1,0 +1,41 @@
+{
+  "experiment": "LP-HIERARCHY-09",
+  "phase": "FROZEN_CODE_BEFORE_MARKET_OUTCOMES",
+  "tests_run": 16,
+  "tests_pass": 16,
+  "tests_failed_after_repairs": 0,
+  "review": {
+    "id": "lp-hierarchy09-crosswalk-review",
+    "state": "TERMINAL",
+    "rc": 78,
+    "outcome": "ADMISSION_DENIED_CANONICAL_SOURCE_UNREADABLE",
+    "source": "Original M2 Fabric run result; no review produced, no retry or altered carrier",
+    "independent_approval": false
+  },
+  "checks": [
+    "Official SIC10 Other is catch-all and produces a disjoint pure mapping",
+    "All 11 ambiguous 49 groups excluded, seven parents retained with \u22652 pure children",
+    "Features use only same-date or earlier returns",
+    "Known 21-session RSI rollover computable from old returns alone",
+    "Three future sessions required for confirmed pivot; incomplete outcomes excluded",
+    "Prediction starts next close and does not count that entry day as a return",
+    "One-sided flips both covered by direction sign",
+    "Identical duplicate candidate features do not change baseline predictions or shrinkage",
+    "Four shuffled-placebo maps preserve source child multiset and group cardinalities",
+    "Train-only transforms and offset correction",
+    "Date-block counts distinct from parent-row count",
+    "Weekly alert budgets match before cooldown",
+    "Raw vendor files and per-origin predictions will remain private"
+  ],
+  "source_hashes": {
+    "F-F_Research_Data_Factors_daily_CSV.zip": "2f29e22546069914890a712680a6f81f3680ebc3543b52864484d209ca13a7db",
+    "Siccodes49.zip": "36761b4009107e11cd15cff0eb75f8837ef49f024524b7378634629bf90905d5",
+    "10_Industry_Portfolios_daily_CSV.zip": "12e33cce09517c9a2bb38cf75d43b5a15e65238848e864145d06d456e170161d",
+    "49_Industry_Portfolios_daily_CSV.zip": "8f394fe34bea54d41b9aafed410425ee8f8e252ede3c71a7c1cd20bab83040de",
+    "Siccodes10.zip": "d7022df07d9e9d1f8ceddf5499cdd6aff9dff28e1b3dedf8b4b6d91ef8780429"
+  },
+  "model_script_sha256": "849fad0bb302d5058030ec3c5b4c380a07c260c58167f8b978191f33d7cbfebe",
+  "test_script_sha256": "7609c52ff025ad332c10247d8b51cecb2ebcb8ae5df89fd150a854471ff2a300",
+  "source_semantics": "Reconstructed French Aug2026 CRSP data, not original-vintage live measurements or investable baskets",
+  "forecast_authority": false
+}
