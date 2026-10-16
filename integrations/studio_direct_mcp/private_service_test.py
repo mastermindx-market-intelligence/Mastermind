@@ -329,6 +329,42 @@ class TestIdentity(unittest.TestCase):
         self.assertFalse(svc._valid_manifest({**base, "files": extra}, "test-account", _label_for("test-account")))
         self.assertFalse(svc._valid_manifest({**base, "version": 2, "files": current}, "test-account", _label_for("test-account")))
 
+    def test_v2_verified_chatgpt1_historical_fleet_tailnet_fileset_only(self):
+        """The already-applied 0.1.10 12-file canary is a V2-only predecessor."""
+        digest = "a" * 64
+        names = {
+            "gateway.mjs", "output-budget.mjs", "git-publish.mjs",
+            "workspace-access.mjs", "paper-design.mjs", "fleet-status.mjs",
+            "fleet-routing.mjs", "private-tunnel-auth.mjs",
+            "private-tunnel-gateway.mjs", "tailnet-gateway.mjs",
+            "package.json", "package-lock.json",
+        }
+        self.assertEqual(len(names), 12)
+        self.assertNotIn(frozenset(names), svc.KNOWN_MANIFEST_FILESETS)
+        account = "chatgpt1"
+        label = _label_for(account)
+        manifest = {
+            "version": 2, "account": account, "label": label,
+            "files": {name: digest for name in names},
+            "configHash": digest, "plistHash": digest,
+            "source": "/owned/source", "node": "/owned/node",
+            "backend": "/owned/backend", "host": "127.0.0.1",
+            "port": 45018, "nodeHash": digest,
+            "backendHash": digest, "dependencyTreeHash": digest,
+        }
+        self.assertTrue(svc._valid_manifest(manifest, account, label))
+        for rejected in (
+            {**{key: value for key, value in manifest.items()
+                 if key not in ("nodeHash", "backendHash", "dependencyTreeHash")},
+             "version": 1},
+            {**manifest, "files": dict((name, digest) for name in names - {"fleet-routing.mjs"})},
+            {**manifest, "files": {**manifest["files"], "unrecognized.mjs": digest}},
+            {**manifest, "files": {**manifest["files"], "tailnet-gateway.mjs": "bad"}},
+            {**manifest, "account": "chatgpt2"},
+            {**manifest, "dependencyTreeHash": "bad"},
+        ):
+            self.assertFalse(svc._valid_manifest(rejected, account, label))
+
     def test_v1_provisioned_manifest_accepts_only_exact_inert_legacy_shape(self):
         digest = "0" * 64
         with tempfile.TemporaryDirectory() as raw:
@@ -1038,6 +1074,68 @@ class TestUpgrade(unittest.TestCase):
                 self.assertIsNone(manifest["dependencyTreeHash"])
                 _seal_runtime()
                 svc._verify_staged_install("test-account", _label_for("test-account"), roots)
+
+    def test_v2_fleet_tailnet_canary_upgrade_preserves_optin_and_integrity(self):
+        """The authorized historical v0.1.10 seal must upgrade without accepting drift."""
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            home = tmp / "home"
+            home.mkdir()
+            (home / "Library" / "LaunchAgents").mkdir(parents=True)
+            account = "chatgpt1"
+            with mock.patch.dict(os.environ, {"HOME": str(home)}):
+                _, node, backend, _ = _do_stage(tmp, home, account=account)
+                roots = svc._build_runtime_roots(account)
+                _seed_node_modules(roots)
+                names = svc.V2_CHATGPT1_FLEET_TAILNET_PREDECESSOR
+                for name in set(svc.STAGE_FILES) - names:
+                    (roots["base"] / name).unlink()
+                for name in names - set(svc.STAGE_FILES):
+                    (roots["base"] / name).write_text(
+                        f"// legacy approved {name}\n", encoding="utf-8")
+                prior = json.loads(roots["manifest"].read_text())
+                prior["files"] = {
+                    name: svc._sha256_file(roots["base"] / name)
+                    for name in sorted(names)
+                }
+                config = json.loads(roots["config"].read_text())
+                config["repositoryWorkspaces"] = {
+                    "enabled": True,
+                    "allowedRepositories": ["mastermind", "macro", "terminal"],
+                }
+                config["gitPublish"] = svc._typed_git_config(
+                    home, closed_repositories=True)
+                roots["config"].write_text(
+                    json.dumps(config, sort_keys=True), encoding="utf-8")
+                prior["configHash"] = svc._sha256_file(roots["config"])
+                roots["manifest"].write_text(
+                    json.dumps(prior, sort_keys=True), encoding="utf-8")
+                _seal_runtime(account)
+                verified = svc._verify_staged_install(
+                    account, _label_for(account), roots)
+                self.assertEqual(set(verified["files"]), names)
+                legacy_path = roots["base"] / "fleet-routing.mjs"
+                saved = legacy_path.read_bytes()
+                try:
+                    legacy_path.write_bytes(saved + b"unauthorized")
+                    with self.assertRaisesRegex(SystemExit, "hash mismatch"):
+                        svc._verify_staged_install(
+                            account, _label_for(account), roots)
+                finally:
+                    legacy_path.write_bytes(saved)
+                upgraded_source = _make_upgrade_source(tmp)
+                with mock.patch.object(svc, "_run", CmdRecorder()):
+                    rc, _out = _capture_stdout(lambda: svc.cmd_upgrade(
+                        _stage_args(upgraded_source, node, backend, account)))
+                self.assertEqual(rc, 0)
+                upgraded = json.loads(roots["manifest"].read_text())
+                self.assertEqual(set(upgraded["files"]), set(svc.STAGE_FILES))
+                current = json.loads(roots["config"].read_text())
+                self.assertEqual(current["repositoryWorkspaces"], config["repositoryWorkspaces"])
+                self.assertEqual(current["gitPublish"], config["gitPublish"])
+                self.assertIsNone(upgraded["dependencyTreeHash"])
+                _seal_runtime(account)
+                svc._verify_staged_install(account, _label_for(account), roots)
 
     def test_legacy_install_can_be_stopped_before_upgrade(self):
         with tempfile.TemporaryDirectory() as raw:

@@ -109,6 +109,20 @@ LEGACY_STAGE_FILES_V4 = tuple(name for name in LEGACY_STAGE_FILES_V5 if name != 
 LEGACY_STAGE_FILES_V3 = tuple(name for name in LEGACY_STAGE_FILES_V4 if name != "paper-design.mjs")
 LEGACY_STAGE_FILES_V2 = tuple(name for name in LEGACY_STAGE_FILES_V3 if name != "output-budget.mjs")
 LEGACY_STAGE_FILES_V1 = tuple(name for name in LEGACY_STAGE_FILES_V2 if name != "git-publish.mjs")
+# The approved 2026-10-14 ChatGPT1 Studio 0.1.10 install had exactly this
+# reviewed predecessor generation (see #1333 and the source lineage of #1477).
+# Unlike general historical generations, its two fleet/tailnet modules came
+# from a branch not in current protected STAGE_FILES. Recognize ONLY this
+# exact 12-file set on a V2 manifest. No file, config, binary, plist or
+# dependency hash verification is relaxed, and no repository grant is implied.
+V2_CHATGPT1_FLEET_TAILNET_PREDECESSOR = frozenset((
+    "gateway.mjs", "output-budget.mjs", "git-publish.mjs",
+    "workspace-access.mjs", "paper-design.mjs", "fleet-status.mjs",
+    "fleet-routing.mjs", "private-tunnel-auth.mjs",
+    "private-tunnel-gateway.mjs", "tailnet-gateway.mjs",
+    "package.json", "package-lock.json",
+))
+
 KNOWN_MANIFEST_FILESETS = frozenset(
     (
         frozenset(STAGE_FILES),
@@ -686,7 +700,12 @@ def _valid_manifest(data, account: str, label: str) -> bool:
         ):
             return False
     files = data.get("files")
-    if not isinstance(files, dict) or frozenset(files) not in KNOWN_MANIFEST_FILESETS:
+    if not isinstance(files, dict):
+        return False
+    fileset = frozenset(files)
+    if (fileset not in KNOWN_MANIFEST_FILESETS
+            and not (version == MANIFEST_VERSION
+                     and fileset == V2_CHATGPT1_FLEET_TAILNET_PREDECESSOR)):
         return False
     if any(not _sha256_hex(digest) for digest in files.values()):
         return False
