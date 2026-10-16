@@ -50,9 +50,12 @@ sessionful legacy handler while sending malformed modern claims to the modern
 validator. Request-scoped views use the same backend owner and limiter, so completing
 an HTTP request detaches its view without closing retained Fabric controllers or
 results. Client metadata never supplies authentication; the existing private tunnel
-principal is checked on each request. Only the seven Fabric tools and the existing
-ping/output-page tools are available on this path. This does not supply individual
-conversation authentication or the Executive v5 current-writer COMMIT fence.
+principal is checked on each request. The original seven Fabric tools and the
+additional bounded `fabric_result_page` when actually advertised by the installed
+backend remain the only Fabric methods on this path. The existing ping/output-page
+tools are separate gateway facilities. Allowlisting a method alone does not install
+the backend or prove client selection. This does not supply individual conversation
+authentication or the Executive v5 current-writer COMMIT fence.
 
 `/readyz` reports the selected modern protocol only after its handler is constructed.
 A modern `studio_ping` reports the protocol and backend generation; its `sessionId`
