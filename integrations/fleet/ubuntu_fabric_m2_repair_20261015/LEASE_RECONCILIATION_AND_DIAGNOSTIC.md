@@ -18,6 +18,18 @@ The four Linux `max_active` values **12 / 18 / 12 / 12** are not the effective p
 
 The original controller logs stop at approximately 00:09–00:11 UTC and do **not** establish M2-side `REMOTE_DONE`, delivered stdout, cleanup receipt or terminal ledger acceptance for these runs. `fabric_task status` reported `UNVERIFIED`, `result_available=false`, `worker_state=UNKNOWN` and `retry_authorized=false`. Remote RC `0` is not by itself a verified lifecycle result. In particular **do not release all five leases**: two workers remained visibly active and the other three have incomplete original controller return evidence.
 
+## Additional direct-host process receipt evidence (read-only)
+
+The same three RC0 runs were then inspected through exact original-host process receipt paths (not the old controller's missing local result). Each preserved `mastermind.local_owned_process_receipt.v1` has exactly **one** JSONL row, matching `label == original run_id`, integer `returncode == 0`, `timed_out == false`, `cleanup.status == not_needed`, `cleanup.reason == normal_completion`, `cleanup.residual_count == 0`, `census_proven == true`, `identity_verified == true`, and all three capture/delivery-complete flags true:
+
+| Host | Original run | Original host process receipt SHA-256 |
+| --- | --- | --- |
+| ubuntu2 | `fable-p3-har-numerical-kernel-20261015` | `14870b36e955adcd86f02d5b0e34bfe4d7eba25cffc2ef12fd8d884c44681b37` |
+| ubuntu1 | `fable-s-incumbent-covariates-20261016` | `c2470ee541602ae8b97359d2b5dd5c265bc83681ae6cf3f49cb52393356be741` |
+| ubuntu0 | `defense-publisher-history-review-01a13300-a` | `919d9126e359593cc678fd1f4d4f26b1c79e9b0cac903a9c5227d90898c11a0e` |
+
+**Important distinction:** These direct-host process receipts strongly support physical worker completion/cleanup and are ready for exact original-owner verification; they do **not** create a new M2 controller transport receipt, an accepted result, or original-parent permission to settle a broker lease. Source generation, immutable log, exact account binding and original delivery still require original-owner reconciliation before any capacity is reclaimed. The two other exact runs still lacked remote terminal markers at the earlier observation and must not be touched merely because their M2 controller vanished.
+
 ## Installed narrow repair, without new lifecycle authority
 
 The incumbent M2 `lease_broker.py` operator `print_status` now emits `CONTROLLER_PID_ABSENT` for a remote-class lease when a **live same-broker-host snapshot** shows its controller PID absent, and prints `remote_worker=UNKNOWN no_release_or_retry=1`. It never changes the lease table, broker GC/TTL behavior, worker PID, credentials, host admission, or provider capacity. The warning is suppressed for a cross-host snapshot, uncertain permissions, and non-remote leases.
