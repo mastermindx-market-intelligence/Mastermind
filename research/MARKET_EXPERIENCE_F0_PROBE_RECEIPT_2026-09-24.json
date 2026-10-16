@@ -1,0 +1,133 @@
+{
+  "contract_cases": [
+    {
+      "actual_count": 1,
+      "case": "public_before_acquisition",
+      "expected_count": 1,
+      "interpretation": "Publication-first read; this is NOT proof of operational possession.",
+      "passed": true
+    },
+    {
+      "actual_count": 0,
+      "case": "unknown_publication_uses_acquisition",
+      "expected_count": 0,
+      "interpretation": "Missing public clock cannot be backdated to event time.",
+      "passed": true
+    },
+    {
+      "actual_count": 1,
+      "case": "future_revision_excluded",
+      "expected_count": 1,
+      "interpretation": "Later revision is not available at the earlier cutoff.",
+      "passed": true
+    },
+    {
+      "actual_count": 2,
+      "case": "eligible_revisions_are_not_collapsed",
+      "expected_count": 2,
+      "interpretation": "This filter does not select the authoritative vintage; use its dataset owner.",
+      "passed": true
+    },
+    {
+      "actual_count": 0,
+      "case": "served_output_not_yet_available",
+      "expected_count": 0,
+      "interpretation": "Computed output is not yet actual served output.",
+      "passed": true
+    },
+    {
+      "case": "derived_is_not_operational_replay",
+      "exception": "PointInTimeError",
+      "passed": true
+    },
+    {
+      "case": "naive_timestamp_refused",
+      "exception": "TemporalError",
+      "passed": true
+    },
+    {
+      "case": "missing_both_clocks_refused",
+      "exception": "PointInTimeError",
+      "passed": true
+    }
+  ],
+  "evidence_class": "OWNER_CONTRACT_MICROBENCHMARK_ONLY",
+  "measurements": [
+    {
+      "construction_wall_seconds": 0.0025906250812113285,
+      "dataset_class": "SYNTHETIC_TEMPORAL_METADATA_NOT_MARKET_HISTORY",
+      "median_filter_wall_seconds": 0.0014980831183493137,
+      "process_lifetime_peak_rss_bytes": 28295168,
+      "rss_scope": "process lifetime high-water mark, not per-stage incremental memory",
+      "synthetic_rows": 2000,
+      "trials": [
+        {
+          "cpu_seconds": 0.0014899999999999913,
+          "retained_rows": 1000,
+          "wall_seconds": 0.0014980831183493137
+        },
+        {
+          "cpu_seconds": 0.0015159999999999896,
+          "retained_rows": 1000,
+          "wall_seconds": 0.001580915879458189
+        },
+        {
+          "cpu_seconds": 0.0013760000000000022,
+          "retained_rows": 1000,
+          "wall_seconds": 0.0013743326999247074
+        }
+      ]
+    },
+    {
+      "construction_wall_seconds": 0.01294304197654128,
+      "dataset_class": "SYNTHETIC_TEMPORAL_METADATA_NOT_MARKET_HISTORY",
+      "median_filter_wall_seconds": 0.04539545904844999,
+      "process_lifetime_peak_rss_bytes": 50888704,
+      "rss_scope": "process lifetime high-water mark, not per-stage incremental memory",
+      "synthetic_rows": 63000,
+      "trials": [
+        {
+          "cpu_seconds": 0.04589700000000001,
+          "retained_rows": 31500,
+          "wall_seconds": 0.046181666664779186
+        },
+        {
+          "cpu_seconds": 0.044833999999999985,
+          "retained_rows": 31500,
+          "wall_seconds": 0.044872707687318325
+        },
+        {
+          "cpu_seconds": 0.04522200000000001,
+          "retained_rows": 31500,
+          "wall_seconds": 0.04539545904844999
+        }
+      ]
+    }
+  ],
+  "model_calls": 0,
+  "observed_at": "2026-09-24T12:31:57.188848+00:00",
+  "owner": {
+    "commit": "cdcfbb27681efcd86151dfb2149633f0b343dfde",
+    "git_blob": "094b149a8b9158f19cb99c4005568c12db96ed41",
+    "path": "lib/dataos/temporal.py",
+    "repository": "mastermindx-market-intelligence/macro",
+    "sha256": "4415404186f0b0d2870f42d9e4a0b95be87937863adf30cf015ed34e8bf92b67"
+  },
+  "platform": "darwin",
+  "probe_sha256": "0c2bc2ec4e2a425b014b469d3dbee4df0fb60b66b4c9650c7a05e9e1d708e813",
+  "production_data_admitted": 0,
+  "python": "3.14.7",
+  "schema": "market_experience.f0_probe.v1",
+  "spend_usd": 0,
+  "unmeasured": [
+    "licensed corpus coverage",
+    "document extraction",
+    "token distribution",
+    "real source bytes",
+    "per-accepted-record cost",
+    "graph query performance",
+    "feature construction",
+    "forecast quality",
+    "fleet throughput"
+  ]
+}
