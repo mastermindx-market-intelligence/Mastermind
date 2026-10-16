@@ -1048,6 +1048,53 @@ def acquire_native_registration(realm_owner: object) -> dict[str, Any]:
                 source_receipt_digest=source["export_sha256"])
 
 
+def validate_native_identity_observation(value: object) -> dict[str, Any]:
+    """Closed initial B3 projection; custody never becomes provider readiness.
+
+    This checks secret-free wire shape only. It grants no producer authenticity,
+    freshness, provider normalization, Capacity eligibility or Runtime authority.
+    Positive provider facts require their actual owners and a reviewed successor.
+    """
+    from datetime import datetime, timezone
+    from control_plane.executive_host_pressure import HOST_REF_RE, BOOT_REF_RE
+    fields = {"schema", "capacity_capability_id", "capability_generation", "host_ref", "boot_ref",
+              "realm_generation", "enrollment_receipt_digest", "observed_at", "realm_auth",
+              "provider_health", "cooling", "quota_horizons", "last_provider_outcome", "source_receipt_digest"}
+    def refuse():
+        raise CapacitySourceContractError("NATIVE_OBSERVATION_INVALID")
+    if type(value) is not dict or set(value) != fields:
+        refuse()
+    if value["schema"] != "mastermind.provider_native_realm_observation/v1":
+        refuse()
+    for key, pattern in (("host_ref", HOST_REF_RE), ("boot_ref", BOOT_REF_RE),
+            ("capacity_capability_id", re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")),
+            ("enrollment_receipt_digest", re.compile(r"[0-9a-f]{64}")),
+            ("source_receipt_digest", re.compile(r"[0-9a-f]{64}"))):
+        if type(value[key]) is not str or pattern.fullmatch(value[key]) is None:
+            refuse()
+    for key in ("capability_generation", "realm_generation"):
+        if type(value[key]) is not int or not 1 <= value[key] < 2**63:
+            refuse()
+    observed = value["observed_at"]
+    if type(observed) is not str or not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z", observed):
+        refuse()
+    try:
+        if datetime.fromisoformat(observed.replace("Z", "+00:00")).utcoffset() != timezone.utc.utcoffset(None):
+            refuse()
+    except ValueError:
+        refuse()
+    unknown = {
+        "realm_auth": {"state": "unknown", "method": "unknown", "source_quality": "unknown"},
+        "provider_health": {"state": "unknown", "error_class": None, "scope": "unknown", "observed_at": None},
+        "cooling": {"active": None, "kind": None, "reset_at": None, "evidence": "unknown", "scope": "unknown", "observed_at": None},
+        "quota_horizons": [],
+        "last_provider_outcome": {"class": "unknown", "observed_at": None, "scope": "unknown"},
+    }
+    if any(value[key] != expected for key, expected in unknown.items()):
+        refuse()
+    return json.loads(json.dumps(value, sort_keys=True, allow_nan=False))
+
+
 def _read_json(source: Path) -> Any:
     try:
         return json.loads(source.read_text(encoding="utf-8"))
