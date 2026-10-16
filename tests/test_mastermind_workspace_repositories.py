@@ -193,6 +193,38 @@ def test_no_arbitrary_repository_or_source_path_selector(fleet, extra):
     assert not root.exists()
 
 
+def test_existing_workspace_reuse_survives_low_storage_without_new_allocation(fleet, monkeypatch, capsys):
+    repos, _, root, env = fleet
+    code, created = acquire(fleet, "mastermind", "reuse-low-storage")
+    assert code == 0 and created["effect"] == "APPLIED"
+    original = Path(created["receipt"]["workspace_path"])
+    for name, value in env.items():
+        if name.startswith("MASTERMIND_"):
+            monkeypatch.setenv(name, value)
+    spec = importlib.util.spec_from_file_location("reuse_storage_cli_test", SCRIPT)
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+    observed = []
+    def storage(path):
+        observed.append(path)
+        return {"admission_allowed": False}
+    monkeypatch.setattr(cli, "_storage_status", storage)
+    code = cli.main(["acquire", "--repository", "mastermind", "--lane", "web",
+                     "--operation-id", "reuse-low-storage", "--base-sha", repos["mastermind"][1]])
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0 and payload["effect"] == "NOT_APPLIED"
+    assert payload["receipt"]["reused"] is True
+    assert payload["receipt"]["workspace_path"] == str(original)
+    assert observed == []
+    assert git(original, "status", "--porcelain=v1") == ""
+
+    code = cli.main(["acquire", "--repository", "mastermind", "--lane", "web",
+                     "--operation-id", "new-low-storage", "--base-sha", repos["mastermind"][1]])
+    assert code == 2
+    assert observed == [root]
+    assert not (root / "web" / "new-low-storage").exists()
+
+
 def test_repository_subroot_does_not_change_storage_policy_root(fleet, monkeypatch, capsys):
     repos, _, root, env = fleet
     for name, value in env.items():
