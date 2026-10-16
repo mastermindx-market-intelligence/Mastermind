@@ -1857,13 +1857,12 @@ class TestFleetV10PublisherCompatibility(unittest.TestCase):
     """One original manifest/installer owner, no new publisher or permission plane."""
 
     @contextmanager
-    def _installed_fleet_fixture(self):
+    def _installed_fleet_fixture(self, account="chatgpt1"):
         with tempfile.TemporaryDirectory() as raw:
             tmp = Path(raw)
             home = tmp / "home"
             home.mkdir()
             (home / "Library" / "LaunchAgents").mkdir(parents=True)
-            account = "chatgpt1"
             with mock.patch.dict(os.environ, {"HOME": str(home)}):
                 source, node, backend, _ = _do_stage(tmp, home, account=account)
                 roots = svc._build_runtime_roots(account)
@@ -2005,6 +2004,38 @@ class TestFleetV10PublisherCompatibility(unittest.TestCase):
             self.assertNotIn("commission-prepare.mjs", after)
             self.assertNotIn("modern-fabric-http.mjs", after)
 
+    def test_second_existing_enrolled_fleet_account_is_manifest_bound(self):
+        with self._installed_fleet_fixture("chatgpt3") as (args, roots, before_cfg):
+            before = self._all_files(roots)
+            args.publisher_preflight_only = True
+            with mock.patch.object(svc, "_run", CmdRecorder()):
+                code, payload = _capture_stdout(lambda: svc.cmd_upgrade(args))
+            self.assertEqual(code, 0)
+            self.assertEqual(json.loads(payload)["effect"], "NOT_APPLIED")
+            args.publisher_preflight_only = False
+            with mock.patch.object(svc, "_run", CmdRecorder()):
+                code, output = _capture_stdout(lambda: svc.cmd_upgrade(args))
+            self.assertEqual(code, 0)
+            self.assertEqual(json.loads(output)["account"], "chatgpt3")
+            self.assertEqual(
+                {name for name in before if before[name] != (roots["base"] / name).read_bytes()},
+                set(svc.FLEET_V10_PUBLISHER_PATCH_SHA256))
+            cfg = json.loads(roots["config"].read_text())
+            self.assertEqual(
+                {k: v for k, v in cfg.items() if k != "gitPublish"},
+                {k: v for k, v in before_cfg.items() if k != "gitPublish"})
+            svc._verify_staged_install("chatgpt3", _label_for("chatgpt3"), roots)
+
+    def test_non_enrolled_seats_refused_despite_fleet_file_similarity(self):
+        with self._installed_fleet_fixture() as (args, roots, _cfg):
+            before = (roots["manifest"].read_bytes(), self._all_files(roots))
+            for account in ("chatgpt2-business", "chatgpt4", "admin-business"):
+                args.account = account
+                with self.assertRaisesRegex(SystemExit, "existing enrolled fleet owner"):
+                    svc.cmd_upgrade(args)
+            self.assertEqual(before, (
+                roots["manifest"].read_bytes(), self._all_files(roots)))
+
     def test_wrong_cas_tamper_and_wrong_scope_fail_without_writes(self):
         with self._installed_fleet_fixture() as (args, roots, _cfg):
             before = (roots["manifest"].read_bytes(), self._all_files(roots))
@@ -2014,7 +2045,7 @@ class TestFleetV10PublisherCompatibility(unittest.TestCase):
             args.publisher_expected_manifest_sha256 = svc._sha256_file(
                 roots["manifest"])
             args.enable_repository_workspaces = True
-            with self.assertRaisesRegex(SystemExit, "exact existing chatgpt1"):
+            with self.assertRaisesRegex(SystemExit, "existing enrolled fleet owner"):
                 svc.cmd_upgrade(args)
             args.enable_repository_workspaces = False
             old_source = svc.FLEET_V10_PRESERVED_GIT_BLOBS

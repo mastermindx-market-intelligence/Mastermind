@@ -138,6 +138,10 @@ FLEET_V10_PRESERVED_GIT_BLOBS = {
     "package.json": "e983917ada1a9da715cedd1acce7559f26a2a932",
     "package-lock.json": "d119580040b0edc59cf0e239922b54a023f899c5",
 }
+# Only existing reviewed, closed-profile enrolled fleet-v0.1.10 seats.
+# Other installed gateways differ in bundle/permissions and are NOT eligible.
+FLEET_V10_ENROLLED_ACCOUNTS = frozenset(("chatgpt1", "chatgpt3"))
+
 FLEET_V10_PUBLISHER_PATCH_SHA256 = {
     "git-publish.mjs": "72faf293d9c0a90c45ab442821e26f199f5ea406a091a7aed7ebce3519e55f69",
     "workspace-access.mjs": "9c4c20dd4edbc426c8561801708ee205e19bb47b48134ec8f5654a10f1cb7cf3",
@@ -1333,12 +1337,12 @@ def _upgrade_fleet_v10_publisher_only(
     """
     expected = getattr(args, "publisher_expected_manifest_sha256", None)
     preview = getattr(args, "publisher_preflight_only", False)
-    if (account != "chatgpt1" or type(preview) is not bool
+    if (account not in FLEET_V10_ENROLLED_ACCOUNTS or type(preview) is not bool
             or not _sha256_hex(expected)
             or getattr(args, "fabric_only", False)
             or getattr(args, "enable_repository_workspaces", False)
             or getattr(args, "os_commission_config_sha256", None)):
-        raise SystemExit("fleet publisher compatibility requires exact existing chatgpt1 owner and manifest CAS")
+        raise SystemExit("fleet publisher compatibility requires an existing enrolled fleet owner and exact manifest CAS")
     path = roots["manifest"]
     if _stable_regular_file_hash(path, label="installed manifest") != expected:
         raise SystemExit("fleet publisher compatibility: installed manifest CAS mismatch")
@@ -1697,7 +1701,7 @@ def build_parser() -> argparse.ArgumentParser:
                        help="enable the closed installed repository-workspace consumer")
         if name == "upgrade":
             s.add_argument("--publisher-only-fleet-v10", action="store_true",
-                           help="preserve the exact sealed ChatGPT1 fleet v0.1.10 runtime; patch only two publisher modules")
+                           help="preserve the exact sealed enrolled fleet v0.1.10 runtime; patch only two publisher modules")
             s.add_argument("--publisher-expected-manifest-sha256",
                            help="CAS pin for the original sealed, approved fleet manifest")
             s.add_argument("--publisher-preflight-only", action="store_true",
