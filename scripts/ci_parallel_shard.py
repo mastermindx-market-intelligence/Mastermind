@@ -77,6 +77,30 @@ def validate_parallel_workflow(text: str) -> None:
         ]
         if len(matches) != 1 or matches[0].get("if") != "matrix.index == 0":
             raise ci_pytest.PolicyError("non-pytest CI gates must run in shard zero")
+    # Preserve the incumbent protected Fabric compatibility gate's *actual*
+    # executable surface. Merely pinning its name and shard index permits a
+    # false-green gate if its Node or private-service tests are silently cut.
+    fabric_name = "Verify private Fabric HTTP compatibility and incumbent backend lifetime"
+    fabric_step = next(
+        step for step in shard_steps
+        if isinstance(step, dict) and step.get("name") == fabric_name
+    )
+    fabric_commands = [
+        "npm ci --ignore-scripts --no-audit --no-fund",
+        "node --test gateway-modern-fabric.test.mjs gateway.test.mjs gateway-shared-backend.test.mjs gateway-owner-lifecycle-regression.test.mjs gateway-output-budget.test.mjs fabric-backend.test.mjs private-cli.test.mjs private-tunnel-auth.test.mjs",
+        "python -m unittest discover -s . -p 'private_service*test.py'",
+    ]
+    actual_commands = fabric_step.get("run")
+    if (
+        set(fabric_step) != {"name", "if", "working-directory", "run"}
+        or fabric_step.get("working-directory") != "integrations/studio_direct_mcp"
+        or not isinstance(actual_commands, str)
+        or [line.strip() for line in actual_commands.splitlines() if line.strip()]
+        != fabric_commands
+    ):
+        raise ci_pytest.PolicyError(
+            "private Fabric compatibility gate must preserve its trusted directory and commands"
+        )
     test_steps = [
         step for step in gate_steps
         if isinstance(step, dict) and step.get("name") == "Run repository test gate"

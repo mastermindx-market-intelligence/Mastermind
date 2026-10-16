@@ -70,6 +70,22 @@ def test_live_ci_workflow_fan_in_is_fail_closed_and_uses_three_full_shards() -> 
             "      - name: Verify private Fabric HTTP compatibility and incumbent backend lifetime\n        if: false",
         ),
         (
+            "working-directory: integrations/studio_direct_mcp",
+            "working-directory: integrations/wrong_mcp",
+        ),
+        (
+            "gateway-shared-backend.test.mjs ",
+            "",
+        ),
+        (
+            "python -m unittest discover -s . -p 'private_service*test.py'",
+            "echo bypass",
+        ),
+        (
+            "npm ci --ignore-scripts --no-audit --no-fund",
+            "echo bypass",
+        ),
+        (
             "python scripts/ci_pytest.py --plan-only --jobs 3",
             "python scripts/ci_pytest.py --jobs 1",
         ),
