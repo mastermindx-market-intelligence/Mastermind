@@ -21,7 +21,7 @@ def test_catalog_loads_reviewed_routing_models_and_stays_inert():
         "capacity_and_quota": "shared_ai_provider_control",
         "lifecycle_and_claim": "executive_os",
     }
-    assert len(catalog.models) == 17
+    assert len(catalog.models) == 18
 
 
 def test_model_capability_and_harness_overlay_remain_distinct():
@@ -52,6 +52,13 @@ def test_api_cash_estimates_are_exact_decimal_and_context_banded():
         input_tokens=1_000_000,
         output_tokens=1_000_000,
     ) == Decimal("1.4")
+    assert catalog.estimate_api_cash_usd(
+        "openai.gpt-6-luna",
+        surface="openai_api",
+        context_tokens=100_000,
+        input_tokens=1_000_000,
+        output_tokens=1_000_000,
+    ) == Decimal("0.60")
     assert catalog.estimate_api_cash_usd(
         "xai.grok-4.6",
         surface="xai_api",

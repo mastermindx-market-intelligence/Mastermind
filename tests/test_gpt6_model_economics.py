@@ -8,7 +8,7 @@ import pytest
 from control_plane.provider_model_economics import ModelEconomicsError, load_provider_model_catalog
 
 CATALOG = Path(__file__).parents[1] / "config" / "provider_model_economics.v1.json"
-MODELS = ("openai.gpt-6-astra", "openai.gpt-6.1-sol")
+MODELS = ("openai.gpt-6-astra", "openai.gpt-6.1-sol", "openai.gpt-6-luna")
 
 
 @pytest.mark.parametrize("key,context,expected", [
@@ -16,6 +16,8 @@ MODELS = ("openai.gpt-6-astra", "openai.gpt-6.1-sol")
     (MODELS[0], 272001, ("20", "2", "25", "75")),
     (MODELS[1], 272000, ("2", "0.10", "2.50", "10")),
     (MODELS[1], 272001, ("4", "0.20", "5", "15")),
+    (MODELS[2], 272000, ("0.10", "0.01", "0.125", "0.50")),
+    (MODELS[2], 272001, ("0.20", "0.02", "0.25", "0.75")),
 ])
 def test_exact_context_boundary(key, context, expected):
     card = load_provider_model_catalog(CATALOG).api_rate_card(key, surface="openai_api", context_tokens=context)
@@ -45,6 +47,7 @@ def test_realistic_disjoint_token_example_and_relative_price():
     kwargs = dict(surface="openai_api", context_tokens=100000, input_tokens=20000, cached_input_tokens=80000, output_tokens=10000)
     assert c.estimate_api_cash_usd(MODELS[0], **kwargs) == Decimal("0.78")
     assert c.estimate_api_cash_usd(MODELS[1], **kwargs) == Decimal("0.148")
+    assert c.estimate_api_cash_usd(MODELS[2], **kwargs) == Decimal("0.0078")
     # Ratio depends on caching; it is not always exactly five.
     assert c.estimate_api_cash_usd(MODELS[0], **kwargs) / c.estimate_api_cash_usd(MODELS[1], **kwargs) > 5
 
@@ -54,6 +57,7 @@ def test_long_context_applies_to_entire_request_not_only_excess():
     kwargs = dict(surface="openai_api", context_tokens=300000, input_tokens=50000, cached_input_tokens=250000, output_tokens=10000)
     assert c.estimate_api_cash_usd(MODELS[0], **kwargs) == Decimal("2.25")
     assert c.estimate_api_cash_usd(MODELS[1], **kwargs) == Decimal("0.40")
+    assert c.estimate_api_cash_usd(MODELS[2], **kwargs) == Decimal("0.0225")
 
 
 def test_price_provenance_and_no_runtime_activation():
@@ -64,7 +68,7 @@ def test_price_provenance_and_no_runtime_activation():
         assert row["provider_model"] == key.removeprefix("openai.")
         for rate in row["api_rates"]:
             source = raw["sources"][rate["source_id"]]
-            assert source["verified_at"] == "2026-10-01"
+            assert source["verified_at"] in {"2026-10-01", "2026-10-06"}
             assert source["url"] == "https://developers.openai.com/api/docs/models/" + row["provider_model"]
         assert not {"remaining", "reset_at", "account_id", "eligible", "worker_id"}.intersection(row)
 
@@ -75,5 +79,5 @@ def test_new_models_use_existing_router_capability_vocabulary(key):
     row = raw["models"][key]
     assert {"text_input", "text_output", "image_input", "coding", "tool_calling", "research", "tests"}.issubset(row["model_capabilities"])
     assert not {"text", "vision"}.intersection(row["model_capabilities"])
-    assert row["positioning"] in {"frontier", "frontier_operator"}
+    assert row["positioning"] in {"frontier", "frontier_operator", "fast"}
     assert row["harness_overlays"][0]["source_ids"] == ["openai-codex-models-20261001"]
