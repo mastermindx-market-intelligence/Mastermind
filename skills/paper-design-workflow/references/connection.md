@@ -29,9 +29,16 @@ The ChatGPT app's approved action snapshot may lag an accepted runtime/source re
 source/runtime now declares `MULTI_WRITER_PER_FILE_TARGET_SCOPED` but the current app tool
 description still says one designer/exclusive ownership or describes prepare as active-file focus,
 classify **DIRECT_TOOL_PUBLICATION_DRIFT / EFFECT_NONE**. Keep the same app/tunnel identity and
-refresh/recreate that app's approved action snapshot through its normal attended admin ceremony
-after the accepted runtime is deployed. Do not create a second Paper plane, infer a file lease from
-stale metadata, or use publication drift to bypass a denial or unresolved effect.
+bring that app's approved action snapshot current through the platform's supported existing-app
+lifecycle after the accepted runtime is deployed. For a developer-mode MCP connection, use
+**Refresh** and verify the new metadata in a new conversation. For a published Plugin Directory
+plugin, use continuous review/rescan. For a published custom workspace MCP app, current OpenAI help
+can require recreate + republish for tool/metadata changes, while Enterprise/Edu Action control can
+Refresh action updates after publication; use the exact current workspace/app state as the gate.
+When recreation is required, replace the old logical Paper app through the attended ceremony while
+reusing the existing tunnel/backend rather than leaving a parallel duplicate. Do not create a second
+Paper plane, infer a file lease from stale metadata, or use publication drift to bypass a denial or
+unresolved effect.
 
 For multi-seat Business rollout, each ChatGPT seat may have its own exact tunnel-client transport,
 seat-specific launchd label and transport singleton. All such transports reuse the same stdio server
@@ -65,10 +72,14 @@ cannot choose an arbitrary host path, Paper endpoint, account, credential or app
 gateway advertises. If that contract includes `paper_prepare` while the current ChatGPT tool surface
 does not, the state is `STUDIO_TOOL_PUBLICATION_DRIFT / EFFECT_NONE`: current-file inspect/read/edit
 may remain usable, but another-file transition is held until the **same Studio Direct app's
-approved action snapshot** is brought current and `paper_prepare` is directly surfaced. ChatGPT does
-not auto-apply MCP tool changes after workspace approval. Current OpenAI Business behavior also does
-not support updating a published app in place: recreate + republish is required; draft/dev apps use
-their tool scan/recreation flow. Never reproduce the transition with generic Studio process/filesystem
+approved action snapshot** is brought current and `paper_prepare` is directly surfaced. ChatGPT may
+retain an older approved definition until the connection/app lifecycle admits the update. For a
+developer-mode MCP connection, deploy the server change, use the connection's **Refresh** action,
+confirm the advertised metadata changed, and start a new conversation. Published Plugin Directory
+plugins use continuous review/rescan. Published custom workspace MCP apps follow the current workspace
+flow: tool/metadata changes can require recreate + republish, while Enterprise/Edu Action control can
+Refresh action updates after publication. If recreation is required, replace the old logical app while
+reusing its existing tunnel/backend; do not leave a parallel duplicate app/tunnel. Never reproduce the transition with generic Studio process/filesystem
 actions, Desktop Commander, raw `open_file`, shell, or UI automation. After the workspace action
 snapshot is current, start a fresh chat/tool selection, call `paper_inspect` again, then the direct
 `paper_prepare(file_id)`, then inspect once more before the first edit.
