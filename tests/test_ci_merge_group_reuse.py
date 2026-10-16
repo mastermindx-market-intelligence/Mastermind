@@ -329,3 +329,77 @@ def test_existing_gh_transport_rejects_nonjson_and_oversized_output():
                 f"repos/{REPOSITORY}/actions/runs/{RUN}",
                 run=fake_process, executable="/approved/gh",
             )
+
+
+def push_environment():
+    return {
+        "GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/heads/master",
+        "GITHUB_REPOSITORY": REPOSITORY, "GITHUB_SHA": HEAD,
+        "GITHUB_RUN_ID": "500", "GITHUB_WORKFLOW": "CI",
+        "GH_TOKEN": "SYNTHETIC_TEST_ONLY",
+    }
+
+
+def test_ci_caller_env_is_opt_in_and_keeps_same_origin_identity():
+    from scripts.ci_merge_group_reuse import possible_same_sha_reuse_for_ci_runner
+    read, calls, paths = _read_fixture()
+    assert possible_same_sha_reuse_for_ci_runner(environ=push_environment(), read=read) == (
+        True, "PRIOR_EXACT_MERGE_GROUP_CI_PROVEN"
+    )
+    assert calls == list(paths)
+
+
+@pytest.mark.parametrize(("field", "replacement"), [
+    ("GITHUB_EVENT_NAME", "merge_group"),
+    ("GITHUB_REF", "refs/heads/feature"),
+    ("GITHUB_REPOSITORY", "other/repo"),
+    ("GITHUB_SHA", "z" * 40),
+    ("GITHUB_RUN_ID", "not-a-run"),
+    ("GITHUB_WORKFLOW", "Unreviewed workflow"),
+    ("GH_TOKEN", ""),
+])
+def test_ci_caller_falls_back_to_full_tests_without_trusted_host_context(field, replacement):
+    from scripts.ci_merge_group_reuse import possible_same_sha_reuse_for_ci_runner
+    read, calls, _paths = _read_fixture()
+    env = push_environment(); env[field] = replacement
+    assert not possible_same_sha_reuse_for_ci_runner(environ=env, read=read)[0]
+    assert calls == []
+
+
+def test_ci_caller_falls_back_to_full_tests_on_provider_failure():
+    from scripts.ci_merge_group_reuse import possible_same_sha_reuse_for_ci_runner
+    read, calls, _paths = _read_fixture(invalid="read_denied")
+    assert not possible_same_sha_reuse_for_ci_runner(environ=push_environment(), read=read)[0]
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("repo", ["../..", "./owner", "owner/..", "owner/.", ".hidden/repo"])
+def test_repository_path_components_cannot_escape_or_stealth_retarget(repo):
+    from scripts.ci_merge_group_reuse import find_prior_merge_group_proof
+    run, jobs = proof_fixture()
+    assert not qualified(run, jobs, repo=repo)[0]
+    calls = []
+    def read(endpoint):
+        calls.append(endpoint)
+        raise AssertionError("invalid repository must not reach provider")
+    assert not find_prior_merge_group_proof(
+        repository=repo,head_sha=HEAD,current_event="push",
+        current_ref="refs/heads/master",current_run_id=500,
+        expected_workflow_id=WORKFLOW,read=read,
+    )[0]
+    assert calls == []
+
+
+@pytest.mark.parametrize("endpoint", [
+    "repos/../repo/actions/runs/123",
+    "repos/org/../actions/runs/123",
+    "repos/.hidden/repo/actions/runs/123",
+])
+def test_endpoint_components_refuse_traversal_or_stealth_owners(endpoint):
+    from scripts.ci_merge_group_reuse import read_json_via_existing_gh
+    with pytest.raises(ValueError, match="ENDPOINT_NOT_ALLOWED"):
+        read_json_via_existing_gh(
+            endpoint,
+            run=lambda *args, **kwargs: pytest.fail("no provider request"),
+            executable="/approved/gh",
+        )

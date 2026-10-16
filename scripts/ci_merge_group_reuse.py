@@ -16,7 +16,7 @@ import re
 from typing import Any
 
 _SHA = re.compile(r"[0-9a-f]{40}\Z")
-_REPOSITORY = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\Z")
+_REPOSITORY = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
 _EXPECTED_JOBS = frozenset({"pytest shard 0", "pytest shard 1", "pytest shard 2", "test"})
 _REQUIRED_STEPS = {
     "pytest shard 0": (
@@ -207,7 +207,7 @@ def find_prior_merge_group_proof(
 
 
 _GH_READ_ENDPOINT = re.compile(
-    r"repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs"
+    r"repos/[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*/actions/runs"
     r"(?:/[1-9][0-9]*(?:/jobs\?per_page=100)?"
     r"|\?head_sha=[0-9a-f]{40}&per_page=100)\Z"
 )
@@ -253,3 +253,47 @@ def read_json_via_existing_gh(endpoint: str, *, run=None, executable: str | None
     if not isinstance(payload, dict):
         raise ValueError("PROVIDER_JSON_INVALID")
     return payload
+
+
+def possible_same_sha_reuse_for_ci_runner(
+    *, environ=None, read=None,
+) -> tuple[bool, str]:
+    """Inactive opt-in environment adapter for the existing Mastermind CI owner.
+
+    No scheduled or external state is introduced. Until `ci_parallel_shard`
+    explicitly calls this in a separately qualified release, its answer cannot
+    skip anything. A missing GitHub-token read capability means full CI, never
+    another credential/account. Every non-push event remains unchanged.
+    """
+    import os
+
+    values = os.environ if environ is None else environ
+    if not hasattr(values, "get"):
+        return False, "CALLER_ENVIRONMENT_INVALID"
+    if values.get("GITHUB_EVENT_NAME") != "push" or values.get("GITHUB_REF") != "refs/heads/master":
+        return False, "NOT_MASTER_PUSH"
+    if values.get("GITHUB_REPOSITORY") != "mastermindx-market-intelligence/Mastermind":
+        return False, "REPOSITORY_UNQUALIFIED"
+    if values.get("GITHUB_WORKFLOW") != "CI":
+        return False, "WORKFLOW_UNQUALIFIED"
+    head = values.get("GITHUB_SHA")
+    raw_id = values.get("GITHUB_RUN_ID")
+    if (
+        not isinstance(head, str) or not _SHA.fullmatch(head)
+        or not isinstance(raw_id, str) or not raw_id.isdecimal()
+        or not isinstance(values.get("GH_TOKEN"), str)
+        or not values.get("GH_TOKEN")
+    ):
+        return False, "IDENTITY_OR_READ_ACCESS_MISSING"
+    try:
+        current_run_id = int(raw_id)
+    except (ValueError, OverflowError):
+        return False, "RUN_ID_INVALID"
+    if not _positive_int(current_run_id):
+        return False, "RUN_ID_INVALID"
+    return find_prior_merge_group_proof(
+        repository=values["GITHUB_REPOSITORY"], head_sha=head,
+        current_event=values["GITHUB_EVENT_NAME"], current_ref=values["GITHUB_REF"],
+        current_run_id=current_run_id, expected_workflow_id=324108847,
+        read=read_json_via_existing_gh if read is None else read,
+    )
