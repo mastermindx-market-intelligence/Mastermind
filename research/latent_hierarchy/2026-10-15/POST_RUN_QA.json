@@ -1,0 +1,15 @@
+{
+  "status": "POST_RUN_NON_EMPIRICAL_TEST_REVIEW",
+  "pre_run_passed": 16,
+  "final_cases_passed": 17,
+  "test_script_sha256": "345cd15102cc8714ef730b091ee16f5fac2d6b01fdd5044bfd804d5f05a5fb75",
+  "model_source_sha256_unchanged": "2eda5a37ed2f4fa46a349b32a3413a00e742119b68e56b094fbd9989cb7781305",
+  "additions": [
+    "Global SIC49 code disjointness independently checked: 5054 nonoverlapping enumerated SIC codes",
+    "Replaced a tautological equality check in the original offset-preservation test with checks for unchanged baseline offset and transformed columns, near-zero training projection cross moment, and baseline prediction identity after candidate evaluation"
+  ],
+  "source_model_changed": false,
+  "forecast_refitted": false,
+  "result_read_retried": false,
+  "scientific_scope": "Strengthens deterministic guard tests only, not an independent empirical result or external review. PRE_RUN_QUALIFICATION.json remains the frozen 16-case receipt."
+}

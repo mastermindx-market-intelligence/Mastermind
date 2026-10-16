@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 from study import (ROOT,BASE,CHILD,rollover,features,attach_labels,fit_year,score,interval,alerts,
                    shuffle_maps,read_data,conditional_candidate,frozen_baseline,fit_year,sha)
-from mapping import mapping
+from mapping import mapping,definitions
 
 class ScientificChecks(unittest.TestCase):
     def test_exact_sic_crosswalk(self):
@@ -14,6 +14,14 @@ class ScientificChecks(unittest.TestCase):
         self.assertEqual(len(m['retained']),7)
         self.assertEqual(sorted(len(v) for v in m['retained'].values()),[2,2,3,4,7,8,10])
         self.assertNotIn('Toys',sum(m['retained'].values(),[]))
+
+    def test_all_49_sic_ranges_are_globally_disjoint(self):
+        groups=definitions(ROOT/'private/Siccodes49.zip')
+        seen=set()
+        for name,codes in groups.items():
+            self.assertFalse(seen.intersection(codes),name+' repeated SIC code')
+            seen.update(codes)
+        self.assertEqual(len(seen),5054)
 
     def test_scrambles_preserve_exact_child_multiset(self):
         m=mapping();original=sum(m['retained'].values(),[])
@@ -128,9 +136,15 @@ class ScientificChecks(unittest.TestCase):
         x['real_breadth5']=(x.rs21*x.rs63)
         xtrain,xtest=x.iloc[:700],x.iloc[700:]
         aa,bb,ot,oe,rec=frozen_baseline(xtrain,xtest)
+        baseline_offset_before=oe.copy()
+        prior_features=aa.copy()
         p,r=conditional_candidate(xtrain,xtest,'real',aa,bb,ot,oe)
-        np.testing.assert_allclose(expit_safe(oe),expit_safe(oe),atol=0)
+        np.testing.assert_allclose(oe,baseline_offset_before,atol=0,rtol=0)
+        np.testing.assert_array_equal(aa,prior_features)
+        self.assertLess(r['max_training_linear_cross_moment'],1e-10)
         self.assertGreaterEqual(r['n_independent_training_features'],1)
+        prediction,_=fit_year(xtrain,xtest)
+        np.testing.assert_allclose(prediction['baseline'],expit_safe(baseline_offset_before),atol=1e-12,rtol=0)
 
     def test_probability_and_loss_range(self):
         x=self.model_panel();pred,_=fit_year(x.iloc[:700],x.iloc[700:])

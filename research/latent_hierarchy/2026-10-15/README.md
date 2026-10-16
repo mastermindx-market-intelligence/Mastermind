@@ -31,7 +31,7 @@ The predeclared gate requires paired date-block Brier improvement >=0.002 with p
 - `PROTOCOL.json`: frozen hypotheses, targets, model controls and accept/reject criteria.
 - `SOURCE_MANIFEST.json`: exact official original URLs, content names, sizes and SHA-256 hashes. Source archives are **private**, not copied into the public repository.
 - `MAPPING_AUDIT.json`: deterministic source-backed pure versus mixed industry inclusion and parent coverage.
-- `mapping.py`, `study.py`, `test_study.py`: executable taxonomy audit, analysis and 16 deterministic timing/identification tests.
+- `mapping.py`, `study.py`, `test_study.py`: executable taxonomy audit, analysis and 16 pre-run deterministic timing/identification tests.
 - `PRE_RUN_QUALIFICATION.json`: prefit test evidence, source hashes, exact dtype repair and independent reviewer refusal.
 - `FRONTIER.md`: exact durable effect state, blocked read and next permitted scientific step.
 
@@ -44,3 +44,7 @@ The completed program printed `RESULT_AGGREGATED 7854 GATE False`. This is a ver
 **Scientific decision:** no predictive promotion. Retain the study as a falsifiable, independently reproducible research method with an honest negative gate, limited to official revised portfolio returns and the selected pure-SIC hierarchy. The critical empirical question—does breadth add calibrated warning value beyond strong price/rollover controls—remains **not positively established**, and the numerical failure analysis is unverified until access to the retained original result is permitted.
 
 No deployment, paid acquisition, source-admission change, instrument ranking, alert, sizing, trade or new control plane occurred.
+
+### Post-run test-only verification
+
+`POST_RUN_QA.json` records 17 passing cases. The later source-only QA added global SIC49 non-overlap and strengthened the previously vacuous model-offset invariance assertion. The frozen predictive implementation, source data, original private forecasts and `GATE False` receipt were not changed or rerun. This is not a new data/performance result.

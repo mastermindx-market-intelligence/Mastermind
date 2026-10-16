@@ -13,3 +13,5 @@ REVIEW: Original Fabric reviewer `lp-hierarchy09-crosswalk-review`, original roo
 PRIOR_FENCES: Older denied IEX DEEP+ PDF semantics, earlier old network/shock result reads, clock-review result and legacy-timestamp impact audit remain distinct and untouched. No old model, source or data changed; no production/schema/rank/alert/size/trade effect.
 
 NEXT: Publish and verify only the independent study's SOURCE, protocol, hash manifest, method/results limitations and terminal gate observation to one draft research PR. Detailed result review would require legitimate current permission on the ORIGINAL retained object; do not bypass a denial. Positive forecast authority remains unavailable regardless. After publication, the next credible scientific vertical is a true point-in-time event/constituent dataset with independent historical dates and calibrated false-alarm evaluation, rather than repeated permutations on already seen reconstructed returns.
+
+POST_RUN_TEST_QA: 17 tests pass; added global SIC source disjointness and replaced a vacuous offset identity assertion. Predictive code unchanged and original result read not retried; details in POST_RUN_QA.json.
