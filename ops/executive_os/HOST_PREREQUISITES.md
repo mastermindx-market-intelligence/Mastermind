@@ -203,6 +203,68 @@ decision:
   network path, bastion, and tunnel reachability remain a separate acceptance
   journey with its own evidence. A green `preboot_remote_unlock` plus an
   unreachable network is still an unrecoverable host.
+
+### External Mini recovery acceptance from the M2 lead host
+
+The four enrolled home Minis have a separate read-only external acceptance
+journey. Run this on the M2 lead host as the ordinary operator:
+
+```bash
+/usr/bin/python3 -I -S -B \
+  "$SOURCE_REPO/ops/executive_os/fleet_recovery_reachability.py"
+```
+
+The observer has a closed host set (`mini1` through `mini4`), resolves only
+the established `mmx-miniN` SSH aliases, binds to the reviewed M2 fleet
+gateway public-key fingerprint, and probes only TCP 22, Screen Sharing 5900,
+and Apple Remote Desktop 3283. It accepts no host, user, key, command, port, or
+credential argument and emits no raw SSH stderr.
+
+A Mini is externally `READY` only when all of the following are true:
+
+- the closed SSH alias still resolves to the expected `miniN.local` / `miniN`
+  identity and exact fleet-gateway key path;
+- TCP 22 is reachable and the exact gateway public key authenticates;
+- at least one independent GUI recovery listener (5900 or 3283) is reachable.
+
+This is intentionally stronger than "port 22 is open." A host whose SSH
+listener answers but rejects the reviewed gateway key is not recoverable
+through the normal boot path.
+
+On FileVault-on macOS 26+ Apple-silicon Macs, the preboot SSH server is a
+different state. The locked data volume contains normal SSH configuration and
+per-user `authorized_keys`, so ordinary public-key authentication is not
+available until a password unlocks FileVault. The local Apple man page
+`apple_ssh_and_filevault(7)` is the platform source for this behavior.
+Accordingly, the external observer reports
+`FILEVAULT_PREBOOT_SUSPECTED`—never "authorized_keys deleted"—when TCP 22 is
+open, the reviewed key is rejected, password plus keyboard-interactive methods
+are advertised, and both GUI listeners are absent.
+
+The observer never handles an unlock secret. For an attended break-glass
+recovery, run the closed interactive launcher from a real TTY on M2:
+
+```bash
+/bin/bash "$SOURCE_REPO/ops/executive_os/fleet_filevault_unlock.sh" mini2
+```
+
+The launcher accepts only `mini1|mini2|mini3|mini4`; it accepts no password,
+host, user, key, command, proxy, or port option. It first proves the preboot
+signature, requires strict known-host verification, clears askpass/display
+channels, and permits exactly one human-entered password attempt. It never
+replays that effect. After the expected preboot disconnect it reconciles only
+by waiting for the exact normal public-key SSH path to return.
+`UNLOCK_CONFIRMED` is success; `UNLOCK_EFFECT_UNKNOWN` (exit 75) is an
+uncertain effect and must not be answered with a second password attempt until
+the original host state is re-observed.
+
+This interactive path is **break-glass recovery, not autonomous recovery**.
+A FileVault-on Mini is not truthfully proven autonomously recoverable merely
+because this launcher exists. Unattended password custody/escrow requires a
+separate reviewed secret owner and explicit Chairman security decision; never
+put a FileVault/login password in Git, shell argv, environment variables,
+receipts, chat, or a generic automation store.
+
 - **`auto_restart_after_power_loss` stays independent.** Preboot unlock decides
   whether a returning host can be opened; `autorestart` decides whether it
   returns at all. Neither substitutes for the other, and a host missing both
