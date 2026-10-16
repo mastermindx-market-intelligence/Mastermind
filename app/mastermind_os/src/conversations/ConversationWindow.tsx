@@ -190,7 +190,7 @@ function ConversationBody({ projection, draft, onDraftChange, readResult, draftR
           </div>}
         </div>}
       </div>
-      {showPanel && readerSelection && readResult ? <ResultSourceReader projection={projection} selection={readerSelection}
+      {showPanel && readerSelection && readResult ? <ResultSourceReader locale={locale} projection={projection} selection={readerSelection}
         readResult={readResult} draftRevision={draftRevision ?? 0} draftInsertion={draftInsertion ?? null}
         appendAvailable={!!onAppendSource && !!onUndoSource && draftRevision !== undefined && !!context.selection && !privateHidden}
         onAppend={(source, revision) => onAppendSource?.(source, revision) ?? false}
