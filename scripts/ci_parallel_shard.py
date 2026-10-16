@@ -34,7 +34,11 @@ def validate_parallel_workflow(text: str) -> None:
     matrix = strategy.get("matrix") if isinstance(strategy, dict) else None
     indices = matrix.get("index") if isinstance(matrix, dict) else None
     if (
-        not isinstance(indices, list)
+        not isinstance(strategy, dict)
+        or set(strategy) != {"fail-fast", "max-parallel", "matrix"}
+        or not isinstance(matrix, dict)
+        or set(matrix) != {"index"}
+        or not isinstance(indices, list)
         or [type(i) for i in indices] != [int, int, int]
         or indices != [0, 1, 2]
         or strategy.get("fail-fast") is not False

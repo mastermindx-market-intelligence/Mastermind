@@ -41,6 +41,20 @@ def test_live_ci_workflow_fan_in_is_fail_closed_and_uses_three_full_shards() -> 
     [
         ("fail-fast: false", "fail-fast: true"),
         ("index: [0, 1, 2]", "index: [0, 2]"),
+        # Matrix exclude can delete shard zero while leaving the remaining
+        # jobs green; the fan-in only sees the matrix's overall success.
+        (
+            "index: [0, 1, 2]",
+            "index: [0, 1, 2]\n        exclude:\n          - index: 0",
+        ),
+        (
+            "index: [0, 1, 2]",
+            "index: [0, 1, 2]\n        include:\n          - index: 3",
+        ),
+        (
+            "index: [0, 1, 2]",
+            "index: [0, 1, 2]\n        python: [3.12]",
+        ),
         ("needs: [pytest_shards]", "needs: []"),
         ("if: ${{ always() }}", "if: false"),
         ("SHARDS_STATUS: ${{ needs.pytest_shards.result }}", "SHARDS_STATUS: wrong"),
