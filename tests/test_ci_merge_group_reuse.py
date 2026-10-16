@@ -178,3 +178,154 @@ def test_duplicate_step_identity_is_not_a_success_witness():
     steps = jobs["jobs"][0]["steps"]
     steps.append(copy.deepcopy(next(s for s in steps if s["name"] == "Run repository test shard")))
     assert not qualified(run, jobs)[0]
+
+
+
+def _read_fixture(*, invalid: str | None = None):
+    run, jobs = proof_fixture()
+    now = dict(run)
+    now.update(id=500, event="push", head_branch="master",
+               created_at="2026-10-16T10:43:00Z", conclusion=None, status="in_progress")
+    listing = {"total_count": 2, "workflow_runs": [now, run]}
+    paths = {
+        f"repos/{REPOSITORY}/actions/runs/500": now,
+        f"repos/{REPOSITORY}/actions/runs?head_sha={HEAD}&per_page=100": listing,
+        f"repos/{REPOSITORY}/actions/runs/{RUN}": run,
+        f"repos/{REPOSITORY}/actions/runs/{RUN}/jobs?per_page=100": jobs,
+    }
+    calls = []
+    def read(path: str):
+        calls.append(path)
+        if invalid == "read_denied":
+            raise PermissionError("synthetic 403")
+        if invalid == "not_json":
+            return "not-json"
+        return copy.deepcopy(paths[path])
+    return read, calls, paths
+
+
+def test_original_read_only_composer_resolves_exact_provider_run():
+    from scripts.ci_merge_group_reuse import find_prior_merge_group_proof
+    read, calls, paths = _read_fixture()
+    result = find_prior_merge_group_proof(
+        repository=REPOSITORY, head_sha=HEAD,
+        current_event="push", current_ref="refs/heads/master", current_run_id=500,
+        expected_workflow_id=WORKFLOW, read=read,
+    )
+    assert result == (True, "PRIOR_EXACT_MERGE_GROUP_CI_PROVEN")
+    assert calls == list(paths)
+
+
+@pytest.mark.parametrize("event,ref", [( "pull_request", "refs/heads/master"),
+    ("merge_group", "refs/heads/master"), ("push", "refs/heads/feature")])
+def test_read_only_composer_never_issues_api_reads_outside_master_push(event, ref):
+    from scripts.ci_merge_group_reuse import find_prior_merge_group_proof
+    read, calls, _paths = _read_fixture()
+    assert not find_prior_merge_group_proof(
+        repository=REPOSITORY, head_sha=HEAD,current_event=event,
+        current_ref=ref,current_run_id=500,expected_workflow_id=WORKFLOW,read=read,
+    )[0]
+    assert calls == []
+
+
+@pytest.mark.parametrize("invalid", ["read_denied", "not_json"])
+def test_read_only_composer_fails_closed_on_permission_or_transport_errors(invalid):
+    from scripts.ci_merge_group_reuse import find_prior_merge_group_proof
+    read, calls, _paths = _read_fixture(invalid=invalid)
+    assert not find_prior_merge_group_proof(
+        repository=REPOSITORY, head_sha=HEAD,current_event="push",
+        current_ref="refs/heads/master",current_run_id=500,
+        expected_workflow_id=WORKFLOW,read=read,
+    )[0]
+    assert len(calls) == 1
+
+
+def test_read_only_composer_rejects_incomplete_run_listing():
+    from scripts.ci_merge_group_reuse import find_prior_merge_group_proof
+    read, calls, paths = _read_fixture()
+    paths[f"repos/{REPOSITORY}/actions/runs?head_sha={HEAD}&per_page=100"]["total_count"] += 1
+    assert not find_prior_merge_group_proof(
+        repository=REPOSITORY, head_sha=HEAD,current_event="push",
+        current_ref="refs/heads/master",current_run_id=500,
+        expected_workflow_id=WORKFLOW,read=read,
+    )[0]
+    assert len(calls) == 2
+
+
+def test_read_only_composer_requires_unambiguous_same_generation():
+    from scripts.ci_merge_group_reuse import find_prior_merge_group_proof
+    read, calls, paths = _read_fixture()
+    listing = paths[f"repos/{REPOSITORY}/actions/runs?head_sha={HEAD}&per_page=100"]
+    listing["workflow_runs"].append(copy.deepcopy(listing["workflow_runs"][1]))
+    listing["total_count"] = 3
+    assert not find_prior_merge_group_proof(
+        repository=REPOSITORY, head_sha=HEAD,current_event="push",
+        current_ref="refs/heads/master",current_run_id=500,
+        expected_workflow_id=WORKFLOW,read=read,
+    )[0]
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize("endpoint", [
+    "https://api.github.com/repos/org/repo/actions/runs/1",
+    "repos/org/repo/issues/1",
+    "repos/org/repo/actions/runs/1/rerun",
+    "repos/org/repo/actions/runs/1/jobs?per_page=100&other=value",
+    "repos/org/repo/actions/runs?head_sha=bad&per_page=100",
+])
+def test_existing_gh_transport_rejects_nonallowed_urls_before_argv(endpoint):
+    from scripts.ci_merge_group_reuse import read_json_via_existing_gh
+    called = []
+    def fake_process(*args, **kwargs):
+        called.append(args)
+        raise AssertionError("invalid endpoint must not spawn GH")
+    with pytest.raises(ValueError, match="ENDPOINT_NOT_ALLOWED"):
+        read_json_via_existing_gh(endpoint, run=fake_process, executable="/usr/bin/gh")
+    assert called == []
+
+
+def test_existing_gh_transport_has_only_one_bounded_get_no_retry():
+    import subprocess
+    from scripts.ci_merge_group_reuse import read_json_via_existing_gh
+    called = []
+    def fake_process(args, **kwargs):
+        called.append((args, kwargs))
+        return subprocess.CompletedProcess(args, 0, stdout='{"hello":"world"}', stderr="ignored diagnostic")
+    value = read_json_via_existing_gh(
+        f"repos/{REPOSITORY}/actions/runs/{RUN}",
+        run=fake_process, executable="/approved/gh",
+    )
+    assert value == {"hello": "world"}
+    assert len(called) == 1
+    args, kwargs = called[0]
+    assert args[0] == "/approved/gh"
+    assert args[1] == "api"
+    assert "--method" in args and args[args.index("--method") + 1] == "GET"
+    assert "--paginate" not in args
+    assert kwargs["timeout"] <= 15
+
+
+def test_existing_gh_transport_fails_closed_without_exposing_raw_provider_error():
+    import subprocess
+    from scripts.ci_merge_group_reuse import read_json_via_existing_gh
+    def fake_process(args, **kwargs):
+        return subprocess.CompletedProcess(args, 1, stdout="", stderr="PRIVATE: gh HTTP 403")
+    with pytest.raises(ValueError) as error:
+        read_json_via_existing_gh(
+            f"repos/{REPOSITORY}/actions/runs/{RUN}",
+            run=fake_process, executable="/approved/gh",
+        )
+    assert "PRIVATE" not in str(error.value)
+
+
+def test_existing_gh_transport_rejects_nonjson_and_oversized_output():
+    import subprocess
+    from scripts.ci_merge_group_reuse import read_json_via_existing_gh
+    for body in ("not-json", "x" * (2_000_000 + 1)):
+        def fake_process(args, **kwargs):
+            return subprocess.CompletedProcess(args, 0, stdout=body, stderr="")
+        with pytest.raises(ValueError):
+            read_json_via_existing_gh(
+                f"repos/{REPOSITORY}/actions/runs/{RUN}",
+                run=fake_process, executable="/approved/gh",
+            )

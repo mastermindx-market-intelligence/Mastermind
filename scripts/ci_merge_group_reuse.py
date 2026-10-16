@@ -126,3 +126,130 @@ def qualify_merge_group_proof(
             if len(matches) != 1 or matches[0].get("status") != "completed" or matches[0].get("conclusion") != "success":
                 return False, "MANDATORY_STEP_UNPROVEN"
     return True, "PRIOR_EXACT_MERGE_GROUP_CI_PROVEN"
+
+
+def find_prior_merge_group_proof(
+    *, repository: str, head_sha: str,
+    current_event: str, current_ref: str, current_run_id: int,
+    expected_workflow_id: int, read,
+) -> tuple[bool, str]:
+    """Compose bounded pre-existing GitHub GET reads; never own their transport.
+
+    A true result is only evidence for a future, separately reviewed CI caller;
+    it does not start, stop, skip or authorize anything. `read(path)` must be an
+    already-authorized exact-GET transport that raises on missing/denied reads.
+    No retry or alternate token/account occurs in this function.
+    """
+    if current_event != "push" or current_ref != "refs/heads/master":
+        return False, "NOT_MASTER_PUSH"
+    if (
+        not isinstance(repository, str) or not _REPOSITORY.fullmatch(repository)
+        or not isinstance(head_sha, str) or not _SHA.fullmatch(head_sha)
+        or not _positive_int(current_run_id)
+        or not _positive_int(expected_workflow_id)
+        or not callable(read)
+    ):
+        return False, "IDENTITY_INVALID"
+    prefix = f"repos/{repository}"
+    try:
+        current = read(f"{prefix}/actions/runs/{current_run_id}")
+    except Exception:
+        return False, "CURRENT_RUN_READ_UNAVAILABLE"
+    if (
+        not isinstance(current, dict)
+        or current.get("id") != current_run_id
+        or current.get("workflow_id") != expected_workflow_id
+        or current.get("head_sha") != head_sha
+        or current.get("event") != "push"
+        or current.get("head_branch") != "master"
+        or current.get("path") != ".github/workflows/ci.yml"
+        or not isinstance(current.get("repository"), dict)
+        or current["repository"].get("full_name") != repository
+        or _timestamp(current.get("created_at")) is None
+    ):
+        return False, "CURRENT_PUSH_IDENTITY_UNVERIFIED"
+    try:
+        listings = read(f"{prefix}/actions/runs?head_sha={head_sha}&per_page=100")
+    except Exception:
+        return False, "RUN_LIST_READ_UNAVAILABLE"
+    if not isinstance(listings, dict) or not isinstance(listings.get("workflow_runs"), list):
+        return False, "RUN_LIST_INVALID"
+    runs = listings["workflow_runs"]
+    if type(listings.get("total_count")) is not int or len(runs) != listings["total_count"] or not 1 <= len(runs) <= 100:
+        return False, "RUN_LIST_TRUNCATED"
+    if any(not isinstance(row, dict) for row in runs):
+        return False, "RUN_LIST_INVALID"
+    if sum(row.get("id") == current_run_id for row in runs) != 1:
+        return False, "CURRENT_RUN_NOT_IN_COVERAGE"
+    candidates = [row for row in runs if (
+        row.get("event") == "merge_group" and row.get("head_sha") == head_sha
+        and row.get("workflow_id") == expected_workflow_id
+    )]
+    if len(candidates) != 1 or not _positive_int(candidates[0].get("id")):
+        return False, "PRIOR_RUN_UNAVAILABLE_OR_AMBIGUOUS"
+    original_id = candidates[0]["id"]
+    if original_id == current_run_id:
+        return False, "PRIOR_RUN_IDENTITY_REUSED"
+    try:
+        original = read(f"{prefix}/actions/runs/{original_id}")
+        jobs = read(f"{prefix}/actions/runs/{original_id}/jobs?per_page=100")
+    except Exception:
+        return False, "PRIOR_EVIDENCE_READ_UNAVAILABLE"
+    if not isinstance(original, dict) or original.get("id") != original_id:
+        return False, "PRIOR_RUN_IDENTITY_CHANGED"
+    return qualify_merge_group_proof(
+        repository=repository, head_sha=head_sha,
+        current_event=current_event, current_ref=current_ref,
+        current_created_at=current["created_at"],
+        expected_workflow_id=expected_workflow_id,
+        workflow_run=original, workflow_jobs=jobs,
+    )
+
+
+_GH_READ_ENDPOINT = re.compile(
+    r"repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs"
+    r"(?:/[1-9][0-9]*(?:/jobs\?per_page=100)?"
+    r"|\?head_sha=[0-9a-f]{40}&per_page=100)\Z"
+)
+
+
+def read_json_via_existing_gh(endpoint: str, *, run=None, executable: str | None = None) -> dict:
+    """One bounded GET through the existing GitHub CLI identity and rate owner.
+
+    No alternate token, credential persistence, retry, mutation, polling worker,
+    or new transport registration is introduced. Missing access fails closed
+    to *ordinary full CI*, not to a skipped test. This is inactive until an
+    existing CI owner explicitly integrates and qualifies its calling site.
+    """
+    import json
+    import shutil
+    import subprocess
+
+    if not isinstance(endpoint, str) or not _GH_READ_ENDPOINT.fullmatch(endpoint):
+        raise ValueError("ENDPOINT_NOT_ALLOWED")
+    binary = executable if executable is not None else shutil.which("gh")
+    if not isinstance(binary, str) or not binary.startswith("/"):
+        raise ValueError("GH_CLI_UNAVAILABLE")
+    perform = subprocess.run if run is None else run
+    arguments = [
+        binary, "api", "--hostname", "github.com", "--method", "GET",
+        "--header", "X-GitHub-Api-Version: 2022-11-28", endpoint,
+    ]
+    try:
+        response = perform(
+            arguments, capture_output=True, text=True, timeout=15,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        raise ValueError("PROVIDER_GET_UNAVAILABLE") from None
+    if response.returncode != 0:
+        raise ValueError("PROVIDER_GET_REFUSED")
+    body = response.stdout
+    if not isinstance(body, str) or len(body.encode("utf-8")) > 2_000_000:
+        raise ValueError("PROVIDER_BODY_UNQUALIFIED")
+    try:
+        payload = json.loads(body)
+    except ValueError:
+        raise ValueError("PROVIDER_JSON_INVALID") from None
+    if not isinstance(payload, dict):
+        raise ValueError("PROVIDER_JSON_INVALID")
+    return payload
