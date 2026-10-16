@@ -11,11 +11,12 @@ partition is verified to be a total, disjoint cover of that exact set before
 any process starts. The gate therefore executes the same modules whatever
 ``--jobs`` is, and a nonzero exit from any shard fails the whole gate.
 
-Sharding deliberately stays *inside* one job. The branch-protection required
-check for this repository is the single context ``test``; turning the gate
-into a workflow matrix would rename it to ``test (0)``/``test (1)``/... and
-silently make the required check unsatisfiable. Parallelism belongs here,
-where the check name is untouched.
+The default ``--jobs`` command runs concurrent subprocesses inside one job.
+A separately qualified workflow may instead dispatch the same verified
+partition to distinct hosted runners. In that arrangement a fail-closed fan-in
+job named ``test`` must require every matrix member to succeed and must
+reverify the canonical complete plan. The branch-protection context remains
+exactly ``test``; dynamic ``pytest shard N`` contexts alone cannot replace it.
 """
 from __future__ import annotations
 
@@ -209,15 +210,15 @@ def pytest_argv(
 
 
 _MEASURED_THREE_JOB_PLACEMENT = {
-    # Measured in the full protected CI gate: these expensive modules hash to
-    # shard 1. Pin only them to the less-loaded shards 2 and 3.
-    # Keep the large capacity-host crash/replay module stationary and retain
-    # the ordinary stable hash for all other paths and job counts.
+    # Union of independently measured hosted placements: preserve the three
+    # protected-master hot-module pins and the accepted separate-runner
+    # capacity-host/trend balance. Every unlisted module retains SHA-256
+    # placement and every test still runs exactly once.
     "tests/test_executive_runtime_bounded_acquisition.py": 1,
     "tests/test_mastermind_window_reader_static_fences.py": 1,
-    # Run38838572941: shard 1 took2517.86s; shards 2/3 took1863.28/1983.26s.
-    # Its all-zero child exits still crossed the unchanged 45m outer budget
-    # after setup. These three modules accounted for245.24s on shard 1.
+    "tests/test_capacity_host_artifacts.py": 1,
+    "tests/test_trend_persistence_walkforward.py": 0,
+    # The protected one-runner CI gate measured these further slow modules.
     "tests/test_market_view.py": 1,
     "tests/test_product_acceptance_original_selector.py": 1,
     "tests/test_executive_os_phase1fc.py": 2,
@@ -242,11 +243,11 @@ def partition_modules(
     same checkout would shard differently on every run and a failure would not
     reproduce.
 
-    For the production three-job gate, a few independently measured, unusually
-    costly modules are pinned from the busiest shard to the less-loaded shard.
-    Every other path keeps its stable hash placement, including when a test
-    file is added. Four-job experiments retain the unmodified hash. This is
-    strictly placement, not exclusion: verify_partition checks total coverage.
+    For the production three-job gate, the explicitly measured hot modules
+    are pinned to less-loaded shards. Every other path keeps stable hash
+    placement, including when a new test is added. Other job counts retain
+    unmodified hashes. This is placement, not exclusion: verify_partition
+    checks the exact complete test coverage.
     Shard sizes remain visible in the plan line. (Do not introduce bare
     three-digit constants outside tests/: the identity guard forbids them.)
     """
