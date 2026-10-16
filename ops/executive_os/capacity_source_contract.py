@@ -1005,6 +1005,27 @@ def acquire_native_registration(realm_owner: object) -> dict[str, Any]:
     source = enrollment["registration_source"]
     export_path = SYSTEM_ROOT / "config" / "capacity-source-components-native-v2" / (source["release_commit"] + ".json")
     document = realm._native_read_config(export_path, source["export_sha256"])
+    selected = validate_native_registration_document(config, document)
+    # A root publication/revocation during collection invalidates the whole read.
+    if (realm._native_read_config(export_path, source["export_sha256"]) != document
+            or realm._native_read_config(path, config_sha) != config):
+        raise CapacitySourceContractError("NATIVE_REGISTRATION_CHANGED")
+    return dict(selected, source_release_commit=source["release_commit"],
+                previous_release_commit=source["previous_release_commit"],
+                source_receipt_digest=source["export_sha256"])
+
+
+def validate_native_registration_document(config: object, document: object) -> dict[str, Any]:
+    """Validate candidate registration content without granting enrollment.
+
+    The existing realm reader and fixed root publisher supply their protected,
+    digest-pinned reads. Dictionaries alone establish neither source custody
+    nor a host/provider identity; this function performs no I/O or admission.
+    """
+    if type(config) is not dict or type(document) is not dict:
+        raise CapacitySourceContractError("NATIVE_REGISTRATION_SOURCE_MISMATCH")
+    enrollment = validate_native_subscription_capacity_enrollment(config.get("native_capacity_enrollment"))
+    source = enrollment["registration_source"]
     if (set(document) != {"repository_commit", "previous_repository_commit", "material_source_digest", "registrations"}
             or document["repository_commit"] != source["release_commit"]
             or document["previous_repository_commit"] != source["previous_release_commit"]
@@ -1039,13 +1060,7 @@ def acquire_native_registration(realm_owner: object) -> dict[str, Any]:
             selected = row
     if selected is None or selected["registration_state"] != "registered":
         raise CapacitySourceContractError("NATIVE_REGISTRATION_NOT_CURRENT")
-    # A root publication/revocation during collection invalidates the whole read.
-    if (realm._native_read_config(export_path, source["export_sha256"]) != document
-            or realm._native_read_config(path, config_sha) != config):
-        raise CapacitySourceContractError("NATIVE_REGISTRATION_CHANGED")
-    return dict(selected, source_release_commit=source["release_commit"],
-                previous_release_commit=source["previous_release_commit"],
-                source_receipt_digest=source["export_sha256"])
+    return dict(selected)
 
 
 def _read_json(source: Path) -> Any:
