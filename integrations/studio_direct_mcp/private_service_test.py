@@ -1075,8 +1075,8 @@ class TestUpgrade(unittest.TestCase):
                 _seal_runtime()
                 svc._verify_staged_install("test-account", _label_for("test-account"), roots)
 
-    def test_v2_fleet_tailnet_canary_upgrade_preserves_optin_and_integrity(self):
-        """The authorized historical v0.1.10 seal must upgrade without accepting drift."""
+    def test_v2_fleet_tailnet_canary_refuses_downgrade_without_effects(self):
+        """Sealed historical v0.1.10 must not lose live fleet routes on upgrade."""
         with tempfile.TemporaryDirectory() as raw:
             tmp = Path(raw)
             home = tmp / "home"
@@ -1105,6 +1105,24 @@ class TestUpgrade(unittest.TestCase):
                 }
                 config["gitPublish"] = svc._typed_git_config(
                     home, closed_repositories=True)
+                config["fleetRouting"] = {
+                    "enabled": True, "requestTimeoutMs": svc.REQUEST_TIMEOUT_MS,
+                    "routes": [
+                        {"hostRef": "ubuntu1", "url": "https://ubuntu1.example.ts.net/mcp"},
+                        {"hostRef": "ubuntu2", "url": "https://ubuntu2.example.ts.net/mcp"},
+                    ],
+                }
+                config["maxPerSessionConcurrency"] = 8
+                config["maxQueuedPerSession"] = 16
+                config["fleetStatus"] = {
+                    "enabled": True,
+                    "launcherPath": str(home / ".local/bin/studio-direct"),
+                    "launcherSha256": "a" * 64,
+                    "timeoutMs": 15000,
+                    "fabricLauncherPath": str(home / ".local/bin/pool"),
+                    "fabricLauncherSha256": "b" * 64,
+                    "fabricTimeoutMs": 8000,
+                }
                 roots["config"].write_text(
                     json.dumps(config, sort_keys=True), encoding="utf-8")
                 prior["configHash"] = svc._sha256_file(roots["config"])
@@ -1124,18 +1142,57 @@ class TestUpgrade(unittest.TestCase):
                 finally:
                     legacy_path.write_bytes(saved)
                 upgraded_source = _make_upgrade_source(tmp)
-                with mock.patch.object(svc, "_run", CmdRecorder()):
-                    rc, _out = _capture_stdout(lambda: svc.cmd_upgrade(
-                        _stage_args(upgraded_source, node, backend, account)))
-                self.assertEqual(rc, 0)
-                upgraded = json.loads(roots["manifest"].read_text())
-                self.assertEqual(set(upgraded["files"]), set(svc.STAGE_FILES))
-                current = json.loads(roots["config"].read_text())
-                self.assertEqual(current["repositoryWorkspaces"], config["repositoryWorkspaces"])
-                self.assertEqual(current["gitPublish"], config["gitPublish"])
-                self.assertIsNone(upgraded["dependencyTreeHash"])
-                _seal_runtime(account)
+                before_manifest = roots["manifest"].read_bytes()
+                before_config = roots["config"].read_bytes()
+                before_files = {
+                    name: (roots["base"] / name).read_bytes()
+                    for name in names
+                }
+                recorder = CmdRecorder()
+                with mock.patch.object(svc, "_run", recorder):
+                    with self.assertRaisesRegex(SystemExit, "fleet|capability|downgrade"):
+                        svc.cmd_upgrade(
+                            _stage_args(upgraded_source, node, backend, account))
+                self.assertEqual(roots["manifest"].read_bytes(), before_manifest)
+                self.assertEqual(roots["config"].read_bytes(), before_config)
+                self.assertEqual(
+                    {name: (roots["base"] / name).read_bytes() for name in names},
+                    before_files)
+                self.assertTrue(recorder.calls)
+                self.assertTrue(all(
+                    call[:2] == ["launchctl", "print"] for call in recorder.calls
+                ), "read-only launchd query allowed; no modification permitted")
+                self.assertFalse((roots["base"] / "commission-prepare.mjs").exists())
                 svc._verify_staged_install(account, _label_for(account), roots)
+                # Even if future source contains fleet/tailnet JS files, the
+                # prospective config must not discard its 2 routes or 8/16 caps.
+                for name in names - set(svc.STAGE_FILES):
+                    (upgraded_source / name).write_text(
+                        f"// future reviewed {name}\n", encoding="utf-8")
+                with mock.patch.object(
+                    svc, "STAGE_FILES", svc.STAGE_FILES + tuple(
+                        sorted(names - set(svc.STAGE_FILES))
+                    )
+                ):
+                    with mock.patch.object(svc, "_run", CmdRecorder()):
+                        with self.assertRaisesRegex(SystemExit, "fleet capability fleetRouting"):
+                            svc.cmd_upgrade(
+                                _stage_args(upgraded_source, node, backend, account))
+                    # A future compatible release is allowed only when its
+                    # *complete* prospective routing/caps/status exactly match.
+                    svc._verify_upgrade_preserves_installed_fleet_capabilities(
+                        prior, roots, config)
+                    for key in (
+                        "fleetRouting", "maxPerSessionConcurrency",
+                        "maxQueuedPerSession", "fleetStatus",
+                    ):
+                        incompatible = dict(config)
+                        incompatible.pop(key)
+                        with self.assertRaisesRegex(SystemExit, "fleet capability " + key):
+                            svc._verify_upgrade_preserves_installed_fleet_capabilities(
+                                prior, roots, incompatible)
+                self.assertEqual(roots["manifest"].read_bytes(), before_manifest)
+                self.assertEqual(roots["config"].read_bytes(), before_config)
 
     def test_legacy_install_can_be_stopped_before_upgrade(self):
         with tempfile.TemporaryDirectory() as raw:

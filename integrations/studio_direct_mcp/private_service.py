@@ -1252,6 +1252,54 @@ def _verify_staged_install(
     return manifest
 
 
+
+def _verify_upgrade_preserves_installed_fleet_capabilities(
+    prior: dict, roots: dict, projected: dict,
+) -> None:
+    """Fail closed before any writes when an enrolled v0.1.10 fleet seat would lose service.
+
+    This is an explicit migration guard, NOT permission to broaden historical
+    filesets or treat an approved old manifest as permission to downgrade it.
+    A separately reviewed compatibility source must retain both fleet modules
+    and every configured fleet route, scheduling cap and fleet-status binding.
+    """
+    if frozenset(prior["files"]) != V2_CHATGPT1_FLEET_TAILNET_PREDECESSOR:
+        return
+    required = frozenset(("fleet-routing.mjs", "tailnet-gateway.mjs"))
+    if not required.issubset(STAGE_FILES):
+        raise SystemExit(
+            "refusing upgrade: installed fleet/tailnet capability modules absent "
+            "from target release; reviewed compatibility migration required"
+        )
+    config_path = roots["config"]
+    if config_path.is_symlink() or not config_path.is_file():
+        raise SystemExit("refusing upgrade: existing fleet config unavailable")
+    before_hash = _stable_regular_file_hash(config_path, label="existing config")
+    if before_hash != prior["configHash"]:
+        raise SystemExit("refusing upgrade: existing fleet config hash changed")
+    try:
+        existing = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise SystemExit("refusing upgrade: existing fleet config invalid") from exc
+    if (_stable_regular_file_hash(config_path, label="existing config") != before_hash
+            or not isinstance(existing, dict)):
+        raise SystemExit("refusing upgrade: existing fleet config changed")
+    routes = existing.get("fleetRouting")
+    if (not isinstance(routes, dict) or routes.get("enabled") is not True
+            or not isinstance(routes.get("routes"), list)
+            or len(routes["routes"]) < 1):
+        raise SystemExit("refusing upgrade: historical fleet routes unverified")
+    for key in (
+        "fleetRouting", "maxPerSessionConcurrency", "maxQueuedPerSession",
+        "fleetStatus",
+    ):
+        if existing.get(key) != projected.get(key):
+            raise SystemExit(
+                f"refusing upgrade: fleet capability {key} would change; "
+                "reviewed compatibility migration required"
+            )
+
+
 def cmd_upgrade(args) -> int:
     account = args.account
     _validate_account_label(account)
@@ -1289,6 +1337,19 @@ def cmd_upgrade(args) -> int:
     for path in _stage_dest_files(roots):
         _assert_dest_safe(path)
     fabric_only = _fabric_profile_setting(args, roots, prior)
+    repository_workspaces = _repository_workspace_setting(args, roots, prior)
+    commission_digest = _commission_setting(args, roots, prior)
+    # Compute the exact target policy BEFORE the first installation write.
+    # Recognizing a sealed historical manifest is not permission to remove
+    # the original fleet routes, tailnet adapter, concurrency or telemetry.
+    if frozenset(prior["files"]) == V2_CHATGPT1_FLEET_TAILNET_PREDECESSOR:
+        projected = _build_config(
+            account, host, port, node_abs, backend_abs, roots["state"],
+            _user_root(), repository_workspaces=repository_workspaces,
+            commission_digest=commission_digest, fabric_only=fabric_only,
+        )
+        _verify_upgrade_preserves_installed_fleet_capabilities(
+            prior, roots, projected)
     # Preserve the existing restricted profile; do not silently restore tools.
     if not fabric_only:
         _verify_paper_runtime(_user_root())
@@ -1296,8 +1357,8 @@ def cmd_upgrade(args) -> int:
     return _write_install(
         source, node_abs, backend_abs, account, label, host, port, roots,
         result_key="upgraded", previous_source=str(prior.get("source") or ""),
-        repository_workspaces=_repository_workspace_setting(args, roots, prior),
-        commission_digest=_commission_setting(args, roots, prior),
+        repository_workspaces=repository_workspaces,
+        commission_digest=commission_digest,
         fabric_only=fabric_only,
     )
 
