@@ -261,3 +261,22 @@ def test_web_scenarios_distinguish_ghost_parent_from_real_sticky_effect():
     )
     assert "EFFECT_UNKNOWN" in by_id["ceo-archived-chat-live-sticky-effect"]["prompt"]
     assert "no current Chairman assignment" in by_id["ceo-old-packet-no-current-assignment"]["prompt"]
+
+
+def test_handoff_writer_never_disclaims_to_ghost_parent():
+    closeout = text("docs/sol_skills/CLOSEOUT.md")
+    assert "Do not write a continuation whose only next action is" in closeout
+    assert "the original writer or parent must act" in closeout
+    assert "a reachable currently assigned receiver" in closeout
+    assert "STARTed" in closeout and "EFFECT_UNKNOWN" in closeout
+    for rel in ("AGENTS.md", "CLAUDE.md", "docs/SOL_CEO_ACCOUNT_INSTRUCTIONS.md"):
+        source = text(rel)
+        assert "When writing a handoff, name a safe next action" in source
+        assert "original parent" in source
+    kernel = text("docs/sol_skills/BOOTSTRAP_KERNEL.md")
+    assert "Handoffs name an executable successor action" in kernel
+    import json
+    cases = json.loads((ROOT / "tests/fixtures/web_ceo_skill_cases.json").read_text())["cases"]
+    case = next(c for c in cases if c["id"] == "ceo-handoff-writer-no-ghost-receiver")
+    assert case["expected_skills"] == ["mastermind-web-ceo"]
+    assert case["must_observe"] and case["must_not_observe"]

@@ -58,6 +58,8 @@ The currently commissioned receiver owns recovery: inspect the original PR/works
 live writer and effects through existing owners; consume the next permitted result or
 advance an independent in-scope step. A live STARTed exact-session operation remains
 bound to its admitted receiver until lawful reconciliation, never assumed transferred.
+When writing a handoff, name a safe next action for the current or next valid receiver
+with source/effect checks, not an unreachable original parent as the sole actor.
 
 An architectural owner is not a live session. Data OS and other system names identify
 existing contracts and implementation boundaries, not an approver to find in another
