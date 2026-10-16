@@ -16,6 +16,15 @@ import types
 import pytest
 import yaml
 
+# Make the whole composed fixture ancestry visible when pytest runs this module
+# in an independent CI shard. Imported functions alone do not expose their
+# nested fixtures to this module's fixture namespace.
+from tests.test_native_fabric_protected_broker_composition import complete_broker
+from tests.test_native_fabric_quota_admission_composition import current_candidate
+from tests.test_native_fabric_advisory_reset_boundary import advisory_reader
+from tests.test_native_fabric_quota_pinned_reclaim_composition import joined_candidate
+from tests.test_native_fabric_quota_waiter_transition import quota_yield_candidate
+from tests.test_native_fabric_pinned_ready_memo import optimized_module
 from tests.test_native_fabric_model_pinned_waiters import model_module
 from tests.test_native_fabric_protected_broker_composition import (
     BUNDLE, FIXTURES, _apply, _module,
