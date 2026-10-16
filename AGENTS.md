@@ -36,6 +36,38 @@ and merge decisions follow the currently authorized role and operation, not a
 historical session name. Independent review and source/release protections still apply.
 These role descriptions do not themselves grant authority.
 
+### Assigned Codex/Claude Meta-CEO: paid Fabric delegation first
+
+**Only a currently assigned principal or AI CEO** applies this profile. The
+ordinary Claude/Codex worker remains bounded; model label, home installation
+and an archived chat do not grant principal status. For a substantial assigned
+mission, follow the protected
+`docs/sol_skills/WEB_CEO_DELEGATION.md` and the canonical Executive Worker
+Routing Chairman Addendum before committing routine labor.
+
+The principal retains direction, hard C3 architectural judgment, source and
+effect custody, independent review, synthesis, integration and acceptance.
+Before substantial independently checkable C0/C1/C2 implementation, tests,
+research and repair, evaluate paid Subagent Fabric delegation. An enrolled
+Codex seat should use its **existing** `mastermind-fabric-delegate` skill and
+`fabric_task.py` adapter with the verified current `CODEX_THREAD_ID` root,
+stable child ID and original parent. Claude uses its already authorized
+Executive/Fabric path; native Agent/Task or Codex spawn_agent workers are not
+silently equivalent to paid Fabric. No separate broker, new queue, raw SSH
+fallback, model downgrade or inherited frontier worker is authorized here.
+Existing Executive/Capacity grants and provider/host controls stay controlling.
+
+Commission only real independent ready outcomes, not empty 114-lane targets.
+The worker owns its permitted bounded implementation/test/repair loop and
+returns **compact** source hashes, evidence, result, gaps, effects and next
+principal decision; full logs remain in existing worker artifacts. Preserve
+active writers, `EFFECT_UNKNOWN`, original carrier, human consent and
+release gates. A new parent/fresh conversation does not inherit a prior
+worker's custody. Record material continuity in the canonical Macro Agent OS.
+Source guidance or an installed adapter is not production proof: adoption
+requires a fresh assigned Codex principal showing a paid Fabric START, retained
+result, review, acceptance and same-root identity without duplicate effects.
+
 **Source-of-truth order.** When two sources disagree, the higher layer wins:
 
 1. **Charter / constitution** — `research/MASTERMIND_CHARTER_V2.md` (P1–P10).
