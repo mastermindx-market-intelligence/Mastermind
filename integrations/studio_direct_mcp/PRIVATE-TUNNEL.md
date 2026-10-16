@@ -33,7 +33,7 @@ There are no 15-minute application access tokens on this private path. The owned
 Local proof and native ChatGPT proof are separate:
 
 1. Core and adapter regressions: run the Node tests and the isolated Python service tests.
-2. Start the installed private gateway, then run `node private-acceptance.mjs http://127.0.0.1:<port>/mcp`. It checks absent OAuth metadata, lists the real engine tools, reads eight lines of the system version file, runs a unique harmless `printf`/`true`, and deletes its MCP session.
+2. Start the installed private gateway, then run `node private-acceptance.mjs http://127.0.0.1:<port>/mcp`. It checks absent OAuth metadata, lists the real engine tools, creates a private temporary marker under `/private/tmp`, reads that marker through the bounded file tool, runs a unique harmless `printf`/`true`, deletes its MCP session, and removes the marker fixture.
 3. Run `tunnel-client doctor` for the exact profile. No Auth metadata returning 404 is expected; initialization must succeed.
 4. Start the owned tunnel LaunchAgent and verify `running`, `healthy`, `ready`, `managedAliasRunning: false`, and `transportTTL: "5h"` with `python3 private_tunnel_service.py status --account <account>`. Transport readiness also requires a successful control-plane poll timestamp within the last 90 seconds. The official client's historical `control_plane_poll.ok` flag alone can remain true during an upstream outage; a missing, malformed, future or stale timestamp keeps the transport unready without restarting it.
 5. Run `node private-state-probe.mjs <absolute-private-gateway-module> --expect-shared` against an isolated real engine to prove cross-session process reads, creator DELETE, and twelve-session capacity churn.

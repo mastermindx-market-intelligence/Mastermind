@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -14,6 +16,7 @@ const transport = new StreamableHTTPClientTransport(url);
 const receipt = { kind: 'installed-loopback-real-engine', nativeChatGPT: false,
   at: new Date().toISOString(), endpoint: url.href, measurements: [] };
 let initialized = false;
+let fixtureDir = null;
 const measure = async (name, fn) => {
   const start = performance.now();
   const result = await fn();
@@ -42,10 +45,15 @@ try {
     assert.ok(tools.some(t => t.name === required), `${required} exposed`);
   const ping = await measure('studio_ping', () => client.callTool({ name: 'studio_ping', arguments: {} }));
   receipt.ping = ping;
+  fixtureDir = await mkdtemp('/private/tmp/studio-private-acceptance-');
+  const fixturePath = join(fixtureDir, 'read-marker.txt');
+  const fixtureMarker = `STUDIO_PRIVATE_READ_${Date.now()}`;
+  await writeFile(fixturePath, `${fixtureMarker}\n`, { encoding: 'utf8', mode: 0o600 });
   for (let i = 0; i < 3; i++) {
     const read = await measure('read_file', () => client.callTool({ name: 'read_file', arguments: {
-      path: '/System/Library/CoreServices/SystemVersion.plist', offset: 0, length: 8 } }));
-    assert.ok(read.content.some(c => c.type === 'text' && c.text.includes('plist')), 'real system file read');
+      path: fixturePath, offset: 0, length: 8 } }));
+    assert.ok(read.content.some(c => c.type === 'text' && c.text.includes(fixtureMarker)),
+      'bounded acceptance marker read');
   }
   const marker = `STUDIO_PRIVATE_ACCEPTANCE_${Date.now()}`;
   const command = await measure('start_process', () => client.callTool({ name: 'start_process', arguments: {
@@ -63,5 +71,9 @@ try {
     catch (error) { receipt.cleanupError = error.message; process.exitCode = 1; }
   }
   await client.close();
+  if (fixtureDir) {
+    try { await rm(fixtureDir, { recursive: true, force: true }); receipt.fixtureDeleted = true; }
+    catch (error) { receipt.fixtureCleanupError = error.message; process.exitCode = 1; }
+  }
   console.log(JSON.stringify(receipt, null, 2));
 }
