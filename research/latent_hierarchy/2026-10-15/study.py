@@ -327,7 +327,7 @@ def run(root:Path):
     prefix=features(vw10.loc[mask],ew10.loc[mask],vw49.loc[mask],f.loc[mask],maps)
     cols=BASE+[a+'_'+b for a in ['real']+[f'placebo{i}' for i in range(4)] for b in CHILD]
     expected=complete[complete.date<=cutoff]
-    np.testing.assert_allclose(prefix[cols],expected[cols],equal_nan=True,atol=1e-9,rtol=1e-9)
+    np.testing.assert_allclose(prefix[cols].to_numpy(dtype=float),expected[cols].to_numpy(dtype=float),equal_nan=True,atol=1e-9,rtol=1e-9)
     z=complete[(complete.date.dt.weekday==4)&(complete.date>='1980-01-01')&complete.eligible_parent]
     excluded_for_features=len(z)
     z=z.replace([np.inf,-np.inf],np.nan).dropna(subset=cols)
