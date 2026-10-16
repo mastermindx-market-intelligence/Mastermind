@@ -53,3 +53,15 @@ def test_registry_patch_detector_catches_new_policy_rewrite():
     assert _registry_deltas("--- a/hosts.json\n+++ b/hosts.json\n@@ -1 +1 @@\n")
     assert not _registry_deltas("--- a/remote_sub.sh\n+++ b/remote_sub.sh\n")
     assert not _registry_deltas("note only: previous hosts.json was modified")
+
+
+def test_board_runbook_distinguishes_current_gate_from_firmware_thermal_point():
+    board = (BASE / "BOARD_LEVEL_THERMAL_ACCEPTANCE.md").read_text()
+    assert "**80°C**" in board
+    assert "85°C" in board
+    assert "not the current Fabric admission threshold" in board
+    assert "refuses new automatic placement at 85°C" not in board
+    assert "DO_NOT_REDO_STATIC_RESTORE" in board
+    assert "12/18/12/12" in board
+    assert "Both hosts already report Balanced" in board
+    assert "https://www.msi.com/Landing/msi-click-bios-intel-amd-motherboard" in board
