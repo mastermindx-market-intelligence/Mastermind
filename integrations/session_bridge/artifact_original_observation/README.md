@@ -32,7 +32,7 @@ permission refusals remain binding: this capability never authorizes replaying a
 refused read through a newly admitted route. The motivating App worker and all
 other live workers retain their original assigning parent and controller.
 
-Validation:111 affected inert checks pass against the actual candidates. The
+Validation:111 affected inert checks pass against the actual candidates; four additional fixed support-closure checks also pass. The
 legacy test loader gained an optional source directory so its unchanged cases
 exercise installed/candidate bytes rather than accidentally testing its old copy.
 One independent read-risk review is pending. No original App remote observation

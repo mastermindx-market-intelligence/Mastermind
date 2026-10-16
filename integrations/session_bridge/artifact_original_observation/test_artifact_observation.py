@@ -159,6 +159,31 @@ def test_remote_packet_binding_is_checked_without_stdout_read(original):
     assert r.reads==[('lanes','tmp',o['rid']+'.txt')]
 
 
+@pytest.mark.parametrize('fault',[None,'manifest','code','manifest_changed'])
+def test_exact_remote_support_closure(original,fault):
+    o=original; files=dict(o['manifest']); data={'schema':'remote-support-code.v1',
+        'files':files,'digest':o['support']}
+    class CodeReader:
+        def __init__(self):self.manifest_reads=0
+        def read(self,parts,limit,**kw):
+            assert parts[:3]==('lanes','support-releases',o['support'])
+            if parts[-1]=='RELEASE.json':
+                assert kw=={'mode':0o444};self.manifest_reads+=1
+                value=dict(data)
+                if fault=='manifest' or fault=='manifest_changed' and self.manifest_reads==2:
+                    value['files']={**files,'outside.py':'0'*64}
+                return reader.canonical(value),None
+            assert parts[3]=='ext' and parts[-1] in files and kw=={'mode':0o555}
+            return (b'changed' if fault=='code' else parts[-1].encode()),None
+    if fault is None:
+        result=remote.support(CodeReader(),o['support'],expected_files=files)
+        assert result['verified_code_files']==31
+        assert result['running_process_source_identity_proven'] is False
+    else:
+        with pytest.raises(remote.Invalid):
+            remote.support(CodeReader(),o['support'],expected_files=files)
+
+
 @pytest.mark.parametrize('mutation',['packet','root','parent','support','arbitrary_file','arbitrary_artifact','pid'])
 def test_remote_negative_contracts(original,mutation):
     o=original;req=request(o);a=req['artifact'];packet=o['packet']

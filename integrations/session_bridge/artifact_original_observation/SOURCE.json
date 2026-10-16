@@ -11,5 +11,5 @@
     "run_observation_delivery.py": "998bff1e2a5bdd19da2076962425d7e13776abeb01ec8b2c8e3d47388d6e33ab",
     "fabric_task.py": "8f28799dc4f2d0b815fa467dab1dee5c5a9781d220199a5358be49773a74b686"
   },
-  "checks": "111 affected inert checks PASS against candidate source, including 31 legacy observation and38 active-lineage checks; no remote operation"
+  "checks": "111 affected candidate checks PASS plus4 additional remote support-closure checks PASS; no remote operation"
 }
