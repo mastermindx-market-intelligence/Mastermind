@@ -159,7 +159,16 @@ def main(argv=None):
         finally:
             os.close(descriptor)
         try:
-            app = create_runtime(deployment,verifier,policy,audit_sink=audit)
+            # Only an explicitly admitted v2 archive owner reaches the selected
+            # composition here, after qualify and before any listener exists.
+            # A v1 owner (selected_options None) keeps the exact legacy call, and
+            # a failed selected preparation refuses without legacy fallback.
+            selected = verifier.selected_options
+            if selected is None:
+                app = create_runtime(deployment,verifier,policy,audit_sink=audit)
+            else:
+                app = create_runtime(deployment,verifier,policy,audit_sink=audit,
+                    selected_options=selected)
             if args.citation_unix:
                 from integrations.research_read_mcp.citation_transport import (
                     UnixSocketPolicy, acquire_listeners, build_citation_consumer, run_dual_server, MCP_ADDRESS)
