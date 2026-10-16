@@ -1368,6 +1368,7 @@ function resultHost(result: unknown = resultAvailable) {
   });
   const detail = vi.fn(async () => result);
   window.MastermindMissionHost = {
+    invalidationGeneration: () => 0,
     readPrograms: programsFor(selected.work_ref, selected.root_job_id),
     readMission: legacy,
     readMissionV3: vi.fn(async () => renamed),
@@ -1415,6 +1416,71 @@ describe("result card and same-observation Mission lifecycle", () => {
     expect(h.detail).toHaveBeenCalledTimes(1);
     expect(await screen.findByText("Result detail")).toBeTruthy();
   });
+  it("opens a source-qualified selected Mission worker result using the existing Projects reader", async () => {
+    const h = resultHost(); const ref = h.mission.result_refs.refs[0];
+    h.mission.children.items = [{
+      job_id: ref.job_id, parent_job_id: ref.root_job_id, status: "COMPLETED",
+      depth: 1, orchestration_role: ref.orchestration_role, plan_step_id: "step-1",
+      attempt_count: 1, attempt_limit: 2, current_attempt_id: ref.attempt_id,
+      worker_id: "fixture-worker",
+      latest_attempt: { attempt_id: ref.attempt_id, attempt_number: 1, status: "COMPLETED",
+        started_at: "2026-10-15T12:00:00Z", finished_at: "2026-10-15T12:10:00Z",
+        exit_code: 0, has_result: true, error_present: false, error_class: null },
+    }];
+    h.mission.children.state = "AVAILABLE"; h.mission.children.coverage = "COMPLETE";
+    h.mission.children.total_count = 1; h.mission.children.overflow_count = 0;
+    h.mission.children.unjoined_job_count = 0; h.mission.children.unjoined_job_ids = [];
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => expect(window.MastermindMissionHost!.readMissionV3).toHaveBeenCalledTimes(1));
+    expect(h.detail).not.toHaveBeenCalled();
+    await user.click(screen.getByText("Subagent Fabric · inspect execution"));
+    const inside = within(screen.getByRole("region", { name: "Inside this mission" }));
+    await user.click(await inside.findByRole("button", { name: new RegExp("^" + ref.job_id + " ·") }));
+    await user.click(inside.getByRole("button", { name: "Inspect indexed result" }));
+    await waitFor(() => expect(h.detail).toHaveBeenCalledTimes(1));
+    expect(h.detail).toHaveBeenCalledWith(expect.objectContaining({
+      workRef: resultAvailable.selection.work_ref,
+      rootJobId: ref.root_job_id, jobId: ref.job_id,
+      attemptId: ref.attempt_id, resultEnvelopeDigest: ref.result_envelope_digest,
+      signal: expect.any(AbortSignal),
+    }));
+    expect(await screen.findByRole("heading", { name: "Projects", level: 1 })).toBeTruthy();
+    expect(await screen.findByText("Result detail")).toBeTruthy();
+    expect(h.legacy).not.toHaveBeenCalled();
+  });
+  it.each(["identity-generation", "lost-principal"] as const)(
+    "refuses a pending Office result click when the actual source loses %s", async boundary => {
+      const h = resultHost(); const ref = h.mission.result_refs.refs[0];
+      h.mission.children.items = [{
+        job_id: ref.job_id, parent_job_id: ref.root_job_id, status: "COMPLETED",
+        depth: 1, orchestration_role: ref.orchestration_role, plan_step_id: "step-1",
+        attempt_count: 1, attempt_limit: 2, current_attempt_id: ref.attempt_id,
+        worker_id: "fixture-worker",
+        latest_attempt: { attempt_id: ref.attempt_id, attempt_number: 1, status: "COMPLETED",
+          started_at: "2026-10-15T12:00:00Z", finished_at: "2026-10-15T12:10:00Z", exit_code: 0,
+          has_result: true, error_present: false, error_class: null },
+      }];
+      h.mission.children.state = "AVAILABLE"; h.mission.children.coverage = "COMPLETE";
+      h.mission.children.total_count = 1; h.mission.children.overflow_count = 0;
+      h.mission.children.unjoined_job_count = 0; h.mission.children.unjoined_job_ids = [];
+      const user = userEvent.setup();
+      render(<App />);
+      await waitFor(() => expect(window.MastermindMissionHost!.readMissionV3).toHaveBeenCalledTimes(1));
+      await user.click(screen.getByText("Subagent Fabric · inspect execution"));
+      const inside = within(screen.getByRole("region", { name: "Inside this mission" }));
+      await user.click(await inside.findByRole("button", { name: new RegExp("^" + ref.job_id + " ·") }));
+      const button = inside.getByRole("button", { name: "Inspect indexed result" });
+      if (boundary === "identity-generation")
+        window.MastermindMissionHost!.invalidationGeneration = () => 1;
+      else
+        window.MastermindMissionHost!.auth!.getState = () =>
+          ({ status: "signed_out", acquisition: false, content: false, reason: null });
+      await user.click(button);
+      expect(h.detail).not.toHaveBeenCalled();
+      expect(screen.queryByText("Result detail")).toBeNull();
+    },
+  );
   it("does not fall back to legacy data after v3 refusal", async () => {
     const h = resultHost();
     window.MastermindMissionHost!.readMissionV3 = async () => {

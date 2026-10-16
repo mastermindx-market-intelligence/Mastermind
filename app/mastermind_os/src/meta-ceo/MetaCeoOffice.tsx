@@ -3,6 +3,7 @@ import { createDirectionPreview, previewIsCurrent, type DirectionPreview } from 
 import { sameTarget, type OfficeProjection, type ProjectionContext, type SourceClaim } from "./projection";
 import "./office.css";
 import { FabricMissionInspector } from "../fabric/FabricMissionInspector";
+import type { ResultSelection } from "../result";
 import { AttendedFabricWorkspace } from "../fabric/AttendedFabricWorkspace";
 
 /** Draft storage belongs to the existing shell. Inspection never rewrites or sends it. */
@@ -11,6 +12,8 @@ export interface MetaCeoOfficeProps {
   projection: OfficeProjection;
   draft: OfficeDraft;
   onDraftChange: (text: string) => void;
+  /** Reuse App's exact Result owner reader; this component never acquires content. */
+  onInspectWorkerResult?: (selection: ResultSelection) => void;
   locale?: "en" | "zh-CN";
 }
 
@@ -106,7 +109,7 @@ function SourceBadge({ source }: { source: SourceClaim }) {
   return <span className="office-state" data-state={source.state}>{source.state}</span>;
 }
 
-export function MetaCeoOffice({ projection, draft, onDraftChange, locale = "en" }: MetaCeoOfficeProps) {
+export function MetaCeoOffice({ projection, draft, onDraftChange, onInspectWorkerResult, locale = "en" }: MetaCeoOfficeProps) {
   const t = (en: keyof typeof OFFICE_ZH): string => locale === "zh-CN" ? OFFICE_ZH[en] : en;
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [preview, setPreview] = useState<DirectionPreview | null>(null);
@@ -169,6 +172,7 @@ export function MetaCeoOffice({ projection, draft, onDraftChange, locale = "en" 
     <FabricMissionInspector
       key={JSON.stringify([projection.context.authGeneration, projection.context.selection])}
       mission={mission} locale={locale}
+      onInspectResult={projection.mission.source.state === "CURRENT" ? onInspectWorkerResult : undefined}
     />
     <AttendedFabricWorkspace
       key={`attended:${projection.context.authGeneration}`}

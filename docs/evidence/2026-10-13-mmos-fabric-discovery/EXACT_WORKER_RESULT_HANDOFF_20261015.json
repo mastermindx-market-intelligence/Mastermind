@@ -1,0 +1,59 @@
+{
+  "schema": "mastermind.fabric_worker_exact_result_handoff.v1",
+  "observed_at": "2026-10-16T00:06:37.911618+00:00",
+  "source_parent": "411535d60843274bf3cbf58ea55c116fd477befc",
+  "phase": "BUILT_NOT_PROVEN",
+  "files_sha256": {
+    "app/mastermind_os/src/fabric/mission-worker-result.ts": "fa72651dce2433cca441dfa094a9cd2330a8996f4632849adf4c8cb0d0257cb5",
+    "app/mastermind_os/src/fabric/mission-worker-result.test.ts": "c2c5d75606e2ff9ae36a10362327a850aa859c1aba0790ce4d9265dd27bf52cb",
+    "app/mastermind_os/src/fabric/FabricMissionInspector.tsx": "7c21377d650ae9f82f4288cb57794cd769cc34951b8c9476ad604d3761bb9431",
+    "app/mastermind_os/src/fabric/FabricMissionInspector.test.tsx": "182ebf2217f5910a62df1c5601b9344f7dbdef37abc50cf93ae2ae3e46aa7a6f",
+    "app/mastermind_os/src/fabric/fabric-inspector.css": "a9b5fee14bb3b24e3c36e174104fe9b022cea26fa727eee0c2108f9eedbfaa32",
+    "app/mastermind_os/src/meta-ceo/MetaCeoOffice.tsx": "2f6a510ad62f9025a2363903e299f3f63f201f364afbf67e0802d3e36f86c04d",
+    "app/mastermind_os/src/meta-ceo/MetaCeoOffice.test.tsx": "c0fb7e82b250517d034e9a15c6437a0a30c6e07055d0be8b0d8f912e6a20aca3",
+    "app/mastermind_os/src/App.tsx": "8fa731a29afa36678cfe44b4d42a4aac2ec9edef5becaf2d2931bda0cd51b71a",
+    "app/mastermind_os/src/App.test.tsx": "09e9981cf8dbdb9f246a8ac52e8ba69d04579ee17db838771a44c8b502660aed"
+  },
+  "verification_log_sha256": {
+    "worker-result-reference-red.log": "bc0755f350f398518c933bef79cab0fbec1faf622a75f65fb20079819c5ff4c7",
+    "worker-result-reference-green1.log": "5c907d443f002940a020dc73135d5996b9f0ddf88db5351a9490a2a3172a96ea",
+    "worker-result-dom-red.log": "5f3a12996c975455d7094ed258c168ec6c447a3522016bc8cddbfb135743b73d",
+    "worker-result-dom-green1.log": "21d783b709b9cde311bd2bbc16cb3c926aa091b8aba6ca3a9e5efb437a7e007c",
+    "worker-result-office-pass-through.log": "70cd1e3adf447dd8808ac82ed7ad1398a34a1f45ed82064566e7956d37b6d140",
+    "worker-result-app-route6.log": "a8585976b7f242233bdb86e1e19071713c87a00c2f466d971a443eb44a561604",
+    "worker-result-reader-honesty-focused.log": "bb0b8e5e7e9332dd803da5751e364d91565f74f8152d0d038bd888f22e05bd57",
+    "worker-result-final-full-suite.log": "0bcb889038b689cce70524b4452455af2d4c5915503f7105d4e8777da860cdb7",
+    "worker-result-final-typecheck.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "worker-result-final-build.log": "e5ef42acc9ab77ad764e3a48198de514fbbbeda7d643155247d5b2690719ee00"
+  },
+  "verification": {
+    "passed": 1513,
+    "skipped": 1,
+    "failed": 0,
+    "test_files": 67,
+    "typescript_exit": 0,
+    "vite_build_exit": 0
+  },
+  "security": {
+    "reuses_existing_Mission_v3_index": true,
+    "reuses_existing_Result_owner": true,
+    "exact_tuple_fields": 5,
+    "requires_explicit_click": true,
+    "checks_live_principal_and_epoch": true,
+    "no_browser_M2_secret": true,
+    "no_legacy_fallback": true
+  },
+  "effects": {
+    "new_worker": 0,
+    "backend_auth_writes": 0,
+    "Paper_changes": 0,
+    "production_deployment": 0,
+    "remote_plugin_install": 0
+  },
+  "remaining": [
+    "independent source review",
+    "hosted CI",
+    "live browser/installation proof",
+    "direct attended M2 per-user authorized catalog source"
+  ]
+}

@@ -7,6 +7,7 @@ import { observedMissionAssociation } from "./workspace-contract";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { MetaCeoOffice } from "./meta-ceo/MetaCeoOffice";
 import { AttendedFabricWorkspace } from "./fabric/AttendedFabricWorkspace";
+import { qualifyWorkerResultRef } from "./fabric/mission-worker-result";
 import { useOfficeProjection } from "./meta-ceo/useOfficeProjection";
 import { Projects } from "./projects/Projects";
 import { Inbox } from "./inbox/Inbox";
@@ -3025,6 +3026,44 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
         });
       });
   };
+  // Open exactly the indexed worker return through the *existing* Result
+  // owner, never by manufacturing a URL, another read path or permission.
+  const workerResultHost = window.MastermindMissionHost;
+  const workerResultEpoch = workerResultHost?.invalidationGeneration?.();
+  const openOfficeWorkerResult = (input: ResultSelection) => {
+    const valid = normalizeResultSelection(input);
+    const host = window.MastermindMissionHost;
+    const user = host?.auth?.getState();
+    const source = office.projection.mission;
+    const indexed = missionV3 && isDocv3(missionV3) ? missionV3 : null;
+    if (!valid || !host?.readResult || host !== workerResultHost ||
+        workerResultEpoch === undefined ||
+        host.invalidationGeneration?.() !== workerResultEpoch ||
+        user?.status !== "signed_in" || !user.acquisition ||
+        authState?.status !== "signed_in" || !authState.acquisition ||
+        source.source.state !== "CURRENT" ||
+        source.value?.schema !== "mastermind.mission_workspace.v3" ||
+        !indexed || !selection ||
+        valid.workRef !== selection.workRef || valid.rootJobId !== selection.rootJobId ||
+        source.value.program.work_ref !== selection.workRef ||
+        source.value.mission.root_job_id !== selection.rootJobId ||
+        indexed.result_refs.snapshot_digest !== source.value.result_refs.snapshot_digest ||
+        JSON.stringify(indexed.result_refs.generation) !== JSON.stringify(source.value.result_refs.generation))
+      return;
+    const c = source.value.children.items.find(row =>
+      row.job_id === valid.jobId && row.latest_attempt?.attempt_id === valid.attemptId);
+    const exact = c ? qualifyWorkerResultRef(source.value, c) : null;
+    const stillIndexed = indexed.result_refs.refs.some(ref =>
+      ref.root_job_id === valid.rootJobId && ref.job_id === valid.jobId &&
+      ref.attempt_id === valid.attemptId && ref.result_envelope_digest === valid.resultEnvelopeDigest);
+    if (!exact || !stillIndexed ||
+        exact.resultEnvelopeDigest !== valid.resultEnvelopeDigest) return;
+    // This user interaction is the explicit permitted read. The Result owner
+    // rechecks identity, source and exact digest during the bounded acquisition.
+    setActive("Projects");
+    setProjectTab("Overview");
+    pickResult(exact);
+  };
   const resultRefs =
     d && missionV3 && isDocv3(missionV3) ? (
       <ResultRefs
@@ -3089,6 +3128,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
           projection={office.projection}
           draft={office.draft}
           onDraftChange={office.changeDraft}
+          onInspectWorkerResult={workerResultHost?.readResult ? openOfficeWorkerResult : undefined}
         />
         <OperationalNavigation label="Company operations" onNavigate={navigateOperationalView} />
       </>

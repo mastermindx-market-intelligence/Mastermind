@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 import { MetaCeoOffice } from "./MetaCeoOffice";
 import { projectOffice, type OfficeInput, type ProjectionContext, type SourceState } from "./projection";
 import { decodeMission } from "../mission";
 import currentMission from "../fixtures/mission-v2-current-128c46f6.json";
+import v3Fixture from "../fixtures/mission-v3-owner-current-operator-harness.json";
+import type { Missionv3Document, ChildCard } from "../mission";
 
 afterEach(cleanup);
 const context: ProjectionContext = { authGeneration: 1, selection: { workRef: "WS:ONE", rootJobId: "JOB-1" }, sessionRef: null, bindingGeneration: null, revisions: { mission: "rev:1", programs: null, result: null, conversation: null } };
@@ -27,6 +29,42 @@ describe("Daily Office consumer", () => {
     render(<MetaCeoOffice projection={projectOffice(reads, context)} draft={{ text: "", context }} onDraftChange={() => {}} />);
     const attention = screen.getByRole("region", { name: freshness === "current" ? "The owner has requested Chairman attention." : "Chairman attention is not established." });
     expect(attention.textContent.includes("Reserved decision from owner.")).toBe(freshness === "current");
+  });
+  it("passes only a current owner's exact worker result reference to the existing reader callback", () => {
+    const ctx: ProjectionContext = { ...context, selection: { workRef: "WS:ONE", rootJobId: "JOB-001" } };
+    const values = input();
+    const mission = structuredClone(v3Fixture) as unknown as Missionv3Document;
+    const ref = mission.result_refs.refs[0];
+    const child: ChildCard = {
+      job_id: ref.job_id, parent_job_id: ref.root_job_id, status: "COMPLETED", depth: 1,
+      orchestration_role: ref.orchestration_role, plan_step_id: "step-1",
+      attempt_count: 1, attempt_limit: 2, current_attempt_id: ref.attempt_id,
+      worker_id: "observed-worker",
+      latest_attempt: { attempt_id: ref.attempt_id, attempt_number: 1, status: "COMPLETED",
+        started_at: null, finished_at: null, exit_code: 0,
+        has_result: true, error_present: false, error_class: null },
+    };
+    mission.children.items = [child];
+    values.mission = { context: ctx, source: { ...values.mission!.source, ref: "mission:JOB-001", state: "CURRENT" }, value: mission };
+    const opened = vi.fn();
+    const projection = projectOffice(values, ctx);
+    expect(projection.mission.source.state).toBe("CURRENT");
+    const view = render(<MetaCeoOffice projection={projection} draft={{ text: "", context: ctx }}
+      onDraftChange={() => {}} onInspectWorkerResult={opened} />);
+    fireEvent.click(screen.getByText("Subagent Fabric · inspect execution"));
+    const panel = within(screen.getByRole("region", { name: "Inside this mission" }));
+    fireEvent.click(panel.getByRole("button", { name: /^JOB-002 ·/ }));
+    fireEvent.click(panel.getByRole("button", { name: "Inspect indexed result" }));
+    expect(opened).toHaveBeenCalledWith({
+      workRef: "WS:ONE", rootJobId: "JOB-001", jobId: ref.job_id,
+      attemptId: ref.attempt_id, resultEnvelopeDigest: ref.result_envelope_digest,
+    });
+    opened.mockClear();
+    values.mission.source.state = "STALE";
+    view.rerender(<MetaCeoOffice projection={projectOffice(values, ctx)} draft={{ text: "", context: ctx }}
+      onDraftChange={() => {}} onInspectWorkerResult={opened} />);
+    expect(panel.queryByRole("button", { name: "Inspect indexed result" })).toBeNull();
+    expect(opened).not.toHaveBeenCalled();
   });
   it("puts the qualified answer before movement and exposes missing producers", () => {
     render(<MetaCeoOffice projection={projectOffice(input(), context)} draft={{ text: "", context }} onDraftChange={() => {}} />);

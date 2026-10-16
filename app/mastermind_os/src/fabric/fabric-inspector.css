@@ -59,3 +59,7 @@
 .fi-relations button { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; width: 100%; min-width: 0; min-height: 36px; padding: 8px 10px; border-radius: 8px; text-align: left; }
 .fi-relations button > span { font-size: 12px; color: var(--fi-muted); }
 .fi-relations button > code { overflow-wrap: anywhere; white-space: normal; max-width: 100%; font-size: 12.5px; }
+
+.fi-return { display: flex; flex-direction: column; gap: 7px; padding: 12px; margin-block: 12px; min-width: 0; border: 1px solid var(--fi-line); border-radius: 10px; background: var(--fi-fill); }
+.fi-return button { align-self: flex-start; min-height: 36px; padding: 9px 12px; border-radius: 8px; font-size: 12.5px; }
+.fi-return small { overflow-wrap: anywhere; }
