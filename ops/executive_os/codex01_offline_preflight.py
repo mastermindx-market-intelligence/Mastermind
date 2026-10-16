@@ -49,6 +49,31 @@ def _literal(path: str) -> str:
     return json.dumps(path, ensure_ascii=True)
 
 
+def _strict_fixture_child(candidate: Path, parent: Path) -> bool:
+    """Reject lexical traversal and existing aliases even for missing files.
+
+    pathlib.is_relative_to alone is lexical: 'scratch/../outside' can pass.
+    A missing leaf can also follow an existing symlinked ancestor; checking
+    candidate.exists() before resolve would silently skip that case.
+    """
+    try:
+        if (not isinstance(candidate, Path)
+                or not candidate.is_absolute() or candidate == parent
+                or ".." in candidate.parts
+                or not candidate.is_relative_to(parent)):
+            return False
+        cursor = candidate
+        while cursor != parent:
+            if cursor.is_symlink():
+                return False
+            cursor = cursor.parent
+        return candidate.resolve(strict=False).is_relative_to(
+            parent.resolve(strict=False)
+        )
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
 def policy(scratch: Path, *, deny_fixture: Path | None = None,
            allow_fixture: Path | None = None) -> str:
     """Fixed defensive sandbox. Optional fixture paths are test-only.
@@ -68,19 +93,11 @@ def policy(scratch: Path, *, deny_fixture: Path | None = None,
                 or scratch.stat().st_mode & 0o777 != 0o700
             ))):
         raise ValueError("private scratch required")
-    if deny_fixture is not None and (
-        not deny_fixture.is_absolute() or not deny_fixture.is_relative_to(scratch)
-        or deny_fixture.is_symlink()
-        or (deny_fixture.exists()
-            and not deny_fixture.resolve().is_relative_to(scratch))
-    ):
+    if deny_fixture is not None and not _strict_fixture_child(deny_fixture, scratch):
         raise ValueError("fixture must remain inside scratch")
     if allow_fixture is not None and (
-        deny_fixture is None or not allow_fixture.is_absolute()
-        or not allow_fixture.is_relative_to(deny_fixture)
-        or allow_fixture.is_symlink()
-        or (allow_fixture.exists()
-            and not allow_fixture.resolve().is_relative_to(deny_fixture))
+        deny_fixture is None
+        or not _strict_fixture_child(allow_fixture, deny_fixture)
     ):
         raise ValueError("only exact test fixture child can be allowed")
     clauses = [
@@ -198,11 +215,14 @@ def preflight() -> dict[str, object]:
             ("system_config_denied", "/private/etc"),
             ("brew_config_denied", "/opt/homebrew/etc"),
         ):
-            # No directory entries are returned or consumed when denied.
+            # A fail-open sandbox must not enumerate sensitive directory
+            # names: attempt only a read-capability open, close immediately,
+            # and never call listdir/scandir/read on any real location.
             checks[key] = _probe(profile, scratch,
                 f"import os,errno; p={root!r};"
                 "e=0;"
-                "\ntry: os.listdir(p)\nexcept OSError as x: e=x.errno"
+                "\ntry: fd=os.open(p,os.O_RDONLY|os.O_DIRECTORY);os.close(fd)"
+                "\nexcept OSError as x: e=x.errno"
                 "\nprint('DENIED' if e==errno.EPERM else 'FAIL')")
         checks["outside_write_denied"] = _probe(profile, scratch,
             "import os,errno; e=0;"

@@ -49,6 +49,47 @@ def test_fixture_allow_must_be_exact_child_of_explicit_denied_test_directory():
     assert '(allow file-read* (literal "/private/tmp/mmx_codex01_offline_unittest/secret/file"))' in text
 
 
+def test_nonexistent_lexical_traversal_is_not_an_eligible_fixture():
+    scratch = Path("/private/tmp/mmx_codex01_offline_unittest")
+    denied = scratch / "blocked"
+    # pathlib.is_relative_to is lexical, not a traversal/alias guard.
+    with pytest.raises(ValueError):
+        subject.policy(scratch, deny_fixture=scratch / ".." / "outside-uncreated")
+    with pytest.raises(ValueError):
+        subject.policy(scratch, deny_fixture=denied,
+                       allow_fixture=denied / ".." / ".." / "outside-uncreated")
+
+
+def test_nonexistent_child_under_existing_symlink_parent_cannot_escape(tmp_path, monkeypatch):
+    monkeypatch.setattr(subject, "SCRATCH_PARENT", tmp_path)
+    scratch = tmp_path / "mmx_codex01_offline_fixture"
+    scratch.mkdir(mode=0o700)
+    outside = tmp_path / "outside-test-only"
+    outside.mkdir()
+    (scratch / "alias").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError):
+        subject.policy(scratch, deny_fixture=scratch / "alias" / "uncreated")
+    blocked = scratch / "blocked"
+    blocked.mkdir()
+    (blocked / "alias").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError):
+        subject.policy(scratch, deny_fixture=blocked,
+                       allow_fixture=blocked / "alias" / "uncreated")
+
+
+def test_existing_internal_symlink_ancestor_is_not_an_eligible_fixture(tmp_path, monkeypatch):
+    # Even when the alias currently targets scratch, retargeting after
+    # qualification could change the exception's effective filesystem scope.
+    monkeypatch.setattr(subject, "SCRATCH_PARENT", tmp_path)
+    scratch = tmp_path / "mmx_codex01_offline_alias"
+    scratch.mkdir(mode=0o700)
+    inside = scratch / "real"
+    inside.mkdir()
+    (scratch / "alias").symlink_to(inside, target_is_directory=True)
+    with pytest.raises(ValueError):
+        subject.policy(scratch, deny_fixture=scratch / "alias" / "missing")
+
+
 def test_literal_disallows_ambiguous_profile_text():
     for value in ["not/absolute", "/tmp/new\n(allow network*)", "/tmp/\x00hidden"]:
         with pytest.raises(ValueError):
@@ -65,6 +106,17 @@ def test_credential_free_child_environment_has_no_ambient_authority(monkeypatch)
     assert env["HOME"] == "/private/tmp/test-isolation/home"
     assert env["CODEX_HOME"] == "/private/tmp/test-isolation/codex-home"
     assert env["PYTHONNOUSERSITE"] == "1"
+
+
+def test_sensitive_path_probe_cannot_enumerate_names_when_sandbox_fails_open():
+    source = Path(subject.__file__).read_text(encoding="utf-8")
+    section = source.split("for key, root in (", 1)[1].split(
+        'checks["outside_write_denied"]', 1
+    )[0]
+    assert "os.listdir(" not in section
+    assert "os.scandir(" not in section
+    assert "os.O_DIRECTORY" in section
+    assert "os.close(fd)" in section
 
 
 def test_negative_write_probe_cannot_create_a_host_file_even_if_denial_fails():
