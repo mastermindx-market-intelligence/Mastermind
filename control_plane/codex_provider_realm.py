@@ -903,6 +903,44 @@ class SubscriptionRealmOwner:
     _config_sha256: str
     _seal: object
 
+    def observe_native_capacity(self) -> dict[str, Any]:
+        """Produce current, secret-free native evidence, never availability.
+
+        There are no caller inputs. Enrollment/source identity comes from this
+        existing worker-local owner; the FP1B observer owns kernel boot
+        provenance. Private credential custody does not establish provider
+        authentication, health, cooling or remaining quota: those stay unknown
+        until their actual owners supply evidence. No Runtime state is changed.
+        """
+        from datetime import UTC, datetime
+        from ops.executive_os.host_capacity_probe import current_boot_reference
+        from ops.executive_os.capacity_source_contract import validate_native_identity_observation
+
+        if self._seal is not _SUBSCRIPTION_REALM_OWNER_SEAL:
+            _native_refuse()
+        enrollment = self.observe_capacity_enrollment()
+        boot_ref = current_boot_reference()
+        value = {
+            "schema": "mastermind.provider_native_realm_observation/v1",
+            "capacity_capability_id": enrollment["capacity_capability_id"],
+            "capability_generation": enrollment["capability_generation"],
+            "host_ref": enrollment["host_ref"], "boot_ref": boot_ref,
+            "realm_generation": enrollment["realm_generation"],
+            "enrollment_receipt_digest": enrollment["receipt_digest"],
+            "observed_at": datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+            "realm_auth": {"state": "unknown", "method": "unknown", "source_quality": "unknown"},
+            "provider_health": {"state": "unknown", "error_class": None,
+                                "scope": "unknown", "observed_at": None},
+            "cooling": {"active": None, "kind": None, "reset_at": None, "evidence": "unknown",
+                        "scope": "unknown", "observed_at": None},
+            "quota_horizons": [],
+            "last_provider_outcome": {"class": "unknown", "observed_at": None, "scope": "unknown"},
+            "source_receipt_digest": enrollment["source_receipt_digest"],
+        }
+        if self.observe_capacity_enrollment() != enrollment or current_boot_reference() != boot_ref:
+            _native_refuse()
+        return validate_native_identity_observation(value)
+
     def observe_capacity_enrollment(self) -> dict[str, Any]:
         """Bind the current finite MiniMax realm to its actual source registration.
 
