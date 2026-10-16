@@ -1,5 +1,10 @@
 # Opus / original-M2 release frontier — Ubuntu Fabric thermal + sparse worker creation
 
+> **Current-state supersession (2026-10-16 09:33 UTC): `DO_NOT_REAPPLY_COMBINED_PATCH`.** Macro #9194 was merged on 2026-10-15 (`40abd9bd`), and the incumbent M2 `fabric_task.py`, `remote_sub.sh`, `remote_sub_exec.py`, and `support_bundle.py` already contain the scoped sparse/CPU-worker integration. The original 31-source support generation `8172955c...` was independently observed on all four Ubuntu hosts. Do **not** replay the historical combined patch, replace an immutable generation, or equate source installation with a qualified/accepted paid worker. Ubuntu0/2 donor helpers were observed at reviewed blob `75297acb...`; Ubuntu1/3 donors remained dirty on older `296e47ba...`, so no force reset, unreviewed overlay, or old-worktree conversion. Current new-job host ceilings remain 12/18/12/12; Ubuntu2/3 Tctl admission is 80°C, with all physical thermal, disk, load, provider, lease, root/parent, and effect-unknown gates retained. No 12-way CPU-heavy acceptance or attended BIOS/cooler acceptance is claimed.
+>
+> **Operator correction:** The numbered historical install/apply steps below are not a current action list. Reconcile the incumbent M2 source and current protected branch before any distinct remaining release step; never retry earlier AccessDenied effects.
+
+
 **Recovered:** 2026-10-15 UTC, direct Chairman commission to keep working, with optional Opus handoff if a real release/human boundary remains. **Status:** SOURCE_READY / TESTED / RELEASE_AND_HARDWARE_UNPROVEN. This is a compact recovery frontier, not a second orchestrator, request queue, new authorization, or grant to replace existing worker custody.
 
 ## DONE_WHEN

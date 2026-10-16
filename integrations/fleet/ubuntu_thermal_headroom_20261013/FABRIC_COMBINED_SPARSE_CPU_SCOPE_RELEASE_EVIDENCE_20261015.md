@@ -1,5 +1,10 @@
 # One original Fabric launch: sparse mint + CPU-budget scope
 
+> **Current-state supersession (2026-10-16 09:33 UTC): `DO_NOT_REAPPLY_COMBINED_PATCH`.** Macro #9194 was merged on 2026-10-15 (`40abd9bd`), and the incumbent M2 `fabric_task.py`, `remote_sub.sh`, `remote_sub_exec.py`, and `support_bundle.py` already contain the scoped sparse/CPU-worker integration. The original 31-source support generation `8172955c...` was independently observed on all four Ubuntu hosts. Do **not** replay the historical combined patch, replace an immutable generation, or equate source installation with a qualified/accepted paid worker. Ubuntu0/2 donor helpers were observed at reviewed blob `75297acb...`; Ubuntu1/3 donors remained dirty on older `296e47ba...`, so no force reset, unreviewed overlay, or old-worktree conversion. Current new-job host ceilings remain 12/18/12/12; Ubuntu2/3 Tctl admission is 80°C, with all physical thermal, disk, load, provider, lease, root/parent, and effect-unknown gates retained. No 12-way CPU-heavy acceptance or attended BIOS/cooler acceptance is claimed.
+>
+> **Evidence correction:** The opening `SOURCE_READY / TESTED_IN_ISOLATION / NOT_INSTALLED` describes the earlier isolated candidate at the date of that test, not the current installed M2 controller. The originally recorded test receipts remain historical evidence.
+
+
 **Verified October 15, 2026 UTC. State: SOURCE_READY / TESTED_IN_ISOLATION / NOT_INSTALLED / NOT_RELEASED.** This is an integration of the **existing** original Fabric run, host/provider/physical admission, immutable support and result/settlement owners. It creates no second broker, worker queue, native RuntimeBinding, cleanup daemon, retry plane or power-management authority.
 
 ## Why these two changes must be one source update

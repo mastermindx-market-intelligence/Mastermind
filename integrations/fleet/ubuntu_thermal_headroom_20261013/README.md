@@ -1,5 +1,10 @@
 # Ubuntu Fabric thermal headroom — 2026-10-13
 
+> **Current-state supersession (2026-10-16 09:33 UTC): `DO_NOT_REAPPLY_COMBINED_PATCH`.** Macro #9194 was merged on 2026-10-15 (`40abd9bd`), and the incumbent M2 `fabric_task.py`, `remote_sub.sh`, `remote_sub_exec.py`, and `support_bundle.py` already contain the scoped sparse/CPU-worker integration. The original 31-source support generation `8172955c...` was independently observed on all four Ubuntu hosts. Do **not** replay the historical combined patch, replace an immutable generation, or equate source installation with a qualified/accepted paid worker. Ubuntu0/2 donor helpers were observed at reviewed blob `75297acb...`; Ubuntu1/3 donors remained dirty on older `296e47ba...`, so no force reset, unreviewed overlay, or old-worktree conversion. Current new-job host ceilings remain 12/18/12/12; Ubuntu2/3 Tctl admission is 80°C, with all physical thermal, disk, load, provider, lease, root/parent, and effect-unknown gates retained. No 12-way CPU-heavy acceptance or attended BIOS/cooler acceptance is claimed.
+>
+> **Source-owner correction:** Earlier prose calling the combined patch prospective, or treating old policy snapshots as current derates, is historical. The adjacent installed-source regression and PR #1404 own source convergence; Web Fabric integration #1457 owns only its separate Web/Worker MCP surface.
+
+
 **Status:** Installed and observed on the existing M2 Fabric controller; independent source-record draft. NOT proof of sustained physical cooling. This is **not** the separate, held Ubuntu 0/3 host telemetry deployment in PR #1363. No denied host-side activation was retried, and no existing worker, lease, or provider was migrated.
 
 ## Verified current-policy fence — 2026-10-15 23:44 UTC
