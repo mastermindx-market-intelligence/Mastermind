@@ -109,6 +109,8 @@ def artifact_snapshot(run_id, root):
     manifest = reader.strict_json(raw['support'])
     run_observation.validate_artifact_files(manifest)
     validator = delivery.original_validator_context(manifest)
+    if validator is None:
+        import artifact_production as validator
     contract = validator.parse_packet(raw['packet'].decode('utf-8'))
     if (contract is None or any(contract[k] != v for k,v in
             {'run_id':run_id, 'root':root, 'parent':parent,
@@ -170,11 +172,17 @@ def request_for(run_id, root, *, support_metadata_only=False, original_parent=No
 
 def validate_request(request):
     if (type(request) is not dict or type(request.get('run_id')) is not str
-            or type(request.get('root')) is not str or request.get('observe_pid') is not False
-            or request != request_for(request.get('run_id'), request.get('root'),
-                                      original_parent=request.get('parent') if request.get('kind')=='ordinary_artifact' else None,
-                                      support_metadata_only=request.get('support_metadata_only',False))):
+            or type(request.get('root')) is not str or request.get('observe_pid') is not False):
         raise ValueError('observation_request_mismatch')
+    if request.get('kind') == 'ordinary_artifact':
+        current, evidence = artifact_snapshot(request['run_id'], request['root'])
+    else:
+        current = request_for(request['run_id'], request['root'],
+                              support_metadata_only=request.get('support_metadata_only',False))
+        evidence = None
+    if request != current:
+        raise ValueError('observation_request_mismatch')
+    return evidence
 
 
 def qualify_bytes(request, scope, raw):
@@ -232,11 +240,8 @@ def qualify_bytes(request, scope, raw):
 
 
 def qualify(request, *, observed_log=None):
-    validate_request(request)
+    evidence = validate_request(request)
     if request.get('kind') == 'ordinary_artifact':
-        current, evidence = artifact_snapshot(request['run_id'], request['root'])
-        if current != request:
-            raise ValueError('observation_sources_changed')
         return evidence
     scope = SCOPES[request['run_id']]
     paths = {'log': delivery.HERE/'state/remote_sub'/(request['run_id']+'.log'),

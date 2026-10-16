@@ -13,6 +13,8 @@ import fabric_task
 import run_observation as remote
 import run_observation_delivery as observation
 
+REAL_VALIDATOR_SELECTOR = delivery.original_validator_context
+
 
 def digest(value):
     return hashlib.sha256(value).hexdigest()
@@ -80,6 +82,36 @@ def test_general_original_parent_without_per_run_allowlist(original):
     assert evidence['account_binding']=='retained_original_broker_row'
     assert 'lease_id' not in req and 'account' not in req
     assert req['artifact']['packet_sha256']==digest(o['packet'])
+
+
+def test_current_producer_uses_incumbent_default_validator(original,monkeypatch):
+    # The real selector returns None when the installed producer matches the
+    # support manifest. Only historical generations return a context object.
+    monkeypatch.setattr(delivery,'original_validator_context',lambda _:None)
+    o=original
+    req=request(o)
+    assert req['artifact']['contract']==production.parse_packet(o['packet'].decode())
+
+
+def test_current_producer_real_selector_contract(original,monkeypatch):
+    o=original
+    for module in (production,reader):
+        path=Path(module.__file__)
+        raw=path.read_bytes()
+        (o['home']/path.name).write_bytes(raw)
+        o['manifest'][path.name]=digest(raw)
+    support=digest(reader.canonical({'schema':'remote-support-code.v1','files':o['manifest']}))
+    packet=production.encode_packet('bounded input',root=o['root'],parent=o['parent'],
+        run_id=o['rid'],names=['patch.diff'],support_digest=support).encode()
+    o['packet_path'].write_bytes(packet)
+    (o['state']/(o['rid']+'.support.json')).write_bytes(reader.canonical(o['manifest']))
+    o['binding'].update(packet_sha256=digest(packet),support_digest=support)
+    o['events'][3]=f'SUPPORT_VERSION_READY digest={support} policy='+('c'*64)
+    o['events'][4]='LAUNCH_BINDING '+json.dumps(o['binding'])
+    o['log'].write_bytes(o['log_bytes']())
+    monkeypatch.setattr(delivery,'original_validator_context',REAL_VALIDATOR_SELECTOR)
+    assert REAL_VALIDATOR_SELECTOR(o['manifest']) is None
+    assert request(o)['artifact']['contract']==production.parse_packet(packet.decode())
 
 
 def test_legacy_unknown_scope_remains_closed(original):
@@ -262,3 +294,30 @@ def test_permission_denial_stops_observation_without_alternate_read(original,mon
     assert report['request_stopped'] is True and calls==['reader']
     envelope={'schema':req['schema'],'request_sha256':digest(reader.canonical(req)),'report':report}
     assert observation.validate_response(reader.canonical(envelope),req)==report
+
+
+def test_one_broker_snapshot_per_qualification(original,monkeypatch):
+    o=original;req=request(o);calls=[]
+    monkeypatch.setattr(delivery,'retained_lease',lambda *a,**k:(calls.append(a) or o['lease']))
+    observation.qualify(req)
+    assert len(calls)==1
+
+
+def test_remote_and_local_report_limits_match(original,monkeypatch):
+    class Denied:
+        def __init__(self,*a,**k):raise PermissionError(13,'inert refusal')
+    monkeypatch.setattr(remote,'Reader',Denied)
+    o=original
+    assert remote.observe(o['rid'],o['support'])['limits']==observation.LIMITS
+    for name in ('SUPPORT_METADATA_LIMITS','SUPPORT_METADATA_RUN','SUPPORT_METADATA_MAX_COMPONENTS'):
+        assert getattr(remote,name)==getattr(observation,name)
+
+
+def test_maximum_valid_contract_fits_fixed_transport(original):
+    o=original;req=request(o);contract=req['artifact']['contract']
+    for key in ('root','parent','run_id'):
+        contract[key]='r'*128;req[key]=contract[key]
+    req['host']='h'*128
+    contract['names']=[str(i)+'n'*127 for i in range(8)]
+    production.validate_contract(contract)
+    assert len(reader.canonical(req))<=8192

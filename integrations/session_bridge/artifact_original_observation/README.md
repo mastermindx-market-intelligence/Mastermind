@@ -32,8 +32,18 @@ permission refusals remain binding: this capability never authorizes replaying a
 refused read through a newly admitted route. The motivating App worker and all
 other live workers retain their original assigning parent and controller.
 
-Validation:111 affected inert checks pass against the actual candidates; four additional fixed support-closure checks also pass. The
-legacy test loader gained an optional source directory so its unchanged cases
-exercise installed/candidate bytes rather than accidentally testing its old copy.
-One independent read-risk review is pending. No original App remote observation
+Validation: 120 affected checks pass against the final candidate, including the
+legacy observation and lineage cases. Two reproduced failures were corrected:
+the current producer selector returns `None` for its default validator, and
+qualification previously read the broker twice. The final path uses the actual
+default validator and one broker snapshot per qualification while retaining each
+pre/post-read and publication guard.
+
+The one independent paid read-risk review returned concrete findings. The parent
+resolved error handling and duplicate snapshot findings, verified the exact
+incumbent launch template and existing local contract validation, and added a
+report-limit parity check. The worker exceeded its 8,000-character output bound
+(9,287 characters), so it remains NOT_ACCEPTED and no accept command was run.
+Source findings were adjudicated separately; repairs were checked by the parent,
+not described as an independent second review. No original App remote observation
 or worker effect has been performed by this source author.
