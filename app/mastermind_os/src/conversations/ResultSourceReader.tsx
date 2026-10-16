@@ -5,7 +5,48 @@ import { decodeResultEnvelope, normalizeResultSelection, type ResultSelection } 
 import { projectOffice, type OfficeProjection, type ProjectedRead } from "../meta-ceo/projection";
 import type { DraftInsertion, DraftSource } from "./drafts";
 
+const READER_ZH: Record<string, string> = {
+  "Result source reader": "结果来源阅读器",
+  "Result source": "结果来源",
+  "Back to evidence": "返回证据",
+  "A bounded Executive result. Review and acceptance remain separate.": "受限的 Executive 结果。审阅与验收仍相互独立。",
+  "Reading the exact result…": "正在读取精确结果…",
+  "Result content is unavailable. No excerpt can be added.": "结果内容不可用。无法加入摘要。",
+  "observation · Freshness unverified · Acceptance not projected": "观测 · 新鲜度未经核验 · 未提供验收状态",
+  "Exact summary excerpt": "精确摘要片段",
+  "Source label for the draft": "草稿的来源标签",
+  "Add result summary to draft": "将结果摘要加入草稿",
+  "An eligible scoped draft is unavailable. Reading does not create one.": "没有符合条件且范围明确的草稿。读取不会创建草稿。",
+  "Undo source insertion": "撤销来源插入",
+  "The draft has changed. Automatic removal is unavailable.": "草稿已更改。无法自动移除。",
+  "Edit draft": "编辑草稿",
+  "Return to evidence and reopen this result to review the current draft before adding.": "请返回证据并重新打开此结果，审阅当前草稿后再加入。",
+  "Read details": "读取详情",
+  "Exact source details": "精确来源详情",
+  "Work reference": "工作引用",
+  "Root Job": "根任务",
+  "Job": "任务",
+  "Attempt": "执行尝试",
+  "Result envelope digest": "结果封装摘要",
+  "Owner": "所有者",
+  "Role result digest": "角色结果摘要",
+  "Locally acquired": "本地获取",
+  "Source time": "来源时间",
+  "Not supplied": "未提供",
+  "Coverage": "覆盖范围",
+  "Bounded result": "受限结果",
+  "Complete returned content": "完整返回内容",
+  "Partial returned content": "部分返回内容",
+  "Added to draft · Not sent": "已加入草稿 · 未发送",
+  "The original draft changed or is unavailable. Return to review it before adding.": "原始草稿已更改或不可用。请返回审阅后再加入。",
+  "Source insertion removed. Your original draft is preserved.": "已移除来源插入。原始草稿已保留。",
+  "The draft changed. Edit the draft to preserve your newer text.": "草稿已更改。请编辑草稿以保留较新的文字。",
+  "Recheck exact result": "重新核对精确结果",
+  "Closing stops this display read. It does not stop work or resolve an original operation.": "关闭只会停止此次显示读取，不会停止工作，也不会核定原操作的结果。"
+};
+
 export interface ResultSourceReaderProps {
+  locale?: "en" | "zh-CN";
   projection: OfficeProjection;
   selection: ResultSelection;
   readResult: MissionResultRead;
@@ -23,7 +64,8 @@ type ReadState = { kind: "loading" } | { kind: "unavailable" } | { kind: "read";
 /** Existing fixed Result read only. The parent keys this view by its exact
  * auth/selection/paired-observation boundary. No generic source URL or cache. */
 export function ResultSourceReader({ projection, selection, readResult, draftRevision,
-  draftInsertion, appendAvailable, onAppend, onUndo, onEditDraft, onClose }: ResultSourceReaderProps) {
+  draftInsertion, appendAvailable, onAppend, onUndo, onEditDraft, onClose, locale = "en" }: ResultSourceReaderProps) {
+  const t = (text: string) => locale === "zh-CN" ? READER_ZH[text] ?? text : text;
   const [read, setRead] = useState<ReadState>({ kind: "loading" });
   const [notice, setNotice] = useState("");
   const originalDraftRevision = useRef(draftRevision);
@@ -86,19 +128,19 @@ export function ResultSourceReader({ projection, selection, readResult, draftRev
   const unchanged = draftRevision === originalDraftRevision.current;
   const canUndo = !!added && draftRevision === added.revision;
   return <section ref={region} tabIndex={-1} className="conversation-companion conversation-result-reader"
-    role="region" aria-label="Result source reader" onKeyDown={event => {
+    role="region" aria-label={t("Result source reader")} onKeyDown={event => {
       if (event.key === "Escape" && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
         event.stopPropagation(); onClose();
       }
     }}>
-    <header><h2>Result source</h2><button type="button" onClick={onClose}>Back to evidence</button></header>
+    <header><h2>{t("Result source")}</h2><button type="button" onClick={onClose}>{t("Back to evidence")}</button></header>
     <p>{selection.workRef} · {selection.jobId}</p>
-    <p>A bounded Executive result. Review and acceptance remain separate.</p>
-    {read.kind === "loading" ? <p role="status">Reading the exact result…</p> : <>
-      {!summary ? <p role="status">Result content is unavailable. No excerpt can be added.</p> : <>
-        <p>{qualified!.source.state} observation · Freshness unverified · Acceptance not projected</p>
-        <h3>Exact summary excerpt</h3><blockquote className="conversation-source-excerpt">{summary}</blockquote>
-        <details><summary>Source label for the draft</summary><p>{source!.label}</p></details>
+    <p>{t("A bounded Executive result. Review and acceptance remain separate.")}</p>
+    {read.kind === "loading" ? <p role="status">{t("Reading the exact result…")}</p> : <>
+      {!summary ? <p role="status">{t("Result content is unavailable. No excerpt can be added.")}</p> : <>
+        <p>{qualified!.source.state} {t("observation · Freshness unverified · Acceptance not projected")}</p>
+        <h3>{t("Exact summary excerpt")}</h3><blockquote className="conversation-source-excerpt">{summary}</blockquote>
+        <details><summary>{t("Source label for the draft")}</summary><p>{source!.label}</p></details>
         <button type="button" disabled={!appendAvailable || !!added || !unchanged} onKeyDown={event => {
           if (event.key === "Enter" && (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault();
         }} onClick={() => {
@@ -106,30 +148,30 @@ export function ResultSourceReader({ projection, selection, readResult, draftRev
           setNotice(onAppend(source, originalDraftRevision.current)
             ? "Added to draft · Not sent"
             : "The original draft changed or is unavailable. Return to review it before adding.");
-        }}>Add result summary to draft</button>
-        {!appendAvailable && <p>An eligible scoped draft is unavailable. Reading does not create one.</p>}
+        }}>{t("Add result summary to draft")}</button>
+        {!appendAvailable && <p>{t("An eligible scoped draft is unavailable. Reading does not create one.")}</p>}
         {canUndo ? <button type="button" onClick={() => {
           setNotice(onUndo(added!.source.identity, draftRevision)
             ? "Source insertion removed. Your original draft is preserved."
             : "The draft changed. Edit the draft to preserve your newer text.");
-        }}>Undo source insertion</button> : (added || !unchanged) && <>
-          <p>The draft has changed. Automatic removal is unavailable.</p><button type="button" onClick={onEditDraft}>Edit draft</button>
+        }}>{t("Undo source insertion")}</button> : (added || !unchanged) && <>
+          <p>{t("The draft has changed. Automatic removal is unavailable.")}</p><button type="button" onClick={onEditDraft}>{t("Edit draft")}</button>
         </>}
-        {!added && !unchanged && <p>Return to evidence and reopen this result to review the current draft before adding.</p>}
+        {!added && !unchanged && <p>{t("Return to evidence and reopen this result to review the current draft before adding.")}</p>}
       </>}
-      {qualified?.reason && <details><summary>Read details</summary><p>{qualified.reason}</p></details>}
+      {qualified?.reason && <details><summary>{t("Read details")}</summary><p>{qualified.reason}</p></details>}
     </>}
-    <details><summary>Exact source details</summary>
-      <dl><dt>Work reference</dt><dd>{selection.workRef}</dd><dt>Root Job</dt><dd>{selection.rootJobId}</dd>
-        <dt>Job</dt><dd>{selection.jobId}</dd><dt>Attempt</dt><dd>{selection.attemptId}</dd>
-        <dt>Result envelope digest</dt><dd>{selection.resultEnvelopeDigest}</dd>
-        {summary && <><dt>Owner</dt><dd>{qualified!.source.owner}</dd><dt>Role result digest</dt><dd>{result!.role_result_digest}</dd>
-          <dt>Locally acquired</dt><dd>{qualified!.source.observed_at}</dd><dt>Source time</dt><dd>Not supplied</dd>
-          <dt>Coverage</dt><dd>Bounded result · {result!.content_complete ? "Complete returned content" : "Partial returned content"}</dd></>}
+    <details><summary>{t("Exact source details")}</summary>
+      <dl><dt>{t("Work reference")}</dt><dd>{selection.workRef}</dd><dt>{t("Root Job")}</dt><dd>{selection.rootJobId}</dd>
+        <dt>{t("Job")}</dt><dd>{selection.jobId}</dd><dt>{t("Attempt")}</dt><dd>{selection.attemptId}</dd>
+        <dt>{t("Result envelope digest")}</dt><dd>{selection.resultEnvelopeDigest}</dd>
+        {summary && <><dt>{t("Owner")}</dt><dd>{qualified!.source.owner}</dd><dt>{t("Role result digest")}</dt><dd>{result!.role_result_digest}</dd>
+          <dt>{t("Locally acquired")}</dt><dd>{qualified!.source.observed_at}</dd><dt>{t("Source time")}</dt><dd>{t("Not supplied")}</dd>
+          <dt>{t("Coverage")}</dt><dd>{t("Bounded result")} · {t(result!.content_complete ? "Complete returned content" : "Partial returned content")}</dd></>}
       </dl>
     </details>
-    {(notice || added) && <p ref={actionStatus} tabIndex={-1} role="status">{notice || "Added to draft · Not sent"}</p>}
-    <button type="button" disabled={read.kind === "loading"} onClick={() => { void acquire(); }}>Recheck exact result</button>
-    <p>Closing stops this display read. It does not stop work or resolve an original operation.</p>
+    {(notice || added) && <p ref={actionStatus} tabIndex={-1} role="status">{t(notice || "Added to draft · Not sent")}</p>}
+    <button type="button" disabled={read.kind === "loading"} onClick={() => { void acquire(); }}>{t("Recheck exact result")}</button>
+    <p>{t("Closing stops this display read. It does not stop work or resolve an original operation.")}</p>
   </section>;
 }
