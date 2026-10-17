@@ -29,11 +29,11 @@ routing:
   cursor_grok_monthly_share:
     enabled: true
     percent: 15
-    task_classes: [reviewer, audit, repair]
+    task_classes: [operator, repair]
 ```
 
 - Disabled by default. Strict `enabled: true`, integer percentage **1–20**
-  and an explicit subset of existing judgment classes are required.
+  and an explicit subset of **operator/repair** classes are required.
 - Only a proven active `GROK_EXHAUSTED` marker selects the cohort.
   A quota screenshot, old sentinel, or unknown reset time must be separately
   reconciled by the incumbent quota owner; this overlay does not infer one.
@@ -43,6 +43,10 @@ routing:
 - Only explicitly classified **C2_COMPLEX_BOUNDED** judgment is eligible;
   C0/C1, C3, unknown complexity, explicit `prefer` and missing/invalid
   route keys **never** enter this cohort.
+- The sampler deliberately excludes `reviewer`, `review`, `audit` and `verify`:
+  the historical source fixture evaluates `audit`/`review`/`verify` on the
+  execute path, while `reviewer` does not inherit R33's subject-author
+  independence checks. An override must not claim independent review proof.
 - All admitted candidates still pass incumbent role, subject/reviewer
   independence, model needs, capacity, host, account, economics and native
   route gates. A failed Cursor candidate falls back to the original judgment
@@ -71,13 +75,13 @@ Do not auto-charge credits to make sampling succeed.
 
 1. Hermetic source fixture: `python3 -m unittest tests/test_native_fabric_cursor_grok_monthly_share_20261017.py -v`.
    Patch applies with `--fuzz=0` and AST compiles, with distribution,
-   policy, reviewer/labor/C3, exhaustion and preference gates.
+   policy, no-review/no-labor/C3, exhaustion and preference gates.
 2. Prestart route previews on the *actual* installed source: bounded
    percentage of distinct eligible judgment route keys choose
    `POOL=cursor MODEL=cursor-grok-4.6-high` with
    `ROUTE_ALLOC=cursor_grok_monthly_share` only when all other gates pass.
-   No `POOL=cursor` on unknown/stale Grok exhaustion, independent Grok-authored
-   review, failed eligibility, or C0/C1 labor.
+   No cohort `POOL=cursor` on unknown/stale Grok exhaustion, reviewer-class
+   work, failed eligibility, or C0/C1 labor.
 3. One admitted actual worker START, COMPLETED result consumed by its parent,
    settled processes and Cursor provider usage attributed to that operation.
    A successful selection/CI check or the Cursor UI graph alone is not enough.
