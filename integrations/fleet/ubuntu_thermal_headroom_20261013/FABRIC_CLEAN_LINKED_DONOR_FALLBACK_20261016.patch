@@ -1,6 +1,6 @@
 --- a/remote_sub_exec.py
 +++ b/remote_sub_exec.py
-@@ -117,12 +117,66 @@
+@@ -117,12 +117,69 @@
  # deployment fence, not permission to install that draft into an old host.
  # Any source revision requires new review/test and an explicit hash update.
  _MACRO_FABRIC_SPARSE_BLOB = "75297acb10d0cef4d01730a59fdcad19c7cfd3e6"
@@ -61,13 +61,22 @@
 +            or inspect("rev-parse", "HEAD") != _MACRO_REVIEWED_MERGE
 +            or inspect("rev-parse", "HEAD:scripts/worktree_sparse.py") != _MACRO_FABRIC_SPARSE_BLOB
 +            or inspect("status", "--porcelain=v1", "--untracked-files=all")
++            # Ignored source files can shadow stdlib imports without appearing
++            # in porcelain. Every ignored object in this dedicated donor refuses.
++            or inspect("ls-files", "--others", "--ignored", "--exclude-standard", "-z")
 +            or inspect("config", "--get", "core.sparseCheckout") != "true"):
 +        raise SparseWorkspaceRefused("FABRIC_SPARSE_REVIEWED_DONOR_UNQUALIFIED")
 +    return alternate
  
  
  def _new_macro_workspace(key: str, cwd: str, here: Path, env: dict,
-@@ -148,31 +202,36 @@
+@@ -143,49 +200,70 @@
+             or not os.environ.get("POOL_LEASE_ID")):
+         raise SparseWorkspaceRefused("FABRIC_SPARSE_SCOPE_REFUSED")
+     donor = Path.home() / "lanes" / "repos" / "macro"
++    original_donor = donor
+     try:
+         if Path(cwd).resolve(strict=True) != donor.resolve(strict=True):
              raise SparseWorkspaceRefused("FABRIC_SPARSE_DONOR_REFUSED")
      except (OSError, RuntimeError) as exc:
          raise SparseWorkspaceRefused("FABRIC_SPARSE_DONOR_UNAVAILABLE") from exc
@@ -129,7 +138,36 @@
      destination = Path.home() / "lanes" / "wt" / key
      if os.path.lexists(destination):
          raise SparseWorkspaceRefused("FABRIC_SPARSE_DESTINATION_EXISTS")
-@@ -229,7 +288,10 @@
+     receipt = here / "lanes" / (key + ".workspace-mint.process.jsonl")
+     if os.path.lexists(receipt):
+         raise SparseWorkspaceRefused("FABRIC_SPARSE_MINT_RECEIPT_EXISTS")
++    if donor != original_donor:
++        # Requalify immediately before the new process starts. The filesystem
++        # cannot be transaction-locked by status; Python -I closes the import
++        # search-path injection even if an ignored module appears afterward.
++        if _clean_linked_sparse_donor(original_donor) != donor:
++            raise SparseWorkspaceRefused("FABRIC_SPARSE_REVIEWED_DONOR_DRIFT")
++        try:
++            prelaunch = helper.lstat()
++            if ((prelaunch.st_dev, prelaunch.st_ino, prelaunch.st_size,
++                 prelaunch.st_mtime_ns) !=
++                (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
++                 or helper.read_bytes() != content):
++                raise SparseWorkspaceRefused("FABRIC_SPARSE_HELPER_CHANGED")
++        except OSError as exc:
++            raise SparseWorkspaceRefused("FABRIC_SPARSE_HELPER_CHANGED") from exc
+     # Only the invocation of the approved Macro owner receives the one-shot
+     # flag. Do not leak it into the subsequent model's shell environment.
+     mint_env = dict(env)
+     mint_env["MASTERMIND_FABRIC_SPARSE_NEW"] = "1"
+     try:
+         result = run_owned_process(
+-            [sys.executable, str(helper), "fabric-mint", key, commit],
++            [sys.executable, "-I", str(helper), "fabric-mint", key, commit],
+             cwd=str(donor), timeout=180.0, env=mint_env, nice=config.nice,
+             label=key + ":workspace-mint", receipt_path=receipt,
+             timeout_returncode=124,
+@@ -229,7 +307,10 @@
      try:
          dstat = destination.lstat()
          gstat = (destination / ".git").lstat()

@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import stat
 import subprocess
+import sys
 
 import pytest
 
@@ -20,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PATCH = (ROOT / "integrations" / "fleet" /
          "ubuntu_thermal_headroom_20261013" /
          "FABRIC_CLEAN_LINKED_DONOR_FALLBACK_20261016.patch")
-PATCH_SHA256 = "666e67daa6c3c980801defd5657e8b7c3be85ef3ce5b23b3cd586c7628107dd5"
+PATCH_SHA256 = "354134d103a0cd04f838985e7cce2f291b92bf0a0786e857df004dd9c6be15ef"
 OLD_BLOB = "296e47bab2d28f9a019e81b5aef76eeea62a6cc3"
 REVIEWED_BLOB = "75297acb10d0cef4d01730a59fdcad19c7cfd3e6"
 REVIEWED_MERGE = "40abd9bd2291997cc066f30b408a1e670124cec4"
@@ -153,8 +154,53 @@ def test_source_patch_preserves_lease_and_capacity_owners():
     assert "hosts.json" not in patch
     assert "max_active" not in patch
     assert "LaneLease.acquire" not in patch
+    assert '+            or inspect("ls-files", "--others", "--ignored", "--exclude-standard", "-z")' in patch
+    assert '+            [sys.executable, "-I", str(helper), "fabric-mint", key, commit],' in patch
+    assert '+        if _clean_linked_sparse_donor(original_donor) != donor:' in patch
     assert "fabric-mint" not in patch.split("+def _clean_linked_sparse_donor", 1)[1].split(" def _new_macro_workspace", 1)[0]
     assert '+        if attempt == 0 and git_blob == _MACRO_PREMERGE_SPARSE_BLOB:' in patch
     assert '+            donor = _clean_linked_sparse_donor(donor)' in patch
     assert '+            raise SparseWorkspaceRefused("FABRIC_SPARSE_HELPER_BLOB_MISMATCH")' in patch
     assert 'donor_git = Path(git_value(donor, "rev-parse", "--path-format=absolute",' in patch
+
+def test_ignored_untracked_stdlib_shadow_refused_by_reviewed_donor(repository):
+    orig, alt, rev, body, _ = repository
+    # The ignore rule is tracked by the reviewed worktree commit; the malicious
+    # Python file is not. --porcelain alone falsely reports this checkout clean.
+    (alt / ".gitignore").write_text("scripts/json.py\n")
+    _git(alt, "add", ".gitignore")
+    _git(alt, "commit", "-qm", "fixture ignore rule")
+    reviewed_head = _git(alt, "rev-parse", "HEAD")
+    (alt / "scripts" / "json.py").write_text("raise RuntimeError('shadow')\n")
+    assert _git(alt, "status", "--porcelain=v1", "--untracked-files=all") == ""
+    assert "scripts/json.py" in _git(
+        alt, "ls-files", "--others", "--ignored", "--exclude-standard", "-z"
+    )
+    with pytest.raises(SparseWorkspaceRefused, match="REVIEWED_DONOR_UNQUALIFIED"):
+        _patched_donor_validator(reviewed_head, _blob(body))(orig)
+
+
+def test_isolated_python_invocation_blocks_late_shadow_import(tmp_path):
+    """Even if a file appears after validation, -I excludes scripts/."""
+    patch = PATCH.read_text()
+    assert '[sys.executable, "-I", str(helper), "fabric-mint", key, commit]' in patch
+    directory = tmp_path / "scripts"
+    directory.mkdir()
+    sentinel = tmp_path / "shadow-executed"
+    helper = directory / "helper.py"
+    helper.write_text("import json\nprint('stdlib-import-finished')\n")
+    (directory / "json.py").write_text(
+        "from pathlib import Path\n"
+        + "Path(" + repr(str(sentinel)) + ").write_text('injected')\n"
+    )
+    nonisolated = subprocess.run(
+        [sys.executable, str(helper)], capture_output=True, text=True, timeout=8
+    )
+    assert nonisolated.returncode == 0 and sentinel.is_file()
+    sentinel.unlink()
+    isolated = subprocess.run(
+        [sys.executable, "-I", str(helper)], capture_output=True, text=True, timeout=8
+    )
+    assert isolated.returncode == 0
+    assert "stdlib-import-finished" in isolated.stdout
+    assert not sentinel.exists()
