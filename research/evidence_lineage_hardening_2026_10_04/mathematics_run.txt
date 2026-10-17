@@ -1,0 +1,24 @@
+test_01_zero_correlation_nonlinear_dependence (__main__.MathematicalChecks.test_01_zero_correlation_nonlinear_dependence) ... ok
+test_02_zero_correlation_does_not_zero_mutual_information (__main__.MathematicalChecks.test_02_zero_correlation_does_not_zero_mutual_information) ... ok
+test_03_xor_all_pairs_independent (__main__.MathematicalChecks.test_03_xor_all_pairs_independent) ... ok
+test_04_xor_not_mutually_independent (__main__.MathematicalChecks.test_04_xor_not_mutually_independent) ... ok
+test_05_xor_pairwise_target_screen_misses_synergy (__main__.MathematicalChecks.test_05_xor_pairwise_target_screen_misses_synergy) ... ok
+test_06_exact_positive_clone (__main__.MathematicalChecks.test_06_exact_positive_clone) ... ok
+test_07_negative_clone_is_one_dimension (__main__.MathematicalChecks.test_07_negative_clone_is_one_dimension) ... ok
+test_08_high_correlation_can_retain_target_information (__main__.MathematicalChecks.test_08_high_correlation_can_retain_target_information) ... ok
+test_09_equal_weight_variance_and_effective_count (__main__.MathematicalChecks.test_09_equal_weight_variance_and_effective_count) ... ok
+test_10_spectral_rank_is_not_same_effective_count (__main__.MathematicalChecks.test_10_spectral_rank_is_not_same_effective_count) ... ok
+test_11_pairwise_matrix_can_fail_psd (__main__.MathematicalChecks.test_11_pairwise_matrix_can_fail_psd) ... ok
+test_12_zero_variance_correlation_is_undefined (__main__.MathematicalChecks.test_12_zero_variance_correlation_is_undefined) ... ok
+test_13_independent_noise_need_not_add_prediction (__main__.MathematicalChecks.test_13_independent_noise_need_not_add_prediction) ... ok
+test_14_duplicate_likelihood_multiplies_false_confidence (__main__.MathematicalChecks.test_14_duplicate_likelihood_multiplies_false_confidence) ... ok
+test_15_invertible_transform_adds_no_new_observation (__main__.MathematicalChecks.test_15_invertible_transform_adds_no_new_observation) ... ok
+test_16_training_decorrelation_does_not_constrain_future_covariance (__main__.MathematicalChecks.test_16_training_decorrelation_does_not_constrain_future_covariance) ... ok
+test_17_threshold_connectivity_is_not_pairwise_equivalence (__main__.MathematicalChecks.test_17_threshold_connectivity_is_not_pairwise_equivalence) ... ok
+test_18_negative_correlation_can_reduce_risk_not_create_independent_origins (__main__.MathematicalChecks.test_18_negative_correlation_can_reduce_risk_not_create_independent_origins) ... ok
+
+----------------------------------------------------------------------
+Ran 18 tests in 0.001s
+
+OK
+{"errors": 0, "failures": 0, "source_sha256": "b4a73075db7c682e4b65cd131b11dc91bb5497f764ac432cafb52a8633e30e08", "successful": true, "tests_run": 18}

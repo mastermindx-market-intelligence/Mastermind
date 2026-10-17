@@ -1,0 +1,47 @@
+{
+  "errors": 0,
+  "failures": 0,
+  "illustrations": {
+    "five_signal_rho_0_8_variance_effective_count": 1.1904761904761905,
+    "invalid_pairwise_matrix_determinant": -2.888,
+    "near_clone_correlation": 0.9999500037496877,
+    "same_matrix_spectral_participation_ratio": 1.404494382022472,
+    "single_observation_posterior": 0.8,
+    "three_clone_naive_posterior": 0.9846153846153847,
+    "x_squared_covariance": 0,
+    "x_squared_mutual_information_bits": 0.9182958340544896
+  },
+  "limits": [
+    "No Mastermind or Macro production code imported or executed.",
+    "No repository suite, source accessor, historical data, or market outcomes executed.",
+    "No model fitting, independence certification, alpha claim, or production acceptance.",
+    "This is author-run verification, not an independent reviewer sign-off."
+  ],
+  "python_version": "3.13.5",
+  "schema": "commission7.mathematical_verification.v1",
+  "scope": "finite_synthetic_mathematical_counterexamples_only",
+  "skipped": 0,
+  "source_sha256": "b4a73075db7c682e4b65cd131b11dc91bb5497f764ac432cafb52a8633e30e08",
+  "successful": true,
+  "test_ids": [
+    "test_01_zero_correlation_nonlinear_dependence",
+    "test_02_zero_correlation_does_not_zero_mutual_information",
+    "test_03_xor_all_pairs_independent",
+    "test_04_xor_not_mutually_independent",
+    "test_05_xor_pairwise_target_screen_misses_synergy",
+    "test_06_exact_positive_clone",
+    "test_07_negative_clone_is_one_dimension",
+    "test_08_high_correlation_can_retain_target_information",
+    "test_09_equal_weight_variance_and_effective_count",
+    "test_10_spectral_rank_is_not_same_effective_count",
+    "test_11_pairwise_matrix_can_fail_psd",
+    "test_12_zero_variance_correlation_is_undefined",
+    "test_13_independent_noise_need_not_add_prediction",
+    "test_14_duplicate_likelihood_multiplies_false_confidence",
+    "test_15_invertible_transform_adds_no_new_observation",
+    "test_16_training_decorrelation_does_not_constrain_future_covariance",
+    "test_17_threshold_connectivity_is_not_pairwise_equivalence",
+    "test_18_negative_correlation_can_reduce_risk_not_create_independent_origins"
+  ],
+  "tests_run": 18
+}
