@@ -204,11 +204,27 @@ class ConditionalMovingBaseHTTP:
         )
 
 
+class MovingBaseRunner:
+    def __init__(self) -> None:
+        self.base = fx._ProbeRunner()
+
+    def __call__(self, command, **kwargs):
+        call = tuple(str(part) for part in command)
+        if "cat-file" in call and f"{NEW_BASE_SHA}^{{commit}}" in call:
+            return self.base._done()
+        if "diff" in call and f"{NEW_BASE_SHA}..{fx.HEAD_SHA}" in call:
+            return self.base._done(
+                stdout="\0".join(fx.FINAL_OWNED_PATHS) + "\0"
+            )
+        return self.base(command, **kwargs)
+
+
 def _run(module, http, capsys: pytest.CaptureFixture[str]) -> tuple[int, dict[str, object]]:
     exit_code = fx._run_cli(
         module,
         fx._cli_argv("remote-complete"),
         http=http,
+        runner=MovingBaseRunner(),
     )
     captured = capsys.readouterr()
     assert captured.err == ""
@@ -371,7 +387,7 @@ def test_conditional_same_head_metadata_churn_remains_acceptable(
 
 def test_closed_invocation_budgets_remain_unchanged() -> None:
     module = fx._cli_module()
-    assert module._MAX_COLLISION_PRS == 490
+    assert not hasattr(module, "_MAX_COLLISION_PRS")
     assert module._MAX_HTTP_CALLS == 1152
     assert module._MAX_HTTP_NORMALIZED_BYTES == 128 * 1024 * 1024
     assert module._HTTP_READ_BUDGET_SECONDS == 300.0
