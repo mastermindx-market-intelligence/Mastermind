@@ -15,6 +15,7 @@ unchanged five-minute read cache for historical indicative prices."""
 
 from __future__ import annotations
 
+import json
 import math
 import re
 import time
@@ -292,22 +293,155 @@ def qualifies_live_risk(t: dict | None) -> bool:
         return False
 
 
+_MAX_VERIFIED_OBSERVATION_BYTES = 32768
+
+
+def _bounded_observation_json(observation: dict | None) -> str | None:
+    """Bound traversal BEFORE JSON expansion, then stream one closed-size blob.
+
+    Fail closed on cycles, shared mutable container aliases, pathological
+    nesting, huge strings/numbers, untyped scalars or oversized output. A
+    32 KiB *post-hoc* check of json.dumps alone permits exponential expansion
+    of shared graphs before authentication and is not a resource bound.
+    """
+    if type(observation) is not dict:
+        return None
+    seen: set[int] = set()
+    count = 0
+
+    def preflight(value: object, depth: int) -> bool:
+        nonlocal count
+        count += 1
+        if count > 512 or depth > 12:
+            return False
+        kind = type(value)
+        if kind in (dict, list):
+            if id(value) in seen or len(value) > 64:
+                return False
+            seen.add(id(value))
+            if kind is dict:
+                return all(
+                    type(key) is str and len(key) <= 128
+                    and preflight(item, depth + 1)
+                    for key, item in value.items()
+                )
+            return all(preflight(item, depth + 1) for item in value)
+        if kind is str:
+            return len(value) <= 8192
+        if kind is int:
+            return value.bit_length() <= 8192
+        if kind is float:
+            return math.isfinite(value)
+        return kind is bool or value is None
+
+    if not preflight(observation, 0):
+        return None
+    try:
+        encoder = json.JSONEncoder(
+            sort_keys=True, ensure_ascii=True, allow_nan=False,
+            separators=(",", ":"),
+        )
+        chunks = []
+        size = 0
+        for chunk in encoder.iterencode(observation):
+            size += len(chunk)  # ensure_ascii ensures one byte per character
+            if size > _MAX_VERIFIED_OBSERVATION_BYTES:
+                return None
+            chunks.append(chunk)
+        return "".join(chunks)
+    except (TypeError, ValueError, OverflowError, RecursionError, UnicodeError):
+        return None
+
+
+def qualified_live_snapshot(observation: dict | None) -> dict | None:
+    """Return a private, detached source-authenticated JSON observation.
+
+    The incumbent Data OS host owns full-body and rights verification. It
+    receives its own temporary decode, NEVER the reference returned to trading
+    or output consumers. Detect mutations made during the verifier call, and
+    account for slow verification against a monotonic elapsed-time window.
+    No new credential, lease or second authorization plane is introduced.
+    """
+    tick_start = time.monotonic()
+    wall_start = datetime.now(timezone.utc)
+    encoded = _bounded_observation_json(observation)
+    if encoded is None:
+        return None
+    try:
+        verifier_body = json.loads(encoded)
+        if not qualifies_live_risk(verifier_body):
+            return None
+        if _bounded_observation_json(verifier_body) != encoded:
+            # A verifier cannot amend the approved body, even after returning
+            # a positive verdict. A retained verifier reference is not reused.
+            return None
+        source_clock = datetime.fromisoformat(
+            verifier_body["source_quality"]["source_observed_at_utc"].replace(
+                "Z", "+00:00"
+            )
+        ).astimezone(timezone.utc)
+        elapsed = time.monotonic() - tick_start
+        age = (wall_start - source_clock).total_seconds() + max(0.0, elapsed)
+        if not math.isfinite(age) or not -30 <= age <= _TTL:
+            return None
+        return json.loads(encoded)  # new object with no verifier-side aliases
+    except (TypeError, ValueError, OverflowError, RecursionError, KeyError):
+        return None
+
+
+def _monotonic_clock() -> float:
+    """Elapsed-time clock for an ephemeral observation, never a market clock."""
+    return time.monotonic()
+
+
+def _initial_source_deadline(
+    qualified: dict | None, first_wall_utc: datetime,
+    first_monotonic: float,
+) -> float | None:
+    """Freeze expiry from FIRST observation admission, not a later recheck.
+
+    A monotonic deadline cannot grow if the wall clock is adjusted backwards
+    while a model prompt is prepared. This is a short-lived, in-memory usage
+    fence, NOT a source identity or a second rights authority.
+    """
+    if not isinstance(qualified, dict):
+        return None
+    try:
+        if (first_wall_utc.tzinfo is None
+                or first_wall_utc.utcoffset() is None
+                or not math.isfinite(float(first_monotonic))):
+            return None
+        observed = qualified["source_quality"]["source_observed_at_utc"]
+        source_time = datetime.fromisoformat(
+            observed.replace("Z", "+00:00")
+        ).astimezone(timezone.utc)
+        age = (first_wall_utc.astimezone(timezone.utc) - source_time).total_seconds()
+        if not math.isfinite(age) or not -30 <= age <= _TTL:
+            return None
+        return float(first_monotonic) + _TTL - age
+    except (AttributeError, TypeError, KeyError, ValueError, OverflowError):
+        return None
+
+
 def is_material(t: dict | None = None) -> bool:
     """Deterministic tripwire (free — no LLM): is the overnight tape moving enough to warrant a Brain
     reconsideration? True when the distilled risk read is 'elevated' or 'stressed'."""
     t = t if t is not None else tape()
-    # Materiality is evaluated only AFTER host source/rights admission.
-    # Even an asserted live=True from a caller cannot trigger a Brain.
-    return (qualifies_live_risk(t)
-            and t["risk"]["state"] in ("elevated", "stressed"))
+    # Compare materiality on the SAME verified private data object. If the
+    # source callback mutates its original dict during or after admission,
+    # it cannot substitute a risk state after this decision is verified.
+    qualified = qualified_live_snapshot(t)
+    return (qualified is not None
+            and qualified["risk"]["state"] in ("elevated", "stressed"))
 
 
 def brief(t: dict | None = None) -> str:
-    """A one-line human/Brain summary of the overnight tape (for prompts + logs)."""
+    """A one-line human/Brain summary of a source-verified, detached tape."""
     t = t if t is not None else tape()
-    if not qualifies_live_risk(t):
+    qualified = qualified_live_snapshot(t)
+    if qualified is None:
         return "Overnight tape unavailable (historical closes or unqualified evidence are not live risk)."
-    risk = t.get("risk") or {}
+    risk = qualified["risk"]
     return f"Overnight tape: risk {risk.get('state')} — " + "; ".join(risk.get("reasons") or [])
 
 
@@ -325,8 +459,53 @@ def public_tape(observation: dict | None) -> dict:
     remain visible as historical-only, with its risk forced to UNKNOWN.
     A rejected claimed-live packet exposes no unqualified prices or receipts.
     """
-    if qualifies_live_risk(observation):
-        return observation
+    qualified = qualified_live_snapshot(observation)
+    if qualified is not None:
+        # The host verified the COMPLETE detached body (including its receipt
+        # and rights) before we make a separate, tightly CLOSED public view.
+        # Never export the raw source packet, receipt identifier, provider
+        # diagnostics, arbitrary row metadata or source-controlled labels to
+        # the dashboard or model tool. The true source verifier, not claimed
+        # booleans, must separately establish permitted downstream use.
+        groups: dict[str, list[dict]] = {}
+        for group, catalog in GROUPS.items():
+            labels = dict(catalog)
+            displayed: list[dict] = []
+            for row in qualified["groups"].get(group, []):
+                ticker = row["ticker"]
+                price = row.get("price")
+                try:
+                    price = (float(price)
+                             if type(price) in (int, float) else None)
+                    if (price is not None
+                            and (not math.isfinite(price)
+                                 or not 0 <= price <= 1e9)):
+                        price = None
+                except (OverflowError, ValueError, TypeError):
+                    price = None
+                change = row.get("change_pct")
+                displayed.append({
+                    "ticker": ticker, "name": labels[ticker],
+                    "price": price,
+                    "change_pct": float(change) if change is not None else None,
+                })
+            groups[group] = displayed
+        source = qualified["source_quality"]
+        observed_at = source["source_observed_at_utc"]
+        return {
+            "as_of": observed_at,
+            "as_of_kind": "source_observed_at",
+            "groups": groups,
+            "risk": risk_read(groups),
+            "n_symbols": sum(len(rows) for rows in groups.values()),
+            "live": True,
+            "source_quality": {
+                "classification": "LIVE_QUALIFIED",
+                "source_vendor": source["source_vendor"],
+                "source_observed_at_utc": observed_at,
+                "risk_qualified": True,
+            },
+        }
 
     risk = risk_read({})
     quality = (observation or {}).get("source_quality") if isinstance(observation, dict) else None

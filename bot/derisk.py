@@ -243,8 +243,9 @@ def tripwire(pid: str, asof: str, *, regime: dict | None = None) -> dict:
         # string or asserted live=True is never evidence of a licensed,
         # source-clock-qualified overnight move. Preserve independent Macro
         # Risk Officer, dealer gamma, credit and distribution channels below.
-        if overnight.qualifies_live_risk(tp):
-            ostate = tp["risk"]["state"]
+        qualified = overnight.qualified_live_snapshot(tp)
+        if qualified is not None:
+            ostate = qualified["risk"]["state"]
             if ostate == "stressed":
                 reasons.append("overnight tape STRESSED")
                 severity = max(severity, 2)

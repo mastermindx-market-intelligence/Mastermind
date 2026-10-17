@@ -648,17 +648,32 @@ def _run_brain(asof: str, inaugural: bool, directive: str | None = None) -> dict
     prompt = student.inject(prompt, _safe_date(asof))   # #3 fast numeric prior (MASTERMIND_STUDENT; OFF→unchanged)
     persona = self_mirror.inject(_PERSONA, "autonomous", _safe_date(asof))
     persona = risk_lens.govern_persona(persona, "autonomous")   # RISK GOVERNOR mandate; OFF → unchanged
-    coro = cli_bridge.reason(
-        prompt,
-        role="deep",                 # opus, per config/agents.yml
-        arm=True,
-        append_system=persona,
-        mcp_servers=autonomous_mcp.build_servers(),
-        allowed_tools=autonomous_mcp.allowed_tools(),
-        max_turns=_MAX_TURNS,
-        book=PORTFOLIO_ID,           # bot records against cost_guard; skip bridge double-count
-    )
-    return _run_coro(coro)
+    # The expensive prompt/persona work above cannot extend a revoked
+    # overnight source's authority to start an LLM. Normal daily runs (no
+    # overnight directive) are unchanged.
+    from bot import overnight as overnight_owner
+    overnight_owner.require_overnight_source_at_dispatch(directive)
+    async def _source_checked_reason():
+        # The coroutine may be scheduled AFTER expensive host/model/MCP
+        # preparation. A revoked overnight source must not enter the bridge
+        # merely because it passed an earlier synchronous PM prompt check.
+        overnight_owner.require_overnight_source_at_dispatch(directive)
+        # MCP construction can revoke/expire the original observation. It
+        # must finish BEFORE the final check that precedes the bridge call.
+        prepared_servers = autonomous_mcp.build_servers()
+        prepared_tools = autonomous_mcp.allowed_tools()
+        overnight_owner.require_overnight_source_at_dispatch(directive)
+        return await cli_bridge.reason(
+            prompt,
+            role="deep",                 # opus, per config/agents.yml
+            arm=True,
+            append_system=persona,
+            mcp_servers=prepared_servers,
+            allowed_tools=prepared_tools,
+            max_turns=_MAX_TURNS,
+            book=PORTFOLIO_ID,           # bot records against cost_guard; skip bridge double-count
+        )
+    return _run_coro(_source_checked_reason())
 
 
 def _build_prompt(asof: str, inaugural: bool, directive: str | None = None) -> str:

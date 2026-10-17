@@ -1,0 +1,100 @@
+{
+  "schema": "mastermind.overnight_snapshot_source_verification.v1",
+  "operation": "overnight-risk-truth-20261015-sol-001",
+  "original_head": "c59eb47792bba7cb701bc920099a4b53e2bf0227",
+  "status": "SOURCE_ONLY_SCOPED_APPROVED_P1_PHYSICAL_START_OPEN_DRAFT_HOLD",
+  "code_sha256": {
+    "data_layer/overnight.py": "9a03b8080e9307b3d4f8ab31a29cdd46eb5d96b8f4c41b963e8fddc38f3cc5e5",
+    "bot/overnight.py": "838a8adbd51f2236985942416100cf0f48162553f9d116beb006699b74ec6184",
+    "bot/derisk.py": "17952f32813e65467098614784a4eda04ff81679a065c8d1294faf3f2d21852a",
+    "bot/autonomous.py": "ef677986b11fa156ec9ea34f7258e8a79be562603f90f8ff51941a70eaf3a1b4",
+    "bot/china.py": "cb7c85dc28e774de3a37d988348aa9b9c303870fb47f393c66faf3496a25457e",
+    "bot/hk.py": "05c3a2c5d289d3047cf7edd576b57228ea24dc92d892a54d18ff0eb2d7b63a34",
+    "tests/test_overnight_snapshot_projection.py": "5395d022aee80e15da14993f3aba39a3195f23100402cd5d849b0ad98a4a96c5",
+    "tests/test_overnight_dispatch_fence.py": "0d2d283c225323c64397e43e16db5958749fa78f5b4daa41bab8a50ccdbc4900",
+    "tests/test_overnight_revocation_handshake.py": "87b1bb630608843482c95185bd33206065055f996023cfc849d461dfb7e1ef0f"
+  },
+  "test_receipts": [
+    {
+      "passed": 17,
+      "source": "overnight-review-four-green2.log",
+      "sha256": "45918021d07b2c2fb40cc3c77a42ec44db42d31888a2b6fac3cd31a899d612f7"
+    },
+    {
+      "passed": 280,
+      "source": "overnight-review-repaired-full.xml",
+      "junit_sha256": "c9a3b9ade39ac44e39c19cce14c6a580700b7e02ec53ed4b537a2313d3b4f6aa",
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "passed": 285,
+      "failed": 0,
+      "skipped": 0,
+      "source": "overnight-recovery-complete-junit.xml",
+      "junit_sha256": "9810001dcd0cb4ee0b73297b75ef8bff6edc9c35ad6b0e90c67370ecdb6adcca",
+      "scope": "full original overnight/risk/scheduler/autonomous/dashboard source selection after 5 red/green repairs"
+    },
+    {
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0,
+      "source": "overnight-5-recovery-green.log",
+      "sha256": "d024bf6d1f7d9975fc2d00b758765df9659314450412d3a15b30460f8d604905",
+      "scope": "three regional MCP revocation + monotonic post-check + materiality source handling; baseline was 4 failed 1 passed"
+    }
+  ],
+  "prior_review": "four findings in previous independent review: actual asynchronous provider start, whitespace unwrapped prefix, initial monotonic deadline, stale risk after source revocation",
+  "implemented": [
+    "original bounded detached full-body JSON source snapshot and nonaliased host verdict",
+    "closed public view strips receipt/arbitrary provider metadata",
+    "normalized whitespace prefix",
+    "original source monotonic deadline carried through watch/directive/model coroutine check",
+    "revocations report risk unknown and skipped tape_unavailable",
+    "three original Brain runners recheck source on coroutine execution",
+    "in each US/China/HK model coroutine, prepare original MCP server and tool args before the final pre-bridge original source recheck",
+    "recheck original first-observation monotonic source deadline after host qualifier return and after post-macro directive revalidation",
+    "distinguish revoked/unknown source from qualified calm at materiality branch (5 previously RED tests now pass)"
+  ],
+  "constraint": "Physical provider START still occurs downstream in existing cli_bridge/codex_bridge/provider_waterfall and is NOT protected by an effective pre-spawn hook. Keep real live-source admission OFF until original backend source effects are reconciled and bound to the same verified source/expiry; do not duplicate the existing provider plane.",
+  "rights_status": {
+    "dataos_identity_admitted": false,
+    "redistribution_admitted": false,
+    "pit_backtest_eligible": false
+  },
+  "effects": {
+    "live_data_admitted": false,
+    "provider_started": false,
+    "production_deployed": false,
+    "portfolio_written": false
+  },
+  "followup_independent_review": "SCOPED_CLEAR_THREE_FINITE_SOURCE_DEFECTS__PHYSICAL_PROVIDER_START_P1_OPEN",
+  "recovery_repaired_five_cases": {
+    "selected_tests": 5,
+    "failed": 4,
+    "passed": 1,
+    "log_sha256": "1bb23097ace29c7441e137982320f52642138abf2f9c345b5fc3d9ac0e1cacd2",
+    "green_result": {
+      "selected_tests": 5,
+      "passed": 5,
+      "log_sha256": "d024bf6d1f7d9975fc2d00b758765df9659314450412d3a15b30460f8d604905"
+    }
+  },
+  "latest_broad": {
+    "passed": 285,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0,
+    "junit_sha256": "9810001dcd0cb4ee0b73297b75ef8bff6edc9c35ad6b0e90c67370ecdb6adcca"
+  },
+  "independent_review": {
+    "original_report_sha256": "c87eb10b1ac4ea205b3661e042391ea3c7b0fa3450f2c99017068f611df42e54",
+    "normalized_published_sha256": "6ce8a0e2171db3a11ed06b0b9502455bba75b11cdf2c17816e5b60cf65d1f8cb",
+    "source_file": "tests/fixtures/overnight-risk-truth/snapshot-final-independent-review.md",
+    "frozen_code_files": 9,
+    "frozen_hashes_verified": true,
+    "reviewer_scope": "read-only local source; did not run tests, credentials, providers or real market operations",
+    "verdict": "SCOPED_CLEAR_THREE_SOURCE_DEFECTS",
+    "blocking_outcome": "P1 downstream actual provider START callback/effect fence not implemented; live-source gate stays default-deny"
+  }
+}
