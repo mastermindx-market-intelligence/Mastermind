@@ -274,8 +274,11 @@ def _latest_holdings(book: str) -> dict[str, dict]:
             continue
         price = None
         try:
+            # The accepted current-valuation authority for this boundary: the live mark, else
+            # the last point of the engine price series. Both are real observations of the
+            # market, already USD-normalised by the account layer.
             price = paper_account._current_price(ticker)
-        except Exception:  # noqa: BLE001 - average cost is the conservative fallback
+        except Exception:  # noqa: BLE001 - an unreachable quote source is an absent mark
             price = None
         try:
             price = float(price) if price is not None else None
@@ -286,17 +289,17 @@ def _latest_holdings(book: str) -> dict[str, dict]:
                 price = fx.usd_to(price, currency)
             except (AttributeError, TypeError, ValueError):
                 price = None
-        try:
-            avg_cost = float(raw_rec.get("avg_cost"))
-        except (TypeError, ValueError):
-            avg_cost = 0.0
-        mark_source = "live_quote"
+        # ``avg_cost`` is historical transaction evidence, NOT a current market observation, so
+        # it is never read here. Substituting it fabricated a current portfolio composition in
+        # whichever direction the old fill happened to sit — a name bought at 100 and now near
+        # 55 was valued at 100, and one now near 180 was also valued at 100 — and on a regional
+        # book it additionally smuggled a raw USD cost into a CNY/HKD NAV, skipping the
+        # conversion a real mark receives. Absence of current valuation authority must stay
+        # absence: freeze before any numeric target is built and let the caller preserve the
+        # standing book. Cost basis keeps its legitimate roles (P&L, provenance) elsewhere.
         if price is None or not math.isfinite(price) or price <= 0:
-            price = avg_cost
-            mark_source = "account_avg_cost_fallback"
-        if not math.isfinite(price) or price <= 0:
             raise DecisionBoundaryFreeze(f"unpriceable_held_position:{ticker}")
-        marked[ticker] = (raw_rec, shares, price, mark_source)
+        marked[ticker] = (raw_rec, shares, price, "live_quote")
 
     nav = cash + sum(shares * mark for _, shares, mark, _ in marked.values())
     if not math.isfinite(nav) or nav <= 0:
@@ -1012,6 +1015,9 @@ def normalize(
         "mandatory_instrument_migrations": mandatory_migrations,
         "identity": identity_audit,
         "unallocated_adds": unallocated_adds,
+        # Structurally empty: ``_latest_holdings`` freezes rather than marking a held line at
+        # average cost, so no submission can carry that provenance. Retained as a standing
+        # invariant check (and a schema-stable field) rather than removed.
         "quote_fallback_holdings": sorted(
             rec.get("ticker")
             for rec in cleaned
