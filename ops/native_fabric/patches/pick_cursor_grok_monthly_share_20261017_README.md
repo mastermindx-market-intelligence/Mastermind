@@ -14,7 +14,14 @@ That number proves consumption, not Fabric attribution, remaining monthly
 credits, percentage-of-plan capacity or dispatch conversion.
 
 This overlay adds an optional, *bounded prestart judgment share*, not a new
-fallback system or account/quota tracker.
+fallback system or account/quota tracker. It is **not** an X Subscription
+workaround: current Cursor documentation states that X Subscription plans share
+one weekly Grok/Cursor pool, whereas legacy Cursor plans retain separate monthly
+usage. Whether this specific account is legacy is presently UNKNOWN.
+
+Official sources (read 2026-10-17):
+- https://prod.cursor.com/help/models-and-usage/usage-limits
+- https://cursor.com/docs/account/pricing/legacy-cursor-plans
 
 ## Proposed behavior
 
@@ -27,13 +34,22 @@ The existing `routing` policy may opt in with:
 ```yaml
 routing:
   cursor_grok_monthly_share:
-    enabled: true
+    enabled: false   # never enable on assumed plan/remaining usage
     percent: 15
     task_classes: [operator, repair]
 ```
 
 - Disabled by default. Strict `enabled: true`, integer percentage **1–20**
   and an explicit subset of **operator/repair** classes are required.
+- **Also requires** a fresh bounded `cursor_entitlement` in the same protected
+  policy, with exact fields: `plan_type: legacy_independent_monthly`,
+  `source: account_dashboard_readback`, `on_demand_enabled: false`,
+  numeric `remaining_pct >= 20`, `observed_at` and `reset_at` in UTC ISO-8601
+  ending `Z`. Observation age must be **0–6 hours**, reset must be future and
+  within 35 days of observation. Unknown/missing/expired evidence, new
+  shared-weekly plans, top-up-on-demand eligibility or a depleted independent
+  pool **disable the cohort**. This is bounded manual account evidence, not
+  fabricated provider API telemetry.
 - Only a proven active `GROK_EXHAUSTED` marker selects the cohort.
   A quota screenshot, old sentinel, or unknown reset time must be separately
   reconciled by the incumbent quota owner; this overlay does not infer one.
@@ -65,9 +81,11 @@ this isolated overlay onto its **exact live-source preimage** after reconciling
 source writers and #1443 routing changes. Do not apply this candidate blindly
 to the installed native kit or override a failed preimage guard.
 
-Before enabling any nonzero share, require a current actual Cursor
-entitlement/remaining-budget observation, a safe limit/cap and read-only
-routing cohort preview; UI "Included" tokens alone do not certify those.
+Before enabling any nonzero share, require a current *actual* Cursor legacy
+entitlement/remaining-budget observation and proof that paid on-demand is off,
+then record the above bounded policy fields with source attribution and observe
+a safe limit/cap and read-only routing cohort preview. Cursor's UI "Included"
+tokens alone do not certify any of this.
 Confirm the real Grok Build weekly reset independently of the Grok Bot meter.
 Do not auto-charge credits to make sampling succeed.
 
@@ -75,7 +93,8 @@ Do not auto-charge credits to make sampling succeed.
 
 1. Hermetic source fixture: `python3 -m unittest tests/test_native_fabric_cursor_grok_monthly_share_20261017.py -v`.
    Patch applies with `--fuzz=0` and AST compiles, with distribution,
-   policy, no-review/no-labor/C3, exhaustion and preference gates.
+   policy, no-review/no-labor/C3, shared-weekly-plan, stale/manual-quota,
+   exhaustion and preference gates.
 2. Prestart route previews on the *actual* installed source: bounded
    percentage of distinct eligible judgment route keys choose
    `POOL=cursor MODEL=cursor-grok-4.6-high` with
