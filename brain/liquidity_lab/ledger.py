@@ -97,7 +97,10 @@ class ShockRegistry(_AppendOnlyStore):
 
     ``record`` returns ``created`` or ``duplicate``.  Reusing a ``shock_id``
     with different first-detection evidence fails closed; corrections must use
-    ``amend`` and leave the original row byte-addressable.
+    ``amend`` and leave the original row byte-addressable.  A different
+    ``shock_id`` for an already-recorded observation of the same family (same
+    ``source_observed_at`` or ``first_detected``) is a correction, not a new
+    episode, and also fails closed.
     """
 
     def record(self, shock: ShockRecord) -> str:
@@ -111,6 +114,20 @@ class ShockRegistry(_AppendOnlyStore):
                 if original == payload:
                     return "duplicate"
                 raise KeepFirstConflict(f"shock_id collision: {shock.shock_id}")
+            for row in rows:
+                if row.get("kind") != "shock":
+                    continue
+                existing = row.get("payload") or {}
+                if existing.get("shock_family") != payload["shock_family"]:
+                    continue
+                if (
+                    existing.get("source_observed_at") == payload["source_observed_at"]
+                    or existing.get("first_detected") == payload["first_detected"]
+                ):
+                    raise KeepFirstConflict(
+                        "first-known episode already recorded for this observation "
+                        f"({row.get('shock_id')}); corrections use ShockRegistry.amend"
+                    )
             self._append(
                 handle,
                 {
