@@ -1,0 +1,117 @@
+{
+  "experiment_id": "LP-ETF-01",
+  "frozen_at": "2026-10-14T21:22:59.073764+00:00",
+  "status": "PREREGISTERED_BEFORE_OUTCOMES",
+  "research_only": true,
+  "source_pin": "78388ac29f7e54c9dfe7799a8e4769fb46d4aed6",
+  "universe": [
+    "XLB",
+    "XLC",
+    "XLE",
+    "XLF",
+    "XLI",
+    "XLK",
+    "XLP",
+    "XLRE",
+    "XLU",
+    "XLV",
+    "XLY",
+    "SMH",
+    "SOXX"
+  ],
+  "benchmark": "SPY",
+  "data_root_alias": "macro_snapshot:yahoo",
+  "feature_price": "close (vendor split/dividend-adjusted)",
+  "history_start": "2010-01-01",
+  "training_start": "2011-01-01",
+  "warmup_sessions": 260,
+  "development_years": [
+    2018,
+    2019,
+    2020,
+    2021,
+    2022
+  ],
+  "holdout_years": [
+    2023,
+    2024,
+    2025
+  ],
+  "label": "log(C_i[t+21]/C_i[t+1])-log(C_SPY[t+21]/C_SPY[t+1]) > 0",
+  "decision": "features observed at t close; modeled entry t+1 close; exit t+21 close",
+  "fit": "annual expanding pooled ridge logistic; training label end strictly before test year; train-only scaling and clipping +/-5; ridge mean-loss lambda=0.01; intercept unpenalized; no tuning",
+  "models": {
+    "constant": [],
+    "price": [
+      "mom5",
+      "mom20",
+      "mom60",
+      "trend50",
+      "trend200",
+      "vol20"
+    ],
+    "baseline": [
+      "mom5",
+      "mom20",
+      "mom60",
+      "trend50",
+      "trend200",
+      "vol20",
+      "rs5",
+      "rs20",
+      "rs60",
+      "rs_accel",
+      "rank20",
+      "churn10",
+      "def_off20",
+      "rvol",
+      "obv20",
+      "market_trend",
+      "market_vol"
+    ],
+    "persistence_add": [
+      "persist_signedvol",
+      "signedvol_change",
+      "sign_autocorr"
+    ],
+    "impact_add": [
+      "impact_asymmetry",
+      "low_impact_high_volume",
+      "low_impact_direction"
+    ],
+    "resilience_add": [
+      "down_market_residual",
+      "up_market_residual",
+      "resilience_change"
+    ],
+    "combined": "baseline plus all three candidate families"
+  },
+  "primary_metric": "paired out-of-sample Brier improvement versus baseline; positive means candidate better",
+  "secondary_metrics": [
+    "AUC",
+    "log_loss",
+    "calibration bins",
+    "precision at p>=0.6 and p<=0.4",
+    "false alarm rate",
+    "coverage",
+    "return direction by ticker and market regime"
+  ],
+  "inference": {
+    "bootstrap": "1000 circular moving-block resamples of daily cross-sectional mean Brier differences; block60 observed sessions; seed14102026",
+    "multiplicity": "Holm correction for four candidate-versus-baseline tests in holdout; no retraining/tuning after results",
+    "promotion_gate": "mean Brier gain>=0.002, 95% block CI above0, Holm p<0.05, no negative mean gain in development, and no severe regime concentration; a pass only permits further validation, never live authority"
+  },
+  "diagnostics": {
+    "nonoverlap": "every20th eligible decision session; long top3 vs SPY using equal weights, compare baseline and combined; 10/30bp full-switch round-trip deductions per20-session interval; not a portfolio strategy or executable-quote proof",
+    "pivot": "RS20 changes sign and keeps new sign for5sessions; alert episodes at p>=0.6 or<=0.4 while RS20 is opposite; 20session cooldown; report fraction with matching pivot within20sessions, lead time only among true matches; probabilities target returns, not pivot probability",
+    "incident": "separately recompute June24-July2 2026 defensive/semis returns and bps units; do not mix into2018-2025 results"
+  },
+  "caveats": [
+    "Later-vintage vendor snapshots, not original availability vintages",
+    "Selected surviving ETF set; SMH predecessor/index changes not a constant economic basket",
+    "No constituent breadth, true signed trades, options, or dealer inventory claims",
+    "XLC and XLRE become eligible only after actual history plus warmup; never backfill before inception",
+    "Feature windows, model families and threshold set before outcomes; bug corrections retained explicitly",
+    "Historical holdout is unconsulted by this pilot before run, not pristine prospective data across the organization"
+  ]
+}

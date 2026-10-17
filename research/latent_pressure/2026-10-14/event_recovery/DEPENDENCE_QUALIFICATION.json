@@ -1,0 +1,22 @@
+{
+  "status": "POST_RESULT_UNCERTAINTY_QUALIFICATION_NO_REFITS",
+  "single_calendar_day": true,
+  "primary_mean_gain": -0.011415312783586049,
+  "sensitivity": {
+    "15minute_blocks": {
+      "blocks": 10,
+      "ci95": [
+        -0.020892417066004546,
+        -0.0018056533265638462
+      ]
+    },
+    "30minute_blocks": {
+      "blocks": 5,
+      "ci95": [
+        -0.017452055646221126,
+        -0.003097215651616066
+      ]
+    }
+  },
+  "interpretation": "Longer within-day blocks still do not create independent days; 15-minute outcome censoring and serial features limit primary5-minute bootstrap. No population significance claim."
+}

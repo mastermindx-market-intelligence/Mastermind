@@ -1,0 +1,78 @@
+{
+  "not_market_evidence": true,
+  "before_recovery": {
+    "schema": "research_snapshot_not_production",
+    "cutoff_ns": "5",
+    "last_received_ns": "1",
+    "last_sequence": "2",
+    "input_origin": "SYNTHETIC_NORMALIZED_FIXTURE",
+    "source_integrity": true,
+    "sides": {
+      "bid": {
+        "pending": {
+          "side": 1,
+          "level": 100,
+          "start_ns": 1,
+          "start_sequence": 2,
+          "original_depth": 10,
+          "shock_quantity": 5,
+          "initial_remaining": 5,
+          "state": "PENDING",
+          "completed_ns": null,
+          "completion_sequence": null
+        },
+        "elapsed_ns": 4,
+        "current_level_depth": 5,
+        "past_recoveries": 0,
+        "past_level_depletions": 0,
+        "right_censored": 0,
+        "median_completed_recovery_ns": null
+      },
+      "ask": {
+        "pending": null,
+        "elapsed_ns": null,
+        "current_level_depth": null,
+        "past_recoveries": 0,
+        "past_level_depletions": 0,
+        "right_censored": 0,
+        "median_completed_recovery_ns": null
+      }
+    },
+    "immediate_depletions_not_predicted": 0,
+    "inferred_institution": null,
+    "forecast_probability": null,
+    "forecast_authority": "NONE"
+  },
+  "after_observed_recovery": {
+    "schema": "research_snapshot_not_production",
+    "cutoff_ns": "8",
+    "last_received_ns": "8",
+    "last_sequence": "3",
+    "input_origin": "SYNTHETIC_NORMALIZED_FIXTURE",
+    "source_integrity": true,
+    "sides": {
+      "bid": {
+        "pending": null,
+        "elapsed_ns": null,
+        "current_level_depth": null,
+        "past_recoveries": 1,
+        "past_level_depletions": 0,
+        "right_censored": 0,
+        "median_completed_recovery_ns": 7
+      },
+      "ask": {
+        "pending": null,
+        "elapsed_ns": null,
+        "current_level_depth": null,
+        "past_recoveries": 0,
+        "past_level_depletions": 0,
+        "right_censored": 0,
+        "median_completed_recovery_ns": null
+      }
+    },
+    "immediate_depletions_not_predicted": 0,
+    "inferred_institution": null,
+    "forecast_probability": null,
+    "forecast_authority": "NONE"
+  }
+}

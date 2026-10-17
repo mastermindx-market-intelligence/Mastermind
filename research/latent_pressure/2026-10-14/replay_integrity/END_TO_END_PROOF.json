@@ -1,0 +1,127 @@
+{
+  "status": "EXECUTED_SYNTHETIC_END_TO_END_CLI_NOT_REAL_MARKET_PROOF",
+  "base_ns": "1152921504606846976",
+  "source_input_sha256": "0a452703c33e4059cdca44e5c7cecd7a3acd4d8c41117db54e2895a08f87790e",
+  "cuts": [
+    {
+      "fixture_offset_ns": 2,
+      "exit_code": 0,
+      "output_file": "EXAMPLE_PENDING.json",
+      "output_sha256": "fe4fe0eb8c2c09fd7c3760b80671052c8fa647c501a00ce69a5f679bbfa93bee",
+      "records": [
+        {
+          "symbol": "SYN-FAST",
+          "coverage_status": "SYNTHETIC_PREFIX_OBSERVED_TO_CUTOFF",
+          "measurement_cutoff_ns": "1152921504606846978",
+          "pending": true,
+          "elapsed_ns": 0,
+          "past_recoveries": 0,
+          "past_level_depletions": 0,
+          "median_completed_recovery_ns": null,
+          "forecast_probability": null
+        },
+        {
+          "symbol": "SYN-SLOW",
+          "coverage_status": "SYNTHETIC_PREFIX_OBSERVED_TO_CUTOFF",
+          "measurement_cutoff_ns": "1152921504606846978",
+          "pending": true,
+          "elapsed_ns": 0,
+          "past_recoveries": 0,
+          "past_level_depletions": 0,
+          "median_completed_recovery_ns": null,
+          "forecast_probability": null
+        }
+      ]
+    },
+    {
+      "fixture_offset_ns": 4,
+      "exit_code": 0,
+      "output_file": "EXAMPLE_PENDING_WITH_COVERAGE.json",
+      "output_sha256": "30604998c9c631fbeec910c0957156b621518a8f56fdf94c607d87dd4b82d9f8",
+      "records": [
+        {
+          "symbol": "SYN-FAST",
+          "coverage_status": "SYNTHETIC_PREFIX_OBSERVED_TO_CUTOFF",
+          "measurement_cutoff_ns": "1152921504606846980",
+          "pending": true,
+          "elapsed_ns": 2,
+          "past_recoveries": 0,
+          "past_level_depletions": 0,
+          "median_completed_recovery_ns": null,
+          "forecast_probability": null
+        },
+        {
+          "symbol": "SYN-SLOW",
+          "coverage_status": "SYNTHETIC_PREFIX_OBSERVED_TO_CUTOFF",
+          "measurement_cutoff_ns": "1152921504606846980",
+          "pending": true,
+          "elapsed_ns": 2,
+          "past_recoveries": 0,
+          "past_level_depletions": 0,
+          "median_completed_recovery_ns": null,
+          "forecast_probability": null
+        }
+      ]
+    },
+    {
+      "fixture_offset_ns": 6,
+      "exit_code": 0,
+      "output_file": "EXAMPLE_COMMITTED.json",
+      "output_sha256": "18a82c87ce497c21b99227ca3ae43a42d9fb5fb4d521e9f1f82b316824204944",
+      "records": [
+        {
+          "symbol": "SYN-FAST",
+          "coverage_status": "SYNTHETIC_PREFIX_OBSERVED_TO_CUTOFF",
+          "measurement_cutoff_ns": "1152921504606846982",
+          "pending": false,
+          "elapsed_ns": null,
+          "past_recoveries": 1,
+          "past_level_depletions": 0,
+          "median_completed_recovery_ns": 4,
+          "forecast_probability": null
+        },
+        {
+          "symbol": "SYN-SLOW",
+          "coverage_status": "SYNTHETIC_PREFIX_OBSERVED_TO_CUTOFF",
+          "measurement_cutoff_ns": "1152921504606846982",
+          "pending": false,
+          "elapsed_ns": null,
+          "past_recoveries": 0,
+          "past_level_depletions": 1,
+          "median_completed_recovery_ns": null,
+          "forecast_probability": null
+        }
+      ]
+    },
+    {
+      "fixture_offset_ns": 7,
+      "exit_code": 0,
+      "output_file": "EXAMPLE_COVERAGE_LAG.json",
+      "output_sha256": "f481a132b63554277d4f779a98065de7901673c3c9b369a96084d660781e5186",
+      "records": [
+        {
+          "symbol": "SYN-FAST",
+          "coverage_status": "COVERAGE_NOT_PROVEN_TO_REQUESTED_CUTOFF",
+          "measurement_cutoff_ns": "1152921504606846982",
+          "pending": false,
+          "elapsed_ns": null,
+          "past_recoveries": 1,
+          "past_level_depletions": 0,
+          "median_completed_recovery_ns": 4,
+          "forecast_probability": null
+        },
+        {
+          "symbol": "SYN-SLOW",
+          "coverage_status": "COVERAGE_NOT_PROVEN_TO_REQUESTED_CUTOFF",
+          "measurement_cutoff_ns": "1152921504606846982",
+          "pending": false,
+          "elapsed_ns": null,
+          "past_recoveries": 0,
+          "past_level_depletions": 1,
+          "median_completed_recovery_ns": null,
+          "forecast_probability": null
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,240 @@
+{
+  "schema": "normalized_recovery_replay.v1_RESEARCH_ONLY",
+  "origin": "SYNTHETIC_NORMALIZED_FIXTURE",
+  "requested_cutoff_ns": "1152921504606846982",
+  "frames_received": 10,
+  "records": [
+    {
+      "symbol": "SYN-FAST",
+      "session": "fixture-session-1",
+      "state": "SYNTHETIC_PREFIX_OBSERVED_TO_CUTOFF",
+      "requested_cutoff_ns": "1152921504606846982",
+      "measurement_cutoff_ns": "1152921504606846982",
+      "observation_age_ns": 0,
+      "recovery": {
+        "schema": "research_snapshot_not_production",
+        "cutoff_ns": "1152921504606846982",
+        "last_received_ns": "1152921504606846982",
+        "last_sequence": "1152921504606846980",
+        "input_origin": "SYNTHETIC_NORMALIZED_FIXTURE",
+        "source_integrity": true,
+        "sides": {
+          "bid": {
+            "pending": null,
+            "elapsed_ns": null,
+            "current_level_depth": null,
+            "past_recoveries": 1,
+            "past_level_depletions": 0,
+            "right_censored": 0,
+            "median_completed_recovery_ns": 4
+          },
+          "ask": {
+            "pending": null,
+            "elapsed_ns": null,
+            "current_level_depth": null,
+            "past_recoveries": 0,
+            "past_level_depletions": 0,
+            "right_censored": 0,
+            "median_completed_recovery_ns": null
+          }
+        },
+        "immediate_depletions_not_predicted": 0,
+        "same_batch_resolved_shocks_not_predicted": 0,
+        "committed_batches": 3,
+        "inferred_institution": null,
+        "forecast_probability": null,
+        "forecast_authority": "NONE"
+      },
+      "descriptive_competing_outcomes": {
+        "schema": "synthetic_recovery_competing_outcomes.v1_RESEARCH_ONLY",
+        "cutoff_ns": "1152921504606846982",
+        "last_received_ns": "1152921504606846982",
+        "source_integrity": true,
+        "input_origin": "SYNTHETIC_NORMALIZED_EVENTS_ONLY",
+        "bid": {
+          "n": 1,
+          "curve": [
+            {
+              "duration_ns": 4,
+              "at_risk_before": 1,
+              "recoveries": 1,
+              "level_depletions": 0,
+              "censored": 0,
+              "recovery_incidence": 1.0,
+              "depletion_incidence": 0.0,
+              "unresolved_survival_estimate": 0.0
+            }
+          ],
+          "terminal_estimate": {
+            "recovery_incidence": 1.0,
+            "depletion_incidence": 0.0,
+            "unresolved_survival_estimate": 0.0
+          },
+          "median_completed_recovery_ns": 4,
+          "median_recovery_incidence_ns": 4,
+          "followup_end_ns": 4,
+          "observed_counts": {
+            "recovered": 1,
+            "depleted": 0,
+            "censored": 0
+          },
+          "status": "DESCRIPTIVE_ESTIMATES_NOT_CALIBRATED_FORECASTS",
+          "limitations": [
+            "Independent/noninformative censoring is not established",
+            "Episodes can be dependent; no confidence interval or population inference",
+            "Unresolved tail mass is not proof that no future event will occur",
+            "Displayed-level depletion is not a traded-price breakdown"
+          ]
+        },
+        "ask": {
+          "n": 0,
+          "curve": [],
+          "terminal_estimate": null,
+          "median_completed_recovery_ns": null,
+          "median_recovery_incidence_ns": null,
+          "followup_end_ns": null,
+          "status": "NO_OBSERVED_EPISODES"
+        },
+        "forecast_probability": null,
+        "institutional_inventory": null,
+        "real_DEEPplus_book_adapter": "UNVERIFIED_FAIL_CLOSED_UNCHANGED",
+        "authority": {
+          "rotation_call_write": false,
+          "live_alert": false,
+          "rank": false,
+          "size": false
+        }
+      },
+      "forecast_probability": null,
+      "pressure_direction": null,
+      "institutional_inventory": null,
+      "authority": {
+        "rotation_call_write": false,
+        "live_alert": false,
+        "rank": false,
+        "size": false
+      }
+    },
+    {
+      "symbol": "SYN-SLOW",
+      "session": "fixture-session-1",
+      "state": "SYNTHETIC_PREFIX_OBSERVED_TO_CUTOFF",
+      "requested_cutoff_ns": "1152921504606846982",
+      "measurement_cutoff_ns": "1152921504606846982",
+      "observation_age_ns": 0,
+      "recovery": {
+        "schema": "research_snapshot_not_production",
+        "cutoff_ns": "1152921504606846982",
+        "last_received_ns": "1152921504606846982",
+        "last_sequence": "1152921504606846979",
+        "input_origin": "SYNTHETIC_NORMALIZED_FIXTURE",
+        "source_integrity": true,
+        "sides": {
+          "bid": {
+            "pending": null,
+            "elapsed_ns": null,
+            "current_level_depth": null,
+            "past_recoveries": 0,
+            "past_level_depletions": 1,
+            "right_censored": 0,
+            "median_completed_recovery_ns": null
+          },
+          "ask": {
+            "pending": null,
+            "elapsed_ns": null,
+            "current_level_depth": null,
+            "past_recoveries": 0,
+            "past_level_depletions": 0,
+            "right_censored": 0,
+            "median_completed_recovery_ns": null
+          }
+        },
+        "immediate_depletions_not_predicted": 0,
+        "same_batch_resolved_shocks_not_predicted": 0,
+        "committed_batches": 3,
+        "inferred_institution": null,
+        "forecast_probability": null,
+        "forecast_authority": "NONE"
+      },
+      "descriptive_competing_outcomes": {
+        "schema": "synthetic_recovery_competing_outcomes.v1_RESEARCH_ONLY",
+        "cutoff_ns": "1152921504606846982",
+        "last_received_ns": "1152921504606846982",
+        "source_integrity": true,
+        "input_origin": "SYNTHETIC_NORMALIZED_EVENTS_ONLY",
+        "bid": {
+          "n": 1,
+          "curve": [
+            {
+              "duration_ns": 4,
+              "at_risk_before": 1,
+              "recoveries": 0,
+              "level_depletions": 1,
+              "censored": 0,
+              "recovery_incidence": 0.0,
+              "depletion_incidence": 1.0,
+              "unresolved_survival_estimate": 0.0
+            }
+          ],
+          "terminal_estimate": {
+            "recovery_incidence": 0.0,
+            "depletion_incidence": 1.0,
+            "unresolved_survival_estimate": 0.0
+          },
+          "median_completed_recovery_ns": null,
+          "median_recovery_incidence_ns": null,
+          "followup_end_ns": 4,
+          "observed_counts": {
+            "recovered": 0,
+            "depleted": 1,
+            "censored": 0
+          },
+          "status": "DESCRIPTIVE_ESTIMATES_NOT_CALIBRATED_FORECASTS",
+          "limitations": [
+            "Independent/noninformative censoring is not established",
+            "Episodes can be dependent; no confidence interval or population inference",
+            "Unresolved tail mass is not proof that no future event will occur",
+            "Displayed-level depletion is not a traded-price breakdown"
+          ]
+        },
+        "ask": {
+          "n": 0,
+          "curve": [],
+          "terminal_estimate": null,
+          "median_completed_recovery_ns": null,
+          "median_recovery_incidence_ns": null,
+          "followup_end_ns": null,
+          "status": "NO_OBSERVED_EPISODES"
+        },
+        "forecast_probability": null,
+        "institutional_inventory": null,
+        "real_DEEPplus_book_adapter": "UNVERIFIED_FAIL_CLOSED_UNCHANGED",
+        "authority": {
+          "rotation_call_write": false,
+          "live_alert": false,
+          "rank": false,
+          "size": false
+        }
+      },
+      "forecast_probability": null,
+      "pressure_direction": null,
+      "institutional_inventory": null,
+      "authority": {
+        "rotation_call_write": false,
+        "live_alert": false,
+        "rank": false,
+        "size": false
+      }
+    }
+  ],
+  "retired_sessions": [],
+  "real_DEEPplus_adapter": "UNVERIFIED_FAIL_CLOSED_UNCHANGED",
+  "authority": {
+    "rotation_call_write": false,
+    "live_alert": false,
+    "rank": false,
+    "size": false
+  },
+  "interpretation": "Synthetic measurement and data-integrity examples, not real-market probabilities.",
+  "fixture_sha256": "0a452703c33e4059cdca44e5c7cecd7a3acd4d8c41117db54e2895a08f87790e"
+}

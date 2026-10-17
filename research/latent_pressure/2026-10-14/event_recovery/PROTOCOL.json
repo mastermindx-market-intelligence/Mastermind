@@ -1,0 +1,75 @@
+{
+  "id": "LP-EVENT-03A",
+  "frozen_at_utc": "2026-10-15T04:28:45.738194+00:00",
+  "question": "Do causal histories of repeated same displayed-order executions add forward print-price direction information beyond price/volume/cadence? This is NOT full quote-recovery/fatigue qualification.",
+  "scope": "existing IEX HIST day only; new source/analysis only under research event_recovery; no purchases/provider capture sockets/production/schema/trade effects",
+  "source": "DPLS 20261005 captured IEX single-channel0x8005, archiveSHA2e41ba84c2a24ccd541d079c2bb05a6da38e988790d8e97a19c1527b1195b0dd",
+  "cohort": [
+    "AAPL",
+    "MSFT",
+    "NVDA",
+    "AMD",
+    "MU",
+    "INTC",
+    "SPY",
+    "XLV"
+  ],
+  "cohort_selection": "fixed before archive outcomes, spans liquid equities, semiconductors and two ETFs; selected surviving names, no marketwide inference",
+  "documented_message": "Order Executed L, timestamp2:uint64ns, symbol10:8, order18:uint64, size26:uint32, price30:int64/10000, tradeid38:uint64. Source DEEP+ page24 already read. Other messages retained raw only.",
+  "eligibility": "sale_flags==0 (documented example: regular continuous execution);09:45-15:45 NewYork;positiveprice/qty;source send timestamp<=decision; no signedaggressor or NBBO assertion",
+  "observation_clock": "source send_ns, monotonic stream confirmed; not end-user ingestion time or execution latency proof",
+  "decision": "each eligible L after20prior eligibleL. Current medianoflast5prints is anchor. Newview uses only currently and previously received executions, not futuregroup lengths.",
+  "label": "three classes DOWN/SAME/UP comparing median of first5 eligible future L afterdecision+1s to currentmedianlast5; all5 mustarrive bydecision+15min and15:45. Missingfuturecoverage ismissing,neverflat. Sameprices retained.",
+  "split": "train decisions09:45-12:00withlabelend<12:00;test13:00-15:30withlabelend<=15:45; no separate-day generalization; 12-13hourreserved notusedfortuning",
+  "baseline": [
+    "logret1",
+    "median5_vsmedianprev5",
+    "logret20",
+    "eventvol20",
+    "pricerange20",
+    "logshares20",
+    "logelapsed20",
+    "loglastinterarrival",
+    "logmedianqty20",
+    "time_of_day",
+    "ticker_onehots"
+  ],
+  "candidate": [
+    "share_recentvolumeonrepeatedobservedorderids20",
+    "volumeHHI20",
+    "largestordershare20",
+    "fractionrecentfillswhoseorderwaspreviouslyseen",
+    "logmedian_elapsed_since_first_observed_fill20",
+    "known_repeat_fraction5_minusprevious15",
+    "repeatshare_x_recentpricechange"
+  ],
+  "models": [
+    "trainclassthresholdconstant",
+    "ridge_softmax_baseline",
+    "ridge_softmax_baseline_plus_orderhistory"
+  ],
+  "fit": "fixedmeanlossL2=.01,trainonlystandardizeclip+-5, interceptunpenalized, maxiter500; samecompletecases allarms; no tuning",
+  "primary": "3classBriergain=sumclasssquaredloss baseline-candidate; crosssection/timeblock summaries",
+  "secondary": [
+    "logloss",
+    "classcalibration",
+    "accuracy",
+    "directionalbalancedaccuracy",
+    "empiricalhorizonseconds",
+    "sampleandfuturecoveragebyname",
+    "simplecurrentdirectioncarrybaseline"
+  ],
+  "inference": "pairedlosses grouped by5-minute decisionblocks;1000resamples ofblocks preserving allnames;seed20261015;approximately30testblocksonecalendar-day remainsnotindependentdays",
+  "negative_control": "fixedseed permutation oforderidentifiers within ticker standardconditiontape; recomputecandidate causalprefix, train/evaluatewithsameoutcomes as after-primary diagnostic, label explicitly nondeployable permutationcontrol; no search over seeds",
+  "positive_gate": "Briergain>=.002,95percentblockCIabove0,positivein>=5of8nameswithadequaten>=30, candidatedirectionnotdrivenbyjustfuturecoverage; atmostexploratoryfollowuppermission,neverproductionalpha",
+  "limits": [
+    "Only IEX displayed executions, hiddenTradeT excluded",
+    "Many individualorders execute once, no institutionidentity",
+    "Priceimprovementandbidaskbounce affectprintprices; noquoteorcost-awareprofitclaim",
+    "Singlecalendar-dayselection andevent-clockhorizons",
+    "Newlydownloaded documentation read/render call denied; doNOTretry action via another tool. Fullquote-recoverysemanticsunverified andheld. ThisindependentL-onlytestusespriorretrievedfields.",
+    "Original negative daily pilots unchanged"
+  ],
+  "proof": "decoderfixtures,fullsequence/offsetscan,archivereceipthash,independentPython decode of extractedrawL,causalprefixandno-future-IDhistory tests,trainlabelpurge",
+  "publication": "code,safeaggregatecounts,metrics,human/machineconsumablereadonlyresearchrecordexamples(noactualrawseries); sourceandforecastseriesstayprivate"
+}

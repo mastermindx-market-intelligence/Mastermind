@@ -1,0 +1,76 @@
+{
+  "id": "LP-NOVEL-02",
+  "frozen_at": "2026-10-15T02:40:50.952897+00:00",
+  "scope": "Research follow-up expressly requested by Chairman; no production, purchases, schemas, sizing, or trading",
+  "novelty": "New to this commission; not a claim of worldwide first discovery",
+  "mechanistic_tests": [
+    "Exact observational equivalence of aggregate net pressure",
+    "Loss of order information under permutation-invariant summaries",
+    "Overnight/intraday cancellation and learned pressure-release interactions"
+  ],
+  "real_data_status": "Exploratory later-vintage feasibility only. Existing normalized Tiingo flags source_rights_admitted=false, dataos_identity_admitted=false, pit_backtest_eligible=false are preserved; no Data OS/point-in-time/production admission asserted. Chairman previously asserted broad Tiingo research/commercial rights; no licensing files or flags changed. No raw data redistributed.",
+  "cohort": [
+    "ACN",
+    "AMAT"
+  ],
+  "benchmark": "SPY",
+  "selection": "Two liquid US equities with >=2005 history found in bounded first250-file metadata census; convenience cohort chosen BEFORE outcomes, not representative or pristine heldout universe. No sector generalization.",
+  "range": "2005-2025; training2006+; annual expanding test2018-2025; retrospective dev2018-2022 and evaluation2023-2025",
+  "source_selection": "Longest matching snapshot from frozen census; file hashes fixed; choose max rows then lexical ref as deterministic tiebreak",
+  "target": "log(close_i[t+5]/open_i[t+1])-log(close_SPY[t+5]/open_SPY[t+1])>0; features at tclose, nextopen entry and fifth later session close exit; label end within2025",
+  "basis": "open_tradj/close_tradj; verify within-day adjustment multipliers equal; later-vintage economic-return proxies not raw-price book events",
+  "baseline": [
+    "mom1",
+    "mom5",
+    "mom20",
+    "mom60",
+    "rs1",
+    "rs5",
+    "rs20",
+    "rs60",
+    "vol20",
+    "trend200",
+    "rvol",
+    "obv20",
+    "beta60",
+    "market_mom20",
+    "market_vol20",
+    "ticker_dummy"
+  ],
+  "new_component_features": [
+    "day_minus_night_5_normalized",
+    "day_minus_night_20_normalized"
+  ],
+  "new_sequence_features": [
+    "signed20day_cancellation_mass",
+    "cancel20_times_releasing_opposition_5day"
+  ],
+  "exact_definitions": "beta60 lag1; day/night residuals use same lagged beta against SPY components. M_day20=sum(dres20),M_night20=sum(ores20). Signed cancel=sign(M_day20)*min(abs(M_day20),abs(M_night20)) if opposite signs, else0; normalize by20dayclose volatility*sqrt20. Release=cancel_magnitude*(sign(day20)*(day5+night5)/(sigma*sqrt5)); retain both direction and magnitude; no interpretation as participant identity.",
+  "models": [
+    "constant_by_ticker",
+    "baseline",
+    "baseline+components",
+    "baseline+components+sequence"
+  ],
+  "fit": "Mean-loss ridge logistic lambda0.01, intercept unpenalized, train-onlystandardization clip+-5. No tuned hyperparameters. Same finite complete-case rows for allarms. Training label ends strictly before yearstart.",
+  "metrics": [
+    "Brier",
+    "AUC with no significance assertion unless separately estimated",
+    "date-block pairedBrierimprovement",
+    "calibration",
+    "significant cancellation descriptive frequency",
+    "year andticker comparisons"
+  ],
+  "inference": "1000 circular60decision-date blockbootstrap of dailycrosssectionmean pairedloss;seed20421014;Holm2 candidate-vsbaselinecomparisons",
+  "exploratory_pass": "Gain>=0.001,blockCIabove0,Holmp<.05,>=2/3 evaluationyearpositive and no ticker dominated effect; even pass cannot grant validation with unqualifiedPIT inputs or conveniencecohort",
+  "diagnostics": [
+    "futureprefixfeatureinvariance",
+    "open/close adjustment algebra",
+    "no duplicated dates",
+    "sameinputhash before/after",
+    "labelcalendar andpurge",
+    "explicit eventprobability vs physicalinventory nonidentification"
+  ],
+  "do_not_redo": "Original LP-ETF-01 remains unchanged; no postresultretuning; any bugcorrection or extraquery declared",
+  "public_output": "Safeaggregates,code,spec,sourcehashes only; privatefullforecasts remainignored"
+}
