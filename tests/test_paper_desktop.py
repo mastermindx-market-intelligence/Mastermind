@@ -227,20 +227,22 @@ class CoreTests(unittest.TestCase):
                      "set_comment_thread_status"]:
             self.assertIn(name, b.EDIT_TOOLS)
         for name in ["create_file", "open_file", "delete_nodes", "export",
-                     "export_combined_pdf", "rename_pages", "list_files",
+                     "export_combined_pdf", "rename_pages", "arrange_pages", "update_pages", "list_files",
                      "list_resources", "rename_resource"]:
             self.assertNotIn(name, b.READ_TOOLS | b.EDIT_TOOLS)
         self.assertEqual(
             b.SUPPORTED_CATALOG_SHA256,
-            "48b2587455d839a57b4b78f5cfdb2e75df8d530ad8059a3ad6af303c0d37224f",
+            "1b9afff4c9bcf6f11f5ca2db301bf25ccdc442025344e2ec402459cedcd6a2db",
         )
 
     def test_reviewed_full_catalog_fixture_and_descriptor_mutations_fail_closed(self):
-        fixture_path = ROOT / "tests" / "fixtures" / "paper_desktop" / "48b258_full_catalog.json"
+        fixture_path = ROOT / "tests" / "fixtures" / "paper_desktop" / "1b9aff_full_catalog.json"
         catalog = json.loads(fixture_path.read_text(encoding="utf-8"))
         self.assertEqual(b.digest(catalog), b.SUPPORTED_CATALOG_SHA256)
         self.assertIn("write_html", catalog)
-        self.assertIn("rename_pages", catalog)
+        self.assertNotIn("rename_pages", catalog)
+        self.assertIn("arrange_pages", catalog)
+        self.assertIn("update_pages", catalog)
         self.assertNotIn("list_files", catalog)
 
         class CatalogFake(Fake):
@@ -251,7 +253,7 @@ class CoreTests(unittest.TestCase):
             def catalog(self):
                 return copy.deepcopy(self.value)
 
-        for tool_name in ("get_font_family_info", "write_html", "rename_pages"):
+        for tool_name in ("get_font_family_info", "write_html", "arrange_pages", "update_pages"):
             with self.subTest(tool_name=tool_name):
                 mutated = copy.deepcopy(catalog)
                 mutated[tool_name]["description"] = mutated[tool_name].get("description", "") + " drift"
@@ -297,7 +299,7 @@ class CoreTests(unittest.TestCase):
         # Do not allow catalog compatibility without the new required exact target.
         drift = copy.deepcopy(current)
         drift["get_font_family_info"]["inputSchema"]["required"].remove("fileId")
-        self.assertNotEqual(b.digest(drift), b.SUPPORTED_CATALOG_SHA256)
+        self.assertNotEqual(b.digest(drift), b.digest(current))
 
     def test_token_delete_refused_before_dispatch(self):
         self.client.info = {"fileId": "file-a", "artboards": []}
