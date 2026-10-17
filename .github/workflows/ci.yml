@@ -22,6 +22,10 @@ jobs:
   # or the repository's one protected status context named "test".
   pytest_shards:
     name: pytest shard ${{ matrix.index }}
+    # Only the test-shard job needs read-only workflow-run evidence.
+    permissions:
+      contents: read
+      actions: read
     runs-on: ubuntu-latest
     # Retain protected master's bounded five-minute headroom for test setup.
     # All three shards must still succeed within the finite 45-minute limit.
@@ -111,7 +115,18 @@ jobs:
           find scripts ops/executive_os -type f -name '*.sh' -print0 |
             xargs -0 -n1 bash -n
 
+      # No shard JOB is skipped. Existing non-pytest security gates always
+      # execute; only a previously green, same-SHA native merge-group proof
+      # may avoid re-executing the identical pytest module suite on a push.
+      # If proof is absent or uncertain, every shard executes normally.
+      - name: Verify exact prior merge-group CI
+        id: previous_ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -m scripts.ci_postmerge_proof
+
       - name: Run repository test shard
+        if: ${{ steps.previous_ci.outputs.reuse != 'true' }}
         run: python -m scripts.ci_parallel_shard --jobs 3 --index ${{ matrix.index }}
 
   # Branch protection requires exactly the stable context "test". Matrix

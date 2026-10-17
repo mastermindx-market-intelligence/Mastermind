@@ -877,6 +877,7 @@ def test_hosted_full_gate_has_a_bounded_completion_window():
     shards = jobs["pytest_shards"]
     gate = jobs["test"]
     assert workflow["permissions"] == {"contents": "read"}
+    assert shards["permissions"] == {"contents": "read", "actions": "read"}
     assert shards["timeout-minutes"] == 45
     assert gate["timeout-minutes"] == 8
     assert shards["strategy"]["fail-fast"] is False
