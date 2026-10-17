@@ -9,6 +9,9 @@ from common.executive_content_contract import (
     load_content_profiles, ACCESS_SCHEMA, PAGE_SCHEMA, ERRORS, MAX_PAGE_BYTES,
     canonical, digest, epoch,
 )
+from control_plane.operator_harness_contract import (
+    OperationId, OperationReceiptKind, operation_receipt_command_id,
+)
 
 
 class ContentRefused(ValueError):
@@ -105,29 +108,83 @@ class ExecutiveContentObserver:
             if live and connection.execute("SELECT 1 FROM events WHERE event_type='OHF_RESTORE_INVALIDATED' AND worker_id=? LIMIT 1",(row['worker_id'],)).fetchone():
                 raise ContentRefused('GRANT_INVALIDATED')
             turns = connection.execute('''
-                SELECT aggregate_id,event_type,payload_json FROM events
+                SELECT aggregate_id,command_id,actor,event_type,payload_json,
+                       job_id,attempt_id,worker_id,quota_class
+                FROM events
                 WHERE aggregate_type='operator_operation' AND attempt_id=?
                   AND event_type IN ('OPERATOR_OPERATION_INTENT','OPERATOR_OPERATION_APPLIED')
                   AND json_extract(payload_json,'$.operation_kind')='begin_turn'
                   AND json_extract(payload_json,'$.turn_id')=? LIMIT 3
             ''',(p.attempt_id,p.local_turn_id)).fetchall()
             import json
-            if len(turns) != 2 or {t['event_type'] for t in turns} != {'OPERATOR_OPERATION_INTENT','OPERATOR_OPERATION_APPLIED'} or len({t['aggregate_id'] for t in turns}) != 1:
+            if (len(turns) != 2
+                    or {t['event_type'] for t in turns}
+                    != {'OPERATOR_OPERATION_INTENT','OPERATOR_OPERATION_APPLIED'}
+                    or len({t['aggregate_id'] for t in turns}) != 1):
                 raise ContentRefused('GRANT_INVALIDATED')
-            native = None
-            for t in turns:
-                data = json.loads(t['payload_json'])
-                if any(data.get(k) != v for k,v in {'attempt_id':p.attempt_id,'session_epoch_id':p.session_epoch_id,'process_generation_id':p.process_generation_id,'turn_id':p.local_turn_id}.items()):
-                    raise ContentRefused('GRANT_INVALIDATED')
-                if t['event_type']=='OPERATOR_OPERATION_INTENT' and (data.get('worker_id')!=row['worker_id'] or data.get('provider_session_id')!=row['provider_session_id']):
-                    raise ContentRefused('GRANT_INVALIDATED')
-                if t['event_type']=='OPERATOR_OPERATION_APPLIED':
-                    if data.get('acknowledged') is not True:
-                        raise ContentRefused('GRANT_INVALIDATED')
-                    native = data.get('provider_native_turn_id')
+            expected_source = (
+                p.job_id, p.attempt_id, row['worker_id'], row['quota_class'],
+            )
+            by_type = {t['event_type']: t for t in turns}
+            intent = by_type['OPERATOR_OPERATION_INTENT']
+            applied = by_type['OPERATOR_OPERATION_APPLIED']
+            try:
+                operation = OperationId(intent['aggregate_id'])
+                applied_command_id = operation_receipt_command_id(
+                    operation, OperationReceiptKind.APPLIED,
+                )
+            except (ValueError, TypeError):
+                raise ContentRefused('GRANT_INVALIDATED') from None
+            if (intent['actor'] != 'supervisor'
+                    or applied['actor'] != 'supervisor'
+                    or (intent['job_id'],intent['attempt_id'],
+                        intent['worker_id'],intent['quota_class'])
+                    != expected_source
+                    or (applied['job_id'],applied['attempt_id'],
+                        applied['worker_id'],applied['quota_class'])
+                    != expected_source
+                    or intent['command_id'] != operation.command_id
+                    or applied['command_id'] != applied_command_id):
+                raise ContentRefused('GRANT_INVALIDATED')
+            try:
+                intent_payload = json.loads(intent['payload_json'])
+                applied_payload = json.loads(applied['payload_json'])
+            except (TypeError, ValueError):
+                raise ContentRefused('GRANT_INVALIDATED') from None
+            expected_intent = {
+                'schema_version':'mastermind.operator_harness_turn_intent/v1',
+                'operation_kind':'begin_turn',
+                'attempt_id':p.attempt_id,
+                'session_epoch_id':p.session_epoch_id,
+                'process_generation_id':p.process_generation_id,
+                'worker_id':row['worker_id'],
+                'provider_session_id':row['provider_session_id'],
+                'turn_id':p.local_turn_id,
+            }
+            applied_keys = {
+                'schema_version','operation_kind','attempt_id',
+                'session_epoch_id','process_generation_id','turn_id',
+                'provider_native_turn_id','acknowledged',
+            }
+            if (intent_payload != expected_intent
+                    or set(applied_payload) != applied_keys
+                    or applied_payload.get('schema_version')
+                    != 'mastermind.operator_harness_turn_applied/v1'
+                    or applied_payload.get('operation_kind') != 'begin_turn'
+                    or applied_payload.get('attempt_id') != p.attempt_id
+                    or applied_payload.get('session_epoch_id') != p.session_epoch_id
+                    or applied_payload.get('process_generation_id')
+                    != p.process_generation_id
+                    or applied_payload.get('turn_id') != p.local_turn_id
+                    or applied_payload.get('acknowledged') is not True):
+                raise ContentRefused('GRANT_INVALIDATED')
+            native = applied_payload.get('provider_native_turn_id')
             if not isinstance(native,str) or not 1<=len(native)<=256:
                 raise ContentRefused('GRANT_INVALIDATED')
-            if live and connection.execute("SELECT 1 FROM events WHERE aggregate_type='operator_operation' AND aggregate_id=? AND event_type='OPERATOR_OPERATION_EFFECT_UNKNOWN' LIMIT 1",(turns[0]['aggregate_id'],)).fetchone():
+            if live and connection.execute(
+                    "SELECT 1 FROM events WHERE aggregate_type='operator_operation' "
+                    "AND aggregate_id=? AND event_type='OPERATOR_OPERATION_EFFECT_UNKNOWN' "
+                    "LIMIT 1",(operation.command_id,)).fetchone():
                 raise ContentRefused('GRANT_INVALIDATED')
         # The turn key keeps the canonical TurnKey field set (never a lease
         # token); the current fence travels beside it into the access ticket.

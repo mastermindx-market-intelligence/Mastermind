@@ -1,0 +1,37 @@
+{
+  "adapter_integrated": false,
+  "codex_version": "0.159.3",
+  "command": "codex app-server generate-json-schema --out <owned ignored probe directory>",
+  "compaction_requested": false,
+  "credential_files_present": false,
+  "isolated_codex_home": true,
+  "launcher_sha256": "61b0194f3bb6534439c8d26a3ed57d0805f84b884588b761795323eeb92fcf70",
+  "model_turn_requested": false,
+  "native_binary_bytes": 240351424,
+  "native_binary_sha256": "4d210f7c5a18fd0386434df23b5bdbb8c0e7257d3e8a2b30b0769c8bbe99a878",
+  "native_package_version": "0.159.3-darwin-arm64",
+  "observed_at": "2026-10-12T07:53:05.965472+00:00",
+  "platform": "darwin-arm64",
+  "production_runtime_mutated": false,
+  "proof_scope": "installed protocol export; not live provider event delivery or production acceptance",
+  "retained_usage_schema": "tests/fixtures/codex_context/ThreadTokenUsageUpdatedNotification-0.159.3.json",
+  "schema_artifacts": [
+    {
+      "name": "ThreadTokenUsageUpdatedNotification.json",
+      "sha256": "aba4f6c7e4a19b2b842c08ee793b57000c07dafd57b922ad0d8e7c76609108c2"
+    },
+    {
+      "name": "ThreadCompactStartParams.json",
+      "sha256": "684b20adf20213a9fcbca31b59108feadcd5a8b693c16431c20d701049df3737"
+    },
+    {
+      "name": "ThreadCompactStartResponse.json",
+      "sha256": "74674e47f33e37d7d97d144eac1789ef0580a1fc12d45a5675bb97caa08d803a"
+    },
+    {
+      "name": "ContextCompactedNotification.json",
+      "sha256": "c9f9a58ef680e09d568cff5f24b45895841e1cf138b650bae64dcf6c85f177af"
+    }
+  ],
+  "schema_version": "mastermind.fabric_context_protocol_probe/v1"
+}
