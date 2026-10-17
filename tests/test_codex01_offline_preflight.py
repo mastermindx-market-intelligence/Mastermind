@@ -13,9 +13,12 @@ from ops.executive_os import codex01_offline_preflight as subject
 
 
 @pytest.fixture
-def scratch_fixture():
-    # The real preflight owns an already-created TemporaryDirectory. Tests
-    # must likewise grant no sandbox exception to a merely plausible path.
+def scratch_fixture(tmp_path, monkeypatch):
+    # The real macOS preflight owns an already-created /private/tmp scratch.
+    # Linux CI has no /private/tmp; its harmless policy-shape tests use an
+    # existing pytest-owned parent. The installed macOS path is unchanged.
+    if not subject.SCRATCH_PARENT.is_dir():
+        monkeypatch.setattr(subject, "SCRATCH_PARENT", tmp_path)
     with tempfile.TemporaryDirectory(prefix="mmx_codex01_offline_", dir=subject.SCRATCH_PARENT) as name:
         yield Path(name)
 
