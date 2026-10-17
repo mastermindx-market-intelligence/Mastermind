@@ -156,5 +156,46 @@ class CursorMonthlyShareSourceTests(unittest.TestCase):
         self.assertNotIn("_emit", calls)
 
 
+    def test_native_failure_returns_original_judgment_route(self):
+        picker = next(
+            n for n in self.tree.body
+            if isinstance(n, ast.FunctionDef) and n.name == "_format_pick_host"
+        )
+        branch = next(
+            n for n in ast.walk(picker)
+            if isinstance(n, ast.If) and isinstance(n.test, ast.Call)
+            and isinstance(n.test.func, ast.Name)
+            and n.test.func.id == "is_judgment_class"
+        )
+        wrapper = ast.parse("def probe():\\n    pass\\n")
+        wrapper.body[0].body = [branch]
+        base = {
+            "is_judgment_class": lambda *args: True,
+            "_cursor_grok_monthly_share": lambda *args: True,
+            "_cursor_grok_after_quota": lambda *args, **kwargs:
+                "NONE reason=cursor_at_capacity",
+            "_pick_scored": lambda *args, **kwargs:
+                "POOL=glm MODEL=glm-5.3",
+            "tc": "reviewer", "doc": self.policy(),
+            "route_key": "judgment-91", "prefer_c": None,
+            "complexity": "C2_COMPLEX_BOUNDED",
+            "needs": None, "subject_pool": None,
+            "host_modes": None, "escalation_reason": "",
+        }
+        exec(compile(ast.fix_missing_locations(wrapper),
+                     "<picker-judgment-branch>", "exec"), base)
+        self.assertEqual(base["probe"](), "POOL=glm MODEL=glm-5.3")
+        base["_cursor_grok_after_quota"] = lambda *args, **kwargs: (
+            "POOL=cursor MODEL=cursor-grok-4.6-high"
+        )
+        self.assertEqual(
+            base["probe"](),
+            "POOL=cursor MODEL=cursor-grok-4.6-high"
+            " ROUTE_ALLOC=cursor_grok_monthly_share",
+        )
+        base["_cursor_grok_monthly_share"] = lambda *args: False
+        self.assertEqual(base["probe"](), "POOL=glm MODEL=glm-5.3")
+
+
 if __name__ == "__main__":
     unittest.main()
