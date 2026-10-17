@@ -55,7 +55,9 @@ def installation(tmp_path, monkeypatch):
     receipt = root / "attestation.json"
     def publish(value=document):
         receipt.chmod(0o600) if receipt.exists() else None
-        receipt.write_text(json.dumps(value)); receipt.chmod(0o440)
+        receipt.write_text(json.dumps(value))
+        os.chown(receipt, -1, os.getegid())
+        receipt.chmod(0o440)
     publish()
     def load():
         return att.load_native_claude_attestation(receipt, expected_binary_path=binary,
@@ -69,6 +71,36 @@ def test_reader_reuses_installed_authority_without_launching_provider(installati
     assert result.path==str(i.binary) and result.sha256==i.document['cli']['sha256']
     assert result.team_identifier==att.CLAUDE_TEAM
     assert len(i.calls)==calls
+
+
+
+
+def test_v2_receipt_excludes_boot_local_device_identity(installation):
+    i = installation
+    assert i.document["schema_version"] == att.SCHEMA
+    assert att.SCHEMA.endswith("/v2")
+    assert "device" not in i.document["cli"]["identity"]
+    assert "device" not in i.document["sdk"]["python"]["identity"]
+    assert set(i.document["cli"]["identity"]) == set(att._DURABLE_IDENTITY)
+
+
+def test_device_renumber_after_receipt_does_not_invalidate_durable_installation(
+    installation, monkeypatch
+):
+    i = installation
+    original = att._identity
+    original_device = os.stat(i.binary).st_dev
+
+    def renumbered(info):
+        value = original(info)
+        value["device"] += 4096
+        return value
+
+    monkeypatch.setattr(att, "_identity", renumbered)
+    result = i.load()
+    assert result.sha256 == i.document["cli"]["sha256"]
+    assert result.inode == i.document["cli"]["identity"]["inode"]
+    assert result.device == original_device + 4096
 
 
 def test_same_bytes_replaced_cli_is_stale(installation):
