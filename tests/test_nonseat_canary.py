@@ -103,6 +103,7 @@ def _environment_loader_for(provision: dict, *, running=False):
                 {"profile_id": "111111111111111111111111", "running": True},
                 {"profile_id": "222222222222222222222222", "running": True},
                 {"profile_id": "333333333333333333333333", "running": True},
+                {"profile_id": "444444444444444444444444", "running": True},
             ],
         }
     return _load
@@ -113,6 +114,7 @@ def _binding_doc(*, colliding_profile_id=None) -> dict:
         colliding_profile_id or "111111111111111111111111",
         "222222222222222222222222",
         "333333333333333333333333",
+        "444444444444444444444444",
     ]
     bindings = []
     for index, profile_id in enumerate(profile_ids, start=1):
@@ -2774,11 +2776,11 @@ def test_mutation_multilogin_truncated_census_refuses_not_absent():
 
 
 # ---------------------------------------------------------------------------
-# 32. SOL blocker 4 — affirmative current three-seat collision census
+# 32. SOL blocker 4 — affirmative current four-seat collision census
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("mutation", ("one-seat", "stale", "future", "missing-observed", "renamed-seat", "four-seats", "conflict"))
+@pytest.mark.parametrize("mutation", ("one-seat", "stale", "future", "missing-observed", "renamed-seat", "five-seats", "conflict"))
 def test_mutation_incomplete_stale_or_conflicting_binding_census_refuses(tmp_path, mutation):
     provision = _valid_provision("multilogin")
     path = _write_provision(tmp_path, provision)
@@ -2794,11 +2796,11 @@ def test_mutation_incomplete_stale_or_conflicting_binding_census_refuses(tmp_pat
         doc["bindings"][0]["observed_at"] = "not-a-timestamp"
     elif mutation == "renamed-seat":
         doc["bindings"][0]["seat_ref"] = "chatgpt-seat-1"
-    elif mutation == "four-seats":
+    elif mutation == "five-seats":
         extra = copy.deepcopy(doc["bindings"][0])
         extra["binding_id"] = "synthetic-extra-binding"
-        extra["seat_ref"] = "chatgpt4"
-        extra["locator"]["profile_id"] = "444444444444444444444444"
+        extra["seat_ref"] = "chatgpt5"
+        extra["locator"]["profile_id"] = "555555555555555555555555"
         doc["bindings"].append(extra)
     elif mutation == "conflict":
         conflict = copy.deepcopy(doc["bindings"][0])
@@ -6768,6 +6770,7 @@ def _peer_bootstrap_census(provision, *, running=False):
             {"profile_id": "111111111111111111111111", "running": True},
             {"profile_id": "222222222222222222222222", "running": True},
             {"profile_id": "333333333333333333333333", "running": True},
+            {"profile_id": "444444444444444444444444", "running": True},
         ],
     }
 
@@ -8052,6 +8055,7 @@ def _realm1_environment(provision=None) -> dict:
             {"profile_id": "111111111111111111111111", "running": True},
             {"profile_id": "222222222222222222222222", "running": True},
             {"profile_id": "333333333333333333333333", "running": True},
+            {"profile_id": "444444444444444444444444", "running": True},
         ],
         "multilogin": [{
             "workspace_id": _REALM1_WORKSPACE,
@@ -8113,11 +8117,11 @@ def test_realm1_live_snapshot_has_an_exact_total_cardinality_ceiling():
     raw = _realm1_environment()
     raw["gologin"].extend(
         {"profile_id": f"{index:024x}", "running": False}
-        for index in range(996)
+        for index in range(995)
     )
     assert len(raw["gologin"]) + len(raw["multilogin"]) == 1000
     assert _seal_realm1_environment(raw) is not None
-    raw["gologin"].append({"profile_id": f"{996:024x}", "running": False})
+    raw["gologin"].append({"profile_id": f"{995:024x}", "running": False})
     assert _seal_realm1_environment(raw) is None
 
 
@@ -8283,6 +8287,7 @@ def test_realm1_candidate_collision_uses_exact_manager_folder_profile_identity(t
         "gologin": [
             {"profile_id": "222222222222222222222222", "running": True},
             {"profile_id": "333333333333333333333333", "running": True},
+            {"profile_id": "444444444444444444444444", "running": True},
         ],
         "multilogin": [
             {
@@ -8328,7 +8333,7 @@ def test_realm1_candidate_collision_uses_exact_manager_folder_profile_identity(t
     ),
 )
 def test_realm1_live_gate_refuses_running_set_and_binding_mutations(tmp_path, mutation):
-    """Catches any relaxation of exact three-seat equality or binding identity."""
+    """Catches any relaxation of exact four-seat equality or binding identity."""
     provision = _stored_provision(_valid_provision("multilogin"))
     path = _write_provision(tmp_path, provision)
     raw = _realm1_environment(provision)
@@ -8338,7 +8343,7 @@ def test_realm1_live_gate_refuses_running_set_and_binding_mutations(tmp_path, mu
     elif mutation == "seat_stopped":
         raw["gologin"][0]["running"] = False
     elif mutation == "extra_running":
-        raw["gologin"].append({"profile_id": "444444444444444444444444", "running": True})
+        raw["gologin"].append({"profile_id": "555555555555555555555555", "running": True})
     elif mutation == "binding_disagrees":
         conflict = copy.deepcopy(bindings["bindings"][0])
         conflict["binding_id"] = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
