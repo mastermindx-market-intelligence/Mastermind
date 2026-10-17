@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { MissionHost } from "../host";
-import { decodeFabricCatalog, type CatalogRow, type FabricCatalog } from "./catalog-contract";
+import { decodeBrowserScopedFabricCatalog, type CatalogRow, type FabricCatalog } from "./catalog-contract";
 import { observedRunLineage, type RunLineageState } from "./catalog-lineage";
 import "./fabric-catalog.css";
 
@@ -99,12 +99,12 @@ export function FabricRunCatalog({ host, locale = "en", onInspect }: FabricRunCa
           started !== host.invalidationGeneration?.()) return;
       const after = host.auth?.getState();
       if (after?.status !== "signed_in" || !after.acquisition) throw new Error("FABRIC_ACCESS_CHANGED");
-      setObservation({ document: decodeFabricCatalog(raw), host, epoch: started });
+      setObservation({ document: decodeBrowserScopedFabricCatalog(raw), host, epoch: started });
     } catch (cause) {
       if (controller.signal.aborted || ticket !== serial.current || currentHost.current !== host ||
           started !== host.invalidationGeneration?.()) return;
       const code = cause instanceof Error ? cause.message : "";
-      setError(["FABRIC_CATALOG_INVALID", "FABRIC_ACCESS_CHANGED"].includes(code) ? code : "FABRIC_SOURCE_UNAVAILABLE");
+      setError(["FABRIC_CATALOG_INVALID", "FABRIC_CATALOG_SCOPE_REFUSED", "FABRIC_ACCESS_CHANGED"].includes(code) ? code : "FABRIC_SOURCE_UNAVAILABLE");
     } finally { if (ticket === serial.current) setBusy(false); }
   }
   const filters: Array<[Filter, string, string]> = [["all", "All", "全部"], ["active", "Active or waiting", "活动或等待"],

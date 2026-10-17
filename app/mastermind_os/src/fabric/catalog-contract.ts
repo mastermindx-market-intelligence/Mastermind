@@ -87,3 +87,17 @@ export function decodeFabricCatalog(raw: unknown): FabricCatalog {
     items, reason_codes: raw.reason_codes as string[],
   };
 }
+
+/**
+ * Browser-facing consumer guard, not an authorization grant.
+ *
+ * A machine-owner catalog may be valid diagnostic metadata, but it must
+ * never be projected as a signed-in user's permitted run set. The actual
+ * Workspace owner must still authorize each original run server-side.
+ */
+export function decodeBrowserScopedFabricCatalog(raw: unknown): FabricCatalog {
+  const document = decodeFabricCatalog(raw);
+  if (document.source.scope !== "EXACT_RUN_SET")
+    throw new Error("FABRIC_CATALOG_SCOPE_REFUSED");
+  return document;
+}

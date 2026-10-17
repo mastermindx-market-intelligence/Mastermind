@@ -19,3 +19,7 @@ Independent exact-head source review, actual browser/layout qualification, sourc
 ## Subsequent source-backed execution
 
 [October 15 C3 ready-tunnel reconciliation and parent/child catalog lineage qualification](C3_TUNNEL_AND_CATALOG_LINEAGE_20261015.md). This is local managed tunnel/read-only MCP and frontend contract proof, **not** a native ChatGPT plugin-consent or live authenticated Mastermind OS acceptance.
+
+## October 17 consumer security continuation
+
+[October 17 signed-in machine-owner scope refusal](CATALOG_MACHINE_SCOPE_REFUSAL_20261017.md): signed-in OS catalog refuses machine-owned observations; server-issued original-run entitlement remains mandatory.

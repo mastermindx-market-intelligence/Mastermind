@@ -24,7 +24,7 @@ function catalog() {
     availability: "AVAILABLE", observed_at: "2026-10-13T21:10:00Z",
     source: {
       owner: "ATTENDED_FABRIC", observation_kind: "CONTROLLER_STATUS_SNAPSHOT",
-      revision: "a".repeat(64), scope: "MACHINE_OWNER", atomic: false, time_basis: "LOCAL_READ",
+      revision: "a".repeat(64), scope: "EXACT_RUN_SET", atomic: false, time_basis: "LOCAL_READ",
     },
     coverage: { returned_count: 1, candidate_count: 1, omitted_count: 0, scan_complete: true, status_complete: true },
     items: [{ run_id: "fabric-selected-run", controller_modified_at: "2026-10-13T21:09:00Z", status: status(), reason_code: null }],

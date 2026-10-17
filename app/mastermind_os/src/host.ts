@@ -1,4 +1,4 @@
-import { decodeFabricCatalog, type FabricCatalog } from "./fabric/catalog-contract";
+import { decodeBrowserScopedFabricCatalog, type FabricCatalog } from "./fabric/catalog-contract";
 import { attendedSelection, decodeAttendedStatus, type AttendedSelection, type AttendedStatus } from "./fabric/attended-status";
 import { createNativeExecutiveTransport } from "./native-executive-transport";
 import type { ExecutiveSessionTransport } from "./orchestration/executive-session-command-port";
@@ -187,7 +187,7 @@ export function bindMissionHost(
         check(signal, started);
         const current = client.getState();
         if (current.status !== "signed_in" || !current.acquisition) throw new Error("FABRIC_READ_UNAUTHORIZED");
-        return decodeFabricCatalog(raw);
+        return decodeBrowserScopedFabricCatalog(raw);
       },
     } : {}),
     async readPrograms({ signal }) {

@@ -5,7 +5,7 @@ import { bindMissionHost, type AuthState, type RawClient } from "../host";
 import { FabricRunCatalog } from "./FabricRunCatalog";
 import { AttendedFabricWorkspace } from "./AttendedFabricWorkspace";
 import ownerNested from "../fixtures/fabric-catalog-m2-nested-observation-20261015.json";
-import { CATALOG_LIMIT, decodeFabricCatalog, type CatalogRow, type FabricCatalog } from "./catalog-contract";
+import { CATALOG_LIMIT, decodeFabricCatalog, decodeBrowserScopedFabricCatalog, type CatalogRow, type FabricCatalog } from "./catalog-contract";
 
 afterEach(cleanup);
 function row(id = "run-one"): CatalogRow {
@@ -35,6 +35,12 @@ const load = async () => { fireEvent.click(screen.getByRole("button", { name: "L
 const select = (id = "run-one") => fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${id} ·`) }));
 
 describe("catalog metadata contract", () => {
+  it("retains machine-owned metadata for offline diagnostics but refuses it in a signed-in OS view", () => {
+    const machine = catalog(); machine.source.scope = "MACHINE_OWNER";
+    expect(decodeFabricCatalog(machine).source.scope).toBe("MACHINE_OWNER");
+    expect(() => decodeBrowserScopedFabricCatalog(machine)).toThrow("FABRIC_CATALOG_SCOPE_REFUSED");
+    expect(decodeBrowserScopedFabricCatalog(catalog()).source.scope).toBe("EXACT_RUN_SET");
+  });
   it("keeps a valid owner-shaped observation and strips unsanctioned content", () => {
     const d = catalog(); const projected = decodeFabricCatalog({ ...d, prompts: "PRIVATE", items: [{ ...d.items[0], raw_log: "PRIVATE", status: { ...d.items[0].status, bearer: "PRIVATE" } }] });
     expect(projected).toEqual(d); expect(JSON.stringify(projected)).not.toContain("PRIVATE");
@@ -94,6 +100,19 @@ describe("owner-authorized catalog host and view", () => {
     second.change({ status: "signed_out", acquisition: false, content: false, reason: null });
     await expect(host.readAttendedFabricCatalog!({ signal: new AbortController().signal })).rejects.toThrow("FABRIC_READ_UNAUTHORIZED");
     expect(second.raw.readAttendedFabricCatalog).not.toHaveBeenCalled();
+  });
+  it("never displays or opens a machine-owner catalog merely because the user is signed in", async () => {
+    const machine = catalog(); machine.source.scope = "MACHINE_OWNER";
+    const c = client(async () => machine), host = bindMissionHost(c.raw);
+    render(<FabricRunCatalog host={host} onInspect={vi.fn()} />);
+    await expect(host.readAttendedFabricCatalog!({ signal: new AbortController().signal }))
+      .rejects.toThrow("FABRIC_CATALOG_SCOPE_REFUSED");
+    fireEvent.click(screen.getByRole("button", { name: "Load runs" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("FABRIC_CATALOG_SCOPE_REFUSED");
+    expect(screen.queryByRole("button", { name: /^run-one ·/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Use in run inspector" })).toBeNull();
+    expect(c.raw.readAttendedFabricCatalog).toHaveBeenCalledTimes(2);
+    expect(c.statusRead).not.toHaveBeenCalled();
   });
   it("loads only on explicit demand and separates observed controller states from acceptance", async () => {
     const c = client(); render(<FabricRunCatalog host={bindMissionHost(c.raw)} />);
