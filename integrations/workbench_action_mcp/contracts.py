@@ -17,8 +17,11 @@ import re
 from typing import Any
 
 from .command_contracts import (
+    ARTIFACT_HMAC_PURPOSE,
     COMMAND_HMAC_PURPOSE,
+    PreparedActionArtifact,
     PreparedClosedCommand,
+    validate_prepared_artifact,
     validate_prepared_command,
 )
 
@@ -376,6 +379,85 @@ class ActionTokenCodec:
         except Exception as error:
             raise ActionContractError("invalid action reference") from error
         return validate_prepared(value, now_ms=now_ms, require_fresh=require_fresh)
+
+    def encode_artifact(self, value: PreparedActionArtifact) -> str:
+        validate_prepared_artifact(
+            value, now_ms=value.issued_at_ms, require_fresh=True
+        )
+        payload = json.dumps(
+            dataclasses.asdict(value),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+        if len(payload) > MAX_ACTION_REF_BYTES // 2:
+            raise ActionContractError("artifact reference is too large")
+        signature = self._mac(payload, purpose=ARTIFACT_HMAC_PURPOSE)
+        token = f"{_b64encode(payload)}.{_b64encode(signature)}"
+        if len(token.encode("ascii")) > MAX_ACTION_REF_BYTES:
+            raise ActionContractError("artifact reference is too large")
+        return token
+
+    def decode_artifact(
+        self, token: object, *, now_ms: int
+    ) -> PreparedActionArtifact:
+        return self._decode_artifact(token, now_ms=now_ms, require_fresh=True)
+
+    def decode_artifact_evidence(
+        self, token: object, *, now_ms: int
+    ) -> PreparedActionArtifact:
+        return self._decode_artifact(token, now_ms=now_ms, require_fresh=False)
+
+    def _decode_artifact(
+        self, token: object, *, now_ms: int, require_fresh: bool
+    ) -> PreparedActionArtifact:
+        try:
+            if (
+                type(token) is not str
+                or not token
+                or len(token.encode("utf-8")) > MAX_ACTION_REF_BYTES
+            ):
+                raise ActionContractError("invalid artifact reference")
+            parts = token.split(".")
+            if len(parts) != 2:
+                raise ActionContractError("invalid artifact reference")
+            payload = _b64decode(parts[0])
+            supplied = _b64decode(parts[1])
+            expected = self._mac(payload, purpose=ARTIFACT_HMAC_PURPOSE)
+            if len(supplied) != len(expected) or not hmac.compare_digest(
+                supplied, expected
+            ):
+                raise ActionContractError("invalid artifact reference")
+
+            def pairs(items: list[tuple[str, Any]]) -> dict[str, Any]:
+                selected: dict[str, Any] = {}
+                for key, item in items:
+                    if key in selected:
+                        raise ActionContractError("invalid artifact reference")
+                    selected[key] = item
+                return selected
+
+            def constant(_value: str) -> None:
+                raise ActionContractError("invalid artifact reference")
+
+            raw: Any = json.loads(
+                payload.decode("utf-8"),
+                object_pairs_hook=pairs,
+                parse_constant=constant,
+            )
+            names = {field.name for field in dataclasses.fields(PreparedActionArtifact)}
+            if type(raw) is not dict or set(raw) != names:
+                raise ActionContractError("invalid artifact reference")
+            value = PreparedActionArtifact(**raw)
+            return validate_prepared_artifact(
+                value, now_ms=now_ms, require_fresh=require_fresh
+            )
+        except ActionContractError:
+            raise
+        except Exception as error:
+            raise ActionContractError("invalid artifact reference") from error
+
 
     def encode_command(self, value: PreparedClosedCommand) -> str:
         validate_prepared_command(

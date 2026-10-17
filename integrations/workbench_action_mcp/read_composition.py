@@ -25,6 +25,8 @@ from integrations.workbench_local_mcp.schemas import (
 from integrations.workbench_read_mcp.observer import ReadScope
 
 from .command_contracts import (
+    MAX_ARTIFACT_BYTES,
+    MAX_ARTIFACT_CHUNK_BYTES,
     MAX_PAGE_BYTES as MAX_COMMAND_PAGE_BYTES,
     MAX_PAGE_LINES as MAX_COMMAND_PAGE_LINES,
     RECIPE_SHA256,
@@ -62,6 +64,7 @@ UNIFIED_TOOL_NAMES = (
     "prepare_project_command",
     "run_project_command",
     "read_action_result",
+    "read_action_artifact",
     "reconcile_action",
 )
 
@@ -125,10 +128,10 @@ _MANIFEST_DATA = _closed_object(
                     },
                     ("recipe_id", "sha256"),
                 )
-                for recipe_id in ("canary_checksum", "canary_refuse")
+                for recipe_id in sorted(RECIPE_SHA256)
             ],
-            "minItems": 2,
-            "maxItems": 2,
+            "minItems": len(RECIPE_SHA256),
+            "maxItems": len(RECIPE_SHA256),
         },
         "limits": _closed_object(
             {
@@ -140,12 +143,16 @@ _MANIFEST_DATA = _closed_object(
                 },
                 "command_result_page_lines": {"const": MAX_COMMAND_PAGE_LINES},
                 "command_result_page_bytes": {"const": MAX_COMMAND_PAGE_BYTES},
+                "artifact_maximum_bytes": {"const": MAX_ARTIFACT_BYTES},
+                "artifact_chunk_bytes": {"const": MAX_ARTIFACT_CHUNK_BYTES},
             },
             (
                 "action_ttl_ms",
                 "process_deadline_seconds",
                 "command_result_page_lines",
                 "command_result_page_bytes",
+                "artifact_maximum_bytes",
+                "artifact_chunk_bytes",
             ),
         ),
         "effects": _closed_object(
@@ -315,7 +322,7 @@ class BoundReadComposition:
             data["supported_tools"] = list(UNIFIED_TOOL_NAMES)
             data["recipes"] = [
                 {"recipe_id": recipe_id, "sha256": RECIPE_SHA256[recipe_id]}
-                for recipe_id in ("canary_checksum", "canary_refuse")
+                for recipe_id in sorted(RECIPE_SHA256)
             ]
             data["limits"] = {
                 "action_ttl_ms": self.action_ttl_ms,
@@ -324,6 +331,8 @@ class BoundReadComposition:
                 ),
                 "command_result_page_lines": MAX_COMMAND_PAGE_LINES,
                 "command_result_page_bytes": MAX_COMMAND_PAGE_BYTES,
+                "artifact_maximum_bytes": MAX_ARTIFACT_BYTES,
+                "artifact_chunk_bytes": MAX_ARTIFACT_CHUNK_BYTES,
             }
             data["effects"] = {
                 "file_write": True,
