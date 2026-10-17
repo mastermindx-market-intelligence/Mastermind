@@ -79,6 +79,151 @@ describe('App selected-session composition',()=>{
     expect(f.transport.send).not.toHaveBeenCalled();expect(f.store.reserve).not.toHaveBeenCalled();expect(f.saved()).toEqual(pointer);
     expect(screen.queryByLabelText('What would you like done?')).toBeNull();
   });
+  it("commits one qualified original reply into the real Conversations view before pointer clearance", async () => {
+    const f = fixture(pointer, false, true);
+    const read = vi.spyOn(f.host.binding.port, "readQualifiedAnswer").mockResolvedValue({
+      receipt: { ...pointer, disposition: "accepted", reason: "ACCEPTED" },
+      answer: { text: "The bounded original finding is confirmed.",
+        nextStep: "Review original evidence", readRef: "read-ref-1", parentConsumed: false },
+    });
+    // The pointer cannot clear merely because the underlying read returns:
+    // React must have actually committed the qualified view first.
+    const originalClear = vi.mocked(f.store.clearIfEqual).getMockImplementation()!;
+    vi.mocked(f.store.clearIfEqual).mockImplementation((scope, p) => {
+      expect(screen.getByRole("region", { name: "Qualified original answer" })).toBeTruthy();
+      expect(screen.getByText("The bounded original finding is confirmed.")).toBeTruthy();
+      expect(p).toEqual(pointer);
+      return originalClear(scope, p);
+    });
+    render(<App />); await panel();
+    fireEvent.click(await screen.findByRole("button", { name: "Check status" }));
+    await waitFor(() => expect(f.store.clearIfEqual).toHaveBeenCalledTimes(1));
+    const answer = screen.getByRole("region", { name: "Qualified original answer" });
+    expect(answer.closest(".conversation-window")).not.toBeNull();
+    expect(answer.textContent).toContain("Original-parent acceptance is not established");
+    expect(read).toHaveBeenCalledWith(pointer, expect.any(AbortSignal));
+    expect(f.transport.send).not.toHaveBeenCalled();
+    expect(f.transport.reply).not.toHaveBeenCalled();
+    expect(f.saved()).toBeNull();
+  });
+  it("keeps a locally accepted original answer across non-security navigation", async () => {
+    const f = fixture(pointer, false, true);
+    const read = vi.spyOn(f.host.binding.port, "readQualifiedAnswer").mockResolvedValue({
+      receipt: { ...pointer, disposition: "accepted", reason: "ACCEPTED" },
+      answer: { text: "A qualified answer remains in this Office session.",
+        nextStep: "Review", readRef: "read-ref-1", parentConsumed: false },
+    });
+    render(<App />); await panel();
+    fireEvent.click(await screen.findByRole("button", { name: "Check status" }));
+    await waitFor(() => expect(f.saved()).toBeNull());
+    expect(screen.getAllByRole("region", { name: "Qualified original answer" })).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Today" }));
+    expect(screen.queryByText("A qualified answer remains in this Office session.")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Conversations" }));
+    expect(await screen.findByText("A qualified answer remains in this Office session.")).toBeTruthy();
+    expect(screen.getAllByRole("region", { name: "Qualified original answer" })).toHaveLength(1);
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(f.transport.send).not.toHaveBeenCalled();
+  });
+  it("renders an idempotent original reply after failed compare-clear without a second SEND", async () => {
+    const f = fixture(pointer, false, true);
+    const read = vi.spyOn(f.host.binding.port, "readQualifiedAnswer").mockResolvedValue({
+      receipt: { ...pointer, disposition: "accepted", reason: "ACCEPTED" },
+      answer: { text: "This original answer must not appear twice.",
+        nextStep: "Inspect owner proof", readRef: "read-ref-1", parentConsumed: false },
+    });
+    vi.mocked(f.store.clearIfEqual).mockReturnValue(false);
+    render(<App />); await panel();
+    fireEvent.click(await screen.findByRole("button", { name: "Check status" }));
+    await waitFor(() => expect(read).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(f.store.clearIfEqual).toHaveBeenCalledTimes(1));
+    expect(screen.getAllByRole("region", { name: "Qualified original answer" })).toHaveLength(1);
+    expect(f.saved()).toEqual(pointer);
+    fireEvent.click(await screen.findByRole("button", { name: "Check status" }));
+    await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+    expect(screen.getAllByRole("region", { name: "Qualified original answer" })).toHaveLength(1);
+    expect(f.saved()).toEqual(pointer);
+    expect(f.transport.send).not.toHaveBeenCalled();
+  });
+  it("withholds a delayed qualified reply when authentication generation changes", async () => {
+    const f = fixture(pointer, false, true);
+    const late = deferred<{
+      receipt: { operationKey: string; kind: "message"; targetKey: string; disposition: "accepted"; reason: "ACCEPTED" };
+      answer: { text: string; nextStep: string; readRef: string; parentConsumed: false };
+    }>();
+    const read = vi.spyOn(f.host.binding.port, "readQualifiedAnswer").mockReturnValue(late.promise);
+    render(<App />); await panel();
+    fireEvent.click(await screen.findByRole("button", { name: "Check status" }));
+    await waitFor(() => expect(read).toHaveBeenCalledTimes(1));
+    await act(async () => f.notifyAuth());
+    await act(async () => late.resolve({
+      receipt: { operationKey: KEY, kind: "message", targetKey: REF,
+        disposition: "accepted", reason: "ACCEPTED" },
+      answer: { text: "No stale answer may leak.", nextStep: "none", readRef: "read-ref-1", parentConsumed: false },
+    }));
+    expect(screen.queryByRole("region", { name: "Qualified original answer" })).toBeNull();
+    expect(screen.queryByText("No stale answer may leak.")).toBeNull();
+    expect(f.store.clearIfEqual).not.toHaveBeenCalled();
+    expect(f.saved()).toEqual(pointer);
+    expect(f.transport.send).not.toHaveBeenCalled();
+  });
+  it("does not display a late original answer after navigation away, retaining its key for explicit recovery", async () => {
+    const f = fixture(pointer, false, true);
+    const late = deferred<Awaited<ReturnType<NonNullable<typeof f.host.binding.port.readQualifiedAnswer>>>>();
+    const read = vi.spyOn(f.host.binding.port, "readQualifiedAnswer")
+      .mockReturnValueOnce(late.promise)
+      .mockResolvedValue({
+        receipt: { ...pointer, disposition: "accepted", reason: "ACCEPTED" },
+        answer: { text: "Reopened only under original authority.",
+          nextStep: "Verify", readRef: "read-ref-1", parentConsumed: false },
+      });
+    render(<App />); await panel();
+    fireEvent.click(await screen.findByRole("button", { name: "Check status" }));
+    await waitFor(() => expect(read).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Today" }));
+    await act(async () => late.resolve({
+      receipt: { ...pointer, disposition: "accepted", reason: "ACCEPTED" },
+      answer: { text: "Must not publish a late old-view answer.",
+        nextStep: "none", readRef: "read-ref-1", parentConsumed: false },
+    }));
+    expect(screen.queryByText("Must not publish a late old-view answer.")).toBeNull();
+    expect(f.saved()).toEqual(pointer);
+    expect(f.store.clearIfEqual).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Conversations" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Check status" }));
+    await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("Reopened only under original authority.")).toBeTruthy();
+    await waitFor(() => expect(f.saved()).toBeNull());
+    expect(f.transport.send).not.toHaveBeenCalled();
+  });
+  it("hides the qualified local answer immediately when the original auth owner changes", async () => {
+    const f = fixture(pointer, false, true);
+    vi.spyOn(f.host.binding.port, "readQualifiedAnswer").mockResolvedValue({
+      receipt: { ...pointer, disposition: "accepted", reason: "ACCEPTED" },
+      answer: { text: "Only current authorized source may see me.",
+        nextStep: "Review", readRef: "read-ref-1", parentConsumed: false },
+    });
+    render(<App />); await panel();
+    fireEvent.click(await screen.findByRole("button", { name: "Check status" }));
+    await waitFor(() => expect(f.saved()).toBeNull());
+    expect(screen.getByText("Only current authorized source may see me.")).toBeTruthy();
+    await act(async () => f.notifyAuth());
+    expect(screen.queryByText("Only current authorized source may see me.")).toBeNull();
+    expect(f.transport.send).not.toHaveBeenCalled();
+  });
+  it("does not clear or display a malformed/foreign original answer", async () => {
+    const f = fixture(pointer, false, true);
+    vi.spyOn(f.host.binding.port, "readQualifiedAnswer").mockResolvedValue({
+      receipt: { ...pointer, operationKey: "foreign-key", disposition: "accepted", reason: "ACCEPTED" },
+      answer: { text: "Foreign content", nextStep: "none", readRef: "read-ref-foreign", parentConsumed: false },
+    });
+    render(<App />); await panel();
+    fireEvent.click(await screen.findByRole("button", { name: "Check status" }));
+    await waitFor(() => expect(f.host.binding.port.readQualifiedAnswer).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("region", { name: "Qualified original answer" })).toBeNull();
+    expect(f.saved()).toEqual(pointer);
+    expect(f.store.clearIfEqual).not.toHaveBeenCalled();
+  });
   it('holds SEND on unreadable pointer storage instead of inferring absence',async()=>{
     const f=fixture(); vi.mocked(f.store.read).mockRejectedValue(new Error('private store failure'));render(<App/>);await panel();
     await screen.findByRole('button',{name:'Check status'});

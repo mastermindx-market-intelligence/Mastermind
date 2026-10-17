@@ -28,7 +28,9 @@ function fixture() {
     }),
   };
   const readAnswer = vi.fn(async (_pointer: OperationPointer, _signal: AbortSignal): Promise<QualifiedAnswerRead<typeof ANSWER>> => ({ receipt: receipt(), answer: ANSWER }));
-  const onAdmission = vi.fn(), onAnswer = vi.fn(() => true);
+  const onAdmission = vi.fn(), onAnswer = vi.fn(
+    (_pointer: OperationPointer, _answer: typeof ANSWER): boolean | Promise<boolean> => true,
+  );
   const wrapped = createAwaitingAnswerPort({ port, readAnswer, isCurrent: p => current && p.targetKey === POINTER.targetKey, onAdmission, onAnswer });
   const controller = new OperationController(wrapped, store);
   return { controller, wrapped, port, store, readAnswer, onAdmission, onAnswer, saved: () => saved,
@@ -134,5 +136,45 @@ describe("Office two-phase answer durability over the existing controller", () =
     expect((await f.controller.recover()).status).toBe("accepted");
     expect(f.readAnswer.mock.calls[0][0].operationKey).toBe(POINTER.operationKey);
     expect(f.port.prepare).toHaveBeenCalledTimes(1); expect(f.port.submit).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("rendered answer acknowledgement", () => {
+  it("retains the original pointer until the current view confirms its commit", async () => {
+    const f = fixture(); await f.controller.begin(INTENT);
+    const ack = deferred<boolean>();
+    f.onAnswer.mockReturnValue(ack.promise);
+    const recovering = f.controller.recover();
+    await vi.waitFor(() => expect(f.onAnswer).toHaveBeenCalledTimes(1));
+    expect(f.saved()).toEqual(POINTER);
+    expect(f.store.clearIfEqual).not.toHaveBeenCalled();
+    ack.resolve(true);
+    expect((await recovering).status).toBe("accepted");
+    expect(f.saved()).toBeNull();
+    expect(f.port.submit).toHaveBeenCalledTimes(1);
+  });
+  it("keeps its original pointer if a view unmounts before its async ack", async () => {
+    const f = fixture(); await f.controller.begin(INTENT);
+    const ack = deferred<boolean>();
+    f.onAnswer.mockReturnValue(ack.promise);
+    const recovering = f.controller.recover();
+    await vi.waitFor(() => expect(f.onAnswer).toHaveBeenCalledTimes(1));
+    ack.resolve(false);
+    expect((await recovering).status).toBe("unknown");
+    expect(f.saved()).toEqual(POINTER);
+    expect(f.store.clearIfEqual).not.toHaveBeenCalled();
+  });
+  it("refuses pointer clearance when owner changes during the committed-view acknowledgement", async () => {
+    const f = fixture(); await f.controller.begin(INTENT);
+    const ack = deferred<boolean>();
+    f.onAnswer.mockReturnValue(ack.promise);
+    const recovering = f.controller.recover();
+    await vi.waitFor(() => expect(f.onAnswer).toHaveBeenCalledTimes(1));
+    f.changeOwner(); ack.resolve(true);
+    // OperationController deliberately invalidates to IDLE on a changed
+    // owner; the load-bearing invariant is zero stale acceptance/clear.
+    expect((await recovering).status).not.toBe("accepted");
+    expect(f.saved()).toEqual(POINTER);
+    expect(f.store.clearIfEqual).not.toHaveBeenCalled();
   });
 });
