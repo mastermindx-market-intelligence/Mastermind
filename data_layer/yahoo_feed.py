@@ -217,6 +217,17 @@ def price_cached(ticker: str) -> float | None:
     return None
 
 
+def history_cached(ticker: str, period: str = "2y"):
+    """Copy already observed history without fetching, resetting or extending its clock.
+
+    An older cache remains dated history, not a current quote. Consumers must
+    retain the last observation date and require common dates for comparisons.
+    """
+    symbol = (ticker or "").upper().strip()
+    cached = _HISTORY_CACHE.get((symbol, str(period)))
+    return cached.copy() if cached is not None else None
+
+
 def history_local(ticker: str, period: str = "2y"):
     """Native-currency daily close history for a Yahoo symbol, cached in-process.
 
