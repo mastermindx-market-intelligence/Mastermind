@@ -1,0 +1,72 @@
+{
+  "schema": "issuer_inflection.research_publication_manifest.v1",
+  "status": "records_only",
+  "runtime_effects": false,
+  "worker_dispatch": false,
+  "outcome_experiments_run": false,
+  "source_brief_sha256": "f222714b8fb452505e80fb82028b405c8ed0bfe84e2b6d94b49df2b47befb64a",
+  "carrier_pr": 1183,
+  "parent_commit": "11a64ce93328d5248967987be0d2a51883765797",
+  "branch": "research/issuer-inflection-intelligence-blueprint-20261003",
+  "prepared_at": "2026-10-03T10:28:12.105410+00:00",
+  "census_pins": {
+    "macro": "bebcb24db8707f93c3acca470590fead13e78dbd",
+    "Mastermind": "20adcaf65c2dd1bb734ab06e215feb1a0eb65659",
+    "mastermind-terminal": "41b8af2da46614cedd2a485214e53003d4f030fc"
+  },
+  "later_compared_pins": {
+    "macro": "3d9969c15bba0f57b64da7592c0731cc8a0f2eac",
+    "Mastermind": "cb8398a30b27ef6f0c369d803daab45bb28c337e"
+  },
+  "execution_front_door": "docs/superpowers/plans/2026-10-03-issuer-inflection-intelligence-program.md",
+  "concurrent_audit_preserved": true,
+  "file_hashes": {
+    "research/issuer_inflection/2026-10-03/research_supplement/ARCHITECTURE_AND_PRODUCT.md": {
+      "sha256": "70407be8e93b5d220a12a33faa2a1ca1d27c2d89eec6b0b3312eca87a080c768",
+      "bytes": 24717,
+      "words": 3061
+    },
+    "research/issuer_inflection/2026-10-03/research_supplement/ASTRA_CEO_PROMPT.md": {
+      "sha256": "81b71bea6a0e1d3b94baac1afc3f227aa8c5d6d4dc1da5b58cd636001a978a27",
+      "bytes": 7862,
+      "words": 947
+    },
+    "research/issuer_inflection/2026-10-03/research_supplement/CENSUS_AND_REUSE_MAP.md": {
+      "sha256": "77817199281b9fd2c597cf1bc1191c6b29b5a19be10b0d6eca87a4ab5f20316f",
+      "bytes": 27665,
+      "words": 3027
+    },
+    "research/issuer_inflection/2026-10-03/research_supplement/MASTERPLAN.md": {
+      "sha256": "2684d3f0f6b7a6902f20a1eb8bd4daa68507f29b26cb8117f6c4e19f05f7e8ba",
+      "bytes": 31209,
+      "words": 3718
+    },
+    "research/issuer_inflection/2026-10-03/research_supplement/README.md": {
+      "sha256": "90f95ed0e9775932cfca76232b32cc55269da0fdb11e288d5ba8a9707698265b",
+      "bytes": 9085,
+      "words": 1055
+    },
+    "research/issuer_inflection/2026-10-03/research_supplement/RESEARCH_AND_RIGHTS.md": {
+      "sha256": "c7eb5e92f8029c6b943b3ef9df29d34427dc1f081156464cddd093576bcfa44e",
+      "bytes": 27793,
+      "words": 3324
+    },
+    "research/issuer_inflection/2026-10-03/research_supplement/VALIDATION_AND_RED_TEAM.md": {
+      "sha256": "0fcc7f9ede9bb2b956002fbd71dea5cd5141334eddbfa17a4e35ff1a32aeaffd",
+      "bytes": 20197,
+      "words": 2694
+    }
+  },
+  "checks": {
+    "local_links": "pass",
+    "balanced_code_fences": "pass",
+    "target_collisions": 0,
+    "source_scope": "additive research documents only"
+  },
+  "limitations": [
+    "No new runtime tests, backtests or sealed holdouts run by this session",
+    "CDV-1 427-test result attributed to concurrent audit, not re-executed here",
+    "No authenticated product qualification or paid entitlement audit",
+    "No merge or trading/ranking authority change"
+  ]
+}
