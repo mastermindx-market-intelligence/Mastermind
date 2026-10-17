@@ -327,10 +327,11 @@ def _sha256_fd_exact(fd: int, expected_size: int) -> str | None:
     return digest.hexdigest()
 
 
-def _published_bundle_matches(
+def _published_bundle_status(
     output: Path, expected: dict[str, tuple[str, int]],
-) -> bool:
-    """Bounded, read-only verification of a possibly published release directory."""
+) -> str:
+    """Classify one bounded, read-only published-bundle observation."""
+
     directory_fd = -1
     try:
         directory_flags = os.O_RDONLY
@@ -343,15 +344,15 @@ def _published_bundle_matches(
             or output_info.st_uid != os.getuid()
             or stat.S_IMODE(output_info.st_mode) != OUTPUT_DIR_MODE
         ):
-            return False
+            return "ARTIFACT_MISMATCH"
         names: list[str] = []
         with os.scandir(directory_fd) as entries:
             for entry in entries:
                 names.append(entry.name)
                 if len(names) > len(expected):
-                    return False
+                    return "ARTIFACT_MISMATCH"
         if set(names) != set(expected):
-            return False
+            return "ARTIFACT_MISMATCH"
         file_flags = (
             os.O_RDONLY
             | getattr(os, "O_NOFOLLOW", 0)
@@ -369,7 +370,7 @@ def _published_bundle_matches(
                     or before.st_size != expected_size
                     or _sha256_fd_exact(file_fd, expected_size) != expected_digest
                 ):
-                    return False
+                    return "ARTIFACT_MISMATCH"
                 after = os.fstat(file_fd)
                 if (
                     after.st_dev != before.st_dev
@@ -378,18 +379,26 @@ def _published_bundle_matches(
                     or after.st_size != expected_size
                     or stat.S_IMODE(after.st_mode) != OUTPUT_FILE_MODE
                 ):
-                    return False
+                    return "ARTIFACT_MISMATCH"
             finally:
                 os.close(file_fd)
     except (OSError, TypeError, ValueError):
-        return False
+        return "VERIFY_EFFECT_UNKNOWN"
     finally:
         if directory_fd >= 0:
             try:
                 os.close(directory_fd)
             except OSError:
                 pass
-    return True
+    return "STAGED_ALREADY_PRESENT"
+
+
+def _published_bundle_matches(
+    output: Path, expected: dict[str, tuple[str, int]],
+) -> bool:
+    """Compatibility Boolean used only by the staging publication fence."""
+
+    return _published_bundle_status(output, expected) == "STAGED_ALREADY_PRESENT"
 
 
 def _canonical_json(value: Any) -> bytes:
@@ -406,6 +415,114 @@ def _canonical_json(value: Any) -> bytes:
         ).encode("ascii")
     except (TypeError, ValueError, UnicodeError, RecursionError):
         _refuse("INTERNAL_ERROR")
+
+
+def _expected_bundle(
+    source: Path,
+    commit: str,
+    tree: str,
+) -> tuple[dict[str, tuple[str, int]], str]:
+    """Reconstruct expected staged bytes without consulting an existing output."""
+
+    _source_identity(source, commit, tree)
+    unit = _render_unit(_git_text(source, commit, UNIT_TEMPLATE), commit)
+    caddy = _render_caddy(_git_text(source, commit, CADDY_TEMPLATE))
+    with tempfile.TemporaryDirectory(prefix=".steward-verify-") as raw:
+        temporary = Path(raw)
+        archive_path = temporary / ARCHIVE_NAME
+        archive_digest, member_count, expanded_bytes, archive_size = _archive(
+            source, commit, archive_path
+        )
+        unit_bytes = unit.encode("utf-8")
+        caddy_bytes = caddy.encode("utf-8")
+        unit_digest = hashlib.sha256(unit_bytes).hexdigest()
+        caddy_digest = hashlib.sha256(caddy_bytes).hexdigest()
+        manifest = {
+            "schema": SCHEMA,
+            "status": "STAGED_INERT",
+            "source_commit": commit,
+            "source_tree": tree,
+            "public_host": PUBLIC_HOST,
+            "resource_url": RESOURCE_URL,
+            "resource_metadata_url": METADATA_URL,
+            "release_roots": list(RELEASE_ROOTS),
+            "archive": {
+                "name": ARCHIVE_NAME,
+                "sha256": archive_digest,
+                "member_count": member_count,
+                "expanded_bytes": expanded_bytes,
+            },
+            "unit": {"name": UNIT_NAME, "sha256": unit_digest},
+            "caddy": {"name": CADDY_NAME, "sha256": caddy_digest},
+            "service_effect_applied": False,
+            "proxy_effect_applied": False,
+            "dns_effect_applied": False,
+            "oauth_effect_applied": False,
+            "workspace_effect_applied": False,
+            "provider_effect_applied": False,
+            "production_acceptance_granted": False,
+        }
+        manifest_bytes = _canonical_json(manifest)
+        manifest_digest = hashlib.sha256(manifest_bytes).hexdigest()
+        expected = {
+            ARCHIVE_NAME: (archive_digest, archive_size),
+            UNIT_NAME: (unit_digest, len(unit_bytes)),
+            CADDY_NAME: (caddy_digest, len(caddy_bytes)),
+            MANIFEST_NAME: (manifest_digest, len(manifest_bytes)),
+        }
+    return expected, manifest_digest
+
+
+def verify(
+    *,
+    source_repo: Path,
+    accepted_commit: str,
+    accepted_tree: str,
+    output_dir: Path,
+) -> dict[str, Any]:
+    """Read-only reconcile an existing staged bundle against accepted source."""
+
+    source = source_repo.expanduser()
+    output = output_dir.expanduser()
+    _source_identity(source, accepted_commit, accepted_tree)
+    if not output.is_absolute():
+        _refuse("OUTPUT_PATH_REFUSED")
+    try:
+        source_real = source.resolve(strict=True)
+        output_real = output.resolve(strict=False)
+    except OSError:
+        _refuse("OUTPUT_PATH_REFUSED")
+    if (
+        output_real == source_real
+        or source_real in output_real.parents
+        or output_real in source_real.parents
+    ):
+        _refuse("OUTPUT_PATH_REFUSED")
+    if not output.exists():
+        status = "OUTPUT_NOT_FOUND"
+        manifest_digest = None
+    elif output.is_symlink() or not output.is_dir():
+        status = "ARTIFACT_MISMATCH"
+        manifest_digest = None
+    else:
+        expected, manifest_digest = _expected_bundle(
+            source, accepted_commit, accepted_tree
+        )
+        status = _published_bundle_status(output, expected)
+    return {
+        "schema": SCHEMA,
+        "status": status,
+        "source_commit": accepted_commit,
+        "source_tree": accepted_tree,
+        "manifest_sha256": manifest_digest,
+        "service_effect_applied": False,
+        "proxy_effect_applied": False,
+        "dns_effect_applied": False,
+        "oauth_effect_applied": False,
+        "workspace_effect_applied": False,
+        "provider_effect_applied": False,
+        "production_acceptance_granted": False,
+    }
 
 
 def stage(
@@ -514,6 +631,11 @@ def stage(
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--mode",
+        choices=("stage", "verify"),
+        default="stage",
+    )
     parser.add_argument("--source-repo", required=True, type=Path)
     parser.add_argument("--accepted-commit", required=True)
     parser.add_argument("--accepted-tree", required=True)
@@ -524,7 +646,8 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(sys.argv[1:] if argv is None else argv)
     try:
-        result = stage(
+        operation = verify if args.mode == "verify" else stage
+        result = operation(
             source_repo=args.source_repo,
             accepted_commit=args.accepted_commit,
             accepted_tree=args.accepted_tree,
@@ -539,8 +662,9 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
         return 2
-    print(json.dumps({"ok": True, **result}, sort_keys=True, separators=(",", ":")))
-    return 0
+    ok = result.get("status") in {"STAGED_INERT", "STAGED_ALREADY_PRESENT"}
+    print(json.dumps({"ok": ok, **result}, sort_keys=True, separators=(",", ":")))
+    return 0 if ok else 3
 
 
 if __name__ == "__main__":
