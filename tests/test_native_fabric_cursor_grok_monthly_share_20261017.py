@@ -122,6 +122,9 @@ class CursorMonthlyShareSourceTests(unittest.TestCase):
             self.assertFalse(self.choose(key, task_class="mechanical"))
             self.assertFalse(self.choose(key, task_class="executor"))
             self.assertFalse(self.choose(key, complexity="C3_FRONTIER_JUDGMENT"))
+            self.assertFalse(self.choose(key, complexity="C1_ROUTINE_BOUNDED"))
+            self.assertFalse(self.choose(key, complexity="C0_MECHANICAL"))
+            self.assertFalse(self.choose(key, complexity=""))
             self.assertFalse(self.choose(key, prefer="glm"))
 
     def test_fail_closed_class_config_and_identity(self):
