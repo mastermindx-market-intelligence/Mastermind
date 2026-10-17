@@ -29,12 +29,19 @@ empty = dict(schema='mastermind.fabric_task_status.v1', run_id=rid, root_id=None
              result_bytes=None, accepted=None, accepted_by=None)
 if args.action == 'request':
     packet = sys.stdin.read()
+    data = b'RETURN: VERIFIED\n\n'
+    if os.environ.get('FABRIC_FIXTURE_RESULT_BYTES'):
+        size = int(os.environ['FABRIC_FIXTURE_RESULT_BYTES'])
+        prefix = b'SYNTHETIC RESULT\n'
+        if size < len(prefix) or size > 8_388_608:
+            raise ValueError('invalid synthetic fixture size')
+        data = prefix + b'R' * (size - len(prefix))
     status = dict(empty, root_id=args.root, parent_run_id=args.parent, state='DONE',
-                  result_available=True, result_bytes=18, accepted=False)
+                  result_available=True, result_bytes=len(data), accepted=False)
     with path.open('x') as stream:
         json.dump(status, stream)
     (root / (rid + '.packet')).write_text(packet)
-    (root / (rid + '.result')).write_bytes(b'RETURN: VERIFIED\n\n')
+    (root / (rid + '.result')).write_bytes(data)
     print(json.dumps(status))
 elif args.action in ('status', 'wait'):
     print(path.read_text() if path.exists() else json.dumps(empty))
