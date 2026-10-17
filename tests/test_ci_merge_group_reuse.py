@@ -340,7 +340,9 @@ def push_environment():
     }
 
 
-def test_ci_caller_env_is_opt_in_and_keeps_same_origin_identity():
+def test_ci_caller_env_is_opt_in_and_keeps_same_origin_identity(monkeypatch):
+    from scripts import ci_merge_group_reuse as reuse
+    monkeypatch.setattr(reuse, '_checkout_identity_proven', lambda expected: expected == HEAD)
     from scripts.ci_merge_group_reuse import possible_same_sha_reuse_for_ci_runner
     read, calls, paths = _read_fixture()
     assert possible_same_sha_reuse_for_ci_runner(environ=push_environment(), read=read) == (
@@ -366,7 +368,9 @@ def test_ci_caller_falls_back_to_full_tests_without_trusted_host_context(field, 
     assert calls == []
 
 
-def test_ci_caller_falls_back_to_full_tests_on_provider_failure():
+def test_ci_caller_falls_back_to_full_tests_on_provider_failure(monkeypatch):
+    from scripts import ci_merge_group_reuse as reuse
+    monkeypatch.setattr(reuse, '_checkout_identity_proven', lambda expected: expected == HEAD)
     from scripts.ci_merge_group_reuse import possible_same_sha_reuse_for_ci_runner
     read, calls, _paths = _read_fixture(invalid="read_denied")
     assert not possible_same_sha_reuse_for_ci_runner(environ=push_environment(), read=read)[0]
@@ -518,3 +522,30 @@ def test_workflow_privileges_cannot_mutate_without_detection(before, after):
         and step.get('env') == {'GH_TOKEN': "${{ github.event_name == 'push' && github.token || '' }}"}
     )
     assert not is_exact
+
+
+def test_checkout_attestation_rejects_stale_head_and_modified_tracked_inputs(tmp_path):
+    import subprocess
+    from scripts.ci_merge_group_reuse import _checkout_identity_proven
+    repo = tmp_path / 'source'
+    repo.mkdir()
+    def git(*args):
+        return subprocess.run(['git','-C',str(repo),*args],capture_output=True,text=True,check=True).stdout.strip()
+    git('init','-q');git('config','user.name','Fixture');git('config','user.email','fixture@example.invalid')
+    file = repo/'scripts'/'runner.py';file.parent.mkdir();file.write_text('accepted = True\n')
+    git('add','scripts/runner.py');git('commit','-qm','fixture')
+    head=git('rev-parse','HEAD')
+    assert _checkout_identity_proven(head,root=repo)
+    assert not _checkout_identity_proven('f'*40,root=repo)
+    file.write_text('accepted = False\n')
+    assert not _checkout_identity_proven(head,root=repo)
+    git('add','scripts/runner.py')
+    assert not _checkout_identity_proven(head,root=repo)
+
+
+def test_proof_reader_is_never_called_for_unqualified_actual_checkout(monkeypatch):
+    from scripts import ci_merge_group_reuse as reuse
+    read, calls, _paths = _read_fixture()
+    monkeypatch.setattr(reuse,'_checkout_identity_proven',lambda expected:False)
+    assert not reuse.possible_same_sha_reuse_for_ci_runner(environ=push_environment(),read=read)[0]
+    assert calls == []

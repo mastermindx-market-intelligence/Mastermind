@@ -255,6 +255,36 @@ def read_json_via_existing_gh(endpoint: str, *, run=None, executable: str | None
     return payload
 
 
+def _checkout_identity_proven(expected_head: str, *, root=None) -> bool:
+    """Prove checkout HEAD and all tracked source match the workflow's SHA.
+
+    The event environment alone is not source integrity. A stale checkout or
+    tracked worktree mutation must execute full pytest instead of reusing the
+    previous native-queue result. No network, git fetch or checkout mutation.
+    """
+    import subprocess
+
+    if not isinstance(expected_head, str) or not _SHA.fullmatch(expected_head):
+        return False
+    commands = (
+        ["git", "rev-parse", "--verify", "HEAD"],
+        ["git", "diff", "--quiet", "HEAD", "--"],
+    )
+    for index, command in enumerate(commands):
+        try:
+            record = subprocess.run(
+                command, cwd=root, capture_output=True, text=True,
+                timeout=10, stdin=subprocess.DEVNULL,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        if record.returncode != 0:
+            return False
+        if index == 0 and record.stdout.strip() != expected_head:
+            return False
+    return True
+
+
 def possible_same_sha_reuse_for_ci_runner(
     *, environ=None, read=None,
 ) -> tuple[bool, str]:
@@ -291,6 +321,8 @@ def possible_same_sha_reuse_for_ci_runner(
         return False, "RUN_ID_INVALID"
     if not _positive_int(current_run_id):
         return False, "RUN_ID_INVALID"
+    if not _checkout_identity_proven(head):
+        return False, "LOCAL_CHECKOUT_HEAD_OR_TRACKED_TREE_UNVERIFIED"
     return find_prior_merge_group_proof(
         repository=values["GITHUB_REPOSITORY"], head_sha=head,
         current_event=values["GITHUB_EVENT_NAME"], current_ref=values["GITHUB_REF"],
