@@ -16,7 +16,7 @@
          return _pick_scored(tc, prefer_c, doc, needs=needs, subject_pool=subject_pool, host_modes=host_modes,
                               task_complexity=complexity, escalation_reason=escalation_reason)
  
-@@ -2161,6 +2170,36 @@
+@@ -2161,6 +2170,35 @@
      return same
  
  
@@ -28,8 +28,7 @@
 +    percent = cfg.get("percent")
 +    if type(percent) is not int or not (1 <= percent <= 20):
 +        return False
-+    allowed = frozenset({"operator", "reviewer", "audit", "repair",
-+                         "adjudicate", "domain_orchestration"})
++    allowed = frozenset({"operator", "repair"})
 +    classes = cfg.get("task_classes")
 +    if (type(classes) is not list or not classes or len(classes) > len(allowed)
 +            or any(type(c) is not str or c not in allowed for c in classes)
