@@ -79,6 +79,7 @@ def create_browser_ports(
     *,
     resolve_binding: Callable[..., Any],
     resolve_recovery_binding: Callable[..., Any] | None = None,
+    require_resource_claim_for_fresh: bool = False,
     clock_ms: Callable[[], int],
     action_token_key: bytes,
     artifact_store: object,
@@ -106,6 +107,9 @@ def create_browser_ports(
         raise ValueError("BROWSER_PORT_OWNERS_INVALID")
     if resolve_recovery_binding is not None and not callable(resolve_recovery_binding):
         raise ValueError("BROWSER_RECOVERY_BINDING_INVALID")
+    if (type(require_resource_claim_for_fresh) is not bool
+            or (require_resource_claim_for_fresh and resolve_recovery_binding is None)):
+        raise ValueError("BROWSER_FRESH_RESOURCE_CLAIM_INVALID")
     selected_host = validate_host_config(host_config)
     selected_inspector = inspector or ProcessInspector()
     codec = BrowserRefCodec(action_token_key)
@@ -125,6 +129,7 @@ def create_browser_ports(
     action_port = BrowserActionPort(
         resolve_binding=resolve_binding,
         resolve_recovery_binding=resolve_recovery_binding,
+        require_resource_claim_for_fresh=require_resource_claim_for_fresh,
         clock_ms=clock_ms,
         codec=codec,
         artifact_store=artifact_store,

@@ -41,10 +41,9 @@ def budget(seconds=3):
 
 
 def release(state='RUNNING', boot=BOOT, commit=COMMIT):
-    roles = tuple(o.release._RoleObservation(role, state if role == 'broker' else 'RUNNING', 'e'*64,
-        S(release_commit=commit), 'fixture', BROKER.pid if role == 'broker' else 9,
-        BROKER.unique_id, BROKER.pidversion) for role in o._ROLES)
-    return o.release._ReleaseObservation(boot, roles, 'e'*64, None)
+    from tests.incident_release_fixtures import make_observation
+    return make_observation(source=dict(SOURCE, release_sha=commit), boot=boot,
+                            states={'broker': state}, broker=BROKER)
 
 
 def terminal(raw):
@@ -77,7 +76,7 @@ def world(monkeypatch):
     monkeypatch.setattr(o.namespace, '_require_socket_absent', Mock())
     monkeypatch.setattr(o.namespace, '_observe_socket_node', Mock(return_value=anchor))
     monkeypatch.setattr(o.namespace, '_require_same_socket', Mock())
-    monkeypatch.setattr(o.release, '_observe_release', Mock(return_value=release()))
+    monkeypatch.setattr(o.incident_release, '_observe_incident_release', Mock(return_value=release()))
     monkeypatch.setattr(o.release, '_boot', Mock(return_value=BOOT))
     monkeypatch.setattr(o, '_observe_running_owner_set', Mock(return_value=S(
         origin_instance=ORIGIN, broker_instance=BROKER, boot_id=BOOT)))
@@ -97,7 +96,7 @@ def world(monkeypatch):
 
 def interval(world, seconds=3):
     b = budget(seconds)
-    v = o._OriginInterval(boot_id=BOOT, release_commit=COMMIT, observer=ORIGIN,
+    v = o._OriginInterval(boot_id=BOOT, release_commit=COMMIT, cohort_content_sha256=release().cohort_content_sha256, observer=ORIGIN,
         deadline_monotonic_ns=b.endpoint, handles=world.acquire(deadline_monotonic_ns=b.endpoint),
         started_monotonic_ns=b.started, completed_monotonic_ns=b.last)
     v.phase='OBSERVATION_ONLY'; v.bootstrapped=True; v._socket_anchor=world.anchor
@@ -254,9 +253,9 @@ def test_partial_and_oversized_frames_refuse(raw):
     with pytest.raises(ValueError):c._read_stream_frame(io.BytesIO(raw))
 
 
-@pytest.mark.parametrize('field,value',[('v',True),('v',2),('kind','wrong'),('extra',None)])
+@pytest.mark.parametrize('field,value',[('v',True),('v',1),('v',3),('kind','wrong'),('extra',None)])
 def test_closed_frame_keys_and_types(field,value):
-    frame={'kind':'sent','v':1,'forward_request_sha256':'f'*64};frame[field]=value
+    frame={'kind':'sent','v':2,'forward_request_sha256':'f'*64};frame[field]=value
     with pytest.raises(ValueError):o._shape(frame,{'kind','v','forward_request_sha256'},'sent')
 
 
@@ -282,7 +281,7 @@ from pathlib import Path
 @pytest.mark.parametrize('failure',['enable','bootstrap','readback','namespace'])
 def test_bootstrap_attempt_is_burned_and_not_retried(world,monkeypatch,failure):
     v=interval(world);v.phase='EXCLUSIVE';v.bootstrapped=False
-    monkeypatch.setattr(o.release,'_observe_release',Mock(return_value=release('UNLOADED')))
+    monkeypatch.setattr(o.incident_release,'_observe_incident_release',Mock(return_value=release('UNLOADED')))
     calls=[]
     def command(argv,b):
         calls.append(argv)
@@ -299,7 +298,7 @@ def test_bootstrap_attempt_is_burned_and_not_retried(world,monkeypatch,failure):
 
 def test_bootstrap_enable_then_bootstrap_and_retains_creation_anchor(world,monkeypatch):
     v=interval(world);v.phase='EXCLUSIVE';v.bootstrapped=False
-    monkeypatch.setattr(o.release,'_observe_release',Mock(return_value=release('UNLOADED')))
+    monkeypatch.setattr(o.incident_release,'_observe_incident_release',Mock(return_value=release('UNLOADED')))
     effect=Mock(return_value=(0,b'',b''));monkeypatch.setattr(o,'_run_origin_command',effect)
     monkeypatch.setattr(o,'_broker_load_state',Mock(return_value='LOADED'))
     v.bootstrap_once()
@@ -311,7 +310,7 @@ def test_bootstrap_enable_then_bootstrap_and_retains_creation_anchor(world,monke
 def test_original_anchors_refuse_drift(world,monkeypatch,bad):
     v=interval(world)
     if bad in ('source','boot'):
-        monkeypatch.setattr(o.release,'_observe_release',Mock(return_value=release(
+        monkeypatch.setattr(o.incident_release,'_observe_incident_release',Mock(return_value=release(
             commit='d'*40 if bad=='source' else COMMIT,boot='different' if bad=='boot' else BOOT)))
     else:
         seam='_require_same_socket' if bad=='socket' else '_recheck_namespace'
@@ -426,7 +425,11 @@ def test_fixed_spawn_owns_uid_drop_and_isolated_args(world,monkeypatch):
     child=o._spawn_origin_client(v,forward_args())
     assert child.instance==CHILD and child.origin is v and v.child is child
     call=popen.call_args
-    assert call.args[0]==o._CHILD_ARGV_PREFIX+('/fixed/entry.py',)
+    # Independently bind the observed spawn to the qualified signed main image,
+    # not the pythonw launcher which performs another exec after Popen returns.
+    assert call.args[0]==(o.peer._PYTHON_MAIN_EXECUTABLE,'-I','-S','-B','/fixed/entry.py')
+    assert call.args[0][0] != o.peer._PYTHON_LAUNCHER
+    assert 'executable' not in call.kwargs
     assert call.kwargs['user']==call.kwargs['group']==450
     assert call.kwargs['extra_groups']==[] and call.kwargs['close_fds'] and call.kwargs['bufsize']==0
     assert call.kwargs['env']==o._CHILD_ENVIRONMENT

@@ -89,6 +89,12 @@ function Provenance({ source, locale }: { source: SourceClaim; locale: Conversat
     <dt>{source.observed_at_kind === "LOCAL_ACQUISITION" ? ui(locale, "Locally acquired") : ui(locale, "Observed")}</dt><dd>{source.observed_at ?? ui(locale, "Not supplied")}</dd>
     <dt>{ui(locale, "State")}</dt><dd>{source.state}</dd><dt>{ui(locale, "Coverage")}</dt><dd>{source.coverage}</dd></dl>;
 }
+function observationKey(projection: OfficeProjection) {
+  const { context, conversation, mission, result } = projection;
+  return JSON.stringify([context.authGeneration, context.selection, context.sessionRef,
+    context.bindingGeneration, context.revisions.conversation, context.revisions.mission, context.revisions.result,
+    conversation.source.state, mission.source.state, result.source.state]);
+}
 function ConversationBody({ projection, draft, onDraftChange, readResult, draftRevision,
   draftInsertion, onAppendSource, onUndoSource, locale = "en", notesPresentation = "inline", continuation }: ConversationWindowProps) {
   const [notesOpen, setNotesOpen] = useState(notesPresentation !== "collapsed");
@@ -101,6 +107,17 @@ function ConversationBody({ projection, draft, onDraftChange, readResult, draftR
   const returningFromReader = useRef(false);
   const companion = useRef<HTMLElement>(null), panelId = useId();
   const { conversation: read, mission, result, context } = projection;
+  const currentObservation = observationKey(projection);
+  const [inspectedObservation, setInspectedObservation] = useState(currentObservation);
+  if (inspectedObservation !== currentObservation) {
+    // Discard inspection state before committing changed evidence, including A-B-A.
+    // Notes are parent-scoped and survive a passive observation refresh.
+    setInspectedObservation(currentObservation);
+    setPanel(null);
+    setReaderSelection(null);
+    returningFromReader.current = false;
+    pendingNotesFocus.current = false;
+  }
   useLayoutEffect(() => { if (notesOpen && pendingNotesFocus.current && draftInput.current) { pendingNotesFocus.current = false; draftInput.current.focus(); } }, [notesOpen, readerSelection]);
   const retained = read.source.state === "CURRENT" || read.source.state === "STALE";
   // Defensive reduction: neither a context.sessionRef nor a runtime card can
@@ -190,7 +207,7 @@ function ConversationBody({ projection, draft, onDraftChange, readResult, draftR
           </div>}
         </div>}
       </div>
-      {showPanel && readerSelection && readResult ? <ResultSourceReader projection={projection} selection={readerSelection}
+      {showPanel && readerSelection && readResult ? <ResultSourceReader locale={locale} projection={projection} selection={readerSelection}
         readResult={readResult} draftRevision={draftRevision ?? 0} draftInsertion={draftInsertion ?? null}
         appendAvailable={!!onAppendSource && !!onUndoSource && draftRevision !== undefined && !!context.selection && !privateHidden}
         onAppend={(source, revision) => onAppendSource?.(source, revision) ?? false}
@@ -222,12 +239,13 @@ function ConversationBody({ projection, draft, onDraftChange, readResult, draftR
  * command binding; this component cannot promote a window to that capability. */
 export function ConversationWindow(props: ConversationWindowProps) {
   const { context, conversation, mission, result } = props.projection;
-  // Keep the command slot outside the independently keyed observation body.
-  // A passive source revision must not remount an unchanged parent Session epoch.
+  // Privacy/target changes still replace the body. Passive evidence refreshes
+  // only withdraw inspection state, preserving the actual notes textarea.
+  // Keep the owner's Session command slot outside both lifetimes.
   return <div className="conversation-window">
     <ConversationBody key={JSON.stringify([context.authGeneration, context.selection, context.sessionRef,
-    context.bindingGeneration, context.revisions.conversation, context.revisions.mission, context.revisions.result,
-    conversation.source.state, mission.source.state, result.source.state])} {...props} />
+    context.bindingGeneration, conversation.source.state === "WITHHELD",
+    mission.source.state === "WITHHELD", result.source.state === "WITHHELD"])} {...props} />
     {props.continuation != null && <div className="conversation-continuation-slot">{props.continuation}</div>}
   </div>;
 }

@@ -1,11 +1,11 @@
 """Dormant live-origin interval owner for the exact DUE10 forward transition.
 
-Host-owned source only.  Nothing here is wired to any production entrypoint,
-installer, broker constructor or policy: the production incident policy stays
-``None`` and the forward host-guard producer stays uncomposed.  No service,
-socket, permission or provider effect occurs at import or under test; every
-native/process effect boundary is exercised only through isolated private
-fakes in the focused source tests.
+The production composer selects this fixed owner only after its source-owned
+forward policy is authorized; that policy remains ``None``. No service,
+socket, permission or provider effect occurs at import. The incident-only v2
+observation preserves a stopped frozen Relay's historical provenance while
+the four authority roles use the current release. Generic convergence remains
+strict, and source tests do not qualify any physical recovery operation.
 
 Guarantee scope (accepted decision d9f51538): sampled observation, never a
 globally atomic census.  The original root installer retains its live
@@ -30,6 +30,7 @@ from typing import Any, Mapping
 
 from control_plane import executive_installed_peer as peer
 from control_plane import executive_release_observation as release
+from control_plane import executive_incident_release_observation as incident_release
 from control_plane import executive_recovery_host_observation as host
 from control_plane import executive_recovery_namespace as namespace
 from control_plane.executive_process_identity import (
@@ -53,7 +54,9 @@ _ORIGIN_COMMANDS = (_ENABLE_ARGV, _BOOTSTRAP_ARGV, _PRINT_BROKER_ARGV)
 # The one fixed direct-child launch shape.  No caller argv, path, uid, fd or
 # callback is ever accepted; the pinned signed interpreter runs exactly one
 # fixed root-owned sealed entrypoint from the exact installed release.
-_CHILD_ARGV_PREFIX = (peer._PYTHON_LAUNCHER, "-I", "-S", "-B")
+# Launch the already-qualified signed main image directly: the pythonw wrapper
+# performs another exec, which cannot be adopted after first-generation binding.
+_CHILD_ARGV_PREFIX = (peer._PYTHON_MAIN_EXECUTABLE, "-I", "-S", "-B")
 _CHILD_ENVIRONMENT = {
     "HOME": "/var/empty",
     "LANG": "C",
@@ -64,6 +67,7 @@ _CHILD_ENVIRONMENT = {
     "TZ": "UTC",
 }
 _MAX_FRAME_BYTES = 65536
+_WIRE_VERSION = 2
 _MAX_WITNESS_EXCHANGES = 16
 _MAX_STDERR_BYTES = 65536
 _SETTLE_GRACE_SECONDS = 1.0
@@ -143,6 +147,15 @@ def _run_origin_command(argv: tuple, budget: release._Budget) -> tuple:
     """Closed owned launcher readback; bounded pipes and complete cleanup."""
     if type(argv) is not tuple or argv not in _ORIGIN_COMMANDS:
         _refuse("ORIGIN_COMMAND_REFUSED")
+    return _run_owned_native_command(argv, budget)
+
+
+def _run_owned_native_command(argv: tuple, budget: release._Budget) -> tuple:
+    """Internal process mechanic; trusted callers own their fixed verb lists.
+
+    No request, environment or public CLI selects this callable or its argv.
+    The original origin entry retains its narrower command fence above.
+    """
     budget.check(force=True)
     end = min(budget.endpoint, time.monotonic_ns() + 3_000_000_000)
     process = None
@@ -261,6 +274,7 @@ class _OriginInterval:
         *,
         boot_id: str,
         release_commit: str,
+        cohort_content_sha256: str,
         observer: Instance,
         deadline_monotonic_ns: int,
         handles,
@@ -269,6 +283,9 @@ class _OriginInterval:
     ):
         self.boot_id = boot_id
         self.release_commit = release_commit
+        if not _hex(cohort_content_sha256):
+            _refuse("ORIGIN_COHORT_DIGEST_MALFORMED")
+        self.cohort_content_sha256 = cohort_content_sha256
         self.observer = observer
         self.deadline_monotonic_ns = deadline_monotonic_ns
         self.started_monotonic_ns = started_monotonic_ns
@@ -301,11 +318,15 @@ class _OriginInterval:
         try:
             budget = self._budget()
             whole = budget.call(
-                release._observe_release,
+                incident_release._observe_incident_release,
                 deadline_monotonic_ns=self.deadline_monotonic_ns,
             )
             if whole.boot_id != self.boot_id:
                 _refuse("ORIGIN_BOOT_DRIFT")
+            incident_release._validate_observation(whole)
+            if (whole.cohort_content_sha256 != self.cohort_content_sha256
+                    or any(row.state != "UNLOADED" for row in whole.roles[:3])):
+                _refuse("ORIGIN_COHORT_DRIFT")
             if tuple(role.role for role in whole.roles) != _ROLES:
                 _refuse("ORIGIN_PUBLICATION_INCOHERENT")
             if whole.roles[-1].role != "broker" or whole.roles[-1].state != "UNLOADED":
@@ -385,16 +406,16 @@ class _OriginInterval:
             pass
 
 
-def _installed_release_commit(budget: release._Budget, boot_id: str) -> str:
-    whole = budget.call(release._observe_release, deadline_monotonic_ns=budget.endpoint)
+def _installed_incident_observation(budget: release._Budget, boot_id: str):
+    whole = budget.call(incident_release._observe_incident_release, deadline_monotonic_ns=budget.endpoint)
+    incident_release._validate_observation(whole)
     if whole.boot_id != boot_id:
         _refuse("ORIGIN_BOOT_DRIFT")
     if tuple(role.role for role in whole.roles) != _ROLES:
         _refuse("ORIGIN_PUBLICATION_INCOHERENT")
-    commits = {role.content.release_commit for role in whole.roles}
-    if len(commits) != 1:
-        _refuse("ORIGIN_MIXED_CONTENT")
-    return commits.pop()
+    if any(row.state != "UNLOADED" for row in whole.roles[:3]):
+        _refuse("ORIGIN_CONSUMERS_NOT_STOPPED")
+    return whole
 
 
 def _enter_origin_interval(*, deadline_monotonic_ns: int) -> _OriginInterval:
@@ -423,11 +444,12 @@ def _enter_origin_interval(*, deadline_monotonic_ns: int) -> _OriginInterval:
         )
         if budget.call(release._boot, budget) != boot:
             _refuse("ORIGIN_BOOT_DRIFT")
-        release_commit = _installed_release_commit(budget, boot)
+        whole = _installed_incident_observation(budget, boot)
         budget.check(force=True)
         interval = _OriginInterval(
             boot_id=boot,
-            release_commit=release_commit,
+            release_commit=whole.roles[0].content.release_commit,
+            cohort_content_sha256=whole.cohort_content_sha256,
             observer=observer,
             deadline_monotonic_ns=deadline_monotonic_ns,
             handles=handles,
@@ -554,14 +576,15 @@ _STAGES = ("before_preflight", "before_reservation", "before_reservation_attempt
 _WITNESS = {"kind", "v", "stage", "ordinal", "nonce", "reservation_sha256",
             "deadline_monotonic_ns", "binding_sha256"}
 _OBS = {"kind", "v", "stage", "ordinal", "boot_id", "release_commit", "origin",
-        "broker", "socket_sha256", "deadline_monotonic_ns", "binding_sha256"}
+        "broker", "socket_sha256", "deadline_monotonic_ns", "binding_sha256",
+        "purpose", "cohort_content_sha256"}
 _ACQUIRE = {"kind", "v", "nonce", "binding", "binding_sha256", "deadline_monotonic_ns"}
 _CLOSE = {"kind", "v", "nonce", "ordinal", "binding_sha256"}
 
 
 def _shape(frame, keys, kind):
     if (type(frame) is not dict or set(frame) != set(keys) or frame.get("kind") != kind
-            or type(frame.get("v")) is not int or frame["v"] != 1):
+            or type(frame.get("v")) is not int or frame["v"] != _WIRE_VERSION):
         _refuse("ORIGIN_FRAME_MALFORMED")
 
 
@@ -588,7 +611,8 @@ def _binding_payload(request, source, policy, nonce):
     return {"I": forward.ORIGINAL_ISSUER_REQUEST_ID, "D": forward.ORIGINAL_REQUEST_SHA256,
             "M": forward.ORIGINAL_MARKER_SHA256, "R": forward.ORIGINAL_RELEASE_SHA,
             "Q": forward.SUCCESSOR_REQUEST_ID, "F": digest, "source": dict(source),
-            "policy": dict(policy), "nonce": nonce}
+            "policy": dict(policy), "nonce": nonce,
+            "observation_purpose": incident_release._PURPOSE}
 
 
 class _FrameBuffer:
@@ -708,8 +732,11 @@ def _observe_running_owner_set(budget: release._Budget, *,
     """
     if type(budget) is not release._Budget:
         _refuse("ORIGIN_BUDGET_REQUIRED")
-    if type(broker_observation) is not release._ReleaseObservation:
+    if type(broker_observation) is not incident_release._IncidentReleaseObservation:
         _refuse("ORIGIN_RELEASE_OBSERVATION_REQUIRED")
+    incident_release._validate_observation(broker_observation)
+    if any(row.state != "UNLOADED" for row in broker_observation.roles[:3]):
+        _refuse("ORIGIN_CONSUMERS_NOT_STOPPED")
     _require_instance(origin_instance, code="ORIGIN_OWNER_INSTANCE_MALFORMED")
     if tuple(role.role for role in broker_observation.roles) != _ROLES:
         _refuse("ORIGIN_ROLE_SET_REFUSED")
@@ -767,7 +794,7 @@ _CHALLENGE_KEYS = frozenset({
 })
 _OBSERVATION_KEYS = frozenset({
     "kind", "v", "stage", "ordinal", "boot_id", "release_commit",
-    "origin", "broker", "socket_sha256",
+    "origin", "broker", "socket_sha256", "purpose", "cohort_content_sha256",
 })
 _TERMINAL_KINDS = ("sent", "challenge", "response", "failed")
 
@@ -776,8 +803,12 @@ def _parent_observation(origin: _OriginInterval, stage: str, ordinal: int,
                         budget: release._Budget) -> dict:
     """Fresh independent root-side joins for one witness stage."""
     fresh = budget.call(
-        release._observe_release, deadline_monotonic_ns=origin.deadline_monotonic_ns
+        incident_release._observe_incident_release, deadline_monotonic_ns=origin.deadline_monotonic_ns
     )
+    incident_release._validate_observation(fresh)
+    if (fresh.cohort_content_sha256 != origin.cohort_content_sha256
+            or any(row.state != "UNLOADED" for row in fresh.roles[:3])):
+        _refuse("ORIGIN_COHORT_DRIFT")
     owners = budget.call(
         _observe_running_owner_set,
         budget,
@@ -794,11 +825,13 @@ def _parent_observation(origin: _OriginInterval, stage: str, ordinal: int,
         _refuse("ORIGIN_SOURCE_DRIFT")
     return {
         "kind": "observation",
-        "v": 1,
+        "v": _WIRE_VERSION,
         "stage": stage,
         "ordinal": ordinal,
         "boot_id": owners.boot_id,
         "release_commit": commit,
+        "purpose": fresh.purpose,
+        "cohort_content_sha256": fresh.cohort_content_sha256,
         "origin": _instance_record(owners.origin_instance),
         "broker": _instance_record(owners.broker_instance),
         "socket_sha256": socket_sha256,
@@ -824,8 +857,9 @@ def _serve_origin_witnesses(origin: _OriginInterval, child: _OriginChild) -> _Or
         for stream in (child.process.stdout, child.process.stderr):
             os.set_blocking(stream.fileno(), False)
             selector.register(stream, selectors.EVENT_READ)
-        _write_child_frame(child, {"kind": "origin-interval", "v": 1,
+        _write_child_frame(child, {"kind": "origin-interval", "v": _WIRE_VERSION,
             "boot_id": origin.boot_id, "release_commit": origin.release_commit,
+            "purpose": incident_release._PURPOSE, "cohort_content_sha256": origin.cohort_content_sha256,
             "origin": _instance_record(origin.observer), "deadline_monotonic_ns": budget.endpoint,
             "request": child.request.to_dict(), "socket": namespace._CANONICAL}, budget)
         while response is None:
@@ -882,7 +916,7 @@ def _serve_origin_witnesses(origin: _OriginInterval, child: _OriginChild) -> _Or
                 if not prechecked or attempted or frame["forward_request_sha256"] != child.forward_request_sha256:
                     _refuse("ORIGIN_SUBMISSION_REPLAY_OR_MISMATCH")
                 attempted = True
-                _write_child_frame(child, {"kind": "attempt-ack", "v": 1,
+                _write_child_frame(child, {"kind": "attempt-ack", "v": _WIRE_VERSION,
                     "forward_request_sha256": child.forward_request_sha256}, budget)
             elif kind == "origin-witness-acquire":
                 _shape(frame, _ACQUIRE, kind)

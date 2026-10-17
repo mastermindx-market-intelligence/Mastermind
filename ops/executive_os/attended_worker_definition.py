@@ -216,7 +216,7 @@ def build_finite_worker_artifacts(*, primary_config, worker_id, worker_user, wor
         realm_generation, release_root, release_commit, release_tree, release_manifest_sha256, python_binary,
         host_ref, model_class, execution_profile_digest, service_source_sha256=None,
         permission_profile_sha256=None, routing_root_id, routing_parent_run_id,
-        max_turns=2, capacity_capability_id=None):
+        max_turns=2, capacity_capability_id=None, native_capacity_enrollment=None):
     """Return exact bytes for one owner-selected secondary worker, never publish.
 
     primary_config is the existing installed primary definition supplied by its
@@ -301,6 +301,14 @@ def build_finite_worker_artifacts(*, primary_config, worker_id, worker_user, wor
                 or re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,127}', capacity_capability_id) is None):
             raise AttendedDefinitionError('exact capacity capability identity required')
         worker['capacity_capability_id'] = capacity_capability_id
+    if native_capacity_enrollment is not None:
+        from ops.executive_os.capacity_source_contract import validate_native_subscription_capacity_enrollment
+        if capacity_capability_id is None:
+            raise AttendedDefinitionError('native enrollment requires its Provider Control identity')
+        stanza = validate_native_subscription_capacity_enrollment(native_capacity_enrollment)
+        if stanza['host_ref'] != host_ref:
+            raise AttendedDefinitionError('native enrollment differs from physical host owner')
+        worker['native_capacity_enrollment'] = stanza
     worker_bytes = _json(worker)
     physical = FabricHostBinding(socket_path=str(socket), host_ref=host_ref, worker_id=worker_id,
         worker_uid=worker_uid, worker_gid=worker_gid, bridge_uid=worker_uid,

@@ -95,6 +95,13 @@ def compose_owner_resources(config, *, config_path, bindings_path, bindings_sha2
     owner = realm.load_subscription_realm_owner(realm_config_path,
         expected_config_sha256=physical.worker_source_config_digest)
     observation = owner.observe()
+    native_enrollment = None
+    if 'native_capacity_enrollment' in raw:
+        native_enrollment = owner.observe_capacity_enrollment()
+        if (native_enrollment['host_ref'] != physical.host_ref
+                or native_enrollment['capacity_capability_id'] != raw.get('capacity_capability_id')
+                or native_enrollment['realm_generation'] != observation['realm_generation']):
+            _refuse()
     if (observation['worker_id'] != physical.worker_id
             or observation['control_uid'] != config.control_uid
             or observation['realm_config_sha256'] != physical.worker_source_config_digest
@@ -118,6 +125,7 @@ def compose_owner_resources(config, *, config_path, bindings_path, bindings_sha2
         credential_bindings_document=bindings, credential_profiles_document=profiles)
     if (source(host_ref, worker_id) != physical
             or canary.definition(realm_config_path, physical) != raw
+            or (native_enrollment is not None and owner.observe_capacity_enrollment() != native_enrollment)
             or owner.observe() != observation
             or realm._observe_attended_claude_binary(raw, physical.worker_gid) != binary
             or compose_catalog_digest() != catalog_sha

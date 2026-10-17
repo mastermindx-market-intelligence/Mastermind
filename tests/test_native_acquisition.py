@@ -19,6 +19,7 @@ def _load_fixture_world():
         PKG.__path__ = [str(ROOT / 'control_plane')]
         sys.modules['control_plane'] = PKG
         PEER = types.ModuleType('control_plane.executive_installed_peer')
+        PEER._GATEWAY_MCP_PROFILES = ('release_control_v1', 'web_ceo_release_v1')
         PEER._SYSCTL_OSRELEASE_ARGV = ('/usr/sbin/sysctl', '-n', 'kern.osrelease')
         PEER._SYSCTL_BOOT_ID_ARGV = ('/usr/sbin/sysctl', '-n', 'kern.bootsessionuuid')
         PEER._LAUNCHD_ENVIRONMENT = {'PATH': '/usr/bin:/bin:/usr/sbin:/sbin'}
@@ -162,7 +163,10 @@ class HostTests(unittest.TestCase):
         self.assertEqual(value.matching_runtime_instances,(OWN,N.Instance(20,120,1)))
 
     def test_census_refuses_birth_exit_reuse_and_unknown_image(self):
-        cases=[dict(pids=[(1,10,20),(1,10)]),dict(own=[OWN,N.Instance(10,111,1)]),dict(rows=[row(1),row(10,MAIN),row(20),row(1),row(10,MAIN),row(20,MAIN)]),dict(rows=[row(1),row(10,MAIN),OSError('vanished')]),dict(files=[MAIN,OTHER])]
+        # Complete inventory churn may reacquire, but three unstable candidates
+        # still refuse. Identity/image errors are never converted into retries.
+        churn=dict(pids=[(1,10,20),(1,10)]*3,rows=[row(1),row(10,MAIN),row(20)]*3,own=[OWN]*4,files=[MAIN]*4)
+        cases=[churn,dict(own=[OWN,N.Instance(10,111,1)]),dict(rows=[row(1),row(10,MAIN),row(20),row(1),row(10,MAIN),row(20,MAIN)]),dict(rows=[row(1),row(10,MAIN),OSError('vanished')]),dict(files=[MAIN,OTHER])]
         for case in cases:
             with self.subTest(case=case),self.assertRaises((H.HostObservationError,OSError)):
                 self.census(**case)

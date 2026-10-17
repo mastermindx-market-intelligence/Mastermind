@@ -196,17 +196,26 @@ def _freshness(asof: Any) -> dict[str, Any]:
     """Build a freshness sub-record from a plane's OWN asof.
 
     ``age_sessions`` reuses regime_frame's trading-day arithmetic (the one calendar).
-    Unknown age (asof absent/unparseable) is fail-closed: ``stale=True`` (an unknown-age
-    plane can never sign the tilt).
+    That helper clamps future dates to age zero, so source-date admissibility must
+    be checked separately. Unknown or future source dates cannot sign the tilt.
     """
-    age = _rf._trading_days_since(str(asof) if asof is not None else None)
+    asof_text = str(asof) if asof is not None else None
+    age = _rf._trading_days_since(asof_text)
+    future_dated = age is not None and age < 0
+    if asof_text is not None:
+        try:
+            future_dated = future_dated or (
+                date.fromisoformat(asof_text) > datetime.now(tz=timezone.utc).date()
+            )
+        except (ValueError, TypeError):
+            pass  # The existing age reader makes malformed dates unavailable.
     stale_after = _stale_after_td()
-    stale = age is None or age < 0 or age > stale_after
+    stale = age is None or future_dated or age > stale_after
     return {
-        "asof": str(asof) if asof is not None else None,
+        "asof": asof_text,
         "age_sessions": age,
         "stale": bool(stale),
-        "future_dated": age is not None and age < 0,
+        "future_dated": bool(future_dated),
         "stale_after_sessions": stale_after,
     }
 
@@ -1173,9 +1182,9 @@ def _adapt_liquidity_transmission(lt_out: Any) -> dict[str, Any]:
         # clock postdating first-known, a producer declaring itself degraded), and
         # _freshness() owns the view's own trading-day horizon.  Neither may RELEASE what
         # the other condemned.  This is load-bearing rather than belt-and-braces:
-        # _trading_days_since clamps a future date to 0 sessions, so the view's own
-        # future_dated guard cannot fire here at all -- without this union a clock dated
-        # next week would read as a fresh plane.
+        # _freshness also rejects future source dates, but does not qualify the
+        # producer's evidence/first-known ordering or degradation. Preserve the
+        # producer's rejection even when the view's source-date and age checks pass.
         if is_stale:
             rec["freshness"]["stale"] = True
             rec["freshness"]["stale_reason"] = lt_out.get("reason")
