@@ -1,0 +1,76 @@
+{
+  "schema": "mastermind.native_fabric_request_waiters_source/v1",
+  "operation": "fabric-routing-deep-audit-20261013-c2-001",
+  "parent_head": "ca4b99d6ada2a9af117c76a6c77dcf75823909a4",
+  "procedure_pin": "76576d8680bb70cdb9e1cfe7016aefec0fb3286f",
+  "status": "SOURCE_CANDIDATE_NOT_INSTALLED",
+  "scope": "source-backed broker-method and wiring-context proof; not full native broker",
+  "source_evidence": [
+    {
+      "commit": "c2168fb0656688c11c386e83b26d0dc778bb4be4",
+      "path": "tests/fixtures/native_fabric/lease_broker.before.py.txt",
+      "blob": "3a8122c283dd4d37a7d80387dad7f2533c97c64b",
+      "ranges": ["135-240", "400-560", "600-910"],
+      "note": "Existing waiter schema, root fairness, enqueue and success-cleanup SQL; apply #1443 job_class and sibling-priority amendments before this follow-on. Ranges identify the fetched evidence windows, not an exact full-file reconstruction."
+    },
+    {
+      "commit": "ca4b99d6ada2a9af117c76a6c77dcf75823909a4",
+      "path": "ops/native_fabric/routing_audit_20261013/logical_job_priority.patch"
+    },
+    {
+      "commit": "ca4b99d6ada2a9af117c76a6c77dcf75823909a4",
+      "path": "ops/native_fabric/routing_audit_20261013/queue_priority/queue_priority_isolation.patch"
+    }
+  ],
+  "apply_order": [
+    "original logical_job_priority.patch",
+    "prior queue_priority/queue_priority_isolation.patch",
+    "request_waiters.patch",
+    "request_waiters_wiring.patch"
+  ],
+  "artifacts": {
+    "reference.py.txt": {"sha256": "dbb190daf150ca7de8526a9f63709b584de69eba0d5bb9a471c1761f5692a894", "bytes": 5173},
+    "request_waiters.patch": {"sha256": "5736d880e62658c335ae2a10addf680a868e46b4918483c934a472d8b658281c", "bytes": 5995},
+    "wiring_contexts.json": {"sha256": "921503581b98068d447ad081fd301b7883ef6fecc08f7359416933e41fddeeac", "bytes": 6706},
+    "request_waiters_wiring.patch": {"sha256": "b42116975940a13a97e83d5b07b00f9a57878cbcb300526016e4f78bd96fd71e", "bytes": 3811}
+  },
+  "tests": {
+    "baseline_failed": 45,
+    "baseline_passed": 6,
+    "candidate_passed": 51,
+    "candidate_failed": 0,
+    "candidate_breakdown": {"request_waiter_suite": 49, "clock_tie_regressions": 2},
+    "fifo_decisions_inside_suite": 2250,
+    "parallel_sibling_requests": 32,
+    "parallel_workers": 8,
+    "native_or_provider_processes": 0,
+    "sqlite_schema_migration": false,
+    "python": "3.13.5",
+    "pytest": "9.0.2",
+    "full_native_regression": false,
+    "independent_review": false,
+    "structural_repairs": "Caught INSERT OR REPLACE legacy collision, intervening register_demand method and artificial wiring-separator anchors before publication.",
+    "clock_tie_repair": "Two added tests failed the first candidate: changed request shape retained rowid/FIFO advantage at equal timestamps. Reinsert only that exact demand under the incumbent lock; unchanged heartbeat retains its original position. Both regressions now pass."
+  },
+  "release_gates": [
+    "existing source-writer custody and exact modern full-source reconciliation",
+    "combined selector/cache/broker/launcher postimages and broker override interface compatibility",
+    "original denied native/fixture operations remain held",
+    "independent exact-candidate review and hosted CI",
+    "protected acceptance and authorized installation",
+    "real original-parent consumption and observed installed routing proof"
+  ],
+  "production_modified": false,
+  "test_source": {"path": "tests/test_native_fabric_request_waiters.py", "sha256": "b902996ce2894b913f5ae116dd76d215162c3d2afa212916d74bead875037d0a"},
+  "clock_tie_test_source": {"path": "tests/test_native_fabric_requeue_clock_ties.py", "sha256": "7c6deef35fd82d353796eaa62c4b2655daf4947c55a92b4ba0d95b62cf6fdf5a"},
+  "method_candidate_sha256": "eeb06144187e1c4e1e1f045c9b665ef4db601ba5f43b01a8f25896ba7d2fceb6",
+  "verified_remote_head": "a41433291ba4a006c13826b5b3aef06743cb8cc8",
+  "verified_remote_blobs": {
+    "reference.py.txt": "5da36b8d0612525f69f160b49713731bdc1c086e",
+    "request_waiters.patch": "33eb8ce7f95b7b042b365471dac8bc8c3b737248",
+    "wiring_contexts.json": "a04ea03233c83ba5c721cbe3a1cbbc1c901da94b",
+    "request_waiters_wiring.patch": "de700a315680166c107a23d87b6f4e5997c955e4",
+    "tests/test_native_fabric_request_waiters.py": "1a515180f9d0ba4883bd0b895f1b8131252369ad",
+    "tests/test_native_fabric_requeue_clock_ties.py": "49da893f560798c0e4c4bcabb5973ae29bab6752"
+  }
+}

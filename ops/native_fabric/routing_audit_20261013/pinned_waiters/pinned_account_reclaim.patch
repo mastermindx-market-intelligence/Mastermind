@@ -1,0 +1,37 @@
+--- a/ext/lease_broker.py
++++ b/ext/lease_broker.py
+@@ -557,11 +557,14 @@
+             return False
+ 
+     def _below_share_waiters(
+-        self, conn: sqlite3.Connection, pool: str, except_orch: str, share: int
++        self, conn: sqlite3.Connection, pool: str, except_orch: str, share: int,
++        *, include_full_pins: bool = False,
+     ) -> List[sqlite3.Row]:
+         out = []
+         for w in self._waiters(conn, pool):
+-            if self._waiter_pinned_account_full(conn, pool, w):
++            # Full pins cannot consume unrelated idle slots, but their demand
++            # must still reclaim borrowed capacity at existing step boundaries.
++            if not include_full_pins and self._waiter_pinned_account_full(conn, pool, w):
+                 continue
+             if w["orchestrator_id"] == except_orch:
+                 continue
+@@ -816,7 +819,7 @@
+             conn, waiter_id, orch, pool, account, task_class, host, need, job_class=job_class
+         )
+         share_now = self.fair_share(conn, pool)
+-        if self._below_share_waiters(conn, pool, "", share_now):
++        if self._below_share_waiters(conn, pool, "", share_now, include_full_pins=True):
+             self._mark_surplus_nonrenewable(conn, pool, share_now)
+             conn.commit()
+         return wid
+@@ -1124,7 +1127,7 @@
+             share = self.fair_share(conn, pool, extra=orch)
+             held_rows = self._held_by(conn, orch, pool)
+             held_n = len(held_rows)
+-            below_any = self._below_share_waiters(conn, pool, "", share)
++            below_any = self._below_share_waiters(conn, pool, "", share, include_full_pins=True)
+             below = self._below_share_waiters(conn, pool, orch, share)
+             if below_any:
+                 self._mark_surplus_nonrenewable(conn, pool, share)

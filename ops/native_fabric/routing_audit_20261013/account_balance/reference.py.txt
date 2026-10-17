@@ -1,0 +1,69 @@
+class Broker:
+    def _pick_account(
+        self,
+        conn: sqlite3.Connection,
+        pool: str,
+        preferred: Optional[str],
+        model: str = "",
+        grantable_override: Optional[List[Dict[str, Any]]] = None,
+    ) -> Optional[str]:
+        grantable = self.grantable_accounts(pool) if grantable_override is None else grantable_override
+        if not grantable:
+            return None
+
+        def has_model_room(acct: Dict[str, Any], name: str) -> bool:
+            model_cap = self.account_model_cap(pool, acct, model)
+            if model_cap is None:
+                return True
+            return self._account_model_held(conn, pool, name, model) < model_cap
+
+        if preferred:
+            for a in grantable:
+                if a.get("name") == preferred:
+                    if (
+                        self._account_held(conn, pool, preferred) < int(a["_eff_cap"])
+                        and has_model_room(a, preferred)
+                    ):
+                        return preferred
+                    return None
+            return None  # stickiness: requested account not grantable
+        scored: List[Tuple[int, int, str]] = []
+        for a in grantable:
+            name = str(a["name"])
+            held = self._account_held(conn, pool, name)
+            cap = int(a["_eff_cap"])
+            if held >= cap or not has_model_room(a, name):
+                continue
+            scored.append((held, cap, name))
+        if not scored:
+            return None
+        if self.provider_name(pool) == "bailian":
+            # The current tie breaker (alphabetical) silently reuses Chris
+            # forever whenever workloads are sequential and held=0. Use the
+            # incumbent broker's durable grant history instead. This creates
+            # no new queue, cache, memory plane or provider operation.
+            recent = {
+                str(row["account"]): float(row["last_grant"])
+                for row in conn.execute(
+                    "SELECT account, MAX(granted_at) AS last_grant "
+                    "FROM leases WHERE pool=? GROUP BY account",
+                    (self.provider_name(pool),),
+                )
+                if row["last_grant"] is not None
+            }
+            scored.sort(key=lambda t: (
+                t[0], -t[1], recent.get(t[2], float("-inf")), t[2]
+            ))
+        elif self.provider_name(pool) == "glm":
+            # Pool-level R31 urgency must not point to a different account's
+            # lease. Only paired fresh authoritative evidence may promote an
+            # *already grantable* account before the claim is inserted.
+            urgent = self._fresh_glm_expiring_accounts({t[2] for t in scored})
+            scored.sort(key=lambda t: (
+                0 if t[2] in urgent else 1,
+                urgent.get(t[2], float("inf")),
+                t[0], -t[1], t[2],
+            ))
+        else:
+            scored.sort(key=lambda t: (t[0], -t[1], t[2]))
+        return scored[0][2]

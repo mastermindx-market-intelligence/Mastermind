@@ -1,0 +1,52 @@
+--- a/ext/lease_broker.py
++++ b/ext/lease_broker.py
+@@ -2,2 +2,3 @@
+         job_class: Optional[str] = None,
++        request_id: Optional[str] = None,
+     ) -> AcquireResult:
+@@ -8,3 +9,7 @@
+             return AcquireResult(ok=False, reason="missing_orchestrator_id", pool=pool)
+-        waiter_id: Optional[str] = None
++        try:
++            waiter_id = _request_waiter_id(orchestrator_id, pool, request_id)
++        except ValueError:
++            return AcquireResult(ok=False, reason="invalid_request_id", pool=pool,
++                                 orchestrator_id=orchestrator_id)
+         deadline = self.now() + max(0.0, float(wait))
+@@ -14,2 +19,3 @@
+-            if not self._front_of_queue(conn, pool, orch, task_class, job_class=job_class):
++            if not self._front_of_queue(conn, pool, orch, task_class, job_class=job_class,
++                                        waiter_id=waiter_id):
+                 waiter_id = self._register_demand(
+@@ -19,5 +25,2 @@
+-            conn.execute(
+-                "DELETE FROM waiters WHERE orchestrator_id=? AND pool=?",
+-                (orch, pool),
+-            )
++            self._clear_acquired_waiter(conn, pool, orch, waiter_id)
+             waiter_id = None
+@@ -27,2 +30,3 @@
+     pa.add_argument("--job-class", default=None, help="logical work class for queue priority only")
++    pa.add_argument("--request-id", default=None, help="stable run identity for queued demand only")
+     pa.add_argument("--model", default="")
+@@ -33,2 +37,3 @@
+             job_class=args.job_class,
++            request_id=args.request_id,
+             model=args.model,
+--- a/ext/remote_sub.sh
++++ b/ext/remote_sub.sh
+@@ -2,3 +2,3 @@
+   if [ "$DRY_RUN" -eq 1 ]; then
+-    show_args "<broker>" acquire --orchestrator-id "remote-sub-$ID" --pool "$ACQUIRE_POOL" --task-class "remote-$MODE" --job-class "${POOL_TASK_CLASS:-}" --model "$MODEL" --pid "$$" --ttl "$PROVIDER_LEASE_TTL" --wait "${REMOTE_SUB_LEASE_WAIT:-3600}"
++    show_args "<broker>" acquire --orchestrator-id "remote-sub-$ID" --pool "$ACQUIRE_POOL" --task-class "remote-$MODE" --job-class "${POOL_TASK_CLASS:-}" --request-id "$ID" --model "$MODEL" --pid "$$" --ttl "$PROVIDER_LEASE_TTL" --wait "${REMOTE_SUB_LEASE_WAIT:-3600}"
+     log "LEASE_WAIT pool=$ACQUIRE_POOL wait=${REMOTE_SUB_LEASE_WAIT:-3600}"
+@@ -8,3 +8,3 @@
+     if [ "$NATIVE_MODE" -eq 1 ]; then
+-      broker acquire ${OPERATOR_CHILD_ARGS[@]+"${OPERATOR_CHILD_ARGS[@]}"} --host "$HOST_ARG" --orchestrator-id "$ORCH_ID" --pool "$ACQUIRE_POOL" --task-class "remote-$MODE" --job-class "${POOL_TASK_CLASS:-}" --model "$MODEL" --pid "$$" --ttl "$PROVIDER_LEASE_TTL" --wait "${REMOTE_SUB_LEASE_WAIT:-3600}" > "$LEASE_OUTPUT_FILE" || {
++      broker acquire ${OPERATOR_CHILD_ARGS[@]+"${OPERATOR_CHILD_ARGS[@]}"} --host "$HOST_ARG" --orchestrator-id "$ORCH_ID" --pool "$ACQUIRE_POOL" --task-class "remote-$MODE" --job-class "${POOL_TASK_CLASS:-}" --request-id "$ID" --model "$MODEL" --pid "$$" --ttl "$PROVIDER_LEASE_TTL" --wait "${REMOTE_SUB_LEASE_WAIT:-3600}" > "$LEASE_OUTPUT_FILE" || {
+         RC=$?
+@@ -14,3 +14,3 @@
+     else
+-      broker acquire ${OPERATOR_CHILD_ARGS[@]+"${OPERATOR_CHILD_ARGS[@]}"} --host "$HOST_ARG" --orchestrator-id "$ORCH_ID" --pool "$ACQUIRE_POOL" --task-class "remote-$MODE" --job-class "${POOL_TASK_CLASS:-}" --model "$MODEL" --pid "$$" --ttl "$PROVIDER_LEASE_TTL" --wait "${REMOTE_SUB_LEASE_WAIT:-3600}" > "$LEASE_OUTPUT_FILE" || {
++      broker acquire ${OPERATOR_CHILD_ARGS[@]+"${OPERATOR_CHILD_ARGS[@]}"} --host "$HOST_ARG" --orchestrator-id "$ORCH_ID" --pool "$ACQUIRE_POOL" --task-class "remote-$MODE" --job-class "${POOL_TASK_CLASS:-}" --request-id "$ID" --model "$MODEL" --pid "$$" --ttl "$PROVIDER_LEASE_TTL" --wait "${REMOTE_SUB_LEASE_WAIT:-3600}" > "$LEASE_OUTPUT_FILE" || {
+         RC=$?

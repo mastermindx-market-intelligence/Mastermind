@@ -1,0 +1,54 @@
+{
+  "schema": "mastermind.native_fabric_account_balance_source/v1",
+  "operation": "fabric-routing-deep-audit-20261013-c2-001",
+  "status": "SOURCE_CANDIDATE_NOT_INSTALLED",
+  "procedure_pin": "76576d8680bb70cdb9e1cfe7016aefec0fb3286f",
+  "source_reference": {
+    "description": "Audited _pick_account method with the incumbent #1365 GLM-expiry sorting amendment; a source-backed excerpt, not a current installed full broker.",
+    "audited_native_broker_sha256": "a72bc031ddb81e559e0cf48fcbf824a959edfcf445c1d3d2d89348c3c66c6f0c",
+    "expiry_owner_pr": 1365,
+    "expiry_owner_head": "4c27a8d3a4dab635b5301e3f8fda84576b711b9f",
+    "expiry_patch": "ops/native_fabric/patches/lease_broker_glm_expiry_preference_20261013.patch",
+    "expiry_patch_sha256": "9fc2376397f58819c7a2debab389ef9bd4b9abef9f9400ecd210f011591ef95e",
+    "helper_ownership": "_fresh_glm_expiring_accounts remains the #1365 implementation; tests supply synthetic eligible expiry maps, not provider observations."
+  },
+  "selection_order": [
+    "unchanged account/model/host-compatible eligibility and explicit account stickiness",
+    "unchanged fresh eligible GLM expiry priority and reset ordering",
+    "maximum of total-account utilization and target-model utilization",
+    "least-recent grant from the existing same-pool lease history",
+    "capacity then account name for deterministic residual ties"
+  ],
+  "files": {
+    "reference.py.txt": {"sha256": "4e44ba48ebe43ec28bff4d4ac41ee288288d0dbeb66ec9315fdd4329d03845cd", "git_blob": "5418fadf9889ef5d3bf221ff8c958876d74b3a6b"},
+    "normalized_account_balance.patch": {"sha256": "13327989d0703cad7a3f966af8f5a90a404a2278b40c3e4ee23f63c930aaf85e", "git_blob": "6b64c05ab43a9798f8854e55b4345e94e225cf93"},
+    "tests/test_native_fabric_account_balance.py": {"sha256": "b32ea923200abf4ec23eaff645a65560dd3d051bd8df9aded4b3a1304f25a9c3", "git_blob": "3f20d27d30600201c2ab99fd4d0c1c973cbcb8b3"},
+    "tests/test_native_fabric_legacy_queue_compatibility.py": {"sha256": "8e466323ad4c46f5405e1ddd60e2253e2dcde1583c6a1d9deb6b786458901eeb", "git_blob": "37dd6c55060a4d6c8decb329833b7de57624751d"},
+    "tests/test_native_fabric_routing_patch_composition.py": {"sha256": "196735fc44ab8fb586a830a291dd45cba09a8714243808e34e333bdb3c572c99", "git_blob": "40107f0e63f20cb40ac140ac307625a3b59b6b5b"}
+  },
+  "method_candidate_sha256": "89a40fedb5da16a908c6edad2dc1c732f02aaf3783ff4901c548af3cb721fb65",
+  "combined_method_fragment_sha256": "a0a2068ee050c806307f50f5f92646eb2ec28acc11c2d8f637e647504ea6309a",
+  "verified_remote_head": "a41433291ba4a006c13826b5b3aef06743cb8cc8",
+  "verification": {
+    "measurement_evidence": {
+      "path": "research/evidence/fabric_routing_validation_20261015.json",
+      "sha256": "6ae28362d47f719b982439269edca93500992686b8102ae737c4ad4e11f28e15"
+    },
+    "composition_scope": "Both raw patches apply to one source-backed Broker method fragment in either order with identical output; root fair_share, active_orchestrators and register_demand AST bodies remain unchanged. Not a full broker or install proof.",
+    "independent_review": false,
+    "full_native_regression": false,
+    "production_proof": false
+  },
+  "effects": {
+    "live_source_modified": false,
+    "provider_or_native_worker_launched": false,
+    "original_denied_actions_retried": false,
+    "new_queue_or_budget_owner": false
+  },
+  "release_gates": [
+    "current native source custody and exact full-file integration with #1365/#1441/#1391",
+    "independent exact-source review and full native regression, preserving original held actions",
+    "protected acceptance and compatible broker/launcher installation",
+    "actual account usage, model-cap refusal and original-parent consumption proof"
+  ]
+}

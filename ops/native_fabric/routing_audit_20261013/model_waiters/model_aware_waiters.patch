@@ -1,0 +1,222 @@
+--- a/ext/lease_broker.py
++++ b/ext/lease_broker.py
+@@ -212,6 +212,7 @@
+                     pool TEXT NOT NULL,
+                     account TEXT,
+                     task_class TEXT NOT NULL,
++                    model TEXT NOT NULL DEFAULT '',
+                     host TEXT,
+                     enqueued_at REAL NOT NULL,
+                     priority INTEGER NOT NULL,
+@@ -253,6 +254,8 @@
+                 "ALTER TABLE leases ADD COLUMN model TEXT NOT NULL DEFAULT ''"
+             )
+         wcols = {r[1] for r in conn.execute("PRAGMA table_info(waiters)")}
++        if "model" not in wcols:
++            conn.execute("ALTER TABLE waiters ADD COLUMN model TEXT NOT NULL DEFAULT ''")
+         if "last_heartbeat" not in wcols:
+             conn.execute("ALTER TABLE waiters ADD COLUMN last_heartbeat REAL")
+             conn.execute(
+@@ -584,11 +587,41 @@
+                 ImportError, OSError, sqlite3.Error):
+             return False
+ 
++    def _waiter_pinned_model_full(
++        self, conn: sqlite3.Connection, pool: str, waiter: sqlite3.Row
++    ) -> bool:
++        """Only a known model cap can exclude a pinned waiter from ready-slot FIFO.
++
++        A missing/legacy model, ambiguous account or unknown per-model allowance
++        remains competing demand. This changes no pin, grant, queue identity or
++        original-root reclamation. Both model and total capacity are rechecked
++        by the incumbent _pick_account at the actual grant.
++        """
++        try:
++            account = waiter["account"]
++            model = waiter["model"]
++            if (type(account) is not str or not account
++                    or type(model) is not str or not model
++                    or self.provider_name(pool) != "glm"):
++                return False
++            eligible = [a for a in self.grantable_accounts(pool)
++                        if a.get("name") == account]
++            if len(eligible) != 1:
++                return False
++            model_cap = self.account_model_cap(pool, eligible[0], model)
++            if type(model_cap) is not int or model_cap < 0:
++                return False
++            used = self._account_model_held(conn, pool, account, model)
++            return type(used) is int and used >= model_cap
++        except (AttributeError, KeyError, IndexError, TypeError, ValueError,
++                ImportError, OSError, sqlite3.Error):
++            return False
++
+     def _waiter_skips_ready_queue(
+         self, conn: sqlite3.Connection, pool: str, waiter: sqlite3.Row,
+-        observed: Dict[str, bool],
++        observed: Dict[object, bool],
+     ) -> bool:
+-        """Memoize account-only readiness for one locked arbitration scan.
++        """Memoize known account and model-limited readiness for one locked scan.
+ 
+         This is neither a lasting provider cache nor an admission decision.
+         Real account/model and native limits are rechecked at claim time.
+@@ -604,14 +637,25 @@
+                 self._waiter_pinned_account_full(conn, pool, waiter)
+                 or self._waiter_pinned_quota_parked(pool, waiter)
+             )
+-        return observed[account]
++        if observed[account]:
++            return True
++        try:
++            model = waiter["model"]
++        except (KeyError, IndexError, TypeError):
++            return False
++        if type(model) is not str or not model:
++            return False
++        model_key = (account, model)
++        if model_key not in observed:
++            observed[model_key] = self._waiter_pinned_model_full(conn, pool, waiter)
++        return observed[model_key]
+ 
+     def _below_share_waiters(
+         self, conn: sqlite3.Connection, pool: str, except_orch: str, share: int,
+         *, include_full_pins: bool = False,
+     ) -> List[sqlite3.Row]:
+         out = []
+-        observed: Dict[str, bool] = {}
++        observed: Dict[object, bool] = {}
+         for w in self._waiters(conn, pool):
+             # Full pins cannot consume unrelated idle slots, but their demand
+             # must still reclaim borrowed capacity at existing step boundaries.
+@@ -787,8 +831,10 @@
+         host: str,
+         need: int = 1,
+         job_class: Optional[str] = None,
++        model: str = "",
+     ) -> str:
+         now = self.now()
++        model = str(model or "").strip()
+         scoped = bool(waiter_id and waiter_id.startswith("rq-"))
+         if scoped:
+             existing = conn.execute("SELECT * FROM waiters WHERE id=?", (waiter_id,)).fetchone()
+@@ -803,8 +849,8 @@
+         if existing and scoped:
+             priority = _class_priority(task_class, job_class)
+             old_shape = (existing["priority"], existing["account"], existing["task_class"],
+-                         existing["host"], existing["need"])
+-            new_shape = (priority, account, task_class, host, int(need))
++                         existing["host"], existing["need"], existing["model"])
++            new_shape = (priority, account, task_class, host, int(need), model)
+             if old_shape != new_shape:
+                 # Reinsert this exact demand under the incumbent lock so a
+                 # repeated clock tick cannot preserve its old rowid/FIFO rank.
+@@ -818,7 +864,7 @@
+             enqueued_at = existing["enqueued_at"]
+             conn.execute(
+                 "UPDATE waiters SET last_heartbeat=?, task_class=?, priority=?, "
+-                "account=?, host=?, need=?, enqueued_at=? WHERE id=?",
++                "account=?, host=?, need=?, model=?, enqueued_at=? WHERE id=?",
+                 (
+                     now,
+                     task_class,
+@@ -826,6 +872,7 @@
+                     account,
+                     host,
+                     int(need),
++                    model,
+                     enqueued_at,
+                     wid,
+                 ),
+@@ -835,15 +882,16 @@
+         wid = waiter_id or uuid.uuid4().hex[:12]
+         conn.execute(
+             "INSERT INTO waiters "
+-            "(id, orchestrator_id, pool, account, task_class, host, "
++            "(id, orchestrator_id, pool, account, task_class, model, host, "
+             "enqueued_at, priority, need, last_heartbeat) "
+-            "VALUES (?,?,?,?,?,?,?,?,?,?)",
++            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+             (
+                 wid,
+                 orch,
+                 pool,
+                 account,
+                 task_class,
++                model,
+                 host,
+                 now,
+                 _class_priority(task_class, job_class),
+@@ -865,10 +913,12 @@
+         host: str,
+         need: int = 1,
+         job_class: Optional[str] = None,
++        model: str = "",
+     ) -> str:
+         """Blocked/failed acquire: persist demand and drain surplus (B5 / N1)."""
+         wid = self._enqueue_waiter(
+-            conn, waiter_id, orch, pool, account, task_class, host, need, job_class=job_class
++            conn, waiter_id, orch, pool, account, task_class, host, need,
++            job_class=job_class, model=model
+         )
+         share_now = self.fair_share(conn, pool)
+         if self._below_share_waiters(conn, pool, "", share_now, include_full_pins=True):
+@@ -902,7 +952,7 @@
+             return True
+         my_p = _class_priority(task_class, job_class)
+         scoped = bool(waiter_id and waiter_id.startswith("rq-"))
+-        observed: Dict[str, bool] = {}
++        observed: Dict[object, bool] = {}
+         # A scoped sibling is a separate contender, not this request's FIFO credit.
+         for w in waiters:
+             if self._waiter_skips_ready_queue(conn, pool, w, observed):
+@@ -1169,7 +1219,8 @@
+         try:
+             if cap <= 0:
+                 waiter_id = self._register_demand(
+-                    conn, waiter_id, orch, pool, account, task_class, host, job_class=job_class
++                    conn, waiter_id, orch, pool, account, task_class, host,
++                    job_class=job_class, model=model
+                 )
+                 return (
+                     AcquireResult(ok=False, reason="no_grantable_account", pool=pool, orchestrator_id=orch),
+@@ -1196,7 +1247,8 @@
+             want_surplus = held_n >= share
+             if want_surplus and below:
+                 waiter_id = self._register_demand(
+-                    conn, waiter_id, orch, pool, account, task_class, host, job_class=job_class
++                    conn, waiter_id, orch, pool, account, task_class, host,
++                    job_class=job_class, model=model
+                 )
+                 return (
+                     AcquireResult(ok=False, reason="lending_blocked", pool=pool, orchestrator_id=orch),
+@@ -1205,7 +1257,8 @@
+                 )
+             if len(active) >= cap:
+                 waiter_id = self._register_demand(
+-                    conn, waiter_id, orch, pool, account, task_class, host, job_class=job_class
++                    conn, waiter_id, orch, pool, account, task_class, host,
++                    job_class=job_class, model=model
+                 )
+                 return (
+                     AcquireResult(ok=False, reason="cap_full", pool=pool, orchestrator_id=orch),
+@@ -1215,7 +1268,8 @@
+             if not self._front_of_queue(conn, pool, orch, task_class, job_class=job_class,
+                                         waiter_id=waiter_id):
+                 waiter_id = self._register_demand(
+-                    conn, waiter_id, orch, pool, account, task_class, host, job_class=job_class
++                    conn, waiter_id, orch, pool, account, task_class, host,
++                    job_class=job_class, model=model
+                 )
+                 return (
+                     AcquireResult(ok=False, reason="priority_wait", pool=pool, orchestrator_id=orch),
+@@ -1235,7 +1289,8 @@
+                 )
+                 if persist:
+                     waiter_id = self._register_demand(
+-                        conn, waiter_id, orch, pool, account, task_class, host, job_class=job_class
++                        conn, waiter_id, orch, pool, account, task_class, host,
++                        job_class=job_class, model=model
+                     )
+                 return (
+                     AcquireResult(ok=False, reason=reason, pool=pool, orchestrator_id=orch),
