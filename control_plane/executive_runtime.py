@@ -4353,8 +4353,13 @@ class RuntimeStore:
                 raise PersistenceError(
                     "Executive schema upgrade barrier appeared after write lock acquisition"
                 )
+            from control_plane.finite_initial_admission import (
+                _classification_before_transaction, _finish_transaction,
+            )
+            initial_classifications = _classification_before_transaction(connection)
             self._write_connections.add(connection)
             yield connection
+            _finish_transaction(connection, initial_classifications)
             if self._upgrade_barrier_present():
                 raise PersistenceError(
                     "Executive schema upgrade barrier appeared before write commit"
@@ -15883,6 +15888,7 @@ class AttemptRegistry:
         carrier_claim: _CarrierClaimSpec | None = None,
         _c2_capability: object | None = None,
         exact_target: ExactWorkerClaimTarget | None = None,
+        _initial_capacity_evidence: Mapping[str, Any] | None = None,
     ) -> AttemptLease | None:
         """Own the existing quota/Attempt/Job/claim mutation sequence."""
 
@@ -16092,6 +16098,8 @@ class AttemptRegistry:
                     carrier_claim.carrier_authority_fingerprint
                 ),
             }
+        if _initial_capacity_evidence is not None:
+            claim_payload["capacity_evidence"] = dict(_initial_capacity_evidence)
         if exact_target is not None:
             claim_payload["exact_worker_target"] = exact_target.evidence()
         self.store.append_event(
@@ -16130,6 +16138,7 @@ class AttemptRegistry:
         command_id: str | None = None,
         _coo_cycle_dispatch_capability: object | None = None,
         exact_target: ExactWorkerClaimTarget | object = _NO_EXACT_WORKER_TARGET,
+        _initial_prepared: object | None = None,
     ) -> AttemptLease | OrchestrationDispatchOutcome | None:
         duration = (
             self.store.lease_seconds if lease_seconds is None else int(lease_seconds)
@@ -16222,6 +16231,9 @@ class AttemptRegistry:
                             str(replay_token) if replay_token is not None else None
                         ),
                     )
+            if _initial_prepared is not None:
+                from control_plane.finite_initial_admission import _activate
+                _activate(_initial_prepared, self.store, connection, job_id, command_id, worker_id, selected_quota)
             job_row = connection.execute(
                 "SELECT * FROM jobs WHERE job_id=?", (job_id,)
             ).fetchone()
@@ -16238,6 +16250,8 @@ class AttemptRegistry:
                     + ", ".join(str(row["job_id"]) for row in living_children)
                 )
             if timestamp < int(job_row["available_at_ms"]):
+                if _initial_prepared is not None:
+                    raise StateConflict("finite initial common claim deferred")
                 return None
             if int(job_row["attempt_count"]) >= int(job_row["attempt_limit"]):
                 raise StateConflict(f"job {job_id} exhausted its attempt limit")
@@ -16414,6 +16428,8 @@ class AttemptRegistry:
                     continue
                 candidates.append(row)
             if not candidates:
+                if _initial_prepared is not None:
+                    raise StateConflict("finite initial common claim refused")
                 return None
             candidates.sort(key=lambda row: _capacity_route_rank(row, constraints))
             capacity = candidates[0]
@@ -16456,7 +16472,10 @@ class AttemptRegistry:
                 placement_snapshot=placement_snapshot,
                 placement_snapshot_digest=placement_snapshot_digest,
                 exact_target=exact_target,
+                _initial_capacity_evidence=(_initial_prepared.evidence if _initial_prepared is not None else None),
             )
+            if _initial_prepared is not None and claimed is None:
+                raise StateConflict("finite initial common claim lost CAS")
         return claimed
 
     def _validate_exact_target_launch(
