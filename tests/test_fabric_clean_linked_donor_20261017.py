@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PATCH = (ROOT / "integrations" / "fleet" /
          "ubuntu_thermal_headroom_20261013" /
          "FABRIC_CLEAN_LINKED_DONOR_FALLBACK_20261016.patch")
-PATCH_SHA256 = "354134d103a0cd04f838985e7cce2f291b92bf0a0786e857df004dd9c6be15ef"
+PATCH_SHA256 = "32773b3642d47579b1794878db48e4993f7114995d729ef203c93993c74a7ee3"
 OLD_BLOB = "296e47bab2d28f9a019e81b5aef76eeea62a6cc3"
 REVIEWED_BLOB = "75297acb10d0cef4d01730a59fdcad19c7cfd3e6"
 REVIEWED_MERGE = "40abd9bd2291997cc066f30b408a1e670124cec4"
@@ -62,7 +62,7 @@ def _patched_donor_validator(merge: str, helper_blob: str):
         "stat": stat,
         "subprocess": subprocess,
         "SparseWorkspaceRefused": SparseWorkspaceRefused,
-        "_MACRO_REVIEWED_MERGE": merge,
+        "_MACRO_PINNED_DONOR_COMMIT": merge,
         "_MACRO_FABRIC_SPARSE_BLOB": helper_blob,
     }
     exec(compile(parsed, str(PATCH), "exec"), ns)
@@ -86,7 +86,7 @@ def repository(tmp_path: Path):
     _git(original, "commit", "-qm", "original donor source")
     original_head = _git(original, "rev-parse", "HEAD")
 
-    alt = original.parent / "macro-fabric-reviewed"
+    alt = original.parent / "macro-fabric-pinned-20261016"
     _git(original, "worktree", "add", "-q", "-b", "reviewed-fixture", str(alt))
     reviewed_bytes = b"new reviewed test fixture\n"
     (alt / "scripts" / "worktree_sparse.py").write_bytes(reviewed_bytes)
@@ -145,6 +145,13 @@ def test_unrelated_git_repository_cannot_impersonate_linked_donor(repository):
     _git(alt, "sparse-checkout", "set", "--cone", "scripts")
     with pytest.raises(SparseWorkspaceRefused, match="REVIEWED_DONOR_UNQUALIFIED"):
         _patched_donor_validator(rev, _blob(body))(orig)
+
+
+def test_trusted_donor_commit_and_path_are_exactly_pinned():
+    raw = PATCH.read_text()
+    assert '+_MACRO_PINNED_DONOR_COMMIT = "6ee058b0491a3f67e843f25d4379b94e98880e8b"' in raw
+    assert '+    alternate = original.parent / "macro-fabric-pinned-20261016"' in raw
+    assert '+            or inspect("rev-parse", "HEAD") != _MACRO_PINNED_DONOR_COMMIT' in raw
 
 
 def test_source_patch_preserves_lease_and_capacity_owners():

@@ -7,7 +7,7 @@
 +# Only the exact earlier committed helper is eligible for the clean linked
 +# donor fallback; unknown/tampered source must refuse, never silently reroute.
 +_MACRO_PREMERGE_SPARSE_BLOB = "296e47bab2d28f9a019e81b5aef76eeea62a6cc3"
-+_MACRO_REVIEWED_MERGE = "40abd9bd2291997cc066f30b408a1e670124cec4"
++_MACRO_PINNED_DONOR_COMMIT = "6ee058b0491a3f67e843f25d4379b94e98880e8b"
  
  
  class SparseWorkspaceRefused(ValueError):
@@ -23,7 +23,7 @@
 +    The old source checkout, its feature branch and its dirty bytes stay intact.
 +    An absent or drifting dedicated donor refuses before any mint.
 +    """
-+    alternate = original.parent / "macro-fabric-reviewed"
++    alternate = original.parent / "macro-fabric-pinned-20261016"
 +    try:
 +        info = alternate.lstat()
 +        link_info = (alternate / ".git").lstat()
@@ -58,7 +58,7 @@
 +        raise SparseWorkspaceRefused("FABRIC_SPARSE_REVIEWED_DONOR_UNAVAILABLE") from exc
 +    if (common != original_git
 +            or gitdir.parent != original_git / "worktrees"
-+            or inspect("rev-parse", "HEAD") != _MACRO_REVIEWED_MERGE
++            or inspect("rev-parse", "HEAD") != _MACRO_PINNED_DONOR_COMMIT
 +            or inspect("rev-parse", "HEAD:scripts/worktree_sparse.py") != _MACRO_FABRIC_SPARSE_BLOB
 +            or inspect("status", "--porcelain=v1", "--untracked-files=all")
 +            # Ignored source files can shadow stdlib imports without appearing
