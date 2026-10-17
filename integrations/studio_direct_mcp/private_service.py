@@ -63,9 +63,9 @@ TYPED_GIT_CLOSED_PROFILES = (
 # Runtime generations are immutable from the perspective of installed seats. A new
 # bridge SHA gets a new directory so one-seat canaries cannot invalidate another
 # seat that still pins the previous bridge bytes.
-PAPER_RUNTIME_REL = Path(".local/share/mastermind-paper/runtime/v10")
+PAPER_RUNTIME_REL = Path(".local/share/mastermind-paper/runtime/v11")
 PAPER_RUNTIME_SCHEMA = "mastermind.paper_runtime.v1"
-PAPER_BRIDGE_SHA256 = "7d810c458a53e00e21014fd7375ac338dc9c1421b30f823feb4d34184f9d08fc"
+PAPER_BRIDGE_SHA256 = "6d28be62b21bff12dc04ae1bdc50f12a4ff55fdb8261bdd6923bac2804fecf7c"
 PAPER_COMMAND_TIMEOUT_MS = 70_000
 PAPER_APP_REL = Path("Applications/Paper.app")
 
