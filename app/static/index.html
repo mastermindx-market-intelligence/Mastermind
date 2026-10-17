@@ -3047,6 +3047,7 @@ html[data-theme="light"] body.page-mm {
         <div>
           <div class="mm-hero-eyebrow"><span class="mm-hb"></span>&nbsp;<span class="l-en">SELF-DIRECTED &mdash; YOUR PAPER BOOK</span><span class="l-zh">自主交易 &mdash; 你的模拟组合</span></div>
           <div class="mm-perf-nav-value" id="sd-nav" style="font-size:32px;margin-top:4px">$1,000,000</div>
+          <div id="sd-nav-kind" style="font-size:11px;color:var(--muted)"></div>
           <div style="margin-top:7px;display:flex;gap:9px;align-items:center;flex-wrap:wrap">
             <span class="mm-paper">PAPER</span>
             <span class="mm-sd-mkt closed" id="sd-mkt"><span class="dot"></span><span id="sd-mkt-txt">—</span></span>
@@ -3059,7 +3060,7 @@ html[data-theme="light"] body.page-mm {
           <div class="mm-perf-stat"><div class="mm-perf-stat-label"><span class="l-en">Total Return</span><span class="l-zh">总回报</span></div><div class="mm-perf-stat-value neu" id="sd-return">—</div><div class="mm-perf-stat-sub"><span class="l-en">since funding</span><span class="l-zh">自注资以来</span></div></div>
         </div>
       </div>
-      <div class="mm-sd-hint"><span class="l-en">Your own book &mdash; you choose the names and the sizing; the engine just executes and keeps score. Long-only paper, no leverage. Orders fill at the live price while the market is open, or queue and fill at the next session&rsquo;s open when it&rsquo;s closed.</span><span class="l-zh">这是你自己的组合 &mdash; 标的与仓位由你决定，系统只负责执行与记账。仅做多模拟、无杠杆。开市时按实时价成交，休市时排队并于下个交易日开盘价成交。</span></div>
+      <div class="mm-sd-hint"><span class="l-en">Your own book: long-only paper trading, no leverage. Regular orders fill while the US cash market is open or queue for the next regular open. Opt into an overnight BOATS paper LIMIT order from 8 PM&ndash;4 AM ET where Tiingo data, display rights and paper execution are enabled. Unmarketable overnight limits are rejected, not carried into the morning.</span><span class="l-zh">自主操盘仅为模拟交易，不提供杠杆。常规交易于美股盘中成交，休市时排队至下一常规开盘。Tiingo BOATS 数据、展示许可及模拟执行均开启时，可选择美东时间 20:00&ndash;04:00 的隔夜限价模拟单；不可成交的隔夜限价单不会顺延至开盘。</span></div>
     </div>
   </div>
 
@@ -3088,6 +3089,19 @@ html[data-theme="light"] body.page-mm {
           </div>
           <input class="mm-sd-input" id="sd-shares" type="number" min="0" step="any" inputmode="decimal" placeholder="0" oninput="selfUpdateEst()">
           <div class="mm-sd-est" id="sd-est"></div>
+          <div style="display:flex;flex-direction:column;gap:8px;margin:9px 0">
+            <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer">
+              <input type="checkbox" id="sd-overnight" onchange="selfOvernightToggle()">
+              <span class="l-en">Overnight paper limit · 8 PM–4 AM ET</span><span class="l-zh">隔夜模拟限价单 · 美东 20:00–04:00</span>
+            </label>
+            <input class="mm-sd-input" id="sd-limit" type="number" min="0" step="0.01"
+                   inputmode="decimal" placeholder="Limit price ($)" aria-label="Overnight limit price"
+                   oninput="selfUpdateEst()" style="display:none">
+            <div id="sd-overnight-note" style="font-size:11px;color:var(--muted)">
+              <span class="l-en">Requires eligible stock and fresh real-time BOATS bid/ask. Indicative quotes cannot fill. Marketable limits only; no standing order.</span>
+              <span class="l-zh">需股票符合资格且有实时 BOATS 买卖报价。参考报价不成交；仅支持可即时成交的限价单，不留挂单。</span>
+            </div>
+          </div>
           <div class="mm-sd-actions">
             <button class="mm-sd-btn mm-sd-btn-buy"  id="sd-buy"  type="button" onclick="placeSelfOrder('buy')"  disabled>Buy</button>
             <button class="mm-sd-btn mm-sd-btn-sell" id="sd-sell" type="button" onclick="placeSelfOrder('sell')" disabled>Sell</button>
@@ -3408,6 +3422,7 @@ var I18N = {
 
   // ── Self-Directed book (third portfolio) ──────────────────────────────────
   'sd.mkt.open':          { en: 'Market open', zh: '开市中' },
+  'sd.mkt.overnight':     { en: 'Overnight · 8 PM–4 AM ET', zh: '隔夜交易 · 美东 20:00–04:00' },
   'sd.mkt.pre':           { en: 'Pre-market — opens', zh: '盘前 — 开盘' },
   'sd.mkt.post':          { en: 'Closed — next open', zh: '已收盘 — 下次开盘' },
   'sd.mkt.closed':        { en: 'Closed — next open', zh: '休市 — 下次开盘' },
@@ -3429,6 +3444,8 @@ var I18N = {
   'sd.filled':            { en: 'Filled', zh: '已成交' },
   'sd.queued':            { en: 'Queued — fills at the next market open.', zh: '已排队 —— 将于下次开盘成交。' },
   'sd.order_failed':      { en: 'Order rejected', zh: '订单被拒绝' },
+  'sd.operator_required': { en: 'No paper order placed. This shared desk requires an approved operator session; Pro access alone cannot authorize trading.', zh: '模拟订单未提交。本交易组合要求通过批准的操作员身份验证，仅有 Pro 访问权限不能授权交易。' },
+  'sd.operator_unready':  { en: 'No paper order placed. The operator authorization service is not configured.', zh: '模拟订单未提交。操作员授权服务尚未配置。' },
   'sd.at':                { en: 'at', zh: '价格' },
   'sd.alloc_cash':        { en: 'Cash', zh: '现金' },
   'sd.alloc_npos':        { en: 'Holdings', zh: '持仓数' },
@@ -5840,6 +5857,15 @@ function renderSelf() {
 function renderSelfHeader() {
   var b = _self || {}, a = b.allocation || {};
   if (E('sd-nav'))   E('sd-nav').textContent = fmtNav(b.nav != null ? b.nav : 1000000);
+  if (E('sd-nav-kind')) {
+    if (b.nav_mark_kind === 'indicative_overnight_preview') {
+      E('sd-nav-kind').innerHTML = 'Overnight NAV preview · midpoint, not official close · ' +
+        '<a href="https://www.tiingo.com" target="_blank" rel="noopener">Data sourced by Tiingo</a>';
+    } else {
+      E('sd-nav-kind').textContent = b.nav_mark_kind === 'last_known_regular_marks' ?
+        'Overnight feed unavailable · showing prior marks' : '';
+    }
+  }
   if (E('sd-cash'))  E('sd-cash').textContent = b.cash != null ? fmtNav(b.cash) : '—';
   if (E('sd-cash-pct')) E('sd-cash-pct').textContent = a.cash_pct != null ? pctInt(a.cash_pct) : '';
   if (E('sd-invested')) E('sd-invested').textContent = b.invested != null ? fmtNav(b.invested) : '—';
@@ -5861,6 +5887,7 @@ function renderSelfHeader() {
 function _mktLabel(m) {
   if (!m) return { cls: 'closed', txt: t('sd.mkt.closed') };
   if (m.session === 'open') return { cls: 'open', txt: t('sd.mkt.open') };
+  if (m.session === 'overnight') return { cls: 'open', txt: t('sd.mkt.overnight') };
   var no = m.next_open ? (' ' + String(m.next_open).replace('T', ' ') + ' ET') : '';
   var key = m.session === 'pre' ? 'sd.mkt.pre' : m.session === 'post' ? 'sd.mkt.post' : 'sd.mkt.closed';
   return { cls: 'closed', txt: t(key) + no };
@@ -5869,7 +5896,7 @@ function _mktLabel(m) {
 function renderSelfMarket() {
   var m = (_self || {}).market || {};
   var liveSession = (_liveMarks && _liveMarks.portfolio === 'self_directed') ? _liveMarks.session : null;
-  if (liveSession) {
+  if (liveSession && m.session !== 'overnight') {
     m = {
       session: liveSession.is_open ? 'open' :
         (liveSession.state === 'pre_open' ? 'pre' :
@@ -5881,8 +5908,11 @@ function renderSelfMarket() {
   var pill = E('sd-mkt'), txt = E('sd-mkt-txt');
   if (pill) pill.className = 'mm-sd-mkt ' + lab.cls;
   if (txt) txt.textContent = lab.txt;
-  if (E('sd-buy'))  E('sd-buy').textContent  = open ? t('sd.buy')  : t('sd.buy_open');
-  if (E('sd-sell')) E('sd-sell').textContent = open ? t('sd.sell') : t('sd.sell_open');
+  var overnightMode = !!((E('sd-overnight') || {}).checked);
+  if (E('sd-buy'))  E('sd-buy').textContent  = overnightMode ? 'Buy · Limit' :
+    (open ? t('sd.buy') : t('sd.buy_open'));
+  if (E('sd-sell')) E('sd-sell').textContent = overnightMode ? 'Sell · Limit' :
+    (open ? t('sd.sell') : t('sd.sell_open'));
 }
 
 function renderSelfAlloc() {
@@ -5931,11 +5961,20 @@ function renderSelfPositions() {
     var u = pnlCell(p.unrealized_pnl, p.unrealized_pct);
     var hasTh = !!(p.thesis && p.thesis.trim());
     var selfPosName = securityName(p);
+    var overnightQ = (((_self || {}).overnight_quotes) || {})[p.ticker];
+    var overnightActive = (((_self || {}).market) || {}).session === 'overnight';
+    var priceBadge = overnightActive ? (
+      overnightQ && overnightQ.fresh ?
+        ' <span class="mm-sd-thesis-flag" title="' +
+        esc(overnightQ.indicative ? 'Indicative overnight midpoint, not executable' :
+          'Realtime BOATS bid/ask midpoint (paper preview)') + '">☾</span>' :
+        ' <span class="mm-sd-thesis-flag" title="Last known regular mark; no fresh overnight quote">•</span>'
+    ) : '';
     rows += '<tr class="pos-row" onclick="toggleSelfExpand(\'' + esc(p.ticker) + '\')">' +
       '<td><span class="pos-ticker">' + esc(p.ticker) + '</span>' + (hasTh ? ' <span class="mm-sd-thesis-flag" title="' + t('sd.has_thesis') + '">◆</span>' : '') + (selfPosName ? '<span class="pos-name" style="display:block;font-size:11px;color:var(--muted);font-weight:500;line-height:1.2">' + esc(selfPosName) + '</span>' : '') + '</td>' +
       '<td style="font-variant-numeric:tabular-nums">' + fmtShares(p.shares) + '</td>' +
       '<td class="mm-hide-sm" style="font-variant-numeric:tabular-nums">' + (p.avg_cost != null ? '$' + Number(p.avg_cost).toFixed(2) : '—') + '</td>' +
-      '<td style="font-variant-numeric:tabular-nums">' + (p.current_price != null ? '$' + Number(p.current_price).toFixed(2) : '—') + '</td>' +
+      '<td style="font-variant-numeric:tabular-nums">' + (p.current_price != null ? '$' + Number(p.current_price).toFixed(2) : '—') + priceBadge + '</td>' +
       '<td class="mm-hide-sm" style="font-variant-numeric:tabular-nums">' + (p.market_value != null ? fmtNav(p.market_value) : '—') + '</td>' +
       '<td style="font-variant-numeric:tabular-nums;font-weight:700">' + (p.weight != null ? (p.weight * 100).toFixed(1) + '%' : '—') + '</td>' +
       '<td class="' + u.cls + '">' + u.txt + '</td>' +
@@ -6024,10 +6063,14 @@ function renderSelfHistory() {
   hist.forEach(function(r) {
     var isBuy = r.action === 'buy', rr = pnlCell(r.realized_pnl, r.realized_pct);
     var queuedTag = r.queued ? ' <span class="mm-sd-thesis-flag" title="' + esc(t('sd.queued_fill')) + '">⧖</span>' : '';
+    var overnightTag = r.session === 'overnight' ?
+      ' <span class="mm-sd-thesis-flag" title="Overnight paper limit · ' +
+      esc(r.quote_source || 'BOATS') + (r.limit_price != null ? ' · limit $' + Number(r.limit_price).toFixed(2) : '') +
+      '">☾</span>' : '';
     var selfTradeName = securityName(r);
     rows += '<tr>' +
       '<td class="l" style="font-variant-numeric:tabular-nums;color:var(--muted)">' + fmtDate(r.date) + '</td>' +
-      '<td><span class="pos-ticker">' + esc(r.ticker || '—') + '</span>' + queuedTag + (selfTradeName ? '<span class="pos-name" style="display:block;font-size:11px;color:var(--muted);font-weight:500;line-height:1.2">' + esc(selfTradeName) + '</span>' : '') + '</td>' +
+      '<td><span class="pos-ticker">' + esc(r.ticker || '—') + '</span>' + queuedTag + overnightTag + (selfTradeName ? '<span class="pos-name" style="display:block;font-size:11px;color:var(--muted);font-weight:500;line-height:1.2">' + esc(selfTradeName) + '</span>' : '') + '</td>' +
       '<td><span class="mm-side-chip ' + (isBuy ? 'buy' : 'sell') + '">' + (isBuy ? t('trades.buy') : t('trades.sell')) + '</span></td>' +
       '<td class="mm-hide-sm" style="font-variant-numeric:tabular-nums">' + fmtShares(r.shares) + '</td>' +
       '<td style="font-variant-numeric:tabular-nums">' + (r.price != null ? '$' + Number(r.price).toFixed(2) : '—') + '</td>' +
@@ -6092,11 +6135,12 @@ window.selectSelfTicker = function(ticker) {
   if (!ticker) return;
   _selfResults = []; renderSelfResults([], '');
   var inp = E('sd-search'); if (inp) inp.value = ticker;
-  _selfSel = { ticker: ticker, price: null, name: '' };
+  _selfSel = { ticker: ticker, price: null, name: '', overnight: null };
   renderSelfSelected(true);
   fetch('/api/self_directed/quote?ticker=' + encodeURIComponent(ticker))
     .then(function(r){ return r.ok ? r.json() : null; })
-    .then(function(d){ if (d) _selfSel = { ticker: d.ticker || ticker, price: d.price, name: d.name || '' }; renderSelfSelected(false); selfUpdateEst(); })
+    .then(function(d){ if (d) _selfSel = { ticker: d.ticker || ticker, price: d.price,
+      name: d.name || '', overnight: d.overnight || null, price_source: d.price_source }; renderSelfSelected(false); selfUpdateEst(); })
     .catch(function(){ renderSelfSelected(false); });
 };
 
@@ -6108,15 +6152,45 @@ function renderSelfSelected(loading) {
     return;
   }
   var s = _selfSel;
-  var px = s.price != null ? ('$' + Number(s.price).toFixed(2)) : (loading ? '…' : t('sd.no_price'));
+  var px = s.price != null ? ('$' + Number(s.price).toFixed(2) +
+    (s.overnight && !s.overnight.fresh ? ' · last known' : '')) :
+    (loading ? '…' : t('sd.no_price'));
   el.className = 'mm-sd-sel';
+  var q = s.overnight, quoteLine = '';
+  if (q) {
+    quoteLine = '<div class="mm-sd-sel-sub">' +
+      (q.bid != null ? 'Bid $' + Number(q.bid).toFixed(2) : 'Bid —') +
+      (q.bid_size != null ? ' × ' + fmtShares(q.bid_size) : '') + ' · ' +
+      (q.ask != null ? 'Ask $' + Number(q.ask).toFixed(2) : 'Ask —') +
+      (q.ask_size != null ? ' × ' + fmtShares(q.ask_size) : '') +
+      (q.last != null ? ' · Last $' + Number(q.last).toFixed(2) : '') +
+      ' · ' + esc(q.provider || q.feed || 'overnight') +
+      ' · ' + esc(q.status || 'unknown') +
+      (q.quoted_at ? ' · quote ' + esc(q.quoted_at) : '') +
+      (q.fresh && q.provider === 'tiingo' ?
+        ' · <a href="https://www.tiingo.com" target="_blank" rel="noopener">Data sourced by Tiingo</a>' : '') +
+      '</div>';
+  }
   el.innerHTML = '<div class="mm-sd-sel-top"><span class="mm-sd-sel-tk">' + esc(s.ticker) + '</span>' +
     (s.name ? '<span class="mm-sd-sel-nm">' + esc(s.name) + '</span>' : '') +
     '<span class="mm-sd-sel-px">' + px + '</span></div>' +
+    quoteLine +
     '<div class="mm-sd-sel-sub">' + t('sd.buying_power') + ' ' + fmtNav((_self || {}).cash || 0) + '</div>';
 }
 
 var _selfUnit = 'shares';   // 'shares' | 'dollars' — order-ticket sizing unit
+window.selfOvernightToggle = function() {
+  var checked = !!((E('sd-overnight') || {}).checked), limit = E('sd-limit');
+  if (limit) {
+    limit.style.display = checked ? 'block' : 'none';
+    if (checked && !(Number(limit.value) > 0) && _selfSel) {
+      var q = _selfSel.overnight;
+      limit.value = q && q.ask ? Number(q.ask).toFixed(2) : '';
+    }
+  }
+  renderSelfMarket();
+  selfUpdateEst();
+};
 window.setSelfUnit = function(u) {
   _selfUnit = (u === 'dollars') ? 'dollars' : 'shares';
   var sh = E('sd-unit-shares'), dl = E('sd-unit-dollars'), inp = E('sd-shares'), lbl = E('sd-amt-lbl');
@@ -6134,7 +6208,12 @@ window.selfUpdateEst = function() {
   if (!est) return;
   var s = _selfSel, amt = parseFloat((E('sd-shares') || {}).value);
   if (!s) { est.textContent = ''; if (buy) buy.disabled = true; if (sell) sell.disabled = true; return; }
-  var px = s.price, held = _heldShares(s.ticker), cash = (_self || {}).cash || 0;
+  var overnight = !!((E('sd-overnight') || {}).checked);
+  var limit = Number((E('sd-limit') || {}).value);
+  var q = s.overnight, overnightOpen = ((_self || {}).market || {}).session === 'overnight';
+  var executable = !!(q && q.executable && overnightOpen && limit > 0);
+  var px = overnight ? (limit > 0 ? limit : null) : s.price;
+  var held = _heldShares(s.ticker), cash = (_self || {}).cash || 0;
   var dollars = _selfUnit === 'dollars';
   var shares = (px != null && amt > 0) ? (dollars ? amt / px : amt) : 0;
   var parts = [];
@@ -6144,8 +6223,15 @@ window.selfUpdateEst = function() {
   }
   parts.push(t('sd.buying_power') + ' ' + fmtNav(cash));
   if (held > 0) parts.push(t('sd.you_hold') + ' ' + fmtShares(held) + ' ' + t('sd.shares_unit'));
+  if (overnight) {
+    parts.push(!overnightOpen ? 'Overnight session closed' :
+      (!q ? 'Select stock for live overnight quote' :
+      (!q.executable ? 'Paper overnight execution unavailable: ' + q.status :
+       'Marketable limit only; latest quote rechecked on submit')));
+  }
   est.textContent = parts.join(' · ');
   var canBuy = px != null && amt > 0, canSell = px != null && amt > 0 && held > 0;
+  if (overnight) { canBuy = canBuy && executable; canSell = canSell && executable; }
   if (buy) buy.disabled = !canBuy || _selfBusy;
   if (sell) sell.disabled = !canSell || _selfBusy;
 };
@@ -6162,11 +6248,24 @@ window.placeSelfOrder = function(side, tickerOverride) {
   if (E('sd-buy')) E('sd-buy').disabled = true;
   if (E('sd-sell')) E('sd-sell').disabled = true;
   var body = dollars ? { ticker: ticker, side: side, notional: amt } : { ticker: ticker, side: side, shares: amt };
+  if (!tickerOverride && (E('sd-overnight') || {}).checked) {
+    var limit = Number((E('sd-limit') || {}).value);
+    if (!(limit > 0)) { _selfBusy = false; _selfMsg('err', 'Positive overnight limit required'); selfUpdateEst(); return; }
+    body.session = 'overnight';
+    body.limit_price = limit;
+  }
   fetch('/api/self_directed/order', { method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body) })
-    .then(function(r){ return r.json(); })
-    .then(function(d) {
-      if (!d || !d.ok) { _selfMsg('err', t('sd.order_failed') + (d && d.error ? ': ' + esc(d.error) : '')); return; }
+    .then(function(r){ return r.json().catch(function(){ return {}; }).then(function(d){ return { httpStatus: r.status, data: d }; }); })
+    .then(function(reply) {
+      var d = reply.data || {};
+      if (reply.httpStatus === 401 && d.error === 'operator_bearer_required') {
+        _selfMsg('err', t('sd.operator_required')); return;
+      }
+      if (reply.httpStatus === 503 && d.error === 'operator_auth_misconfigured') {
+        _selfMsg('err', t('sd.operator_unready')); return;
+      }
+      if (!d.ok) { _selfMsg('err', t('sd.order_failed') + (d.error ? ': ' + esc(d.error) : '')); return; }
       if (d.status === 'filled') {
         var f = d.fill || {};
         _selfMsg('ok', t('sd.filled') + ': ' + (side === 'buy' ? t('sd.buy') : t('sd.sell')) + ' ' + fmtShares(f.shares) + ' ' + esc(ticker) + ' ' + t('sd.at') + ' ' + (f.price != null && !isNaN(f.price) ? '$' + Number(f.price).toFixed(2) : '—'));

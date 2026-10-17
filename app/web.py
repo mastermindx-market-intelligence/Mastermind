@@ -2392,6 +2392,8 @@ class _OrderReq(BaseModel):
     side: str                          # "buy" | "sell"
     shares: float | None = None        # share-sized order
     notional: float | None = None      # OR dollar-sized order ($ → shares at the fill price)
+    session: str = "regular"            # "regular" | explicit "overnight" paper limit
+    limit_price: float | None = None   # required for overnight; never converted to a market order
 
 
 class _ThesisReq(BaseModel):
@@ -2409,8 +2411,26 @@ def api_self_directed() -> JSONResponse:
         held = list((self_directed._load_account().get("positions") or {}).keys())
         pend = [o.get("ticker") for o in self_directed._load_pending()]
         prices = _live_prices(sorted({*held, *[t for t in pend if t]}))
+        overnight_quotes = {}
+        if self_directed._market_status().get("session") == "overnight" and held:
+            # One bounded parallel read burst, never a ledger mutation. An indicative
+            # midpoint is a UI NAV preview, NOT a tradeable fill or daily NAV mark.
+            from concurrent.futures import ThreadPoolExecutor
+            from data_layer import overnight_equities
+            symbols = sorted(set(held))[:16]
+            with ThreadPoolExecutor(max_workers=min(8, len(symbols))) as pool:
+                quotes = list(pool.map(overnight_equities.latest, symbols))
+            overnight_quotes = dict(zip(symbols, quotes))
+            for symbol, q in overnight_quotes.items():
+                if q.get("fresh") and q.get("mid"):
+                    prices[symbol] = q["mid"]
         payload = self_directed.book(
             prices=prices, read_only=True, resolve_missing_prices=False)
+        if overnight_quotes:
+            payload["overnight_quotes"] = overnight_quotes
+            payload["nav_mark_kind"] = ("indicative_overnight_preview"
+                if any(q.get("fresh") for q in overnight_quotes.values())
+                else "last_known_regular_marks")
         _attach_security_names(payload.get("positions"))
         _attach_security_names(payload.get("pending"))
         return JSONResponse(payload)
@@ -2466,7 +2486,8 @@ def api_self_directed_order(req: _OrderReq) -> JSONResponse:
     try:
         from portfolio import self_directed
         return JSONResponse(self_directed.place_order(
-            req.ticker, req.side, req.shares, notional=req.notional))
+            req.ticker, req.side, req.shares, notional=req.notional,
+            session=req.session, limit_price=req.limit_price))
     except Exception as exc:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
 
