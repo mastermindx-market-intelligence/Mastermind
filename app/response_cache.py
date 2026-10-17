@@ -44,6 +44,7 @@ _MAX_ENTRIES = 512
 _DENY_PREFIXES = ("/api/self_directed/search", "/api/self_directed/quote", "/api/pfolio/",
                   "/api/account",        # per-user Supabase profile — never shared/public
                   "/api/live_marks",     # active-book intraday marks + session clock
+                  "/api/performance",    # observed availability/source clocks; preserve no-store
                   "/api/mastermind_ai")  # W-AI admin surface — always fresh, never mirror-cached
 
 # The origin already holds these read-only responses for ``MASTERMIND_RESP_CACHE_TTL`` seconds.
