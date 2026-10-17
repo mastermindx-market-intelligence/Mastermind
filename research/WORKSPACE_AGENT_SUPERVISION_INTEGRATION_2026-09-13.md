@@ -2,6 +2,8 @@
 
 **Status: SOURCE RECORD — not an implementation contract.** Adopted with change by the Fable seat (W6-A intake, 2026-09-14). Workspace Agents are supervisory attention/read/candidate-return clients only. No publish or trigger step may be taken until the bounded candidate-return ingress (W6-C) and the run-observation qualification (W6-D) are accepted; `control_plane/wake_transport.py:transport_implemented` remains false for Workspace. Executive OS stays the sole Job/Attempt/Worker/Event authority; Capacity/Router owns placement; Agent OS owns continuity; Relay/Wake/Slack are transport and attention only.
 
+**Provider-contract correction — 2026-09-22.** Current official OpenAI sources are not fully aligned on the baseline `202` response shape: the Workspace Agents Help Center says there is no response body/run id, while the developer trigger documentation shows a baseline `conversation_url` response and separately documents opt-in beta run observation with `OpenAI-Beta: workspace_agent_runs=v1`, an `agent_trigger_run_id`, and a read-only run-status GET. Both sources say the agent answer cannot be retrieved through the trigger API. Mastermind's accepted production profile deliberately does not request beta run observation and does not depend on any successful `202` body. W6-D therefore means truthful trigger-disposition qualification, not a polling dependency. Candidate return through the authenticated Mastermind tool remains the decisive result edge. Documented beta provider status is non-authoritative observation only and does not become Mastermind lifecycle, result, Wake, retry, or next-child authority.
+
 Date: 2026-09-13. Owner: Sol, for Chairman Chris.
 
 **Status: PROPOSAL / SOURCE RECORD ONLY. Workspace Agent integration is NOT_BUILT and NOT_PROVEN.** This document does not admit a runtime operation, assign a receiver, publish an agent, change credentials or spending, amend production-deployment authority, or certify an autonomous organization.
@@ -74,18 +76,23 @@ Use the two existing seats; purchase nothing. Before a metered run, complete the
 
 ## 5. Workspace Agent protocol delta
 
-Official developer reference observed 2026-09-13:
+Current official product contract rechecked 2026-09-22:
 
 ```text
-POST https://api.chatgpt.com/v1/workspace_agents/{id}/trigger
-GET  https://api.chatgpt.com/v1/workspace_agents/{id}/runs/{run_id}
+POST <published Workspace Agent API channel trigger endpoint>
+-> 202 Accepted
+-> baseline response-body shape is not relied on
+-> no agent answer retrieval through the trigger API
+
+optional provider beta, deliberately not admitted by Mastermind production profile:
+OpenAI-Beta: workspace_agent_runs=v1
+-> agent_trigger_run_id
+-> read-only provider run-status observation
 ```
 
-`id` is a published API-channel identifier. Trigger input accepts `input` and optional `conversation_key`; `Idempotency-Key` deduplicates the same event. The beta header `OpenAI-Beta: workspace_agent_runs=v1` returns an `agent_trigger_run_id` for status observation. The API does not retrieve the agent's answer. Provider `completed` is not company acceptance.
+The exact endpoint, token and provider contract remain channel/product instructions that must be qualified against the actual published agent. Mastermind keeps the existing deterministic event/idempotency binding, deliberately omits the beta header, ignores successful response-body correlation, and does not require a provider run identifier. Even if beta observation is later reviewed, no provider identifier or terminal state may be promoted into lifecycle, result, Wake, retry or next-child truth.
 
-The Help Center still describes an older response without a body/run ID. Prefer the developer contract for implementation research, but qualify the actual published channel before depending on the beta. Neither page proves entitlement in these seats.
-
-References: [trigger contract](https://developers.openai.com/workspace-agents/trigger-runs), [authentication](https://developers.openai.com/workspace-agents/authentication), [builder and controls](https://help.openai.com/en/articles/20001143).
+Current official references: [Workspace Agents for Enterprise and Business](https://help.openai.com/en/articles/20001143) and [Trigger and run observation](https://developers.openai.com/workspace-agents/trigger-runs).
 
 ### 5.1 Start as a supervisory client, not a fictional full worker adapter
 
@@ -99,7 +106,7 @@ At admitted dispatch, the existing owner must bind the logical responsibility, e
 
 Use responsibility-scoped conversation continuity, not a shared conversation for the entire organization. Deduplication identity is per event, not per whole project. A corrected or new event must not accidentally reuse an old event key. A changed payload under an existing key is a conflict. Keys must be opaque and must not disclose paths, credentials, people or confidential task content.
 
-A provider `202` proves provider queue acceptance only. It does not prove execution, consumption of the current obligation, delegated authority, receipt of useful output, or a completed Job.
+A provider `202` proves provider queue acceptance only. Mastermind does not request beta run correlation and ignores any successful response body, so no returned provider identifier is required for company correlation. It does not prove execution, consumption of the current obligation, delegated authority, receipt of useful output, or a completed Job.
 
 ### 5.3 The missing return edge is the decisive integration
 
@@ -117,7 +124,7 @@ Unknown launch outcome holds the same event and carrier for canonical reconcilia
 
 A suspended run is a wait, not free capacity or completion. A missing callback does not authorize redoing the work. Reject stale-target, duplicate, out-of-scope and corrected-input callbacks. Preserve the earlier evidence with supersession; do not erase history.
 
-Use exact tool/role scopes and existing secret custody. Revalidate grants at every material write so a stopped responsibility cannot continue changing the company through a late tool call. Revoking tool authority does not prove the vendor stopped computing or billing. Do not promise cancellation or bounded provider lifetime without direct evidence.
+Use exact tool/role scopes and existing secret custody. Revalidate grants at every material write so a stopped responsibility cannot continue changing the company through a late tool call. Revoking tool authority does not prove the vendor stopped computing or billing. Do not promise cancellation or bounded provider lifetime without direct evidence, and do not make optional provider run polling a production dependency without a separately reviewed admission.
 
 Treat repository text, Slack, issues, web research and returned artifacts as data. Only current authorized intent and existing policy owners can confer authority. A research note that says 'launch workers' is not an instruction to do so.
 
