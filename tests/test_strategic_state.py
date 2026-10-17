@@ -5,8 +5,10 @@ Covers:
   2. P0 objective ids are unique and UPPER_SNAKE_CASE
   3. P0 department/status values come from the declared vocabularies
   4. Resource-policy weights sum to ~1.0
-  5. Required constraint fields exist, and the standing prohibitions are prohibited
-  6. The reader FAILS LOUD on every malformation class (its stated design law) —
+  5. Core-product value weights/readiness rubric are valid strategy data
+  6. Descriptive phase gates are complete and remain non-runtime strategy data
+  7. Required constraint fields exist, and the standing prohibitions are prohibited
+  8. The reader FAILS LOUD on every malformation class (its stated design law) —
      each case mutates a copy of the real document so the assertions cannot pass
      for the wrong reason
   7. The reader stays decoupled from the Phase 1B worker runtime (AST import check)
@@ -85,6 +87,8 @@ def test_strategic_state_parses(state):
     assert state["schema"] == SCHEMA
     assert state["company_phase"].strip()
     assert state["north_star"], "north_star must not be empty"
+    assert state["core_product_value_model"], "core_product_value_model must not be empty"
+    assert state["phase_gates"], "phase_gates must not be empty"
     assert state["meta"]["authority"] == "advisory_and_orientation_only", (
         "the strategic state must keep declaring itself advisory — a runtime "
         "authority here would be the duplicate control plane it prohibits"
@@ -127,6 +131,74 @@ def test_resource_weights_sum_to_one(state):
     assert total == pytest.approx(1.0, abs=ss.RESOURCE_SUM_TOLERANCE), (
         f"resource_policy weights sum to {total:.4f}, expected ~1.0"
     )
+
+
+def test_core_product_value_model_is_complete_and_balanced(state):
+    model = state["core_product_value_model"]
+    assert model["products"] == [
+        "Prophet",
+        "Macro Dashboard",
+        "Sector Intelligence",
+        "Research Vault",
+        "Terminal",
+        "Options Intelligence",
+    ]
+    assert sum(float(v) for v in model["dimensions"].values()) == pytest.approx(1.0)
+    assert model["evidence_rule"].strip()
+    assert len(model["production_readiness"]) >= 5
+
+
+def test_phase_gates_are_descriptive_and_complete(state):
+    assert set(state["phase_gates"]) == {"AUTONOMY_BASELINE", "SELL_READY"}
+    for name, gate in state["phase_gates"].items():
+        assert ss._ID_RE.match(name)
+        assert gate["purpose"].strip()
+        assert gate["criteria"]
+        assert all(isinstance(item, str) and item.strip() for item in gate["criteria"])
+        assert gate["on_pass"].strip()
+
+
+def test_active_company_portfolio_is_exactly_four_p0s(state):
+    active = [item for item in state["p0"] if item["status"] == "active"]
+    assert [item["id"] for item in active] == [
+        "CORE_INTELLIGENCE_PRODUCTIZATION",
+        "PREMIUM_PRODUCT_EXPERIENCE",
+        "DISTRIBUTION_AND_REVENUE",
+        "AUTONOMY_FORCE_MULTIPLIER",
+    ]
+    retired = {item["id"] for item in state["p0"] if item["status"] == "retired"}
+    assert {
+        "US_PROPHET_ENTRY_TIMING",
+        "PRODUCT_TRUST_COHERENCE",
+        "MONETIZATION_AND_ONBOARDING",
+        "ZERO_TO_ONE_ACQUISITION",
+        "EXECUTIVE_OS",
+        "CHAIRMAN_COGNITION_AUTONOMY",
+    } <= retired
+
+
+def test_value_model_bad_weight_sum_raises(tmp_path):
+    def mutate(doc):
+        doc["core_product_value_model"]["dimensions"]["decision_impact_and_time_saved"] = 0.9
+    path = _mutated(tmp_path, mutate)
+    with pytest.raises(StrategicStateError, match="dimension weights sum"):
+        load_strategic_state(path)
+
+
+def test_value_model_duplicate_product_raises(tmp_path):
+    def mutate(doc):
+        doc["core_product_value_model"]["products"].append("Prophet")
+    path = _mutated(tmp_path, mutate)
+    with pytest.raises(StrategicStateError, match="products must be unique"):
+        load_strategic_state(path)
+
+
+def test_value_model_malformed_readiness_raises(tmp_path):
+    def mutate(doc):
+        doc["core_product_value_model"]["production_readiness"][0] = ""
+    path = _mutated(tmp_path, mutate)
+    with pytest.raises(StrategicStateError, match="production_readiness entries"):
+        load_strategic_state(path)
 
 
 def test_required_constraints_exist(state):
@@ -196,7 +268,7 @@ def test_empty_mapping_does_not_read_as_empty_state(tmp_path):
         load_strategic_state(path)
 
 
-@pytest.mark.parametrize("key", ["company_phase", "p0", "resource_policy", "constraints"])
+@pytest.mark.parametrize("key", ["company_phase", "p0", "resource_policy", "core_product_value_model", "phase_gates", "constraints"])
 def test_missing_required_key_raises(tmp_path, key):
     path = _mutated(tmp_path, lambda d: d.pop(key))
     with pytest.raises(StrategicStateError, match="missing required key"):
@@ -240,27 +312,27 @@ def test_blank_p0_field_raises(tmp_path):
 
 
 def test_resource_weights_not_summing_to_one_raises(tmp_path):
-    path = _mutated(tmp_path, lambda d: d["resource_policy"].update(prophet_quality=0.9))
+    path = _mutated(tmp_path, lambda d: d["resource_policy"].update(core_intelligence_productization=0.9))
     with pytest.raises(StrategicStateError, match="must sum to ~1.0"):
         load_strategic_state(path)
 
 
 def test_non_numeric_resource_weight_raises(tmp_path):
-    path = _mutated(tmp_path, lambda d: d["resource_policy"].update(prophet_quality="lots"))
+    path = _mutated(tmp_path, lambda d: d["resource_policy"].update(core_intelligence_productization="lots"))
     with pytest.raises(StrategicStateError, match="must be a number"):
         load_strategic_state(path)
 
 
 def test_boolean_resource_weight_raises(tmp_path):
     """bool is an int subclass — True must not silently score as a weight of 1.0."""
-    path = _mutated(tmp_path, lambda d: d["resource_policy"].update(prophet_quality=True))
+    path = _mutated(tmp_path, lambda d: d["resource_policy"].update(core_intelligence_productization=True))
     with pytest.raises(StrategicStateError, match="must be a number"):
         load_strategic_state(path)
 
 
 def test_negative_resource_weight_raises(tmp_path):
     def mutate(doc):
-        doc["resource_policy"].update(prophet_quality=-0.3, exploratory_rd=0.65)
+        doc["resource_policy"].update(core_intelligence_productization=-0.3, exploratory_rd=0.65)
     path = _mutated(tmp_path, mutate)
     with pytest.raises(StrategicStateError, match="must not be negative"):
         load_strategic_state(path)
