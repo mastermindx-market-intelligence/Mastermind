@@ -18,14 +18,20 @@ class ControlRoomDrainUnavailable(RuntimeError):
 
 
 class HostedControlRoom:
-    def __init__(self, config, *, shutdown_timeout=10.0):
+    def __init__(self, config, *, shutdown_timeout=10.0, cache_only=False):
         from scripts.chairman_control_room import ServerConfig
         if (type(config) is not ServerConfig or config.port < 0 or config.port > 65535
                 or type(shutdown_timeout) not in (int, float) or not 0.1 <= shutdown_timeout <= 30
                 or type(config.state_ttl) not in (int, float) or not math.isfinite(config.state_ttl)
-                or not 0.1 <= config.state_ttl <= 3600):
+                or not 0.1 <= config.state_ttl <= 3600
+                or type(cache_only) is not bool):
             raise ValueError("control room hosting configuration refused")
         self.config = config
+        # Source-only prerequisite for separating the existing canonical cache
+        # from its user-facing HTTP presentation. The privileged Control caller
+        # is NOT switched to this mode by this candidate.
+        self.cache_only = cache_only
+        self._cache_active = False
         self.shutdown_timeout = shutdown_timeout
         self._server = None
         self._server_thread = None
@@ -33,26 +39,35 @@ class HostedControlRoom:
         self._stop = threading.Event()
 
     def current_owner(self):
-        if self._server is None or self._stop.is_set():
+        if self._stop.is_set():
             return None
-        return self._server.config
+        if self.cache_only:
+            return self.config if self._cache_active else None
+        return self._server.config if self._server is not None else None
 
     def _start(self):
         from scripts.chairman_control_room import ControlRoomServer, ChairmanControlRoomHandler, HOST
-        if self._server is not None or self._stop.is_set():
+        if self._server is not None or self._cache_active or self._stop.is_set():
             raise ValueError("control room owner cannot be reused")
         # Bind-before-precompose is the existing server constructor's ordering.
         # Occupancy refuses here without minting a published dummy cache.
         if self.config.state_published_seq or self.config.state_cache:
             raise ValueError("control room hosting requires a fresh owner")
         self.config.workspace_refresh_on_read = False
-        self._server = ControlRoomServer((HOST, self.config.port), ChairmanControlRoomHandler, self.config)
-        self.config.port = self._server.server_address[1]
-        self.config.origin = f"http://{HOST}:{self.config.port}"
-        self._server_thread = threading.Thread(
-            target=lambda: self._server.serve_forever(poll_interval=0.05),
-            name="workspace-canonical-control-room", daemon=True)
-        self._server_thread.start()
+        if self.cache_only:
+            # Exact existing compose/publish/cache owner, without creating a
+            # Control-owned AF_INET listener. No second cache or read identity.
+            from scripts.chairman_control_room import _precompose_initial_state
+            _precompose_initial_state(self.config)
+            self._cache_active = True
+        else:
+            self._server = ControlRoomServer((HOST, self.config.port), ChairmanControlRoomHandler, self.config)
+            self.config.port = self._server.server_address[1]
+            self.config.origin = f"http://{HOST}:{self.config.port}"
+            self._server_thread = threading.Thread(
+                target=lambda: self._server.serve_forever(poll_interval=0.05),
+                name="workspace-canonical-control-room", daemon=True)
+            self._server_thread.start()
         self._refresh_thread = threading.Thread(target=self._refresh, name="workspace-control-room-refresh", daemon=True)
         self._refresh_thread.start()
 
@@ -93,6 +108,7 @@ class HostedControlRoom:
         if self._server is not None:
             self._server.server_close()
             self._server = None
+        self._cache_active = False
 
     async def close(self):
         task = asyncio.create_task(asyncio.to_thread(self._close))
