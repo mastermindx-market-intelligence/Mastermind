@@ -36,7 +36,7 @@
 +            or len(classes) != len(set(classes))):
 +        return False
 +    if (tc not in classes or tc not in allowed or prefer not in (None, "")
-+            or complexity == "C3_FRONTIER_JUDGMENT"):
++            or complexity != "C2_COMPLEX_BOUNDED"):
 +        return False
 +    if (type(route_key) is not str or
 +            re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", route_key) is None):
