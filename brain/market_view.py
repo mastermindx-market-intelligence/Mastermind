@@ -1182,9 +1182,9 @@ def _adapt_liquidity_transmission(lt_out: Any) -> dict[str, Any]:
         # clock postdating first-known, a producer declaring itself degraded), and
         # _freshness() owns the view's own trading-day horizon.  Neither may RELEASE what
         # the other condemned.  This is load-bearing rather than belt-and-braces:
-        # _trading_days_since clamps a future date to 0 sessions, so the view's own
-        # future_dated guard cannot fire here at all -- without this union a clock dated
-        # next week would read as a fresh plane.
+        # _freshness also rejects future source dates, but does not qualify the
+        # producer's evidence/first-known ordering or degradation. Preserve the
+        # producer's rejection even when the view's source-date and age checks pass.
         if is_stale:
             rec["freshness"]["stale"] = True
             rec["freshness"]["stale_reason"] = lt_out.get("reason")
