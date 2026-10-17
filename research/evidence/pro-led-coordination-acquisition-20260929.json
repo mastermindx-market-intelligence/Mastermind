@@ -1,0 +1,221 @@
+{
+  "actual_project_read": {
+    "actual_compiler_and_records": true,
+    "after": {
+      "budget": 16384,
+      "estimate": 12736,
+      "items": 66,
+      "omitted": 0,
+      "payload_digest": "sha256:f86864b07097e217e3d0b56298a69b4f9436db8c57e6f1bb5a73ab1ea93df6c5",
+      "section_counts": {
+        "artifacts": 13,
+        "decisions": 3,
+        "discoveries": 1,
+        "handoff": 1,
+        "higher_law": 2,
+        "workstream": 46
+      }
+    },
+    "before": {
+      "budget": 8000,
+      "estimate": 9986,
+      "items": 48,
+      "omitted": 18,
+      "payload_sha256": "77432a5dace010135a59958cf7f1e5ff845f04fb5094ef0b5ed2c3b33dc2457b",
+      "section_counts": {
+        "artifacts": 0,
+        "decisions": 0,
+        "discoveries": 0,
+        "handoff": 0,
+        "higher_law": 2,
+        "workstream": 46
+      }
+    },
+    "comparison_log_sha256": "17e20517cc40088b76833753d89efc6590b40a55e0532bb9c3cdd99a2a45ca78",
+    "compiler_sha256": "759bafaa825187eee22e76cee4df637763605a9c8878d8e101405375e3a19ee9",
+    "fixed_observation_time": "2026-09-30T01:46:38Z",
+    "macro_sha": "0f62daf545719e641036be9e5b88101c3af7ab5f",
+    "no_complete_memory_claim": true,
+    "no_model_dispatch": true,
+    "project_ref": "WS:EXECUTIVE-CAPACITY-FABRIC",
+    "remaining_missing_join": "active_builds.json absent: PR state and wave/PR agreement unproven",
+    "revalidation_unchanged": true,
+    "same_repo_compiler_time_and_record_digest": true,
+    "source_records_digest": "sha256:7b0f4aac9e1f61a4bc28300719c8cfaa5ec8ae370fb2453ea077cdbac94e16d5"
+  },
+  "base_head": "5934b81e5539c5222af6e411c76206ec3f46d3f8",
+  "capability_state": "BUILT_NOT_PROVEN",
+  "checks": [
+    {
+      "errors": 0,
+      "failures": 36,
+      "log_sha256": "4cf9208e2f9ea97e68848a83b64b89c0c6d284cbf2f728fc10fd728c28af4369",
+      "name": "coordination-acquisition-red",
+      "skipped": 0,
+      "tests": 36,
+      "xml_sha256": "1020a3a2e22bd8a304acf11c81be85bb11becb1f78235988e9818823de2c2e9c"
+    },
+    {
+      "errors": 0,
+      "failures": 0,
+      "log_sha256": "1e4ea318dc8d7d919a3ee028c8a7470cec31c209a53ca3565d057d410fd546ea",
+      "name": "coordination-acquisition-recovered",
+      "skipped": 0,
+      "tests": 115,
+      "xml_sha256": "145ac9291fc3ac1cde7e7bd3613a874ce47bb8a1aa34fff149fa47e789553ee5"
+    },
+    {
+      "errors": 0,
+      "failures": 1,
+      "log_sha256": "3f841070f85b0e0350cb28bd243147da6845e9394cc18e9e8994847338d559c4",
+      "name": "coordination-scope-digest-red",
+      "skipped": 0,
+      "tests": 1,
+      "xml_sha256": "145aef9cea78555cd380d6059b489d6266252b094aa45337b6406047836f52b5"
+    },
+    {
+      "errors": 0,
+      "failures": 9,
+      "log_sha256": "026edda79998a086783dcc3ee8a7265f0d638d936399af6882eff5ecbf5e8616",
+      "name": "coordination-scoped-attestation-red",
+      "skipped": 0,
+      "tests": 9,
+      "xml_sha256": "15c682768e816194e79e902e24d59571700c325545eaca47f7a135134f270156"
+    },
+    {
+      "errors": 0,
+      "failures": 10,
+      "log_sha256": "eee4278f0fd3b82f54e0f936ff29a6d8e337dea437aa5db60d4e57f42552959c",
+      "name": "coordination-concrete-binding-red",
+      "skipped": 0,
+      "tests": 10,
+      "xml_sha256": "4db938d1f42bdb05f67b169108cf02d6ac26e94f7984793737f6048da8e1de6f"
+    },
+    {
+      "errors": 0,
+      "failures": 1,
+      "log_sha256": "b0cc44088e0df4f7b59f880731526f9bb76b88ec1e1523c25e10ec8e4099da08",
+      "name": "coordination-memory-default-red",
+      "skipped": 0,
+      "tests": 1,
+      "xml_sha256": "eba2fbf52c8a29666a7f38bf7862591181943c463340d2c97491856b37bc755d"
+    },
+    {
+      "errors": 0,
+      "failures": 1,
+      "log_sha256": "7be6964d5e01c30878c7a722cb1325afabc26863ed66f9d4b097900e4c08abd9",
+      "name": "coordination-utc-equality-red",
+      "skipped": 0,
+      "tests": 1,
+      "xml_sha256": "0f0cb5741989c061920fdfc7cbc43ec5da99fd0764f02cf1528a827eac8a33a9"
+    },
+    {
+      "errors": 0,
+      "failures": 1,
+      "log_sha256": "cc1decc94b360e1b47ead3079d996f065db2116a1d93570aeac3c0b771666707",
+      "name": "coordination-mode-identity-red",
+      "skipped": 0,
+      "tests": 1,
+      "xml_sha256": "67bff006908b86d29bac446687695e0077e750be43c97a14651ea49a600173cb"
+    },
+    {
+      "errors": 0,
+      "failures": 0,
+      "log_sha256": "cf426ab35f3b06fccef8290fde5325d90af130a79da1d1752031518df77c4236",
+      "name": "coordination-concrete-full-roundtrip",
+      "skipped": 0,
+      "tests": 3,
+      "xml_sha256": "1b8b5dc6c46634a8d04e5ccc6ff1b64dc8207441fe2b8a33238c7eb0f99ac293"
+    },
+    {
+      "errors": 0,
+      "failures": 0,
+      "log_sha256": "774ffd633e7a38bbb0fdb4c059f99c3dd56ec7e90ef298d40d8587efd522e59b",
+      "name": "coordination-acquisition-final-v2",
+      "skipped": 0,
+      "tests": 682,
+      "xml_sha256": "d564750f2ec40bc1ebba7f4a17764b0168104aeeaf1db77a864394ede99fedfa"
+    }
+  ],
+  "concurrency_correction": "Sibling workspace creation no longer invalidates unchanged selected sealed artifact; selected namespace and permission checks remain.",
+  "historical_ci": {
+    "all_checks_success": true,
+    "head": "5934b81e5539c5222af6e411c76206ec3f46d3f8",
+    "not_future_source_acceptance": true,
+    "test_check": 109362715243
+  },
+  "limits": [
+    "Not installed or armed",
+    "No live model or automatic Web Pro turn",
+    "No native dispatch through readonly Executive connection",
+    "No independent source review or collision release",
+    "No new full repository qualification; prior native ACL campaign not repeated",
+    "Trusted live Chairman/authority/target inputs and protected source namespace remain host responsibilities",
+    "No source artifact grants execution or acceptance authority",
+    "No base builder retasked"
+  ],
+  "operation": "mastermind-pro-led-project-delivery-20260929-sol-001",
+  "parent_issue": 1056,
+  "procedure_pin": "32aebf0379f77a7d359a64f01187d5d2a978556f",
+  "process": {
+    "final_test_pid": 63181,
+    "group_absent_verified": true,
+    "no_production_process_stopped": true,
+    "pgid": 63181,
+    "terminal_exit": 0
+  },
+  "recorded_at": "2026-09-30T02:12:36.373808+00:00",
+  "recovery": {
+    "no_effect_replayed": true,
+    "original_acquisition_sha256": "ad5b6265fdafaa0d03ae30479da4d6ee422ae8279c4595e5995365feaa79c286",
+    "original_test_sha256": "d45aa0e7a1d75733c8df6c0d15d9c815910288b04b366e772fb5a9caeeabd35f",
+    "uncommitted_files_recovered": true
+  },
+  "source": [
+    {
+      "path": "control_plane/chairman_coordination_acquisition.py",
+      "sha256": "0986f178ce11a02b493fd8ec151dd6253a6d1465676e418600bf9cf183923fb1"
+    },
+    {
+      "path": "control_plane/chairman_cognition_sources.py",
+      "sha256": "aec8dfad78e9395f8875decb9cd38361396be6f96efb2d3affd805b6241ec1e5"
+    },
+    {
+      "path": "tests/test_chairman_coordination_acquisition.py",
+      "sha256": "504f2c8180a5a973119b614569b2a22e7782c47a7aaf2726c6b32a62e35b2080"
+    }
+  ],
+  "source_collisions": [
+    {
+      "historical_pr124_preimage": "0d6f2f2b9e3ef0a4945d5b48ed32a6d1fd554447",
+      "identical": true,
+      "own_committed_preimage": "0d6f2f2b9e3ef0a4945d5b48ed32a6d1fd554447",
+      "path": "control_plane/chairman_cognition_sources.py",
+      "release_hold_retained": true
+    },
+    {
+      "historical_pr124_preimage": "445eb0c8b2254c88219f9b12b7bd94171a64306f",
+      "identical": false,
+      "own_committed_preimage": "03ae26dad3d784f92234cb6991da20327ef65530",
+      "path": "scripts/chairman_cognition.py",
+      "release_hold_retained": true
+    }
+  ],
+  "source_pr": 1059,
+  "source_scope_correction": {
+    "company_brief_receipt_and_delegation_not_rewritten": true,
+    "dedicated_attestation_requires_exact_payload_project_revision_time": true,
+    "project_record_digest_is_not_company_store_digest": true
+  },
+  "tests": {
+    "compiler_unit_test": "explicit CLI stand-in with real subprocess",
+    "errors": 0,
+    "failed": 0,
+    "new_acquisition_tests": 105,
+    "passed": 682,
+    "provider_execution": "explicit fixture",
+    "related_suite_files": 14,
+    "runtime": "actual temporary Runtime and supervisor",
+    "skipped": 0
+  }
+}

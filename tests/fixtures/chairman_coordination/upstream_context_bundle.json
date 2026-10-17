@@ -1,0 +1,80 @@
+{
+  "degraded": [],
+  "excluded": [],
+  "generated_at": "2026-08-30T15:00:00Z",
+  "no_answer_reason": null,
+  "omitted_due_to_budget": [],
+  "repo_sha": "6e41fc72c90f154d6523478969bff6c305f4429b",
+  "schema": "context_bundle.v1",
+  "sections": [
+    {
+      "authority_note": "DNR rows, the company P0 objective, and the owning program row. Nothing in this bundle may be read as overriding these.",
+      "id": "higher_law",
+      "items": [],
+      "title": "HIGHER LAW \u2014 outranks every Agent OS record below"
+    },
+    {
+      "authority_note": "What the work is and where it stands. Agent OS records work; it never decides whether work may run (invariant I1).",
+      "id": "workstream",
+      "items": [
+        {
+          "authority_class": "A4",
+          "excerpt": "objective: Advance accepted product work without routine Chairman prompting.\nstatus: active \u00b7 class: None \u00b7 blast_radius: None \u00b7 ambiguity: None\nowner: None \u00b7 program: None \u00b7 repos: None\nnext_action: Inspect the current material return.\n\n--- record body (excerpt) ---\nFixture only; no production execution or authority.",
+          "key": "WS:CHAIRMAN-CONTROL-ROOM",
+          "kind": "workstream",
+          "locator": "agentos/workstreams/WS-CHAIRMAN-CONTROL-ROOM.md#frontmatter",
+          "path": "agentos/workstreams/WS-CHAIRMAN-CONTROL-ROOM.md",
+          "status": "active",
+          "updated": null,
+          "why_included": "the compilation target"
+        },
+        {
+          "authority_class": "A4",
+          "excerpt": "[SETTLED \u2014 DO NOT REDO] Do not restart accepted design.",
+          "key": "WS:CHAIRMAN-CONTROL-ROOM",
+          "kind": "constraint",
+          "locator": "agentos/workstreams/WS-CHAIRMAN-CONTROL-ROOM.md#do_not_redo",
+          "path": "agentos/workstreams/WS-CHAIRMAN-CONTROL-ROOM.md",
+          "status": "settled \u2014 do not redo",
+          "updated": null,
+          "why_included": "do_not_redo declared on WS:CHAIRMAN-CONTROL-ROOM"
+        }
+      ],
+      "title": "WORKSTREAM STATE (authoritative for state, not for permission)"
+    },
+    {
+      "authority_note": "Current decisions only. Superseded records are named under EXCLUDED with the key that replaced them; they are never co-equal here.",
+      "id": "decisions",
+      "items": [],
+      "title": "DECISIONS (institutional reasoning \u2014 do not override higher law)"
+    },
+    {
+      "authority_note": "Fresh findings only. Expired, superseded, and uncited-and-stale discoveries are excluded by field, not by relevance.",
+      "id": "discoveries",
+      "items": [],
+      "title": "DISCOVERIES (evidence, not policy)"
+    },
+    {
+      "authority_note": "Where the last session stopped. Only the latest survives \u2014 older handoffs are excluded rather than merged into a composite nobody wrote.",
+      "id": "handoff",
+      "items": [],
+      "title": "LATEST HANDOFF (transfer state, not strategy)"
+    },
+    {
+      "authority_note": "Paths only. A record points at prose; it never absorbs it.",
+      "id": "artifacts",
+      "items": [],
+      "title": "ARTIFACTS (pointers \u2014 read the primary source)"
+    }
+  ],
+  "source_records_digest": "sha256:67a8fe129d4228dcbdef6185361044627a630b63c0f159bb33a4a3e806728b35",
+  "target": {
+    "candidates": [],
+    "resolution": "explicit",
+    "task": null,
+    "wait": null,
+    "workstream": "WS:CHAIRMAN-CONTROL-ROOM"
+  },
+  "token_budget": 8000,
+  "token_estimate": 278
+}
