@@ -87,11 +87,11 @@ def policy(scratch: Path, *, deny_fixture: Path | None = None,
     if (not scratch.is_absolute() or scratch.parent != SCRATCH_PARENT
             or not scratch.name.startswith("mmx_codex01_offline_")
             or scratch.is_symlink()
-            or (scratch.exists() and (
-                not scratch.is_dir()
-                or scratch.stat().st_uid != os.geteuid()
-                or scratch.stat().st_mode & 0o777 != 0o700
-            ))):
+            # No profile may be generated for an unowned future pathname:
+            # the real preflight creates its mode-0700 scratch *first*.
+            or not scratch.is_dir()
+            or scratch.stat().st_uid != os.geteuid()
+            or scratch.stat().st_mode & 0o777 != 0o700):
         raise ValueError("private scratch required")
     if deny_fixture is not None and not _strict_fixture_child(deny_fixture, scratch):
         raise ValueError("fixture must remain inside scratch")

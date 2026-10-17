@@ -4,6 +4,7 @@ import os
 import platform
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -11,8 +12,16 @@ import pytest
 from ops.executive_os import codex01_offline_preflight as subject
 
 
-def test_policy_keeps_deny_default_and_no_network_or_ambient_home():
-    text = subject.policy(Path("/private/tmp/mmx_codex01_offline_unittest"))
+@pytest.fixture
+def scratch_fixture():
+    # The real preflight owns an already-created TemporaryDirectory. Tests
+    # must likewise grant no sandbox exception to a merely plausible path.
+    with tempfile.TemporaryDirectory(prefix="mmx_codex01_offline_", dir=subject.SCRATCH_PARENT) as name:
+        yield Path(name)
+
+
+def test_policy_keeps_deny_default_and_no_network_or_ambient_home(scratch_fixture):
+    text = subject.policy(scratch_fixture)
     assert text.startswith("(version 1)\n(deny default)\n")
     assert "(allow process-exec)" in text
     assert "(deny network*)" in text
@@ -20,9 +29,39 @@ def test_policy_keeps_deny_default_and_no_network_or_ambient_home():
     assert "(allow mach-lookup" not in text
     for root in subject.DENIED_READ_ROOTS:
         assert f'(deny file-read* (subpath "{root}"))' in text
-    assert '(allow file-write* (subpath "/private/tmp/mmx_codex01_offline_unittest"))' in text
+    assert f'(allow file-write* (subpath "{scratch_fixture}"))' in text
     assert "(allow file-write*)" not in text
     assert "(allow file-read*)" in text  # Sandbox runtime baseline, explicit protected denies
+
+
+def test_sandbox_never_grants_nonexistent_private_scratch(monkeypatch, tmp_path):
+    # A future caller must not emit a writable sandbox exception for an
+    # unowned pathname that could later become a foreign directory or alias.
+    monkeypatch.setattr(subject, "SCRATCH_PARENT", tmp_path)
+    missing = tmp_path / "mmx_codex01_offline_not-yet-owned"
+    assert not missing.exists()
+    with pytest.raises(ValueError):
+        subject.policy(missing)
+
+
+@pytest.mark.parametrize("mode", [0o750, 0o755, 0o777])
+def test_sandbox_never_grants_a_nonprivate_existing_scratch(monkeypatch, tmp_path, mode):
+    monkeypatch.setattr(subject, "SCRATCH_PARENT", tmp_path)
+    scratch = tmp_path / "mmx_codex01_offline_weak-mode"
+    scratch.mkdir(mode=0o700)
+    scratch.chmod(mode)
+    with pytest.raises(ValueError):
+        subject.policy(scratch)
+
+
+def test_sandbox_never_grants_a_symlinked_scratch_root(monkeypatch, tmp_path):
+    monkeypatch.setattr(subject, "SCRATCH_PARENT", tmp_path)
+    owned = tmp_path / "mmx_codex01_offline_owned"
+    owned.mkdir(mode=0o700)
+    link = tmp_path / "mmx_codex01_offline_link"
+    link.symlink_to(owned, target_is_directory=True)
+    with pytest.raises(ValueError):
+        subject.policy(link)
 
 
 @pytest.mark.parametrize("bad", [
@@ -34,8 +73,8 @@ def test_invalid_scratch_refused(bad):
         subject.policy(bad)
 
 
-def test_fixture_allow_must_be_exact_child_of_explicit_denied_test_directory():
-    scratch = Path("/private/tmp/mmx_codex01_offline_unittest")
+def test_fixture_allow_must_be_exact_child_of_explicit_denied_test_directory(scratch_fixture):
+    scratch = scratch_fixture
     with pytest.raises(ValueError):
         subject.policy(scratch, allow_fixture=Path("/etc/passwd"))
     with pytest.raises(ValueError):
@@ -43,14 +82,15 @@ def test_fixture_allow_must_be_exact_child_of_explicit_denied_test_directory():
     with pytest.raises(ValueError):
         subject.policy(scratch, deny_fixture=scratch / "secret",
                        allow_fixture=scratch / "outside")
-    text = subject.policy(scratch, deny_fixture=scratch / "secret",
-                          allow_fixture=scratch / "secret" / "file")
-    assert '(deny file-read* (subpath "/private/tmp/mmx_codex01_offline_unittest/secret"))' in text
-    assert '(allow file-read* (literal "/private/tmp/mmx_codex01_offline_unittest/secret/file"))' in text
+    secret = scratch / "secret"
+    allowed = secret / "file"
+    text = subject.policy(scratch, deny_fixture=secret, allow_fixture=allowed)
+    assert f'(deny file-read* (subpath "{secret}"))' in text
+    assert f'(allow file-read* (literal "{allowed}"))' in text
 
 
-def test_nonexistent_lexical_traversal_is_not_an_eligible_fixture():
-    scratch = Path("/private/tmp/mmx_codex01_offline_unittest")
+def test_nonexistent_lexical_traversal_is_not_an_eligible_fixture(scratch_fixture):
+    scratch = scratch_fixture
     denied = scratch / "blocked"
     # pathlib.is_relative_to is lexical, not a traversal/alias guard.
     with pytest.raises(ValueError):
