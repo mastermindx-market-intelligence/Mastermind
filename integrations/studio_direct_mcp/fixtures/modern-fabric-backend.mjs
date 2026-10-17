@@ -4,7 +4,9 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { ListToolsRequestSchema, CallToolRequestSchema, McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
 import { createFabricFacade } from '../fabric-backend.mjs';
 const names = ['fabric_capabilities', 'fabric_request', 'fabric_status', 'fabric_wait',
-  'fabric_result', 'fabric_accept', 'fabric_controller_output'];
+  'fabric_result', 'fabric_accept', 'fabric_controller_output',
+  // Synthetic optional backend catalog. No real adapter or provider calls.
+  ...(process.env.FIXTURE_PAGED === 'true' ? ['fabric_result_page'] : [])];
 let effects = 0;
 let resultCalls = 0;
 const finished = value => ({ content: [{ type: 'text', text:
