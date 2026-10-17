@@ -1,0 +1,360 @@
+--- a/fabric_task.py
++++ b/fabric_task.py
+@@ -412,14 +412,24 @@
+     requested_model: str | None = None,
+     artifact_names: list[str] | None = None,
+     native_return: bool = False,
+     qualification_host: str | None = None,
++    new_macro_worktree: str | None = None,
+ ) -> int:
+     rid = validate_run_id(run_id)
+     if bool(packet) == bool(stdin_bytes is not None):
+         raise ValueError("provide exactly one of packet or stdin")
+     env = os.environ.copy()
+     observed_root = resolve_request_root(root_id, env)
++    # An explicit NEW worktree request is not permission to adopt an existing
++    # session, mutate an incumbent checkout, or mint before a host lease.
++    if new_macro_worktree is not None:
++        if (re.fullmatch(r"[0-9a-f]{40}", new_macro_worktree) is None
++                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,95}", rid) is None
++                or cwd != "~/lanes/repos/macro"
++                or not observed_root or not parent_run_id
++                or qualification_host or artifact_names or native_return):
++            raise FabricTaskError("FABRIC_NEW_MACRO_WORKTREE_SCOPE_REFUSED")
+     # Explicit empty arguments clear inherited values; None uses the existing
+     # economic metadata. Selection and launch see the same exact witness.
+     complexity = task_complexity if task_complexity is not None else env.get("POOL_TASK_COMPLEXITY", "")
+     reason = escalation_reason if escalation_reason is not None else env.get("POOL_ESCALATION_REASON", "")
+@@ -440,16 +450,22 @@
+             **({"subject_pool": subject_pool} if subject_pool is not None else {}),
+             task_complexity=complexity, escalation_reason=reason,
+             requested_model=requested_model, route_key=rid,
+             **({"required_modes": sorted(artifact_production.MODES),
+-                "required_platforms": ["linux"]} if artifact_names else {}),
++                "required_platforms": ["linux"]} if artifact_names else
++               {"required_platforms": ["linux"]} if new_macro_worktree else {}),
+         ))
+     guard = pick.launch_policy(
+         route["MODE"], task_class, route["MODEL"],
+         escalation_reason=reason, task_complexity=complexity,
+     )
+     if not guard.get("allowed"):
+         raise FabricTaskError("ECONOMIC_POLICY_REFUSED: " + str(guard.get("reason")))
++    if new_macro_worktree is not None:
++        if route["HOST"] not in {"ubuntu0", "ubuntu1", "ubuntu2", "ubuntu3"}:
++            raise FabricTaskError("FABRIC_SPARSE_HOST_REFUSED")
++        if route["MODE"] not in {"glm", "glm-codex", "minimax", "qwen"}:
++            raise FabricTaskError("FABRIC_SPARSE_MODE_NOT_YET_QUALIFIED")
+     env["POOL_TASK_CLASS"] = task_class
+     if task_complexity is not None or "POOL_TASK_COMPLEXITY" in env:
+         env["POOL_TASK_COMPLEXITY"] = complexity
+     if escalation_reason is not None or "POOL_ESCALATION_REASON" in env:
+@@ -516,8 +532,10 @@
+             route["MODEL"],
+             "--run-id",
+             rid,
+         ]
++        if new_macro_worktree is not None:
++            argv.extend(["--new-macro-worktree", new_macro_worktree])
+         proc = subprocess.run(argv, env=env)
+         return int(proc.returncode)
+     finally:
+         if temp_path is not None:
+@@ -561,8 +579,10 @@
+     p_request.add_argument("--class", dest="task_class", required=True)
+     p_request.add_argument("--native-return", action="store_true", help="Subscribe this new paid child to the separately reviewed/trusted native Stop hook")
+     p_request.add_argument("--artifact-output", action="append", help="Required new file basename; opts into verified artifact production")
+     p_request.add_argument("--cwd", default=os.getcwd())
++    p_request.add_argument("--new-macro-worktree", metavar="COMMIT_SHA40",
++                           help="Explicit new Macro sparse workspace at original run ID; never resume/reuse")
+     packet_group = p_request.add_mutually_exclusive_group(required=True)
+     packet_group.add_argument("--packet")
+     packet_group.add_argument("--stdin", action="store_true")
+     p_request.add_argument("--pool")
+@@ -769,8 +789,9 @@
+                 task_complexity=args.task_complexity,
+                 escalation_reason=args.escalation_reason,
+                 requested_model=args.requested_model,
+                 qualification_host=args.qualification_host,
++                new_macro_worktree=args.new_macro_worktree,
+             )
+         if args.cmd == "status":
+             _json(inspect_run(args.run_id))
+             return 0
+--- a/remote_sub.sh
++++ b/remote_sub.sh
+@@ -18,8 +18,9 @@
+   cat >&2 <<'USAGE'
+ usage: remote_sub.sh <host|auto> <mode> <packet_file> <remote_cwd> [model]
+                      [--run-id <stable_id>] [--out <local_out>] [--dry-run]
+                      [--max-age <secs>] [--refresh]
++                     [--new-macro-worktree <existing-commit-sha40>]
+                      [--expect-output-token <literal-token>]
+ USAGE
+   exit 2
+ }
+@@ -32,8 +33,9 @@
+ LOCAL_OUT=""
+ RUN_ID_ARG=""
+ EXPECT_OUTPUT_TOKEN=""
+ EXPECT_OUTPUT_SPECIFIED=0
++NEW_MACRO_COMMIT=""
+ DRY_RUN=0
+ MAX_AGE=600
+ MAX_AGE_EXPLICIT=0
+ REFRESH=0
+@@ -43,8 +45,9 @@
+     --run-id) [ "$#" -ge 2 ] || usage; RUN_ID_ARG="$2"; shift ;;
+     --out) [ "$#" -ge 2 ] || usage; LOCAL_OUT="$2"; shift ;;
+     --max-age) [ "$#" -ge 2 ] || usage; MAX_AGE="$2"; MAX_AGE_EXPLICIT=1; shift ;;
+     --refresh) REFRESH=1 ;;
++    --new-macro-worktree) [ "$#" -ge 2 ] || usage; NEW_MACRO_COMMIT="$2"; shift ;;
+     --expect-output-token)
+       [ "$#" -ge 2 ] || usage
+       EXPECT_OUTPUT_TOKEN="$2"
+       EXPECT_OUTPUT_SPECIFIED=1
+@@ -102,8 +105,22 @@
+   fi
+   ID="$RUN_ID_ARG"
+ else
+   ID="rs_$(date -u +%Y%m%dT%H%M%SZ)_$$"
++fi
++if [ -n "$NEW_MACRO_COMMIT" ]; then
++  if [[ ! "$NEW_MACRO_COMMIT" =~ ^[0-9a-f]{40}$ ]] ||
++     [[ ! "$ID" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$ ]] ||
++     [ "$REMOTE_CWD" != "~/lanes/repos/macro" ] ||
++     [ -z "${POOL_ORCHESTRATOR_ID:-}" ] ||
++     [ -z "${POOL_PARENT_RUN_ID:-}" ]; then
++    echo "FABRIC_NEW_MACRO_SCOPE_REFUSED before_lease=1" >&2
++    exit 78
++  fi
++  case "$MODE" in
++    glm|glm-codex|minimax|qwen) ;;
++    *) echo "FABRIC_NEW_MACRO_MODE_NOT_QUALIFIED before_lease=1" >&2; exit 78 ;;
++  esac
+ fi
+ # Correlation fields describe this transport; they do not grant admission.
+ RUN_STARTED_SECONDS=$SECONDS
+ USAGE_VALID=0
+@@ -410,8 +427,15 @@
+   read -r SSH_ALIAS CORES MAX_ACTIVE LOAD_GATE MIN_FREE_MEM_GB MAX_CPU_TCTL_C MIN_FREE_DISK_GB <<< "$REGISTRY"
+   LANE_HOST_LOAD_RATIO=$(awk -v g="$LOAD_GATE" -v c="$CORES" 'BEGIN{if(c+0<=0) exit 1; printf "%.4f", (g+0)/(c+0)}') || { log "HOST_POLICY_RATIO_REFUSED"; RC=3; return "$RC"; }
+ }
+ load_host_registry || exit "$RC"
++if [ -n "$NEW_MACRO_COMMIT" ]; then
++  # This initial implementation covers the four Linux fleet hosts only.
++  case "$HOST_ARG" in
++    ubuntu0|ubuntu1|ubuntu2|ubuntu3) ;;
++    *) log "FABRIC_NEW_MACRO_LINUX_HOST_REFUSED before_lease=1"; exit 78 ;;
++  esac
++fi
+ 
+ # Economic decision is pure: static model/class policy only, before a lease.
+ # Dry-run stays an inspection path. Real children repeat the same check.
+ if [ "$DRY_RUN" -ne 1 ]; then
+@@ -951,9 +975,9 @@
+ if [ -n "$GLM_CAP_REMOTE" ]; then
+   REMOTE_INNER='export GLM_REMOTE_CAPABILITY_FILE="$HOME/lanes/tmp/$KEY.glm-cap.json"; '"$REMOTE_INNER"
+ fi
+ log "LAUNCH stdout=$REMOTE_STDOUT rc_file=ext/$REMOTE_RC cwd=$REMOTE_CWD"
+-LAUNCH_REMOTE="$NATIVE_TIMING_PREFIX $RPATH; $HOST_ENV; $NATIVE_TIMING_AFTER_ENV umask 077 || exit; cd ~/lanes/ext || exit; rm -f \"$REMOTE_STDOUT\" \"$REMOTE_RC\" || exit; KEY='$ID' MODE='$MODE' PACKET=\"\$HOME/lanes/tmp/${ID}.txt\" REMOTE_CWD='$REMOTE_CWD' MODEL='$MODEL' RC_FILE=\"\$HOME/lanes/ext/$REMOTE_RC\" nohup env $NATIVE_TIMING_ENV $ROUTING_ENV $OPERATOR_ENV SUPPORT_DIGEST='$SUPPORT_DIGEST' PYTHONDONTWRITEBYTECODE=1 LANE_LEASED=1 POOL_ACCOUNT='$ACCOUNT_ARG' POOL_LEASE_ID='$LEASE_ID' REMOTE_SUB_RUN_ID='$ID' LANE_REMOTE_HOST='$HOST_ARG' NATIVE_LEASE_ISSUED='$NATIVE_LEASE_ISSUED' NATIVE_LEASE_DEADLINE='$NATIVE_LEASE_DEADLINE' LANE_MAX_ACTIVE='$MAX_ACTIVE' LANE_MIN_FREE_MEM_GB='$MIN_FREE_MEM_GB' LANE_MAX_CPU_TCTL_C='$MAX_CPU_TCTL_C' LANE_MIN_FREE_DISK_GB='$MIN_FREE_DISK_GB' LANE_MAX_LOAD_RATIO='$LANE_HOST_LOAD_RATIO' LANE_NICE=10 REMOTE_SUB_CHILD_TIMEOUT='$CHILD_TIMEOUT' bash -c '$REMOTE_INNER' </dev/null > \"$REMOTE_STDOUT\" 2>&1 &"
++LAUNCH_REMOTE="$NATIVE_TIMING_PREFIX $RPATH; $HOST_ENV; $NATIVE_TIMING_AFTER_ENV umask 077 || exit; cd ~/lanes/ext || exit; rm -f \"$REMOTE_STDOUT\" \"$REMOTE_RC\" || exit; KEY='$ID' MODE='$MODE' PACKET=\"\$HOME/lanes/tmp/${ID}.txt\" REMOTE_CWD='$REMOTE_CWD' MODEL='$MODEL' RC_FILE=\"\$HOME/lanes/ext/$REMOTE_RC\" nohup env $NATIVE_TIMING_ENV $ROUTING_ENV $OPERATOR_ENV SUPPORT_DIGEST='$SUPPORT_DIGEST' PYTHONDONTWRITEBYTECODE=1 LANE_LEASED=1 POOL_ACCOUNT='$ACCOUNT_ARG' POOL_LEASE_ID='$LEASE_ID' REMOTE_SUB_RUN_ID='$ID' LANE_REMOTE_HOST='$HOST_ARG' NATIVE_LEASE_ISSUED='$NATIVE_LEASE_ISSUED' NATIVE_LEASE_DEADLINE='$NATIVE_LEASE_DEADLINE' LANE_MAX_ACTIVE='$MAX_ACTIVE' LANE_MIN_FREE_MEM_GB='$MIN_FREE_MEM_GB' LANE_MAX_CPU_TCTL_C='$MAX_CPU_TCTL_C' LANE_MIN_FREE_DISK_GB='$MIN_FREE_DISK_GB' FABRIC_NEW_MACRO_COMMIT='$NEW_MACRO_COMMIT' LANE_MAX_LOAD_RATIO='$LANE_HOST_LOAD_RATIO' LANE_NICE=10 REMOTE_SUB_CHILD_TIMEOUT='$CHILD_TIMEOUT' bash -c '$REMOTE_INNER' </dev/null > \"$REMOTE_STDOUT\" 2>&1 &"
+ ADMISSION_FILE="$HERE/lanes/${ID}.admission"
+ if [ "$DRY_RUN" -ne 1 ]; then SCRATCH_PATHS+=("$ADMISSION_FILE"); fi
+ ADMISSION_WAIT_STARTED_SECONDS=""
+ launch_attempt=0
+--- a/remote_sub_exec.py
++++ b/remote_sub_exec.py
+@@ -10,8 +10,11 @@
+ import json
+ import hashlib
+ from contextlib import ExitStack
+ import os
++import re
++import stat
++import subprocess
+ import sys
+ from pathlib import Path
+ import native_remote
+ import time
+@@ -109,8 +112,144 @@
+         normalized_bytes=len(normalized),normalized_sha256=hashlib.sha256(normalized).hexdigest(),
+         contract=contract,manifest=manifest)
+ 
+ 
++# The exact reviewed Macro sparse-owner blob from draft #9194. This is a
++# deployment fence, not permission to install that draft into an old host.
++# Any source revision requires new review/test and an explicit hash update.
++_MACRO_FABRIC_SPARSE_BLOB = "620927823770362b5c1d1e0dec6584612624d848"
++
++
++class SparseWorkspaceRefused(ValueError):
++    def __init__(self, reason: str, *, effect_unknown: bool = False):
++        super().__init__(reason)
++        self.effect_unknown = effect_unknown
++
++
++def _new_macro_workspace(key: str, cwd: str, here: Path, env: dict,
++                         config) -> str:
++    """Optional pre-mint within the incumbent LaneLease, before worker START.
++
++    No parallel worker/queue/authority is created. A failed or uncertain mint
++    leaves its original lease and worktree for original-carrier reconciliation.
++    """
++    commit = os.environ.get("FABRIC_NEW_MACRO_COMMIT", "")
++    if not commit:
++        return cwd
++    if (re.fullmatch(r"[0-9a-f]{40}", commit) is None
++            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,95}", key) is None
++            or os.environ.get("REMOTE_SUB_RUN_ID") != key
++            or not os.environ.get("POOL_ORCHESTRATOR_ID")
++            or not os.environ.get("POOL_PARENT_RUN_ID")
++            or not os.environ.get("POOL_LEASE_ID")):
++        raise SparseWorkspaceRefused("FABRIC_SPARSE_SCOPE_REFUSED")
++    donor = Path.home() / "lanes" / "repos" / "macro"
++    try:
++        if Path(cwd).resolve(strict=True) != donor.resolve(strict=True):
++            raise SparseWorkspaceRefused("FABRIC_SPARSE_DONOR_REFUSED")
++    except (OSError, RuntimeError) as exc:
++        raise SparseWorkspaceRefused("FABRIC_SPARSE_DONOR_UNAVAILABLE") from exc
++    helper = donor / "scripts" / "worktree_sparse.py"
++    try:
++        info = helper.lstat()
++        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
++                or info.st_size > 131072 or helper.is_symlink()):
++            raise SparseWorkspaceRefused("FABRIC_SPARSE_HELPER_UNQUALIFIED")
++        content = helper.read_bytes()
++    except OSError as exc:
++        raise SparseWorkspaceRefused("FABRIC_SPARSE_HELPER_UNAVAILABLE") from exc
++    # Detect concurrent modification of the shared source between the
++    # verified read and the controlled child start. Git blob proof binds
++    # reviewed code; inode/stat is the ordinary shared-file drift guard.
++    try:
++        after_read = helper.lstat()
++    except OSError as exc:
++        raise SparseWorkspaceRefused("FABRIC_SPARSE_HELPER_CHANGED") from exc
++    if (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns) != (
++        after_read.st_dev, after_read.st_ino, after_read.st_size, after_read.st_mtime_ns
++    ):
++        raise SparseWorkspaceRefused("FABRIC_SPARSE_HELPER_CHANGED")
++    git_blob = hashlib.sha1(
++        b"blob " + str(len(content)).encode() + b"\0" + content
++    ).hexdigest()
++    if git_blob != _MACRO_FABRIC_SPARSE_BLOB:
++        raise SparseWorkspaceRefused("FABRIC_SPARSE_HELPER_BLOB_MISMATCH")
++    destination = Path.home() / "lanes" / "wt" / key
++    if os.path.lexists(destination):
++        raise SparseWorkspaceRefused("FABRIC_SPARSE_DESTINATION_EXISTS")
++    receipt = here / "lanes" / (key + ".workspace-mint.process.jsonl")
++    if os.path.lexists(receipt):
++        raise SparseWorkspaceRefused("FABRIC_SPARSE_MINT_RECEIPT_EXISTS")
++    # Only the invocation of the approved Macro owner receives the one-shot
++    # flag. Do not leak it into the subsequent model's shell environment.
++    mint_env = dict(env)
++    mint_env["MASTERMIND_FABRIC_SPARSE_NEW"] = "1"
++    try:
++        result = run_owned_process(
++            [sys.executable, str(helper), "fabric-mint", key, commit],
++            cwd=str(donor), timeout=180.0, env=mint_env, nice=config.nice,
++            label=key + ":workspace-mint", receipt_path=receipt,
++            timeout_returncode=124,
++        )
++    except (OSError, ValueError, LaneRuntimeError, OwnedProcessStartError) as exc:
++        raise SparseWorkspaceRefused("FABRIC_SPARSE_MINT_EFFECT_UNKNOWN",
++                                     effect_unknown=True) from exc
++    if (result.returncode != 0 or result.timed_out
++            or not result.cleanup_proven or result.stdout_truncated
++            or result.stderr_truncated):
++        raise SparseWorkspaceRefused("FABRIC_SPARSE_MINT_UNVERIFIED",
++                                     effect_unknown=True)
++    try:
++        after_mint = helper.lstat()
++        current_helper = helper.read_bytes()
++    except OSError as exc:
++        raise SparseWorkspaceRefused("FABRIC_SPARSE_HELPER_EFFECT_UNKNOWN",
++                                     effect_unknown=True) from exc
++    if ((after_mint.st_dev, after_mint.st_ino, after_mint.st_size,
++         after_mint.st_mtime_ns) !=
++        (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
++        or current_helper != content):
++        raise SparseWorkspaceRefused("FABRIC_SPARSE_HELPER_EFFECT_UNKNOWN",
++                                     effect_unknown=True)
++
++    def git_value(root: Path, *args: str) -> str:
++        try:
++            p = subprocess.run(
++                ["git", "--no-optional-locks", "-C", str(root), *args],
++                capture_output=True, text=True, timeout=9, check=False,
++            )
++        except (OSError, subprocess.TimeoutExpired) as exc:
++            raise SparseWorkspaceRefused(
++                "FABRIC_SPARSE_VERIFY_UNKNOWN", effect_unknown=True
++            ) from exc
++        if p.returncode or len(p.stdout) > 8192:
++            raise SparseWorkspaceRefused("FABRIC_SPARSE_VERIFY_REFUSED",
++                                         effect_unknown=True)
++        return p.stdout.strip()
++
++    try:
++        dstat = destination.lstat()
++        gstat = (destination / ".git").lstat()
++        donor_git = (donor / ".git").resolve(strict=True)
++        gitdir = Path(git_value(destination, "rev-parse", "--path-format=absolute",
++                                "--git-dir")).resolve(strict=True)
++        if (not stat.S_ISDIR(dstat.st_mode) or destination.is_symlink()
++                or dstat.st_uid != os.getuid()
++                or not stat.S_ISREG(gstat.st_mode)
++                or (destination / ".git").is_symlink()
++                or gitdir.parent != donor_git / "worktrees"
++                or git_value(destination, "rev-parse", "HEAD") != commit
++                or git_value(destination, "branch", "--show-current") != "lane/" + key
++                or git_value(destination, "config", "--get", "core.sparseCheckout") != "true"
++                or git_value(destination, "status", "--porcelain=v1", "-uall")):
++            raise SparseWorkspaceRefused("FABRIC_SPARSE_POSTCONDITION_REFUSED",
++                                         effect_unknown=True)
++    except OSError as exc:
++        raise SparseWorkspaceRefused("FABRIC_SPARSE_POSTCONDITION_UNKNOWN",
++                                     effect_unknown=True) from exc
++    return str(destination)
++
++
+ def _execute(argv: list[str], state: dict) -> int:
+     if len(argv) != 6:
+         return _fail(
+             "usage: remote_sub_exec.py <key> <mode> <packet> <cwd> <model>", 2
+@@ -218,8 +357,35 @@
+     try:
+         with lease, ExitStack() as artifact_stack:
+             artifact_owner = (artifact_stack.enter_context(artifact_production.NewDirectory(artifact_contract))
+                               if artifact_contract is not None else None)
++            # Physical admission + original provider lease already succeeded.
++            # Mint only this explicitly NEW, pinned workspace before worker START.
++            try:
++                cwd = _new_macro_workspace(key, cwd, here, child_env, config)
++            except SparseWorkspaceRefused as exc:
++                if exc.effect_unknown:
++                    lease.hold_for_reconciliation("sparse_workspace_effect_unknown")
++                return _fail(str(exc), 76 if exc.effect_unknown else 78)
++            child_env.pop("MASTERMIND_FABRIC_SPARSE_NEW", None)
++            child_env.pop("FABRIC_NEW_MACRO_COMMIT", None)
++            if os.environ.get("FABRIC_NEW_MACRO_COMMIT"):
++                child_env["FABRIC_WORKSPACE_READY"] = "1"
++                child_env["FABRIC_WORKSPACE_RUN_ID"] = key
++            # Do not alter any ordinary/legacy worker argv. Only a qualified
++            # brand-new sparse checkout needs its CWD rebound before START.
++            if os.environ.get("FABRIC_NEW_MACRO_COMMIT"):
++                if mode in ("glm", "minimax", "qwen"):
++                    command = ["bash", str(here / "sub.sh"), "--prompt-file", mode,
++                               str(packet_path.resolve()), cwd]
++                else:
++                    command = ["bash", str(here / "sub.sh"), mode, prompt, cwd]
++                if model:
++                    command.append(model)
++                if mode in native_remote.MODES:
++                    command = native_remote.command(
++                        mode, model, prompt, cwd, packet_path=packet_path.resolve()
++                    )
+             if mode in native_remote.MODES:
+                 child_env = native_remote.environment(mode, model, key, here, child_env)
+             # Worker-spawned shell tools inherit PATH. The immutable, reviewed
+             # "yes" shim bounds CPU-stealer lifetime even when an agent leaves

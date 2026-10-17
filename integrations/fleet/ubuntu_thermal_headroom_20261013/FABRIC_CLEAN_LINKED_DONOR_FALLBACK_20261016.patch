@@ -1,0 +1,181 @@
+--- a/remote_sub_exec.py
++++ b/remote_sub_exec.py
+@@ -117,12 +117,69 @@
+ # deployment fence, not permission to install that draft into an old host.
+ # Any source revision requires new review/test and an explicit hash update.
+ _MACRO_FABRIC_SPARSE_BLOB = "75297acb10d0cef4d01730a59fdcad19c7cfd3e6"
++# Only the exact earlier committed helper is eligible for the clean linked
++# donor fallback; unknown/tampered source must refuse, never silently reroute.
++_MACRO_PREMERGE_SPARSE_BLOB = "296e47bab2d28f9a019e81b5aef76eeea62a6cc3"
++_MACRO_PINNED_DONOR_COMMIT = "6ee058b0491a3f67e843f25d4379b94e98880e8b"
+ 
+ 
+ class SparseWorkspaceRefused(ValueError):
+     def __init__(self, reason: str, *, effect_unknown: bool = False):
+         super().__init__(reason)
+         self.effect_unknown = effect_unknown
++
++
++def _clean_linked_sparse_donor(original: Path) -> Path:
++    """Select only a pre-provisioned, reviewed *linked* worktree in the same Git.
++
++    This is an opt-in source-root choice, not a new checkout/provisioning owner.
++    The old source checkout, its feature branch and its dirty bytes stay intact.
++    An absent or drifting dedicated donor refuses before any mint.
++    """
++    alternate = original.parent / "macro-fabric-pinned-20261016"
++    try:
++        info = alternate.lstat()
++        link_info = (alternate / ".git").lstat()
++        original_git = (original / ".git").resolve(strict=True)
++        if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
++                or alternate.is_symlink() or alternate.resolve(strict=True) != alternate
++                or not stat.S_ISREG(link_info.st_mode) or link_info.st_uid != os.getuid()
++                or (alternate / ".git").is_symlink()
++                or not original_git.is_dir()):
++            raise SparseWorkspaceRefused("FABRIC_SPARSE_REVIEWED_DONOR_UNQUALIFIED")
++    except (OSError, RuntimeError) as exc:
++        raise SparseWorkspaceRefused("FABRIC_SPARSE_REVIEWED_DONOR_UNAVAILABLE") from exc
++
++    def inspect(*args: str) -> str:
++        try:
++            p = subprocess.run(
++                ["git", "--no-optional-locks", "-C", str(alternate), *args],
++                capture_output=True, text=True, timeout=12, check=False,
++            )
++        except (OSError, subprocess.TimeoutExpired) as exc:
++            raise SparseWorkspaceRefused("FABRIC_SPARSE_REVIEWED_DONOR_UNAVAILABLE") from exc
++        if p.returncode or len(p.stdout) > 8192 or len(p.stderr) > 8192:
++            raise SparseWorkspaceRefused("FABRIC_SPARSE_REVIEWED_DONOR_UNQUALIFIED")
++        return p.stdout.strip()
++
++    try:
++        common = Path(inspect("rev-parse", "--path-format=absolute",
++                              "--git-common-dir")).resolve(strict=True)
++        gitdir = Path(inspect("rev-parse", "--path-format=absolute",
++                              "--git-dir")).resolve(strict=True)
++    except (OSError, RuntimeError) as exc:
++        raise SparseWorkspaceRefused("FABRIC_SPARSE_REVIEWED_DONOR_UNAVAILABLE") from exc
++    if (common != original_git
++            or gitdir.parent != original_git / "worktrees"
++            or inspect("rev-parse", "HEAD") != _MACRO_PINNED_DONOR_COMMIT
++            or inspect("rev-parse", "HEAD:scripts/worktree_sparse.py") != _MACRO_FABRIC_SPARSE_BLOB
++            or inspect("status", "--porcelain=v1", "--untracked-files=all")
++            # Ignored source files can shadow stdlib imports without appearing
++            # in porcelain. Every ignored object in this dedicated donor refuses.
++            or inspect("ls-files", "--others", "--ignored", "--exclude-standard", "-z")
++            or inspect("config", "--get", "core.sparseCheckout") != "true"):
++        raise SparseWorkspaceRefused("FABRIC_SPARSE_REVIEWED_DONOR_UNQUALIFIED")
++    return alternate
+ 
+ 
+ def _new_macro_workspace(key: str, cwd: str, here: Path, env: dict,
+@@ -143,49 +200,70 @@
+             or not os.environ.get("POOL_LEASE_ID")):
+         raise SparseWorkspaceRefused("FABRIC_SPARSE_SCOPE_REFUSED")
+     donor = Path.home() / "lanes" / "repos" / "macro"
++    original_donor = donor
+     try:
+         if Path(cwd).resolve(strict=True) != donor.resolve(strict=True):
+             raise SparseWorkspaceRefused("FABRIC_SPARSE_DONOR_REFUSED")
+     except (OSError, RuntimeError) as exc:
+         raise SparseWorkspaceRefused("FABRIC_SPARSE_DONOR_UNAVAILABLE") from exc
+-    helper = donor / "scripts" / "worktree_sparse.py"
+-    try:
+-        info = helper.lstat()
+-        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+-                or info.st_size > 131072 or helper.is_symlink()):
+-            raise SparseWorkspaceRefused("FABRIC_SPARSE_HELPER_UNQUALIFIED")
+-        content = helper.read_bytes()
+-    except OSError as exc:
+-        raise SparseWorkspaceRefused("FABRIC_SPARSE_HELPER_UNAVAILABLE") from exc
+-    # Detect concurrent modification of the shared source between the
+-    # verified read and the controlled child start. Git blob proof binds
+-    # reviewed code; inode/stat is the ordinary shared-file drift guard.
+-    try:
+-        after_read = helper.lstat()
+-    except OSError as exc:
+-        raise SparseWorkspaceRefused("FABRIC_SPARSE_HELPER_CHANGED") from exc
+-    if (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns) != (
+-        after_read.st_dev, after_read.st_ino, after_read.st_size, after_read.st_mtime_ns
+-    ):
+-        raise SparseWorkspaceRefused("FABRIC_SPARSE_HELPER_CHANGED")
+-    git_blob = hashlib.sha1(
+-        b"blob " + str(len(content)).encode() + b"\0" + content
+-    ).hexdigest()
+-    if git_blob != _MACRO_FABRIC_SPARSE_BLOB:
+-        raise SparseWorkspaceRefused("FABRIC_SPARSE_HELPER_BLOB_MISMATCH")
++    # An old-but-exact committed helper on an occupied feature-branch donor
++    # may use a *separately qualified* clean linked worktree. No automatic
++    # clone, reset, source copy, account read or provider launch occurs here.
++    for attempt in (0, 1):
++        helper = donor / "scripts" / "worktree_sparse.py"
++        try:
++            info = helper.lstat()
++            if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
++                    or info.st_size > 131072 or helper.is_symlink()):
++                raise SparseWorkspaceRefused("FABRIC_SPARSE_HELPER_UNQUALIFIED")
++            content = helper.read_bytes()
++        except OSError as exc:
++            raise SparseWorkspaceRefused("FABRIC_SPARSE_HELPER_UNAVAILABLE") from exc
++        try:
++            after_read = helper.lstat()
++        except OSError as exc:
++            raise SparseWorkspaceRefused("FABRIC_SPARSE_HELPER_CHANGED") from exc
++        if (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns) != (
++            after_read.st_dev, after_read.st_ino, after_read.st_size, after_read.st_mtime_ns
++        ):
++            raise SparseWorkspaceRefused("FABRIC_SPARSE_HELPER_CHANGED")
++        git_blob = hashlib.sha1(
++            b"blob " + str(len(content)).encode() + b"\0" + content
++        ).hexdigest()
++        if attempt == 0 and git_blob == _MACRO_PREMERGE_SPARSE_BLOB:
++            donor = _clean_linked_sparse_donor(donor)
++            continue
++        if git_blob != _MACRO_FABRIC_SPARSE_BLOB:
++            raise SparseWorkspaceRefused("FABRIC_SPARSE_HELPER_BLOB_MISMATCH")
++        break
+     destination = Path.home() / "lanes" / "wt" / key
+     if os.path.lexists(destination):
+         raise SparseWorkspaceRefused("FABRIC_SPARSE_DESTINATION_EXISTS")
+     receipt = here / "lanes" / (key + ".workspace-mint.process.jsonl")
+     if os.path.lexists(receipt):
+         raise SparseWorkspaceRefused("FABRIC_SPARSE_MINT_RECEIPT_EXISTS")
++    if donor != original_donor:
++        # Requalify immediately before the new process starts. The filesystem
++        # cannot be transaction-locked by status; Python -I closes the import
++        # search-path injection even if an ignored module appears afterward.
++        if _clean_linked_sparse_donor(original_donor) != donor:
++            raise SparseWorkspaceRefused("FABRIC_SPARSE_REVIEWED_DONOR_DRIFT")
++        try:
++            prelaunch = helper.lstat()
++            if ((prelaunch.st_dev, prelaunch.st_ino, prelaunch.st_size,
++                 prelaunch.st_mtime_ns) !=
++                (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
++                 or helper.read_bytes() != content):
++                raise SparseWorkspaceRefused("FABRIC_SPARSE_HELPER_CHANGED")
++        except OSError as exc:
++            raise SparseWorkspaceRefused("FABRIC_SPARSE_HELPER_CHANGED") from exc
+     # Only the invocation of the approved Macro owner receives the one-shot
+     # flag. Do not leak it into the subsequent model's shell environment.
+     mint_env = dict(env)
+     mint_env["MASTERMIND_FABRIC_SPARSE_NEW"] = "1"
+     try:
+         result = run_owned_process(
+-            [sys.executable, str(helper), "fabric-mint", key, commit],
++            [sys.executable, "-I", str(helper), "fabric-mint", key, commit],
+             cwd=str(donor), timeout=180.0, env=mint_env, nice=config.nice,
+             label=key + ":workspace-mint", receipt_path=receipt,
+             timeout_returncode=124,
+@@ -229,7 +307,10 @@
+     try:
+         dstat = destination.lstat()
+         gstat = (destination / ".git").lstat()
+-        donor_git = (donor / ".git").resolve(strict=True)
++        # For a linked donor, .git is a gitfile. The *common* Git root is
++        # still the original donor's Git and owns all minted worktree gitdirs.
++        donor_git = Path(git_value(donor, "rev-parse", "--path-format=absolute",
++                                   "--git-common-dir")).resolve(strict=True)
+         gitdir = Path(git_value(destination, "rev-parse", "--path-format=absolute",
+                                 "--git-dir")).resolve(strict=True)
+         if (not stat.S_ISDIR(dstat.st_mode) or destination.is_symlink()
