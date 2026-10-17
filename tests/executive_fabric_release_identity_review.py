@@ -86,6 +86,30 @@ REVIEWED_FILES = {
                                                   (778, 97, 120, 'str', '_mastermind_agent_relay'),
                                                   (784, 89, 92, 'int', '457'))}}
 
+# Candidate-only fixed finite publisher principal/mode postimage for independent
+# review: SHA and precise sites are frozen, not computed at runtime. This does
+# not authorize publication, merge, release or Capacity admission.
+REVIEWED_FILES['ops/executive_os/finite_definition_publication.py'] = {'sha256': '580134e478b7ff954302a1ec0f4780a8fad92b7e31071107260c87d70fa6cd6f',
+ 'sites': ((112, 54, 59, 'int', '0o700'),
+ (112, 61, 66, 'int', '0o755'),
+ (139, 45, 50, 'int', '0o755'),
+ (148, 53, 58, 'int', '0o444'),
+ (189, 29, 34, 'int', '0o700'),
+ (195, 28, 33, 'int', '0o700'),
+ (198, 88, 93, 'int', '0o700'),
+ (251, 71, 76, 'int', '0o700'),
+ (260, 28, 33, 'int', '0o755'),
+ (268, 75, 80, 'int', '0o755'),
+ (280, 60, 65, 'int', '0o700'),
+ (337, 25, 30, 'int', '0o444'),
+ (345, 39, 44, 'int', '0o440'),
+ (345, 59, 62, 'int', '470'),
+ (357, 55, 76, 'str', '"_mastermind_minimax"'),
+ (358, 25, 46, 'str', '"_mastermind_minimax"'),
+ (358, 59, 62, 'int', '470'),
+ (358, 75, 78, 'int', '470'),
+ (359, 24, 27, 'int', '450'))}
+
 # Exact finite lifecycle successor postimage. The production delta changes only
 # socket ACL observation/currentness; the same 37 reviewed principal/mode literals
 # remain fixed. Any other byte or token movement exposes the complete source to D8.
