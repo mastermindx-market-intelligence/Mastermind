@@ -140,6 +140,41 @@ FLEET_V10_PRESERVED_GIT_BLOBS = {
     "package.json": "e983917ada1a9da715cedd1acce7559f26a2a932",
     "package-lock.json": "d119580040b0edc59cf0e239922b54a023f899c5",
 }
+# The already-installed C2 Business fleet v0.1.10 predecessor is a DISTINCT
+# 11-file owner, with NO repository-workspace enrollment. Recognizing its
+# exact V2 manifest does not grant a new Git repository or change its live
+# gateway, tenant or tool catalog. A separate closed migration may later
+# upgrade the bounded source generation with explicit original-manifest CAS.
+V2_C2_BUSINESS_FLEET_PREDECESSOR = frozenset((
+    "gateway.mjs", "git-publish.mjs", "output-budget.mjs",
+    "package.json", "package-lock.json", "paper-design.mjs",
+    "fleet-status.mjs", "fleet-routing.mjs", "tailnet-gateway.mjs",
+    "private-tunnel-auth.mjs", "private-tunnel-gateway.mjs",
+))
+
+# Exact historical installed C2 Business 0.1.10 generation. All pinned file
+# hashes are provenance checks, NOT a repository access grant. The Gateway
+# target source is the independently reviewed fleet v0.1.10 generation; the
+# Git publisher/workspace layer is pinned to the reviewed #1535 source.
+C2_BUSINESS_V10_ORIGINAL_BLOBS = {
+    "fleet-routing.mjs": "7a1d770bf59d9198f1b29f94f56c2e845c4e1b55",
+    "fleet-status.mjs": "f04630857f75d712f701360f18e84d42ac8ae8ba",
+    "gateway.mjs": "b4fd9aa277403d42e532ed9ecb0a9ff50adb5fe9",
+    "git-publish.mjs": "f187b291cbb21782abfdb460a67b557ef1d29638",
+    "output-budget.mjs": "6d4680a357dc5780e1b09ae32c9ebc908c94353b",
+    "package-lock.json": "d119580040b0edc59cf0e239922b54a023f899c5",
+    "package.json": "e983917ada1a9da715cedd1acce7559f26a2a932",
+    "paper-design.mjs": "82b35d150433f5128b83a089b581873ad5d73daa",
+    "private-tunnel-auth.mjs": "cd7ec9fc38ae10cefe8e472246aaf9c6221b0281",
+    "private-tunnel-gateway.mjs": "6ea4b75a0ce76995cde4c7f090ad4e28a183f3db",
+    "tailnet-gateway.mjs": "d654200a417d5a4dadfcc4e0f6141ef9adda6a04",
+}
+C2_BUSINESS_TARGET_PATCH_SHA256 = {
+    "gateway.mjs": "17157fa5f8739dbe17aae767a335e97dd713a978dde9b192feb1b41a7b036b30",
+    "git-publish.mjs": "72faf293d9c0a90c45ab442821e26f199f5ea406a091a7aed7ebce3519e55f69",
+    "workspace-access.mjs": "9c4c20dd4edbc426c8561801708ee205e19bb47b48134ec8f5654a10f1cb7cf3",
+}
+
 # Only existing reviewed, closed-profile enrolled fleet-v0.1.10 seats.
 # Other installed gateways differ in bundle/permissions and are NOT eligible.
 FLEET_V10_ENROLLED_ACCOUNTS = frozenset(("chatgpt1", "chatgpt3"))
@@ -738,8 +773,11 @@ def _valid_manifest(data, account: str, label: str) -> bool:
         return False
     fileset = frozenset(files)
     if (fileset not in KNOWN_MANIFEST_FILESETS
-            and not (version == MANIFEST_VERSION
-                     and fileset == V2_CHATGPT1_FLEET_TAILNET_PREDECESSOR)):
+            and not (version == MANIFEST_VERSION and (
+                fileset == V2_CHATGPT1_FLEET_TAILNET_PREDECESSOR
+                or (account == "chatgpt2-business"
+                    and fileset == V2_C2_BUSINESS_FLEET_PREDECESSOR)
+            ))):
         return False
     if any(not _sha256_hex(digest) for digest in files.values()):
         return False
@@ -1328,7 +1366,10 @@ def _verify_upgrade_preserves_installed_fleet_capabilities(
     A separately reviewed compatibility source must retain both fleet modules
     and every configured fleet route, scheduling cap and fleet-status binding.
     """
-    if frozenset(prior["files"]) != V2_CHATGPT1_FLEET_TAILNET_PREDECESSOR:
+    if frozenset(prior["files"]) not in (
+        V2_CHATGPT1_FLEET_TAILNET_PREDECESSOR,
+        V2_C2_BUSINESS_FLEET_PREDECESSOR,
+    ):
         return
     required = frozenset(("fleet-routing.mjs", "tailnet-gateway.mjs"))
     if not required.issubset(STAGE_FILES):
@@ -1531,6 +1572,194 @@ def _upgrade_fleet_v10_publisher_only(
     return 0
 
 
+def _upgrade_c2_business_original_fleet_mastermind_only(
+    args, source: Path, node_abs: Path, backend_abs: Path,
+    account: str, label: str, port: int, roots: dict,
+) -> int:
+    """One original installer transaction: C2's exact 11-file -> 12-file source.
+
+    Preserves every configured capability and original Mastermind-only Git
+    boundary. No auto-enrollment of Macro/Terminal, no service restart, and no
+    cross-seat copying of secrets/config. Source bytes are pinned independently
+    of the supplied directory and must be reviewed before any live release.
+    """
+    expected = getattr(args, "publisher_expected_manifest_sha256", None)
+    preview = getattr(args, "publisher_preflight_only", False)
+    if (account != "chatgpt2-business" or type(preview) is not bool
+            or not _sha256_hex(expected)
+            or getattr(args, "enable_repository_workspaces", False) is True
+            or getattr(args, "fabric_only", False) is True
+            or type(getattr(args, "os_commission_config_sha256", None)) is str):
+        raise SystemExit("C2 compatibility requires original Business owner, sealed manifest CAS and no new repository grants")
+    manifest_path = roots["manifest"]
+    config_path = roots["config"]
+    if _stable_regular_file_hash(manifest_path, label="installed manifest") != expected:
+        raise SystemExit("C2 compatibility: original manifest CAS mismatch")
+    prior = _verify_staged_install(
+        account, label, roots, require_runtime_seal=True)
+    if (prior.get("version") != MANIFEST_VERSION
+            or frozenset(prior["files"]) != V2_C2_BUSINESS_FLEET_PREDECESSOR
+            or not prior.get("dependencyTreeHash")
+            or prior.get("node") != str(node_abs)
+            or prior.get("backend") != str(backend_abs)
+            or prior.get("host") != "127.0.0.1"
+            or prior.get("port") != port):
+        raise SystemExit("C2 compatibility: original sealed identity does not match")
+    for name, expected_blob in C2_BUSINESS_V10_ORIGINAL_BLOBS.items():
+        installed = roots["base"] / name
+        _assert_dest_safe(installed)
+        raw = installed.read_bytes()
+        observed_blob = hashlib.sha1(
+            b"blob " + str(len(raw)).encode("ascii") + b"\0" + raw
+        ).hexdigest()
+        if observed_blob != expected_blob:
+            raise SystemExit("C2 compatibility: original generation changed")
+    if frozenset(C2_BUSINESS_V10_ORIGINAL_BLOBS) != V2_C2_BUSINESS_FLEET_PREDECESSOR:
+        raise SystemExit("C2 compatibility: pinned predecessor incomplete")
+    if (_stable_regular_file_hash(config_path, label="installed config")
+            != prior["configHash"]):
+        raise SystemExit("C2 compatibility: original config changed")
+    old_config_bytes = config_path.read_bytes()
+    try:
+        old_config = json.loads(old_config_bytes)
+    except (ValueError, UnicodeError) as exc:
+        raise SystemExit("C2 compatibility: original config unreadable") from exc
+    if (type(old_config) is not dict
+            or "repositoryWorkspaces" in old_config
+            or old_config.get("gitPublish") != _typed_git_config(_user_root())
+            or old_config.get("fleetRouting", {}).get("enabled") is not True
+            or len(old_config["fleetRouting"].get("routes", [])) != 2
+            or old_config.get("maxPerSessionConcurrency") != 8
+            or old_config.get("maxQueuedPerSession") != 16
+            or type(old_config.get("fleetStatus")) is not dict
+            or old_config.get("fabricOnly") is True
+            or "commissionPublication" in old_config
+            or "modernFabricProtocol" in old_config):
+        raise SystemExit("C2 compatibility: original Mastermind-only capabilities changed")
+    if (hashlib.sha256(old_config_bytes).hexdigest() != prior["configHash"]
+            or _stable_regular_file_hash(manifest_path, label="installed manifest") != expected):
+        raise SystemExit("C2 compatibility: original snapshot changed")
+    if frozenset(C2_BUSINESS_TARGET_PATCH_SHA256) != frozenset((
+            "gateway.mjs", "git-publish.mjs", "workspace-access.mjs")):
+        raise SystemExit("C2 compatibility: proposed patch scope invalid")
+    old_modules: dict[str, bytes | None] = {}
+    new_modules: dict[str, bytes] = {}
+    for name, digest in C2_BUSINESS_TARGET_PATCH_SHA256.items():
+        installed = roots["base"] / name
+        staged = source / name
+        _assert_dest_safe(installed)
+        if staged.is_symlink() or not staged.is_file():
+            raise SystemExit("C2 compatibility: reviewed source module missing")
+        data = staged.read_bytes()
+        if hashlib.sha256(data).hexdigest() != digest:
+            raise SystemExit("C2 compatibility: reviewed source hash mismatch")
+        if name in prior["files"]:
+            original = installed.read_bytes()
+            if hashlib.sha256(original).hexdigest() != prior["files"][name]:
+                raise SystemExit("C2 compatibility: installed module hash mismatch")
+            old_modules[name] = original
+        else:
+            if installed.exists() or installed.is_symlink():
+                raise SystemExit("C2 compatibility: new module already exists")
+            old_modules[name] = None
+        new_modules[name] = data
+    future = dict(prior)
+    future["files"] = dict(prior["files"])
+    for name, data in new_modules.items():
+        future["files"][name] = hashlib.sha256(data).hexdigest()
+    if (frozenset(future["files"]) != V2_CHATGPT1_FLEET_TAILNET_PREDECESSOR
+            or not _valid_manifest(future, account, label)):
+        raise SystemExit("C2 compatibility: proposed 12-file sealed manifest refused")
+    new_manifest_bytes = json.dumps(
+        future, indent=2, sort_keys=True).encode("utf-8")
+    if _stable_regular_file_hash(manifest_path, label="installed manifest") != expected:
+        raise SystemExit("C2 compatibility: original manifest changed during preflight")
+    if preview:
+        print(json.dumps({
+            "preflight": True, "effect": "NOT_APPLIED",
+            "account": account, "originalManifestSha256": expected,
+            "changedModules": sorted(new_modules),
+            "noNewRepositoryGrants": True,
+            "fleetRoutesPreserved": 2,
+            "concurrencyPreserved": [8, 16],
+            "serviceStarted": False,
+        }, sort_keys=True))
+        return 0
+    if _launchd_inspect(label) is not None:
+        raise SystemExit("refusing C2 compatibility upgrade while service is loaded; stop first")
+    if (_stable_regular_file_hash(manifest_path, label="installed manifest") != expected
+            or _stable_regular_file_hash(config_path, label="installed config") != prior["configHash"]
+            or any(_sha256_file(roots["base"] / n) != prior["files"][n]
+                   for n in prior["files"])
+            or (roots["base"] / "workspace-access.mjs").exists()):
+        raise SystemExit("C2 compatibility: previous installation changed before write")
+    before = {roots["base"] / n: old_modules[n] for n in new_modules}
+    before[manifest_path] = manifest_path.read_bytes()
+    planned = {roots["base"] / n: new_modules[n] for n in new_modules}
+    planned[manifest_path] = new_manifest_bytes
+    committed = False
+    try:
+        for target, payload in planned.items():
+            # A file which was previously absent must still be absent immediately
+            # before the attempted create. Unexpected new files never get clobbered.
+            if before[target] is None and (target.exists() or target.is_symlink()):
+                raise RuntimeError("unexpected third-party new module")
+            _atomic_write_bytes(target, payload)
+        committed = True
+        _verify_staged_install(
+            account, label, roots, require_runtime_seal=True)
+    except BaseException as exc:
+        if committed:
+            raise SystemExit(
+                "C2 compatibility: EFFECT_UNKNOWN after manifest commit; "
+                "inspect original installed state before recovery"
+            ) from exc
+        try:
+            if _launchd_inspect(label) is not None:
+                raise RuntimeError("service became loaded during compatibility transaction")
+            observed = {}
+            for target, new_bytes in planned.items():
+                if target.is_symlink():
+                    raise RuntimeError("unexpected symlink during recovery")
+                observed[target] = target.read_bytes() if target.exists() else None
+                if observed[target] not in (before[target], new_bytes):
+                    raise RuntimeError("concurrent out-of-scope file mutation")
+            for target in reversed(tuple(planned)):
+                if observed[target] == before[target]:
+                    continue
+                if before[target] is None:
+                    # This pathname was absent before our transaction.
+                    target.unlink()
+                    parent_fd = os.open(target.parent, os.O_RDONLY)
+                    try:
+                        os.fsync(parent_fd)
+                    finally:
+                        os.close(parent_fd)
+                else:
+                    _atomic_write_bytes(target, before[target])
+            if (any((t.read_bytes() if t.exists() else None) != before[t]
+                    for t in planned)
+                    or _stable_regular_file_hash(manifest_path, label="installed manifest") != expected):
+                raise RuntimeError("original installation could not be restored")
+            _verify_staged_install(
+                account, label, roots, require_runtime_seal=True)
+        except BaseException as recovery_error:
+            raise SystemExit(
+                "C2 compatibility: EFFECT_UNKNOWN during rollback; "
+                "do not retry or restart without exact effect reconciliation"
+            ) from recovery_error
+        raise SystemExit("C2 compatibility: NOT_APPLIED original state restored") from exc
+    print(json.dumps({
+        "account": account, "effect": "APPLIED",
+        "gatewayCompatibilityInstalled": True,
+        "manifestSha256": _sha256_file(manifest_path),
+        "noNewRepositoryGrants": True,
+        "fleetModulesPreserved": True,
+        "serviceStarted": False,
+    }, sort_keys=True))
+    return 0
+
+
 def cmd_upgrade(args) -> int:
     account = args.account
     _validate_account_label(account)
@@ -1542,13 +1771,19 @@ def cmd_upgrade(args) -> int:
     source = Path(args.source)
     if source.is_symlink() or not source.is_dir():
         raise SystemExit(f"source dir invalid: {source}")
-    _check_source_files(source)
+    # C2 fleet predecessor migration is a tightly hash-pinned three-module
+    # compatibility package, NOT the incompatible current STAGE_FILES bundle.
+    if getattr(args, "c2_business_fleet_compat", False) is not True:
+        _check_source_files(source)
     node_abs = _resolve_abs("--node", args.node)
     backend_abs = _resolve_abs("--backend", args.backend)
     port = int(args.port)
     _validate_port(port)
 
     roots = _build_runtime_roots(account)
+    if getattr(args, "c2_business_fleet_compat", False) is True:
+        return _upgrade_c2_business_original_fleet_mastermind_only(
+            args, source, node_abs, backend_abs, account, label, port, roots)
     if getattr(args, "publisher_only_fleet_v10", False) is True:
         return _upgrade_fleet_v10_publisher_only(
             args, source, node_abs, backend_abs, account, label, port, roots)
@@ -1581,7 +1816,10 @@ def cmd_upgrade(args) -> int:
     # Compute the exact target policy BEFORE the first installation write.
     # Recognizing a sealed historical manifest is not permission to remove
     # the original fleet routes, tailnet adapter, concurrency or telemetry.
-    if frozenset(prior["files"]) == V2_CHATGPT1_FLEET_TAILNET_PREDECESSOR:
+    if frozenset(prior["files"]) in (
+        V2_CHATGPT1_FLEET_TAILNET_PREDECESSOR,
+        V2_C2_BUSINESS_FLEET_PREDECESSOR,
+    ):
         projected = _build_config(
             account, host, port, node_abs, backend_abs, roots["state"],
             _user_root(), repository_workspaces=repository_workspaces,
@@ -1743,6 +1981,8 @@ def build_parser() -> argparse.ArgumentParser:
         s.add_argument("--enable-repository-workspaces", action="store_true",
                        help="enable the closed installed repository-workspace consumer")
         if name == "upgrade":
+            s.add_argument("--c2-business-fleet-compat", action="store_true",
+                           help="exact hash-pinned C2 11-to-12-file gateway compatibility; no new repo grants")
             s.add_argument("--publisher-only-fleet-v10", action="store_true",
                            help="preserve the exact sealed enrolled fleet v0.1.10 runtime; patch only two publisher modules")
             s.add_argument("--publisher-expected-manifest-sha256",
