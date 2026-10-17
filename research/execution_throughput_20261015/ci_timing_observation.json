@@ -1,0 +1,534 @@
+{
+  "repository": "mastermindx-market-intelligence/Mastermind",
+  "observed_at": "2026-10-15T05:20:18.939039+00:00",
+  "sample": "latest 20 completed CI workflow records; descriptive, not population cancellation rate",
+  "recent_completed": [
+    {
+      "conclusion": "cancelled",
+      "created_at": "2026-10-15T05:07:01Z",
+      "event": "pull_request",
+      "head_sha": "275530aa7e5c815eebeb79276e14f0584c3b409e",
+      "id": 38685041075,
+      "run_started_at": "2026-10-15T05:07:01Z",
+      "updated_at": "2026-10-15T05:12:01Z"
+    },
+    {
+      "conclusion": "cancelled",
+      "created_at": "2026-10-15T04:58:25Z",
+      "event": "pull_request",
+      "head_sha": "41070839358a91875233601a60279a355a19911f",
+      "id": 38684274206,
+      "run_started_at": "2026-10-15T04:58:25Z",
+      "updated_at": "2026-10-15T05:19:02Z"
+    },
+    {
+      "conclusion": "success",
+      "created_at": "2026-10-15T04:56:22Z",
+      "event": "pull_request",
+      "head_sha": "cecc339ea3468efe914a2a6c71cfb253dd7847cc",
+      "id": 38684100093,
+      "run_started_at": "2026-10-15T04:56:22Z",
+      "updated_at": "2026-10-15T05:16:42Z"
+    },
+    {
+      "conclusion": "cancelled",
+      "created_at": "2026-10-15T04:54:31Z",
+      "event": "pull_request",
+      "head_sha": "47c43e6eb5f583bd2fbffefbd6157275e3892957",
+      "id": 38683936102,
+      "run_started_at": "2026-10-15T04:54:31Z",
+      "updated_at": "2026-10-15T05:06:54Z"
+    },
+    {
+      "conclusion": "cancelled",
+      "created_at": "2026-10-15T04:52:38Z",
+      "event": "pull_request",
+      "head_sha": "8488442f8ac31b07694538ea13560c519fd3ad6c",
+      "id": 38683767999,
+      "run_started_at": "2026-10-15T04:52:38Z",
+      "updated_at": "2026-10-15T05:17:47Z"
+    },
+    {
+      "conclusion": "failure",
+      "created_at": "2026-10-15T04:44:38Z",
+      "event": "pull_request",
+      "head_sha": "0b5679d566958f17f955efc92312b752466f9b9a",
+      "id": 38683064927,
+      "run_started_at": "2026-10-15T04:44:38Z",
+      "updated_at": "2026-10-15T05:01:02Z"
+    },
+    {
+      "conclusion": "cancelled",
+      "created_at": "2026-10-15T04:42:46Z",
+      "event": "pull_request",
+      "head_sha": "57c4e48b19ca5ccf08b22cb949a1dc6260048bbc",
+      "id": 38682898764,
+      "run_started_at": "2026-10-15T04:42:46Z",
+      "updated_at": "2026-10-15T04:58:43Z"
+    },
+    {
+      "conclusion": "cancelled",
+      "created_at": "2026-10-15T04:41:39Z",
+      "event": "pull_request",
+      "head_sha": "6714032b4fdcc876afcf894cd233af72cc24ff89",
+      "id": 38682800175,
+      "run_started_at": "2026-10-15T04:41:39Z",
+      "updated_at": "2026-10-15T04:54:48Z"
+    },
+    {
+      "conclusion": "failure",
+      "created_at": "2026-10-15T04:41:22Z",
+      "event": "pull_request",
+      "head_sha": "f577024191d4d03fa0735d8c12f1f0e3af87d3a9",
+      "id": 38682775621,
+      "run_started_at": "2026-10-15T04:41:22Z",
+      "updated_at": "2026-10-15T05:16:09Z"
+    },
+    {
+      "conclusion": "success",
+      "created_at": "2026-10-15T04:40:27Z",
+      "event": "pull_request",
+      "head_sha": "35897ffa78b6c0148f8edcfc3d78d5117f5c3f37",
+      "id": 38682695635,
+      "run_started_at": "2026-10-15T04:40:27Z",
+      "updated_at": "2026-10-15T05:04:01Z"
+    },
+    {
+      "conclusion": "cancelled",
+      "created_at": "2026-10-15T04:38:05Z",
+      "event": "pull_request",
+      "head_sha": "14d4282a4659f3b1cb74e039afb67dd47a388fa9",
+      "id": 38682490475,
+      "run_started_at": "2026-10-15T04:38:05Z",
+      "updated_at": "2026-10-15T04:52:13Z"
+    },
+    {
+      "conclusion": "failure",
+      "created_at": "2026-10-15T04:37:27Z",
+      "event": "pull_request",
+      "head_sha": "c91d838bcaa90304efa12a11fc7cc3ff33ac635f",
+      "id": 38682438400,
+      "run_started_at": "2026-10-15T04:37:27Z",
+      "updated_at": "2026-10-15T05:13:22Z"
+    },
+    {
+      "conclusion": "success",
+      "created_at": "2026-10-15T04:36:04Z",
+      "event": "pull_request",
+      "head_sha": "e58abb643e82169da418cf4d4c24b4c960066338",
+      "id": 38682319484,
+      "run_started_at": "2026-10-15T04:36:04Z",
+      "updated_at": "2026-10-15T04:56:50Z"
+    },
+    {
+      "conclusion": "success",
+      "created_at": "2026-10-15T04:35:55Z",
+      "event": "pull_request",
+      "head_sha": "c57d0c6e25fea5c1b8a84b904dce3a47f13e3000",
+      "id": 38682305459,
+      "run_started_at": "2026-10-15T04:35:55Z",
+      "updated_at": "2026-10-15T04:59:37Z"
+    },
+    {
+      "conclusion": "success",
+      "created_at": "2026-10-15T04:35:45Z",
+      "event": "pull_request",
+      "head_sha": "109c5229ba64810c3399c8e503de2b1751a72d04",
+      "id": 38682291446,
+      "run_started_at": "2026-10-15T04:35:45Z",
+      "updated_at": "2026-10-15T04:59:54Z"
+    },
+    {
+      "conclusion": "cancelled",
+      "created_at": "2026-10-15T04:35:11Z",
+      "event": "pull_request",
+      "head_sha": "5f2feb8d731453b36e2e5cf39df60b280f26a3b5",
+      "id": 38682239330,
+      "run_started_at": "2026-10-15T04:35:11Z",
+      "updated_at": "2026-10-15T04:38:22Z"
+    },
+    {
+      "conclusion": "cancelled",
+      "created_at": "2026-10-15T04:35:11Z",
+      "event": "pull_request",
+      "head_sha": "7186fc5427c2366816dbb656c7b455ae6e42d78a",
+      "id": 38682238810,
+      "run_started_at": "2026-10-15T04:35:11Z",
+      "updated_at": "2026-10-15T04:51:05Z"
+    },
+    {
+      "conclusion": "cancelled",
+      "created_at": "2026-10-15T04:33:04Z",
+      "event": "pull_request",
+      "head_sha": "d7ad7ebf927eedb52998d7210d98ed5d2e3a40e1",
+      "id": 38682051683,
+      "run_started_at": "2026-10-15T04:33:04Z",
+      "updated_at": "2026-10-15T04:35:29Z"
+    },
+    {
+      "conclusion": "cancelled",
+      "created_at": "2026-10-15T04:32:22Z",
+      "event": "pull_request",
+      "head_sha": "aeb0f9184bbdfc8528ebe8b7c27cd13c2eb5716c",
+      "id": 38681990861,
+      "run_started_at": "2026-10-15T04:32:22Z",
+      "updated_at": "2026-10-15T04:35:29Z"
+    },
+    {
+      "conclusion": "cancelled",
+      "created_at": "2026-10-15T04:32:12Z",
+      "event": "pull_request",
+      "head_sha": "44037803dda22b2380a860b7f998a7ce384ed9c7",
+      "id": 38681975951,
+      "run_started_at": "2026-10-15T04:32:12Z",
+      "updated_at": "2026-10-15T04:36:22Z"
+    }
+  ],
+  "successful_run_detail": [
+    {
+      "conclusion": "success",
+      "created_at": "2026-10-15T04:56:22Z",
+      "event": "pull_request",
+      "head_sha": "cecc339ea3468efe914a2a6c71cfb253dd7847cc",
+      "id": 38684100093,
+      "run_started_at": "2026-10-15T04:56:22Z",
+      "updated_at": "2026-10-15T05:16:42Z",
+      "jobs": [
+        {
+          "completed_at": "2026-10-15T05:16:41Z",
+          "conclusion": "success",
+          "id": 116254911171,
+          "name": "test",
+          "started_at": "2026-10-15T04:56:25Z",
+          "steps": [
+            {
+              "completed_at": "2026-10-15T04:56:27Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "started_at": "2026-10-15T04:56:26Z"
+            },
+            {
+              "completed_at": "2026-10-15T04:56:31Z",
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "started_at": "2026-10-15T04:56:27Z"
+            },
+            {
+              "completed_at": "2026-10-15T04:56:36Z",
+              "conclusion": "success",
+              "name": "Checkout pinned Macro engine",
+              "started_at": "2026-10-15T04:56:31Z"
+            },
+            {
+              "completed_at": "2026-10-15T04:56:41Z",
+              "conclusion": "success",
+              "name": "Run actions/setup-node@v4",
+              "started_at": "2026-10-15T04:56:36Z"
+            },
+            {
+              "completed_at": "2026-10-15T04:56:44Z",
+              "conclusion": "success",
+              "name": "Install Node dependencies",
+              "started_at": "2026-10-15T04:56:41Z"
+            },
+            {
+              "completed_at": "2026-10-15T04:56:50Z",
+              "conclusion": "success",
+              "name": "Run actions/setup-python@v5",
+              "started_at": "2026-10-15T04:56:44Z"
+            },
+            {
+              "completed_at": "2026-10-15T04:57:17Z",
+              "conclusion": "success",
+              "name": "Install project",
+              "started_at": "2026-10-15T04:56:50Z"
+            },
+            {
+              "completed_at": "2026-10-15T04:57:20Z",
+              "conclusion": "success",
+              "name": "Compile source",
+              "started_at": "2026-10-15T04:57:17Z"
+            },
+            {
+              "completed_at": "2026-10-15T04:57:20Z",
+              "conclusion": "success",
+              "name": "Validate shell scripts",
+              "started_at": "2026-10-15T04:57:20Z"
+            },
+            {
+              "completed_at": "2026-10-15T05:16:35Z",
+              "conclusion": "success",
+              "name": "Run repository test gate",
+              "started_at": "2026-10-15T04:57:20Z"
+            },
+            {
+              "completed_at": "2026-10-15T05:16:36Z",
+              "conclusion": "success",
+              "name": "Post Run actions/setup-python@v5",
+              "started_at": "2026-10-15T05:16:35Z"
+            },
+            {
+              "completed_at": "2026-10-15T05:16:38Z",
+              "conclusion": "success",
+              "name": "Post Run actions/setup-node@v4",
+              "started_at": "2026-10-15T05:16:36Z"
+            },
+            {
+              "completed_at": "2026-10-15T05:16:38Z",
+              "conclusion": "success",
+              "name": "Post Checkout pinned Macro engine",
+              "started_at": "2026-10-15T05:16:38Z"
+            },
+            {
+              "completed_at": "2026-10-15T05:16:38Z",
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "started_at": "2026-10-15T05:16:38Z"
+            },
+            {
+              "completed_at": "2026-10-15T05:16:38Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "started_at": "2026-10-15T05:16:38Z"
+            }
+          ]
+        }
+      ],
+      "run_record_elapsed_s": 1220.0
+    },
+    {
+      "conclusion": "success",
+      "created_at": "2026-10-15T04:40:27Z",
+      "event": "pull_request",
+      "head_sha": "35897ffa78b6c0148f8edcfc3d78d5117f5c3f37",
+      "id": 38682695635,
+      "run_started_at": "2026-10-15T04:40:27Z",
+      "updated_at": "2026-10-15T05:04:01Z",
+      "jobs": [
+        {
+          "completed_at": "2026-10-15T05:04:01Z",
+          "conclusion": "success",
+          "id": 116250557170,
+          "name": "test",
+          "started_at": "2026-10-15T04:40:29Z",
+          "steps": [
+            {
+              "completed_at": "2026-10-15T04:40:30Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "started_at": "2026-10-15T04:40:30Z"
+            },
+            {
+              "completed_at": "2026-10-15T04:40:34Z",
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "started_at": "2026-10-15T04:40:30Z"
+            },
+            {
+              "completed_at": "2026-10-15T04:40:39Z",
+              "conclusion": "success",
+              "name": "Checkout pinned Macro engine",
+              "started_at": "2026-10-15T04:40:34Z"
+            },
+            {
+              "completed_at": "2026-10-15T04:40:44Z",
+              "conclusion": "success",
+              "name": "Run actions/setup-node@v4",
+              "started_at": "2026-10-15T04:40:39Z"
+            },
+            {
+              "completed_at": "2026-10-15T04:40:45Z",
+              "conclusion": "success",
+              "name": "Install Node dependencies",
+              "started_at": "2026-10-15T04:40:44Z"
+            },
+            {
+              "completed_at": "2026-10-15T04:40:50Z",
+              "conclusion": "success",
+              "name": "Run actions/setup-python@v5",
+              "started_at": "2026-10-15T04:40:45Z"
+            },
+            {
+              "completed_at": "2026-10-15T04:41:12Z",
+              "conclusion": "success",
+              "name": "Install project",
+              "started_at": "2026-10-15T04:40:50Z"
+            },
+            {
+              "completed_at": "2026-10-15T04:41:31Z",
+              "conclusion": "success",
+              "name": "Verify Paper direct pinned MCP SDK",
+              "started_at": "2026-10-15T04:41:12Z"
+            },
+            {
+              "completed_at": "2026-10-15T04:41:34Z",
+              "conclusion": "success",
+              "name": "Compile source",
+              "started_at": "2026-10-15T04:41:31Z"
+            },
+            {
+              "completed_at": "2026-10-15T04:41:34Z",
+              "conclusion": "success",
+              "name": "Validate shell scripts",
+              "started_at": "2026-10-15T04:41:34Z"
+            },
+            {
+              "completed_at": "2026-10-15T05:03:57Z",
+              "conclusion": "success",
+              "name": "Run repository test gate",
+              "started_at": "2026-10-15T04:41:34Z"
+            },
+            {
+              "completed_at": "2026-10-15T05:03:57Z",
+              "conclusion": "success",
+              "name": "Post Run actions/setup-python@v5",
+              "started_at": "2026-10-15T05:03:57Z"
+            },
+            {
+              "completed_at": "2026-10-15T05:03:57Z",
+              "conclusion": "success",
+              "name": "Post Run actions/setup-node@v4",
+              "started_at": "2026-10-15T05:03:57Z"
+            },
+            {
+              "completed_at": "2026-10-15T05:03:58Z",
+              "conclusion": "success",
+              "name": "Post Checkout pinned Macro engine",
+              "started_at": "2026-10-15T05:03:57Z"
+            },
+            {
+              "completed_at": "2026-10-15T05:03:58Z",
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "started_at": "2026-10-15T05:03:58Z"
+            },
+            {
+              "completed_at": "2026-10-15T05:03:58Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "started_at": "2026-10-15T05:03:58Z"
+            }
+          ]
+        }
+      ],
+      "run_record_elapsed_s": 1414.0
+    },
+    {
+      "conclusion": "success",
+      "created_at": "2026-10-15T04:36:04Z",
+      "event": "pull_request",
+      "head_sha": "e58abb643e82169da418cf4d4c24b4c960066338",
+      "id": 38682319484,
+      "run_started_at": "2026-10-15T04:36:04Z",
+      "updated_at": "2026-10-15T04:56:50Z",
+      "jobs": [
+        {
+          "completed_at": "2026-10-15T04:56:49Z",
+          "conclusion": "success",
+          "id": 116249464074,
+          "name": "test",
+          "started_at": "2026-10-15T04:36:24Z",
+          "steps": [
+            {
+              "completed_at": "2026-10-15T04:36:25Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "started_at": "2026-10-15T04:36:25Z"
+            },
+            {
+              "completed_at": "2026-10-15T04:36:29Z",
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "started_at": "2026-10-15T04:36:25Z"
+            },
+            {
+              "completed_at": "2026-10-15T04:36:33Z",
+              "conclusion": "success",
+              "name": "Checkout pinned Macro engine",
+              "started_at": "2026-10-15T04:36:29Z"
+            },
+            {
+              "completed_at": "2026-10-15T04:36:37Z",
+              "conclusion": "success",
+              "name": "Run actions/setup-node@v4",
+              "started_at": "2026-10-15T04:36:33Z"
+            },
+            {
+              "completed_at": "2026-10-15T04:36:39Z",
+              "conclusion": "success",
+              "name": "Install Node dependencies",
+              "started_at": "2026-10-15T04:36:37Z"
+            },
+            {
+              "completed_at": "2026-10-15T04:36:42Z",
+              "conclusion": "success",
+              "name": "Run actions/setup-python@v5",
+              "started_at": "2026-10-15T04:36:39Z"
+            },
+            {
+              "completed_at": "2026-10-15T04:37:03Z",
+              "conclusion": "success",
+              "name": "Install project",
+              "started_at": "2026-10-15T04:36:42Z"
+            },
+            {
+              "completed_at": "2026-10-15T04:37:24Z",
+              "conclusion": "success",
+              "name": "Verify Paper direct pinned MCP SDK",
+              "started_at": "2026-10-15T04:37:03Z"
+            },
+            {
+              "completed_at": "2026-10-15T04:37:26Z",
+              "conclusion": "success",
+              "name": "Compile source",
+              "started_at": "2026-10-15T04:37:24Z"
+            },
+            {
+              "completed_at": "2026-10-15T04:37:26Z",
+              "conclusion": "success",
+              "name": "Validate shell scripts",
+              "started_at": "2026-10-15T04:37:26Z"
+            },
+            {
+              "completed_at": "2026-10-15T04:56:45Z",
+              "conclusion": "success",
+              "name": "Run repository test gate",
+              "started_at": "2026-10-15T04:37:26Z"
+            },
+            {
+              "completed_at": "2026-10-15T04:56:45Z",
+              "conclusion": "success",
+              "name": "Post Run actions/setup-python@v5",
+              "started_at": "2026-10-15T04:56:45Z"
+            },
+            {
+              "completed_at": "2026-10-15T04:56:47Z",
+              "conclusion": "success",
+              "name": "Post Run actions/setup-node@v4",
+              "started_at": "2026-10-15T04:56:45Z"
+            },
+            {
+              "completed_at": "2026-10-15T04:56:47Z",
+              "conclusion": "success",
+              "name": "Post Checkout pinned Macro engine",
+              "started_at": "2026-10-15T04:56:47Z"
+            },
+            {
+              "completed_at": "2026-10-15T04:56:47Z",
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "started_at": "2026-10-15T04:56:47Z"
+            },
+            {
+              "completed_at": "2026-10-15T04:56:47Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "started_at": "2026-10-15T04:56:47Z"
+            }
+          ]
+        }
+      ],
+      "run_record_elapsed_s": 1246.0
+    }
+  ]
+}

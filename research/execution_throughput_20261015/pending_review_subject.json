@@ -1,0 +1,23 @@
+{
+  "observed_at": "2026-10-15T05:27:51.602818+00:00",
+  "base_candidate": "268b264b8c27e29616295c21122b7220786520ac",
+  "source_sha256": {
+    "integrations/github_ci_candidate_reader.py": "e514754f6b8bf374abba9de984e85f2c2d3ddd41ababfebbe35c2310921f333d",
+    "scripts/github_ci_candidate.py": "59085c5bf5d60f3d22524856825ba9af80fb7b993443366b316fdbeaab6aafe8",
+    "tests/test_github_ci_candidate_reader.py": "c7959af524575cce60ff25967e7c7d6b8d196fa86d2cbb0718cda64b98da99a3",
+    "tests/test_github_ci_candidate_cli.py": "bef43a033fc071334b4fca682ee54f0487b1f0d8b9a2af7e0806d1a3bc67d37a",
+    "tests/test_github_ci_candidate_generation.py": "ccda6033fbc88d4a80454ef84d2338ad1510a8b3e80f2ed11b6b6ad055f9ee22",
+    "tests/test_github_ci_candidate_transport.py": "f43bae3fa5a8ba07c310b51f4469178b5e82d159d02241d6097a63a4e319b997"
+  },
+  "tests": {
+    "total": 319,
+    "passed": 317,
+    "failed": [
+      "tests.test_github_ci_candidate_reader::test_complete_check_pagination_uses_all_pages",
+      "tests.test_github_ci_candidate_reader::test_checks_changed_during_pagination_refuses"
+    ],
+    "exit_code": 1
+  },
+  "junit_sha256": "05d6eff46e929fcb4b0eadc230ce03197b48bedf34f9c905b3fa1d813c42e325",
+  "change": "Positive active-workflow evidence with missing current job remains PENDING; terminal/unknown membership and permission failures still refuse."
+}
