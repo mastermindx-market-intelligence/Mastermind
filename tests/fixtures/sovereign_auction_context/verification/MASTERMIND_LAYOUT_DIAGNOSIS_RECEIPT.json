@@ -1,0 +1,960 @@
+{
+  "scope": "Read-only in-memory browser diagnosis; exact Git baseline and exact candidate bytes; intercepted loopback requests; no source file write or FastAPI acceptance claim.",
+  "source": {
+    "incumbentHtml": "adf9d87855356fec37d8bf9d6fc2f2c3c67e42b1a6dce8af779874b9514bb5c6",
+    "currentHtml": "ea065f214c49c053fa584eb1143631f9b09bee5f7a3563b9c5e7237178d70daa",
+    "candidateHtml": "b8d84a7313bdd7c9f4bbcc3ddfeadaaeddd85b9976ca143a64acaf5146c8a043",
+    "theme": "2afb70595a193b82387a5b720b5f08d6a0ad50468413d9401724dd422b9659f4"
+  },
+  "browser": "149.0.7827.55",
+  "results": [
+    {
+      "width": 1440,
+      "lang": "en",
+      "theme": "light",
+      "source": "incumbent_before_auction",
+      "initial": {
+        "viewport": 1440,
+        "document": 1440,
+        "rootWidth": 1280,
+        "auctionWidth": null,
+        "table": {
+          "client": 1232,
+          "scroll": 1232,
+          "overflow": "auto",
+          "containingPanelWidth": 1280,
+          "containingPanelMinWidth": "auto"
+        },
+        "visibleCards": 0,
+        "minCardWidth": null
+      },
+      "expanded": [],
+      "errors": [],
+      "blocked": []
+    },
+    {
+      "width": 1440,
+      "lang": "en",
+      "theme": "light",
+      "source": "current_unavailable",
+      "initial": {
+        "viewport": 1440,
+        "document": 1440,
+        "rootWidth": 1280,
+        "auctionWidth": 1280,
+        "table": {
+          "client": 1232,
+          "scroll": 1232,
+          "overflow": "auto",
+          "containingPanelWidth": 1280,
+          "containingPanelMinWidth": "auto"
+        },
+        "visibleCards": 0,
+        "minCardWidth": null
+      },
+      "expanded": [],
+      "errors": [],
+      "blocked": []
+    },
+    {
+      "width": 1440,
+      "lang": "en",
+      "theme": "light",
+      "source": "patched_unavailable",
+      "initial": {
+        "viewport": 1440,
+        "document": 1440,
+        "rootWidth": 1280,
+        "auctionWidth": 1280,
+        "table": {
+          "client": 1232,
+          "scroll": 1232,
+          "overflow": "auto",
+          "containingPanelWidth": 1280,
+          "containingPanelMinWidth": "0px"
+        },
+        "visibleCards": 0,
+        "minCardWidth": null
+      },
+      "expanded": [],
+      "errors": [],
+      "blocked": []
+    },
+    {
+      "width": 1440,
+      "lang": "en",
+      "theme": "light",
+      "source": "patched_observed",
+      "initial": {
+        "viewport": 1440,
+        "document": 1440,
+        "rootWidth": 1280,
+        "auctionWidth": 1280,
+        "table": {
+          "client": 1232,
+          "scroll": 1232,
+          "overflow": "auto",
+          "containingPanelWidth": 1280,
+          "containingPanelMinWidth": "0px"
+        },
+        "visibleCards": 13,
+        "minCardWidth": 518.5
+      },
+      "expanded": [
+        {
+          "heading": "Tentative calendar (28)",
+          "geometry": {
+            "viewport": 1440,
+            "document": 1440,
+            "rootWidth": 1280,
+            "auctionWidth": 1280,
+            "table": {
+              "client": 1232,
+              "scroll": 1232,
+              "overflow": "auto",
+              "containingPanelWidth": 1280,
+              "containingPanelMinWidth": "0px"
+            },
+            "visibleCards": 36,
+            "minCardWidth": 518.5
+          }
+        },
+        {
+          "heading": "Observed results (43)",
+          "geometry": {
+            "viewport": 1440,
+            "document": 1440,
+            "rootWidth": 1280,
+            "auctionWidth": 1280,
+            "table": {
+              "client": 1232,
+              "scroll": 1232,
+              "overflow": "auto",
+              "containingPanelWidth": 1280,
+              "containingPanelMinWidth": "0px"
+            },
+            "visibleCards": 51,
+            "minCardWidth": 518.5
+          }
+        }
+      ],
+      "errors": [],
+      "blocked": []
+    },
+    {
+      "width": 1440,
+      "lang": "en",
+      "theme": "dark",
+      "source": "patched_observed",
+      "initial": {
+        "viewport": 1440,
+        "document": 1440,
+        "rootWidth": 1280,
+        "auctionWidth": 1280,
+        "table": {
+          "client": 1232,
+          "scroll": 1232,
+          "overflow": "auto",
+          "containingPanelWidth": 1280,
+          "containingPanelMinWidth": "0px"
+        },
+        "visibleCards": 13,
+        "minCardWidth": 518.5
+      },
+      "expanded": [
+        {
+          "heading": "Tentative calendar (28)",
+          "geometry": {
+            "viewport": 1440,
+            "document": 1440,
+            "rootWidth": 1280,
+            "auctionWidth": 1280,
+            "table": {
+              "client": 1232,
+              "scroll": 1232,
+              "overflow": "auto",
+              "containingPanelWidth": 1280,
+              "containingPanelMinWidth": "0px"
+            },
+            "visibleCards": 36,
+            "minCardWidth": 518.5
+          }
+        },
+        {
+          "heading": "Observed results (43)",
+          "geometry": {
+            "viewport": 1440,
+            "document": 1440,
+            "rootWidth": 1280,
+            "auctionWidth": 1280,
+            "table": {
+              "client": 1232,
+              "scroll": 1232,
+              "overflow": "auto",
+              "containingPanelWidth": 1280,
+              "containingPanelMinWidth": "0px"
+            },
+            "visibleCards": 51,
+            "minCardWidth": 518.5
+          }
+        }
+      ],
+      "errors": [],
+      "blocked": []
+    },
+    {
+      "width": 1440,
+      "lang": "zh",
+      "theme": "light",
+      "source": "patched_observed",
+      "initial": {
+        "viewport": 1440,
+        "document": 1440,
+        "rootWidth": 1280,
+        "auctionWidth": 1280,
+        "table": {
+          "client": 1232,
+          "scroll": 1232,
+          "overflow": "auto",
+          "containingPanelWidth": 1280,
+          "containingPanelMinWidth": "0px"
+        },
+        "visibleCards": 13,
+        "minCardWidth": 518.5
+      },
+      "expanded": [
+        {
+          "heading": "暂定日历 (28)",
+          "geometry": {
+            "viewport": 1440,
+            "document": 1440,
+            "rootWidth": 1280,
+            "auctionWidth": 1280,
+            "table": {
+              "client": 1232,
+              "scroll": 1232,
+              "overflow": "auto",
+              "containingPanelWidth": 1280,
+              "containingPanelMinWidth": "0px"
+            },
+            "visibleCards": 36,
+            "minCardWidth": 518.5
+          }
+        },
+        {
+          "heading": "已观察结果 (43)",
+          "geometry": {
+            "viewport": 1440,
+            "document": 1440,
+            "rootWidth": 1280,
+            "auctionWidth": 1280,
+            "table": {
+              "client": 1232,
+              "scroll": 1232,
+              "overflow": "auto",
+              "containingPanelWidth": 1280,
+              "containingPanelMinWidth": "0px"
+            },
+            "visibleCards": 51,
+            "minCardWidth": 518.5
+          }
+        }
+      ],
+      "errors": [],
+      "blocked": []
+    },
+    {
+      "width": 1440,
+      "lang": "zh",
+      "theme": "dark",
+      "source": "patched_observed",
+      "initial": {
+        "viewport": 1440,
+        "document": 1440,
+        "rootWidth": 1280,
+        "auctionWidth": 1280,
+        "table": {
+          "client": 1232,
+          "scroll": 1232,
+          "overflow": "auto",
+          "containingPanelWidth": 1280,
+          "containingPanelMinWidth": "0px"
+        },
+        "visibleCards": 13,
+        "minCardWidth": 518.5
+      },
+      "expanded": [
+        {
+          "heading": "暂定日历 (28)",
+          "geometry": {
+            "viewport": 1440,
+            "document": 1440,
+            "rootWidth": 1280,
+            "auctionWidth": 1280,
+            "table": {
+              "client": 1232,
+              "scroll": 1232,
+              "overflow": "auto",
+              "containingPanelWidth": 1280,
+              "containingPanelMinWidth": "0px"
+            },
+            "visibleCards": 36,
+            "minCardWidth": 518.5
+          }
+        },
+        {
+          "heading": "已观察结果 (43)",
+          "geometry": {
+            "viewport": 1440,
+            "document": 1440,
+            "rootWidth": 1280,
+            "auctionWidth": 1280,
+            "table": {
+              "client": 1232,
+              "scroll": 1232,
+              "overflow": "auto",
+              "containingPanelWidth": 1280,
+              "containingPanelMinWidth": "0px"
+            },
+            "visibleCards": 51,
+            "minCardWidth": 518.5
+          }
+        }
+      ],
+      "errors": [],
+      "blocked": []
+    },
+    {
+      "width": 820,
+      "lang": "en",
+      "theme": "light",
+      "source": "incumbent_before_auction",
+      "initial": {
+        "viewport": 820,
+        "document": 924,
+        "rootWidth": 796,
+        "auctionWidth": null,
+        "table": {
+          "client": 880,
+          "scroll": 880,
+          "overflow": "auto",
+          "containingPanelWidth": 912,
+          "containingPanelMinWidth": "auto"
+        },
+        "visibleCards": 0,
+        "minCardWidth": null
+      },
+      "expanded": [],
+      "errors": [],
+      "blocked": []
+    },
+    {
+      "width": 820,
+      "lang": "en",
+      "theme": "light",
+      "source": "current_unavailable",
+      "initial": {
+        "viewport": 820,
+        "document": 924,
+        "rootWidth": 796,
+        "auctionWidth": 912,
+        "table": {
+          "client": 880,
+          "scroll": 880,
+          "overflow": "auto",
+          "containingPanelWidth": 912,
+          "containingPanelMinWidth": "auto"
+        },
+        "visibleCards": 0,
+        "minCardWidth": null
+      },
+      "expanded": [],
+      "errors": [],
+      "blocked": []
+    },
+    {
+      "width": 820,
+      "lang": "en",
+      "theme": "light",
+      "source": "patched_unavailable",
+      "initial": {
+        "viewport": 820,
+        "document": 820,
+        "rootWidth": 796,
+        "auctionWidth": 796,
+        "table": {
+          "client": 764,
+          "scroll": 880,
+          "overflow": "auto",
+          "containingPanelWidth": 796,
+          "containingPanelMinWidth": "0px"
+        },
+        "visibleCards": 0,
+        "minCardWidth": null
+      },
+      "expanded": [],
+      "errors": [],
+      "blocked": []
+    },
+    {
+      "width": 820,
+      "lang": "en",
+      "theme": "light",
+      "source": "patched_observed",
+      "initial": {
+        "viewport": 820,
+        "document": 820,
+        "rootWidth": 796,
+        "auctionWidth": 796,
+        "table": {
+          "client": 764,
+          "scroll": 880,
+          "overflow": "auto",
+          "containingPanelWidth": 796,
+          "containingPanelMinWidth": "0px"
+        },
+        "visibleCards": 13,
+        "minCardWidth": 378.5
+      },
+      "expanded": [
+        {
+          "heading": "Tentative calendar (28)",
+          "geometry": {
+            "viewport": 820,
+            "document": 820,
+            "rootWidth": 796,
+            "auctionWidth": 796,
+            "table": {
+              "client": 764,
+              "scroll": 880,
+              "overflow": "auto",
+              "containingPanelWidth": 796,
+              "containingPanelMinWidth": "0px"
+            },
+            "visibleCards": 36,
+            "minCardWidth": 378.5
+          }
+        },
+        {
+          "heading": "Observed results (43)",
+          "geometry": {
+            "viewport": 820,
+            "document": 820,
+            "rootWidth": 796,
+            "auctionWidth": 796,
+            "table": {
+              "client": 764,
+              "scroll": 880,
+              "overflow": "auto",
+              "containingPanelWidth": 796,
+              "containingPanelMinWidth": "0px"
+            },
+            "visibleCards": 51,
+            "minCardWidth": 378.5
+          }
+        }
+      ],
+      "errors": [],
+      "blocked": []
+    },
+    {
+      "width": 820,
+      "lang": "en",
+      "theme": "dark",
+      "source": "patched_observed",
+      "initial": {
+        "viewport": 820,
+        "document": 820,
+        "rootWidth": 796,
+        "auctionWidth": 796,
+        "table": {
+          "client": 764,
+          "scroll": 880,
+          "overflow": "auto",
+          "containingPanelWidth": 796,
+          "containingPanelMinWidth": "0px"
+        },
+        "visibleCards": 13,
+        "minCardWidth": 378.5
+      },
+      "expanded": [
+        {
+          "heading": "Tentative calendar (28)",
+          "geometry": {
+            "viewport": 820,
+            "document": 820,
+            "rootWidth": 796,
+            "auctionWidth": 796,
+            "table": {
+              "client": 764,
+              "scroll": 880,
+              "overflow": "auto",
+              "containingPanelWidth": 796,
+              "containingPanelMinWidth": "0px"
+            },
+            "visibleCards": 36,
+            "minCardWidth": 378.5
+          }
+        },
+        {
+          "heading": "Observed results (43)",
+          "geometry": {
+            "viewport": 820,
+            "document": 820,
+            "rootWidth": 796,
+            "auctionWidth": 796,
+            "table": {
+              "client": 764,
+              "scroll": 880,
+              "overflow": "auto",
+              "containingPanelWidth": 796,
+              "containingPanelMinWidth": "0px"
+            },
+            "visibleCards": 51,
+            "minCardWidth": 378.5
+          }
+        }
+      ],
+      "errors": [],
+      "blocked": []
+    },
+    {
+      "width": 820,
+      "lang": "zh",
+      "theme": "light",
+      "source": "patched_observed",
+      "initial": {
+        "viewport": 820,
+        "document": 820,
+        "rootWidth": 796,
+        "auctionWidth": 796,
+        "table": {
+          "client": 764,
+          "scroll": 880,
+          "overflow": "auto",
+          "containingPanelWidth": 796,
+          "containingPanelMinWidth": "0px"
+        },
+        "visibleCards": 13,
+        "minCardWidth": 378.5
+      },
+      "expanded": [
+        {
+          "heading": "暂定日历 (28)",
+          "geometry": {
+            "viewport": 820,
+            "document": 820,
+            "rootWidth": 796,
+            "auctionWidth": 796,
+            "table": {
+              "client": 764,
+              "scroll": 880,
+              "overflow": "auto",
+              "containingPanelWidth": 796,
+              "containingPanelMinWidth": "0px"
+            },
+            "visibleCards": 36,
+            "minCardWidth": 378.5
+          }
+        },
+        {
+          "heading": "已观察结果 (43)",
+          "geometry": {
+            "viewport": 820,
+            "document": 820,
+            "rootWidth": 796,
+            "auctionWidth": 796,
+            "table": {
+              "client": 764,
+              "scroll": 880,
+              "overflow": "auto",
+              "containingPanelWidth": 796,
+              "containingPanelMinWidth": "0px"
+            },
+            "visibleCards": 51,
+            "minCardWidth": 378.5
+          }
+        }
+      ],
+      "errors": [],
+      "blocked": []
+    },
+    {
+      "width": 820,
+      "lang": "zh",
+      "theme": "dark",
+      "source": "patched_observed",
+      "initial": {
+        "viewport": 820,
+        "document": 820,
+        "rootWidth": 796,
+        "auctionWidth": 796,
+        "table": {
+          "client": 764,
+          "scroll": 880,
+          "overflow": "auto",
+          "containingPanelWidth": 796,
+          "containingPanelMinWidth": "0px"
+        },
+        "visibleCards": 13,
+        "minCardWidth": 378.5
+      },
+      "expanded": [
+        {
+          "heading": "暂定日历 (28)",
+          "geometry": {
+            "viewport": 820,
+            "document": 820,
+            "rootWidth": 796,
+            "auctionWidth": 796,
+            "table": {
+              "client": 764,
+              "scroll": 880,
+              "overflow": "auto",
+              "containingPanelWidth": 796,
+              "containingPanelMinWidth": "0px"
+            },
+            "visibleCards": 36,
+            "minCardWidth": 378.5
+          }
+        },
+        {
+          "heading": "已观察结果 (43)",
+          "geometry": {
+            "viewport": 820,
+            "document": 820,
+            "rootWidth": 796,
+            "auctionWidth": 796,
+            "table": {
+              "client": 764,
+              "scroll": 880,
+              "overflow": "auto",
+              "containingPanelWidth": 796,
+              "containingPanelMinWidth": "0px"
+            },
+            "visibleCards": 51,
+            "minCardWidth": 378.5
+          }
+        }
+      ],
+      "errors": [],
+      "blocked": []
+    },
+    {
+      "width": 390,
+      "lang": "en",
+      "theme": "light",
+      "source": "incumbent_before_auction",
+      "initial": {
+        "viewport": 390,
+        "document": 924,
+        "rootWidth": 366,
+        "auctionWidth": null,
+        "table": {
+          "client": 880,
+          "scroll": 880,
+          "overflow": "auto",
+          "containingPanelWidth": 912,
+          "containingPanelMinWidth": "auto"
+        },
+        "visibleCards": 0,
+        "minCardWidth": null
+      },
+      "expanded": [],
+      "errors": [],
+      "blocked": []
+    },
+    {
+      "width": 390,
+      "lang": "en",
+      "theme": "light",
+      "source": "current_unavailable",
+      "initial": {
+        "viewport": 390,
+        "document": 924,
+        "rootWidth": 366,
+        "auctionWidth": 912,
+        "table": {
+          "client": 880,
+          "scroll": 880,
+          "overflow": "auto",
+          "containingPanelWidth": 912,
+          "containingPanelMinWidth": "auto"
+        },
+        "visibleCards": 0,
+        "minCardWidth": null
+      },
+      "expanded": [],
+      "errors": [],
+      "blocked": []
+    },
+    {
+      "width": 390,
+      "lang": "en",
+      "theme": "light",
+      "source": "patched_unavailable",
+      "initial": {
+        "viewport": 390,
+        "document": 390,
+        "rootWidth": 366,
+        "auctionWidth": 366,
+        "table": {
+          "client": 334,
+          "scroll": 880,
+          "overflow": "auto",
+          "containingPanelWidth": 366,
+          "containingPanelMinWidth": "0px"
+        },
+        "visibleCards": 0,
+        "minCardWidth": null
+      },
+      "expanded": [],
+      "errors": [],
+      "blocked": []
+    },
+    {
+      "width": 390,
+      "lang": "en",
+      "theme": "light",
+      "source": "patched_observed",
+      "initial": {
+        "viewport": 390,
+        "document": 390,
+        "rootWidth": 366,
+        "auctionWidth": 366,
+        "table": {
+          "client": 334,
+          "scroll": 880,
+          "overflow": "auto",
+          "containingPanelWidth": 366,
+          "containingPanelMinWidth": "0px"
+        },
+        "visibleCards": 13,
+        "minCardWidth": 336
+      },
+      "expanded": [
+        {
+          "heading": "Tentative calendar (28)",
+          "geometry": {
+            "viewport": 390,
+            "document": 390,
+            "rootWidth": 366,
+            "auctionWidth": 366,
+            "table": {
+              "client": 334,
+              "scroll": 880,
+              "overflow": "auto",
+              "containingPanelWidth": 366,
+              "containingPanelMinWidth": "0px"
+            },
+            "visibleCards": 36,
+            "minCardWidth": 336
+          }
+        },
+        {
+          "heading": "Observed results (43)",
+          "geometry": {
+            "viewport": 390,
+            "document": 390,
+            "rootWidth": 366,
+            "auctionWidth": 366,
+            "table": {
+              "client": 334,
+              "scroll": 880,
+              "overflow": "auto",
+              "containingPanelWidth": 366,
+              "containingPanelMinWidth": "0px"
+            },
+            "visibleCards": 51,
+            "minCardWidth": 336
+          }
+        }
+      ],
+      "errors": [],
+      "blocked": []
+    },
+    {
+      "width": 390,
+      "lang": "en",
+      "theme": "dark",
+      "source": "patched_observed",
+      "initial": {
+        "viewport": 390,
+        "document": 390,
+        "rootWidth": 366,
+        "auctionWidth": 366,
+        "table": {
+          "client": 334,
+          "scroll": 880,
+          "overflow": "auto",
+          "containingPanelWidth": 366,
+          "containingPanelMinWidth": "0px"
+        },
+        "visibleCards": 13,
+        "minCardWidth": 336
+      },
+      "expanded": [
+        {
+          "heading": "Tentative calendar (28)",
+          "geometry": {
+            "viewport": 390,
+            "document": 390,
+            "rootWidth": 366,
+            "auctionWidth": 366,
+            "table": {
+              "client": 334,
+              "scroll": 880,
+              "overflow": "auto",
+              "containingPanelWidth": 366,
+              "containingPanelMinWidth": "0px"
+            },
+            "visibleCards": 36,
+            "minCardWidth": 336
+          }
+        },
+        {
+          "heading": "Observed results (43)",
+          "geometry": {
+            "viewport": 390,
+            "document": 390,
+            "rootWidth": 366,
+            "auctionWidth": 366,
+            "table": {
+              "client": 334,
+              "scroll": 880,
+              "overflow": "auto",
+              "containingPanelWidth": 366,
+              "containingPanelMinWidth": "0px"
+            },
+            "visibleCards": 51,
+            "minCardWidth": 336
+          }
+        }
+      ],
+      "errors": [],
+      "blocked": []
+    },
+    {
+      "width": 390,
+      "lang": "zh",
+      "theme": "light",
+      "source": "patched_observed",
+      "initial": {
+        "viewport": 390,
+        "document": 390,
+        "rootWidth": 366,
+        "auctionWidth": 366,
+        "table": {
+          "client": 334,
+          "scroll": 880,
+          "overflow": "auto",
+          "containingPanelWidth": 366,
+          "containingPanelMinWidth": "0px"
+        },
+        "visibleCards": 13,
+        "minCardWidth": 336
+      },
+      "expanded": [
+        {
+          "heading": "暂定日历 (28)",
+          "geometry": {
+            "viewport": 390,
+            "document": 390,
+            "rootWidth": 366,
+            "auctionWidth": 366,
+            "table": {
+              "client": 334,
+              "scroll": 880,
+              "overflow": "auto",
+              "containingPanelWidth": 366,
+              "containingPanelMinWidth": "0px"
+            },
+            "visibleCards": 36,
+            "minCardWidth": 336
+          }
+        },
+        {
+          "heading": "已观察结果 (43)",
+          "geometry": {
+            "viewport": 390,
+            "document": 390,
+            "rootWidth": 366,
+            "auctionWidth": 366,
+            "table": {
+              "client": 334,
+              "scroll": 880,
+              "overflow": "auto",
+              "containingPanelWidth": 366,
+              "containingPanelMinWidth": "0px"
+            },
+            "visibleCards": 51,
+            "minCardWidth": 336
+          }
+        }
+      ],
+      "errors": [],
+      "blocked": []
+    },
+    {
+      "width": 390,
+      "lang": "zh",
+      "theme": "dark",
+      "source": "patched_observed",
+      "initial": {
+        "viewport": 390,
+        "document": 390,
+        "rootWidth": 366,
+        "auctionWidth": 366,
+        "table": {
+          "client": 334,
+          "scroll": 880,
+          "overflow": "auto",
+          "containingPanelWidth": 366,
+          "containingPanelMinWidth": "0px"
+        },
+        "visibleCards": 13,
+        "minCardWidth": 336
+      },
+      "expanded": [
+        {
+          "heading": "暂定日历 (28)",
+          "geometry": {
+            "viewport": 390,
+            "document": 390,
+            "rootWidth": 366,
+            "auctionWidth": 366,
+            "table": {
+              "client": 334,
+              "scroll": 880,
+              "overflow": "auto",
+              "containingPanelWidth": 366,
+              "containingPanelMinWidth": "0px"
+            },
+            "visibleCards": 36,
+            "minCardWidth": 336
+          }
+        },
+        {
+          "heading": "已观察结果 (43)",
+          "geometry": {
+            "viewport": 390,
+            "document": 390,
+            "rootWidth": 366,
+            "auctionWidth": 366,
+            "table": {
+              "client": 334,
+              "scroll": 880,
+              "overflow": "auto",
+              "containingPanelWidth": 366,
+              "containingPanelMinWidth": "0px"
+            },
+            "visibleCards": 51,
+            "minCardWidth": 336
+          }
+        }
+      ],
+      "errors": [],
+      "blocked": []
+    }
+  ]
+}
