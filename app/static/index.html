@@ -7672,9 +7672,11 @@ function _fetchPortfolioCritical(id) {
     .catch(function() { return null; })
     .then(function(book) {
       var snapshot = { portfolio: id, book: book, cachedAt: Date.now(), complete: false };
-      if (book && book.account_preview && book.account_preview.availability) {
+      if (book && book.account_preview) {
         snapshot.performance = Object.assign({ series: [] }, book.account_preview);
       }
+      // Legacy account previews cannot qualify unavailable performance values.
+      if (snapshot.performance && !snapshot.performance.availability) delete snapshot.performance;
       return snapshot;
     });
 }

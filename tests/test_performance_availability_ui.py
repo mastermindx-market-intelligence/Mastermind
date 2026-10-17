@@ -84,4 +84,25 @@ def test_initial_html_has_no_fabricated_performance_values():
     for key in ("perf-nav", "perf-ret", "perf-spy", "perf-day"):
         assert 'id="' + key + '">—</div>' in HTML
     assert "alpha vs benchmark" not in HTML
-    assert "book && book.account_preview && book.account_preview.availability" in HTML
+
+
+def test_critical_fetch_omits_unqualified_preview_but_preserves_qualified_zero():
+    if not NODE:
+        pytest.skip("Node is required")
+    start = HTML.index("function _fetchPortfolioCritical")
+    script = HTML[start:HTML.index("function _fetchPortfolioDetails", start)] + """
+    var preview = {current_nav:777777,cash:777777};
+    function fetch() {return Promise.resolve({ok:true,json:()=>Promise.resolve({account_preview:preview})});}
+    (async function() {
+      var unqualified = await _fetchPortfolioCritical('us');
+      preview = {current_nav:0,cash:0,availability:{status:'provisional',valuation_basis:'cash_only'}};
+      var qualified = await _fetchPortfolioCritical('china');
+      console.log(JSON.stringify({unqualified:unqualified,qualified:qualified}));
+    })().catch(function(error) {console.error(error);process.exitCode=1;});
+    """
+    result = subprocess.run([NODE], input=script, text=True, capture_output=True, check=True)
+    data = json.loads(result.stdout)
+    assert "performance" not in data["unqualified"]
+    assert data["qualified"]["performance"]["current_nav"] == 0
+    assert data["qualified"]["performance"]["cash"] == 0
+    assert data["qualified"]["performance"]["availability"]["status"] == "provisional"
