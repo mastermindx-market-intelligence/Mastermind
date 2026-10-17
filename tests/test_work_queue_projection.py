@@ -1972,7 +1972,7 @@ def test_wqp1_b1_observed_at_is_oldest_source_not_qualified_at():
     """B1: ``observed_at`` is the OLDEST parseable
     ``validity.card.sources[*].observed_at`` — never ``qualified_at``,
     never ``autonomy.generated_at``.  Multiple sources with the oldest
-    first prove the lexicographic-chronological equivalence."""
+    first prove that the source instant, not the render clock, is used."""
     card = _autonomy_card(seat="ceo")
     card["validity"]["card"]["sources"] = [
         {"observed_at": "2026-09-22T23:59:30Z", "freshness": "current"},
@@ -1983,6 +1983,92 @@ def test_wqp1_b1_observed_at_is_oldest_source_not_qualified_at():
     result = derive_work_producers_v1(autonomy)
     assert result["accountability"]["JOB-1"]["observed_at"] == "2026-09-22T23:59:30Z"
     assert result["evidence_as_of"] == "2026-09-23T00:00:00Z"
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize(("older", "newer"), [
+    ("2026-10-09T12:00:00Z", "2026-10-09T12:00:00.9Z"),
+    ("2026-10-09T12:00:00.1Z", "2026-10-09T12:00:00.11Z"),
+    ("2026-10-09T12:00:00.12Z", "2026-10-09T12:00:00.120001Z"),
+])
+def test_wqp1_mixed_precision_selects_chronological_oldest(older, newer, reverse):
+    card = _autonomy_card(seat="ceo")
+    stamps = [older, newer]
+    if reverse:
+        stamps.reverse()
+    card["validity"]["card"]["sources"] = [
+        {"observed_at": stamp, "freshness": "current"} for stamp in stamps
+    ]
+    result = derive_work_producers_v1(
+        _autonomy([card], generated_at="2026-10-09T12:01:00Z"))
+    assert result["accountability"]["JOB-1"]["observed_at"] == older
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("seat", ["ceo", "worker"])
+def test_wqp1_mixed_precision_stale_source_cannot_promote_work(seat, reverse):
+    card = _autonomy_card(seat=seat, placement_value="WAITING_CAPACITY")
+    stamps = ["2026-10-09T12:00:00Z", "2026-10-09T12:00:00.900000Z"]
+    if reverse:
+        stamps.reverse()
+    card["validity"]["card"]["sources"] = [
+        {"observed_at": stamp, "freshness": "current"} for stamp in stamps
+    ]
+    producers = derive_work_producers_v1(
+        _autonomy([card], generated_at="2026-10-09T12:15:00.500000Z"))
+    result = compose_work_queue_v1(
+        _root_list(roots=[_row("JOB-1", "QUEUED")]),
+        **{key: producers[key] for key in
+           ("accountability", "placement", "effects", "evidence_as_of")},
+    )
+    assert len(result["groups"]["QUEUED"]) == 1
+    row = result["groups"]["QUEUED"][0]
+    assert row["next_actor"]["value"] == "UNKNOWN"
+    assert row["next_actor"]["reason"] == "evidence_stale"
+    assert row["capacity"]["value"] == "UNKNOWN"
+    assert row["capacity"]["reason"] == "evidence_stale"
+    assert row["next_actor"]["observed_at"] == "2026-10-09T12:00:00Z"
+    assert result["groups"]["NEEDS_SOL"] == []
+    assert result["groups"]["NEEDS_WORKER"] == []
+    assert result["groups"]["WAITING_CAPACITY"] == []
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_wqp1_mixed_precision_stale_effect_remains_sticky(reverse):
+    card = _autonomy_card(
+        seat="ceo", placement_value="EFFECT_UNKNOWN", attempt_id="ATT-1")
+    stamps = ["2026-10-09T12:00:00Z", "2026-10-09T12:00:00.900000Z"]
+    if reverse:
+        stamps.reverse()
+    card["validity"]["card"]["sources"] = [
+        {"observed_at": stamp, "freshness": "current"} for stamp in stamps
+    ]
+    producers = derive_work_producers_v1(
+        _autonomy([card], generated_at="2026-10-09T12:15:00.500000Z"))
+    result = compose_work_queue_v1(
+        _root_list(roots=[_row("JOB-1", "QUEUED")]),
+        **{key: producers[key] for key in
+           ("accountability", "placement", "effects", "evidence_as_of")},
+    )
+    row = result["groups"]["EFFECT_EXCEPTION"][0]
+    assert row["effect"]["value"] == "EFFECT_UNKNOWN"
+    assert row["effect"]["reason"] == "evidence_supplied_stale"
+    assert row["effect"]["observed_at"] == "2026-10-09T12:00:00Z"
+    assert row["next_actor"]["value"] == "UNKNOWN"
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_wqp1_mixed_precision_equal_instants_keep_original_deterministic_text(reverse):
+    card = _autonomy_card(seat="ceo")
+    stamps = ["2026-10-09T12:00:00.1Z", "2026-10-09T12:00:00.100000Z"]
+    if reverse:
+        stamps.reverse()
+    card["validity"]["card"]["sources"] = [
+        {"observed_at": stamp, "freshness": "current"} for stamp in stamps
+    ]
+    result = derive_work_producers_v1(
+        _autonomy([card], generated_at="2026-10-09T12:01:00Z"))
+    assert result["accountability"]["JOB-1"]["observed_at"] == min(stamps)
 
 
 def test_wqp1_b1_evidence_ref_uses_proof_ref_when_present():
