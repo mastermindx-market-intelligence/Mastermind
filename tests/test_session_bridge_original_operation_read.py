@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from integrations.business_mcp_auth.principal_projection import principal_projection
 from integrations.session_bridge.native_read import NativeReplyReader
 from integrations.session_bridge.return_tools import NativeReplyReadTool
 from integrations.session_bridge.schemas import BridgeError
@@ -15,6 +16,31 @@ def tool(s):
     return NativeReplyReadTool(NativeReplyReader(
         s.owner, socket_path=Path('/private/tmp/original-operation-read.sock'),
         service_call=s.service))
+
+
+def configure_trusted_read_pair(s):
+    """Emulate trusted host composition, not a caller-supplied pairing."""
+    from integrations.mastermind_executive_app.gateway import AppPolicies
+    from integrations.session_bridge.runtime_return import RuntimeSessionReturn
+    from tests import test_mastermind_executive_app_asgi as auth
+    shared = dict(
+        resource=s.principal.resource,
+        resource_metadata_url=s.principal.resource + "/.well-known/oauth-protected-resource",
+        issuer=s.principal.issuer,
+        authorization_servers=[s.principal.issuer],
+        jwks_uri=s.principal.issuer + ".well-known/jwks.json",
+        allowed_subject_digests=[s.principal.subject_digest],
+    )
+    policies = AppPolicies(
+        read=auth._read_policy(policy_id="test-read", **shared),
+        submit=auth._submit_policy(policy_id=s.principal.policy_id, **shared),
+    )
+    s.owner = RuntimeSessionReturn(
+        s.runtime, fabric=s.owner.fabric, codex=s.owner.codex,
+        socket_path=s.owner.socket_path, service_call=s.service,
+        authorized_policies=policies,
+    )
+    return policies
 
 
 def events(s):
@@ -34,6 +60,170 @@ def test_lost_read_ref_recovers_exact_reply_using_original_operation_only(setup)
     assert result['data']['reply_committed'] is True
     assert result['data']['parent_consumed'] is False
     assert s.service.calls and all(c['operation'] == 'read_thread' for c in s.service.calls)
+    assert events(s) == before
+
+
+def test_original_send_remains_readable_under_same_principal_read_only_policy(setup):
+    s = setup
+    configure_trusted_read_pair(s)
+    read_ref = populate(s)  # Original request was admitted with READ + SEND.
+    before = events(s)
+    reader = dataclasses.replace(
+        s.principal, policy_id='test-read', scopes=('mastermind.executive.read',))
+    s.enabled[0] = False  # No current target is needed to read original return.
+    s.service.calls.clear()
+
+    result = asyncio.run(tool(s).handle(
+        reader, 'session_reply_read', {'operation_key': s.args['operation_key']}))
+    assert result['ok'] is True
+    assert result['data']['read_ref'] == read_ref
+    assert result['data']['reply_committed'] is True
+    assert result['data']['parent_consumed'] is False
+    assert [c['operation'] for c in s.service.calls] and all(
+        c['operation'] == 'read_thread' for c in s.service.calls)
+    assert events(s) == before
+
+
+@pytest.mark.parametrize('change', [
+    {'subject_digest': 'f' * 64}, {'client_ref': 'foreign'},
+    {'issuer_digest': 'f' * 64}, {'resource': 'https://foreign.invalid'},
+])
+def test_read_only_policy_transition_does_not_cross_principal_identity(setup, change):
+    s = setup
+    configure_trusted_read_pair(s)
+    populate(s)
+    before = events(s)
+    reader = dataclasses.replace(s.principal,
+        policy_id='test-read', scopes=('mastermind.executive.read',), **change)
+    s.service.calls.clear()
+    result = asyncio.run(tool(s).handle(
+        reader, 'session_reply_read', {'operation_key': s.args['operation_key']}))
+    assert result['ok'] is False
+    assert result['error']['code'] == 'reply_unavailable'
+    assert not s.service.calls
+    assert events(s) == before
+
+
+def test_changed_policy_without_read_only_scope_does_not_recover_original(setup):
+    s = setup
+    configure_trusted_read_pair(s)
+    populate(s)
+    before = events(s)
+    foreign = dataclasses.replace(s.principal, policy_id='test-foreign')
+    s.service.calls.clear()
+    result = asyncio.run(tool(s).handle(
+        foreign, 'session_reply_read', {'operation_key': s.args['operation_key']}))
+    assert result['ok'] is False
+    assert result['error']['code'] == 'reply_unavailable'
+    assert not s.service.calls
+    assert events(s) == before
+
+
+@pytest.mark.parametrize('configure', [False, True])
+def test_unapproved_read_only_policy_cannot_read_original(setup, configure):
+    s = setup
+    if configure:
+        configure_trusted_read_pair(s)
+    populate(s)
+    before = events(s)
+    stranger = dataclasses.replace(
+        s.principal, policy_id='unapproved-read-policy',
+        scopes=('mastermind.executive.read',))
+    s.service.calls.clear()
+    result = asyncio.run(tool(s).handle(
+        stranger, 'session_reply_read', {'operation_key': s.args['operation_key']}))
+    assert result['ok'] is False
+    assert result['error']['code'] == 'reply_unavailable'
+    assert not s.service.calls
+    assert events(s) == before
+
+
+def test_missing_trusted_pair_withholds_even_legitimate_read_only_policy(setup):
+    s = setup
+    populate(s)
+    before = events(s)
+    reader = dataclasses.replace(
+        s.principal, policy_id='test-read',
+        scopes=('mastermind.executive.read',))
+    s.service.calls.clear()
+    result = asyncio.run(tool(s).handle(
+        reader, 'session_reply_read', {'operation_key': s.args['operation_key']}))
+    assert result['ok'] is False
+    assert result['error']['code'] == 'reply_unavailable'
+    assert not s.service.calls
+    assert events(s) == before
+
+
+def test_trusted_read_pair_requires_matching_original_policy_and_principal(setup):
+    s = setup
+    pairs = configure_trusted_read_pair(s)
+    from integrations.mastermind_executive_app.gateway import AppPolicies
+    from integrations.session_bridge.runtime_return import RuntimeSessionReturn
+
+    def construct(policies):
+        return RuntimeSessionReturn(
+            s.runtime, fabric=s.owner.fabric, codex=s.owner.codex,
+            socket_path=s.owner.socket_path, service_call=s.service,
+            authorized_policies=policies)
+
+    assert construct(pairs) is not None
+    with pytest.raises(ValueError, match='trusted read and submit policy pair invalid'):
+        construct(AppPolicies(
+            read=dataclasses.replace(pairs.read, policy_id=pairs.submit.policy_id),
+            submit=pairs.submit))
+    with pytest.raises(ValueError, match='trusted read and submit policy pair invalid'):
+        construct(AppPolicies(
+            read=dataclasses.replace(pairs.read, allowed_subject_digests=('f' * 64,)),
+            submit=pairs.submit))
+    with pytest.raises(ValueError, match='trusted read and submit policy pair invalid'):
+        construct(AppPolicies(
+            read=dataclasses.replace(pairs.read, resource='https://foreign.invalid'),
+            submit=pairs.submit))
+
+
+def test_read_only_policy_inflight_runtime_expiry_withholds_answer(setup, monkeypatch):
+    """Runtime must revalidate independent READ after an awaited carrier read."""
+    from integrations.session_bridge import runtime_return as runtime_module
+    s = setup
+    configure_trusted_read_pair(s)
+    read_ref = populate(s)
+    before = events(s)
+    reader = dataclasses.replace(
+        s.principal, policy_id='test-read',
+        scopes=('mastermind.executive.read',))
+    s.service.calls.clear()
+    # Expiration is triggered while the *Runtime resolver* awaits Dialogue.
+    s.service.on_read = lambda: monkeypatch.setattr(
+        runtime_module.time, 'time', lambda: reader.expires_at + 60)
+    with pytest.raises(BridgeError) as error:
+        asyncio.run(s.owner.resolve_read(
+            principal=principal_projection(reader), read_ref=read_ref))
+    assert error.value.code == 'reply_unavailable'
+    assert s.service.calls and all(
+        c['operation'] == 'read_thread' for c in s.service.calls)
+    assert events(s) == before
+
+
+def test_uncommitted_request_target_drift_blocks_read_only_recovery(setup, monkeypatch):
+    """Do not apply the committed-reply archival exception to an active drift."""
+    from integrations.session_bridge import runtime_return as runtime_module
+    s = setup
+    configure_trusted_read_pair(s)
+    read_ref = s.owner.bind_request(s.projection, s.args)
+    before = events(s)
+    reader = dataclasses.replace(
+        s.principal, policy_id='test-read',
+        scopes=('mastermind.executive.read',))
+    s.service.calls.clear()
+    monkeypatch.setattr(runtime_module, '_read_current_target', lambda *_: None)
+    assert s.owner.resolve_operation_read_ref(
+        principal=principal_projection(reader),
+        operation_key=s.args['operation_key']) == read_ref
+    result = asyncio.run(tool(s).handle(
+        reader, 'session_reply_read', {'operation_key': s.args['operation_key']}))
+    assert result['ok'] is False
+    assert result['error']['code'] == 'reply_unavailable'
+    assert not s.service.calls
     assert events(s) == before
 
 

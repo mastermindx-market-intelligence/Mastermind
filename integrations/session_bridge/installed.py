@@ -247,11 +247,15 @@ def build_runtime_native_reply_writer(runtime: Any, *, dialogue_socket_path: Pat
 
 def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
                                  summon_handler: Callable | None = None,
-                                 codex_owner_configured: Callable[[], bool] | None = None):
+                                 codex_owner_configured: Callable[[], bool] | None = None,
+                                 authorized_policies: Any = None):
     """Compose the installed fabric path from existing Runtime/Dialogue owners.
 
     Compatibility schemas do not grant native Codex or Claude ownership. Those
     kinds stay absent until their actual host-owned session adapters are bound.
+    The trusted Runtime host may supply its already-validated OAuth AppPolicies
+    pair; absent that pairing, a new READ-only policy cannot claim an original
+    SEND principal's answer. No private caller selects this pairing.
     """
     from .runtime_owner import (RuntimeFabricTargetProjector, RuntimeCodexTargetProjector,
                                 RuntimeExecutiveReplyBindingResolver)
@@ -264,7 +268,8 @@ def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
     from .runtime_return import RuntimeSessionReturn
     from .native_read import NativeReplyReader
     returns = RuntimeSessionReturn(runtime, fabric=projector, codex=codex,
-                                   socket_path=dialogue_socket_path)
+                                   socket_path=dialogue_socket_path,
+                                   authorized_policies=authorized_policies)
     reply_reader = NativeReplyReader(returns, socket_path=dialogue_socket_path,
                                     projected_principal=True)
     reader = CanonicalTargetReader(

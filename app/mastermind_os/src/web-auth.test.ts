@@ -559,14 +559,14 @@ describe("optional Executive authentication in the existing web owner", () => {
     expect(e.client.getState()).toMatchObject({ status: "signed_in", acquisition: true, content: true });
     expect(e.client.executive!.available()).toBe(false);
   });
-  it.each([scopes.split(" ").reverse().join(" "), scopes + " admin", scopes + " mastermind.executive.read"])(
-    "accepts only the exact scope set from an Executive token response", async (returnedScope) => {
+  it.each([scopes.split(" ").reverse().join(" "), "mastermind.executive.read", "mastermind.executive.intent.submit", scopes + " admin", scopes + " mastermind.executive.read"])(
+    "accepts only the full or READ-only Executive scope set", async (returnedScope) => {
       const e = setup({ executiveResource: resource });
       e.fetcher.mockImplementation(async () => response({ token_type: "Bearer", access_token: "private-token", expires_in: 3600,
         scope: new URL(e.popup.location).searchParams.get("audience") === resource
           ? returnedScope : new URL(e.popup.location).searchParams.get("scope") }));
       await e.login();
-      expect(e.client.executive!.available()).toBe(returnedScope === scopes.split(" ").reverse().join(" "));
+      expect(e.client.executive!.available()).toBe(returnedScope === scopes.split(" ").reverse().join(" ") || returnedScope === "mastermind.executive.read");
     });
   it("exposes only three fixed authenticated POST routes with exact bodies", async () => {
     const e = setup({ executiveResource: resource }); await e.login();

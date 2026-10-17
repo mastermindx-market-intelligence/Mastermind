@@ -14,6 +14,7 @@ from types import SimpleNamespace
 import pytest
 
 from tests import test_mastermind_executive_app_asgi as auth_fixture
+from tests.test_session_bridge_runtime_return import setup
 from common.session_bridge_private_contract import private_result
 from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
 from integrations.business_mcp_auth.mcp_adapter import MastermindTokenVerifier
@@ -269,6 +270,110 @@ def test_audit_failure_closes_before_private_call(rsa_key, operation):
     status, result = request(app, auth_fixture._submit_token(rsa_key), operation)
     assert status in (401, 403) and not peer.calls
     assert result["effect"] == ("UNKNOWN" if operation == "reply" else "NONE")
+
+
+def test_verified_read_only_token_recovers_submit_policy_request_across_private_bridge(
+    rsa_key, setup, monkeypatch,
+):
+    """Real JWT policy pairs -> private frame -> Runtime provenance -> Dialogue read."""
+    import time
+    from pathlib import Path
+
+    from integrations.business_mcp_auth.principal_projection import principal_projection
+    from integrations.mastermind_executive_app.gateway import AppPolicies
+    from common.session_bridge_private_contract import PRIVATE_SCHEMA
+    from integrations.session_bridge.installed import (
+        InstalledSessionBridgeProvider, principal_frame)
+    from integrations.session_bridge.native_read import NativeReplyReader
+    from integrations.session_bridge.runtime_return import RuntimeSessionReturn
+    from tests.test_session_bridge_runtime_return import populate
+
+    s = setup
+    app, peer, clock, _ = make_app(rsa_key)
+    now = int(time.time())
+    monkeypatch.setattr(auth_fixture, "NOW", now)
+    clock[0] = now
+    # The stored request must be admitted under the actual authenticated SEND
+    # policy identity, not a fabricated policy alias.
+    send_token = auth_fixture._submit_token(rsa_key)
+    submit_principal = asyncio.run(
+        app._submit_pair[1].verify_token(send_token, now=now))
+    s.principal = submit_principal
+    s.projection = principal_projection(submit_principal)
+    # This is host-owned policy pairing, not an attribute supplied by the
+    # caller's private principal frame.
+    s.owner = RuntimeSessionReturn(
+        s.runtime, fabric=s.owner.fabric, codex=s.owner.codex,
+        socket_path=s.owner.socket_path, service_call=s.service,
+        authorized_policies=AppPolicies(
+            read=app._read_pair[1].policy,
+            submit=app._submit_pair[1].policy))
+    read_ref = populate(s)
+    before = [e.to_dict() for e in s.runtime.events.list_events(job_id=s.epoch.job_id)]
+    s.enabled[0] = False
+    s.service.calls.clear()
+
+    def no_effect(*_):
+        raise AssertionError("reply recovery cannot submit or rediscover targets")
+
+    reader = NativeReplyReader(s.owner,
+        socket_path=Path("/private/tmp/verified-policy-transition.sock"),
+        service_call=s.service, projected_principal=True)
+    provider = InstalledSessionBridgeProvider(
+        target_projector=no_effect, reply_handler=no_effect,
+        summon_handler=no_effect, reply_read_handler=reader)
+    frames = []
+
+    async def send_frame(_path, frame):
+        frames.append(copy.deepcopy(frame))
+        return SimpleNamespace(transport=TRANSPORT_SENT_OK, ok=True,
+                               result=await provider.handle_frame(frame))
+
+    peer.send_frame = send_frame
+    read_token = auth_fixture._read_token(rsa_key)
+    status, recovered = request(app, read_token, "reply",
+        {"arguments": {"operation_key": s.args["operation_key"]}})
+    assert status == 200 and recovered["ok"]
+    assert recovered["operation_key"] == s.args["operation_key"]
+    assert recovered["data"]["read_ref"] == read_ref
+    assert recovered["data"]["text"] == "The bounded finding is confirmed."
+    assert recovered["data"]["parent_consumed"] is False
+    assert [x["tool"] for x in frames] == ["session_reply_read"]
+    assert frames[0]["principal"]["policy_id"] == "bsc-e1-test-read"
+    assert s.service.calls and all(c["operation"] == "read_thread" for c in s.service.calls)
+
+    # A separately valid, signed READ policy for the same subject/resource
+    # must NOT claim this operation unless it is the approved counterpart.
+    other_policy = auth_fixture._read_policy(policy_id="unpaired-read-policy")
+    other_auth = JwtAuthenticator(
+        policy=other_policy, jwks_cache=auth_fixture._FakeJwksCache(rsa_key))
+    other_principal = asyncio.run(other_auth.verify_token(read_token, now=now))
+    previous_reads = len(s.service.calls)
+    foreign = asyncio.run(provider.handle_frame({
+        "schema": PRIVATE_SCHEMA, "tool": "session_reply_read",
+        "principal": principal_frame(other_principal),
+        "arguments": {"operation_key": s.args["operation_key"]}}))
+    assert foreign["ok"] is False and foreign["error"]["code"] == "reply_unavailable"
+    assert len(s.service.calls) == previous_reads
+
+    denied_status, denied = request(app, read_token, "send")
+    assert denied_status in (401, 403) and not denied["ok"]
+    assert len(frames) == 1
+    revoked = auth_fixture._token(rsa_key, scope="")
+    revoked_status, revoked_result = request(app, revoked, "reply",
+        {"arguments": {"operation_key": s.args["operation_key"]}})
+    assert revoked_status in (401, 403) and not revoked_result["ok"]
+    assert len(frames) == 1
+
+    # A READ credential that expires during the awaited private carrier read
+    # must never release a reply body, even if the backend found the answer.
+    s.service.on_read = lambda: clock.__setitem__(0, now + 400)
+    withheld_status, withheld = request(app, read_token, "reply",
+        {"arguments": {"operation_key": s.args["operation_key"]}})
+    assert withheld_status == 202 and not withheld["ok"]
+    assert withheld["effect"] == "UNKNOWN" and withheld["data"] is None
+    assert len(frames) == 2 and frames[-1]["tool"] == "session_reply_read"
+    assert [e.to_dict() for e in s.runtime.events.list_events(job_id=s.epoch.job_id)] == before
 
 
 def test_read_only_token_cannot_send(rsa_key):

@@ -282,8 +282,10 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
         (resource === "research"
           ? t.scope !== RESEARCH_SCOPE
           : resource === "executive"
-          ? typeof t.scope !== "string" || t.scope.trim().split(/\s+/).sort().join(" ") !==
-            EXECUTIVE_SCOPE.split(" ").sort().join(" ")
+          ? typeof t.scope !== "string" ||
+            ![EXECUTIVE_SCOPE.split(" ").sort().join(" "), "mastermind.executive.read"].includes(
+              t.scope.trim().split(/\s+/).sort().join(" "),
+            )
           : t.scope !== undefined && t.scope !== scope)
       )
         throw new Error("TOKEN_INVALID");
