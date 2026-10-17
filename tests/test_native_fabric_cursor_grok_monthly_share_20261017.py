@@ -167,7 +167,7 @@ class CursorMonthlyShareSourceTests(unittest.TestCase):
             and isinstance(n.test.func, ast.Name)
             and n.test.func.id == "is_judgment_class"
         )
-        wrapper = ast.parse("def probe():\\n    pass\\n")
+        wrapper = ast.parse("def probe():\n    pass\n")
         wrapper.body[0].body = [branch]
         base = {
             "is_judgment_class": lambda *args: True,
