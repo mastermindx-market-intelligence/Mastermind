@@ -42,6 +42,7 @@
   <nav class="ccr-sidebar" aria-label="Control Room">
     <div class="ccr-nav-group">
       <a class="ccr-nav-link is-active" href="#today" data-nav="today"><span>Today</span><span id="nav-today-count" class="ccr-nav-count">—</span></a>
+      <a class="ccr-nav-link" href="#attention-frontier" data-nav="attention-frontier"><span>Attention</span><span id="nav-attention-frontier-count" class="ccr-nav-count">—</span></a>
       <a class="ccr-nav-link" href="#autonomy" data-nav="autonomy"><span>Autonomy</span><span id="nav-autonomy-count" class="ccr-nav-count">—</span></a>
       <a class="ccr-nav-link" href="#work" data-nav="work"><span>Work</span><span id="nav-work-count" class="ccr-nav-count">—</span></a>
       <a class="ccr-nav-link" href="#surfaces" data-nav="surfaces"><span>Surfaces</span><span id="nav-surface-count" class="ccr-nav-count">—</span></a>
@@ -104,6 +105,17 @@
         </div>
         <div id="ccr-focus-list" class="ccr-mission-list"></div>
       </section>
+    </section>
+
+    <section id="attention-frontier" class="ccr-view-section ccr-af-section" aria-labelledby="attention-frontier-heading">
+      <div class="ccr-page-heading">
+        <div>
+          <p class="ccr-section-eyebrow">Executive attention</p>
+          <h2 id="attention-frontier-heading">Attention Frontier</h2>
+        </div>
+        <p class="ccr-page-note">Pressure, authority and whether the action path is usable are three separate readings. Authority is resolved before attention ordering and never moves upward on pressure; urgency never grants permission, and a blocked interrupt is still an interrupt. Nothing is compacted away without a receipt.</p>
+      </div>
+      <div id="ccr-attention-frontier" class="ccr-af-body"></div>
     </section>
 
     <section id="autonomy" class="ccr-view-section ccr-autonomy-section" aria-labelledby="autonomy-heading">

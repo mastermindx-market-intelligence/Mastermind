@@ -332,6 +332,9 @@ def test_output_keys_are_exactly_the_frozen_set(boot_packet, inbox, active_build
         # the canonical Steward-based responsibility view.  Additive only —
         # every C1-owned key above is untouched.
         "autonomy",
+        # EAF A2 additive report-only attention frontier.  Additive only, and
+        # deliberately omittable: it re-reads no source and owns no truth store.
+        "attention_frontier",
     }
     # No facts document was supplied (the common case) -> no section, no
     # degraded entry named for it (CAP-C1).
