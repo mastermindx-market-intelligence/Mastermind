@@ -279,8 +279,10 @@ _DIRECTIVE = {
         "in check and stay alert to crowding and liquidity; do not let a calm tape drift you into the "
         "crowded leader."),
     _UNKNOWN: (
-        "The in-house risk tape is unreadable right now — do NOT assume calm. Pull get_overnight_tape, "
-        "get_options (dealer gamma) and get_divergences yourself and evaluate risk BEFORE you size."),
+        "The in-house risk evidence is unavailable — do NOT assume calm. "
+        "get_overnight_tape currently returns historical DAILY closes, NOT verified live risk; "
+        "do not infer intraday movement or authorize additions from it. "
+        "Inspect independently qualified risk/options/divergence sources before sizing."),
 }
 
 _MANDATE_FREEFORM = (
@@ -295,7 +297,9 @@ _MANDATE_FREEFORM = (
     "uncorrelated defensives, and do NOT chase the crowded leader. Risk is governed at the level of "
     "the WHOLE book's gross + correlation — NOT one position. A single token 5% hedge while you stay "
     "~95% in the correlated bet is NOT risk management; it is the exact mistake this governor exists "
-    "to stop. Confirm the live risk yourself (get_overnight_tape / get_options / get_divergences) "
+    "to stop. Check the qualification and observation clocks of your risk sources: "
+    "get_overnight_tape currently shows only indicative daily closes, not a live overnight signal; "
+    "do not confuse it with authorized intraday data. Verify independent risk evidence "
     "before you commit size."
 )
 
@@ -311,8 +315,9 @@ _MANDATE_HEAVYWEIGHT = (
     "(it earns ~4% — rewarded), spread across MORE of Flagship's names, tilt toward its lower-beta / "
     "more defensive holdings, and REFUSE to go heavy. You are NOT obliged to be concentrated every "
     "day. Pressing the crowded leader into a selloff is the cardinal sin this governor exists to stop; "
-    "going lighter or to cash is a legitimate, rewarded decision. Confirm the live risk yourself "
-    "(get_overnight_tape / get_options / get_divergences) before you press."
+    "going lighter or to cash is a legitimate, rewarded decision. Check risk evidence source "
+    "clocks and rights first: get_overnight_tape is currently DAILY history, not a confirmed "
+    "live move; use qualified independent evidence before you press."
 )
 
 
@@ -339,7 +344,7 @@ def _format_briefing(st: dict) -> str:
     if officer and officer.get("headline"):
         lines.append(f"Macro Risk Officer: {officer['headline']}")
     if st.get("evidence"):
-        lines.append("Live risk tape:")
+        lines.append("Risk evidence (source clocks and freshness must be verified):")
         lines += [f"  - {e}" for e in st["evidence"]]
     lines.append("Directive: " + _DIRECTIVE.get(posture, _DIRECTIVE[_NEUTRAL]))
     if officer and officer.get("directive"):
