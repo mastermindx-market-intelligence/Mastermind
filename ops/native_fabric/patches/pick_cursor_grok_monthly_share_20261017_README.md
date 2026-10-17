@@ -40,8 +40,9 @@ routing:
 - Uses deterministic SHA-256 on an existing logical `route_key` and task class
   to sample independent tasks, not repeated evaluations. No new ledger,
   counters, queue, leases, credentials or state.
-- Explicit `prefer`, missing/invalid route keys and C3 frontier judgment
-  **never** enter this cohort.
+- Only explicitly classified **C2_COMPLEX_BOUNDED** judgment is eligible;
+  C0/C1, C3, unknown complexity, explicit `prefer` and missing/invalid
+  route keys **never** enter this cohort.
 - All admitted candidates still pass incumbent role, subject/reviewer
   independence, model needs, capacity, host, account, economics and native
   route gates. A failed Cursor candidate falls back to the original judgment
