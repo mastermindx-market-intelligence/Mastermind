@@ -1,0 +1,283 @@
+{
+  "approved_canonical_sha256": "48b2587455d839a57b4b78f5cfdb2e75df8d530ad8059a3ad6af303c0d37224f",
+  "current_canonical_sha256": "1b9afff4c9bcf6f11f5ca2db301bf25ccdc442025344e2ec402459cedcd6a2db",
+  "approved_tools": 36,
+  "current_tools": 37,
+  "added": [
+    "arrange_pages",
+    "update_pages"
+  ],
+  "removed": [
+    "rename_pages"
+  ],
+  "changed_common": [
+    "create_page",
+    "get_basic_info",
+    "get_jsx"
+  ],
+  "unchanged_common": [
+    "create_artboard",
+    "create_file",
+    "create_tokens",
+    "delete_nodes",
+    "duplicate_nodes",
+    "export",
+    "export_combined_pdf",
+    "find_nodes",
+    "finish_working_on_nodes",
+    "get_children",
+    "get_comment_thread",
+    "get_computed_styles",
+    "get_fill_image",
+    "get_font_family_info",
+    "get_guide",
+    "get_node_info",
+    "get_screenshot",
+    "get_selection",
+    "get_tokens",
+    "get_tree_summary",
+    "list_comment_thread_authors",
+    "list_comment_threads",
+    "list_resources",
+    "move_nodes",
+    "open_file",
+    "rename_nodes",
+    "rename_resource",
+    "set_comment_thread_status",
+    "set_text_content",
+    "set_tokens",
+    "update_styles",
+    "write_html"
+  ],
+  "differences": [
+    {
+      "path": "/arrange_pages",
+      "added": {
+        "annotations": {
+          "destructiveHint": true
+        },
+        "description": "Reorder the page list and add or remove dividers in one call. Dividers are visual separators between groups of pages. Pass the complete new order; the call is rejected without changes if it misses an item or lists an unknown or repeated ID, which also happens when pages were added or removed since you read the list. Pages are never deleted. Does not switch which page the user is viewing. Returns the resulting page list, including the IDs of new dividers.",
+        "inputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "fileId": {
+              "description": "The file ID that the tool should operate on.",
+              "type": "string"
+            },
+            "order": {
+              "description": "The complete page list in its new order: every page and divider ID from get_basic_info exactly once, except dividers listed in removeDividerIds. Put { \"type\": \"divider\" } where a new divider should go.",
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "type": {
+                        "const": "divider",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            "removeDividerIds": {
+              "description": "IDs of existing dividers to remove.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "order",
+            "fileId"
+          ],
+          "type": "object"
+        },
+        "name": "arrange_pages"
+      }
+    },
+    {
+      "path": "/create_page/description",
+      "old": "Creates a new page in the file and returns its ID. To work on the new page use the returned pageId in subsequent tool calls.",
+      "new": "Creates a new page in the file and returns its ID. The page is added after the page the user is viewing; use arrange_pages to move it. To work on the new page use the returned pageId in subsequent tool calls."
+    },
+    {
+      "path": "/create_page/inputSchema/properties/icon",
+      "added": {
+        "description": "Icon shown in place of the default page icon in the page list. Icons are decorative and do not change page behavior. About some icons: arrow: Depicts a thick arrow pointing to the right. May be used to indicate the key page in a file, as it points towards the page name in the page list, helping it stand out from other pages. design: Depicts a pencil crossed over a ruler. paper: Depicts a piece of crumpled paper. May be used to indicate previous drafts or discarded work that is no longer relevant.",
+        "enum": [
+          "arrow",
+          "padlock",
+          "check",
+          "cross",
+          "info",
+          "question",
+          "design",
+          "vector",
+          "images",
+          "table",
+          "presentation",
+          "blueprint",
+          "swatches",
+          "bar-chart",
+          "line-chart",
+          "pie-chart",
+          "paper"
+        ],
+        "type": "string"
+      }
+    },
+    {
+      "path": "/get_basic_info/description",
+      "old": "Get essential context about the current design: file name, page name, node count, artboards with their dimensions, font families used, a compact list of design tokens.\nCall get_basic_info first to understand the canvas situation.\n- When no fileId is provided the file the user is viewing is used.\n- Pass pageId to inspect a specific page; omit to use the page the user is viewing.\n- worldX/worldY properties are the world position of the node\n- worldX/worldY/width/height are null when the size or position depends on layout (e.g. fit-content, flex children) and the node was not measured (i.e. the page is inactive)\n- pages lists every page in the file; the one with isActive is what the user sees and controls, and it can change while you work if the user switches pages\n- you can work on other pages without disrupting the user by passing their pageId to page-scoped tools (create_artboard, export, get_basic_info); tools that take a nodeId act on whichever page the node lives on",
+      "new": "Get essential context about the current design: file name, page name, node count, artboards with their dimensions, font families used, a compact list of design tokens.\nCall get_basic_info first to understand the canvas situation.\n- When no fileId is provided the file the user is viewing is used.\n- Pass pageId to inspect a specific page; omit to use the page the user is viewing.\n- worldX/worldY properties are the world position of the node\n- worldX/worldY/width/height are null when the size or position depends on layout (e.g. fit-content, flex children) and the node was not measured (i.e. the page is inactive)\n- pages lists the page list in display order: pages (type \"page\") and dividers (type \"divider\"), which separate groups of pages and have no canvas, so their IDs cannot be used as pageId\n- the page with isActive is what the user sees and controls, and it can change while you work if the user switches pages\n- you can work on other pages without disrupting the user by passing their pageId to page-scoped tools (create_artboard, export, get_basic_info); tools that take a nodeId act on whichever page the node lives on"
+    },
+    {
+      "path": "/get_jsx/inputSchema/properties/includeNodeIds",
+      "added": {
+        "description": "Add an id attribute with the Paper node ID to each element (default true), so you can target nodes for edits. Pass false when exporting clean code for a codebase.",
+        "type": "boolean"
+      }
+    },
+    {
+      "path": "/get_jsx/inputSchema/properties/includeRootPositioning",
+      "added": {
+        "description": "Keep the root element's absolute position from the canvas (position/top/left/right/bottom) (default false). By default these are stripped so the JSX is portable and safe to reuse as a template; use get_node_info for the node's coordinates.",
+        "type": "boolean"
+      }
+    },
+    {
+      "path": "/rename_pages",
+      "removed": {
+        "annotations": {
+          "destructiveHint": true
+        },
+        "description": "Rename one or more pages in the file. Sets the display name shown in the page list. Does not switch which page the user is viewing. Supports batch renames in a single call.",
+        "inputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "fileId": {
+              "description": "The file ID that the tool should operate on.",
+              "type": "string"
+            },
+            "updates": {
+              "description": "Array of rename updates. Each item specifies a page ID and its new name.",
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "description": "The new display name for the page (shown in the page list).",
+                    "type": "string"
+                  },
+                  "pageId": {
+                    "description": "The ID of the page to rename. Use get_basic_info to list pages.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "pageId",
+                  "name"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "updates",
+            "fileId"
+          ],
+          "type": "object"
+        },
+        "name": "rename_pages"
+      }
+    },
+    {
+      "path": "/update_pages",
+      "added": {
+        "annotations": {
+          "destructiveHint": true
+        },
+        "description": "Change the name and/or icon of one or more pages in the file. Does not switch which page the user is viewing. Supports batch updates in a single call.",
+        "inputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "fileId": {
+              "description": "The file ID that the tool should operate on.",
+              "type": "string"
+            },
+            "updates": {
+              "description": "Array of page updates. Each item specifies a page ID and the fields to change.",
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "icon": {
+                    "anyOf": [
+                      {
+                        "enum": [
+                          "arrow",
+                          "padlock",
+                          "check",
+                          "cross",
+                          "info",
+                          "question",
+                          "design",
+                          "vector",
+                          "images",
+                          "table",
+                          "presentation",
+                          "blueprint",
+                          "swatches",
+                          "bar-chart",
+                          "line-chart",
+                          "pie-chart",
+                          "paper"
+                        ],
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Icon shown in place of the default page icon in the page list. Icons are decorative and do not change page behavior. About some icons: arrow: Depicts a thick arrow pointing to the right. May be used to indicate the key page in a file, as it points towards the page name in the page list, helping it stand out from other pages. design: Depicts a pencil crossed over a ruler. paper: Depicts a piece of crumpled paper. May be used to indicate previous drafts or discarded work that is no longer relevant. Omit to leave it unchanged, or pass null to restore the default page icon."
+                  },
+                  "name": {
+                    "description": "The new display name for the page (shown in the page list). Omit to leave it unchanged.",
+                    "type": "string"
+                  },
+                  "pageId": {
+                    "description": "The ID of the page to update. Use get_basic_info to list pages.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "pageId"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "updates",
+            "fileId"
+          ],
+          "type": "object"
+        },
+        "name": "update_pages"
+      }
+    }
+  ]
+}
