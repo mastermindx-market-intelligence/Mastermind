@@ -1,0 +1,40 @@
+--- a/ext/pick.py
++++ b/ext/pick.py
+@@ -235,7 +235,7 @@
+     import math
+     try:
+         import quota_remote
+-        states = quota_remote.read_provider("minimax")
++        states = quota_remote.read_provider("minimax", allow_remote=False)
+         freshness = float(quota_remote.FRESH_S)
+     except Exception:
+         return None
+@@ -285,7 +285,7 @@
+         if HERE not in sys.path:
+             sys.path.insert(0, HERE)
+         import quota_remote
+-        rows = quota_remote.glm_accounts_state()
++        rows = quota_remote.glm_accounts_state(allow_remote=False)
+     except Exception:
+         return None
+     now = datetime.now(timezone.utc)
+@@ -1490,7 +1490,9 @@
+         if HERE not in sys.path:
+             sys.path.insert(0, HERE)
+         import pool_ledger
+-        return pool_ledger.glm_burn()
++        # Advisory ranking reads cache and local usage only; never refreshes a
++        # remote quota or writes the GLM window state. Broker still grants.
++        return pool_ledger.glm_burn(read_remote=False, write_state=False)
+     except Exception:
+         return None
+ 
+@@ -1501,7 +1503,7 @@
+         return str((burn or {}).get("state") or "")
+     try:
+         import quota_remote
+-        remote_states = quota_remote.read_provider("glm")
++        remote_states = quota_remote.read_provider("glm", allow_remote=False)
+         fresh_remote = any(
+             state.source == "PROVIDER_AUTHORITATIVE"
+             and quota_remote._age_seconds(state, quota_remote._utc_now().timestamp()) <= quota_remote.FRESH_S
