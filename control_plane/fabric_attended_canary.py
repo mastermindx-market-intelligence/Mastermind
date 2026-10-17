@@ -180,6 +180,75 @@ class AttendedControlProbeSource:
             shared_run_gid=physical.worker_gid), physical)
         return raw, worker, attestation, assigned
 
+    async def native_observation(self, physical):
+        """Acquire one fixed, current same-host source observation; never admit.
+
+        No request fields select identity, source, clock, endpoint or callback.
+        The incumbent root socket namespace and kernel peer UID bind transport;
+        the current root Control/Worker definitions and source pin bind expected
+        coordinates. The JSON/hash alone grants no authenticity or availability.
+        """
+        import secrets
+        import time
+        from datetime import datetime
+        from control_plane.executive_capacity_observation import OBSERVATION_LIFETIME_MS, CLOCK_SKEW_MS
+        from control_plane.executive_fabric_adapter import _fixed_client
+        from ops.executive_os.capacity_source_contract import (
+            acquire_control_native_registration, validate_native_identity_observation,
+        )
+        from ops.executive_os.host_capacity_probe import current_boot_reference
+
+        snapshot = self.configuration(physical)
+        raw, worker, _attestation = snapshot
+        stanza = worker.get('native_capacity_enrollment')
+        if type(stanza) is not dict:
+            _refuse()
+        registration = acquire_control_native_registration(self, physical)
+        boot = current_boot_reference()
+        started_wall = time.time_ns() // 1_000_000
+        started_mono = time.monotonic_ns()
+        nonce = secrets.token_hex(16)
+        # No retry or cache: a failed/ambiguous read remains unavailable.
+        result = await _fixed_client(physical).request('native-capacity-observation', {'nonce': nonce})
+        finished_wall = time.time_ns() // 1_000_000
+        elapsed_ms = (time.monotonic_ns() - started_mono) // 1_000_000
+        if (type(result) is not dict or set(result) != {'nonce', 'observation'}
+                or result['nonce'] != nonce or not 0 <= elapsed_ms <= OBSERVATION_LIFETIME_MS
+                or abs((finished_wall - started_wall) - elapsed_ms) > CLOCK_SKEW_MS):
+            _refuse()
+        value = validate_native_identity_observation(result['observation'])
+        observed_ms = int(datetime.fromisoformat(value['observed_at'].replace('Z', '+00:00')).timestamp()*1000)
+        expected = dict(capacity_capability_id=registration['capacity_capability_id'],
+            capability_generation=registration['capability_generation'], host_ref=physical.host_ref,
+            boot_ref=boot, realm_generation=worker['subscription_realm_enrollment']['generation'],
+            source_receipt_digest=registration['source_receipt_digest'])
+        enrollment = dict(schema='mastermind.provider_realm_enrollment/v2',
+            capacity_capability_id=registration['capacity_capability_id'],
+            capability_generation=registration['capability_generation'],
+            realm_generation=expected['realm_generation'], provider_family='minimax',
+            product='claude-code', execution_surface='native_cli', auth_family='minimax_subscription_api_key',
+            **{key: stanza[key] for key in ('host_ref', 'os_principal_ref', 'config_custody_ref', 'enrollment_state')},
+            registration_receipt_digest=registration['registration_receipt_digest'],
+            source_receipt_digest=registration['source_receipt_digest'],
+            receipt_id='realm-'+hashlib.sha256((physical.worker_source_config_digest+
+                registration['registration_receipt_digest']).encode()).hexdigest())
+        expected['enrollment_receipt_digest'] = digest(enrollment)
+        if (any(value[key] != expected_value for key, expected_value in expected.items())
+                or not finished_wall-OBSERVATION_LIFETIME_MS-CLOCK_SKEW_MS <= observed_ms <= finished_wall+CLOCK_SKEW_MS
+                or value['host_ref'] != stanza['host_ref']
+                or acquire_control_native_registration(self, physical) != registration
+                or self.configuration(physical) != snapshot or current_boot_reference() != boot):
+            _refuse()
+        # Owner revalidation itself may block. Do not return a once-fresh read
+        # after its complete acquisition interval has expired or its clock moved.
+        final_wall = time.time_ns() // 1_000_000
+        total_ms = (time.monotonic_ns()-started_mono) // 1_000_000
+        if (not 0 <= total_ms <= OBSERVATION_LIFETIME_MS
+                or abs((final_wall-started_wall)-total_ms) > CLOCK_SKEW_MS
+                or not final_wall-OBSERVATION_LIFETIME_MS-CLOCK_SKEW_MS <= observed_ms <= final_wall+CLOCK_SKEW_MS):
+            _refuse()
+        return value
+
     def validate(self, snapshot, result):
         from scripts.executive_os_phase1c import _validate_canary_envelope
         raw, worker, attestation, assigned = snapshot

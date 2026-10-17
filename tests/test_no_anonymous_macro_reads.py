@@ -450,7 +450,9 @@ def test_ci_yml_macro_checkout_step_is_authenticated():
     step while leaving this one bare."""
     ci_path = _WORKFLOWS_DIR / "ci.yml"
     workflow = yaml.safe_load(ci_path.read_text())
-    steps = workflow["jobs"]["test"]["steps"]
+    # The authenticated Macro checkout moved into every actual pytest runner.
+    # The fan-in `test` job only verifies the aggregated result.
+    steps = workflow["jobs"]["pytest_shards"]["steps"]
     macro_step = next(
         s for s in steps if isinstance(s, dict) and s.get("name") == "Checkout pinned Macro engine"
     )

@@ -81,6 +81,12 @@ CI blocks merge/release, not independent useful work. Repair in-scope failures a
 independent work while one existing observer handles the release wait. A missing optional watcher
 blocks unattended-continuation claims, not authorized foreground work. The active assigned session
 owns recovery until a real successor accepts; do not end with an unbound "owner must act".
+A handoff that says "original writer/parent must act" is a custody clue, not a
+dead-chat dependency. Inspect the actual PR/workspace, lease and effects; the current
+receiver executes the next permitted recovery action, while STARTed sticky work stays
+on its original carrier until lawful reconciliation. Do not claim custody by inference.
+When writing a handoff, name a safe next action for the current or next valid receiver
+with source/effect checks, not an unreachable original parent as the sole actor.
 Use `docs/sol_skills/ACTIVE_EXECUTION.md` for the shared recovery procedure; this summary adds no
 runtime authority, required form, new watcher or extra human approval. Existing exact grants,
 source custody, effect reconciliation, review and release controls remain in force.

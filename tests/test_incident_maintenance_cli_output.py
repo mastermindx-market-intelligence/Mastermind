@@ -13,6 +13,7 @@ def report(**changes):
         "release_sha": "a" * 40,
         "disable_attempted": True,
         "bootout_attempted": True,
+        "socket_retirement_attempted": False,
         "origin_custody": False,
         "provider_called": False,
         **changes,
@@ -34,6 +35,7 @@ def test_success_output_excludes_private_metadata(monkeypatch, capsys, attempted
         "maintenance_state": "BROKER_STOPPED_OBSERVED",
         "disable_attempted": attempted,
         "bootout_attempted": attempted,
+        "socket_retirement_attempted": False,
         "origin_custody": False,
         "provider_called": False,
     }
@@ -45,6 +47,7 @@ def test_success_output_excludes_private_metadata(monkeypatch, capsys, attempted
     report(maintenance_state="fixture-private-source-metadata"),
     report(disable_attempted="fixture-private-source-metadata"),
     report(bootout_attempted=1), report(origin_custody=True),
+    report(socket_retirement_attempted=1),
     report(provider_called=True),
 ])
 def test_invalid_report_preserves_uncertain_effect_without_logging_data(
@@ -59,6 +62,7 @@ def test_invalid_report_preserves_uncertain_effect_without_logging_data(
         "maintenance_state": "REFUSED",
         "disable_attempted": None,
         "bootout_attempted": None,
+        "socket_retirement_attempted": None,
         "origin_custody": False,
         "provider_called": None,
         "error": {"code": "BROKER_MAINTENANCE_REPORT_UNPROVEN"},
