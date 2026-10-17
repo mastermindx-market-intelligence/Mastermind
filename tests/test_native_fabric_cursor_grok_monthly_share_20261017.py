@@ -4,7 +4,9 @@ Only the historical source fixture is patched. This does not touch a live
 controller, a host, a provider account, or an installed Fabric policy.
 """
 import ast
+from datetime import datetime, timedelta, timezone
 import hashlib
+import math
 from pathlib import Path
 import re
 import shutil
@@ -47,12 +49,23 @@ class CursorMonthlyShareSourceTests(unittest.TestCase):
 
     @staticmethod
     def policy(percent=15, enabled=True, classes=None):
+        now = datetime.now(timezone.utc)
         return {"routing": {
             "cursor_grok_monthly_share": {
                 "enabled": enabled,
                 "percent": percent,
                 "task_classes": classes if classes is not None
                 else ["operator", "repair"],
+                "cursor_entitlement": {
+                    "plan_type": "legacy_independent_monthly",
+                    "source": "account_dashboard_readback",
+                    "on_demand_enabled": False,
+                    "remaining_pct": 80.0,
+                    "observed_at": (now - timedelta(minutes=2))
+                        .strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "reset_at": (now + timedelta(days=10))
+                        .strftime("%Y-%m-%dT%H:%M:%SZ"),
+                },
             }
         }}
 
@@ -64,6 +77,9 @@ class CursorMonthlyShareSourceTests(unittest.TestCase):
             "_routing": lambda d: d.get("routing") or {},
             "_grok_exhausted": lambda: exhausted,
             "hashlib": hashlib,
+            "math": math,
+            "datetime": datetime,
+            "timezone": timezone,
             "re": re,
         }
         module = ast.Module(body=[self.helper], type_ignores=[])
@@ -109,6 +125,41 @@ class CursorMonthlyShareSourceTests(unittest.TestCase):
             self.assertFalse(any(
                 self.choose(f"t-{i}", doc) for i in range(60)
             ))
+
+    def test_new_shared_weekly_plan_and_unknown_quota_fail_closed(self):
+        now = datetime.now(timezone.utc)
+        samples = [
+            {"plan_type": "shared_weekly"},
+            {"plan_type": "unknown"},
+            {"source": "self_report_unverified"},
+            {"on_demand_enabled": True},
+            {"on_demand_enabled": None},
+            {"remaining_pct": 19.9},
+            {"remaining_pct": 0.0},
+            {"remaining_pct": True},
+            {"remaining_pct": float("nan")},
+            {"observed_at": (now - timedelta(hours=7))
+                .strftime("%Y-%m-%dT%H:%M:%SZ")},
+            {"observed_at": (now + timedelta(hours=1))
+                .strftime("%Y-%m-%dT%H:%M:%SZ")},
+            {"reset_at": (now - timedelta(seconds=1))
+                .strftime("%Y-%m-%dT%H:%M:%SZ")},
+            {"reset_at": (now + timedelta(days=40))
+                .strftime("%Y-%m-%dT%H:%M:%SZ")},
+            {"reset_at": "not-a-date"},
+            {"reset_at": "2030-01-01T00:00:00+01:00"},
+        ]
+        for change in samples:
+            doc = self.policy()
+            doc["routing"]["cursor_grok_monthly_share"]["cursor_entitlement"].update(change)
+            with self.subTest(change=change):
+                self.assertFalse(any(
+                    self.choose(f"quota-negative-{i}", doc)
+                    for i in range(150)
+                ))
+        doc = self.policy()
+        del doc["routing"]["cursor_grok_monthly_share"]["cursor_entitlement"]
+        self.assertFalse(self.choose("absent-proof", doc))
 
     def test_no_share_without_confirmed_grok_exhaustion(self):
         self.assertFalse(any(
