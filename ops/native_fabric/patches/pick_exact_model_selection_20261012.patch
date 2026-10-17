@@ -1,0 +1,75 @@
+--- a/ext/pick.py
++++ b/ext/pick.py
+@@ -1892,31 +1892,52 @@
+     complexity = str(task_complexity or "").strip().upper()
+     explicit_model = str(requested_model or "").strip().casefold()
+     forced = canonical_pool(pool)
+     if complexity and complexity not in TASK_COMPLEXITY_CLASSES:
+         return f"NONE reason=unknown_task_complexity ({complexity})"
+-    # Complexity alone is classification, never permission to upgrade. Only
+-    # the existing full-GLM C2 build escalation is admitted by this narrow API.
++    # A pinned exact model must already be the qualified default for this
++    # task/pool. Preserve historical implicit-GLM full escalation law; allowing
++    # an explicit same-model selection never grants extra provider quota,
++    # terminal admission, cross-class upgrade, or native session selection.
+     if explicit_model:
+-        models = {str(value).casefold() for value in _glm_models(doc).values()}
+-        full = (_glm_models(doc).get("reviewer") or _glm_models(doc).get("operator") or "").casefold()
+-        if explicit_model not in models:
+-            return f"NONE reason=unknown requested_model ({explicit_model})"
+-        effective_pool = ROUTING_TOKEN_POOLS.get(forced, forced)
+-        if forced and effective_pool != "glm":
+-            return f"NONE reason=requested_model contradicts pool={pool!r}"
+-        if tc != "build" or complexity != "C2_COMPLEX_BOUNDED" or explicit_model != full:
+-            return "NONE reason=requested model/complexity escalation not admitted"
+-        guard = launch_policy(
+-            "glm", tc, explicit_model, escalation_reason=escalation_reason,
+-            doc=doc, task_complexity=complexity,
+-        )
+-        if not guard.get("allowed"):
+-            return f"NONE reason={guard.get('reason') or 'launch_policy_refused'}"
+-        if glm_peak_active(doc, model=explicit_model) and _glm_labor_class(tc, doc):
+-            return "NONE reason=explicit model held by GLM peak labor policy"
+-        forced = "glm"
++        glm_models = {str(value).casefold() for value in _glm_models(doc).values()}
++        selected_pool = ROUTING_TOKEN_POOLS.get(forced, forced)
++        if explicit_model in glm_models:
++            if selected_pool and selected_pool != "glm":
++                return f"NONE reason=requested_model contradicts pool={pool!r}"
++            normal_model, _ = _selection_model("glm", tc, doc)
++            # New explicitly pool-qualified same-model path; never infer an
++            # implicit GLM override to bypass the existing escalation witness.
++            if not (selected_pool == "glm" and explicit_model == normal_model.casefold()):
++                full = (_glm_models(doc).get("reviewer") or _glm_models(doc).get("operator") or "").casefold()
++                if tc != "build" or complexity != "C2_COMPLEX_BOUNDED" or explicit_model != full:
++                    return "NONE reason=requested model/complexity escalation not admitted"
++                guard = launch_policy(
++                    "glm", tc, explicit_model, escalation_reason=escalation_reason,
++                    doc=doc, task_complexity=complexity,
++                )
++                if not guard.get("allowed"):
++                    return f"NONE reason={guard.get('reason') or 'launch_policy_refused'}"
++                if glm_peak_active(doc, model=explicit_model) and _glm_labor_class(tc, doc):
++                    return "NONE reason=explicit model held by GLM peak labor policy"
++            forced = "glm"
++        elif selected_pool:
++            model, _ = _selection_model(selected_pool, tc, doc)
++            if not model or model.casefold() != explicit_model:
++                return "NONE reason=requested model not admitted for selected pool/task"
++            forced = selected_pool
++        else:
++            # Unscoped explicit model can infer only a unique existing worker
++            # default, never a premium native principal or model upgrade.
++            matches = []
++            for candidate in ("grok", "minimax", "bailian"):
++                model, _ = _selection_model(candidate, tc, doc)
++                if model and model.casefold() == explicit_model:
++                    matches.append(candidate)
++            if len(matches) != 1:
++                return f"NONE reason=unknown requested_model ({explicit_model})"
++            forced = matches[0]
+     if forced:
+         forced = ROUTING_TOKEN_POOLS.get(forced, forced)
+         if forced not in (doc.get("pools") or {}):
+             return f"NONE reason=unknown forced pool={pool!r}"
+     prefer_c = canonical_pool(prefer)

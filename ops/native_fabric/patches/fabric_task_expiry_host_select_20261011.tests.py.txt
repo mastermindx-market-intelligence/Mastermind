@@ -1,0 +1,108 @@
+import json
+import pytest
+import fabric_task
+
+
+def setup_guard(monkeypatch, route="POOL=grok KEY=- MODEL=grok-4.6 REASON=burn_down_urgent HOST=ubuntu0 MODE=grok"):
+    calls=[]
+    def route_pick(*a,**kw):
+        calls.append((a,kw))
+        return route
+    monkeypatch.setattr(fabric_task.pick,"format_pick",route_pick)
+    monkeypatch.setattr(fabric_task.pick,"launch_policy",lambda *a,**kw: {"allowed":True})
+    return calls
+
+
+def test_preview_auto_uses_existing_router_without_dispatch(monkeypatch):
+    calls=setup_guard(monkeypatch)
+    def forbidden(*a,**kw): raise AssertionError("preview dispatched a worker")
+    monkeypatch.setattr(fabric_task.subprocess,"run",forbidden)
+    out=fabric_task.preview_route("stable21","review",host="auto",pool="auto",requested_model="auto")
+    assert out["state"]=="PREVIEW_ONLY" and out["reserved"] is False
+    assert (out["pool"],out["host"],out["model"])==("grok","ubuntu0","grok-4.6")
+    assert calls[0][1]["host"]=="auto"
+    assert calls[0][1]["pool"] is None
+    assert calls[0][1]["requested_model"] is None
+    assert calls[0][1]["route_key"]=="stable21"
+
+
+def test_preview_exact_host_model_and_pool_preserved(monkeypatch):
+    calls=setup_guard(monkeypatch,"POOL=glm KEY=- MODEL=glm-5.3 REASON=qualified HOST=ubuntu1 MODE=glm")
+    fabric_task.preview_route("stable22","build",host="ubuntu1",pool="glm",requested_model="glm-5.3",
+                              task_complexity="C2_COMPLEX_BOUNDED",escalation_reason="prior proof in same operation")
+    assert calls[0][1]["host"]=="ubuntu1"
+    assert calls[0][1]["pool"]=="glm"
+    assert calls[0][1]["requested_model"]=="glm-5.3"
+
+
+@pytest.mark.parametrize("bad",["","unknown host","--help","../ubuntu1","A"*80,3,True])
+def test_host_refuses_invalid_tokens_before_routing(monkeypatch,bad):
+    def forbidden(*a,**kw): raise AssertionError("picker invoked for invalid host")
+    monkeypatch.setattr(fabric_task.pick,"format_pick",forbidden)
+    with pytest.raises(fabric_task.FabricTaskError,match="INVALID_HOST_SELECTOR"):
+        fabric_task.preview_route("stable23","review",host=bad)
+
+
+def test_unqualified_host_refused_without_launch(monkeypatch,tmp_path):
+    setup_guard(monkeypatch,"NONE reason=no eligible remote mode on requested host")
+    def forbidden(*a,**kw): raise AssertionError("unqualified host dispatched")
+    monkeypatch.setattr(fabric_task.subprocess,"run",forbidden)
+    with pytest.raises(fabric_task.FabricTaskError,match="NONE reason=no eligible"):
+        fabric_task.request("stable24","review",cwd="/work",packet=tmp_path/"packet.txt",stdin_bytes=None,host="ubuntu9")
+
+
+def test_request_exact_host_and_model_uses_frozen_route_and_run_id(monkeypatch,tmp_path):
+    calls=setup_guard(monkeypatch,"POOL=glm KEY=- MODEL=glm-5.3 REASON=qualified HOST=ubuntu1 MODE=glm")
+    seen={}
+    class Completed: returncode=0
+    def fake(argv,env=None):
+        seen.update(argv=argv,env=env)
+        return Completed()
+    monkeypatch.setattr(fabric_task.subprocess,"run",fake)
+    rc=fabric_task.request("stable25","build",cwd="/work",packet=tmp_path/"packet.txt",
+                           stdin_bytes=None,host="ubuntu1",pool="glm",
+                           task_complexity="C2_COMPLEX_BOUNDED",
+                           escalation_reason="previous qualified model insufficient",
+                           requested_model="glm-5.3",root_id="root24",parent_run_id="parent24")
+    assert rc==0
+    assert calls[0][1]["host"]=="ubuntu1"
+    assert seen["argv"][2:7]==["ubuntu1","glm",str(tmp_path/"packet.txt"),"/work","glm-5.3"]
+    assert seen["argv"][-2:]==["--run-id","stable25"]
+    assert seen["env"]["POOL_ORCHESTRATOR_ID"]=="root24"
+
+
+def test_qualification_host_is_separate_not_pinnable(monkeypatch,tmp_path):
+    def forbidden(*a,**kw): raise AssertionError("should refuse before qualification")
+    monkeypatch.setattr(fabric_task.pick,"format_pick",forbidden)
+    with pytest.raises(fabric_task.FabricTaskError,match="HOST_QUALIFICATION_CONFLICT"):
+        fabric_task.request("stable26","review",cwd="/work",packet=tmp_path/"packet",stdin_bytes=None,
+                            pool="grok",qualification_host="mb",host="ubuntu1")
+
+
+def test_model_guard_refusal_does_not_spawn(monkeypatch,tmp_path):
+    monkeypatch.setattr(fabric_task.pick,"format_pick",lambda *a,**k:
+                        "POOL=glm KEY=- MODEL=glm-5.3 REASON=qualified HOST=ubuntu1 MODE=glm")
+    monkeypatch.setattr(fabric_task.pick,"launch_policy",lambda *a,**kw:
+                        {"allowed":False,"reason":"frontier_witness_required"})
+    def forbidden(*a,**kw): raise AssertionError("refused model dispatched")
+    monkeypatch.setattr(fabric_task.subprocess,"run",forbidden)
+    with pytest.raises(fabric_task.FabricTaskError,match="frontier_witness_required"):
+        fabric_task.request("stable27","build",cwd="/work",packet=tmp_path/"packet",stdin_bytes=None,
+                            host="ubuntu1",pool="glm",requested_model="glm-5.3")
+
+
+def test_preview_cli_is_readonly_and_json(monkeypatch,capsys):
+    setup_guard(monkeypatch)
+    assert fabric_task.main(["preview","--id","stable28","--class","review",
+                             "--pool","auto","--host","auto","--model","auto"])==0
+    out=json.loads(capsys.readouterr().out)
+    assert out["reserved"] is False and out["pool"]=="grok"
+
+
+def test_request_cli_forwards_requested_host(monkeypatch,tmp_path):
+    calls={}
+    monkeypatch.setattr(fabric_task,"request",lambda *a,**kw:
+                        calls.update(args=a,kwargs=kw) or 0)
+    assert fabric_task.main(["request","--id","stable29","--class","review",
+                             "--packet",str(tmp_path/"packet"),"--host","ubuntu3"])==0
+    assert calls["kwargs"]["host"]=="ubuntu3"

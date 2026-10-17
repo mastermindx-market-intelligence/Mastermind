@@ -1,0 +1,323 @@
+"""Provider-free source qualification for GLM R31 account-affinity at Broker claim."""
+from __future__ import annotations
+
+import json
+import math
+import os
+import threading
+from datetime import datetime, timezone, timedelta
+
+import pytest
+
+import lease_broker
+import pick
+import quota_remote
+
+FIXED = 2_000_000_000.0
+ACCOUNT_NAMES = ("alpha_far_reset", "zeta_near_reset")
+CONFIG = """\
+schema: mastermind.provider_accounts.v1
+providers:
+  glm:
+    enabled: true
+    concurrency_cap: 4
+    accounts:
+      - name: alpha_far_reset
+        per_account_cap: 2
+        per_model_caps: {glm-5.3-flash: 2}
+      - name: zeta_near_reset
+        per_account_cap: 2
+        per_model_caps: {glm-5.3-flash: 2}
+"""
+
+
+def iso(t):
+    return datetime.fromtimestamp(t, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def sample_account(now, *, weekly_reset=6 * 3600, five_reset=3600,
+                   weekly_pct=70, five_pct=75, age=25, source="PROVIDER_AUTHORITATIVE",
+                   provider="glm", observed_age=None, duplicate=False):
+    stamp = iso(now - (age if observed_age is None else observed_age))
+    week = dict(provider=provider, window="weekly", used=30, cap=100,
+                remaining_pct=weekly_pct, reset_at=iso(now + weekly_reset),
+                source=source, observed_at=stamp, confidence=0.98, detail="test-only")
+    five = dict(provider=provider, window="5h", used=25, cap=100,
+                remaining_pct=five_pct, reset_at=iso(now + five_reset),
+                source=source, observed_at=stamp, confidence=0.98, detail="test-only")
+    return dict(refreshed_at=now-age, states=[week, five] + ([dict(week)] if duplicate else []))
+
+
+@pytest.fixture()
+def case(monkeypatch, tmp_path):
+    config = tmp_path / "accounts.yaml"
+    config.write_text(CONFIG)
+    now = [FIXED]
+    br = lease_broker.Broker(
+        db_path=str(tmp_path / "leases.sqlite3"),
+        lock_path=str(tmp_path / "leases.lock"),
+        accounts_path=str(config),
+        now_fn=lambda: now[0],
+        check_pid=False,
+        external_gates=False,
+        grok_marker=str(tmp_path / "none"),
+        this_host="m2",
+        status_json=str(tmp_path / "status.json"),
+    )
+    cache = tmp_path / "provider-cache.json"
+    content = {
+        "glm": {"accounts": {
+            "alpha_far_reset": sample_account(now[0], weekly_reset=72*3600),
+            "zeta_near_reset": sample_account(now[0], weekly_reset=4*3600),
+        }}
+    }
+    cache.write_text(json.dumps(content))
+    monkeypatch.setattr(quota_remote, "CACHE_PATH", str(cache))
+    monkeypatch.setattr(pick, "load_pools", lambda: {
+        "routing": {"burn_down": {
+            "hours_before_reset": 36,
+            "min_remaining_pct": 15,
+            "promote": True,
+        }}
+    })
+    # No network or credential access is ever allowed during claim.
+    monkeypatch.setattr(quota_remote, "_live_glm",
+                        lambda *a, **k: pytest.fail("provider/network read in claim"))
+    def store():
+        cache.write_text(json.dumps(content))
+    def acquire(name, account=None, model="glm-5.3-flash"):
+        return br.acquire(
+            orchestrator_id=name, pool="glm", model=model, account=account,
+            task_class="review", host="ubuntu0", pid=os.getpid(),
+            ttl=120, wait=0, poll=.01,
+        )
+    return br, now, content, store, acquire, cache
+
+
+def test_urgency_selects_matching_account_in_actual_atomic_claim(case):
+    br, now, data, save, acquire, _ = case
+    r = acquire("first")
+    assert r.ok and r.account == "zeta_near_reset"
+    assert r.lease_id
+    with br._conn() as conn:
+        record=conn.execute("SELECT account,model,host FROM leases WHERE id=?",(r.lease_id,)).fetchone()
+    assert (record["account"],record["model"],record["host"])==("zeta_near_reset","glm-5.3-flash","ubuntu0")
+
+
+def test_fill_urgent_account_then_fall_back_to_grantable(case):
+    br, now, data, save, acquire, _=case
+    a=[acquire("fill"+str(i)) for i in range(4)]
+    assert all(x.ok for x in a)
+    assert [x.account for x in a]==["zeta_near_reset","zeta_near_reset",
+                                     "alpha_far_reset","alpha_far_reset"]
+    extra=acquire("fifth")
+    assert not extra.ok
+
+
+def test_explicit_sticky_account_outweighs_urgency(case):
+    br, now, data, save, acquire, _=case
+    a=acquire("stick",account="alpha_far_reset")
+    assert a.ok and a.account=="alpha_far_reset"
+
+
+@pytest.mark.parametrize("mutation", [
+    lambda d,n: d[n].update(refreshed_at=FIXED-1200),
+    lambda d,n: d[n]["states"][0].update(observed_at=iso(FIXED-1200)),
+    lambda d,n: d[n]["states"][0].update(reset_at=iso(FIXED-5)),
+    lambda d,n: d[n]["states"][0].update(reset_at=iso(FIXED+40*3600)),
+    lambda d,n: d[n]["states"][0].update(remaining_pct=10),
+    lambda d,n: d[n]["states"][0].update(remaining_pct=None),
+    lambda d,n: d[n]["states"][0].update(remaining_pct=True),
+    lambda d,n: d[n]["states"][0].update(remaining_pct=float("nan")),
+    lambda d,n: d[n]["states"][0].update(source="LOCAL_RECONSTRUCTION"),
+    lambda d,n: d[n]["states"][0].update(provider="minimax"),
+    lambda d,n: d[n]["states"][1].update(remaining_pct=0),
+    lambda d,n: d[n]["states"][1].update(source="LOCAL_RECONSTRUCTION"),
+    lambda d,n: d[n]["states"][1].update(observed_at=iso(FIXED-20)),
+    lambda d,n: d[n]["states"][1].update(reset_at=iso(FIXED-2)),
+    lambda d,n: d[n]["states"].pop(),
+    lambda d,n: d[n]["states"].append(dict(d[n]["states"][0])),
+])
+def test_invalid_or_stale_window_never_promotes_account(case,mutation):
+    br, now, data, save, acquire, _=case
+    mutation(data["glm"]["accounts"], "zeta_near_reset")
+    save()
+    # Neither account is urgent; original stable alphabetical tie-break.
+    assert acquire("invalid").account=="alpha_far_reset"
+
+
+def test_urgent_recomputed_in_claim_not_cached_across_reset(case):
+    br, now, data, save, acquire, _=case
+    assert br._fresh_glm_expiring_accounts(set(ACCOUNT_NAMES))=={"zeta_near_reset": FIXED+4*3600}
+    now[0]+=10*3600
+    assert br._fresh_glm_expiring_accounts(set(ACCOUNT_NAMES))=={}
+    # Stale evidence must not keep priority; normal route remains possible.
+    assert acquire("later").account=="alpha_far_reset"
+
+
+def test_policy_disabled_returns_original_order(case,monkeypatch):
+    br, now, data, save, acquire, _=case
+    monkeypatch.setattr(pick, "load_pools",
+                        lambda: {"routing":{"burn_down":{"promote":False}}})
+    assert acquire("disabled").account=="alpha_far_reset"
+
+
+def test_freshness_reader_errors_fail_neutral_without_new_authority(case,monkeypatch):
+    br, now, data, save, acquire, cache=case
+    cache.write_text("{corrupt")
+    assert acquire("corrupt").account=="alpha_far_reset"
+    cache.unlink()
+    assert br._fresh_glm_expiring_accounts(set(ACCOUNT_NAMES))=={}
+    # Without authoritative data, the next normal claim may load-balance to
+    # the less-occupied account; it is not an expiry-guided decision.
+    second=acquire("missing")
+    assert second.ok and second.account=="zeta_near_reset"
+
+
+def test_untrusted_cache_symlink_is_not_consumed(case,tmp_path):
+    br, now, data, save, acquire, cache=case
+    target=tmp_path/"target.json";target.write_text(json.dumps(data))
+    cache.unlink();cache.symlink_to(target)
+    assert acquire("symlink").account=="alpha_far_reset"
+
+
+def test_model_cap_is_hard_even_for_urgent_account(case):
+    br, now, data, save, acquire, _=case
+    # Bound model-specific cap on urgent account to 0, and preserved normal
+    # account capacity can still admit the other qualified account.
+    data["glm"]["accounts"]["zeta_near_reset"]["states"][1]["remaining_pct"]=85
+    save()
+    source_provider=br.provider
+    def changed_provider(pool):
+        provider=source_provider(pool)
+        if provider["_name"]=="glm":
+            for row in provider["accounts"]:
+                if row["name"]=="zeta_near_reset":
+                    row["per_model_caps"]={"glm-5.3-flash":0}
+        return provider
+    br.provider=changed_provider
+    assert acquire("model-limited").account=="alpha_far_reset"
+
+
+def test_concurrent_claims_not_double_overcap(case):
+    br, now, data, save, acquire, _=case
+    barrier=threading.Barrier(6)
+    results=[]
+    mutex=threading.Lock()
+    def worker(i):
+        barrier.wait()
+        result=acquire("parallel-"+str(i))
+        with mutex:
+            results.append(result)
+    threads=[threading.Thread(target=worker,args=(i,)) for i in range(6)]
+    for t in threads:t.start()
+    for t in threads:t.join(timeout=15)
+    assert len(results)==6
+    granted=[r for r in results if r.ok]
+    assert len(granted)==4
+    assert sum(r.account=="zeta_near_reset" for r in granted)==2
+    assert sum(r.account=="alpha_far_reset" for r in granted)==2
+    assert len({r.lease_id for r in granted})==4
+
+
+def test_no_urgency_on_other_provider_pool(case):
+    br, now, data, save, acquire, _=case
+    assert br._fresh_glm_expiring_accounts(set())=={}
+    assert br._fresh_glm_expiring_accounts({"unknown"})=={}
+
+
+def test_cache_symlink_swap_between_stat_and_open_cannot_promote(case, monkeypatch, tmp_path):
+    """Adversarial path swap after lstat cannot change the opened quota file."""
+    br, now, data, save, acquire, cache = case
+    target = tmp_path / "other.json"
+    target.write_text(json.dumps(data))
+    original_open = lease_broker.os.open
+    changed = [False]
+
+    def swap(path, *args, **kwargs):
+        if not changed[0] and str(path) == str(cache):
+            cache.unlink()
+            cache.symlink_to(target)
+            changed[0] = True
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(lease_broker.os, "open", swap)
+    assert br._fresh_glm_expiring_accounts(set(ACCOUNT_NAMES)) == {}
+    assert changed == [True]
+
+
+def test_cache_modified_while_open_is_not_trusted(case, monkeypatch):
+    """A simultaneous provider cache replace/in-place edit cannot combine epochs."""
+    br, now, data, save, acquire, cache = case
+    original_read = lease_broker.os.read
+    touched = [False]
+
+    def mutate(fd, n):
+        chunk = original_read(fd, n)
+        if not touched[0]:
+            touched[0] = True
+            cache.write_text('{"glm":{"accounts":{}}}\n' + ' ' * 120)
+        return chunk
+
+    monkeypatch.setattr(lease_broker.os, "read", mutate)
+    assert br._fresh_glm_expiring_accounts(set(ACCOUNT_NAMES)) == {}
+    assert touched == [True]
+
+
+def test_cache_truncated_json_is_not_urgency(case):
+    br, now, data, save, acquire, cache = case
+    cache.write_bytes(b'{"glm": {"accounts": ')
+    assert br._fresh_glm_expiring_accounts(set(ACCOUNT_NAMES)) == {}
+
+
+def test_cache_exceeding_bounded_file_limit_is_not_urgency(case):
+    br, now, data, save, acquire, cache = case
+    cache.write_bytes(b' ' * (1_048_576 + 1))
+    assert br._fresh_glm_expiring_accounts(set(ACCOUNT_NAMES)) == {}
+
+
+def test_host_qualified_account_subset_precedes_expiry_preference(case, monkeypatch):
+    """The current host+model qualification owner is never overridden by expiry."""
+    import glm_host_account_source
+    br, now, data, save, acquire, cache = case
+    seen = []
+
+    def compatible(rows, *, host, model, now, preferred, hosts_path):
+        seen.append((host, model, preferred))
+        return ([row for row in rows if row["name"] == "alpha_far_reset"], ())
+
+    monkeypatch.setattr(glm_host_account_source, "filter_observed_accounts", compatible)
+    actual = br.acquire(
+        orchestrator_id="host-bound-1", pool="glm", account=None,
+        model="glm-5.3-flash", task_class="remote-glm", host="ubuntu0",
+        pid=os.getpid(), ttl=120, wait=0, poll=.01,
+    )
+    assert actual.ok and actual.account == "alpha_far_reset"
+    assert seen == [("ubuntu0", "glm-5.3-flash", None)]
+    with br._conn() as conn:
+        row = conn.execute("SELECT account, model, host FROM leases WHERE id=?",
+                           (actual.lease_id,)).fetchone()
+    assert (row["account"], row["model"], row["host"]) == (
+        "alpha_far_reset", "glm-5.3-flash", "ubuntu0",
+    )
+
+
+def test_explicit_account_outside_host_qualified_subset_stays_refused(case, monkeypatch):
+    import glm_host_account_source
+    br, now, data, save, acquire, cache = case
+
+    def compatible(rows, *, host, model, now, preferred, hosts_path):
+        allowed = ([row for row in rows if row["name"] == "alpha_far_reset"]
+                   if preferred in (None, "alpha_far_reset") else [])
+        return allowed, ()
+
+    monkeypatch.setattr(glm_host_account_source, "filter_observed_accounts", compatible)
+    result = br.acquire(
+        orchestrator_id="host-refused-1", pool="glm", account="zeta_near_reset",
+        model="glm-5.3-flash", task_class="remote-glm", host="ubuntu0",
+        pid=os.getpid(), ttl=120, wait=0, poll=.01,
+    )
+    assert not result.ok and result.reason == "host_account_unavailable"
+    with br._conn() as conn:
+        rows = conn.execute("SELECT COUNT(*) AS n FROM leases").fetchone()
+    assert rows["n"] == 0

@@ -1,0 +1,113 @@
+--- a/ext/pick.py
++++ b/ext/pick.py
+@@ -271,48 +271,83 @@
+     eligible = [window for window in windows if window[1] >= floor]
+     return min(eligible or windows, key=lambda window: window[0])
+ 
+ 
+ def _glm_account_weekly_windows() -> Optional[List[Tuple[float, float]]]:
+-    """[(hours until THAT account's weekly reset, THAT account's remaining %)].
+-
+-    Read from one provider row per account (`quota_remote.glm_accounts_state()`,
+-    cached, FRESH_S=600, ~5 ms) so hours and remaining are paired by construction.
+-    An account whose reset is already in the PAST is DROPPED, not scored as
+-    hours=0 -- a past stamp is a stale reading, not an imminent boundary.
+-    None = no authoritative per-account reading at all -> callers refuse.
++    """Provider-account weekly urgency only when its SAME 5-hour window is usable.
++
++    R31 must not route a task to GLM merely because one account's weekly
++    allowance expires soon while the account's near-term 5h allowance is spent.
++    Use paired provider-authoritative states from the incumbent quota reader;
++    stale/mixed/incomplete observations never establish expiring capacity.
++    This is suitability only; the existing lease broker must bind the exact
++    grantable account at claim time.
+     """
++    import math
+     try:
+         if HERE not in sys.path:
+             sys.path.insert(0, HERE)
+         import quota_remote
+         rows = quota_remote.glm_accounts_state()
++        floor = float(_burn_down_cfg()["min_remaining_pct"])
++        fresh_s = float(quota_remote.FRESH_S)
++        if not math.isfinite(fresh_s) or fresh_s <= 0:
++            return None
++        if not math.isfinite(floor) or not 0 <= floor <= 100:
++            return None
+     except Exception:
+         return None
++
+     now = datetime.now(timezone.utc)
++    def strict_time(value):
++        if not isinstance(value, str) or not value.strip():
++            return None
++        try:
++            dt = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
++            return dt if dt.utcoffset() is not None else None
++        except (TypeError, ValueError, OverflowError):
++            return None
++
++    def checked(state, expected):
++        if (getattr(state, "window", None) != expected
++                or getattr(state, "provider", None) != "glm"
++                or getattr(state, "source", None) != "PROVIDER_AUTHORITATIVE"):
++            return None
++        remaining = getattr(state, "remaining_pct", None)
++        if type(remaining) not in (int, float) or not math.isfinite(remaining):
++            return None
++        if not 0 <= remaining <= 100:
++            return None
++        observed = strict_time(getattr(state, "observed_at", None))
++        reset = strict_time(getattr(state, "reset_at", None))
++        if observed is None or reset is None:
++            return None
++        if not 0 <= (now - observed).total_seconds() <= fresh_s or reset <= now:
++            return None
++        return (float(remaining), observed, reset)
++
+     out: List[Tuple[float, float]] = []
+     for row in rows or []:
+-        if str((row or {}).get("source") or "") != "PROVIDER_AUTHORITATIVE":
+-            continue
+-        for st in (row or {}).get("states") or []:
+-            if str(getattr(st, "window", "") or "").lower() not in ("weekly", "week", "7d"):
+-                continue
+-            rem = getattr(st, "remaining_pct", None)
+-            reset = getattr(st, "reset_at", None)
+-            if rem is None or not reset:
+-                continue
+-            try:
+-                when = datetime.fromisoformat(str(reset).strip().replace("Z", "+00:00"))
+-                if when.tzinfo is None:
+-                    when = when.replace(tzinfo=timezone.utc)
+-                hours = (when - now).total_seconds() / 3600.0
+-                rem_f = max(0.0, min(100.0, float(rem)))
+-            except (TypeError, ValueError):
+-                continue
+-            if hours <= 0:
+-                continue
+-            out.append((hours, rem_f))
++        if not isinstance(row, dict) or row.get("source") != "PROVIDER_AUTHORITATIVE":
++            continue
++        states = row.get("states")
++        if not isinstance(states, list) or len(states) > 8:
++            continue
++        short = [checked(state, "5h") for state in states
++                 if getattr(state, "window", None) == "5h"]
++        weekly = [checked(state, "weekly") for state in states
++                  if getattr(state, "window", None) == "weekly"]
++        if (len(short) != 1 or len(weekly) != 1
++                or short[0] is None or weekly[0] is None):
++            continue
++        five_pct, five_observed, _five_reset = short[0]
++        week_pct, week_observed, week_reset = weekly[0]
++        if five_observed != week_observed or five_pct < floor:
++            continue
++        hours = (week_reset - now).total_seconds() / 3600.0
++        if hours > 0:
++            out.append((hours, week_pct))
+     return out or None
+ 
+ 
+ def _glm_burn_down_window(doc: Optional[Dict[str, Any]] = None
+                           ) -> Optional[Tuple[float, float]]:

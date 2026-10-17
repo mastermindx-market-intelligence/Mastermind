@@ -1,0 +1,108 @@
+--- a/ext/tests/test_r31_glm_burn_down.py
++++ b/ext/tests/test_r31_glm_burn_down.py
+@@ -38,22 +38,32 @@
+ 
+ 
+ def _state(window, remaining_pct, reset_hours):
+     st = types.SimpleNamespace()
+     st.window = window
++    st.provider = "glm"
++    st.source = "PROVIDER_AUTHORITATIVE"
++    st.observed_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+     st.remaining_pct = remaining_pct
+     st.reset_at = (None if reset_hours is None else
+                    (datetime.now(timezone.utc) + timedelta(hours=reset_hours))
+                    .isoformat().replace("+00:00", "Z"))
+     return st
+ 
+ 
+ def _rows(spec, source="PROVIDER_AUTHORITATIVE"):
+-    """spec = [(account_name, remaining_pct_week, hours_to_its_weekly_reset), ...]"""
+-    return [{"name": n, "source": source, "error": None,
+-             "states": [_state("5h", 100.0, 1.0), _state("weekly", rem, hrs)]}
+-            for n, rem, hrs in spec]
++    """Each account has paired short+weekly observations from one provider moment."""
++    rows = []
++    for n, rem, hrs in spec:
++        stamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
++        states = [_state("5h", 100.0, 1.0), _state("weekly", rem, hrs)]
++        for st in states:
++            st.observed_at = stamp
++            st.source = source
++        rows.append({"name": n, "source": source, "error": None,
++                     "states": states})
++    return rows
+ 
+ 
+ @pytest.fixture(autouse=True)
+ def _quiet(monkeypatch):
+     monkeypatch.setattr(pick, "_slot_concurrent", lambda p: 0)
+@@ -192,16 +202,16 @@
+     })
+     _use(monkeypatch, [("chairman-max", 0.0, 6.7)])
+     assert pick.burn_down_urgent("glm") is False
+ 
+ 
+-# ── 5. MiniMax now requires provider evidence; Grok is unchanged ──────────────────────────────────
+-
+-def test_minimax_requires_observation_and_grok_keeps_legacy_policy(monkeypatch):
++# ── 5. All pools require dated provider evidence, no fictitious 100% ───────────────────────────────
++
++def test_minimax_glm_grok_unknown_balances_cannot_claim_expiring_surplus(monkeypatch):
+     monkeypatch.setattr(pick, "_weekly_remaining_pct", lambda p: None)
+     assert pick._burn_down_remaining_pct_r31("minimax") is None
+-    assert pick._burn_down_remaining_pct_r31("grok") == 100.0
++    assert pick._burn_down_remaining_pct_r31("grok") is None
+     assert pick._burn_down_remaining_pct_r31("glm") is None
+ 
+ 
+ def test_glm_readers_do_not_touch_minimax_or_grok_hours(monkeypatch):
+     monkeypatch.setattr(pick, "_minimax_burn_down_window", lambda doc=None: None)
+@@ -275,5 +285,47 @@
+         return _rows([("rich", 66.0, 6.0)])
+ 
+     monkeypatch.setattr(quota_remote, "glm_accounts_state", counted)
+     assert pick.burn_down_urgent("glm") is True
+     assert calls["n"] == 1, f"pair sampled {calls['n']} times, must be exactly 1"
++
++
++# ── R31 account-affinity/5h safety: weekly balance alone is not executable ─────
++
++def test_weekly_near_reset_cannot_promote_if_five_hour_exhausted(monkeypatch):
++    rows = _rows([("near-spent", 80.0, 4.0)])
++    rows[0]["states"][0].remaining_pct = 0.0
++    monkeypatch.setattr(quota_remote, "glm_accounts_state", lambda *a, **k: rows)
++    assert pick._glm_account_weekly_windows() is None
++    assert pick.burn_down_urgent("glm") is False
++
++
++def test_weekly_near_reset_rejects_insufficient_five_hour_budget(monkeypatch):
++    rows = _rows([("near-low", 80.0, 4.0)])
++    rows[0]["states"][0].remaining_pct = pick._burn_down_cfg()["min_remaining_pct"] - 0.01
++    monkeypatch.setattr(quota_remote, "glm_accounts_state", lambda *a, **k: rows)
++    assert pick.burn_down_urgent("glm") is False
++
++
++@pytest.mark.parametrize("mutate", [
++    lambda r: r["states"].pop(0),
++    lambda r: r["states"].append(r["states"][0]),
++    lambda r: r["states"][0].__setattr__("source", "LOCAL_RECONSTRUCTION"),
++    lambda r: r["states"][0].__setattr__("provider", "minimax"),
++    lambda r: r["states"][0].__setattr__("reset_at", None),
++    lambda r: r["states"][0].__setattr__("remaining_pct", True),
++    lambda r: r["states"][0].__setattr__("observed_at", "2024-01-01T00:00:00Z"),
++    lambda r: r["states"][1].__setattr__("observed_at", "2024-01-01T00:00:00Z"),
++    lambda r: r["states"][1].__setattr__("remaining_pct", float("nan")),
++    lambda r: r["states"][1].__setattr__("reset_at", "2024-01-01T00:00:00Z"),
++    lambda r: r["states"][1].__setattr__("reset_at", "2050-01-01T00:00:00"),
++])
++def test_malformed_mixed_or_stale_provider_windows_never_claim_glm_urgency(monkeypatch, mutate):
++    rows = _rows([("near", 75.0, 5.0)])
++    mutate(rows[0])
++    monkeypatch.setattr(quota_remote, "glm_accounts_state", lambda *a, **k: rows)
++    assert pick.burn_down_urgent("glm") is False
++
++
++def test_valid_same_account_five_hour_and_weekly_window_promotes(monkeypatch):
++    _use(monkeypatch, [("near-rich", 75.0, 4.0)])
++    assert pick.burn_down_urgent("glm") is True
