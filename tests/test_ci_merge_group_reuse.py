@@ -403,3 +403,118 @@ def test_endpoint_components_refuse_traversal_or_stealth_owners(endpoint):
             run=lambda *args, **kwargs: pytest.fail("no provider request"),
             executable="/approved/gh",
         )
+
+
+def _stub_parallel_shard(monkeypatch, tmp_path):
+    from scripts import ci_parallel_shard as runner
+    from scripts import ci_merge_group_reuse as reuse
+    included = tuple(f"tests/test_fake_{index}.py" for index in range(12))
+    monkeypatch.setattr(runner, "validate_parallel_workflow", lambda *_a: None)
+    monkeypatch.setattr(runner.ci_pytest, "resolve_gate", lambda root: {
+        "included": included,
+        "plan": {"discovered": len(included), "excluded": 0, "running": len(included)},
+    })
+    workflow = tmp_path / ".github" / "workflows"
+    workflow.mkdir(parents=True)
+    (workflow / "ci.yml").write_text("stub not a release workflow")
+    return runner, reuse, included
+
+
+def test_canonical_runner_reuses_exact_qualified_push_proof_without_pytest(monkeypatch, tmp_path):
+    from scripts import ci_merge_group_reuse as reuse
+    runner, _, included = _stub_parallel_shard(monkeypatch, tmp_path)
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
+    monkeypatch.setenv("GITHUB_REF", "refs/heads/master")
+    seen=[]
+    monkeypatch.setattr(reuse, "possible_same_sha_reuse_for_ci_runner", lambda: (True, "PRIOR_EXACT_MERGE_GROUP_CI_PROVEN"))
+    monkeypatch.setattr(runner.subprocess, "run", lambda *args, **kw: pytest.fail("previous exact proof must prevent a duplicate pytest subprocess"))
+    assert runner.main(["--jobs", "3", "--index", "1", "--root", str(tmp_path)]) == 0
+
+
+@pytest.mark.parametrize("qualified,raises", [(False, False), (False, True)])
+def test_canonical_runner_executes_full_suite_for_missing_or_error_proof(monkeypatch, tmp_path, qualified, raises):
+    import subprocess
+    from scripts import ci_merge_group_reuse as reuse
+    runner, _, included = _stub_parallel_shard(monkeypatch, tmp_path)
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
+    monkeypatch.setenv("GITHUB_REF", "refs/heads/master")
+    def outcome():
+        if raises:
+            raise PermissionError("provider-denied")
+        return qualified, "PROVIDER_EVIDENCE_UNAVAILABLE"
+    monkeypatch.setattr(reuse, "possible_same_sha_reuse_for_ci_runner", outcome)
+    seen=[]
+    def fake_pytest(args, **kwargs):
+        seen.append((args, kwargs))
+        return subprocess.CompletedProcess(args, 0)
+    monkeypatch.setattr(runner.subprocess, "run", fake_pytest)
+    assert runner.main(["--jobs", "3", "--index", "2", "--root", str(tmp_path)]) == 0
+    assert seen == [(runner.ci_pytest.pytest_argv(runner.ci_pytest.partition_modules(included,jobs=3)[2], progress=True), {"cwd":tmp_path.resolve(),"check":False})]
+
+
+def test_canonical_runner_does_not_probe_during_merge_group_or_plan_only(monkeypatch, tmp_path):
+    from scripts import ci_merge_group_reuse as reuse
+    runner, _, included = _stub_parallel_shard(monkeypatch, tmp_path)
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "merge_group")
+    monkeypatch.setenv("GITHUB_REF", "refs/heads/master")
+    monkeypatch.setattr(reuse, "possible_same_sha_reuse_for_ci_runner", lambda: pytest.fail("merge_group should never inspect prior proof"))
+    import subprocess
+    seen=[]
+    def run(args, **kwargs):
+        seen.append(args)
+        return subprocess.CompletedProcess(args,0)
+    monkeypatch.setattr(runner.subprocess, "run",run)
+    assert runner.main(["--jobs","3","--index","0","--root",str(tmp_path)]) == 0
+    assert len(seen)==1
+    monkeypatch.setenv("GITHUB_EVENT_NAME","push")
+    assert runner.main(["--jobs","3","--index","0","--root",str(tmp_path),"--plan-only"]) == 0
+    assert len(seen)==1
+
+
+def test_real_workflow_grants_narrow_actions_read_and_only_push_step_receives_token():
+    from pathlib import Path
+    import yaml
+    from scripts import ci_pytest
+    root = Path(__file__).resolve().parents[1]
+    source = (root / '.github/workflows/ci.yml').read_text(encoding='utf-8')
+    workflow = yaml.load(source, Loader=ci_pytest._WorkflowYAMLLoader)
+    assert workflow['permissions'] == {'contents': 'read'}
+    assert set(workflow['jobs']) == {'pytest_shards', 'test'}
+    shard = workflow['jobs']['pytest_shards']
+    assert shard['permissions'] == {'contents': 'read', 'actions': 'read'}
+    assert workflow['jobs']['test'].get('permissions') is None
+    steps = [step for step in shard['steps'] if step.get('name') == 'Run repository test shard']
+    assert len(steps) == 1
+    step = steps[0]
+    assert step['run'] == 'python -m scripts.ci_parallel_shard --jobs 3 --index ${{ matrix.index }}'
+    assert step.get('env') == {'GH_TOKEN': "${{ github.event_name == 'push' && github.token || '' }}"}
+    assert shard['strategy']['matrix']['index'] == [0,1,2]
+    assert workflow['jobs']['test']['name'] == 'test'
+    assert workflow['jobs']['test']['needs'] == ['pytest_shards']
+
+
+@pytest.mark.parametrize(("before", "after"), [
+    ("      actions: read", "      actions: write"),
+    ("      actions: read", "      actions: none"),
+    ("      contents: read\n      actions: read", "      actions: read"),
+    ("github.event_name == 'push' && github.token || ''", "github.token"),
+    ("github.event_name == 'push' && github.token || ''", "github.event_name == 'pull_request' && github.token || ''"),
+])
+def test_workflow_privileges_cannot_mutate_without_detection(before, after):
+    """Bound the exact source-level grant to push-only read-only provenance."""
+    from pathlib import Path
+    import yaml
+    from scripts import ci_pytest
+    root = Path(__file__).resolve().parents[1]
+    text = (root / '.github/workflows/ci.yml').read_text(encoding='utf-8')
+    assert before in text
+    mutant = text.replace(before, after, 1)
+    doc = yaml.load(mutant, Loader=ci_pytest._WorkflowYAMLLoader)
+    shards = doc['jobs']['pytest_shards']
+    step = next(s for s in shards['steps'] if s.get('name') == 'Run repository test shard')
+    is_exact = (
+        doc['permissions'] == {'contents': 'read'}
+        and shards.get('permissions') == {'contents': 'read','actions': 'read'}
+        and step.get('env') == {'GH_TOKEN': "${{ github.event_name == 'push' && github.token || '' }}"}
+    )
+    assert not is_exact
