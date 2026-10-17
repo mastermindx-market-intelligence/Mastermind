@@ -1,0 +1,6 @@
+{
+  "path": "data/reference/issuer_master.parquet",
+  "source_commit": "37122b69fffa98cb160022c4831df0338ef3e7e3",
+  "sha256": "61738052362bdd939d686461d2bb19fcb7b01ce6fc2dc8fddd77d8e4ea44b61c",
+  "bytes": 43765
+}

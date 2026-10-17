@@ -1,0 +1,54 @@
+{
+  "old": "7cff784b47556464eb6ec20445fcf5e659c5b64d",
+  "new": "d1594f3c7ae750db3f14b4eebf0de3460f84267a",
+  "files": [
+    {
+      "path": "AGENTS.md",
+      "pickup_blob": "f251f95d2b1a335059bb22422afde77f618918e1",
+      "current_blob": "f251f95d2b1a335059bb22422afde77f618918e1",
+      "same": true
+    },
+    {
+      "path": "docs/DELIVERY_WORKFLOW.md",
+      "pickup_blob": "1aa822c511d1af89f3ec580b2178f62ad75502a3",
+      "current_blob": "1aa822c511d1af89f3ec580b2178f62ad75502a3",
+      "same": true
+    },
+    {
+      "path": "docs/sol_skills/INDEX.md",
+      "pickup_blob": "4b0189a75d559d963365097485e8509a49c70e23",
+      "current_blob": "4b0189a75d559d963365097485e8509a49c70e23",
+      "same": true
+    },
+    {
+      "path": "docs/sol_skills/BOOTSTRAP_KERNEL.md",
+      "pickup_blob": "2e394aa111f8db58abb95d8511416bcf440269fd",
+      "current_blob": "2e394aa111f8db58abb95d8511416bcf440269fd",
+      "same": true
+    },
+    {
+      "path": "docs/sol_skills/ACTIVE_EXECUTION.md",
+      "pickup_blob": "9fed10f7cc7a2f4323d039b406f7c0715445e22e",
+      "current_blob": "9fed10f7cc7a2f4323d039b406f7c0715445e22e",
+      "same": true
+    },
+    {
+      "path": "docs/sol_skills/WORKER_AVENUE_ROUTING.md",
+      "pickup_blob": "5c0820beedbf14e32a3342c745e36f75463cdfaa",
+      "current_blob": "5c0820beedbf14e32a3342c745e36f75463cdfaa",
+      "same": true
+    },
+    {
+      "path": "docs/sol_skills/WEB_CEO_DELEGATION.md",
+      "pickup_blob": "2073a33f05506268b15f0b5ce292ce57d5b60ed3",
+      "current_blob": "2073a33f05506268b15f0b5ce292ce57d5b60ed3",
+      "same": true
+    },
+    {
+      "path": "docs/sol_skills/REVIEW_RETURN.md",
+      "pickup_blob": "f4e7fa1dd183cfb3d28d26dccfbf527dd5dd8e00",
+      "current_blob": "f4e7fa1dd183cfb3d28d26dccfbf527dd5dd8e00",
+      "same": true
+    }
+  ]
+}

@@ -1,0 +1,116 @@
+{
+  "case": "aapl_unlinked_assets",
+  "source_commit": "37122b69fffa98cb160022c4831df0338ef3e7e3",
+  "response_sha256": "aa6f82dc415e2d3449118c627deb339f98814f0a1be6dff61e88f8819495bb21",
+  "actual_sha256": "aa6f82dc415e2d3449118c627deb339f98814f0a1be6dff61e88f8819495bb21",
+  "bytes": 68681,
+  "query_hash": "3d288b5d9b464abd498154af8e8e2c559d64465ef999e1f38f97e691b66010bd",
+  "delivery": {
+    "kind": "committed_golden_fixture",
+    "attested": false,
+    "production_issuer_service": false
+  },
+  "authority": {
+    "class": "context_only",
+    "display_only": true
+  },
+  "root_cells": [
+    {
+      "cell_id": "metric_cell_230e839775901921d4c86e2c889ab07ca7e4ee02045a2ed111713e6aad14fb4e",
+      "governance_bundle_id": "716c2b82d8d5e8f451be2fcd3646c3965c816735327c1fc7875320a8d8c54671",
+      "ticker": "AAPL",
+      "entity_id": "0000320193",
+      "metric_id": "total_assets",
+      "period": {
+        "kind": "instant",
+        "start": null,
+        "end": "2025-09-27",
+        "fiscal_year": null,
+        "fiscal_quarter": null,
+        "calendar_kind": "unknown",
+        "fiscal_year_weeks": null,
+        "week_count": null,
+        "inferred_week_count": null,
+        "semantics": [
+          "instant"
+        ],
+        "label": "2025-09-27"
+      },
+      "state": "not_evaluable",
+      "status": "not_evaluable",
+      "value": null,
+      "unit": "USD",
+      "reason": "unlinked source vintages require an explicit typed revision lineage",
+      "provenance": {
+        "kind": "direct",
+        "evaluation_policy": "on_demand_cutoff_projection",
+        "policy": "latest_known_as_of",
+        "source_snapshot_at": "2026-08-01T00:00:00.000000Z",
+        "recorded_cutoff_at": "2026-08-23T12:00:00.000000Z",
+        "source_entity_id": null,
+        "source": null,
+        "accession": null,
+        "document_id": null,
+        "source_url": null,
+        "source_body_sha256": null,
+        "form": null,
+        "filed_at": null,
+        "filing_metadata_available_at": null,
+        "filing_metadata_content_sha256": null,
+        "accepted_at": null,
+        "recorded_at": null,
+        "mapping_available_at": null,
+        "governance_available_at": "2026-08-02T00:00:00.000000Z",
+        "computed_at": null,
+        "published_at": null,
+        "source_ready_at": "2026-07-31T10:01:02.000000Z",
+        "system_ready_at": "2026-08-23T07:02:13.000000Z",
+        "concept_qname": "us-gaap:Assets",
+        "taxonomy": "us-gaap",
+        "concept": "Assets",
+        "unit": null,
+        "metric_rule_id": "metric.total_assets/v1",
+        "metric_rule_version": "1.0.0",
+        "metric_rule_digest": "226ae11695da6185b83632bdf493e147a143c178e116b21254ff2910aff645b1",
+        "mapping_rule_id": "mapping.total_assets/v1",
+        "mapping_rule_version": "1.0.0",
+        "mapping_digest": "fce6d4977ad2bc4e45d031aa489319ba7b87adfa21ceaaefa6533ac630934c25",
+        "mapping_rule_ids": [
+          "mapping.total_assets/v1"
+        ],
+        "mapping_rule_versions": [
+          "1.0.0"
+        ],
+        "mapping_digests": [
+          "fce6d4977ad2bc4e45d031aa489319ba7b87adfa21ceaaefa6533ac630934c25"
+        ],
+        "formula_rule_id": null,
+        "formula_rule_version": null,
+        "formula_digest": null,
+        "catalog_id": "fundamental_forensics_core_gaap_metrics",
+        "catalog_version": "cutoff-projection-v1",
+        "catalog_digest": "737db87533977c90db806b7808239b2ac0bda58d21551674a750f21d28d89921",
+        "mapping_pack_version": "cutoff-projection-v1",
+        "mapping_pack_digest": "4794177f62a59f91818126627534624f37236b32145587c3749b3b908e74b308",
+        "formula_pack_version": "cutoff-projection-v1",
+        "formula_pack_digest": "effc801cdb10ddffccd0829ec64df245d13fa5f5d53369916ded2e9175ab7c47",
+        "confidence": "A",
+        "alias_priority": 10,
+        "source_occurrence_ids": [
+          "rawfact_9669446bc8076fa26bca33a3d9a067093bddadbb28e4617318bb3de33a4eca29",
+          "rawfact_bc9355a292f06baaaf988b683106b2b02e3dd9c4a9555f1eb160a94643e4feaf"
+        ],
+        "dependency_cell_ids": [],
+        "selected_raw_fact": null,
+        "reason": "unlinked source vintages require an explicit typed revision lineage"
+      }
+    }
+  ],
+  "executed_at": "2026-10-03T19:49:34.631473+00:00",
+  "completed_at": "2026-10-03T19:49:34.712193+00:00",
+  "I3_emission_at": null,
+  "historical_emission_at": null,
+  "trial_registered": false,
+  "development_only": true,
+  "method_sha256": "b183fa79087c1f2bc4f53f6eba345553cfbb1eed55d6751c1ce3af525dbf7c08"
+}

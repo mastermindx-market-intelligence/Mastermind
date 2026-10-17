@@ -1,0 +1,50 @@
+{
+  "archive_sha256": "a02aec7db76da6a145c35c078182c90c2b257cf850afab912babf602edbd467f",
+  "command": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "-m",
+    "pytest",
+    "-c",
+    "/dev/null",
+    "--noconftest",
+    "-p",
+    "no:cacheprovider",
+    "-q",
+    "tests/test_fundamental_forensics_ixbrl_raw_ledger.py::test_required_governed_aapl_values",
+    "tests/test_fundamental_forensics_ixbrl_raw_ledger.py::test_unlinked_vintages_are_not_evaluable",
+    "tests/test_fundamental_forensics_ixbrl_raw_ledger.py::test_pit_cutoffs_hide_future_knowledge",
+    "tests/test_fundamental_forensics_ixbrl_raw_ledger.py::test_statement_query_reconciliation_for_direct_metrics"
+  ],
+  "completed_at": "2026-10-03T19:47:48.125478+00:00",
+  "exit_code": 0,
+  "harness_change": "Restore exact same-pin issuer metadata. Provider source inspection confirms security_master and issuer_master are the two Data OS file dependencies.",
+  "i3_acceptance": false,
+  "kind": "read_only_owner_input_preflight",
+  "observed_result": "4 PASSED, 1 deprecation warning, 9.88s",
+  "prior_attempt_receipts": [
+    "pytest-attempt-1.json",
+    "pytest-attempt-2.json",
+    "pytest-attempt-3.json"
+  ],
+  "production_proof": false,
+  "python": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)]",
+  "restored_inputs": [
+    {
+      "bytes": 79371,
+      "path": "data/reference/security_master.parquet",
+      "sha256": "ed45e4a4f9e17cc91da1a382ebeffbb1e73ae4d9fb2556036eb4efedb5b30158",
+      "source_commit": "37122b69fffa98cb160022c4831df0338ef3e7e3"
+    },
+    {
+      "bytes": 43765,
+      "path": "data/reference/issuer_master.parquet",
+      "sha256": "61738052362bdd939d686461d2bb19fcb7b01ce6fc2dc8fddd77d8e4ea44b61c",
+      "source_commit": "37122b69fffa98cb160022c4831df0338ef3e7e3"
+    }
+  ],
+  "source_commit": "37122b69fffa98cb160022c4831df0338ef3e7e3",
+  "source_or_tests_modified": false,
+  "started_at": "2026-10-03T19:47:37.751557+00:00",
+  "stdout_bytes": 605,
+  "stdout_sha256": "7325b49374efec39520033d0102aac6407ab6a1a1dd4c51596e0097802bd8f2f"
+}

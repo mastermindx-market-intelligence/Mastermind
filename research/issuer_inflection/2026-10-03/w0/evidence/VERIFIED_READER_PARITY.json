@@ -1,0 +1,52 @@
+{
+  "kind": "fixed_capture_consumer_parity",
+  "recorded_before_execution_at": "2026-10-04T02:27:51.727388+00:00",
+  "reader_sha256": "b4375a1bf7a64a15a49788f7e9edd2b8b8435e4f0f982b3c5ec70119efe629d8",
+  "replay_sha256": "3501ec52a3843046d11696daee21317b2bae92ef809ca741bf942d3540e572d9",
+  "case_names": [
+    "first_admission",
+    "later_admission_refusal",
+    "source_cutoff_refusal",
+    "identical_cutoff"
+  ],
+  "live_consumer": false,
+  "trial_registered": false,
+  "completed_at": "2026-10-04T02:27:51.769069+00:00",
+  "results": [
+    {
+      "case": "first_admission",
+      "existing_artifact_sha256": "ee7faddbd0bf053a0ec674344fa6a7d5c95fd9fecdab822188606f81c27809cd",
+      "machine_bytes_sha256": "3b79a27d1b897160e698b3b08ff86aeb19c3ebeee13ef2f421813e145ad92edd",
+      "human_text_sha256": "65551bc2d9c5cca8dd26590c48bb45958e807b2c3676abd685f6b9b22afcaad9",
+      "requested_slots": 4,
+      "same_identity": true
+    },
+    {
+      "case": "later_admission_refusal",
+      "existing_artifact_sha256": "52cb04350d7cee2769b106827a0b39a592fd85d7a723a1c64c8cc8e5db7ad82b",
+      "machine_bytes_sha256": "55f3805cd66f8a2d7d0e68fe27bfad7a1babd0586ab7006f83a33eb84fa5395c",
+      "human_text_sha256": "b1f5268f9bd1bfb42b678cdeab68f8aae85d6c9efa4181a2abc28d12e1d29d83",
+      "requested_slots": 4,
+      "same_identity": true
+    },
+    {
+      "case": "source_cutoff_refusal",
+      "existing_artifact_sha256": "007542c487242ff0e2536b0b03ff6412ffd47e54ab349f3554ceaa1e6a855eca",
+      "machine_bytes_sha256": "fd4dac90fbf13a5d88ade6cef0e63e0762c37151c2cea6ee4800d4eecb21e355",
+      "human_text_sha256": "ef109c76d2f3896ac3f139375b215d85219293b05c77d56a86abf05dec22b799",
+      "requested_slots": 4,
+      "same_identity": true
+    },
+    {
+      "case": "identical_cutoff",
+      "existing_artifact_sha256": "efeb04d0ef1f53b8eeed2d14c9474492e95e0ab186cb67e3305ba7448bcaba41",
+      "machine_bytes_sha256": "623d25b75a7fdcac5043d10f20caa72fca693762f6e7623e70e08735a365ea7a",
+      "human_text_sha256": "81f1174fa00f722972198b7eea58b096727330a7e08fb713a34519b66d3426ba",
+      "requested_slots": 4,
+      "same_identity": true
+    }
+  ],
+  "artifact_identities_changed": false,
+  "i3_acceptance": false,
+  "production_proof": false
+}

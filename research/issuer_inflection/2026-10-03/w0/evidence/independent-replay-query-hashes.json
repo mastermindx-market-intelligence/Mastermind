@@ -1,0 +1,12 @@
+[
+  {
+    "case": "aapl_same_filing_annual_revenue",
+    "response_sha256": "a752302d0d11457920be1425cb9ebb6d1f29560b7f1e8f41a5de98075083c6af",
+    "bytes": 76239
+  },
+  {
+    "case": "aapl_unlinked_assets",
+    "response_sha256": "aa6f82dc415e2d3449118c627deb339f98814f0a1be6dff61e88f8819495bb21",
+    "bytes": 68681
+  }
+]

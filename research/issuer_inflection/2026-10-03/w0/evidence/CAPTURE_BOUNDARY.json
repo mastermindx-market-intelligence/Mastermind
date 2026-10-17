@@ -1,0 +1,21 @@
+{
+  "capture_limit": "Method label/version/requests were written before the owner queries. Full future I3 schema/composer/corpus/registry/exposure-writer admission is not yet frozen. This source-controlled capsule is evidence, not a runtime trial registry.",
+  "classification_graded": false,
+  "development_exposed": true,
+  "heldout": false,
+  "kind": "static_development_evidence_capsule",
+  "method_before_execution_sha256": "b183fa79087c1f2bc4f53f6eba345553cfbb1eed55d6751c1ce3af525dbf7c08",
+  "operation_id": "i3-w0-issuer-inflection-20261003-astra-c4",
+  "original_probe_driver_sha256": "4420285d5a20010af51db553a2782c352be5b54a3d800c3bb6a172263b7ac72e",
+  "parent_carrier": "mastermindx-market-intelligence/Mastermind#1183",
+  "prediction_graded": false,
+  "prior_attempts_retained": 4,
+  "production_emitted": false,
+  "program": "issuer-inflection-intelligence",
+  "rights_promotion": false,
+  "runtime_exposure_writer_bound": false,
+  "source_pin": "37122b69fffa98cb160022c4831df0338ef3e7e3",
+  "trial_registered": false,
+  "utility_graded": false,
+  "wave": "W0"
+}

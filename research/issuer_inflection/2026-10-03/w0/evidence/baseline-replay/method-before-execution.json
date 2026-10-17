@@ -1,0 +1,194 @@
+{
+  "checked_local_dependencies": [
+    {
+      "path": "engine/company_intelligence/financial_dossier.py",
+      "sha256": "87471b024532c13bc52679423edc8b43a1eff2d112062a5e3ff8588733232123"
+    },
+    {
+      "path": "engine/company_intelligence/event_workspace.py",
+      "sha256": "ff90af02298ed82797b0071f947be34a035064e1347f91f1cfef9f33822bfd47"
+    },
+    {
+      "path": "engine/earnings_narrative/economic_interpretation.py",
+      "sha256": "675d8332310dd5152c5dede1aa98eebc968e8b5e75f54b6741bdff235e4159a7"
+    },
+    {
+      "path": "engine/fundamental_forensics/query_service.py",
+      "sha256": "7fc5b10ea5b7b0e26c82e3316ed429f84734ec81f4bab593adf6843dbe2ed7eb"
+    },
+    {
+      "path": "engine/fundamental_forensics/ixbrl_raw_ledger.py",
+      "sha256": "d3f0c2c83396396ce7be8495978b29be5320484023851b0161fc33c2230bec10"
+    },
+    {
+      "path": "engine/fundamental_forensics/statement_service.py",
+      "sha256": "245a33053dfd845f6390635142f5e9f27dd0102ca626f1e02512593eb15b2f6e"
+    },
+    {
+      "path": "tests/test_fundamental_forensics_ixbrl_raw_ledger.py",
+      "sha256": "6a4f78ceba0aef7e475c8ec2f65b4f2daeba9b1603e87dfd040697abba1481d4"
+    },
+    {
+      "path": "config/fundamental_forensics/metrics/v1/metric_catalog.yaml",
+      "sha256": "195f8df1a278e79e63051718c2e491a64bbac2b9425db5fcfe687a3b558b45a0"
+    },
+    {
+      "path": "config/fundamental_forensics/metrics/v1/mappings/core.yaml",
+      "sha256": "ccfceb0f0181877a14992691a410e28ebf53fb6abf24765d0bd820fcbc9d9bc0"
+    },
+    {
+      "path": "config/fundamental_forensics/metrics/v1/formulas/core.yaml",
+      "sha256": "3bff86c3545d2c34b225d2211a81367f71d5e0393bf33a067651e6686b324689"
+    },
+    {
+      "path": "data/reference/security_master.parquet",
+      "sha256": "ed45e4a4f9e17cc91da1a382ebeffbb1e73ae4d9fb2556036eb4efedb5b30158"
+    },
+    {
+      "path": "data/reference/issuer_master.parquet",
+      "sha256": "61738052362bdd939d686461d2bb19fcb7b01ce6fc2dc8fddd77d8e4ea44b61c"
+    }
+  ],
+  "comparison_pairs": [
+    {
+      "after": "after_a1_before_a2_admission",
+      "before": "before_a1_admission",
+      "name": "first_admission"
+    },
+    {
+      "after": "after_a2_admission",
+      "before": "after_a1_before_a2_admission",
+      "name": "later_admission_refusal"
+    },
+    {
+      "after": "after_a2_admission",
+      "before": "before_a2_source",
+      "name": "source_cutoff_refusal"
+    },
+    {
+      "after": "after_a2_admission",
+      "before": "after_a2_admission",
+      "name": "identical_cutoff"
+    }
+  ],
+  "development_exposed": true,
+  "kind": "development_fixture_method_before_execution",
+  "method_file_sha256": "08fc591ae58894c6fd8489caabf86ccc9563f86287e9d7004f6e8e475cbac1f6",
+  "owner_admission_changed": false,
+  "production_emission": false,
+  "recorded_at": "2026-10-04T00:06:41.239965+00:00",
+  "replay_module_sha256": "57dc50061e80d04fc5bddec414cb839e2a15e88c22c5ad54819e11e7ed2c0c41",
+  "requests": {
+    "after_a1_before_a2_admission": {
+      "entity_id": "ISS:US-XNAS-AAPL",
+      "metric_ids": [
+        "revenue",
+        "total_assets"
+      ],
+      "periods": [
+        {
+          "end": "2025-09-27",
+          "kind": "duration",
+          "label": "FY2025",
+          "start": "2024-09-29"
+        },
+        {
+          "end": "2025-09-27",
+          "kind": "instant",
+          "label": "2025-09-27",
+          "start": null
+        }
+      ],
+      "policy": {
+        "recorded_at": "2026-08-23T07:02:12Z",
+        "selection": "latest_known_as_of",
+        "source_snapshot_at": "2026-08-01T00:00:00Z"
+      },
+      "schema": "fundamental_forensics.financial_query_request/v1"
+    },
+    "after_a2_admission": {
+      "entity_id": "ISS:US-XNAS-AAPL",
+      "metric_ids": [
+        "revenue",
+        "total_assets"
+      ],
+      "periods": [
+        {
+          "end": "2025-09-27",
+          "kind": "duration",
+          "label": "FY2025",
+          "start": "2024-09-29"
+        },
+        {
+          "end": "2025-09-27",
+          "kind": "instant",
+          "label": "2025-09-27",
+          "start": null
+        }
+      ],
+      "policy": {
+        "recorded_at": "2026-08-23T12:00:00Z",
+        "selection": "latest_known_as_of",
+        "source_snapshot_at": "2026-08-01T00:00:00Z"
+      },
+      "schema": "fundamental_forensics.financial_query_request/v1"
+    },
+    "before_a1_admission": {
+      "entity_id": "ISS:US-XNAS-AAPL",
+      "metric_ids": [
+        "revenue",
+        "total_assets"
+      ],
+      "periods": [
+        {
+          "end": "2025-09-27",
+          "kind": "duration",
+          "label": "FY2025",
+          "start": "2024-09-29"
+        },
+        {
+          "end": "2025-09-27",
+          "kind": "instant",
+          "label": "2025-09-27",
+          "start": null
+        }
+      ],
+      "policy": {
+        "recorded_at": "2026-08-23T00:32:30Z",
+        "selection": "latest_known_as_of",
+        "source_snapshot_at": "2026-08-01T00:00:00Z"
+      },
+      "schema": "fundamental_forensics.financial_query_request/v1"
+    },
+    "before_a2_source": {
+      "entity_id": "ISS:US-XNAS-AAPL",
+      "metric_ids": [
+        "revenue",
+        "total_assets"
+      ],
+      "periods": [
+        {
+          "end": "2025-09-27",
+          "kind": "duration",
+          "label": "FY2025",
+          "start": "2024-09-29"
+        },
+        {
+          "end": "2025-09-27",
+          "kind": "instant",
+          "label": "2025-09-27",
+          "start": null
+        }
+      ],
+      "policy": {
+        "recorded_at": "2026-08-23T12:00:00Z",
+        "selection": "latest_known_as_of",
+        "source_snapshot_at": "2026-07-31T10:01:01Z"
+      },
+      "schema": "fundamental_forensics.financial_query_request/v1"
+    }
+  },
+  "runner_sha256": "46221804dcdf1ab7ba9566bf6faf0c6620f710a42daa7040b196d8ebdfec1b84",
+  "source_commit": "37122b69fffa98cb160022c4831df0338ef3e7e3",
+  "trial_registered": false
+}
