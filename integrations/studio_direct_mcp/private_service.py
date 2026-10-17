@@ -66,9 +66,9 @@ TYPED_GIT_CLOSED_PROFILES = (
 # Runtime generations are immutable from the perspective of installed seats. A new
 # bridge SHA gets a new directory so one-seat canaries cannot invalidate another
 # seat that still pins the previous bridge bytes.
-PAPER_RUNTIME_REL = Path(".local/share/mastermind-paper/runtime/v11")
+PAPER_RUNTIME_REL = Path(".local/share/mastermind-paper/runtime/v12")
 PAPER_RUNTIME_SCHEMA = "mastermind.paper_runtime.v1"
-PAPER_BRIDGE_SHA256 = "6d28be62b21bff12dc04ae1bdc50f12a4ff55fdb8261bdd6923bac2804fecf7c"
+PAPER_BRIDGE_SHA256 = "82bc7f2d75aec423711922198b68f317618a83de177bf4934b73d7b418a6ecfb"
 PAPER_COMMAND_TIMEOUT_MS = 70_000
 PAPER_APP_REL = Path("Applications/Paper.app")
 
@@ -152,14 +152,14 @@ FLEET_V10_PUBLISHER_PATCH_SHA256 = {
     "workspace-access.mjs": "9c4c20dd4edbc426c8561801708ee205e19bb47b48134ec8f5654a10f1cb7cf3",
 }
 
-# Exact sealed C2 predecessor observed for the one-seat Paper v10 -> v11 repair.
+# Exact sealed C2 predecessor observed for the one-seat Paper v10 -> v12 repair.
 # These are reviewed installation identity pins, never caller-selectable source or runtime paths.
 # The fleet bundle remains installed byte-for-byte; only Paper configuration moves.
 C2_PAPER_ACCOUNT = "chatgpt2-personal"
 C2_PAPER_ORIGINAL_MANIFEST_SHA256 = "10658ddba662cac2c0a321dfdc48b9b009199187e9709f8f7d63a30bf2406337"
 C2_PAPER_MANIFEST_CANONICAL_SHA256 = frozenset((
     "821e37a4e10011f3335984416edaac92899c6bc27526c0f017b3d75130950d84",
-    "f5af6d89936f39ecdda58d2dc1218b4a0ec658fd8cb8429a2a67f39acdc21226",
+    "d477cd952b86d76c07a2554a94a1ce5dc8c5e42bda544a5603caf0f54e17c9b7",
 ))
 C2_LIFECYCLE_LOCK_NAME = "private-service.lifecycle.lock"
 C2_PAPER_NON_PAPER_CONFIG_SHA256 = "adc1c3367236b8a3a49b30169c2fb0a5dc3e85ecb415ab1b7d4d799fdf075b38"
@@ -1753,7 +1753,7 @@ def cmd_upgrade(args) -> int:
 
 @_c2_lifecycle_serialized(readonly_preflight=True)
 def cmd_paper_runtime_upgrade(args) -> int:
-    """Select reviewed Paper v11 on the exact sealed C2 fleet without restaging it.
+    """Select reviewed Paper v12 on the exact sealed C2 fleet without restaging it.
 
     This dedicated transaction grants no new account, file cohort or capability.
     It cannot stop/start a service, copy gateway source or select an arbitrary bridge.
@@ -1769,8 +1769,8 @@ def cmd_paper_runtime_upgrade(args) -> int:
         raise SystemExit("paper runtime compatibility requires an exact manifest CAS")
     if expected != C2_PAPER_ORIGINAL_MANIFEST_SHA256:
         raise SystemExit("paper runtime compatibility: original manifest is not the reviewed predecessor")
-    if PAPER_RUNTIME_REL.name != "v11":
-        raise SystemExit("paper runtime compatibility requires the reviewed v11 target")
+    if PAPER_RUNTIME_REL.name != "v12":
+        raise SystemExit("paper runtime compatibility requires the reviewed v12 target")
 
     label = f"com.mastermind.studio-direct-private.{account}"
     roots = _build_runtime_roots(account)
@@ -1824,7 +1824,7 @@ def cmd_paper_runtime_upgrade(args) -> int:
     if _stable_regular_file_hash(manifest_path, label="installed manifest") != expected:
         raise SystemExit("paper runtime compatibility: installed manifest changed during planning")
     receipt = {
-        "account": account, "fromGeneration": "v10", "toGeneration": "v11",
+        "account": account, "fromGeneration": "v10", "toGeneration": "v12",
         "originalManifestSha256": expected, "targetManifestSha256": target_manifest_sha,
         "bridgeSha256": PAPER_BRIDGE_SHA256, "nonPaperConfigSha256": non_paper_sha,
         "preservedGatewayFiles": len(prior["files"]), "runtimeSealPreserved": True,

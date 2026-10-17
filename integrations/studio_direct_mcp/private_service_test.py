@@ -424,12 +424,18 @@ class TestIdentity(unittest.TestCase):
         self.assertEqual(svc.IDLE_TIMEOUT_MS, 1_800_000)
         self.assertEqual(svc.REQUEST_TIMEOUT_MS, 300_000)
 
-    def test_paper_runtime_pin_matches_reviewed_v11_generation(self):
-        self.assertEqual(svc.PAPER_RUNTIME_REL.name, "v11")
+    def test_paper_runtime_pin_matches_reviewed_v12_generation(self):
+        self.assertEqual(svc.PAPER_RUNTIME_REL.name, "v12")
         self.assertEqual(
             svc.PAPER_BRIDGE_SHA256,
-            paper_runtime_stage.REVIEWED_GENERATIONS["v11"]["bridge.py"],
+            paper_runtime_stage.REVIEWED_GENERATIONS["v12"]["bridge.py"],
         )
+
+    def test_c2_admission_contains_only_original_and_exact_v12_successor(self):
+        self.assertEqual(svc.C2_PAPER_MANIFEST_CANONICAL_SHA256, frozenset((
+            "821e37a4e10011f3335984416edaac92899c6bc27526c0f017b3d75130950d84",
+            "d477cd952b86d76c07a2554a94a1ce5dc8c5e42bda544a5603caf0f54e17c9b7",
+        )))
 
 
 # -------------------------------------------------------------------
@@ -2580,6 +2586,29 @@ class TestC2PaperRuntimeCompatibility(unittest.TestCase):
                     run.assert_not_called()
                     write.assert_not_called()
                 self.assertEqual(before, self._snapshot(roots))
+
+    def test_unactivated_v11_successor_cannot_enter_generic_start(self):
+        with self._installed_c2_fixture() as (args, roots, cfg):
+            manifest = json.loads(roots["manifest"].read_text())
+            prior_runtime = svc._user_root() / ".local/share/mastermind-paper/runtime/v11"
+            cfg["paperDesign"] = {
+                **svc._paper_design_config(svc._user_root()),
+                "pythonPath": str(prior_runtime / "venv/bin/python"),
+                "bridgePath": str(prior_runtime / "source/bridge.py"),
+                "bridgeSha256": "6d28be62b21bff12dc04ae1bdc50f12a4ff55fdb8261bdd6923bac2804fecf7c",
+            }
+            roots["config"].write_text(json.dumps(cfg, indent=2, sort_keys=True))
+            manifest["configHash"] = svc._sha256_file(roots["config"])
+            roots["manifest"].write_text(json.dumps(manifest, indent=2, sort_keys=True))
+            self.assertFalse(svc._valid_manifest(manifest, args.account, _label_for(args.account)))
+            before = self._snapshot(roots)
+            with mock.patch.object(svc, "_run") as run, \
+                 mock.patch.object(svc, "_atomic_write_bytes") as write:
+                with self.assertRaisesRegex(SystemExit, "corrupt manifest"):
+                    svc.cmd_start(args)
+                run.assert_not_called()
+                write.assert_not_called()
+            self.assertEqual(before, self._snapshot(roots))
 
     def test_canonical_admission_preserves_original_and_target_lifecycle(self):
         with self._installed_c2_fixture() as (args, roots, _):
