@@ -127,3 +127,17 @@ def test_ledgers_fail_closed_on_corrupt_existing_history(tmp_path):
     registry = ShockRegistry(path)
     with pytest.raises(LedgerCorruptionError, match="line 2"):
         registry.record(_shock())
+
+
+def test_shock_registry_refuses_second_episode_for_same_observation(tmp_path):
+    registry = ShockRegistry(tmp_path / "shocks.jsonl")
+    shock = _shock()
+    assert registry.record(shock) == "created"
+    revision = replace(shock, shock_id=f"{shock.shock_id}_rev", data_version="pit_2")
+    with pytest.raises(KeepFirstConflict, match="corrections use ShockRegistry.amend"):
+        registry.record(revision)
+    other_family = replace(
+        shock, shock_id=f"{shock.shock_id}_other", shock_family="credit_impulse"
+    )
+    assert registry.record(other_family) == "created"
+    assert len(registry.shocks()) == 2
