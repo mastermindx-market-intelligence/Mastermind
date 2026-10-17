@@ -80,7 +80,7 @@ def _print_running(
     label: str = "com.mastermind.studio-direct-private.test-account",
 ) -> str:
     return (
-        f"gui/501/{label} = {{\n"
+        f"gui/{os.getuid()}/{label} = {{\n"
         "\tactive count = 1\n"
         f"\tpath = {plist}\n"
         "\tstate = running\n"
@@ -96,7 +96,7 @@ def _print_crashed(
     label: str = "com.mastermind.studio-direct-private.test-account",
 ) -> str:
     return (
-        f"gui/501/{label} = {{\n"
+        f"gui/{os.getuid()}/{label} = {{\n"
         "\tactive count = 0\n"
         f"\tpath = {plist}\n"
         "\tstate = waiting\n"
@@ -424,12 +424,18 @@ class TestIdentity(unittest.TestCase):
         self.assertEqual(svc.IDLE_TIMEOUT_MS, 1_800_000)
         self.assertEqual(svc.REQUEST_TIMEOUT_MS, 300_000)
 
-    def test_paper_runtime_pin_matches_reviewed_v11_generation(self):
-        self.assertEqual(svc.PAPER_RUNTIME_REL.name, "v11")
+    def test_paper_runtime_pin_matches_reviewed_v12_generation(self):
+        self.assertEqual(svc.PAPER_RUNTIME_REL.name, "v12")
         self.assertEqual(
             svc.PAPER_BRIDGE_SHA256,
-            paper_runtime_stage.REVIEWED_GENERATIONS["v11"]["bridge.py"],
+            paper_runtime_stage.REVIEWED_GENERATIONS["v12"]["bridge.py"],
         )
+
+    def test_c2_admission_contains_only_original_and_exact_v12_successor(self):
+        self.assertEqual(svc.C2_PAPER_MANIFEST_CANONICAL_SHA256, frozenset((
+            "821e37a4e10011f3335984416edaac92899c6bc27526c0f017b3d75130950d84",
+            "d477cd952b86d76c07a2554a94a1ce5dc8c5e42bda544a5603caf0f54e17c9b7",
+        )))
 
 
 # -------------------------------------------------------------------
@@ -1753,7 +1759,7 @@ class TestCLI(unittest.TestCase):
         sub = next(a for a in parser._actions if hasattr(a, "choices") and a.choices)
         self.assertEqual(
             set(sub.choices),
-            {"stage", "upgrade", "seal-runtime", "start", "status", "stop"},
+            {"stage", "upgrade", "paper-runtime-upgrade", "seal-runtime", "start", "status", "stop"},
         )
 
     def test_stage_requires_all_args(self):
@@ -2138,6 +2144,751 @@ class TestFleetV10PublisherCompatibility(unittest.TestCase):
             ))
             svc._verify_staged_install(
                 "chatgpt1", _label_for("chatgpt1"), roots)
+
+class TestC2PaperRuntimeCompatibility(unittest.TestCase):
+    """Real installer checks over isolated, sealed data fixtures; no live effects."""
+
+    @staticmethod
+    def _absent_result():
+        return FakeResult(113, "", (
+            f'Bad request.\nCould not find service "{_label_for(svc.C2_PAPER_ACCOUNT)}" '
+            f'in domain for user gui: {os.getuid()}\n'))
+
+    def _unloaded_recorder(self, handler=None):
+        return CmdRecorder(handler=handler, default=self._absent_result())
+
+    @contextmanager
+    def _installed_c2_fixture(self):
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            home = tmp / "home"
+            home.mkdir()
+            (home / "Library" / "LaunchAgents").mkdir(parents=True)
+            with mock.patch.dict(os.environ, {"HOME": str(home)}):
+                account = svc.C2_PAPER_ACCOUNT
+                _do_stage(tmp, home, account=account, port=45026)
+                roots = svc._build_runtime_roots(account)
+                _seed_node_modules(roots)
+                names = frozenset(svc.C2_PAPER_FILES_SHA256)
+                for name in set(svc.STAGE_FILES) - names:
+                    (roots["base"] / name).unlink()
+                for name in names - set(svc.STAGE_FILES):
+                    path = roots["base"] / name
+                    path.write_text(f"// fixture C2 fleet {name}\n", encoding="utf-8")
+                    path.chmod(svc.FILE_MODE)
+                cfg = json.loads(roots["config"].read_text())
+                runtime_v10 = home / ".local/share/mastermind-paper/runtime/v10"
+                cfg["paperDesign"].update({
+                    "pythonPath": str(runtime_v10 / "venv/bin/python"),
+                    "bridgePath": str(runtime_v10 / "source/bridge.py"),
+                    "bridgeSha256": svc.C2_PAPER_ORIGINAL_BRIDGE_SHA256,
+                })
+                cfg["fleetRouting"] = {
+                    "enabled": True, "requestTimeoutMs": svc.REQUEST_TIMEOUT_MS,
+                    "routes": [
+                        {"hostRef": name, "url": f"https://{name}.example.ts.net/mcp"}
+                        for name in ("mini3", "mini4")
+                    ],
+                }
+                cfg["maxPerSessionConcurrency"] = 8
+                cfg["maxQueuedPerSession"] = 16
+                cfg["fleetStatus"] = {
+                    "enabled": True, "launcherPath": str(home / ".local/bin/studio-direct"),
+                    "launcherSha256": "a" * 64, "timeoutMs": 15000,
+                }
+                # Non-ASCII fixture proves the reviewed default JSON encoding is used.
+                cfg["fixturePreserved"] = {"label": "caf\u00e9", "nested": [False, None, 7]}
+                roots["config"].write_text(json.dumps(cfg, indent=2, sort_keys=True))
+                prior = json.loads(roots["manifest"].read_text())
+                prior["files"] = {
+                    name: svc._sha256_file(roots["base"] / name) for name in sorted(names)
+                }
+                prior["configHash"] = svc._sha256_file(roots["config"])
+                prior["dependencyTreeHash"] = svc._dependency_tree_hash(roots["node_modules"])
+                roots["manifest"].write_text(json.dumps(prior, indent=2, sort_keys=True))
+                original_sha = svc._sha256_file(roots["manifest"])
+                non_paper_sha = hashlib.sha256(json.dumps(
+                    {k: v for k, v in cfg.items() if k != "paperDesign"},
+                    sort_keys=True, separators=(",", ":"),
+                ).encode()).hexdigest()
+                identity = {key: prior[key] for key in svc.C2_PAPER_RUNTIME_IDENTITY}
+                target_config = {**cfg, "paperDesign": {
+                    **svc._paper_design_config(home), "bridgeSha256": PAPER_BRIDGE_FIXTURE_SHA,
+                }}
+                future = {**prior, "configHash": hashlib.sha256(json.dumps(
+                    target_config, indent=2, sort_keys=True,
+                ).encode()).hexdigest()}
+                canonical_pins = frozenset(svc._canonical_json_sha256(value)
+                                           for value in (prior, future))
+                # Only fixture identity data are replaced. All admission, runtime,
+                # hash, config, transaction and rollback checks execute unchanged.
+                with mock.patch.multiple(
+                    svc, C2_PAPER_FILES_SHA256=prior["files"],
+                    C2_PAPER_RUNTIME_IDENTITY=identity,
+                    C2_PAPER_ORIGINAL_MANIFEST_SHA256=original_sha,
+                    C2_PAPER_MANIFEST_CANONICAL_SHA256=canonical_pins,
+                    C2_PAPER_NON_PAPER_CONFIG_SHA256=non_paper_sha,
+                    PAPER_BRIDGE_SHA256=PAPER_BRIDGE_FIXTURE_SHA,
+                ):
+                    with svc._c2_lifecycle_mutex(account):
+                        pass
+                    svc._verify_staged_install(account, _label_for(account), roots)
+                    args = svc.build_parser().parse_args([
+                        "paper-runtime-upgrade", "--account", account,
+                        "--expected-manifest-sha256", original_sha,
+                    ])
+                    args._fixture_target_manifest = future
+                    yield args, roots, cfg
+
+    @staticmethod
+    def _snapshot(roots):
+        files = {
+            str(path.relative_to(roots["base"])): path.read_bytes()
+            for path in roots["base"].rglob("*") if path.is_file()
+        }
+        files["@plist"] = roots["plist"].read_bytes()
+        return files
+
+    def _assert_no_writes(self, args, roots, message):
+        before = self._snapshot(roots)
+        recorder = self._unloaded_recorder()
+        with mock.patch.object(svc, "_atomic_write_bytes") as write, \
+             mock.patch.object(svc, "_run", recorder):
+            with self.assertRaisesRegex(SystemExit, message):
+                svc.cmd_paper_runtime_upgrade(args)
+            write.assert_not_called()
+        self.assertEqual(before, self._snapshot(roots))
+        self.assertTrue(all(c[:2] == ["launchctl", "print"] for c in recorder.calls))
+
+    def test_exact_cohort_admission_is_account_version_identity_and_digest_bound(self):
+        with self._installed_c2_fixture() as (args, roots, _):
+            prior = json.loads(roots["manifest"].read_text())
+            label = _label_for(args.account)
+            self.assertTrue(svc._valid_manifest(prior, args.account, label))
+            variants = {
+                "one module digest": {**prior, "files": {**prior["files"], "gateway.mjs": "0" * 64}},
+                "missing module": {**prior, "files": {k: v for k, v in prior["files"].items() if k != "tailnet-gateway.mjs"}},
+                "extra module": {**prior, "files": {**prior["files"], "unexpected.mjs": "a" * 64}},
+                "unsealed dependencies": {**prior, "dependencyTreeHash": None},
+                "legacy version": {k: v for k, v in {**prior, "version": 1}.items()
+                                   if k not in ("nodeHash", "backendHash", "dependencyTreeHash")},
+            }
+            for key in svc.C2_PAPER_RUNTIME_IDENTITY:
+                variants[key] = {**prior, key: 45027 if key == "port" else "0" * 64}
+            for name, candidate in variants.items():
+                with self.subTest(name=name):
+                    self.assertFalse(svc._valid_manifest(candidate, args.account, label))
+            foreign = {**prior, "account": "chatgpt4", "label": _label_for("chatgpt4")}
+            self.assertFalse(svc._valid_manifest(foreign, "chatgpt4", foreign["label"]))
+            # Only the reviewed target configHash transition stays admitted.
+            self.assertTrue(svc._valid_manifest(
+                args._fixture_target_manifest, args.account, label))
+            self.assertFalse(svc._valid_manifest(
+                {**prior, "configHash": "b" * 64}, args.account, label))
+
+    def test_readonly_preflight_while_loaded_has_no_service_or_file_effect(self):
+        with self._installed_c2_fixture() as (args, roots, _):
+            lock_path = roots["state"] / svc.C2_LIFECYCLE_LOCK_NAME
+            lock_path.unlink()  # Fixture-only: prove preflight does not create a lock.
+            before = self._snapshot(roots)
+            args.preflight_only = True
+            live = CmdRecorder(default=FakeResult(0, _print_running(
+                str(roots["plist"]), _label_for(args.account))))
+            with mock.patch.object(svc, "_run", live), \
+                 mock.patch.object(svc, "_c2_lifecycle_mutex") as mutex, \
+                 mock.patch.object(svc, "_atomic_write_bytes") as write:
+                rc, output = _capture_stdout(lambda: svc.cmd_paper_runtime_upgrade(args))
+                write.assert_not_called()
+                mutex.assert_not_called()
+            result = json.loads(output)
+            self.assertEqual((rc, result["effect"], result["preflight"]), (0, "NOT_APPLIED", True))
+            self.assertEqual(result["originalManifestSha256"], args.expected_manifest_sha256)
+            self.assertNotEqual(result["targetManifestSha256"], args.expected_manifest_sha256)
+            self.assertEqual(result["preservedGatewayFiles"], 11)
+            self.assertFalse(result["serviceStarted"])
+            self.assertEqual(before, self._snapshot(roots))
+            self.assertFalse(lock_path.exists())
+            self.assertTrue(all(c[:2] == ["launchctl", "print"] for c in live.calls))
+
+    def test_stopped_apply_changes_only_paper_and_config_hash_then_normal_admission_works(self):
+        with self._installed_c2_fixture() as (args, roots, cfg):
+            before = self._snapshot(roots)
+            prior = json.loads(roots["manifest"].read_text())
+            recorder = self._unloaded_recorder()
+            with mock.patch.object(svc, "_run", recorder):
+                rc, output = _capture_stdout(lambda: svc.cmd_paper_runtime_upgrade(args))
+                status_rc, status = _capture_stdout(lambda: svc.cmd_status(args))
+            receipt = json.loads(output)
+            self.assertEqual((rc, receipt["effect"]), (0, "APPLIED"))
+            self.assertEqual(status_rc, 0)
+            self.assertEqual(json.loads(status)["port"], 45026)
+            self.assertFalse(json.loads(status)["loaded"])
+            after = self._snapshot(roots)
+            self.assertEqual(set(before), set(after))
+            self.assertEqual({name for name in before if before[name] != after[name]},
+                             {"config.json", "manifest.json"})
+            new_cfg = json.loads(roots["config"].read_text())
+            self.assertEqual({k: v for k, v in new_cfg.items() if k != "paperDesign"},
+                             {k: v for k, v in cfg.items() if k != "paperDesign"})
+            self.assertEqual({k for k in cfg["paperDesign"]
+                              if cfg["paperDesign"][k] != new_cfg["paperDesign"][k]},
+                             {"pythonPath", "bridgePath", "bridgeSha256"})
+            installed = svc._verify_staged_install(args.account, _label_for(args.account), roots)
+            self.assertEqual({k: v for k, v in installed.items() if k != "configHash"},
+                             {k: v for k, v in prior.items() if k != "configHash"})
+            self.assertEqual(svc._sha256_file(roots["manifest"]), receipt["targetManifestSha256"])
+            self.assertTrue(all(c[:2] == ["launchctl", "print"] for c in recorder.calls))
+            self._assert_no_writes(args, roots, "CAS mismatch")
+
+    def test_cli_exposes_only_fixed_scope_and_required_manifest_cas(self):
+        parser = svc.build_parser()
+        base = ["paper-runtime-upgrade", "--account", svc.C2_PAPER_ACCOUNT,
+                "--expected-manifest-sha256", "a" * 64]
+        self.assertIs(parser.parse_args(base).func, svc.cmd_paper_runtime_upgrade)
+        for extra in (["--source", "/tmp/source"], ["--runtime", "v12"],
+                      ["--node", "/tmp/node"], ["--enable-repository-workspaces"]):
+            with self.subTest(extra=extra), mock.patch("sys.stderr", io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    parser.parse_args(base + extra)
+        with mock.patch("sys.stderr", io.StringIO()), self.assertRaises(SystemExit):
+            parser.parse_args(base[:3])
+
+    def test_other_account_and_unreviewed_cas_cannot_enroll(self):
+        with self._installed_c2_fixture() as (args, roots, _):
+            args.account = "chatgpt1"
+            self._assert_no_writes(args, roots, "exact enrolled C2")
+            args.account = svc.C2_PAPER_ACCOUNT
+            for value in ("", "garbage", "b" * 64):
+                with self.subTest(value=value):
+                    args.expected_manifest_sha256 = value
+                    self._assert_no_writes(args, roots, "manifest CAS|reviewed predecessor")
+
+    def test_every_gateway_module_and_runtime_seal_is_verified_before_writes(self):
+        with self._installed_c2_fixture() as (args, roots, _):
+            manifest = json.loads(roots["manifest"].read_text())
+            paths = [roots["base"] / name for name in manifest["files"]]
+            paths += [Path(manifest["node"]), Path(manifest["backend"]),
+                      roots["node_modules"] / "fixture-package/index.js", roots["plist"]]
+            for path in paths:
+                with self.subTest(path=path.name):
+                    before = path.read_bytes()
+                    try:
+                        path.write_bytes(before + b"tampered\n")
+                        self._assert_no_writes(args, roots, "hash mismatch")
+                    finally:
+                        path.write_bytes(before)
+
+    def test_self_consistent_profile_or_original_paper_changes_are_still_refused(self):
+        for field in ("fleetRouting", "paperDesign"):
+            with self.subTest(field=field), self._installed_c2_fixture() as (args, roots, cfg):
+                if field == "fleetRouting":
+                    cfg[field]["routes"].pop()
+                    message = "non-Paper profile changed"
+                else:
+                    cfg[field]["commandTimeoutMs"] += 1
+                    message = "not exact v10"
+                roots["config"].write_text(json.dumps(cfg, sort_keys=True))
+                manifest = json.loads(roots["manifest"].read_text())
+                manifest["configHash"] = svc._sha256_file(roots["config"])
+                roots["manifest"].write_text(json.dumps(manifest, sort_keys=True))
+                args.expected_manifest_sha256 = svc._sha256_file(roots["manifest"])
+                # Isolate the additional semantic pin beyond the original snapshot CAS.
+                with mock.patch.object(svc, "C2_PAPER_ORIGINAL_MANIFEST_SHA256",
+                                       args.expected_manifest_sha256), \
+                     mock.patch.object(svc, "C2_PAPER_MANIFEST_CANONICAL_SHA256",
+                                       svc.C2_PAPER_MANIFEST_CANONICAL_SHA256
+                                       | {svc._canonical_json_sha256(manifest)}):
+                    self._assert_no_writes(args, roots, message)
+
+    def test_target_runtime_receipt_bridge_and_python_are_verified(self):
+        for fault in ("missing bridge", "changed bridge", "wrong receipt", "symlink python"):
+            with self.subTest(fault=fault), self._installed_c2_fixture() as (args, roots, _):
+                runtime = svc._user_root() / svc.PAPER_RUNTIME_REL
+                bridge = runtime / "source/bridge.py"
+                if fault == "missing bridge":
+                    bridge.unlink()
+                elif fault == "changed bridge":
+                    bridge.write_bytes(b"different bridge\n")
+                elif fault == "wrong receipt":
+                    receipt_path = runtime / "RUNTIME.json"
+                    receipt = json.loads(receipt_path.read_text())
+                    receipt["generation"] = "v10"
+                    receipt_path.write_text(json.dumps(receipt))
+                else:
+                    python = runtime / "venv/bin/python"
+                    python.unlink()
+                    python.symlink_to(sys.executable)
+                self._assert_no_writes(args, roots, "paper .*missing or unsafe|paper bridge hash|receipt")
+
+    def test_running_or_crashed_loaded_service_refuses_without_writes(self):
+        for state in (_print_running, _print_crashed):
+            with self.subTest(state=state.__name__), self._installed_c2_fixture() as (args, roots, _):
+                before = self._snapshot(roots)
+                rec = CmdRecorder(default=FakeResult(0, state(str(roots["plist"]), _label_for(args.account))))
+                with mock.patch.object(svc, "_run", rec), \
+                     mock.patch.object(svc, "_atomic_write_bytes") as write:
+                    with self.assertRaisesRegex(SystemExit, "while service is loaded"):
+                        svc.cmd_paper_runtime_upgrade(args)
+                    write.assert_not_called()
+                self.assertEqual(before, self._snapshot(roots))
+                self.assertTrue(all(c[:2] == ["launchctl", "print"] for c in rec.calls))
+
+    def test_generic_full_upgrade_and_restage_refuse_exact_c2_cohort_without_writes(self):
+        with self._installed_c2_fixture() as (args, roots, _):
+            prior = json.loads(roots["manifest"].read_text())
+            generic = _stage_args(Path(prior["source"]), Path(prior["node"]),
+                                  Path(prior["backend"]), args.account, prior["port"])
+            for operation, message in ((svc.cmd_upgrade, "fleet/tailnet capability modules absent"),
+                                       (svc.cmd_stage, "refusing|upgrade")):
+                with self.subTest(operation=operation.__name__):
+                    before = self._snapshot(roots)
+                    with mock.patch.object(svc, "_run", self._unloaded_recorder()), \
+                         mock.patch.object(svc, "_atomic_write_bytes") as write:
+                        with self.assertRaisesRegex(SystemExit, message):
+                            operation(generic)
+                        write.assert_not_called()
+                    self.assertEqual(before, self._snapshot(roots))
+
+    def test_manifest_cas_drift_after_final_runtime_check_refuses_before_write(self):
+        with self._installed_c2_fixture() as (args, roots, _):
+            before = roots["manifest"].read_bytes()
+            verify = svc._verify_paper_runtime
+            calls = []
+            def inject(*pos, **kw):
+                result = verify(*pos, **kw)
+                calls.append(1)
+                if len(calls) == 2:
+                    roots["manifest"].write_bytes(before + b"\n")
+                return result
+            with mock.patch.object(svc, "_run", self._unloaded_recorder()), \
+                 mock.patch.object(svc, "_verify_paper_runtime", inject), \
+                 mock.patch.object(svc, "_atomic_write_bytes") as write:
+                with self.assertRaisesRegex(SystemExit, "snapshot CAS mismatch"):
+                    svc.cmd_paper_runtime_upgrade(args)
+                write.assert_not_called()
+            self.assertEqual(roots["manifest"].read_bytes(), before + b"\n")
+
+    def test_failures_before_or_after_atomic_replace_restore_exact_original_bytes(self):
+        for filename in ("config.json", "manifest.json"):
+            for after_replace in (False, True):
+                with self.subTest(filename=filename, after_replace=after_replace), \
+                     self._installed_c2_fixture() as (args, roots, _):
+                    before = self._snapshot(roots)
+                    real = svc._atomic_write_bytes
+                    fired = []
+                    def inject(path, data, mode=svc.FILE_MODE):
+                        if Path(path).name == filename and not fired:
+                            fired.append(1)
+                            if after_replace:
+                                real(path, data, mode)
+                            raise OSError("fixture atomic write failure")
+                        return real(path, data, mode)
+                    with mock.patch.object(svc, "_run", self._unloaded_recorder()), \
+                         mock.patch.object(svc, "_atomic_write_bytes", inject):
+                        with self.assertRaisesRegex(SystemExit, "NOT_APPLIED; original state restored"):
+                            svc.cmd_paper_runtime_upgrade(args)
+                    self.assertTrue(fired)
+                    self.assertEqual(before, self._snapshot(roots))
+                    svc._verify_staged_install(args.account, _label_for(args.account), roots)
+
+    def test_foreign_bytes_after_first_write_are_not_overwritten_by_rollback(self):
+        for target in ("config", "manifest"):
+            with self.subTest(target=target), self._installed_c2_fixture() as (args, roots, _):
+                real = svc._atomic_write_bytes
+                writes = []
+                foreign = b'{"concurrentOwner":true}\n'
+                def inject(path, data, mode=svc.FILE_MODE):
+                    writes.append(Path(path).name)
+                    real(path, data, mode)
+                    roots[target].write_bytes(foreign)
+                    raise OSError("concurrent mutation observed after config replacement")
+                with mock.patch.object(svc, "_run", self._unloaded_recorder()), \
+                     mock.patch.object(svc, "_atomic_write_bytes", inject):
+                    with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN during rollback"):
+                        svc.cmd_paper_runtime_upgrade(args)
+                self.assertEqual(roots[target].read_bytes(), foreign)
+                self.assertEqual(writes, ["config.json"])
+
+    def test_service_loaded_before_commit_produces_unknown_and_no_service_mutation(self):
+        with self._installed_c2_fixture() as (args, roots, _):
+            before_manifest = roots["manifest"].read_bytes()
+            real = svc._atomic_write_bytes
+            writes = []
+            def inject(path, data, mode=svc.FILE_MODE):
+                writes.append(Path(path).name)
+                return real(path, data, mode)
+            inspections = iter((None, None, {"running": True}, {"running": True}))
+            with mock.patch.object(svc, "_lifecycle_inspect", side_effect=lambda *_: next(inspections)), \
+                 mock.patch.object(svc, "_atomic_write_bytes", inject), \
+                 mock.patch.object(svc, "_run") as run:
+                with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN during rollback"):
+                    svc.cmd_paper_runtime_upgrade(args)
+                run.assert_not_called()
+            self.assertEqual(writes, ["config.json"])
+            self.assertEqual(roots["manifest"].read_bytes(), before_manifest)
+
+    def test_rollback_failure_keeps_unknown_and_never_replays(self):
+        with self._installed_c2_fixture() as (args, roots, _):
+            before_manifest = roots["manifest"].read_bytes()
+            real = svc._atomic_write_bytes
+            writes = []
+            def inject(path, data, mode=svc.FILE_MODE):
+                writes.append(Path(path).name)
+                if len(writes) > 1:
+                    raise OSError("fixture manifest and rollback writes refused")
+                return real(path, data, mode)
+            with mock.patch.object(svc, "_run", self._unloaded_recorder()), \
+                 mock.patch.object(svc, "_atomic_write_bytes", inject):
+                with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN during rollback"):
+                    svc.cmd_paper_runtime_upgrade(args)
+            self.assertEqual(writes, ["config.json", "manifest.json", "config.json"])
+            self.assertEqual(roots["manifest"].read_bytes(), before_manifest)
+
+    def test_postcommit_verification_failure_never_claims_no_effect_or_rolls_back(self):
+        with self._installed_c2_fixture() as (args, roots, _):
+            before_manifest = roots["manifest"].read_bytes()
+            real_verify = svc._verify_staged_install
+            real_write = svc._atomic_write_bytes
+            reads, writes = [], []
+            def verify(*pos, **kw):
+                reads.append(1)
+                if len(reads) == 3:
+                    raise SystemExit("fixture postcommit verification failure")
+                return real_verify(*pos, **kw)
+            def write(path, data, mode=svc.FILE_MODE):
+                writes.append(Path(path).name)
+                return real_write(path, data, mode)
+            with mock.patch.object(svc, "_run", self._unloaded_recorder()), \
+                 mock.patch.object(svc, "_verify_staged_install", verify), \
+                 mock.patch.object(svc, "_atomic_write_bytes", write):
+                with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN after manifest commit"):
+                    svc.cmd_paper_runtime_upgrade(args)
+            self.assertEqual(writes, ["config.json", "manifest.json"])
+            self.assertNotEqual(roots["manifest"].read_bytes(), before_manifest)
+
+    def test_same_binary_profile_or_source_change_cannot_enter_generic_start(self):
+        for change in ("repositoryWorkspaces", "commissionPublication", "fabricOnly", "fleetRouting", "source"):
+            with self.subTest(change=change), self._installed_c2_fixture() as (args, roots, cfg):
+                manifest = json.loads(roots["manifest"].read_text())
+                if change == "source":
+                    manifest["source"] += "-different-owner"
+                else:
+                    cfg[change] = {"enabled": True} if change != "fabricOnly" else True
+                    roots["config"].write_text(json.dumps(cfg, sort_keys=True))
+                    manifest["configHash"] = svc._sha256_file(roots["config"])
+                roots["manifest"].write_text(json.dumps(manifest, sort_keys=True))
+                self.assertFalse(svc._valid_manifest(manifest, args.account, _label_for(args.account)))
+                before = self._snapshot(roots)
+                with mock.patch.object(svc, "_run") as run, \
+                     mock.patch.object(svc, "_atomic_write_bytes") as write:
+                    with self.assertRaisesRegex(SystemExit, "corrupt manifest"):
+                        svc.cmd_start(args)
+                    run.assert_not_called()
+                    write.assert_not_called()
+                self.assertEqual(before, self._snapshot(roots))
+
+    def test_unactivated_v11_successor_cannot_enter_generic_start(self):
+        with self._installed_c2_fixture() as (args, roots, cfg):
+            manifest = json.loads(roots["manifest"].read_text())
+            prior_runtime = svc._user_root() / ".local/share/mastermind-paper/runtime/v11"
+            cfg["paperDesign"] = {
+                **svc._paper_design_config(svc._user_root()),
+                "pythonPath": str(prior_runtime / "venv/bin/python"),
+                "bridgePath": str(prior_runtime / "source/bridge.py"),
+                "bridgeSha256": "6d28be62b21bff12dc04ae1bdc50f12a4ff55fdb8261bdd6923bac2804fecf7c",
+            }
+            roots["config"].write_text(json.dumps(cfg, indent=2, sort_keys=True))
+            manifest["configHash"] = svc._sha256_file(roots["config"])
+            roots["manifest"].write_text(json.dumps(manifest, indent=2, sort_keys=True))
+            self.assertFalse(svc._valid_manifest(manifest, args.account, _label_for(args.account)))
+            before = self._snapshot(roots)
+            with mock.patch.object(svc, "_run") as run, \
+                 mock.patch.object(svc, "_atomic_write_bytes") as write:
+                with self.assertRaisesRegex(SystemExit, "corrupt manifest"):
+                    svc.cmd_start(args)
+                run.assert_not_called()
+                write.assert_not_called()
+            self.assertEqual(before, self._snapshot(roots))
+
+    def test_canonical_admission_preserves_original_and_target_lifecycle(self):
+        with self._installed_c2_fixture() as (args, roots, _):
+            original = json.loads(roots["manifest"].read_text())
+            original_bytes = roots["manifest"].read_bytes()
+            roots["manifest"].write_text(json.dumps(original, separators=(",", ":")))
+            self.assertEqual(svc._verify_staged_install(
+                args.account, _label_for(args.account), roots), original)
+            roots["manifest"].write_bytes(original_bytes)
+            with mock.patch.object(svc, "_run", self._unloaded_recorder()):
+                _capture_stdout(lambda: svc.cmd_paper_runtime_upgrade(args))
+            self.assertEqual(svc._verify_staged_install(
+                args.account, _label_for(args.account), roots), args._fixture_target_manifest)
+            before = self._snapshot(roots)
+            recorder = self._unloaded_recorder(handler=lambda cmd: FakeResult(0)
+                if cmd[:2] == ["launchctl", "bootstrap"] else None)
+            with mock.patch.object(svc, "_run", recorder):
+                rc, output = _capture_stdout(lambda: svc.cmd_start(args))
+            self.assertEqual(rc, 0)
+            self.assertTrue(json.loads(output)["started"])
+            self.assertEqual([cmd[1] for cmd in recorder.calls], ["print", "bootstrap"])
+            self.assertEqual(before, self._snapshot(roots))
+
+    def test_persistent_private_mutex_conflicts_before_all_four_mutating_commands(self):
+        with self._installed_c2_fixture() as (args, roots, _):
+            lock = roots["state"] / svc.C2_LIFECYCLE_LOCK_NAME
+            lock.unlink()  # Fixture-only first-creation case.
+            before = self._snapshot(roots)
+            with svc._c2_lifecycle_mutex(args.account):
+                identity = lock.stat()
+                self.assertEqual(stat.S_IMODE(identity.st_mode), 0o600)
+                self.assertEqual(identity.st_uid, os.getuid())
+                self.assertEqual((identity.st_nlink, identity.st_size), (1, 0))
+                with mock.patch.object(svc, "_run") as run, \
+                     mock.patch.object(svc, "_atomic_write_bytes") as write:
+                    for operation in (svc.cmd_paper_runtime_upgrade, svc.cmd_start,
+                                      svc.cmd_stop, svc.cmd_seal_runtime):
+                        with self.subTest(operation=operation.__name__):
+                            with self.assertRaisesRegex(SystemExit, "lifecycle mutation already in progress"):
+                                operation(args)
+                    run.assert_not_called()
+                    write.assert_not_called()
+            self.assertEqual(lock.stat().st_ino, identity.st_ino)
+            after = self._snapshot(roots)
+            added = str(lock.relative_to(roots["base"]))
+            self.assertEqual(after, {**before, added: b""})
+            with self.assertRaisesRegex(RuntimeError, "fixture exit"):
+                with svc._c2_lifecycle_mutex(args.account):
+                    raise RuntimeError("fixture exit")
+            with svc._c2_lifecycle_mutex(args.account):
+                self.assertEqual(lock.stat().st_ino, identity.st_ino)
+
+    def test_preflight_bypasses_contended_mutex_without_writes(self):
+        with self._installed_c2_fixture() as (args, roots, _):
+            args.preflight_only = True
+            before = self._snapshot(roots)
+            with svc._c2_lifecycle_mutex(args.account), \
+                 mock.patch.object(svc, "_run") as run, \
+                 mock.patch.object(svc, "_atomic_write_bytes") as write:
+                rc, output = _capture_stdout(lambda: svc.cmd_paper_runtime_upgrade(args))
+                run.assert_not_called()
+                write.assert_not_called()
+            self.assertEqual((rc, json.loads(output)["effect"]), (0, "NOT_APPLIED"))
+            self.assertEqual(before, self._snapshot(roots))
+
+    def test_mutex_rejects_unsafe_inode_parent_and_ownership(self):
+        for fault in ("symlink", "parent symlink", "public mode", "hardlink", "directory", "owner"):
+            with self.subTest(fault=fault), self._installed_c2_fixture() as (args, roots, _):
+                lock = roots["state"] / svc.C2_LIFECYCLE_LOCK_NAME
+                if fault == "symlink":
+                    target = roots["state"] / "fixture-lock-target"
+                    lock.rename(target)
+                    lock.symlink_to(target)
+                elif fault == "parent symlink":
+                    target = roots["base"] / "fixture-state"
+                    roots["state"].rename(target)
+                    roots["state"].symlink_to(target)
+                elif fault == "public mode":
+                    lock.chmod(0o644)
+                elif fault == "hardlink":
+                    os.link(lock, roots["state"] / "fixture-lock-link")
+                elif fault == "directory":
+                    lock.unlink()
+                    lock.mkdir(mode=0o700)
+                real_fstat = os.fstat
+                def ownership(fd):
+                    values = list(real_fstat(fd))
+                    if fault == "owner":
+                        values[4] = os.getuid() + 1
+                    return os.stat_result(values)
+                with mock.patch.object(svc.os, "fstat", ownership):
+                    self._assert_no_writes(args, roots, "symlink|lifecycle lock")
+
+    def test_mutex_detects_replacement_between_open_and_acquisition(self):
+        with self._installed_c2_fixture() as (args, roots, _):
+            lock = roots["state"] / svc.C2_LIFECYCLE_LOCK_NAME
+            old_inode = lock.stat().st_ino
+            real_flock = svc.fcntl.flock
+            def replace(fd, operation):
+                self.assertFalse(os.get_inheritable(fd))
+                lock.rename(lock.with_name("fixture-prior-lock"))
+                lock.write_bytes(b"")
+                lock.chmod(0o600)
+                return real_flock(fd, operation)
+            with mock.patch.object(svc.fcntl, "flock", replace), \
+                 mock.patch.object(svc, "_atomic_write_bytes") as write, \
+                 mock.patch.object(svc, "_run") as run:
+                with self.assertRaisesRegex(SystemExit, "inode is unsafe or changed"):
+                    svc.cmd_paper_runtime_upgrade(args)
+                write.assert_not_called()
+                run.assert_not_called()
+            self.assertNotEqual(lock.stat().st_ino, old_inode)
+
+    def test_start_holds_mutex_from_verification_through_bootstrap_or_kickstart(self):
+        for action in ("bootstrap", "kickstart"):
+            with self.subTest(action=action), self._installed_c2_fixture() as (args, roots, _):
+                before = self._snapshot(roots)
+                checkpoints = []
+                real_verify = svc._verify_staged_install
+                def contend(checkpoint):
+                    with self.assertRaisesRegex(SystemExit, "lifecycle mutation already in progress"):
+                        svc.cmd_paper_runtime_upgrade(args)
+                    checkpoints.append(checkpoint)
+                def verify(*pos, **kw):
+                    result = real_verify(*pos, **kw)
+                    contend("verified")
+                    return result
+                def handle(cmd):
+                    if cmd[:2] == ["launchctl", action]:
+                        contend(action)
+                        return FakeResult(0)
+                    if action == "kickstart" and cmd[:2] == ["launchctl", "print"]:
+                        return FakeResult(0, _print_crashed(str(roots["plist"]), _label_for(args.account)))
+                    return None
+                with mock.patch.object(svc, "_verify_staged_install", verify), \
+                     mock.patch.object(svc, "_run", self._unloaded_recorder(handle)):
+                    rc, _ = _capture_stdout(lambda: svc.cmd_start(args))
+                self.assertEqual(rc, 0)
+                self.assertEqual(checkpoints, ["verified", action])
+                self.assertEqual(before, self._snapshot(roots))
+
+    def test_apply_and_rollback_hold_mutex_against_concurrent_start(self):
+        with self._installed_c2_fixture() as (args, roots, _):
+            before = self._snapshot(roots)
+            real_write = svc._atomic_write_bytes
+            checkpoints = []
+            def inject(path, data, mode=svc.FILE_MODE):
+                if Path(path) == roots["manifest"]:
+                    raise OSError("fixture manifest failure")
+                with self.assertRaisesRegex(SystemExit, "lifecycle mutation already in progress"):
+                    svc.cmd_start(args)
+                checkpoints.append(Path(path).name)
+                return real_write(path, data, mode)
+            with mock.patch.object(svc, "_run", self._unloaded_recorder()), \
+                 mock.patch.object(svc, "_atomic_write_bytes", inject):
+                with self.assertRaisesRegex(SystemExit, "NOT_APPLIED; original state restored"):
+                    svc.cmd_paper_runtime_upgrade(args)
+            self.assertEqual(checkpoints, ["config.json", "config.json"])
+            self.assertEqual(before, self._snapshot(roots))
+
+    def test_stop_and_seal_hold_mutex_through_their_effects(self):
+        for operation in (svc.cmd_stop, svc.cmd_seal_runtime):
+            with self.subTest(operation=operation.__name__), self._installed_c2_fixture() as (args, roots, _):
+                checkpoints = []
+                real_write = svc._atomic_write_bytes
+                stopped = []
+                def contend():
+                    with self.assertRaisesRegex(SystemExit, "lifecycle mutation already in progress"):
+                        svc.cmd_start(args)
+                    checkpoints.append(1)
+                def write(path, data, mode=svc.FILE_MODE):
+                    contend()
+                    return real_write(path, data, mode)
+                def handle(cmd):
+                    if cmd[:2] == ["launchctl", "bootout"]:
+                        contend()
+                        stopped.append(1)
+                        return FakeResult(0)
+                    if operation is svc.cmd_stop and not stopped:
+                        return FakeResult(0, _print_running(str(roots["plist"]), _label_for(args.account)))
+                    return None
+                with mock.patch.object(svc, "_run", self._unloaded_recorder(handle)), \
+                     mock.patch.object(svc, "_atomic_write_bytes", write):
+                    rc, _ = _capture_stdout(lambda: operation(args))
+                self.assertEqual((rc, len(checkpoints)), (0, 1))
+
+    def test_strict_inspection_accepts_exact_absence_and_nested_coalition_output(self):
+        with self._installed_c2_fixture() as (args, roots, _):
+            label = _label_for(args.account)
+            output = _print_running(str(roots["plist"]), label)
+            output = output[:-2] + (
+                "\tresource coalition = {\n\t\tid = 41\n\t\tstate = active\n\t}\n"
+                "\tjetsam coalition = {\n\t\tid = 42\n\t\tstate = active\n\t}\n}\n")
+            recorder = CmdRecorder(default=FakeResult(0, output))
+            with mock.patch.object(svc, "_run", recorder):
+                result = svc._lifecycle_inspect(args.account, label, roots)
+            self.assertEqual(result, {"state": "running", "pid": 4321, "path": str(roots["plist"])})
+            self.assertEqual(recorder.calls, [["launchctl", "print", f"gui/{os.getuid()}/{label}"]])
+            with mock.patch.object(svc, "_run", self._unloaded_recorder()):
+                self.assertIsNone(svc._lifecycle_inspect(args.account, label, roots))
+
+    def test_strict_inspection_rejects_unknown_errors_wrong_identity_and_top_level_duplicates(self):
+        with self._installed_c2_fixture() as (args, roots, _):
+            label = _label_for(args.account)
+            running = _print_running(str(roots["plist"]), label)
+            absent = self._absent_result()
+            cases = {
+                "legacy ambiguous absence": FakeResult(1, "", "not loaded"),
+                "wrong code": FakeResult(1, "", absent.stderr),
+                "unexpected stdout": FakeResult(113, "unknown\n", absent.stderr),
+                "wrong label": FakeResult(113, "", absent.stderr.replace(label, label + "-other")),
+                "wrong uid": FakeResult(113, "", absent.stderr.replace(f"gui: {os.getuid()}", f"gui: {os.getuid() + 1}")),
+                "domain failure": FakeResult(113, "", "Could not find domain for user gui\n"),
+                "empty success": FakeResult(0),
+                "warning on success": FakeResult(0, running, "unexpected warning"),
+                "wrong target header": FakeResult(0, running.replace(f"/{label} =", "/other =")),
+                "wrong plist": FakeResult(0, running.replace(str(roots["plist"]), "/tmp/foreign.plist")),
+                "duplicate state": FakeResult(0, running.replace("\tstate = running\n", "\tstate = running\n\tstate = waiting\n")),
+                "malformed pid": FakeResult(0, running.replace("pid = 4321", "pid = invalid")),
+                "missing state": FakeResult(0, running.replace("\tstate = running\n", "")),
+                "wrong indentation": FakeResult(0, running.replace("\tstate = running", "\t\tstate = running")),
+                "missing block close": FakeResult(0, running[:-2]),
+                "transport error": OSError("fixture transport failure"),
+            }
+            for name, response in cases.items():
+                with self.subTest(name=name):
+                    with mock.patch.object(svc, "_run", CmdRecorder(default=response)):
+                        with self.assertRaisesRegex(SystemExit, "state is indeterminate"):
+                            svc._lifecycle_inspect(args.account, label, roots)
+
+    def test_unknown_inspection_blocks_every_c2_modifying_path(self):
+        with self._installed_c2_fixture() as (args, roots, _):
+            for operation in (svc.cmd_paper_runtime_upgrade, svc.cmd_start, svc.cmd_stop, svc.cmd_seal_runtime):
+                with self.subTest(operation=operation.__name__):
+                    before = self._snapshot(roots)
+                    recorder = CmdRecorder(default=FakeResult(1, "", "permission denied"))
+                    with mock.patch.object(svc, "_run", recorder), \
+                         mock.patch.object(svc, "_atomic_write_bytes") as write:
+                        with self.assertRaisesRegex(SystemExit, "state is indeterminate"):
+                            operation(args)
+                        write.assert_not_called()
+                    self.assertTrue(all(cmd[:2] == ["launchctl", "print"] for cmd in recorder.calls))
+                    self.assertEqual(before, self._snapshot(roots))
+
+    def test_unknown_inspection_during_paper_recovery_does_not_restore_or_replay(self):
+        with self._installed_c2_fixture() as (args, roots, _):
+            before_manifest = roots["manifest"].read_bytes()
+            writes = []
+            real_write = svc._atomic_write_bytes
+            def write(path, data, mode=svc.FILE_MODE):
+                writes.append(Path(path).name)
+                real_write(path, data, mode)
+                raise OSError("fixture post-replace failure")
+            def handle(cmd):
+                if writes:
+                    return FakeResult(1, "", "unavailable")
+                return None
+            with mock.patch.object(svc, "_run", self._unloaded_recorder(handle)), \
+                 mock.patch.object(svc, "_atomic_write_bytes", write):
+                with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN during rollback"):
+                    svc.cmd_paper_runtime_upgrade(args)
+            self.assertEqual(writes, ["config.json"])
+            self.assertEqual(roots["manifest"].read_bytes(), before_manifest)
+
+    def test_unknown_inspection_after_bootout_retains_effect_unknown(self):
+        with self._installed_c2_fixture() as (args, roots, _):
+            stopped = []
+            def handle(cmd):
+                if cmd[:2] == ["launchctl", "bootout"]:
+                    stopped.append(1)
+                    return FakeResult(0)
+                if stopped:
+                    return FakeResult(113, "", "unexpected diagnostic")
+                return FakeResult(0, _print_running(str(roots["plist"]), _label_for(args.account)))
+            recorder = CmdRecorder(handler=handle)
+            with mock.patch.object(svc, "_run", recorder):
+                with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN after bootout"):
+                    svc.cmd_stop(args)
+            self.assertEqual([cmd[1] for cmd in recorder.calls], ["print", "bootout", "print"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
