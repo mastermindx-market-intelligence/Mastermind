@@ -12,6 +12,8 @@ from typing import Any
 
 MAX_BYTES = 16_000_000
 MAX_ROWS = 8192
+# Cached benchmark observation bound; approximately two trading years.
+MAX_BENCHMARK_ROWS = 504
 
 
 def _unique_pairs(pairs):

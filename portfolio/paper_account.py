@@ -3313,7 +3313,7 @@ def performance(portfolio_id: str | None = None,
     dates. This reader does not change the account, journal, cohort or strategy.
     """
     from portfolio import registry
-    from portfolio.performance_read import read_performance_sources
+    from portfolio.performance_read import MAX_BENCHMARK_ROWS, read_performance_sources
     from portfolio.performance_projection import project_performance
 
     try:
@@ -3326,7 +3326,7 @@ def performance(portfolio_id: str | None = None,
         benchmark_issue = []
         try:
             # Cache-only: regional histories must not trigger Yahoo on a performance GET.
-            history = _load_spy_history(504, benchmark)
+            history = _load_spy_history(MAX_BENCHMARK_ROWS, benchmark)
         except Exception:
             history = []
             benchmark_issue = ["benchmark_unavailable"]
