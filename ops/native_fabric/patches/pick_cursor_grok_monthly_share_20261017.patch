@@ -16,7 +16,7 @@
          return _pick_scored(tc, prefer_c, doc, needs=needs, subject_pool=subject_pool, host_modes=host_modes,
                               task_complexity=complexity, escalation_reason=escalation_reason)
  
-@@ -2161,6 +2170,35 @@
+@@ -2161,6 +2170,59 @@
      return same
  
  
@@ -24,6 +24,30 @@
 +    """Opt-in deterministic judgment cohort, not quota or worker admission."""
 +    cfg = _routing(doc).get("cursor_grok_monthly_share")
 +    if not isinstance(cfg, dict) or cfg.get("enabled") is not True:
++        return False
++    # Legacy Cursor and new X subscriptions do not share the same economics.
++    # Unknown plan, stale proof, exhausted allowance or paid overflow fail closed.
++    proof = cfg.get("cursor_entitlement")
++    if (type(proof) is not dict
++            or proof.get("plan_type") != "legacy_independent_monthly"
++            or proof.get("source") != "account_dashboard_readback"
++            or proof.get("on_demand_enabled") is not False):
++        return False
++    remaining = proof.get("remaining_pct")
++    if (type(remaining) not in (int, float) or not math.isfinite(remaining)
++            or not 20.0 <= remaining <= 100.0):
++        return False
++    if any(type(proof.get(k)) is not str or not proof[k].endswith("Z")
++           for k in ("observed_at", "reset_at")):
++        return False
++    try:
++        observed = datetime.fromisoformat(proof["observed_at"][:-1] + "+00:00").timestamp()
++        reset = datetime.fromisoformat(proof["reset_at"][:-1] + "+00:00").timestamp()
++        now = datetime.now(timezone.utc).timestamp()
++    except (ValueError, OverflowError):
++        return False
++    if not (0 <= now - observed <= 6 * 3600
++            and now < reset <= observed + 35 * 86400):
 +        return False
 +    percent = cfg.get("percent")
 +    if type(percent) is not int or not (1 <= percent <= 20):
