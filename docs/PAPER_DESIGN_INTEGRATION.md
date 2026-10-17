@@ -128,6 +128,23 @@ bridge SHA-256 `7d810c458a53e00e21014fd7375ac338dc9c1421b30f823feb4d34184f9d08fc
 Exact target, snapshot, token-delete, desktop mutex, and EFFECT_UNKNOWN/no-replay guards are preserved.
 Evidence: `docs/evidence/paper_desktop/20261001_0514_catalog_compatibility.json`.
 
+### Studio Direct selects the reviewed v11 runtime — 2026-10-17
+
+The canonical Studio Direct installer now selects immutable Paper runtime **v11**,
+bridge SHA-256 `6d28be62b21bff12dc04ae1bdc50f12a4ff55fdb8261bdd6923bac2804fecf7c`.
+That generation is already qualified in `runtime_stage.py`; its exact full-catalog
+pin is `48b2587455d839a57b4b78f5cfdb2e75df8d530ad8059a3ad6af303c0d37224f`.
+This closes the release gap in which the canonical bridge supported the observed
+Paper catalog while Studio Direct still installed v10 and refused design writes.
+
+Existing installations remain on their current generation until the normal owner
+stages v11, stops the explicitly selected seat, upgrades it with its existing
+account/node/backend/port and preserved capability profile, then starts and reads
+back that same seat. No live config or immutable v10 file is edited in place. The
+catalog equality check, exact file/snapshot binding, desktop mutex, operation
+identity and unknown-effect rules are unchanged. Source selection is not a live
+rollout receipt; selected-seat catalog/read/edit proof is recorded separately.
+
 ### Paper release-version compatibility ruling — 2026-09-30
 
 Paper Desktop's reported release version is now **observational metadata, not a write-admission
