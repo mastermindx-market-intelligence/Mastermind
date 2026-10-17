@@ -412,6 +412,7 @@ def build_authenticated_app(
     token_verifier: MastermindTokenVerifier,
     allowed_origins: Sequence[str] = ("https://chatgpt.com",),
     live_window: LiveWindowConfig | None = None,
+    app_generation: str = "secretary-v2",
 ) -> Starlette:
     """Build one stateless A1-authenticated, read-only Steward MCP app."""
 
@@ -426,7 +427,18 @@ def build_authenticated_app(
     if verifier_policy != policy:
         raise ValueError("token_verifier policy must match Steward policy")
 
-    mcp_server = build_mcp_server(contract)
+    if app_generation == "secretary-v2":
+        mcp_server = build_mcp_server(contract)
+    elif app_generation == "research-v3":
+        # Delayed import keeps the protected v2 module graph independent of the
+        # optional later generation while admitting only this reviewed builder.
+        from integrations.mastermind_steward_app.research_server import (
+            build_research_mcp_server,
+        )
+
+        mcp_server = build_research_mcp_server(contract)
+    else:
+        raise ValueError("unsupported Steward app generation")
     hosts = _allowed_hosts(policy)
     origins = tuple(str(value) for value in allowed_origins)
     security = TransportSecuritySettings(
