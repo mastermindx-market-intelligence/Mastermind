@@ -20,6 +20,8 @@ class EstateHTTP(fx._ProbeHTTP):
         file_counts=None,
         change=None,
         overlap=False,
+        identity_complete=False,
+        move_overlap=False,
     ):
         super().__init__()
         self.count = count
@@ -27,6 +29,8 @@ class EstateHTTP(fx._ProbeHTTP):
         self.file_counts = {} if file_counts is None else dict(file_counts)
         self.change = change
         self.overlap = overlap
+        self.identity_complete = identity_complete
+        self.move_overlap = move_overlap
         self.passes = 0
         self.after_read = None
 
@@ -37,8 +41,32 @@ class EstateHTTP(fx._ProbeHTTP):
             self.calls.append((url, token, timeout))
             if page == 1:
                 self.passes += 1
-            rows = [{"number": fx.PR_NUMBER}] + [
-                {"number": 1000 + i} for i in range(self.count - 1)]
+            foreign_rows = []
+            for i in range(self.count - 1):
+                number = 1000 + i
+                if self.identity_complete:
+                    head_sha = f"{number:040x}"[-40:]
+                    if (
+                        self.move_overlap
+                        and self.passes > 1
+                        and number == 1000 + self.count - 2
+                    ):
+                        head_sha = "e" * 40
+                    foreign_rows.append({
+                        "number": number,
+                        "state": "open",
+                        "head": {
+                            "sha": head_sha,
+                            "repo": {"full_name": fx.REPOSITORY},
+                        },
+                        "base": {
+                            "sha": "f" * 40,
+                            "repo": {"full_name": fx.REPOSITORY},
+                        },
+                    })
+                else:
+                    foreign_rows.append({"number": number})
+            rows = [{"number": fx.PR_NUMBER}] + foreign_rows
             if self.change == "membership" and self.passes > 1:
                 rows[-1] = {"number": 9000}
             if self.change == "duplicate" and page == 2:
@@ -116,6 +144,101 @@ def test_large_estate_still_requires_stable_complete_observations(
     monkeypatch.setattr(module, "monotonic", Clock(), raising=False)
     rc, payload = run_cli(module, capsys, EstateHTTP(143, change=change))
     assert rc != 0 and payload["code"] == code
+
+
+def _foreign_file_call_count(http: EstateHTTP) -> int:
+    return sum(
+        1
+        for url, _token, _timeout in http.calls
+        if "/files?" in url and f"/pulls/{fx.PR_NUMBER}/" not in url
+    )
+
+
+def test_490_selective_revalidation_reuses_stable_foreign_evidence(monkeypatch):
+    module = fx._cli_module()
+    monkeypatch.setattr(module, "monotonic", Clock(), raising=False)
+    estate_size = 490
+    http = EstateHTTP(
+        estate_size,
+        overlap=True,
+        identity_complete=True,
+    )
+
+    first = module._collision_census_details(
+        http, fx.TOKEN, fx.REPOSITORY, fx.PR_NUMBER, fx.FINAL_OWNED_PATHS
+    )
+    assert first.complete is True
+    assert first.state is module.CollisionState.OVERLAP
+    first_file_calls = _foreign_file_call_count(http)
+    assert first_file_calls == estate_size - 1
+
+    matched, complete, final_records = module._revalidate_collision_census(
+        http,
+        fx.TOKEN,
+        fx.REPOSITORY,
+        fx.PR_NUMBER,
+        fx.FINAL_OWNED_PATHS,
+        first.foreign_records,
+        first.colliding_pr_numbers,
+    )
+
+    assert (matched, complete) == (True, True)
+    assert len(final_records) == estate_size - 1
+    assert _foreign_file_call_count(http) == first_file_calls
+    assert http.passes == 2
+
+
+def test_490_selective_revalidation_reproves_only_moved_foreign_identity(monkeypatch):
+    module = fx._cli_module()
+    monkeypatch.setattr(module, "monotonic", Clock(), raising=False)
+    estate_size = 490
+    http = EstateHTTP(
+        estate_size,
+        overlap=True,
+        identity_complete=True,
+        move_overlap=True,
+    )
+
+    first = module._collision_census_details(
+        http, fx.TOKEN, fx.REPOSITORY, fx.PR_NUMBER, fx.FINAL_OWNED_PATHS
+    )
+    first_file_calls = _foreign_file_call_count(http)
+
+    matched, complete, final_records = module._revalidate_collision_census(
+        http,
+        fx.TOKEN,
+        fx.REPOSITORY,
+        fx.PR_NUMBER,
+        fx.FINAL_OWNED_PATHS,
+        first.foreign_records,
+        first.colliding_pr_numbers,
+    )
+
+    assert (matched, complete) == (True, True)
+    assert len(final_records) == estate_size - 1
+    assert _foreign_file_call_count(http) == first_file_calls + 1
+    assert http.passes == 2
+
+
+def test_490_estate_moved_collider_same_projection_stays_within_closed_budget(
+        capsys, monkeypatch):
+    module = fx._cli_module()
+    monkeypatch.setattr(module, "monotonic", Clock(), raising=False)
+    estate_size = 490
+    http = EstateHTTP(
+        estate_size,
+        overlap=True,
+        identity_complete=True,
+        move_overlap=True,
+    )
+    rc, payload = run_cli(module, capsys, http)
+    assert rc == 0, payload
+    assert payload["collision_state"] == "OVERLAP"
+    assert payload["colliding_pr_numbers"] == [1000 + estate_size - 2]
+    assert payload["receipt_version"] == "v2"
+    assert len(payload["collision_evidence_fingerprint"]) == 64
+    assert len(http.calls) < module._MAX_HTTP_CALLS
+    assert http.passes == 2
 
 
 def test_last_foreign_pr_overlap_is_preserved(capsys, monkeypatch):
