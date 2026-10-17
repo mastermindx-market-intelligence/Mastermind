@@ -1,0 +1,166 @@
+{
+  "card_version": "glt_estimand_card.v1",
+  "relation_id": "glt_rel_monetary_impulse_to_broad_targets.v1",
+  "frozen_at": "2026-10-13",
+  "frozen_at_rule": "caller-supplied freeze date recorded by T13; nothing reads a wall clock",
+  "validated": false,
+  "evidence_tier": "research_measurement_only",
+  "record": "research/liquidity_transmission/GLT_T13_ESTIMAND_IDENTIFICATION_2026-10-13.md",
+  "card_hash": "f53d9296ae1556544a0d55d1a3d742bbc169138c0ae04b5a458ceb6eaf3c5537",
+  "card_hash_rule": "BROAD_TARGET_CARD_V1_SHA256 in brain/liquidity_lab/target_card.py: canonical SHA-256 of BROAD_TARGET_CARD_V1.to_dict() with sorted keys and separators (',', ':')",
+  "treatment": {
+    "family": "measured_monetary_impulse",
+    "state_family": "monetary_impulse",
+    "shock_type": "policy_liquidity_impulse",
+    "measure": "state.monetary_impulse_z",
+    "construction": "causal expanding z of the weekly change in the weighted mean causal z of USD-converted log central-bank balance sheets: WALCL; ECBASSETSW converted with EURUSD=X; JPNASSETS converted with USDJPY=X (month_end)",
+    "timing": "known_at under the T05 knowledge-time law (publication availability), never observed_at",
+    "shock_class": "observed_state_change",
+    "identification_status": "NOT_IDENTIFIED",
+    "event_definition": "brain.liquidity_lab.eventization.event_definition_id(policy); no production EventizationPolicy is ratified",
+    "constant_fx_variant": "local-currency component from T04 decompose_fx_change; used only by the mechanical_target_overlap falsifier",
+    "sources": [
+      {
+        "role": "producer",
+        "repo": "macro",
+        "path": "engine/global_liquidity_transmission.py",
+        "ref": "engine/global_liquidity_transmission.py@eb57d3db6448b9e785e1500efef4d9a49f79f427",
+        "blob": "11aec5b7ffeb5c693c02fb506d77ec21568575d6",
+        "symbols": ["causal_orthogonal_residual"]
+      },
+      {
+        "role": "T04_accounting",
+        "repo": "macro",
+        "path": "engine/global_liquidity_accounting.py",
+        "ref": "engine/global_liquidity_accounting.py@eb57d3db6448b9e785e1500efef4d9a49f79f427",
+        "blob": "2ec9a5a8849e29f987dbaf1b84c4571fae47e4b3",
+        "symbols": ["decompose_fx_change", "standardized_magnitudes", "reserves_from_balance_sheet"]
+      },
+      {
+        "role": "T05_knowledge_time",
+        "repo": "macro",
+        "path": "engine/global_liquidity_knowledge_time.py",
+        "ref": "engine/global_liquidity_knowledge_time.py@eb57d3db6448b9e785e1500efef4d9a49f79f427",
+        "blob": "19505db1aab9b80652bab82222bebaecfc5a62d7",
+        "symbols": ["eligible_as_of", "cutoff_utc", "anchor_month_end"]
+      },
+      {
+        "role": "config",
+        "repo": "macro",
+        "path": "config/global_liquidity_transmission_v1.yml",
+        "ref": "config/global_liquidity_transmission_v1.yml@eb57d3db6448b9e785e1500efef4d9a49f79f427",
+        "blob": "545b6423afa3ea282ed7cb6a5f7676652c27385c",
+        "symbols": []
+      }
+    ],
+    "source_commit": {
+      "repo": "macro",
+      "commit": "eb57d3db6448b9e785e1500efef4d9a49f79f427",
+      "pull_request": 9157,
+      "blobs_unchanged_at": "a9939167d46b6ab1a73bf0a24e7f05554bf29ad8"
+    }
+  },
+  "outcome_family": {
+    "card": "BROAD_TARGET_CARD_V1",
+    "card_module": "brain/liquidity_lab/target_card.py",
+    "target_card_version": "glt_broad_target_card.v1",
+    "target_card_sha256": "f53d9296ae1556544a0d55d1a3d742bbc169138c0ae04b5a458ceb6eaf3c5537",
+    "planning_horizons_bdays": [5, 20, 60],
+    "primary_horizon_bdays": null,
+    "return_basis": "each entry's card basis (default total_return); no substitute basis",
+    "horizon_counting_rule": "declared-calendar sessions from the card govern; an estimator horizon counted on supplied closes is admissible only when every declared session in the window is supplied, otherwise the outcome is immature and never shifted; implementation belongs to T15",
+    "basis_data_rights": "UNRESOLVED: a licensed total-return or dividend-adjusted series per entry must be recorded before any outcome read (T14/T15 precondition)",
+    "targets": [
+      {"target_id": "spy", "asset_class": "us_equity", "overlap_families": [], "leave_target_family_out": false},
+      {"target_id": "qqq", "asset_class": "us_equity", "overlap_families": [], "leave_target_family_out": false},
+      {"target_id": "smh", "asset_class": "us_equity", "overlap_families": [], "leave_target_family_out": false},
+      {"target_id": "igv", "asset_class": "us_equity", "overlap_families": [], "leave_target_family_out": false},
+      {"target_id": "iwm", "asset_class": "us_equity", "overlap_families": [], "leave_target_family_out": false},
+      {"target_id": "tlt", "asset_class": "rates", "overlap_families": ["real_yield_10y"], "leave_target_family_out": true},
+      {"target_id": "hyg", "asset_class": "credit", "overlap_families": ["high_yield_oas"], "leave_target_family_out": true},
+      {"target_id": "lqd", "asset_class": "credit", "overlap_families": ["high_yield_oas", "real_yield_10y"], "leave_target_family_out": true},
+      {"target_id": "gld", "asset_class": "commodity", "overlap_families": ["broad_dollar"], "leave_target_family_out": true},
+      {"target_id": "slv", "asset_class": "commodity", "overlap_families": ["broad_dollar"], "leave_target_family_out": true},
+      {"target_id": "dbc", "asset_class": "commodity", "overlap_families": ["broad_dollar"], "leave_target_family_out": true},
+      {"target_id": "uso", "asset_class": "commodity", "overlap_families": ["broad_dollar"], "leave_target_family_out": true},
+      {"target_id": "cper", "asset_class": "commodity", "overlap_families": ["broad_dollar"], "leave_target_family_out": true},
+      {"target_id": "efa", "asset_class": "dm_equity", "overlap_families": ["broad_dollar"], "leave_target_family_out": true},
+      {"target_id": "eem", "asset_class": "em_equity", "overlap_families": ["broad_dollar"], "leave_target_family_out": true},
+      {"target_id": "fxi", "asset_class": "china_equity", "overlap_families": ["broad_dollar"], "leave_target_family_out": true},
+      {"target_id": "mchi", "asset_class": "china_equity", "overlap_families": ["broad_dollar"], "leave_target_family_out": true},
+      {"target_id": "kweb", "asset_class": "china_equity", "overlap_families": ["broad_dollar"], "leave_target_family_out": true}
+    ],
+    "funding_family_rule": "a target is in the funding family when its return mechanically shares a component of the usd_funding composite (broad_dollar, real_yield_10y, high_yield_oas): rates and credit through yields and spreads; USD-quoted commodities and non-US equity funds through the dollar numeraire. Each such target is evaluated against a leave-target-family-out baseline (protocol section 6)"
+  },
+  "estimands": {
+    "predictive": {
+      "id": "glt_estimand_predictive.v1",
+      "quantity": "E[log(P_(anchor+h) / P_anchor) on the card basis | a measured monetary-impulse episode first known at known_at, information set I_known_at], h in the card planning horizons",
+      "conditioning_set": ["pre_treatment confounders listed below", "registered condition buckets us_liquidity_quality and usd_funding_impulse, measured at known_at"],
+      "conditioning_note": "usd_funding_impulse at known_at is partly a mediator; conditioning on it makes this a conditional predictive association and forbids any causal reading of the conditioned cells",
+      "interpretation": "association only; never an effect of policy",
+      "novelty_requirement": "must beat the direct-component and leave-target-family-out baselines of protocol section 6 on identical origins before any claim of incremental information",
+      "gate": "T14 preregistration (one outcome, one horizon) and walk-forward validation before any read"
+    },
+    "causal": {
+      "id": "glt_estimand_causal_total.v1",
+      "quantity": "total response of the target log return at horizon h to an identified intervention in central-bank balance sheets, every mediator left free",
+      "requires": "identification_receipt: a named design with first-stage relevance, timing, exclusion argument, no-anticipation evidence and a threat analysis",
+      "direct_effect_note": "a direct effect holding a mediator fixed is a different estimand and is not declared",
+      "estimable": false
+    }
+  },
+  "confounders": [
+    {"id": "lagged_growth_news", "timing": "pre_treatment", "path": "growth deterioration moves balance-sheet policy and asset returns together (reaction function)"},
+    {"id": "lagged_financial_stress", "timing": "pre_treatment", "path": "stress episodes trigger emergency facilities that expand balance sheets while risk assets fall"},
+    {"id": "lagged_inflation_and_policy_rate_path", "timing": "pre_treatment", "path": "inflation and the expected rate path drive purchase and runoff decisions and discount rates"},
+    {"id": "lagged_treasury_plumbing", "timing": "pre_treatment", "path": "TGA and ON RRP shifts change reserves relative to balance-sheet totals and move funding markets"},
+    {"id": "lagged_target_returns_and_volatility", "timing": "pre_treatment", "path": "policy reacts to market declines; trailing returns also carry momentum"},
+    {"id": "lagged_global_common_risk_factor", "timing": "pre_treatment", "path": "a global risk factor moves policy, the dollar and every target"},
+    {"id": "lagged_broad_dollar_level", "timing": "pre_treatment", "path": "the dollar translates ECB and BoJ assets into the USD stance and prices USD-quoted targets"}
+  ],
+  "mediators": [
+    {"id": "contemporaneous_broad_dollar", "path": "balance-sheet impulse to dollar to USD-quoted returns"},
+    {"id": "contemporaneous_real_yield_10y", "path": "balance-sheet impulse to term premium and real yields to duration assets"},
+    {"id": "contemporaneous_high_yield_oas", "path": "balance-sheet impulse to credit spreads to credit and equity"},
+    {"id": "usd_funding_impulse_composite", "path": "the macro usd_funding composite of the three channels above"}
+  ],
+  "colliders": [
+    {"id": "post_treatment_market_stress_response", "path": "realized post-treatment volatility or drawdown is caused by the impulse and by unobserved private shocks that also move returns"},
+    {"id": "post_treatment_funding_stress_realized", "path": "realized funding stress after the impulse is a common effect of policy and private funding shocks"},
+    {"id": "outcome_conditioned_episode_selection", "path": "keeping only episodes in which markets visibly reacted selects on a common effect of treatment and outcome noise"}
+  ],
+  "forbidden_controls": [
+    {"id": "contemporaneous_broad_dollar", "kind": "mediator", "applies_to": ["causal"]},
+    {"id": "contemporaneous_real_yield_10y", "kind": "mediator", "applies_to": ["causal"]},
+    {"id": "contemporaneous_high_yield_oas", "kind": "mediator", "applies_to": ["causal"]},
+    {"id": "usd_funding_impulse_composite", "kind": "mediator", "applies_to": ["causal"]},
+    {"id": "post_treatment_market_stress_response", "kind": "collider", "applies_to": ["predictive", "causal"]},
+    {"id": "post_treatment_funding_stress_realized", "kind": "collider", "applies_to": ["predictive", "causal"]},
+    {"id": "outcome_conditioned_episode_selection", "kind": "collider", "applies_to": ["predictive", "causal"]},
+    {"id": "contemporaneous_or_future_target_returns", "kind": "post_treatment_outcome", "applies_to": ["predictive", "causal"]},
+    {"id": "contemporaneous_global_common_risk_factor", "kind": "post_treatment_common_factor", "applies_to": ["causal"]}
+  ],
+  "exclusion_assumptions": [
+    {"id": "no_fx_translation_channel", "assumption": "the treatment reaches returns only through policy channels, not through the accounting FX translation of ECB and BoJ assets", "status": "violated_by_measurement_construction"},
+    {"id": "publication_is_news", "assumption": "the balance-sheet change first known at known_at was not already priced", "status": "not_defended"},
+    {"id": "no_information_effect", "assumption": "balance-sheet actions do not reveal central-bank information about growth or stress", "status": "not_defended"},
+    {"id": "facility_usage_is_not_a_stress_proxy", "assumption": "emergency facility usage does not itself measure the stress that moves returns", "status": "not_defended"}
+  ],
+  "falsifiers": [
+    {"id": "anticipation", "threat": "scheduled purchase and runoff paths are priced before publication, so the impulse at known_at is not news", "test": "split scheduled from unscheduled balance-sheet change; compare responses timed at announcement and at T05 known_at; the scheduled component must show no response at known_at", "refutes": "any claim that the published impulse moves returns"},
+    {"id": "reverse_policy_reaction", "threat": "balance sheets expand because markets and growth fell (facilities, QE restarts)", "test": "predict the impulse from lagged target returns, stress and growth news; report the response separately for reaction-driven and scheduled episodes", "refutes": "reading a negative association as policy harming returns or a positive one as policy helping"},
+    {"id": "common_risk_factor", "threat": "a global risk shock moves the USD-converted stance and every target at once", "test": "response must survive the lagged common-risk-factor baseline and a cross-region comparison; the contemporaneous factor is never added as a control", "refutes": "attributing a common-factor move to liquidity transmission"},
+    {"id": "mechanical_target_overlap", "threat": "the dollar sits inside the USD-converted treatment and inside USD-quoted targets; the funding composite shares dollar, real yield and HY OAS with funding-family targets", "test": "leave-target-family-out baseline for every funding-family target, plus the constant-FX treatment variant from T04 decompose_fx_change", "refutes": "any response that vanishes under constant FX or leave-family-out"},
+    {"id": "placebo_leads", "threat": "pre-trends or spurious timing produce a response before the impulse is known", "test": "same estimator on lead windows ending before known_at and on pseudo-event dates drawn from non-event weeks under a fixed protocol", "refutes": "the timing of any measured response"},
+    {"id": "weak_instrument", "threat": "a candidate instrument with weak first stage or an indefensible exclusion yields a forced causal number", "test": "declare a relevance threshold before outcomes; below it, or with an undefended exclusion, the status is NOT_IDENTIFIED", "refutes": "every causal estimate built on that instrument"}
+  ],
+  "non_exogenous_constructions": [
+    {"id": "ols_residual", "where": "any regression of the impulse on chosen regressors", "why_not_exogenous": "orthogonal to the included regressors in sample only; still correlated with omitted drivers such as growth news, stress and the reaction function"},
+    {"id": "eventization_threshold_crossing", "where": "brain/liquidity_lab/eventization.py EventizationPolicy", "why_not_exogenous": "a deterministic function of the same endogenous state; a threshold selects large endogenous moves and adds no outside variation; event_definition_id records the choice and identifies nothing"},
+    {"id": "causal_orthogonal_residual", "where": "macro engine/global_liquidity_transmission.py@eb57d3db6448b9e785e1500efef4d9a49f79f427 lines 147-165", "why_not_exogenous": "expanding-window OLS of the impulse on the stance; causal means no look-ahead, not identification; the residual remains a function of endogenous balance-sheet changes"},
+    {"id": "significant_response_curve_cell", "where": "brain/liquidity_lab/estimator.py ResponseCurveCell", "why_not_exogenous": "an interval that excludes zero measures sampling uncertainty of an association; reverse reaction and common factors also produce significant cells; it is an output, not evidence about the input"}
+  ],
+  "identification_status": "association_only",
+  "abstention_reason": "No external instrument or identified-intervention receipt exists. The measured impulse is the change in an endogenous state variable that responds to growth, inflation, financial stress and FX translation; eventization at a threshold does not make it an instrument; its exclusion assumptions are undefended or violated by construction. The causal estimand is not estimated. Only the predictive association may proceed, under T14 preregistration."
+}
