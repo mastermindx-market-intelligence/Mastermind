@@ -1,0 +1,53 @@
+--- a/lease_broker.py
++++ b/lease_broker.py
+@@ -129,6 +129,24 @@
+ 
+     def __bool__(self) -> bool:
+         return self.ok
++
++
++def _broker_controller_pid_observation(pid: object) -> str:
++    """Advisory only: an OS PID is not a verified original worker return.
++
++    Called only while viewing this broker's own live snapshot, for the
++    controller-side PID passed by remote_sub.sh on original `acquire`.
++    Never expire, release, change a lease, or interpret PID reuse as proof.
++    """
++    if type(pid) is not int or pid <= 0:
++        return "UNVERIFIED"
++    try:
++        os.kill(pid, 0)
++    except ProcessLookupError:
++        return "ABSENT"
++    except OSError:  # Permission denied/unknown is not proof of process death.
++        return "UNVERIFIED"
++    return "PRESENT_UNVERIFIED"
+ 
+ 
+ class Broker:
+@@ -1356,6 +1374,25 @@
+             )
+         if not snap.get("leases"):
+             print("  (none)")
++        # This is the existing broker's *read-only* operator view, not another
++        # lease-reaper or completion authority. Remote shell acquires record
++        # their launching broker-host PID even when execution host differs.
++        # Only inspect PIDs when the snapshot is from our own PID namespace.
++        if snap.get("this_host") == self.this_host:
++            absent = []
++            for row in snap.get("leases") or []:
++                if (isinstance(row, dict)
++                        and str(row.get("task_class") or "").startswith("remote-")
++                        and row.get("state") in ("held", "rented")
++                        and _broker_controller_pid_observation(row.get("pid")) == "ABSENT"):
++                    absent.append(str(row.get("id") or ""))
++            if absent:
++                print(f"  CONTROLLER_PID_ABSENT count={len(absent)} (broker host only)")
++                for lease_id in absent[:20]:
++                    print(f"    lease={lease_id} remote_worker=UNKNOWN no_release_or_retry=1")
++                if len(absent) > 20:
++                    print(f"    additional_unlisted={len(absent) - 20}")
++                print("  Original run/host result and lease effect must be reconciled before release.")
+         print("─" * cols)
+         print("  WAITERS")
+         if snap.get("waiters"):
