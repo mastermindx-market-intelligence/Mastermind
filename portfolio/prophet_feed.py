@@ -27,6 +27,18 @@ WHY IT IS SHAPED THIS WAY — the load-bearing invariants
     week-old geometry against today's tape is how you knife into a name whose plan already
     invalidated. Top-level ``asof`` older than ``_STALE_DAYS`` calendar days → the whole feed goes
     inert (``index()`` returns ``{}``), exactly as ``brain/neural_web_context`` treats its context.
+  * THE CLOCK IS THE CALLER'S, NOT THE WALL'S. Every public reader takes an optional ``asof``: a
+    BINDING point-in-time boundary, already resolved by the caller. It does two things — it refuses
+    an artifact that POST-DATES the boundary (the look-ahead guard: a September board can never
+    inform a July decision), and it measures both the artifact staleness gate and the per-plan
+    discovery age against that boundary instead of ``date.today()``. A bounded read is therefore
+    reproducible: replay it next month and it returns the same plans, or the same explicit
+    unavailable reason (see ``availability``).
+    ``asof=None`` means NO BOUND and keeps the exact wall-clock behaviour. This module does NOT
+    infer the bound from the wall clock, because it cannot: the Macro lanes publish on different
+    cadences (the regime date is 2026-09-15 while this emit is stamped 2026-09-16), so "the asof
+    is in the past" would routinely be true of a perfectly live run and would silently kill the
+    feed. Only the caller knows which contract it wants — see ``portfolio.conviction.build``.
   * INJECTABLE FOR TESTS. The artifact path is a module-level ``_ARTIFACT_PATH`` derived from the
     ``_V`` vendor root (same convention as ``portfolio/lenses`` and ``brain/neural_web_context``),
     and the read is cached per-process with an explicit ``_reset_cache()`` — so a test can write a
@@ -141,8 +153,13 @@ def _reset_cache() -> None:
 # internal helpers
 # --------------------------------------------------------------------------- #
 
-def _age_days(asof_str: str | None) -> int | None:
-    """Calendar days since an ISO ``YYYY-MM-DD`` date (leading 10 chars used). None if unparseable.
+def _age_days(asof_str: str | None, ref: "date | None" = None) -> int | None:
+    """Calendar days from an ISO ``YYYY-MM-DD`` date to ``ref`` (default: today). None if
+    unparseable.
+
+    ``ref`` is the DECISION BOUNDARY. Passing it is what makes a historical replay deterministic:
+    a plan one day old at the decision it preceded is one day old forever, however long ago that
+    decision was. ``ref=None`` keeps the wall-clock reading (the live/unbounded path).
 
     Mirrors brain/neural_web_context._age_days so staleness is computed identically across readers.
     """
@@ -150,7 +167,20 @@ def _age_days(asof_str: str | None) -> int | None:
         return None
     try:
         asof_date = date.fromisoformat(str(asof_str)[:10])
-        return (date.today() - asof_date).days
+        return ((ref or date.today()) - asof_date).days
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _ref_date(asof: str | None) -> "date | None":
+    """The reference date for every freshness read, from the caller's decision boundary.
+
+    ``None`` (unparseable or absent ``asof``) means "no bound" — every downstream read falls back
+    to the wall clock, i.e. exactly the pre-asof behaviour."""
+    if not asof:
+        return None
+    try:
+        return date.fromisoformat(str(asof)[:10])
     except Exception:  # noqa: BLE001
         return None
 
@@ -220,10 +250,12 @@ def _t1_t2(plan: dict) -> tuple[float | None, float | None]:
     return t1, t2
 
 
-def _normalize(plan: dict) -> dict | None:
+def _normalize(plan: dict, ref: "date | None" = None) -> dict | None:
     """Normalize ONE raw plan dict into the stable shape the sleeve consumes, or None if it is not
     a usable dict. Pure; never raises. (Filtering by direction/phase/asset-shape is the caller's
-    job — this only reshapes + defensively coerces.)"""
+    job — this only reshapes + defensively coerces.)
+
+    ``ref`` is the decision boundary used to age the plan; None keeps the wall-clock reading."""
     if not isinstance(plan, dict):
         return None
     ticker = str(plan.get("asset") or "").upper().strip()
@@ -242,7 +274,7 @@ def _normalize(plan: dict) -> dict | None:
         "phase": plan.get("phase"),
         "recommended_action": plan.get("recommended_action"),
         "signal_date": signal_date,
-        "age_days": _age_days(signal_date),
+        "age_days": _age_days(signal_date, ref),
         # NOTE: no rr_grade exists in prophet.index/v1 — degrades to None, never fabricated.
         "rr_grade": _first(plan, "rr_grade"),
     }
@@ -252,17 +284,12 @@ def _normalize(plan: dict) -> dict | None:
 # public API
 # --------------------------------------------------------------------------- #
 
-def index() -> dict:
-    """Return the cached, parsed Prophet index dict — or ``{}`` when it must be inert.
+def _raw_index() -> dict:
+    """The cached, schema-checked artifact as parsed — BEFORE any freshness/boundary gating.
 
-    ``{}`` (fully inert) is returned when ANY of these hold, each fail-open and silent:
-      * the flag ``MASTERMIND_PROPHET_FEED`` is OFF,
-      * the artifact file is absent (the common fresh-worktree case — dangling vendor symlink),
-      * the JSON is malformed / not a dict / wrong ``schema``,
-      * the top-level ``asof`` is missing/unparseable, or older than ``_STALE_DAYS`` calendar days.
-
-    Cached for the process lifetime; call ``_reset_cache()`` to force a fresh read (tests / intraday
-    refresh). Never raises — a read/parse error logs at debug and yields ``{}``.
+    Split out of ``index()`` so the file read stays cached per-process (mtime-keyed) while the
+    gating, which depends on the CALLER's decision boundary, is recomputed per call. Without the
+    split a cache populated by one ``asof`` would silently serve another.
     """
     global _CACHE, _CACHE_LOADED, _CACHE_MTIME_NS
     try:
@@ -278,8 +305,6 @@ def index() -> dict:
     _CACHE_MTIME_NS = current_mtime
     _CACHE = {}
     try:
-        if not feed_enabled():
-            return {}
         if not _ARTIFACT_PATH.exists():
             return {}
         import json  # local import: keep module import cheap / dependency-light
@@ -289,14 +314,6 @@ def index() -> dict:
         if raw.get("schema") != _EXPECTED_SCHEMA:
             log.debug("prophet_feed: wrong schema %r", raw.get("schema"))
             return {}
-        asof = raw.get("asof")
-        age = _age_days(asof)
-        if age is None:
-            log.debug("prophet_feed: asof missing/unparseable (%r)", asof)
-            return {}
-        if age > _STALE_DAYS:
-            log.debug("prophet_feed: stale asof=%s age=%dd > %dd", asof, age, _STALE_DAYS)
-            return {}
         _CACHE = raw
         return _CACHE
     except Exception as e:  # noqa: BLE001 — fail-open: never raise into a build
@@ -305,7 +322,87 @@ def index() -> dict:
         return {}
 
 
-def plans() -> list[dict]:
+def availability(asof: str | None = None) -> dict:
+    """The HONEST admissibility record for this artifact at decision boundary ``asof``.
+
+    ``{"available": bool, "reason": str | None, "artifact_asof": str | None, "asof": str | None,
+    "age_days": int | None}``. ``reason`` is set only when the feed is inert, and names WHY, so a
+    historical build can report "Prophet was unavailable at this boundary" instead of silently
+    producing a smaller book. Never raises.
+
+    THE POINT-IN-TIME RULE. ``vendor/macro/site/prophet/index.json`` is a SINGLE CURRENT file that
+    states the instant it represents (top-level ``asof``); there is no dated archive of past boards
+    (``plans/`` and ``states/`` are keyed by plan identity ``TICKER-DIRECTION-SIGNALDATE``, not by
+    observation date). So the only truthful reading is whole-artifact:
+
+      * ``artifact.asof <= asof`` → the file genuinely IS a pre-boundary snapshot → admissible,
+        and its staleness is measured against ``asof``, never the wall clock;
+      * ``artifact.asof >  asof`` → it carries post-boundary information → ``future_artifact``,
+        fully inert.
+
+    It is deliberately NOT mined plan-by-plan for rows whose ``_signal_date`` precedes ``asof``:
+    each plan's phase / recommended_action / conviction is RECOMPUTED at the artifact's own asof,
+    so such a row would import post-boundary judgment about a pre-boundary plan. That would be
+    manufacturing history the source does not have.
+    """
+    rec = {"available": False, "reason": None, "artifact_asof": None,
+           "asof": asof, "age_days": None}
+    try:
+        if not feed_enabled():
+            rec["reason"] = "flag_off"
+            return rec
+        raw = _raw_index()
+        if not raw:
+            rec["reason"] = "artifact_absent_or_malformed"
+            return rec
+        art_asof = raw.get("asof")
+        rec["artifact_asof"] = art_asof
+        ref = _ref_date(asof)
+        age = _age_days(art_asof, ref)
+        rec["age_days"] = age
+        if age is None:
+            rec["reason"] = "artifact_asof_unparseable"
+            return rec
+        if age < 0:
+            # the artifact post-dates the decision boundary — the split-clock leak this guards
+            rec["reason"] = "future_artifact"
+            return rec
+        if age > _STALE_DAYS:
+            rec["reason"] = "stale"
+            return rec
+        rec["available"] = True
+        return rec
+    except Exception as e:  # noqa: BLE001 — fail-open: never raise into a build
+        log.debug("prophet_feed: availability(%r) failed (%s)", asof, e)
+        rec["reason"] = "error"
+        return rec
+
+
+def index(asof: str | None = None) -> dict:
+    """Return the parsed Prophet index dict — or ``{}`` when it must be inert.
+
+    ``{}`` (fully inert) is returned when ANY of these hold, each fail-open and silent:
+      * the flag ``MASTERMIND_PROPHET_FEED`` is OFF,
+      * the artifact file is absent (the common fresh-worktree case — dangling vendor symlink),
+      * the JSON is malformed / not a dict / wrong ``schema``,
+      * the top-level ``asof`` is missing/unparseable,
+      * the artifact POST-DATES ``asof`` (see ``availability`` — the look-ahead guard), or
+      * it is older than ``_STALE_DAYS`` days *measured from* ``asof`` (the wall clock when
+        ``asof`` is None, which is the unchanged live reading).
+
+    Cached for the process lifetime; call ``_reset_cache()`` to force a fresh read (tests / intraday
+    refresh). Never raises — a read/parse error logs at debug and yields ``{}``.
+    """
+    av = availability(asof)
+    if not av["available"]:
+        if av["reason"] not in (None, "artifact_absent_or_malformed", "flag_off"):
+            log.debug("prophet_feed: inert (%s) artifact_asof=%s asof=%s age=%s",
+                      av["reason"], av["artifact_asof"], asof, av["age_days"])
+        return {}
+    return _raw_index()
+
+
+def plans(asof: str | None = None) -> list[dict]:
     """Return the normalized ACTIVE, LONG, equity plans from the index (``[]`` when inert).
 
     Filters applied to ``index()["plans"]``:
@@ -315,9 +412,12 @@ def plans() -> list[dict]:
       * ``asset`` is a plain equity ticker (uppercase alnum, dots/hyphens allowed).
 
     Each element is the normalized shape from ``_normalize`` (numeric fields coerced float-or-None,
-    ``age_days`` computed vs ``signal_date``, ``t1``/``t2`` resolved by label). Never raises."""
+    ``age_days`` computed vs ``signal_date``, ``t1``/``t2`` resolved by label). Never raises.
+
+    ``asof`` bounds BOTH gates: the artifact must be admissible at that boundary (see
+    ``availability``) and each plan is aged against it, so a historical read is reproducible."""
     try:
-        idx = index()
+        idx = index(asof) if asof is not None else index()
         if not idx:
             return []
         raw_plans = idx.get("plans")
@@ -337,7 +437,7 @@ def plans() -> list[dict]:
                 continue
             if not _is_equity_ticker(str(p.get("asset") or "").upper().strip()):
                 continue
-            norm = _normalize(p)
+            norm = _normalize(p, _ref_date(asof))
             if norm is not None:
                 out.append(norm)
         return out
@@ -346,7 +446,7 @@ def plans() -> list[dict]:
         return []
 
 
-def candidate_tickers() -> list[str]:
+def candidate_tickers(asof: str | None = None) -> list[str]:
     """Return the ADDITIVE candidate tickers Prophet contributes to conviction sourcing (``[]`` when
     inert), sorted by conviction desc, deduped, capped at ``MAX_CANDIDATES``.
 
@@ -359,7 +459,7 @@ def candidate_tickers() -> list[str]:
     represented by its highest-conviction one. A plan with ``conviction is None`` sorts last."""
     try:
         eligible = [
-            p for p in plans()
+            p for p in (plans(asof) if asof is not None else plans())
             if str(p.get("recommended_action") or "").lower() in _SOURCEABLE_ACTIONS
             and p.get("age_days") is not None
             and p["age_days"] <= _CANDIDATE_MAX_AGE_DAYS
@@ -384,7 +484,7 @@ def candidate_tickers() -> list[str]:
         return []
 
 
-def plan_for(ticker: str) -> dict | None:
+def plan_for(ticker: str, asof: str | None = None) -> dict | None:
     """Return the single most-relevant normalized plan for ``ticker``, or None.
 
     Selection among that ticker's ACTIVE plans (ANY active phase — a held/triggered/overtime plan
@@ -396,7 +496,8 @@ def plan_for(ticker: str) -> dict | None:
         t = (ticker or "").upper().strip()
         if not t:
             return None
-        mine = [p for p in plans() if p.get("ticker") == t]
+        mine = [p for p in (plans(asof) if asof is not None else plans())
+                if p.get("ticker") == t]
         if not mine:
             return None
         # freshest (age asc; unknown age → +inf so it sorts last), then conviction desc
