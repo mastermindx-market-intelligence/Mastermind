@@ -75,7 +75,7 @@ class CursorMonthlyShareSourceTests(unittest.TestCase):
     def test_patch_uses_one_existing_picker_seam(self):
         picker = next(
             n for n in self.tree.body
-            if isinstance(n, ast.FunctionDef) and n.name == "_format_pick_host"
+            if isinstance(n, ast.FunctionDef) and n.name == "_format_pick"
         )
         calls = [
             n.func.id for n in ast.walk(picker)
@@ -138,7 +138,7 @@ class CursorMonthlyShareSourceTests(unittest.TestCase):
     def test_grok_quota_native_gate_stays_in_control(self):
         picker = next(
             n for n in self.tree.body
-            if isinstance(n, ast.FunctionDef) and n.name == "_format_pick_host"
+            if isinstance(n, ast.FunctionDef) and n.name == "_format_pick"
         )
         # The new branch must run only inside judgment classes and must call
         # the existing full-qualification fallback, never direct _emit/claim.
@@ -159,7 +159,7 @@ class CursorMonthlyShareSourceTests(unittest.TestCase):
     def test_native_failure_returns_original_judgment_route(self):
         picker = next(
             n for n in self.tree.body
-            if isinstance(n, ast.FunctionDef) and n.name == "_format_pick_host"
+            if isinstance(n, ast.FunctionDef) and n.name == "_format_pick"
         )
         branch = next(
             n for n in ast.walk(picker)
