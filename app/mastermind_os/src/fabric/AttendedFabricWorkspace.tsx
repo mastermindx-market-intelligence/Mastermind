@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { MissionHost } from "../host";
 import { AttendedFabricInspector } from "./AttendedFabricInspector";
 import { FabricRunCatalog } from "./FabricRunCatalog";
+import { LocalFabricOwnerImport } from "./LocalFabricOwnerImport";
 
 /** A catalog click fills the existing inspector; it never starts a read or worker. */
 export function AttendedFabricWorkspace({ host, locale = "en" }: { host?: MissionHost; locale?: "en" | "zh-CN" }) {
@@ -18,5 +19,6 @@ export function AttendedFabricWorkspace({ host, locale = "en" }: { host?: Missio
         setSelection({ ...tuple, sourceEpoch: generation, sourceHost: host });
     }} />
     <AttendedFabricInspector key={epoch} host={host} locale={locale} selection={visible} />
+    <LocalFabricOwnerImport key={`local-owner:${epoch}`} host={host} locale={locale} />
   </>;
 }

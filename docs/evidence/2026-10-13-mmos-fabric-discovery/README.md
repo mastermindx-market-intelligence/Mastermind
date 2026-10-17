@@ -23,3 +23,7 @@ Independent exact-head source review, actual browser/layout qualification, sourc
 ## October 17 consumer security continuation
 
 [October 17 signed-in machine-owner scope refusal](CATALOG_MACHINE_SCOPE_REFUSAL_20261017.md): signed-in OS catalog refuses machine-owned observations; server-issued original-run entitlement remains mandatory.
+
+## October 17 — M2 local operator, no Executive prerequisite
+
+[Private M2 Fabric owner reader and native import qualification](M2_LOCAL_OPERATOR_20261017.md). The CLI actually read 32 unique retained run records from the installed M2 ledger; browser import is native-only, explicit, offline and source-bounded. Six Rust reader tests, 27 normal native tests and the complete OS frontend suite passed. No live worker census, remote user grant, standalone Tauri distribution or production acceptance is implied. The original PR remains Draft/Hold until independent review and required release gates.
