@@ -28,6 +28,7 @@ from control_plane.executive_agent_capabilities import (
     CLAUDE_OPERATOR_HARNESS_KIND,
     CLAUDE_OPERATOR_PROVIDER,
     CapabilityPolicyError,
+    CAPABILITY_POLICY_SCHEMA_V4,
     ExecutionCapabilityRegistry,
 )
 from control_plane.executive_operator_harness_port import ExecutiveOperatorHarnessPort
@@ -103,6 +104,47 @@ class RetainedNativeOperatorSession:
     session: OperatorSessionReceipt
     adapter: Any = field(repr=False)
     canonical_plan_json: str = field(repr=False)
+
+
+# Exact opt-in read-only nonplanner package. Production's default v3
+# registry has no such profile; mere Job role/metadata cannot activate it.
+_NONPLANNER_V4_READ_PROFILE = "operator.appserver.readonly.mastermind-operator.v1"
+_NONPLANNER_ROLES = frozenset({"work", "review"})
+_NONPLANNER_SKILL_GRANTS = (
+    ("mastermind-operator.escalate-decision.v1", "escalate-decision"),
+    ("mastermind-operator.finish-operation.v1", "finish-operation"),
+    ("mastermind-operator.receive-commission.v1", "receive-commission"),
+    ("mastermind-operator.return-progress.v1", "return-progress"),
+)
+
+def _admitted_readonly_nonplanner_skill_profile(registry, profile) -> bool:
+    """Verify the original V4 package exactly; this selects no Worker or host.
+
+    Strictly read-only Work/Review is an incremental source path. Repair,
+    branch-write, RUN_TESTS, arbitrary MCP and Browser effects remain held.
+    """
+    return (
+        registry.schema_version == CAPABILITY_POLICY_SCHEMA_V4
+        and profile.enabled is True
+        and profile.profile_id == _NONPLANNER_V4_READ_PROFILE
+        and profile.execution_surface == "codex-app-server"
+        and profile.auth_realm == "dedicated-worker-account"
+        and profile.sandbox_policy == "read-only"
+        and profile.approval_policy == "never"
+        and profile.write_capable is False
+        and profile.network_policy == "disabled"
+        and profile.native_helper_policy.value == "DISABLED"
+        and profile.native_helper is None
+        and not profile.mcp_servers
+        and not profile.mcp_server_grants
+        and not profile.resource_grants
+        and not profile.plugins
+        and profile.skills == tuple(item[1] for item in _NONPLANNER_SKILL_GRANTS)
+        and tuple(
+            (grant.capability_id, grant.runtime_name)
+            for grant in profile.skill_grants
+        ) == _NONPLANNER_SKILL_GRANTS
+    )
 
 
 RemoteAdapterFactory = Callable[
@@ -334,9 +376,17 @@ class ExecutiveOperatorSupervisor:
             raise ExecutiveOperatorSupervisorError(
                 "App Server supervisor refuses the interactive profile before claim"
             )
-        if job.orchestration_role != "plan":
+        is_nonplanner = job.orchestration_role in _NONPLANNER_ROLES
+        if job.orchestration_role != "plan" and not is_nonplanner:
             raise ExecutiveOperatorSupervisorError(
-                "App Server composition accepts only the read-only planner role"
+                "App Server role is not one reviewed COO role"
+            )
+        if is_nonplanner and (
+            self._claimed_adapter_factory is None
+            or constraints.get("execution_profile_id") != _NONPLANNER_V4_READ_PROFILE
+        ):
+            raise ExecutiveOperatorSupervisorError(
+                "nonplanner App Server requires claim-aware exact V4 Skill profile"
             )
         if (
             job.requested_authorities != ["READ"]
@@ -344,7 +394,7 @@ class ExecutiveOperatorSupervisor:
             or job.validation_commands
         ):
             raise ExecutiveOperatorSupervisorError(
-                "operator planner authority is not closed read-only"
+                "operator App Server authority is not closed read-only"
             )
         quota = self.runtime.workers.get_quota_class(
             lease.attempt.worker_id, lease.attempt.quota_class
@@ -397,8 +447,12 @@ class ExecutiveOperatorSupervisor:
             and profile.sandbox_policy == "read-only"
             and profile.approval_policy == "never"
             and not profile.write_capable
-            and not profile.skills
+            and (is_nonplanner or not profile.skills)
             and not profile.plugins
+        )
+        nonplanner_profile_ok = (
+            is_nonplanner
+            and _admitted_readonly_nonplanner_skill_profile(registry, profile)
         )
         docs_profile_ok = (
             profile.profile_id
@@ -449,8 +503,11 @@ class ExecutiveOperatorSupervisor:
             and not profile.resource_grants
         )
         if not common_profile_ok or not (
-            docs_profile_ok or browser_profile_ok or native_return_profile_ok
-            or native_claude_profile_ok
+            nonplanner_profile_ok
+            if is_nonplanner else (
+                docs_profile_ok or browser_profile_ok or native_return_profile_ok
+                or native_claude_profile_ok
+            )
         ):
             raise ExecutiveOperatorSupervisorError(
                 "operator planner profile is not one reviewed rich read-only lane"
@@ -467,6 +524,12 @@ class ExecutiveOperatorSupervisor:
         ):
             raise ExecutiveOperatorSupervisorError(
                 "native Claude planner provider drifted after claim"
+            )
+        if is_nonplanner and (
+            quota.provider != "codex" or job.constraints.get("provider") != "codex"
+        ):
+            raise ExecutiveOperatorSupervisorError(
+                "nonplanner App Server provider drifted after claim"
             )
         if quota.model != job.constraints.get("model") or quota.effort != job.constraints.get(
             "effort"
@@ -517,7 +580,7 @@ class ExecutiveOperatorSupervisor:
             run_id=lease.attempt.attempt_id,
             worker_id=lease.attempt.worker_id,
             effective_grant_digest=lease.attempt.effective_grant_digest,
-            orchestration_role="plan",
+            orchestration_role=job.orchestration_role,
             root_job_id=job.root_job_id,
         )
         base_prompt = (
@@ -1136,7 +1199,39 @@ class ExecutiveOperatorSupervisor:
         if job is None:
             raise StateConflict(f"job {job_id!r} does not exist")
         if job.orchestration_role != "plan":
-            raise StateConflict("App Server supervisor accepts only planner Jobs")
+            if (
+                job.orchestration_role not in _NONPLANNER_ROLES
+                or self._claimed_adapter_factory is None
+                or job.constraints.get("execution_profile_id")
+                != _NONPLANNER_V4_READ_PROFILE
+                or job.requested_authorities != ["READ"]
+                or job.allowed_write_paths
+                or job.validation_commands
+            ):
+                raise StateConflict(
+                    "App Server nonplanner needs exact read-only V4 Skill admission"
+                )
+            try:
+                registry = ExecutionCapabilityRegistry.load()
+                profile = registry.resolve(_NONPLANNER_V4_READ_PROFILE)
+                if (
+                    not _admitted_readonly_nonplanner_skill_profile(
+                        registry, profile,
+                    )
+                    or job.constraints.get("capability_policy_version")
+                    != registry.policy_version
+                    or job.constraints.get("capability_policy_digest")
+                    != registry.policy_digest
+                    or job.constraints.get("execution_profile_digest")
+                    != profile.profile_digest
+                ):
+                    raise CapabilityPolicyError(
+                        "V4 Skill identity is not the admitted source"
+                    )
+            except CapabilityPolicyError as exc:
+                raise StateConflict(
+                    "nonplanner V4 Skill policy is not installed"
+                ) from exc
         if self.runtime.operator_harness.is_interactive_job(job_id):
             raise StateConflict("interactive Jobs are not owned by the one-shot supervisor")
         from control_plane.foreground_operation import _current_foreground_operation_or_none
