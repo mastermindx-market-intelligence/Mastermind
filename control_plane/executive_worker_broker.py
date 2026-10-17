@@ -45,6 +45,12 @@ from control_plane.executive_ambient_process import (
     AmbientProcessIdentity,
     NullAmbientClassifier,
 )
+from control_plane.codex_operator_adapter import (
+    CodexOperatorAdapter,
+    CodexSkillCanaryBinding,
+    CodexSkillTurnInput,
+    CodexTurnInputEnvelope,
+)
 from control_plane.codex_worker import (
     GitPreflightFailed,
     GitPreflightTimeout,
@@ -103,6 +109,13 @@ from control_plane.operator_harness_wire import (
     provider_session_handoff as wire_provider_session_handoff,
     to_wire as operator_to_wire,
     turn_ref as wire_turn_ref,
+)
+from control_plane.operator_skill_selection import (
+    MAX_OPERATOR_PROMPT_BYTES,
+    OperatorSkillSelection,
+    OperatorSkillSelectionError,
+    OperatorSkillTurnInput,
+    skill_selection_from_wire,
 )
 from control_plane.operator_materialization_receipt import (
     MATERIALIZATION_STATUS_SCHEMA,
@@ -195,7 +208,7 @@ _ALLOWED_OPERATIONS = frozenset(
      "assignment-seal-finalize"}
 ) | _OHF_OPERATIONS
 _MAX_REQUEST_BYTES = 1024 * 1024
-_MAX_OPERATOR_PROMPT_BYTES = 512 * 1024
+_MAX_OPERATOR_PROMPT_BYTES = MAX_OPERATOR_PROMPT_BYTES
 _MAX_VALIDATION_COMMANDS = 32
 _MAX_VALIDATION_ARGS = 128
 _MAX_VALIDATION_BYTES = 64 * 1024
@@ -482,7 +495,7 @@ class OperatorAttemptResource(Protocol):
 
 
 OperatorAdapterFactory = Callable[
-    [Path, Callable[[TurnRef], str], RequestedExecutionProfile], OperatorAdapter
+    [Path, Callable[[TurnRef], str | CodexTurnInputEnvelope], RequestedExecutionProfile], OperatorAdapter
 ]
 OperatorResourceFactory = Callable[
     [
@@ -974,9 +987,60 @@ class _BrokerOperatorRun:
     provider_session_id: str
     materialization_receipt: OperatorMaterializationReceipt | None = None
     resource: OperatorAttemptResource | None = None
-    prompts: dict[str, str] = dataclasses.field(default_factory=dict)
+    prompts: dict[str, str | CodexTurnInputEnvelope] = dataclasses.field(default_factory=dict)
     terminal_error: str | None = None
     busy: bool = False
+
+
+def _bound_skill_turn_input(
+    state: _BrokerOperatorRun, text: str, selection: OperatorSkillSelection,
+) -> CodexTurnInputEnvelope:
+    """Resolve only from this generation's worker-local verified Skill binding.
+
+    The wire has no path, runtime name, receipt, profile or permission fields.
+    The unchanged adapter revalidates its causal Skill state before turn/start.
+    """
+    adapter = state.adapter
+    if type(adapter) is not CodexOperatorAdapter or state.resource is not None:
+        raise BrokerProtocolError("operator Skill selection has no compatible local adapter")
+    binding = adapter.skill_canary_binding
+    if type(binding) is not CodexSkillCanaryBinding:
+        raise BrokerProtocolError("operator Skill selection has no local package binding")
+    requested = state.requested
+    manifest = binding.profile.capability_manifest(
+        harness_binary_digest=adapter.binary_digest,
+    )
+    if (
+        requested.worker_id != adapter.worker_id
+        or requested.provider != "openai-codex"
+        or requested.harness_kind != "codex-app-server"
+        or requested.harness_binary_digest != adapter.binary_digest
+        or requested.capabilities != manifest
+        or requested.expected_config_digest != binding.profile.expected_config_digest
+        or adapter.expected_config_digest != binding.profile.expected_config_digest
+        or binding.projection.owning_process_generation
+        != state.generation.process_generation_id
+        or selection.package_generation_digest
+        != binding.generation.package_generation_digest
+    ):
+        raise BrokerProtocolError("operator Skill selection is outside the bound generation")
+    grants = [
+        grant for grant in binding.profile.skill_grants
+        if grant.capability_id == selection.capability_id
+    ]
+    if len(grants) != 1 or grants[0].skill_content_digest != selection.skill_content_digest:
+        raise BrokerProtocolError("operator Skill selection is outside the effective grant")
+    grant = grants[0]
+    return CodexTurnInputEnvelope(
+        text=text,
+        skills=(CodexSkillTurnInput(
+            capability_id=grant.capability_id,
+            runtime_name=grant.runtime_name,
+            skill_md_path=f"{binding.projection.skills_root}/{grant.runtime_name}/SKILL.md",
+            skill_content_digest=grant.skill_content_digest,
+            package_generation_digest=binding.generation.package_generation_digest,
+        ),),
+    )
 
 
 def _is_within(path: Path, root: Path) -> bool:
@@ -1877,7 +1941,7 @@ class ExecutiveWorkerBroker:
 
     def _operator_factory(
         self, requested: RequestedExecutionProfile
-    ) -> tuple[OperatorAdapter, dict[str, str], Path]:
+    ) -> tuple[OperatorAdapter, dict[str, str | CodexTurnInputEnvelope], Path]:
         self._require_current_autonomy()
         if not self.operator_harness_armed or self.operator_adapter_factory is None:
             raise BrokerStateError("the Operator Harness is not armed by worker policy")
@@ -1890,9 +1954,9 @@ class ExecutiveWorkerBroker:
             raise BrokerProtocolError(
                 "operator workspace must be a direct broker assignment"
             )
-        prompts: dict[str, str] = {}
+        prompts: dict[str, str | CodexTurnInputEnvelope] = {}
 
-        def load_turn(turn: TurnRef) -> str:
+        def load_turn(turn: TurnRef) -> str | CodexTurnInputEnvelope:
             try:
                 return prompts[turn.turn_id]
             except KeyError as exc:
@@ -2401,14 +2465,15 @@ class ExecutiveWorkerBroker:
 
     async def _ohf_begin_turn(self, payload: dict[str, Any]) -> dict[str, Any]:
         self._require_current_autonomy()
-        if set(payload) != {
-            "operation_id",
-            "turn",
-            "generation",
-            "launch",
-            "prompt",
-        }:
+        fields = {"operation_id", "turn", "generation", "launch", "prompt"}
+        if set(payload) != fields and set(payload) != fields | {"skill_selection"}:
             raise BrokerProtocolError("ohf-begin-turn payload fields are invalid")
+        selection = None
+        if "skill_selection" in payload:
+            try:
+                selection = skill_selection_from_wire(payload["skill_selection"])
+            except OperatorSkillSelectionError as exc:
+                raise BrokerProtocolError(str(exc)) from exc
         try:
             operation = wire_operation_id(payload["operation_id"])
             turn = wire_turn_ref(payload["turn"])
@@ -2417,6 +2482,11 @@ class ExecutiveWorkerBroker:
         except OperatorHarnessWireError as exc:
             raise BrokerProtocolError(str(exc)) from exc
         prompt = payload["prompt"]
+        if selection is not None:
+            try:
+                OperatorSkillTurnInput(prompt, selection)
+            except OperatorSkillSelectionError as exc:
+                raise BrokerProtocolError(str(exc)) from exc
         if (
             not isinstance(prompt, str)
             or not prompt
@@ -2436,7 +2506,10 @@ class ExecutiveWorkerBroker:
                 raise BrokerProtocolError(
                     "operator turn or launch decision is outside the active generation"
                 )
-            state.prompts[turn.turn_id] = prompt
+            state.prompts[turn.turn_id] = (
+                prompt if selection is None
+                else _bound_skill_turn_input(state, prompt, selection)
+            )
             try:
                 observation = await self._operator_call(
                     "begin turn",

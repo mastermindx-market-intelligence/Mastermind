@@ -57,6 +57,11 @@ from control_plane.operator_harness_wire import (
     to_wire,
     turn_start_observation,
 )
+from control_plane.operator_skill_selection import (
+    OperatorSkillSelectionError,
+    OperatorSkillTurnInput,
+    operator_turn_payload,
+)
 from control_plane.operator_materialization_receipt import (
     OperatorMaterializationReceiptError,
     OperatorMaterializationStatusObservation,
@@ -71,7 +76,7 @@ from control_plane.worker_browser_b1 import (
 )
 
 
-TurnInputLoader = Callable[[TurnRef], str]
+TurnInputLoader = Callable[[TurnRef], str | OperatorSkillTurnInput]
 
 
 _REQUIRED_REMOTE_OPERATIONS = (
@@ -376,11 +381,16 @@ class RemoteOperatorHarnessAdapter:
         generation: ProcessGenerationRef,
         launch: LaunchComparison,
     ) -> TurnStartObservation:
-        prompt = self.turn_input_loader(turn)
+        try:
+            prompt, selection = operator_turn_payload(self.turn_input_loader(turn))
+        except OperatorSkillSelectionError as exc:
+            raise BrokerProtocolError(str(exc)) from exc
         payload = {
             "operation_id": to_wire(operation_id), "turn": to_wire(turn),
             "generation": to_wire(generation), "launch": to_wire(launch), "prompt": prompt,
         }
+        if selection is not None:
+            payload["skill_selection"] = selection
         result = self.client.request_sync("ohf-begin-turn", payload, timeout_seconds=90,
             **self._fresh_write_options("ohf-begin-turn", payload))
         try:
