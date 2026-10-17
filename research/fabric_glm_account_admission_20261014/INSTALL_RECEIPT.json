@@ -1,0 +1,14 @@
+{
+  "at": "2026-10-14T17:30:47.021703+00:00",
+  "state": "INSTALLED",
+  "intent_sha256": "9d7c1706d004dd435a89240d3b99334c47d46c9d7c5e570e3c28efb007f5a8ae",
+  "review_sha256": "2d8f34e90a02bf737e17606b3ffe277395cee3d1e29438d71642c40f69785500",
+  "postimages": {
+    "quota_remote.py": "a1dab11da10264836e6271955b375b8e6508c23f23d0444c99d96464deb70f2b",
+    "lease_broker.py": "d59fed1160403d93c2c46a34b39e0ff87d587f3bc207f74aec3749f658ba20ec"
+  },
+  "worker_retry": false,
+  "provider_calls": 0,
+  "manual_lease_mutation": false,
+  "installed_guard_changed": false
+}
