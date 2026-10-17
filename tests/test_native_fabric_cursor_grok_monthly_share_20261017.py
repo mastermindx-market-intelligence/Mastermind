@@ -52,11 +52,11 @@ class CursorMonthlyShareSourceTests(unittest.TestCase):
                 "enabled": enabled,
                 "percent": percent,
                 "task_classes": classes if classes is not None
-                else ["reviewer", "audit", "repair"],
+                else ["operator", "repair"],
             }
         }}
 
-    def choose(self, route_key, doc=None, task_class="reviewer", prefer=None,
+    def choose(self, route_key, doc=None, task_class="operator", prefer=None,
                complexity="C2_COMPLEX_BOUNDED", exhausted=True):
         if doc is None:
             doc = self.policy()
@@ -121,6 +121,11 @@ class CursorMonthlyShareSourceTests(unittest.TestCase):
             key = f"t-{i}"
             self.assertFalse(self.choose(key, task_class="mechanical"))
             self.assertFalse(self.choose(key, task_class="executor"))
+            self.assertFalse(self.choose(key, task_class="audit"))
+            self.assertFalse(self.choose(key, task_class="reviewer"))
+            self.assertFalse(self.choose(key, task_class="review"))
+            self.assertFalse(self.choose(key, task_class="verify"))
+            self.assertFalse(self.choose(key, task_class="adjudicate"))
             self.assertFalse(self.choose(key, complexity="C3_FRONTIER_JUDGMENT"))
             self.assertFalse(self.choose(key, complexity="C1_ROUTINE_BOUNDED"))
             self.assertFalse(self.choose(key, complexity="C0_MECHANICAL"))
@@ -131,9 +136,28 @@ class CursorMonthlyShareSourceTests(unittest.TestCase):
         self.assertFalse(self.choose(None))
         self.assertFalse(self.choose("a\\nnewline"))
         self.assertFalse(self.choose("X" * 129))
-        for classes in ([], ["reviewer", "reviewer"], ["mechanical"],
-                        ["reviewer", 17], "reviewer"):
+        for classes in ([], ["operator", "operator"], ["mechanical"],
+                        ["operator", 17], "operator", ["reviewer"],
+                        ["audit"], ["review"], ["verify"]):
             self.assertFalse(self.choose("t-1", self.policy(classes=classes)))
+
+    def test_cohort_classes_are_reachable_judgment_not_reviews(self):
+        identities = {"EXECUTE_CLASSES_DEFAULT", "JUDGMENT_CLASSES_R28",
+                      "REVIEW_CLASSES_R33"}
+        declared = {}
+        for node in self.tree.body:
+            if not isinstance(node, ast.Assign):
+                continue
+            for target in node.targets:
+                if (isinstance(target, ast.Name) and target.id in identities
+                        and isinstance(node.value, ast.Call)
+                        and node.value.args):
+                    declared[target.id] = ast.literal_eval(node.value.args[0])
+        self.assertEqual(set(declared), identities)
+        for task_class in ("operator", "repair"):
+            self.assertIn(task_class, declared["JUDGMENT_CLASSES_R28"])
+            self.assertNotIn(task_class, declared["EXECUTE_CLASSES_DEFAULT"])
+            self.assertNotIn(task_class, declared["REVIEW_CLASSES_R33"])
 
     def test_grok_quota_native_gate_stays_in_control(self):
         picker = next(
@@ -176,7 +200,7 @@ class CursorMonthlyShareSourceTests(unittest.TestCase):
                 "NONE reason=cursor_at_capacity",
             "_pick_scored": lambda *args, **kwargs:
                 "POOL=glm MODEL=glm-5.3",
-            "tc": "reviewer", "doc": self.policy(),
+            "tc": "operator", "doc": self.policy(),
             "route_key": "judgment-91", "prefer_c": None,
             "complexity": "C2_COMPLEX_BOUNDED",
             "needs": None, "subject_pool": None,
