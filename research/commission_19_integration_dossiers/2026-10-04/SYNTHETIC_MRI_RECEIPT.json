@@ -1,0 +1,31 @@
+{
+  "assertions": {
+    "path_lookup_returns_none": true,
+    "positive_control_exact": true,
+    "producer_shape_returns_none": true
+  },
+  "classification": "assembly_only_synthetic_proof",
+  "macro_source_revision": "9201f1602bfe47e05a63d61802fbed6f7f55a19d",
+  "passed": true,
+  "results": {
+    "path_lookup": null,
+    "positive_control": {
+      "asof": "synthetic-2026-10-04T00:00:00Z",
+      "available": true,
+      "expectation_read": {
+        "tag": "aligned"
+      },
+      "pred_spread_sigma": 1.2,
+      "release_type": "cpi",
+      "sigma_surprise": 0.31
+    },
+    "producer_shape": null
+  },
+  "scope": "Source files were read after hash verification. No module top-level or full producer executed; all upstream values and files were synthetic temporary inputs. No real/runtime data was read or changed.",
+  "source": {
+    "producer_sha256": "5f3448c442481592940b314e6db4ce4b9994edc4b1c9d4446445bc81ee3ef0ec",
+    "producer_site_relpath": "site/macrodata/release_forecast.json",
+    "reader_function_ast_sha256": "c19e54a049b72892eb1daaa775721cf3ac77900a57a7e47a7d5eb9c5e313bd92",
+    "reader_sha256": "8757c8728b9ca566d2303853da69572c74a7ace61e1d810d66cbbb2f837581ae"
+  }
+}
