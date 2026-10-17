@@ -1,0 +1,44 @@
+{
+  "reviewed_head": "806c65c29611b8017064ebcffb404fa07f0babed",
+  "base": "cbc7503536b6853ec7c35c2192abdfaccb87b561",
+  "review_result": "REQUEST_CHANGES",
+  "review_process_exit_code": 0,
+  "reviewer_native_session": "01a12d9d-461c-7b00-81eb-9c447a0e37f6",
+  "requested_model": "gpt-6.1-sol",
+  "served_model": "NOT_INDEPENDENTLY_ATTESTED",
+  "paid_fabric_execution": false,
+  "repair_state": "PLATFORM_REFUSED_NOT_APPLIED",
+  "review_regressions": {
+    "failed": 11,
+    "passed": 2
+  },
+  "original_review_sha256": "ccc2da2e327fb931a020767a8dd6517181a076bab70ce6c50fd7b71544186abf",
+  "source_files": [
+    {
+      "path": "portfolio/decision_snapshot.py",
+      "sha256": "ccc70b3d7830e080c32f6c5e5c7fd728caa00650e1d3d55ca3ae023b7b9ebc36"
+    },
+    {
+      "path": "portfolio/decision_snapshot_contracts.py",
+      "sha256": "26253130461dd56b65bf188e9fbb820b0ac678264497c437184ab815567d8f7f"
+    },
+    {
+      "path": "brain/decision_research.py",
+      "sha256": "b63d53114a3de9e00294549d64f267989023a0b508dec8e4d6df0854b27c6927"
+    },
+    {
+      "path": "tests/test_decision_snapshot_review_regressions.py",
+      "sha256": "55f070d8b1365f329e4064892fad6cb1fba0499667e5f272b0de4df06e2ea510"
+    },
+    {
+      "path": "tests/test_decision_research.py",
+      "sha256": "bdee36c42a990aad24f4ba8068871c373c7a9ca2ef81aacfe5ab5d6040e21f56"
+    },
+    {
+      "path": "tests/decision_research_service_contract.py",
+      "sha256": "6cc88a5fe7c049b7617195903325a4ebe188bc684d6863b1b2bfca1651baaf24"
+    }
+  ],
+  "published_review_sha256": "ee1ad2cc1a245fd540b6b543dd13138a3196831927a7b21a71153cc51dfe2dd2",
+  "review_presentation_normalization": "trailing Markdown line-break spaces removed; original raw final-report digest retained"
+}

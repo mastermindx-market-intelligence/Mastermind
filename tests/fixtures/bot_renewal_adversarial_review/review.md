@@ -1,0 +1,32 @@
+**Request changes on candidate `806c65c29611b8017064ebcffb404fa07f0babed`, reviewed against `cbc7503536b6853ec7c35c2192abdfaccb87b561`.** I found five actionable defects: two P1 findings affecting evidence eligibility/completeness and three P2 findings affecting correction selection, durability recovery, and clock consistency. Line references below bind to the committed candidate.
+
+1. **P1 — Post-cutoff source content can enter a valid partial snapshot and its read projection.**
+   **Location:** [portfolio/decision_snapshot_contracts.py:243–246](https://github.com/mastermindx-market-intelligence/Mastermind/blob/806c65c29611b8017064ebcffb404fa07f0babed/portfolio/decision_snapshot_contracts.py#L243-L246).
+
+   Section validation checks source/domain references and imposes source coverage requirements only when the section is `COMPLETE`. A `PARTIAL` section may reference a source explicitly marked `FUTURE_AT_CUTOFF` while preserving its decision rows. A pure probe supplied a source known/generated on September 16 against a September 15 cutoff, with one attributed row in `book_truth`. Composition and the store’s `_checked` validation accepted it; `read_projection` returned `status=AVAILABLE` with that row. This allows explicitly ineligible future content into the supposedly point-in-time information set. A partial-coverage label does not exclude the content.
+
+2. **P1 — A domain can claim complete coverage while omitting one of its declared required sources.**
+   **Location:** [portfolio/decision_snapshot_contracts.py:243–252](https://github.com/mastermindx-market-intelligence/Mastermind/blob/806c65c29611b8017064ebcffb404fa07f0babed/portfolio/decision_snapshot_contracts.py#L243-L252).
+
+   Validation examines only the sources listed in a section’s `source_ids`; it does not require a complete section to include every required receipt whose `domains` contains that section. The additional all-source qualification check runs only for a globally `COMPLETE` snapshot. A pure probe added a required `book.positions` receipt with `status=MISSING` and `domains=["book_truth"]`, while the complete `book_truth` section referenced only the available account receipt. The twelve-domain snapshot passed composition and store validation with `book_truth=COMPLETE`. Consequently, an otherwise partial snapshot can give the inspector a false complete book-truth badge despite a declared required book input being missing.
+
+3. **P2 — An original snapshot can outrank its explicit correction when their recording timestamps are equal.**
+   **Location:** [portfolio/decision_snapshot.py:288–294](https://github.com/mastermindx-market-intelligence/Mastermind/blob/806c65c29611b8017064ebcffb404fa07f0babed/portfolio/decision_snapshot.py#L288-L294).
+
+   Latest selection orders records by cutoff, recording time, then the lexical digest, without considering correction lineage. Clocks permit only whole seconds, so an original and its correction can legitimately share both timestamps. A pure probe composed such a pair with changed source generation and an explicit predecessor reference. The correction’s digest sorted below the original, and `list_snapshots(limit=1)` selected the predecessor. This ordering feeds both `latest_snapshot` and the default API/UI selection, allowing the inspector to silently default to superseded evidence even though its correction is present.
+
+4. **P2 — Same-identity replay can return success without resolving failed publication durability.**
+   **Location:** [portfolio/decision_snapshot.py:203–206](https://github.com/mastermindx-market-intelligence/Mastermind/blob/806c65c29611b8017064ebcffb404fa07f0babed/portfolio/decision_snapshot.py#L203-L206).
+
+   The existing-record branch verifies bytes and immediately returns success without syncing the containing directory. A no-write filesystem simulation exercised a successful final link followed by failures of both directory-sync attempts; the first call correctly raised `SnapshotWriteUncertain`. Replaying the exact identity then returned successfully with `created=False` and **zero additional directory-sync attempts**, while the injected sync failure remained active. Visibility and byte equality therefore turn into a successful persistence result even though the directory entry’s durability remains unresolved. A concurrent caller encountering the record between the creator’s link and directory sync has the same exposure.
+
+5. **P2 — A source observation after the snapshot’s recording time is accepted as qualified evidence.**
+   **Location:** [portfolio/decision_snapshot_contracts.py:221–226](https://github.com/mastermindx-market-intelligence/Mastermind/blob/806c65c29611b8017064ebcffb404fa07f0babed/portfolio/decision_snapshot_contracts.py#L221-L226).
+
+   The cross-clock checks bound `known_at` and `generated_at` against the cutoff and `filesystem_observed_at` against recording time, but leave `observed_at` unordered. A pure probe supplied an otherwise available, fresh, complete source with `observed_at=2027-01-01T00:00:00Z` in a snapshot recorded at `2026-09-15T20:01:00Z`. Composition and store validation accepted it with complete book-truth coverage. The immutable record can thus assert that it preserved an observation occurring months after the record itself, without becoming invalid or clock-unqualified.
+
+**Scope and limitations:** This was a read-only semantic review of the two specified Git identities, their changed implementation, and relevant committed dependencies/contracts. The probes loaded committed code through `git show` and used synthetic in-memory inputs and mocked filesystem operations. No source or Git mutation, runtime-data access, credential use, HTTP/provider request, child delegation, or deployment occurred.
+
+I did not establish an additional actionable defect in the new auth/cache isolation path, the UI’s snapshot/section identity fencing, or the US/HK calendar-owner consolidation. That is a bounded source-review result; it does not establish operational safety or production acceptance. Exchange-calendar publications were not independently fetched.
+
+The reported **600 scoped Python passes, one absent-live-state skip, and 46 intercepted-browser cases** were not rerun or promoted into production proof. Source capture remains absent/held; bridge **#1147**, auth enrollment, current-base integration, deployed authentication, and natural-session acceptance remain outside this review. None of these findings depends on replacing those owners or changing the held sources.

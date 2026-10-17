@@ -103,6 +103,8 @@ if FastAPI is not None:
     app = FastAPI(title="Mastermind", version="0.0.1")
 
     app.include_router(web.router)
+    from app import decision_snapshot as decision_evidence
+    app.include_router(decision_evidence.router)
     # Portfolio Risk Desk CRUD proxy (W1). PRD-R8 (re-revised for the VPS cutover): the
     # personal Supabase portfolio panel. Its handlers act as the operator with the
     # SERVICE-ROLE key and take NO caller identity, so app/auth.py owns the boundary —

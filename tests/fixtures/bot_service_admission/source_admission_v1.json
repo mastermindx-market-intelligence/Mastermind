@@ -1,0 +1,49 @@
+{
+  "scope": "Cross-PR source client-to-canonical-admission proof with real temporary SQLite; fixture transport and host grant; no installed auth, provider, worker or production proof",
+  "bot_head": "8c91ddb451325cde0dc647a8fa3e974bc4c95149",
+  "service_head": "608ab814f6434317a25acf01586bb90d5c32f7f8",
+  "integration_tree": "d4a4a38da6240c606d83deb944321523aa183a81",
+  "passed": 8,
+  "cases": [
+    {
+      "case": "prepared_context_reaches_original_job_losslessly",
+      "passed": true,
+      "request_bytes": 26525,
+      "job_id": "JOB-001",
+      "snapshot_id": "sha256:e530b3928bcf7d799ca0ce50a9e48d2b29e70e5ccb1f6a27df573da8fe211dfb",
+      "context_id": "sha256:7973b00cc2c8134013eca7112814ee1433d09dd95c98154145a663dd70a3572c",
+      "dispatch": false
+    },
+    {
+      "case": "exact_duplicate_reconciles_while_disarmed_without_new_route",
+      "passed": true
+    },
+    {
+      "case": "changed_context_same_operation_cannot_overwrite_original",
+      "passed": true
+    },
+    {
+      "case": "restart_reads_original_receipt_and_refuses_unfinished_answer",
+      "passed": true
+    },
+    {
+      "case": "lost_reply_reconciles_same_durable_operation_without_resubmit",
+      "passed": true
+    },
+    {
+      "case": "provider_selector_refuses_before_transport",
+      "passed": true
+    },
+    {
+      "case": "tampered_reply_is_uncertain_and_exact_status_recovers_receipt",
+      "passed": true
+    },
+    {
+      "case": "task_aware_routing_gap_is_explicit",
+      "passed": true,
+      "capability_state": "NOT_WIRED",
+      "application_risk": "elevated",
+      "service_host_risk": "routine"
+    }
+  ]
+}

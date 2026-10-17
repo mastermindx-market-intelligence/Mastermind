@@ -1,0 +1,39 @@
+{
+  "scope": "Source-only synthetic claim consumption, not provider execution, installed auth, or Runtime direct completion",
+  "source_tree": "4de9a95f07633ff27bbd51f5d928acb1c3d60584",
+  "passed": 7,
+  "cases": [
+    {
+      "case": "original_context_to_validated_synthetic_result_to_candidate_claims",
+      "passed": true
+    },
+    {
+      "case": "real_client_status_then_exact_direct_read_consumed_without_submit",
+      "passed": true
+    },
+    {
+      "case": "changed_snapshot_refused_even_with_new_canonical_content_hash",
+      "passed": true
+    },
+    {
+      "case": "changed_context_refused_even_with_new_canonical_content_hash",
+      "passed": true
+    },
+    {
+      "case": "numeric_target_refused_despite_self_consistent_answer_hash",
+      "passed": true
+    },
+    {
+      "case": "worker_execution_grant_refused_despite_self_consistent_answer_hash",
+      "passed": true
+    },
+    {
+      "case": "claim_consumption_creates_no_worker_attempt_or_portfolio_action",
+      "passed": true
+    }
+  ],
+  "original_job_id": "JOB-001",
+  "snapshot_id": "sha256:49cc74d31d08509194f89da73e6326c676a570c233d1d564a3cdfedf59b22e60",
+  "context_id": "sha256:252842d523513e46b744b260b23d3a0503115b151dd9dde707cbc635b09e39fb",
+  "candidate_id": "sha256:f0df801ab9d8cac2c57274fb34695222ff89e4cdd2da9a9f6ed2ba1349470d04"
+}

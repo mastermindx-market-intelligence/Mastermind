@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Decision evidence · Mastermind</title>
+  <link rel="stylesheet" href="/theme.css"><link rel="stylesheet" href="/decision-evidence.css">
+  <script src="/decision-evidence.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#evidence-main">Skip to evidence</a>
+<header class="topbar">
+  <a href="/" class="brand">MASTERMIND <span> / RESEARCH OPERATIONS</span></a>
+  <div class="top-actions"><span class="paper-label">PAPER · READ ONLY</span><button id="theme-toggle" type="button" aria-label="Switch to light theme">Light theme</button></div>
+</header>
+<main id="evidence-main">
+  <section class="heading">
+    <div><p class="eyebrow">US BRAIN / EVIDENCE INSPECTOR</p><h1>Decision evidence</h1><p class="subtitle">The information behind a decision. Preserved, bounded and inspectable.</p></div>
+    <button id="refresh" class="primary" type="button">Refresh evidence</button>
+  </section>
+  <section id="status-panel" class="status-panel" data-state="loading" aria-live="polite" aria-atomic="true">
+    <span id="status" class="status-label">Loading evidence</span><p id="status-detail">Checking this session and the existing snapshot store.</p>
+  </section>
+  <section class="overview" aria-label="Snapshot overview">
+    <div class="snapshot-choice"><label for="snapshot-select">PRESERVED SNAPSHOT</label><select id="snapshot-select" disabled><option>No snapshot loaded</option></select><p id="snapshot-id" class="mono">No identity loaded</p></div>
+    <div class="metric"><span>Decision cutoff · UTC</span><strong id="cutoff">—</strong><small id="recorded">Recorded time unavailable</small></div>
+    <div class="metric"><span>Evidence coverage</span><strong id="coverage">—</strong><small id="coverage-detail">Unknown is not complete</small></div>
+    <div class="metric"><span>Available sources</span><strong id="source-count">—</strong><small>Availability does not prove correctness</small></div>
+  </section>
+  <div class="workspace">
+    <aside class="domains"><div class="section-label">EVIDENCE DOMAINS <span>12</span></div><nav id="domain-list" aria-label="Evidence domains"></nav><p class="scope-note">Each section is read from the exact selected snapshot. Nothing is regenerated here.</p></aside>
+    <section class="evidence-panel" aria-labelledby="domain-title">
+      <div class="panel-heading"><div><p class="eyebrow">PRESERVED CONTENT</p><h2 id="domain-title">Book truth</h2></div><span id="domain-state" class="badge">Not loaded</span></div>
+      <p id="domain-summary" class="muted">Select available evidence to inspect its coverage and source references.</p>
+      <div id="gaps" class="gaps" aria-label="Coverage gaps"></div>
+      <div id="source-refs" class="source-refs"></div>
+      <div id="rows" class="rows"><p class="empty-copy">No evidence is displayed until this session is authorized and a snapshot is available.</p></div>
+      <div class="pagination"><span id="page-label">No rows loaded</span><div><button id="previous-page" type="button" disabled>Previous</button><button id="next-page" type="button" disabled>Next</button></div></div>
+    </section>
+  </div>
+  <footer class="evidence-footer"><strong>Evidence, not execution.</strong> This inspector cannot capture sources, call a model, alter allocations or submit orders. Source capture and production identity integration are separate qualification steps.</footer>
+</main>
+</body>
+</html>
