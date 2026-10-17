@@ -145,9 +145,12 @@ FLEET_V10_PRESERVED_GIT_BLOBS = {
 FLEET_V10_ENROLLED_ACCOUNTS = frozenset(("chatgpt1", "chatgpt3"))
 
 FLEET_V10_PUBLISHER_PATCH_SHA256 = {
-    "git-publish.mjs": "72faf293d9c0a90c45ab442821e26f199f5ea406a091a7aed7ebce3519e55f69",
+    "git-publish.mjs": "d8f7f7712129094ce0ffac2eaeb66d15dd3f063a3ade9fa354de7af0d412477a",
     "workspace-access.mjs": "9c4c20dd4edbc426c8561801708ee205e19bb47b48134ec8f5654a10f1cb7cf3",
 }
+# PR #1535's exact, already-installed closed publisher is the ONLY eligible
+# second-stage predecessor. No arbitrary closed publisher may be overwritten.
+FLEET_V10_PREVIOUS_CLOSED_PUBLISHER_SHA256 = "72faf293d9c0a90c45ab442821e26f199f5ea406a091a7aed7ebce3519e55f69"
 
 
 KNOWN_MANIFEST_FILESETS = frozenset(
@@ -1421,7 +1424,6 @@ def _upgrade_fleet_v10_publisher_only(
     if (type(old_config) is not dict
             or old_config.get("repositoryWorkspaces") != {
                 "enabled": True, "allowedRepositories": ["mastermind", "macro", "terminal"]}
-            or old_config.get("gitPublish") != _typed_git_config(user_root)
             or old_config.get("fleetRouting", {}).get("enabled") is not True
             or len(old_config["fleetRouting"].get("routes", [])) != 2
             or old_config.get("maxPerSessionConcurrency") != 8
@@ -1431,8 +1433,23 @@ def _upgrade_fleet_v10_publisher_only(
             or "commissionPublication" in old_config
             or "modernFabricProtocol" in old_config):
         raise SystemExit("fleet publisher compatibility: original scoped capabilities changed")
+    # Preserve the first-stage legacy install path, and admit only the exact
+    # already-installed PR #1535 closed publisher for an index-sync hotfix.
+    # The manifest is sealed first; no caller may choose a publisher identity.
+    original_publisher = old_config.get("gitPublish")
+    expected_closed = _typed_git_config(user_root, closed_repositories=True)
+    if original_publisher == _typed_git_config(user_root):
+        pass  # existing legacy-to-closed upgrade
+    elif (original_publisher == expected_closed
+            and prior["files"].get("git-publish.mjs") ==
+                FLEET_V10_PREVIOUS_CLOSED_PUBLISHER_SHA256
+            and prior["files"].get("workspace-access.mjs") ==
+                FLEET_V10_PUBLISHER_PATCH_SHA256["workspace-access.mjs"]):
+        pass  # exact reviewed closed-to-closed module update
+    else:
+        raise SystemExit("fleet publisher compatibility: unrecognized prior publisher identity")
     new_config = dict(old_config)
-    new_config["gitPublish"] = _typed_git_config(user_root, closed_repositories=True)
+    new_config["gitPublish"] = expected_closed
     if ({k: v for k, v in new_config.items() if k != "gitPublish"}
             != {k: v for k, v in old_config.items() if k != "gitPublish"}):
         raise SystemExit("fleet publisher compatibility: unrelated config change")

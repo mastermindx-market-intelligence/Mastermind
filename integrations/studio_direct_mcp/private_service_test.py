@@ -2028,6 +2028,63 @@ class TestFleetV10PublisherCompatibility(unittest.TestCase):
                 {k: v for k, v in before_cfg.items() if k != "gitPublish"})
             svc._verify_staged_install("chatgpt3", _label_for("chatgpt3"), roots)
 
+    def test_exact_closed_v10_predecessor_may_receive_only_the_reviewed_module_patch(self):
+        # The live ChatGPT1 seat can already contain #1535's closed publisher.
+        # Do not treat that as a fresh grant or allow arbitrary closed versions.
+        with self._installed_fleet_fixture() as (args, roots, _cfg):
+            source = Path(args.source)
+            prior_bytes = b"fixture reviewed closed publisher before await fix\n"
+            (roots["base"] / "git-publish.mjs").write_bytes(prior_bytes)
+            (roots["base"] / "workspace-access.mjs").write_bytes(
+                (source / "workspace-access.mjs").read_bytes())
+            cfg = json.loads(roots["config"].read_text())
+            cfg["gitPublish"] = svc._typed_git_config(
+                Path(os.environ["HOME"]), closed_repositories=True)
+            roots["config"].write_text(
+                json.dumps(cfg, indent=2, sort_keys=True), encoding="utf-8")
+            manifest = json.loads(roots["manifest"].read_text())
+            for name in svc.FLEET_V10_PUBLISHER_PATCH_SHA256:
+                manifest["files"][name] = svc._sha256_file(roots["base"] / name)
+            manifest["configHash"] = svc._sha256_file(roots["config"])
+            roots["manifest"].write_text(
+                json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+            args.publisher_expected_manifest_sha256 = svc._sha256_file(
+                roots["manifest"])
+            before = (roots["manifest"].read_bytes(), roots["config"].read_bytes(),
+                      self._all_files(roots))
+            exact_prior_sha = hashlib.sha256(prior_bytes).hexdigest()
+            with mock.patch.object(svc, "FLEET_V10_PREVIOUS_CLOSED_PUBLISHER_SHA256", "0" * 64):
+                with self.assertRaisesRegex(SystemExit, "unrecognized prior publisher identity"):
+                    svc.cmd_upgrade(args)
+            self.assertEqual(
+                before, (roots["manifest"].read_bytes(),
+                         roots["config"].read_bytes(), self._all_files(roots)),
+                "foreign closed publishers must refuse before writing anything")
+            with mock.patch.object(svc, "FLEET_V10_PREVIOUS_CLOSED_PUBLISHER_SHA256", exact_prior_sha):
+                args.publisher_preflight_only = True
+                with mock.patch.object(svc, "_run", CmdRecorder()):
+                    code, receipt = _capture_stdout(lambda: svc.cmd_upgrade(args))
+                self.assertEqual(code, 0)
+                self.assertEqual(json.loads(receipt)["effect"], "NOT_APPLIED")
+                self.assertEqual(
+                    before, (roots["manifest"].read_bytes(),
+                             roots["config"].read_bytes(), self._all_files(roots)))
+                args.publisher_preflight_only = False
+                with mock.patch.object(svc, "_run", CmdRecorder()):
+                    code, receipt = _capture_stdout(lambda: svc.cmd_upgrade(args))
+                self.assertEqual(code, 0)
+                self.assertEqual(json.loads(receipt)["effect"], "APPLIED")
+            self.assertEqual(roots["config"].read_bytes(), before[1],
+                             "closed predecessor must not change grants or fleet controls")
+            self.assertEqual(
+                {name for name, old in before[2].items()
+                 if (roots["base"] / name).read_bytes() != old},
+                {"git-publish.mjs"}, "second stage changes only the publisher module")
+            self.assertEqual(
+                svc._sha256_file(roots["base"] / "git-publish.mjs"),
+                svc.FLEET_V10_PUBLISHER_PATCH_SHA256["git-publish.mjs"])
+            svc._verify_staged_install("chatgpt1", _label_for("chatgpt1"), roots)
+
     def test_non_enrolled_seats_refused_despite_fleet_file_similarity(self):
         with self._installed_fleet_fixture() as (args, roots, _cfg):
             before = (roots["manifest"].read_bytes(), self._all_files(roots))
