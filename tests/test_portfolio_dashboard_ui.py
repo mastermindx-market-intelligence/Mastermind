@@ -163,7 +163,7 @@ def test_live_marks_replace_around_the_clock_full_dashboard_polling() -> None:
 
 def test_initial_loadbar_finishes_before_live_and_deferred_hydration() -> None:
     fetch_all = HTML.index("async function fetchAll(opts)")
-    critical = HTML.index("await _fetchPortfolioCritical(requestedPortfolio)", fetch_all)
+    critical = HTML.index("await _fetchPortfolioCritical(requestedPortfolio", fetch_all)
     paint = HTML.index("_paintPortfolioSnapshot(scopedSnapshot)")
     done = HTML.index("loadBarDone(); barFinished = true", paint)
     live_first = HTML.index("await Promise.race([", done)
@@ -172,7 +172,7 @@ def test_initial_loadbar_finishes_before_live_and_deferred_hydration() -> None:
     assert critical < paint < done < live_first < details < shared
 
     critical_fn = HTML[
-        HTML.index("function _fetchPortfolioCritical(id)"):
+        HTML.index("function _fetchPortfolioCritical(id"):
         HTML.index("function _fetchPortfolioDetails(id, base)")
     ]
     assert "/api/portfolio" in critical_fn
