@@ -7,6 +7,13 @@ these pins are not learned or refreshed by the tests.
 """
 
 REVIEWED_FILES = {
+    # R2 AEAD source candidate: the existing Control UID remains fixed at this
+    # single exact site. Independent source acceptance remains a release gate;
+    # these static test pins do not establish it or grant a new identity.
+    "ops/executive_os/control_aead_profile.py": {
+        "sha256": "08595b2ecf5b4d5841a85532062e01cd560ae1afe4af3adfe4c7e6eaf22eb2b0",
+        "sites": ((277, 124, 127, "int", "450"),),
+    },
     # Existing ten-minute telemetry age, not a UID. Full reviewed source and
     # exact token only; drift exposes the source to ordinary D8 again.
     "research/fabric_bailian_host_eligibility_20261015/candidate/glm_host_account_readiness.py": {

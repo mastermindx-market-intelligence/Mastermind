@@ -1368,6 +1368,21 @@ def test_complete_composition_binds_only_original_capture(composition, role):
 
 
 @pytest.mark.parametrize('role', ['control', 'gateway'])
+def test_projection_rejoins_use_only_this_qualification_observation(monkeypatch, composition, role):
+    value = composition(role)
+    calls = []
+    def projection(budget, previous=None):
+        calls.append((budget, previous))
+        return value.projection
+    monkeypatch.setattr(m, '_verify_control_projection', projection)
+    m.qualify_installed_peer(value.peer, role=role)
+    assert len(calls) == 3
+    assert calls[0][1] is None
+    assert all(previous is value.projection for _, previous in calls[1:])
+    assert all(budget is calls[0][0] for budget, _ in calls)
+
+
+@pytest.mark.parametrize('role', ['control', 'gateway'])
 @pytest.mark.parametrize('failure', ['pid', 'username', 'group', 'program', 'argv', 'cwd', 'dynamic_path', 'dynamic_status'])
 def test_composition_refuses_identity_mismatch(monkeypatch, composition, role, failure):
     value = composition(role)
