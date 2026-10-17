@@ -108,6 +108,39 @@ the same page. Prefer disjoint board/artboard/node target sets. For known same-b
 overlap, partition node targets and re-read/re-plan before the next bounded edit rather
 than acquiring a file-wide or page-wide lease.
 
+## Load and apply the human design contract
+
+Paper capability is not design readiness. Before substantive composition, read the existing
+content and visual owners in `mastermindx-market-intelligence/macro`:
+
+- `docs/DESIGN_DOCTRINE.md` — human-facing content, hierarchy and disclosure law;
+- `research/MASTER_PRODUCT_DESIGN_SYSTEM_V1.md` — visual grammar, archetypes and components;
+- the target product's current accepted navigation and interaction contract.
+
+Resolve Macro's current canonical `main` commit, record it separately from the Sol Skillpack
+pin, and read both design documents at that same Macro commit. This cross-repository product
+source is not a replacement for atomic same-commit Skillpack loading. A candidate PR is not
+accepted doctrine. If the design owner cannot be read, preserve that exact design-source gap;
+connection diagnosis may continue, but do not invent a parallel design system or call an
+ungrounded composition compliant. Apply any actual source conflict before the affected edit.
+
+The designer's first deliverable is a coherent reading and navigation model, not an artboard
+count. Name what an intended user should recognize in 3–4 seconds: subject, main assessment
+and useful next step, with material limitations visible where they matter. Preserve depth in
+well-named destinations and accessible disclosure. Descriptions and subtext are optional;
+word budgets are ceilings, not quotas to fill beneath every heading.
+
+Use the shared shell, tokens and interaction grammar. Consolidate competing studies of one
+product by mapping their useful jobs and evidence into one current framework. Do not stack
+their panels, erase research depth, merge incompatible cohorts or multiply theme/device
+variants before repairing the primary journey. Different page jobs may use different accepted
+archetypes; one grammar does not mean one identical card grid everywhere.
+
+A useful next step can be investigation, comparison or waiting for current data. It need not
+be a trade. Never create a signal, fused score, rank, size or execution permission to make a
+design seem decisive. Translate owner-issued states faithfully; move internal filenames,
+CI/PR status and governance instructions out of the customer glance path without hiding risk.
+
 ## Inspect, design and verify
 
 1. Resolve the intended exact document and existing artboards. If there is no stable ID or artboard

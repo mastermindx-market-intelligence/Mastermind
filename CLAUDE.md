@@ -11,6 +11,25 @@ source, test, and maintenance actions follow the current assignment and applicab
 under the Executive contract below. This distinction does not grant runtime, credential,
 trading, or source-write authority and never promotes research into trade execution.
 
+## Human-first product work
+
+For any user-facing design, mockup, build or review, read the existing shared content
+law `docs/DESIGN_DOCTRINE.md` and visual/composition law
+`research/MASTER_PRODUCT_DESIGN_SYSTEM_V1.md` in `mastermindx-market-intelligence/macro`.
+Pin that repository's accepted main revision separately from the Sol Skillpack; do not
+substitute an unmerged proposal, chat memory or a stale vendored copy. Use the target
+product's accepted shell and token implementation, not a parallel design system.
+
+Mastermind does the synthesis; the user receives the understanding. Apply the doctrine's
+3–4-second orientation target, purposeful hierarchy, optional descriptions/subtext,
+preserved analytical depth, accessible disclosure and navigation/return continuity.
+Carry the reading contract into designer-to-builder handoffs and review it in the
+implemented journey. Rendering, design critique, observed human comprehension and real
+product acceptance are separate claims; missing human evidence is not yet tested.
+This applies beyond Paper and beyond Sector Intelligence. It changes no model route,
+source custody, trading authority, lifecycle or release gate. Independent permitted
+work can continue while an acceptance or source-access requirement is outstanding.
+
 ## Executive contract
 
 Binding on every worker session. Full text: `AGENTS.md` § "Executive contract" —
