@@ -145,6 +145,67 @@ catalog equality check, exact file/snapshot binding, desktop mutex, operation
 identity and unknown-effect rules are unchanged. Source selection is not a live
 rollout receipt; selected-seat catalog/read/edit proof is recorded separately.
 
+### C2 fleet installation: Paper-only runtime selection — 2026-10-17
+
+The attended C2 Personal gateway has an existing sealed V2 manifest with an exact
+11-file fleet/tailnet bundle. It predates the 12-file ChatGPT1 compatibility cohort
+and is not the current protected `STAGE_FILES` bundle. The prior installer rejected
+this cohort as `corrupt manifest` before any effect; inspection established that all
+11 installed files matched their recorded hashes. The historical source-directory
+pointer is retained provenance, not a safe instruction to restage its current bytes.
+
+The canonical private installer owns the bounded `paper-runtime-upgrade` operation.
+It recognizes only the reviewed C2 account and exact installed file digests, verifies
+the existing node/backend/dependency seal and plist, and requires a caller-supplied
+compare-and-swap digest of the current manifest. Admission is restricted to the
+canonical digests of the reviewed original manifest and its planned v11 successor;
+a self-consistent but different profile is not enrolled. Its separately pinned
+non-Paper configuration identifies the observed capability profile. Generic
+whole-bundle upgrade remains guarded for both historical fleet cohorts.
+
+This operation selects the installer-owned, verified immutable v11 Paper runtime.
+It preserves every gateway/module byte, the original source pointer, launchd plist,
+binary and dependency hashes, account/port, fleet routes, concurrency settings and
+all other configuration. Only `paperDesign` and the manifest's `configHash` change.
+It does not copy draft fleet source, enable capabilities, alter a tunnel or switch
+the Paper carrier.
+
+The Paper transaction, start, stop and seal commands share a nonblocking per-account
+lifecycle mutex, held across verification, effects and any recovery. The private
+`state/private-service.lifecycle.lock` file remains in place so concurrent commands
+always contend on the same inode. Read-only preflight does not create or acquire it.
+Service absence requires launchctl's exact code 113, empty stdout and missing-service
+diagnostic naming the requested label and current user's GUI domain. Other errors or
+malformed successful output are indeterminate and cannot authorize a lifecycle effect.
+
+The assigned operator uses the exact reviewed release helper:
+
+1. Stage and verify v11 with the existing `runtime_stage.py` owner.
+2. Run the read-only preflight while the original service remains available:
+
+   ```sh
+   python3 <accepted-release>/integrations/studio_direct_mcp/private_service.py \
+     paper-runtime-upgrade --account chatgpt2-personal \
+     --expected-manifest-sha256 <fresh-observed-manifest-sha256> --preflight-only
+   ```
+
+3. Confirm the original seat has no in-flight work or unresolved effect, then stop
+   that exact seat with the same accepted helper.
+4. Repeat the same Paper operation and manifest digest without `--preflight-only`.
+   The installer writes configuration atomically and the manifest last, and verifies
+   the retained runtime seal. Dependency reinstallation is not part of this change.
+5. Start the same seat through the installer, then observe a new gateway generation,
+   v11's exact accepted catalog, preparation of the intended file, and an explicitly
+   requested guarded edit with readback. These live receipts are distinct from source
+   or runtime-stage readiness.
+
+A stale manifest, changed profile, unrecognized bundle, unsafe file, invalid runtime,
+concurrent lifecycle command or loaded-service refusal is a gate, not an invitation
+to edit JSON manually. The transaction reconciles observed bytes before rollback;
+an unknown effect requires
+reconciliation through this same owner before restart or replay. Existing Paper
+snapshot, file-writer, operation-id and no-cross-carrier-replay rules still apply.
+
 ### Paper release-version compatibility ruling — 2026-09-30
 
 Paper Desktop's reported release version is now **observational metadata, not a write-admission
