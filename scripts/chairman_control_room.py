@@ -1047,6 +1047,183 @@ def _codex_sessions() -> list[dict[str, Any]]:
     return entries[:_DISCOVER_CAP]
 
 
+@dataclass(frozen=True)
+class OpenBindingResult:
+    """Separate owner preconditions from an actual provider's outcome."""
+    outcome: dict[str, Any]
+    source_precondition_failed: bool = False
+
+
+_NO_OWED_CONTEXT = object()
+
+
+def _owed_open_refusal_result() -> OpenBindingResult:
+    return OpenBindingResult(
+        {"ok": False, "verified": False, "failure_kind": "source_precondition_failed",
+         "detail": "The owed action needs a current read; its source or exact target changed.",
+         "next_action": "read_current_state"},
+        source_precondition_failed=True,
+    )
+
+
+def open_surface(config: ServerConfig, *, binding_id: str,
+                 target_surface: str | None = None,
+                 owed_context: Any = _NO_OWED_CONTEXT) -> OpenBindingResult:
+    """Open the checked target through this exact existing Control Room owner.
+
+    The trusted caller owns admission. Provider work runs outside owner locks;
+    only unchanged original rows receive later verification metadata. Explicit
+    malformed owed context never falls back to ordinary Open. A provider's
+    exception or outcome is not reclassified as a pre-dispatch refusal.
+    """
+    if not isinstance(binding_id, str) or not binding_id:
+        raise ValueError("binding_id: required (non-empty string)")
+    if target_surface is not None and (
+        type(target_surface) is not str or target_surface not in {"default", "desktop"}
+    ):
+        raise ValueError("target_surface: must be 'default' or 'desktop'")
+    owed_route = owed_context is not _NO_OWED_CONTEXT
+    if owed_route and not _owed_context_shape(owed_context):
+        return _owed_open_refusal_result()
+
+    open_fn = config.open_binding_fn
+    provider_runner = config.runner
+    provider_options = dict(claude_projects_dir=config.claude_projects_dir,
+                            claude_desktop_cli=config.claude_desktop_cli,
+                            claude_desktop_handoff_runner=config.claude_desktop_handoff_runner,
+                            target_surface=target_surface,
+                            codex_sessions_dir=config.codex_sessions_dir,
+                            mlx_profiles_root=config.mlx_profiles_root,
+                            gologin_profiles_root=config.gologin_profiles_root)
+    with config.bindings_lock:
+        bindings_path = config.bindings_path
+        doc, problems = sb.load_bindings(bindings_path)
+        binding = next(
+            (row for row in (doc or {}).get("bindings", [])
+             if isinstance(row, dict) and row.get("binding_id") == binding_id),
+            None,
+        )
+        binding_preimage = copy.deepcopy(binding)
+    if doc is None:
+        if owed_route:
+            return _owed_open_refusal_result()
+        if problems:
+            outcome = contract.refused(
+                "unknown", binding_id, "invalid_binding", "the bindings file failed validation"
+            )
+        else:
+            outcome = contract.refused(
+                "unknown", binding_id, "not_found", "no bindings file is present"
+            )
+        return OpenBindingResult(outcome)
+
+    if binding is None:
+        if owed_route:
+            return _owed_open_refusal_result()
+        outcome = contract.refused("unknown", binding_id, "not_found", "no binding with this id exists")
+        return OpenBindingResult(outcome)
+
+    binding = _freeze_target(binding)
+    if owed_route:
+        if not _owed_handoff_current(config, owed_context, binding, doc["bindings"]):
+            return _owed_open_refusal_result()
+    outcome = open_fn(binding, provider_runner, **provider_options)
+    # last_verified_at / VERIFIED_OPENABLE law (Sol review 5000169412,
+    # blocker 2): a mere Terminal-launch ACK must never advance this —
+    # only an outcome that PROVED the provider-native session/tab exists
+    # (contract.OpenOutcome.verified=True) may. `ok=True, verified=False`
+    # (chatgpt / claude_desktop / cursor_agent — no proven local read
+    # surface) stays BOUND_UNVERIFIED and leaves the bindings file
+    # byte-unchanged.
+    if not owed_route and outcome.get("ok") and outcome.get("verified"):
+        try:
+            with config.bindings_lock:
+                if config.bindings_path == bindings_path:
+                    current_doc, _problems = sb.load_bindings(bindings_path)
+                    if current_doc is not None:
+                        matches = [
+                            row for row in current_doc["bindings"]
+                            if isinstance(row, dict) and row.get("binding_id") == binding_id
+                        ]
+                        # A changed/removed/restamped row receives no evidence
+                        # for the old target. Preserve all concurrent siblings.
+                        if len(matches) == 1 and matches[0] == binding_preimage:
+                            matches[0]["last_verified_at"] = config.now_fn()
+                            sb.save_bindings(current_doc, bindings_path)
+        except Exception:
+            # Navigation already returned success. Metadata failure must not
+            # conceal that effect, leak a locator or invite a second Open.
+            outcome = dict(outcome, detail=(
+                "Open completed; the verification timestamp update could not be confirmed. "
+                "Do not repeat Open solely to update this timestamp."
+            ))
+    return OpenBindingResult(outcome)
+
+
+def bind_surface(config: ServerConfig, *, work_ref: str, role: str, provider: str,
+                 locator: dict[str, Any], seat_ref: str | None = None) -> dict[str, Any]:
+    """Apply one complete binding transaction on the existing file owner."""
+    if not isinstance(work_ref, str) or not isinstance(role, str) or not isinstance(provider, str):
+        raise ValueError("work_ref, role, and provider must be strings")
+    if not isinstance(locator, dict):
+        raise ValueError("locator must be an object")
+    if seat_ref is not None and not isinstance(seat_ref, str):
+        raise ValueError("seat_ref must be a string or null")
+
+    # sb._PROVIDER_LOCATOR_KIND is the same module's own provider->kind
+    # map — reused, not re-derived, so a new provider added there never
+    # needs a matching edit here. An unknown provider maps to itself,
+    # which validate_bindings_document then names as a "must be one of"
+    # problem — never a crash.
+    locator_kind = sb._PROVIDER_LOCATOR_KIND.get(provider, provider)
+    binding = sb.new_binding(
+        work_ref=work_ref, role=role, provider=provider, locator_kind=locator_kind,
+        locator=locator, observed_at=config.now_fn(), seat_ref=seat_ref,
+    )
+
+    with config.bindings_lock:
+        bindings_path = config.bindings_path
+        existing_doc, load_problems = sb.load_bindings(bindings_path)
+        if existing_doc is None and load_problems:
+            outcome = {"ok": False, "problems": load_problems}
+        else:
+            if existing_doc is None:
+                existing_doc = {"schema": sb.SCHEMA, "bindings": []}
+            new_doc = {
+                "schema": existing_doc.get("schema", sb.SCHEMA),
+                "bindings": list(existing_doc.get("bindings", [])) + [binding],
+            }
+            problems = sb.validate_bindings_document(new_doc)
+            if problems:
+                outcome = {"ok": False, "problems": problems}
+            else:
+                sb.save_bindings(new_doc, bindings_path)
+                outcome = {"ok": True, "binding_id": binding["binding_id"]}
+    return outcome
+
+
+def unbind_surface(config: ServerConfig, *, binding_id: str) -> dict[str, Any]:
+    """Remove a binding through the same complete read/modify/write transaction."""
+    if not isinstance(binding_id, str) or not binding_id:
+        raise ValueError("binding_id: required (non-empty string)")
+
+    with config.bindings_lock:
+        bindings_path = config.bindings_path
+        doc, _problems = sb.load_bindings(bindings_path)
+        outcome = {"ok": False}
+        if doc is not None:
+            rows = doc.get("bindings", [])
+            remaining = [
+                row for row in rows
+                if not (isinstance(row, dict) and row.get("binding_id") == binding_id)
+            ]
+            if len(remaining) != len(rows):
+                new_doc = {"schema": doc.get("schema", sb.SCHEMA), "bindings": remaining}
+                sb.save_bindings(new_doc, bindings_path)
+                outcome = {"ok": True}
+    return outcome
+
+
 def refresh_builds(config: ServerConfig) -> dict[str, Any]:
     """Run the existing active-build refresh on this exact Control Room owner.
 
@@ -1374,84 +1551,15 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
             return self._owed_open_refused()
 
         config: ServerConfig = self.server.config  # type: ignore[attr-defined]
-        open_fn = config.open_binding_fn
-        provider_runner = config.runner
-        provider_options = dict(claude_projects_dir=config.claude_projects_dir,
-                                claude_desktop_cli=config.claude_desktop_cli,
-                                claude_desktop_handoff_runner=config.claude_desktop_handoff_runner,
-                                target_surface=target_surface,
-                                codex_sessions_dir=config.codex_sessions_dir,
-                                mlx_profiles_root=config.mlx_profiles_root,
-                                gologin_profiles_root=config.gologin_profiles_root)
-        with config.bindings_lock:
-            bindings_path = config.bindings_path
-            doc, problems = sb.load_bindings(bindings_path)
-            binding = next(
-                (row for row in (doc or {}).get("bindings", [])
-                 if isinstance(row, dict) and row.get("binding_id") == binding_id),
-                None,
-            )
-            binding_preimage = copy.deepcopy(binding)
-        if doc is None:
-            if owed_route:
-                return self._owed_open_refused()
-            if problems:
-                outcome = contract.refused(
-                    "unknown", binding_id, "invalid_binding", "the bindings file failed validation"
-                )
-            else:
-                outcome = contract.refused(
-                    "unknown", binding_id, "not_found", "no bindings file is present"
-                )
-            return self._send_json(200, outcome, no_store=True)
-
-        if binding is None:
-            if owed_route:
-                return self._owed_open_refused()
-            outcome = contract.refused("unknown", binding_id, "not_found", "no binding with this id exists")
-            return self._send_json(200, outcome, no_store=True)
-
-        binding = _freeze_target(binding)
-        if owed_route:
-            if not _owed_handoff_current(config, data["owed_context"], binding, doc["bindings"]):
-                return self._owed_open_refused()
-        outcome = open_fn(binding, provider_runner, **provider_options)
-        # last_verified_at / VERIFIED_OPENABLE law (Sol review 5000169412,
-        # blocker 2): a mere Terminal-launch ACK must never advance this —
-        # only an outcome that PROVED the provider-native session/tab exists
-        # (contract.OpenOutcome.verified=True) may. `ok=True, verified=False`
-        # (chatgpt / claude_desktop / cursor_agent — no proven local read
-        # surface) stays BOUND_UNVERIFIED and leaves the bindings file
-        # byte-unchanged.
-        if not owed_route and outcome.get("ok") and outcome.get("verified"):
-            try:
-                with config.bindings_lock:
-                    if config.bindings_path == bindings_path:
-                        current_doc, _problems = sb.load_bindings(bindings_path)
-                        if current_doc is not None:
-                            matches = [
-                                row for row in current_doc["bindings"]
-                                if isinstance(row, dict) and row.get("binding_id") == binding_id
-                            ]
-                            # A changed/removed/restamped row receives no evidence
-                            # for the old target. Preserve all concurrent siblings.
-                            if len(matches) == 1 and matches[0] == binding_preimage:
-                                matches[0]["last_verified_at"] = config.now_fn()
-                                sb.save_bindings(current_doc, bindings_path)
-            except Exception:
-                # Navigation already returned success. Metadata failure must not
-                # conceal that effect, leak a locator or invite a second Open.
-                outcome = dict(outcome, detail=(
-                    "Open completed; the verification timestamp update could not be confirmed. "
-                    "Do not repeat Open solely to update this timestamp."
-                ))
-        self._send_json(200, outcome, no_store=True)
+        result = open_surface(
+            config, binding_id=binding_id, target_surface=target_surface,
+            owed_context=data["owed_context"] if owed_route else _NO_OWED_CONTEXT,
+        )
+        self._send_json(409 if result.source_precondition_failed else 200,
+                        result.outcome, no_store=True)
 
     def _owed_open_refused(self) -> None:
-        self._send_json(409, {"ok": False, "verified": False,
-                             "failure_kind": "source_precondition_failed",
-                             "detail": "The owed action needs a current read; its source or exact target changed.",
-                             "next_action": "read_current_state"}, no_store=True)
+        self._send_json(409, _owed_open_refusal_result().outcome, no_store=True)
 
     _BIND_ALLOWED_KEYS = frozenset({"work_ref", "role", "provider", "seat_ref", "locator"})
 
@@ -1477,35 +1585,8 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
             return self._bad_request("seat_ref must be a string or null")
 
         config: ServerConfig = self.server.config  # type: ignore[attr-defined]
-        # sb._PROVIDER_LOCATOR_KIND is the same module's own provider->kind
-        # map — reused, not re-derived, so a new provider added there never
-        # needs a matching edit here. An unknown provider maps to itself,
-        # which validate_bindings_document then names as a "must be one of"
-        # problem — never a crash.
-        locator_kind = sb._PROVIDER_LOCATOR_KIND.get(provider, provider)
-        binding = sb.new_binding(
-            work_ref=work_ref, role=role, provider=provider, locator_kind=locator_kind,
-            locator=locator, observed_at=config.now_fn(), seat_ref=seat_ref,
-        )
-
-        with config.bindings_lock:
-            bindings_path = config.bindings_path
-            existing_doc, load_problems = sb.load_bindings(bindings_path)
-            if existing_doc is None and load_problems:
-                outcome = {"ok": False, "problems": load_problems}
-            else:
-                if existing_doc is None:
-                    existing_doc = {"schema": sb.SCHEMA, "bindings": []}
-                new_doc = {
-                    "schema": existing_doc.get("schema", sb.SCHEMA),
-                    "bindings": list(existing_doc.get("bindings", [])) + [binding],
-                }
-                problems = sb.validate_bindings_document(new_doc)
-                if problems:
-                    outcome = {"ok": False, "problems": problems}
-                else:
-                    sb.save_bindings(new_doc, bindings_path)
-                    outcome = {"ok": True, "binding_id": binding["binding_id"]}
+        outcome = bind_surface(config, work_ref=work_ref, role=role, provider=provider,
+                               locator=locator, seat_ref=seat_ref)
         self._send_json(200, outcome, no_store=True)
 
     def _handle_unbind(self) -> None:
@@ -1520,21 +1601,7 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
             return self._bad_request("binding_id: required (non-empty string)")
 
         config: ServerConfig = self.server.config  # type: ignore[attr-defined]
-        with config.bindings_lock:
-            bindings_path = config.bindings_path
-            doc, _problems = sb.load_bindings(bindings_path)
-            outcome = {"ok": False}
-            if doc is not None:
-                rows = doc.get("bindings", [])
-                remaining = [
-                    row for row in rows
-                    if not (isinstance(row, dict) and row.get("binding_id") == binding_id)
-                ]
-                if len(remaining) != len(rows):
-                    new_doc = {"schema": doc.get("schema", sb.SCHEMA), "bindings": remaining}
-                    sb.save_bindings(new_doc, bindings_path)
-                    outcome = {"ok": True}
-        self._send_json(200, outcome, no_store=True)
+        self._send_json(200, unbind_surface(config, binding_id=binding_id), no_store=True)
 
     def _handle_refresh_builds(self) -> None:
         data, err = self._read_json_body()
