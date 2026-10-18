@@ -541,6 +541,14 @@ class _ExecutivePolicyVerifiers:
         return None
 
 
+_WORKSPACE_CONTROL_ROOM_ACTION_ROUTES: tuple[str, ...] = (
+    "/workspace/control-room/open",
+    "/workspace/control-room/bind",
+    "/workspace/control-room/unbind",
+    "/workspace/control-room/refresh-builds",
+)
+
+
 class _ExecutivePathFence:
     """Literal, query-free routes for the private stateless HTTP transport."""
 
@@ -576,6 +584,12 @@ class _ExecutivePathFence:
             self._workspace_routes.add("/workspace/window/current")
         self._routes.update({path: "GET" for path in self._workspace_routes})
         self._public_routes.update(self._workspace_routes)
+        if workspace_app is not None:
+            # Fixed actions share the incumbent public credential/host fences
+            # but must not be included in the preceding GET method expansion.
+            self._routes.update({path: "POST" for path in _WORKSPACE_CONTROL_ROOM_ACTION_ROUTES})
+            self._workspace_routes.update(_WORKSPACE_CONTROL_ROOM_ACTION_ROUTES)
+            self._public_routes.update(_WORKSPACE_CONTROL_ROOM_ACTION_ROUTES)
         if os_app is not None:
             if type(os_app) is not OsStaticApp:
                 raise ValueError("fixed OS static owner required")
@@ -1263,6 +1277,10 @@ def _build_profile_mcp_app(
                              "/workspace/mission/v4/current",
                              "/workspace/result/current",
                              "/workspace/plan/current"))
+        outer_routes.extend(
+            Route(path, workspace_app, methods=["POST"])
+            for path in _WORKSPACE_CONTROL_ROOM_ACTION_ROUTES
+        )
     if content_app is not None:
         outer_routes.append(Route("/workspace/window/current", content_app, methods=["GET"]))
     if os_app is not None:
