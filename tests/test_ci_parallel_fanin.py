@@ -14,7 +14,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 _WORKFLOW = _ROOT / ".github" / "workflows" / "ci.yml"
 
 
-def test_live_ci_workflow_fan_in_is_fail_closed_and_uses_three_full_shards() -> None:
+def test_live_ci_workflow_fan_in_is_fail_closed_and_uses_six_full_shards() -> None:
     text = _WORKFLOW.read_text(encoding="utf-8")
     fan.validate_parallel_workflow(text)
     import yaml
@@ -28,9 +28,9 @@ def test_live_ci_workflow_fan_in_is_fail_closed_and_uses_three_full_shards() -> 
     }
     assert set(data["jobs"]) == {"pytest_shards", "test"}
     shards = data["jobs"]["pytest_shards"]
-    assert shards["strategy"]["matrix"]["index"] == [0, 1, 2]
+    assert shards["strategy"]["matrix"]["index"] == [0, 1, 2, 3, 4, 5]
     assert shards["strategy"]["fail-fast"] is False
-    assert shards["strategy"]["max-parallel"] == 3
+    assert shards["strategy"]["max-parallel"] == 6
     assert shards["runs-on"] == "ubuntu-latest"
     assert data["jobs"]["test"]["name"] == "test"
     assert data["jobs"]["test"]["needs"] == ["pytest_shards"]
@@ -40,20 +40,20 @@ def test_live_ci_workflow_fan_in_is_fail_closed_and_uses_three_full_shards() -> 
     ("preimage", "mutation"),
     [
         ("fail-fast: false", "fail-fast: true"),
-        ("index: [0, 1, 2]", "index: [0, 2]"),
+        ("index: [0, 1, 2, 3, 4, 5]", "index: [0, 2, 3, 4, 5]"),
         # Matrix exclude can delete shard zero while leaving the remaining
         # jobs green; the fan-in only sees the matrix's overall success.
         (
-            "index: [0, 1, 2]",
-            "index: [0, 1, 2]\n        exclude:\n          - index: 0",
+            "index: [0, 1, 2, 3, 4, 5]",
+            "index: [0, 1, 2, 3, 4, 5]\n        exclude:\n          - index: 0",
         ),
         (
-            "index: [0, 1, 2]",
-            "index: [0, 1, 2]\n        include:\n          - index: 3",
+            "index: [0, 1, 2, 3, 4, 5]",
+            "index: [0, 1, 2, 3, 4, 5]\n        include:\n          - index: 6",
         ),
         (
-            "index: [0, 1, 2]",
-            "index: [0, 1, 2]\n        python: [3.12]",
+            "index: [0, 1, 2, 3, 4, 5]",
+            "index: [0, 1, 2, 3, 4, 5]\n        python: [3.12]",
         ),
         ("needs: [pytest_shards]", "needs: []"),
         ("if: ${{ always() }}", "if: false"),
@@ -71,8 +71,8 @@ def test_live_ci_workflow_fan_in_is_fail_closed_and_uses_three_full_shards() -> 
         ),
         ("exit 1\n          fi", "echo \"not stopping\"\n          fi\n          exit 1"),
         (
-            "python -m scripts.ci_parallel_shard --jobs 3 --index ${{ matrix.index }}",
-            "python -m scripts.ci_parallel_shard --jobs 3 --index 0",
+            "python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }}",
+            "python -m scripts.ci_parallel_shard --jobs 6 --index 0",
         ),
         ("if: matrix.index == 0", "if: matrix.index == 1"),
         (
@@ -100,7 +100,7 @@ def test_live_ci_workflow_fan_in_is_fail_closed_and_uses_three_full_shards() -> 
             "echo bypass",
         ),
         (
-            "python scripts/ci_pytest.py --plan-only --jobs 3",
+            "python scripts/ci_pytest.py --plan-only --jobs 6",
             "python scripts/ci_pytest.py --jobs 1",
         ),
     ],
@@ -118,13 +118,13 @@ def test_unsafe_matrix_or_required_fanin_regression_is_refused(
 def test_all_matrix_shards_exactly_cover_canonical_discovery_once() -> None:
     gate = cip.resolve_gate(_ROOT)
     included = gate["included"]
-    shards = cip.partition_modules(included, jobs=3)
+    shards = cip.partition_modules(included, jobs=6)
     cip.verify_partition(included, shards)
-    assert len(shards) == 3
+    assert len(shards) == 6
     seen: set[str] = set()
     digests: set[str] = set()
-    for index in range(3):
-        plan, selected, digest = fan.shard_plan(_ROOT, jobs=3, index=index)
+    for index in range(6):
+        plan, selected, digest = fan.shard_plan(_ROOT, jobs=6, index=index)
         assert plan["included"] == included
         assert selected == shards[index]
         assert seen.isdisjoint(selected)
@@ -135,7 +135,7 @@ def test_all_matrix_shards_exactly_cover_canonical_discovery_once() -> None:
 
 
 def _stub_gate(monkeypatch: pytest.MonkeyPatch) -> tuple[str, ...]:
-    included = tuple(f"tests/test_fixture_{index}.py" for index in range(12))
+    included = tuple(f"tests/test_fixture_{index}.py" for index in range(120))
     monkeypatch.setattr(
         fan.ci_pytest, "resolve_gate",
         lambda root: {
@@ -165,9 +165,9 @@ def test_worker_executes_only_its_exact_canonical_shard_and_preserves_status(
         return subprocess.CompletedProcess(args=args, returncode=17)
 
     monkeypatch.setattr(fan.subprocess, "run", fake_run)
-    code = fan.main(["--jobs", "3", "--index", "1", "--root", str(tmp_path)])
+    code = fan.main(["--jobs", "6", "--index", "1", "--root", str(tmp_path)])
     assert code == 17  # A failed shard cannot become a green matrix leg.
-    expected = cip.partition_modules(included, jobs=3)[1]
+    expected = cip.partition_modules(included, jobs=6)[1]
     assert recorded == [
         (cip.pytest_argv(expected, progress=True), tmp_path.resolve(), False),
     ]
@@ -175,7 +175,7 @@ def test_worker_executes_only_its_exact_canonical_shard_and_preserves_status(
 
 @pytest.mark.parametrize(
     ("jobs", "index"),
-    [(0, 0), (1, 0), (2, 0), (4, 0), (3, -1), (3, 3)],
+    [(0, 0), (1, 0), (2, 0), (4, 0), (6, -1), (6, 6)],
 )
 def test_invalid_worker_configuration_is_refused_before_execution(
     jobs: int, index: int, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -208,6 +208,6 @@ def test_plan_only_does_not_run_any_test(
         lambda *args, **kwargs: pytest.fail("plan-only must not spawn pytest"),
     )
     assert fan.main(
-        ["--jobs", "3", "--index", "2", "--plan-only", "--root", str(tmp_path)]
+        ["--jobs", "6", "--index", "2", "--plan-only", "--root", str(tmp_path)]
     ) == 0
-    assert "parallel_shard=3/3" in capsys.readouterr().out
+    assert "parallel_shard=3/6" in capsys.readouterr().out

@@ -39,14 +39,14 @@ def validate_parallel_workflow(text: str) -> None:
         or not isinstance(matrix, dict)
         or set(matrix) != {"index"}
         or not isinstance(indices, list)
-        or [type(i) for i in indices] != [int, int, int]
-        or indices != [0, 1, 2]
+        or [type(i) for i in indices] != [int] * 6
+        or indices != list(range(6))
         or strategy.get("fail-fast") is not False
-        or strategy.get("max-parallel") != 3
+        or strategy.get("max-parallel") != 6
         or shards.get("if") is not None
         or shards.get("continue-on-error") is not None
     ):
-        raise ci_pytest.PolicyError("parallel CI must execute all three shard indices")
+        raise ci_pytest.PolicyError("parallel CI must execute all six shard indices")
     if (
         gate.get("name") != "test"
         or gate.get("needs") != ["pytest_shards"]
@@ -66,7 +66,7 @@ def validate_parallel_workflow(text: str) -> None:
     if (
         len(shard_runner) != 1
         or shard_runner[0].get("run")
-        != "python -m scripts.ci_parallel_shard --jobs 3 --index ${{ matrix.index }}"
+        != "python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }}"
         or shard_runner[0].get("if") is not None
     ):
         raise ci_pytest.PolicyError("each matrix member must run its canonical shard")
@@ -122,7 +122,7 @@ def validate_parallel_workflow(text: str) -> None:
         "exit 1",
         "fi",
         "# Same discovery/exclusion/total-cover plan, never a test skip.",
-        "python scripts/ci_pytest.py --plan-only --jobs 3",
+        "python scripts/ci_pytest.py --plan-only --jobs 6",
     ]
     actual_lines = [line.strip() for line in code.splitlines() if line.strip()] if isinstance(code, str) else []
     env = final.get("env")
@@ -146,8 +146,8 @@ def validate_parallel_workflow(text: str) -> None:
 def shard_plan(
     root: Path, *, jobs: int, index: int
 ) -> tuple[dict, tuple[str, ...], str]:
-    if jobs != 3:
-        raise ci_pytest.PolicyError("parallel CI requires exactly three jobs")
+    if jobs != 6:
+        raise ci_pytest.PolicyError("parallel CI requires exactly six jobs")
     if index not in range(jobs):
         raise ci_pytest.PolicyError("parallel CI shard index is outside the plan")
     gate = ci_pytest.resolve_gate(root)
