@@ -235,6 +235,15 @@ C2_PAPER_RUNTIME_IDENTITY = {
     "dependencyTreeHash": "91ce96dc69159edcabb3eee472e6ebafb18450b93a03addd6adf0df6dca47e29",
 }
 
+# Distinct sealed, already-enrolled C2 Business Paper v10 installation. This is
+# an independent per-seat transaction, never permission to rewrite another
+# account's config, fleet modules, workspace grants, or immutable runtime.
+C2_PAPER_BUSINESS_ACCOUNT = "chatgpt2-business"
+C2_PAPER_UPGRADE_ACCOUNTS = frozenset((C2_PAPER_ACCOUNT, C2_PAPER_BUSINESS_ACCOUNT))
+C2_PAPER_BUSINESS_ORIGINAL_MANIFEST_SHA256 = "504c22af839e154bb1a5314134240b9eb7064f043e1003a357922e1103c21b06"
+C2_PAPER_BUSINESS_NON_PAPER_CONFIG_SHA256 = "ed2dc2b9f7f812406c7ef7e9297b3ad5b54c8c15c11903463e61a1d628b0fdf0"
+C2_PAPER_BUSINESS_RUNTIME_IDENTITY = {**C2_PAPER_RUNTIME_IDENTITY, "port": 45028}
+
 
 KNOWN_MANIFEST_FILESETS = frozenset(
     (
@@ -596,9 +605,11 @@ def _c2_lifecycle_mutex(account: str):
     inode while the previous one is still held. Closing the descriptor (including
     process exit) releases the lock, and CLOEXEC prevents launchctl inheriting it.
     """
-    if account not in (C2_PAPER_ACCOUNT, FABRIC_BACKEND_ACCOUNT):
+    # Preserve Fabric backend's existing locked lifecycle and extend only the
+    # exact sealed C2 Paper upgrade cohort (personal plus business).
+    if account not in C2_PAPER_UPGRADE_ACCOUNTS | {FABRIC_BACKEND_ACCOUNT}:
         raise SystemExit("C2 lifecycle mutex cannot select another account")
-    subject = "C2" if account == C2_PAPER_ACCOUNT else "Fabric"
+    subject = "Fabric" if account == FABRIC_BACKEND_ACCOUNT else "C2"
     lock_path = _build_runtime_roots(account)["state"] / C2_LIFECYCLE_LOCK_NAME
     _assert_dest_safe(lock_path)
     current = lock_path.parent
@@ -645,7 +656,7 @@ def _c2_lifecycle_serialized(*, readonly_preflight: bool = False):
     def decorate(function):
         @wraps(function)
         def guarded(args):
-            if (args.account != C2_PAPER_ACCOUNT
+            if (args.account not in C2_PAPER_UPGRADE_ACCOUNTS
                     or (readonly_preflight and getattr(args, "preflight_only", False) is True)):
                 return function(args)
             with _c2_lifecycle_mutex(args.account):
@@ -1021,11 +1032,17 @@ def _launchd_inspect(label: str) -> dict | None:
     return parsed
 
 
-def _lifecycle_inspect(account: str, label: str, roots: dict) -> dict | None:
-    """Closed lifecycle owners require exact identity or observed service absence."""
-    if account not in (C2_PAPER_ACCOUNT, FABRIC_BACKEND_ACCOUNT):
+def _lifecycle_inspect(account: str, label: str, roots: dict, *,
+                       require_positive: bool = False) -> dict | None:
+    """Preserve Fabric/C2 Personal strict lifecycle identity checks.
+
+    C2 Business keeps historical generic lifecycle semantics except in its
+    exact Paper upgrade transaction, which explicitly requires positive
+    proof of the original service identity or exact unloaded state.
+    """
+    if account not in (C2_PAPER_ACCOUNT, FABRIC_BACKEND_ACCOUNT) and not require_positive:
         return _launchd_inspect(label)
-    subject = "C2" if account == C2_PAPER_ACCOUNT else "Fabric"
+    subject = "Fabric" if account == FABRIC_BACKEND_ACCOUNT else "C2"
     target = _launchd_target(label)
     absent = (f'Bad request.\nCould not find service "{label}" '
               f'in domain for user gui: {os.getuid()}\n')
@@ -2071,11 +2088,21 @@ def cmd_paper_runtime_upgrade(args) -> int:
     _validate_account_label(account)
     expected = args.expected_manifest_sha256
     preview = args.preflight_only
-    if account != C2_PAPER_ACCOUNT or type(preview) is not bool:
+    if account == C2_PAPER_ACCOUNT:
+        original_manifest = C2_PAPER_ORIGINAL_MANIFEST_SHA256
+        non_paper_pin = C2_PAPER_NON_PAPER_CONFIG_SHA256
+        runtime_identity = C2_PAPER_RUNTIME_IDENTITY
+    elif account == C2_PAPER_BUSINESS_ACCOUNT:
+        original_manifest = C2_PAPER_BUSINESS_ORIGINAL_MANIFEST_SHA256
+        non_paper_pin = C2_PAPER_BUSINESS_NON_PAPER_CONFIG_SHA256
+        runtime_identity = C2_PAPER_BUSINESS_RUNTIME_IDENTITY
+    else:
         raise SystemExit("paper runtime compatibility requires the exact enrolled C2 account")
+    if type(preview) is not bool:
+        raise SystemExit("paper runtime compatibility preflight flag invalid")
     if not _sha256_hex(expected):
         raise SystemExit("paper runtime compatibility requires an exact manifest CAS")
-    if expected != C2_PAPER_ORIGINAL_MANIFEST_SHA256:
+    if expected != original_manifest:
         raise SystemExit("paper runtime compatibility: original manifest is not the reviewed predecessor")
     if PAPER_RUNTIME_REL.name != "v12":
         raise SystemExit("paper runtime compatibility requires the reviewed v12 target")
@@ -2089,7 +2116,7 @@ def cmd_paper_runtime_upgrade(args) -> int:
         raise SystemExit("paper runtime compatibility: installed manifest CAS mismatch")
     prior = _verify_staged_install(account, label, roots, require_runtime_seal=True)
     if (prior.get("files") != C2_PAPER_FILES_SHA256
-            or any(prior.get(key) != value for key, value in C2_PAPER_RUNTIME_IDENTITY.items())):
+            or any(prior.get(key) != value for key, value in runtime_identity.items())):
         raise SystemExit("paper runtime compatibility: original sealed identity does not match")
     for name in prior["files"]:
         _assert_dest_safe(roots["base"] / name)
@@ -2107,7 +2134,7 @@ def cmd_paper_runtime_upgrade(args) -> int:
     non_paper_sha = hashlib.sha256(json.dumps(
         non_paper, sort_keys=True, separators=(",", ":"),
     ).encode("utf-8")).hexdigest()
-    if non_paper_sha != C2_PAPER_NON_PAPER_CONFIG_SHA256:
+    if non_paper_sha != non_paper_pin:
         raise SystemExit("paper runtime compatibility: original non-Paper profile changed")
 
     user_root = _user_root()
@@ -2141,7 +2168,7 @@ def cmd_paper_runtime_upgrade(args) -> int:
     if preview:
         print(json.dumps({**receipt, "preflight": True, "effect": "NOT_APPLIED"}, sort_keys=True))
         return 0
-    if _lifecycle_inspect(account, label, roots) is not None:
+    if _lifecycle_inspect(account, label, roots, require_positive=True) is not None:
         raise SystemExit("refusing Paper runtime upgrade while service is loaded; stop first")
     # Reconfirm the complete sealed installation and target before the first write.
     if _verify_staged_install(account, label, roots, require_runtime_seal=True) != prior:
@@ -2150,7 +2177,7 @@ def cmd_paper_runtime_upgrade(args) -> int:
     if (_stable_regular_file_hash(manifest_path, label="installed manifest") != expected
             or _stable_regular_file_hash(config_path, label="installed config") != prior["configHash"]):
         raise SystemExit("paper runtime compatibility: original snapshot CAS mismatch")
-    if _lifecycle_inspect(account, label, roots) is not None:
+    if _lifecycle_inspect(account, label, roots, require_positive=True) is not None:
         raise SystemExit("refusing Paper runtime upgrade while service is loaded; stop first")
 
     old_bytes = {config_path: old_config_bytes, manifest_path: old_manifest_bytes}
@@ -2161,7 +2188,7 @@ def cmd_paper_runtime_upgrade(args) -> int:
         # Manifest commits last so fresh integrity checks reject partial file updates.
         if (_stable_regular_file_hash(manifest_path, label="installed manifest") != expected
                 or _stable_regular_file_hash(config_path, label="installed config") != future["configHash"]
-                or _lifecycle_inspect(account, label, roots) is not None):
+                or _lifecycle_inspect(account, label, roots, require_positive=True) is not None):
             raise RuntimeError("installed state changed before manifest commit")
         _atomic_write_bytes(manifest_path, manifest_bytes)
         committed = True
@@ -2169,7 +2196,7 @@ def cmd_paper_runtime_upgrade(args) -> int:
                 or _stable_regular_file_hash(manifest_path, label="installed manifest") != target_manifest_sha):
             raise RuntimeError("committed installation does not match the planned result")
         _verify_paper_runtime(user_root)
-        if _lifecycle_inspect(account, label, roots) is not None:
+        if _lifecycle_inspect(account, label, roots, require_positive=True) is not None:
             raise RuntimeError("service became loaded during commit verification")
     except BaseException as exc:
         if committed:
@@ -2178,7 +2205,7 @@ def cmd_paper_runtime_upgrade(args) -> int:
                 "inspect the original service before recovery or restart"
             ) from exc
         try:
-            if _lifecycle_inspect(account, label, roots) is not None:
+            if _lifecycle_inspect(account, label, roots, require_positive=True) is not None:
                 raise RuntimeError("service became loaded during transaction")
             observed = {}
             for path in planned:
@@ -2191,7 +2218,7 @@ def cmd_paper_runtime_upgrade(args) -> int:
                     raise RuntimeError("non-owned concurrent mutation while recovering")
             for path in reversed(tuple(planned)):
                 if observed[path] != old_bytes[path]:
-                    if (_lifecycle_inspect(account, label, roots) is not None
+                    if (_lifecycle_inspect(account, label, roots, require_positive=True) is not None
                             or _stable_regular_file_hash(path, label="rollback target")
                             != hashlib.sha256(observed[path]).hexdigest()):
                         raise RuntimeError("rollback target or service changed before restoration")
@@ -2200,7 +2227,7 @@ def cmd_paper_runtime_upgrade(args) -> int:
                     or _stable_regular_file_hash(manifest_path, label="installed manifest") != expected):
                 raise RuntimeError("rollback byte identity differs")
             _verify_staged_install(account, label, roots, require_runtime_seal=True)
-            if _lifecycle_inspect(account, label, roots) is not None:
+            if _lifecycle_inspect(account, label, roots, require_positive=True) is not None:
                 raise RuntimeError("service became loaded during rollback verification")
         except BaseException as rollback_exc:
             raise SystemExit(
