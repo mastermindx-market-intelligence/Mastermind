@@ -170,3 +170,35 @@ describe("existing MissionHost authenticated plan acquisition", () => {
     expect(read).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("native original-owner plan read", () => {
+  it("uses one fixed Tauri command and refuses cross-identity late results", async () => {
+    const { createNativeClient, bindMissionHost } = await import("../host");
+    const commands: Array<{ command: string; args: unknown }> = [];
+    let authListener!: (message: { payload: unknown }) => void;
+    let release!: (response: unknown) => void;
+    const signed = { status: "signed_in", reason: null, acquisition: true, content: false };
+    const loggedOut = { status: "signed_out", reason: null, acquisition: false, content: false };
+    const invoke = <T,>(command: string, args?: Record<string, unknown>): Promise<T> => {
+      commands.push({ command, args });
+      if (command === "executive_auth_status") return Promise.resolve({ generation: 0, available: false } as T);
+      if (command === "auth_status") return Promise.resolve(signed as T);
+      if (command === "read_admitted_plan") return new Promise<T>(resolve => { release = response => resolve(response as T); });
+      return Promise.reject(new Error("UNEXPECTED_COMMAND"));
+    };
+    const client = await createNativeClient(invoke, async (event, fn) => {
+      if (event === "mastermind-auth-state") authListener = fn;
+      return () => {};
+    });
+    const host = bindMissionHost(client);
+    const signal = new AbortController().signal;
+    const pending = host.readAdmittedPlan!({ ...selection, signal });
+    expect(commands.at(-1)).toEqual({
+      command: "read_admitted_plan", args: { selection: { ...selection } },
+    });
+    authListener({ payload: loggedOut });
+    release(fixture());
+    await expect(pending).rejects.toThrow("READ_CANCELLED");
+    expect(host.auth?.getState().status).toBe("signed_out");
+  });
+});

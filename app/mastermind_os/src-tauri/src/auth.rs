@@ -617,6 +617,9 @@ const RESULT_RESPONSE_CAP: usize = 16_384;
 const MISSION_V3_RESPONSE_CAP: usize = 2_000_000;
 const RESULT_MISSION_V3_PATH: &str = "/workspace/mission/v3/current";
 const RESULT_DETAIL_PATH: &str = "/workspace/result/current";
+const PLAN_DETAIL_PATH: &str = "/workspace/plan/current";
+const PLAN_RESPONSE_CAP: usize = 16_384;
+const PLAN_SCHEMA: &str = "mastermind.workspace_admitted_execution_plan.v1";
 const WORK_PATH: &str = "/workspace/work/current";
 const MISSION_V3_SCHEMA: &str = "mastermind.mission_workspace.v3";
 const RESULT_SCHEMA: &str = "mastermind.workspace_role_result.v1";
@@ -745,6 +748,44 @@ pub async fn read_mission(app: AppHandle, selection: MissionSelection) -> Result
     )
     .await
 }
+#[tauri::command]
+pub async fn read_admitted_plan(app: AppHandle, selection: MissionSelection) -> Result<Value> {
+    // Original Workspace selection grammar is narrower than legacy Mission selection.
+    validate_workspace_pair(&selection.work_ref, &selection.root_job_id)?;
+    let mut url = Url::parse(&format!("{ORIGIN}{PLAN_DETAIL_PATH}"))
+        .map_err(|_| "REQUEST_INVALID")?;
+    url.query_pairs_mut()
+        .append_pair("work_ref", &selection.work_ref)
+        .append_pair("root_job_id", &selection.root_job_id);
+    let state = app.state::<NativeAuth>();
+    let (token, generation) = {
+        let inner = state.lock()?;
+        (inner.token(Resource::Acquisition)
+            .ok_or("AUTHENTICATION_REQUIRED")?.value.clone(), inner.generation)
+    };
+    let response = state.http.get(url).bearer_auth(token)
+        .header("Accept", "application/json")
+        .header("Cache-Control", "no-store")
+        .send().await.map_err(|_| "SOURCE_UNAVAILABLE")?;
+    let result = if response.status().as_u16() == 503 {
+        read_json_body(response, PLAN_RESPONSE_CAP).await
+            .and_then(|value| typed_unavailable(value, PLAN_SCHEMA, false))
+    } else {
+        bounded_json(response, PLAN_RESPONSE_CAP).await
+    };
+    // A completed HTTP request is not publication permission after identity rotation.
+    if !state.lock()?.release_allowed(generation, Resource::Acquisition) {
+        return Err("AUTHENTICATION_CHANGED".into());
+    }
+    let value = result?;
+    if value.get("schema").and_then(Value::as_str) != Some(PLAN_SCHEMA) {
+        return Err("RESPONSE_INVALID".into());
+    }
+    // Exact fields, source observation, availability, and selectors are decoded in
+    // the existing frontend Plan consumer; no private response fields are projected.
+    Ok(value)
+}
+
 #[tauri::command]
 pub async fn read_mission_v3(app: AppHandle, selection: MissionSelection) -> Result<Value> {
     let mut url =
