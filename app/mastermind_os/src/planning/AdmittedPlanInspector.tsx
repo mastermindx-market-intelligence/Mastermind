@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { validPlanSelection, type PlanRead, type PlanSelection } from "./admitted-plan";
+import { RetainedActivityInspector, type RetainedActivityReader } from "./RetainedActivityInspector";
+import { validActivitySelection } from "./retained-activity";
 import type { MissionDocument, Missionv3Document } from "../mission";
 import { observePlanWorkers } from "./plan-mission-observation";
 import "./admitted-plan.css";
@@ -9,6 +11,7 @@ export type AdmittedPlanReader = (request: PlanSelection & { signal: AbortSignal
 export interface AdmittedPlanInspectorProps {
   selection: PlanSelection | null;
   read?: AdmittedPlanReader;
+  readActivity?: RetainedActivityReader;
   /** Existing auth/source generation, not a new identity or permission authority. */
   sourceGeneration?: () => number;
   canRead?: () => boolean;
@@ -20,7 +23,7 @@ export interface AdmittedPlanInspectorProps {
 }
 
 export function AdmittedPlanInspector({
-  selection, read, sourceGeneration, canRead, locale = "en",
+  selection, read, readActivity, sourceGeneration, canRead, locale = "en",
   mission = null, missionSourceState = "UNAVAILABLE", missionObservedAt = null,
 }: AdmittedPlanInspectorProps) {
   const [document, setDocument] = useState<PlanRead | null>(null);
@@ -116,6 +119,15 @@ export function AdmittedPlanInspector({
             <ul>{observedWorkers.get(step.step_id)!.workers.map(worker => <li key={worker.job_id}>
               <code>{worker.job_id}</code> · {chinese ? "观测状态" : "observed job state"}: {worker.status ?? (chinese ? "未知" : "unknown")}
               {worker.worker_id && <span> · {chinese ? "工作代理" : "worker"}: {worker.worker_id}</span>}
+              {readActivity && selection && worker.current_attempt_id &&
+                validActivitySelection({ ...selection, job_id: worker.job_id,
+                  attempt_id: worker.current_attempt_id }) &&
+                <RetainedActivityInspector
+                  key={worker.job_id + ":" + worker.current_attempt_id}
+                  selection={{ ...selection, job_id: worker.job_id,
+                    attempt_id: worker.current_attempt_id }}
+                  read={readActivity} sourceGeneration={sourceGeneration}
+                  canRead={canRead} locale={locale} />}
             </li>)}</ul>
             {observedWorkers.get(step.step_id)!.omitted && <p>{chinese ? "部分关联任务未显示。" : "Some associated jobs exceed this display bound."}</p>}
           </div>}
