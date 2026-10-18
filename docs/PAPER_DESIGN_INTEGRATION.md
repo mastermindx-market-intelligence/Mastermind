@@ -587,3 +587,30 @@ then repeat the same Paper inspection canary.
 
 These two account/client ceremonies are the remaining native-human gates; they are
 not reasons to create additional Paper user accounts or another MCP gateway.
+
+### C4 composition with protected Fabric release
+
+The C4 proposal integrates protected master `89cf2399c47da20c0c23826266e52984f88c27e7`.
+Its installer code at `7347c319db18c86b4f6f6dc5a0714e0aebca56c3` retains the dedicated
+Fabric owner and its stage/upgrade/seal/start/stop decorators. The shared mutex admits
+the union of the qualified Paper accounts and that exact Fabric account; the separate
+decorator predicates prevent double acquisition. Dedicated Paper inspections still
+request positive service-state evidence, while generic C2 Business behavior is preserved.
+
+The combined installer and backend-release suites pass 162 tests. A fresh actual C4
+preflight with this installer remains `NOT_APPLIED`: installed configuration, manifest,
+plist and lock existence are unchanged. See `paper-c4-integrated-preflight.json` and the
+current integration entry in `verification.json`. No Fabric runtime action was performed.
+
+The current Portfolio mission adopts the exact inherited #1603 source
+`12fe3d9a7f5ed7deff75b1e8c9101227a92d0aa8` into the owned #1611 composition, including
+the independently reviewed shared-writer lock correction. Normal acceptance of the
+combined source dispositions that inherited component; the original branch remains
+untouched. A protected-commit comparison must establish what landed. C2 runtime
+selection and publisher operations retain their separate release and live-proof scope.
+
+The C4 stop/select/start operator must remain available after C4 stops. Use the existing
+accepted installer from an independently authorized local or RDC host installation
+context, checking each stage before the next. A command launched through the C4 backend
+itself is not a qualified self-cutover mechanism. The subsequent Paper prepare/edit and
+visual readback remain on Studio Direct C4.
