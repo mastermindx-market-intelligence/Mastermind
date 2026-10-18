@@ -1349,6 +1349,7 @@ class _WorkRefusal(Exception):
 
 
 def workspace_provider_factory(*, control_room, authorize, armed, runtime_identity, bounded_runtime=None,
+                               authorize_discovery=None,
                                product_acceptance_basis_reader=None, product_acceptance_owner_target=None,
                                product_acceptance_owner_guard=None, product_acceptance_read=None,
                                product_acceptance_observe=None):
@@ -1362,6 +1363,9 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
     with the owner's qualified namespace capability. An omitted callback retains
     the ordinary Runtime and cannot manufacture a SAME receipt. The public App
     never receives this callback, a path, or namespace custody.
+    authorize_discovery is a separately selected, revocable trusted action owner;
+    omission keeps Discovery refused. The READ membership callback does not
+    supply this grant.
     """
     from control_plane.workspace_control_room_lifecycle import HostedControlRoom
     if type(control_room) is not HostedControlRoom or not callable(authorize):
@@ -1370,7 +1374,9 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
     # The original source+permission owner, not a new publisher or identity.
     # Discovery requires an independent callback and remains dark by default.
     from control_plane.workspace_control_room_presenter import ExistingControlRoomPresenter
-    presenter = ExistingControlRoomPresenter(cache, authorize=authorize)
+    presenter = ExistingControlRoomPresenter(
+        cache, authorize=authorize, authorize_discovery=authorize_discovery,
+    )
     def provide(runtime):
         return WorkspaceReadService(cache=cache, runtime=runtime, authorize=authorize,
                                     armed=armed, runtime_identity=runtime_identity,
