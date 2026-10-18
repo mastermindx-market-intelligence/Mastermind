@@ -392,10 +392,12 @@ def test_cctx0_checkpoint_adds_no_durable_schema(tmp_path):
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )
         }
-        expected_tables = set(frozen) | {"schema_migrations"}
+        expected_tables = set(frozen) | {
+            "schema_migrations", "physical_resource_commitments", "physical_resource_demands"
+        }
         assert tables == expected_tables, (
-            "Fresh installs must not add durable tables outside the frozen legacy "
-            "registry and schema_migrations."
+            "Fresh installs retain the frozen legacy registry, schema_migrations "
+            "and the two admitted physical resource tables."
         )
         for table in ("attempts", "jobs"):
             columns = tuple(
