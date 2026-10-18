@@ -1068,13 +1068,17 @@ def _owed_open_refusal_result() -> OpenBindingResult:
 
 def open_surface(config: ServerConfig, *, binding_id: str,
                  target_surface: str | None = None,
-                 owed_context: Any = _NO_OWED_CONTEXT) -> OpenBindingResult:
+                 owed_context: Any = _NO_OWED_CONTEXT,
+                 before_effect: Callable[[], None] | None = None) -> OpenBindingResult:
     """Open the checked target through this exact existing Control Room owner.
 
     The trusted caller owns admission. Provider work runs outside owner locks;
     only unchanged original rows receive later verification metadata. Explicit
     malformed owed context never falls back to ordinary Open. A provider's
     exception or outcome is not reclassified as a pre-dispatch refusal.
+    before_effect is a trusted transport callback, never a request field. It
+    rechecks admission after source reads, immediately before the first effect;
+    once admitted, ordinary verification metadata stays part of the same work.
     """
     if not isinstance(binding_id, str) or not binding_id:
         raise ValueError("binding_id: required (non-empty string)")
@@ -1127,6 +1131,8 @@ def open_surface(config: ServerConfig, *, binding_id: str,
     if owed_route:
         if not _owed_handoff_current(config, owed_context, binding, doc["bindings"]):
             return _owed_open_refusal_result()
+    if before_effect is not None:
+        before_effect()
     outcome = open_fn(binding, provider_runner, **provider_options)
     # last_verified_at / VERIFIED_OPENABLE law (Sol review 5000169412,
     # blocker 2): a mere Terminal-launch ACK must never advance this —
@@ -1161,8 +1167,13 @@ def open_surface(config: ServerConfig, *, binding_id: str,
 
 
 def bind_surface(config: ServerConfig, *, work_ref: str, role: str, provider: str,
-                 locator: dict[str, Any], seat_ref: str | None = None) -> dict[str, Any]:
-    """Apply one complete binding transaction on the existing file owner."""
+                 locator: dict[str, Any], seat_ref: str | None = None,
+                 before_effect: Callable[[], None] | None = None) -> dict[str, Any]:
+    """Apply one complete binding transaction on the existing file owner.
+
+    A trusted before_effect callback runs inside that transaction immediately
+    before the write. It may refuse admission without splitting the lock.
+    """
     if not isinstance(work_ref, str) or not isinstance(role, str) or not isinstance(provider, str):
         raise ValueError("work_ref, role, and provider must be strings")
     if not isinstance(locator, dict):
@@ -1197,13 +1208,19 @@ def bind_surface(config: ServerConfig, *, work_ref: str, role: str, provider: st
             if problems:
                 outcome = {"ok": False, "problems": problems}
             else:
+                if before_effect is not None:
+                    before_effect()
                 sb.save_bindings(new_doc, bindings_path)
                 outcome = {"ok": True, "binding_id": binding["binding_id"]}
     return outcome
 
 
-def unbind_surface(config: ServerConfig, *, binding_id: str) -> dict[str, Any]:
-    """Remove a binding through the same complete read/modify/write transaction."""
+def unbind_surface(config: ServerConfig, *, binding_id: str,
+                   before_effect: Callable[[], None] | None = None) -> dict[str, Any]:
+    """Remove a binding through the same complete read/modify/write transaction.
+
+    The trusted before_effect callback runs immediately before the write.
+    """
     if not isinstance(binding_id, str) or not binding_id:
         raise ValueError("binding_id: required (non-empty string)")
 
@@ -1219,18 +1236,23 @@ def unbind_surface(config: ServerConfig, *, binding_id: str) -> dict[str, Any]:
             ]
             if len(remaining) != len(rows):
                 new_doc = {"schema": doc.get("schema", sb.SCHEMA), "bindings": remaining}
+                if before_effect is not None:
+                    before_effect()
                 sb.save_bindings(new_doc, bindings_path)
                 outcome = {"ok": True}
     return outcome
 
 
-def refresh_builds(config: ServerConfig) -> dict[str, Any]:
+def refresh_builds(config: ServerConfig, *,
+                   before_effect: Callable[[], None] | None = None) -> dict[str, Any]:
     """Run the existing active-build refresh on this exact Control Room owner.
 
     The calling transport owns authentication and request validation. This
     operation accepts no caller-selected root, command or replacement cache.
     A false publication result may still retain the accepted live input; it
     must not be interpreted as a no-effect receipt or automatic retry advice.
+    A trusted before_effect callback runs once before the compiler; admission
+    is not repeated halfway through accepted input and publication work.
     """
     macro_root = config.macro_root
     if not macro_root:
@@ -1242,6 +1264,8 @@ def refresh_builds(config: ServerConfig) -> dict[str, Any]:
 
     argv = [sys.executable, str(script_path), "--json-stdout"]
     # Preserve the existing compiler's explicit 4 MiB JSON-output budget.
+    if before_effect is not None:
+        before_effect()
     result = config.runner(
         argv, timeout=_REFRESH_BUILDS_TIMEOUT, cwd=macro_root,
         max_bytes=_REFRESH_BUILDS_MAX_OUTPUT_BYTES,
