@@ -92,6 +92,10 @@ def test_continue_carrier_does_not_require_or_arm_attention(
     service._ceo_ingress_app_binding.session_bridge_provider_factory(object())
     assert bound["codex_owner_configured"]() is w3c_installed
     assert checked == [{"release_sha": raw["proof_base_sha"]}]
+    from integrations.session_bridge.runtime_attention import RuntimeSessionAttention
+    assert type(bound["attention_requester"]) is RuntimeSessionAttention
+    # The actual installed factory supplies the adapter but creates no Wake
+    # handler, activation grant, listener or worker in an unarmed profile.
     assert "dialogue_wake_handler" not in captured
     assert raw["dialogue_bridge_armed"] is False
     assert raw["dialogue_wake_retry_policy"].armed is False

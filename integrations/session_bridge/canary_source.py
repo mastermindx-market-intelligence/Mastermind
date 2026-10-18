@@ -55,13 +55,26 @@ def _digest(value):
     ).encode("ascii")).hexdigest()
 
 
-async def derive_canary_grant_proposal(
+@dataclasses.dataclass(frozen=True)
+class ContinuationAttentionSource:
+    """Canonical continuation evidence; never an activation grant."""
+    request: DialogueWakeRequest
+    read_ref: str
+    target_ref: str
+    operation_key: str
+    message_key: str
+    source_event_sha256: str
+
+
+async def resolve_continuation_attention(
     runtime: Runtime, *, read_ref: str, socket_path: Path,
-    installed_release_sha: str, validity_seconds: int, now_provider: Callable[[], int],
-) -> CanaryGrantProposal:
-    """Derive one active child continuation; returns evidence, never authority."""
-    if type(validity_seconds) is not int or not 0 < validity_seconds <= MAX_VALIDITY_SECONDS:
-        raise ValueError("invalid bounded grant interval")
+) -> ContinuationAttentionSource:
+    """Resolve the original committed continuation through existing owners.
+
+    Shared by the grant proposal reader and the installed attention callback.
+    This performs reads only; the existing Wake owner retains all admission,
+    current-writer, arming, delivery and exactly-once decisions.
+    """
     fabric = RuntimeFabricTargetProjector(runtime)
     # This reader never discovers/adopts a native session. Keep native discovery
     # explicitly unavailable; current identity is proven by the Runtime below.
@@ -139,6 +152,28 @@ async def derive_canary_grant_proposal(
         raise ValueError("original child is not the unique current writer")
     route = route_obligation(obligation, target.registry, binding=target.runtime_binding)
     request = dataclasses.replace(request, proposed_route=route)
+    return ContinuationAttentionSource(
+        request=request, read_ref=read_ref, target_ref=value["target_ref"],
+        operation_key=value["operation_key"], message_key=message["message_key"],
+        source_event_sha256=_digest(source["event"]),
+    )
+
+
+async def derive_canary_grant_proposal(
+    runtime: Runtime, *, read_ref: str, socket_path: Path,
+    installed_release_sha: str, validity_seconds: int, now_provider: Callable[[], int],
+) -> CanaryGrantProposal:
+    """Derive one active child continuation; returns evidence, never authority."""
+    if type(validity_seconds) is not int or not 0 < validity_seconds <= MAX_VALIDITY_SECONDS:
+        raise ValueError("invalid bounded grant interval")
+    source = await resolve_continuation_attention(
+        runtime, read_ref=read_ref, socket_path=socket_path)
+    request = source.request
+    target = resolve_current_dialogue_wake_target(runtime, request)
+    if target is None or target.target_attempt_id != request.candidate.attempt_id:
+        raise ValueError("original child is not the unique current writer")
+    route = route_obligation(request.obligation, target.registry, binding=target.runtime_binding)
+    request = dataclasses.replace(request, proposed_route=route)
     facts, now = derive_dialogue_wake_canary_current_facts(
         runtime, request, target, route,
         installed_release_sha=installed_release_sha, now_provider=now_provider,
@@ -148,7 +183,7 @@ async def derive_canary_grant_proposal(
         expires_at_epoch_seconds=now + validity_seconds,
     )
     return CanaryGrantProposal(
-        grant=grant, read_ref=read_ref, source_event_sha256=_digest(source["event"]),
+        grant=grant, read_ref=read_ref, source_event_sha256=source.source_event_sha256,
         facts_sha256=_digest(facts.to_dict()),
     )
 
