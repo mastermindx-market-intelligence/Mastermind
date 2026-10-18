@@ -1,0 +1,16 @@
+{
+  "fixture_scope": "isolated sealed installations, real admission and mutex logic, fixture launchctl responses",
+  "installed_cohort_observation": "paper-c4-cohort.json",
+  "installer_sha256": "20ec3cbcb0182788796dbf9270c5f09377752a6dfdacd2f7d4821c389c97a123",
+  "live_preflight": "paper-c4-live-preflight.json",
+  "new_c4_command_path_tests": 10,
+  "new_shared_mutex_exclusion_and_recovery_tests": 4,
+  "paper_edit_proven": false,
+  "production_acceptance": false,
+  "result": "PASS",
+  "runtime_selection_applied": false,
+  "source_commit_qualified": "0ef1aa2c1900ee5b0141c2e6357dac20187de3e2",
+  "test_command": "python3 -m unittest integrations.studio_direct_mcp.private_service_test",
+  "test_log_sha256": "1e23435a5c9cda608d0fe9a52f57b277b530b3d4f95de06af635ce07e749b891",
+  "tests": 148
+}
