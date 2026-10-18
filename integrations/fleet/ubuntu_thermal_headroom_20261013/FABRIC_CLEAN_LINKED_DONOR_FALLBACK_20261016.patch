@@ -8,7 +8,7 @@
  import stat
  import subprocess
  import sys
-@@ -113,16 +114,380 @@
+@@ -113,10 +114,20 @@
          contract=contract,manifest=manifest)
  
  
@@ -32,11 +32,10 @@
  
  
  class SparseWorkspaceRefused(ValueError):
-     def __init__(self, reason: str, *, effect_unknown: bool = False):
-         super().__init__(reason)
+@@ -125,12 +136,372 @@
          self.effect_unknown = effect_unknown
-+
-+
+ 
+ 
 +def _sparse_stat(info) -> tuple:
 +    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns,
 +            info.st_ctime_ns, info.st_mode, info.st_uid, info.st_gid)
@@ -367,6 +366,11 @@
 +                or fields[3] != b"0"):
 +            # Lowercase tags include every assume-unchanged entry, even `s`.
 +            raise SparseWorkspaceRefused("FABRIC_SPARSE_INDEX_FLAGS_UNQUALIFIED")
++        if fields[1] == b"160000":
++            # Status can enter an initialized submodule whose local config is
++            # outside the qualified common/worktree pair. Never recurse into
++            # that separate trust boundary, including a staged Gitlink.
++            raise SparseWorkspaceRefused("FABRIC_SPARSE_GITLINK_UNQUALIFIED")
 +        rel = os.fsdecode(name)
 +        parts = tuple(rel.rstrip("/").split("/"))
 +        if not parts or any(p in {"", ".", ".."} for p in parts):
@@ -389,10 +393,21 @@
 +    common = original / ".git"
 +    _qualify_sparse_donor(alternate, common, pinned=True)
 +    return alternate
- 
- 
++
++
  def _new_macro_workspace(key: str, cwd: str, here: Path, env: dict,
-@@ -143,49 +508,62 @@
+                          config) -> str:
+     """Optional pre-mint within the incumbent LaneLease, before worker START.
+ 
+-    No parallel worker/queue/authority is created. A failed or uncertain mint
+-    leaves its original lease and worktree for original-carrier reconciliation.
++    No parallel worker/queue/authority is created. This controller does not
++    remove or reuse a checkout. Uncertain effects retain the incumbent lease
++    for reconciliation; the pinned mint helper owns its own failure cleanup.
+     """
+     commit = os.environ.get("FABRIC_NEW_MACRO_COMMIT", "")
+     if not commit:
+@@ -143,49 +514,62 @@
              or not os.environ.get("POOL_LEASE_ID")):
          raise SparseWorkspaceRefused("FABRIC_SPARSE_SCOPE_REFUSED")
      donor = Path.home() / "lanes" / "repos" / "macro"
@@ -484,7 +499,7 @@
              cwd=str(donor), timeout=180.0, env=mint_env, nice=config.nice,
              label=key + ":workspace-mint", receipt_path=receipt,
              timeout_returncode=124,
-@@ -198,38 +576,27 @@
+@@ -198,38 +582,27 @@
              or result.stderr_truncated):
          raise SparseWorkspaceRefused("FABRIC_SPARSE_MINT_UNVERIFIED",
                                       effect_unknown=True)
@@ -537,7 +552,7 @@
          gitdir = Path(git_value(destination, "rev-parse", "--path-format=absolute",
                                  "--git-dir")).resolve(strict=True)
          if (not stat.S_ISDIR(dstat.st_mode) or destination.is_symlink()
-@@ -243,7 +610,7 @@
+@@ -243,7 +616,7 @@
                  or git_value(destination, "status", "--porcelain=v1", "-uall")):
              raise SparseWorkspaceRefused("FABRIC_SPARSE_POSTCONDITION_REFUSED",
                                           effect_unknown=True)

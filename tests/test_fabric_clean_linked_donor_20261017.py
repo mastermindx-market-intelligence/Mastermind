@@ -26,8 +26,8 @@ ROOT = Path(__file__).resolve().parents[1]
 PATCH = ROOT / "integrations/fleet/ubuntu_thermal_headroom_20261013/FABRIC_CLEAN_LINKED_DONOR_FALLBACK_20261016.patch"
 PREIMAGE = ROOT / "tests/fixtures/fabric_executor_m2_a29798ab.py.txt"
 PREIMAGE_SHA256 = "a29798abb84294b1d8a67c53ef2b45137db4517f960598e51c8da21796d6cf61"
-PATCH_SHA256 = "517273bea24378c740c739a17268d5201efd21538915b881b87cfdfc3ab8664d"
-POSTIMAGE_SHA256 = "2e43cf37f881ec5a5c2000b0d7104c3ec49b52c6344db03db992c72ed9cb74b2"
+PATCH_SHA256 = "dbcc9b8938781cc18f3da0fdfe5bad8ee5693c89873f68260e33a8c44339ce95"
+POSTIMAGE_SHA256 = "131f56a4c26915d9e6a5fc6501f930b3aeeb5e4c4501eb730b080e0c6dde5772"
 
 
 def _blob(body: bytes) -> str:
@@ -213,6 +213,38 @@ def test_untrusted_config_refuses_before_any_controller_git_or_mint(repository, 
     with pytest.raises(f.module["SparseWorkspaceRefused"], match="GIT_CONFIG_UNQUALIFIED") as raised:
         f.invoke()
     assert not raised.value.effect_unknown
+    assert f.calls == []
+
+
+@pytest.mark.parametrize("direct", [False, True])
+def test_gitlink_refuses_before_status_or_mint(repository, direct):
+    f = repository
+    donor = f.alternate
+    if direct:
+        donor = f.original
+        (donor / "preserve.txt").write_text("keep\n")
+        (donor / "scripts/worktree_sparse.py").write_bytes(f.reviewed)
+        _git(donor, "add", "scripts/worktree_sparse.py")
+        _git(donor, "commit", "-qm", "reviewed original fixture")
+    name = ".codex/nested-fixture"
+    child = donor / name
+    child.mkdir()
+    _git(child, "init", "-q")
+    child_config = (child / ".git/config").read_bytes()
+    _git(donor, "update-index", "--add", "--cacheinfo", "160000", f.head, name)
+    assert _git(donor, "ls-files", "--stage", "--", name).startswith("160000 ")
+    real = f.module["_sparse_git"]
+
+    def observed(root, common, *args, **kwargs):
+        if args[0] == "status":
+            pytest.fail("Gitlink reached status before child-repository refusal")
+        return real(root, common, *args, **kwargs)
+
+    f.module["_sparse_git"] = observed
+    with pytest.raises(f.module["SparseWorkspaceRefused"], match="GITLINK_UNQUALIFIED") as raised:
+        f.invoke()
+    assert not raised.value.effect_unknown
+    assert (child / ".git/config").read_bytes() == child_config
     assert f.calls == []
 
 

@@ -43,9 +43,10 @@ passing CI are not acceptance evidence for this repair.
 | Item | Immutable identity |
 | --- | --- |
 | Source parent for this repair | `ba3938c79eedbb8f590dfed106b8e0876ee88e91` |
+| Immediate parent of the Gitlink follow-up | `ae58437d2ad6520f7413223fa17a35fd6cc64f4d` |
 | Sealed executor preimage, M2 carrier | SHA-256 `a29798abb84294b1d8a67c53ef2b45137db4517f960598e51c8da21796d6cf61` |
-| Repaired executor postimage | SHA-256 `2e43cf37f881ec5a5c2000b0d7104c3ec49b52c6344db03db992c72ed9cb74b2` |
-| Shipped one-file patch | SHA-256 `517273bea24378c740c739a17268d5201efd21538915b881b87cfdfc3ab8664d` |
+| Repaired executor postimage | SHA-256 `131f56a4c26915d9e6a5fc6501f930b3aeeb5e4c4501eb730b080e0c6dde5772` |
+| Shipped one-file patch | SHA-256 `dbcc9b8938781cc18f3da0fdfe5bad8ee5693c89873f68260e33a8c44339ce95` |
 | Eligible old helper | Git blob `296e47bab2d28f9a019e81b5aef76eeea62a6cc3` |
 | Reviewed helper | Git blob `75297acb10d0cef4d01730a59fdcad19c7cfd3e6` |
 | Reviewed working policy | Git blob `46b4d13bb5302a68b437a257eebe066d07bdc7ff` |
@@ -90,6 +91,16 @@ index entry with neither hidden flag, and a stable no-follow working-file read.
 A clean-looking status is insufficient. Helper and policy identities are checked
 again after mint; drift preserves an uncertain effect.
 
+The follow-up independent native semantic assessment of `ae58437d...` identified
+another configuration boundary: ordinary status can enter an initialized
+submodule with separate, unqualified local configuration. The repaired index
+qualification refuses an observed Gitlink (mode `160000`) before status,
+including staged entries. A collapsed sparse-index directory is allowed only
+when its complete path is provably absent; a materialized child cannot qualify
+through that exception. This refusal does not recursively trust child repository
+configuration. Two inert actual-workspace-function cases cover direct and linked
+donors and fail immediately if status or mint is reached.
+
 Requalification failure now reaches `FABRIC_SPARSE_REVIEWED_DONOR_DRIFT` with its
 original cause and effect-unknown flag. Unconfirmed Git-process cleanup and a
 forced observation abort are typed uncertain effects: reaping the direct PID
@@ -108,6 +119,7 @@ independent review. It does **not** claim literal compliance with the old wordin
 | Observed condition | Admission |
 | --- | --- |
 | Any assume-unchanged tag, including combined lowercase `s` | Refuse |
+| Observed Gitlink entry (mode `160000`), including a staged entry | Refuse before status |
 | Helper or policy has either flag, wrong stage, or mismatched HEAD/index/disk bytes | Refuse |
 | Uppercase `S` on a materialized object, required-cone path, or uncertain absence | Refuse |
 | Uppercase `S` on a provably absent path outside the independently fixed donor cone | Permit |
@@ -145,10 +157,12 @@ applies the shipped patch to
 checks the postimage hash, compiles the applied source and calls its actual
 `_new_macro_workspace`. It no longer tests only an extracted donor selector.
 
-**64 behavioral/source-contract cases passed**, and **88 tests passed** across
-the six affected root test modules on Linux, Python 3.12.14, system Git 2.43.0.
+**66 behavioral/source-contract cases passed**, and **90 tests passed** across
+the six affected root test modules on Linux, Python 3.12.14, with Git 2.43.0
+and Git 2.55.0. The latter uses an isolated build of the official Git tag with a
+test-process executable remap; production retains the fixed system Git path.
 Coverage includes full/sparse indexes, direct/fallback source paths, inert
-configuration refusals before Git, independent policy/index/byte pins, actual
+configuration refusals before Git, Gitlink refusal before status, independent policy/index/byte pins, actual
 `-I` arguments and Git environment at the owned-process boundary, second-pass
 helper mismatch, reachable drift, duplicate-effect refusal and uncertain cleanup.
 
@@ -179,6 +193,9 @@ The old postimage `49862414...`, patch `32773b36...`, and private offline
 generation `303b4455972fb0541efbbb6ce09934d3a7a0dc4cfc4e294d9be6a4f559303676`
 are superseded for this repair. Earlier generations `93901a25...` and
 `8eeb04e0...` remain historical evidence. None may be relabeled as repaired.
+The subsequent private `e377f8e4...` generation `9dd98999...` and positive actual
+helper proof cover its earlier production bytes; the Gitlink follow-up changes
+the executor again and requires a new generation and proof before deployment.
 
 The old statement that Ubuntu3 currently had staged security-master edits was
 stale: the reviewer observed its legacy feature donor clean at `bf5b534c...`.
@@ -188,6 +205,10 @@ Ubuntu1's original dirty source and all other incumbents remain preserved.
 The October 18 metadata read also found group-writable source inputs on
 Ubuntu0/1/2. The candidate correctly refuses those paths until their original
 custody permits qualification; no permission normalization was performed.
+Subsequent data-only ancestry reads found additional directory holds on
+Ubuntu1/2 and Ubuntu3 (`~/lanes` mode `0775`), so all four hosts have recorded
+qualification holds. That separate receipt is retained on M2 as
+`/Volumes/Mastermind/evidence/ubuntu-fabric-audit-20261015-sol-web-01/DONOR_DIRECTORY_QUALIFICATION_E377F8E4_20261018.json`.
 The read-only receipt is not an all-host admission or deployment claim.
 
 Required next evidence remains: independent semantic approval of the repaired
