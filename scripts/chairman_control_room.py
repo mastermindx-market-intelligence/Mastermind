@@ -77,6 +77,7 @@ Usage
 from __future__ import annotations
 
 import argparse
+import copy
 import http.server
 import ipaddress
 import json
@@ -614,7 +615,9 @@ class ServerConfig:
     #: gather — the failure propagates to the existing refresh-error path and
     #: the last good composition (or explicit unavailability) stands. The
     #: default ``None`` keeps the exact standalone legacy behavior.
-    compose_inputs: Callable[[str], dict[str, Any]] | None = None
+    #: A supplied live snapshot is a detached keyword input for that attempt;
+    #: omission preserves the one-argument installed callback contract.
+    compose_inputs: Callable[..., dict[str, Any]] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -622,7 +625,8 @@ class ServerConfig:
 # ---------------------------------------------------------------------------
 
 def _compose_state_doc(
-    config: ServerConfig, *, timeout: float = ceo_boot_packet.DEFAULT_TIMEOUT
+    config: ServerConfig, *, timeout: float = ceo_boot_packet.DEFAULT_TIMEOUT,
+    active_builds_snapshot: Any = ccr._ACTIVE_BUILDS_SNAPSHOT_OMITTED,
 ) -> dict[str, Any]:
     """Fresh ``mastermind.chairman_control_room.v1`` document for ``/api/state``.
 
@@ -651,8 +655,15 @@ def _compose_state_doc(
     document is never substituted for a configured source.
     """
     generated_at = config.now_fn()
+    snapshot_kwargs: dict[str, Any] = {}
+    with config.state_lock:
+        if active_builds_snapshot is ccr._ACTIVE_BUILDS_SNAPSHOT_OMITTED:
+            if "active_builds" in config.live_cache:
+                snapshot_kwargs["active_builds_snapshot"] = copy.deepcopy(config.live_cache["active_builds"])
+        else:
+            snapshot_kwargs["active_builds_snapshot"] = copy.deepcopy(active_builds_snapshot)
     if config.compose_inputs is not None:
-        doc = config.compose_inputs(generated_at)
+        doc = config.compose_inputs(generated_at, **snapshot_kwargs)
         if (not isinstance(doc, dict)
                 or doc.get("schema") != ccr.SCHEMA):
             raise ValueError("configured compose_inputs returned a non-canonical document")
@@ -670,8 +681,7 @@ def _compose_state_doc(
     # present cache key, including an explicitly unavailable/malformed value,
     # is a supplied source state and must reach the canonical builder without
     # a second artifact read.
-    if "active_builds" in config.live_cache:
-        build_kwargs["active_builds_snapshot"] = config.live_cache["active_builds"]
+    build_kwargs.update(snapshot_kwargs)
     return ccr.build_control_room(**build_kwargs)
 
 
@@ -684,7 +694,10 @@ def _compose_state_doc(
 # calls them, through the existing ``_compose_state_doc`` seam.
 # ---------------------------------------------------------------------------
 
-def _reserve_composition(config: ServerConfig, *, explicit: bool = False) -> int:
+def _reserve_composition(
+    config: ServerConfig, *, explicit: bool = False,
+    active_builds_snapshot: Any = ccr._ACTIVE_BUILDS_SNAPSHOT_OMITTED,
+) -> int:
     """Reserve the next composition generation, under ``state_lock``, and
     count one more composition as in flight (H1 repair, Sol review
     5000983751 Blocker 2).
@@ -699,9 +712,15 @@ def _reserve_composition(config: ServerConfig, *, explicit: bool = False) -> int
     the floor a background composition may never publish (or record an
     error) below.
     """
+    if active_builds_snapshot is not ccr._ACTIVE_BUILDS_SNAPSHOT_OMITTED and not explicit:
+        raise ValueError("live snapshot requires an explicit composition")
     with config.state_lock:
         if config.state_stopping:
             raise RuntimeError("control room owner is stopping")
+        if active_builds_snapshot is not ccr._ACTIVE_BUILDS_SNAPSHOT_OMITTED:
+            # Retained input and its explicit floor advance atomically. Failed
+            # publication keeps this input, but never reports a successful refresh.
+            config.live_cache["active_builds"] = copy.deepcopy(active_builds_snapshot)
         config.state_compose_seq += 1
         gen = config.state_compose_seq
         if explicit:
@@ -711,8 +730,9 @@ def _reserve_composition(config: ServerConfig, *, explicit: bool = False) -> int
 
 
 def _refresh_state_cache(
-    config: ServerConfig, *, timeout: float, generation: int, include_capabilities: bool = True
-) -> None:
+    config: ServerConfig, *, timeout: float, generation: int, include_capabilities: bool = True,
+    active_builds_snapshot: Any = ccr._ACTIVE_BUILDS_SNAPSHOT_OMITTED,
+) -> bool:
     thread = threading.current_thread()
     with config.state_lock:
         config.state_refresh_threads.add(thread)
@@ -721,19 +741,26 @@ def _refresh_state_cache(
             config.state_refreshes_in_flight -= 1
     try:
         if not stopping:
-            _refresh_state_cache_impl(config, timeout=timeout, generation=generation,
-                                      include_capabilities=include_capabilities)
+            return _refresh_state_cache_impl(
+                config, timeout=timeout, generation=generation,
+                include_capabilities=include_capabilities,
+                active_builds_snapshot=active_builds_snapshot,
+            )
+        return False
     finally:
         with config.state_lock:
             config.state_refresh_threads.discard(thread)
 
 
 def _refresh_state_cache_impl(
-    config: ServerConfig, *, timeout: float, generation: int, include_capabilities: bool = True
-) -> None:
+    config: ServerConfig, *, timeout: float, generation: int, include_capabilities: bool = True,
+    active_builds_snapshot: Any = ccr._ACTIVE_BUILDS_SNAPSHOT_OMITTED,
+) -> bool:
     """Compose a fresh doc (+ capability census, when requested) for
     ``generation`` and, unless a newer generation has already published,
-    atomically swap the cache.
+    atomically swap the cache. Return True only when this exact generation
+    publishes; failure, supersession and owner retirement cannot report success.
+    An explicit snapshot remains attached to this attempt through composition.
 
     Never raises into the caller (startup pre-compose runs this inline on
     the main thread; every other call runs on a daemon background thread or
@@ -746,7 +773,7 @@ def _refresh_state_cache_impl(
     calling this; this function always decrements it on the way out.
 
     Superseded gating (H1 repair, Sol review 5000983751 Blocker 2): a
-    generation is superseded when it is strictly below
+    generation is superseded when the owner is stopping or it is strictly below
     :attr:`ServerConfig.state_explicit_floor` (an explicit recompose was
     reserved after this one started) OR at/below
     :attr:`ServerConfig.state_published_seq` (a newer generation — explicit
@@ -765,14 +792,20 @@ def _refresh_state_cache_impl(
     # Anchor before _compose_state_doc captures its source reference or gathers.
     qualification_anchor = _sample_source_clock(config)
     try:
-        doc = _compose_state_doc(config, timeout=timeout)
+        if active_builds_snapshot is ccr._ACTIVE_BUILDS_SNAPSHOT_OMITTED:
+            doc = _compose_state_doc(config, timeout=timeout)
+        else:
+            doc = _compose_state_doc(
+                config, timeout=timeout, active_builds_snapshot=active_builds_snapshot,
+            )
         capabilities = capability.census(runner=config.runner) if include_capabilities else None
     except Exception as exc:  # noqa: BLE001 — never raise into a serving thread
         detail = f"{exc.__class__.__name__}: {str(exc).splitlines()[0] if str(exc) else ''}"
         with config.state_lock:
             config.state_refreshes_in_flight -= 1
             superseded = (
-                generation < config.state_explicit_floor or generation <= config.state_published_seq
+                config.state_stopping or generation < config.state_explicit_floor
+                or generation <= config.state_published_seq
             )
             if not superseded:
                 config.state_refresh_error = "state refresh failed; serving last good composition"
@@ -786,12 +819,13 @@ def _refresh_state_cache_impl(
             )
         else:
             print(f"state refresh failed: {detail}", flush=True)
-        return
+        return False
 
     composed_at = config.now_fn()
     with config.state_lock:
         config.state_refreshes_in_flight -= 1
-        superseded = generation < config.state_explicit_floor or generation <= config.state_published_seq
+        superseded = (config.state_stopping or generation < config.state_explicit_floor
+                      or generation <= config.state_published_seq)
         published = config.state_published_seq
         floor = config.state_explicit_floor
         if not superseded:
@@ -809,6 +843,7 @@ def _refresh_state_cache_impl(
             f"explicit_floor={floor})",
             flush=True,
         )
+    return not superseded
 
 
 def _precompose_initial_state(config: ServerConfig) -> None:
@@ -1465,7 +1500,9 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
                 200, {"ok": False, "detail": "stdout schema was not project_active_builds.v1"}, no_store=True
             )
 
-        config.live_cache["active_builds"] = parsed
+        # Retain the accepted input atomically with its explicit reservation
+        # below. A failed publication keeps that input for later composition,
+        # while the response reports this attempt's actual publication outcome.
         # H0 hardening (2026-08-22): GET /api/state now serves a cache, not
         # a fresh composition per request — but this ONE write path (a live
         # active-builds refresh) must still be visible on the very next GET,
@@ -1479,8 +1516,19 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
         # EXPLICIT generation — it raises state_explicit_floor, so an older
         # background recompose that finishes after this one may never
         # overwrite it.
-        gen = _reserve_composition(config, explicit=True)
-        _refresh_state_cache(config, timeout=config.compose_timeout, generation=gen, include_capabilities=True)
+        try:
+            gen = _reserve_composition(config, explicit=True, active_builds_snapshot=parsed)
+        except RuntimeError:
+            return self._send_json(200, {"ok": False, "detail": "control room is stopping"}, no_store=True)
+        published = _refresh_state_cache(
+            config, timeout=config.compose_timeout, generation=gen,
+            include_capabilities=True, active_builds_snapshot=parsed,
+        )
+        if not published:
+            return self._send_json(
+                200, {"ok": False, "detail": "refreshed builds were not published by this request"},
+                no_store=True,
+            )
         self._send_json(200, {"ok": True, "collected_at": parsed.get("collected_at")}, no_store=True)
 
 
