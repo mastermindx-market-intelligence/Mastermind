@@ -809,7 +809,7 @@ export function createGitPublisher(config, dependencies = {}) {
         try {
           const observed = await workspace(operationId, { observeRemote: false });
           if (observed.localHead === commitHead) {
-            return finishKnownApplied('APPLIED_AFTER_AMBIGUOUS_UPDATE_RETURN');
+            return await finishKnownApplied('APPLIED_AFTER_AMBIGUOUS_UPDATE_RETURN');
           }
         } catch {
           // Preserve uncertainty from a lost ref-update response.
@@ -827,7 +827,7 @@ export function createGitPublisher(config, dependencies = {}) {
         };
       }
 
-      return finishKnownApplied('APPLIED');
+      return await finishKnownApplied('APPLIED');
     } finally {
       try {
         await remove(scratch, { recursive: true, force: true });
