@@ -316,6 +316,256 @@ class BackendReleaseTests(unittest.TestCase):
         self.assertEqual(self.roots['config'].read_bytes(), alien)
         self.assertEqual(self.roots['manifest'].read_bytes(), self.before[self.roots['manifest']])
 
+    def _install_legacy_fleet_status_profile(self):
+        """Drop modern selectors, install a launcher, and seal the matching legacy fleetStatus.
+
+        Mirrors the historical restricted install: fleetStatus is present, while
+        modernFabricProtocol and backendMode are absent. The launcher is harmless
+        and owned by the fixture so the existing safe regular-file hash check
+        produces the same digest both when the fixture is sealed and when the
+        owner re-derives fleet_status_config.
+        """
+        launcher = self.home / svc.FLEET_STATUS_LAUNCHER_REL
+        launcher.parent.mkdir(parents=True, exist_ok=True)
+        launcher.write_text('#!/bin/sh\nexit 0\n')
+        launcher.chmod(0o700)
+        fleet_status = svc._fleet_status_config(self.home)
+        self.assertIsNotNone(fleet_status)
+        config = json.loads(self.roots['config'].read_bytes())
+        config.pop('modernFabricProtocol', None)
+        config.pop('backendMode', None)
+        config['fleetStatus'] = fleet_status
+        self.roots['config'].write_bytes(svc._fabric_release_json(config))
+        manifest = json.loads(self.roots['manifest'].read_bytes())
+        manifest['configHash'] = svc._sha256_file(self.roots['config'])
+        self.roots['manifest'].write_bytes(svc._fabric_release_json(manifest))
+        self.before = self.snapshot()
+        self.args.expected_manifest_sha256 = svc._sha256_file(self.roots['manifest'])
+
+    def _reseal_with_fleet_status(self, value):
+        config = json.loads(self.roots['config'].read_bytes())
+        config.pop('modernFabricProtocol', None)
+        config.pop('backendMode', None)
+        config['fleetStatus'] = value
+        self.roots['config'].write_bytes(svc._fabric_release_json(config))
+        manifest = json.loads(self.roots['manifest'].read_bytes())
+        manifest['configHash'] = svc._sha256_file(self.roots['config'])
+        self.roots['manifest'].write_bytes(svc._fabric_release_json(manifest))
+        self.args.expected_manifest_sha256 = svc._sha256_file(self.roots['manifest'])
+        self.before = self.snapshot()
+
+    def test_regression_legacy_fleet_status_preview_and_apply_round_trip(self):
+        """The pre-fix release refused any sealed config containing fleetStatus.
+
+        The accepted legacy install lacks modernFabricProtocol/backendMode. After
+        the fix, preview and apply preserve the legacy fleetStatus exactly while
+        changing only args[0] in the config and the three documented manifest
+        fields.
+        """
+        self._install_legacy_fleet_status_profile()
+        preview = self.preview()
+        self.assertEqual(preview['changedConfigFields'], ['args[0]'])
+        self.assertEqual(preview['changedManifestFields'], ['backend', 'backendHash', 'configHash'])
+        self.assertEqual(self.snapshot(), self.before)
+        self.assertFalse((self.roots['state'] / 'fabric-backend-releases').exists())
+        self.args.preflight_only = False
+        self.args.expected_plan_sha256 = preview['planSha256']
+        result = self.capture(lambda: svc.cmd_fabric_backend_release(self.args))
+        self.assertEqual(result['effect'], 'APPLIED')
+        self.assertFalse(result['serviceStarted'])
+        old_config = json.loads(self.before[self.roots['config']])
+        new_config = json.loads(self.roots['config'].read_bytes())
+        expected_config = copy.deepcopy(old_config)
+        expected_config['args'][0] = str(self.backend)
+        self.assertEqual(new_config, expected_config)
+        self.assertEqual(new_config['fleetStatus'], old_config['fleetStatus'])
+        self.assertNotIn('modernFabricProtocol', new_config)
+        self.assertNotIn('backendMode', new_config)
+        old_manifest = json.loads(self.before[self.roots['manifest']])
+        new_manifest = json.loads(self.roots['manifest'].read_bytes())
+        self.assertEqual({k for k in new_manifest if old_manifest[k] != new_manifest[k]},
+                         {'backend', 'backendHash', 'configHash'})
+        for path, data in self.before.items():
+            if path not in (self.roots['config'], self.roots['manifest']):
+                self.assertEqual(path.read_bytes(), data)
+
+    def test_rejects_legacy_fleet_status_with_modern_protocol_selector(self):
+        """A present modernFabricProtocol selector (even False) violates the legacy form."""
+        self._install_legacy_fleet_status_profile()
+        config = json.loads(self.roots['config'].read_bytes())
+        config['modernFabricProtocol'] = False
+        self.roots['config'].write_bytes(svc._fabric_release_json(config))
+        manifest = json.loads(self.roots['manifest'].read_bytes())
+        manifest['configHash'] = svc._sha256_file(self.roots['config'])
+        self.roots['manifest'].write_bytes(svc._fabric_release_json(manifest))
+        self.args.expected_manifest_sha256 = svc._sha256_file(self.roots['manifest'])
+        self.before = self.snapshot()
+        with self.assertRaisesRegex(SystemExit, 'legacy fleetStatus requires absent'):
+            self.preview()
+        self.assertEqual(self.snapshot(), self.before)
+
+    def test_rejects_legacy_fleet_status_with_backend_mode_selector(self):
+        """A present backendMode selector (even null) violates the legacy form."""
+        self._install_legacy_fleet_status_profile()
+        config = json.loads(self.roots['config'].read_bytes())
+        config['backendMode'] = None
+        self.roots['config'].write_bytes(svc._fabric_release_json(config))
+        manifest = json.loads(self.roots['manifest'].read_bytes())
+        manifest['configHash'] = svc._sha256_file(self.roots['config'])
+        self.roots['manifest'].write_bytes(svc._fabric_release_json(manifest))
+        self.args.expected_manifest_sha256 = svc._sha256_file(self.roots['manifest'])
+        self.before = self.snapshot()
+        with self.assertRaisesRegex(SystemExit, 'legacy fleetStatus requires absent'):
+            self.preview()
+        self.assertEqual(self.snapshot(), self.before)
+
+    def test_rejects_legacy_fleet_status_with_invalid_field_types(self):
+        """Legacy fleetStatus must satisfy exact type contract for all four keys."""
+        launcher = self.home / svc.FLEET_STATUS_LAUNCHER_REL
+        launcher.parent.mkdir(parents=True, exist_ok=True)
+        launcher.write_text('#!/bin/sh\nexit 0\n')
+        launcher.chmod(0o700)
+        base = svc._fleet_status_config(self.home)
+
+        cases = (
+            ({**base, 'enabled': 1}, 'legacy fleetStatus field types'),
+            ({**base, 'enabled': None}, 'legacy fleetStatus field types'),
+            ({**base, 'enabled': False}, 'legacy fleetStatus field types'),
+            ({**base, 'timeoutMs': True}, 'legacy fleetStatus field types'),
+            ({**base, 'timeoutMs': False}, 'legacy fleetStatus field types'),
+            ({**base, 'timeoutMs': 15000.0}, 'legacy fleetStatus field types'),
+            ({**base, 'launcherPath': 12345}, 'legacy fleetStatus field types'),
+            ({**base, 'launcherPath': None}, 'legacy fleetStatus field types'),
+            ({**base, 'launcherSha256': 12345}, 'legacy fleetStatus field types'),
+            ({**base, 'launcherSha256': None}, 'legacy fleetStatus field types'),
+            ({**base, 'extra': 'unauthorized'}, 'legacy fleetStatus requires exact'),
+        )
+        missing = dict(base)
+        missing.pop('launcherSha256')
+        all_cases = cases + ((missing, 'legacy fleetStatus requires exact'),)
+        for value, expected_message in all_cases:
+            self._reseal_with_fleet_status(value)
+            with self.assertRaisesRegex(SystemExit, expected_message):
+                self.preview()
+            self.assertEqual(self.snapshot(), self.before)
+
+    def test_rejects_legacy_fleet_status_with_owner_mismatch(self):
+        """Legacy fleetStatus must equal the current owner's fresh output exactly."""
+        self._install_legacy_fleet_status_profile()
+        base = svc._fleet_status_config(self.home)
+        cases = (
+            ({**base, 'launcherPath': str(self.home / 'fake-launcher')}),
+            ({**base, 'launcherSha256': 'a' * 64}),
+            ({**base, 'timeoutMs': 12345}),
+        )
+        for value in cases:
+            self._reseal_with_fleet_status(value)
+            with self.assertRaisesRegex(SystemExit, 'legacy fleetStatus does not match owner'):
+                self.preview()
+            self.assertEqual(self.snapshot(), self.before)
+
+    def test_rejects_legacy_fleet_status_when_owner_launcher_is_missing_or_unsafe(self):
+        """None / missing / unsafe owner launcher must fail closed without writing."""
+        self._install_legacy_fleet_status_profile()
+        launcher = self.home / svc.FLEET_STATUS_LAUNCHER_REL
+        # 1. Owner launcher deleted -> fresh _fleet_status_config returns None.
+        launcher.unlink()
+        with self.assertRaisesRegex(SystemExit, 'legacy fleetStatus owner launcher unavailable'):
+            self.preview()
+        self.assertEqual(self.snapshot(), self.before)
+        # 2. Owner launcher replaced by a symlink -> safe regular-file hash raises.
+        launcher.symlink_to(self.home / 'node')
+        with self.assertRaisesRegex(SystemExit, 'Studio Direct control launcher'):
+            self.preview()
+        self.assertEqual(self.snapshot(), self.before)
+
+    def test_legacy_fleet_status_apply_revalidates_after_state_change(self):
+        """Apply revalidates under the existing lock; an earlier passing preview cannot bypass."""
+        self._install_legacy_fleet_status_profile()
+        preview = self.preview()
+        self.assertEqual(preview['changedConfigFields'], ['args[0]'])
+        self.args.preflight_only = False
+        self.args.expected_plan_sha256 = preview['planSha256']
+        # Tamper with the sealed config so the legacy form no longer holds.
+        config = json.loads(self.roots['config'].read_bytes())
+        config['modernFabricProtocol'] = True
+        self.roots['config'].write_bytes(svc._fabric_release_json(config))
+        manifest = json.loads(self.roots['manifest'].read_bytes())
+        manifest['configHash'] = svc._sha256_file(self.roots['config'])
+        self.roots['manifest'].write_bytes(svc._fabric_release_json(manifest))
+        self.args.expected_manifest_sha256 = svc._sha256_file(self.roots['manifest'])
+        with self.assertRaisesRegex(SystemExit, 'legacy fleetStatus requires absent'):
+            svc.cmd_fabric_backend_release(self.args)
+        # No service mutation: the transaction directory was never created.
+        self.assertFalse((self.roots['state'] / 'fabric-backend-releases').exists())
+
+    def test_rejects_legacy_fleet_status_when_launcher_descriptor_owner_changes(self):
+        """Wrong-owner launcher descriptor fails closed even with valid bytes.
+
+        The sealed config and launcher bytes stay valid; only the descriptor
+        st_uid the validator sees is narrow-mocked to a different owner. The
+        rest of the validator runs and the file system itself is untouched
+        (no chown, no process-wide UID change, no whole-validator mock).
+        """
+        self._install_legacy_fleet_status_profile()
+        launcher = self.home / svc.FLEET_STATUS_LAUNCHER_REL
+        # _fabric_release_bytes consults both os.open and os.fstat. Patch only
+        # these two module-level names so the launcher's fstat reports a
+        # different st_uid. Every other path uses the real syscall.
+        real_open = os.open
+        real_fstat = os.fstat
+        launcher_path = os.path.realpath(str(launcher))
+        launcher_fds: set[int] = set()
+
+        def tracking_open(path, *args, **kwargs):
+            fd = real_open(path, *args, **kwargs)
+            try:
+                opened = os.path.realpath(os.fspath(path))
+            except (TypeError, ValueError):
+                opened = ''
+            if opened == launcher_path:
+                launcher_fds.add(fd)
+            return fd
+
+        def faked_fstat(fd):
+            result = real_fstat(fd)
+            if fd in launcher_fds:
+                # os.stat_result is a structseq; rebuild with st_uid overridden.
+                # st_uid is at positional index 4 in the standard sequence.
+                return os.stat_result(
+                    result[:4]
+                    + (((result.st_uid + 1) % (2 ** 32),) if result.st_uid != (2 ** 32) - 1 else (0,))
+                    + result[5:]
+                )
+            return result
+
+        with mock.patch('os.open', tracking_open), mock.patch('os.fstat', faked_fstat):
+            with self.assertRaisesRegex(SystemExit, 'unsafe or too large'):
+                self.preview()
+        self.assertEqual(self.snapshot(), self.before)
+        self.assertFalse((self.roots['state'] / 'fabric-backend-releases').exists())
+
+    def test_legacy_fleet_status_preview_then_apply_drift_refuses_with_seal_intact(self):
+        """Apply revalidates freshly; a passing preview cannot bypass a later
+        launcher-byte change. Config, manifest, expected_manifest_sha256 and
+        expected_plan_sha256 stay pinned. Sealed files remain unchanged and
+        no transaction is created.
+        """
+        self._install_legacy_fleet_status_profile()
+        preview = self.prepare_apply()
+        launcher = self.home / svc.FLEET_STATUS_LAUNCHER_REL
+        original_launcher_bytes = launcher.read_bytes()
+        launcher.write_text('#!/bin/sh\necho drifted launcher\n')
+        launcher.chmod(0o700)
+        try:
+            with self.assertRaisesRegex(SystemExit, 'legacy fleetStatus does not match owner'):
+                svc.cmd_fabric_backend_release(self.args)
+            self.assertEqual(self.snapshot(), self.before)
+            self.assertFalse((self.roots['state'] / 'fabric-backend-releases').exists())
+        finally:
+            launcher.write_bytes(original_launcher_bytes)
+            launcher.chmod(0o700)
+
 
 if __name__ == '__main__':
     unittest.main()
