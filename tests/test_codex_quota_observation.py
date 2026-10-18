@@ -1,0 +1,157 @@
+"""Provider-free, account-bound evidence tests: no quota API or worker calls."""
+
+from __future__ import annotations
+
+from copy import deepcopy
+
+import pytest
+
+from control_plane.codex_quota_observation import compare_native_codex_quota
+
+T = 1792252800
+HOUR = 3600
+WEEK = 7 * 24 * HOUR
+
+
+def probe(*, at=T, subject="a" * 64, weekly_reset=T + WEEK,
+          used=50.0, weekly=True, primary=None, state="NATIVE_READS_COMPLETED"):
+    windows = {}
+    states = {"primary": "NOT_APPLICABLE", "secondary": "NOT_APPLICABLE"}
+    if primary is not None:
+        windows["primary"] = {
+            "used_percent": primary,
+            "remaining_percent": 100 - primary,
+            "resets_at": int(at + 5 * HOUR),
+            "window_minutes": 300,
+        }
+        states["primary"] = "OBSERVED"
+    if weekly:
+        windows["secondary"] = {
+            "used_percent": used,
+            "remaining_percent": 100 - used,
+            "resets_at": int(weekly_reset),
+            "window_minutes": 10080,
+        }
+        states["secondary"] = "OBSERVED"
+    return {
+        "state": state,
+        "stop": {"private_group_empty": True, "termination_outcome": "stopped"},
+        "home_identity": {"account_id_sha256": subject, "ignored": "secret-do-not-copy"},
+        "account": {
+            "observed_at_unix": at, "auth_state": "MANAGED_CHATGPT_OBSERVED",
+            "limit_id": "codex", "windows": windows, "window_states": states,
+            "arbitrary_provider_text": "access_token=must-never-escape",
+        },
+    }
+
+
+def test_unexpected_early_reset_is_candidate_only_and_does_not_admit():
+    before = probe(used=84)
+    after = probe(at=T + HOUR, weekly_reset=T + WEEK + 5 * HOUR, used=1)
+    frozen = deepcopy((before, after))
+    result = compare_native_codex_quota(before, after)
+    assert (before, after) == frozen
+    assert result["state"] == "CHANGE_OBSERVED"
+    assert result["early_refresh_candidate"] is True
+    assert result["observed_windows"][0]["classification"] == "EARLY_REFRESH_CANDIDATE"
+    assert result["schedule_changed"] is True
+    assert result["provider_cause"] == "UNATTRIBUTED"
+    for field in ("admission_granted", "account_switch_authorized",
+                  "reset_redemption_authorized", "schedule_prediction_authorized"):
+        assert result[field] is False
+    assert "secret-do-not-copy" not in str(result)
+    assert "access_token" not in str(result)
+
+
+def test_normal_window_turnover_is_not_falsely_classified_early():
+    prior = probe(at=T, weekly_reset=T + HOUR, used=99)
+    later = probe(at=T + 2 * HOUR, weekly_reset=T + WEEK, used=0)
+    got = compare_native_codex_quota(prior, later)
+    assert got["state"] == "CHANGE_OBSERVED"
+    assert got["early_refresh_candidate"] is False
+    assert got["observed_windows"][0]["classification"] == "PRIOR_WINDOW_DUE"
+
+
+def test_timer_move_without_proven_headroom_is_not_reset_proof():
+    before = probe(used=1)
+    after = probe(at=T + HOUR, weekly_reset=T + WEEK + HOUR, used=2)
+    got = compare_native_codex_quota(before, after)
+    assert got["early_refresh_candidate"] is False
+    assert got["observed_windows"][0]["classification"] == "TIMER_CHANGED_CAUSE_UNKNOWN"
+
+
+def test_headroom_increase_without_timer_move_is_not_reset_proof():
+    before = probe(used=65)
+    after = probe(at=T + HOUR, weekly_reset=T + WEEK, used=5)
+    got = compare_native_codex_quota(before, after)
+    assert got["state"] == "CHANGE_OBSERVED"
+    assert got["schedule_changed"] is False
+    assert got["early_refresh_candidate"] is False
+    assert got["observed_windows"][0]["classification"] == "HEADROOM_GAIN_WITHOUT_TIMER_PROOF"
+
+
+def test_same_seat_no_material_change():
+    got = compare_native_codex_quota(probe(used=5), probe(at=T + HOUR, used=8))
+    assert got["state"] == "NO_MATERIAL_CHANGE"
+    assert got["observed_windows"][0]["classification"] == "NO_TIMER_CHANGE"
+
+
+@pytest.mark.parametrize("replacement,reason", [
+    ({"subject": "b" * 64}, "SUBJECT_OR_LIMIT_MISMATCH"),
+    ({"state": "QUOTA_UNAVAILABLE"}, "UNVERIFIED_OBSERVATIONS"),
+    ({"state": "NATIVE_CLEANUP_UNPROVEN"}, "UNVERIFIED_OBSERVATIONS"),
+    ({"at": T - 10}, "NONMONOTONIC_OBSERVATION"),
+    ({"at": T + 7 * HOUR}, "GAP_TOO_LONG_TO_INFER_RESET"),
+])
+def test_cross_account_failure_or_stale_observation_refused(replacement, reason):
+    got = compare_native_codex_quota(probe(), probe(**replacement))
+    assert got["state"] == "UNKNOWN"
+    assert got["reason"] == reason
+    assert got["early_refresh_candidate"] is False
+
+
+@pytest.mark.parametrize("corrupt", ["bad_hash", "no_stop", "wrong_auth", "bad_percent",
+                                     "missing_limit", "different_limit", "invalid_reset"])
+def test_identity_and_window_validation_fails_closed(corrupt):
+    old = probe()
+    new = probe(at=T + HOUR, weekly_reset=T + WEEK + HOUR, used=1)
+    if corrupt == "bad_hash":
+        new["home_identity"]["account_id_sha256"] = "not-a-hash"
+    elif corrupt == "no_stop":
+        new["stop"]["private_group_empty"] = False
+    elif corrupt == "wrong_auth":
+        new["account"]["auth_state"] = "LOGIN_REQUIRED"
+    elif corrupt == "bad_percent":
+        new["account"]["windows"]["secondary"]["remaining_percent"] = 200
+    elif corrupt == "missing_limit":
+        new["account"]["limit_id"] = None
+    elif corrupt == "different_limit":
+        new["account"]["limit_id"] = "different"
+    elif corrupt == "invalid_reset":
+        new["account"]["windows"]["secondary"]["resets_at"] = "timestamp"
+    result = compare_native_codex_quota(old, new)
+    assert result["state"] == "UNKNOWN"
+    assert result["early_refresh_candidate"] is False
+
+
+def test_weekly_only_business_shape_is_comparable_without_five_hour_window():
+    before = probe(used=80, primary=None)
+    after = probe(at=T + HOUR, weekly_reset=T + WEEK + 2 * HOUR, used=0, primary=None)
+    result = compare_native_codex_quota(before, after)
+    assert [x["window"] for x in result["observed_windows"]] == ["secondary"]
+    assert result["early_refresh_candidate"] is True
+
+
+def test_missing_weekly_window_does_not_establish_available_weekly_capacity():
+    old = probe(weekly=False, primary=30)
+    new = probe(at=T + HOUR, weekly=False, primary=30)
+    got = compare_native_codex_quota(old, new)
+    assert got["early_refresh_candidate"] is False
+    assert got["admission_granted"] is False
+    assert not any(x["window"] == "secondary" for x in got["observed_windows"])
+
+
+def test_no_comparable_windows_stays_unknown():
+    got = compare_native_codex_quota(probe(weekly=False), probe(at=T + HOUR, weekly=False))
+    assert got["state"] == "UNKNOWN"
+    assert got["reason"] == "NO_COMPARABLE_WINDOWS"

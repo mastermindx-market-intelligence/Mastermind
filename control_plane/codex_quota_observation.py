@@ -1,0 +1,136 @@
+"""Read-only comparison of two *same-seat* native Codex quota observations.
+
+This is an evidence projector, not a Capacity candidate, quota ledger, worker
+registration, account picker, provider probe, redemption or reset predictor.
+Use only sanitized results from the existing admitted native account observer.
+"""
+
+from __future__ import annotations
+
+import math
+import re
+from collections.abc import Mapping
+from typing import Any
+
+SCHEMA = "mastermind.codex_quota_comparison.v1"
+_WINDOW_NAMES = ("primary", "secondary")
+_HASH = re.compile(r"[0-9a-f]{64}\Z")
+_MAX_GAP_SECONDS = 6 * 60 * 60
+_CLOCK_TOLERANCE_SECONDS = 60
+_HEADROOM_GAIN_POINTS = 10.0
+
+
+def _number(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    num = float(value)
+    return num if math.isfinite(num) else None
+
+
+def _verified_sample(raw: object) -> dict[str, Any] | None:
+    """Accept only a cleanly stopped native-read probe and a hashed identity."""
+    if not isinstance(raw, Mapping) or raw.get("state") != "NATIVE_READS_COMPLETED":
+        return None
+    stop = raw.get("stop")
+    identity = raw.get("home_identity")
+    account = raw.get("account")
+    if not isinstance(stop, Mapping) or stop.get("private_group_empty") is not True:
+        return None
+    if not isinstance(identity, Mapping) or not isinstance(account, Mapping):
+        return None
+    account_hash = identity.get("account_id_sha256")
+    if not isinstance(account_hash, str) or _HASH.fullmatch(account_hash) is None:
+        return None
+    if account.get("auth_state") != "MANAGED_CHATGPT_OBSERVED":
+        return None
+    observed_at = _number(account.get("observed_at_unix"))
+    if observed_at is None or observed_at <= 0:
+        return None
+    windows = account.get("windows")
+    states = account.get("window_states")
+    if not isinstance(windows, Mapping) or not isinstance(states, Mapping):
+        return None
+    checked: dict[str, dict[str, float | int]] = {}
+    for name in _WINDOW_NAMES:
+        if states.get(name) != "OBSERVED":
+            continue
+        window = windows.get(name)
+        if not isinstance(window, Mapping):
+            continue
+        used = _number(window.get("used_percent"))
+        remaining = _number(window.get("remaining_percent"))
+        reset_at = window.get("resets_at")
+        minutes = window.get("window_minutes")
+        if (used is None or remaining is None or not 0 <= used <= 100
+                or not 0 <= remaining <= 100 or abs(100 - used - remaining) > 0.001
+                or type(reset_at) is not int or reset_at <= observed_at
+                or type(minutes) is not int or minutes <= 0):
+            continue
+        checked[name] = {"used_percent": used, "remaining_percent": remaining,
+                         "resets_at": reset_at, "window_minutes": minutes}
+    return {"account_hash": account_hash, "observed_at": observed_at,
+            "limit_id": account.get("limit_id"), "windows": checked}
+
+
+def compare_native_codex_quota(before: object, after: object) -> dict[str, Any]:
+    """Compare two observations without combining accounts or authorizing work.
+
+    An early timer move with materially recovered headroom is *candidate*
+    evidence of refresh; the cause (promotion, explicit reset, server correction,
+    first-request anchoring, etc.) is deliberately unclassified.
+    """
+    result: dict[str, Any] = {
+        "schema": SCHEMA, "state": "UNKNOWN", "reason": "UNVERIFIED_OBSERVATIONS",
+        "observed_windows": [], "schedule_changed": False,
+        "early_refresh_candidate": False, "provider_cause": "UNATTRIBUTED",
+        "admission_granted": False, "account_switch_authorized": False,
+        "reset_redemption_authorized": False, "schedule_prediction_authorized": False,
+    }
+    old, new = _verified_sample(before), _verified_sample(after)
+    if old is None or new is None:
+        return result
+    if old["account_hash"] != new["account_hash"] or old["limit_id"] != new["limit_id"]:
+        result["reason"] = "SUBJECT_OR_LIMIT_MISMATCH"
+        return result
+    gap = new["observed_at"] - old["observed_at"]
+    if gap <= 0:
+        result["reason"] = "NONMONOTONIC_OBSERVATION"
+        return result
+    if gap > _MAX_GAP_SECONDS:
+        result["reason"] = "GAP_TOO_LONG_TO_INFER_RESET"
+        return result
+
+    for name in _WINDOW_NAMES:
+        previous, current = old["windows"].get(name), new["windows"].get(name)
+        if not previous or not current or previous["window_minutes"] != current["window_minutes"]:
+            continue
+        moved = current["resets_at"] - previous["resets_at"]
+        headroom_gained = current["remaining_percent"] - previous["remaining_percent"]
+        timer_changed = abs(moved) > _CLOCK_TOLERANCE_SECONDS
+        if not timer_changed:
+            classification = ("HEADROOM_GAIN_WITHOUT_TIMER_PROOF"
+                              if headroom_gained >= _HEADROOM_GAIN_POINTS else "NO_TIMER_CHANGE")
+        elif new["observed_at"] >= previous["resets_at"]:
+            classification = "PRIOR_WINDOW_DUE"
+        elif moved > 0 and headroom_gained >= _HEADROOM_GAIN_POINTS:
+            classification = "EARLY_REFRESH_CANDIDATE"
+        else:
+            classification = "TIMER_CHANGED_CAUSE_UNKNOWN"
+        result["observed_windows"].append({
+            "window": name, "timer_moved_seconds": moved,
+            "headroom_delta_points": round(headroom_gained, 3),
+            "classification": classification,
+        })
+        result["schedule_changed"] = result["schedule_changed"] or timer_changed
+        result["early_refresh_candidate"] = (
+            result["early_refresh_candidate"] or classification == "EARLY_REFRESH_CANDIDATE"
+        )
+
+    if not result["observed_windows"]:
+        result["reason"] = "NO_COMPARABLE_WINDOWS"
+        return result
+    result["state"] = ("CHANGE_OBSERVED" if result["schedule_changed"]
+                       or any(row["classification"] == "HEADROOM_GAIN_WITHOUT_TIMER_PROOF"
+                              for row in result["observed_windows"]) else "NO_MATERIAL_CHANGE")
+    result["reason"] = "SAME_SEAT_NATIVE_WINDOW_COMPARISON"
+    return result
