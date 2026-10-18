@@ -736,3 +736,106 @@ def test_deploy_transaction_closes_race_noop_and_failure_paths(tmp_path: Path) -
         assert not marker.exists()
     finally:
         marker.unlink(missing_ok=True)
+
+
+def test_status_qualifies_closed_day_marks_without_rewriting_or_recomputing(
+    isolated_root: Path, monkeypatch,
+) -> None:
+    """A recorded holiday valuation is retained but cannot certify a session gate."""
+    from datetime import date
+    from portfolio import forward_evaluation as fe, market_calendar
+
+    book_dir = fe._portfolio_data_dir("autonomous")
+    _seed_legacy(book_dir)
+    _activate_start()
+    legacy = json.loads((book_dir / "nav_history.jsonl").read_text().splitlines()[0])
+    rows = [legacy] + [
+        {"date": day, "nav": 1_000_000.0, "cash": 400_000.0,
+         "invested": 600_000.0, "spy_nav": 1_000_000.0, "benchmark": "SPY"}
+        for day in ("2026-09-04", "2026-09-07", "2026-09-08")
+    ]
+    _write_jsonl(book_dir / "nav_history.jsonl", rows)
+    monkeypatch.setattr(fe, "_utc_today", lambda: "2026-09-08")
+    saved = fe.evaluate("autonomous", "2026-09-08")
+    assert not market_calendar.is_trading_day(date(2026, 9, 7))
+    assert saved["metrics"]["marked_session_count"]["value"] == 3
+
+    def inventory() -> dict[str, bytes]:
+        return {str(p.relative_to(isolated_root)): p.read_bytes()
+                for p in isolated_root.rglob("*") if p.is_file()}
+
+    before = inventory()
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("status must not recompute or write evaluation evidence")
+
+    for name in ("evaluate", "_read_inputs", "_read_jsonl"):
+        monkeypatch.setattr(fe, name, forbidden)
+
+    for response in (fe.status("autonomous"), fe.status("autonomous", "2026-09-08")):
+        assert response["snapshot"] == saved
+        q = response["observation_qualification"]
+        assert q["reported_mark_count"] == 3
+        assert q["count_unit"] == "recorded_nav_date_labels"
+        assert q["calendar_session_count"] is None
+        assert q["price_qualified_session_count"] is None
+        assert q["eligible_for_session_gate"] is False
+    by_book = {row["book"]: row for row in fe.status()["books"]}
+    assert by_book["autonomous"]["observation_qualification"]["reported_mark_count"] == 3
+    assert by_book["china"]["observation_qualification"]["reported_mark_count"] is None
+    assert by_book["hk"]["observation_qualification"]["reported_mark_count"] is None
+    assert inventory() == before
+
+
+@pytest.mark.parametrize("value,metric_status,expected", [
+    (0, "available", 0),
+    (4, "partial", 4),
+    (None, "missing", None),
+    (False, "available", None),
+    (-1, "available", None),
+    ("49", "available", None),
+    (49, {"available": True}, None),
+])
+def test_mark_qualification_preserves_real_zero_and_withholds_unusable_counts(
+    value, metric_status, expected,
+) -> None:
+    from copy import deepcopy
+    from portfolio import forward_evaluation as fe
+
+    original = {
+        "book": "autonomous",
+        "snapshot": {
+            "schema": fe.SCHEMA, "book": "autonomous", "asof": "2026-10-16",
+            "metrics": {"marked_session_count": {"value": value, "status": metric_status}},
+        },
+    }
+    before = deepcopy(original)
+    result = fe._qualify_mark_observations(original)
+    q = result["observation_qualification"]
+    assert q["reported_mark_count"] == expected
+    assert q["reported_mark_count_status"] == (
+        metric_status if expected is not None else "unavailable")
+    assert q["calendar_session_count"] is None
+    assert q["price_qualified_session_count"] is None
+    assert q["eligible_for_session_gate"] is False
+    assert original == before
+    assert result["snapshot"] == before["snapshot"]
+
+
+def test_status_withholds_mark_count_from_wrong_book_snapshot(
+    isolated_root: Path,
+) -> None:
+    from portfolio import forward_evaluation as fe
+
+    _activate_start()
+    wrong_book = {
+        "schema": fe.SCHEMA, "book": "china", "asof": "2026-10-16",
+        "metrics": {"marked_session_count": {"value": 49, "status": "available"}},
+    }
+    _write_json(fe._book_output_dir("autonomous") / "latest.json", wrong_book)
+    result = fe.status("autonomous")
+    assert result["snapshot"] == wrong_book
+    q = result["observation_qualification"]
+    assert q["reported_mark_count"] is None
+    assert q["reported_mark_count_missing_reason"] == "stored_snapshot_identity_unverified"
+    assert q["eligible_for_session_gate"] is False

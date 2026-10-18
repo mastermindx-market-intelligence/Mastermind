@@ -1664,6 +1664,56 @@ def _book_status(book: str, asof: str | date | None = None) -> dict[str, Any]:
     }
 
 
+def _qualify_mark_observations(book_status: dict[str, Any]) -> dict[str, Any]:
+    """Qualify the saved count without recomputing or rewriting its snapshot.
+
+    The legacy marked_session_count is a count of recorded NAV date labels.
+    Its presence does not certify exchange sessions, point-in-time prices, or
+    eligibility for an evaluation horizon. Missing qualifications remain unknown.
+    """
+    book = book_status.get("book")
+    if book not in ACTIVE_BOOKS:
+        return book_status
+    snapshot = book_status.get("snapshot")
+    identity_matches = (
+        isinstance(snapshot, dict)
+        and snapshot.get("schema") == SCHEMA
+        and snapshot.get("book") == book
+    )
+    metrics = snapshot.get("metrics") if isinstance(snapshot, dict) else None
+    metric = metrics.get("marked_session_count") if isinstance(metrics, dict) else None
+    value = metric.get("value") if isinstance(metric, dict) else None
+    source_status = metric.get("status") if isinstance(metric, dict) else None
+    usable = (identity_matches and type(value) is int and value >= 0
+              and type(source_status) is str and source_status in {"available", "partial"})
+    if not isinstance(snapshot, dict):
+        reason = "stored_snapshot_unavailable"
+    elif not identity_matches:
+        reason = "stored_snapshot_identity_unverified"
+    elif not usable:
+        reason = "reported_mark_count_unavailable"
+    else:
+        reason = None
+    return {
+        **book_status,
+        "observation_qualification": {
+            "schema": "mastermind.portfolio_forward_evaluation.observation_qualification.v1",
+            "source_metric": "marked_session_count",
+            "source_scope": "stored_snapshot_only",
+            "reported_mark_count": value if usable else None,
+            "reported_mark_count_status": source_status if usable else "unavailable",
+            "reported_mark_count_missing_reason": reason,
+            "count_unit": "recorded_nav_date_labels",
+            "calendar_session_count": None,
+            "calendar_status": "not_checked",
+            "price_qualified_session_count": None,
+            "price_status": "not_checked",
+            "eligible_for_session_gate": False,
+            "qualification_reason": "exchange_sessions_and_point_in_time_prices_not_verified",
+        },
+    }
+
+
 def status(book: str | None = None, asof: str | date | None = None) -> dict[str, Any]:
     """Read-only status/API contract.  It never computes or writes a snapshot."""
     if book is not None:
@@ -1687,9 +1737,9 @@ def status(book: str | None = None, asof: str | date | None = None) -> dict[str,
                 "sample_counts": _zero_sample_counts(),
                 "snapshot": None,
             }
-        return {"schema": STATUS_SCHEMA, **_book_status(b, asof)}
+        return {"schema": STATUS_SCHEMA, **_qualify_mark_observations(_book_status(b, asof))}
     marker = load_start()
-    books = [_book_status(item, asof) for item in ACTIVE_BOOKS]
+    books = [_qualify_mark_observations(_book_status(item, asof)) for item in ACTIVE_BOOKS]
     active = bool(marker and marker.get("release_state") == "active")
     return {
         "schema": STATUS_SCHEMA,
