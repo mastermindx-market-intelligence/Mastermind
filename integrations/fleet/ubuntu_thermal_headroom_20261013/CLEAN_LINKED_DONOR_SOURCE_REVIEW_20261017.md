@@ -1,71 +1,208 @@
-# Clean linked sparse donor candidate, 2026-10-16
+# Clean linked sparse donor — security repair, 2026-10-18
 
-STATE: SOURCE_PUBLISHED_FOR_REVIEW / REAL-GIT-TESTED / NOT_INSTALLED / NOT_MERGED.
-DO_NOT_INSTALL_UNREVIEWED_CANDIDATE.
-Additive compatibility candidate for fleet PR #1404, not another worker,
-queue, provider, broker, release owner or credential plane.
+STATE: REPAIRED_SOURCE_FOR_REVIEW / LOCAL_TESTS_PASS / NOT_MERGED / NOT_DEPLOYED.
+MISSION_COMPLETE: false.
 
-## Blocker
-Ubuntu0 and Ubuntu2 donor repos have reviewed helper blob 75297acb at Macro
-merge 40abd9bd and are clean. Ubuntu1 is on feature branch lane/lr-meas-b3
-with uncommitted engine/research_vault/ingest.py. Ubuntu3 is on feature branch
-claude/mi-skyd-identity-rename-20261011 with staged security-master edits.
-Their helper blob is 296e47ba and neither feature branch is proven an
-ancestor of the merged Macro source. Dirty paths overlap. DO NOT force-reset,
-merge-forward, overlay, replace or re-sparsify existing donor/worktree source.
+This record supersedes the earlier candidate and isolation claims in this file.
+PR [#1404](https://github.com/mastermindx-market-intelligence/Mastermind/pull/1404)
+and its existing branch remain the source carrier. No worker, provider, lease,
+cleanup owner, source writer or runtime binding is transferred by this document.
 
-## Candidate
-Keep original incoming CWD and original LaneLease/provider/root/parent. Only
-when the original helper matches the exact known old Git blob, select a
-separately pre-provisioned clean linked checkout at
-~/lanes/repos/macro-fabric-reviewed. Require owned non-symlink directory and
-gitfile, exact same original Git common dir, exact reviewed Macro merge
-40abd9bd2291997cc066f30b408a1e670124cec4, reviewed helper Git blob,
-no staged or untracked changes, and core.sparseCheckout=true. Validate
-the minted child Git dir under the original shared Git common dir. Unknown
-source, missing donor, dirty donor, unreviewed HEAD or tampering refuse
-before mint. Existing effect-unknown lease retention is unchanged.
+## Original independent review consumed
 
-This does not create that alternate linked donor or dispatch a worker.
-Provisioning remains with the original qualified Macro/Fabric worktree owner
-AFTER reviewed release and active source-custody verification.
+The retained result of `ghost-parent-fabric-linked-donor-review-ba3938-20261017-02`
+was read through the installed original `fabric_task.read_result` mechanism.
+Its SHA-256 was verified as
+`157b2bf2a767e3264af3c40469ea1d31a2d55989aedf375361730ab5948feea2`.
+Original root and parent remain
+`ghost-parent-handoff-validation-20261017-sol-001`.
+The run is TERMINAL, rc0, with retained bytes; its source verdict is
+**CHANGES_REQUIRED**. It was not restarted or duplicated.
 
-## Tests
-- Exact M2 source preimage and proposed postimage in the attached manifest.
-- Six real-Git fixture cases pass, including mint by the ACTUAL merged Macro
-  helper from a clean linked donor while original dirty source stays intact;
-  missing, dirty, unreviewed and unknown-source inputs refuse.
-- git apply --check and exact postimage replay passed against the live-source
-  preimage in an isolated scratch target.
-- This one-file candidate composes with the original #1404 receipt-retention
-  patch that affects remote_sub.sh, not remote_sub_exec.py. Combined Bash and
-  Python syntax checks passed in isolation.
-- No host limits, thermal gates, provider qualifications or live leases were
-  modified. No load test or paid worker was run.
+Reading a result does not accept it. At recovery the original ledger projection
+was **NOT_ACCEPTED / NO_OUTCOME**. On October 18 the assigned continuation CEO
+Integrator reverified all 14,371 retained bytes and the verified terminal
+root/parent identity, then adjudicated this review deliverable through the
+incumbent `pool_ledger.record_outcome` with strict durable acknowledgement.
+The same-run readback is **ACCEPTED / VALIDATED_OUTCOME**, `accepted_by=reviewer`,
+with the original root and parent unchanged. This accepts the useful returned
+review; **CHANGES_REQUIRED** remains its verdict on the old source. No worker
+operation was restarted, reparented or duplicated. The local ledger projection
+does not authenticate an original-parent callback or itself attest result bytes;
+the delegated CEO adjudication and independent byte verification are stated
+separately. It is not source, deployment or real-worker acceptance.
 
-## Source custody and next step
-The original fleet PR #1404 branch advanced concurrently (commit 3fdafc02,
-source writer active). Do not push an uncoordinated concurrent source change.
-Original writer should integrate the exact-hash one-file delta on that same
-branch after one scoped source-trust review. Then separately qualify the
-actual clean donor on Ubuntu1/3 and obtain immutable support-generation and
-original-worker proof before claiming deployment/acceptance. Prior OS
-AccessDenied, uncertain effects, and user-attended BIOS controls are not
-overridden by this candidate.
+The reviewer identified controller-side Git configuration execution, hidden
+working-policy changes through assume-unchanged, missing real workspace-function
+coverage, an unreachable donor-drift branch, and misleading provenance/isolation
+claims. The old source head `ba3938c79eedbb8f590dfed106b8e0876ee88e91` and its
+passing CI are not acceptance evidence for this repair.
 
-## October 17 portable release contract
-The source review branch also carries tests/test_fabric_clean_linked_donor_20261017.py. Its seven portable real-Git tests passed in a hermetic Mac scratch checkout (2.48 s; only unrelated historical pytest-temp cleanup warnings). They execute the patched donor selection function against a clean linked Git worktree and confirm missing/dirty/unreviewed/unrelated donors refuse. The original six-test M2 integration separately exercised the true reviewed Macro helper mint, not merely a mock source selector. CI/review and physical rollout are separate gates. All source and test artifacts are owned by existing PR #1404.
+## Exact source contract
 
-## October 17 source security review repair (supersedes preceding candidate)
-The independent reviewer requested changes at exact head `ab1722503a55` for an ignored `scripts/json.py` module-shadow attack. Git status does not reveal ignored files, and the original ordinary Python helper invocation included the scripts directory in sys.path. The revised single-file source patch SHA-256 is `354134d103a0cd04f838985e7cce2f291b92bf0a0786e857df004dd9c6be15ef`; the repaired executor postimage SHA-256 is `cb5926c24a51ba4bd1dd99ff195a15cceb9a6512bb5a9fda4938caca3e4f8172` against the same original installed preimage `a29798ab...`.
+| Item | Immutable identity |
+| --- | --- |
+| Source parent for this repair | `ba3938c79eedbb8f590dfed106b8e0876ee88e91` |
+| Sealed executor preimage, M2 carrier | SHA-256 `a29798abb84294b1d8a67c53ef2b45137db4517f960598e51c8da21796d6cf61` |
+| Repaired executor postimage | SHA-256 `2e43cf37f881ec5a5c2000b0d7104c3ec49b52c6344db03db992c72ed9cb74b2` |
+| Shipped one-file patch | SHA-256 `517273bea24378c740c739a17268d5201efd21538915b881b87cfdfc3ab8664d` |
+| Eligible old helper | Git blob `296e47bab2d28f9a019e81b5aef76eeea62a6cc3` |
+| Reviewed helper | Git blob `75297acb10d0cef4d01730a59fdcad19c7cfd3e6` |
+| Reviewed working policy | Git blob `46b4d13bb5302a68b437a257eebe066d07bdc7ff` |
+| Dedicated donor HEAD | `6ee058b0491a3f67e843f25d4379b94e98880e8b` |
+| Dedicated donor path | `~/lanes/repos/macro-fabric-pinned-20261016` |
 
-The repair explicitly refuses Git-ignored objects in the dedicated linked donor, uses `python -I` for real mint to isolate script directory from stdlib imports, and reruns the donor Git/head/helper and file stat/content checks immediately before launch. No preflight snapshot is claimed to provide an atomic filesystem lock. Existing original physical lease, provider, capacity, root/parent and effect-unknown handling remain unchanged. Linux runtime installation is **not** authorized by this source update; old donor feature branches are untouched.
+The helper and policy identities were independently fetched from
+[the pinned Macro source](https://github.com/mastermindx-market-intelligence/macro/tree/6ee058b0491a3f67e843f25d4379b94e98880e8b).
+The old `macro-fabric-reviewed` / `40abd9bd...` alternate was a superseded
+candidate assumption and is not selected.
 
-Revised tests: **9/9 portable** and **7/7 actual reviewed Macro helper mint** passed on M2; **9/9 portable** and **7/7 actual helper mint** passed on Ubuntu3 in separate scratch, including deliberate post-preflight malicious Python module injection that never executed under `-I`. The equivalent new patch-file staging write on Ubuntu1 was specifically blocked by platform safety checks and not retried or rerouted; earlier 7+6 Ubuntu1 tests concern the preceding now-superseded candidate only. Previous scratch release digest `8eeb04e027b56858d9975987d88c9153cf1738993c611e2670d37990a27fecbe` is **superseded**. The real 31-file private offline publisher passed again for repaired digest `93901a25095cc553df274f3f1d4cefa97e85bb2bf2f2aaa48cb0dfaa7f80685f`, with the installed M2 executor unchanged. Original safety reviewer must requalify exact new source head and final mandatory CI before release.
+### What the patch changes
 
-## October 17 pre-provisioned donor selection (newer source candidate; supersedes hardcoded reviewed checkout name)
-The previously recorded `macro-fabric-reviewed` directory and `40abd9bd...` donor HEAD were **candidate-only assumptions**. Fresh direct host readback on *both* Ubuntu1 and Ubuntu3 verifies the already provisioned `~/lanes/repos/macro-fabric-pinned-20261016`: detached commit `6ee058b0491a3f67e843f25d4379b94e98880e8b`, original shared Git common dir, clean staged/untracked/ignored inventory, `core.sparseCheckout=true`, tracked + working reviewed helper Git blob `75297acb10d0cef4d01730a59fdcad19c7cfd3e6`, and tracked + working sparse config blob `46b4d13bb5302a68b437a257eebe066d07bdc7ff`. Protected Macro main has this exact commit as an ancestor, and its helper/config blobs match directly fetched GitHub source. Original Ubuntu1/3 feature-branch donors remain untouched.
+The controller resolves Git metadata through bounded stable file reads before
+its first donor Git invocation. It verifies ownership, regular-file/directory
+shape, non-symlink ancestry, linked-worktree backpointers and the original common
+Git directory. Group/world-writable paths refuse; validation never changes their
+permissions or source bytes.
 
-This PR source patch now selects that exact pre-existing pinned path and commit while preserving the October 17 security fix: `python -I`, `git ls-files --others --ignored --exclude-standard -z`, final donor/bytes check, and unchanged original admission/lease/unknown-effect ownership. The pinned source patch SHA256 is `32773b3642d47579b1794878db48e4993f7114995d729ef203c93993c74a7ee3`, expected patched executor SHA256 `49862414e67b6b4919046a553e424d89d994dfbf15d1f0aad372ae9f1c6bfa20` from unchanged installed executor `a29798ab...`. **No host or controller source was installed.**
+A strict, data-only Git config subset is accepted. Common and worktree config are
+both checked, including an inactive worktree config. Includes, aliases, fsmonitor,
+hooks, pager, editor, SSH commands, filters, protocol settings, repository
+redirection and unsupported or ambiguous syntax refuse before Git. The existing
+partial-clone metadata, multiple fetch refspecs, branch bindings, and inert LFS
+repository-format marker are recognized as data. No actual fetch is authorized.
 
-Proof: M2 **10/10 portable and 7/7 actual reviewed Macro-helper mint** tests; Ubuntu3 **10/10 portable, 7/7 actual helper mint**, and read-only invocation of the patched validator against Ubuntu3's *real pre-existing pinned worktree* returned the exact qualified path. Ubuntu1 direct Git read-only checks all matched, but previous explicit platform safety refusal to stage the patched executor on Ubuntu1 remains respected (no cross-carrier replay). This is a source qualification, not a paid worker START, actual provider admission, accepted task result, or sustained 54-way thermal proof. Exact new PR-head CI and a fresh independent semantic review are still required. The earlier private support release digest `93901a25...` describes the **superseded** prior patch and must not be installed as this new source revision.
+Controller Git uses the fixed system executable and explicit fsmonitor/hooks
+neutralization. Its environment removes inherited `GIT_*` and loader overrides,
+suppresses system/global Git config, disables replacement objects, and denies
+every transport. The empty `GIT_ALLOW_PROTOCOL` allow-list also protects Git
+versions predating `GIT_NO_LAZY_FETCH`; missing local objects must refuse.
+Those older versions may first create an internal Git fetch child
+([Git 2.43 source](https://github.com/git/git/blob/v2.43.0/promisor-remote.c));
+transport denial does not prove that no child process was created.
+The same protections and fixed system search path reach the actual mint
+invocation, whose pinned helper uses bare Git subprocesses. Original root,
+parent, provider and lease values are retained; the subsequent worker environment
+is not rewritten by the mint helper.
+
+Both consumed inputs must match their independent pins in HEAD, a stage-zero
+index entry with neither hidden flag, and a stable no-follow working-file read.
+A clean-looking status is insufficient. Helper and policy identities are checked
+again after mint; drift preserves an uncertain effect.
+
+Requalification failure now reaches `FABRIC_SPARSE_REVIEWED_DONOR_DRIFT` with its
+original cause and effect-unknown flag. Unconfirmed Git-process cleanup and a
+forced observation abort are typed uncertain effects: reaping the direct PID
+alone does not prove settlement of possible internal children. The executor's
+existing `_execute` section—including
+physical lease acquisition, provider launch and hold-for-reconciliation—is
+byte-identical to the sealed preimage.
+
+### Explicit disposition required: sparse index flags
+
+The review's blanket wording to reject every skip-worktree flag conflicts with
+the intended sparse donor: [Git uses that flag for omitted files](https://git-scm.com/docs/git-sparse-checkout).
+This repair proposes the following narrower, explicit invariant for renewed
+independent review. It does **not** claim literal compliance with the old wording.
+
+| Observed condition | Admission |
+| --- | --- |
+| Any assume-unchanged tag, including combined lowercase `s` | Refuse |
+| Helper or policy has either flag, wrong stage, or mismatched HEAD/index/disk bytes | Refuse |
+| Uppercase `S` on a materialized object, required-cone path, or uncertain absence | Refuse |
+| Uppercase `S` on a provably absent path outside the independently fixed donor cone | Permit |
+| Sparse-index directory entry | Apply the same excluded-and-absent rule to the directory |
+
+The dedicated donor cone is exactly `.claude`, `.codex`, `config`, `scripts`,
+plus Git's top-level-file semantics. The complete canonical rules were observed
+on both Ubuntu1 and Ubuntu3 through a read-only original-M2 metadata probe:
+[retained metadata receipt](CLEAN_LINKED_DONOR_METADATA_20261018.json).
+The helper's pinned JSON policy instead excludes `data`, `site`, `mockups`,
+`verify_shots` from **new worker worktrees**. These are distinct profiles.
+Validation neither broadens nor rewrites either donor.
+
+The direct reviewed-helper path also qualifies its config, input pins and index.
+A full original donor has no permitted skipped entries. A sparse original donor
+must match the pinned worker-policy profile. Existing unknown or dirty source
+refuses; only the exact earlier helper selects the separately qualified donor.
+
+## Scope of isolation
+
+[Python `-I`](https://docs.python.org/3/using/cmdline.html#cmdoption-I) excludes the
+script directory and user site and ignores Python environment variables.
+It does not exclude interpreter-wide site-packages or sitecustomize, and it
+does not establish an OS sandbox. This patch assumes a trusted system Git,
+interpreter and OS account boundary. Stable reads, config rechecks and byte pins
+harden admission of pre-existing donor contents; they are not an atomic lock
+against a concurrent adversarial same-UID writer. Such a stronger threat model
+requires an independently approved isolation boundary.
+
+## Reproducible tests and limits
+
+[The portable suite](../../../tests/test_fabric_clean_linked_donor_20261017.py)
+applies the shipped patch to
+[the exact test-only preimage](../../../tests/fixtures/fabric_executor_m2_a29798ab.py.txt),
+checks the postimage hash, compiles the applied source and calls its actual
+`_new_macro_workspace`. It no longer tests only an extracted donor selector.
+
+**64 behavioral/source-contract cases passed**, and **88 tests passed** across
+the six affected root test modules on Linux, Python 3.12.14, system Git 2.43.0.
+Coverage includes full/sparse indexes, direct/fallback source paths, inert
+configuration refusals before Git, independent policy/index/byte pins, actual
+`-I` arguments and Git environment at the owned-process boundary, second-pass
+helper mismatch, reachable drift, duplicate-effect refusal and uncertain cleanup.
+
+The owned-process runner is a stub that creates a genuine disposable linked
+sparse Git worktree. This tests controller behavior and Git postconditions;
+it does not prove the actual Macro helper process, physical admission, production
+receipt, provider START or accepted worker result. No executable security payload
+is run. Protected CI and independent review must bind the newly published head.
+
+The historical [actual Macro mint script](tests/test_actual_macro_mint.py) exists
+under this integration directory, not root `tests/`. It requires privately
+staged executor/helper files and installed M2 dependencies, so it is not a
+self-contained checkout test. Prior M2/Ubuntu3 7/7 observations belong to older
+candidates and must not be presented as execution proof for this repaired head.
+
+## Correct runtime provenance and release frontier
+
+`a29798ab...` identifies the **sealed support-release executor preimage carried
+by M2**, also read back from the incumbent M2 executor. It does not identify
+Ubuntu3's legacy `~/lanes/ext/remote_sub_exec.py`. The independent review observed
+that flat copy at `98407dbd...`, without the sparse-mint section; this patch
+does not apply there. The actual launcher uses
+`~/lanes/support-releases/$SUPPORT_DIGEST/ext/remote_sub_exec.py`.
+Release must use the existing publisher and full 31-file dependency closure,
+with exact preimage qualification and a new immutable generation.
+
+The old postimage `49862414...`, patch `32773b36...`, and private offline
+generation `303b4455972fb0541efbbb6ce09934d3a7a0dc4cfc4e294d9be6a4f559303676`
+are superseded for this repair. Earlier generations `93901a25...` and
+`8eeb04e0...` remain historical evidence. None may be relabeled as repaired.
+
+The old statement that Ubuntu3 currently had staged security-master edits was
+stale: the reviewer observed its legacy feature donor clean at `bf5b534c...`.
+That observation grants no overwrite, reset or branch-conversion permission.
+Ubuntu1's original dirty source and all other incumbents remain preserved.
+
+The October 18 metadata read also found group-writable source inputs on
+Ubuntu0/1/2. The candidate correctly refuses those paths until their original
+custody permits qualification; no permission normalization was performed.
+The read-only receipt is not an all-host admission or deployment claim.
+
+Required next evidence remains: independent semantic approval of the repaired
+immutable head, explicitly covering the sparse
+exception and threat boundary; protected CI and merge; a newly published and
+verified support generation; host binding; and real admitted original-worker
+START/result/acceptance witnesses. The installed Session Bridge was unavailable
+during recovery, and Executive visibility reported new CEO submission unarmed.
+Those observations do not authorize an alternative queue, worker root or
+shell-based worker submission.
+
+Configured ceilings remain **12/18/12/12**, with Ubuntu2/3 **80°C** new-job
+temperature admission and existing disk/load/PSI/provider protections. The
+accepted 13-file registry-hardening patch and its 259-test historical proof are
+preserved. No old thermal, sparse or combined patch is replayed. The earlier
+rc78 review and Ubuntu1's platform-blocked security-patch staging remain
+nonretryable. Unaccepted worker data and uncertain effects remain with their
+original owners. Macro GC #9430 and Web MCP #1457 retain separate ownership.

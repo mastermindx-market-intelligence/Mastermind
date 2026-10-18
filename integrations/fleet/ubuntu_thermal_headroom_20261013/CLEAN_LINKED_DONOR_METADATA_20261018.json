@@ -1,0 +1,285 @@
+{
+  "schema": "mastermind.fabric_donor_metadata_observation.v1",
+  "observation_utc_day": "2026-10-18",
+  "source_head_before_repair": "ba3938c79eedbb8f590dfed106b8e0876ee88e91",
+  "transport": "Original M2 host-command carrier using ssh_alias values read from incumbent hosts.json; direct read-only metadata observation, not Fabric dispatch",
+  "process_pid": 91279,
+  "process_exit_code": 0,
+  "git_executed_in_donors": false,
+  "source_or_permission_mutations": false,
+  "worker_started": false,
+  "limitations": [
+    "Snapshot is not an atomic lock, config safety verdict, source-custody transfer, live worker acceptance or host binding.",
+    "Common config values and individual branch names are omitted; full config SHA-256 binds each observation.",
+    "Group-writable inputs fail this candidate's ownership boundary until original custody permits correction; no chmod was performed."
+  ],
+  "hosts": [
+    {
+      "host": "ubuntu0",
+      "rc": 0,
+      "donors": [
+        {
+          "name": "macro",
+          "exists": true,
+          "gitdir_qualified_shape": true,
+          "sparse_rules": null,
+          "configs": [
+            {
+              "name": "config",
+              "mode": "0o644",
+              "sha256": "443436bc4eea7dd53ddfb8e58dc7b53ab2e08e153528b7d24d50ac40f69b0338",
+              "keys": [
+                "[core] repositoryformatversion",
+                "[core] filemode",
+                "[core] bare",
+                "[core] logallrefupdates",
+                "[remote \"*\"] url",
+                "[remote \"*\"] fetch",
+                "[remote \"*\"] promisor",
+                "[remote \"*\"] partialclonefilter",
+                "[branch \"*\"] remote",
+                "[branch \"*\"] merge",
+                "[extensions] worktreeConfig"
+              ]
+            }
+          ],
+          "helper": {
+            "git_blob": "75297acb10d0cef4d01730a59fdcad19c7cfd3e6",
+            "mode": "0o664"
+          },
+          "policy": {
+            "git_blob": "46b4d13bb5302a68b437a257eebe066d07bdc7ff",
+            "mode": "0o600"
+          }
+        },
+        {
+          "name": "macro-fabric-pinned-20261016",
+          "exists": false
+        }
+      ]
+    },
+    {
+      "host": "ubuntu1",
+      "rc": 0,
+      "donors": [
+        {
+          "name": "macro",
+          "exists": true,
+          "gitdir_qualified_shape": true,
+          "sparse_rules": "/config.yml\n/scripts/\n/engine/\n/collectors/\n/app/\n/tests/\n/lib/\n/config/\n/docs/ops/ticker-news.md\n",
+          "configs": [
+            {
+              "name": "config",
+              "mode": "0o664",
+              "sha256": "735251b958b1c5648d2da3494e5b949a54a92340dcb604ebb18e7dfaa1711030",
+              "keys": [
+                "[core] repositoryformatversion",
+                "[core] filemode",
+                "[core] bare",
+                "[core] logallrefupdates",
+                "[core] sparseCheckout",
+                "[core] sparseCheckoutCone",
+                "[remote \"*\"] url",
+                "[remote \"*\"] fetch",
+                "[remote \"*\"] promisor",
+                "[remote \"*\"] partialclonefilter",
+                "[branch \"*\"] remote",
+                "[branch \"*\"] merge",
+                "[extensions] worktreeConfig",
+                "[user] email",
+                "[user] name",
+                "[lfs] repositoryformatversion"
+              ]
+            }
+          ],
+          "helper": {
+            "git_blob": "296e47bab2d28f9a019e81b5aef76eeea62a6cc3",
+            "mode": "0o664"
+          },
+          "policy": {
+            "git_blob": "46b4d13bb5302a68b437a257eebe066d07bdc7ff",
+            "mode": "0o664"
+          }
+        },
+        {
+          "name": "macro-fabric-pinned-20261016",
+          "exists": true,
+          "gitdir_qualified_shape": true,
+          "sparse_rules": "/*\n!/*/\n/.claude/\n/.codex/\n/config/\n/scripts/\n",
+          "configs": [
+            {
+              "name": "config",
+              "mode": "0o664",
+              "sha256": "735251b958b1c5648d2da3494e5b949a54a92340dcb604ebb18e7dfaa1711030",
+              "keys": [
+                "[core] repositoryformatversion",
+                "[core] filemode",
+                "[core] bare",
+                "[core] logallrefupdates",
+                "[core] sparseCheckout",
+                "[core] sparseCheckoutCone",
+                "[remote \"*\"] url",
+                "[remote \"*\"] fetch",
+                "[remote \"*\"] promisor",
+                "[remote \"*\"] partialclonefilter",
+                "[branch \"*\"] remote",
+                "[branch \"*\"] merge",
+                "[extensions] worktreeConfig",
+                "[user] email",
+                "[user] name",
+                "[lfs] repositoryformatversion"
+              ]
+            },
+            {
+              "name": "worktrees/macro-fabric-pinned-20261016/config.worktree",
+              "mode": "0o600",
+              "sha256": "bfefdfeb2bf56f4a5282c172fe3a69b4075e13fe3bf3cd54f6611bafa461c276",
+              "keys": [
+                "[core] sparseCheckout",
+                "[core] sparseCheckoutCone"
+              ]
+            }
+          ],
+          "helper": {
+            "git_blob": "75297acb10d0cef4d01730a59fdcad19c7cfd3e6",
+            "mode": "0o600"
+          },
+          "policy": {
+            "git_blob": "46b4d13bb5302a68b437a257eebe066d07bdc7ff",
+            "mode": "0o600"
+          }
+        }
+      ]
+    },
+    {
+      "host": "ubuntu2",
+      "rc": 0,
+      "donors": [
+        {
+          "name": "macro",
+          "exists": true,
+          "gitdir_qualified_shape": true,
+          "sparse_rules": null,
+          "configs": [
+            {
+              "name": "config",
+              "mode": "0o664",
+              "sha256": "7764aa1c14ac634f73f52d6c8d29d785a896d04139414ffaa078ab63dbbeb29a",
+              "keys": [
+                "[core] repositoryformatversion",
+                "[core] filemode",
+                "[core] bare",
+                "[core] logallrefupdates",
+                "[remote \"*\"] url",
+                "[remote \"*\"] fetch",
+                "[remote \"*\"] promisor",
+                "[remote \"*\"] partialclonefilter",
+                "[remote \"*\"] pushurl",
+                "[branch \"*\"] remote",
+                "[branch \"*\"] merge",
+                "[extensions] worktreeConfig",
+                "[user] name",
+                "[user] email"
+              ]
+            }
+          ],
+          "helper": {
+            "git_blob": "75297acb10d0cef4d01730a59fdcad19c7cfd3e6",
+            "mode": "0o664"
+          },
+          "policy": {
+            "git_blob": "46b4d13bb5302a68b437a257eebe066d07bdc7ff",
+            "mode": "0o600"
+          }
+        },
+        {
+          "name": "macro-fabric-pinned-20261016",
+          "exists": false
+        }
+      ]
+    },
+    {
+      "host": "ubuntu3",
+      "rc": 0,
+      "donors": [
+        {
+          "name": "macro",
+          "exists": true,
+          "gitdir_qualified_shape": true,
+          "sparse_rules": null,
+          "configs": [
+            {
+              "name": "config",
+              "mode": "0o644",
+              "sha256": "b015b81d44552cdfa2d4d506459e8bcc31dc7fa24a0d306d3f01de10c8f928d9",
+              "keys": [
+                "[core] repositoryformatversion",
+                "[core] filemode",
+                "[core] bare",
+                "[core] logallrefupdates",
+                "[remote \"*\"] url",
+                "[remote \"*\"] fetch",
+                "[remote \"*\"] promisor",
+                "[remote \"*\"] partialclonefilter",
+                "[branch \"*\"] remote",
+                "[branch \"*\"] merge",
+                "[extensions] worktreeConfig"
+              ]
+            }
+          ],
+          "helper": {
+            "git_blob": "296e47bab2d28f9a019e81b5aef76eeea62a6cc3",
+            "mode": "0o644"
+          },
+          "policy": {
+            "git_blob": "46b4d13bb5302a68b437a257eebe066d07bdc7ff",
+            "mode": "0o644"
+          }
+        },
+        {
+          "name": "macro-fabric-pinned-20261016",
+          "exists": true,
+          "gitdir_qualified_shape": true,
+          "sparse_rules": "/*\n!/*/\n/.claude/\n/.codex/\n/config/\n/scripts/\n",
+          "configs": [
+            {
+              "name": "config",
+              "mode": "0o644",
+              "sha256": "b015b81d44552cdfa2d4d506459e8bcc31dc7fa24a0d306d3f01de10c8f928d9",
+              "keys": [
+                "[core] repositoryformatversion",
+                "[core] filemode",
+                "[core] bare",
+                "[core] logallrefupdates",
+                "[remote \"*\"] url",
+                "[remote \"*\"] fetch",
+                "[remote \"*\"] promisor",
+                "[remote \"*\"] partialclonefilter",
+                "[branch \"*\"] remote",
+                "[branch \"*\"] merge",
+                "[extensions] worktreeConfig"
+              ]
+            },
+            {
+              "name": "worktrees/macro-fabric-pinned-20261016/config.worktree",
+              "mode": "0o644",
+              "sha256": "bfefdfeb2bf56f4a5282c172fe3a69b4075e13fe3bf3cd54f6611bafa461c276",
+              "keys": [
+                "[core] sparseCheckout",
+                "[core] sparseCheckoutCone"
+              ]
+            }
+          ],
+          "helper": {
+            "git_blob": "75297acb10d0cef4d01730a59fdcad19c7cfd3e6",
+            "mode": "0o644"
+          },
+          "policy": {
+            "git_blob": "46b4d13bb5302a68b437a257eebe066d07bdc7ff",
+            "mode": "0o644"
+          }
+        }
+      ]
+    }
+  ]
+}

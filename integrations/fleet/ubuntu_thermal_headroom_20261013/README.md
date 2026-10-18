@@ -5,7 +5,18 @@
 > **Source-owner correction:** Earlier prose calling the combined patch prospective, or treating old policy snapshots as current derates, is historical. The adjacent installed-source regression and PR #1404 own source convergence; Web Fabric integration #1457 owns only its separate Web/Worker MCP surface.
 
 
-**Status:** Installed and observed on the existing M2 Fabric controller; independent source-record draft. NOT proof of sustained physical cooling. This is **not** the separate, held Ubuntu 0/3 host telemetry deployment in PR #1363. No denied host-side activation was retried, and no existing worker, lease, or provider was migrated.
+**Current security release status (2026-10-18):** The independent review of
+`ba3938c79eedbb8f590dfed106b8e0876ee88e91` returned **CHANGES_REQUIRED**.
+The [repaired donor source contract](CLEAN_LINKED_DONOR_SOURCE_REVIEW_20261017.md)
+supersedes its config/index validation and provenance claims. The revised patch
+is tested source awaiting immutable-head review, protected CI, merge and a new
+support generation; it is not installed or accepted live-worker proof.
+
+**Historical installation status:** The earlier thermal/backend changes below
+were installed and observed on the existing M2 controller. This is not proof of
+sustained physical cooling, nor the separate held Ubuntu 0/3 telemetry deployment
+in PR #1363. No denied host-side activation is retried and no worker, lease or
+provider is migrated by this source record.
 
 ## Verified current-policy fence — 2026-10-15 23:44 UTC
 

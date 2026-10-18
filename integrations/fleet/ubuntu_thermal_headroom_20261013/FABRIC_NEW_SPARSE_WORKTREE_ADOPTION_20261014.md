@@ -1,5 +1,16 @@
 # Fabric original-worker creation seam — strict sparse checkout adoption
 
+> **Historical source/fixture record, superseded 2026-10-18.** The current
+> security repair and exact preimage contract are in
+> [CLEAN_LINKED_DONOR_SOURCE_REVIEW_20261017.md](CLEAN_LINKED_DONOR_SOURCE_REVIEW_20261017.md).
+> The October 14 standalone/combined patches and helper pins below must not be
+> replayed over the incumbent M2 stack. Current configured ceilings remain
+> **12/18/12/12**, with Ubuntu2/3 **80°C** new-job admission. Older thermal and
+> capacity numbers below are dated history, not restoration targets.
+> The linked actual-mint script exists in this integration directory but needs
+> private staged executor/helper files and M2 dependencies; its old observations
+> do not establish a self-contained CI test or execution proof for the repair.
+
 **Prepared:** 2026-10-14 UTC. **Status:** SOURCE_READY / TESTED_IN_FIXTURES; **NOT** production-installed, provider-qualified, automatically selected, or accepted. This is the next bounded in-scope consumer step after [Macro draft #9194](https://github.com/mastermindx-market-intelligence/macro/pull/9194). It does not create another queue, retry/auth plane, worker-run registry, cleanup daemon, or source lifecycle.
 
 ## Why the existing helper matters
