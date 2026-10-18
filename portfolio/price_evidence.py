@@ -9,6 +9,7 @@ from __future__ import annotations
 import inspect
 import json
 import math
+import re
 from datetime import date, datetime
 from numbers import Real
 
@@ -16,6 +17,7 @@ READ_SCHEMA = "mastermind.price_read.v1"
 SETTLEMENT_SCHEMA = "mastermind.settlement_price_evidence.v1"
 YAHOO_SCHEMA = "mastermind.yahoo_daily_bar_evidence.v1"
 YAHOO_OPEN_SCHEMA = "mastermind.yahoo_daily_bar_evidence.v2"
+POLYGON_SCHEMA = "mastermind.polygon_snapshot_evidence.v1"
 _YAHOO_SCHEMAS = (YAHOO_SCHEMA, YAHOO_OPEN_SCHEMA)
 MAX_CONTEXT_BYTES = 16_384
 MAX_QUOTES = 128
@@ -89,6 +91,105 @@ _YAHOO_FIELDS = frozenset({
 
 _YAHOO_OPEN_FIELDS = _YAHOO_FIELDS | frozenset({"cache_refresh_basis"})
 
+_POLYGON_FIELDS = frozenset({
+    "schema", "ticker", "field", "price", "currency", "status", "reason",
+    "payload_ticker", "payload_ticker_status", "source_updated_raw", "source_updated_unit",
+    "source_bar_label", "source_bar_label_kind", "cache_anchor_at", "request_started_at",
+    "response_returned_at", "cache_age_observed_at", "cache_age_seconds", "within_cache_ttl",
+    "cache_clock_basis", "market_observed_at", "execution_qualification",
+})
+
+
+def _valid_polygon_context(value):
+    """Check recorded observation consistency; never qualify the selected Open."""
+    if (
+        value["field"] != "day.o" or value["currency"] != "USD"
+        or value["cache_clock_basis"] != "lookup_before_request"
+        or value["source_updated_unit"] != "not_established"
+        or value["source_bar_label"] is not None
+        or value["source_bar_label_kind"] != "not_provided"
+        or value["status"] not in ("available", "partial", "unavailable")
+    ):
+        return False
+    status, reason = value["status"], value["reason"]
+    reasons = {
+        "available": {None},
+        "partial": {
+            "local_clock_regressed", "retrieval_clock_unavailable",
+            "payload_ticker_mismatch", "payload_ticker_unavailable", "snapshot_updated_unavailable",
+        },
+        "unavailable": {
+            "snapshot_context_unavailable", "no_selected_open",
+            "unsupported_selected_value", "snapshot_fields_changed",
+        },
+    }
+    if reason not in reasons[status]:
+        return False
+    symbol = value["payload_ticker"]
+    if symbol is not None and (
+        type(symbol) is not str or not re.fullmatch(r"[A-Za-z0-9._:-]{1,64}", symbol)
+    ):
+        return False
+    symbol_status = "unavailable" if symbol is None else (
+        "matched" if symbol == value["ticker"] else "mismatch"
+    )
+    if value["payload_ticker_status"] != symbol_status:
+        return False
+    updated = value["source_updated_raw"]
+    if updated is not None and (
+        type(updated) is not str or not re.fullmatch(r"[0-9]{1,20}", updated)
+        or not 0 <= int(updated) < 2**64 or str(int(updated)) != updated
+    ):
+        return False
+    clock_keys = ("cache_anchor_at", "request_started_at", "response_returned_at", "cache_age_observed_at")
+    clocks = []
+    for key in clock_keys:
+        item = value[key]
+        if item is None:
+            clocks.append(None)
+        elif type(item) is str:
+            stamp = datetime.fromisoformat(item)
+            if stamp.tzinfo is None or stamp.utcoffset() is None:
+                return False
+            clocks.append(stamp.timestamp())
+        else:
+            return False
+    age, within = value["cache_age_seconds"], value["within_cache_ttl"]
+    if age is not None and (type(age) not in (int, float) or age < 0):
+        return False
+    if within is not None and type(within) is not bool:
+        return False
+    if (age is None) != (within is None):
+        return False
+    known = [clock for clock in clocks if clock is not None]
+    regressed = any(a > b for a, b in zip(known, known[1:]))
+    if age is not None and (
+        clocks[0] is None or clocks[-1] is None or regressed
+        or not math.isclose(age, clocks[-1] - clocks[0], rel_tol=0, abs_tol=0.000001)
+    ):
+        return False
+    if status == "available":
+        return (
+            symbol_status == "matched" and updated is not None
+            and all(clock is not None for clock in clocks) and age is not None
+            and positive_number(value["price"]) is not None
+        )
+    if status == "unavailable":
+        return (
+            symbol is None and updated is None and all(clock is None for clock in clocks)
+            and age is None and (value["price"] is None) == (reason == "no_selected_open")
+        )
+    if positive_number(value["price"]) is None:
+        return False
+    return {
+        "local_clock_regressed": regressed and age is None,
+        "retrieval_clock_unavailable": any(clock is None for clock in clocks),
+        "payload_ticker_mismatch": symbol_status == "mismatch",
+        "payload_ticker_unavailable": symbol_status == "unavailable",
+        "snapshot_updated_unavailable": updated is None,
+    }[reason]
+
+
 
 def _binding_reason(copied, ticker, price, currency):
     if copied.get("ticker") != ticker:
@@ -97,7 +198,7 @@ def _binding_reason(copied, ticker, price, currency):
     field = "price_local" if copied["schema"] in _YAHOO_SCHEMAS else "price"
     if expected is None or positive_number(copied.get(field)) != expected:
         return "price_mismatch"
-    if copied["schema"] == READ_SCHEMA and copied.get("currency") != currency:
+    if copied["schema"] in (READ_SCHEMA, POLYGON_SCHEMA) and copied.get("currency") != currency:
         return "currency_mismatch"
     return None
 
@@ -115,10 +216,11 @@ def _snapshot(value, *, depth=0):
         return None, "context_too_deep"
     try:
         schema = value.get("schema")
-        if type(schema) is not str or schema not in (READ_SCHEMA, *_YAHOO_SCHEMAS):
+        if type(schema) is not str or schema not in (READ_SCHEMA, *_YAHOO_SCHEMAS, POLYGON_SCHEMA):
             return None, "unsupported_schema"
         required = (
             _READ_FIELDS if schema == READ_SCHEMA
+            else _POLYGON_FIELDS if schema == POLYGON_SCHEMA
             else _YAHOO_OPEN_FIELDS if schema == YAHOO_OPEN_SCHEMA
             else _YAHOO_FIELDS
         )
@@ -148,7 +250,7 @@ def _snapshot(value, *, depth=0):
                 return None, "invalid_or_oversized_field"
         if not _text(copied.get("ticker")):
             return None, "invalid_context"
-        price_field = "price" if schema == READ_SCHEMA else "price_local"
+        price_field = "price_local" if schema in _YAHOO_SCHEMAS else "price"
         if copied[price_field] is not None and positive_number(copied[price_field]) is None:
             return None, "invalid_context"
         label = copied.get("source_bar_label")
@@ -169,6 +271,9 @@ def _snapshot(value, *, depth=0):
             if age is not None and (type(age) not in (int, float) or age < 0):
                 return None, "invalid_context"
             if copied["within_cache_ttl"] is not None and type(copied["within_cache_ttl"]) is not bool:
+                return None, "invalid_context"
+        elif schema == POLYGON_SCHEMA:
+            if not _valid_polygon_context(copied):
                 return None, "invalid_context"
         else:
             if copied["read_status"] not in ("returned", "missing", "invalid_value"):
