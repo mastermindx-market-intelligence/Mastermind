@@ -362,6 +362,7 @@ def read_decision_availability(
     verify_receipt: Callable[[dict], bool],
     validate_pending: Callable[[dict, str], str | None],
     inspect_settlement_prices: Callable[[dict | None], dict] | None = None,
+    inspect_provider_diagnostics: Callable[[dict | None], dict] | None = None,
 ) -> dict:
     """Read canonical book files, retaining independent clocks and optional receipt inspection."""
     observed = datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
@@ -418,6 +419,37 @@ def read_decision_availability(
                 settlement_price_inspection = inspection
         except Exception:
             settlement_price_inspection = unavailable
+    provider_diagnostic_inspection = None
+    if inspect_provider_diagnostics is not None:
+        selected_attempt = _decision(selection["latest_attempt"])
+        expected_run_id = selected_attempt.get("run_id") if selected_attempt else None
+        unavailable_provider = {
+            "schema": "mastermind.bot.provider_diagnostic_inspection.v1",
+            "portfolio_id": portfolio_id, "run_id": expected_run_id,
+            "status": "unavailable", "reason": "diagnostic_inspection_unavailable",
+            "candidates": [], "candidates_observed": None,
+            "attempt_coverage": "partial", "provider_start": "not_proven",
+            "effect_reconciliation": "not_performed",
+        }
+        try:
+            # Pass a copied public allowlist, never the selector's mutable row
+            # or its private adapter error/prompt fields.
+            inspection = inspect_provider_diagnostics(
+                dict(selected_attempt) if selected_attempt is not None else None)
+            if (
+                not isinstance(inspection, dict)
+                or inspection.get("schema") != unavailable_provider["schema"]
+                or inspection.get("portfolio_id") != portfolio_id
+                or inspection.get("run_id") != expected_run_id
+                or inspection.get("effect_reconciliation") != "not_performed"
+                or inspection.get("provider_start") != "not_proven"
+            ):
+                provider_diagnostic_inspection = {
+                    **unavailable_provider, "reason": "diagnostic_inspection_identity_mismatch"}
+            else:
+                provider_diagnostic_inspection = inspection
+        except Exception:
+            provider_diagnostic_inspection = unavailable_provider
     account_raw = data["account"]
     if account_raw and any(account_raw.get(key) not in (None, portfolio_id)
                            for key in ("portfolio_id", "book")):
@@ -474,7 +506,23 @@ def read_decision_availability(
                 status="provisional", reason="book_sources_not_stable",
                 context_status="unavailable", price_context=None,
             )
+    if provider_diagnostic_inspection is not None:
+        provider_diagnostic_inspection = {
+            **provider_diagnostic_inspection,
+            "decision_binding_consistency": "changed_during_read" if "decisions" in changed else "observed_stable",
+            "decision_history_status": sources["decisions"]["status"],
+        }
+        # Account and WAL observations have independent authority. Only a
+        # changed decision source invalidates this exact selected-run binding.
+        if "decisions" in changed:
+            provider_diagnostic_inspection.update(
+                status="provisional", reason="decision_source_changed_during_read",
+                run_binding="provisional", candidates=[], candidates_observed=None,
+                candidate_omissions=None, latest_observation_at=None, observation_age_seconds=None,
+            )
     return {
+        **({"provider_diagnostic_inspection": provider_diagnostic_inspection}
+           if provider_diagnostic_inspection is not None else {}),
         **({"settlement_price_inspection": settlement_price_inspection}
            if settlement_price_inspection is not None else {}),
         "schema": SCHEMA, "portfolio_id": portfolio_id, "observed_at": observed_at,
