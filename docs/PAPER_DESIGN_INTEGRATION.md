@@ -257,6 +257,14 @@ real configuration/module write boundaries and during recovery. Both public comm
 intents independently pass real preflight in the same sealed fixture before re-entry;
 the mutex itself is not mocked.
 
+Protected master then advanced to `d5cce731a23588ddbf4df806bd9e8dcfa5eecf24`
+(PR #1604), which adds a separately admitted C2 Personal publisher operation.
+Integrated source `b442c550dde1fe4136f93806516b108b0ef20590` preserves that protected
+operation and its admission rules. Both C2 compatibility applies take their existing
+account lifecycle mutex, while genuine read-only preflights stay lock-free.
+The integrated suite passes **153** tests, including two new Personal publisher
+contention/recovery cases. This does not select or apply either C2 publisher operation.
+
 The real C4 `--preflight-only` invocation then returned `NOT_APPLIED`, preserving
 configuration, manifest and plist bytes and creating no lifecycle lock. It proposes
 original manifest `849e0af6b498408eba843bcbf2c9c500e199c218db06f00db9cb13b54303b071`
