@@ -36,6 +36,14 @@ const unavailable = () => {
 };
 
 describe("authenticated admitted-plan contract", () => {
+  it("accepts the exact canonical Workspace workstream selector grammar", () => {
+    const unusual = { work_ref: "WS:1a.b_c", root_job_id: selection.root_job_id };
+    const x = fixture();
+    x.selection = unusual;
+    x.source_observation.selection = unusual;
+    expect(decodeAdmittedPlan(x, unusual).availability).toBe("AVAILABLE");
+    expect(() => decodeAdmittedPlan(x, { ...unusual, work_ref: "WS:bad!" })).toThrow("ADMITTED_PLAN_INVALID");
+  });
   it("projects only approved fields with ordered prerequisites and no fabricated progress", () => {
     const original = fixture();
     const decoded = decodeAdmittedPlan(original, selection);

@@ -44,7 +44,7 @@ const refuse = (): never => { throw new Error("ADMITTED_PLAN_INVALID"); };
 export function validPlanSelection(value: unknown): value is PlanSelection {
   if (!record(value) || !keys(value, ["work_ref", "root_job_id"])) return false;
   return typeof value.work_ref === "string" && value.work_ref.length <= 128 &&
-    /^WS:[A-Z][A-Z0-9-]*$/.test(value.work_ref) &&
+    /^WS:[A-Z0-9][A-Za-z0-9._-]{1,63}$/.test(value.work_ref) &&
     typeof value.root_job_id === "string" && /^JOB-[0-9]{1,9}$/.test(value.root_job_id);
 }
 
