@@ -84,15 +84,25 @@ def _native_source_pin(worker):
     registration = source.validate_native_registration_document(worker, export)
     if registration['provider'] != 'minimax':
         raise ValueError('native finite source provider differs')
-    producer = source.SYSTEM_ROOT/'capacity-sources/macro'/selected['release_commit']/PRODUCER_RELATIVE
+    source_root = source.SYSTEM_ROOT/'capacity-sources/macro'/selected['release_commit']
+    producer = source_root/PRODUCER_RELATIVE
     with _native_open(producer) as (fd, _):
         content = os.read(fd, 65537)
     if not content or len(content) > 65536:
         raise ValueError('native capacity producer size is invalid')
+    # Custody alone cannot bless new code bytes. Use the existing complete Git
+    # source-closure owner, and require this producer in its qualified material.
+    # A source profile that does not yet include V2 must continue to refuse.
+    from ops.executive_os.capacity_host_artifacts import _verify_installed_repair_source
+    manifest, _ = _verify_installed_repair_source(source_root, selected['release_commit'])
+    rows = [row for row in manifest['material'] if row['path'] == str(PRODUCER_RELATIVE)]
+    if (len(rows) != 1 or rows[0]['sha256'] != owner.sha256_bytes(content)
+            or rows[0]['size'] != len(content)):
+        raise ValueError('native producer is outside the qualified source material')
     if _native_read_config(export_path, selected['export_sha256']) != export:
         raise ValueError('native registration changed during staging')
     return {'macro_release': selected['release_commit'],
-            'producer_sha256': owner.sha256_bytes(content)}
+            'producer_sha256': rows[0]['sha256']}
 
 
 class ProductionFiniteStagingHost(owner.ProductionCeoSubmitHost):

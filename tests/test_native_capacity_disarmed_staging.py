@@ -1,4 +1,5 @@
 """Native source preparation stays inert inside the original config owner."""
+import copy
 import json
 from types import SimpleNamespace
 
@@ -125,7 +126,26 @@ def test_disarmed_service_does_not_construct_native_acquisition(
     assert observation.requests == []
 
 
-def test_native_stage_pin_comes_from_existing_export_and_sealed_producer(bound):
+@pytest.fixture
+def qualified_source(monkeypatch):
+    from ops.executive_os import capacity_host_artifacts as closure
+    from ops.executive_os import capacity_source_contract as source
+    content = b'"""Inert test source; must never execute."""\nraise AssertionError("not executable")\n'
+    manifest = {"material": [{"path": "engine/provider_capacity_v2.py",
+                             "sha256": owner.sha256_bytes(content), "size": len(content)}]}
+    calls = []
+
+    def verify(root, commit):
+        assert root == source.SYSTEM_ROOT / "capacity-sources/macro" / ("b" * 40)
+        assert commit == "b" * 40
+        calls.append((root, commit))
+        return copy.deepcopy(manifest), object()
+
+    monkeypatch.setattr(closure, "_verify_installed_repair_source", verify)
+    return SimpleNamespace(content=content, manifest=manifest, calls=calls)
+
+
+def test_native_stage_pin_comes_from_existing_export_and_sealed_producer(bound, qualified_source):
     from ops.executive_os import capacity_source_contract as source
     bound.publish()
     worker = bound.f.config
@@ -140,6 +160,7 @@ def test_native_stage_pin_comes_from_existing_export_and_sealed_producer(bound):
     assert pin == {"macro_release": "b" * 40,
                    "producer_sha256": owner.sha256_bytes(content)}
     assert worker["native_capacity_enrollment"]["enrollment_state"] == "unenrolled"
+    assert len(qualified_source.calls) == 1
 
 
 @pytest.mark.parametrize("fault", ["missing", "empty", "oversize", "revoked", "source", "digest"])
@@ -174,13 +195,13 @@ def test_legacy_definition_does_not_read_or_infer_native_pin(monkeypatch):
     assert staging._native_source_pin({"worker_id": "minimax-finite-01"}) is None
 
 
-def test_native_stage_refuses_source_revocation_between_reads(bound, monkeypatch):
+def test_native_stage_refuses_source_revocation_between_reads(bound, monkeypatch, qualified_source):
     from control_plane import codex_provider_realm as realm
     from ops.executive_os import capacity_source_contract as source
     bound.publish()
     producer = source.SYSTEM_ROOT / "capacity-sources/macro" / ("b" * 40) / "engine/provider_capacity_v2.py"
     producer.parent.mkdir(parents=True)
-    producer.write_bytes(b"source")
+    producer.write_bytes(qualified_source.content)
     original = realm._native_read_config
     reads = []
 
@@ -271,3 +292,53 @@ def test_native_pin_does_not_accept_unprotected_source_file(bound, monkeypatch):
     monkeypatch.setattr(realm, "_native_open", strict_producer)
     with pytest.raises(ValueError):
         staging._native_source_pin(bound.f.config)
+
+
+@pytest.mark.parametrize("fault", ["producer-bytes", "unlisted", "size", "duplicate", "closure-refusal"])
+def test_native_source_origin_failure_preserves_original_staging_preimage(
+        bound, installed, qualified_source, monkeypatch, fault):
+    from ops.executive_os import capacity_source_contract as source
+    from ops.executive_os import capacity_host_artifacts as closure
+    bound.export.write_bytes(json.dumps(bound.document, sort_keys=True, separators=(",", ":")).encode())
+    bound.f.config["native_capacity_enrollment"]["registration_source"]["export_sha256"] = owner.sha256_bytes(bound.export.read_bytes())
+    bound.f.config["native_capacity_enrollment"]["enrollment_state"] = "unenrolled"
+    producer = source.SYSTEM_ROOT / "capacity-sources/macro" / ("b" * 40) / "engine/provider_capacity_v2.py"
+    producer.parent.mkdir(parents=True)
+    producer.write_bytes(qualified_source.content)
+    export_before = bound.export.read_bytes()
+    mode_before = producer.stat().st_mode
+    if fault == "producer-bytes":
+        producer.write_bytes(b"substituted source with unchanged protected metadata")
+    elif fault == "unlisted":
+        qualified_source.manifest["material"] = []
+    elif fault == "size":
+        qualified_source.manifest["material"][0]["size"] += 1
+    elif fault == "duplicate":
+        qualified_source.manifest["material"] *= 2
+    elif fault == "closure-refusal":
+        def refuse(*args):
+            raise closure.CapacityHostArtifactError("SOURCE_GIT_BLOB_MISMATCH")
+        monkeypatch.setattr(closure, "_verify_installed_repair_source", refuse)
+    retained_disarm(installed)
+    prior_control = owner.CONTROL_CONFIG.read_bytes()
+    prior_worker = owner.WORKER_CONFIG.read_bytes()
+    prior_receipt = owner.AUTONOMY_RECEIPT.read_bytes()
+
+    delta_reads = []
+
+    def native_delta():
+        delta_reads.append(True)
+        return dict(installed.delta, native_capacity_v2=staging._native_source_pin(bound.f.config))
+
+    monkeypatch.setattr(installed.host, "read_delta", native_delta)
+    with pytest.raises((ValueError, owner.HostControlError)):
+        stage(installed)
+    assert delta_reads == [True]
+    if fault != "closure-refusal":
+        assert len(qualified_source.calls) == 1
+    assert producer.stat().st_mode == mode_before
+    assert bound.export.read_bytes() == export_before
+    assert owner.CONTROL_CONFIG.read_bytes() == prior_control
+    assert owner.WORKER_CONFIG.read_bytes() == prior_worker
+    assert owner.AUTONOMY_RECEIPT.read_bytes() == prior_receipt
+    assert not installed.marker.exists()
