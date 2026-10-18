@@ -331,3 +331,95 @@ def test_original_root_uniqueness_is_bounded_and_fail_closed(setup):
         s.runtime.store.unique_root_created_event(s.epoch.root_job_id)
     with pytest.raises(ValueError):
         s.owner._stored_request(read_ref)
+
+
+def test_reference_projection_is_canonical_read_only_and_cursor_bound(setup):
+    s = setup
+    expected = populate(s)
+    work_ref = s.binding.work_ref if hasattr(s.binding, "work_ref") else "WS:WORKSPACE-AGENT-PROGRAM"
+    before = events(s)
+    s.service.calls.clear()
+    page = s.owner.session_reply_references(
+        principal=s.projection, work_ref=work_ref, page_size=1)
+    assert page["schema"] == "mastermind.session_reply_references.v1"
+    assert len(page["references"]) == 1
+    assert page["references"][0]["read_ref"] == expected
+    assert page["references"][0]["reference_only"] is True
+    assert page["status"] == "PARTIAL"
+    assert events(s) == before
+    assert not s.service.calls
+    next_page = s.owner.session_reply_references(
+        principal=s.projection, work_ref=work_ref, page_size=1,
+        cursor=page["next_cursor"])
+    assert next_page["references"] == []
+    assert next_page["status"] == "COMPLETE"
+    with pytest.raises(BridgeError):
+        s.owner.session_reply_references(principal=s.projection,
+            work_ref="WS:OTHER", cursor=page["next_cursor"])
+    with pytest.raises(BridgeError):
+        s.owner.session_reply_references(principal=s.projection,
+            work_ref=work_ref, cursor=page["next_cursor"] + "Z")
+    stranger = dataclasses.replace(s.projection, subject_digest="f" * 64)
+    assert s.owner.session_reply_references(
+        principal=stranger, work_ref=work_ref)["references"] == []
+    with pytest.raises(BridgeError):
+        s.owner.session_reply_references(
+            principal=stranger, work_ref=work_ref, cursor=page["next_cursor"])
+    assert events(s) == before
+
+
+def test_reference_projection_fails_closed_on_duplicate_root(setup):
+    s = setup
+    populate(s)
+    with s.runtime.store.transaction() as conn:
+        s.runtime.store.append_event(
+            conn, aggregate_type="test", aggregate_id="duplicate-root-ref",
+            event_type="JOB_CREATED", job_id=s.epoch.root_job_id,
+            command_id="test-r2-duplicate-root-ref", payload={"duplicate": True})
+    with pytest.raises(BridgeError):
+        s.owner.session_reply_references(
+            principal=s.projection, work_ref="WS:WORKSPACE-AGENT-PROGRAM")
+
+
+def test_reference_projection_sparse_history_empty_intermediate_page(setup):
+    s = setup
+    expected = populate(s)
+    s.service.calls.clear()
+    store = s.runtime.store
+    with store.transaction() as conn:
+        for i in range(275):
+            store.append_event(conn, aggregate_type="test", aggregate_id="noise",
+                event_type="TEST_NOISE", command_id=f"test-r2-noise-{i}",
+                payload={"synthetic": i})
+    before = events(s)
+    first = s.owner.session_reply_references(
+        principal=s.projection, work_ref="WS:WORKSPACE-AGENT-PROGRAM")
+    assert first["references"] == []
+    assert first["status"] == "PARTIAL"
+    assert first["next_cursor"]
+    with store.transaction() as conn:
+        store.append_event(conn, aggregate_type="test", aggregate_id="new-later",
+            event_type="TEST_NEW", command_id="test-r2-appended-after-watermark",
+            payload={"late": True})
+    second = s.owner.session_reply_references(
+        principal=s.projection, work_ref="WS:WORKSPACE-AGENT-PROGRAM",
+        cursor=first["next_cursor"])
+    assert [r["read_ref"] for r in second["references"]] == [expected]
+    assert all(r["request_event_id"] <= first["high_water"]
+               for r in second["references"])
+    assert before == events(s)
+    assert not s.service.calls or all(c["operation"] != "send_message" for c in s.service.calls)
+
+
+def test_reference_projection_oversized_candidate_is_unavailable(setup):
+    s = setup
+    populate(s)
+    with s.runtime.store.transaction() as conn:
+        s.runtime.store.append_event(
+            conn, aggregate_type="session_bridge_continue",
+            aggregate_id="oversized", event_type="SESSION_BRIDGE_CONTINUE_REQUESTED",
+            actor="executive-session-bridge", command_id="test-r2-oversized-request",
+            payload={"untrusted": "X" * 70000})
+    with pytest.raises(BridgeError):
+        s.owner.session_reply_references(
+            principal=s.projection, work_ref="WS:WORKSPACE-AGENT-PROGRAM")

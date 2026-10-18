@@ -4538,6 +4538,27 @@ class RuntimeStore:
                 raise ValueError("original root changed")
             return _event_from_row(row)
 
+    def bounded_event_by_id(
+        self, event_id: int, *, max_payload_bytes: int = 65536,
+    ) -> Event | None:
+        """Read one exact Event only after checking its UTF-8 payload byte size."""
+        if type(event_id) is not int or event_id < 1:
+            raise ValueError("invalid event ID")
+        if type(max_payload_bytes) is not int or not 1 <= max_payload_bytes <= 65536:
+            raise ValueError("invalid payload limit")
+        with self.read() as conn:
+            size = conn.execute(
+                "SELECT length(CAST(payload_json AS BLOB)) FROM events WHERE event_id=?",
+                (event_id,),
+            ).fetchone()
+            if size is None:
+                return None
+            if size[0] > max_payload_bytes:
+                raise ValueError("event payload budget exceeded")
+            row = conn.execute("SELECT * FROM events WHERE event_id=?",
+                               (event_id,)).fetchone()
+            return None if row is None else _event_from_row(row)
+
     def bounded_event_metadata_window(
         self, *, high_water: int | None = None,
         before_event_id: int | None = None, limit: int = 256,

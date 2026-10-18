@@ -7,6 +7,9 @@ only send/dedup owner; this module creates no endpoint, retry or session store.
 from __future__ import annotations
 
 import dataclasses
+import base64
+import hmac
+import secrets
 from contextlib import contextmanager
 import hashlib
 import json
@@ -142,6 +145,7 @@ class RuntimeSessionReturn:
         self.runtime, self.fabric, self.codex = runtime, fabric, codex
         self.socket_path, self.service_call = Path(socket_path), service_call
         self._trusted_read_pair = _trusted_read_pair(authorized_policies)
+        self._reference_cursor_key = secrets.token_bytes(32)
 
     def _target(self, target_ref):
         if target_ref.startswith("codex:"):
@@ -552,6 +556,118 @@ class RuntimeSessionReturn:
         except Exception:
             raise BridgeError("source_unavailable",
                               "authorized canonical continuation is unavailable") from None
+
+    def session_reply_references(
+        self, *, principal, work_ref: str, root_job_id: str | None = None,
+        cursor: str | None = None, page_size: int = 16,
+    ) -> dict:
+        """READ-only bounded projection from immutable original request Events.
+
+        Rows are REFERENCE_ONLY, never COMMIT, reply availability or parent ACK.
+        Process-local signed cursors expire on composition restart. This method
+        does not allocate an active operation slot or issue any Dialogue effects.
+        """
+        try:
+            identity = _principal(principal)
+            if (type(work_ref) is not str or _TOKEN.fullmatch(work_ref) is None
+                    or (root_job_id is not None and
+                        (type(root_job_id) is not str or _TOKEN.fullmatch(root_job_id) is None))
+                    or type(page_size) is not int or not 1 <= page_size <= 32):
+                raise ValueError("invalid reference selector")
+            scope = hashlib.sha256(_canonical({
+                "principal": identity, "scopes": tuple(principal.scopes),
+                "work_ref": work_ref, "root_job_id": root_job_id,
+            })).hexdigest()
+            if cursor is None:
+                watermark, before = None, None
+            else:
+                if type(cursor) is not str or len(cursor) > 2048:
+                    raise ValueError("invalid cursor")
+                raw = base64.urlsafe_b64decode(cursor.encode("ascii"))
+                if len(raw) > 384 or len(raw) < 33:
+                    raise ValueError("invalid cursor size")
+                body, mac = raw[:-32], raw[-32:]
+                expected = hmac.digest(self._reference_cursor_key, body, "sha256")
+                if not hmac.compare_digest(mac, expected):
+                    raise ValueError("invalid cursor authentication")
+                state = json.loads(body)
+                if (type(state) is not dict or set(state) != {"v", "s", "w", "p"}
+                        or state["v"] != 1 or state["s"] != scope
+                        or type(state["w"]) is not int or state["w"] < 0
+                        or type(state["p"]) is not int or state["p"] < 1):
+                    raise ValueError("invalid cursor binding")
+                watermark, before = state["w"], state["p"]
+            watermark, window = self.runtime.store.bounded_event_metadata_window(
+                high_water=watermark, before_event_id=before, limit=256)
+            rows = []
+            # Charge pessimistically for each nested root and candidate Event,
+            # even when its actual payload is smaller. No full-history getter.
+            candidate_reads = 0
+            position = None
+            for meta in window:
+                position = meta["event_id"]
+                if (meta["event_type"] != _EVENT
+                        or meta["aggregate_type"] != "session_bridge_continue"
+                        or meta["actor"] != _ACTOR):
+                    continue
+                candidate_reads += 1
+                if candidate_reads > 32:
+                    # Resume before this *uninspected* candidate.
+                    position += 1
+                    break
+                if meta["payload_bytes"] > 65536:
+                    raise ValueError("oversized original request")
+                event = self.runtime.store.bounded_event_by_id(position)
+                if event is None or event.event_type != _EVENT:
+                    raise ValueError("request changed")
+                value = event.payload
+                _validate_payload(value)
+                if (value["read_ref"] != "session-reply-" + _request_key(value["operation_key"])
+                        or event.command_id != _PREFIX + _request_key(value["operation_key"])
+                        or (event.job_id, event.attempt_id, event.worker_id) !=
+                        (value["job_id"], value["attempt_id"], value["worker_id"])):
+                    raise ValueError("request binding changed")
+                if (value["context"]["work_ref"] != work_ref
+                        or (root_job_id is not None and value["root_job_id"] != root_job_id)
+                        or not _read_matches_original(
+                            value["principal"], identity, principal,
+                            trusted_pair=self._trusted_read_pair)):
+                    continue
+                root = self.runtime.store.unique_root_created_event(value["root_job_id"])
+                if (root.event_id != value["root_event_id"]
+                        or _digest(root.to_dict()) != value["root_event_sha256"]):
+                    raise ValueError("original root changed")
+                rows.append({
+                    "read_ref": value["read_ref"],
+                    "operation_key": value["operation_key"],
+                    "request_ref": event.command_id,
+                    "request_event_id": event.event_id,
+                    "request_revision": _digest(event.to_dict()),
+                    "requested_at": event.created_at,
+                    "work_ref": work_ref,
+                    "root_job_id": value["root_job_id"],
+                    "target_ref": value["target_ref"],
+                    "reference_only": True,
+                })
+                if len(rows) >= page_size:
+                    break
+            # Never claim completeness when a partial metadata window exists.
+            more = position is not None and position > 1
+            next_cursor = None
+            if more:
+                body = _canonical({"v": 1, "s": scope, "w": watermark, "p": position})
+                next_cursor = base64.urlsafe_b64encode(
+                    body + hmac.digest(self._reference_cursor_key, body, "sha256")
+                ).decode("ascii")
+            if _principal(principal) != identity:
+                raise ValueError("authorization changed")
+            return {"schema": "mastermind.session_reply_references.v1",
+                    "status": "PARTIAL" if more else "COMPLETE",
+                    "references": rows, "next_cursor": next_cursor,
+                    "high_water": watermark}
+        except Exception:
+            raise BridgeError("reply_unavailable",
+                              "authorized canonical reply references unavailable") from None
 
     def resolve_operation_read_ref(self, *, principal, operation_key):
         """Recover an original caller's reference using immutable provenance only."""
