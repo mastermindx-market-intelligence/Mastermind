@@ -15,6 +15,8 @@ from typing import Any
 SCHEMA = "mastermind.codex_quota_comparison.v1"
 _WINDOW_NAMES = ("primary", "secondary")
 _HASH = re.compile(r"[0-9a-f]{64}\Z")
+_LIMIT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
+_WINDOW_STATES = frozenset({"UNKNOWN", "MISSING", "NOT_APPLICABLE", "INVALID_OR_STALE", "OBSERVED"})
 _MAX_GAP_SECONDS = 6 * 60 * 60
 _CLOCK_TOLERANCE_SECONDS = 60
 _HEADROOM_GAIN_POINTS = 10.0
@@ -32,7 +34,8 @@ def _number(value: object) -> float | None:
 
 def _validated_sample(raw: object) -> dict[str, Any] | None:
     """Validate native-result shape; provenance stays with the existing owner."""
-    if not isinstance(raw, Mapping) or raw.get("state") != "NATIVE_READS_COMPLETED":
+    if (not isinstance(raw, Mapping) or raw.get("state") != "NATIVE_READS_COMPLETED"
+            or raw.get("api_fallback") is not False):
         return None
     stop = raw.get("stop")
     identity = raw.get("home_identity")
@@ -47,8 +50,7 @@ def _validated_sample(raw: object) -> dict[str, Any] | None:
     if account.get("auth_state") != "MANAGED_CHATGPT_OBSERVED":
         return None
     limit_id = account.get("limit_id")
-    if (not isinstance(limit_id, str) or not limit_id
-            or len(limit_id) > 128 or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]*", limit_id) is None):
+    if not isinstance(limit_id, str) or _LIMIT_ID.fullmatch(limit_id) is None:
         return None
     observed_at = _number(account.get("observed_at_unix"))
     if observed_at is None or observed_at <= 0:
@@ -58,12 +60,19 @@ def _validated_sample(raw: object) -> dict[str, Any] | None:
     if not isinstance(windows, Mapping) or not isinstance(states, Mapping):
         return None
     checked: dict[str, dict[str, float | int]] = {}
+    checked_states: dict[str, str] = {}
     for name in _WINDOW_NAMES:
-        if states.get(name) != "OBSERVED":
+        state = states.get(name)
+        if not isinstance(state, str) or state not in _WINDOW_STATES:
+            return None
+        checked_states[name] = state
+        if state != "OBSERVED":
+            if name in windows:
+                return None
             continue
         window = windows.get(name)
         if not isinstance(window, Mapping):
-            continue
+            return None
         used = _number(window.get("used_percent"))
         remaining = _number(window.get("remaining_percent"))
         reset_at = window.get("resets_at")
@@ -72,11 +81,12 @@ def _validated_sample(raw: object) -> dict[str, Any] | None:
                 or not 0 <= remaining <= 100 or abs(100 - used - remaining) > 0.001
                 or type(reset_at) is not int or reset_at <= observed_at
                 or type(minutes) is not int or minutes <= 0):
-            continue
+            return None
         checked[name] = {"used_percent": used, "remaining_percent": remaining,
                          "resets_at": reset_at, "window_minutes": minutes}
     return {"account_hash": account_hash, "observed_at": observed_at,
-            "limit_id": limit_id, "plan_type": account.get("plan_type"), "windows": checked}
+            "limit_id": limit_id, "plan_type": account.get("plan_type"),
+            "windows": checked, "window_states": checked_states}
 
 
 def compare_native_codex_quota(before: object, after: object) -> dict[str, Any]:
@@ -84,11 +94,15 @@ def compare_native_codex_quota(before: object, after: object) -> dict[str, Any]:
 
     An early timer move with materially recovered headroom is *candidate*
     evidence of refresh; the cause (promotion, explicit reset, server correction,
-    first-request anchoring, etc.) is deliberately unclassified.
+    first-request anchoring, etc.) is deliberately unclassified. A changed
+    window constraint requires rebaseline; any timer movement updates the
+    schedule without proving a promotion. NO_MATERIAL_CHANGE refers only to
+    reset anomalies: consumers must still ingest every fresh quota balance.
     """
     result: dict[str, Any] = {
         "schema": SCHEMA, "state": "UNKNOWN", "reason": "UNVERIFIED_OBSERVATIONS",
         "observed_windows": [], "schedule_changed": False,
+        "constraint_shape_changed": False,
         "early_refresh_candidate": False, "provider_cause": "UNATTRIBUTED",
         "provenance_verified": False,
         "admission_granted": False, "account_switch_authorized": False,
@@ -111,16 +125,29 @@ def compare_native_codex_quota(before: object, after: object) -> dict[str, Any]:
         result["reason"] = "GAP_TOO_LONG_TO_INFER_RESET"
         return result
 
+    old_shape = tuple((name, old["window_states"][name],
+                       old["windows"].get(name, {}).get("window_minutes"))
+                      for name in _WINDOW_NAMES)
+    new_shape = tuple((name, new["window_states"][name],
+                       new["windows"].get(name, {}).get("window_minutes"))
+                      for name in _WINDOW_NAMES)
+    if old_shape != new_shape:
+        result["constraint_shape_changed"] = True
+        result["reason"] = "WINDOW_CONSTRAINTS_CHANGED"
+        return result
+
     for name in _WINDOW_NAMES:
         previous, current = old["windows"].get(name), new["windows"].get(name)
         if not previous or not current or previous["window_minutes"] != current["window_minutes"]:
             continue
         moved = current["resets_at"] - previous["resets_at"]
         headroom_gained = current["remaining_percent"] - previous["remaining_percent"]
-        timer_changed = abs(moved) > _CLOCK_TOLERANCE_SECONDS
+        timer_changed = moved != 0
         if not timer_changed:
             classification = ("HEADROOM_GAIN_WITHOUT_TIMER_PROOF"
                               if headroom_gained >= _HEADROOM_GAIN_POINTS else "NO_TIMER_CHANGE")
+        elif abs(moved) <= _CLOCK_TOLERANCE_SECONDS:
+            classification = "TIMER_ADJUSTED_WITHIN_TOLERANCE"
         elif new["observed_at"] >= previous["resets_at"]:
             classification = "PRIOR_WINDOW_DUE"
         elif moved > 0 and headroom_gained >= _HEADROOM_GAIN_POINTS:

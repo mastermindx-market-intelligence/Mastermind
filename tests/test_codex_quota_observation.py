@@ -35,6 +35,7 @@ def probe(*, at=T, subject="a" * 64, weekly_reset=T + WEEK,
         states["secondary"] = "OBSERVED"
     return {
         "state": state,
+        "api_fallback": False,
         "stop": {"private_group_empty": True, "termination_outcome": "stopped"},
         "home_identity": {"account_id_sha256": subject, "ignored": "secret-do-not-copy"},
         "account": {

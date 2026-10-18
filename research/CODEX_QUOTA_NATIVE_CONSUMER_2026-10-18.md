@@ -71,3 +71,37 @@ The historical CODEX-01 issuer and separate Auth0 registration uncertainties
 remain on their original carriers. This candidate does not retry or resolve
 them. No production Worker, account, host, runtime or installed config changes
 are authorized by this document or by green source tests.
+
+## October 17 evening: native observation trust/shape regression closure
+
+Original managed Codex quota workspace/branch retained. Starting immutable source
+head `36a1fb380a689945b717beb80628b41e27b69aa3`; tracked tree was clean,
+ignored Python test caches preserved, no live writer process observed. Source
+preimage `control_plane/codex_quota_observation.py` Git blob
+`a1370f2190bdb80a9c06288c3ddc4b89d982ab91` was verified before editing.
+
+Nine focused regression cases FAILED on that predecessor, establishing that
+missing/malformed native transport provenance, contradictory native quota window
+shapes, or a 15-second reset-time adjustment could be silently accepted or
+misclassified. This successor now rejects non-native/missing `api_fallback`,
+requires known explicit native window states and valid matching observed
+windows, distinguishes changed constraint shapes with a fail-closed rebaseline
+request, and treats any reset-time movement as a changed schedule without
+inventing a promotional reset. Previously implemented same-subject, limit,
+plan and `provenance_verified=false` safeguards remain. The new
+`constraint_shape_changed` result property is informational only; no
+Capacity admission, switch, redemption or entitlement is granted.
+
+A fresh combined M2 suite passed **144/144** tests across account environment,
+comparison, 18 new hardening tests, reset inventory and native worker factory.
+Python compileall, `git diff --check`, and managed workspace source readback
+passed. No actual native provider RPC, credential, model turn, live reservation,
+worker lease, tool permission or production configuration was changed.
+
+This proof qualifies source behavior only. Independent current-head source and
+security review, hosted exact-head CI, current protected-master compatibility,
+existing quota-owner provenance and claim-time reservation integration, and a
+real originally-parented admitted Codex work return remain outstanding. Keep
+Draft/uninstalled. Existing CODEX-01 and Auth0 unknown effects remain frozen
+on their original carriers; unrelated Fable programme and messaging PR #1587
+remain separate.
