@@ -351,3 +351,127 @@ def test_concurrent_price_refresh_cannot_attach_another_prices_evidence_to_quote
     assert evidence["status"] == "unavailable"
     assert evidence["reason"] == "cache_binding_unavailable"
     assert evidence["source_bar_label"] is None
+
+
+@pytest.mark.parametrize("reader", ["price_local", "quote_cached"])
+def test_same_value_refresh_during_selection_cannot_replace_selected_bar_identity(
+    feed, monkeypatch, reader
+):
+    _, download = feed
+    download["frame"] = bars("multi", ["2026-10-12"], [202.0])
+    read_price()
+    original_record = yahoo_feed._CLOSE_EVIDENCE["AAPL"]
+    refreshes = []
+
+    class RefreshAfterRead(dict):
+        def get(self, key, default=None):
+            selected = super().get(key, default)
+            if key == "AAPL" and not refreshes:
+                # A background request started before this read and publishes a
+                # newer bar now. Its equal scalar does not identify the old read.
+                refreshes.append(key)
+                yahoo_feed._TS[key] = 1001.0
+                yahoo_feed._ASOF[key] = "2026-10-13T15:00:01+00:00"
+                yahoo_feed._CLOSE_EVIDENCE[key] = {
+                    **original_record,
+                    "source_bar_label": "2026-10-13T00:00:00",
+                    "fetched_mono": 1001.0,
+                    "fetch_started_at": "2026-10-13T15:00:01+00:00",
+                    "download_returned_at": "2026-10-13T15:00:04+00:00",
+                }
+            return selected
+
+    monkeypatch.setattr(yahoo_feed, "_CACHE", RefreshAfterRead(yahoo_feed._CACHE))
+    if reader == "price_local":
+        price, evidence = read_price()
+    else:
+        quote = yahoo_feed.quote_cached("AAPL")
+        price, evidence = quote["price_local"], quote["daily_bar_evidence"]
+
+    assert price == 202.0
+    assert evidence["status"] == "unavailable"
+    assert evidence["reason"] == "cache_binding_unavailable"
+    assert evidence["source_bar_label"] is None
+    assert refreshes == ["AAPL"]
+    assert len(download["calls"]) == 1
+
+
+def test_retained_bar_ttl_uses_its_own_age_if_refresh_finishes_during_projection(
+    feed, monkeypatch
+):
+    clock, download = feed
+    download["frame"] = bars("multi", ["2026-10-12"], [202.0])
+    read_price()
+    original_record = dict(yahoo_feed._CLOSE_EVIDENCE["AAPL"])
+    clock["now"] += timedelta(seconds=130)
+    clock["mono"] += 130
+    download["fail"] = True
+    refreshes = []
+
+    class RefreshDuringProjection(dict):
+        def get(self, key, default=None):
+            selected = super().get(key, default)
+            if key == "download_returned_at" and not refreshes:
+                refreshes.append(key)
+                fetched_mono = clock["mono"] - 1.0
+                fetched_at = (clock["now"] - timedelta(seconds=1)).isoformat()
+                yahoo_feed._TS["AAPL"] = fetched_mono
+                yahoo_feed._ASOF["AAPL"] = fetched_at
+                yahoo_feed._CLOSE_EVIDENCE["AAPL"] = {
+                    **original_record,
+                    "fetched_mono": fetched_mono,
+                    "fetch_started_at": fetched_at,
+                    "source_bar_label": "2026-10-13T00:00:00",
+                    "download_returned_at": clock["now"].isoformat(),
+                }
+            return selected
+
+    monkeypatch.setitem(
+        yahoo_feed._CLOSE_EVIDENCE, "AAPL", RefreshDuringProjection(original_record)
+    )
+    price, evidence = read_price()
+
+    assert price == 202.0
+    assert evidence["status"] == "available"
+    assert evidence["source_bar_label"] == original_record["source_bar_label"]
+    assert evidence["fetch_age_seconds"] == 136.0
+    assert evidence["within_cache_ttl"] is False
+    assert refreshes == ["download_returned_at"]
+    assert len(download["calls"]) == 2
+
+
+def test_disabled_ttl_still_describes_the_bound_older_record_as_within_cache_policy(
+    feed, monkeypatch
+):
+    clock, download = feed
+    download["frame"] = bars("multi", ["2026-10-12"], [202.0])
+    read_price()
+    monkeypatch.setenv("YAHOO_FEED_TTL_SEC", "0")
+    clock["now"] += timedelta(seconds=130)
+    clock["mono"] += 130
+
+    price, evidence = read_price()
+
+    assert price == 202.0
+    assert evidence["source_bar_label"] == "2026-10-12T00:00:00"
+    assert evidence["fetch_age_seconds"] == 133.0
+    assert evidence["within_cache_ttl"] is True
+    assert len(download["calls"]) == 1
+
+
+def test_metadata_generation_read_failure_does_not_prevent_scalar_selection(feed, monkeypatch):
+    _, download = feed
+    download["frame"] = bars("multi", ["2026-10-13"], [202.0])
+    read_price()
+
+    class BrokenMetadata(dict):
+        def get(self, *args, **kwargs):
+            raise RuntimeError("synthetic metadata read failure")
+
+    monkeypatch.setattr(yahoo_feed, "_CLOSE_EVIDENCE", BrokenMetadata())
+    price, evidence = read_price()
+
+    assert price == 202.0
+    assert evidence["status"] == "unavailable"
+    assert evidence["source_bar_label"] is None
+    assert len(download["calls"]) == 1

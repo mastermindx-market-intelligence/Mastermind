@@ -173,7 +173,15 @@ def _remember_close_evidence(sym, series, price, fetched_mono, fetched_at, retur
         pass
 
 
-def _close_price_evidence(sym, price, now, fetched_mono, fetched_at) -> dict:
+def _close_evidence_generation(sym):
+    """Pin the metadata record before the scalar read; publication replaces whole records."""
+    try:
+        return _CLOSE_EVIDENCE.get(sym)
+    except Exception:
+        return None  # Metadata capture must not prevent the original scalar read.
+
+
+def _close_price_evidence(sym, price, now, fetched_mono, fetched_at, cached) -> dict:
     """Observational metadata only: a daily-bar label is not a trade or availability time."""
     out = {
         "schema": "mastermind.yahoo_daily_bar_evidence.v1",
@@ -202,9 +210,9 @@ def _close_price_evidence(sym, price, now, fetched_mono, fetched_at) -> dict:
             return out
         out["price_local"] = float(price)
         out["reason"] = "cache_binding_unavailable"
-        cached = _CLOSE_EVIDENCE.get(sym)
         if (
             not isinstance(cached, dict)
+            or _CLOSE_EVIDENCE.get(sym) is not cached
             or cached.get("price_local") != price
             or cached.get("fetched_mono") != fetched_mono
             or cached.get("fetch_started_at") != fetched_at
@@ -214,6 +222,7 @@ def _close_price_evidence(sym, price, now, fetched_mono, fetched_at) -> dict:
         out["reason"] = "cache_clock_invalid"
         if not math.isfinite(age) or age < 0:
             return out
+        ttl = _ttl()
         out.update({
             "status": "available",
             "reason": None,
@@ -221,7 +230,7 @@ def _close_price_evidence(sym, price, now, fetched_mono, fetched_at) -> dict:
             "fetch_started_at": cached.get("fetch_started_at"),
             "download_returned_at": cached.get("download_returned_at"),
             "fetch_age_seconds": round(age, 1),
-            "within_cache_ttl": _fresh(sym, now, _ttl()),
+            "within_cache_ttl": ttl <= 0 or age <= ttl,
         })
         if out["source_bar_label"] is None:
             out.update(status="partial", reason="source_bar_label_unavailable")
@@ -303,11 +312,12 @@ def price_local(ticker: str, asof: str | None = None,
     t = (ticker or "").upper().strip()
     if t:
         warm([t])                                 # no-op when the symbol is still fresh
+    cached = _close_evidence_generation(t) if _evidence is not None else None
     price = _CACHE.get(t) if t else None
     if _evidence is not None:
         try:
             _evidence.update(_close_price_evidence(
-                t, price, time.monotonic(), _TS.get(t), _ASOF.get(t)
+                t, price, time.monotonic(), _TS.get(t), _ASOF.get(t), cached
             ))
         except Exception:
             pass                                  # observation cannot control price selection
@@ -374,6 +384,7 @@ def quote_cached(ticker: str) -> dict | None:
     now = time.monotonic()
     if not t or not _fresh(t, now, _ttl()):
         return None
+    cached = _close_evidence_generation(t)
     price = _CACHE.get(t)
     fetched_mono, fetched_at = _TS.get(t, now), _ASOF.get(t)
     return {
@@ -384,7 +395,7 @@ def quote_cached(ticker: str) -> dict | None:
         "time_kind": "feed_retrieval",
         "age_seconds": max(0, round(now - fetched_mono, 1)),
         "fresh": True,
-        "daily_bar_evidence": _close_price_evidence(t, price, now, fetched_mono, fetched_at),
+        "daily_bar_evidence": _close_price_evidence(t, price, now, fetched_mono, fetched_at, cached),
     }
 
 
