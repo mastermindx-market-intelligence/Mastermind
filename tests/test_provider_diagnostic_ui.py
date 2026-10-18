@@ -61,7 +61,7 @@ def test_new_sdk_panel_shows_bound_contradiction_without_changing_decision_cards
     html = render(data(book), book)
     assert "SDK observations for the recorded attempt" in html
     assert "Contradictory success/error flags" in html
-    assert "SDK raised an exception" in html
+    assert "Invocation ended with an exception" in html
     assert "ResultError" in html and "0.2.168" in html
     assert "2026-10-15 20:00:02 UTC" in html
     assert "37 hours" in html
@@ -77,7 +77,7 @@ def test_new_chinese_panel_keeps_accepted_target_separate():
     assert "本次记录尝试的 SDK 观察" in html
     assert "成功与错误标记相互矛盾" in html
     assert "此错误不会抹去已接受目标" in html
-    assert "SDK 抛出异常" in html
+    assert "调用因异常结束" in html
     assert "37 小时" in html
     assert "8123" not in html  # Existing locale currency uses a thousands separator.
     assert "8,123.45" in html

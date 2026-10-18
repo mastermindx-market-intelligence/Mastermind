@@ -35,6 +35,7 @@ _REASONS = frozenset({
     "stop_sequence", "tool_use", "pause_turn", "refusal", "model_context_window_exceeded",
 })
 _EXCEPTION_CLASSES = frozenset({
+    "ProviderStartRefused",
     "ResultError", "ProcessError", "CLINotFoundError", "CLIConnectionError",
     "CLIJSONDecodeError", "MessageParseError", "TimeoutError", "RuntimeError",
     "PermissionError", "FileNotFoundError", "CancelledError", "KeyboardInterrupt",

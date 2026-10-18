@@ -6830,8 +6830,9 @@ function _providerDiagnosticHtml(d, portfolio, isZh) {
     'error_max_turns', 'error_max_budget_usd', 'error_max_structured_output_retries'];
   var classes = ['ResultError', 'ProcessError', 'CLINotFoundError', 'CLIConnectionError',
     'CLIJSONDecodeError', 'MessageParseError', 'TimeoutError', 'RuntimeError',
-    'PermissionError', 'FileNotFoundError', 'CancelledError', 'KeyboardInterrupt'];
-  var endLabels = {exhausted: say('Stream ended', '数据流结束'), raised: say('SDK raised an exception', 'SDK 抛出异常'),
+    'PermissionError', 'FileNotFoundError', 'CancelledError', 'KeyboardInterrupt',
+    'ProviderStartRefused'];
+  var endLabels = {exhausted: say('Stream ended', '数据流结束'), raised: say('Invocation ended with an exception', '调用因异常结束'),
     interrupted: say('Interrupted', '已中断')};
   function terminal(name, value) {
     if (!value || typeof value !== 'object') return detail(name, say('Unavailable', '不可用'));
@@ -6842,7 +6843,7 @@ function _providerDiagnosticHtml(d, portfolio, isZh) {
       (status !== null ? detail(say('Recorded API status', '记录的 API 状态'), status) : '');
   }
   var headers = [say('Candidate and time', '候选与时间'), say('Observed counts', '观察数量'),
-    say('SDK end and terminal', 'SDK 结束与终端信息'), say('Capture limits', '捕获限制')];
+    say('Invocation end and terminal', '调用结束与终端信息'), say('Capture limits', '捕获限制')];
   var htmlRows = eligible.map(function(c) {
     var ob = c.observation || {}, ts = c.terminals || {}, ex = c.exception || {}, end = c.exit || {};
     var time = stamp(c.recorded_at), seconds = (observed - time) / 1000;
@@ -6860,7 +6861,7 @@ function _providerDiagnosticHtml(d, portfolio, isZh) {
         detail(say('Terminal messages', '终端消息'), count(ts.count)) +
         detail(say('Tool-use blocks', '工具使用块'), count(ob.tool_use_blocks_observed)) +
         detail(say('Tool-result blocks', '工具结果块'), count(ob.tool_result_blocks_observed)),
-      detail(say('SDK end', 'SDK 结束'), Object.prototype.hasOwnProperty.call(endLabels, end.end_state) ? endLabels[end.end_state] : null) +
+      detail(say('Invocation end', '调用结束状态'), Object.prototype.hasOwnProperty.call(endLabels, end.end_state) ? endLabels[end.end_state] : null) +
         (Number.isSafeInteger(end.exit_code) ? detail(say('Recorded exit code', '记录退出码'), end.exit_code) : '') +
         terminal(say('First terminal', '首个终端'), first) +
         (count(ts.count) > 1 ? terminal(say('Last terminal', '末个终端'), last) : '') +
