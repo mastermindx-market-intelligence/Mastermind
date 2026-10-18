@@ -755,7 +755,7 @@ run "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
   'mkdir -p ~/lanes/tmp ~/lanes/ext/active ~/lanes/ext/lanes ~/lanes/orch/fabric' || { RC=$?; log "REMOTE_SETUP_FAILED rc=$RC"; exit "$RC"; }
 
 SUPPORT_FILES=(
-  provider_outcome.py quota_circuit.py
+  provider_outcome.py quota_circuit.py recovery_artifacts.py capacity_preflight.py
   pools.yaml fabric_policy_snapshot.py remote_sub_exec.py fabric_cpu_scope.py native_remote.py fabric_operator_client.py fabric_operator_stop.py fabric_operator_diagnostics.py artifact_production.py artifact_reader.py lane_runtime.py sub.sh slot.py pick.py glm_bound_claude.py model_tier.py yes
   codex_usage.py go_remote_codex.py go_remote_capsule.py
   mm_codex_exec.sh glm_codex_exec.sh go_codex_exec.sh qwen_exec.sh
@@ -764,7 +764,7 @@ SUPPORT_FILES=(
 )
 SUPPORT_MANIFEST="$LOG_DIR/${ID}.support.json"
 REMOTE_SUPPORT_SOURCE="~/lanes/tmp/${ID}.support-src"
-TEMP_FILES+=("$SUPPORT_MANIFEST")
+ # Retain the exact per-run manifest as the pre-task control-flow identity.
 SUPPORT_DIGEST="<verified-code-digest>"
 POLICY_SHA="<verified-policy-digest>"
 if [ "$DRY_RUN" -eq 0 ]; then
@@ -1132,6 +1132,19 @@ while true; do
   break
 done
 WORKER_RC="$RC"
+
+# Copy only small discovery receipts; private session content remains on its
+# original host. Receipt presence never settles execution or authorizes replay.
+for _session_suffix in session-created.json session-retained.json; do
+  if "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
+      "test -f \"\$HOME/lanes/ext/lanes/${ID}.${_session_suffix}\"" >/dev/null 2>&1; then
+    if "$RSYNC_CMD" -aq "$SSH_ALIAS:~/lanes/ext/lanes/${ID}.${_session_suffix}" "$LOG_DIR/${ID}.${_session_suffix}"; then
+      log "SESSION_INDEX_SAVED file=${ID}.${_session_suffix}"
+    else
+      log "SESSION_INDEX_COPY_FAILED remote_index_retained=1"
+    fi
+  fi
+done
 
 mkdir -p "$(dirname "$LOCAL_OUT")" 2>/dev/null || true
 RSYNC_RC=0

@@ -78,8 +78,11 @@ STUDIO_MCP_CODEX_OVERRIDE="$("$HERE/studio_mcp_projection.sh" codex codex-overri
   exit 78
 }
 SRC_HOME="$HERE/codex_glm"
-CODEX_SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/glm_codex_home.XXXXXX")"
-cp "$SRC_HOME/config.toml" "$CODEX_SCRATCH/config.toml"
+if [ -n "${REMOTE_SUB_RUN_ID:-}" ]; then
+  CODEX_SCRATCH="$(POOL_RECOVERY_MODEL="$MODEL" python3 "$HERE/recovery_artifacts.py" create "$HERE" "$REMOTE_SUB_RUN_ID" glm)" || exit 78
+else
+  CODEX_SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/glm_codex_home.XXXXXX")"
+fi
 export CODEX_HOME="$CODEX_SCRATCH"
 CODEX_TERMINAL_CONFIRMED=0
 # Track any backgrounded codex/agent child pid this script may have launched.
@@ -125,12 +128,18 @@ cleanup_codex_home() {
     python3 "$HERE/provider_outcome.py" codex "$CODEX_SCRATCH" "$_exit_status" glm "$MODEL" "${LAST_MSG:-$CODEX_SCRATCH/last_message.txt}" || true
   fi
   if [ "$_exit_status" -ne 0 ] || [ "$CODEX_TERMINAL_CONFIRMED" -ne 1 ]; then
+    if [ -n "${REMOTE_SUB_RUN_ID:-}" ]; then
+      python3 "$HERE/recovery_artifacts.py" retain "$HERE" "$REMOTE_SUB_RUN_ID" "$CODEX_SCRATCH" \
+        "${POOL_ORCHESTRATOR_ID:-}" "${POOL_PARENT_RUN_ID:-}" glm "$MODEL" \
+        "${POOL_LEASE_ID:-}" "${POOL_ACCOUNT:-}" "${LANE_REMOTE_HOST:-}" "$_exit_status" || true
+    fi
     printf 'CODEX_SESSION_RETAINED rc=%s path=%q\n' "$_exit_status" "$CODEX_SCRATCH" >&2 || true
     return 0
   fi
   rm -rf "$CODEX_SCRATCH" 2>/dev/null || rm -rf "$CODEX_SCRATCH" 2>/dev/null || true
 }
 trap cleanup_codex_home EXIT
+cp "$SRC_HOME/config.toml" "$CODEX_SCRATCH/config.toml"
 
 # Remote fleet runs prefer a short-lived broker-bound capability. The provider
 # API key never leaves the controller. The capability is consumed into this
@@ -302,7 +311,7 @@ if [ -n "$DEVELOPER_CONFIG" ]; then
     -c "$STUDIO_MCP_CODEX_OVERRIDE" \
     ${GLM_WORKER_ARGS[@]+"${GLM_WORKER_ARGS[@]}"} \
     -c "$DEVELOPER_CONFIG" \
-    "${CODEX_CONTEXT_ARGS[@]}" \
+    ${CODEX_CONTEXT_ARGS[@]+"${CODEX_CONTEXT_ARGS[@]}"} \
     --dangerously-bypass-approvals-and-sandbox \
     --skip-git-repo-check \
     -C "$CWD" \
@@ -313,7 +322,7 @@ else
   codex exec \
     -c "$STUDIO_MCP_CODEX_OVERRIDE" \
     ${GLM_WORKER_ARGS[@]+"${GLM_WORKER_ARGS[@]}"} \
-    "${CODEX_CONTEXT_ARGS[@]}" \
+    ${CODEX_CONTEXT_ARGS[@]+"${CODEX_CONTEXT_ARGS[@]}"} \
     --dangerously-bypass-approvals-and-sandbox \
     --skip-git-repo-check \
     -C "$CWD" \
@@ -346,7 +355,7 @@ while [ "$rc" -eq 0 ] && [ "$attempt" -lt "$MAX_CONTINUES" ] && ! has_status_lin
       -c "$STUDIO_MCP_CODEX_OVERRIDE" \
       ${GLM_WORKER_ARGS[@]+"${GLM_WORKER_ARGS[@]}"} \
       -c "$DEVELOPER_CONFIG" \
-      "${CODEX_CONTEXT_ARGS[@]}" \
+      ${CODEX_CONTEXT_ARGS[@]+"${CODEX_CONTEXT_ARGS[@]}"} \
       --dangerously-bypass-approvals-and-sandbox \
       --skip-git-repo-check \
       -m "$MODEL" \
@@ -356,7 +365,7 @@ while [ "$rc" -eq 0 ] && [ "$attempt" -lt "$MAX_CONTINUES" ] && ! has_status_lin
     codex -C "$CWD" exec resume --last \
       -c "$STUDIO_MCP_CODEX_OVERRIDE" \
       ${GLM_WORKER_ARGS[@]+"${GLM_WORKER_ARGS[@]}"} \
-      "${CODEX_CONTEXT_ARGS[@]}" \
+      ${CODEX_CONTEXT_ARGS[@]+"${CODEX_CONTEXT_ARGS[@]}"} \
       --dangerously-bypass-approvals-and-sandbox \
       --skip-git-repo-check \
       -m "$MODEL" \

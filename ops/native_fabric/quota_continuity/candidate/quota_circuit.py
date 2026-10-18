@@ -23,10 +23,14 @@ def init_schema(conn):
     cols = {r[1] for r in conn.execute("PRAGMA table_info(leases)")}
     if "quota_outcome_sha256" not in cols:
         conn.execute("ALTER TABLE leases ADD COLUMN quota_outcome_sha256 TEXT")
+    if "quota_scope" not in cols:
+        conn.execute("ALTER TABLE leases ADD COLUMN quota_scope TEXT")
 
 
 def scope_for(br, pool, account):
     spec = br.provider(pool)
+    if not isinstance(account, str) or not account:
+        raise ValueError("quota_account_unqualified")
     rows = [a for a in spec.get("accounts", []) if a.get("name") == account]
     if len(rows) != 1:
         raise ValueError("quota_account_unqualified")
@@ -55,7 +59,10 @@ def cooldown(br, pool, account, conn=None):
 def account_cap(br, pool, acct, base):
     if base is None:
         return None
-    row = cooldown(br, pool, str(acct.get("name") or ""))
+    try:
+        row = cooldown(br, pool, acct.get("name"))
+    except (ValueError, TypeError, KeyError):
+        return None  # A malformed target account cannot close other pools.
     if row is None:
         return base
     if row["until_ts"] > br.now():
@@ -65,7 +72,10 @@ def account_cap(br, pool, acct, base):
 
 def admission_room(br, conn, pool, acct):
     name = str(acct.get("name") or "")
-    row = cooldown(br, pool, name, conn)
+    try:
+        row = cooldown(br, pool, name, conn)
+    except (ValueError, TypeError, KeyError):
+        return False
     if row is None:
         return True
     if row["until_ts"] > br.now():
@@ -74,7 +84,18 @@ def admission_room(br, conn, pool, acct):
     # Other aliases/accounts/products in this allowance count too. The caller
     # holds the incumbent broker lock throughout this check and lease INSERT.
     for held in br._active_leases(conn):
-        if scope_for(br, held["pool"], held["account"]) == wanted:
+        held_scope = held["quota_scope"]
+        if held_scope is None:
+            try:
+                held_scope = scope_for(br, held["pool"], held["account"])
+            except (ValueError, TypeError, KeyError):
+                # Pre-upgrade leases have no captured allowance. An unknown
+                # account in this provider withholds its probe; an unrelated
+                # provider cannot wedge admission or status for every pool.
+                if br.provider_name(held["pool"]) == br.provider_name(pool):
+                    return False
+                continue
+        if held_scope == wanted:
             return False
     return True
 
@@ -83,8 +104,20 @@ def pool_blocked(br, pool):
     accounts = br.provider(pool).get("accounts") or []
     if not accounts:
         return False  # enrollment/ordinary policy remains its incumbent gate.
-    return all((row := cooldown(br, pool, str(a.get("name") or ""))) is not None
-               and row["until_ts"] > br.now() for a in accounts)
+    def blocked(account):
+        try:
+            row = cooldown(br, pool, account.get("name"))
+            return row is not None and row["until_ts"] > br.now()
+        except (ValueError, TypeError, KeyError):
+            return True
+    return all(blocked(a) for a in accounts)
+
+
+def snapshot_cooldown(br, pool, account, conn):
+    try:
+        return cooldown(br, pool, account, conn)
+    except (ValueError, TypeError, KeyError):
+        return {"state": "UNQUALIFIED", "reason": "quota_account_or_scope_invalid"}
 
 
 def observe_locked(br, conn, lease_id, root_id, run_id, outcome_path, process_path):
@@ -118,8 +151,9 @@ def observe_locked(br, conn, lease_id, root_id, run_id, outcome_path, process_pa
             or not lease["granted_at"] <= stamp <= now + 5
             or now - stamp > 28800):
         raise ValueError("quota_observation_time_unqualified")
-    scope = scope_for(br, lease["pool"], lease["account"])
-    prior = cooldown(br, lease["pool"], lease["account"], conn)
+    scope = lease["quota_scope"] or scope_for(br, lease["pool"], lease["account"])
+    prior_row = conn.execute("SELECT * FROM quota_cooldowns WHERE scope=?", (scope,)).fetchone()
+    prior = dict(prior_row) if prior_row else None
     kind = value.get("kind")
     rc = value.get("command_rc")
     if kind in provider_outcome.CAPACITY and type(rc) is int and rc != 0:

@@ -22,6 +22,9 @@ class Retention(unittest.TestCase):
         self.tmp = self.root / 'tmp'; self.tmp.mkdir()
         for name in ('mm_codex_exec.sh', 'glm_codex_exec.sh'):
             shutil.copy(ROOT / 'candidate' / name, self.ext / name)
+        for name in ('recovery_artifacts.py','provider_outcome.py'):
+            shutil.copy(ROOT / 'candidate' / name, self.ext / name)
+        self.serial = 0
         for name in ('codex_glm', 'codex_minimax'):
             path = self.ext / name; path.mkdir()
             (path / 'config.toml').write_text('# inert test configuration\n')
@@ -58,7 +61,7 @@ sys.exit(1 if kind=='failure' else 0)
     def script(self, path, text):
         path.write_text(text); path.chmod(0o700)
 
-    def run_wrapper(self, wrapper, kind, missing=False, usage_fail=False):
+    def run_wrapper(self, wrapper, kind, missing=False, usage_fail=False, scoped=False):
         marker = self.root / 'home.path'
         env = {'PATH': str(self.bin) + os.pathsep + '/usr/bin:/bin',
                'TMPDIR': str(self.tmp), 'GLM_SHIM_TOKEN': 'inert-fixture',
@@ -68,6 +71,12 @@ sys.exit(1 if kind=='failure' else 0)
                'POOL_USAGE_FILE': str(self.root / 'usage.json'), 'POOL_USAGE_RUN_ID': 'fixture'}
         if usage_fail:
             env['FAKE_USAGE_FAIL'] = '1'
+        self.serial += 1
+        if scoped:
+            env.update(REMOTE_SUB_RUN_ID='scoped-fixture-'+str(self.serial),
+                POOL_ORCHESTRATOR_ID='fixture-root', POOL_PARENT_RUN_ID='fixture-parent',
+                POOL_ACCOUNT='fixture-account', POOL_LEASE_ID='fixture-lease',
+                LANE_REMOTE_HOST='fixture-host')
         result = subprocess.run(['/bin/bash', str(self.ext / wrapper), str(self.root),
             'fixture-model', str(self.root / 'missing' if missing else self.prompt)],
             env=env, text=True, capture_output=True, timeout=15)
@@ -76,6 +85,30 @@ sys.exit(1 if kind=='failure' else 0)
         self.assertNotIn('unfinished state', result.stderr)
         self.assertNotIn('inert test configuration', result.stderr)
         return result, retained
+
+    def test_fabric_homes_indexed_before_and_after_interruption(self):
+        for wrapper in ('mm_codex_exec.sh','glm_codex_exec.sh'):
+            for kind in ('failure','progress','blocked','signal'):
+                with self.subTest(wrapper=wrapper, kind=kind):
+                    result, _ = self.run_wrapper(wrapper, kind, scoped=True)
+                    run = 'scoped-fixture-'+str(self.serial)
+                    created = json.loads((self.ext/'lanes'/(run+'.session-created.json')).read_text())
+                    home = Path(created['home_path'])
+                    self.assertEqual(created['root_id'],'fixture-root')
+                    self.assertEqual(created['home_inode'],home.stat().st_ino)
+                    self.assertTrue((home/'sessions'/'fixture.jsonl').exists())
+                    if kind != 'signal':
+                        index = json.loads((self.ext/'lanes'/(run+'.session-retained.json')).read_text())
+                        self.assertEqual(index['command_rc'],result.returncode)
+                        self.assertEqual(index['home_path'],str(home))
+
+    def test_fabric_completed_home_removed_and_creation_receipt_preserved(self):
+        result, _ = self.run_wrapper('mm_codex_exec.sh','complete',scoped=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        run = 'scoped-fixture-'+str(self.serial)
+        created = json.loads((self.ext/'lanes'/(run+'.session-created.json')).read_text())
+        self.assertFalse(Path(created['home_path']).exists())
+        self.assertFalse((self.ext/'lanes'/(run+'.session-retained.json')).exists())
 
     def test_failed_and_incomplete_sessions_survive(self):
         for wrapper in ('mm_codex_exec.sh','glm_codex_exec.sh'):

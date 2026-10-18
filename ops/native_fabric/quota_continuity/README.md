@@ -26,8 +26,9 @@ proof/installation operations remain held and are not used as this patch's tests
   database. Both picker exclusion and locked reservation consult those rows.
   Expiry allows one lease across the shared allowance to probe; its qualified
   success clears the row. Old successes do not clear newer exhaustion.
-* Model aliases share their account's allowance. Existing provider/account
-  metadata may declare `quota_scope` to join products or accounts known to share
+* Model aliases conservatively share a short account cooldown. This is a backoff
+  decision, not proof that every model allowance is exhausted. Existing
+  provider/account metadata may declare `quota_scope` to join products or accounts known to share
   a subscription. This patch does not invent a Cursor/Grok entitlement mapping
   or edit account configuration. Unknown cross-product sharing remains unproven.
 * Task packets remain in existing private per-run artifacts even when no route
@@ -36,9 +37,10 @@ proof/installation operations remain held and are not used as this patch's tests
   incumbent cleanup behavior. These files are not queued work or permission to
   resume an old process.
 * `request --quota-fallback` permits at most three sequential attempts within the
-  existing commission wall-clock fuse, only after a typed **initial** capacity
+  existing commission wall-clock fuse, only after a typed **pre-task** capacity
   rejection, verified process cleanup, strict terminal publication and actual
-  release of the original provider lease. Every successor has its own run ID,
+  release of the original provider lease. A CLI's first visible rejection alone
+  does not establish that startup hooks or MCP servers had no effects. Every successor has its own run ID,
   original root/parent, frozen task digest and immutable predecessor link.
 * Exact-run status/result/acceptance remain exact. `status --follow` and bounded
   `wait --follow` expose the actual successor plus earlier failed attempts. The
@@ -47,6 +49,49 @@ proof/installation operations remain held and are not used as this patch's tests
   reviews and accepts the actual successful successor.
 * A crash or missing final controller receipt is unconfirmed execution. Reading
   it never starts another worker. There is no new background scheduler or queue.
+
+## Pre-task capacity check
+
+For eligible MiniMax and GLM Claude attempts, the existing admitted wrapper makes
+one small request after binding its exact leased account, endpoint and model, but
+before starting the task CLI. It submits a fixed prompt with `max_tokens: 1` and
+no task bytes, tools, MCP servers or system prompt. It does not discover keys,
+change credentials, redirect requests, add a provider, or raise a spending limit.
+
+The check has a 20-second whole-response deadline, a 64-KiB response limit, no
+redirects and no retries. It remains inside the original commission timeout.
+Success, timeout, server errors and unrecognized responses let the original CLI
+proceed. Success reserves no capacity; the subsequent task can still hit a limit.
+The extra request consumes input and up to one generated token and can increase
+request-count usage noticeably for very small tasks.
+
+Only a documented typed capacity rejection causes the wrapper to return before
+CLI execution. GLM's numeric API codes distinguish quota/rate limits from its
+other HTTP 429 responses, including billing, plan restrictions and policy
+restrictions. Known denials stop without migration; unknown codes remain unknown.
+No code is extracted from an error message or assistant prose.
+
+Continuation verifies the probe's request digest, control-flow source hashes,
+immutable remote support digest, exact run/account/lease/model/process receipt,
+strict ledger outcome, released lease, and frozen packet digest. A task-start
+reservation prevents conversion of a later CLI error into pre-task evidence.
+Each failed attempt remains independently observable and auditable.
+
+## Retention and reclamation
+
+An interrupted or incomplete Codex home remains private on its original host.
+Creation and retention indexes identify its run, root, parent, account, lease,
+model, original inode and path. The controller copies only those small indexes;
+session contents stay on the worker. Status describes the reference as unprobed
+and does not grant resume or deletion authority.
+
+`recovery_artifacts.py plan` is read-only. Explicit `reclaim --abandon` requires
+the reviewed index digest, original identities, proven process cleanup and no
+active marker. It rechecks these under the existing admission lock, deletes only
+the exact private home with safe file-descriptor traversal, and preserves an
+intent and completion receipt. It never kills a process, releases a lease,
+replays a task, or expires all retained sessions by age. A missing final retention
+index can use the bound creation index after cleanup has actually been proven.
 
 ## Limits that remain explicit
 
@@ -63,13 +108,13 @@ conversation/lifecycle owner. This candidate does not supply that owner.
 
 ## Source and validation layout
 
-`candidate/` contains the proposed native files. `source/lane_runtime.py` is the
-unchanged inspected cleanup-receipt dependency used by offline tests, not a new
-runtime owner. `baseline.json` records exact preimage hashes. The MCP facade
+`candidate/` contains the proposed native files. `source/` contains unchanged
+inspected dependencies needed by offline tests. `baseline.json` records exact
+preimage hashes. The MCP facade
 change belongs to `integrations/studio_direct_mcp/fabric-backend.mjs` in the same PR.
 
 Run the offline tests with `python3 -m unittest discover -s tests -v` from this
-directory. Run the facade tests with `node --test fabric-backend.test.mjs` in its
+directory. Run the facade tests with `node fabric-backend.test.mjs` in its
 incumbent integration directory. Fixtures use isolated databases and inert CLI
 processes; they do not spend provider quota, read real credentials or exercise
 the held Executive proof operations.
@@ -78,6 +123,30 @@ Claude result/error enums were checked against the official published
 `@anthropic-ai/claude-agent-sdk` 0.3.301 declarations and the official CLI reference:
 https://app.unpkg.com/@anthropic-ai/claude-agent-sdk@0.3.301/files/sdk.d.ts
 https://code.claude.com/docs/en/cli-reference
+
+The bounded Messages request and vendor error classifications use primary docs:
+https://platform.minimax.io/docs/api-reference/text-anthropic-api
+https://platform.minimax.io/docs/api-reference/errorcode
+https://docs.z.ai/devpack/tool/others
+https://docs.z.ai/api-reference/api-code
+Codex rollout enums were checked against its official protocol source:
+https://github.com/openai/codex/blob/main/codex-rs/protocol/src/protocol.rs
+
+## Deployment order
+
+Install the complete native source group from the actual merged immutable
+release before upgrading the same existing Fabric facade account. The facade
+checks that the adapter supports both quota fallback and successor-following
+before creating a controller; an older adapter produces
+`ADAPTER_CONTINUITY_UNAVAILABLE`. Preserve the account, port, tunnel, installed
+protocol selection and current runtime owner.
+
+The flat native kit must not be updated while controllers can still reopen its
+files. Use a dispatch-ingress pause and a verified drain; the broker lock alone
+is not such a barrier. Existing workers retain their immutable remote releases
+and settle through their original controllers. Verify all installed hashes and
+the dependency closure before reopening ingress. The reviewed rollout procedure
+must establish how every supported native entry point is fenced.
 
 Publication, independent review, protected merge, installed native bytes, facade
 restart and an observed native canary are separate gates. This source checkpoint

@@ -16,6 +16,19 @@ import provider_outcome as outcome
 import quota_circuit as circuit
 
 
+def preflight_fixture(directory,run,model='fixture-model'):
+    """Test-owned immutable source binding, using real candidate source hashes."""
+    import capacity_preflight
+    manifest={n:outcome.digest((ROOT/'candidate'/n).read_bytes()) for n in ('sub.sh','capacity_preflight.py')}
+    sha=outcome.digest(json.dumps({'schema':'remote-support-code.v1','files':manifest},sort_keys=True,separators=(',',':')).encode())
+    (directory/(run+'.support.json')).write_text(json.dumps(manifest))
+    return dict(schema='mastermind.capacity_preflight.v1',task_cli_started=False,attempts=1,
+        api_status=429,error_type='rate_limit_error',support_digest=sha,
+        control_flow_owner='sub.sh',control_flow_sha256=manifest['sub.sh'],
+        helper_sha256=manifest['capacity_preflight.py'],endpoint_sha256='a'*64,
+        response_sha256='b'*64,request_sha256=outcome.digest(capacity_preflight.payload(model)))
+
+
 def rejection(code='rate_limit', turns=1):
     return [
         {'type': 'system', 'subtype': 'init'},
@@ -61,7 +74,19 @@ class Classification(unittest.TestCase):
         for raw in [b'{"type":', b'quota exhausted', b'[{"type":"result"}]xxx']:
             display, row, _ = outcome.parse_claude(raw, 1)
             self.assertFalse(row['initial_rejection'])
-            self.assertEqual(display, '')
+            self.assertEqual(display, '' if raw.startswith((b'{',b'[')) else raw.decode())
+
+    def test_complete_stream_json_is_parsed(self):
+        raw = b''.join(json.dumps(row).encode()+b'\n' for row in rejection())
+        _, row, _ = outcome.parse_claude(raw, 1)
+        self.assertEqual(row['kind'],'rate_limit')
+        self.assertTrue(row['initial_rejection'])
+        import importlib.util
+        spec=importlib.util.spec_from_file_location('quota_fixture_glm',ROOT/'candidate/glm_bound_claude.py')
+        glm_bound_claude=importlib.util.module_from_spec(spec);spec.loader.exec_module(glm_bound_claude)
+        argv=glm_bound_claude.make_command(str(ROOT),'glm-5.3','fixture','','{}','2')
+        self.assertEqual(argv[argv.index('--output-format')+1],'stream-json')
+        self.assertIn('--verbose',argv)
 
     def test_budget_and_permission_are_not_capacity_failover(self):
         for subtype, expected in outcome.STOP_REASONS.items():
@@ -155,6 +180,35 @@ class BrokerCircuit(unittest.TestCase):
         lease = self.acquire(); self.observe(lease)
         self.br.release(lease.lease_id, 'root')
         self.assertFalse(self.acquire(br=self.broker()).ok)
+        code = '''import sys,json
+from lease_broker import Broker
+p=sys.argv[1]
+b=Broker(db_path=p+'/broker.sqlite',lock_path=p+'/broker.lock',accounts_path=p+'/accounts.json',now_fn=lambda:1000,check_pid=False,external_gates=False,this_host='fixture')
+r=b.acquire('restarted-root','minimax',model='fixture-model',host='fixture',task_class='fixture',ttl=1000,wait=0)
+print(json.dumps({'ok':r.ok,'reason':r.reason}))
+'''
+        env=dict(os.environ,PYTHONPATH=os.pathsep.join((str(ROOT/'candidate'),str(ROOT/'source'))))
+        child=subprocess.run([sys.executable,'-c',code,str(self.root)],env=env,
+                             text=True,capture_output=True,timeout=10,check=True)
+        self.assertFalse(json.loads(child.stdout)['ok'])
+
+    def test_captured_scope_survives_account_removal_without_wedging_foreign_pool(self):
+        held=self.acquire(pool='healthy')
+        bad=self.acquire();self.observe(bad);self.br.release(bad.lease_id,'root')
+        p=self.root/'accounts.json';doc=json.loads(p.read_text())
+        doc['providers']['healthy']['accounts']=[];p.write_text(json.dumps(doc))
+        self.br._accounts_mtime=None
+        self.clock[0]+=61
+        self.assertTrue(self.acquire().ok)
+        self.assertIsInstance(self.br.snapshot(),dict)
+
+    def test_malformed_account_is_local_to_its_provider(self):
+        p=self.root/'accounts.json';doc=json.loads(p.read_text())
+        doc['providers']['minimax']['accounts'].append(dict(doc['providers']['minimax']['accounts'][0]))
+        p.write_text(json.dumps(doc));self.br._accounts_mtime=None
+        self.assertFalse(self.acquire().ok)
+        self.assertTrue(self.acquire(pool='healthy').ok)
+        self.assertEqual(self.br.snapshot()['pools']['minimax']['accounts'][0]['quota_cooldown']['state'],'UNQUALIFIED')
 
     def test_only_one_half_open_probe_across_shared_products(self):
         lease = self.acquire(); self.observe(lease)

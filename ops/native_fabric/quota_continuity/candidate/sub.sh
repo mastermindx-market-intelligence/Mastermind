@@ -743,15 +743,18 @@ if [ "$5" = "1" ]; then
     --permission-mode dontAsk --permission-prompts none --max-turns 60 \
     --tools "Read,Glob,Grep" --allowedTools "Read,Glob,Grep" --model "$2"
 fi
-exec claude -p "${_mm_prompt_args[@]}" --output-format json --verbose --dangerously-skip-permissions --max-turns "$8" --model "$2" \
+python3 "${10}/capacity_preflight.py" minimax "$2"
+_mm_probe_rc=$?
+if [ "$_mm_probe_rc" -ne 0 ]; then exit "$_mm_probe_rc"; fi
+exec claude -p "${_mm_prompt_args[@]}" --output-format stream-json --verbose --dangerously-skip-permissions --max-turns "$8" --model "$2" \
   --strict-mcp-config --mcp-config "$7"
-' _ "$LAUNCH_CWD" "${MODEL:-MiniMax-M3}" "$PROMPT" "$HERE/../minimax_claude_home" "${MINIMAX_VISUAL_HELPER:-0}" "$_mm_visual_system" "$_mm_mcp_config" "$CLAUDE_WORKER_MAX_TURNS" "$_SUB_PROMPT_FILE_MODE" > "$_json" || _rc=$?
+' _ "$LAUNCH_CWD" "${MODEL:-MiniMax-M3}" "$PROMPT" "$HERE/../minimax_claude_home" "${MINIMAX_VISUAL_HELPER:-0}" "$_mm_visual_system" "$_mm_mcp_config" "$CLAUDE_WORKER_MAX_TURNS" "$_SUB_PROMPT_FILE_MODE" "$HERE" > "$_json" || _rc=$?
     if [ "${MINIMAX_VISUAL_HELPER:-0}" = "1" ]; then
       cat "$_json"
     else
       python3 "$HERE/provider_outcome.py" claude "$_json" "$_rc" minimax "${MODEL:-MiniMax-M3}" || _rc=$?
     fi
-    rm -f "$_json"
+    if [ "$_rc" -eq 0 ]; then rm -f "$_json"; fi
     exit "$_rc" ;;
   glm)
     if ! python3 "$HERE/glm_keys.py" enabled >/dev/null 2>&1; then
@@ -784,7 +787,7 @@ exec claude -p "${_mm_prompt_args[@]}" --output-format json --verbose --dangerou
         slot_pool=glm-frontier
       fi
     fi
-    # R26: --output-format json captures the usage block for credit metering;
+    # The complete event stream captures typed errors and the usage block;
     # only the .result string is printed so callers see the same text as before.
     # LAUNCH_CWD: see minimax branch above.
     _json="$(mktemp "${TMPDIR:-/tmp}/sub_glm.XXXXXX")"
@@ -796,7 +799,7 @@ exec claude -p "${_mm_prompt_args[@]}" --output-format json --verbose --dangerou
     python3 "$HERE/slot.py" "$slot_pool" --wait 1200 -- \
       python3 "$HERE/glm_bound_claude.py" "${_glm_prompt_args[@]}" > "$_json" || _rc=$?
     python3 "$HERE/provider_outcome.py" claude "$_json" "$_rc" glm "$model" || _rc=$?
-    rm -f "$_json"
+    if [ "$_rc" -eq 0 ]; then rm -f "$_json"; fi
     exit "$_rc" ;;
   minimax-codex)
     # Fail-closed admission gate: fed by the lease broker plan (empty/error output parses to 0).

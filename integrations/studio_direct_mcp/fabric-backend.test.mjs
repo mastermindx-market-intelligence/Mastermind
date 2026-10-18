@@ -24,10 +24,10 @@ function continuationEnvelope(controller='RECORDED') {
 function continuingFacade(e){return api.createFabricFacade(e,{adapterPath:'/host/fabric_task.py',quotaFallback:true});}
 
 test('continuation-aware request stays on one incumbent controller',async()=>{
- const e=engine([finished(JSON.stringify(absent)),pending()]);
+ const e=engine([finished('--quota-fallback'),finished('--follow'),finished(JSON.stringify(absent)),pending()]);
  const out=unwrap(await continuingFacade(e).call('fabric_request',packet));
- assert.equal(out.controller_pid,456);assert.equal(e.calls.length,2);
- assert.match(e.calls[1].arguments.command,/'--quota-fallback'/);
+ assert.equal(out.controller_pid,456);assert.equal(e.calls.length,4);
+ assert.match(e.calls[3].arguments.command,/'--quota-fallback'/);
 });
 test('origin observations expose the actual successor and keep the failed attempt',async()=>{
  const e=engine([finished(JSON.stringify(continuationEnvelope()))]);
@@ -168,4 +168,10 @@ test('actual shell and Python fixture: literal packet -> status -> byte-exact re
   const result=unwrap(await f.call('fabric_result',id));assert.equal(result.adapter_response,'RETURN: VERIFIED\n\n');assert.equal(result.response_sha256,digest('RETURN: VERIFIED\n\n'));
   const accepted=unwrap(await f.call('fabric_accept',{...id,by:'deterministic',expected_response_sha256:result.response_sha256,verification_summary:'Compared exact fixture result bytes and verified no packet command executed.'}));assert.equal(accepted.accepted,true);
  }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test('continuity requests refuse an older adapter before reserving a controller',async()=>{
+ const e=engine([finished('old request help'),finished('old status help')]);
+ const out=unwrap(await continuingFacade(e).call('fabric_request',packet));
+ assert.equal(out.error,'ADAPTER_CONTINUITY_UNAVAILABLE');assert.equal(e.calls.length,2);
 });

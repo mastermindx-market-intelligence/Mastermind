@@ -11,7 +11,7 @@ import { resolve, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 const ID_PATTERN = '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$';
 const ID_RE = new RegExp(ID_PATTERN);
 const MAX_RESPONSE_BYTES = 65536;
@@ -40,14 +40,14 @@ function tool(name, description, properties, required, readOnly) {
 }
 export const FABRIC_TOOLS = Object.freeze([
   tool('fabric_capabilities', 'Read adapter availability and the fixed tool boundary. This does not dispatch, prove provider admission, or identify a ChatGPT user.', {}, [], true),
-  tool('fabric_request', 'Submit one new bounded work packet to the existing M2 Fabric adapter. Checks the exact run ID first. A returned controller PID does not prove worker START. Never replay an interrupted request or move an existing Executive operation here.', {
+  tool('fabric_request', 'Submit a new bounded commission to the existing M2 Fabric adapter. The installed owner may use up to three immutable attempts after proven pre-task capacity rejection. Checks the exact origin run ID first. A returned controller PID does not prove worker START. Never replay an interrupted request or move an existing Executive operation here.', {
     ...identity, parent_id:idSchema, task_class:{type:'string',enum:CLASSES}, task_complexity:{type:'string',enum:COMPLEXITIES},
     work_packet:{type:'string',minLength:1,maxLength:16000}, escalation_reason:{type:'string',minLength:1,maxLength:1000},
     subject_pool:{type:'string',minLength:1,maxLength:64,pattern:'^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$'},
   }, ['run_id','root_id','parent_id','task_class','task_complexity','work_packet'], false),
-  tool('fabric_status', 'Read the same run through fabric_task.py. NOT_FOUND after a lost request is not proof of no effect or permission to retry. Root metadata is not authentication.', identity, ['run_id','root_id'], true),
+  tool('fabric_status', 'Read the requested commission and its actual successor through fabric_task.py. Earlier failed attempts remain visible. NOT_FOUND after a lost request is not proof of no effect or permission to retry. Root metadata is not authentication.', identity, ['run_id','root_id'], true),
   tool('fabric_wait', 'Use the incumbent adapter bounded wait for this run, at most ten seconds. Creates no watcher, retry loop, cancellation or background wake.', {...identity,timeout_seconds:{type:'integer',minimum:0,maximum:10,default:5}}, ['run_id','root_id'], true),
-  tool('fabric_result', 'Retrieve retained result only when available and the ledger root matches. Returns a digest of the complete adapter response, not an artifact attestation. Does not accept the result.', {...identity,max_bytes:maxBytes}, ['run_id','root_id'], true),
+  tool('fabric_result', 'Retrieve the actual successor result only when available and the ledger root matches. Returns accept_run_id for exact reviewed-leaf acceptance. Returns a digest of the complete adapter response, not an artifact attestation. Does not accept the result.', {...identity,max_bytes:maxBytes}, ['run_id','root_id'], true),
   tool('fabric_accept', 'Record acceptance only after actual deterministic verification or authorized review. Re-reads the complete response and compares its digest first. Legacy ledger acceptance is not an atomic cryptographic attestation. Never retry an uncertain acceptance.', {
     ...identity, by:{type:'string',enum:['deterministic','reviewer']}, expected_response_sha256:{type:'string',pattern:'^[0-9a-f]{64}$'},
     verification_summary:{type:'string',minLength:1,maxLength:1000}, max_bytes:maxBytes,
@@ -113,7 +113,7 @@ function statusJSON(result, runId, follow=false) {
        || !['NOT_APPLICABLE','UNCONFIRMED','RECORDED'].includes(s.controller_return)) fail('ADAPTER_CONTINUATION_INVALID');
     const effective=statusJSON({exit_code:0,stdout:JSON.stringify(s.effective_status)},s.effective_run_id);
     return {...effective,continuation:{requested_run_id:runId,effective_run_id:s.effective_run_id,
-      prior_attempts:s.prior_attempts,controller_return:s.controller_return}};
+      prior_attempts:s.prior_attempts,controller_return:s.controller_return,controller_reason:s.controller_reason??null}};
   }
   if (!s || s.schema!=='mastermind.fabric_task_status.v1' || s.run_id!==runId || typeof s.state!=='string' || typeof s.result_available!=='boolean') fail('ADAPTER_STATUS_INVALID');
   return s;
@@ -157,6 +157,13 @@ export function createFabricFacade(engine, options={}) {
     if(!parsed) fail('OBSERVATION_INCOMPLETE',{controller_pid:pid});
     return parsed;
   }
+  async function continuityAvailable() {
+    if(!cfg.quotaFallback) return false;
+    const requestHelp=await runShort(['request','--help']);
+    const statusHelp=await runShort(['status','--help']);
+    return requestHelp.exit_code===0 && statusHelp.exit_code===0 &&
+      requestHelp.stdout.includes('--quota-fallback') && statusHelp.stdout.includes('--follow');
+  }
   async function status(args,follow=cfg.quotaFallback) {
     const s=statusJSON(await runShort(['status',args.run_id,...(follow?['--follow']:[])]),args.run_id,follow);
     checkRoot(s,args);return s;
@@ -181,7 +188,10 @@ export function createFabricFacade(engine, options={}) {
       validate(name,args);
       if(name==='fabric_capabilities') {
         const h=await runShort(['--help']);
+        const continuity=await continuityAvailable();
         return response({action:'capabilities',adapter_available:h.exit_code===0 && ['request','status','result','accept'].every(x=>h.stdout.includes(x)),
+          quota_continuity:{enabled:cfg.quotaFallback,adapter_available:continuity,max_attempts:3,
+            replay_basis:'pre_task_capacity_rejection',mid_task_replay:false,native_parent_wake:false,background_execution:false},
           worker_admission:'UNPROBED',worker_start:'UNPROBED',backend:'existing Desktop Commander process owner',
           tools:FABRIC_TOOLS.map(t=>t.name),caller_identity:'trusted enrolled channel; not individual ChatGPT identity',root_metadata_is_authentication:false});
       }
@@ -195,6 +205,7 @@ export function createFabricFacade(engine, options={}) {
         const requestKey=args.run_id;
         if(attempted.has(requestKey)) fail('REQUEST_ALREADY_ATTEMPTED');
         if(attempted.size>=MAX_CONTROLLERS) fail('CONTROLLER_TRACKING_CAPACITY');
+        if(cfg.quotaFallback && !await continuityAvailable()) fail('ADAPTER_CONTINUITY_UNAVAILABLE');
         const s=await status(args,false);
         if(s.state!=='NOT_FOUND') fail(s.state==='EFFECT_UNKNOWN'?'EFFECT_UNKNOWN':'RUN_EXISTS');
         const argv=['request','--id',args.run_id,'--class',args.task_class,'--task-complexity',args.task_complexity,'--cwd',cfg.workerCwd,'--root',args.root_id,'--parent',args.parent_id,'--stdin'];

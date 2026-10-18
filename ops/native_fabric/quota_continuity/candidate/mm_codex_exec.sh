@@ -60,8 +60,11 @@ STUDIO_MCP_CODEX_OVERRIDE="$("$HERE/studio_mcp_projection.sh" codex codex-overri
   exit 78
 }
 SRC_HOME="$HERE/codex_minimax"
-CODEX_SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/mm_codex_home.XXXXXX")"
-cp "$SRC_HOME/config.toml" "$CODEX_SCRATCH/config.toml"
+if [ -n "${REMOTE_SUB_RUN_ID:-}" ]; then
+  CODEX_SCRATCH="$(POOL_RECOVERY_MODEL="$MODEL" python3 "$HERE/recovery_artifacts.py" create "$HERE" "$REMOTE_SUB_RUN_ID" minimax)" || exit 78
+else
+  CODEX_SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/mm_codex_home.XXXXXX")"
+fi
 export CODEX_HOME="$CODEX_SCRATCH"
 CODEX_TERMINAL_CONFIRMED=0
 # Track any backgrounded codex/agent child pid this script may have launched.
@@ -105,6 +108,11 @@ cleanup_codex_home() {
     python3 "$HERE/provider_outcome.py" codex "$CODEX_SCRATCH" "$_exit_status" minimax "$MODEL" "${LAST_MSG:-$CODEX_SCRATCH/last_message.txt}" || true
   fi
   if [ "$_exit_status" -ne 0 ] || [ "$CODEX_TERMINAL_CONFIRMED" -ne 1 ]; then
+    if [ -n "${REMOTE_SUB_RUN_ID:-}" ]; then
+      python3 "$HERE/recovery_artifacts.py" retain "$HERE" "$REMOTE_SUB_RUN_ID" "$CODEX_SCRATCH" \
+        "${POOL_ORCHESTRATOR_ID:-}" "${POOL_PARENT_RUN_ID:-}" minimax "$MODEL" \
+        "${POOL_LEASE_ID:-}" "${POOL_ACCOUNT:-}" "${LANE_REMOTE_HOST:-}" "$_exit_status" || true
+    fi
     # Preserve the same private home in place, including interrupted resumes.
     # A retained path is recovery evidence; it does not authorize a new worker.
     printf 'CODEX_SESSION_RETAINED rc=%s path=%q\n' "$_exit_status" "$CODEX_SCRATCH" >&2 || true
@@ -113,6 +121,7 @@ cleanup_codex_home() {
   rm -rf "$CODEX_SCRATCH" 2>/dev/null || rm -rf "$CODEX_SCRATCH" 2>/dev/null || true
 }
 trap cleanup_codex_home EXIT
+cp "$SRC_HOME/config.toml" "$CODEX_SCRATCH/config.toml"
 export MINIMAX_API_KEY="$(python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/.minimax/config.json")))["api_key"])')"
 
 if [ ! -f "$PROMPT_FILE" ]; then
@@ -172,7 +181,7 @@ capture_unaccepted_report() {
 set +e
 codex exec \
     -c "$STUDIO_MCP_CODEX_OVERRIDE" \
-    "${CODEX_CONTEXT_ARGS[@]}" \
+    ${CODEX_CONTEXT_ARGS[@]+"${CODEX_CONTEXT_ARGS[@]}"} \
   --dangerously-bypass-approvals-and-sandbox \
   --skip-git-repo-check \
   -C "$CWD" \
@@ -201,7 +210,7 @@ while [ "$rc" -eq 0 ] && [ "$attempt" -lt "$MAX_CONTINUES" ] && ! has_status_lin
   set +e
   codex -C "$CWD" exec resume --last \
       -c "$STUDIO_MCP_CODEX_OVERRIDE" \
-      "${CODEX_CONTEXT_ARGS[@]}" \
+      ${CODEX_CONTEXT_ARGS[@]+"${CODEX_CONTEXT_ARGS[@]}"} \
     --dangerously-bypass-approvals-and-sandbox \
     --skip-git-repo-check \
     -m "$MODEL" \

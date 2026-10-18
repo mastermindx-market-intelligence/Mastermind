@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import time
 import uuid
 
@@ -45,6 +46,30 @@ def eligible(api, here, run, root, parent):
             or record.get("recorded") is not True or record.get("kind") != value.get("kind")
             or value.get("command_rc") != status["rc"]):
         raise ValueError("continuation_not_initial_capacity_rejection")
+    proof=value.get("pre_task_evidence")
+    if (not isinstance(proof,dict) or proof.get("schema")!="mastermind.capacity_preflight.v1"
+            or proof.get("task_cli_started") is not False or proof.get("attempts")!=1
+            or proof.get("api_status")!=429
+            or status["rc"]!=75
+            or proof.get("control_flow_owner") not in {"sub.sh","glm_bound_claude.py"}):
+        raise ValueError("continuation_task_not_started_unproven")
+    import capacity_preflight
+    error={"type":proof.get("error_type"),"code":proof.get("error_code")}
+    if capacity_preflight.classify_error(value.get('provider'),proof['api_status'],error)!=value['kind']:
+        raise ValueError("continuation_preflight_error_unqualified")
+    if (proof.get('request_sha256')!=provider_outcome.digest(capacity_preflight.payload(value['model']))
+            or any(not isinstance(proof.get(k),str) or not re.fullmatch('[a-f0-9]{64}',proof[k]) for k in
+                   ('endpoint_sha256','response_sha256','support_digest','control_flow_sha256','helper_sha256'))):
+        raise ValueError("continuation_preflight_identity_invalid")
+    manifest=_read(_path(here,run,".support.json"))
+    canonical=json.dumps({"schema":"remote-support-code.v1","files":manifest},sort_keys=True,separators=(',',':')).encode()
+    support_sha=provider_outcome.digest(canonical)
+    log=provider_outcome.regular_bytes(_path(here,run,".log"),8*1024*1024).decode('utf-8',errors='replace')
+    if (proof.get("support_digest")!=support_sha
+            or re.findall(r'SUPPORT_VERSION_READY digest=([a-f0-9]{64})',log)!=[support_sha]
+            or manifest.get(proof["control_flow_owner"])!=proof.get("control_flow_sha256")
+            or manifest.get("capacity_preflight.py")!=proof.get("helper_sha256")):
+        raise ValueError("continuation_preflight_source_binding")
     process_raw = provider_outcome.regular_bytes(_path(here, run, ".process.jsonl"), 1048576)
     process = json.loads(process_raw.splitlines()[-1])
     provider_outcome.validate_receipt(value, process, run)
@@ -81,7 +106,7 @@ def eligible(api, here, run, root, parent):
 def foreground(api, run_id, task_class, **kwargs):
     """Called once by request --quota-fallback; never resurrected by a read."""
     root, parent = kwargs.get("root_id"), kwargs.get("parent_run_id")
-    unsupported = ("pool", "requested_model", "artifact_names", "native_return",
+    unsupported = ("pool", "prefer", "requested_model", "artifact_names", "native_return",
                    "qualification_host", "new_macro_worktree", "cpu_scope_percent")
     if not root or not parent or any(kwargs.get(k) for k in unsupported):
         raise ValueError("continuation_contract_not_qualified")
@@ -113,7 +138,10 @@ def foreground(api, run_id, task_class, **kwargs):
             if remaining < 30:
                 reason = "commission_time_exhausted"
                 break
-            rc = api.request(current, task_class, **kwargs, request_remaining_seconds=remaining)
+            rc = 75
+            reason = "controller_exception"
+            rc = api.request(current, task_class, **kwargs, request_remaining_seconds=remaining,
+                             request_capacity_preflight=True)
             if rc == 0:
                 reason = "terminal_return"
                 break
@@ -180,21 +208,43 @@ def resolve(api, run_id):
     final = api.inspect_run(current)
     if final.get("root_id") not in (None, root) or final.get("parent_run_id") not in (None, parent):
         raise ValueError("continuation_successor_identity")
+    if previous:
+        leaf_request = _path(here, current, ".request.json")
+        if leaf_request.exists() or leaf_request.is_symlink():
+            origin_request = _read(_path(here, run_id, ".request.json"))
+            leaf = _read(leaf_request)
+            if (leaf.get("schema") != "mastermind.fabric_request_artifact.v1"
+                    or leaf.get("run_id") != current or leaf.get("root_id") != root
+                    or leaf.get("parent_run_id") != parent
+                    or leaf.get("packet") != current + ".request.packet"
+                    or any(leaf.get(k) != origin_request.get(k) for k in
+                           ("packet_sha256", "task_class", "cwd"))
+                    or provider_outcome.digest(provider_outcome.regular_bytes(
+                        _path(here,current,".request.packet"),api.MAX_RESULT_BYTES)) != origin_request.get("packet_sha256")):
+                raise ValueError("continuation_successor_task_changed")
+        elif final.get("state") != "NOT_FOUND":
+            raise ValueError("continuation_successor_request_missing")
+        if final.get("result_available") or final.get("state") == "TERMINAL":
+            if final.get("root_id") != root or final.get("parent_run_id") != parent:
+                raise ValueError("continuation_successor_terminal_identity")
     finished = _path(here, run_id, ".continuation-finished.json")
     returned = "UNCONFIRMED"
+    return_reason = None
     if finished.exists() or finished.is_symlink():
         row = _read(finished)
         if (row.get("schema") != SCHEMA or row.get("origin_run_id") != run_id
                 or row.get("effective_run_id") != current or row.get("root_id") != root
                 or row.get("parent_run_id") != parent or row.get("background_execution") is not False):
             raise ValueError("continuation_return_invalid")
-        returned = "RECORDED"
+        return_reason = row.get("reason")
+        returned = "UNCONFIRMED" if return_reason == "controller_exception" else "RECORDED"
     return {"schema": SCHEMA, "requested_run_id": run_id, "effective_run_id": current,
-            "effective_status": final, "prior_attempts": previous, "controller_return": returned}
+            "effective_status": final, "prior_attempts": previous, "controller_return": returned,
+            "controller_reason": return_reason}
 
 
 def wait(api, run_id, timeout, interval):
-    if not 0 <= timeout <= 60 or not 0.05 <= interval <= 10:
+    if not 0 <= timeout <= 7200 or not 0.05 <= interval <= 10:
         raise ValueError("continuation_wait_bounds")
     deadline = time.monotonic() + timeout
     while True:

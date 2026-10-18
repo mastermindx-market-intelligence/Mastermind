@@ -47,13 +47,21 @@ TERMINAL_REASONS = {
 }
 CODEX_ERRORS = {
     "ContextWindowExceeded": "context_limit",
+    "SessionBudgetExceeded": "budget_limit",
     "UsageLimitExceeded": "quota_exhausted",
-    "TooManyRequests": "rate_limit",
+    "RateLimitExceeded": "rate_limit",
     "Unauthorized": "authentication",
     "context_window_exceeded": "context_limit",
+    "session_budget_exceeded": "budget_limit",
     "usage_limit_exceeded": "quota_exhausted",
-    "too_many_requests": "rate_limit",
+    "rate_limit_exceeded": "rate_limit",
     "unauthorized": "authentication",
+    "server_overloaded": "provider_error",
+    "flex_unavailable": "provider_error",
+    "bad_request": "invalid_request",
+    "invalid_prompt": "invalid_request",
+    "sandbox_error": "permission",
+    "too_many_denials": "permission",
 }
 
 
@@ -86,6 +94,41 @@ def write_new(path: Path, value: dict) -> None:
         output.write(data)
         output.flush()
         os.fsync(output.fileno())
+    directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
+def retain_capture(source: Path, target: Path) -> dict:
+    """Preserve bounded private diagnostics without putting raw thoughts on stdout."""
+    fd = os.open(source, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError("capture_kind_unqualified")
+        with os.fdopen(fd, "rb", closefd=False) as stream:
+            raw = stream.read(64 * 1024 * 1024)
+        after = os.fstat(fd)
+        if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
+                after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+            raise ValueError("capture_changed")
+        capture = target.with_suffix(".capture.jsonl")
+        dest = os.open(capture, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(dest,"wb") as stream:
+            stream.write(raw); stream.flush(); os.fsync(stream.fileno())
+        value = {"file": capture.name, "sha256": digest(raw), "bytes": len(raw),
+                 "source_bytes": before.st_size, "truncated": before.st_size > len(raw)}
+        write_new(target.with_suffix(".capture.json"), value)
+        # A durable bounded replacement now exists. The caller's exact original
+        # tempfile is only removed if it still names the same captured inode.
+        current = source.lstat()
+        if (current.st_dev, current.st_ino) == (before.st_dev, before.st_ino):
+            source.unlink()
+        return value
+    finally:
+        os.close(fd)
 
 
 def parse_claude(raw: bytes, command_rc: int) -> tuple[str, dict, dict | None]:
@@ -133,9 +176,14 @@ def parse_claude(raw: bytes, command_rc: int) -> tuple[str, dict, dict | None]:
         kind = "rate_limit"
     if kind is None:
         kind = "unknown" if failed or final is None else "success"
-    # A lone typed initial API rejection can be replay-safe. Any normal model
-    # response, hook event, child, tool, unknown event, or incomplete capture
-    # withholds this narrow evidence. num_turns is never sufficient on its own.
+    if final is None and not raw.lstrip().startswith((b"{", b"[")):
+        # An old plain-text responder/proxy diagnostic remains useful output.
+        # Its words are never classification or replay evidence. Malformed
+        # structured streams are retained separately, never echoed as thoughts.
+        display = raw.decode("utf-8", errors="replace")
+    # This CLI observation is diagnostic only. Startup hooks or MCP servers can
+    # have effects before the first visible model turn. Only the separate bound
+    # pre-task wrapper probe can qualify automatic continuation.
     safe_events = all(
         (m.get("type") == "system" and m.get("subtype") == "init")
         or (m.get("type") == "assistant" and isinstance(m.get("error"), str) and m.get("error") in ERRORS
@@ -197,7 +245,7 @@ def parse_codex(home: Path, command_rc: int, last_message: bytes) -> dict:
     if any(not isinstance(e, dict) or not isinstance(e.get("payload"), dict) for e in events):
         raise ValueError("codex_event_invalid")
     errors, session_ids, work_observed = [], [], False
-    safe_event_types = {"task_started", "turn_started", "task_complete", "turn_complete", "token_count", "user_message", "error"}
+    safe_event_types = {"task_started", "turn_started", "token_count", "user_message", "error"}
     for event in events:
         typ, data = event.get("type"), event["payload"]
         if typ == "session_meta":
@@ -220,7 +268,7 @@ def parse_codex(home: Path, command_rc: int, last_message: bytes) -> dict:
                 work_observed = True
         elif typ != "turn_context":
             work_observed = True
-    kind = errors[-1] if errors else ("success" if command_rc == 0 else "unknown")
+    kind = errors[-1] if errors else ("success" if events and command_rc == 0 else "unknown")
     sid = session_ids[0] if len(session_ids) == 1 else None
     if not isinstance(sid, str) or not IDENT.fullmatch(sid):
         sid = None
@@ -268,6 +316,21 @@ def claude_main(args: list[str]) -> int:
     try:
         raw = regular_bytes(Path(raw_path), 64 * 1024 * 1024)
         display, fields, final = parse_claude(raw, rc)
+        target = os.environ.get("POOL_OUTCOME_FILE")
+        if raw == b"" and rc in (75,78) and target:
+            path=Path(target).with_suffix('.preflight.json')
+            start_marker=Path(target).with_suffix('.task-cli-started.json')
+            if path.exists() and not os.path.lexists(start_marker):
+                pre=json.loads(regular_bytes(path,16384))
+                binding=bound_outcome({},os.environ,provider,model)
+                keys=('schema','run_id','lease_id','account','root_id','host','provider','model')
+                evidence=pre.get('pre_task_evidence')
+                if (all(pre.get(k)==binding[k] for k in keys)
+                        and pre.get('command_rc')==rc and isinstance(evidence,dict)
+                        and evidence.get('schema')=='mastermind.capacity_preflight.v1'
+                        and evidence.get('task_cli_started') is False
+                        and pre.get('stdout_sha256')==digest(b'')):
+                    fields=pre
     except (OSError, ValueError, RecursionError):
         display, fields, final = "", {"kind": "unknown"}, None
     # A CLI success exit with a structured failure must not publish success.
@@ -277,6 +340,13 @@ def claude_main(args: list[str]) -> int:
     sys.stdout.write(display)
     sys.stdout.flush()
     target = os.environ.get("POOL_OUTCOME_FILE")
+    if target and rc != 0:
+        try:
+            fields["diagnostic_capture"] = retain_capture(Path(raw_path), Path(target))
+        except (OSError, ValueError):
+            print("PROVIDER_CAPTURE_RETAINED_AT_SOURCE path=" + raw_path, file=sys.stderr)
+    elif rc != 0:
+        print("PROVIDER_CAPTURE_RETAINED_AT_SOURCE path=" + raw_path, file=sys.stderr)
     if target and "stdout_sha256" in fields:
         try:
             value = bound_outcome(fields, os.environ, provider, model)
@@ -297,7 +367,8 @@ def claude_main(args: list[str]) -> int:
         if valid:
             kwargs = dict(input_tokens=tokens["input_tokens"] + tokens["cache_creation_input_tokens"],
                           cached_tokens=tokens["cache_read_input_tokens"], output_tokens=tokens["output_tokens"])
-        pool_ledger.append(pool=provider, task_class=provider, rc=rc,
+        task_class = os.environ.get("POOL_TASK_CLASS") or provider
+        pool_ledger.append(pool=provider, task_class=task_class, rc=rc,
                            signal="ok" if rc == 0 else "other", model=model, **kwargs)
     except Exception:
         pass

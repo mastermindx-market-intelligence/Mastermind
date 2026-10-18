@@ -981,9 +981,10 @@ class Broker:
             conn.execute(
                 "INSERT INTO leases "
                 "(id, orchestrator_id, pool, account, task_class, model, host, pid, "
-                "granted_at, ttl, last_heartbeat, state, renewable) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (lid, orch, pool, picked, task_class, model, host, pid, now, use_ttl, now, state, 1),
+                "granted_at, ttl, last_heartbeat, state, renewable, quota_scope) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (lid, orch, pool, picked, task_class, model, host, pid, now, use_ttl, now, state, 1,
+                 __import__("quota_circuit").scope_for(self, pool, picked)),
             )
             if operator_child_id is not None:
                 conn.execute("UPDATE operator_child_authorizations SET admitted_lease_id=? WHERE run_id=? AND root=? AND admitted_lease_id IS NULL",
@@ -1229,7 +1230,7 @@ class Broker:
                         "held": self._account_held(conn, name, aname),
                         "parked": self._parked(acct, now),
                         "parked_until": acct.get("parked_until"),
-                        "quota_cooldown": __import__("quota_circuit").cooldown(self, name, aname, conn),
+                        "quota_cooldown": __import__("quota_circuit").snapshot_cooldown(self, name, aname, conn),
                         "usage": acct.get("usage") or {},
                     }
                 )

@@ -81,7 +81,7 @@ def make_command(cwd, model, prompt, system_prompt, mcp_config, turns, *, prompt
     if system_prompt:
         argv.extend(["--append-system-prompt",system_prompt])
     argv.extend([
-        "--output-format","json","--verbose","--dangerously-skip-permissions",
+        "--output-format","stream-json","--verbose","--dangerously-skip-permissions",
         "--max-turns",turns,"--model",model,
         "--strict-mcp-config","--mcp-config",mcp_config,
     ])
@@ -112,6 +112,12 @@ def launch(cwd,model,prompt,system_prompt,mcp_config,turns,*,environ=None,accoun
         scoped=dict(environ)
         scoped["ANTHROPIC_AUTH_TOKEN"]=key
         scoped.pop("GLM_SHIM_TOKEN",None)
+        if exec_fn is None:
+            import capacity_preflight
+            rejected=capacity_preflight.check(scoped,"glm",model,Path(__file__))
+            if rejected is not None:
+                return capacity_preflight.stop_before_task(rejected,scoped)
+            capacity_preflight.reserve_task_start(scoped)
         if exec_fn is not None:
             return exec_fn(argv,scoped)
         os.chdir(cwd)
@@ -132,7 +138,7 @@ def main(args=None):
         print("glm_bound_claude: argument contract refused",file=sys.stderr)
         return 78
     try:
-        launch(*args,prompt_file=prompt_file)
+        return int(launch(*args,prompt_file=prompt_file) or 0)
     except BindingRefused as exc:
         allowed = {"binding missing", "lease unavailable", "lease mismatch", "model refused", "workdir refused", "turn bound refused", "prompt file refused", "account credential unavailable"}
         reason = str(exc) if str(exc) in allowed else "binding refused"

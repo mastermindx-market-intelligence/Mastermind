@@ -9,6 +9,8 @@
     "pick.py": "0f5cbc32504680e09055b77cffdea81adea734388b7b061fcf77d017b7715cb2",
     "glm_bound_claude.py": "7944854d9a55c38af9f492d574e567a87fae1799c8fa0f8ff6c35cf7e8d33d17",
     "mm_codex_exec.sh": "8875be8db4ecdf0a16529687de7062d5215da43ba8f7c1481283f042bb218e9a",
-    "sub.sh": "39601b1c2485190049b54183bed82f43c9390339bce59b460d5e6aed9e3e6866"
+    "sub.sh": "39601b1c2485190049b54183bed82f43c9390339bce59b460d5e6aed9e3e6866",
+    "support_bundle.py": "e054b05fece124c6918f12dc1ce3962e6f20b5d74dea5e26630524be9b20295a",
+    "remote_sub_helpers.py": "60a01b4a56f827b36885ff262c407a3f47af69398cbe4a6fd8eb57b5520eec1b"
   }
 }

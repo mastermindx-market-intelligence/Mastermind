@@ -351,12 +351,27 @@ def inspect_run(run_id: str) -> dict[str, Any]:
                 row = json.loads(_bounded_regular(retained, 32768))
                 if row.get("schema") != "mastermind.fabric_request_artifact.v1" or row.get("run_id") != rid:
                     raise FabricTaskError("retained_request_invalid")
+                state = "REQUEST_RETAINED_NO_START_EVIDENCE"
+                refused = retained.with_name(rid + ".request-refused.json")
+                launch = retained.with_name(rid + ".request-launch.json")
+                if refused.exists() and not (launch.exists() or launch.is_symlink()):
+                    import provider_outcome
+                    proof = json.loads(_bounded_regular(refused, 32768))
+                    if (proof.get("schema") != "mastermind.fabric_request_refusal.v1"
+                            or proof.get("run_id") != rid or proof.get("root_id") != row.get("root_id")
+                            or proof.get("parent_run_id") != row.get("parent_run_id")
+                            or proof.get("request_sha256") != provider_outcome.digest(_bounded_regular(retained,32768))
+                            or proof.get("launch_attempted") is not False):
+                        raise FabricTaskError("retained_refusal_invalid")
+                    state = "REQUEST_REFUSED_BEFORE_LAUNCH"
                 return {"schema": "mastermind.fabric_task_status.v1", "run_id": rid,
-                    "state": "REQUEST_RETAINED_NO_START_EVIDENCE", "rc": None, "signal": None,
+                    "state": state, "rc": None, "signal": None,
                     "result_available": False, "result_bytes": None,
                     **_acceptance_unknown("EXECUTION_NOT_ELIGIBLE"),
                     "request_root_id": row.get("root_id"), "request_parent_run_id": row.get("parent_run_id"),
-                    "execution_absence_proven": False, "background_execution": False}
+                    "execution_absence_proven": state == "REQUEST_REFUSED_BEFORE_LAUNCH",
+                    "background_execution": False, "request_retained": True,
+                    "same_run_replay_allowed": False}
             except (OSError, ValueError, FabricTaskError, AttributeError):
                 return {"schema": "mastermind.fabric_task_status.v1", "run_id": rid,
                     "state": "STATUS_UNREADABLE", "rc": None, "signal": None,
@@ -480,6 +495,28 @@ def inspect_run(run_id: str) -> dict[str, Any]:
     status.update(_acceptance_projection(rid, status, original_log))
     if state == "ACTIVE_OR_WAITING":
         status.update(_active_lineage_projection(rid, original_log))
+    for suffix in (".session-retained.json", ".session-created.json"):
+        path = HERE / "state" / "remote_sub" / (rid + suffix)
+        if suffix == ".session-created.json" and rc == 0:
+            continue
+        try:
+            raw = _bounded_regular(path, 16384)
+            row = json.loads(raw)
+            if (row.get("run_id") != rid or row.get("root_id") != status.get("root_id")
+                    or row.get("parent_id") != status.get("parent_run_id")
+                    or row.get("schema") not in {"mastermind.local_session_retained.v1", "mastermind.local_session_created.v1"}):
+                continue
+            import hashlib
+            status["session_home_reference"] = {
+                "host": row.get("host"), "home_path": row.get("home_path"),
+                "provider": row.get("provider"), "index_file": path.name,
+                "index_sha256": hashlib.sha256(raw).hexdigest(),
+                "current_home_existence": "UNPROBED", "resume_authorized": False,
+                "reclaim_authorized": False,
+            }
+            break
+        except (OSError, ValueError, AttributeError, FabricTaskError):
+            continue
     return status
 
 
@@ -530,11 +567,15 @@ def request(
     new_macro_worktree: str | None = None,
     cpu_scope_percent: int | None = None,
     request_remaining_seconds: int | None = None,
+    request_capacity_preflight: bool = False,
 ) -> int:
     rid = validate_run_id(run_id)
     if bool(packet) == bool(stdin_bytes is not None):
         raise ValueError("provide exactly one of packet or stdin")
     env = os.environ.copy()
+    env.pop("POOL_CAPACITY_PREFLIGHT",None)
+    if request_capacity_preflight is True:
+        env["POOL_CAPACITY_PREFLIGHT"]="1"
     if request_remaining_seconds is not None:
         if type(request_remaining_seconds) is not int or not 1 <= request_remaining_seconds <= 7200:
             raise FabricTaskError("REQUEST_REMAINING_TIME_INVALID")
@@ -564,144 +605,169 @@ def request(
         "root_id": observed_root, "parent_run_id": parent_run_id,
         "task_class": task_class, "cwd": cwd, "packet": retained_packet.name,
         "packet_sha256": hashlib.sha256(source).hexdigest(),
-        "packet_bytes": len(source), "automatic_background_execution": False,
+        "packet_bytes": len(source), "created_at": time.time(),
+        "automatic_background_execution": False,
     })
     packet, stdin_bytes = retained_packet, None
-    # An explicit NEW worktree request is not permission to adopt an existing
-    # session, mutate an incumbent checkout, or mint before a host lease.
-    if new_macro_worktree is not None:
-        if (re.fullmatch(r"[0-9a-f]{40}", new_macro_worktree) is None
-                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,95}", rid) is None
-                or cwd != "~/lanes/repos/macro"
-                or not observed_root or not parent_run_id
-                or qualification_host or artifact_names or native_return):
-            raise FabricTaskError("FABRIC_NEW_MACRO_WORKTREE_SCOPE_REFUSED")
-    if cpu_scope_percent is not None:
-        if (type(cpu_scope_percent) is not int
-                or cpu_scope_percent not in (100, 200, 400)
-                or not observed_root or not parent_run_id
-                or artifact_names or native_return or qualification_host):
-            raise FabricTaskError("CPU_SCOPE_REQUEST_UNQUALIFIED")
-    # Explicit empty arguments clear inherited values; None uses the existing
-    # economic metadata. Selection and launch see the same exact witness.
-    complexity = task_complexity if task_complexity is not None else env.get("POOL_TASK_COMPLEXITY", "")
-    reason = escalation_reason if escalation_reason is not None else env.get("POOL_ESCALATION_REASON", "")
-    if artifact_names:
-        import artifact_production
-    if qualification_host:
-        if pool != "grok" or artifact_names or native_return or requested_model or prefer:
-            raise FabricTaskError("QUALIFICATION_OPTIONS_REFUSED")
-        import fabric_host_qualification
-        route = _parse_route(fabric_host_qualification.qualification_route(
-            qualification_host, task_class=task_class, complexity=complexity,
-            reason=reason, subject_pool=subject_pool,
-            root=observed_root, parent=parent_run_id,
-        ))
-    else:
-        route = _parse_route(pick.format_pick(
-            task_class, prefer=prefer, host="auto", pool=pool,
-            **({"subject_pool": subject_pool} if subject_pool is not None else {}),
-            task_complexity=complexity, escalation_reason=reason,
-            requested_model=requested_model, route_key=rid,
-            **({"required_modes": sorted(artifact_production.MODES),
-                "required_platforms": ["linux"]} if artifact_names else
-               {"required_platforms": ["linux"]} if (new_macro_worktree is not None or cpu_scope_percent is not None) else {}),
-        ))
-    guard = pick.launch_policy(
-        route["MODE"], task_class, route["MODEL"],
-        escalation_reason=reason, task_complexity=complexity,
-    )
-    if not guard.get("allowed"):
-        raise FabricTaskError("ECONOMIC_POLICY_REFUSED: " + str(guard.get("reason")))
-    if new_macro_worktree is not None:
-        if route["HOST"] not in {"ubuntu0", "ubuntu1", "ubuntu2", "ubuntu3"}:
-            raise FabricTaskError("FABRIC_SPARSE_HOST_REFUSED")
-        if route["MODE"] not in {"glm", "glm-codex", "minimax", "qwen"}:
-            raise FabricTaskError("FABRIC_SPARSE_MODE_NOT_YET_QUALIFIED")
-    if cpu_scope_percent is not None:
-        if route["HOST"] not in {"ubuntu2", "ubuntu3"}:
-            raise FabricTaskError("CPU_SCOPE_HOST_NOT_QUALIFIED")
-        if route["MODE"] not in {"glm", "glm-codex", "minimax", "qwen"}:
-            raise FabricTaskError("CPU_SCOPE_MODE_NOT_QUALIFIED")
-    env["POOL_TASK_CLASS"] = task_class
-    if task_complexity is not None or "POOL_TASK_COMPLEXITY" in env:
-        env["POOL_TASK_COMPLEXITY"] = complexity
-    if escalation_reason is not None or "POOL_ESCALATION_REASON" in env:
-        env["POOL_ESCALATION_REASON"] = reason
-    if observed_root:
-        env["POOL_ORCHESTRATOR_ID"] = observed_root
-    if parent_run_id:
-        env["POOL_PARENT_RUN_ID"] = validate_run_id(parent_run_id)
-
-    if native_return:
-        # Transport binding is not an authentication/custody grant. Explicit new
-        # requests only: never adopt a retained or uncertain operation.
-        if (not observed_root or env.get("CODEX_THREAD_ID") != observed_root
-                or env.get("POOL_PARENT_RUN_ID") != observed_root):
-            raise FabricTaskError("NATIVE_RETURN_REQUIRES_CURRENT_ORIGINAL_PARENT")
-        log_path, result_path = _paths(rid)
-        if any(path.exists() or path.is_symlink() for path in (log_path, result_path)):
-            raise FabricTaskError("NATIVE_RETURN_EXISTING_RUN_NOT_ADOPTED")
-
-    # Explicit opt-in only. The existing router/lease/controller still own execution.
-    if artifact_names:
-        import artifact_production
-        if route["MODE"] not in artifact_production.MODES:
-            raise FabricTaskError("ARTIFACT_CONTRACT_MODE_UNAVAILABLE")
-        if route["HOST"] == "m2":
-            raise FabricTaskError("ARTIFACT_CONTRACT_LOCAL_UNAVAILABLE")
-        if not observed_root or not env.get("POOL_PARENT_RUN_ID"):
-            raise FabricTaskError("ARTIFACT_CONTRACT_REQUIRES_ORIGINAL_ROOT_AND_PARENT")
-        source = packet.read_bytes() if packet is not None else stdin_bytes
-        stdin_bytes = artifact_production.encode_packet(
-            source.decode("utf-8"), root=env["POOL_ORCHESTRATOR_ID"],
-            parent=env["POOL_PARENT_RUN_ID"], run_id=rid, names=artifact_names,
-            support_digest=artifact_production.source_digest(HERE)).encode()
-        packet = None
-
-    if native_return:
-        import fabric_stop_return
-        # This private metadata records one attention subscription, not a job,
-        # lease, result, retry permission or native RuntimeBinding.
-        fabric_stop_return.register_subscription(observed_root, rid, HERE / "state" / "native_return")
-
-    temp_path: Path | None = None
     try:
-        if packet is None:
-            state_dir = HERE / "state" / "remote_sub"
-            state_dir.mkdir(parents=True, exist_ok=True)
-            fd, raw = tempfile.mkstemp(prefix=f"{rid}.packet.", dir=state_dir)
-            os.fchmod(fd, 0o600)
-            with os.fdopen(fd, "wb") as handle:
-                handle.write(stdin_bytes or b"")
-                handle.flush()
-                os.fsync(handle.fileno())
-            temp_path = Path(raw)
-            packet_path = temp_path
-        else:
-            packet_path = packet
-        argv = [
-            "/bin/bash",
-            str(HERE / "remote_sub.sh"),
-            route["HOST"],
-            route["MODE"],
-            str(packet_path),
-            cwd,
-            route["MODEL"],
-            "--run-id",
-            rid,
-        ]
+        # An explicit NEW worktree request is not permission to adopt an existing
+        # session, mutate an incumbent checkout, or mint before a host lease.
         if new_macro_worktree is not None:
-            argv.extend(["--new-macro-worktree", new_macro_worktree])
+            if (re.fullmatch(r"[0-9a-f]{40}", new_macro_worktree) is None
+                    or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,95}", rid) is None
+                    or cwd != "~/lanes/repos/macro"
+                    or not observed_root or not parent_run_id
+                    or qualification_host or artifact_names or native_return):
+                raise FabricTaskError("FABRIC_NEW_MACRO_WORKTREE_SCOPE_REFUSED")
         if cpu_scope_percent is not None:
-            argv.extend(["--cpu-scope-quota", str(cpu_scope_percent)])
-        proc = subprocess.run(argv, env=env)
-        return int(proc.returncode)
-    finally:
-        if temp_path is not None:
-            # Compiled identity-bearing artifact packets remain private too.
-            # Retention supplies recovery evidence, never a second launch.
-            pass
+            if (type(cpu_scope_percent) is not int
+                    or cpu_scope_percent not in (100, 200, 400)
+                    or not observed_root or not parent_run_id
+                    or artifact_names or native_return or qualification_host):
+                raise FabricTaskError("CPU_SCOPE_REQUEST_UNQUALIFIED")
+        # Explicit empty arguments clear inherited values; None uses the existing
+        # economic metadata. Selection and launch see the same exact witness.
+        complexity = task_complexity if task_complexity is not None else env.get("POOL_TASK_COMPLEXITY", "")
+        reason = escalation_reason if escalation_reason is not None else env.get("POOL_ESCALATION_REASON", "")
+        if artifact_names:
+            import artifact_production
+        if qualification_host:
+            if pool != "grok" or artifact_names or native_return or requested_model or prefer:
+                raise FabricTaskError("QUALIFICATION_OPTIONS_REFUSED")
+            import fabric_host_qualification
+            route = _parse_route(fabric_host_qualification.qualification_route(
+                qualification_host, task_class=task_class, complexity=complexity,
+                reason=reason, subject_pool=subject_pool,
+                root=observed_root, parent=parent_run_id,
+            ))
+        else:
+            route = _parse_route(pick.format_pick(
+                task_class, prefer=prefer, host="auto", pool=pool,
+                **({"subject_pool": subject_pool} if subject_pool is not None else {}),
+                task_complexity=complexity, escalation_reason=reason,
+                requested_model=requested_model, route_key=rid,
+                **({"required_modes": sorted(artifact_production.MODES),
+                    "required_platforms": ["linux"]} if artifact_names else
+                   {"required_platforms": ["linux"]} if (new_macro_worktree is not None or cpu_scope_percent is not None) else {}),
+            ))
+        guard = pick.launch_policy(
+            route["MODE"], task_class, route["MODEL"],
+            escalation_reason=reason, task_complexity=complexity,
+        )
+        if not guard.get("allowed"):
+            raise FabricTaskError("ECONOMIC_POLICY_REFUSED: " + str(guard.get("reason")))
+        if new_macro_worktree is not None:
+            if route["HOST"] not in {"ubuntu0", "ubuntu1", "ubuntu2", "ubuntu3"}:
+                raise FabricTaskError("FABRIC_SPARSE_HOST_REFUSED")
+            if route["MODE"] not in {"glm", "glm-codex", "minimax", "qwen"}:
+                raise FabricTaskError("FABRIC_SPARSE_MODE_NOT_YET_QUALIFIED")
+        if cpu_scope_percent is not None:
+            if route["HOST"] not in {"ubuntu2", "ubuntu3"}:
+                raise FabricTaskError("CPU_SCOPE_HOST_NOT_QUALIFIED")
+            if route["MODE"] not in {"glm", "glm-codex", "minimax", "qwen"}:
+                raise FabricTaskError("CPU_SCOPE_MODE_NOT_QUALIFIED")
+        env["POOL_TASK_CLASS"] = task_class
+        if task_complexity is not None or "POOL_TASK_COMPLEXITY" in env:
+            env["POOL_TASK_COMPLEXITY"] = complexity
+        if escalation_reason is not None or "POOL_ESCALATION_REASON" in env:
+            env["POOL_ESCALATION_REASON"] = reason
+        if observed_root:
+            env["POOL_ORCHESTRATOR_ID"] = observed_root
+        if parent_run_id:
+            env["POOL_PARENT_RUN_ID"] = validate_run_id(parent_run_id)
+
+        if native_return:
+            # Transport binding is not an authentication/custody grant. Explicit new
+            # requests only: never adopt a retained or uncertain operation.
+            if (not observed_root or env.get("CODEX_THREAD_ID") != observed_root
+                    or env.get("POOL_PARENT_RUN_ID") != observed_root):
+                raise FabricTaskError("NATIVE_RETURN_REQUIRES_CURRENT_ORIGINAL_PARENT")
+            log_path, result_path = _paths(rid)
+            if any(path.exists() or path.is_symlink() for path in (log_path, result_path)):
+                raise FabricTaskError("NATIVE_RETURN_EXISTING_RUN_NOT_ADOPTED")
+
+        # Explicit opt-in only. The existing router/lease/controller still own execution.
+        if artifact_names:
+            import artifact_production
+            if route["MODE"] not in artifact_production.MODES:
+                raise FabricTaskError("ARTIFACT_CONTRACT_MODE_UNAVAILABLE")
+            if route["HOST"] == "m2":
+                raise FabricTaskError("ARTIFACT_CONTRACT_LOCAL_UNAVAILABLE")
+            if not observed_root or not env.get("POOL_PARENT_RUN_ID"):
+                raise FabricTaskError("ARTIFACT_CONTRACT_REQUIRES_ORIGINAL_ROOT_AND_PARENT")
+            source = packet.read_bytes() if packet is not None else stdin_bytes
+            stdin_bytes = artifact_production.encode_packet(
+                source.decode("utf-8"), root=env["POOL_ORCHESTRATOR_ID"],
+                parent=env["POOL_PARENT_RUN_ID"], run_id=rid, names=artifact_names,
+                support_digest=artifact_production.source_digest(HERE)).encode()
+            packet = None
+
+        if native_return:
+            import fabric_stop_return
+            # This private metadata records one attention subscription, not a job,
+            # lease, result, retry permission or native RuntimeBinding.
+            fabric_stop_return.register_subscription(observed_root, rid, HERE / "state" / "native_return")
+
+        temp_path: Path | None = None
+        try:
+            if packet is None:
+                state_dir = HERE / "state" / "remote_sub"
+                state_dir.mkdir(parents=True, exist_ok=True)
+                fd, raw = tempfile.mkstemp(prefix=f"{rid}.packet.", dir=state_dir)
+                os.fchmod(fd, 0o600)
+                with os.fdopen(fd, "wb") as handle:
+                    handle.write(stdin_bytes or b"")
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                temp_path = Path(raw)
+                packet_path = temp_path
+            else:
+                packet_path = packet
+            argv = [
+                "/bin/bash",
+                str(HERE / "remote_sub.sh"),
+                route["HOST"],
+                route["MODE"],
+                str(packet_path),
+                cwd,
+                route["MODEL"],
+                "--run-id",
+                rid,
+            ]
+            if new_macro_worktree is not None:
+                argv.extend(["--new-macro-worktree", new_macro_worktree])
+            if cpu_scope_percent is not None:
+                argv.extend(["--cpu-scope-quota", str(cpu_scope_percent)])
+            provider_outcome.write_new(state_dir / f"{rid}.request-launch.json", {
+                "schema": "mastermind.fabric_request_launch.v1", "run_id": rid,
+                "root_id": observed_root, "parent_run_id": parent_run_id,
+                "packet_sha256": hashlib.sha256(source).hexdigest(),
+                "state": "LAUNCH_ATTEMPT_RESERVED", "created_at": time.time(),
+            })
+            proc = subprocess.run(argv, env=env)
+            return int(proc.returncode)
+        finally:
+            if temp_path is not None:
+                # Original input is indexed by request.json. Artifact compilation
+                # is deterministic and is not a separately resumable commission.
+                temp_path.unlink(missing_ok=True)
+    except BaseException as exc:
+        # Only this invocation owns its just-created request. A launch intent,
+        # even without a log, withholds no-start evidence after any crash.
+        launch = state_dir / f"{rid}.request-launch.json"
+        if not any(p.exists() or p.is_symlink() for p in (*_paths(rid), launch)):
+            try:
+                provider_outcome.write_new(state_dir / f"{rid}.request-refused.json", {
+                    "schema": "mastermind.fabric_request_refusal.v1", "run_id": rid,
+                    "root_id": observed_root, "parent_run_id": parent_run_id,
+                    "request_sha256": provider_outcome.digest(
+                        provider_outcome.regular_bytes(request_file, 32768)),
+                    "reason": "prelaunch_" + type(exc).__name__,
+                    "launch_attempted": False, "created_at": time.time(),
+                })
+            except (OSError, ValueError):
+                pass  # Preserve the original refusal; never invent a receipt.
+        raise
 
 
 def plan_accepted_macro_worktree_release(
@@ -785,7 +851,7 @@ def wait_for(run_id: str, *, timeout: float, interval: float) -> dict[str, Any]:
     while True:
         status = inspect_run(rid)
         if status["state"] in {
-            "NOT_FOUND", "TERMINAL", "TERMINAL_FAILURE", "RESULT_UNAVAILABLE", "EFFECT_UNKNOWN", "STATUS_UNREADABLE", "RECONCILED_PRESTART_FAILURE", "RECONCILED_PREEXEC_FAILURE", "REQUEST_RETAINED_NO_START_EVIDENCE"
+            "NOT_FOUND", "TERMINAL", "TERMINAL_FAILURE", "RESULT_UNAVAILABLE", "EFFECT_UNKNOWN", "STATUS_UNREADABLE", "RECONCILED_PRESTART_FAILURE", "RECONCILED_PREEXEC_FAILURE", "REQUEST_RETAINED_NO_START_EVIDENCE", "REQUEST_REFUSED_BEFORE_LAUNCH"
         }:
             return status
         # A wait on unchanged local files cannot reconnect a lost collector.
