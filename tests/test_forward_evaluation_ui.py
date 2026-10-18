@@ -59,7 +59,7 @@ def test_recorded_dates_never_become_a_verified_session_horizon():
     assert "Recorded through 2026-10-16" in html
     assert "Not yet qualified" in html
     assert html.count(">Unverified</div>") == 2
-    assert "cannot establish an investment-skill verdict" in html
+    assert "independent return samples or investment skill" in html
     assert "49 sessions" not in html
     assert "2026-08-11" in html
 
@@ -87,7 +87,7 @@ def test_partial_and_failed_latest_run_keep_saved_record_qualifications():
     assert "Partial source" in html
     assert '<span class="mm-eval-badge">Partial record</span>' in html
     assert "Recorded through 2026-10-16" in html
-    assert "session checks remain unverified" in html
+    assert html.count(">Unverified</div>") == 2
 
 
 def test_wrong_book_dates_old_schema_and_contradictory_projection_are_withheld():
@@ -180,3 +180,178 @@ var document={documentElement:{getAttribute:function(){return 'en';}}};
     assert "Unavailable" in result["unavailable"]["html"]
     assert len(result["calls"]) == 3
     assert all(options == {"cache": "no-store"} for _, options in result["calls"])
+
+
+def calendar_payload(book="autonomous", partial=False):
+    """Synthetic wire records; full browser proof uses the real composed API."""
+    from copy import deepcopy
+
+    dates, closed, venue = {
+        "autonomous": (["2026-09-04", "2026-09-07", "2026-09-08"], "2026-09-07", "US"),
+        "china": (["2026-09-24", "2026-09-25", "2026-09-28"], "2026-09-25", "CN"),
+        "hk": (["2026-09-30", "2026-10-01", "2026-10-02"], "2026-10-01", "HK"),
+    }[book]
+    status = "partial" if partial else "available"
+    data = payload(book, count=3, source_status=status)
+    begin, end = dates[0], dates[-1]
+    data["evaluation_start"], data["latest_asof"] = begin, end
+    snapshot = data["snapshot"]
+    snapshot["asof"] = end
+    snapshot["cohort"] = {"evaluation_start": begin, "deployment_sha": "a" * 40}
+    basis = {
+        "schema": "mastermind.portfolio_forward_evaluation.nav_date_basis.v1",
+        "book": book, "evaluation_start": begin, "asof": end,
+        "deployment_sha": "a" * 40, "status": status, "selected_row_count": 3,
+        "date_labels": dates, "fingerprint": "b" * 64,
+    }
+    snapshot["nav_date_basis"] = deepcopy(basis)
+    scheduled = [day for day in dates if day != closed]
+    calendar = {
+        "schema": "mastermind.cash_session_date_evidence.v1",
+        "calendar_owner": "portfolio.market_calendar" if venue == "US"
+                          else "portfolio.china_calendar",
+        "venue": venue, "start": begin, "end": end,
+        "coverage_start": "2026-01-01", "coverage_end": "2026-12-31",
+        "source_checked_on": "2026-10-18", "scope": "published_static_cash_session_dates",
+        "exceptional_closures": "listed_only",
+        "rule_version": "monday_friday_excluding_listed_closures.v1",
+        "status": "available", "missing_reason": None, "price_or_cutoff_qualified": False,
+        "scheduled_dates": scheduled,
+    }
+    q = data["observation_qualification"]
+    q.update({
+        "schema": "mastermind.portfolio_forward_evaluation.observation_qualification.v2",
+        "source_scope": "stored_snapshot_and_current_calendar_evidence",
+        "date_basis": deepcopy(basis), "calendar_session_count": 2,
+        "calendar_status": status,
+        "calendar_missing_reason": "partial_nav_date_basis" if partial else None,
+        "calendar_count_unit": "selected_nav_dates_on_scheduled_cash_sessions",
+        "calendar_basis": {
+            "schema": "mastermind.portfolio_forward_evaluation.calendar_basis.v1",
+            "interpretation": "current_published_calendar_on_saved_nav_dates",
+            "book": book, "nav_date_basis_fingerprint": basis["fingerprint"],
+            "nav_date_basis_status": status, "calendar_content_fingerprint": "c" * 64,
+            "fingerprint": "d" * 64, "calendar_evidence": calendar,
+            "selected_session_dates": list(scheduled), "non_session_mark_dates": [closed],
+            "scheduled_dates_without_forward_mark": [], "scheduled_session_count": 2,
+        },
+    })
+    return data
+
+
+def calendar_fact(html, label):
+    needle = '<div class="mm-eval-label">' + label + '</div><div class="mm-eval-value">'
+    assert needle in html
+    return html.split(needle, 1)[1].split("</div>", 1)[0]
+
+
+@pytest.mark.parametrize("book", ["autonomous", "china", "hk"])
+def test_calendar_projection_displays_matched_dates_without_price_or_skill_claim(book):
+    data = calendar_payload(book)
+    before = json.dumps(data, sort_keys=True)
+    html = render(data, book=book)
+    assert calendar_fact(html, "Recorded NAV dates") == "3"
+    assert calendar_fact(html, "Dates matching exchange schedule") == "2"
+    assert calendar_fact(html, "Price-checked sessions") == "Unverified"
+    assert "Prices unverified" in html
+    assert "recorded NAV dates fall outside" in html
+    assert "Inspect evidence record" in html
+    assert json.dumps(data, sort_keys=True) == before
+
+
+def test_calendar_projection_chinese_copy_separates_schedule_and_price_checks():
+    html = render(calendar_payload("hk"), book="hk", zh=True)
+    assert calendar_fact(html, "已记录净值日期") == "3"
+    assert calendar_fact(html, "符合交易日历的记录日期") == "2"
+    assert calendar_fact(html, "价格已验证交易日") == "未验证"
+    assert "查看完整证据记录" in html
+
+
+@pytest.mark.parametrize("reason,expected", [
+    ("saved_nav_date_basis_unavailable", "exact NAV-date basis is unavailable"),
+    ("outside_published_calendar_coverage", "outside published calendar coverage"),
+    ("calendar_evidence_contract_unavailable", "Calendar evidence is unavailable"),
+])
+def test_calendar_projection_unavailable_does_not_erase_saved_count(reason, expected):
+    data = calendar_payload()
+    q = data["observation_qualification"]
+    q.update({"calendar_basis": None, "calendar_session_count": None,
+              "calendar_status": "unavailable", "calendar_missing_reason": reason})
+    if reason == "saved_nav_date_basis_unavailable":
+        q["date_basis"] = {"status": "unavailable"}
+    html = render(data)
+    assert calendar_fact(html, "Recorded NAV dates") == "3"
+    assert calendar_fact(html, "Dates matching exchange schedule") == "Unverified"
+    assert expected in html
+
+
+@pytest.mark.parametrize("holiday_only", [False, True])
+def test_calendar_projection_true_zero_is_preserved(holiday_only):
+    data = calendar_payload()
+    q = data["observation_qualification"]
+    projection = q["calendar_basis"]
+    dates = list(projection["non_session_mark_dates"]) if holiday_only else []
+    data["snapshot"]["metrics"]["marked_session_count"]["value"] = len(dates)
+    q["reported_mark_count"], q["calendar_session_count"] = len(dates), 0
+    for basis in (q["date_basis"], data["snapshot"]["nav_date_basis"]):
+        basis["date_labels"], basis["selected_row_count"] = list(dates), len(dates)
+    projection["selected_session_dates"] = []
+    projection["non_session_mark_dates"] = list(dates)
+    projection["scheduled_dates_without_forward_mark"] = list(
+        projection["calendar_evidence"]["scheduled_dates"])
+    html = render(data)
+    assert calendar_fact(html, "Recorded NAV dates") == str(len(dates))
+    assert calendar_fact(html, "Dates matching exchange schedule") == "0"
+    assert "Scheduled dates without a selected forward mark" in html
+
+
+def test_calendar_projection_partial_and_stale_evidence_remain_visible():
+    data = calendar_payload("china", partial=True)
+    data["status"] = "stale_after_error"
+    html = render(data, book="china")
+    assert calendar_fact(html, "Dates matching exchange schedule") == "2"
+    assert "Partial record" in html and "recorded source is partial" in html
+    assert "Latest evaluation failed. Showing the saved record" in html
+    assert "2026-09-28" in html and "mm-eval-failed" in html
+
+
+@pytest.mark.parametrize("path,value", [
+    (("calendar_basis", "book"), "hk"),
+    (("calendar_basis", "calendar_evidence", "venue"), "HK"),
+    (("calendar_basis", "nav_date_basis_fingerprint"), "e" * 64),
+    (("date_basis", "asof"), "2026-09-09"),
+    (("calendar_session_count",), True),
+    (("calendar_session_count",), "2"),
+    (("calendar_session_count",), -1),
+    (("calendar_basis", "selected_session_dates"), ["2026-09-04"]),
+    (("calendar_basis", "calendar_evidence", "scheduled_dates"), ["2026-09-04"]),
+    (("calendar_basis", "scheduled_dates_without_forward_mark"), ["2026-09-04"]),
+    (("calendar_status",), "partial"),
+    (("calendar_basis", "calendar_evidence", "price_or_cutoff_qualified"), True),
+    (("calendar_basis", "calendar_content_fingerprint"), "fake"),
+    (("calendar_basis", "calendar_evidence", "scheduled_dates"), ["2026-09-04"] * 4097),
+])
+def test_calendar_projection_malformed_calendar_keeps_independent_saved_count(path, value):
+    data = calendar_payload()
+    target = data["observation_qualification"]
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+    html = render(data)
+    assert calendar_fact(html, "Recorded NAV dates") == "3"
+    assert calendar_fact(html, "Dates matching exchange schedule") == "Unverified"
+
+
+def test_calendar_projection_missing_cohort_start_cannot_certify_zero():
+    data = calendar_payload()
+    q = data["observation_qualification"]
+    projection = q["calendar_basis"]
+    data["evaluation_start"] = data["snapshot"]["cohort"]["evaluation_start"] = None
+    data["snapshot"]["metrics"]["marked_session_count"]["value"] = 0
+    q["reported_mark_count"] = q["calendar_session_count"] = 0
+    for basis in (q["date_basis"], data["snapshot"]["nav_date_basis"]):
+        basis.update({"evaluation_start": None, "date_labels": [], "selected_row_count": 0})
+    projection["calendar_evidence"].update({"start": None, "scheduled_dates": []})
+    projection.update({"selected_session_dates": [], "non_session_mark_dates": [],
+                       "scheduled_dates_without_forward_mark": [], "scheduled_session_count": 0})
+    assert calendar_fact(render(data), "Dates matching exchange schedule") == "Unverified"

@@ -6615,12 +6615,80 @@ function _feDate(value) {
   var stamp = new Date(value + 'T00:00:00Z');
   return !isNaN(stamp.getTime()) && stamp.toISOString().slice(0,10) === value ? value : null;
 }
+function _feDates(value) {
+  if (!Array.isArray(value) || value.length > 4096) return null;
+  for (var i = 0; i < value.length; i++) {
+    if (!_feDate(value[i]) || (i && value[i - 1] >= value[i])) return null;
+  }
+  return value;
+}
+function _feSameDates(left, right) {
+  return left.length === right.length && left.every(function(day, i) { return day === right[i]; });
+}
+function _feCalendarView(q, snapshot, portfolio, start, count) {
+  if (!start || count === null || q.schema !== 'mastermind.portfolio_forward_evaluation.observation_qualification.v2' ||
+      (q.calendar_status !== 'available' && q.calendar_status !== 'partial') ||
+      q.calendar_count_unit !== 'selected_nav_dates_on_scheduled_cash_sessions' ||
+      !Number.isSafeInteger(q.calendar_session_count) || q.calendar_session_count < 0) return null;
+  var basis = q.date_basis, savedBasis = snapshot.nav_date_basis, projection = q.calendar_basis;
+  if (!_feObject(basis) || !_feObject(savedBasis) || !_feObject(projection) ||
+      !_feObject(snapshot.cohort) || basis.schema !== 'mastermind.portfolio_forward_evaluation.nav_date_basis.v1' ||
+      savedBasis.schema !== basis.schema || basis.book !== portfolio || savedBasis.book !== portfolio ||
+      basis.status !== q.reported_mark_count_status || basis.status !== q.calendar_status ||
+      basis.status !== savedBasis.status || basis.evaluation_start !== savedBasis.evaluation_start ||
+      basis.asof !== savedBasis.asof || basis.deployment_sha !== savedBasis.deployment_sha ||
+      typeof basis.deployment_sha !== 'string' || !/^[0-9a-f]{40}$/.test(basis.deployment_sha) ||
+      basis.evaluation_start !== start || basis.evaluation_start !== snapshot.cohort.evaluation_start ||
+      basis.asof !== snapshot.asof || basis.deployment_sha !== snapshot.cohort.deployment_sha ||
+      basis.selected_row_count !== count || savedBasis.selected_row_count !== count ||
+      basis.fingerprint !== savedBasis.fingerprint ||
+      projection.schema !== 'mastermind.portfolio_forward_evaluation.calendar_basis.v1' ||
+      projection.interpretation !== 'current_published_calendar_on_saved_nav_dates' ||
+      projection.book !== portfolio || projection.nav_date_basis_status !== basis.status ||
+      projection.nav_date_basis_fingerprint !== basis.fingerprint ||
+      q.calendar_missing_reason !== (basis.status === 'partial' ? 'partial_nav_date_basis' : null)) return null;
+  var hashes = [basis.fingerprint, projection.calendar_content_fingerprint, projection.fingerprint];
+  if (!hashes.every(function(value) { return typeof value === 'string' && /^[0-9a-f]{64}$/.test(value); })) return null;
+  var source = projection.calendar_evidence;
+  var venue = {autonomous:'US', china:'CN', hk:'HK'}[portfolio];
+  var owner = portfolio === 'autonomous' ? 'portfolio.market_calendar' : 'portfolio.china_calendar';
+  if (!_feObject(source) || source.schema !== 'mastermind.cash_session_date_evidence.v1' ||
+      source.calendar_owner !== owner || source.venue !== venue ||
+      source.scope !== 'published_static_cash_session_dates' || source.exceptional_closures !== 'listed_only' ||
+      source.rule_version !== 'monday_friday_excluding_listed_closures.v1' ||
+      source.status !== 'available' || source.missing_reason !== null ||
+      source.price_or_cutoff_qualified !== false ||
+      source.start !== start || source.end !== snapshot.asof ||
+      !_feDate(source.coverage_start) || !_feDate(source.coverage_end) ||
+      !_feDate(source.source_checked_on) || source.coverage_start > start ||
+      source.coverage_end < snapshot.asof) return null;
+  var dates = _feDates(basis.date_labels), savedDates = _feDates(savedBasis.date_labels);
+  var scheduled = _feDates(source.scheduled_dates), matched = _feDates(projection.selected_session_dates);
+  var excluded = _feDates(projection.non_session_mark_dates);
+  var unmarked = _feDates(projection.scheduled_dates_without_forward_mark);
+  if (!dates || !savedDates || !scheduled || !matched || !excluded || !unmarked ||
+      dates.length !== count || !_feSameDates(dates, savedDates) ||
+      matched.length !== q.calendar_session_count || projection.scheduled_session_count !== scheduled.length ||
+      !dates.concat(scheduled).every(function(day) { return start <= day && day <= snapshot.asof; })) return null;
+  var selectedSet = new Set(dates), scheduleSet = new Set(scheduled);
+  if (!_feSameDates(matched, dates.filter(function(day) { return scheduleSet.has(day); })) ||
+      !_feSameDates(excluded, dates.filter(function(day) { return !scheduleSet.has(day); })) ||
+      !_feSameDates(unmarked, scheduled.filter(function(day) { return !selectedSet.has(day); }))) return null;
+  return {count:matched.length, excluded:excluded, unmarked:unmarked, scheduled:scheduled.length,
+    coverageStart:source.coverage_start, coverageEnd:source.coverage_end,
+    checkedOn:source.source_checked_on};
+}
 function _forwardEvaluationHtml(data, portfolio, isZh, pending) {
   if (!_isAvailabilityBook(portfolio)) return '';
   function say(en, zh) { return isZh ? zh : en; }
   function fact(label, value) {
     return '<div class="mm-eval-fact"><div class="mm-eval-label">' + label +
       '</div><div class="mm-eval-value">' + esc(value) + '</div></div>';
+  }
+  function dateList(dates) {
+    var text = dates.slice(0,12).join(', ');
+    if (dates.length > 12) text += say(' (first 12 of ', '（显示前12个，共') + dates.length + say(')', '个）');
+    return esc(text || say('None', '无'));
   }
   var title = '<h2>' + say('Evaluation record', '评估记录') + '</h2>';
   if (pending) return title + '<div class="mm-eval-note">' +
@@ -6633,10 +6701,13 @@ function _forwardEvaluationHtml(data, portfolio, isZh, pending) {
   var saved = snapshot.schema === 'mastermind.portfolio_forward_evaluation.v1' &&
     snapshot.book === portfolio && cutoff !== null && data.latest_asof === cutoff;
   var q = bound && _feObject(data.observation_qualification) ? data.observation_qualification : {};
-  var contract = q.schema === 'mastermind.portfolio_forward_evaluation.observation_qualification.v1' &&
-    q.source_scope === 'stored_snapshot_only' && q.source_metric === 'marked_session_count' &&
+  var legacy = q.schema === 'mastermind.portfolio_forward_evaluation.observation_qualification.v1' &&
+    q.source_scope === 'stored_snapshot_only' && q.calendar_status === 'not_checked' &&
+    q.calendar_session_count === null;
+  var current = q.schema === 'mastermind.portfolio_forward_evaluation.observation_qualification.v2' &&
+    q.source_scope === 'stored_snapshot_and_current_calendar_evidence';
+  var contract = (legacy || current) && q.source_metric === 'marked_session_count' &&
     q.count_unit === 'recorded_nav_date_labels' && q.eligible_for_session_gate === false &&
-    q.calendar_status === 'not_checked' && q.calendar_session_count === null &&
     q.price_status === 'not_checked' && q.price_qualified_session_count === null;
   var metric = _feObject(snapshot.metrics) && _feObject(snapshot.metrics.marked_session_count)
     ? snapshot.metrics.marked_session_count : {};
@@ -6645,16 +6716,36 @@ function _forwardEvaluationHtml(data, portfolio, isZh, pending) {
     q.reported_mark_count >= 0 && (q.reported_mark_count_status === 'available' ||
     q.reported_mark_count_status === 'partial') && metric.value === q.reported_mark_count &&
     metric.status === q.reported_mark_count_status ? q.reported_mark_count : null;
+  var start = bound ? _feDate(data.evaluation_start) : null;
+  var calendar = _feCalendarView(q, snapshot, portfolio, start, count);
   var partial = count !== null && q.reported_mark_count_status === 'partial';
-  var badge = partial ? say('Partial record', '记录不完整')
+  var badge = partial ? say('Partial record', '记录不完整') : calendar ? say('Prices unverified', '价格未验证')
     : count !== null ? say('Not yet qualified', '尚未验证') : say('Unavailable', '不可用');
   var note = count !== null
     ? say('Recorded dates do not establish a verified market-session sample.',
           '记录日期数量不等于已验证的市场交易日样本。')
     : say('A qualified saved count is unavailable for this book.', '此账本已保存记录的有效计数不可用。');
+  if (calendar) {
+    note = (calendar.excluded.length
+      ? String(calendar.excluded.length) + say(' recorded NAV dates fall outside the published exchange schedule. ',
+                                               '个净值记录日期不属于已公布的交易日。')
+      : say('All recorded dates match the published exchange schedule. ', '所有记录日期均符合已公布的交易日历。')) +
+      say('Prices and observation cutoffs remain unverified.', '价格与观测截止时点仍未验证。');
+    if (partial) note = say('The recorded source is partial. ', '已记录的来源不完整。') + note;
+  } else if (current && count !== null) {
+    if (q.calendar_missing_reason === 'outside_published_calendar_coverage') {
+      note = say('The saved window is outside published calendar coverage. Prices remain unverified.',
+                 '已保存的评估区间超出已公布的交易日历覆盖范围；价格仍未验证。');
+    } else if (q.calendar_missing_reason === 'saved_nav_date_basis_unavailable') {
+      note = say('An exact NAV-date basis is unavailable for this saved record. Session and price checks remain unverified.',
+                 '此保存记录缺少可验证的净值日期依据；交易日与价格验证尚未完成。');
+    } else {
+      note = say('Calendar evidence is unavailable. The saved NAV-date count is retained.',
+                 '交易日历证据不可用；已保存的净值日期计数仍予保留。');
+    }
+  }
   if (bound && data.status === 'stale_after_error') {
-    note = say('Latest evaluation failed. Showing the saved record; session checks remain unverified.',
-               '最近一次评估失败。以下为已保存记录；交易日验证尚未完成。');
+    note = say('Latest evaluation failed. Showing the saved record. ', '最近一次评估失败。以下显示已保存记录。') + note;
   } else if (bound && data.status === 'not_started') {
     badge = say('Not started', '尚未开始');
     note = say('Forward evaluation has not started for this book.', '此账本尚未开始前瞻评估。');
@@ -6665,19 +6756,28 @@ function _forwardEvaluationHtml(data, portfolio, isZh, pending) {
     : say('Saved cutoff unavailable', '已保存记录的截止日期不可用');
   var sourceStatus = partial ? say('Partial source', '来源不完整') : count !== null
     ? say('Stored count available', '已保存计数可用') : say('Count unavailable', '计数不可用');
-  var start = bound ? _feDate(data.evaluation_start) : null;
+  var calendarDetails = calendar
+    ? '<div>' + say('NAV dates outside schedule: ', '不属于交易日的净值日期：') + dateList(calendar.excluded) + '</div>' +
+      '<div>' + say('Scheduled dates without a selected forward mark: ', '没有入选前瞻净值记录的交易日：') +
+        dateList(calendar.unmarked) + '</div>' +
+      '<div>' + say('Published calendar coverage: ', '已公布的日历覆盖范围：') + esc(calendar.coverageStart) +
+        ' – ' + esc(calendar.coverageEnd) + ' · ' + say('Source checked ', '来源核对日期 ') + esc(calendar.checkedOn) + '</div>'
+    : '';
   return '<div class="mm-eval-head">' + title + '<span class="mm-eval-badge">' + badge + '</span></div>' +
     '<div class="mm-eval-cutoff">' + dateText + '</div>' +
     '<div class="mm-eval-grid">' +
       fact(say('Recorded NAV dates', '已记录净值日期'), count === null ? '—' : String(count)) +
-      fact(say('Verified trading sessions', '已验证交易日'), say('Unverified', '未验证')) +
+      fact(say('Dates matching exchange schedule', '符合交易日历的记录日期'), calendar ? String(calendar.count) : say('Unverified', '未验证')) +
       fact(say('Price-checked sessions', '价格已验证交易日'), say('Unverified', '未验证')) + '</div>' +
     '<div class="mm-eval-note' + (bound && data.status === 'stale_after_error' ? ' mm-eval-failed' : '') +
       '">' + note + '</div>' +
     '<details class="mm-eval-details"><summary>' + say('How to read this record', '如何理解此记录') + '</summary>' +
-      '<p>' + say('NAV dates may include closed-market valuations. Calendar and point-in-time price checks are incomplete. This record cannot establish an investment-skill verdict.',
-                   '净值日期可能包含休市期间的估值。交易日历与时点价格尚未完成验证；此记录不足以判断持续投资能力。') + '</p>' +
+      '<p>' + say('Schedule matching compares saved NAV dates with published cash-session dates. It does not validate prices, cutoffs, fills, independent return samples or investment skill.',
+                   '日历匹配只核对已保存的净值日期与已公布的现金市场交易日；不代表价格、截止时点、成交、独立回报样本或投资能力已经验证。') + '</p>' +
       '<div>' + sourceStatus + (start ? ' · ' + say('Evaluation start ', '评估起点 ') + esc(start) : '') + '</div>' +
+      calendarDetails +
+      (bound ? '<a href="/api/forward-evaluation?portfolio=' + encodeURIComponent(portfolio) +
+        '" target="_blank" rel="noopener">' + say('Inspect evidence record', '查看完整证据记录') + '</a>' : '') +
     '</details>';
 }
 function renderForwardEvaluation() {
