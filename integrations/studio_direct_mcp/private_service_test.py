@@ -3255,20 +3255,21 @@ class TestC2BusinessHistoricalCompatibility(unittest.TestCase):
         ))
 
     @contextmanager
-    def _installed_c2(self):
+    def _installed_c2(self, account="chatgpt2-business"):
         """Hermetic hash-sealed C2 seat, never a real host write."""
         with tempfile.TemporaryDirectory() as raw:
             tmp = Path(raw)
             home = tmp / "home"
             home.mkdir()
             (home / "Library" / "LaunchAgents").mkdir(parents=True)
-            account = "chatgpt2-business"
+            # account bound at fixture entry
             with mock.patch.dict(os.environ, {"HOME": str(home)}):
                 source, node, backend, _rec = _do_stage(
                     tmp, home, account=account)
                 roots = svc._build_runtime_roots(account)
                 _seed_node_modules(roots)
-                _seal_runtime(account)
+                with mock.patch.object(svc, "_lifecycle_inspect", return_value=None):
+                    _seal_runtime(account)
                 old_names = self._legacy_11_set()
                 for name in set(svc.STAGE_FILES) - old_names:
                     (roots["base"] / name).unlink()
@@ -3306,11 +3307,13 @@ class TestC2BusinessHistoricalCompatibility(unittest.TestCase):
                 prior["configHash"] = svc._sha256_file(roots["config"])
                 roots["manifest"].write_text(
                     json.dumps(prior, sort_keys=True), encoding="utf-8")
-                for name in svc.C2_BUSINESS_TARGET_PATCH_SHA256:
+                target_names = (svc.C2_PERSONAL_TARGET_PATCH_SHA256 if account == "chatgpt2-personal" else svc.C2_BUSINESS_TARGET_PATCH_SHA256)
+                for name in target_names:
                     (source / name).write_text(
                         f"// reviewed target C2 {name}\n", encoding="utf-8")
                 args = _stage_args(source, node, backend, account=account)
-                args.c2_business_fleet_compat = True
+                args.c2_business_fleet_compat = account == "chatgpt2-business"
+                args.c2_personal_closed_publisher = account == "chatgpt2-personal"
                 args.publisher_preflight_only = False
                 args.publisher_expected_manifest_sha256 = svc._sha256_file(
                     roots["manifest"])
@@ -3322,14 +3325,20 @@ class TestC2BusinessHistoricalCompatibility(unittest.TestCase):
                     ).hexdigest()
                 target = {
                     name: svc._sha256_file(source / name)
-                    for name in svc.C2_BUSINESS_TARGET_PATCH_SHA256
+                    for name in target_names
                 }
+                personal_pins = {name: svc._sha256_file(roots["base"] / name) for name in old_names}
+                runtime_id = {k: prior[k] for k in svc.C2_PAPER_RUNTIME_IDENTITY}
                 with mock.patch.object(
                     svc, "C2_BUSINESS_V10_ORIGINAL_BLOBS", pins
                 ), mock.patch.object(
                     svc, "C2_BUSINESS_TARGET_PATCH_SHA256", target
-                ), mock.patch.object(
-                    svc, "_run", CmdRecorder()
+                ), mock.patch.object(svc, "C2_PAPER_FILES_SHA256", personal_pins
+                ), mock.patch.object(svc, "C2_PAPER_RUNTIME_IDENTITY", runtime_id
+                ), mock.patch.object(svc, "C2_PAPER_MANIFEST_CANONICAL_SHA256", frozenset((svc._canonical_json_sha256(prior),))
+                ), mock.patch.object(svc, "C2_PERSONAL_CURRENT_MANIFEST_SHA256", args.publisher_expected_manifest_sha256
+                ), mock.patch.object(svc, "C2_PERSONAL_TARGET_PATCH_SHA256", target
+                ), mock.patch.object(svc, "_run", CmdRecorder()
                 ):
                     yield args, roots, cfg, prior
 
@@ -3691,3 +3700,101 @@ class TestC2BusinessHistoricalCompatibility(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+class TestC2PersonalClosedPublisher(unittest.TestCase):
+
+    @staticmethod
+    def _public_args(args):
+        return svc.build_parser().parse_args([
+            "upgrade", "--account", args.account, "--port", str(args.port),
+            "--source", args.source, "--node", args.node, "--backend", args.backend,
+            "--c2-personal-closed-publisher", "--publisher-expected-manifest-sha256",
+            args.publisher_expected_manifest_sha256,
+        ])
+
+    def test_personal_preflight_remains_readonly_and_apply_contends_on_lifecycle_mutex(self):
+        fixture = TestC2BusinessHistoricalCompatibility()
+        with fixture._installed_c2(account=svc.C2_PAPER_ACCOUNT) as (args, roots, _, _):
+            public = self._public_args(args)
+            before = TestC2PaperRuntimeCompatibility._snapshot(roots)
+            with svc._c2_lifecycle_mutex(public.account), \
+                 mock.patch.object(svc, "_run") as run, \
+                 mock.patch.object(svc, "_atomic_write_bytes") as write:
+                public.publisher_preflight_only = True
+                rc, output = _capture_stdout(lambda: svc.cmd_upgrade(public))
+                self.assertEqual((rc, json.loads(output)["effect"]), (0, "NOT_APPLIED"))
+                public.publisher_preflight_only = False
+                with self.assertRaisesRegex(SystemExit, "lifecycle mutation already in progress"):
+                    svc.cmd_upgrade(public)
+                run.assert_not_called()
+                write.assert_not_called()
+            self.assertEqual(before, TestC2PaperRuntimeCompatibility._snapshot(roots))
+
+    def test_personal_compatibility_mutex_covers_writes_and_recovery(self):
+        fixture = TestC2BusinessHistoricalCompatibility()
+        with fixture._installed_c2(account=svc.C2_PAPER_ACCOUNT) as (args, roots, _, _):
+            public = self._public_args(args)
+            public.publisher_preflight_only = True
+            rc, output = _capture_stdout(lambda: svc.cmd_upgrade(public))
+            self.assertEqual((rc, json.loads(output)["effect"]), (0, "NOT_APPLIED"))
+            public.publisher_preflight_only = False
+            before = TestC2PaperRuntimeCompatibility._snapshot(roots)
+            real_write = svc._atomic_write_bytes
+            checkpoints = []
+            def write(path, data, mode=svc.FILE_MODE):
+                name = Path(path).name
+                if Path(path) == roots["manifest"]:
+                    raise OSError("fixture manifest failure")
+                with self.assertRaisesRegex(SystemExit, "lifecycle mutation already in progress"):
+                    svc.cmd_start(public)
+                checkpoints.append((name, data == before.get(name)))
+                return real_write(path, data, mode)
+            with mock.patch.object(svc, "_atomic_write_bytes", write):
+                with self.assertRaisesRegex(SystemExit, "NOT_APPLIED original state restored"):
+                    svc.cmd_upgrade(public)
+            self.assertIn(("config.json", False), checkpoints)
+            self.assertIn(("config.json", True), checkpoints)
+            self.assertEqual(before, TestC2PaperRuntimeCompatibility._snapshot(roots))
+
+    def test_wrong_cas_refuses_without_mutation(self):
+        fixture = TestC2BusinessHistoricalCompatibility()
+        with fixture._installed_c2(account="chatgpt2-personal") as (args, roots, cfg, prior):
+            before = (roots["manifest"].read_bytes(), roots["config"].read_bytes())
+            args.publisher_expected_manifest_sha256 = "0" * 64
+            with self.assertRaisesRegex(SystemExit, "CAS mismatch"):
+                svc.cmd_upgrade(args)
+            self.assertEqual(before, (roots["manifest"].read_bytes(), roots["config"].read_bytes()))
+            self.assertFalse((roots["base"]/"workspace-access.mjs").exists())
+
+    def test_wrong_source_refuses_without_mutation(self):
+        fixture = TestC2BusinessHistoricalCompatibility()
+        with fixture._installed_c2(account="chatgpt2-personal") as (args, roots, cfg, prior):
+            before = (roots["manifest"].read_bytes(), roots["config"].read_bytes())
+            (Path(args.source)/"git-publish.mjs").write_text("unreviewed publisher")
+            with self.assertRaisesRegex(SystemExit, "reviewed source hash mismatch"):
+                svc.cmd_upgrade(args)
+            self.assertEqual(before, (roots["manifest"].read_bytes(), roots["config"].read_bytes()))
+            self.assertFalse((roots["base"]/"workspace-access.mjs").exists())
+
+    def test_preflight_and_upgrade_preserve_fleet_paper_and_seals(self):
+        fixture = TestC2BusinessHistoricalCompatibility()
+        with fixture._installed_c2(account="chatgpt2-personal") as (args, roots, cfg, prior):
+            before = {n:(roots["base"]/n).read_bytes() for n in prior["files"]}
+            old_config = json.loads(roots["config"].read_text())
+            args.publisher_preflight_only = True
+            rc, out = _capture_stdout(lambda: svc.cmd_upgrade(args))
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(out)["effect"], "NOT_APPLIED")
+            self.assertFalse((roots["base"]/"workspace-access.mjs").exists())
+            args.publisher_preflight_only = False
+            rc, out = _capture_stdout(lambda: svc.cmd_upgrade(args))
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(out)["effect"], "APPLIED")
+            future = svc._verify_staged_install(args.account, _label_for(args.account), roots, require_runtime_seal=True)
+            self.assertEqual(future["dependencyTreeHash"], prior["dependencyTreeHash"])
+            config = json.loads(roots["config"].read_text())
+            self.assertEqual(config["gitPublish"], svc._typed_git_config(svc._user_root(), closed_repositories=True))
+            self.assertEqual(config["repositoryWorkspaces"]["allowedRepositories"], ["mastermind","macro","terminal"])
+            for key in ("paperDesign","fleetRouting","fleetStatus","maxPerSessionConcurrency","maxQueuedPerSession"):
+                self.assertEqual(config[key], old_config[key])
+            self.assertEqual({n for n in before if (roots["base"]/n).read_bytes() != before[n]}, {"gateway.mjs","git-publish.mjs"})
