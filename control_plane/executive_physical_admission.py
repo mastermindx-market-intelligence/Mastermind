@@ -14,9 +14,13 @@ the existing owners once, in one process, for one canonical Job/command:
   producer and stay descriptive labels, never admission authority.
 
 The only release this composer issues is a positive pre-BEGIN NO_EFFECT
-abandonment of its own reservation. After BEGIN the debit stays until an
-incumbent terminal-evidence owner settles it (none exists yet); the one-shot
-finite capacity bounds that exposure and later admission fails closed.
+abandonment of its own reservation; it keeps caller/process/Job identity and
+Runtime binds but not Job status, so a Job cancelled before BEGIN still
+releases. After BEGIN the debit stays until an incumbent terminal-evidence
+owner settles it (none exists yet). Each finite Job holds at most one such
+debit, counted per host across boots, so later admission over-reserves and
+fails closed rather than over-admitting. ``st_dev`` is part of the database
+identity: a remount or schema migration refuses until the policy is re-armed.
 
 Every missing or changed input refuses with a ``PhysicalResourceRefusal`` code.
 Nothing here arms policy, migrates schema, invents a host/boot reference or
@@ -412,13 +416,19 @@ def admit(broker, request, ctx, *, connection=None, stage='entry'):
         if stage in {'locked', 'before_commit'}:
             _require_canonical_runtime(policy, runtime_identity(ctx.store, connection), ctx.host_ref, ctx.boot_ref)
         job = connection.execute('SELECT * FROM jobs WHERE job_id=?', (ctx.job_id,)).fetchone()
-        if (job is None or job['root_job_id'] != ctx.root_job_id or job['parent_job_id'] != ctx.parent_job_id
-                or job['status'] != 'QUEUED' or job['current_attempt_id'] is not None or job['attempt_count'] != 0):
+        if job is None or job['root_job_id'] != ctx.root_job_id or job['parent_job_id'] != ctx.parent_job_id:
             _refuse('JOB_BINDING_MISMATCH', 'Job, root or parent no longer matches the composed caller')
-        if connection.execute('SELECT 1 FROM events WHERE command_id=?', (ctx.dispatch_command_id,)).fetchone():
-            _refuse('COMMAND_REPLAYED', 'dispatch command already has a durable outcome')
-        if abandon and connection.execute('SELECT 1 FROM events WHERE command_id=?', (ctx.begin_command_id,)).fetchone():
-            _refuse('PHYSICAL_OUTCOME_AMBIGUOUS', 'BEGIN is durable; no-effect abandonment is unproven')
+        if abandon:
+            # NO_EFFECT rests on the in-writer absence of BEGIN, not Job status:
+            # a Job cancelled or replayed between reserve and BEGIN must still
+            # release its own unbegun debit instead of leaking it.
+            if connection.execute('SELECT 1 FROM events WHERE command_id=?', (ctx.begin_command_id,)).fetchone():
+                _refuse('PHYSICAL_OUTCOME_AMBIGUOUS', 'BEGIN is durable; no-effect abandonment is unproven')
+        else:
+            if job['status'] != 'QUEUED' or job['current_attempt_id'] is not None or job['attempt_count'] != 0:
+                _refuse('JOB_BINDING_MISMATCH', 'Job, root or parent no longer matches the composed caller')
+            if connection.execute('SELECT 1 FROM events WHERE command_id=?', (ctx.dispatch_command_id,)).fetchone():
+                _refuse('COMMAND_REPLAYED', 'dispatch command already has a durable outcome')
     return copy.deepcopy({'policy': policy,
                           'observations': json.loads(ctx.observations_json),
                           'binding': ctx.binding()})

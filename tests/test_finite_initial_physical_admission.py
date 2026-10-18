@@ -333,6 +333,50 @@ def test_forged_release_evidence_or_command_refuses(unbegun,kw,code):
     assert snap(s)==before and {r['state'] for r in _commitments(s)}=={'RESERVED'}
 
 
+def test_job_cancelled_before_begin_still_releases(dispatcher,monkeypatch):
+    s=dispatcher;original=s.runtime.broker.begin_physical
+    def begin(request,*,caller_context):
+        s.runtime.jobs.cancel_job(s.job.job_id)
+        return original(request,caller_context=caller_context)
+    with monkeypatch.context() as m:
+        m.setattr(s.runtime.broker,'begin_physical',begin)
+        _refused('JOB_BINDING_MISMATCH',s.dispatch)
+    rows=_commitments(s)
+    assert rows and {r['state'] for r in rows}=={'ABANDONED_NO_EFFECT'} and set(_demand_charges(s))=={0}
+    assert _job_attempts(s)==0
+
+
+@pytest.mark.parametrize('field',['database_identity','schema_identity'])
+def test_runtime_change_after_compose_refuses_inside_writer(unbegun,monkeypatch,field):
+    s=unbegun;ctx,reservation=_compose(s);real=adm.runtime_identity;before=snap(s)
+    with monkeypatch.context() as m:
+        m.setattr(adm,'runtime_identity',lambda store,c:dict(real(store,c),**{field:'replaced'}))
+        assert _reserve(s,ctx,reservation)['code']=='RUNTIME_MISMATCH'
+    assert snap(s)==before and _commitments(s)==[]
+    out=_reserve(s,ctx,reservation);assert out['code']=='RESERVED',out
+    refs=[{'commitment_id':c['commitment_id'],'allocation_generation':c['allocation_generation'],
+           'expected_revision':c['revision']} for c in out['receipt']['commitments']]
+    with monkeypatch.context() as m:
+        m.setattr(adm,'runtime_identity',lambda store,c:dict(real(store,c),**{field:'replaced'}))
+        assert _abandon(s,ctx,reservation,refs)['code']=='RUNTIME_MISMATCH'
+    assert {r['state'] for r in _commitments(s)}=={'RESERVED'}
+
+
+def test_begin_committed_after_deadline_is_never_released(dispatcher,monkeypatch):
+    s=dispatcher;original=s.runtime.broker.begin_physical;settles=[]
+    def begin(request,*,caller_context):
+        out=original(request,caller_context=caller_context);assert out['code']=='BEGUN',out
+        return dict(out,code='BEGIN_COMMITTED_DEADLINE_EXPIRED',fresh_begin=False)
+    with monkeypatch.context() as m:
+        m.setattr(s.runtime.broker,'begin_physical',begin)
+        m.setattr(s.runtime.broker,'settle_physical',lambda *a,**kw:settles.append(a) or {})
+        _refused('BEGIN_COMMITTED_DEADLINE_EXPIRED',s.dispatch)
+    assert settles==[] and {r['state'] for r in _commitments(s)}=={'EFFECT_MAY_HAVE_BEGUN'}
+    before=snap(s)
+    _refused('PHYSICAL_OUTCOME_AMBIGUOUS',s.dispatch)
+    assert snap(s)==before and _job_attempts(s)==0
+
+
 # --- replay / ambiguity / concurrency ----------------------------------------
 
 def test_prior_physical_outcome_is_never_replayed(dispatcher):

@@ -140,8 +140,8 @@ class FiniteInitialAdmission:
             # Definite pre-BEGIN no-effect release; this one-shot is not retried.
             raise PhysicalResourceRefusal('PHYSICAL_ADMISSION_ABANDONED','finite physical admission was released without effect')
         if prior is not None or begin is not None:
-            # A crash may leave RESERVED rows; only the reconciliation owner
-            # may release them. Never auto-abandon from a later dispatch.
+            # A crash may leave RESERVED rows; a later dispatch has a new caller
+            # fingerprint and never auto-abandons them (fails closed).
             raise PhysicalResourceRefusal('PHYSICAL_OUTCOME_AMBIGUOUS','finite physical admission already has an outcome')
         reserved=runtime.broker.reserve_physical(reservation,caller_context=context)
         if reserved.get('code')!='RESERVED' or reserved.get('admitted') is not True:
@@ -276,8 +276,9 @@ def _abandon_unbegun(runtime, context, reservation, refs):
     """Release this caller's own debit when BEGIN never became durable.
 
     The broker refuses NO_EFFECT once any BEGIN exists, inside its writer, so
-    this is race-safe. A refused or failed release leaves RESERVED rows for
-    the reconciliation owner; the original BEGIN refusal is still raised.
+    this is race-safe. A release refused for a caller/process/Runtime change
+    leaves RESERVED rows that no production owner can release yet; they fail
+    closed (over-reserve). The original BEGIN refusal is still raised.
     """
     from control_plane.executive_physical_admission import ABANDON_EVIDENCE
     if runtime.store.get_event_by_command_id(context.begin_command_id) is not None:
