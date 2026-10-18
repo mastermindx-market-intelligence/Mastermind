@@ -96,6 +96,12 @@ PRODUCTION_MODEL = "gpt-5.6-sol"
 REQUALIFICATION_PREDECESSOR_VERSION = "0.147.0"
 REQUALIFICATION_PREDECESSOR_SHA256 = "19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37"
 MAX_REQUALIFICATION_HORIZON = timedelta(hours=1)
+# Same-generation terminal requalification (reviewed 2026-10-18): one new canary on the
+# CURRENT reviewed pin after a finalized closed terminal failure recorded on that exact
+# binary with the exact same credential. The minimum age bounds burn to one canary per
+# credential per day and makes each failure one-shot. A receipt cannot nominate code;
+# this admission never opens current-pin recovery or the broker typed action.
+SAME_GENERATION_REQUALIFICATION_MIN_AGE = timedelta(hours=24)
 MAX_READINESS_AGE = timedelta(hours=24)
 MIN_ACCEPTANCE_MARGIN = timedelta(minutes=30)
 MAX_CLOCK_SKEW = timedelta(minutes=5)
@@ -792,6 +798,103 @@ def validate_terminal_predecessor_document(
             raise ReadinessError("requalification_component_timestamp_conflict")
 
 
+def validate_same_generation_terminal_document(
+    value: Mapping[str, Any], *,
+    auth_identity: Mapping[str, Any], binary_identity: Mapping[str, Any],
+    expected_kind: str, workspace_binding_class: str,
+    worker_uid: int = WORKER_UID, worker_gid: int = WORKER_GID,
+) -> None:
+    """Verify closed terminal evidence on the current pin without granting a canary.
+
+    Admits only a closed terminal failure recorded on the current reviewed pin
+    with the same credential. Never a passing receipt, reservation, timeout,
+    signal exit, changed credential, changed binary, or a failure younger than
+    24h. This grants no canary by itself.
+    """
+    if (expected_kind != "device-auth"
+            or workspace_binding_class != COMPANY_WORKSPACE_BINDING_CLASS
+            or (worker_uid, worker_gid) != (WORKER_UID, WORKER_GID)):
+        raise ReadinessError("requalification_requires_company_device_auth")
+    if (set(value) != _RECEIPT_FIELDS
+            or value.get("schema_version") != SCHEMA_VERSION
+            or value.get("passed") is not False
+            or value.get("refusal") != "provider_turn_failed"
+            or value.get("expected_credential_kind") != expected_kind
+            or value.get("workspace_binding_class") != workspace_binding_class
+            or value.get("forced_chatgpt_workspace_id_applied") is not False):
+        raise ReadinessError("requalification_requires_terminal_adverse")
+    _deadline_fields(
+        observed_at=value.get("observed_at"),
+        credential_expires_at=value.get("credential_expires_at"),
+        readiness_expires_at=value.get("readiness_expires_at"),
+        allow_expired_readiness=True,
+    )
+    _assert_worker_identity(auth_identity, worker_uid=worker_uid, worker_gid=worker_gid)
+    historical_auth = value.get("credential_lstat")
+    historical_binary = value.get("codex_binary")
+    if not isinstance(historical_auth, Mapping) or not isinstance(historical_binary, Mapping):
+        raise ReadinessError("requalification_historical_identity_missing")
+    if (binary_identity.get("path") != os.fspath(CODEX_BINARY)
+            or binary_identity.get("version") != CODEX_VERSION
+            or binary_identity.get("sha256") != CODEX_SHA256
+            or binary_identity.get("team_identifier") != CODEX_TEAM_ID):
+        raise ReadinessError("requalification_current_binary_unreviewed")
+    # Exact lstat equality for both objects; no device-renumbering tolerance.
+    if historical_binary != dict(binary_identity):
+        raise ReadinessError("requalification_same_generation_binary_mismatch")
+    if historical_auth != dict(auth_identity):
+        raise ReadinessError("requalification_same_generation_credential_changed")
+    identity, canary = value.get("provider_identity"), value.get("inference_canary")
+    if not isinstance(identity, Mapping) or not isinstance(canary, Mapping):
+        raise ReadinessError("requalification_components_missing")
+    safe_identity = _safe_identity(identity)
+    safe_canary = _safe_canary(canary, binary_identity=binary_identity)
+    if (safe_identity["refusal"] is not None
+            or safe_identity["codex_binary"] != historical_binary
+            or safe_identity["credential_lstat"] != historical_auth
+            or safe_identity["expected_credential_kind"] != expected_kind
+            or safe_identity["workspace_binding_class"] != workspace_binding_class):
+        raise ReadinessError("requalification_identity_mismatch")
+    # Exact reviewed failure class: no timeout, signal, missing result or
+    # finalization failure may be promoted into evidence of a closed turn.
+    if (safe_canary["passed"] is not False
+            or type(safe_canary["exit_code"]) is not int or safe_canary["exit_code"] != 1
+            or safe_canary["timed_out"] is not False
+            or safe_canary["terminal_event_class"] != "provider_turn_failed"
+            or safe_canary["result_valid"] is not False
+            or safe_canary["refusal"] != "provider_turn_failed"):
+        raise ReadinessError("requalification_effect_not_closed_terminal")
+    observed = _timestamp(value["observed_at"], code="receipt_timestamp_malformed")
+    for component in (safe_identity, safe_canary):
+        if abs(_timestamp(component["observed_at"], code="receipt_timestamp_malformed") - observed) > MAX_CLOCK_SKEW:
+            raise ReadinessError("requalification_component_timestamp_conflict")
+    if datetime.now(UTC) - observed < SAME_GENERATION_REQUALIFICATION_MIN_AGE:
+        raise ReadinessError("requalification_same_generation_failure_too_recent")
+
+
+def classify_same_generation_terminal_requalification(
+    value: Mapping[str, Any], *,
+    auth_identity: Mapping[str, Any], binary_identity: Mapping[str, Any],
+    expected_kind: str, workspace_binding_class: str,
+    new_credential_expires_at: str,
+    worker_uid: int = WORKER_UID, worker_gid: int = WORKER_GID,
+) -> None:
+    """Admit only a >=24h-old closed terminal failure on the current pin.
+
+    Same bounded horizon as the reviewed upgrade path; never an automatic
+    retry, an expiry extension or resolution of an uncertain provider effect.
+    """
+    current = datetime.now(UTC)
+    deadline = _timestamp(new_credential_expires_at, code="credential_expiry_malformed")
+    if not current + MIN_ACCEPTANCE_MARGIN < deadline <= current + MAX_REQUALIFICATION_HORIZON:
+        raise ReadinessError("requalification_deadline_out_of_bounds")
+    validate_same_generation_terminal_document(
+        value, auth_identity=auth_identity, binary_identity=binary_identity,
+        expected_kind=expected_kind, workspace_binding_class=workspace_binding_class,
+        worker_uid=worker_uid, worker_gid=worker_gid,
+    )
+
+
 def validate_revalidation_predecessor_document(
     value: Mapping[str, Any], *,
     auth_identity: Mapping[str, Any], binary_identity: Mapping[str, Any],
@@ -933,6 +1036,17 @@ def _terminal_requalification_preimage(
         args, auth_identity=auth_identity, binary_identity=binary_identity,
         expected_digest=args.requalify_terminal_adverse_sha256,
         classifier=classify_terminal_requalification,
+    )
+
+
+def _same_generation_requalification_preimage(
+    args: argparse.Namespace, *, auth_identity: Mapping[str, Any],
+    binary_identity: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    return _explicit_requalification_preimage(
+        args, auth_identity=auth_identity, binary_identity=binary_identity,
+        expected_digest=args.requalify_same_generation_terminal_sha256,
+        classifier=classify_same_generation_terminal_requalification,
     )
 
 
@@ -1709,6 +1823,7 @@ def _parser() -> argparse.ArgumentParser:
     reuse.add_argument("--worker-gid", type=int, default=WORKER_GID)
     reuse_replacement = reuse.add_mutually_exclusive_group()
     reuse_replacement.add_argument("--requalify-terminal-adverse-sha256")
+    reuse_replacement.add_argument("--requalify-same-generation-terminal-sha256")
     reuse_replacement.add_argument("--renew-device-revalidation-sha256")
     reuse_replacement.add_argument("--requalify-company-device-drift-sha256")
     reuse_replacement.add_argument("--recover-current-pin-grant-sha256")
@@ -1725,6 +1840,7 @@ def _parser() -> argparse.ArgumentParser:
     reserve.add_argument("--worker-gid", type=int, default=WORKER_GID)
     replacement = reserve.add_mutually_exclusive_group()
     replacement.add_argument("--requalify-terminal-adverse-sha256")
+    replacement.add_argument("--requalify-same-generation-terminal-sha256")
     replacement.add_argument("--renew-device-revalidation-sha256")
     replacement.add_argument("--requalify-company-device-drift-sha256")
     replacement.add_argument("--recover-current-pin-grant-sha256")
@@ -1876,6 +1992,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                     ), binary_identity=current_binary_identity(args.binary),
                 )
                 return 6
+            if args.requalify_same_generation_terminal_sha256 is not None:
+                _same_generation_requalification_preimage(
+                    args, auth_identity=current_auth_identity(
+                        args.auth, worker_uid=args.worker_uid, worker_gid=args.worker_gid,
+                    ), binary_identity=current_binary_identity(args.binary),
+                )
+                return 9
             if args.requalify_terminal_adverse_sha256 is not None:
                 _terminal_requalification_preimage(
                     args, auth_identity=current_auth_identity(
@@ -1961,11 +2084,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             identity_payload = _read_json(args.identity_json)
             if (args.requalify_company_device_drift_sha256 is not None
                     or args.requalify_terminal_adverse_sha256 is not None
+                    or args.requalify_same_generation_terminal_sha256 is not None
                     or args.renew_device_revalidation_sha256 is not None):
                 preimage = (_company_device_drift_preimage
                             if args.requalify_company_device_drift_sha256 is not None
                             else _device_revalidation_preimage
                             if args.renew_device_revalidation_sha256 is not None
+                            else _same_generation_requalification_preimage
+                            if args.requalify_same_generation_terminal_sha256 is not None
                             else _terminal_requalification_preimage)
                 document, receipt_identity = preimage(
                     args, auth_identity=auth_identity, binary_identity=binary_identity,
@@ -2009,6 +2135,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     workspace_binding_class=args.workspace_binding_class, worker_gid=args.worker_gid,
                     expected_receipt_sha256=(args.requalify_company_device_drift_sha256
                                              or args.requalify_terminal_adverse_sha256
+                                             or args.requalify_same_generation_terminal_sha256
                                              or args.renew_device_revalidation_sha256),
                     current_identity_guard=identity_guard,
                 )
