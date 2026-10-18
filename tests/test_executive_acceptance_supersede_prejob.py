@@ -15,6 +15,37 @@ from tests.test_executive_acceptance_supersede_unstarted import (
 )
 
 
+WORKER_ID = "minimax-worker-1"
+
+
+def attended_membership(**overrides):
+    """The ten-field value ``Acceptance._attended_worker_membership`` returns."""
+    value = {
+        "worker_user": "_mastermind_minimax", "worker_uid": 460,
+        "worker_group": "_mastermind_minimax", "worker_gid": 461,
+        "provider_home": f"/private/var/db/mastermind-executive/workers/{WORKER_ID}/provider-home",
+        "worker_id": WORKER_ID,
+        "worker_config_path": "/Library/Application Support/MastermindExecutive/finite/minimax.json",
+        "worker_config_sha256": "a" * 64, "bindings_sha256": "b" * 64,
+        "physical_binding_sha256": "c" * 64,
+    }
+    value.update(overrides)
+    return value
+
+
+def group_receipt(**overrides):
+    """``protected-group-membership.json`` exactly as ``Acceptance`` writes it (eight keys)."""
+    value = {
+        "passed": True, "effective_members": {"_mastermind_control": ["_mastermind_control"]},
+        "attended_worker_membership": attended_membership(),
+        "control_definition_sha256": "d" * 64,
+        "primary_gid_census": "COMPLETE", "name_members": "EXACT",
+        "uuid_members": "EXACT", "nested_groups": "ABSENT",
+    }
+    value.update(overrides)
+    return value
+
+
 def receipt_prefix(runtime, selected, monkeypatch, marker_schema=None):
     monkeypatch.setattr(pwd, "getpwnam", lambda name: SimpleNamespace(pw_uid=os.getuid()))
     monkeypatch.setattr(grp, "getgrnam", lambda name: SimpleNamespace(gr_gid=os.getgid()))
@@ -23,11 +54,7 @@ def receipt_prefix(runtime, selected, monkeypatch, marker_schema=None):
     root.mkdir(mode=0o700)
     docs = {
         "nonexecutive-launchd-before.json": {"sha256": "1" * 64, "labels_excluded": 2},
-        "protected-group-membership.json": {
-            "passed": True, "effective_members": {"control": ["fixture"]},
-            "primary_gid_census": "COMPLETE", "name_members": "EXACT",
-            "uuid_members": "EXACT", "nested_groups": "ABSENT",
-        },
+        "protected-group-membership.json": group_receipt(),
     }
     for name, doc in docs.items():
         (root / name).write_text(json.dumps(doc))
@@ -228,6 +255,108 @@ def test_prejob_refuses_drift_or_any_later_acceptance_state(tmp_path, monkeypatc
         _rewrite(bundle / "descriptor.json", selected)
     with pytest.raises((m.MaintenanceError, OSError)):
         m.validate_superseded_binding(d, before=before, artifacts=artifacts, prior_canary=canary)
+
+
+GROUP_RECEIPT = "protected-group-membership.json"
+SCHEMA_DRIFT = "interrupted acceptance receipt schema drifted"
+MEMBERSHIP_KEYS = sorted(attended_membership())
+
+
+def _write_group_receipt(root, value):
+    _rewrite(root / GROUP_RECEIPT, value)
+
+
+def test_group_receipt_fixture_is_the_producers_eight_key_form(tmp_path, monkeypatch):
+    d, selected, before, artifacts, canary, bundle, root = fixture(tmp_path, monkeypatch)
+    assert set(json.loads((root / GROUP_RECEIPT).read_text())) == m._GROUP_RECEIPT_KEYS == {
+        "passed", "effective_members", "attended_worker_membership", "control_definition_sha256",
+        "primary_gid_census", "name_members", "uuid_members", "nested_groups"}
+    assert set(attended_membership()) == m._ATTENDED_MEMBERSHIP_KEYS
+    assert m.prejob_evidence(S) == d["prejob_evidence_sha256"]
+
+
+def test_group_receipt_without_a_finite_worker_stanza_is_accepted(tmp_path, monkeypatch):
+    # ``_attended_worker_membership`` returns None when control.json has no fabric_attended_probe.
+    d, selected, before, artifacts, canary, bundle, root = fixture(tmp_path, monkeypatch)
+    _write_group_receipt(root, group_receipt(attended_worker_membership=None))
+    assert len(m.prejob_evidence(S)) == 64
+
+
+def _legacy_six_key_receipt():
+    return {"passed": True, "effective_members": {"control": ["fixture"]},
+            "primary_gid_census": "COMPLETE", "name_members": "EXACT",
+            "uuid_members": "EXACT", "nested_groups": "ABSENT"}
+
+
+def _without(key):
+    value = group_receipt()
+    del value[key]
+    return value
+
+
+@pytest.mark.parametrize("receipt", [
+    group_receipt(unexpected="x"),
+    _without("control_definition_sha256"),
+    _without("attended_worker_membership"),
+    group_receipt(control_definition_sha256="z" * 64),
+    group_receipt(control_definition_sha256="D" * 64),
+    group_receipt(control_definition_sha256="d" * 63),
+    group_receipt(control_definition_sha256=None),
+    group_receipt(control_definition_sha256=int("1" * 64)),
+    group_receipt(attended_worker_membership=attended_membership(unexpected="x")),
+    group_receipt(attended_worker_membership=["a"]),
+    group_receipt(attended_worker_membership="membership"),
+    group_receipt(attended_worker_membership={}),
+    group_receipt(attended_worker_membership=attended_membership(worker_uid="460")),
+    group_receipt(attended_worker_membership=attended_membership(worker_gid="461")),
+    group_receipt(attended_worker_membership=attended_membership(worker_uid=True)),
+    group_receipt(attended_worker_membership=attended_membership(worker_uid=500)),
+    group_receipt(attended_worker_membership=attended_membership(worker_gid=399)),
+    group_receipt(attended_worker_membership=attended_membership(worker_user="minimax")),
+    group_receipt(attended_worker_membership=attended_membership(worker_user="_mastermind_" + "x" * 20)),
+    group_receipt(attended_worker_membership=attended_membership(worker_group="_Mastermind_minimax")),
+    group_receipt(attended_worker_membership=attended_membership(worker_id="")),
+    group_receipt(attended_worker_membership=attended_membership(worker_config_path="finite/minimax.json")),
+    group_receipt(attended_worker_membership=attended_membership(
+        provider_home="/private/var/db/mastermind-executive/workers/other/provider-home")),
+    group_receipt(attended_worker_membership=attended_membership(worker_config_sha256="z" * 64)),
+    group_receipt(attended_worker_membership=attended_membership(bindings_sha256="b" * 63)),
+    group_receipt(attended_worker_membership=attended_membership(physical_binding_sha256=7)),
+    group_receipt(passed=False),
+    group_receipt(effective_members=["x"]),
+    group_receipt(primary_gid_census="PARTIAL"),
+    group_receipt(name_members="INEXACT"),
+    group_receipt(uuid_members="INEXACT"),
+    group_receipt(nested_groups="PRESENT"),
+    _legacy_six_key_receipt(),
+], ids=[
+    "extra-top-level-key", "missing-control-definition", "missing-attended-membership",
+    "control-definition-non-hex", "control-definition-uppercase", "control-definition-short",
+    "control-definition-none", "control-definition-int",
+    "membership-extra-key", "membership-list", "membership-str", "membership-empty",
+    "uid-str", "gid-str", "uid-bool", "uid-out-of-range", "gid-out-of-range",
+    "user-pattern", "user-too-long", "group-pattern", "worker-id-empty", "config-path-relative",
+    "provider-home-not-derived", "config-sha-non-hex", "bindings-sha-short", "physical-sha-int",
+    "passed-false", "effective-members-list", "gid-census-partial", "name-members-inexact",
+    "uuid-members-inexact", "nested-groups-present", "legacy-six-key-form",
+])
+def test_group_receipt_must_match_the_producers_exact_shape(tmp_path, monkeypatch, receipt):
+    d, selected, before, artifacts, canary, bundle, root = fixture(tmp_path, monkeypatch)
+    _write_group_receipt(root, receipt)
+    with pytest.raises(m.MaintenanceError, match=SCHEMA_DRIFT):
+        m.prejob_evidence(S)
+    with pytest.raises(m.MaintenanceError, match=SCHEMA_DRIFT):  # the sealed binding refuses it too
+        m.validate_superseded_binding(d, before=before, artifacts=artifacts, prior_canary=canary)
+
+
+@pytest.mark.parametrize("key", MEMBERSHIP_KEYS)
+def test_group_receipt_membership_requires_every_field(tmp_path, monkeypatch, key):
+    d, selected, before, artifacts, canary, bundle, root = fixture(tmp_path, monkeypatch)
+    membership = attended_membership()
+    del membership[key]
+    _write_group_receipt(root, group_receipt(attended_worker_membership=membership))
+    with pytest.raises(m.MaintenanceError, match=SCHEMA_DRIFT):
+        m.prejob_evidence(S)
 
 
 def test_unstarted_stays_strict_with_the_same_prejob_prefix(tmp_path, monkeypatch):

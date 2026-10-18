@@ -124,9 +124,10 @@ class _DefinitionCheckPassed(Exception):
 def test_serve_from_config_real_loader_passes_service_definition_check(tmp_path, monkeypatch, root_stats, router):
     """Production order with the REAL ``load_control_config``: ``_serve_from_config``
     loads control.json (both stanzas), digests it in ``from_startup``, then
-    ``_service_from_config`` runs ``require_definition`` against the loaded config
-    (a fresh reload + re-digest).  Only host reads and external effects are patched;
-    the run is stopped right after that check so no service is constructed."""
+    ``_service_from_config`` calls ``require_definition(raw)``, which re-digests the
+    raw loaded object it was passed (there is no second load).  Only host reads and
+    external effects are patched; the run is stopped right after that check so no
+    service is constructed."""
     from ops.executive_os import coo_principal_host, dialogue_wake_canary_control
     path = both_stanza_config(tmp_path)
     monkeypatch.setattr(cli, "_load_control_environment_attestation", lambda *a, **kw: {"config_sha256": "a" * 64})
@@ -140,7 +141,7 @@ def test_serve_from_config_real_loader_passes_service_definition_check(tmp_path,
     real_require_definition = AttendedControlProbeSource.require_definition
 
     def spy(self, raw):
-        real_require_definition(self, raw)  # real reload, real digest comparison
+        real_require_definition(self, raw)  # real re-digest of the raw object, real comparison
         checked.append(raw)
         raise _DefinitionCheckPassed
 

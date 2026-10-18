@@ -40,7 +40,19 @@ The selected control-owned 0700 acceptance directory may contain exactly
 `nonexecutive-launchd-before.json` and `protected-group-membership.json`. Both
 must be control-owned, single-link, 0400 JSON files without ACLs. Their exact
 bytes and expected prefix shapes are checked, hashed into the new descriptor,
-and rechecked before the successor's exclusive run marker is written. Unsafe
+and rechecked before the successor's exclusive run marker is written.
+`nonexecutive-launchd-before.json` holds exactly `sha256` and `labels_excluded`
+(2). `protected-group-membership.json` holds exactly the eight keys the acceptance
+producer writes: `passed` (true), `effective_members` (object),
+`attended_worker_membership`, `control_definition_sha256` (64 lowercase hex),
+`primary_gid_census` (`COMPLETE`), `name_members` and `uuid_members` (`EXACT`),
+and `nested_groups` (`ABSENT`). `attended_worker_membership` is `null` when
+control.json has no `fabric_attended_probe` stanza; otherwise exactly the ten
+fields of `_attended_worker_membership` (`worker_user`/`worker_group`
+`_mastermind_*` names of at most 31 characters, `worker_uid`/`worker_gid` integers in
+400-499, `worker_id`, an absolute `worker_config_path`, a `provider_home` derived
+from `worker_id`, and three 64-hex digests). Any other key set or shape is refused
+as a schema drift; the earlier six-key form is no longer accepted. Unsafe
 aliases, changed namespace/receipts, summaries, canary receipts, additional
 outputs or any Runtime delta refuse recovery. Only the existing trusted Darwin
 `/var` alias is recognized; ordinary unstarted absence checks are unchanged.

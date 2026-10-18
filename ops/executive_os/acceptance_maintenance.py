@@ -49,7 +49,20 @@ _MAX_CARRY_DEPTH = 64
 _MAX_SUPERSEDE_DEPTH = 64
 _SHA = re.compile(r"[0-9a-f]{40}")
 _DIGEST = re.compile(r"[0-9a-f]{64}")
-_TERMINAL = {"COMPLETED", "FAILED", "LOST", "CANCELLED", "RATE_LIMITED"}
+# The interrupted pre-Job group receipt is written by ``Acceptance`` (acceptance.py,
+# ``protected-group-membership.json``); keep these key sets equal to that producer.
+_GROUP_RECEIPT_KEYS = frozenset({
+    "passed", "effective_members", "attended_worker_membership", "control_definition_sha256",
+    "primary_gid_census", "name_members", "uuid_members", "nested_groups",
+})
+# ``_attended_worker_membership`` returns None without a ``fabric_attended_probe`` stanza.
+_ATTENDED_MEMBERSHIP_KEYS = frozenset({
+    "worker_user", "worker_uid", "worker_group", "worker_gid", "provider_home", "worker_id",
+    "worker_config_path", "worker_config_sha256", "bindings_sha256", "physical_binding_sha256",
+})
+_ATTENDED_ACCOUNT = re.compile(r"_mastermind_[a-z0-9_]+")
+_WORKER_HOMES = Path("/private/var/db/mastermind-executive/workers")
+_TERMINAL ={"COMPLETED", "FAILED", "LOST", "CANCELLED", "RATE_LIMITED"}
 _HEARTBEAT = {"last_seen_at_ms", "updated_at_ms", "version"}
 _QUOTA_MUTABLE = _HEARTBEAT | {"status", "held_attempt_id", "fence_counter"}
 _JOB_MUTABLE = {"status", "assigned_worker_id", "assigned_quota_class",
@@ -805,6 +818,29 @@ def sealed_backup_snapshot(path: Path, expected_digest: str) -> dict:
         os.close(fd)
 
 
+def _attended_membership_shape_valid(value: Any) -> bool:
+    """Shape of ``Acceptance._attended_worker_membership``: None, or exactly its ten fields."""
+    if value is None:
+        return True
+    if type(value) is not dict or set(value) != _ATTENDED_MEMBERSHIP_KEYS:
+        return False
+    for key in ("worker_uid", "worker_gid"):
+        if type(value[key]) is not int or not 400 <= value[key] < 500:
+            return False
+    for key in ("worker_user", "worker_group"):
+        name = value[key]
+        if (type(name) is not str or len(name) > 31
+                or _ATTENDED_ACCOUNT.fullmatch(name) is None):
+            return False
+    worker_id, config_path = value["worker_id"], value["worker_config_path"]
+    if (type(worker_id) is not str or not worker_id
+            or type(config_path) is not str or not Path(config_path).is_absolute()
+            or value["provider_home"] != os.fspath(_WORKER_HOMES / worker_id / "provider-home")):
+        return False
+    return all(type(value[key]) is str and _DIGEST.fullmatch(value[key]) is not None
+               for key in ("worker_config_sha256", "bindings_sha256", "physical_binding_sha256"))
+
+
 def prejob_evidence(sha: str) -> str:
     """Hash only the two control-owned receipts preceding service attestation.
 
@@ -862,9 +898,11 @@ def prejob_evidence(sha: str) -> str:
                      and _DIGEST.fullmatch(value["sha256"]) is not None
                      and type(value["labels_excluded"]) is int and value["labels_excluded"] == 2)
         else:
-            valid = (set(value) == {"passed", "effective_members", "primary_gid_census",
-                                   "name_members", "uuid_members", "nested_groups"}
+            valid = (set(value) == _GROUP_RECEIPT_KEYS
                      and value["passed"] is True and isinstance(value["effective_members"], dict)
+                     and isinstance(value["control_definition_sha256"], str)
+                     and _DIGEST.fullmatch(value["control_definition_sha256"]) is not None
+                     and _attended_membership_shape_valid(value["attended_worker_membership"])
                      and value["primary_gid_census"] == "COMPLETE"
                      and value["name_members"] == value["uuid_members"] == "EXACT"
                      and value["nested_groups"] == "ABSENT")
