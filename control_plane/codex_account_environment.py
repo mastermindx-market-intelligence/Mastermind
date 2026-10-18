@@ -378,9 +378,15 @@ def probe_native_account(environment: CodexAccountEnvironment, binary: Path,
                             "home_identity": environment.auth_metadata()}
     stage = "construct"
     try:
+        native_env = environment.process_environment()
+        # The exact attended Homebrew Codex CLI on macOS needs its fixed
+        # executable directory for app-server initialize. Never inherit the
+        # parent PATH or widen the installed Executive pinned-binary path.
+        if Path(binary) == Path("/opt/homebrew/bin/codex"):
+            native_env["PATH"] = "/opt/homebrew/bin:" + native_env["PATH"]
         client = AppServerClient([str(binary), "app-server", "-c",
             'cli_auth_credentials_store="file"', "-c", 'model_provider="openai"'],
-            env=environment.process_environment(), cwd=environment.home,
+            env=native_env, cwd=environment.home,
             start_new_session=True)
         stage = "start"
         client.start()

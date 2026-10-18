@@ -470,3 +470,75 @@ def test_native_probe_json_consumer_retains_window_evidence(home, monkeypatch, k
     assert packet["stop"]["private_group_empty"] is True
     assert calls == ["initialize", "account/read", "account/rateLimits/read"]
     assert "secret" not in json.dumps(packet)
+
+
+@pytest.mark.parametrize("binary,expected_path", [
+    (Path("/opt/homebrew/bin/codex"),
+     "/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"),
+    (Path("/Library/Application Support/MastermindExecutive/bin/codex-0.159.2"),
+     "/usr/bin:/bin:/usr/sbin:/sbin"),
+])
+def test_native_read_observer_has_fixed_minimal_executable_path(
+    home, monkeypatch, binary, expected_path,
+):
+    """Real M2 Codex CLI requires its Homebrew prefix for App Server initialize.
+
+    Never propagate an inherited PATH, API credentials, home or provider
+    overrides; keep the installed pinned Executive binary in its strict path.
+    This is only an inert fake App Server and cannot turn, refresh or dispatch.
+    """
+    from scripts.ohf import laboratory
+    from control_plane.codex_account_environment import probe_native_account
+    private(home / "auth.json", auth())
+    monkeypatch.setenv("PATH", "/untrusted/inherited/executable-directory")
+    monkeypatch.setenv("OPENAI_API_KEY", "CANARY_PARENT_API_SECRET")
+    monkeypatch.setenv("CODEX_ACCESS_TOKEN", "CANARY_PARENT_CODEX_SECRET")
+    seen = []
+
+    class Client:
+        def __init__(self, argv, *, env, cwd, start_new_session):
+            seen.append(("construction", tuple(argv)))
+            assert env["PATH"] == expected_path
+            assert env["HOME"] == env["CODEX_HOME"] == str(home)
+            assert "OPENAI_API_KEY" not in env
+            assert "CODEX_ACCESS_TOKEN" not in env
+            assert "CANARY" not in repr(env)
+            assert start_new_session is True
+            assert cwd == home
+
+        def start(self):
+            seen.append(("start",))
+
+        def request(self, method, *args, **kwargs):
+            seen.append((method,))
+            if method == "initialize":
+                return {"userAgent": "fixture-only"}
+            if method == "account/read":
+                return {"account": {"type": "chatgpt", "planType": "pro"}}
+            if method == "account/rateLimits/read":
+                return {"rateLimits": {
+                    "primary": None, "secondary": None,
+                }}
+            raise AssertionError("unreviewed native observer call")
+
+        def notify(self, *args):
+            seen.append(("notification",))
+
+        def graceful_close(self):
+            return laboratory.AppServerStopProof(
+                controller_returncode=0, private_group_id=12345,
+                private_group_empty=True,
+                leader_exit_confirmed_graceful=True,
+                survivors_detected_after_controller_exit=False,
+                termination_outcome="fixture",
+            )
+
+    monkeypatch.setattr(laboratory, "AppServerClient", Client)
+    with native_codex_account_scope(home) as environment:
+        result = probe_native_account(environment, binary)
+    assert result["state"] == "NATIVE_READS_COMPLETED"
+    assert result["stop"]["private_group_empty"] is True
+    assert [row[0] for row in seen] == [
+        "construction", "start", "initialize", "notification",
+        "account/read", "account/rateLimits/read",
+    ]

@@ -130,3 +130,41 @@ successor head. Still DRAFT / NOT_INSTALLED / SOURCE_ONLY, pending
 independent new-head security review, hosted CI, existing canonical quota
 producer and claim-time revalidation, enrolled native accounts, and
 one real original-parent worker return and acceptance.
+
+
+## October 17 late native C1 enrollment and App Server environment verification
+
+The Chairman completed the native OAuth device-login ceremony for the isolated M2
+C1 CODEX_HOME; its private auth.json (mode 0600) exists and native Codex CLI
+0.159.3 reports an active ChatGPT login. C2/C3/C4 remained unenrolled and no
+Business native homes were registered at the bounded observation.
+
+First exact existing scripts/executive_codex_account.py readiness on the C1
+home failed during initialize with NATIVE_READ_UNAVAILABLE and clean private
+process-group cleanup. A bounded differential showed that merely supplying
+TMPDIR still fails, but a controlled PATH including /opt/homebrew/bin allows
+native initialize -> account/read -> account/rateLimits/read to succeed. The
+exact same isolated home, explicit managed-ChatGPT file store, and openai provider
+were retained. The account/read email did not match the intended C1 account
+from the Chairman's account roster. The actual email, credential and token values
+were never copied or published. Therefore C1 is NOT identity-qualified, and
+nothing was admitted, dispatched, rotated, or reset.
+
+Fix on the original #1585 branch: probe_native_account uses the fixed
+/opt/homebrew/bin search prefix only for the exact attended
+/opt/homebrew/bin/codex binary. It never inherits ambient PATH or credentials
+and leaves the separately installed pinned Executive Codex binary at the old
+strict system-only PATH. Two RED-first fake-App-Server tests confirm the positive
+Homebrew path and negative installed-binary path. The combined native account,
+quota, credit inventory, and worker factory suite passed 151/151, with Python
+compileall and diff checks passing.
+
+The exact post-fix real C1 CLI probe completed with exit=0,
+NATIVE_READS_COMPLETED, MANAGED_CHATGPT_OBSERVED, plan=pro,
+AVAILABLE_OBSERVED, primary window=100% remaining / 10080 minutes,
+secondary=NOT_APPLICABLE, and private_group_empty=true. This is native
+observation evidence, not successful Astra/Sol model execution, verified
+seat-to-email binding, canonical sample custody, runtime claim-time reservation,
+or six-seat admission. Preserve the C1 credentials as observed; only the
+account owner can correct the browser login for the intended C1 identity.
+Remain DRAFT / NOT_INSTALLED pending reviewed exact head CI and integration.
