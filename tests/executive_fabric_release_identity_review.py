@@ -255,9 +255,11 @@ REVIEWED_FILES['ops/native_fabric/quota_continuity/source/glm_host_account_readi
 # CHECKS a retained receipt's shape. It registers no account, assigns no uid or
 # gid and grants nothing. Exact full-file bytes and the three token sites only;
 # any changed byte exposes every site to the generic D8 scanner again.
+# Re-pinned for the historical-only legacy six-key admission (no new literal; the same three
+# tokens moved with the added constant and helper).
 REVIEWED_FILES['ops/executive_os/acceptance_maintenance.py'] = {
-    "sha256": "4bca69145c0bb0eda2fd1bdd023e02675eb03e0043ac63014cbfed342031262e",
-    "sites": ((63, 31, 56, "str", 'r"_mastermind_[a-z0-9_]+"'),
-              (828, 46, 49, "int", "400"),
-              (828, 66, 69, "int", "500")),
+    "sha256": "2523c0c0618106555b49b29199a6151f12f3ddd725d929c0595dce388dd5a314",
+    "sites": ((70, 31, 56, "str", 'r"_mastermind_[a-z0-9_]+"'),
+              (835, 46, 49, "int", "400"),
+              (835, 66, 69, "int", "500")),
 }
