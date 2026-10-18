@@ -15,6 +15,8 @@ from numbers import Real
 READ_SCHEMA = "mastermind.price_read.v1"
 SETTLEMENT_SCHEMA = "mastermind.settlement_price_evidence.v1"
 YAHOO_SCHEMA = "mastermind.yahoo_daily_bar_evidence.v1"
+YAHOO_OPEN_SCHEMA = "mastermind.yahoo_daily_bar_evidence.v2"
+_YAHOO_SCHEMAS = (YAHOO_SCHEMA, YAHOO_OPEN_SCHEMA)
 MAX_CONTEXT_BYTES = 16_384
 MAX_QUOTES = 128
 
@@ -85,12 +87,14 @@ _YAHOO_FIELDS = frozenset({
     "market_observed_at", "execution_qualification",
 })
 
+_YAHOO_OPEN_FIELDS = _YAHOO_FIELDS | frozenset({"cache_refresh_basis"})
+
 
 def _binding_reason(copied, ticker, price, currency):
     if copied.get("ticker") != ticker:
         return "ticker_mismatch"
     expected = positive_number(price)
-    field = "price_local" if copied["schema"] == YAHOO_SCHEMA else "price"
+    field = "price_local" if copied["schema"] in _YAHOO_SCHEMAS else "price"
     if expected is None or positive_number(copied.get(field)) != expected:
         return "price_mismatch"
     if copied["schema"] == READ_SCHEMA and copied.get("currency") != currency:
@@ -99,7 +103,7 @@ def _binding_reason(copied, ticker, price, currency):
 
 
 def _snapshot(value, *, depth=0):
-    """Copy only bounded v1 fields, rebinding every retained nested observation.
+    """Copy only bounded supported fields, rebinding every retained nested observation.
 
     Validation precedes serialization: bounded fields, one upstream edge and at most
     eight two-field attempts per level prevent arbitrary payload traversal. Hashing
@@ -111,9 +115,13 @@ def _snapshot(value, *, depth=0):
         return None, "context_too_deep"
     try:
         schema = value.get("schema")
-        if type(schema) is not str or schema not in (READ_SCHEMA, YAHOO_SCHEMA):
+        if type(schema) is not str or schema not in (READ_SCHEMA, *_YAHOO_SCHEMAS):
             return None, "unsupported_schema"
-        required = _READ_FIELDS if schema == READ_SCHEMA else _YAHOO_FIELDS
+        required = (
+            _READ_FIELDS if schema == READ_SCHEMA
+            else _YAHOO_OPEN_FIELDS if schema == YAHOO_OPEN_SCHEMA
+            else _YAHOO_FIELDS
+        )
         allowed = required | (_CONVERSION_FIELDS if schema == READ_SCHEMA else frozenset())
         if len(value) > len(allowed) or any(type(k) is not str or k not in allowed for k in value):
             return None, "unknown_fields"
@@ -146,8 +154,11 @@ def _snapshot(value, *, depth=0):
         label = copied.get("source_bar_label")
         if label is not None and bar_label(label) != label:
             return None, "invalid_context"
-        if schema == YAHOO_SCHEMA:
-            if copied["field"] != "Close" or copied["status"] not in ("available", "partial", "unavailable"):
+        if schema in _YAHOO_SCHEMAS:
+            expected_field = "Open" if schema == YAHOO_OPEN_SCHEMA else "Close"
+            if copied["field"] != expected_field or copied["status"] not in ("available", "partial", "unavailable"):
+                return None, "invalid_context"
+            if schema == YAHOO_OPEN_SCHEMA and copied["cache_refresh_basis"] != "shared_close_cache":
                 return None, "invalid_context"
             if copied["source_bar_label_kind"] != "daily_bar_label":
                 return None, "invalid_context"
