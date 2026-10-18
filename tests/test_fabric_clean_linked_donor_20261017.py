@@ -312,6 +312,10 @@ def test_skipped_present_or_required_path_observation_refuses(repository, name):
     f = repository
     real = f.module["_sparse_git"]
     if name.startswith("docs/"):
+        # Reach the explicit observed-flag check on every supported Git. Newer
+        # Git emits a sparse-index expansion hint when an omitted directory is
+        # materialized, which correctly triggers an earlier Git refusal.
+        _git(f.alternate, "sparse-checkout", "reapply", "--no-sparse-index")
         (f.alternate / "docs").mkdir()
         (f.alternate / name).write_text("inert present fixture\n")
 
