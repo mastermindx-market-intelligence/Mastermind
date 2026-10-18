@@ -2467,6 +2467,18 @@ html[data-theme="light"] body.page-mm {
 .mm-pf-awaiting{position:relative;min-height:100px}
 .mm-pf-awaiting > *{visibility:hidden}
 .mm-pf-awaiting::after{content:attr(data-scope-message);position:absolute;top:40px;left:20px;right:20px;color:var(--muted);font-size:12px}
+.mm-eval-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.mm-eval-head h2{margin-bottom:8px}
+.mm-eval-badge{flex:none;border:1px solid var(--line);border-radius:20px;padding:3px 9px;font-size:10px;color:var(--muted)}
+.mm-eval-cutoff,.mm-eval-label{font-size:11px;color:var(--muted);line-height:1.5}
+.mm-eval-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-top:14px}
+.mm-eval-fact{min-width:0}
+.mm-eval-value{font-weight:700;font-size:16px;line-height:1.5;overflow-wrap:anywhere}
+.mm-eval-note,.mm-eval-details{font-size:11px;line-height:1.6;color:var(--muted);margin-top:12px}
+.mm-eval-failed{color:var(--warn)}
+.mm-eval-details summary{cursor:pointer}
+.mm-eval-details p{margin:8px 0}
+@media(max-width:620px){.mm-eval-grid{gap:10px}.mm-eval-value{font-size:14px}}
 .mm-da-alert{border-left:3px solid var(--warn);background:var(--panel2);padding:12px 14px;border-radius:6px;margin:10px 0 14px;line-height:1.55}
 .mm-da-alert strong{display:block;margin-bottom:3px}
 .mm-da-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
@@ -2710,6 +2722,11 @@ html[data-theme="light"] body.page-mm {
               aria-controls="auto-sum" aria-expanded="false" onclick="toggleAutoThesis()"></button>
     </div>
   </div>
+</div>
+
+<!-- Evaluation observations are separate from quote-driven performance. -->
+<div class="mm-section" id="forward-evaluation-section" style="display:none">
+  <section class="panel span12" id="forward-evaluation" aria-live="polite" aria-label="Evaluation record"></section>
 </div>
 
 <!-- ── PERFORMANCE HEADER ─────────────────────────────────────────────────── -->
@@ -3738,6 +3755,8 @@ var _calibLoaded = false, _calibLoad = null;
 var _pendingSelfSelect = false;   // set when loaded at /self — auto-select that tab once portfolios load
 var _portfolios = [];             // [{id,name,tagline,kind,manager,status}] from /api/portfolios
 var _decisionAvailability = null; // independent persisted decision/account clocks; active regional books only
+var _forwardEvaluation = null;
+var _forwardEvaluationPending = true;
 var _decisionAvailabilityPending = true;
 var _decisions = [];              // autonomous Brain daily decision log (/api/decisions)
 var DECISION_PREVIEW_COUNT = 5, _decisionsExpanded = false;
@@ -6330,6 +6349,8 @@ function applyPortfolioScope() {
   var auto = _isBrainBook(_portfolio);
   var availabilitySection = E('decision-availability-section');
   if (availabilitySection) availabilitySection.style.display = _isAvailabilityBook(_portfolio) ? '' : 'none';
+  var evaluationSection = E('forward-evaluation-section');
+  if (evaluationSection) evaluationSection.style.display = _isAvailabilityBook(_portfolio) ? '' : 'none';
   var self = _portfolio === 'self_directed';
   var flagship = _portfolio === 'flagship';
   // The self-directed book reuses the dedicated #view-self layout: body.view-self hides every
@@ -6372,13 +6393,16 @@ window.setPortfolio = function(id) {
     _decisionsExpanded = false;
     _book = null; _perf = null; _trades = null; _risk = null; _decisions = []; _rejected = [];
     _decisionAvailability = null;
+    _forwardEvaluation = null;
   }
   _portfolio = id;
   _decisionAvailabilityPending = _isAvailabilityBook(id);
+  _forwardEvaluationPending = _isAvailabilityBook(id);
   renderPortfolioSwitch();
   applyPortfolioScope();
   _updateScopedPanelAvailability(true);
   _safeRender('decision-availability-switch', renderDecisionAvailability);
+  _safeRender('forward-evaluation-switch', renderForwardEvaluation);
   _safeRender('auto-banner-switch', renderAutoBanner);
   _safeRender('decisions-switch', renderDecisions);
   // Paint an already-visited/idle-prefetched book now, then refresh it in the background. The
@@ -6580,6 +6604,102 @@ function renderDecisionAvailability() {
     return;
   }
   host.innerHTML = _decisionAvailabilityHtml(_decisionAvailability, _portfolio, isZh);
+}
+
+// ── EVALUATION RECORD: saved observations never certify an investment horizon ──
+function _feObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+function _feDate(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  var stamp = new Date(value + 'T00:00:00Z');
+  return !isNaN(stamp.getTime()) && stamp.toISOString().slice(0,10) === value ? value : null;
+}
+function _forwardEvaluationHtml(data, portfolio, isZh, pending) {
+  if (!_isAvailabilityBook(portfolio)) return '';
+  function say(en, zh) { return isZh ? zh : en; }
+  function fact(label, value) {
+    return '<div class="mm-eval-fact"><div class="mm-eval-label">' + label +
+      '</div><div class="mm-eval-value">' + esc(value) + '</div></div>';
+  }
+  var title = '<h2>' + say('Evaluation record', '评估记录') + '</h2>';
+  if (pending) return title + '<div class="mm-eval-note">' +
+    say('Reading this book’s saved evaluation…', '正在读取此账本已保存的评估记录…') + '</div>';
+
+  var bound = _feObject(data) && data.schema === 'mastermind.portfolio_forward_evaluation.status.v1' &&
+    data.book === portfolio;
+  var snapshot = bound && _feObject(data.snapshot) ? data.snapshot : {};
+  var cutoff = _feDate(snapshot.asof);
+  var saved = snapshot.schema === 'mastermind.portfolio_forward_evaluation.v1' &&
+    snapshot.book === portfolio && cutoff !== null && data.latest_asof === cutoff;
+  var q = bound && _feObject(data.observation_qualification) ? data.observation_qualification : {};
+  var contract = q.schema === 'mastermind.portfolio_forward_evaluation.observation_qualification.v1' &&
+    q.source_scope === 'stored_snapshot_only' && q.source_metric === 'marked_session_count' &&
+    q.count_unit === 'recorded_nav_date_labels' && q.eligible_for_session_gate === false &&
+    q.calendar_status === 'not_checked' && q.calendar_session_count === null &&
+    q.price_status === 'not_checked' && q.price_qualified_session_count === null;
+  var metric = _feObject(snapshot.metrics) && _feObject(snapshot.metrics.marked_session_count)
+    ? snapshot.metrics.marked_session_count : {};
+  var supported = bound && (data.status === 'available' || data.status === 'stale_after_error');
+  var count = saved && supported && contract && Number.isSafeInteger(q.reported_mark_count) &&
+    q.reported_mark_count >= 0 && (q.reported_mark_count_status === 'available' ||
+    q.reported_mark_count_status === 'partial') && metric.value === q.reported_mark_count &&
+    metric.status === q.reported_mark_count_status ? q.reported_mark_count : null;
+  var partial = count !== null && q.reported_mark_count_status === 'partial';
+  var badge = count !== null ? say('Not yet qualified', '尚未验证') : say('Unavailable', '不可用');
+  var note = count !== null
+    ? say('Recorded dates do not establish a verified market-session sample.',
+          '记录日期数量不等于已验证的市场交易日样本。')
+    : say('A qualified saved count is unavailable for this book.', '此账本已保存记录的有效计数不可用。');
+  if (bound && data.status === 'stale_after_error') {
+    note = say('Latest evaluation failed. Showing the saved record; session checks remain unverified.',
+               '最近一次评估失败。以下为已保存记录；交易日验证尚未完成。');
+  } else if (bound && data.status === 'not_started') {
+    badge = say('Not started', '尚未开始');
+    note = say('Forward evaluation has not started for this book.', '此账本尚未开始前瞻评估。');
+  } else if (bound && data.status === 'awaiting_first_post_mark_snapshot') {
+    note = say('Waiting for the first saved evaluation record.', '尚无第一份已保存的评估记录。');
+  }
+  var dateText = saved ? say('Recorded through ', '记录截至 ') + esc(cutoff)
+    : say('Saved cutoff unavailable', '已保存记录的截止日期不可用');
+  var sourceStatus = partial ? say('Partial source', '来源不完整') : count !== null
+    ? say('Stored count available', '已保存计数可用') : say('Count unavailable', '计数不可用');
+  var start = bound ? _feDate(data.evaluation_start) : null;
+  return '<div class="mm-eval-head">' + title + '<span class="mm-eval-badge">' + badge + '</span></div>' +
+    '<div class="mm-eval-cutoff">' + dateText + '</div>' +
+    '<div class="mm-eval-grid">' +
+      fact(say('Recorded NAV dates', '已记录净值日期'), count === null ? '—' : String(count)) +
+      fact(say('Verified trading sessions', '已验证交易日'), say('Unverified', '未验证')) +
+      fact(say('Price-checked sessions', '价格已验证交易日'), say('Unverified', '未验证')) + '</div>' +
+    '<div class="mm-eval-note' + (bound && data.status === 'stale_after_error' ? ' mm-eval-failed' : '') +
+      '">' + note + '</div>' +
+    '<details class="mm-eval-details"><summary>' + say('How to read this record', '如何理解此记录') + '</summary>' +
+      '<p>' + say('NAV dates may include closed-market valuations. Calendar and point-in-time price checks are incomplete. This record cannot establish an investment-skill verdict.',
+                   '净值日期可能包含休市期间的估值。交易日历与时点价格尚未完成验证；此记录不足以判断持续投资能力。') + '</p>' +
+      '<div>' + sourceStatus + (start ? ' · ' + say('Evaluation start ', '评估起点 ') + esc(start) : '') + '</div>' +
+    '</details>';
+}
+function renderForwardEvaluation() {
+  var host = E('forward-evaluation');
+  if (!host) return;
+  host.innerHTML = _forwardEvaluationHtml(_forwardEvaluation, _portfolio,
+    document.documentElement.getAttribute('data-lang') === 'zh', _forwardEvaluationPending);
+}
+function _fetchForwardEvaluation(id, seq) {
+  if (!_isAvailabilityBook(id) || seq !== _pfFetchSeq || id !== _portfolio) return Promise.resolve();
+  _forwardEvaluation = null;
+  _forwardEvaluationPending = true;
+  _safeRender('forward-evaluation-loading', renderForwardEvaluation);
+  return fetch('/api/forward-evaluation?portfolio=' + encodeURIComponent(id), {cache:'no-store'})
+    .then(function(r) { return r.ok ? r.json() : null; })
+    .catch(function() { return null; })
+    .then(function(data) {
+      if (seq !== _pfFetchSeq || id !== _portfolio) return;
+      _forwardEvaluation = _feObject(data) && data.book === id &&
+        data.schema === 'mastermind.portfolio_forward_evaluation.status.v1' ? data : null;
+      _forwardEvaluationPending = false;
+      _safeRender('forward-evaluation-ready', renderForwardEvaluation);
+    });
 }
 
 // ── AUTONOMOUS BOOK: banner + daily decision log ──────────────────────────────
@@ -7588,7 +7708,7 @@ function _renderScoped() {
     ['performance', renderPerformance], ['equityCurve', renderEquityCurve],
     ['allocation', renderAllocation], ['safety', renderSafety], ['positions', renderPositions],
     ['trades', renderTrades], ['rejected', renderRejected],
-    ['decisionAvailability', renderDecisionAvailability],
+    ['decisionAvailability', renderDecisionAvailability], ['forwardEvaluation', renderForwardEvaluation],
     ['autoBanner', renderAutoBanner], ['decisions', renderDecisions],
     ['sizingScorecard', renderSizingScorecard], ['footer', renderFooter], ['self', renderSelf],
   ];
@@ -8006,6 +8126,9 @@ async function fetchAll(opts) {
       _decisionAvailabilityPending = false;
       _safeRender('decision-availability-first', renderDecisionAvailability);
       _safeRender('original-decision-first', renderAutoBanner);
+      // One bounded read shares this selection token; it cannot repaint a later book.
+      // Do not wait on it before continuing the legacy account/quote path.
+      _fetchForwardEvaluation(requestedPortfolio, mySeq);
     });
 
     if (mySeq !== _pfFetchSeq) return;

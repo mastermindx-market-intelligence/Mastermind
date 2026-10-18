@@ -144,6 +144,7 @@ function loadBarStart(){} function loadBarDone(){} function applyColl(){} functi
 function _safeRender(name,fn){fn();}
 function renderDecisionAvailability(){paints.push(_decisionAvailability && _decisionAvailability.portfolio_id);}
 function renderAutoBanner(){}
+function renderForwardEvaluation(){}
 function _paintPortfolioSnapshot(data){paints.push(data.portfolio);return Promise.resolve();}
 function _fetchPortfolioDetails(id,base){return Promise.resolve(base);}
 CRITICAL
