@@ -413,3 +413,61 @@ def test_validator_failure_is_unavailable_not_artifact_invalid(tmp_path):
     )
     assert result["accepted_target"]["pending"]["status"] == "unavailable"
     assert "CANARY_PRIVATE" not in json.dumps(result)
+
+
+# Receipt inspection is optional and must stay attached to the selected origin.
+@pytest.mark.parametrize("failure_kind", ["raises", "wrong_book", "wrong_decision", "wrong_schema", "not_object"])
+def test_receipt_inspector_failure_is_independent_of_account_and_target(tmp_path, failure_kind):
+    row = accepted(settled=True)
+    write(tmp_path, "decisions.jsonl", [row, failed()])
+    write(tmp_path, "account.json", account())
+    expected = read(tmp_path)
+    seen = []
+
+    def inspect(selected):
+        seen.append(selected)
+        if failure_kind == "raises":
+            raise RuntimeError("CANARY_PRIVATE_RECEIPT_ERROR")
+        result = {
+            "schema": "mastermind.bot.settlement_price_inspection.v1",
+            "portfolio_id": "autonomous", "decision_id": row["decision_id"],
+            "price_context": {"private": "CANARY_PRIVATE_BAD_BINDING"},
+        }
+        if failure_kind == "wrong_book":
+            result["portfolio_id"] = "hk"
+        elif failure_kind == "wrong_decision":
+            result["decision_id"] = "decision.v1." + "e" * 24
+        elif failure_kind == "wrong_schema":
+            result["schema"] += ".future"
+        elif failure_kind == "not_object":
+            return []
+        return result
+
+    result = projection.read_decision_availability(
+        "autonomous", base_dir=tmp_path, observed_at=OBSERVED,
+        verify_receipt=web._decision_execution_receipt_verified,
+        validate_pending=paper_account.pending_target_contract_error,
+        inspect_settlement_prices=inspect,
+    )
+    assert seen == [row]
+    for key in expected:
+        assert result[key] == expected[key]
+    inspection = result["settlement_price_inspection"]
+    assert inspection["status"] == "unavailable"
+    assert inspection["price_context"] is None
+    assert inspection["fill_count"] is None
+    assert inspection["durable_ledger_status"] == inspection["execution_qualification"] == "not_checked"
+    assert "CANARY_PRIVATE" not in json.dumps(result)
+
+
+def test_optional_receipt_inspection_does_not_change_legacy_response_or_manual_scope(tmp_path):
+    write(tmp_path, "decisions.jsonl", [accepted(settled=True)])
+    assert "settlement_price_inspection" not in read(tmp_path)
+    for book in ("self_directed", "flagship", "heavyweight", "etf"):
+        result = projection.read_decision_availability(
+            book, base_dir=tmp_path, observed_at=OBSERVED,
+            verify_receipt=lambda row: pytest.fail("manual book verification called"),
+            validate_pending=lambda *a: pytest.fail("manual book queue read"),
+            inspect_settlement_prices=lambda row: pytest.fail("manual book receipt read"),
+        )
+        assert result["status"] == "not_applicable"

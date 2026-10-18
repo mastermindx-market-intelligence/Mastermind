@@ -1276,6 +1276,8 @@ def api_portfolio(portfolio: str = _PRODUCT_DEFAULT_ID, view: str | None = None)
     portfolio = _product_portfolio_id(portfolio)
     if view == "decision_availability":
         from app.decision_availability import read_decision_availability
+        from app.settlement_price_read import read_settlement_price_evidence
+        from bot import decision_rows
         from portfolio import paper_account
 
         # Resolve strictly through the registry: _portfolio_dir has a legacy fallback to Flagship.
@@ -1285,6 +1287,14 @@ def api_portfolio(portfolio: str = _PRODUCT_DEFAULT_ID, view: str | None = None)
             observed_at=datetime.now(timezone.utc).isoformat(),
             verify_receipt=_decision_execution_receipt_verified,
             validate_pending=paper_account.pending_target_contract_error,
+            inspect_settlement_prices=lambda row: read_settlement_price_evidence(
+                portfolio, row, base_dir=_portfolio_registry.data_dir(portfolio),
+                currency=_portfolio_registry.currency(portfolio),
+                validate_receipt=paper_account.validated_settlement_receipt_prices,
+                # Decision receipt references and transaction IDs have distinct,
+                # established Unicode serialization rules. Reuse the decision owner.
+                fingerprint_receipt=decision_rows._canonical_sha256,
+            ),
         )
         return JSONResponse(payload, headers={"Cache-Control": "no-store"})
     if view is not None:

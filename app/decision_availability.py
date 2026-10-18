@@ -361,8 +361,9 @@ def read_decision_availability(
     portfolio_id: str, *, base_dir: Path, observed_at: str,
     verify_receipt: Callable[[dict], bool],
     validate_pending: Callable[[dict, str], str | None],
+    inspect_settlement_prices: Callable[[dict | None], dict] | None = None,
 ) -> dict:
-    """Read canonical book files, retaining independent clocks and coverage."""
+    """Read canonical book files, retaining independent clocks and optional receipt inspection."""
     observed = datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
     if observed.tzinfo is None or observed.utcoffset() is None:
         raise ValueError("observed_at must include timezone")
@@ -391,6 +392,32 @@ def read_decision_availability(
         portfolio_id, data["decisions"], observed_at=observed_at,
         history_status=sources["decisions"]["status"],
     )
+    settlement_price_inspection = None
+    if inspect_settlement_prices is not None:
+        selected = selection["last_valid"]
+        expected_decision_id = _identity(selected.get("decision_id")) if selected else None
+        unavailable = {
+            "schema": "mastermind.bot.settlement_price_inspection.v1",
+            "portfolio_id": portfolio_id, "decision_id": expected_decision_id,
+            "status": "unavailable", "reason": "receipt_inspection_unavailable",
+            "receipt_linkage": "unavailable", "context_status": "unavailable",
+            "price_context": None, "fill_count": None, "selected_price_count": None,
+            "verification_scope": "receipt_preimage_and_decision_reference",
+            "durable_ledger_status": "not_checked", "execution_qualification": "not_checked",
+        }
+        try:
+            inspection = inspect_settlement_prices(selected)
+            if (
+                not isinstance(inspection, dict)
+                or inspection.get("schema") != unavailable["schema"]
+                or inspection.get("portfolio_id") != portfolio_id
+                or inspection.get("decision_id") != expected_decision_id
+            ):
+                settlement_price_inspection = {**unavailable, "reason": "receipt_inspection_identity_mismatch"}
+            else:
+                settlement_price_inspection = inspection
+        except Exception:
+            settlement_price_inspection = unavailable
     account_raw = data["account"]
     if account_raw and any(account_raw.get(key) not in (None, portfolio_id)
                            for key in ("portfolio_id", "book")):
@@ -439,7 +466,17 @@ def read_decision_availability(
     for key, source in sources.items():
         if source["status"] not in {"available", "missing"}:
             issues.add(key + "_source_" + source["status"])
+    if settlement_price_inspection is not None:
+        settlement_price_inspection = {**settlement_price_inspection, "book_consistency": consistency}
+        if (consistency != "observed_stable"
+                and settlement_price_inspection.get("status") in {"available", "partial"}):
+            settlement_price_inspection.update(
+                status="provisional", reason="book_sources_not_stable",
+                context_status="unavailable", price_context=None,
+            )
     return {
+        **({"settlement_price_inspection": settlement_price_inspection}
+           if settlement_price_inspection is not None else {}),
         "schema": SCHEMA, "portfolio_id": portfolio_id, "observed_at": observed_at,
         "status": "partial" if issues or selection["attempt_coverage"] != "complete" else "available",
         "history_status": selection["coverage_status"],

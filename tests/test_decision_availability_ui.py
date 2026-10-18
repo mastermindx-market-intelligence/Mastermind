@@ -181,3 +181,198 @@ _applyPortfolioSnapshot({portfolio:'china',book:null,decisionAvailability:{portf
 console.log(JSON.stringify({first:first,second:_decisionAvailability,book:_book}));
 """)
     assert result == {"first": "china", "second": None, "book": None}
+
+
+def receipt_payload(book="autonomous"):
+    ticker = {"autonomous": "AAPL", "china": "600519.SS", "hk": "0700.HK"}[book]
+    currency = {"autonomous": "USD", "china": "CNY", "hk": "HKD"}[book]
+    data = payload(book, execution="receipt_identity_verified")
+    decision_id = "decision.v1." + "a" * 24
+    data["last_valid_decision"]["decision_id"] = decision_id
+    data["accepted_target"]["settlement_transaction_id"] = "b" * 64
+    source = {
+        "schema": "mastermind.yahoo_daily_bar_evidence.v1", "ticker": ticker,
+        "field": "Close", "price_local": 100.0, "status": "partial",
+        "reason": "expired_generation_refresh_failed",
+        "source_bar_label": "2026-08-12", "source_bar_label_kind": "daily_bar_label",
+        "fetch_started_at": "2026-08-13T08:29:00+00:00",
+        "download_returned_at": "2026-08-13T08:30:00+00:00",
+        "fetch_age_seconds": 4000, "within_cache_ttl": False,
+        "market_observed_at": None, "execution_qualification": "not_checked",
+    }
+
+    def converted(price, output_currency, input_price, input_currency, upstream, stage):
+        return {
+            "schema": "mastermind.price_read.v1", "ticker": ticker, "stage": stage,
+            "source": "last_price", "price": price, "currency": output_currency,
+            "input_price": input_price, "input_currency": input_currency,
+            "fx_observation": "not_required" if input_currency == output_currency else "not_captured",
+            "read_status": "returned", "upstream": upstream, "upstream_status": "matched",
+            "upstream_reason": None, "source_bar_label": None, "source_bar_label_kind": None,
+            "source_text_sha256": None, "attempts": [{"source": "yahoo", "outcome": "returned"}],
+            "market_observed_at": None, "execution_qualification": "not_checked",
+        }
+
+    usd_price = 100.0 if currency == "USD" else 14.0
+    usd = converted(usd_price, "USD", 100.0, currency, source, "native_to_usd")
+    observation = converted(100.0, currency, usd_price, "USD", usd, "settle_book")
+    data["settlement_price_inspection"] = {
+        "schema": "mastermind.bot.settlement_price_inspection.v1", "portfolio_id": book,
+        "decision_id": decision_id, "status": "available", "reason": None,
+        "transaction_id": "b" * 64, "receipt_sha256": "c" * 64,
+        "receipt_location": "acknowledged", "receipt_linkage": "matched",
+        "verification_scope": "receipt_preimage_and_decision_reference",
+        "durable_ledger_status": "not_checked", "execution_qualification": "not_checked",
+        "consistency": "observed_stable", "book_consistency": "observed_stable",
+        "settlement_asof": "2026-08-13", "fill_count": 0, "selected_price_count": 1,
+        "context_status": "available",
+        "price_context": {
+            "schema": "mastermind.settlement_price_evidence.v1", "currency": currency,
+            "quotes": {ticker: {
+                "price": 100.0, "source": "last_price", "binding_status": "matched",
+                "reason": None, "observation": observation,
+            }},
+            "omitted_quote_count": 0, "market_observed_at": None,
+            "execution_qualification": "not_checked",
+        },
+    }
+    return data
+
+
+def render_receipt(data, book=None, zh=False):
+    return node("console.log(JSON.stringify(_decisionAvailabilityHtml(" + json.dumps(data) + "," +
+                json.dumps(book or data["portfolio_id"]) + "," + str(zh).lower() + ")));" )
+
+
+@pytest.mark.parametrize("book,price", [("autonomous", "$100.00"), ("china", "¥100.00"), ("hk", "HK$100.00")])
+def test_receipt_price_path_and_source_clock_are_visible_without_execution_qualification(book, price):
+    html = render_receipt(receipt_payload(book))
+    assert "Receipt and price evidence" in html
+    assert "Receipt matches this decision" in html
+    assert "Receipt fill rows: <strong>0</strong>" in html
+    assert price in html
+    assert "Yahoo Close" in html
+    assert "2026-08-12 (date only)" in html
+    assert "2026-08-13 08:30:00 UTC" in html
+    assert "Outside cache TTL at capture" in html
+    assert "Execution price quality and the fill ledger have not been checked." in html
+    assert "Market observation time was not captured." in html
+    if book != "autonomous":
+        assert "FX timing was not captured" in html
+        assert "USD 14" in html
+    assert html.count('class="mm-da-card"') == 4
+
+
+@pytest.mark.parametrize("field,value", [
+    ("portfolio_id", "china"), ("decision_id", "decision.v1." + "f" * 24),
+    ("schema", "mastermind.bot.settlement_price_inspection.v9"),
+    ("execution_qualification", "qualified"),
+    ("durable_ledger_status", "verified"),
+    ("verification_scope", "fully_verified"),
+    ("transaction_id", "d" * 64),
+])
+def test_receipt_projection_cannot_borrow_identity_or_promote_qualification(field, value):
+    data = receipt_payload()
+    data["settlement_price_inspection"][field] = value
+    html = render_receipt(data)
+    assert "Receipt inspection unavailable" in html
+    assert "Yahoo Close" not in html
+    assert "$100.00" not in html
+    assert "$8,123.45" in html
+
+
+@pytest.mark.parametrize("status,reason,context_status,expected", [
+    ("unavailable", "receipt_missing", "unavailable", "Referenced receipt is missing"),
+    ("partial", "price_context_not_captured", "not_captured", "Price context was not recorded"),
+    ("partial", "price_context_decoder_unavailable", "unavailable", "Price context decoder unavailable"),
+    ("inconsistent", "receipt_copies_disagree", "unavailable", "Receipt copies disagree"),
+    ("provisional", "active_receipt_still_present", "available", "Receipt still awaiting acknowledgement"),
+    ("provisional", "book_sources_not_stable", "unavailable", "Sources changed or a paper transaction is unfinished"),
+])
+def test_partial_missing_and_provisional_receipts_keep_their_reason(status, reason, context_status, expected):
+    data = receipt_payload()
+    data["settlement_price_inspection"].update(status=status, reason=reason, context_status=context_status)
+    html = render_receipt(data)
+    assert expected in html
+    assert "Yahoo Close" not in html
+    assert "$100.00" not in html
+    assert "Execution price quality and the fill ledger have not been checked." in html
+
+
+def test_price_context_is_bounded_and_escaped_and_omissions_are_visible():
+    import copy
+    data = receipt_payload()
+    capture = data["settlement_price_inspection"]["price_context"]
+    quote = capture["quotes"].pop("AAPL")
+    quotes = {}
+    for index in range(128):
+        ticker = "S%03d" % index
+        current = copy.deepcopy(quote)
+        observation = current["observation"]
+        while observation:
+            observation["ticker"] = ticker
+            observation = observation.get("upstream")
+        quotes[ticker] = current
+    quotes["S000"]["source"] = '<img src=x onerror="CANARY()">'
+    quotes["S000"]["observation"]["source"] = quotes["S000"]["source"]
+    capture.update(quotes=quotes, omitted_quote_count=2)
+    data["settlement_price_inspection"]["selected_price_count"] = 130
+    html = render_receipt(data)
+    assert "<img" not in html
+    assert "&lt;img" in html
+    assert "Showing 12 of 128 captured quotes" in html
+    assert "2 selected prices were omitted at capture" in html
+    assert "S011" in html
+    assert "S012" not in html
+
+
+def test_unavailable_context_does_not_hide_selected_receipt_price_or_invent_source_time():
+    data = receipt_payload()
+    quote = data["settlement_price_inspection"]["price_context"]["quotes"]["AAPL"]
+    quote.update(binding_status="unavailable", reason="not_captured", observation=None)
+    html = render_receipt(data)
+    assert "$100.00" in html
+    assert "Source context unavailable" in html
+    assert "Yahoo Close" not in html
+    assert "08:30:00" not in html
+
+
+def test_source_clock_is_frozen_at_capture_and_chinese_copy_is_complete():
+    data = receipt_payload("china")
+    first = render_receipt(data, zh=True)
+    data["observed_at"] = "2026-10-18T11:00:00+00:00"
+    later = render_receipt(data, zh=True)
+    for html in (first, later):
+        assert "结算凭证与价格证据" in html
+        assert "2026-08-13 08:30:00 UTC" in html
+        assert "捕获时已超过缓存有效期" in html
+        assert "尚未核验执行价格质量与成交账簿" in html
+    assert "2026-10-18 11:00:00 UTC" in later  # read clock still updates independently
+
+
+
+def test_daily_bar_label_and_naive_capture_time_do_not_acquire_an_invented_timezone():
+    data = receipt_payload()
+    source = data["settlement_price_inspection"]["price_context"]["quotes"]["AAPL"]["observation"]["upstream"]["upstream"]
+    source["source_bar_label"] = "2026-08-12T00:00:00"
+    source["download_returned_at"] = "2026-08-13T08:30:00"
+    html = render_receipt(data)
+    assert "2026-08-12T00:00:00 (source label)" in html
+    assert "2026-08-13T08:30:00 (timezone unavailable)" in html
+    assert "2026-08-12 00:00:00 UTC" not in html
+    assert "2026-08-13 08:30:00 UTC" not in html
+
+
+
+def test_expired_cache_and_missing_context_are_visible_before_detailed_quote_rows():
+    data = receipt_payload()
+    html = render_receipt(data)
+    warning = "1 selected quote exceeded the source cache TTL at capture."
+    assert warning in html
+    assert html.index(warning) < html.index('<div class="mm-da-evidence-table">')
+    quote = data["settlement_price_inspection"]["price_context"]["quotes"]["AAPL"]
+    quote.update(binding_status="unavailable", reason="not_captured", observation=None)
+    html = render_receipt(data)
+    warning = "1 selected quote has no retained source context."
+    assert warning in html
+    assert html.index(warning) < html.index('<div class="mm-da-evidence-table">')
