@@ -4,6 +4,7 @@ import { sameTarget, type OfficeProjection, type ProjectionContext, type SourceC
 import "./office.css";
 import { FabricMissionInspector } from "../fabric/FabricMissionInspector";
 import { AttendedFabricInspector } from "../fabric/AttendedFabricInspector";
+import { AdmittedPlanInspector } from "../planning/AdmittedPlanInspector";
 
 /** Draft storage belongs to the existing shell. Inspection never rewrites or sends it. */
 export interface OfficeDraft { text: string; context: ProjectionContext }
@@ -166,6 +167,17 @@ export function MetaCeoOffice({ projection, draft, onDraftChange, locale = "en" 
 
     <details className="fi-disclosure">
       <summary>{locale === "zh-CN" ? "子代理 Fabric · 查看执行内部状态" : "Subagent Fabric · inspect execution"}</summary>
+    <AdmittedPlanInspector
+      key={`plan:${projection.context.authGeneration}`}
+      selection={mission?.program?.work_ref && mission?.mission?.root_job_id
+        ? { work_ref: mission.program.work_ref, root_job_id: mission.mission.root_job_id } : null}
+      read={typeof window !== "undefined" && window.MastermindMissionHost?.readAdmittedPlan
+        ? request => window.MastermindMissionHost!.readAdmittedPlan!(request) : undefined}
+      sourceGeneration={typeof window !== "undefined" ? window.MastermindMissionHost?.invalidationGeneration : undefined}
+      canRead={typeof window !== "undefined" && window.MastermindMissionHost?.auth
+        ? () => { const state = window.MastermindMissionHost!.auth!.getState(); return state.status === "signed_in" && state.acquisition; } : undefined}
+      locale={locale}
+    />
     <FabricMissionInspector
       key={JSON.stringify([projection.context.authGeneration, projection.context.selection])}
       mission={mission} locale={locale}

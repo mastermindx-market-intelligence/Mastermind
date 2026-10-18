@@ -17,6 +17,7 @@ GET_ROUTES = (
     "/os/", "/os/auth/callback", "/workspace/programs/current",
     "/workspace/work/current", "/workspace/mission/current",
     "/workspace/mission/v3/current", "/workspace/result/current",
+    "/workspace/plan/current",
     "/workspace/window/current",
 )
 _TEMPLATE = Path(__file__).with_name("os_public_edge.caddy.template")

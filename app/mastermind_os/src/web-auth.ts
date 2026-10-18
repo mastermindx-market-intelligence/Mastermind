@@ -711,6 +711,12 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
           typedUnavailableSchema: "mastermind.workspace_work_queue.v1",
         },
       ),
+    readAdmittedPlan: ({ work_ref, root_job_id, signal }) => {
+      if (!/^WS:[A-Z][A-Z0-9-]*$/.test(work_ref) || !/^JOB-[0-9]{1,9}$/.test(root_job_id))
+        return Promise.reject(new Error("PLAN_SELECTION_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/plan/current?${new URLSearchParams({ work_ref, root_job_id })}`,
+        signal, { cap: 16_384, typedUnavailableSchema: "mastermind.workspace_admitted_execution_plan.v1" });
+    },
     readMission: ({ work_ref, root_job_id, signal }) => {
       if (!normalizeSelection({ workRef: work_ref, rootJobId: root_job_id }))
         return Promise.reject(new Error("SELECTION_INVALID"));
