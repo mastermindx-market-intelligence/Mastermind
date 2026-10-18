@@ -1,0 +1,22 @@
+#!/bin/sh
+# Fabric-owned CPU-load guard for Linux remote workers.
+# Resolves only bare "yes" through the immutable support release PATH.
+# Tests requiring different stress semantics must use a reviewed, bounded tool.
+LIMIT=${FABRIC_YES_MAX_SECONDS:-300}
+case "$LIMIT" in
+  ''|*[!0-9]*) printf '%s\n' 'FABRIC_CPU_STRESS_INVALID_LIMIT' >&2; exit 78 ;;
+esac
+if [ "$LIMIT" -lt 1 ] || [ "$LIMIT" -gt 300 ]; then
+  printf '%s\n' 'FABRIC_CPU_STRESS_LIMIT_OUT_OF_BOUNDS' >&2
+  exit 78
+fi
+if [ ! -x /usr/bin/yes ] || [ ! -x /usr/bin/timeout ]; then
+  printf '%s\n' 'FABRIC_CPU_STRESS_TOOLS_UNAVAILABLE' >&2
+  exit 78
+fi
+/usr/bin/timeout --signal=TERM --kill-after=5s "${LIMIT}s" /usr/bin/yes "$@"
+RC=$?
+if [ "$RC" -eq 124 ] || [ "$RC" -eq 137 ]; then
+  printf 'FABRIC_CPU_STRESS_FUSE time_limit_seconds=%s rc=%s\n' "$LIMIT" "$RC" >&2
+fi
+exit "$RC"

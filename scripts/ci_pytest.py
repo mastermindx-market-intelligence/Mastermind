@@ -11,11 +11,12 @@ partition is verified to be a total, disjoint cover of that exact set before
 any process starts. The gate therefore executes the same modules whatever
 ``--jobs`` is, and a nonzero exit from any shard fails the whole gate.
 
-Sharding deliberately stays *inside* one job. The branch-protection required
-check for this repository is the single context ``test``; turning the gate
-into a workflow matrix would rename it to ``test (0)``/``test (1)``/... and
-silently make the required check unsatisfiable. Parallelism belongs here,
-where the check name is untouched.
+The default ``--jobs`` command runs concurrent subprocesses inside one job.
+A separately qualified workflow may instead dispatch the same verified
+partition to distinct hosted runners. In that arrangement a fail-closed fan-in
+job named ``test`` must require every matrix member to succeed and must
+reverify the canonical complete plan. The branch-protection context remains
+exactly ``test``; dynamic ``pytest shard N`` contexts alone cannot replace it.
 """
 from __future__ import annotations
 
@@ -24,6 +25,7 @@ import hashlib
 import re
 import subprocess
 import sys
+import threading
 import time
 import tomllib
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -193,19 +195,33 @@ def format_plan(plan: Mapping[str, int], *, shards: Sequence[Sequence[str]] | No
     return rendered
 
 
-def pytest_argv(included: Sequence[str], *, python: str | None = None) -> list[str]:
+def pytest_argv(
+    included: Sequence[str], *, python: str | None = None, progress: bool = False,
+) -> list[str]:
     # Observability only: report bounded slowest setup/call/teardown durations
     # without dropping a test, changing its order, or creating new CI contexts.
-    return [python or sys.executable, "-m", "pytest", "--durations=25", "-q", *included]
+    prefix = [python or sys.executable]
+    if progress:
+        prefix.append("-u")
+    prefix.extend(["-m", "pytest"])
+    if progress:
+        prefix.extend(["-p", "scripts.ci_pytest_timing"])
+    return [*prefix, "--durations=25", "-q", *included]
 
 
 _MEASURED_THREE_JOB_PLACEMENT = {
-    # Measured in the full protected CI gate: these two unusually expensive
-    # modules both hash to shard 1. Pin only them to the less-loaded shard 2.
-    # Keep the large capacity-host crash/replay module stationary and retain
-    # the ordinary stable hash for all other paths and job counts.
+    # Union of independently measured hosted placements: preserve the three
+    # protected-master hot-module pins and the accepted separate-runner
+    # capacity-host/trend balance. Every unlisted module retains SHA-256
+    # placement and every test still runs exactly once.
     "tests/test_executive_runtime_bounded_acquisition.py": 1,
     "tests/test_mastermind_window_reader_static_fences.py": 1,
+    "tests/test_capacity_host_artifacts.py": 1,
+    "tests/test_trend_persistence_walkforward.py": 0,
+    # The protected one-runner CI gate measured these further slow modules.
+    "tests/test_market_view.py": 1,
+    "tests/test_product_acceptance_original_selector.py": 1,
+    "tests/test_executive_os_phase1fc.py": 2,
 }
 
 
@@ -227,11 +243,11 @@ def partition_modules(
     same checkout would shard differently on every run and a failure would not
     reproduce.
 
-    For the production three-job gate, two independently measured, unusually
-    costly modules are pinned from the busiest shard to the less-loaded shard.
-    Every other path keeps its stable hash placement, including when a test
-    file is added. Four-job experiments retain the unmodified hash. This is
-    strictly placement, not exclusion: verify_partition checks total coverage.
+    For the production three-job gate, the explicitly measured hot modules
+    are pinned to less-loaded shards. Every other path keeps stable hash
+    placement, including when a new test is added. Other job counts retain
+    unmodified hashes. This is placement, not exclusion: verify_partition
+    checks the exact complete test coverage.
     Shard sizes remain visible in the plan line. (Do not introduce bare
     three-digit constants outside tests/: the identity guard forbids them.)
     """
@@ -289,25 +305,36 @@ def run_shards(
     would make the gate's own report unreliable, and the remaining shards'
     failures are exactly what a reviewer needs in one pass.
 
-    Output is captured per shard and replayed whole under a banner rather
-    than streamed live, because interleaving several concurrent pytest
-    streams into one log makes failures unattributable. Each block is
-    printed the moment that shard finishes, so one shard hanging until the
-    job timeout still leaves the others' complete output in the log --
-    which a single serial process could not do.
+    Ordinary output stays grouped under its shard's final banner. Only the
+    timing plugin's module records stream immediately, under a shard label,
+    so a job timeout leaves the unfinished module and prior module timings.
+    These records are diagnostics only; every process exit still governs.
     """
+
+    output_lock = threading.Lock()
 
     def _run(index: int) -> tuple[int, int, str, float]:
         started = time.monotonic()
-        completed = subprocess.run(
-            pytest_argv(shards[index], python=python),
+        captured: list[str] = []
+        with subprocess.Popen(
+            pytest_argv(shards[index], python=python, progress=True),
             cwd=root,
-            check=False,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
-        )
+            bufsize=1,
+        ) as process:
+            assert process.stdout is not None
+            for line in process.stdout:
+                if line.startswith("CI_MODULE "):
+                    with output_lock:
+                        print(f"--- shard {index + 1}/{len(shards)} progress --- "
+                              + line.rstrip("\n"), flush=True)
+                else:
+                    captured.append(line)
+            returncode = process.wait()
         elapsed = max(0.0, time.monotonic() - started)
-        return index, completed.returncode, completed.stdout + completed.stderr, elapsed
+        return index, returncode, "".join(captured), elapsed
 
     codes: dict[int, int] = {}
     with ThreadPoolExecutor(max_workers=len(shards)) as pool:
@@ -315,12 +342,13 @@ def run_shards(
         for future in as_completed(futures):
             index, returncode, output, elapsed = future.result()
             codes[index] = returncode
-            print(
-                f"--- shard {index + 1}/{len(shards)} "
-                f"({len(shards[index])} modules) exit={returncode} elapsed_s={elapsed:.2f} ---",
-                flush=True,
-            )
-            print(output, end="" if output.endswith("\n") else "\n", flush=True)
+            with output_lock:
+                print(
+                    f"--- shard {index + 1}/{len(shards)} "
+                    f"({len(shards[index])} modules) exit={returncode} elapsed_s={elapsed:.2f} ---",
+                    flush=True,
+                )
+                print(output, end="" if output.endswith("\n") else "\n", flush=True)
 
     # Lowest shard index wins so the reported code is stable across runs
     # rather than depending on which shard happened to finish first.

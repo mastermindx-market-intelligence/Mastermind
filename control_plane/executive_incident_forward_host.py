@@ -1,4 +1,4 @@
-"""Producer-owned forward host custody context; dormant, never composed.
+"""Producer-owned forward host custody context; dormant under policy None.
 
 Implements the frozen ``_ForwardHostContext`` core ABC against the accepted
 live-origin decision: genuine accepted-connection peer capture (the UID450
@@ -6,11 +6,11 @@ origin child; PID1 is never demanded of this peer), the original absolute
 deadline tightened everywhere, the seven-stage closed witness protocol on the
 single accepted connection, and once-only non-effect cleanup exchange.
 
-Production never composes :func:`_make_forward_host_context`; the broker
-constructor keeps ``forward_host_guard=None`` and every real admission refuses
-typed.  Importing or unit-testing this module is not activation.  This module
-never cleans durable forward evidence and never manufactures custody from a
-prior report.
+The existing production composer selects this fixed factory only after a
+source-owned policy amendment. Importing or unit-testing it is not activation.
+The closed v2 witnesses bind both current authority and the inert frozen Relay
+to independently observed content. This module never cleans durable forward
+evidence or manufactures custody from a prior report.
 """
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ import time
 
 from control_plane import executive_incident_origin as origin_module
 from control_plane import executive_release_observation as release
+from control_plane import executive_incident_release_observation as incident_release
 from control_plane import executive_recovery_namespace as namespace
 from control_plane.executive_peer_identity import (
     PeerIdentityError,
@@ -232,6 +233,7 @@ class _IncidentForwardHostContext(forward._ForwardHostContext):
         self._origin_anchor = self._broker_anchor = self._boot_anchor = self._release_anchor = None
         self._binding_sha256 = None
         self._child_anchor = None
+        self._cohort_anchor = None
 
     def _budget(self) -> release._Budget:
         # One original endpoint for acquisition, every stage and cleanup.
@@ -258,9 +260,10 @@ class _IncidentForwardHostContext(forward._ForwardHostContext):
             payload = {"I": binding.original_request_id, "D": binding.original_request_sha256,
                 "M": binding.original_marker_sha256, "R": binding.original_release_sha,
                 "Q": binding.successor_request_id, "F": binding.forward_request_sha256,
-                "source": dict(binding.sealed_source), "policy": dict(binding.policy_binding), "nonce": self._nonce}
+                "source": dict(binding.sealed_source), "policy": dict(binding.policy_binding), "nonce": self._nonce,
+                "observation_purpose": incident_release._PURPOSE}
             self._binding_sha256 = hashlib.sha256(_canonical(payload)).hexdigest()
-            _send_frame(binding.connection, {"kind": "origin-witness-acquire", "v": 1,
+            _send_frame(binding.connection, {"kind": "origin-witness-acquire", "v": origin_module._WIRE_VERSION,
                 "nonce": self._nonce, "binding": payload, "binding_sha256": self._binding_sha256,
                 "deadline_monotonic_ns": self._endpoint}, budget)
             reply = _read_frame(binding.connection, budget)
@@ -306,7 +309,13 @@ class _IncidentForwardHostContext(forward._ForwardHostContext):
         budget.call(_current_capture, self._captured)
         budget.call(namespace._recheck_namespace, self._handles)
         budget.call(namespace._require_same_socket, self._handles, self._socket_anchor)
-        fresh = budget.call(release._observe_release, deadline_monotonic_ns=self._endpoint)
+        fresh = budget.call(incident_release._observe_incident_release, deadline_monotonic_ns=self._endpoint)
+        incident_release._validate_observation(fresh)
+        if (reply["purpose"] != fresh.purpose
+                or reply["cohort_content_sha256"] != fresh.cohort_content_sha256
+                or (self._cohort_anchor is not None and fresh.cohort_content_sha256 != self._cohort_anchor)
+                or any(row.state != "UNLOADED" for row in fresh.roles[:3])):
+            _refuse("FORWARD_HOST_COHORT_MISMATCH")
         origin_instance, broker_instance = _instance_record(reply["origin"]), _instance_record(reply["broker"])
         child = self._require_child_generation(origin_instance, budget)
         owners = budget.call(origin_module._observe_running_owner_set, budget,
@@ -316,13 +325,15 @@ class _IncidentForwardHostContext(forward._ForwardHostContext):
         if (owners.origin_instance != origin_instance or owners.broker_instance != broker_instance
                 or owners.boot_id != fresh.boot_id or reply["boot_id"] != fresh.boot_id
                 or reply["release_commit"] != commit or reply["socket_sha256"] != digest
-                or commit != dict(self._binding.sealed_source).get("release_sha")):
+                or commit != dict(self._binding.sealed_source).get("release_sha")
+                or fresh.roles[0].content.installed_manifest_digest != dict(self._binding.sealed_source).get("manifest_sha256")):
             _refuse("FORWARD_HOST_NATIVE_JOIN_MISMATCH")
         anchors = (origin_instance, broker_instance, fresh.boot_id, commit)
         if self._origin_anchor is not None and anchors != (self._origin_anchor, self._broker_anchor, self._boot_anchor, self._release_anchor):
             _refuse("FORWARD_HOST_NATIVE_JOIN_DRIFT")
         self._origin_anchor, self._broker_anchor, self._boot_anchor, self._release_anchor = anchors
         self._child_anchor = child
+        self._cohort_anchor = fresh.cohort_content_sha256
         budget.check(force=True)
         return forward._ForwardHostObservation(hashlib.sha256(_canonical(reply)).hexdigest())
 
@@ -351,7 +362,7 @@ class _IncidentForwardHostContext(forward._ForwardHostContext):
         self._ordinal += 1
         challenge = {
             "kind": _KIND_CHALLENGE,
-            "v": 1,
+            "v": origin_module._WIRE_VERSION,
             "stage": stage,
             "ordinal": self._ordinal,
             "nonce": self._nonce,
@@ -374,7 +385,7 @@ class _IncidentForwardHostContext(forward._ForwardHostContext):
                 budget = self._budget()
                 self._require_child_generation(self._origin_anchor, budget)
                 budget.call(namespace._require_same_socket, self._handles, self._socket_anchor)
-                cleanup = {"kind": _KIND_CLEANUP, "v": 1, "nonce": self._nonce,
+                cleanup = {"kind": _KIND_CLEANUP, "v": origin_module._WIRE_VERSION, "nonce": self._nonce,
                     "ordinal": self._ordinal + 1, "binding_sha256": self._binding_sha256}
                 _send_frame(self._binding.connection, cleanup, budget)
                 ack = _read_frame(self._binding.connection, budget)

@@ -108,33 +108,53 @@ def _root_census(budget):
     Not a globally atomic process census or malicious-root containment. The
     qualified runtime main file is compared physically, not by comm/basename
     or launcher identity. Unknown/unqueryable images refuse, including exits.
+    Only disagreement between two complete inventories permits reacquisition:
+    at most three candidates share the caller's original budget and anchors.
+    This never retries a failed acquisition or a surrounding maintenance effect.
     """
     runtime = budget.call(peer._verify_python_runtime, budget)
     main = _physical_file(peer._PYTHON_MAIN_EXECUTABLE, budget)
     observer_pid = os.getpid()
     own_before = _instance(observer_pid, budget)
-    before = _root_pids(budget)
-    if observer_pid not in before:
-        _refuse("RECOVERY_OBSERVER_NOT_ACCOUNTED")
-    rows = tuple(_image_row(pid, budget) for pid in before)
-    after = _root_pids(budget)
-    own_after = _instance(observer_pid, budget)
-    if own_before != own_after or before != after:
-        _refuse("RECOVERY_ROOT_CENSUS_DRIFT")
-    # Recheck every process after the second full inventory; sample-local
-    # stability alone cannot excuse an instance which changed in the meantime.
-    for row in rows:
-        if _image_row(row.instance.pid, budget) != row:
+    pinned_self = pinned_matches = None
+    for _ in range(3):
+        budget.check(force=True)
+        before = _root_pids(budget)
+        if observer_pid not in before:
+            _refuse("RECOVERY_OBSERVER_NOT_ACCOUNTED")
+        # No exceptions are caught. Even a known exited or unreadable PID
+        # aborts; a partial image pass can never trigger reacquisition.
+        rows = tuple(_image_row(pid, budget) for pid in before)
+        after = _root_pids(budget)
+        if observer_pid not in after:
+            _refuse("RECOVERY_OBSERVER_NOT_ACCOUNTED")
+        own_after = _instance(observer_pid, budget)
+        if own_before != own_after:
             _refuse("RECOVERY_ROOT_CENSUS_DRIFT")
-    if _physical_file(peer._PYTHON_MAIN_EXECUTABLE, budget) != main:
-        _refuse("RECOVERY_RUNTIME_DRIFT")
-    budget.call(peer._recheck_python_runtime, runtime, budget)
-    observed_self = next(row for row in rows if row.instance.pid == observer_pid)
-    if observed_self.instance != own_before or observed_self.file_identity[:2] != main[:2]:
-        _refuse("RECOVERY_OBSERVER_IMAGE_UNQUALIFIED")
-    matches = tuple(row.instance for row in rows if row.file_identity[:2] == main[:2])
-    budget.check(force=True)
-    return _RootCensus(own_before, rows, matches)
+        observed_self = next(row for row in rows if row.instance.pid == observer_pid)
+        if observed_self.instance != own_before or observed_self.file_identity[:2] != main[:2]:
+            _refuse("RECOVERY_OBSERVER_IMAGE_UNQUALIFIED")
+        matches = tuple(row.instance for row in rows if row.file_identity[:2] == main[:2])
+        if pinned_self is not None and (observed_self != pinned_self or matches != pinned_matches):
+            # Never hide an already observed qualified runtime owner by taking
+            # a later inventory. Comparisons are anchors, not cached rows.
+            _refuse("RECOVERY_ROOT_CENSUS_DRIFT")
+        pinned_self, pinned_matches = observed_self, matches
+        if before == after:
+            # Recheck every process after the second full inventory. Positive
+            # image/instance drift inside a candidate still refuses immediately.
+            for row in rows:
+                if _image_row(row.instance.pid, budget) != row:
+                    _refuse("RECOVERY_ROOT_CENSUS_DRIFT")
+        if _physical_file(peer._PYTHON_MAIN_EXECUTABLE, budget) != main:
+            _refuse("RECOVERY_RUNTIME_DRIFT")
+        budget.call(peer._recheck_python_runtime, runtime, budget)
+        budget.check(force=True)
+        if before == after:
+            return _RootCensus(own_before, rows, matches)
+        # Discard all rows and both inventories. The next candidate must read
+        # every current PID anew; there is no sleep, exemption or budget reset.
+    _refuse("RECOVERY_ROOT_CENSUS_DRIFT")
 
 
 def _strict_disabled_unloaded(budget):

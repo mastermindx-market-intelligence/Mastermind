@@ -42,7 +42,7 @@ def prepared(world, forward_env, monkeypatch):
     monkeypatch.setattr(origin, 'os', native_os)
     monkeypatch.setattr(origin.host, '_instance', Mock(return_value=ORIGIN))
     monkeypatch.setattr(origin.host, '_observe_old_owner_exclusion', Mock())
-    monkeypatch.setattr(origin.release, '_observe_release', Mock(side_effect=lambda **kw:
+    monkeypatch.setattr(origin.incident_release, '_observe_incident_release', Mock(side_effect=lambda **kw:
         release(state='RUNNING' if native_state['bootstrapped'] else 'UNLOADED')))
     def command(argv, context):
         assert argv in origin._ORIGIN_COMMANDS

@@ -1,0 +1,76 @@
+diff --git a/remote_sub_exec.py b/remote_sub_exec.py
+--- a/remote_sub_exec.py
++++ b/remote_sub_exec.py
+@@ -19,6 +19,8 @@
+ from pathlib import Path
+ import native_remote
+ import time
++from commission_deadline import (CommissionDeadlineExpired,
++                                 narrow_deadline_ns, require_remaining)
+ 
+ from lane_runtime import (
+     LaneAdmissionRefused,
+@@ -628,6 +630,17 @@
+             "usage: remote_sub_exec.py <key> <mode> <packet> <cwd> <model>", 2
+         )
+     _, key, mode, packet, cwd, model = argv
++    # The controller sends a duration immediately before this transport's
++    # launch, never its monotonic clock. Anchor in this host's own clock at
++    # executor entry so admission/preparation cannot refresh the worker fuse.
++    commission_budget = os.environ.get('REMOTE_SUB_COMMISSION_BUDGET_SECONDS')
++    if commission_budget is not None:
++        if (mode not in {'glm', 'glm-codex', 'minimax', 'minimax-codex', 'qwen'}
++                or not re.fullmatch(r'[1-9][0-9]{0,3}', commission_budget)
++                or int(commission_budget) > 7200):
++            return _fail('REMOTE_SUB_COMMISSION_BUDGET_INVALID', 78)
++        state['commission_deadline_ns'] = narrow_deadline_ns(
++            None, int(commission_budget), now_ns=state['entered_monotonic_ns'])
+     here = Path(__file__).resolve().parent
+     packet_path = Path(packet)
+     if not packet_path.is_file():
+@@ -695,6 +708,13 @@
+     except LaneRuntimeError as exc:
+         return _fail("REMOTE_SUB_ADMISSION_ERROR " + type(exc).__name__, 78)
+ 
++    if 'commission_deadline_ns' in state:
++        try:
++            timeout = min(timeout, require_remaining(state['commission_deadline_ns'], minimum_seconds=0.05))
++        except CommissionDeadlineExpired:
++            lease.release()
++            return _fail('REMOTE_SUB_COMMISSION_TIME_EXHAUSTED before_worker=1 stage=admission', 75)
++
+     # Prompt bytes must not consume the operating system's per-argument limit.
+     # The already-delivered file stays inside the existing per-run transport.
+     if mode in ("glm", "minimax", "qwen"):
+@@ -707,6 +727,10 @@
+         command = native_remote.command(mode, model, prompt, cwd, packet_path=packet_path.resolve())
+     lanes_dir = here / "lanes"
+     child_env = dict(os.environ)
++    if 'commission_deadline_ns' in state:
++        # This envelope belongs to this executor, not to worker-created tasks.
++        child_env.pop('REMOTE_SUB_COMMISSION_BUDGET_SECONDS', None)
++        child_env.pop('POOL_COMMISSION_DEADLINE_NS', None)
+     child_env.pop('FABRIC_OPERATOR_CAPABILITY', None)
+     if child_env.get('FABRIC_OPERATOR_CAPSULE'):
+         from fabric_operator_client import load_operator_environment
+@@ -790,6 +814,11 @@
+                     child_env = dict(cpu_scope.env)
+             install_signal_cleanup(on_unproven=lease.hold_for_reconciliation)
+             try:
++                if 'commission_deadline_ns' in state:
++                    try:
++                        timeout = min(timeout, require_remaining(state['commission_deadline_ns'], minimum_seconds=0.05))
++                    except CommissionDeadlineExpired:
++                        return _fail('REMOTE_SUB_COMMISSION_TIME_EXHAUSTED before_worker=1 stage=launch', 75)
+                 state["started"] = True
+                 result = run_owned_process(
+                     command,
+@@ -898,7 +927,7 @@
+ 
+ 
+ def main(argv: list[str]) -> int:
+-    state = {"started": False}
++    state = {"started": False, "entered_monotonic_ns": time.monotonic_ns()}
+     if len(argv) == 6 and argv[2] in native_remote.MODES:
+         state["timing"] = {"remote_exec_entered_at": time.time()}
+     is_go = len(argv) == 6 and argv[2] == "go-codex"

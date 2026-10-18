@@ -11,6 +11,8 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import stat
+import threading
+import time
 from dataclasses import asdict
 
 from .runtime import (DEPLOYMENT_SCHEMA, READ_PORT_CONTRACT, RuntimeRefused,
@@ -26,6 +28,20 @@ _MANIFEST_FIELDS = frozenset({
 _MAX_BYTES = 64 * 1024 * 1024
 _MAX_MEMBERS = 8192
 ARCHIVE_OWNER_SCHEMA = "mastermind.research_read_archive_owner.v1"
+# v2 adds exactly one selected_read object to the SAME owner file. It is an
+# explicit trusted local release-owner declaration, never independent evidence
+# that writers have settled; actual issuance stays with real writer
+# qualification. No default-true or default-selected behavior exists: a v1
+# owner file admits no selected options at all.
+SELECTED_ARCHIVE_OWNER_SCHEMA = "mastermind.research_read_archive_owner.v2"
+MAX_SELECTED_OWNER_VALIDITY_SECONDS = 24 * 60 * 60
+_OWNER_MANIFEST_FIELDS = frozenset({"schema", "manifest_path", "manifest_sha256"})
+_SELECTED_OWNER_FIELDS = _OWNER_MANIFEST_FIELDS | {"selected_read"}
+_SELECTED_READ_FIELDS = frozenset({
+    "expected_producer_commit", "max_age_seconds", "max_reuse_seconds",
+    "corpus_byte_budget", "image_admission_bytes", "refresh_interval_seconds",
+    "writer_protocol_qualified", "valid_until",
+})
 
 
 def _refuse():
@@ -186,11 +202,91 @@ def verify_archive_release(path: str, commit: str, tree: str, *, project: str,
         _refuse()
 
 
+def _wall_now():
+    """Injected wall-clock seam; tests may patch it, the contract never changes."""
+    return time.time()
+
+
+class _SelectedWriterPolicy:
+    """Freshly reread the SAME admitted owner file bytes on every use.
+
+    The callable returns False for an absent, unreadable, changed or expired
+    owner file and keeps returning False for the rest of the process once any
+    invalidation has actually been observed, even if the file is restored
+    afterwards. The latch records only observed invalidation; it is not proof
+    that a transient unobserved change could never have occurred. No network,
+    source sweep or store access happens in this policy.
+    """
+
+    def __init__(self, path, owner_uid, admitted, valid_until):
+        self._path = path
+        self._owner_uid = owner_uid
+        self._admitted = admitted
+        self._valid_until = valid_until
+        self._lock = threading.Lock()
+        self._withdrawn = False
+
+    def __call__(self):
+        with self._lock:
+            if self._withdrawn:
+                return False
+            try:
+                raw = read_secure_json(self._path, expected_owner_uid=self._owner_uid,
+                                       maximum=32768)
+                if raw != self._admitted or int(_wall_now()) >= self._valid_until:
+                    self._withdrawn = True
+                    return False
+            except Exception:
+                self._withdrawn = True
+                return False
+            return True
+
+
+def _selected_owner_options(selected, *, path, owner_uid, admitted):
+    """Validate one explicit closed selected_read object into SelectedReadOptions.
+
+    Every field must be present, no extra field may exist, the owner must have
+    declared a currently qualified writer protocol and a future int
+    valid_until no more than 24 hours away, and the numeric bounds are the existing SelectedReadOptions
+    bounds. The producer commit is independent of the reader release commit.
+    """
+    try:
+        if type(selected) is not dict or set(selected) != _SELECTED_READ_FIELDS:
+            _refuse()
+        valid_until = selected["valid_until"]
+        now = int(_wall_now())
+        # A finite horizon also rejects milliseconds mistaken for epoch seconds.
+        # ``is True`` rejects JSON 1/1.0; a past or non-int valid_until never binds.
+        if (selected["writer_protocol_qualified"] is not True
+                or type(valid_until) is not int
+                or not now < valid_until <= now + MAX_SELECTED_OWNER_VALIDITY_SECONDS):
+            _refuse()
+        from .selected_factory import SelectedReadOptions
+        options = SelectedReadOptions(
+            expected_producer_commit=selected["expected_producer_commit"],
+            writer_policy=_SelectedWriterPolicy(path, owner_uid, admitted, valid_until),
+            max_age_seconds=selected["max_age_seconds"],
+            max_reuse_seconds=selected["max_reuse_seconds"],
+            corpus_byte_budget=selected["corpus_byte_budget"],
+            image_admission_bytes=selected["image_admission_bytes"],
+            refresh_interval_seconds=selected["refresh_interval_seconds"])
+        options.validate()
+        return options
+    except RuntimeRefused:
+        raise
+    except Exception:
+        _refuse()
+
+
 def load_archive_verifier(config_path, deployment, *, owner_uid, release_owner_uid=0):
     """Bind the runtime callback to separately secured owner-selected manifest trust.
 
     The callable re-verifies bytes on every invocation. Its receipts are evidence
     only, never a cached release admission. Reading configuration is explicit.
+    A v1 owner file exposes ``selected_options is None``; a v2 owner file adds
+    exactly one selected_read object and exposes validated SelectedReadOptions
+    whose writer policy rereads this same owner file. Binding is not a serving
+    or production-readiness claim.
     """
     try:
         # A manually constructed Deployment must pass the same closed parser.
@@ -203,13 +299,23 @@ def load_archive_verifier(config_path, deployment, *, owner_uid, release_owner_u
         raw = read_secure_json(config_path, expected_owner_uid=owner_uid, maximum=32768)
         config = _json(raw, 32768)
         if (type(config) is not dict
-                or set(config) != {"schema", "manifest_path", "manifest_sha256"}
-                or config["schema"] != ARCHIVE_OWNER_SCHEMA
+                or set(config) not in (_OWNER_MANIFEST_FIELDS, _SELECTED_OWNER_FIELDS)
+                or config["schema"] not in (ARCHIVE_OWNER_SCHEMA, SELECTED_ARCHIVE_OWNER_SCHEMA)
                 or type(config["manifest_sha256"]) is not str
                 or _DIGEST.fullmatch(config["manifest_sha256"]) is None
                 or type(release_owner_uid) is not int or release_owner_uid < 0):
             _refuse()
+        # Schema and field set are bound together: a v1 file can never carry a
+        # selected_read object and a v2 file must carry exactly one.
+        if ((config["schema"] == ARCHIVE_OWNER_SCHEMA)
+                != (set(config) == _OWNER_MANIFEST_FIELDS)):
+            _refuse()
         _absolute(config["manifest_path"])
+        selected_options = None
+        if config["schema"] == SELECTED_ARCHIVE_OWNER_SCHEMA:
+            selected_options = _selected_owner_options(config["selected_read"],
+                                                       path=config_path, owner_uid=owner_uid,
+                                                       admitted=raw)
         bindings = {
             (qualified.mastermind_release, qualified.mastermind_commit,
              qualified.mastermind_tree): "mastermind",
@@ -223,6 +329,10 @@ def load_archive_verifier(config_path, deployment, *, owner_uid, release_owner_u
     class BoundArchiveVerifier:
         def __init__(self):
             self._receipts = {}
+            # v1 owner: None. v2 owner: validated SelectedReadOptions whose
+            # writer policy is the current callback above; the launcher passes
+            # this to the selected composition, never to a legacy fallback.
+            self.selected_options = selected_options
 
         @property
         def receipts(self):

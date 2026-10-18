@@ -1,0 +1,91 @@
+--- a/pool_status.py
++++ b/pool_status.py
+@@ -865,6 +865,64 @@
+     return rows
+ 
+ 
++def _recent_heat_history(*, now: Optional[datetime] = None,
++                         state_dir: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
++    """Bounded read-only 4-hour Tctl maximums from the existing collector log.
++
++    These are historical observations only; host selection always uses the
++    current validated snapshot and physical last-mile admission.
++    """
++    now = now or datetime.now(timezone.utc)
++    since = now.timestamp() - 4 * 3600
++    root = state_dir or os.path.join(HERE, "state")
++    readings: Dict[Tuple[str, int], float] = {}
++    for filename in ("host_pull.log.1", "host_pull.log"):
++        path = os.path.join(root, filename)
++        try:
++            if os.path.islink(path) or not os.path.isfile(path):
++                continue
++            # The incumbent LaunchAgent writes directly to the same log and
++            # may leave it multi-megabyte despite the old startup rotator.
++            # Read only the last bounded bytes, never the entire historical log.
++            with open(path, "rb") as source:
++                size = os.fstat(source.fileno()).st_size
++                if size > 1_000_000:
++                    source.seek(size - 1_000_000)
++                    source.readline()  # Skip one possibly partial record.
++                for binary_line in source:
++                    parts = binary_line.decode("utf-8", errors="replace").split()
++                    if (len(parts) < 8 or parts[1] != "[pull]"
++                        or "rc=0" not in parts):
++                        continue
++                    host_token = parts[2]
++                    if host_token not in ("host=ubuntu0", "host=ubuntu1",
++                                          "host=ubuntu2", "host=ubuntu3"):
++                        continue
++                    term = next((v[7:] for v in parts
++                                 if v.startswith("tctl_c=")), None)
++                    if term is None:
++                        continue
++                    try:
++                        t = datetime.strptime(parts[0], "%Y-%m-%dT%H:%MZ")
++                        tick = t.replace(tzinfo=timezone.utc).timestamp()
++                        temp = float(term)
++                    except (ValueError, OverflowError):
++                        continue
++                    if not since <= tick <= now.timestamp() + 30:
++                        continue
++                    if not math.isfinite(temp) or not 10 <= temp <= 120:
++                        continue
++                    readings[(host_token[5:], int(tick))] = temp
++        except (OSError, UnicodeError):
++            continue
++    groups: Dict[str, List[float]] = {}
++    for (host, _), temp in readings.items():
++        groups.setdefault(host, []).append(temp)
++    return {host: {"peak_c": max(values), "samples": len(values),
++                   "hot90": sum(v >= 90 for v in values)}
++            for host, values in groups.items() if values}
++
++
+ def print_thermal_table(rows: List[Dict[str, Any]]) -> None:
+     """Read-only live host thermal projection, never a placement owner."""
+     entries = [r for r in rows if r.get("platform") == "linux"
+@@ -873,7 +931,8 @@
+     if not entries:
+         print("  (no Linux lane hosts observed)")
+         return
+-    print(f"  {'HOST':<8} {'CPU TCTL':>9} {'CPU BUSY':>9} {'HEAT':>14} {'COOLDOWN':>10} {'AGE':>8}")
++    history = _recent_heat_history()
++    print(f"  {'HOST':<8} {'CPU TCTL':>9} {'PEAK 4H':>9} {'HOT90':>6} {'CPU BUSY':>9} {'HEAT':>14} {'COOLDOWN':>10} {'AGE':>8}")
+     for r in entries:
+         is_fresh = bool(r.get("reachable")) and r.get("age_label") not in ("STALE","NO_PROBE")
+         temp = r.get("cpu_temp_c") if is_fresh else None
+@@ -882,9 +941,12 @@
+             "STALE" if r.get("age_label") == "STALE" else "DOWN/NO_PROBE")
+         temp_s = f"{float(temp):.1f}C" if type(temp) in (int,float) else "—"
+         busy_s = f"{float(busy):.1f}%" if type(busy) in (int,float) else "—"
++        recent = history.get(r["host"])
++        peak_s = f"{recent['peak_c']:.1f}C" if recent else "—"
++        hot_s = str(recent["hot90"]) if recent else "—"
+         secs = r.get("cooldown_remaining_s",0) if is_fresh else 0
+         cooldown = f"{(secs+59)//60}m" if type(secs) is int and secs>0 else "—"
+-        print(f"  {r['host']:<8} {temp_s:>9} {busy_s:>9} {risk:>14} {cooldown:>10} {r.get('age_label','—'):>8}")
++        print(f"  {r['host']:<8} {temp_s:>9} {peak_s:>9} {hot_s:>6} {busy_s:>9} {risk:>14} {cooldown:>10} {r.get('age_label','—'):>8}")
+         if is_fresh and risk in ("HOT","CRITICAL","RISING_FAST"):
+             tops = r.get("hot_processes") or []
+             if tops:

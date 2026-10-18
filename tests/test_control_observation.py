@@ -199,6 +199,21 @@ def test_transaction_cannot_be_supplied_as_unowned_data(monkeypatch):
         publisher.publish_for_transaction(SimpleNamespace(),{})
 
 
+def test_direct_file_lookalike_classes_cannot_bypass_canonical_guard(monkeypatch):
+    import runpy
+    # Import definitions only, never invoke main or any host operation.
+    duplicate = runpy.run_path(owner.__file__, run_name='inert_foreign_owner')
+    host = duplicate['ProductionTransactionHost']()
+    prior = duplicate['ConfigEvidence']('c'*64, 'd'*64, {}, {})
+    candidate = duplicate['CandidateConfigs']({}, {}, b'{}', b'{}', 'c'*64, 'd'*64)
+    tx = duplicate['TransactionContext']('autonomy-'+'1'*12, SHA, prior, candidate, None)
+    host._active_transaction = tx
+    host._transaction_owner_fd = 123
+    monkeypatch.setattr(publisher, '_source', lambda *a: pytest.fail('foreign class admitted'))
+    with pytest.raises(owner.TransactionEffectUnknown):
+        publisher.publish_for_transaction(host, tx)
+
+
 @pytest.fixture
 def original_transaction(monkeypatch):
     raw = control(); digest = hashlib.sha256(raw).hexdigest()
@@ -217,6 +232,34 @@ def original_transaction(monkeypatch):
     monkeypatch.setattr(host,'_persist_phase',lambda tx,phase:journal.update(phase=phase))
     monkeypatch.setattr(owner,'_read_root_file',lambda *args,**kw:(raw,None))
     return host,tx,journal
+
+
+@pytest.mark.parametrize('phase', ['RECEIPT_REPLACED', publisher.PUBLICATION_PHASE])
+@pytest.mark.parametrize('retained', [None, b'stale observation'])
+def test_reconstructed_disarm_cannot_turn_phase_or_equal_config_into_publication(
+        original_transaction, publication, phase, retained):
+    host, tx, journal = original_transaction
+    journal.update(operation='DISARM', phase=phase)
+    before = dict(journal)
+    publication['sealed'] = retained
+    # Even authentic classes, the original ID and an acquired owner descriptor
+    # do not recreate the exited process's publication provenance.
+    with pytest.raises(owner.TransactionEffectUnknown):
+        publisher.publish_for_transaction(host, tx)
+    assert publication['writes'] == 0
+    assert publication['sealed'] == retained
+    assert journal == before
+
+
+def test_reconstructed_disarm_exact_observation_is_readback_only(
+        original_transaction, publication):
+    host, tx, journal = original_transaction
+    journal.update(operation='DISARM', phase=publisher.PUBLICATION_PHASE)
+    before = dict(journal)
+    publication['sealed'] = publication['expected']
+    publisher.publish_for_transaction(host, tx)
+    assert publication['writes'] == 0
+    assert journal == before
 
 
 @pytest.mark.parametrize('fresh', [False,True])

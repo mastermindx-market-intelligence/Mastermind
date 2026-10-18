@@ -804,6 +804,59 @@ terminal nor in-flight/reconciled evidence exists (`NOT_FOUND`, which is not
 license to resubmit). Malformed or mismatched reconciliation evidence is
 refused rather than downgraded to a clean state.
 
+### Privileged broker maintenance stop
+
+For the assigned root maintenance owner, the installed
+`service-control.sh stop-incident-broker` command disables and unloads only the
+fixed privileged broker. First stop Control, worker and Relay through the existing
+`stop-readside` and `stop` commands. The new command takes no arguments and is
+not exposed as a broker action: a broker must not stop itself while returning a
+privileged-action result.
+
+The command requires the current sealed release, closed intake arms, stopped
+consumers, an idle or already-unloaded broker and no other pinned root interpreter.
+It checks the fixed retained socket slot before any modifying broker verb, then
+uses one disable and one bootout at most. If launchd leaves the canonical socket
+node behind, the same maintenance owner may preserve that exact qualified inode
+at `.privileged-retired.sock` in the existing pinned socket directory. This uses
+the native descriptor-relative no-replace rename, bracketed by complete source,
+closed-arm, disabled/unloaded, strict old-owner, boot and namespace observations.
+It verifies the retained inode, metadata and native ACL absence and requires the
+canonical socket path to be absent. The original absolute budget remains in force.
+
+It never unlinks a socket, repairs permissions, overwrites or adopts a retained
+node, edits configuration or touches incident evidence. An occupied retained slot
+blocks another maintenance operation before disable/bootout, including when the
+canonical path is already absent. The slot is intentionally retained after
+success too; this command provides no cleanup or reuse authority. An active broker,
+ambiguous command result, changed socket generation or cleanup failure refuses.
+`socket_retirement_attempted` remains true after any attempted move, so a failure
+returns exit75 even if the broker was already unloaded and no launchctl verb ran.
+Preserve the original operation and both paths for owner reconciliation; do not
+unlink, roll back the move, or retry it. A sampled lsof absence is not old-owner
+exclusion. Held namespace descriptors are not a global lock against trusted root.
+
+Success reports a sampled stopped state only. It neither grants recovery authority
+nor supplies an origin context; the separately authorized forward entry must
+acquire its own current context. A dormant forward policy stays dormant. This
+maintenance stop does not invoke the original issuer or its qualification.
+
+The incident path uses a private v2 observation purpose. Control, worker,
+gateway and broker must match the current sealed source. The frozen C1 Relay
+must remain exactly unloaded on release
+`326c8469a21d7f50fc9ecb1848196bf1c6e66685`, with its own fully verified manifest
+and wrapper provenance. A loaded Relay, another historical release, unreadable
+closure or content drift refuses. This neither rebinds nor restarts C1.
+
+The parent, fixed client and broker use closed v2 witness frames and compare the
+same cohort-content digest at acquisition and every stage. Version 1 is not a
+fallback for this purpose. The original budget, complete root-process census,
+socket and peer generation checks, one-use reservation, UNKNOWN handling and
+source-owned dormant policy remain unchanged. Generic release observation and
+release-factory convergence still require all five roles on one release; they
+do not accept the incident observation type. Source tests and installation do
+not qualify a physical recovery or authorize another maintenance attempt.
+
 ### Three isolated Personal Pro readiness slots
 
 The company worker above remains the only installed Executive worker service.
@@ -1004,9 +1057,10 @@ receipt, identity and canary must bind the exact reviewed predecessor binary,
 whose retained root-owned install attestation must still validate. The current
 binary must be the reviewed successor; the new identity probe must pass.
 Passing receipts, reservations, missing/ambiguous results, timeouts, signal
-exits, other failures, changed credentials and same-generation attempts refuse
-before a canary. Without this explicit option, existing refusal behavior stays
-unchanged.
+exits, other failures and changed credentials refuse before a canary.
+Same-generation attempts refuse under this option; they are admitted only by
+the dedicated option in the next subsection. Without this explicit option,
+existing refusal behavior stays unchanged.
 
 A specialized `paired_filesystem_device_renumbering` comparison is confined to
 this explicit new qualification and its NOT_APPLIED reconciliation. Historical
@@ -1034,6 +1088,36 @@ old final bytes predate the request, the prior/current binary transition and
 credential identity still validate, and no readiness lock/process remains.
 Any changed receipt or reservation keeps the effect unknown. Reconciliation
 preserves the original marker and never replays the request.
+
+### Same-generation terminal requalification on the current pin (reviewed 2026-10-18)
+
+A closed terminal failure recorded on the **current** reviewed pin with the
+**same** credential has one direct root-operator path only:
+`provision-worker-auth.sh --verify-ready … --requalify-same-generation-terminal-sha256 SHA256`,
+with the company device-auth kind and binding attested as above and no slot
+selector. The `executive.worker_auth.verify_ready` broker action and `mmx-admin` do not
+accept this option; they refuse the unknown key by design. The digest is the
+full SHA256 of the exact root-owned live readiness receipt bytes, a concurrency
+fence, not authority. The deadline must be Chairman-approved and more than 30
+and at most 60 minutes ahead.
+
+Admission requires a finalized v2 `provider_turn_failed` receipt observed at
+least 24 hours earlier whose `codex_binary` equals the live pinned binary lstat
+exactly and whose `credential_lstat` equals the live credential lstat exactly;
+there is no device-renumbering tolerance. Identity policy must be unchanged.
+The canary must have the exact closed terminal shape: exit 1, no timeout,
+matching terminal event/refusal and a non-null sanitized canary. Passing
+receipts, reservations, timeouts, signal exits, changed credentials, changed
+binaries and failures younger than 24 hours refuse before a canary.
+
+The fresh identity probe must pass within the clock-skew bound and carry the
+same identity stability tuple as the live credential. One reservation then
+saves the old bytes as the digest-named `.superseded-<sha16>.json` sibling and
+atomically replaces the live receipt. Exactly one canary runs, followed by the
+existing finalization. A failing canary writes a new adverse receipt that this
+option cannot requalify for 24 hours; a second failure is a provider fact for
+the Chairman, not a reason for a second canary. This option does not touch
+current-pin recovery, its producer table or its grant.
 
 ### Bounded current-pin recovery is implemented but closed on the current pin
 
@@ -1108,10 +1192,14 @@ refund its allocation. Live reuse and reservation still require the grant to
 be within its actual current window; there is no caller-selectable expiry bypass.
 
 **Because the producer table is empty, no current Due10 or same-generation
-failure is recoverable today.** This section documents a capability whose
+failure is recoverable through this section today; a same-generation terminal
+failure is admitted only by the explicit option in the dedicated subsection
+above.** This section documents a capability whose
 admission is closed, not an available procedure. Enabling it requires a new
 source review that adds a qualified producer to the table plus an
-authority-installed grant; both are out of scope for this runbook.
+authority-installed grant; both are out of scope for this runbook. The explicit
+same-generation terminal requalification above is a distinct admission; it uses
+neither the producer table nor a grant.
 
 ### Source-authorized exact incident exception is distinct from ordinary recovery
 

@@ -21,20 +21,20 @@ This file is the resumable program state. A cold stranger resumes from the LAST 
 | WP03 (first wave, read-only census) | ACCEPTED | O1 round 0: lane `c19-o1-wp03-census-20261011` PASS `488cb027` (ancestor of Macro `origin/main` `f45a0a15`; census paths byte-identical). Facts F17, open items G1–G6. |
 | WP08 (first wave, read-only census) | ACCEPTED | O8 round 1 ACCEPT 11:56Z: lane `c19-o8-wp08-census-20261011-r1` PASS `f45a0a15` (amendments A1–A3, F19); seat verified :192-206/:158-166/:300-336/:636-660 at `866bb498`. WP08 BUILD (ref-binding extension) serialized behind WP16 → WP05 (D12). |
 | WP04 (identity boundary) | ACCEPTED | O1 round 0 ACCEPT 12:02Z by artifact (`w2/out/O1-WP04-JUDGMENT.md`) at origin/main `43019867`, no drift over the 5 cited paths; seat spot-check at `9667d803` PASSED; answer PARTIAL (F20); G7 RESOLVED (D12), G9 opened. |
-| WP16 (current-source clock tests, TEST-ONLY build) | MERGED + LANDED (Macro #8813, merged by hand on concluded green; git-only landing check) | O8 lane `c19-o8-wp16-build-20261011` ACCEPTED 13:01Z by artifact (F22); seat opened #8813 at 13:06:43Z, head `2779c1a3`; CI RED on `contract-delta` (new suite unwired, F23); disarm comment 6109483263 → fix head `6db910a8` pushed → `merge-on-green` re-armed LAST; labels `merge-on-green,merge-blocked` (sweeper tag from the red head; the arm stays and a green head merges on the next sweep); watcher F25. |
-| WP05 (request-clock threading + producer-derived leg clock) | MERGED + LANDED (Macro #8862; lane `c19-o1-wp05-build-20261011`; per-path blob identity vs origin/main) | packet `C19-O1-WP05-BUILD` frozen 10853 B sha256 `9b939633d07e31a438b985a5497b6f2aa12fbeff124c9bf606976cce2c0ef9e5` (committed under lanes/W2-2026-10-11/); R3 (F21) shows the identity derivation is missing from it (F24) → amend per D15 and re-freeze; launches only after #8813 MERGES + writer-lease re-read; also flips the WP16 strict xfail. |
+| WP16 (current-source clock tests, TEST-ONLY build) | MERGED + LANDED (Macro #8813, squash `fc5365ea76b0`, ancestor of GitHub main `072cdf86e788` — r9 API check; merged by hand on concluded green) | O8 lane `c19-o8-wp16-build-20261011` ACCEPTED 13:01Z by artifact (F22); seat opened #8813 at 13:06:43Z, head `2779c1a3`; CI RED on `contract-delta` (new suite unwired, F23); disarm comment 6109483263 → fix head `6db910a8` pushed → `merge-on-green` re-armed LAST; labels `merge-on-green,merge-blocked` (sweeper tag from the red head; the arm stays and a green head merges on the next sweep); watcher F25. |
+| WP05 (request-clock threading + producer-derived leg clock) | MERGED + LANDED (Macro #8862, squash `849ed9425038`, ancestor of GitHub main `072cdf86e788` — r9 API check; lane `c19-o1-wp05-build-20261011`; per-path blob identity vs origin/main) | packet `C19-O1-WP05-BUILD` frozen 10853 B sha256 `9b939633d07e31a438b985a5497b6f2aa12fbeff124c9bf606976cce2c0ef9e5` (committed under lanes/W2-2026-10-11/); R3 (F21) shows the identity derivation is missing from it (F24) → amend per D15 and re-freeze; launches only after #8813 MERGES + writer-lease re-read; also flips the WP16 strict xfail. |
 | R3 second-binder / bare-CIK census (WP04 follow-up, read-only) | ACCEPTED | O1 lane `c19-o1-r3-cik-census-20261011` PASS `6ba70f04` (out:77); F21; D14; G9 narrowed to the owner item, G10 opened. |
 | WP06–WP07 (O7) and WP09, WP11 (O3) — census + builds | census ACCEPTED; builds MERGED + LANDED; N1/N4 defect fixes MERGED + LANDED (r7) | O7 census ACCEPTED `734ab857` (F28); O3 census ACCEPTED `572b99a2` (`-h2`/`-h2-r1`, D16). Builds: WP06 Macro #8831 (squash `102ac7ee`), WP07 Macro #8858, WP11 Macro #8836 (squash `db40ae32`), WP11 pins #8972 (`2dbdc9b9`). WP09 = qualification RECORD (baseline null by design; candidate pins → G3 #8954). Defect fixes (seat rulings W6): WP07 N1 non-anticipating impact-cost sigma warmup → Macro #9155 (squash `cfcb840a`); WP11 N4 release_forecast as-of vintage gate → Macro #9158 (squash `1dec2bf9`). |
 | WP12 (event-evolution contract tests, TEST-ONLY build) | MERGED + LANDED (Macro #8886, merged 2026-10-12T05:19:48Z, squash `240fc255`) | O2 census ACCEPTED in two rounds at `f1ae1e03`; Grok lane `c19-o2-wp12-build-20261011` PASS `f3c3b539`. The 04:15Z `contract-delta` + `ci-gate` red was the unwired new suite; repair lane `c19-w4-wp12-wire-20261012` (Grok, packet sha256 `22b80648…`) PASS `9a5eb834` appended the legacy-jobs wiring; merged by hand on concluded green at that head; landing = bare fetch + ancestry + per-path blob identity. |
 | Wave-3 census WP10/13/14/15-pre/23/24/25/26/30 (H1–H9) | ACCEPTED (ORCH-H complete; all 9 lanes `DONE rc=0` PASS at base `5267c668`, no repairs) | WP10 ALREADY_DONE; WP13/WP14/WP15-pre/WP23/WP24/WP25/WP26 NEEDS_DESIGN; WP30 READY_TO_FREEZE. ORCH-H opened no builds. Seat follow-ons: WP30 → #8906, WP24 guard → WP24-G lane, WP26 → routed to #8125's owner. Gaps: open-PR overlap read from cached lists; minor citation drift. |
 | Wave-3 builds G1 (WP08 consumer receipt), G2 (hygiene), G3 (WP09 k3e pins) | MERGED + LANDED (r7): G2 Macro #8957 (squash `eb03b95e`); G1 #8943 (squash `e30ffa1f`); G3 #8954 (squash `595a8927`) | per-lane frozen packets; PRs opened by the seat only; G1/G3 cleared after main's inherited `ci-pack-0` red healed; each squash an ancestor of Macro origin/main `6ecdbd2993ba` (bare `git fetch origin` + `merge-base --is-ancestor`, 2026-10-13). |
-| WP17–WP20, WP22, WP27–WP29, WP31, WP32 (wave-4 census I1–I10) | ACCEPTED (ORCH-I complete); builds MERGED + LANDED: WP29 Macro #8966 (squash `631be922`), WP19 #8971 (`3cda7853`), WP20 #8977 (`b9dff0c0`) | read-only census was Grok grok-4.6, run ids `c19-w4-i<n>-<slug>-20261012`; seat rulings `RULINGS.md` wave 5 (r6). ORCH-I is COMPLETED — never re-spawned. WP17/18/21/32/33 and design-input WPs stay seat-held. Brief `w4/orch/ORCH-I.md` sha256 `80ed166e…`. |
+| WP17–WP20, WP22, WP27–WP29, WP31, WP32 (wave-4 census I1–I10) | CENSUS ACCEPTED (ORCH-I complete) — **a census acceptance, not a package acceptance** (r9 correction, WP21 G2; spec adversarial case (c)). Per package: WP17 and WP18 **NOT ACCEPTED — no code or tests** (rulings R-WP17 / R-WP18 only; grep at HEAD 0 hits); WP19 MERGED + LANDED pins (Macro #8971, `3cda7853`); WP20 MERGED + LANDED pins (#8977, `b9dff0c0`); WP29 MERGED + LANDED (#8966, `631be922`); WP31 **PREREG FROZEN — NOT EXECUTED**, no evaluator (#9540, `8e195093`); WP22 MERGED + LANDED (Macro #9559 r3, merged by hand 15:09:36Z on concluded green, squash `216b9bff199c`, ancestor of GitHub main `072cdf86e788` — r9 API check; its CI-authority main baseline is pending behind in-flight run 39041669978); WP32 NOT STARTED as proof; WP27 DEFERRED (justified; re-open when WP26 qualifies); WP28 BLOCKED — owner hold (CS-V2) | read-only census was Grok grok-4.6, run ids `c19-w4-i<n>-<slug>-20261012`; seat rulings `RULINGS.md` wave 5 (r6). ORCH-I is COMPLETED — never re-spawned. WP22: selection census ACCEPTED, DHI selected (freeze record 2026-10-17T11:02:39Z, PHM alternate); build lanes `c19-w5s-wp22-dhi-traversal-bailian-20261017` → r2 `c19-w5s-wp22-dhi-r2-bailian-20261017` → r3 `c19-w5s-wp22-dhi-r3-bailian-20261017` (ubuntu1, bundle delivery) = #9559; all three lane trees reclaimed after landing. WP31: census ACCEPTED; prereg `research/C19_WP31_INCREMENTAL_INFORMATION_PREREG.md` landed, PREREG_DOC_SHA256 `44c9df65…`; prereg §8.6 ships no evaluator. WP17's non-AAPL financial leg → WS:FUNDAMENTAL-FORENSICS (R-WP17); WP18 = mapping-only packet when a consumer needs it (R-WP18). Per-package frontier: `research/C19_WP33_FRONTIER_2026_10_17.md`. Brief `w4/orch/ORCH-I.md` sha256 `80ed166e…`. |
 | WP13 / WP14 / WP23 / WP25 design inputs (I11–I14) | RULED; WP13 MERGED + LANDED (Macro #8970, squash `10bf86aa`); WP14 observation pins MERGED + LANDED (Macro #9071, squash `569d195f`); WP23 ALREADY_DONE; WP25 HELD on #8660 (DQ2 routed to its owner) | design-input lanes fed seat rulings: WP13 retained-input plane, WP14 owner-consumer envelope (split basis → CS-V2 W6), WP23 consumer/contract, WP25 grain (TP-1 depends on Macro #8660). |
-| WP21, WP33 (Fable-retained) | NOT STARTED | held by the seat; opened after the wave-4 census returns. |
+| WP21, WP33 (Fable-retained) | WP21 **PARTIAL — NOT ACCEPTED at P0** (rung MERGED: source chain on main; route mounted, flag-ON, auth-enforced; production composition NOT observed); WP33 frontier r1 WRITTEN — **C19 NOT complete; M5 not reached** | WP21 decision r2 `research/C19_WP21_P0_DECISION_2026_10_17.md`: gaps G1–G12 each with an owner; independent Opus review `a70d8c627795aa616` sustained the verdict and its findings 1–8 are applied. WP33 frontier r1 `research/C19_WP33_FRONTIER_2026_10_17.md`: census at BASE `08e8e5e41dec` — 39 ON_MAIN / 7 NOT_FOUND (foreign open drafts), 22/22 squash SHA MATCH and ancestors, every C19 test file in a live CI job. The 10-13 ACK-wait line stays withdrawn (r8); Mastermind #1202 comment 6150196259 is a pointer, never re-posted. |
 | WP30 paid PIT estimates decision (records-only) | MERGED + LANDED (Macro #8906, merged 2026-10-12T05:30:06Z, squash `c5a79a69` = origin/main at read) | Grok lane `c19-w4-wp30-doc-20261012` PASS `df4e1c48`; DEFER the buy, SUBSTITUTE SRC-A1 (yfinance consensus_snapshot) baseline; no spend, contact or contract. Merged by hand at the exact head on concluded green (merge-queue-pilot = standing inactive); both decision files LANDED by per-path blob compare. |
-| WP24-G short-pressure availability guard (TEST + guard build) | CI — Macro #8958 at head `4ee15582e2bd34e86300bdb0748fbae0f64a8f0e` (main-sync merge commit, no rebase), NOT armed; seat hand-merges `--match-head-commit` on concluded green; one watcher | the old head's only red was main's inherited `ci-pack-0` (`test_exclusive_curation_narrows_ordinary_code_prs` ceiling), healed on main by Macro #9141 (`d671d318`, not a C19 PR); diff stays exactly `engine/short_pressure.py`, NEW `tests/test_c19_wp24_short_pressure_availability.py`, its appended legacy-jobs hunk; packet sha256 `503888c2…`. |
-| WP15 N2/N4 operating-driver pins (TEST-ONLY) | DELIVERED PARTIAL — lane branch `lane/c19-wp15-n2n4-pins-20261013` at `f841c04a`, pushed, no PR | the lane's contract-delta y3 ran before its commit and reported 4 introduced packing-probe rows naming the new job; committed-tree y3 rerun is the discriminating probe (r7 OPEN). PG `percentage_points` stays OUT of FIF `ALLOWED_UNITS`. |
-| WP24 DQ1 census / DQ2 superseded-generation witnesses (SOURCE + TEST) | DQ1 ACCEPTED (rulings `RULINGS_W6_AMEND2`); DQ2 DELIVERED PASS + seat-ACCEPTED by artifact at `0d04b087` — Macro #9161, CI (hand-merge `--match-head-commit`, not armed) | DQ2 = change-only superseded-generation witnesses in `collectors/finra.py` (short interest → `short_interest_superseded.parquet`), `collectors/finra_short_volume.py` (→ `data/finra_short_volume/superseded.parquet`, plus the BCPC/BCpC case-fold fix: the all-uppercase symbol wins) and `collectors/ibkr_borrow.py` (→ `daily/superseded/`), the backfill script, comment-only `scripts/build_darkpool_desk.py`, a NEW 10-test file and one appended legacy-jobs hunk (seven files). Lane RED 8 failed / 2 passed → GREEN 10; seat byte-check: every source file identical to the staged patch applied to the merge-base. DQ3 (six-state availability) follows DQ2. |
+| WP24-G short-pressure availability guard (TEST + guard build) | MERGED + LANDED (Macro #8958, squash `6488eb75`) | hand-merged `--match-head-commit` on concluded green at `4ee15582`; diff exactly `engine/short_pressure.py`, NEW `tests/test_c19_wp24_short_pressure_availability.py`, its appended legacy-jobs hunk; packet sha256 `503888c2…`. CI-authority covered by green main baseline 39031481171 (head `8e1950932b29`, a descendant). |
+| WP15 N2/N4 operating-driver pins (TEST-ONLY) | MERGED + LANDED as WP15R (Macro #9541, squash `11e34d2d`) | committed-tree y3 on the original lane branch PASS (0 introduced, 2 inherited); delivered as WP15R (N2/N4/N3 operating-driver arithmetic, `engine/operating_driver_scenario.py`, 20 tests, CI job `c19-wp15-operating-driver-pins`) by ubuntu2 bundle, seat-pushed `26c649b6`. CI-authority covered by main run 39034375130 (head `d9b7b9ace151`, a descendant; not seat-dispatched). PG `percentage_points` stays OUT of FIF `ALLOWED_UNITS`. |
+| WP24 DQ1 census / DQ2 superseded-generation witnesses / DQ3 six-state availability / DQ4 name-keyed DTC map (SOURCE + TEST) | DQ1 ACCEPTED; DQ2 MERGED + LANDED (Macro #9161, squash `4bacd5b0`); DQ3 MERGED + LANDED (Macro #9163, squash `6150e7bf`); DQ4 MERGED + LANDED (Macro #9545, squash `cc550eeca537`, ancestor of GitHub main `072cdf86e788` — r9 API check); its CI-authority main baseline ci.yml run 39038909380 concluded SUCCESS at 14:39:41Z on `6329db8dff10` (never re-dispatch for DQ4) | DQ2 = change-only superseded-generation witnesses in `collectors/finra.py`, `collectors/finra_short_volume.py` (plus the BCPC/BCpC case-fold fix) and `collectors/ibkr_borrow.py`, the backfill script, comment-only `scripts/build_darkpool_desk.py`, a 10-test file and one legacy-jobs hunk. DQ4 = `_dtc_map` name-keyed days-to-cover with sentinel / `dtc_capped` exclusion (replaces the positional `si.set_index(si.columns[0])`): lane `c19-w5s-wp24-dq4-build-bailian-20261013` commit `c57745da` PARTIAL (y3 7 introduced / y4 1 failed — seven curated exclusive jobs reaching `engine/narrative_rotation.py` lacked `engine/short_volume.py`); r2 lane `c19-w5s-wp24-dq4-r2-bailian-20261017` PASS widened those seven `paths:` as a second commit (no amend). DQ2 rights/retention → B0 / prophet_v4 SOURCE_RIGHTS owner (not C19). |
 | WP26 commodity supply context (zero-crude guard) | ROUTED (owner carrier) | Finding posted once on Macro #8125 (comment 6118319139, 2026-10-12T05:27:30Z): `scripts/build_commodities.py:452-453` accepts a 0.0 crude level as present (head `57068da8`). `build_commodities.py` is leased by draft #8125 → WS-MARKET-OS owns the fix; C19 holds only a test-only freeze (N2 pin + offline EiaAdapter fixture) until #8125 lands or releases the lease. |
 
 ## 1. FACTS (verified this session, read-only unless stated)
@@ -390,3 +390,376 @@ Running (r6, 2026-10-12 ~08:45Z): no native Opus orchestrator — ORCH-I and ORC
 
 **NEXT**
 1. #8958 → hand-merge `--match-head-commit 4ee15582…` on concluded green, land-check. 2. WP24 DQ2 → Macro #9161 (head `0d04b087`, seat-accepted by artifact, one watcher) → hand-merge `--match-head-commit` on concluded checks → land-check. 3. WP15 per OPEN. 4. WP24 DQ3 ruling + lane. 5. WS refresh at the wave boundary.
+
+#### r8 — wave 7: DQ2/DQ3/WP24-G landed, WP15R + WP31 prereg landed, WP22 DHI selected and building, DQ4 in CI (Macro #9545) — 2026-10-13 → 2026-10-17
+
+**DECIDED**
+- 16:1xZ N5 route delivered to the composer owner: Mastermind #1202 comment 6150196259 (pointer-only). WP21 and the WP22/31/32 chain wait on the owner's ACK. Never re-post.
+- 16:33Z WP22 selection census launched. Run id `c19-w5s-wp22-select-census-glm-20261013` on ubuntu1, glm, model glm-5.3-flash, class census (pool pick 0.8842; ECONOMIC_POLICY cheap_glm_executor; LEASE_OK pool=glm). The packet is `lanes3/C19-W5S-WP22-SELECT-CENSUS.txt`. It is read-only and pinned to BASE `7b30b8580e01c0f9e4ea77f5c692fabc442e8194`. It is forbidden to read prices, returns or outcomes. Universe = every incumbent company-intelligence profile, plus GOOGL, plus AAPL as the reference. Watcher bco73bhsz on launcher PID 50271, sentinel `C19-W5S-WP22-SELECT`.
+  - Selection rule (seat, before any return): choose by prospective evidence sufficiency only. A candidate must have a different driver or industry from AAPL and must traverse the same reusable legs. Rejected candidates and their coverage are preserved in the freeze record, which carries a timestamp and a sha256.
+
+**LANE MATRIX (live)**
+| lane | id | host | state | watcher |
+|---|---|---|---|---|
+| DQ3 PR #9163 | head ca0728ac | — | CI | beo58d6uw (GraphQL, 180s) |
+| WP15 y3 rerun | lane/c19-wp15-n2n4-pins-20261013 @ f841c04a | ubuntu1 | RUNNING | bckm1on79 |
+| WP22 census | c19-w5s-wp22-select-census-glm-20261013 | ubuntu1 | RUNNING | bco73bhsz |
+| DQ4 build | c19-w5s-wp24-dq4-build-bailian-20261013 (reserved) | ubuntu1 | NOT LAUNCHED (after #9163 lands) | — |
+| WP31 census | c19-w5s-wp31-prereg-census-glm-20261013 (fresh main BASE) | ubuntu1 | RUNNING (LEASE_OK glm 16:36Z, PID 58685) | b2y40pz3i |
+
+**OPEN**
+- WP22 freeze record: needs the census return.
+- WP31 prereg plan and WP33 frontier ledger: not started.
+
+#### r8 cycle 2026-10-17T11:0xZ (seat 7ab343c8, resumed under Chris's 10-15 standing execution policy)
+
+**SUPERSEDED** — the 10-13 line "WP21 and the WP22/31/32 chain wait on the owner's ACK" is withdrawn. The 10-15 policy drops ACK/owner waits; #1202 comment 6150196259 stays a pointer (never re-post). The chain proceeds.
+
+**FACTS**
+- #9163 (DQ3) MERGED + LANDED: squash `6150e7bf8ca6` ancestor of origin/main; 4 paths SAME, legacy-jobs.yml DIFF expected (later edits); `censored` present in main bytes.
+- WP15 committed-tree y3 PASS at lane `lane/c19-wp15-n2n4-pins-20261013` @ `f841c04a`: "contract-delta: 0 introduced, 2 inherited (base adb8fa1e9ce7)". TEST-ONLY. No PR yet.
+- Masterplan is read from Mastermind `origin/master:research/commission_19_fable_masterplan/2026-10-11/` (the r6 SSD path is gone); seat copy `$S/w5/WORK_PACKAGES.md`.
+
+**DECIDED — WP22 FREEZE RECORD (2026-10-17T11:02:39Z; no outcome, price or return value read by seat or lane)**
+- Inputs: census out `c19-w5s-wp22-select-census-glm-20261013.out` sha256 `dd76c2c5bd4accb2235d30a7037c25114da27759000fbb601080ca1a628c86a5` (STATUS PASS, BASE `7b30b8580e01`); packet sha256 `90ab6b702e85f283ab9e237acccd428149548c8620631bc164c63dc62f887b25`. Census judged ACCEPT on a–e (minor deviation: global legs marked GLOBAL with citation).
+- Tiers, stated before ranking and evaluated in order; none uses an outcome:
+  1. event_workspace COVERED at BASE → rejects PG (private-only, `rp_internal_private_v1`; public profile returns None), FCX + MP (synthetic only, identity a typed absence, unregistered), GOOGL (no profile/alias in `engine/company_intelligence`; filings not_retained in `five_issuer_v1.json`).
+  2. real pre-cutoff filing text carrying a negative or contradictory event → DHI, PHM, KBH, TOL all pass.
+  3. most distinct committed real events → DHI 2, PHM 2, KBH 2, TOL 1 → rejects TOL.
+  4. latest event's period calendar-aligned with AAPL's reference period (ending 2026-06-27) → DHI FY26 Q3 (June end) and PHM FY26 Q2 (June end) pass; KBH Q2 (May end) rejected.
+  5. deterministic tie-break = registry order of `_HOMEBUILDER_ISSUER_FACTORIES` (`issuer_profiles.py:128-133`: DHI, PHM, KBH, TOL) → DHI.
+- **SELECTED: DHI (US homebuilding; driver = housing/rates, industry ≠ AAPL SIC 3571). Pre-declared alternate: PHM.** Negative event to exercise: DHI FY26 EPS decrease (2 committed periods).
+- Rejected-candidate coverage preserved: matrix rows Q1 of the census output (financial_facts DEGRADED for all non-AAPL; earnings_expectation COVERED all; capital_structure / publication_seam / theme_tape GLOBAL; event_workspace COVERED AAPL + 4 homebuilders, DEGRADED PG/FCX/MP/GOOGL; company_theme_exposure UNKNOWN non-AAPL).
+- **F1 (adversarial case "Hardcoded company labels") — REAL:** the financial_facts leg is hardcoded to AAPL: `app/integrated_answer.py:372-380` (`entity_id: "ISS:US-XNAS-AAPL"`) and `GoldenAaplFinancialQueryProvider` `app/forensics.py:873-891`. DHI cannot traverse financial_facts at BASE. Both files are on the C19 frozen list → route to the composer owner; no C19 lane edits them.
+- **F2 (adversarial case "Different failure silently excluded") — LATENT:** earnings_expectation ok-status path keeps `chip_reason="missing_ticker"` inside the payload (`:526-527`) so a missing chip can read as ok. Does not affect DHI (chip present). Record; route with F1.
+
+**DECIDED — WP31 census ACCEPT (2026-10-17T11:1xZ)**
+- Out sha256 `9cc67f8f1a6980737b1c2759c7be5a83ab42210f2e11acb6c007519766b7a072`, packet sha256 `1c53395498f0c5bc4ef3510a1365cea1f72eb9dc415402f8653f4ee977f1a5dd`, BASE `94d5771fe4f1` = HEAD, clean tree, detached.
+- a ✓ (l.5, l.97) · b ✓ 11/11 Q2 rows cited or GAP · c ✓ 6/6 Q6 rows · d ✓ attestation l.110-113 keys/names only · e ✓ l.108.
+- Exposure note (DEVIATIONS l.127): a SCOPE grep printed `config/compiled_kill_registry.yml` verdict text into the LANE's log. The seat has not opened that log section and carries no value forward. The lane log is marked EXPOSED; it is not an input to the WP31 prereg.
+- Admission route chosen (Q4): prereg doc + `register_trials` / `log_declared_budget` through the public TrialLedger API at the time trials are generated (no `trial_ledger.py` edit; no sparse-tree write to `data/trial_ledger.jsonl` — G-3 truncation signature). Known gaps carried into the prereg as explicit limits: no prereg schema; `info_cutoff` has no audit consumer; holdout-vault peeks not wired into effective_n; no descendant-aware ablation guard; `cost_bps` defaults 0.
+
+**FACTS — 2026-10-17T11:5xZ**
+- WP31 prereg committed by the seat in SSD tree `c19-wp31-prereg-r1-2f08260d54683869` as `33891949eac90320d325206e922cf678ab1a06e2` (`research/C19_WP31_INCREMENTAL_INFORMATION_PREREG.md`, 274 lines, 17324 B). PREREG_DOC_SHA256 `44c9df659288c64987758f8408c2b7eced41488e57251c4390ddd466bf1f7a43` (frozen prefix = bytes through the `## §10 Amendments` heading line, 17155 B; rule = `engine/entry_radar/replay/gates.py` `frozen_prefix`). Macro PR #9540, docs-only, NOT armed, hand-merge `--match-head-commit`.
+- WP15R (N2/N4/N3 operating-driver arithmetic) delivered by lane `c19-w5s-wp15r-build-bailian-20261017` on ubuntu2 as a bundle; the seat fetched it, verified byte-identity to the frozen stage, and pushed `26c649b699bb71de17b830711148fcf36b072839`. Macro PR #9541 (`engine/operating_driver_scenario.py`, 20 tests, CI job `c19-wp15-operating-driver-pins`). CI-authority → one ci.yml main baseline after merge.
+- **FINDING — ubuntu2 lanes cannot push:** the ubuntu2 lane clone carries `pushurl=/nonexistent/fabric-lane-push-disabled` (a deliberate fabric guard; never edited). Delivery from ubuntu2 = bundle; the seat carries it. ubuntu1 lanes may also leave commits unpushed — check ls-remote before assuming a branch exists.
+- DQ4 (WP24 `_dtc_map`: name-keyed days-to-cover with sentinel / `dtc_capped` exclusion, replacing the positional `si.set_index(si.columns[0])`) committed by lane `c19-w5s-wp24-dq4-build-bailian-20261013` on ubuntu1 as `c57745da5963abaf46663fdd1786f5ff34986c28` (branch `lane/c19-wp24-dq4-dtcmap-20261013`, not on origin at 11:50Z). Seat pre-judged the diff correct; final judgment on the lane's `.out`.
+
+**FACTS — 2026-10-17T12:2xZ**
+- #9540 MERGED and LANDED: squash `8e1950932b29f89a89da94c50ccef4ef5f2d8d1c` (2026-10-17T12:01:44Z, verified via `git log origin/main --grep='#9540'`). PREREG_COMMIT = `8e1950932b29f89a89da94c50ccef4ef5f2d8d1c`; PREREG_DOC_SHA256 = `44c9df659288c64987758f8408c2b7eced41488e57251c4390ddd466bf1f7a43`. Docs-only, no CI-authority baseline owed.
+- DQ4 lane returned PARTIAL: y3 7 introduced / y4 1 failed — seven curated `scope: exclusive` jobs whose import closure reaches `engine/narrative_rotation.py` did not declare `engine/short_volume.py` (new DTC_SENTINEL import edge).
+**DECIDED — DQ4 r2 (2026-10-17T12:2xZ)**
+- Widen the 7 jobs' `paths:` (conviction-profile, crypto-vector-r2-organs, international-workspace-browser, international-workspace-foundation, itr-turn-rotation, leadership-measured-read, leadership-rotation-countercases) as a SECOND commit on c57745da (no amend). Seat-frozen patch sha256 `b0c9bc03…`, message sha256 `e4ca426f…`. Lane `c19-w5s-wp24-dq4-r2-bailian-20261017` on ubuntu1 reuses the existing worktree, bundle-only delivery (ubuntu1 https push TLS-aborted last run).
+
+**FACTS — 2026-10-17T13:1xZ**
+- Land-check (`w5/r8_landcheck.sh`: bare `git fetch origin`, then `merge-base --is-ancestor` against Macro origin/main `bbf93bcc5f5e`): #8958 `6488eb75`, #9161 `4bacd5b0`, #9163 `6150e7bf`, #9540 `8e195093`, #9541 `11e34d2d`, #9155 `cfcb840a`, #9158 `1dec2bf9` — all ANCESTOR.
+- CI-authority baselines: main run 39031481171 concluded SUCCESS on `8e1950932b29` (covers #8958, #9161, #9163, #9155, #9158). #9541 is covered only by run 39034375130 on `d9b7b9ace151` (a sibling's dispatch, in flight at write time; one watcher). The seat dispatched neither.
+- DQ4 r2 lane PASS, seat-pushed to `lane/c19-wp24-dq4-dtcmap-20261013`; Macro #9545 opened NOT armed at head `7269e8e2cef4`; one watcher.
+- WP22 build lane launched 2026-10-17 on ubuntu1. Run id `c19-w5s-wp22-dhi-traversal-bailian-20261017`, pool bailian, model qwen3.8-flash, branch `lane/c19-wp22-dhi-traversal-20261017`, bundle delivery. Frozen stage sha256s: test `f26f176e…` (141 lines), `legacy_jobs.patch` `de21ce19…` (one curated job `c19-wp22-dhi-traversal` after `c19-wp19-integrated-answer-pins`), commit message `2f703799…`. The test is offline, sets no production flag and does not touch `app/integrated_answer.py`.
+
+**OPEN**
+- WP22 F1 (REAL): `financial_facts` is hardcoded to AAPL at `app/integrated_answer.py:372-380` and `app/forensics.py:873-891`. It routes to the composer owner (WS:MARKET-INTELLIGENCE-INSTITUTIONAL-BUILDOUT). C19 pins the typed `not_covered` absence and does not edit either file. F2 is LATENT.
+- WP32 (dark deploy / entitled canary / rollback / served-SHA proof): not started.
+- WP33 frontier ledger: not started.
+- The routed items listed in r7 OPEN are unchanged.
+
+**NEXT**
+1. WP22 lane sentinel: judge the artifact, then bundle → verify → seat push → PR (not armed) → one watcher → hand-merge `--match-head-commit` → land-check → one covering main baseline (with preflight).
+2. #9545 on concluded green: hand-merge `--match-head-commit 7269e8e2…` → land-check → one covering main baseline after 39034375130 clears the field.
+3. WP21 adjudication (seat).
+4. WP33 census lane (fresh id).
+5. WP32 design.
+
+#### r9 cycle 2026-10-17T15:2xZ (seat 7ab343c8) — wave 8: WP21 adjudicated PARTIAL, WP33 frontier r1, DQ4 landed + baselined, WP22 r3 merged + landed
+
+**FACTS**
+- Ledger r8 = Mastermind #1576 MERGED + LANDED (master blob `728bcfe0fd39`; master head `d2869085f27d` when the r9 branch was cut).
+- r9 ancestry check (`r9_anc_api.sh`, GitHub compare API, 15:25:03Z): GitHub main `072cdf86e788`; #8813 `fc5365ea76b0`, #8862 `849ed9425038`, #9545 `cc550eeca537`, #9540 `8e1950932b29` and #9559 `216b9bff199c` are all ANCESTOR (behind=0).
+- The ubuntu1 shared clone (`~/lanes/repos/macro`) cannot fetch: `git fetch` exits 1 with "did not send all necessary objects" and "failed to run repack". Its origin/main is stuck at `ce9e80812670`, an older main commit (ahead=9 behind=0 against current main). Any check run there is against stale bytes; until the clone's owner repairs it, the seat land-checks through the GitHub API. The seat does not repair shared infrastructure.
+- DQ4 (Macro #9545) MERGED + LANDED. Its CI-authority main baseline (ci.yml run 39038909380) concluded SUCCESS at 14:39:41Z on `6329db8dff10`, so the legacy-jobs.yml freeze for DQ4 is cleared. Never re-dispatch it.
+- WP22 r3 = Macro #9559 MERGED by hand at 15:09:36Z on concluded green (`--match-head-commit aaaaa7df81168956c277f6b6145bac739c30182d`), squash `216b9bff199c`. Land check (`land_9559_api.sh`, GitHub API): squash ancestor of main; `tests/test_c19_wp22_dhi_traversal.py` (`fa57c29f8513`) and `tests/test_ci_pack.py` (`fa401908c921`) blobs MATCH between PR head and main; main's `.github/ci/legacy-jobs.yml` blob differs from the PR head only by later commits (base drift) and carries the `test_c19_wp22_dhi_traversal` job entry (needle count 2).
+- #9559 edits `.github/ci/legacy-jobs.yml`, so it needs ONE covering ci.yml main baseline. Main run 39041669978 (in progress since 14:39:21Z on `74c2771cf370`) started before the merge and does not cover it. The seat dispatches nothing over an in-flight run; one watcher is on 39041669978.
+- WP22 lane reclaim (`wp22_reclaim.sh`, ubuntu1, guarded on exact HEAD + no process cwd inside): removed `c19-w5s-wp22-dhi-20261017` (`35fb3c04b45c`, clean), `c19-w5s-wp22-dhi-r3-20261017` (`aaaaa7df8116` = the merged head, clean) and `c19-w5s-wp22-dhi-r2-20261017` (`eca8fb8d99c3`). r2 held 2 uncommitted paths superseded by r3; they were saved as a patch plus a file copy in `~/lanes/tmp/c19-w5s-wp22-dhi-r2-out` before `worktree remove --force`. Branch refs and `.git/config` were not touched. ubuntu1 free disk went from 261G to 294G.
+- Lane reclaim (`c19_lane_reclaim.sh`). Each removal was guarded: exact HEAD `6329db8dff10`, clean tree, HEAD ancestor of origin/main, no process cwd inside. Removed: the read-only census worktrees ubuntu1 `c19-w5s-wp32-rollout-20261017`, ubuntu2 `c19-w5s-wp21-p0-20261017` and ubuntu2 `macro-c19wp21`. Branch refs and `.git/config` were not touched. The older C19 trees of uncertain ownership stay untouched.
+
+**DECIDED — WP21 P0 decision r2 (final): PARTIAL — NOT ACCEPTED at P0; rung MERGED** (`research/C19_WP21_P0_DECISION_2026_10_17.md`)
+- Observed (anonymous probes 14:35:27–29Z): `/api/integrated-answer/v1/AAPL` → 401 "missing bearer token"; v2 → 404; a nonexistent path → 404. Decorator ordering (`app/integrated_answer.py:906-913`, `Depends(_require_enabled)` ahead of the auth parameter) means a 401 implies the flag is ON in the serving process. The flag was set by Macro #8811 (`70f42ccb`) under ruling I-R12, seat fd47d431 — not by C19.
+- Not observed: any composed answer. Every probe stopped at auth, so the route body never ran. An honest page of typed absences is not a P0 answer ("All-null answer called golden").
+- Gap owners: G1, G8 → WS:CAPITAL-STRUCTURE-INTELLIGENCE-V2 · G2 (WP17/WP18 no code), G3 (financial_facts AAPL-only) → WS:FUNDAMENTAL-FORENSICS per R-WP17; WP18 mapping-only per R-WP18 · G4 informational (served API code equals main) · G5 receipt persistence = design ruling, held until a consumer needs replay · G6 process-only guard (seat review rule) · G7 → land #9559, natural use is WP32 · G9 → Chairman, human-only · G10 (flag-ON vs `DEC:MI-BUILDOUT-I-ROUTE-WAITS-FOR-ALL-FOUR-LEGS`, OPEN) and G11 (N5 publication_seam scope) → WS:MARKET-INTELLIGENCE-INSTITUTIONAL-BUILDOUT · G12 WP06/WP07/WP11 traces end at site-page consumers; a composer leg is the composer owner's design.
+- r1's "WP22 r3 accepted, pending merge" was withdrawn until #9559 landed. It has now landed (FACTS above), so WP22's DHI traversal build is MERGED + LANDED. G7's remaining half is a natural use of the traversal, which belongs to WP32.
+
+**DECIDED — census-row correction (WP21 G2)**
+- The r8 §0 row "WP17–WP20 … ACCEPTED (ORCH-I complete)" recorded a census acceptance as if it were a package acceptance. That is the spec's adversarial case (c). The r9 §0 row now states each package's own rung.
+
+**DECIDED — WP33 frontier r1: C19 NOT complete; M5 not reached** (`research/C19_WP33_FRONTIER_2026_10_17.md`)
+- Product: the source chain is merged; the route is served, flag-ON and auth-enforced; composition is not observed in production.
+- Scientific qualification: nothing qualified. The WP31 prereg is frozen; no evaluation has run.
+- External waits: the WP31 natural clock (issuer quarterlies plus 10-Q/10-K filings), G9, and the CS-V2 holds.
+
+**OPEN** (owner → next action)
+- G9 / WP32 P2–P3: Chairman, human-only. From an entitled account, load `/api/integrated-answer/v1/AAPL` and one non-AAPL ticker; from a free account, confirm the 403. Named once; the seat creates no accounts.
+- G10, G11, WP32 P7 (rollback): WS:MARKET-INTELLIGENCE-INSTITUTIONAL-BUILDOUT (I-R12, seat fd47d431). C19 never sets or unsets the flag.
+- G3 and WP17's non-AAPL financial leg: WS:FUNDAMENTAL-FORENSICS.
+- G1, G8, WP28: WS:CAPITAL-STRUCTURE-INTELLIGENCE-V2.
+- WP26, WP27: WS-MARKET-OS (WP26's zero-crude guard defect at `scripts/build_commodities.py:452-453`).
+- WP01: C6 and the archive are NOT_LOCATED and stay visible.
+- WP31: the evaluator is not built (prereg §8.6). Known gaps to carry into its census: no prereg schema; `info_cutoff` has no audit consumer; holdout peeks are not counted in effective_n; no descendant-aware ablation guard; `cost_bps` defaults to 0; the SEC XBRL reader is chosen through its existing owner.
+- WP32 P4–P6: not observed.
+
+**NEXT**
+1. #9559 baseline: when main run 39041669978 concludes, preflight (nothing queued or in progress), dispatch ONE ci.yml main baseline, and put one watcher on it. Its SUCCESS clears #9559's CI-authority freeze; never re-dispatch after that.
+2. WP31 evaluator census: fabric lane `c19-w5s-wp31-evaluator-census-glm-20261017` (ubuntu1, glm, read-only, no outcome/price/return values) is RUNNING. Judge its packet by artifact, checking the BASE sha against the ubuntu1 fetch defect. Then the seat writes the WP31 evaluator build packet.
+3. WP32 proof design for P4–P6 within C19 scope.
+
+#### r10 cycle 2026-10-18T01:5xZ (seat 7ab343c8) — wave 9: r9 landed, #9559 baselined, WP31 evaluator census accepted, WP31 evaluator BUILD lanes running
+
+**FACTS**
+- Ledger r9 = Mastermind #1583, merged through the master merge queue at 2026-10-17T16:35:52Z (merge commit `083096e1e4c2`). Its master ledger blob `74dc22199851` is byte-identical to the r9 file the seat wrote, so r9 landed intact. This r10 branch was cut from master after that merge.
+- The #9559 CI-authority freeze is CLEARED. ci.yml main baseline run 39045439693 concluded SUCCESS at 2026-10-17T16:21:52Z on main `227e192393a6`, which descends from the #9559 squash `216b9bff199c`. Never re-dispatch it.
+- WP31 evaluator census = fabric lane `c19-w5s-wp31-evaluator-census-glm-20261017`.
+  - Sentinel: `C19-W5S-WP31-EV: PASS bb9e4a74a5b9`. Packet: 180 lines, sha256 `119dc47d2044…`. BASE `bb9e4a74a5b9` was fetched fresh and the tree stayed clean.
+  - Q1–Q10 were answered with line citations. The census read no price, return, label or outcome value.
+  - Findings the build is held to:
+    - `engine/entry_radar/replay/gates.py` is importable as a pure library, and its `frozen_prefix` / `check_budget_row` are the patterns to mirror.
+    - `engine/trial_ledger.register_trials(family, budget=, reason=, basis=, ledger=)` is the registration API.
+    - `engine/validation.deflated_sharpe(…, ledger=, family=, t_eff=)` takes a duck-typed ledger.
+    - `collectors/edgar_earnings_8k.py` stores sub-day `acceptance_datetime`. `collectors/edgar_eps.py` stores the `filed` DATE only.
+    - The event-workspace current-state reader (`engine/neuralweb/company_intelligence_reader.py:753-858`) has NO as-of parameter: it always resolves the newest `T/YYYYQn` alias.
+    - `info_cutoff` is a stamp on trial-ledger rows with no audit consumer.
+    - The `trial-budgets` CI job is `if: ${{ false }}` at BASE (`legacy-jobs.yml:2953`).
+- WP31 frozen build spec: `WP31_BUILD_SPEC.md`, seat-written, 11,928 bytes, staged sha-verified on each lane host. Its constants:
+  - `PREREG_COMMIT = 8e1950932b29f89a89da94c50ccef4ef5f2d8d1c` (Macro #9540), with `PREREG_COMMIT_TIME = 2026-10-17T12:01:44Z`.
+  - `PREREG_DOC_SHA256 = 44c9df659288c64987758f8408c2b7eced41488e57251c4390ddd466bf1f7a43`. This is the frozen prefix through the `## §10 Amendments (append-only` marker line.
+  - `FAMILY = c19_wp31_incremental_information`, `BUDGET = 6`, basis itemized over 6 items (`primary_delta`, `hr_a1_minus_hr_a0`, `a2_minus_s_vs_a2_minus_k`, `economic_translation_a2`, `split_aapl`, `split_homebuilders`).
+  - Universe: AAPL, plus DHI/PHM/KBH/TOL as one HOMEBUILDERS cluster.
+  - Arms: A0, A1, K-backed, S-backed, A2, A2[−K], A2[−S].
+  - Δ = HR(A2) − HR(A2[−K]) on common support.
+  - Three modules (`scripts/c19_wp31_{stats,gates,sources}.py`), each with one test. The modules import nothing from each other; their only interface is a shared episode dict.
+- WP31 BUILD lanes. All three are RUNNING since 2026-10-18T01:41Z; packets are under `lanes3/`. Each delivers a git bundle and never pushes.
+
+  | lane | run id | host | branch | sentinel |
+  |---|---|---|---|---|
+  | STATS | `c19-w5s-wp31-stats-build-bailian-20261017` | ubuntu0 | `lane/c19-wp31-stats-20261017` | `C19-W5S-WP31-STATS` |
+  | GATES | `c19-w5s-wp31-gates-build-bailian-20261017` | ubuntu2 | `lane/c19-wp31-gates-20261017` | `C19-W5S-WP31-GATES` |
+  | SOURCES | `c19-w5s-wp31-sources-build-bailian-20261017` | ubuntu0 | `lane/c19-wp31-sources-20261017` | `C19-W5S-WP31-SOURCES` |
+
+**DECIDED — WP31 evaluator census ACCEPT; the build is three module lanes; the seat integrates**
+- Accepted by artifact. The census covers every question the build spec needs, its gaps are bounded by the commands it ran, and it carries no exposure.
+- **D1 (DEVIATION, recorded):** STATS calls `deflated_sharpe` with a duck-typed `_FixedBudget` whose `effective_n(family)` returns 6, never the live ledger. The evaluator must not read or write the shared trial ledger outside `register()`.
+- **The S reader is owner-bound.** Because the current-state reader has no as-of, reading an issuer's current event workspace after an eligible release would expose that quarter's label. SOURCES therefore ships `s_from_workspace` as a stub that raises `NotImplementedError("S reader: owner-bound; seat wave 2")`. The as-of S reader is a seat wave-2 decision taken with the company-intelligence owner. C19 does not edit the frozen company-intelligence files.
+- **Integration law:** ONE Macro PR on a fresh `claude/` branch cherry-picks the three lane commits with `-x`. The seat adds ONE `legacy-jobs.yml` job that covers the three new tests, plus the `tests/test_ci_pack.py` lines. Then: one Opus READ_ONLY review, hand-merge `--match-head-commit` on concluded green, ONE covering ci.yml main baseline (preflight: nothing in flight), and an API land check.
+- **Registration timing (unchanged):** `register()` runs before any label read, never from a sparse worktree, and only after the integration PR has landed.
+
+**OPEN** (owner → next action)
+- WP31 S reader as-of (seat wave 2, with the company-intelligence owner). C19 neither builds a second reader nor edits frozen files.
+- The `trial-budgets` CI lint is disabled at BASE. That job belongs to its incumbent owner; C19 does not re-enable it. The evaluator's own G-3 check is the WP31 gate.
+- R2 retention and PIT depth for the event-workspace generations: a read-only metadata probe (object listing and generation dates, never values) is due before the first post-prereg eligible release (PHM, ~2026-10-21).
+- Forensics no-bound gap at `app/forensics.py:873-893`: routed to the composer owner. That file is no-lane for C19.
+- Carried unchanged from r9: G9 / WP32 P2–P3 (Chairman, human-only); G10, G11, WP32 P7 (WS:MARKET-INTELLIGENCE-INSTITUTIONAL-BUILDOUT); G3 (WS:FUNDAMENTAL-FORENSICS); G1, G8, WP28 (WS:CAPITAL-STRUCTURE-INTELLIGENCE-V2); WP26, WP27 (WS-MARKET-OS); WP01 NOT_LOCATED; WP32 P4–P6 not observed.
+
+**NEXT**
+1. On each WP31 lane's watcher event, judge the delivered bundle by artifact: exactly two files per lane, the spec's interface, tests run, and no outcome reads. Then ACCEPT, REQUEST_REPAIR, or REJECT.
+2. When all three lanes are accepted, open ONE integration PR under the integration law above. Then review, merge, baseline and land-check it.
+3. Run the R2 retention / PIT-depth probe before ~2026-10-21.
+4. Write the WP32 P4–P6 proof design within C19 scope. P2–P3 stay human-only.
+
+#### r11 cycle 2026-10-18T03:3xZ (seat 7ab343c8) — wave 10: r10 landed, WP31 evaluator integrated (Macro #9577 in CI), prereg §10 A1–A4, EDGAR clock finding, R2 PIT probe, WP32 P4–P7 design + P6 anonymous probe
+
+**FACTS**
+- Ledger r10 = Mastermind #1588. It merged through the master merge queue at 2026-10-18T02:50:07Z (merge commit `d65414e89ad3`). The master ledger blob became `87464541347f`, and this r11 branch was cut from master after that merge.
+- All three WP31 build lanes delivered and were ACCEPTED by artifact. Each was judged on its bundle diff, its own test run, and the absence of any outcome read.
+
+  | lane | run id | accepted commit | verdict |
+  |---|---|---|---|
+  | GATES | `c19-w5s-wp31-gates-build-bailian-20261017` | `74a402cd5bb1` | ACCEPT |
+  | STATS | `c19-w5s-wp31-stats-build-bailian-20261017` | `4988b2ff21df` | ACCEPT; deviations D1 (`_FixedBudget`), D3, D4 recorded |
+  | SOURCES | `c19-w5s-wp31-sources-build-bailian-20261017` | `e24c3756a1e7` | ACCEPT with seat fixes (strict Form 8-K; rights vocabulary) |
+
+- Integration PR **Macro #9577**, branch `claude/c19-wp31-integration-7ab343c8`, head `c7675c61872e`, was cut from `a1fe765f08fc`. It has six commits: the three lanes cherry-picked with `-x`, the seat integration fixes, CI registration, and the prereg §10 A1–A4 repairs.
+  - Each new test file has its own `legacy-jobs.yml` job (`scope: exclusive`) and a `CURATED_EXCLUSIVE` entry.
+  - `run_ci_pack.curated_exclusive_closure_findings()` returns `{}`.
+  - Local `tests/test_ci_pack.py` + `tests/test_c19_wp31_gates.py` gave 225 passed, 2 skipped. The two skips are the register tests' `full_tree` fixture skipping in a sparse tree, which is expected. Exit 0.
+  - CI is running under ONE watcher.
+- An independent Opus READ_ONLY review of the integrated evaluator returned findings 1–6, all repaired on #9577:
+  1. The rights vocabulary was case-mismatched with the engine. It failed open on blocked labels.
+  2. The K reader checked rights on one row only.
+  3. The `acceptanceDateTime` clock was wrong (below).
+  4. A dropped earlier release filing could shift an episode to a later filing.
+  5. The +0.10 compare used floats: 24/40 − 20/40 → 0.0999….
+  6. The sources lane admitted `8-K/A`.
+- **EDGAR clock (receipted, non-universe issuers only).**
+  - The submissions-JSON `acceptanceDateTime` J is NOT UTC. It is true UTC + |America/New_York offset|; the SGML header carries ET local time. Receipts:
+    - MSFT `0001193125-26-323632`: JSON `2026-07-30T00:04:53Z` vs header `20260729160453`
+    - MSFT `0001193125-26-191457`: JSON `2026-04-30T00:03:31Z` vs header `20260429160331`
+    - JPM `0001628280-26-065582`: JSON `2026-10-13T14:30:38Z` vs header `20261013063038`
+    - JPM `0001628280-26-048078`: JSON `2026-07-14T14:30:38Z` vs header `20260714063038`
+  - Uncorrected, a release made during the regular session lands after that session's close, which leaks the label.
+- **R2 event-workspace manifest chain probe** (metadata only: schema, generated_at, source_clock, counts, link integrity; no values read):
+  - The chain walk covered 214 generations with 0 link mismatches and 0 missing links. It runs from the newest, 2026-10-17T04:29:37Z (the current pointer, v3, gen `c0a93d64b430`), back to the oldest, 2026-07-30T20:30:28Z (v1).
+  - Hops 0–17 are v3 and carry a `source_clock`. Hop 18 onward (196 generations) are v2/v1 with `source_clock = None`.
+  - The chain links hop 17 (generated 2026-10-03T05:23:48Z) directly to hop 18 (generated 2026-07-31T00:30:28Z). It carries no generation between those dates.
+  - **source_clock regression.** Hops 2–3 (generated 2026-10-15T04:44:02Z) carry `source_clock 2026-10-13T05:47:02Z` with 10 events. The newer hops 1 and 0, including the current pointer, carry the older `2026-09-22T16:15:45Z` with 5 events.
+- **WP32 P4–P7 proof design** is written, seat-side:
+  - P4 natural source update.
+  - P5 correction: a tests-only CI lane on a synthetic non-universe ticker, G1→G2.
+  - P6 denial isolation, latency, cache and availability.
+  - P7 rollback: observables only, owned by WS:MARKET-INTELLIGENCE-INSTITUTIONAL-BUILDOUT.
+  - Exposure rule: any universe-issuer record made after an eligible release is headers, status and timing only.
+- **WP32 P6 anonymous probe**, 2026-10-18T02:41:49–02:42:02Z:
+  - Three anonymous `GET /api/integrated-answer/v1/AAPL` each returned `401`, 33 bytes, `cache-control: private, no-store`, `vary: Authorization`, `eo-cache-status: MISS`, with t_total 0.29–0.73 s.
+  - `/api/health` returned `200` with `private, no-store`.
+  - Denial isolation and no-cache for the anonymous path are observed. The authenticated path was not exercised.
+
+**DECIDED — prereg §10 amendments A1–A4, adopted before any eligible release and with no label read**
+- **A1 (rights):** `NONBLOCKING_RIGHTS = {"UNKNOWN"}` is an allow-list; every other label blocks. Both consumed K rows (`average`, `year_ago`) are normalized, and a disagreement becomes `MIXED:a,b`, which blocks.
+- **A2 (clock):** `U = J + utcoffset_ET(J)`, with a round-trip check. A DST-ambiguous or nonexistent instant is unresolvable and mints no episode. A0 history stays uncorrected, which is conservative.
+- **A3 (first filing):** the first release filing or nothing. An episode whose earlier Item 2.02 filing was dropped becomes `NOT_EVALUABLE(earlier_release_filing_dropped)`.
+- **A4 (exact effect):** the useful-effect test compares the exact `Fraction` against 1/10. The float is for display only, and every read prints `d/n`.
+- Strict `form == "8-K"` per prereg §2 (finding 6; no amendment needed).
+- The G-1 frozen-prefix hash `44c9df659288…` is unchanged: the amendments sit below the `## §10 Amendments (append-only` marker, and `check_doc_hash` passes on the #9577 head.
+- `register()` runs only after #9577 has landed, from a NON-sparse tree with an explicit `TrialLedger`, and before DHI's eligible release (~2026-10-20). It is never run from a sparse worktree.
+
+**OPEN** (owner → next action)
+- Upstream clock gap: `collectors/edgar_earnings_8k.py:12` stores the submissions-JSON `acceptanceDateTime` labelled as UTC.
+  - Owner: the collector's incumbent owner.
+  - A collector fix must remove the evaluator's A2 correction in the same change, or the shift is applied twice.
+  - Any `prior_filings` source must supply UTC or the raw JSON, never header ET.
+- WP31 wave 2:
+  - EX-99.1 enrichment.
+  - The S reader as-of (owner-bound, with the company-intelligence owner; `s_from_workspace` still raises `NotImplementedError`).
+  - The runner.
+  - A `prior_filings` UTC source.
+- R2 source_clock regression and the Jul 31 → Oct 3 chain gap. Owner: the event-workspace owner. The S reader's as-of design must not assume monotone `source_clock` or continuous generation history.
+- WP32 P5/P6 tests-only lane (owned files `tests/test_c19_wp32_correction.py` + `tests/fixtures/c19_wp32/`, with CI registration). It is commissioned after #9577 lands.
+- Carried unchanged from r10:
+  - G9 / WP32 P2–P3: Chairman, human-only.
+  - G10, G11, WP32 P7: WS:MARKET-INTELLIGENCE-INSTITUTIONAL-BUILDOUT.
+  - G3: WS:FUNDAMENTAL-FORENSICS.
+  - G1, G8, WP28: WS:CAPITAL-STRUCTURE-INTELLIGENCE-V2.
+  - WP26, WP27: WS-MARKET-OS.
+  - WP01: NOT_LOCATED.
+  - The `trial-budgets` lint is disabled at BASE (incumbent owner).
+  - The forensics no-bound gap (composer owner).
+
+**NEXT**
+1. When #9577's checks conclude green (reds read by name, with the spurious Workers Builds and merge-queue-pilot excluded): hand-merge `--squash --match-head-commit`, then ONE covering ci.yml main baseline (preflight: nothing in flight), then an API land check.
+2. Run `register()` from a non-sparse tree before ~2026-10-20, and record the trial-ledger row in r12.
+3. Commission the WP32 P5/P6 tests-only fabric lane.
+4. Run WP31 wave 2: EX-99.1 enrichment, the runner, and a `prior_filings` UTC source. Hold the S reader as-of design with its owner.
+
+#### r12 cycle 2026-10-18T14:58Z (seat 7ab343c8) — wave 11: WP31 evaluator landed + baselined, trial-ledger legacy-row fix, WP31 family registered, WP32 P5/P6 pins, WP31 wave 2 landed, WP31 wave 3 accepted + integrated
+
+**FACTS**
+- Ledger r11 = Mastermind #1595. It landed on master as `0d51da54`, and this r12 branch was cut from master after it.
+- **WP31 evaluator landed.** Macro #9577 squash-merged as `1ddfee654eea`. The covering ci.yml main baseline, run `39098878023`, was dispatched once over a clear field and concluded SUCCESS.
+- **Trial-ledger regression, repaired.** After #9463, identity-less legacy rows in `data/trial_ledger.jsonl` were counted as corrupt, so every non-strict append was refused. Macro #9582 (engine + tests only) squash-merged as `59e26b1ef51d`. It is the fix that made `register()` possible.
+- **WP31 family registered before any label read.** Macro #9586 squash-merged as `af5379b11d9c` at 2026-10-18T06:09:25Z.
+  - It appended exactly one `declared_budget` row: family `c19_wp31_incremental_information`, n=6, itemized basis. The reason string carries prereg commit `8e1950932b29` and doc sha256 `44c9df659288…`.
+  - `register()` ran from a full (non-sparse) SSD worktree whose base held #9577 and #9582. It checked the on-disk bytes against the committed blob before writing, and checked afterwards that the file was only appended to. G-3 `check_budget_row` passes.
+  - This landed before the first eligible universe release (DHI, from 2026-10-19/20). No price, return, outcome, EPS or EX-99.1 value was read for any universe issuer.
+- **WP32 P5/P6 pins = Macro #9587** (tests-only, plus CI registration). The fabric lane `c19-w5s-wp32-p5p6-tests-bailian-20261017` delivered, and the seat ACCEPTED it by artifact.
+  - `tests/test_c19_wp32_correction.py` (P5, 7 tests) pins:
+    - one generation identity cited in both the body leg ref and the consumed-receipt producer id;
+    - a correction replaces every identity;
+    - no mixed response mid-correction;
+    - an absent ticker is answered honestly;
+    - re-pointing the marker restores the surviving identity;
+    - the CTE leg is never cached.
+  - `tests/test_c19_wp32_denial_cache.py` (P6, 6 tests) pins:
+    - 401 and 403 after a warm entitled 200 carry no leg evidence, SHA header or receipts header;
+    - poisoned `_k3e_cached_*` / `_chip_cached_*` never surface;
+    - the flag-off 404 leaks nothing.
+  - Fixtures are the synthetic non-universe ZZWP/ZZWQ. The flag is set only inside monkeypatch scope.
+  - **Offline compose latency** (`WP32-COMPOSE-LATENCY`, n=20, stubbed legs, five runs): median 0.121–0.124 ms, p95 0.151–0.155 ms, max 0.184–0.190 ms. This is offline only, not production latency.
+  - **Inert-guard repair.** In `tests/test_c19_wp19_integrated_answer_entitlement_pins.py`, `_forbid_compose` patched only `_compose_page`, but the route calls `_compose_page_with_receipts`, so the guard could never fire. It now forbids both. Positive control: an allowed request with the repaired guard raises `composed`; before the fix it returned 200.
+  - **CI repair.** First CI was red on the contract-delta packing probes (`scripts/build_free_content.py` 135 > 134, `templates/index.html` 137 > 136) and on `tests/test_ci_pack.py`. Path inference had selected the new job because its tests import `app/` and `engine/`. The repair declared the job `scope: exclusive`, added it to `CURATED_EXCLUSIVE`, and listed its 720-file static import closure as literal paths (no globs), so the probe ceilings stay fixed. `curated_exclusive_closure_findings` = 0 misses. The literal closure also exposed 15 undeclared tracked ancestor `__init__.py` files, which tripped `test_ancestor_init_census_does_not_grow` (ceilings 344 total / 138 substantive). Those 15 are now declared literally too, so the ratchet does not grow.
+  - **Second CI repair.** The 36 `site/` closure leaves that hosted CI found were declared. CI was then fully green on repair head `a8491547`, including `reference-integrity`. The only non-green check was the advisory `ci-authority/codex/merge-queue-pilot`.
+  - **MERGED** at 2026-10-18T14:07:43Z as `f0f080974812`. It was hand-merged with `--match-head-commit`. Main baseline `ci.yml` run `39134772854` was dispatched at 14:10:09Z on `f0f080974812`, once, covering #9602 and #9587. It concluded `failure` at 14:55Z: the only failing pack was ci-pack-10 with `CI_PACK_FAILED_JOBS=["reference-integrity"]`, and its RIG findings (the three Sol #9592 sector-central packets) are IDENTICAL to main's earlier baseline `39113460230`. No other error line appears. That is the inherited Sol #9592 red, not a C19 regression.
+- **WP31 wave 2 = Macro #9602.** The GLM lane `c19-w5s-wp31-wave2-build-glm-20261018` returned PASS at base `9eba2441`, and the seat ACCEPTED it by artifact.
+  - `scripts/c19_wp31_sources.py` adds:
+    - the S reader `s_from_revisions` and `collect_s_legs` (ONE batched revisions-reader call);
+    - `resolve_company_id`, `parse_fiscal_q`/`previous_fiscal_q` and `s_event_ids`;
+    - EX-99.1 enrichment from the index-headers manifest (exhibit TYPES only);
+    - companyfacts label/A0 located by period end;
+    - the `q_release_before_cutoff`/`pit_unrecoverable` leak rules.
+  - The new `scripts/c19_wp31_runner.py:run_evaluation` is one evaluator read in which every I/O is injected:
+    - gates → episodes → K → one S chain read;
+    - the exposure ledger is recorded BEFORE the label read, and an outside read marks the episode EXPOSED;
+    - then the leak rules, the label status and `stats.build_report`.
+    - It has no CLI, no network and no import-time I/O.
+  - The seat integrated it on a fresh SSD tree from origin/main `cf73aecc4957`: lane cherry-pick `552b0694`, then registration commit `855930ab`, which adds the runner test and script to the `c19-wp31-incremental-information` job (0 closure misses, 0 ancestor inits).
+  - Local checks:
+    - 202 named WP31 tests pass;
+    - `tests/test_ci_pack.py` 196 passed / 2 skipped;
+    - contract-delta rc=0 (0 introduced / 0 inherited);
+    - all 12 packs validate.
+  - **MERGED** at 2026-10-18T13:22:22Z as `eb0dbd77cf38`. It was hand-merged with `--match-head-commit` on the inherited-RIG basis:
+    - every CI pack's `CI_PACK_FAILED_JOBS` was `["reference-integrity"]` only;
+    - the PR's RIG findings were byte-identical to main's own failed run `39113460230`;
+    - the legacy-jobs diff was confined to the WP31 job.
+
+    Main is red on RIG L8 from Sol-owned #9592 (three sector-central packets without a RIG-RECEIPT). That heal is Sol's, and this seat neither touched nor posted on it.
+- **WP31 wave 3 = Macro #9607.** The MiniMax lane `c19-w5s-wp31-wave3-build-minimax-20261018` (ubuntu1) returned PASS at `8f82e279730a`, base `855930ab`, with a bundle-only return (sha256 `8c50a8b2d3d8…84be`). The seat ACCEPTED it by artifact.
+  - `scripts/c19_wp31_production.py:ProductionInputs` lazily wires every runner input to its incumbent producer:
+    - EDGAR submissions and Item-2.02 rows via `collectors/edgar_earnings_8k`;
+    - the index-headers manifest via `collectors/edgar_8k._fetch_doc_text`;
+    - Company Facts via `SecCompanyFactsCollector`;
+    - K via the frozen k3e git-blob loaders at HEAD.
+  - `scripts/c19_wp31_evaluate.py` is the manual seat CLI: an exclusive non-blocking flock (busy exits 3, a refusal exits 2), an atomic report-only write, and counts-only output.
+  - The runner's step 5 now records the evaluator label read whenever ≥1 original-filing period context matches. That is the conservative exposure record from the spec §3.
+  - Tests: 15 new cases. 217 job tests pass.
+  - The seat integrated it on an SSD tree from origin/main `eb0dbd77`: cherry-pick `4626279a`, then registration commit `4dd7b1c0`, which adds the 3 new files plus 21 tracked closure leaves.
+  - Local checks:
+    - closure (tracked-path inventory): 0 misses;
+    - `tests/test_ci_pack.py`: 196 passed / 2 skipped;
+    - contract-delta: 0/0;
+    - all 12 packs validate.
+
+    The evaluator has not been run against real data. Its first live read is a separate gated seat act, taken only after an eligible universe release.
+  - **CI repair.** The first CI on `4dd7b1c0` was red in two packs. ci-pack-3 `unrun-import-hygiene` was the seat's own defect: `scripts/c19_wp31_evaluate.py` is a file-path entry script with no repo-root pin. Repair commit `eb6ee6b3` adds the top-level `_ROOT`/`sys.path.insert(0, …)` pin without extending the baseline (pin test 11 passed, job tests 217 passed, contract-delta 0/0, closure 0). ci-pack-4 failed only `reference-integrity` (`CI_PACK_FAILED_JOBS=["reference-integrity"]`), with the three Sol #9592 sector-central packet findings IDENTICAL to main's baseline log; the legacy-jobs diff is confined to the WP31 job.
+  - **MERGED** at 2026-10-18T14:51:41Z as `e61632b63c22`, hand-merged with `--match-head-commit eb6ee6b3` on that inherited-RIG basis.
+- **Sparse closure false-green (CI trap, remedied).** #9587's first repair passed `curated_exclusive_closure_findings` locally on a sparse tree, but hosted CI found 36 `site/` leaves in the closure that were absent from the sparse checkout. The seat now checks closure with the exact-tree tracked-path inventory (`ci_scope_dependencies.write_tracked_path_inventory` + `planner_tracked_path_inventory`), the same existence oracle contract-delta uses.
+- **Bailian lease refusal (fleet infra).** The WP31 wave-2 bailian lane `c19-w5s-wp31-wave2-build-bailian-20261018` returned LEASE_REFUSED rc=75 at acquire, so the id is burned. Broker status, read-only, showed bailian qwen3.8-flash pairing "readiness envelope invalid" on ubuntu0, ubuntu1 and ubuntu2, while GLM glm-5.3-flash pairing was ok. The seat did not touch readiness documents, hosts or pools.
+
+**DECIDED**
+- WP31 wave 2 was rerouted to GLM unchanged: same frozen spec `WP31_WAVE2_SPEC.md` sha256 `bb0ad59a…`, same owned files, new run id `c19-w5s-wp31-wave2-build-glm-20261018`. Its scope:
+  - the S reader replaces the `s_from_workspace` stub, only CALLING the event-workspace and company-intelligence readers read-only;
+  - EX-99.1 enrichment reads the index-headers manifest (exhibit TYPES) only, never exhibit bodies;
+  - the runner (`scripts/c19_wp31_runner.py`).
+
+  Tests use injected synthetic non-universe revisions with no network.
+- A new legacy-jobs CI job whose tests import `app/` or `engine/` must ship `scope: exclusive` + `CURATED_EXCLUSIVE` + a literal closure + every tracked ancestor `__init__.py` of those literal paths in the SAME PR. Otherwise it reds the packing probes, which sit at zero headroom.
+- WP31 wave 3 starts with a read-only census, not a build. The first lane, `c19-w5s-wp31-wave3-census-glm-20261018` on ubuntu1 (packet sha256 `253f2a0c…`), died after one turn on a GLM provider 429 ("Weekly/Monthly Limit Exhausted"). It was rerouted unchanged to MiniMax as `c19-w5s-wp31-wave3-census-minimax-20261018` (packet sha256 `6dcdc249…`), which launches only once host_pick names an eligible host. The census maps the incumbent production owner of every injected runner input: 8-K rows, submissions, companyfacts, index headers, the SEC HTTP client, k3e inputs, the company-intelligence revision store and identity, and the gate inputs. It also maps the CLI/output conventions, the existing workflows that could host the read, and the CI closure sizes. Wave 3 may only CALL incumbent fetchers; the prereg §9 forbids an invented schedule and a changed producer.
+- The MiniMax census returned PASS at `bc94f4ac5db6`, and the seat ACCEPTED it by artifact with deviations.
+  - **Correction:** `data/revisions/` IS tracked (4 files committed by daily.yml). The census called it untracked; it is not.
+  - The universe CIKs are code-pinned (`engine/security_state.py:77` for AAPL; `engine/company_intelligence/issuer_profiles.py:68-71` for DHI/PHM/KBH/TOL). The wave-3 module carries them as a literal map whose keys must equal `UNIVERSE`, and it does not read `ticker_cik_ledger`.
+- The wave-3 build spec is FROZEN as `WP31_WAVE3_SPEC.md` (sha256 `8b3cf32f…56fe`). Its scope:
+  - `scripts/c19_wp31_production.py` builds `ProductionInputs`. Every injected runner input comes from an incumbent producer, imported lazily: EDGAR submissions and Item-2.02 rows via `collectors/edgar_earnings_8k`, the index-headers manifest via `collectors/edgar_8k._fetch_doc_text`, Company Facts via `SecCompanyFactsCollector`, and K via the frozen k3e git-blob loaders at the HEAD revision.
+  - `scripts/c19_wp31_evaluate.py` is a manual seat CLI. It holds an exclusive non-blocking flock on the exposure ledger for the whole run (busy exits 3; a gate refusal exits 2), atomically writes only the report, and prints counts only. It never writes or prints episodes, labels, K/S values or exhibit details.
+  - There is no workflow, schedule or new collector (prereg §9).
+  - Tests are synthetic, with no network.
+- The wave-3 build was commissioned on MiniMax as `c19-w5s-wp31-wave3-build-minimax-20261018` (ubuntu1, started 12:58Z). It branches from the wave-2 head `855930ab`, because #9602 is not merged yet. The return is bundle-only; the seat integrates it after #9602 lands.
+
+**OPEN** (owner → next action)
+- **Flag-off 404 lacks private headers.** `app/integrated_answer.py:165-167` `_require_enabled` raises a plain `HTTPException`, so the 404 carries no `Cache-Control: private, no-store` and no `Vary: Authorization`, unlike the 401/403 path at `app/forensics.py:164`. It leaks no evidence (P6 pins that), but an intermediary may cache it.
+  - Owner: the composer owner (no lane may touch `app/integrated_answer.py`).
+  - Next: wrap it with `_private_error` and update the P6 assertion in the same change.
+- **Bailian readiness envelope invalid fleet-wide.** Owner: fleet/pool infrastructure. Bailian lanes are unavailable until it is repaired.
+- **GLM pool quota exhausted.** The provider returned 429 at 2026-10-18 12:24Z, with reset at 2026-10-19 05:16:16 on the provider clock. Owner: fleet/pool infrastructure. Until then C19 labor routes to MiniMax through bounded host_pick waits. Gates are never bypassed: at 12:30Z no MiniMax host qualified, and at 12:58Z ubuntu1 did.
+- **WP31 exposure record on an ambiguous period match.** RESOLVED in the wave-3 spec §3 and built in #9607. The runner records the evaluator label read whenever the facts JSON holds ≥1 original-filing context for the episode's period, not only exactly one. That is more conservative under prereg §6, and label extraction is unchanged (`_q_accession_for_period` still returns None on an ambiguous match). No prereg amendment is needed.
+- Carried from r11:
+  - The upstream EDGAR clock gap at `collectors/edgar_earnings_8k.py:12` (collector owner; must remove A2 in the same change).
+  - The R2 source_clock regression and the Jul 31 → Oct 3 chain gap (event-workspace owner).
+  - G9 / WP32 P2–P3: Chairman, human-only.
+  - G10, G11, WP32 P7: WS:MARKET-INTELLIGENCE-INSTITUTIONAL-BUILDOUT.
+  - G3: WS:FUNDAMENTAL-FORENSICS.
+  - G1, G8, WP28: WS:CAPITAL-STRUCTURE-INTELLIGENCE-V2.
+  - WP26, WP27: WS-MARKET-OS.
+  - WP01: NOT_LOCATED.
+  - The `trial-budgets` lint is disabled at BASE.
+  - The forensics no-bound gap.
+
+**NEXT**
+1. #9607 has landed (`e61632b63c22`). Its ONE main baseline, ci.yml run `39138202471`, was dispatched at 14:56:04Z on `e61632b63c22` after the in-flight preflight showed none. Read its conclusion once; a red that is RIG-only and identical to `39113460230` is the inherited #9592 red.
+2. Run ONE ci.yml main baseline per merge. Preflight for in-flight runs first and never dispatch over one. A main baseline cannot go green until Sol heals the #9592 RIG packets.
+3. The first evaluator read happens only after an eligible universe release (from 2026-10-19). Every read prints its counts, and a look is declared only at the prereg §5 thresholds (40 episodes / 12 clusters, then 80 common-support episodes).
