@@ -87,7 +87,7 @@ diff --git a/codex_pool_policy.py b/codex_pool_policy.py
 +        r for r in eligible
 +        if (key := _subject_key(r)) is None or seen[key] == 1
 +    ]
-@@ -174,0 +249,101 @@
+@@ -174,0 +249,124 @@
 +
 +
 +
@@ -129,6 +129,29 @@ diff --git a/codex_pool_policy.py b/codex_pool_policy.py
 +            or account.get("capacity_state") != "AVAILABLE_OBSERVED"
 +            or account.get("limit_id") != "codex"):
 +        raise refusal
++    # Model visibility MUST come from the native App Server catalog observed
++    # with this same account/limit sample. Caller-supplied model choices may
++    # narrow, never widen, that verified catalog.
++    catalog = sample.get("model_visibility")
++    if (not isinstance(catalog, Mapping)
++            or set(catalog) != {"state", "supported_models", "source", "admission_granted"}
++            or catalog.get("state") != "OBSERVED"
++            or catalog.get("source") != "model/list"
++            or catalog.get("admission_granted") is not False):
++        raise refusal
++    listed = catalog.get("supported_models")
++    if (type(listed) is not list or len(listed) > 2
++            or any(type(m) is not str or m not in {"gpt-6-astra", "gpt-6.1-sol"}
++                   for m in listed)
++            or len(set(listed)) != len(listed)):
++        raise refusal
++    native_models = frozenset(listed)
++    if qualified_models is not None and (
++        type(qualified_models) is not frozenset
++        or not qualified_models.issubset(native_models)
++    ):
++        raise refusal
++    verified_models = native_models if qualified_models is None else qualified_models
 +    workspace, member = home.get("account_id_sha256"), home.get("user_id_sha256")
 +    if type(workspace) is not str or _SHA256.fullmatch(workspace) is None:
 +        raise refusal
@@ -187,7 +210,7 @@ diff --git a/codex_pool_policy.py b/codex_pool_policy.py
 +        active_leases=active_leases, lease_cap=lease_cap,
 +        auth_ready=True, binding_verified=binding_verified,
 +        account_id_sha256=workspace, user_id_sha256=member,
-+        entitlement_class=entitlement_class, qualified_models=qualified_models,
++        entitlement_class=entitlement_class, qualified_models=verified_models,
 +    )
 diff --git a/tests/test_codex_native_profile.py b/tests/test_codex_native_profile.py
 --- a/tests/test_codex_native_profile.py

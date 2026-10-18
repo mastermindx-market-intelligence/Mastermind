@@ -179,3 +179,37 @@ has codex-01 and three personal Pro definitions; its read-only status
 reported every reviewed slot NOT_READY with missing provider homes, and
 the Executive reader replied backend_unavailable. A valid model list and
 this pure bridge do not cure those host/realm/acceptance gates.
+
+
+## October 18 same-private-session native model binding
+
+After the original #1585 native observation owner added a bounded optional
+model/list read inside its existing App Server process, the original #1365
+pure project_native_account_observation is hardened to require the exact
+sanitized model_visibility shape: OBSERVED, model/list source,
+admission_granted=false, and no unknown, duplicate or malformed identifiers.
+Only the two approved Astra/Sol identifiers may survive projection. A caller
+may specify a strict subset to narrow execution but cannot add a model that
+the native App Server did not return. A missing/failed native model read
+makes this projective sample ineligible; the native owner separately retains
+any already observed quota evidence for refresh analysis.
+
+RED-first: 9 model-catalog provenance/negative cases failed against the
+predecessor projective source. GREEN: 82/82 combined selector, profile,
+Business identity/entitlement and native-quota/model projection tests pass.
+Exact installed-source replay and hosted CI need independent confirmation.
+
+Real provider metadata probe via C1's private native App Server:
+NATIVE_READS_COMPLETED=true; model visibility OBSERVED=true; separate
+model identifiers Astra/Sol 6.1 both present; provider-home private process
+group cleanup true. The identical sanitized sample passed into current
+project_native_account_observation without separate caller-provided model
+set. It returned only the observed two-model set. Broker seat cap=0, and
+select_account(requested_model=gpt-6-astra) returned None, as required.
+No paid model turn, account rotation, work dispatch, quota debit, reset
+credit, local credential extraction, broker mutation or capacity enrollment.
+
+This remains a source-only proof of a model/subject eligibility observation.
+The incumbent Executive worker source config/OS principal and launch path
+remain NOT_READY; exact START-bound account/host/model enrollment and a real
+parent-accepted worker result are outstanding.

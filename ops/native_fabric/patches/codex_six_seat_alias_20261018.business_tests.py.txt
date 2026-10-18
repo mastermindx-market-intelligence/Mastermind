@@ -132,6 +132,12 @@ def native_sample(*, workspace="a"*64, user="b"*64,
             "account_id_sha256":workspace,
             "user_id_sha256":user,
         },
+        "model_visibility":{
+            "state":"OBSERVED",
+            "supported_models":[ASTRA,SOL],
+            "source":"model/list",
+            "admission_granted":False,
+        },
         "account":{
             "observed_at_unix":seen.timestamp(),
             "auth_state":"MANAGED_CHATGPT_OBSERVED",
@@ -173,7 +179,9 @@ def test_native_probe_to_selector_distinct_personal_and_business_realms():
 @pytest.mark.parametrize("bad", [
     "bad_cleanup", "fallback", "no_user", "unknown_sibling",
     "multiple_windows", "plan_wrong", "expired", "identity_invalid",
-    "quota_state_unknown",
+    "quota_state_unknown", "models_missing", "models_unknown",
+    "models_wrong_source", "models_unrecognized",
+    "models_admission_forged", "models_duplicate",
 ])
 def test_native_probe_projection_fails_closed_for_untrusted_evidence(bad):
     sample=native_sample()
@@ -188,6 +196,12 @@ def test_native_probe_projection_fails_closed_for_untrusted_evidence(bad):
     elif bad=="expired":sample["account"]["windows"]["primary"]["resets_at"]=int((NOW-timedelta(minutes=1)).timestamp())
     elif bad=="identity_invalid":sample["home_identity"]["account_id_sha256"]="ZZZ"
     elif bad=="quota_state_unknown":sample["account"]["capacity_state"]="UNKNOWN"
+    elif bad=="models_missing":sample.pop("model_visibility")
+    elif bad=="models_unknown":sample["model_visibility"]["state"]="UNKNOWN"
+    elif bad=="models_wrong_source":sample["model_visibility"]["source"]="caller"
+    elif bad=="models_unrecognized":sample["model_visibility"]["supported_models"]=["gpt-6-luna"]
+    elif bad=="models_admission_forged":sample["model_visibility"]["admission_granted"]=True
+    elif bad=="models_duplicate":sample["model_visibility"]["supported_models"]=[ASTRA,ASTRA]
     with pytest.raises(ValueError,match="native_observation"):
         project("B1",sample)
 
@@ -219,3 +233,30 @@ def test_native_personal_projection_maintains_backwards_account_shape():
     assert result.account_id_sha256=="c"*64
     assert result.user_id_sha256 is None
     assert pick([result]).alias=="C2"
+
+
+def test_native_provided_catalog_restricts_caller_supplied_model_set():
+    sample=native_sample()
+    sample["model_visibility"]["supported_models"]=[SOL]
+    with pytest.raises(ValueError,match="native_observation"):
+        project("B1",sample,models=frozenset({ASTRA}))
+
+
+def test_native_provided_catalog_can_project_without_caller_model_overrides():
+    sample=native_sample()
+    from codex_pool_policy import project_native_account_observation
+    row=project_native_account_observation(
+        "B1",sample,now=NOW,binding_verified=True,
+        entitlement_class="business_premium_included",
+        qualified_models=None,active_leases=0,lease_cap=1)
+    assert row.qualified_models==frozenset((ASTRA,SOL))
+    assert pick([row],model=ASTRA).alias=="B1"
+
+
+def test_native_model_mismatch_remains_ineligible_even_when_quota_available():
+    sample=native_sample()
+    sample["model_visibility"]["supported_models"]=[SOL]
+    row=project("B1",sample,models=None)
+    assert row.remaining_pct == 95
+    assert pick([row],model=ASTRA) is None
+    assert pick([row],model=SOL).alias=="B1"
