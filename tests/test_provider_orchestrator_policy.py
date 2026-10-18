@@ -1050,3 +1050,85 @@ def test_guard_is_inert_outside_mastermind_scope(
     command = "gh run watch 123456 --interval 150"
     guard.guard_bash(_payload(cwd, command), {"command": command})
     assert capsys.readouterr().out == ""
+
+
+def _accepted_native_codex_config(*, direct_message: bool = True, tools_complete: bool = True) -> str:
+    denied = ('"send_message_to_thread", "create_thread", '
+              '"fork_thread", "handoff_thread"')
+    if not tools_complete:
+        denied = '"create_thread", "fork_thread", "handoff_thread"'
+    return (
+        'model = "gpt-6.1-sol"\n'
+        '[agents]\n'
+        'enabled = true\n'
+        'max_concurrent_threads_per_session = 2\n'
+        'default_subagent_model = "gpt-5.6-terra"\n'
+        '[features]\n'
+        'hooks = true\n'
+        '[features.multi_agent_v2]\n'
+        'enabled = true\n'
+        'max_concurrent_threads_per_session = 2\n'
+        'disable_direct_message = ' + ('true' if direct_message else 'false') + '\n'
+        '[plugins."codex-app-tools@openai-bundled".mcp_servers.codex_app]\n'
+        'enabled = true\n'
+        f'disabled_tools = [{denied}]\n'
+    )
+
+
+def test_accepted_october_reset_config_survives_apply_and_verify(tmp_path: Path) -> None:
+    """The managed hook deployment cannot undo the accepted isolation reset."""
+    home = tmp_path / "home"
+    _seed_home(home)
+    path = home / ".codex" / "config.toml"
+    original = _accepted_native_codex_config()
+    path.write_text(original, encoding="utf-8")
+    first = apply_policy(home)
+    assert first["state"] == "READY"
+    assert path.read_text(encoding="utf-8") == original
+    assert verify_policy(home)["state"] == "READY"
+    again = apply_policy(home)
+    assert again["state"] == "READY"
+    assert path.read_text(encoding="utf-8") == original
+
+
+@pytest.mark.parametrize("guard", ["direct_message", "disabled_tool", "missing_multi"])
+def test_unsafe_enabled_native_profile_is_refused_before_any_write(
+    tmp_path: Path, guard: str,
+) -> None:
+    home = tmp_path / "home"
+    _seed_home(home)
+    path = home / ".codex" / "config.toml"
+    if guard == "direct_message":
+        raw = _accepted_native_codex_config(direct_message=False)
+    elif guard == "disabled_tool":
+        raw = _accepted_native_codex_config(tools_complete=False)
+    else:
+        raw = _accepted_native_codex_config().replace(
+            'disable_direct_message = true\n', ''
+        )
+    path.write_text(raw, encoding="utf-8")
+    instructions = (home / ".codex" / "AGENTS.md").read_bytes()
+    with pytest.raises(OrchestratorPolicyError, match="native|isolat|message"):
+        apply_policy(home)
+    assert path.read_text(encoding="utf-8") == raw
+    assert (home / ".codex" / "AGENTS.md").read_bytes() == instructions
+    assert not (home / ".codex" / "hooks").exists()
+    assert not (home / ".claude" / "hooks").exists()
+
+
+@pytest.mark.parametrize("guard", ["direct_message", "disabled_tool"])
+def test_verify_cannot_report_ready_after_native_isolation_is_downgraded(
+    tmp_path: Path, guard: str,
+) -> None:
+    home = tmp_path / "home"
+    _seed_home(home)
+    path = home / ".codex" / "config.toml"
+    path.write_text(_accepted_native_codex_config(), encoding="utf-8")
+    assert apply_policy(home)["state"] == "READY"
+    if guard == "direct_message":
+        path.write_text(_accepted_native_codex_config(direct_message=False), encoding="utf-8")
+    else:
+        path.write_text(_accepted_native_codex_config(tools_complete=False), encoding="utf-8")
+    verified = verify_policy(home)
+    assert verified["state"] == "DRIFT"
+    assert "codex_config.native_message_isolation" in verified["issues"]
