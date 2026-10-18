@@ -63,6 +63,24 @@ def validate_parallel_workflow(text: str) -> None:
     gate_steps = gate.get("steps", [])
     if not isinstance(shard_steps, list) or not isinstance(gate_steps, list):
         raise ci_pytest.PolicyError("parallel CI steps are missing")
+    # GitHub step expressions address IDs rather than displayed names. A later
+    # duplicate, including one with different casing, could shadow the pinned
+    # previous_ci producer and falsely report reuse=true to skip pytest. Require
+    # global uniqueness across both CI jobs rather than depending on runner
+    # behavior for duplicate IDs.
+    seen_step_ids: set[str] = set()
+    for step in (*shard_steps, *gate_steps):
+        if not isinstance(step, dict):
+            raise ci_pytest.PolicyError("parallel CI steps must be mappings")
+        if "id" not in step:
+            continue
+        step_id = step["id"]
+        if not isinstance(step_id, str) or not step_id:
+            raise ci_pytest.PolicyError("parallel CI step IDs must be nonempty strings")
+        canonical_id = step_id.casefold()
+        if canonical_id in seen_step_ids:
+            raise ci_pytest.PolicyError("parallel CI step IDs must be globally unique")
+        seen_step_ids.add(canonical_id)
     # The single prior-CI probe is read-only and executes before the shard.
     # The final shard step can be conditional ONLY on the verified output of
     # this pinned producer. No skipping whole jobs or trusted non-pytest gates.

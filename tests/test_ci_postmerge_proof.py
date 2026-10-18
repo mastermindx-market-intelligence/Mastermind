@@ -22,6 +22,7 @@ def _env() -> dict[str, str]:
         "GITHUB_SHA": _SHA,
         "GITHUB_API_URL": "https://api.github.com",
         "GITHUB_RUN_ID": "39999999999",
+        "GITHUB_RUN_ATTEMPT": "1",
         "GH_TOKEN": "test-token-never-log",
     }
 
@@ -34,8 +35,28 @@ def _run() -> dict:
         "event": "merge_group",
         "head_sha": _SHA,
         "path": ".github/workflows/ci.yml",
+        "head_branch": "gh-readonly-queue/master/pr-1476-proven",
+        "created_at": "2026-10-16T21:07:58Z",
+        "updated_at": "2026-10-16T21:36:05Z",
         "status": "completed",
         "conclusion": "success",
+        "repository": {"full_name": _REPO},
+        "head_repository": {"full_name": _REPO},
+    }
+
+
+def _push() -> dict:
+    return {
+        "id": 39999999999,
+        "run_attempt": 1,
+        "workflow_id": 324108847,
+        "event": "push",
+        "head_sha": _SHA,
+        "head_branch": "master",
+        "path": ".github/workflows/ci.yml",
+        "status": "in_progress",
+        "conclusion": None,
+        "created_at": "2026-10-16T21:36:27Z",
         "repository": {"full_name": _REPO},
         "head_repository": {"full_name": _REPO},
     }
@@ -63,6 +84,8 @@ def _jobs() -> dict:
                 "name": name,
                 "status": "completed",
                 "conclusion": "success",
+                "started_at": "2026-10-16T21:08:01Z",
+                "completed_at": "2026-10-16T21:35:00Z",
                 "head_sha": _SHA,
                 "run_id": _RUN_ID,
                 "run_attempt": 1,
@@ -80,13 +103,22 @@ def _subject() -> dict[str, dict]:
         "listing": {"total_count": 1, "workflow_runs": [_run()]},
         "jobs": _jobs(),
         "recheck": _run(),
+        "current": _push(),
+        "current_recheck": _push(),
     }
 
 
 def _read(subject: dict, touched: list[str] | None = None):
+    current_reads = 0
+
     def fetch(path: str):
+        nonlocal current_reads
         if touched is not None:
             touched.append(path)
+        if path == f"{_PREFIX}/actions/runs/39999999999":
+            current_reads += 1
+            key = "current" if current_reads == 1 else "current_recheck"
+            return deepcopy(subject[key])
         if path == (
             f"{_PREFIX}/actions/workflows/ci.yml/runs"
             f"?event=merge_group&head_sha={_SHA}&per_page=100"
@@ -104,7 +136,7 @@ def _read(subject: dict, touched: list[str] | None = None):
 def test_exact_same_sha_successful_merge_group_reuses_only_complete_four_jobs():
     touched: list[str] = []
     assert proof.find_reusable_run(_env(), read_json=_read(_subject(), touched)) == _RUN_ID
-    assert len(touched) == 3
+    assert len(touched) == 5
     assert all(path.startswith(_PREFIX + "/actions/") for path in touched)
 
 
@@ -118,6 +150,7 @@ def test_exact_same_sha_successful_merge_group_reuses_only_complete_four_jobs():
         ("GITHUB_SHA", "bad"),
         ("GITHUB_API_URL", "https://malicious.example"),
         ("GITHUB_RUN_ID", ""),
+        ("GITHUB_RUN_ATTEMPT", "0"),
         ("GH_TOKEN", ""),
     ],
 )
@@ -132,6 +165,13 @@ def test_unproven_source_never_queries_api(key: str, replacement: str):
 @pytest.mark.parametrize(
     ("target", "path", "value"),
     [
+        ("current", ("head_branch",), "other"),
+        ("current", ("event",), "pull_request"),
+        ("current", ("head_sha",), "f" * 40),
+        ("current", ("run_attempt",), 2),
+        ("current", ("status",), "queued"),
+        ("current_recheck", ("run_attempt",), 2),
+        ("current_recheck", ("head_sha",), "f" * 40),
         ("listing", ("total_count",), 0),
         ("listing", ("total_count",), 2),
         ("listing", ("workflow_runs", 0, "event"), "push"),
@@ -141,7 +181,13 @@ def test_unproven_source_never_queries_api(key: str, replacement: str):
         ("listing", ("workflow_runs", 0, "repository", "full_name"), "other/repo"),
         ("listing", ("workflow_runs", 0, "head_repository", "full_name"), "other/repo"),
         ("listing", ("workflow_runs", 0, "head_sha"), "f" * 40),
+        ("listing", ("workflow_runs", 0, "head_branch"), "other"),
+        ("listing", ("workflow_runs", 0, "workflow_id"), 123456),
+        ("listing", ("workflow_runs", 0, "updated_at"), "2026-10-16T22:36:05Z"),
         ("listing", ("workflow_runs", 0, "run_attempt"), 0),
+        ("listing", ("workflow_runs", 0, "run_attempt"), 2),
+        ("jobs", ("jobs", 0, "started_at"), "2026-10-16T21:40:00Z"),
+        ("jobs", ("jobs", 2, "completed_at"), "2026-10-16T21:00:00Z"),
         ("jobs", ("total_count",), 3),
         ("jobs", ("jobs", 0, "status"), "skipped"),
         ("jobs", ("jobs", 0, "conclusion"), "skipped"),
@@ -182,11 +228,15 @@ def test_other_valid_commit_must_use_its_own_exact_sha():
 
     def no_matching_group(path: str):
         touched.append(path)
+        if path == f"{_PREFIX}/actions/runs/39999999999":
+            record = _push()
+            record["head_sha"] = "1" * 40
+            return record
         return {"total_count": 0, "workflow_runs": []}
 
     assert proof.find_reusable_run(env, read_json=no_matching_group) is None
-    assert len(touched) == 1
-    assert "head_sha=" + "1" * 40 in touched[0]
+    assert len(touched) == 2
+    assert "head_sha=" + "1" * 40 in touched[1]
 
 
 def test_second_matching_run_is_ambiguous_and_cannot_reuse():
@@ -224,13 +274,66 @@ def test_invalid_or_absent_output_path_fails_closed(monkeypatch: pytest.MonkeyPa
     assert proof.main() != 0
 
 
-def test_verified_output_requires_exact_three_api_reads(
+@pytest.mark.parametrize("failed_stage", [None, 0, 1, 2])
+def test_checkout_proof_checks_head_worktree_and_index(
+    failed_stage: int | None, monkeypatch: pytest.MonkeyPatch
+):
+    from types import SimpleNamespace
+
+    commands: list[tuple[str, ...]] = []
+
+    def fake_run(argv, **kwargs):
+        commands.append(tuple(argv))
+        fail = failed_stage == len(commands) - 1
+        return SimpleNamespace(
+            returncode=1 if fail else 0,
+            stdout=_SHA if argv[1] == "rev-parse" else "",
+        )
+
+    monkeypatch.setattr(proof.subprocess, "run", fake_run)
+    assert proof._checkout_identity_proven(_SHA) is (failed_stage is None)
+    assert commands[0] == ("git", "rev-parse", "--verify", "HEAD")
+    if failed_stage is None:
+        assert commands[1] == ("git", "diff", "--quiet", "--")
+        assert commands[2] == ("git", "diff", "--cached", "--quiet", "--")
+
+
+def test_wrong_local_head_cannot_reuse_even_when_git_is_clean(
+    monkeypatch: pytest.MonkeyPatch
+):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        proof.subprocess, "run",
+        lambda argv, **kwargs: SimpleNamespace(
+            returncode=0,
+            stdout=("f" * 40) if argv[1] == "rev-parse" else "",
+        ),
+    )
+    assert proof._checkout_identity_proven(_SHA) is False
+
+
+def test_live_proof_with_changed_checkout_falls_back_to_pytest(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ):
     output = tmp_path / "output"
     for k, v in _env().items():
         monkeypatch.setenv(k, v)
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setattr(proof, "_checkout_identity_proven", lambda sha: False)
+    monkeypatch.setattr(proof, "_github_read", lambda path, token: _read(_subject())(path))
+    assert proof.main() == 0
+    assert output.read_text() == "reuse=false\n"
+
+
+def test_verified_output_requires_exact_five_api_reads(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+):
+    output = tmp_path / "output"
+    for k, v in _env().items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setattr(proof, "_checkout_identity_proven", lambda sha: True)
     monkeypatch.setattr(proof, "_github_read", lambda path, token: _read(_subject())(path))
     assert proof.main() == 0
     assert output.read_text() == "reuse=true\n"

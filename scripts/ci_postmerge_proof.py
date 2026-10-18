@@ -12,7 +12,9 @@ import json
 import os
 import re
 import sys
+import subprocess
 import urllib.request
+from datetime import datetime
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -40,6 +42,35 @@ def _source_ok(item: object, *, sha: str, repository: str) -> bool:
     )
 
 
+def _time(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        result = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return result if result.tzinfo else None
+    except ValueError:
+        return None
+
+
+def _checkout_identity_proven(sha: str) -> bool:
+    if not _SHA.fullmatch(sha):
+        return False
+    # HEAD-to-worktree equality alone does not prove a clean index: an
+    # adversarial staged blob can differ from HEAD while the working file
+    # happens to match it. Check both surfaces independently, without
+    # refreshing or altering the checkout.
+    for args in (("git", "rev-parse", "--verify", "HEAD"),
+                 ("git", "diff", "--quiet", "--"),
+                 ("git", "diff", "--cached", "--quiet", "--")):
+        try:
+            proc = subprocess.run(args, capture_output=True, text=True, timeout=10, check=False)
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        if proc.returncode or (args[1] == "rev-parse" and proc.stdout.strip() != sha):
+            return False
+    return True
+
+
 def find_reusable_run(
     env: Mapping[str, str], *, read_json: Callable[[str], Any]
 ) -> int | None:
@@ -57,10 +88,28 @@ def find_reusable_run(
         or not _SHA.fullmatch(sha)
         or not env.get("GH_TOKEN")
         or not env.get("GITHUB_RUN_ID", "").isdigit()
+        or not env.get("GITHUB_RUN_ATTEMPT", "").isdigit()
+        or int(env["GITHUB_RUN_ATTEMPT"]) != 1
     ):
         return None
 
     prefix = f"/repos/{_REPOSITORY}"
+    current = read_json(f"{prefix}/actions/runs/{env['GITHUB_RUN_ID']}")
+    if (not isinstance(current, dict)
+        or current.get("id") != int(env["GITHUB_RUN_ID"])
+        or current.get("run_attempt") != 1
+        or current.get("workflow_id") != 324108847
+        or current.get("event") != "push"
+        or current.get("head_branch") != "master"
+        or current.get("head_sha") != sha
+        or current.get("path") != _WORKFLOW
+        or current.get("status") not in {"in_progress", "completed"}
+        or not isinstance(current.get("repository"), dict)
+        or current["repository"].get("full_name") != _REPOSITORY
+        or not isinstance(current.get("head_repository"), dict)
+        or current["head_repository"].get("full_name") != _REPOSITORY
+        or _time(current.get("created_at")) is None):
+        return None
     listing = read_json(
         f"{prefix}/actions/workflows/ci.yml/runs"
         f"?event=merge_group&head_sha={sha}&per_page=100"
@@ -72,16 +121,25 @@ def find_reusable_run(
     if listing["total_count"] != 1 or not isinstance(runs, list) or len(runs) != 1:
         return None
     run = runs[0]
-    if not _source_ok(run, sha=sha, repository=_REPOSITORY):
+    if (not _source_ok(run, sha=sha, repository=_REPOSITORY)
+        or run.get("workflow_id") != current["workflow_id"]
+        or not isinstance(run.get("head_branch"), str)
+        or not run["head_branch"].startswith("gh-readonly-queue/master/")
+        or _time(run.get("created_at")) is None
+        or _time(run.get("updated_at")) is None
+        or not (_time(run["created_at"]) <= _time(run["updated_at"]) <= _time(current["created_at"]))):
         return None
     identifier, attempt = run.get("id"), run.get("run_attempt")
     if (
         type(identifier) is not int or identifier <= 0
-        or type(attempt) is not int or attempt <= 0
+        or type(attempt) is not int or attempt != 1
         or str(identifier) == env["GITHUB_RUN_ID"]
     ):
         return None
 
+    group_start = _time(run["created_at"])
+    group_end = _time(run["updated_at"])
+    push_start = _time(current["created_at"])
     jobs = read_json(f"{prefix}/actions/runs/{identifier}/attempts/{attempt}/jobs?per_page=100")
     if not isinstance(jobs, dict) or jobs.get("total_count") != 4:
         return None
@@ -106,6 +164,13 @@ def find_reusable_run(
             or job.get("run_attempt") != attempt
             or job.get("workflow_name") != "CI"
             or job.get("check_run_url") != f"{_API}{prefix}/check-runs/{check_id}"
+        ):
+            return None
+        job_start = _time(job.get("started_at"))
+        job_end = _time(job.get("completed_at"))
+        if (
+            job_start is None or job_end is None
+            or not (group_start <= job_start <= job_end <= group_end <= push_start)
         ):
             return None
         # GitHub reports a successful JOB even if its test STEP was skipped.
@@ -149,6 +214,11 @@ def find_reusable_run(
         or recheck.get("workflow_id") != run.get("workflow_id")
     ):
         return None
+    current_recheck = read_json(f"{prefix}/actions/runs/{env['GITHUB_RUN_ID']}")
+    if (not isinstance(current_recheck, dict)
+        or any(current_recheck.get(key) != current.get(key) for key in
+               ("id", "run_attempt", "workflow_id", "head_sha", "event", "head_branch", "created_at"))):
+        return None
     return identifier
 
 
@@ -184,7 +254,7 @@ def main() -> int:
         # path, not an unverified green or a retry via another identity.
         proven = None
 
-    usable = proven is not None
+    usable = proven is not None and _checkout_identity_proven(env.get("GITHUB_SHA", ""))
     output = env.get("GITHUB_OUTPUT")
     if not output:
         print("ci_mergegroup_reuse: GITHUB_OUTPUT unavailable", file=sys.stderr)

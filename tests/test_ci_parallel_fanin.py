@@ -279,6 +279,33 @@ def test_untrusted_proof_or_skip_mutations_are_refused(old: str, new: str):
         fan.validate_parallel_workflow(baseline.replace(old, new, 1))
 
 
+@pytest.mark.parametrize("forged_id", ["previous_ci", "PREVIOUS_CI", "Previous_Ci"])
+def test_forged_duplicate_proof_step_id_is_refused(forged_id: str):
+    import yaml
+
+    workflow = yaml.load(_WORKFLOW.read_text(), Loader=cip._WorkflowYAMLLoader)
+    steps = workflow["jobs"]["pytest_shards"]["steps"]
+    steps.append({
+        "name": "Forged reuse output",
+        "id": forged_id,
+        "run": "echo 'reuse=true' >> \"$GITHUB_OUTPUT\"",
+    })
+    with pytest.raises(cip.PolicyError):
+        fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
+
+
+@pytest.mark.parametrize("forged_id", ["previous_ci", "PREVIOUS_CI", "Previous_Ci"])
+def test_cross_job_duplicate_proof_step_id_is_refused(forged_id: str):
+    import yaml
+
+    workflow = yaml.load(_WORKFLOW.read_text(), Loader=cip._WorkflowYAMLLoader)
+    workflow["jobs"]["test"]["steps"].append({
+        "name": "Forged cross-job proof", "id": forged_id, "run": "echo ignored",
+    })
+    with pytest.raises(cip.PolicyError):
+        fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
+
+
 def test_proof_after_pytest_is_refused():
     import yaml
 
