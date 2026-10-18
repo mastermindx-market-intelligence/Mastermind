@@ -15,6 +15,50 @@ function finished(body, code=0, pid=123) {return {content:[{type:'text',text:`Pr
 function captured(body) { return finished(JSON.stringify({exit_code:0,stdout_base64:Buffer.from(body).toString('base64'),stdout_bytes:Buffer.byteLength(body),stdout_sha256:digest(body)})); }
 function pending(pid=456) {return {content:[{type:'text',text:`Process started with PID ${pid} (shell: /bin/zsh)\nInitial output:\n`}]};}
 const unwrap = x => x.structuredContent ?? JSON.parse(x.content[0].text);
+const successorId='web-fabric-001.q1.fixture';
+function continuationEnvelope(controller='RECORDED') {
+ return {schema:'mastermind.fabric_continuation.v1',requested_run_id:id.run_id,effective_run_id:successorId,
+  effective_status:{...done,run_id:successorId,state:'TERMINAL',rc:0,signal:'ok'},
+  prior_attempts:[{...done,rc:1,signal:'quota'}],controller_return:controller};
+}
+function continuingFacade(e){return api.createFabricFacade(e,{adapterPath:'/host/fabric_task.py',quotaFallback:true});}
+
+test('continuation-aware request stays on one incumbent controller',async()=>{
+ const e=engine([finished('--quota-fallback'),finished('--follow'),finished(JSON.stringify(absent)),pending()]);
+ const out=unwrap(await continuingFacade(e).call('fabric_request',packet));
+ assert.equal(out.controller_pid,456);assert.equal(e.calls.length,4);
+ assert.match(e.calls[3].arguments.command,/'--quota-fallback'/);
+});
+test('origin observations expose the actual successor and keep the failed attempt',async()=>{
+ const e=engine([finished(JSON.stringify(continuationEnvelope()))]);
+ const out=unwrap(await continuingFacade(e).call('fabric_status',id));
+ assert.equal(out.run_id,id.run_id);assert.equal(out.effective_run_id,successorId);
+ assert.equal(out.status.run_id,successorId);assert.equal(out.status.continuation.prior_attempts[0].rc,1);
+ assert.match(e.calls[0].arguments.command,/'--follow'/);
+});
+test('result reads the successor; acceptance through the failed origin is refused',async()=>{
+ const e=engine([finished(JSON.stringify(continuationEnvelope())),captured('actual successor report')]);
+ const out=unwrap(await continuingFacade(e).call('fabric_result',id));
+ assert.equal(out.accept_run_id,successorId);assert.equal(out.adapter_response,'actual successor report');
+ assert.match(e.calls[1].arguments.command,new RegExp("'result' '"+successorId+"'"));
+ const a=engine([finished(JSON.stringify(continuationEnvelope()))]);
+ const refused=unwrap(await continuingFacade(a).call('fabric_accept',{...id,by:'reviewer',
+  expected_response_sha256:digest('actual successor report'),verification_summary:'reviewed'}));
+ assert.equal(refused.error,'ACCEPT_EXPLICIT_SUCCESSOR_REQUIRED');assert.equal(a.calls.length,1);
+});
+test('an unfinished continuation controller cannot expose a premature terminal result',async()=>{
+ const e=engine([finished(JSON.stringify(continuationEnvelope('UNCONFIRMED')))]);
+ const out=unwrap(await continuingFacade(e).call('fabric_result',id));
+ assert.equal(out.error,'CONTROLLER_RETURN_UNCONFIRMED');assert.equal(e.calls.length,1);
+});
+test('cross-root or substituted successor envelopes cannot supply results',async()=>{
+ const value=continuationEnvelope();value.effective_status.root_id='different';
+ const e=engine([finished(JSON.stringify(value))]);
+ assert.equal(unwrap(await continuingFacade(e).call('fabric_result',id)).error,'ROOT_MISMATCH');
+ const wrong=continuationEnvelope();wrong.effective_status.run_id='different';
+ const e2=engine([finished(JSON.stringify(wrong))]);
+ assert.equal(unwrap(await continuingFacade(e2).call('fabric_result',id)).error,'ADAPTER_STATUS_INVALID');
+});
 function facade(e) { assert.ok(api?.createFabricFacade, 'the Fabric-only MCP facade must exist');return api.createFabricFacade(e,{ adapterPath:'/host/fabric_task.py', python:'python3', workerCwd:'~' }); }
 
 test('closed, correctly annotated catalog with no generic command tools',()=>{
@@ -124,4 +168,10 @@ test('actual shell and Python fixture: literal packet -> status -> byte-exact re
   const result=unwrap(await f.call('fabric_result',id));assert.equal(result.adapter_response,'RETURN: VERIFIED\n\n');assert.equal(result.response_sha256,digest('RETURN: VERIFIED\n\n'));
   const accepted=unwrap(await f.call('fabric_accept',{...id,by:'deterministic',expected_response_sha256:result.response_sha256,verification_summary:'Compared exact fixture result bytes and verified no packet command executed.'}));assert.equal(accepted.accepted,true);
  }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test('continuity requests refuse an older adapter before reserving a controller',async()=>{
+ const e=engine([finished('old request help'),finished('old status help')]);
+ const out=unwrap(await continuingFacade(e).call('fabric_request',packet));
+ assert.equal(out.error,'ADAPTER_CONTINUITY_UNAVAILABLE');assert.equal(e.calls.length,2);
 });

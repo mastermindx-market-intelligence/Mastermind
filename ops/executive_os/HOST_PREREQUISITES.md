@@ -1192,7 +1192,9 @@ refund its allocation. Live reuse and reservation still require the grant to
 be within its actual current window; there is no caller-selectable expiry bypass.
 
 **Because the producer table is empty, no current Due10 or same-generation
-failure is recoverable today.** This section documents a capability whose
+failure is recoverable through this section today; a same-generation terminal
+failure is admitted only by the explicit option in the dedicated subsection
+above.** This section documents a capability whose
 admission is closed, not an available procedure. Enabling it requires a new
 source review that adds a qualified producer to the table plus an
 authority-installed grant; both are out of scope for this runbook. The explicit

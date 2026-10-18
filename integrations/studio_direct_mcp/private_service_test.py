@@ -1759,7 +1759,7 @@ class TestCLI(unittest.TestCase):
         sub = next(a for a in parser._actions if hasattr(a, "choices") and a.choices)
         self.assertEqual(
             set(sub.choices),
-            {"stage", "upgrade", "paper-runtime-upgrade", "seal-runtime", "start", "status", "stop"},
+            {"stage", "upgrade", "paper-runtime-upgrade", "fabric-backend-release", "seal-runtime", "start", "status", "stop"},
         )
 
     def test_stage_requires_all_args(self):
@@ -3139,20 +3139,21 @@ class TestC2BusinessHistoricalCompatibility(unittest.TestCase):
         ))
 
     @contextmanager
-    def _installed_c2(self):
+    def _installed_c2(self, account="chatgpt2-business"):
         """Hermetic hash-sealed C2 seat, never a real host write."""
         with tempfile.TemporaryDirectory() as raw:
             tmp = Path(raw)
             home = tmp / "home"
             home.mkdir()
             (home / "Library" / "LaunchAgents").mkdir(parents=True)
-            account = "chatgpt2-business"
+            # account bound at fixture entry
             with mock.patch.dict(os.environ, {"HOME": str(home)}):
                 source, node, backend, _rec = _do_stage(
                     tmp, home, account=account)
                 roots = svc._build_runtime_roots(account)
                 _seed_node_modules(roots)
-                _seal_runtime(account)
+                with mock.patch.object(svc, "_lifecycle_inspect", return_value=None):
+                    _seal_runtime(account)
                 old_names = self._legacy_11_set()
                 for name in set(svc.STAGE_FILES) - old_names:
                     (roots["base"] / name).unlink()
@@ -3190,11 +3191,13 @@ class TestC2BusinessHistoricalCompatibility(unittest.TestCase):
                 prior["configHash"] = svc._sha256_file(roots["config"])
                 roots["manifest"].write_text(
                     json.dumps(prior, sort_keys=True), encoding="utf-8")
-                for name in svc.C2_BUSINESS_TARGET_PATCH_SHA256:
+                target_names = (svc.C2_PERSONAL_TARGET_PATCH_SHA256 if account == "chatgpt2-personal" else svc.C2_BUSINESS_TARGET_PATCH_SHA256)
+                for name in target_names:
                     (source / name).write_text(
                         f"// reviewed target C2 {name}\n", encoding="utf-8")
                 args = _stage_args(source, node, backend, account=account)
-                args.c2_business_fleet_compat = True
+                args.c2_business_fleet_compat = account == "chatgpt2-business"
+                args.c2_personal_closed_publisher = account == "chatgpt2-personal"
                 args.publisher_preflight_only = False
                 args.publisher_expected_manifest_sha256 = svc._sha256_file(
                     roots["manifest"])
@@ -3206,14 +3209,20 @@ class TestC2BusinessHistoricalCompatibility(unittest.TestCase):
                     ).hexdigest()
                 target = {
                     name: svc._sha256_file(source / name)
-                    for name in svc.C2_BUSINESS_TARGET_PATCH_SHA256
+                    for name in target_names
                 }
+                personal_pins = {name: svc._sha256_file(roots["base"] / name) for name in old_names}
+                runtime_id = {k: prior[k] for k in svc.C2_PAPER_RUNTIME_IDENTITY}
                 with mock.patch.object(
                     svc, "C2_BUSINESS_V10_ORIGINAL_BLOBS", pins
                 ), mock.patch.object(
                     svc, "C2_BUSINESS_TARGET_PATCH_SHA256", target
-                ), mock.patch.object(
-                    svc, "_run", CmdRecorder()
+                ), mock.patch.object(svc, "C2_PAPER_FILES_SHA256", personal_pins
+                ), mock.patch.object(svc, "C2_PAPER_RUNTIME_IDENTITY", runtime_id
+                ), mock.patch.object(svc, "C2_PAPER_MANIFEST_CANONICAL_SHA256", frozenset((svc._canonical_json_sha256(prior),))
+                ), mock.patch.object(svc, "C2_PERSONAL_CURRENT_MANIFEST_SHA256", args.publisher_expected_manifest_sha256
+                ), mock.patch.object(svc, "C2_PERSONAL_TARGET_PATCH_SHA256", target
+                ), mock.patch.object(svc, "_run", CmdRecorder()
                 ):
                     yield args, roots, cfg, prior
 
@@ -3429,3 +3438,47 @@ class TestC2BusinessHistoricalCompatibility(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+class TestC2PersonalClosedPublisher(unittest.TestCase):
+    def test_wrong_cas_refuses_without_mutation(self):
+        fixture = TestC2BusinessHistoricalCompatibility()
+        with fixture._installed_c2(account="chatgpt2-personal") as (args, roots, cfg, prior):
+            before = (roots["manifest"].read_bytes(), roots["config"].read_bytes())
+            args.publisher_expected_manifest_sha256 = "0" * 64
+            with self.assertRaisesRegex(SystemExit, "CAS mismatch"):
+                svc.cmd_upgrade(args)
+            self.assertEqual(before, (roots["manifest"].read_bytes(), roots["config"].read_bytes()))
+            self.assertFalse((roots["base"]/"workspace-access.mjs").exists())
+
+    def test_wrong_source_refuses_without_mutation(self):
+        fixture = TestC2BusinessHistoricalCompatibility()
+        with fixture._installed_c2(account="chatgpt2-personal") as (args, roots, cfg, prior):
+            before = (roots["manifest"].read_bytes(), roots["config"].read_bytes())
+            (Path(args.source)/"git-publish.mjs").write_text("unreviewed publisher")
+            with self.assertRaisesRegex(SystemExit, "reviewed source hash mismatch"):
+                svc.cmd_upgrade(args)
+            self.assertEqual(before, (roots["manifest"].read_bytes(), roots["config"].read_bytes()))
+            self.assertFalse((roots["base"]/"workspace-access.mjs").exists())
+
+    def test_preflight_and_upgrade_preserve_fleet_paper_and_seals(self):
+        fixture = TestC2BusinessHistoricalCompatibility()
+        with fixture._installed_c2(account="chatgpt2-personal") as (args, roots, cfg, prior):
+            before = {n:(roots["base"]/n).read_bytes() for n in prior["files"]}
+            old_config = json.loads(roots["config"].read_text())
+            args.publisher_preflight_only = True
+            rc, out = _capture_stdout(lambda: svc.cmd_upgrade(args))
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(out)["effect"], "NOT_APPLIED")
+            self.assertFalse((roots["base"]/"workspace-access.mjs").exists())
+            args.publisher_preflight_only = False
+            rc, out = _capture_stdout(lambda: svc.cmd_upgrade(args))
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(out)["effect"], "APPLIED")
+            future = svc._verify_staged_install(args.account, _label_for(args.account), roots, require_runtime_seal=True)
+            self.assertEqual(future["dependencyTreeHash"], prior["dependencyTreeHash"])
+            config = json.loads(roots["config"].read_text())
+            self.assertEqual(config["gitPublish"], svc._typed_git_config(svc._user_root(), closed_repositories=True))
+            self.assertEqual(config["repositoryWorkspaces"]["allowedRepositories"], ["mastermind","macro","terminal"])
+            for key in ("paperDesign","fleetRouting","fleetStatus","maxPerSessionConcurrency","maxQueuedPerSession"):
+                self.assertEqual(config[key], old_config[key])
+            self.assertEqual({n for n in before if (roots["base"]/n).read_bytes() != before[n]}, {"gateway.mjs","git-publish.mjs"})

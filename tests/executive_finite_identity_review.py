@@ -1,12 +1,13 @@
 """Frozen independently accepted finite identity sites, never runtime authority.
 
-Staging postimage 518e3b91 is accepted by reviewer 01a12a08 in receipt5a99ac63;
-this refresh follows that exact source change. Registration sites are unchanged.
+The staging class at d04cc67f was independently reviewed for PR #1593.
+Its seven literal sites remain unchanged; only the native source-pin return
+argument changes the class AST. Registration sites are unchanged.
 Only these static literal sites are masked; semantic anchor drift exposes all.
 """
 
 REVIEWED_ANCHORS_BY_PATH = {'ops/executive_os/attended_control_staging.py': {'ProductionFiniteStagingHost': {'node_type': 'ClassDef',
-                                                                                  'ast_sha256': 'af6bddbea1245488559c85c5d4dcac3a72f07daae2b6a7452c122674beec9a6f',
+                                                                                  'ast_sha256': 'b572895d40444397fa79890e903e435592baeab167f892146b8f4f46e77bcfd9',
                                                                                   'sites': ((('body',
                                                                                               6,
                                                                                               'body',

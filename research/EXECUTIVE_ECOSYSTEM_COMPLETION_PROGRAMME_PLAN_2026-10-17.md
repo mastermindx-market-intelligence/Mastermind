@@ -182,8 +182,60 @@ enrollment ceremonies (human/provider) · Fable `intent.submit` enrollment (`REJ
   market-view dates, #1491 fail-closed finite definition publication, #1565 fabric bootstrap effect classes,
   #1535 Studio Direct typed Git publisher). None touches `research/`, the OS app or the executive transport; the
   ledger's states hold at the pin.
+- **2026-10-18 04:2xZ checkpoint (seat 873aabd3).** The facts below were observed by the seat (UTC) and recorded
+  docs-only on #1598; the recorder took no host action. Where the facts and R1 CORRECTION 2 differ, the facts
+  govern. The credential was not rotated: the same-generation admission replaced the "Human gate (Lane R)"
+  rotation for this canary.
+  1. *Engineering.* #1591 (explicit same-generation terminal requalification on the current pin) merged through
+     the merge queue (GitHub `mergedAt` 2026-10-18T03:49:58Z; the seat observed it at 03:52Z). Protected master
+     S2 = `08d7887335ee8aea11f0809e0660a5298c3ef68c`. The independent read-only Opus review verdict was MERGE, and
+     CI was green.
+  2. *Staging.* S2 was staged on the host from clone `Mastermind-08d78873`:
+     - `os-web-assets` manifest `98ae8aad…`;
+     - install-inputs successor control sha256 `0593db43…`, produced programmatically from the live root-only
+       `control.json`.
+  3. *The one canary.* `provision-worker-auth.sh --verify-ready` ran under the new same-generation admission:
+     codex 0.159.2, pin `16593cc2…`, credential UNCHANGED (same `auth.json` lstat). It PASSED at 03:59:35Z. The
+     receipt's `readiness_expires_at` is 04:56:45Z.
+  4. *Install.* `stop-readside` ran at 04:01Z. The supersede prepare descriptor is
+     `6594613bacf18c12f0494ac7983e6e2f2c4b2e27075a8cb6077ee5623b22d906`. Install SUCCEEDED at 04:08Z ("installed
+     exact Executive OS release 08d78873"; privileged broker armed). Two install refusals were repaired first:
+     - 20 stray root-owned `.pyc` files in the sealed Python framework were removed and the seal was restored;
+     - `--protected-master-sha` is frozen-mode only, so it was dropped for plain mode.
+  5. *Acceptance.* `acceptance.sh` at 04:09Z REFUSED fail-closed with "control account directory group set
+     drifted" (`ops/executive_os/acceptance.py:1053`).
+     - Cause: `_mastermind_exec` is a member of gid 470 `_mastermind_minimax`. The finite lane registered those
+       finite worker principals on the host on 2026-10-14 at 19:57. Meanwhile `control.json` has no
+       `fabric_attended_probe` stanza, and `FINITE_DEFINITION_DIR` `config/fabric-minimax-finite-01` is absent.
+     - Source cross-check by the recorder at `08d78873`: with no stanza, `_attended_worker_membership` returns
+       none, so gid 470 is not in the expected control group set.
+     - #1563 is merged (the seat brief says 03:04Z; GitHub `mergedAt` is 2026-10-17T23:57:29Z). The host
+       publication chain (`finite_definition_publication.py` → `autonomy_control.py finite-control-stage`) was
+       never run.
+     - The seat did not remedy the drift: no group strip, no check weakening, no hand edit of `control.json`.
+  6. *Margin.* Acceptance and arm both enforce `MIN_ACCEPTANCE_MARGIN` = 30 min
+     (`provider_readiness.validate_receipt_file`). The passing receipt therefore became unusable for acceptance
+     at 04:26:45Z. The one canary is SPENT without acceptance or arm, and a further canary needs the Chairman's
+     word.
+  7. *Restore.* `start-readside` ran at 04:17Z from release 08d78873: control pid 78990, sol-state-relay
+     pid 78959, mcp running. The `worker.codex` launchd job is ABSENT (preserved). The system was not left down.
+  8. *Ladder.* Lane R engineering MERGED; S2 install DELIVERED on host; acceptance BLOCKED (cross-lane drift);
+     NOT ARMED; no PRODUCTION_PROOF. The Chairman's decision was asked once:
+     - (a) finite host publication + `finite-control-stage`, then `stop-readside` → ONE further canary →
+       acceptance → arm → Phase F; or
+     - (b) hold S2 installed-unaccepted.
+  9. *Ledger F3.* F3 stays `BUILT_NOT_PROVEN` with a new completion blocker. The host principals are registered
+     but the control stanza is unstaged, which blocks acceptance of ANY release until it is published or ruled.
+     The ledger records this in rows E4–E7, F1 and F3.
 
 ## 7. Checkpoint (newest first)
+
+- **2026-10-18 04:2xZ** — S2 `08d78873` is installed on the host (04:08Z) and the read side is restored
+  (04:17Z). Acceptance REFUSED fail-closed on cross-lane finite group drift (gid 470). The one same-generation
+  canary (PASSED 03:59:35Z) is spent. NOT ARMED.
+  Next exact action: the Chairman's one ruling, either (a) finite host publication + `finite-control-stage`,
+  then one further canary → acceptance → arm, or (b) hold S2 installed-unaccepted.
+  Evidence: §6 "2026-10-18 04:2xZ checkpoint".
 
 - **2026-10-17 ~12:00Z** — Phase A census complete; ledger + this plan written in Mastermind worktree
   `claude/ssd-executive-ecosystem-completion-20261017-427d19196cd8f420` (SSD mint, base `a552a5e5`).

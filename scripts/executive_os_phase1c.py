@@ -361,6 +361,13 @@ class FabricActivationRefused(ServiceError):
     """Shared Fabric execution has no admitted backend and isolation profile."""
 
 
+def _native_capacity_staging_only(raw: Mapping[str, Any]) -> bool:
+    """A source pin can be prepared only while every execution switch is off."""
+    return all(raw.get(key, False) is False for key in (
+        "coo_autonomy_armed", "coo_operator_harness_armed", "coo_foreground_only",
+        "ceo_submit_armed", "fabric_bridge_armed"))
+
+
 def _validate_fabric_bridge_config(raw: Mapping[str, Any]) -> bool:
     armed = raw.get("fabric_bridge_armed", False)
     if type(armed) is not bool:
@@ -390,7 +397,9 @@ def _validate_fabric_bridge_config(raw: Mapping[str, Any]) -> bool:
             raise ServiceError("Fabric attended probe requires one fixed worker definition")
     if "native_capacity_v2" in raw:
         stanza = raw["native_capacity_v2"]
-        if ("fabric_attended_probe" not in raw or raw.get("coo_foreground_only") is not True
+        if ("fabric_attended_probe" not in raw
+                or (not _native_capacity_staging_only(raw)
+                    and raw.get("coo_foreground_only") is not True)
                 or type(stanza) is not dict or set(stanza) != {"macro_release", "producer_sha256"}
                 or type(stanza["macro_release"]) is not str
                 or re.fullmatch(r"[0-9a-f]{40}", stanza["macro_release"]) is None
@@ -1969,7 +1978,10 @@ def _service_from_config(
         product_acceptance_macro_root = Path(raw["ceo_ingress_app_macro_root"])
 
     native_capacity_source = None
-    if "native_capacity_v2" in raw:
+    if ("native_capacity_v2" in raw and _native_capacity_staging_only(raw)
+            and attended_work_placements):
+        raise ServiceError("staged native capacity cannot carry active placements")
+    if "native_capacity_v2" in raw and not _native_capacity_staging_only(raw):
         if (len(attended_work_placements) != 1
                 or qualification_for(attended_work_placements) is None):
             raise ServiceError("native V2 capacity requires the single original finite placement")
