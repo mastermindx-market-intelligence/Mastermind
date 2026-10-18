@@ -155,3 +155,111 @@ def test_no_comparable_windows_stays_unknown():
     got = compare_native_codex_quota(probe(weekly=False), probe(at=T + HOUR, weekly=False))
     assert got["state"] == "UNKNOWN"
     assert got["reason"] == "NO_COMPARABLE_WINDOWS"
+
+
+def test_two_missing_limit_ids_never_compare():
+    before, after = probe(), probe(at=T + HOUR)
+    before["account"]["limit_id"] = None
+    after["account"]["limit_id"] = None
+    got = compare_native_codex_quota(before, after)
+    assert got["state"] == "UNKNOWN"
+    assert got["reason"] == "UNVERIFIED_OBSERVATIONS"
+
+
+def test_oversized_numeric_input_stays_unknown_without_raising():
+    after = probe(at=T + HOUR)
+    after["account"]["observed_at_unix"] = 10 ** 1000
+    got = compare_native_codex_quota(probe(), after)
+    assert got["state"] == "UNKNOWN"
+
+
+def test_changed_plan_is_not_promotional_reset_evidence():
+    before = probe(used=85)
+    after = probe(at=T + HOUR, weekly_reset=T + WEEK + HOUR, used=0)
+    before["account"]["plan_type"] = "pro"
+    after["account"]["plan_type"] = "business"
+    got = compare_native_codex_quota(before, after)
+    assert got["state"] == "UNKNOWN"
+    assert got["reason"] == "ENTITLEMENT_CHANGED"
+    assert got["early_refresh_candidate"] is False
+
+
+@pytest.mark.parametrize("cleanup_ok", [True, False])
+def test_native_probe_publishes_comparison_after_cleanup(tmp_path, monkeypatch, cleanup_ok):
+    from control_plane import codex_account_environment as native
+    from scripts.ohf import laboratory
+
+    before = probe(used=85)
+    before["account"]["plan_type"] = "pro"
+    monkeypatch.setattr(native.time, "time", lambda: T + HOUR)
+    calls = []
+
+    class Environment:
+        home = tmp_path
+        def auth_metadata(self):
+            return {"account_id_sha256": "a" * 64}
+        def process_environment(self):
+            return {}
+
+    class Client:
+        def __init__(self, *args, **kwargs):
+            pass
+        def start(self):
+            pass
+        def request(self, method, *args, **kwargs):
+            calls.append(method)
+            if method == "initialize":
+                return {"userAgent": "fixture"}
+            if method == "account/read":
+                return {"account": {"type": "chatgpt", "planType": "pro"}}
+            assert method == "account/rateLimits/read"
+            return {"rateLimitsByLimitId": {"codex": {"primary": None,
+                "secondary": {"usedPercent": 1, "windowDurationMins": 10080,
+                              "resetsAt": T + WEEK + HOUR}}}}
+        def notify(self, *args):
+            pass
+        def graceful_close(self):
+            return laboratory.AppServerStopProof(
+                controller_returncode=0, private_group_id=12345,
+                private_group_empty=cleanup_ok, leader_exit_confirmed_graceful=True,
+                survivors_detected_after_controller_exit=not cleanup_ok,
+                termination_outcome="fixture")
+
+    monkeypatch.setattr(laboratory, "AppServerClient", Client)
+    result = native.probe_native_account(Environment(), tmp_path / "not-launched",
+                                        previous_observation=before)
+    assert calls == ["initialize", "account/read", "account/rateLimits/read"]
+    assert result["quota_change"]["early_refresh_candidate"] is cleanup_ok
+    assert result["quota_change"]["admission_granted"] is False
+    assert result["state"] == ("NATIVE_READS_COMPLETED" if cleanup_ok else "NATIVE_CLEANUP_UNPROVEN")
+
+
+def test_readiness_cli_rejects_invalid_previous_input_before_account_access(monkeypatch, capsys):
+    import io
+    from scripts import executive_codex_account as cli
+    monkeypatch.setattr(cli.sys, "stdin", io.StringIO("not valid JSON"))
+    def forbidden(*args, **kwargs):
+        raise AssertionError("account access must not begin")
+    monkeypatch.setattr(cli, "native_codex_account_scope", forbidden)
+    code = cli.main(["--provider-home", "/not-opened", "readiness",
+                     "--binary", "/not-launched", "--previous-observation-stdin"])
+    assert code == 2
+    assert "PRIOR_OBSERVATION_INVALID" in capsys.readouterr().out
+
+
+def test_readiness_cli_passes_previous_probe_without_new_store(monkeypatch, capsys):
+    import io
+    import json
+    from contextlib import nullcontext
+    from scripts import executive_codex_account as cli
+    before = probe()
+    monkeypatch.setattr(cli.sys, "stdin", io.StringIO(json.dumps(before)))
+    monkeypatch.setattr(cli, "native_codex_account_scope", lambda *a: nullcontext(object()))
+    def observed(environment, binary, **kwargs):
+        assert kwargs["previous_observation"] == before
+        return {"state": "NATIVE_READS_COMPLETED", "quota_change": {"state": "NO_MATERIAL_CHANGE"}}
+    monkeypatch.setattr(cli, "probe_native_account", observed)
+    code = cli.main(["--provider-home", "/not-opened", "readiness",
+                     "--binary", "/not-launched", "--previous-observation-stdin"])
+    assert code == 0
+    assert json.loads(capsys.readouterr().out)["quota_change"]["state"] == "NO_MATERIAL_CHANGE"

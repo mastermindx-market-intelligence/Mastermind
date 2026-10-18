@@ -23,12 +23,15 @@ _HEADROOM_GAIN_POINTS = 10.0
 def _number(value: object) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    num = float(value)
+    try:
+        num = float(value)
+    except (OverflowError, ValueError):
+        return None
     return num if math.isfinite(num) else None
 
 
-def _verified_sample(raw: object) -> dict[str, Any] | None:
-    """Accept only a cleanly stopped native-read probe and a hashed identity."""
+def _validated_sample(raw: object) -> dict[str, Any] | None:
+    """Validate native-result shape; provenance stays with the existing owner."""
     if not isinstance(raw, Mapping) or raw.get("state") != "NATIVE_READS_COMPLETED":
         return None
     stop = raw.get("stop")
@@ -42,6 +45,10 @@ def _verified_sample(raw: object) -> dict[str, Any] | None:
     if not isinstance(account_hash, str) or _HASH.fullmatch(account_hash) is None:
         return None
     if account.get("auth_state") != "MANAGED_CHATGPT_OBSERVED":
+        return None
+    limit_id = account.get("limit_id")
+    if (not isinstance(limit_id, str) or not limit_id
+            or len(limit_id) > 128 or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]*", limit_id) is None):
         return None
     observed_at = _number(account.get("observed_at_unix"))
     if observed_at is None or observed_at <= 0:
@@ -69,7 +76,7 @@ def _verified_sample(raw: object) -> dict[str, Any] | None:
         checked[name] = {"used_percent": used, "remaining_percent": remaining,
                          "resets_at": reset_at, "window_minutes": minutes}
     return {"account_hash": account_hash, "observed_at": observed_at,
-            "limit_id": account.get("limit_id"), "windows": checked}
+            "limit_id": limit_id, "plan_type": account.get("plan_type"), "windows": checked}
 
 
 def compare_native_codex_quota(before: object, after: object) -> dict[str, Any]:
@@ -83,14 +90,18 @@ def compare_native_codex_quota(before: object, after: object) -> dict[str, Any]:
         "schema": SCHEMA, "state": "UNKNOWN", "reason": "UNVERIFIED_OBSERVATIONS",
         "observed_windows": [], "schedule_changed": False,
         "early_refresh_candidate": False, "provider_cause": "UNATTRIBUTED",
+        "provenance_verified": False,
         "admission_granted": False, "account_switch_authorized": False,
         "reset_redemption_authorized": False, "schedule_prediction_authorized": False,
     }
-    old, new = _verified_sample(before), _verified_sample(after)
+    old, new = _validated_sample(before), _validated_sample(after)
     if old is None or new is None:
         return result
     if old["account_hash"] != new["account_hash"] or old["limit_id"] != new["limit_id"]:
         result["reason"] = "SUBJECT_OR_LIMIT_MISMATCH"
+        return result
+    if old["plan_type"] != new["plan_type"]:
+        result["reason"] = "ENTITLEMENT_CHANGED"
         return result
     gap = new["observed_at"] - old["observed_at"]
     if gap <= 0:

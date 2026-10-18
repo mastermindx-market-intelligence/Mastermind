@@ -363,8 +363,13 @@ def _failure_kind(error: Exception) -> str:
 
 
 def probe_native_account(environment: CodexAccountEnvironment, binary: Path,
-                         *, timeout: float = 20) -> dict[str, Any]:
-    """Two native reads in a contained app-server; no thread, turn or model call."""
+                         *, timeout: float = 20,
+                         previous_observation: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """Two native reads; optional same-seat comparison adds no provider calls.
+
+    The existing observation owner supplies its prior sanitized result. Nothing
+    is persisted here, and a comparison never grants quota or changes admission.
+    """
     from scripts.ohf.laboratory import AppServerClient
     # The explicit provider overrides prevent a saved profile selecting an API
     # route. File storage lets Codex persist its own refreshed managed session.
@@ -411,4 +416,8 @@ def probe_native_account(environment: CodexAccountEnvironment, binary: Path,
                                   "private_group_empty": False}
             if result["state"] == "NATIVE_READS_COMPLETED" and not result["stop"].get("private_group_empty"):
                 result["state"] = "NATIVE_CLEANUP_UNPROVEN"
+    # Observe only after the final cleanup disposition is known. An apparently
+    # successful read with uncertain process cleanup cannot become reset proof.
+    from control_plane.codex_quota_observation import compare_native_codex_quota
+    result["quota_change"] = compare_native_codex_quota(previous_observation, result)
     return result

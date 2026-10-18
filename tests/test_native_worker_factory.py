@@ -69,6 +69,9 @@ def test_wrong_principal_refused_before_native_scope_or_socket(tmp_path, monkeyp
 def test_real_entrypoint_factory_constructs_existing_adapter_with_scoped_home(tmp_path, monkeypatch):
     root = tmp_path.resolve()
     binary, receipt = _fixture(root, monkeypatch)
+    # macOS temp directories can inherit wheel rather than the process group.
+    # Fix only this owned disposable receipt; keep the real loader GID check.
+    os.chown(receipt, -1, os.getegid())
     config = native_config(root)
     config.update(control_uid=os.geteuid() + 1000, allowed_supplementary_gids=[],
                   codex_binary=str(binary), codex_attestation_receipt=str(receipt))
