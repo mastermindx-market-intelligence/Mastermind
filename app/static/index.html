@@ -6731,6 +6731,8 @@ function _forwardEvaluationHtml(data, portfolio, isZh, pending) {
                                                '个净值记录日期不属于已公布的交易日。')
       : say('All recorded dates match the published exchange schedule. ', '所有记录日期均符合已公布的交易日历。')) +
       say('Prices and observation cutoffs remain unverified.', '价格与观测截止时点仍未验证。');
+    if (count === 0) note = say('No selected forward NAV dates were recorded in this window. Prices and observation cutoffs remain unverified.',
+                                '此区间没有入选的前瞻净值日期记录；价格与观测截止时点仍未验证。');
     if (partial) note = say('The recorded source is partial. ', '已记录的来源不完整。') + note;
   } else if (current && count !== null) {
     if (q.calendar_missing_reason === 'outside_published_calendar_coverage') {

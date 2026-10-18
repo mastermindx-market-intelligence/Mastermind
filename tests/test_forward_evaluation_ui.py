@@ -140,7 +140,8 @@ def test_unknown_status_and_untrusted_text_do_not_turn_into_displayed_evidence()
 
 
 @pytest.mark.parametrize("last_response", ["failed", "wrong_book"])
-def test_request_binding_rejects_old_responses_and_current_failures(last_response):
+@pytest.mark.parametrize("schema_version", [1, 2])
+def test_request_binding_rejects_old_responses_and_current_failures(last_response, schema_version):
     code = r"""
 var waiting={}, calls=[], paints=[], _portfolio='autonomous', _pfFetchSeq=1;
 var _forwardEvaluation=null, _forwardEvaluationPending=false;
@@ -168,15 +169,19 @@ var document={documentElement:{getAttribute:function(){return 'en';}}};
  await _fetchForwardEvaluation('china',2);
  console.log(JSON.stringify({accepted:accepted,afterOld:afterOld,unavailable:unavailable,calls:calls}));
 })().catch(function(e){console.error(e);process.exit(1);});
-""".replace("CN", json.dumps(payload("china", count=7))).replace(
-        "US", json.dumps(payload())).replace("LAST_OK", json.dumps(last_response == "wrong_book"))
+""".replace("CN", json.dumps(calendar_payload("china") if schema_version == 2
+                                 else payload("china", count=7))).replace(
+        "US", json.dumps(calendar_payload() if schema_version == 2 else payload())).replace(
+        "LAST_OK", json.dumps(last_response == "wrong_book"))
     result = node(code)
     assert result["accepted"] == result["afterOld"]
     assert result["accepted"][0] == "china"
-    assert ">7</div>" in result["accepted"][1] and ">49</div>" not in result["accepted"][1]
+    expected_count = 3 if schema_version == 2 else 7
+    assert f">{expected_count}</div>" in result["accepted"][1]
+    assert ">49</div>" not in result["accepted"][1]
     assert result["unavailable"]["value"] is None
     assert result["unavailable"]["pending"] is False
-    assert ">7</div>" not in result["unavailable"]["html"]
+    assert f">{expected_count}</div>" not in result["unavailable"]["html"]
     assert "Unavailable" in result["unavailable"]["html"]
     assert len(result["calls"]) == 3
     assert all(options == {"cache": "no-store"} for _, options in result["calls"])
@@ -303,6 +308,9 @@ def test_calendar_projection_true_zero_is_preserved(holiday_only):
     assert calendar_fact(html, "Recorded NAV dates") == str(len(dates))
     assert calendar_fact(html, "Dates matching exchange schedule") == "0"
     assert "Scheduled dates without a selected forward mark" in html
+    if not holiday_only:
+        assert "No selected forward NAV dates were recorded" in html
+        assert "All recorded dates match" not in html
 
 
 def test_calendar_projection_partial_and_stale_evidence_remain_visible():
