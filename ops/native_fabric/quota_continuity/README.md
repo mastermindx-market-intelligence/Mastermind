@@ -77,6 +77,22 @@ strict ledger outcome, released lease, and frozen packet digest. A task-start
 reservation prevents conversion of a later CLI error into pre-task evidence.
 Each failed attempt remains independently observable and auditable.
 
+## Conservative host disk telemetry
+
+The collector floors available disk space to one decimal GiB before publishing
+host state. Both Linux and Darwin keep the existing disk measurement and volume
+selection. This prevents a host below its configured base floor plus checkout
+reserve from becoming eligible solely because telemetry rounded upward. For
+example, 330253288 available KiB becomes 314.9 GiB and remains below a 315 GiB
+requirement; exactly 315 GiB remains eligible. The locked physical admission
+check still uses current capacity and may refuse a host after concurrent usage.
+
+The regression tests execute both actual disk-probe blocks and pass their output
+through the real host picker, including the original rounding failure, exact
+boundary controls and selection of another healthy host. When deploying a new
+generation, rebind the existing host-pull collector to that same generation and
+verify fresh host state: its probe template is loaded once at process startup.
+
 ## Credential custody in the published generation
 
 The Qwen wrapper loads its selected account through a fixed `exec-codex` helper.

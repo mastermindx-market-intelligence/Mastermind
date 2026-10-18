@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 NATIVE = ROOT / "ops/native_fabric/quota_continuity"
 COMPOSED_SHA = "8fc268d94c66227dac66c259343c137da8256d7b4545b4f77591ebc4eb66c43d"
 QUOTA_SHA = "f5ec893143e5bf43c37cc1d98ff1b67c0b36d9cc8674d4bf0b12ab6da0f7a29c"
-NATIVE_MANIFEST_SHA = "58b8bb063324ec67b1720c15488ac06e1091e8383c661cb0a6005f0f8f21907f"
+NATIVE_MANIFEST_SHA = "17660a92b2b02a763cd6afba2f1faf827c735b3eda9ec0ba32ef67d4e8c0523f"
 
 
 def _sha(raw):
