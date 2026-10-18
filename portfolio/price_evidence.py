@@ -319,3 +319,55 @@ def settlement_snapshot(prices, sources, currency, observations):
         "market_observed_at": None,
         "execution_qualification": "not_checked",
     }
+
+
+def validated_settlement_snapshot(prices, sources, currency, captured):
+    """Validate retained v1 context against selected prices without inventing lost data.
+
+    Matched observations are checked by the same bounded constructor as capture.
+    Rejected observations were discarded at capture; their bounded recorded reason
+    is retained, not independently reproduced or authenticated from that lost input.
+    No quote, account, transaction, identifier or policy is created or changed.
+    """
+    fields = {
+        "schema", "currency", "quotes", "omitted_quote_count",
+        "market_observed_at", "execution_qualification",
+    }
+    quote_fields = {"price", "source", "binding_status", "reason", "observation"}
+    if (
+        type(captured) is not dict or len(captured) != len(fields)
+        or any(type(key) is not str or key not in fields for key in captured)
+        or captured["schema"] != SETTLEMENT_SCHEMA
+        or type(captured["currency"]) is not str
+        or captured["currency"] != currency
+        or type(captured["quotes"]) is not dict or len(captured["quotes"]) > MAX_QUOTES
+        or type(captured["omitted_quote_count"]) is not int or captured["omitted_quote_count"] < 0
+        or captured["market_observed_at"] is not None
+        or captured["execution_qualification"] != "not_checked"
+    ):
+        raise ValueError("invalid_settlement_price_capture")
+    observations = {}
+    for ticker, quote in captured["quotes"].items():
+        if (
+            type(ticker) is not str or type(quote) is not dict or len(quote) != len(quote_fields)
+            or any(type(key) is not str or key not in quote_fields for key in quote)
+            or (quote["price"] is not None and positive_number(quote["price"]) is None)
+            or type(quote["binding_status"]) is not str
+            or quote["binding_status"] not in ("matched", "unavailable")
+            or (quote["binding_status"] == "matched"
+                and (quote["reason"] is not None or type(quote["observation"]) is not dict))
+            or (quote["binding_status"] == "unavailable"
+                and (quote["observation"] is not None or _text(quote["reason"]) is None))
+        ):
+            raise ValueError("invalid_settlement_price_quote")
+        observations[ticker] = quote["observation"]
+    expected = settlement_snapshot(prices, sources, currency, observations)
+    for ticker, quote in captured["quotes"].items():
+        reconstructed = expected["quotes"].get(ticker)
+        if reconstructed is None or reconstructed["binding_status"] != quote["binding_status"]:
+            raise ValueError("settlement_price_capture_binding_mismatch")
+        if quote["binding_status"] == "unavailable":
+            reconstructed["reason"] = quote["reason"]
+    if expected != captured:
+        raise ValueError("settlement_price_capture_mismatch")
+    return expected

@@ -760,3 +760,97 @@ def test_missing_price_retains_a_normal_missing_observation_not_a_capture_error(
     assert context["upstream"] is None
     assert context["attempts"]
     assert "capture_error" not in context
+
+
+
+@pytest.mark.parametrize("context_problem", [
+    "matched", "not_captured", "price_mismatch", "currency_mismatch",
+    "ticker_mismatch", "source_mismatch", "unknown_fields",
+])
+def test_retained_capture_decoder_preserves_recorded_gap_without_reconstructing_discarded_input(context_problem):
+    from portfolio import price_evidence as pe
+
+    prices, sources = {"AAPL": 100.0}, {"AAPL": "decision_mark"}
+    observation = pe.make_read("AAPL", 100.0, "USD", "decision_mark", stage="decision_input")
+    if context_problem == "not_captured":
+        observation = None
+    elif context_problem == "price_mismatch":
+        observation["price"] = 99.0
+    elif context_problem == "currency_mismatch":
+        observation["currency"] = "CNY"
+    elif context_problem == "ticker_mismatch":
+        observation["ticker"] = "MSFT"
+    elif context_problem == "source_mismatch":
+        observation["source"] = "different_source"
+    elif context_problem == "unknown_fields":
+        observation["unknown"] = "discard this field"
+    captured = pe.settlement_snapshot(prices, sources, "USD", {"AAPL": observation})
+    if context_problem != "matched":
+        assert captured["quotes"]["AAPL"]["observation"] is None
+        assert captured["quotes"]["AAPL"]["reason"] == context_problem
+    validated = pe.validated_settlement_snapshot(prices, sources, "USD", captured)
+    assert validated == captured
+    assert validated is not captured
+    assert validated["quotes"] is not captured["quotes"]
+    validated["quotes"]["AAPL"]["source"] = "edited_copy"
+    assert captured["quotes"]["AAPL"]["source"] == "decision_mark"
+
+
+@pytest.mark.parametrize("mutation", [
+    "unknown_field", "wrong_currency", "qualified", "market_time", "omitted_count",
+    "unknown_quote_field", "quote_price", "quote_source", "wrong_ticker",
+    "missing_observation", "observation_price", "matched_with_reason",
+    "missing_quote", "unavailable_with_observation", "empty_gap_reason", "oversized_gap_reason",
+])
+def test_retained_capture_decoder_rejects_changed_binding_and_overclaimed_context(mutation):
+    from portfolio import price_evidence as pe
+
+    prices, sources = {"AAPL": 100.0}, {"AAPL": "decision_mark"}
+    observation = pe.make_read("AAPL", 100.0, "USD", "decision_mark", stage="decision_input")
+    captured = pe.settlement_snapshot(prices, sources, "USD", {"AAPL": observation})
+    quote = captured["quotes"]["AAPL"]
+    if mutation == "unknown_field":
+        captured["unknown"] = {}
+    elif mutation == "wrong_currency":
+        captured["currency"] = "CNY"
+    elif mutation == "qualified":
+        captured["execution_qualification"] = "qualified"
+    elif mutation == "market_time":
+        captured["market_observed_at"] = "2026-08-12T20:00:00Z"
+    elif mutation == "omitted_count":
+        captured["omitted_quote_count"] = 1
+    elif mutation == "unknown_quote_field":
+        quote["unknown"] = {}
+    elif mutation == "quote_price":
+        quote["price"] = 101.0
+    elif mutation == "quote_source":
+        quote["source"] = "different"
+    elif mutation == "wrong_ticker":
+        captured["quotes"]["MSFT"] = captured["quotes"].pop("AAPL")
+    elif mutation == "missing_observation":
+        quote["observation"] = None
+    elif mutation == "observation_price":
+        quote["observation"]["price"] = 101.0
+    elif mutation == "matched_with_reason":
+        quote["reason"] = "not_captured"
+    elif mutation == "missing_quote":
+        captured["quotes"].clear()
+    elif mutation == "unavailable_with_observation":
+        quote.update(binding_status="unavailable", reason="recorded_gap")
+    elif mutation in ("empty_gap_reason", "oversized_gap_reason"):
+        quote.update(binding_status="unavailable", observation=None,
+                     reason="" if mutation == "empty_gap_reason" else "x" * 65)
+    with pytest.raises(ValueError):
+        pe.validated_settlement_snapshot(prices, sources, "USD", captured)
+
+
+
+def test_retained_capture_decoder_rejects_boolean_price_even_when_python_equality_matches_one():
+    from portfolio import price_evidence as pe
+
+    prices, sources = {"AAPL": 1.0}, {"AAPL": "decision_mark"}
+    observation = pe.make_read("AAPL", 1.0, "USD", "decision_mark", stage="decision_input")
+    captured = pe.settlement_snapshot(prices, sources, "USD", {"AAPL": observation})
+    captured["quotes"]["AAPL"]["price"] = True
+    with pytest.raises(ValueError):
+        pe.validated_settlement_snapshot(prices, sources, "USD", captured)
