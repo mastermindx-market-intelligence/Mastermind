@@ -70,3 +70,36 @@ child completes and its actual parent consumes the result; no unrelated native
 peer channel is exposed. Larger autonomous workflow promotion additionally
 requires useful delivery, independent review, bounded repair and real product
 acceptance through the existing Executive/Fabric lifecycle.
+
+## Exact-head hosted W6B fixture compatibility repair — October 17 evening
+
+Hosted PR CI run 39086979983 at original semantic head
+\`cb1a1ef45a9b1e5e2cd942eca87945b4195e5ddd\` finished FAILURE:
+pytest shard 0 failed exactly three \`tests/test_w6b_native_round_trip.py\`
+cases. The checked-in W6B test fake projected \`multi_agent_v2\`
+without the newly required \`disable_direct_message=true\` field, so
+its expected security digest disagreed with the legitimately tightened
+generated capability profile (\`89612a1... != c48a700...\`). After
+repairing only the fixture's expected projection, two execution cases
+also correctly refused \`REFUSE_CONFIG_DRIFT\`, because the fake
+App Server's test-local sealed-config wrapper did not echo the new bit.
+
+The candidate repair updates ONLY \`tests/test_w6b_native_round_trip.py\`:
+a single \`disable_direct_message=true\` in the constant, and a
+strictly test-local native-helper \`config/read\` echo for that field.
+It does not modify the shared fake App Server implementation,
+production native-helper configuration, session messaging permission,
+default profile, auth, credential, Runtime, or Fabric.
+
+This is an observed test-fixture convergence, **not weakening isolation**.
+The original hosted failure is retained as RED evidence and cannot be
+claimed green by review or repair alone. New focused M2 suite
+\`tests/test_w6b_native_round_trip.py\` + three native capability/message
+isolation suites **51/51 PASS**, Python compile and \`git diff --check\`
+PASS. Exact successor head/CI follows publication; require fresh
+hosted shard 0 plus all required checks and independent current-head
+review. The actual on-host native App Server readback at Codex CLI
+0.159.3 independently reported \`disable_direct_message=true\` and
+verified private process-group cleanup; no provider turn or real
+worker return was started. Preserve Fable original programme ownership,
+unresolved CODEX-01/other effects, and live deny lists.
