@@ -259,7 +259,7 @@ def test_calendar_projection_displays_matched_dates_without_price_or_skill_claim
     assert calendar_fact(html, "Dates matching exchange schedule") == "2"
     assert calendar_fact(html, "Price-checked sessions") == "Unverified"
     assert "Prices unverified" in html
-    assert "recorded NAV dates fall outside" in html
+    assert "recorded NAV date falls outside" in html
     assert "Inspect evidence record" in html
     assert json.dumps(data, sort_keys=True) == before
 

@@ -6727,7 +6727,9 @@ function _forwardEvaluationHtml(data, portfolio, isZh, pending) {
     : say('A qualified saved count is unavailable for this book.', '此账本已保存记录的有效计数不可用。');
   if (calendar) {
     note = (calendar.excluded.length
-      ? String(calendar.excluded.length) + say(' recorded NAV dates fall outside the published exchange schedule. ',
+      ? String(calendar.excluded.length) + say(calendar.excluded.length === 1
+          ? ' recorded NAV date falls outside the published exchange schedule. '
+          : ' recorded NAV dates fall outside the published exchange schedule. ',
                                                '个净值记录日期不属于已公布的交易日。')
       : say('All recorded dates match the published exchange schedule. ', '所有记录日期均符合已公布的交易日历。')) +
       say('Prices and observation cutoffs remain unverified.', '价格与观测截止时点仍未验证。');
