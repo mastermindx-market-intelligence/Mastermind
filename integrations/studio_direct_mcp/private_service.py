@@ -173,6 +173,11 @@ C2_BUSINESS_V10_ORIGINAL_BLOBS = {
     "tailnet-gateway.mjs": "d654200a417d5a4dadfcc4e0f6141ef9adda6a04",
 }
 C2_PERSONAL_CURRENT_MANIFEST_SHA256 = "c5744dcc7a96d0bc0b019f3c153e8acc8761320ff11541340df753fb493c5460"
+# Exact live C2 Personal post-#1604 sealed generation. A dedicated stopped-
+# service, manifest-CAS migration changes ONLY the Git command budget.
+# Repository enrollment, Git source, fleet, Paper and all module hashes stay fixed.
+C2_PERSONAL_TIMEOUT_PREDECESSOR_SHA256 = "4bb0b40cbc7849487c0d886b30261f70fd6e1828d1d217643a56e3fa6aea40fb"
+C2_PERSONAL_TIMEOUT_COMMAND_MS = 45000
 C2_PERSONAL_TARGET_PATCH_SHA256 = {
     "gateway.mjs": "17157fa5f8739dbe17aae767a335e97dd713a978dde9b192feb1b41a7b036b30",
     "git-publish.mjs": "d8f7f7712129094ce0ffac2eaeb66d15dd3f063a3ade9fa354de7af0d412477a",
@@ -1976,6 +1981,143 @@ def _upgrade_c2_business_original_fleet_mastermind_only(
     return 0
 
 
+def _upgrade_c2_personal_git_timeout_only(
+    args, source: Path, node_abs: Path, backend_abs: Path,
+    account: str, label: str, port: int, roots: dict,
+) -> int:
+    """Change only the bounded Git command timeout on exact sealed C2 Personal.
+
+    Status prechecks can exceed 15s on the 127k-index Macro checkout under M2
+    contention. This is not a repository grant, module upgrade, transport
+    retry or a new publication authority. Manifest/config writes are fenced
+    and the service must be unloaded before any mutation.
+    """
+    expected = getattr(args, "publisher_expected_manifest_sha256", None)
+    preview = getattr(args, "publisher_preflight_only", False)
+    if (account != C2_PAPER_ACCOUNT
+            or getattr(args, "c2_personal_git_timeout_only", False) is not True
+            or type(preview) is not bool or not _sha256_hex(expected)
+            or expected != C2_PERSONAL_TIMEOUT_PREDECESSOR_SHA256
+            or getattr(args, "c2_business_fleet_compat", False) is True
+            or getattr(args, "c2_personal_closed_publisher", False) is True
+            or getattr(args, "publisher_only_fleet_v10", False) is True
+            or getattr(args, "enable_repository_workspaces", False) is True
+            or getattr(args, "fabric_only", False) is True
+            or type(getattr(args, "os_commission_config_sha256", None)) is str):
+        raise SystemExit("C2 Git timeout: original closed owner and manifest CAS required")
+    manifest_path, config_path = roots["manifest"], roots["config"]
+    if _stable_regular_file_hash(manifest_path, label="installed manifest") != expected:
+        raise SystemExit("C2 Git timeout: installed manifest CAS mismatch")
+    prior = _verify_staged_install(account, label, roots, require_runtime_seal=True)
+    if (prior.get("version") != MANIFEST_VERSION
+            or prior.get("source") != str(source)
+            or prior.get("node") != str(node_abs)
+            or prior.get("backend") != str(backend_abs)
+            or prior.get("host") != "127.0.0.1"
+            or prior.get("port") != port
+            or not prior.get("dependencyTreeHash")
+            or frozenset(prior["files"]) != V2_CHATGPT1_FLEET_TAILNET_PREDECESSOR):
+        raise SystemExit("C2 Git timeout: runtime/source identity mismatch")
+    if any(prior["files"].get(n) != digest
+           for n, digest in C2_PERSONAL_TARGET_PATCH_SHA256.items()):
+        raise SystemExit("C2 Git timeout: reviewed installed modules changed")
+    old_config_bytes, old_manifest_bytes = config_path.read_bytes(), manifest_path.read_bytes()
+    if (hashlib.sha256(old_config_bytes).hexdigest() != prior["configHash"]
+            or hashlib.sha256(old_manifest_bytes).hexdigest() != expected):
+        raise SystemExit("C2 Git timeout: sealed snapshot changed")
+    try:
+        old_config = json.loads(old_config_bytes)
+    except (UnicodeError, ValueError) as exc:
+        raise SystemExit("C2 Git timeout: config not valid JSON") from exc
+    original_git = _typed_git_config(_user_root(), closed_repositories=True)
+    if (type(old_config) is not dict or old_config.get("accountLabel") != account
+            or old_config.get("gitPublish") != original_git
+            or old_config.get("repositoryWorkspaces") != {
+                "enabled": True, "allowedRepositories": ["mastermind", "macro", "terminal"]}
+            or old_config.get("fleetRouting", {}).get("enabled") is not True
+            or len(old_config["fleetRouting"].get("routes", [])) != 2
+            or old_config.get("maxPerSessionConcurrency") != 8
+            or old_config.get("maxQueuedPerSession") != 16
+            or old_config.get("paperDesign", {}).get("enabled") is not True
+            or old_config.get("fabricOnly") is True
+            or "commissionPublication" in old_config
+            or "modernFabricProtocol" in old_config):
+        raise SystemExit("C2 Git timeout: installed capability identity changed")
+    new_config = dict(old_config)
+    new_git = dict(original_git)
+    new_git["commandTimeoutMs"] = C2_PERSONAL_TIMEOUT_COMMAND_MS
+    new_config["gitPublish"] = new_git
+    if ({k: v for k, v in new_config.items() if k != "gitPublish"}
+            != {k: v for k, v in old_config.items() if k != "gitPublish"}):
+        raise SystemExit("C2 Git timeout: unrelated config change")
+    config_bytes = json.dumps(new_config, indent=2, sort_keys=True).encode("utf-8")
+    future = dict(prior)
+    future["configHash"] = hashlib.sha256(config_bytes).hexdigest()
+    if not _valid_manifest(future, account, label):
+        raise SystemExit("C2 Git timeout: target sealed manifest refused")
+    manifest_bytes = json.dumps(future, indent=2, sort_keys=True).encode("utf-8")
+    if _stable_regular_file_hash(manifest_path, label="installed manifest") != expected:
+        raise SystemExit("C2 Git timeout: manifest moved during planning")
+    if preview:
+        print(json.dumps({
+            "account": account, "effect": "NOT_APPLIED", "preflight": True,
+            "originalManifestSha256": expected,
+            "commandTimeoutBeforeMs": original_git["commandTimeoutMs"],
+            "commandTimeoutAfterMs": C2_PERSONAL_TIMEOUT_COMMAND_MS,
+            "pushTimeoutPreservedMs": original_git["pushTimeoutMs"],
+            "changedFiles": ["config.json", "manifest.json"],
+            "sourceModulesPreserved": True, "fleetAndPaperPreserved": True,
+            "serviceStarted": False,
+        }, sort_keys=True))
+        return 0
+    if _lifecycle_inspect(account, label, roots) is not None:
+        raise SystemExit("C2 Git timeout: service must be stopped")
+    if (_stable_regular_file_hash(manifest_path, label="installed manifest") != expected
+            or _stable_regular_file_hash(config_path, label="installed config") != prior["configHash"]
+            or _verify_staged_install(account, label, roots, require_runtime_seal=True) != prior):
+        raise SystemExit("C2 Git timeout: original installation changed before mutation")
+    before = {config_path: old_config_bytes, manifest_path: old_manifest_bytes}
+    planned = {config_path: config_bytes, manifest_path: manifest_bytes}
+    committed = False
+    try:
+        for target, payload in planned.items():
+            _atomic_write_bytes(target, payload)
+        committed = True
+        _verify_staged_install(account, label, roots, require_runtime_seal=True)
+    except BaseException as exc:
+        if committed:
+            raise SystemExit("C2 Git timeout: EFFECT_UNKNOWN after manifest commit") from exc
+        try:
+            if _lifecycle_inspect(account, label, roots) is not None:
+                raise RuntimeError("service restarted during config transaction")
+            observed = {}
+            for target in planned:
+                if target.is_symlink():
+                    raise RuntimeError("symlink detected during rollback")
+                observed[target] = target.read_bytes()
+                if observed[target] not in (before[target], planned[target]):
+                    raise RuntimeError("concurrent out-of-scope change during rollback")
+            for target in reversed(tuple(planned)):
+                if observed[target] != before[target]:
+                    _atomic_write_bytes(target, before[target])
+            if (any(target.read_bytes() != before[target] for target in planned)
+                    or _stable_regular_file_hash(manifest_path, label="installed manifest") != expected):
+                raise RuntimeError("original sealed bytes could not be restored")
+            _verify_staged_install(account, label, roots, require_runtime_seal=True)
+        except BaseException as recovery_error:
+            raise SystemExit("C2 Git timeout: EFFECT_UNKNOWN during rollback") from recovery_error
+        raise SystemExit("C2 Git timeout: NOT_APPLIED original state restored") from exc
+    print(json.dumps({
+        "account": account, "effect": "APPLIED",
+        "manifestSha256": _sha256_file(manifest_path),
+        "commandTimeoutMs": C2_PERSONAL_TIMEOUT_COMMAND_MS,
+        "pushTimeoutPreservedMs": original_git["pushTimeoutMs"],
+        "sourceModulesPreserved": True, "fleetAndPaperPreserved": True,
+        "serviceStarted": False,
+    }, sort_keys=True))
+    return 0
+
+
 @_fabric_lifecycle_serialized()
 def cmd_upgrade(args) -> int:
     account = args.account
@@ -1990,7 +2132,9 @@ def cmd_upgrade(args) -> int:
         raise SystemExit(f"source dir invalid: {source}")
     # C2 fleet predecessor migration is a tightly hash-pinned three-module
     # compatibility package, NOT the incompatible current STAGE_FILES bundle.
-    if not (getattr(args, "c2_business_fleet_compat", False) is True or getattr(args, "c2_personal_closed_publisher", False) is True):
+    if not (getattr(args, "c2_business_fleet_compat", False) is True
+            or getattr(args, "c2_personal_closed_publisher", False) is True
+            or getattr(args, "c2_personal_git_timeout_only", False) is True):
         _check_source_files(source)
     node_abs = _resolve_abs("--node", args.node)
     backend_abs = _resolve_abs("--backend", args.backend)
@@ -1998,6 +2142,9 @@ def cmd_upgrade(args) -> int:
     _validate_port(port)
 
     roots = _build_runtime_roots(account)
+    if getattr(args, "c2_personal_git_timeout_only", False) is True:
+        return _upgrade_c2_personal_git_timeout_only(
+            args, source, node_abs, backend_abs, account, label, port, roots)
     if (getattr(args, "c2_business_fleet_compat", False) is True or getattr(args, "c2_personal_closed_publisher", False) is True):
         return _upgrade_c2_business_original_fleet_mastermind_only(
             args, source, node_abs, backend_abs, account, label, port, roots)
@@ -2718,6 +2865,8 @@ def build_parser() -> argparse.ArgumentParser:
             s.add_argument("--c2-business-fleet-compat", action="store_true",
                            help="exact hash-pinned C2 11-to-12-file gateway compatibility; no new repo grants")
             s.add_argument("--c2-personal-closed-publisher", action="store_true")
+            s.add_argument("--c2-personal-git-timeout-only", action="store_true",
+                           help="exact sealed C2 Personal stopped-service Git command budget patch")
             s.add_argument("--publisher-only-fleet-v10", action="store_true",
                            help="preserve the exact sealed enrolled fleet v0.1.10 runtime; patch only two publisher modules")
             s.add_argument("--publisher-expected-manifest-sha256",
