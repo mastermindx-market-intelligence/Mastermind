@@ -1,9 +1,12 @@
 # Preserve a pre-Job interrupted acceptance
 
 The explicit `supersede_prejob_v1` maintenance branch carries an interrupted V2
-acceptance prefix into one fresh protected release. It never replays the failed
-release, credits it with PASS, changes its files, rebaselines Runtime, recovers
-historical capacity or arms a service. Unstarted supersession remains strict.
+or `supersede_unstarted_v1` acceptance prefix (the interrupted release may itself
+be an unstarted-supersession successor) into one fresh protected release. It never
+replays the failed release, credits it with PASS, changes its files, rebaselines
+Runtime, recovers historical capacity or arms a service. Unstarted supersession
+remains strict, and another `supersede_prejob_v1` release is never a valid
+interrupted release.
 
 This repairs the observed `0123ad5ae7408a35fd38b4a0b4e9bf5a132bbe65` service-start
 exit 141. The failed descriptor is
@@ -24,9 +27,14 @@ Preparation requires the installed release to match that selected failed release
 The accepted ancestor retains its actual PASS chain. All V2 semantic fields,
 entire live database snapshot, artifact inventory and prior canary must match
 the failed descriptor's sealed baseline exactly; schema remains v5. The selected
-bundle must contain only its six original files plus an exact V2 run marker
-binding its descriptor (and, if present, the already-supported sealed empty
-legacy backup sidecars).
+bundle must contain only its six original files plus an exact run marker
+binding its descriptor and carrying the interrupted release's own schema
+(`v2`, or `supersede_unstarted_v1` for an unstarted-supersession successor) (and,
+if present, the already-supported sealed empty legacy backup sidecars). When the
+interrupted release is an unstarted-supersession successor, validation continues
+through its own `superseded_unstarted_sha` link to the accepted V2 ancestor; that
+inner release must still be sealed, unstarted (no run marker, no Runtime
+acceptance directory) and match the same live baseline.
 
 The selected control-owned 0700 acceptance directory may contain exactly
 `nonexecutive-launchd-before.json` and `protected-group-membership.json`. Both

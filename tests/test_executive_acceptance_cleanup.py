@@ -92,3 +92,75 @@ def test_not_started_services_are_not_stopped_or_queried(tmp_path, monkeypatch):
     instance.cleanup_after_failure()
     assert runs == []
     assert kills == [(HELPER_PID, acceptance.signal.SIGKILL)]
+
+
+def test_helper_kill_permission_error_does_not_skip_service_stop(tmp_path, monkeypatch, capsys):
+    instance, runs, kills = _cleanup_instance(tmp_path, monkeypatch, lambda *a, **kw: {})
+
+    def denied(pid, sig):
+        raise PermissionError(1, "fixture: not permitted SECRET-DETAIL")
+
+    monkeypatch.setattr(acceptance.os, "kill", denied)
+    instance.cleanup_after_failure()
+    assert runs and runs[-1][-1] == "stop"
+    err = capsys.readouterr().err
+    assert "helper kill raised PermissionError" in err and "SECRET-DETAIL" not in err
+
+
+def test_interrupt_during_capture_still_stops_services(tmp_path, monkeypatch):
+    def interrupted(command, *values, persist=None):
+        raise KeyboardInterrupt
+
+    instance, runs, kills = _cleanup_instance(tmp_path, monkeypatch, interrupted)
+    with pytest.raises(KeyboardInterrupt):  # not swallowed, but the stop ran first
+        instance.cleanup_after_failure()
+    assert runs and runs[-1][-1] == "stop"
+
+
+class _Recorder:
+    def __init__(self, error):
+        self.error = error
+        self.cleaned = 0
+
+    def run(self):
+        raise self.error
+
+    def cleanup_after_failure(self):
+        self.cleaned += 1
+
+
+def _main_with(monkeypatch, recorder):
+    args = type("Args", (), {"success_timeout": 2400.0, "active_timeout": 120.0})()
+    monkeypatch.setattr(acceptance, "_parser", lambda: type("P", (), {"parse_args": lambda self: args})())
+    monkeypatch.setattr(acceptance, "Acceptance", lambda parsed: recorder)
+    return acceptance.main()
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        TypeError("fixture: unexpected failure from run()"),
+        subprocess.TimeoutExpired(["x"], 90.0),
+        acceptance.AcceptanceError("fixture: refused"),
+        KeyboardInterrupt(),
+    ],
+    ids=["TypeError", "TimeoutExpired", "AcceptanceError", "KeyboardInterrupt"],
+)
+def test_main_cleans_up_after_any_failure_and_prints_the_original_error(monkeypatch, capsys, error):
+    recorder = _Recorder(error)
+    assert _main_with(monkeypatch, recorder) == 1
+    assert recorder.cleaned == 1
+    assert f"acceptance error: {type(error).__name__}" in capsys.readouterr().err
+
+
+def test_main_reports_the_original_error_even_if_cleanup_itself_raises(monkeypatch, capsys):
+    recorder = _Recorder(TypeError("fixture: original"))
+
+    def broken_cleanup():
+        raise RuntimeError("fixture: cleanup broke")
+
+    recorder.cleanup_after_failure = broken_cleanup
+    assert _main_with(monkeypatch, recorder) == 1
+    err = capsys.readouterr().err
+    assert "acceptance error: TypeError: fixture: original" in err
+    assert "acceptance cleanup: raised RuntimeError" in err and "cleanup broke" not in err

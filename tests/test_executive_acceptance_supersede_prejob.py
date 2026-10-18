@@ -3,6 +3,7 @@ import grp
 import json
 import os
 import pwd
+import shutil
 from types import SimpleNamespace
 from pathlib import Path
 
@@ -14,7 +15,7 @@ from tests.test_executive_acceptance_supersede_unstarted import (
 )
 
 
-def receipt_prefix(runtime, selected, monkeypatch):
+def receipt_prefix(runtime, selected, monkeypatch, marker_schema=None):
     monkeypatch.setattr(pwd, "getpwnam", lambda name: SimpleNamespace(pw_uid=os.getuid()))
     monkeypatch.setattr(grp, "getgrnam", lambda name: SimpleNamespace(gr_gid=os.getgid()))
     root = runtime / "control/acceptance" / selected["successor_sha"]
@@ -32,7 +33,8 @@ def receipt_prefix(runtime, selected, monkeypatch):
         (root / name).write_text(json.dumps(doc))
         (root / name).chmod(0o400)
     m.write_sealed(m.bundle_path(selected["successor_sha"]) / "run-started.json", {
-        "schema_version": m.SCHEMA_V2, "descriptor_sha256": m.digest(selected),
+        "schema_version": marker_schema or selected["schema_version"],
+        "descriptor_sha256": m.digest(selected),
     }, public=True)
     return root
 
@@ -44,6 +46,84 @@ def fixture(tmp_path, monkeypatch):
     d.update(schema_version=m.SCHEMA_PREJOB, interrupted_prejob_sha=S,
              prejob_evidence_sha256=m.prejob_evidence(S))
     return d, selected, before, artifacts, canary, bundle, root
+
+
+def unstarted_successor_fixture(tmp_path, monkeypatch, marker_schema=None):
+    """A pre-Job candidate selecting a release that was itself minted with
+    ``--supersede-unstarted-sha`` (the installed S2 shape): its sealed descriptor
+    and run marker carry ``supersede_unstarted_v1``; its own inner link is the
+    unstarted V2 ancestor."""
+    d, leaf, before, artifacts, canary, leaf_bundle, runtime = unstarted_fixture(tmp_path, monkeypatch)
+    sha = "1" * 40
+    bundle = m.bundle_path(sha)
+    shutil.copytree(leaf_bundle, bundle)
+    successor = dict(leaf, schema_version=m.SCHEMA_SUPERSEDE, successor_sha=sha,
+                     superseded_unstarted_sha=S, superseded_descriptor_sha256=m.digest(leaf))
+    _rewrite(bundle / "descriptor.json", successor)
+    _rewrite(bundle / "preparing.json", {"schema_version": m.SCHEMA_SUPERSEDE})
+    root = receipt_prefix(runtime, successor, monkeypatch, marker_schema)
+    del d["superseded_unstarted_sha"]
+    d.update(schema_version=m.SCHEMA_PREJOB, interrupted_prejob_sha=sha,
+             superseded_descriptor_sha256=m.digest(successor),
+             prejob_evidence_sha256=m.prejob_evidence(sha))
+    return d, successor, leaf, before, artifacts, canary, bundle, leaf_bundle, root, runtime
+
+
+def test_prejob_over_unstarted_successor_walks_to_the_v2_ancestor(tmp_path, monkeypatch):
+    d, successor, leaf, before, artifacts, canary, bundle, leaf_bundle, root, runtime = (
+        unstarted_successor_fixture(tmp_path, monkeypatch))
+    paths = [*bundle.iterdir(), *leaf_bundle.iterdir(), *root.iterdir()]
+    original = {str(p): p.read_bytes() for p in paths}
+    links = []
+    real = m._validate_superseded_link
+
+    def spy(descriptor, **kwargs):
+        selected = real(descriptor, **kwargs)
+        links.append((descriptor["schema_version"], selected["schema_version"]))
+        return selected
+
+    monkeypatch.setattr(m, "_validate_superseded_link", spy)
+    m.validate_superseded_binding(d, before=before, artifacts=artifacts, prior_canary=canary)
+    assert links == [(m.SCHEMA_PREJOB, m.SCHEMA_SUPERSEDE), (m.SCHEMA_SUPERSEDE, m.SCHEMA_V2)]
+    assert original == {str(p): p.read_bytes() for p in paths}
+    new = m.bundle_path(N)
+    new.mkdir()
+    m.write_sealed(new / "descriptor.json", d, public=True)
+    assert m.descriptor_for(N) == d
+    assert not (new / "run-started.json").exists()
+    assert not (leaf_bundle / "run-started.json").exists()
+
+
+@pytest.mark.parametrize("marker,refused", [
+    (None, False),  # the selected release's own schema: supersede_unstarted_v1
+    ("v2", True), ("prejob", True), ("v1", True),
+], ids=["own-schema", "v2-marker", "prejob-marker", "v1-marker"])
+def test_prejob_marker_must_carry_the_selected_releases_own_schema(tmp_path, monkeypatch, marker, refused):
+    schema = {None: None, "v2": m.SCHEMA_V2, "prejob": m.SCHEMA_PREJOB, "v1": m.SCHEMA}[marker]
+    d, successor, leaf, before, artifacts, canary, *_ = unstarted_successor_fixture(
+        tmp_path, monkeypatch, marker_schema=schema)
+    if refused:
+        with pytest.raises(m.MaintenanceError, match="interrupted pre-Job evidence drifted"):
+            m.validate_superseded_binding(d, before=before, artifacts=artifacts, prior_canary=canary)
+    else:
+        m.validate_superseded_binding(d, before=before, artifacts=artifacts, prior_canary=canary)
+
+
+@pytest.mark.parametrize("fault", ["acceptance-dir", "baseline", "started", "carry"])
+def test_inner_unstarted_link_stays_sealed_under_a_prejob_candidate(tmp_path, monkeypatch, fault):
+    d, successor, leaf, before, artifacts, canary, bundle, leaf_bundle, root, runtime = (
+        unstarted_successor_fixture(tmp_path, monkeypatch))
+    if fault == "acceptance-dir":  # an older Runtime acceptance directory exists
+        (runtime / "control/acceptance" / S).mkdir()
+    elif fault == "baseline":  # the inner release's sealed baseline differs from live
+        _rewrite(leaf_bundle / "baseline.json", {"drift": True})
+    elif fault == "started":  # the inner release was in fact started
+        m.write_sealed(leaf_bundle / "run-started.json", {
+            "schema_version": m.SCHEMA_V2, "descriptor_sha256": m.digest(leaf)}, public=True)
+    else:
+        m.write_sealed(leaf_bundle / "carry-forward.json", {})
+    with pytest.raises((m.MaintenanceError, OSError)):
+        m.validate_superseded_binding(d, before=before, artifacts=artifacts, prior_canary=canary)
 
 
 def test_exact_prejob_prefix_is_preserved_and_never_grants_replay(tmp_path, monkeypatch):
@@ -70,7 +150,7 @@ def test_exact_prejob_prefix_is_preserved_and_never_grants_replay(tmp_path, monk
     "receipt-group", "receipt-acl", "receipt-race", "root-mode", "root-link", "root-acl",
     "parent-mode", "baseline", "live-job", "live-attempt", "live-event", "live-quota",
     "inventory", "canary", "root-identity", "selected-digest", "evidence-digest",
-    "selected-schema", "selected-carry", "path-alias",
+    "selected-schema", "selected-carry", "path-alias", "marker-supersede",
 ])
 def test_prejob_refuses_drift_or_any_later_acceptance_state(tmp_path, monkeypatch, fault):
     d, selected, before, artifacts, canary, bundle, root = fixture(tmp_path, monkeypatch)
@@ -79,7 +159,8 @@ def test_prejob_refuses_drift_or_any_later_acceptance_state(tmp_path, monkeypatc
         (bundle / "run-started.json").unlink()
     elif fault.startswith("marker-"):
         _rewrite(bundle / "run-started.json", {
-            "schema_version": m.SCHEMA if fault == "marker-schema" else m.SCHEMA_V2,
+            "schema_version": {"marker-schema": m.SCHEMA, "marker-supersede": m.SCHEMA_SUPERSEDE}.get(
+                fault, m.SCHEMA_V2),
             "descriptor_sha256": "0" * 64 if fault == "marker-digest" else m.digest(selected),
         })
     elif fault in {"extra-bundle", "carry", "selected-carry"}:

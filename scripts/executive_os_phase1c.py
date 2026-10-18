@@ -3029,6 +3029,8 @@ async def _run(args: argparse.Namespace) -> int:
 def _jsonable(value: Any) -> Any:
     if hasattr(value, "to_dict"):
         return _jsonable(value.to_dict())
+    # asdict() skips to_dict() on nested dataclasses and leaves Enums as-is; neither
+    # applies to WakeRetryPolicy (flat, frozen, bool/int/None fields).
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
         return _jsonable(dataclasses.asdict(value))
     if isinstance(value, Mapping):

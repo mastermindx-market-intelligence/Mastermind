@@ -911,7 +911,7 @@ def _validate_superseded_link(descriptor: dict, *, before: dict | None,
     prejob = descriptor["schema_version"] == SCHEMA_PREJOB
     selected_sha = descriptor["interrupted_prejob_sha" if prejob else "superseded_unstarted_sha"]
     selected = descriptor_for(selected_sha)
-    allowed = {SCHEMA_V2} if prejob else {SCHEMA_V2, SCHEMA_SUPERSEDE}
+    allowed = {SCHEMA_V2, SCHEMA_SUPERSEDE}
     if (selected is None or selected["schema_version"] not in allowed
             or digest(selected) != descriptor["superseded_descriptor_sha256"]
             or selected["predecessor_sha"] != descriptor["predecessor_sha"]):
@@ -935,7 +935,7 @@ def _validate_superseded_link(descriptor: dict, *, before: dict | None,
     from ops.executive_os.autonomy_control import RUNTIME_ROOT
     if prejob:
         if (sealed_json(bundle/"run-started.json") != {
-                "schema_version": SCHEMA_V2, "descriptor_sha256": digest(selected)}
+                "schema_version": selected["schema_version"], "descriptor_sha256": digest(selected)}
                 or prejob_evidence(selected_sha) != descriptor["prejob_evidence_sha256"]):
             raise MaintenanceError("interrupted pre-Job evidence drifted")
     else:

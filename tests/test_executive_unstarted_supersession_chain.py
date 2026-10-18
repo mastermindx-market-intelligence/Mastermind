@@ -108,10 +108,26 @@ def test_inner_selected_link_remains_sealed_and_unstarted(tmp_path, monkeypatch,
     assert not m.bundle_path(candidate['successor_sha']).exists()
 
 
-def test_prejob_cannot_select_unstarted_supersession(tmp_path, monkeypatch):
-    candidate, *_ = _chain(tmp_path, monkeypatch, 3)
-    candidate['schema_version'] = m.SCHEMA_PREJOB
-    candidate['interrupted_prejob_sha'] = candidate.pop('superseded_unstarted_sha')
-    candidate['prejob_evidence_sha256'] = 'f'*64
+def test_prejob_can_select_an_unstarted_supersession_successor(tmp_path, monkeypatch):
+    from tests.test_executive_acceptance_supersede_prejob import unstarted_successor_fixture
+    d, successor, leaf, before, artifacts, canary, *_ = unstarted_successor_fixture(tmp_path, monkeypatch)
+    assert d['schema_version'] == m.SCHEMA_PREJOB and successor['schema_version'] == m.SCHEMA_SUPERSEDE
+    m.validate_superseded_binding(d, before=before, artifacts=artifacts, prior_canary=canary)
+
+
+def test_prejob_still_cannot_select_another_prejob_successor(tmp_path, monkeypatch):
+    candidate, selected, *_ = _chain(tmp_path, monkeypatch, 3)
+    inner = selected[-1]
+    prejob_sha = 'e' * 40
+    interrupted = {key: value for key, value in candidate.items() if key != 'superseded_unstarted_sha'}
+    interrupted.update(schema_version=m.SCHEMA_PREJOB, successor_sha=prejob_sha,
+                       interrupted_prejob_sha=inner['successor_sha'],
+                       superseded_descriptor_sha256=m.digest(inner), prejob_evidence_sha256='f' * 64)
+    bundle = m.bundle_path(prejob_sha)
+    bundle.mkdir()
+    m.write_sealed(bundle / 'descriptor.json', interrupted, public=True)
+    assert m.descriptor_for(prejob_sha) == interrupted  # a real, valid supersede_prejob_v1 release
+    top = dict(interrupted, successor_sha=candidate['successor_sha'], interrupted_prejob_sha=prejob_sha,
+               superseded_descriptor_sha256=m.digest(interrupted))
     with pytest.raises(m.MaintenanceError, match='descriptor or accepted ancestor mismatch'):
-        m.validate_superseded_binding(candidate)
+        m.validate_superseded_binding(top)

@@ -32,7 +32,7 @@ if os.fspath(_RELEASE_ROOT) not in sys.path:
     sys.path.insert(0, os.fspath(_RELEASE_ROOT))
 
 from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
-from ops.executive_os.acceptance_maintenance import Maintenance, MaintenanceError
+from ops.executive_os.acceptance_maintenance import Maintenance
 from ops.executive_os.install_source_policy import (
     InstallSourcePolicyError,
     validate_acceptance_source,
@@ -3146,29 +3146,39 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
                 [success_job_id, interrupted_job_id], self.receipt_root / "acceptance-summary.json")
 
     def cleanup_after_failure(self) -> None:
-        if self.services_started:
-            try:
-                self._capture_failure_observability()
-            except Exception as exc:
-                # Observability is best effort (e.g. the 90 s control client
-                # call can raise TimeoutExpired); it must never skip the
-                # helper kill or the service stop below.
-                print(
-                    f"acceptance cleanup: failure observability capture raised "
-                    f"{type(exc).__name__}; continuing to service stop",
-                    file=sys.stderr,
+        try:
+            if self.services_started:
+                try:
+                    self._capture_failure_observability()
+                except Exception as exc:
+                    # Observability is best effort (e.g. the 90 s control client
+                    # call can raise TimeoutExpired); it must never skip the
+                    # helper kill or the service stop below.
+                    print(
+                        f"acceptance cleanup: failure observability capture raised "
+                        f"{type(exc).__name__}; continuing to service stop",
+                        file=sys.stderr,
+                    )
+            if self.helper_pid is not None and self._pid_exists(self.helper_pid):
+                try:
+                    os.kill(self.helper_pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                except Exception as exc:
+                    print(
+                        f"acceptance cleanup: helper kill raised {type(exc).__name__}; "
+                        f"continuing to service stop",
+                        file=sys.stderr,
+                    )
+        finally:
+            # Whatever the steps above raised (including KeyboardInterrupt), the
+            # service stop is the one step that must run.
+            if self.services_started and self.release.is_dir():
+                _run(
+                    ["/bin/bash", self.release / "ops" / "executive_os" / "service-control.sh", "stop"],
+                    label="failure cleanup service stop",
+                    check=False,
                 )
-        if self.helper_pid is not None and self._pid_exists(self.helper_pid):
-            try:
-                os.kill(self.helper_pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-        if self.services_started and self.release.is_dir():
-            _run(
-                ["/bin/bash", self.release / "ops" / "executive_os" / "service-control.sh", "stop"],
-                label="failure cleanup service stop",
-                check=False,
-            )
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -3197,10 +3207,15 @@ def main() -> int:
     try:
         acceptance = Acceptance(args)
         acceptance.run()
-    except (AcceptanceError, MaintenanceError, KeyError, OSError, subprocess.TimeoutExpired) as exc:
-        if acceptance is not None:
-            acceptance.cleanup_after_failure()
+    except (Exception, KeyboardInterrupt) as exc:
+        # Any failure after the services started (not only the expected acceptance
+        # errors) must still stop them, and the original error must still be printed.
         print(f"acceptance error: {type(exc).__name__}: {exc}", file=sys.stderr)
+        if acceptance is not None:
+            try:
+                acceptance.cleanup_after_failure()
+            except Exception as cleanup_exc:
+                print(f"acceptance cleanup: raised {type(cleanup_exc).__name__}", file=sys.stderr)
         return 1
     print(f"Phase 1C-A acceptance PASS; receipts: {acceptance.receipt_root}")
     return 0
