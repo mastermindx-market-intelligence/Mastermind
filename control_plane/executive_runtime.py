@@ -4512,6 +4512,63 @@ class RuntimeStore:
             self._read_connections.discard(connection)
             connection.close()
 
+    def unique_root_created_event(
+        self, job_id: str, *, max_payload_bytes: int = 65536,
+    ) -> Event:
+        """Validate root uniqueness with at most two metadata rows and one payload.
+
+        Missing/duplicate/oversized roots fail closed. No full job history load.
+        """
+        if not isinstance(job_id, str) or not job_id:
+            raise ValueError("invalid root job")
+        if type(max_payload_bytes) is not int or not 1 <= max_payload_bytes <= 65536:
+            raise ValueError("invalid root payload budget")
+        with self.read() as conn:
+            rows = conn.execute(
+                """SELECT event_id, length(CAST(payload_json AS BLOB)) AS bytes
+                     FROM events WHERE job_id=? AND event_type='JOB_CREATED'
+                     ORDER BY event_id LIMIT 2""",
+                (job_id,),
+            ).fetchall()
+            if len(rows) != 1 or rows[0]["bytes"] > max_payload_bytes:
+                raise ValueError("original root unavailable or budget exceeded")
+            row = conn.execute("SELECT * FROM events WHERE event_id=?",
+                               (rows[0]["event_id"],)).fetchone()
+            if row is None:
+                raise ValueError("original root changed")
+            return _event_from_row(row)
+
+    def bounded_event_metadata_window(
+        self, *, high_water: int | None = None,
+        before_event_id: int | None = None, limit: int = 256,
+    ) -> tuple[int, list[dict[str, Any]]]:
+        """Finite metadata-only provenance window; never materializes payloads.
+
+        This is an acquisition primitive, not an authorized reference API:
+        callers must additionally bound nested event reads and raw payload bytes.
+        """
+        if type(limit) is not int or not 1 <= limit <= 256:
+            raise ValueError("invalid provenance window limit")
+        if high_water is not None and (type(high_water) is not int or high_water < 0):
+            raise ValueError("invalid provenance watermark")
+        if before_event_id is not None and (
+                type(before_event_id) is not int or before_event_id < 1):
+            raise ValueError("invalid provenance position")
+        with self.read() as conn:
+            if high_water is None:
+                high_water = int(conn.execute(
+                    "SELECT COALESCE(MAX(event_id),0) FROM events").fetchone()[0])
+            upper = min(high_water, before_event_id - 1) if before_event_id is not None else high_water
+            rows = conn.execute(
+                """SELECT event_id, event_type, command_id, aggregate_type,
+                          aggregate_id, actor, job_id, attempt_id, worker_id,
+                          created_at_ms, length(CAST(payload_json AS BLOB)) AS payload_bytes
+                     FROM events WHERE event_id <= ?
+                 ORDER BY event_id DESC LIMIT ?""",
+                (upper, limit),
+            ).fetchall()
+            return high_water, [dict(row) for row in rows]
+
     def list_events(
         self,
         *,

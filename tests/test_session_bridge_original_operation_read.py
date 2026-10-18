@@ -282,3 +282,52 @@ def test_unknown_original_operation_does_not_create_provenance(setup):
     assert result['error']['code'] == 'reply_unavailable'
     assert not s.service.calls
     assert events(s) == before
+
+
+def test_bounded_metadata_window_stable_across_pages_and_appends(setup):
+    """Reader traverses finite metadata, not Event payloads or new appends."""
+    s = setup
+    populate(s)
+    store = s.runtime.store
+    watermark, first = store.bounded_event_metadata_window(limit=2)
+    assert len(first) <= 2
+    assert all("payload_json" not in row and "payload_bytes" in row for row in first)
+    assert [r["event_id"] for r in first] == sorted(
+        (r["event_id"] for r in first), reverse=True)
+    with store.transaction() as conn:
+        store.append_event(
+            conn, aggregate_type="test", aggregate_id="append-after-watermark",
+            event_type="TEST_APPENDED", command_id="test-r2-late-metadata-event",
+            payload={"late": True})
+    stable, rest = store.bounded_event_metadata_window(
+        high_water=watermark, before_event_id=first[-1]["event_id"], limit=2)
+    assert stable == watermark
+    assert all(row["event_id"] < first[-1]["event_id"] for row in rest)
+    assert all(row["event_id"] <= watermark for row in rest)
+    assert store.bounded_event_metadata_window(high_water=0)[1] == []
+    for invalid in (0, -1, 257, True, "2"):
+        with pytest.raises(ValueError):
+            store.bounded_event_metadata_window(limit=invalid)
+    with pytest.raises(ValueError):
+        store.bounded_event_metadata_window(before_event_id=0)
+
+
+def test_original_root_uniqueness_is_bounded_and_fail_closed(setup):
+    s = setup
+    read_ref = populate(s)
+    root = s.runtime.store.unique_root_created_event(s.epoch.root_job_id)
+    assert root.event_type == "JOB_CREATED"
+    assert root.job_id == s.epoch.root_job_id
+    assert s.runtime.store.unique_root_created_event(s.epoch.root_job_id) == root
+    with pytest.raises(ValueError):
+        s.runtime.store.unique_root_created_event(s.epoch.root_job_id,
+                                                   max_payload_bytes=1)
+    with s.runtime.store.transaction() as conn:
+        s.runtime.store.append_event(
+            conn, aggregate_type="test", aggregate_id="duplicated-root",
+            event_type="JOB_CREATED", job_id=s.epoch.root_job_id,
+            command_id="test-r2-duplicate-root", payload={"duplicate": True})
+    with pytest.raises(ValueError):
+        s.runtime.store.unique_root_created_event(s.epoch.root_job_id)
+    with pytest.raises(ValueError):
+        s.owner._stored_request(read_ref)
