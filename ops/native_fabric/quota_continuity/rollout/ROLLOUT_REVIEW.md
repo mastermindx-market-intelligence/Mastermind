@@ -173,6 +173,16 @@ paths unchanged for remote support and flat layouts. There is no import cycle.
    Read back the entry hashes, generation selection, release hashes, and receipt.
    Only then claim the documented flat remote ingress has been upgraded.
 
+Phase 1 is the activation boundary for standard pool commands and native task
+CLI calls, including the existing Fabric facade adapter. The production facade
+opts eligible commissions into quota continuation; raw pool runs retain their
+existing single-run contract. Phase 2 retires the direct flat compatibility
+ingress. It requires an actual complete owner record; the inspected broker,
+operator and facade sources do not provide a global legacy-parent/importer
+registry. Preserve the flat remote entry when that prerequisite is unproven.
+The facade can advance after the phase-one selection and entrypoint readback
+while those compatibility callers continue on their existing flat closure.
+
 Direct raw flat helpers such as `sub.sh` and `lease_broker.py` remain legacy APIs.
 The upgraded pool routes to their new generation counterparts. The rollout does
 not claim that every raw helper path is upgraded.

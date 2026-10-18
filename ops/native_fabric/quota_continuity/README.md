@@ -77,6 +77,29 @@ strict ledger outcome, released lease, and frozen packet digest. A task-start
 reservation prevents conversion of a later CLI error into pre-task evidence.
 Each failed attempt remains independently observable and auditable.
 
+## Credential custody in the published generation
+
+The Qwen wrapper loads its selected account through a fixed `exec-codex` helper.
+The helper places the value directly into the Codex child's environment and
+replaces its own process with `codex exec`. The shell handles account names only;
+it never receives a credential through command substitution or `eval`. Shell
+tracing is disabled before wrapper setup, and an inherited credential is cleared.
+The local silent `check-key` preserves the existing key-wait and slot-release
+behavior. The exact account is checked again immediately before execution.
+
+This preserves existing initial/resume arguments, stdin, parent-owned slots,
+outer leases, same-thread continuation and final process statuses. It adds no
+provider request or account migration authority. The new generation explicitly
+retires `bailian_keys.py env`; a mismatched old wrapper receives a refusal before
+that command reads any credential. Account-name/status output remains public
+metadata. The scoped source-flow adjudication is in `SECURITY_REVIEW.md`.
+
+The original helper remains byte-for-byte evidence in
+`source/bailian_keys.py.preimage`. It is non-importable and cannot be selected as
+a deployable fallback. The stage builder requires the secure candidate and
+verifies the original preimage hash before overlaying it. Existing flat and
+historical source retains its prior contract while its old controllers finish.
+
 ## Retention and reclamation
 
 An interrupted or incomplete Codex home remains private on its original host.
@@ -109,7 +132,8 @@ conversation/lifecycle owner. This candidate does not supply that owner.
 ## Source and validation layout
 
 `candidate/` contains the proposed native files. `source/` contains inspected
-preimages and the unchanged native dependency closure. `baseline.json` records
+preimages and the unchanged native dependency closure, including the explicitly
+non-importable retired helper described above. `baseline.json` records
 exact preimage hashes for overlaid source. The rollout manifest names every
 published native file explicitly; state and credential contents are excluded.
 `rollout/` contains the finite native artifact publisher and ingress installer.
@@ -124,6 +148,8 @@ the held Executive proof operations. The wrapper integration test runs the actua
 remote executor, physical process owner, MiniMax/GLM wrappers and broker observer
 against an isolated loopback provider. Its receipts are produced by those owners,
 including the actual stdout hash and cleanup evidence.
+The repository's canonical `tests/test_native_fabric_quota_continuity.py` entry
+runs both native suites in isolated, bounded subprocesses under required CI.
 
 Claude result/error enums were checked against the official published
 `@anthropic-ai/claude-agent-sdk` 0.3.301 declarations and the official CLI reference:
@@ -163,6 +189,14 @@ owner reconciles the finite inventory of legacy parent/launcher processes and
 imported mutating callers, the second phase bridges `remote_sub.sh`. The phase-two
 receipt is bound to the exact bootstrap plan and epoch. Neither an empty lease
 table nor elapsed time substitutes for that reconciliation.
+
+Phase 1 activates the versioned code for standard pool commands, native task CLI
+requests and the existing Fabric facade's CLI adapter. The production facade
+enables eligible automatic continuation by default; direct task CLI commissions
+use `--quota-fallback`. Direct pool runs retain their existing run contracts.
+The separate phase-two retirement of flat `remote_sub.sh` remains gated on the
+complete existing-owner reconciliation record. Until that record exists, leave
+that compatibility entry and its old helpers intact and report it as legacy.
 
 Future generation selection uses an atomic compare-and-swap under an artifact
 publication lock. Running controllers retain their selected code and remote

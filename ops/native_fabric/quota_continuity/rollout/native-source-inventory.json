@@ -48,10 +48,10 @@
       "source": "source/artifact_reader.py"
     },
     "ext/bailian_keys.py": {
-      "bytes": 28654,
+      "bytes": 30957,
       "installed_preimage_sha256": "435dad2bcde27384c4c47edaea5afdf7f248d10229558193414b105664a9759c",
-      "sha256": "435dad2bcde27384c4c47edaea5afdf7f248d10229558193414b105664a9759c",
-      "source": "source/bailian_keys.py"
+      "sha256": "77052ba1b71f684ffe72962519773928b82cea39fa9d79cd974156d23aa627d2",
+      "source": "candidate/bailian_keys.py"
     },
     "ext/bootstrap_clis.py": {
       "bytes": 3015,
@@ -432,10 +432,10 @@
       "source": "candidate/quota_remote.py"
     },
     "ext/qwen_exec.sh": {
-      "bytes": 31718,
+      "bytes": 31246,
       "installed_preimage_sha256": "9173abf57c81e1b53cb555f92fc01a0942396b744ae10f3a652014e5b69306c1",
-      "sha256": "9173abf57c81e1b53cb555f92fc01a0942396b744ae10f3a652014e5b69306c1",
-      "source": "source/qwen_exec.sh"
+      "sha256": "34e5265f98c8fe5f413cda4775abaad43a76441ec59f4a4c10cb98aadf75bed1",
+      "source": "candidate/qwen_exec.sh"
     },
     "ext/recovery_artifacts.py": {
       "bytes": 9654,

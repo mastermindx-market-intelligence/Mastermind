@@ -17,6 +17,8 @@
     "glm_host_account_source.py": "1ec07bd756e8b3edc66f39218b69876f2e9aa898b0b539319e93d8c2ff68587c",
     "native_prestart_reconcile.py": "94e94625fefcfe09368b397493415dc6cd401a40f77d3787217f4fbf225e1dee",
     "native_preexec_reconcile.py": "880b8e6a2d26206f69f03a3ed04ba23c1a575a692860313680bc83a7f992f119",
-    "pool_launcher.sh": "95dad5ac680d605200252f7152ecc80b77a767016874028288822a98b2b72c78"
+    "pool_launcher.sh": "95dad5ac680d605200252f7152ecc80b77a767016874028288822a98b2b72c78",
+    "bailian_keys.py": "435dad2bcde27384c4c47edaea5afdf7f248d10229558193414b105664a9759c",
+    "qwen_exec.sh": "9173abf57c81e1b53cb555f92fc01a0942396b744ae10f3a652014e5b69306c1"
   }
 }

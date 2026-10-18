@@ -34,6 +34,10 @@ sub.sh support_bundle.py host_pull_probe.template yes
 """.split())
 ADDITIONS = frozenset({"recovery_artifacts.py", "fabric_continuation.py", "quota_circuit.py",
                       "capacity_preflight.py", "provider_outcome.py", "native_runtime_bindings.py"})
+# The retired credential-to-stdout helper is audit evidence only. It must never
+# be importable from source/ or selected as a runtime fallback. Its exact bytes
+# still have to match the installed preimage before the secure overlay is used.
+PREIMAGE_ONLY = {"bailian_keys.py": "bailian_keys.py.preimage"}
 EXTRA_PREIMAGES = {
     "yes": "b4f5e5353392e8ff4adc4158e1064243d0d7241333e9a891e05c1866b421813a",
     "host_pull_probe.template": "10ff206fb7050210e502d03c6916c092b2d82a2b8929d4b54b9cfe5b97bbea72",
@@ -62,13 +66,17 @@ def main():
     manifest = {}
     files = {}
     for name in sorted(BASE_FILES | ADDITIONS):
-        source = next((p for p in (root / "candidate" / name,
-            root / "source" / name) if p.is_file()), None)
+        choices = (root / "candidate" / name,)
+        if name not in PREIMAGE_ONLY:
+            choices += (root / "source" / name,)
+        source = next((p for p in choices if p.is_file()), None)
         if source is None or source.is_symlink():
             raise ValueError("missing explicit regular code dependency: " + name)
         preimage = rows.get(name)
         if name in BASE_FILES:
-            if not preimage or sha((root / "source" / name).read_bytes()) != preimage:
+            original = root / "source" / PREIMAGE_ONLY.get(name, name)
+            if (not preimage or original.is_symlink()
+                    or sha(original.read_bytes()) != preimage):
                 raise ValueError("installed preimage mismatch: " + name)
         raw = source.read_bytes()
         relative = "ext/" + name
