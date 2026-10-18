@@ -1393,13 +1393,13 @@ def test_d6_no_new_transport_and_all_arm_defaults_are_false():
 def _d7_reviewed_installed_event_loop(path, source, tree, node):
     # Exact source review of the canonical installed wrapper. This does not
     # exempt other run calls or imports, even inside the same function.
-    # R2 plus protected d65414e composition changes the module; the installed
-    # entry AST below stays identical. This static literal freezes only the
-    # integrated candidate, not independent review acceptance or release authority.
+    # Return plus attention composition changes the module; the installed entry
+    # AST below remains identical to protected d65414e. This static literal
+    # freezes the combined candidate, not independent review or release authority.
     from tests.executive_identity_review import _reviewed_ast_dump
     if (path != 'scripts/executive_os_phase1c.py'
             or hashlib.sha256(source.encode()).hexdigest() !=
-            '627a8be2629c058d0c1e5298fabec40dff6234c043c6bf23910a3bedf31df287'):
+            'bac689995418f71197be1c7d4e67e32ff736397d4218ccc1e2931a231d470480'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']

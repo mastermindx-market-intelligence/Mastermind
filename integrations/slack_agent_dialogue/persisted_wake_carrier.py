@@ -99,8 +99,12 @@ class PersistedWakeCarrier:
             raise TypeError("historical_context_for must be callable or None")
         if physical_source is not None and type(physical_source) is not PhysicalDialogueSourceIdentity:
             raise TypeError("physical_source must be a closed physical identity")
-        if physical_source is not None and canary_profile is None:
-            raise TypeError("physical_source requires the closed canary profile")
+        if (physical_source is not None and canary_profile is None
+                and target_registry is None):
+            raise TypeError("physical_source requires the existing target registry or closed canary profile")
+        # A typed physical source records message correlation, not delivery
+        # authority. Generic dispatch still requires the current target route,
+        # production arming, retry arming and the current RuntimeBinding.
         self._repository = repository
         self._dispatchers = dispatchers
         self._current_binding_for = current_binding_for

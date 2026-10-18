@@ -1447,7 +1447,10 @@ class ExecutiveDialogueWakeBridge:
             ):
                 return DialogueWakeResult("MISSING", "CURRENT_WRITER_REFUSED")
             carrier_route = authoritative_route
-            extra_factory: dict[str, Any] = {}
+            # Physical source correlation is not a canary activation grant.
+            # Preserve it for ordinary armed routes as well, so the current
+            # recipient reads/replies to the exact newly committed message.
+            extra_factory: dict[str, Any] = {"physical_source": request.physical_source}
             if profile is not None:
                 current_provider = self._canary_current_facts_for
                 now_provider = self._canary_now_epoch_seconds

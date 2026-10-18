@@ -118,11 +118,10 @@ def _build_executive_dialogue_wake_carrier(
             runtime_binding=binding, target_registry=registry,
         )
 
-    canary_kwargs = {}
+    canary_kwargs = {"physical_source": physical_source}
     if canary_profile is not None:
-        canary_kwargs = dict(
-            canary_profile=canary_profile, physical_source=physical_source,
-            historical_context_for=historical_context)
+        canary_kwargs.update(
+            canary_profile=canary_profile, historical_context_for=historical_context)
     if historical_only:
         if canary_profile is None:
             raise ServiceError("historical Wake requires its original canary profile")
@@ -2520,9 +2519,21 @@ def _service_from_config(
                     # projector proves native ownership; Wake arming is separate.
                     return w3c_plist_configured(release_sha=config.proof_base_sha)
 
+                from integrations.session_bridge.runtime_attention import RuntimeSessionAttention
+
+                def require_attention_admission():
+                    require_session_admission()
+                    service._namespace_custody.bound_runtime(runtime)
+                    return True
+
+                attention = RuntimeSessionAttention(
+                    runtime, dialogue_socket_path=_CANONICAL_AGENT_RELAY_SOCKET,
+                    wake_handler_provider=lambda: service._dialogue_wake_handler,
+                    admission_guard=require_attention_admission)
                 return build_runtime_session_bridge(
                     runtime, dialogue_socket_path=_CANONICAL_AGENT_RELAY_SOCKET,
-                    summon_handler=summon, codex_owner_configured=codex_owner_configured)
+                    summon_handler=summon, codex_owner_configured=codex_owner_configured,
+                    attention_requester=attention)
             session_factories["session_bridge_provider_factory"] = session_bridge_factory
         ceo_ingress_kwargs["ceo_ingress_app_binding"] = CeoIngressAppBinding(
             peer_uid=int(raw["ceo_ingress_app_peer_uid"]),
