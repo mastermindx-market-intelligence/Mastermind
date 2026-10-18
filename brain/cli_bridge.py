@@ -15,11 +15,13 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import inspect
 import json
 import os
 import shutil
 import time
 from pathlib import Path
+from typing import Callable
 
 import yaml
 
@@ -43,6 +45,36 @@ try:
     _SDK = True
 except Exception:                       # SDK not installed -> subprocess fallback
     _SDK = False
+
+
+class ProviderStartRefused(RuntimeError):
+    """Veto before an SDK/subprocess/model effect; no retry/fallback allowed."""
+
+
+def _require_provider_start(guard: Callable[[], None] | None) -> None:
+    """Existing provider's last local veto. Never mints admission authority.
+
+    The source owner supplies its original immutable observation/deadline
+    callback. Only a synchronous, successful None verdict permits continuing;
+    a denial is a non-started provider attempt, not an auth/quota failure.
+    """
+    if guard is None:
+        return
+    if not callable(guard) or inspect.iscoroutinefunction(guard):
+        raise ProviderStartRefused("source admission revoked before provider start")
+    try:
+        verdict = guard()
+    except Exception:
+        raise ProviderStartRefused("source admission revoked before provider start") from None
+    if verdict is not None:
+        try:
+            close = getattr(verdict, "close", None)
+            if callable(close):
+                close()
+        except Exception:
+            # Cleanup cannot turn an invalid verdict into a retry-classified error.
+            pass
+        raise ProviderStartRefused("source admission revoked before provider start")
 
 
 def _block_kind(b) -> str:
@@ -220,7 +252,8 @@ async def reason(prompt: str, *, role: str = "pm", model: str | None = None,
                  log_run: bool = True,
                  book: str | None = None,
                  seat: str | None = None,
-                 record_book: str | None = None) -> dict:
+                 record_book: str | None = None,
+                 before_provider_start: Callable[[], None] | None = None) -> dict:
     """Run a headless Claude Code reasoning pass. With arm=True, attaches MCP tools (read the
     dashboard + write conclusions back) + WebSearch/WebFetch and runs a multi-turn research loop.
     Pass `mcp_servers` (with a matching `allowed_tools`) to arm a CUSTOM tool surface — e.g. the
@@ -266,6 +299,8 @@ async def reason(prompt: str, *, role: str = "pm", model: str | None = None,
         book=book,
         seat=seat,
         record_book=record_book,
+        **({"before_provider_start": before_provider_start}
+           if before_provider_start is not None else {}),
     )
 
 
@@ -280,8 +315,11 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                   seat: str | None = None,
                   record_book: str | None = None,
                   _backend_override: str | None = None,
-                  _oauth_candidates: list[dict] | None = None) -> dict:
+                  _oauth_candidates: list[dict] | None = None,
+                  before_provider_start: Callable[[], None] | None = None) -> dict:
     """Internal dispatcher with explicit provider overrides for the shared pool."""
+    _veto_kw = ({"before_provider_start": before_provider_start}
+                if before_provider_start is not None else {})
     selected_backend = _selected_backend(_backend_override)
     if selected_backend == "waterfall":
         from brain import provider_waterfall
@@ -302,6 +340,7 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
             book=book,
             seat=seat,
             record_book=record_book,
+            **_veto_kw,
         )
     if selected_backend == "codex":
         from brain import codex_bridge
@@ -323,6 +362,7 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
             book=book,
             seat=seat,
             record_book=record_book,
+            **_veto_kw,
         )
         try:
             _record_cli_cost(
@@ -446,6 +486,7 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                     prompt, mdl, role, system, append_system, tools, dirs, turns, workdir,
                     rc.get("permission_mode", "default"), mcp_servers, resume, arm,
                     run_id=_run_id, env_name=_env_name, thinking_out=_think_box,
+                    **_veto_kw,
                 )
                 # THE CRUX: classify the result TEXT — org-disabled banners arrive as
                 # ok-looking results whose text contains the subscription-disabled message.
@@ -477,6 +518,11 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                 used_key_id = _key_id
                 break
 
+            except ProviderStartRefused:
+                # This veto stops the next provider entry; an earlier invocation
+                # may already have effects. Never classify it as auth/quota,
+                # rotate keys, fall back, or infer that the whole turn was unapplied.
+                raise
             except Exception as e:
                 # Two derivations of the same exception, on purpose.
                 #
@@ -548,6 +594,7 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                     result = await _via_subprocess(
                         prompt, mdl, role, system, append_system, tools, dirs, turns, workdir,
                         rc.get("permission_mode", "default"), base, env_name=_env_name,
+                        **_veto_kw,
                     )
                     # Classify subprocess result for key failure too
                     _classified2 = None
@@ -585,6 +632,7 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
             result = await _via_subprocess(
                 prompt, mdl, role, system, append_system, tools, dirs, turns, workdir,
                 rc.get("permission_mode", "default"), base, env_name=_env_name,
+                **_veto_kw,
             )
             _classified3 = None
             if _pool and _key_id is not None:
@@ -731,7 +779,8 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
 async def _via_sdk(prompt, mdl, role, system, append_system, tools, dirs, turns, workdir, perm,
                    mcp_servers, resume, arm, run_id: str | None = None,
                    env_name: str | None = None,
-                   thinking_out: list | None = None) -> dict:
+                   thinking_out: list | None = None,
+                   before_provider_start: Callable[[], None] | None = None) -> dict:
     """thinking_out: optional side-channel list; when provided, the turn's reasoning
     trace (a list of `mastermind.response_log.v1` thinking segments) is appended as ONE
     element. LEAK LAW (mirrors macro brain_gateway): thinking is LOG-ONLY — it rides
@@ -763,6 +812,10 @@ async def _via_sdk(prompt, mdl, role, system, append_system, tools, dirs, turns,
         _rl = None
         _log = None
 
+    # The first SDK query iteration may start a remote provider/model effect.
+    # Evaluate the source owner's veto AFTER SDK/MCP option preparation and
+    # immediately BEFORE handing it to the original SDK owner.
+    _require_provider_start(before_provider_start)
     async for msg in _sdk_query(prompt=prompt, options=opts):
         if hasattr(msg, "result"):                         # ResultMessage
             text = getattr(msg, "result", None) or text
@@ -840,7 +893,8 @@ async def _via_sdk(prompt, mdl, role, system, append_system, tools, dirs, turns,
 
 
 async def _via_subprocess(prompt, mdl, role, system, append_system, tools, dirs, turns, workdir, perm, base,
-                          env_name: str | None = None) -> dict:
+                          env_name: str | None = None,
+                          before_provider_start: Callable[[], None] | None = None) -> dict:
     # NOTE: `--output-format json` returns only the final result text — no content
     # blocks arrive here, so this backend has no thinking to capture; the response
     # ledger still logs the turn (with thinking=[]) from reason().
@@ -854,6 +908,9 @@ async def _via_subprocess(prompt, mdl, role, system, append_system, tools, dirs,
         argv += ["--system-prompt", system]
     if append_system:
         argv += ["--append-system-prompt", append_system]
+    # The caller's veto is not a provider selection/budget grant. It is
+    # checked after argv preparation, before any process effect occurs.
+    _require_provider_start(before_provider_start)
     proc = await asyncio.create_subprocess_exec(
         *argv, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE, cwd=workdir, env=_subscription_env(env_name))

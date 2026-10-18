@@ -18,7 +18,7 @@ import tempfile
 import time
 import tomllib
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import yaml
 
@@ -464,7 +464,8 @@ async def reason(prompt: str, *, role: str = "pm", model: str | None = None,
                  mcp_servers: dict | None = None,
                  log_run: bool = True, book: str | None = None,
                  seat: str | None = None,
-                 record_book: str | None = None) -> dict:
+                 record_book: str | None = None,
+                 before_provider_start: Callable[[], None] | None = None) -> dict:
     """Run one non-interactive Codex turn and return the cli_bridge contract."""
     del add_dirs, resume, log_run, seat, record_book
     selected, effort = resolve_model(role, model)
@@ -622,7 +623,12 @@ async def reason(prompt: str, *, role: str = "pm", model: str | None = None,
         # This path is non-secret. Only the local MCP adapter opens the owner-only bundle; the
         # model process and its disabled shell surfaces never receive credential values.
         process_env[_MCP_SECRET_FILE_ENV] = str(secret_file)
+    from brain.cli_bridge import ProviderStartRefused, _require_provider_start
     try:
+        # This is the LAST source-origin veto after argv/MCP/credential/env
+        # preparation and before the existing Codex subprocess effect. It
+        # cannot grant any provider, model, tool or portfolio authority.
+        _require_provider_start(before_provider_start)
         proc = await asyncio.create_subprocess_exec(
             *argv,
             stdin=asyncio.subprocess.PIPE,
@@ -639,6 +645,10 @@ async def reason(prompt: str, *, role: str = "pm", model: str | None = None,
             pass
         return {**base, "ok": False, "backend": "codex", "text": None,
                 "error": f"codex timeout after {timeout}s"}
+    except ProviderStartRefused:
+        # A pre-start veto is NOT an auth/quota failure and must not be
+        # swallowed into a result that another backend might retry.
+        raise
     except Exception as exc:
         return {**base, "ok": False, "backend": "codex", "text": None,
                 "error": repr(exc)[:1000]}
@@ -713,6 +723,8 @@ async def reason(prompt: str, *, role: str = "pm", model: str | None = None,
         arm=arm,
         mcp_servers=mcp_servers,
         book=book,
+        **({"before_provider_start": before_provider_start}
+           if before_provider_start is not None else {}),
     )
     submitted["research_session_id"] = result.get("session_id")
     submitted["research_tools_used"] = result.get("tools_used") or []

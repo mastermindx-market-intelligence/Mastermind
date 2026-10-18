@@ -313,3 +313,48 @@ def test_run_autonomous_decides_on_submission_effect_not_brain_ok(
     else:
         assert out.get("executed") in (None, [])
         assert out["target_status"] == "rejected_no_submission"
+
+
+@pytest.mark.parametrize("file_written", [False, True])
+def test_run_autonomous_raised_prestart_veto_preserves_submission_effect(
+    iso, monkeypatch, file_written,
+):
+    """A veto of the next entry cannot erase a prior submission or cause replay."""
+    from brain import autonomous_mcp
+    from brain.cli_bridge import ProviderStartRefused
+    from bot import autonomous, settle
+
+    prices = {"NVDA": 210.0, "SPY": 740.0}
+    monkeypatch.setattr(paper_account, "_current_price", lambda t: prices.get(t))
+    monkeypatch.setattr(settle, "is_open", lambda _pid: True)
+    runs = []
+    submitted = {
+        "holdings": [{"ticker": "NVDA", "weight": 0.4,
+                      "rationale": "Synthetic retained submission"}],
+        "summary": "synthetic retained submission", "gross": 0.4,
+    }
+
+    def fake_brain(asof, inaugural):
+        runs.append(asof)
+        if file_written:
+            path = autonomous_mcp.submission_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(submitted))
+        raise ProviderStartRefused("source admission revoked before provider start")
+
+    monkeypatch.setattr(autonomous, "_run_brain", fake_brain)
+    out = autonomous.run_autonomous(asof="2026-06-21", armed=True)
+    assert runs == ["2026-06-21"]
+    assert out["brain"]["ok"] is False
+    assert "ProviderStartRefused" in out["brain"]["error"]
+    assert out["decided"] is file_written
+    if file_written:
+        retained = autonomous_mcp.read_submission()
+        assert retained["holdings"] == submitted["holdings"]
+        assert retained["summary"] == submitted["summary"]
+        assert {row["ticker"] for row in out["executed"]} == {"NVDA"}
+        assert out["target_status"] != "rejected_no_submission"
+    else:
+        assert autonomous_mcp.read_submission() is None
+        assert out.get("executed") in (None, [])
+        assert out["target_status"] == "rejected_no_submission"
