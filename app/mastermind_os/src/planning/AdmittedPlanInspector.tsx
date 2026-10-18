@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { decodeAdmittedPlan, validPlanSelection, type PlanRead, type PlanSelection } from "./admitted-plan";
+import { validPlanSelection, type PlanRead, type PlanSelection } from "./admitted-plan";
 import "./admitted-plan.css";
 
-/** The injected reader must be the existing authenticated Workspace acquisition owner. */
-export type AdmittedPlanReader = (request: PlanSelection & { signal: AbortSignal }) => Promise<unknown>;
+/** The existing authenticated MissionHost performs the sole raw-owner decode. */
+export type AdmittedPlanReader = (request: PlanSelection & { signal: AbortSignal }) => Promise<PlanRead>;
 export interface AdmittedPlanInspectorProps {
   selection: PlanSelection | null;
   read?: AdmittedPlanReader;
@@ -46,11 +46,9 @@ export function AdmittedPlanInspector({
     setDocument(null);
     setState("loading");
     try {
-      const raw = await read({ ...selection, signal: controller.signal });
+      const qualifiedPlan = await read({ ...selection, signal: controller.signal });
       if (!current()) return;
-      const parsed = decodeAdmittedPlan(raw, selection);
-      if (!current()) return;
-      setDocument(parsed);
+      setDocument(qualifiedPlan);
       setState("ready");
     } catch {
       if (current()) setState("unavailable");

@@ -690,6 +690,9 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       send: (arguments_, signal) => executivePost("session/send", arguments_, signal),
       reply: (arguments_, signal) => executivePost("session/reply", arguments_, signal),
     } satisfies ExecutiveSessionTransport,
+    // Same existing OAuth generation used by every bounded acquisition read.
+    // The MissionHost requires this proof before it mounts the plan port.
+    invalidationGeneration: () => generation,
     getState,
     subscribe(listener) {
       listeners.add(listener);

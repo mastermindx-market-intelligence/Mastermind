@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 afterEach(() => cleanup());
 import { AdmittedPlanInspector } from "./AdmittedPlanInspector";
-import { decodeAdmittedPlan, type PlanSelection } from "./admitted-plan";
+import { decodeAdmittedPlan, type PlanRead, type PlanSelection } from "./admitted-plan";
 
 const selection: PlanSelection = { work_ref: "WS:PLAN-VISIBILITY", root_job_id: "JOB-123" };
 const digest = "a".repeat(64);
@@ -91,7 +91,7 @@ describe("authenticated admitted-plan contract", () => {
 
 describe("admitted plan inspector", () => {
   it("starts no read automatically; selection opens only through explicit interaction", async () => {
-    const read = vi.fn(async () => fixture());
+    const read = vi.fn(async () => decodeAdmittedPlan(fixture(), selection));
     render(<AdmittedPlanInspector selection={selection} read={read}
       sourceGeneration={() => 7} canRead={() => true} />);
     expect(read).not.toHaveBeenCalled();
@@ -104,27 +104,27 @@ describe("admitted plan inspector", () => {
     expect(read).toHaveBeenCalledWith(expect.objectContaining(selection));
   });
   it("has no read action without the source and permission owner", () => {
-    const read = vi.fn(async () => fixture());
+    const read = vi.fn(async () => decodeAdmittedPlan(fixture(), selection));
     render(<AdmittedPlanInspector selection={selection} read={read}
       sourceGeneration={() => 1} canRead={() => false} />);
     expect(screen.getByRole("button", { name: "Inspect plan" })).toHaveProperty("disabled", true);
     expect(read).not.toHaveBeenCalled();
   });
   it("drops obsolete responses on identity change and source-generation revocation", async () => {
-    let release!: (value: unknown) => void;
+    let release!: (value: PlanRead) => void;
     let epoch = 4;
-    const read = vi.fn(() => new Promise<unknown>(resolve => { release = resolve; }));
+    const read = vi.fn(() => new Promise<PlanRead>(resolve => { release = resolve; }));
     const props = { read, sourceGeneration: () => epoch, canRead: () => true };
     const view = render(<AdmittedPlanInspector selection={selection} {...props} />);
     fireEvent.click(screen.getByRole("button", { name: "Inspect plan" }));
     epoch = 5;
-    release(fixture());
+    release(decodeAdmittedPlan(fixture(), selection));
     await waitFor(() => expect(screen.queryByText("Investigate the original parent route")).toBeNull());
     view.rerender(<AdmittedPlanInspector selection={{ ...selection, root_job_id: "JOB-124" }} {...props} />);
     expect(screen.queryByText("Investigate the original parent route")).toBeNull();
   });
   it("preserves unavailable vs admitted and localizes the surface", async () => {
-    const read = vi.fn(async () => unavailable());
+    const read = vi.fn(async () => decodeAdmittedPlan(unavailable(), selection));
     render(<AdmittedPlanInspector selection={selection} read={read}
       sourceGeneration={() => 0} canRead={() => true} locale="zh-CN" />);
     fireEvent.click(screen.getByRole("button", { name: "检查计划" }));
@@ -201,5 +201,43 @@ describe("native original-owner plan read", () => {
     release(fixture());
     await expect(pending).rejects.toThrow("READ_CANCELLED");
     expect(host.auth?.getState().status).toBe("signed_out");
+  });
+});
+
+describe("end-to-end admitted plan host to inspector contract", () => {
+  const clientWith = (readAdmittedPlan: (request: PlanSelection & { signal: AbortSignal }) => Promise<unknown>) => ({
+    getState: () => ({ status: "signed_in", acquisition: true, content: false, reason: null }),
+    invalidationGeneration: () => 7,
+    subscribe: () => () => {},
+    signIn: async () => {}, signOut: async () => {},
+    readPrograms: async () => null, readWork: async () => null,
+    readMission: async () => null, readCurrentWindow: async () => null,
+    readAdmittedPlan,
+  });
+  it("renders one genuine authenticated host decode without re-decoding its PlanRead projection", async () => {
+    const { bindMissionHost } = await import("../host");
+    const acquire = vi.fn(async () => fixture());
+    const host = bindMissionHost(clientWith(acquire) as any);
+    render(<AdmittedPlanInspector selection={selection} read={host.readAdmittedPlan}
+      sourceGeneration={host.invalidationGeneration}
+      canRead={() => { const state = host.auth!.getState(); return state.status === "signed_in" && state.acquisition; }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Inspect plan" }));
+    expect(await screen.findByText("Investigate the original parent route")).toBeTruthy();
+    expect(screen.getByText("Verify the authenticated route")).toBeTruthy();
+    expect(acquire).toHaveBeenCalledTimes(1);
+  });
+  it("rejects an owner response for a different root without displaying its plan", async () => {
+    const { bindMissionHost } = await import("../host");
+    const foreign = fixture();
+    foreign.selection.root_job_id = "JOB-999";
+    const acquire = vi.fn(async () => foreign);
+    const host = bindMissionHost(clientWith(acquire) as any);
+    render(<AdmittedPlanInspector selection={selection} read={host.readAdmittedPlan}
+      sourceGeneration={host.invalidationGeneration}
+      canRead={() => true} />);
+    fireEvent.click(screen.getByRole("button", { name: "Inspect plan" }));
+    expect(await screen.findByText("Plan read unavailable; no progress inferred.")).toBeTruthy();
+    expect(screen.queryByText("Investigate the original parent route")).toBeNull();
+    expect(acquire).toHaveBeenCalledTimes(1);
   });
 });
