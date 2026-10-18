@@ -759,6 +759,8 @@ def test_status_qualifies_closed_day_marks_without_rewriting_or_recomputing(
     saved = fe.evaluate("autonomous", "2026-09-08")
     assert not market_calendar.is_trading_day(date(2026, 9, 7))
     assert saved["metrics"]["marked_session_count"]["value"] == 3
+    # Preserve explicit behavior when the older calendar contract is installed.
+    monkeypatch.delattr(market_calendar, "session_date_evidence", raising=False)
 
     def inventory() -> dict[str, bytes]:
         return {str(p.relative_to(isolated_root)): p.read_bytes()
@@ -878,6 +880,8 @@ def test_nav_date_basis_saved_api_survives_later_journal_changes_without_reading
     from app import web
 
     book_dir, saved = _seed_nav_date_basis(isolated_root)
+    from portfolio import market_calendar
+    monkeypatch.delattr(market_calendar, "session_date_evidence", raising=False)
     (book_dir / "nav_history.jsonl").unlink()
 
     def forbidden(*args, **kwargs):
@@ -1060,3 +1064,263 @@ def test_nav_date_basis_fingerprint_failure_preserves_snapshot_and_status(isolat
     assert q["date_basis"]["status"] == "unavailable"
     assert q["date_basis"]["missing_reason"] == "stored_date_basis_cohort_unverified"
     assert {str(p): p.read_bytes() for p in isolated_root.rglob("*") if p.is_file()} == before
+
+
+@pytest.fixture()
+def calendar_wire(monkeypatch):
+    """Controlled wire fixture; composed proof separately uses the real owner method."""
+    from datetime import date, timedelta
+    from portfolio import market_calendar as us, china_calendar as asia
+
+    state = {"calls": [], "mutate": lambda value: value, "fail": False}
+
+    def read(venue, begin, end):
+        state["calls"].append((venue, begin.isoformat(), end.isoformat()))
+        if state["fail"]:
+            raise RuntimeError("isolated calendar source failure")
+        owner = us if venue == "US" else asia
+        holidays = (us._HOLIDAYS if venue == "US" else
+                    asia._HKEX_HOLIDAYS if venue == "HK" else asia._HOLIDAYS)
+        covered = date(2026, 1, 1) <= begin <= end <= date(2026, 12, 31)
+        days = ([begin + timedelta(days=i) for i in range((end - begin).days + 1)]
+                if covered else [])
+        scheduled = [
+            day.isoformat() for day in days
+            if (owner.is_trading_day(day) if venue == "US"
+                else owner.is_trading_day(day, venue=venue))
+        ]
+        wire = {
+            "schema": "mastermind.cash_session_date_evidence.v1",
+            "calendar_owner": "portfolio.market_calendar" if venue == "US"
+                              else "portfolio.china_calendar",
+            "venue": venue, "start": begin.isoformat(), "end": end.isoformat(),
+            "coverage_start": "2026-01-01", "coverage_end": "2026-12-31",
+            "source_checked_on": "2026-10-18",
+            "source_refs": ["https://example.test/isolated-calendar-wire"],
+            "scope": "published_static_cash_session_dates",
+            "exceptional_closures": "listed_only",
+            "price_or_cutoff_qualified": False,
+            "rule_version": "monday_friday_excluding_listed_closures.v1",
+            "full_day_closures": sorted(day.isoformat() for day in holidays
+                                       if day.year == 2026),
+            "scheduled_dates": scheduled if covered else None,
+            "status": "available" if covered else "unavailable",
+            "missing_reason": None if covered else "outside_published_calendar_coverage",
+        }
+        return state["mutate"](wire)
+
+    monkeypatch.setattr(us, "session_date_evidence",
+                        lambda begin, end: read("US", begin, end), raising=False)
+    monkeypatch.setattr(asia, "session_date_evidence",
+                        lambda begin, end, venue="CN": read(venue, begin, end), raising=False)
+    return state
+
+
+def _seed_calendar_nav(root, monkeypatch, book, dates, asof=None):
+    from portfolio import forward_evaluation as fe
+
+    base = fe._portfolio_data_dir(book)
+    _seed_legacy(base)
+    _activate_start()
+    legacy = json.loads((base / "nav_history.jsonl").read_text().splitlines()[0])
+    rows = [legacy] + [
+        {"date": day, "nav": 1_000_000.0, "cash": 400_000.0, "invested": 600_000.0,
+         "spy_nav": 1_000_000.0, "benchmark": "SPY"}
+        for day in dates
+    ]
+    _write_jsonl(base / "nav_history.jsonl", rows)
+    end = asof or (max(dates) if dates else "2026-08-13")
+    monkeypatch.setattr(fe, "_utc_today", lambda: end)
+    return base, fe.evaluate(book, end)
+
+
+@pytest.mark.parametrize("book,dates,closed", [
+    ("autonomous", ["2026-09-04", "2026-09-07", "2026-09-08"], "2026-09-07"),
+    ("china", ["2026-09-24", "2026-09-25", "2026-09-28"], "2026-09-25"),
+    ("hk", ["2026-09-30", "2026-10-01", "2026-10-02"], "2026-10-01"),
+])
+def test_calendar_join_qualifies_saved_dates_through_actual_api_without_rewriting(
+    isolated_root, monkeypatch, calendar_wire, book, dates, closed,
+):
+    from portfolio import forward_evaluation as fe
+    from app import web
+
+    base, saved = _seed_calendar_nav(isolated_root, monkeypatch, book, dates)
+    (base / "nav_history.jsonl").unlink()
+    before = {str(p): p.read_bytes() for p in isolated_root.rglob("*") if p.is_file()}
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("calendar join must not read or reconstruct NAV inputs")
+
+    for name in ("_read_inputs", "_read_jsonl", "build_snapshot", "evaluate"):
+        monkeypatch.setattr(fe, name, forbidden)
+    response = json.loads(web.api_forward_evaluation(portfolio=book).body)
+    q = response["observation_qualification"]
+    assert response["snapshot"] == saved
+    assert q["schema"] == "mastermind.portfolio_forward_evaluation.observation_qualification.v2"
+    assert q["source_scope"] == "stored_snapshot_and_current_calendar_evidence"
+    assert q["reported_mark_count"] == 3
+    assert q["calendar_session_count"] == 2
+    assert q["calendar_status"] == "available"
+    assert q["calendar_count_unit"] == "selected_nav_dates_on_scheduled_cash_sessions"
+    assert q["calendar_basis"]["selected_session_dates"] == [day for day in dates if day != closed]
+    assert q["calendar_basis"]["non_session_mark_dates"] == [closed]
+    assert q["calendar_basis"]["interpretation"] == "current_published_calendar_on_saved_nav_dates"
+    assert q["calendar_basis"]["nav_date_basis_fingerprint"] == saved["nav_date_basis"]["fingerprint"]
+    assert "2026-08-11" in q["calendar_basis"]["scheduled_dates_without_forward_mark"]
+    assert q["calendar_basis"]["scheduled_session_count"] > 2
+    assert q["price_qualified_session_count"] is None
+    assert q["price_status"] == "not_checked"
+    assert q["eligible_for_session_gate"] is False
+    assert len(calendar_wire["calls"]) == 1
+    assert {str(p): p.read_bytes() for p in isolated_root.rglob("*") if p.is_file()} == before
+
+
+def test_calendar_join_missing_owner_is_explicit_and_never_uses_weekday_fallback(
+    isolated_root, monkeypatch,
+):
+    from portfolio import forward_evaluation as fe, market_calendar as us
+
+    _seed_calendar_nav(isolated_root, monkeypatch, "autonomous", ["2026-08-12"])
+    monkeypatch.delattr(us, "session_date_evidence", raising=False)
+    q = fe.status("autonomous")["observation_qualification"]
+    assert q["reported_mark_count"] == 1
+    assert q["calendar_session_count"] is None
+    assert q["calendar_status"] == "not_checked"
+    assert q["calendar_missing_reason"] == "calendar_evidence_contract_unavailable"
+
+
+def test_calendar_join_legacy_basis_never_calls_current_calendar(
+    isolated_root, monkeypatch, calendar_wire,
+):
+    from portfolio import forward_evaluation as fe
+
+    _, saved = _seed_calendar_nav(isolated_root, monkeypatch, "autonomous", ["2026-08-12"])
+    saved.pop("nav_date_basis")
+    for name in ("latest.json", "2026-08-12.json"):
+        _write_json(fe._book_output_dir("autonomous") / name, saved)
+    calendar_wire["fail"] = True
+    q = fe.status("autonomous")["observation_qualification"]
+    assert q["reported_mark_count"] == 1
+    assert q["calendar_session_count"] is None
+    assert q["calendar_missing_reason"] == "saved_nav_date_basis_unavailable"
+    assert not calendar_wire["calls"]
+
+
+@pytest.mark.parametrize("dates", [[], ["2026-09-07"]])
+def test_calendar_join_preserves_real_zero_for_no_selected_session_dates(
+    isolated_root, monkeypatch, calendar_wire, dates,
+):
+    from portfolio import forward_evaluation as fe
+
+    _seed_calendar_nav(isolated_root, monkeypatch, "autonomous", dates)
+    q = fe.status("autonomous")["observation_qualification"]
+    assert q["reported_mark_count"] == len(dates)
+    assert q["calendar_session_count"] == 0
+    assert q["calendar_status"] == "available"
+    assert q["calendar_basis"]["non_session_mark_dates"] == dates
+    assert q["eligible_for_session_gate"] is False
+
+
+def test_calendar_join_partial_input_never_becomes_complete_evidence(
+    isolated_root, monkeypatch, calendar_wire,
+):
+    from portfolio import forward_evaluation as fe
+
+    base, _ = _seed_calendar_nav(isolated_root, monkeypatch, "autonomous", ["2026-08-12"])
+    with (base / "nav_history.jsonl").open("a") as f:
+        f.write("{broken\n")
+    saved = fe.evaluate("autonomous", "2026-08-12")
+    q = fe.status("autonomous")["observation_qualification"]
+    assert saved["metrics"]["marked_session_count"]["status"] == "partial"
+    assert q["calendar_session_count"] == 1
+    assert q["calendar_status"] == "partial"
+    assert q["calendar_missing_reason"] == "partial_nav_date_basis"
+    assert q["calendar_basis"]["nav_date_basis_status"] == "partial"
+    assert q["eligible_for_session_gate"] is False
+
+
+def test_calendar_join_withholds_a_window_outside_calendar_coverage(
+    isolated_root, monkeypatch, calendar_wire,
+):
+    from portfolio import forward_evaluation as fe
+
+    _seed_calendar_nav(isolated_root, monkeypatch, "china", ["2027-01-04"])
+    q = fe.status("china")["observation_qualification"]
+    assert q["reported_mark_count"] == 1
+    assert q["calendar_session_count"] is None
+    assert q["calendar_status"] == "unavailable"
+    assert q["calendar_missing_reason"] == "outside_published_calendar_coverage"
+
+
+def test_calendar_join_source_failure_cannot_erase_original_snapshot(
+    isolated_root, monkeypatch, calendar_wire,
+):
+    from portfolio import forward_evaluation as fe
+    from app import web
+
+    _, saved = _seed_calendar_nav(isolated_root, monkeypatch, "autonomous", ["2026-08-12"])
+    calendar_wire["fail"] = True
+    response = json.loads(web.api_forward_evaluation(portfolio="autonomous").body)
+    assert response["snapshot"] == saved
+    q = response["observation_qualification"]
+    assert q["reported_mark_count"] == 1
+    assert q["calendar_session_count"] is None
+    assert q["calendar_status"] == "unavailable"
+    assert q["calendar_missing_reason"] == "calendar_source_failed"
+
+
+@pytest.mark.parametrize("field,value", [
+    ("schema", "unknown"),
+    ("calendar_owner", "portfolio.china_calendar"),
+    ("venue", "HK"),
+    ("start", "2026-08-10"),
+    ("end", "2026-08-13"),
+    ("coverage_start", "2026-08-13"),
+    ("scope", "actual_executed_sessions"),
+    ("price_or_cutoff_qualified", True),
+    ("rule_version", "weekday_guess"),
+    ("scheduled_dates", ["2026-08-12"]),
+    ("scheduled_dates", ["2026-08-11", "2026-08-11", "2026-08-12"]),
+    ("full_day_closures", ["2026-08-12"]),
+    ("source_refs", ["https://example.test/fixture"] * 9),
+    ("source_refs", ["https://example.test/\ud800"]),
+])
+def test_calendar_join_rejects_wrong_truncated_or_inconsistent_calendar(
+    isolated_root, monkeypatch, calendar_wire, field, value,
+):
+    from portfolio import forward_evaluation as fe
+
+    _, saved = _seed_calendar_nav(isolated_root, monkeypatch, "autonomous", ["2026-08-12"])
+    calendar_wire["mutate"] = lambda wire: {**wire, field: value}
+    response = fe.status("autonomous")
+    assert response["snapshot"] == saved
+    q = response["observation_qualification"]
+    assert q["reported_mark_count"] == 1
+    assert q["calendar_session_count"] is None
+    assert q["calendar_status"] == "unavailable"
+    assert q["calendar_missing_reason"] == "calendar_source_invalid"
+    assert q["calendar_basis"] is None
+
+
+def test_calendar_join_content_change_is_versioned_without_mutating_saved_cohort(
+    isolated_root, monkeypatch, calendar_wire,
+):
+    from datetime import date
+    from portfolio import forward_evaluation as fe, market_calendar as us
+
+    _, saved = _seed_calendar_nav(isolated_root, monkeypatch, "autonomous",
+                                  ["2026-08-12", "2026-08-13"])
+    before_files = {str(p): p.read_bytes() for p in isolated_root.rglob("*") if p.is_file()}
+    before = fe.status("autonomous")["observation_qualification"]
+    monkeypatch.setattr(us, "_HOLIDAYS", us._HOLIDAYS | {date(2026, 8, 12)})
+    response = fe.status("autonomous")
+    after = response["observation_qualification"]
+    assert response["snapshot"] == saved
+    assert before["reported_mark_count"] == after["reported_mark_count"] == 2
+    assert before["calendar_session_count"] == 2
+    assert after["calendar_session_count"] == 1
+    assert before["calendar_basis"]["calendar_content_fingerprint"] != after["calendar_basis"]["calendar_content_fingerprint"]
+    assert before["calendar_basis"]["fingerprint"] != after["calendar_basis"]["fingerprint"]
+    assert before["date_basis"] == after["date_basis"]
+    assert {str(p): p.read_bytes() for p in isolated_root.rglob("*") if p.is_file()} == before_files

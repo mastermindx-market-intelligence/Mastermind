@@ -30,7 +30,7 @@ import re
 import statistics
 from contextlib import contextmanager
 from contextvars import ContextVar
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
@@ -1810,6 +1810,127 @@ def _saved_nav_date_basis(book_status: dict[str, Any], snapshot: Any,
     return {**basis, "date_labels": list(dates)}
 
 
+def _qualify_calendar_dates(book: str, date_basis: dict[str, Any]) -> dict[str, Any]:
+    """Join a saved date basis to explicitly covered, current calendar evidence.
+
+    This is a versioned interpretation of saved observations, not a rewrite of
+    the original cohort or proof of actual trading, prices, cutoffs or returns.
+    """
+    def unavailable(reason: str, status: str = "not_checked") -> dict[str, Any]:
+        return {
+            "calendar_session_count": None,
+            "calendar_status": status,
+            "calendar_missing_reason": reason,
+            "calendar_count_unit": "selected_nav_dates_on_scheduled_cash_sessions",
+            "calendar_basis": None,
+        }
+
+    if date_basis.get("status") not in {"available", "partial"}:
+        return unavailable("saved_nav_date_basis_unavailable")
+    venue = {"autonomous": "US", "china": "CN", "hk": "HK"}.get(book)
+    if venue is None:
+        return unavailable("calendar_book_unavailable")
+    try:
+        from portfolio import china_calendar, market_calendar
+        owner = market_calendar if venue == "US" else china_calendar
+        reader = getattr(owner, "session_date_evidence", None)
+        if not callable(reader):
+            return unavailable("calendar_evidence_contract_unavailable")
+        begin = date.fromisoformat(date_basis["evaluation_start"])
+        end = date.fromisoformat(date_basis["asof"])
+        if not 0 <= (end - begin).days < _MAX_NAV_DATE_LABELS:
+            return unavailable("calendar_window_limit_exceeded", "unavailable")
+        raw = (reader(begin, end) if venue == "US"
+               else reader(begin, end, venue=venue))
+    except Exception:
+        return unavailable("calendar_source_failed", "unavailable")
+
+    try:
+        fields = {
+            "schema", "calendar_owner", "venue", "start", "end", "coverage_start",
+            "coverage_end", "source_checked_on", "source_refs", "scope",
+            "exceptional_closures", "price_or_cutoff_qualified", "rule_version",
+            "full_day_closures", "scheduled_dates", "status", "missing_reason",
+        }
+        expected_owner = ("portfolio.market_calendar" if venue == "US"
+                          else "portfolio.china_calendar")
+        if (type(raw) is not dict or set(raw) != fields
+                or raw["schema"] != "mastermind.cash_session_date_evidence.v1"
+                or raw["calendar_owner"] != expected_owner or raw["venue"] != venue
+                or raw["start"] != begin.isoformat() or raw["end"] != end.isoformat()
+                or raw["scope"] != "published_static_cash_session_dates"
+                or raw["exceptional_closures"] != "listed_only"
+                or raw["price_or_cutoff_qualified"] is not False
+                or raw["rule_version"] != "monday_friday_excluding_listed_closures.v1"):
+            return unavailable("calendar_source_invalid", "unavailable")
+        for key in ("coverage_start", "coverage_end", "source_checked_on"):
+            if type(raw[key]) is not str or _day(raw[key]) != raw[key]:
+                return unavailable("calendar_source_invalid", "unavailable")
+        coverage_start = date.fromisoformat(raw["coverage_start"])
+        coverage_end = date.fromisoformat(raw["coverage_end"])
+        if coverage_start > coverage_end:
+            return unavailable("calendar_source_invalid", "unavailable")
+        sources = raw["source_refs"]
+        closures = raw["full_day_closures"]
+        if (type(sources) is not list or not 1 <= len(sources) <= 8
+                or not all(type(ref) is str and ref.startswith("https://")
+                           and len(ref) <= 1024 for ref in sources)
+                or type(closures) is not list or len(closures) > _MAX_NAV_DATE_LABELS
+                or not all(type(day) is str and _day(day) == day
+                           and raw["coverage_start"] <= day <= raw["coverage_end"]
+                           for day in closures)
+                or closures != sorted(set(closures))):
+            return unavailable("calendar_source_invalid", "unavailable")
+        covered = coverage_start <= begin <= end <= coverage_end
+        if not covered:
+            if (raw["status"] == "unavailable" and raw["scheduled_dates"] is None
+                    and raw["missing_reason"] == "outside_published_calendar_coverage"):
+                return unavailable("outside_published_calendar_coverage", "unavailable")
+            return unavailable("calendar_source_invalid", "unavailable")
+        scheduled = raw["scheduled_dates"]
+        if (raw["status"] != "available" or raw["missing_reason"] is not None
+                or type(scheduled) is not list or len(scheduled) > _MAX_NAV_DATE_LABELS
+                or not all(type(day) is str and _day(day) == day for day in scheduled)
+                or scheduled != sorted(set(scheduled))):
+            return unavailable("calendar_source_invalid", "unavailable")
+        # Validate completeness against the owner's declared, closed v1 rule.
+        # A truncated or internally inconsistent schedule is not a denominator.
+        closed = set(closures)
+        window = [begin + timedelta(days=i) for i in range((end - begin).days + 1)]
+        expected = [day.isoformat() for day in window
+                    if day.weekday() < 5 and day.isoformat() not in closed]
+        if scheduled != expected:
+            return unavailable("calendar_source_invalid", "unavailable")
+        # Copy the bounded wire value before hashing or returning mutable children.
+        calendar = json.loads(_canonical(raw))
+        selected, scheduled_set = set(date_basis["date_labels"]), set(scheduled)
+        matched = sorted(selected & scheduled_set)
+        projection = {
+            "schema": "mastermind.portfolio_forward_evaluation.calendar_basis.v1",
+            "interpretation": "current_published_calendar_on_saved_nav_dates",
+            "book": book,
+            "nav_date_basis_fingerprint": date_basis["fingerprint"],
+            "nav_date_basis_status": date_basis["status"],
+            "calendar_content_fingerprint": _digest(calendar),
+            "calendar_evidence": calendar,
+            "selected_session_dates": matched,
+            "non_session_mark_dates": sorted(selected - scheduled_set),
+            "scheduled_dates_without_forward_mark": sorted(scheduled_set - selected),
+            "scheduled_session_count": len(scheduled),
+        }
+        projection["fingerprint"] = _digest(projection)
+    except Exception:
+        return unavailable("calendar_source_invalid", "unavailable")
+    partial = date_basis["status"] == "partial"
+    return {
+        "calendar_session_count": len(matched),
+        "calendar_status": "partial" if partial else "available",
+        "calendar_missing_reason": "partial_nav_date_basis" if partial else None,
+        "calendar_count_unit": "selected_nav_dates_on_scheduled_cash_sessions",
+        "calendar_basis": projection,
+    }
+
+
 def _qualify_mark_observations(book_status: dict[str, Any]) -> dict[str, Any]:
     """Qualify the saved count without recomputing or rewriting its snapshot.
 
@@ -1840,25 +1961,28 @@ def _qualify_mark_observations(book_status: dict[str, Any]) -> dict[str, Any]:
         reason = "reported_mark_count_unavailable"
     else:
         reason = None
+    date_basis = _saved_nav_date_basis(
+        book_status, snapshot, value if usable else None, source_status if usable else None)
+    calendar = _qualify_calendar_dates(book, date_basis)
     return {
         **book_status,
         "observation_qualification": {
-            "schema": "mastermind.portfolio_forward_evaluation.observation_qualification.v1",
+            "schema": "mastermind.portfolio_forward_evaluation.observation_qualification.v2",
             "source_metric": "marked_session_count",
-            "source_scope": "stored_snapshot_only",
+            "source_scope": "stored_snapshot_and_current_calendar_evidence",
             "reported_mark_count": value if usable else None,
             "reported_mark_count_status": source_status if usable else "unavailable",
             "reported_mark_count_missing_reason": reason,
             "count_unit": "recorded_nav_date_labels",
-            "date_basis": _saved_nav_date_basis(
-                book_status, snapshot, value if usable else None,
-                source_status if usable else None),
-            "calendar_session_count": None,
-            "calendar_status": "not_checked",
+            "date_basis": date_basis,
+            **calendar,
             "price_qualified_session_count": None,
             "price_status": "not_checked",
             "eligible_for_session_gate": False,
-            "qualification_reason": "exchange_sessions_and_point_in_time_prices_not_verified",
+            "qualification_reason": (
+                "point_in_time_prices_not_verified"
+                if calendar["calendar_status"] in {"available", "partial"}
+                else "exchange_sessions_and_point_in_time_prices_not_verified"),
         },
     }
 
