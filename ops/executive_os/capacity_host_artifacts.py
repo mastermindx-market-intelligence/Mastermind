@@ -131,6 +131,20 @@ _V2_WORKTREE_CONFIG = (
 _V2_SPARSE_CHECKOUT = b"".join(
     f"/{path}\n".encode("utf-8") for path in PRODUCER_MATERIAL_PATHS
 )
+# One closed native profile in the incumbent source-closure owner. Building a
+# transport proves source content; it does not admit a release, enroll a realm,
+# enable a provider, or authorize any service/configuration effect.
+NATIVE_TRANSPORT_SCHEMA = "mastermind.capacity_source_transport/native_v1"
+NATIVE_PRODUCER_COMMIT = "084ac334a2bf4beb76bd22b5bf7d37a8eb93e051"
+NATIVE_PRODUCER_MATERIAL_PATHS = tuple(sorted((
+    *PRODUCER_MATERIAL_PATHS,
+    "config/provider_native_capabilities.v1.json",
+    "engine/provider_native_capabilities.py",
+    "engine/provider_native_capability_source.py",
+    "engine/provider_capacity_v2.py",
+    "scripts/build_provider_native_capability_registration.py",
+    "scripts/build_provider_capacity_v2.py",
+)))
 _V2_ZIP32_ERROR = "TRANSPORT_V2_ZIP32_LIMIT_EXCEEDED"
 # The accepted Macro commit currently produces an approximately 21 GiB complete
 # pack. Keep a hard pre-copy and archive bound while leaving enough deterministic
@@ -6638,21 +6652,38 @@ def build_source_transport_v2(
 
 
 def build_source_transport_v3(
+    source_repository: Path, output: Path, *, commit: str,
+) -> dict[str, Any]:
+    """Build the unchanged legacy complete large-closure transport."""
+    return _build_source_transport_large(source_repository, output, commit=commit, native=False)
+
+
+def build_native_source_transport(
+    source_repository: Path, output: Path, *, commit: str,
+) -> dict[str, Any]:
+    """Build only the fixed native source profile through the existing owner."""
+    return _build_source_transport_large(source_repository, output, commit=commit, native=True)
+
+
+def _build_source_transport_large(
     source_repository: Path,
     output: Path,
     *,
     commit: str,
+    native: bool,
 ) -> dict[str, Any]:
     """Build the complete large-closure transport without changing v2 semantics."""
 
-    if commit != PRODUCER_COMMIT or _COMMIT_RE.fullmatch(commit) is None:
+    expected = NATIVE_PRODUCER_COMMIT if native else PRODUCER_COMMIT
+    material_paths = NATIVE_PRODUCER_MATERIAL_PATHS if native else PRODUCER_MATERIAL_PATHS
+    if commit != expected or _COMMIT_RE.fullmatch(commit) is None:
         raise CapacityHostArtifactError("COMMIT_MISMATCH")
     if output.exists() or output.is_symlink():
         raise CapacityHostArtifactError("OUTPUT_EXISTS")
     source = source_repository.resolve(strict=True)
     rows = enumerate_reachable_objects(source, commit)
     material = _material_rows(
-        source, commit=commit, material_paths=PRODUCER_MATERIAL_PATHS
+        source, commit=commit, material_paths=material_paths
     )
     output.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(
@@ -6665,7 +6696,7 @@ def build_source_transport_v3(
         _write_complete_pack(source, rows, temporary)
         _validate_pack_file(temporary, expected_count=len(rows))
         manifest = {
-            "schema_version": TRANSPORT_SCHEMA_V3,
+            "schema_version": NATIVE_TRANSPORT_SCHEMA if native else TRANSPORT_SCHEMA_V3,
             "repository": PRODUCER_REPOSITORY,
             "commit": commit,
             "object_format": "sha1",
@@ -6675,7 +6706,7 @@ def build_source_transport_v3(
             "object_inventory_sha256": _inventory_digest(rows),
             "material": material,
         }
-        validate_transport_manifest_v3(manifest, expected_commit=commit)
+        validate_complete_transport_manifest(manifest, expected_commit=commit)
         _write_transport_v3_archive(output, manifest, temporary)
         return manifest
     except Exception:
@@ -6740,10 +6771,26 @@ def validate_transport_manifest_v2(
 
 
 def validate_transport_manifest_v3(
-    value: Any, *, expected_commit: str
+    value: Any, *, expected_commit: str,
+) -> dict[str, Any]:
+    return _validate_large_transport_manifest(value, expected_commit=expected_commit, native=False)
+
+
+def validate_native_transport_manifest(
+    value: Any, *, expected_commit: str,
+) -> dict[str, Any]:
+    return _validate_large_transport_manifest(value, expected_commit=expected_commit, native=True)
+
+
+def _validate_large_transport_manifest(
+    value: Any, *, expected_commit: str, native: bool
 ) -> dict[str, Any]:
     """Validate the large-closure schema without reinterpreting v1 or v2."""
 
+    schema = NATIVE_TRANSPORT_SCHEMA if native else TRANSPORT_SCHEMA_V3
+    commit = NATIVE_PRODUCER_COMMIT if native else PRODUCER_COMMIT
+    material_paths = NATIVE_PRODUCER_MATERIAL_PATHS if native else PRODUCER_MATERIAL_PATHS
+    error_prefix = "TRANSPORT_NATIVE" if native else "TRANSPORT_V3"
     fields = {
         "schema_version",
         "repository",
@@ -6756,11 +6803,11 @@ def validate_transport_manifest_v3(
         "material",
     }
     if not isinstance(value, Mapping) or set(value) != fields:
-        raise CapacityHostArtifactError("TRANSPORT_V3_MANIFEST_FIELDS_INVALID")
+        raise CapacityHostArtifactError(error_prefix + "_MANIFEST_FIELDS_INVALID")
     count = value.get("object_count")
     if (
-        expected_commit != PRODUCER_COMMIT
-        or value.get("schema_version") != TRANSPORT_SCHEMA_V3
+        expected_commit != commit
+        or value.get("schema_version") != schema
         or value.get("repository") != PRODUCER_REPOSITORY
         or value.get("commit") != expected_commit
         or value.get("object_format") != "sha1"
@@ -6771,12 +6818,12 @@ def validate_transport_manifest_v3(
         or count < 1
         or _DIGEST_RE.fullmatch(str(value.get("object_inventory_sha256"))) is None
     ):
-        raise CapacityHostArtifactError("TRANSPORT_V3_MANIFEST_MISMATCH")
+        raise CapacityHostArtifactError(error_prefix + "_MANIFEST_MISMATCH")
     rows = value.get("material")
     if (
         not isinstance(rows, list)
         or [row.get("path") for row in rows if isinstance(row, Mapping)]
-        != list(PRODUCER_MATERIAL_PATHS)
+        != list(material_paths)
     ):
         raise CapacityHostArtifactError("TRANSPORT_MATERIAL_INVENTORY_INVALID")
     row_fields = {"path", "mode", "git_blob", "sha256", "size"}
@@ -6805,7 +6852,24 @@ def validate_complete_transport_manifest(
         return validate_transport_manifest_v2(value, expected_commit=expected_commit)
     if schema == TRANSPORT_SCHEMA_V3:
         return validate_transport_manifest_v3(value, expected_commit=expected_commit)
+    if schema == NATIVE_TRANSPORT_SCHEMA:
+        return validate_native_transport_manifest(value, expected_commit=expected_commit)
     raise CapacityHostArtifactError("TRANSPORT_COMPLETE_MANIFEST_SCHEMA_INVALID")
+
+
+def _complete_material_paths(manifest: Mapping[str, Any]) -> tuple[str, ...]:
+    if manifest.get("schema_version") == NATIVE_TRANSPORT_SCHEMA:
+        return NATIVE_PRODUCER_MATERIAL_PATHS
+    if manifest.get("schema_version") in (TRANSPORT_SCHEMA_V2, TRANSPORT_SCHEMA_V3):
+        return PRODUCER_MATERIAL_PATHS
+    raise CapacityHostArtifactError("TRANSPORT_COMPLETE_MANIFEST_SCHEMA_INVALID")
+
+
+def _complete_sparse_checkout(manifest: Mapping[str, Any]) -> bytes:
+    paths = _complete_material_paths(manifest)
+    if manifest["schema_version"] != NATIVE_TRANSPORT_SCHEMA:
+        return _V2_SPARSE_CHECKOUT
+    return b"".join(f"/{path}\n".encode("utf-8") for path in paths)
 
 
 def _validate_transport_v2_zip_layout(
@@ -7135,10 +7199,25 @@ def extract_source_transport_v2(
 
 
 def extract_source_transport_v3(
+    archive_path: Path, destination: Path, *, expected_commit: str,
+) -> dict[str, Any]:
+    return _extract_source_transport_large(archive_path, destination,
+        expected_commit=expected_commit, native=False)
+
+
+def extract_native_source_transport(
+    archive_path: Path, destination: Path, *, expected_commit: str,
+) -> dict[str, Any]:
+    return _extract_source_transport_large(archive_path, destination,
+        expected_commit=expected_commit, native=True)
+
+
+def _extract_source_transport_large(
     archive_path: Path,
     destination: Path,
     *,
     expected_commit: str,
+    native: bool,
 ) -> dict[str, Any]:
     """Stream and authenticate the exact canonical ZIP64 complete transport."""
 
@@ -7191,7 +7270,8 @@ def extract_source_transport_v3(
                     manifest_bytes = manifest_source.read(_V2_MANIFEST_MAX_BYTES + 1)
                 if len(manifest_bytes) > _V2_MANIFEST_MAX_BYTES:
                     raise CapacityHostArtifactError("TRANSPORT_MANIFEST_TOO_LARGE")
-                manifest = validate_transport_manifest_v3(
+                validator = validate_native_transport_manifest if native else validate_transport_manifest_v3
+                manifest = validator(
                     json.loads(manifest_bytes), expected_commit=expected_commit
                 )
                 if manifest_bytes != canonical_json(manifest):
@@ -8366,12 +8446,13 @@ def _inspect_complete_repository_direct(
         maximum_bytes=_V2_MANIFEST_MAX_BYTES,
     ) != canonical_json(manifest):
         raise CapacityHostArtifactError("SOURCE_MANIFEST_MISMATCH")
+    sparse_checkout = _complete_sparse_checkout(manifest)
     if _read_verified_metadata_file(
         git_dir / "info" / "sparse-checkout",
         expected_uid=expected_uid,
         expected_gid=expected_gid,
-        maximum_bytes=len(_V2_SPARSE_CHECKOUT),
-    ) != _V2_SPARSE_CHECKOUT:
+        maximum_bytes=len(sparse_checkout),
+    ) != sparse_checkout:
         raise CapacityHostArtifactError("SOURCE_SPARSE_CHECKOUT_INVALID")
 
     alternates = git_dir / "objects" / "info" / "alternates"
@@ -8638,7 +8719,7 @@ def verify_complete_repository(
             or _inventory_digest(reachable) != validated["object_inventory_sha256"]
         ):
             raise CapacityHostArtifactError("SOURCE_OBJECT_INVENTORY_MISMATCH")
-        expected_paths = list(PRODUCER_MATERIAL_PATHS)
+        expected_paths = list(_complete_material_paths(validated))
         if _observed_worktree_files_v2(view) != expected_paths:
             raise CapacityHostArtifactError("SOURCE_WORKTREE_INVENTORY_MISMATCH")
         for row in validated["material"]:
@@ -8796,18 +8877,34 @@ def materialize_source_transport_v2(
 
 
 def materialize_source_transport_v3(
+    archive_path: Path, source_root: Path, *, expected_commit: str,
+) -> dict[str, Any]:
+    return _materialize_source_transport_large(archive_path, source_root,
+        expected_commit=expected_commit, native=False)
+
+
+def materialize_native_source_transport(
+    archive_path: Path, source_root: Path, *, expected_commit: str,
+) -> dict[str, Any]:
+    return _materialize_source_transport_large(archive_path, source_root,
+        expected_commit=expected_commit, native=True)
+
+
+def _materialize_source_transport_large(
     archive_path: Path,
     source_root: Path,
     *,
     expected_commit: str,
+    native: bool,
 ) -> dict[str, Any]:
     """Materialize one complete direct repository from the large transport."""
 
-    transport = source_root.with_name(f".{source_root.name}.transport-v3")
+    suffix = "native-v1" if native else "v3"
+    transport = source_root.with_name(f".{source_root.name}.transport-{suffix}")
     if source_root.exists() or source_root.is_symlink() or transport.exists():
         raise CapacityHostArtifactError("SOURCE_DESTINATION_EXISTS")
-    manifest = extract_source_transport_v3(
-        archive_path, transport, expected_commit=expected_commit
+    manifest = _extract_source_transport_large(
+        archive_path, transport, expected_commit=expected_commit, native=native
     )
     try:
         source_root.mkdir(mode=0o700, parents=False, exist_ok=False)
@@ -8836,7 +8933,7 @@ def materialize_source_transport_v3(
         ):
             raise CapacityHostArtifactError("SOURCE_PACK_INSTALL_INVALID")
         sparse = source_root / ".git" / "info" / "sparse-checkout"
-        sparse.write_bytes(_V2_SPARSE_CHECKOUT)
+        sparse.write_bytes(_complete_sparse_checkout(manifest))
         _run_git(source_root, "checkout", "--detach", expected_commit)
         (source_root / ".git" / "cf2-h0-transport-manifest.json").write_bytes(
             canonical_json(manifest)
@@ -9019,6 +9116,15 @@ def _parser() -> argparse.ArgumentParser:
     materialize_v3.add_argument("--archive", type=Path, required=True)
     materialize_v3.add_argument("--destination", type=Path, required=True)
     materialize_v3.add_argument("--commit", required=True)
+    native_build = commands.add_parser("build-native-source-transport")
+    native_build.add_argument("--source-repository", type=Path, required=True)
+    native_build.add_argument("--output", type=Path, required=True)
+    native_build.add_argument("--commit", required=True)
+    for name in ("extract-native-source-transport", "materialize-native-source-transport"):
+        native = commands.add_parser(name)
+        native.add_argument("--archive", type=Path, required=True)
+        native.add_argument("--destination", type=Path, required=True)
+        native.add_argument("--commit", required=True)
     verify_complete = commands.add_parser("verify-complete-repository")
     verify_complete.add_argument("--source-root", type=Path, required=True)
     verify_complete.add_argument("--manifest", type=Path, required=True)
@@ -9132,6 +9238,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.destination,
                 expected_commit=args.commit,
             )
+        elif args.command == "build-native-source-transport":
+            value = build_native_source_transport(args.source_repository, args.output, commit=args.commit)
+        elif args.command == "extract-native-source-transport":
+            value = extract_native_source_transport(args.archive, args.destination, expected_commit=args.commit)
+        elif args.command == "materialize-native-source-transport":
+            value = materialize_native_source_transport(args.archive, args.destination, expected_commit=args.commit)
         elif args.command == "verify-complete-repository":
             manifest = validate_complete_transport_manifest(
                 json.loads(_read_small_nofollow(args.manifest, _V2_MANIFEST_MAX_BYTES)),

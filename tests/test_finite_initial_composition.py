@@ -1,4 +1,4 @@
-"""Inactive original source composition; OS/physical authority remains fixture-only."""
+"""Original source composition; production v5 refuses, v6 composes through the broker."""
 import asyncio
 import dataclasses
 import json
@@ -7,9 +7,10 @@ from control_plane import finite_initial_admission as initial
 from control_plane import finite_initial_registration as registration
 from control_plane import native_capacity_acquisition as acquisition
 from control_plane import executive_runtime as rt
+from control_plane.executive_physical_resources import PhysicalResourceRefusal
 from control_plane.fabric_attended_routing import installed_control_placements
 from scripts import executive_os_phase1c as service
-from tests.test_finite_initial_transaction import setup,claim,snap
+from tests.test_finite_initial_transaction import setup,unbegun,v5,claim,snap
 from tests.test_native_capacity_v2 import composed,reader,native,bound,enrolled,good_snapshot
 from tests.test_installed_finite_control import finite_raw
 from tests.test_executive_fabric_composition import root_stats
@@ -61,18 +62,41 @@ def test_real_acquisition_unknowns_refuse_before_claim(setup,composed):
     assert len(reader.requests)==1 and snap(s)==before
 
 
-def test_known_fixture_still_cannot_create_physical_authority(setup,composed,monkeypatch):
-    s=setup;source,_=composed;before=snap(s)
+def test_production_v5_schema_refuses_physical_authority(v5,composed,monkeypatch):
+    s=v5;source,_=composed;before=snap(s)
     async def fixture(_self):
         assert not s.runtime.store._write_connections
-        return s.p.evidence['provider_capacity']
+        return s.snapshot
     monkeypatch.setattr(acquisition.NativeCapacitySource,'acquire',fixture)
-    with pytest.raises(initial.InitialPhysicalCompositionUnavailable) as exc:
+    with pytest.raises(PhysicalResourceRefusal) as exc:
         asyncio.run(initial.FiniteInitialAdmission(source).dispatch(s.runtime,s.job.job_id,s.command,lease_owner='fixture'))
-    candidate=json.loads(exc.value.candidate_json)
-    assert candidate['runtime_schema_version']==5 and not candidate['physical_caller_composed']
-    assert candidate['job_id']==s.job.job_id and candidate['root_creation_command_id']==s.operation._command
+    assert exc.value.code=='RESOURCE_SCHEMA_UNADMITTED'
     assert snap(s)==before
+
+
+def test_composed_dispatch_reserves_begins_and_claims_once(unbegun,composed,monkeypatch):
+    s=unbegun;source,_=composed
+    async def fixture(_self):
+        assert not s.runtime.store._write_connections
+        return s.snapshot
+    monkeypatch.setattr(acquisition.NativeCapacitySource,'acquire',fixture)
+    outcome=asyncio.run(initial.FiniteInitialAdmission(source).dispatch(s.runtime,s.job.job_id,s.command,lease_owner='fixture'))
+    assert outcome.outcome=='ACTIVE' and outcome.job_id==s.job.job_id
+    store=s.runtime.store
+    reserve=store.get_event_by_command_id(f'physical:{s.command}:reserve')
+    begin=store.get_event_by_command_id(f'physical:{s.command}:begin')
+    claimed=store.get_event_by_command_id(s.command)
+    assert reserve.event_type=='PHYSICAL_RESOURCE_RESERVE' and begin.event_type=='PHYSICAL_RESOURCE_BEGIN'
+    physical=claimed.payload['capacity_evidence']['physical_capacity']
+    assert physical['begin_event_id']==begin.event_id
+    with store.read() as c:
+        rows=[dict(r) for r in c.execute('SELECT * FROM physical_resource_commitments')]
+        assert c.execute('SELECT COUNT(*) FROM attempts WHERE job_id=?',(s.job.job_id,)).fetchone()[0]==1
+    assert rows and {r['state'] for r in rows}=={'EFFECT_MAY_HAVE_BEGUN'}
+    assert {r['operation_key'] for r in rows}=={f'finite-initial:{s.job.job_id}'}
+    before=snap(s)
+    again=asyncio.run(initial.FiniteInitialAdmission(source).dispatch(s.runtime,s.job.job_id,s.command,lease_owner='fixture'))
+    assert again.attempt.attempt_id==outcome.attempt.attempt_id and snap(s)==before
 
 
 @pytest.mark.parametrize('fault',['none','extra','path','nonground','no-probe'])
@@ -85,7 +109,9 @@ def test_actual_control_config_accepts_only_fixed_optional_definition(fault):
         return
     if fault=='extra':raw['native_capacity_v2']['available']=True
     if fault=='path':raw['native_capacity_v2']['macro_release']='../caller'
-    if fault=='nonground':raw['coo_foreground_only']=False
+    if fault=='nonground':
+        raw['coo_foreground_only']=False
+        raw['coo_autonomy_armed']=True
     if fault=='no-probe':del raw['fabric_attended_probe']
     with pytest.raises(service.ServiceError):service._validate_fabric_bridge_config(raw)
 
