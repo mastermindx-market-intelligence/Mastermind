@@ -206,9 +206,12 @@ C2_PAPER_MANIFEST_CANONICAL_SHA256 = frozenset((
     "d477cd952b86d76c07a2554a94a1ce5dc8c5e42bda544a5603caf0f54e17c9b7",
 ))
 C2_LIFECYCLE_LOCK_NAME = "private-service.lifecycle.lock"
-# This is the already enrolled restricted Fabric seat, not a caller-selectable
-# deployment profile. Its backend may advance independently of its sealed gateway.
+# These are the two already enrolled restricted Fabric seats, not a caller-selectable
+# account family. Their backends may advance independently of their sealed gateways.
 FABRIC_BACKEND_ACCOUNT = "subagent-fabric-c3"
+FABRIC_BACKEND_MODERN_ACCOUNT = "fabric-c3-570f6f34"
+FABRIC_BACKEND_MODERN_PORT = 45280
+FABRIC_BACKEND_ACCOUNTS = frozenset((FABRIC_BACKEND_ACCOUNT, FABRIC_BACKEND_MODERN_ACCOUNT))
 FABRIC_BACKEND_SOURCE = "integrations/studio_direct_mcp/fabric-backend.mjs"
 FABRIC_BACKEND_RELEASES_REL = Path(".local/share/studio-direct-mcp/releases")
 FABRIC_BACKEND_RELEASE_SCHEMA = "mastermind.fabric_backend_release.v1"
@@ -625,9 +628,9 @@ def _c2_lifecycle_mutex(account: str):
     inode while the previous one is still held. Closing the descriptor (including
     process exit) releases the lock, and CLOEXEC prevents launchctl inheriting it.
     """
-    if account not in (PAPER_RUNTIME_UPGRADE_ACCOUNTS | frozenset((FABRIC_BACKEND_ACCOUNT,))):
+    if account not in (PAPER_RUNTIME_UPGRADE_ACCOUNTS | FABRIC_BACKEND_ACCOUNTS):
         raise SystemExit("C2 lifecycle mutex cannot select another account")
-    subject = "Fabric" if account == FABRIC_BACKEND_ACCOUNT else "C2"
+    subject = "Fabric" if account in FABRIC_BACKEND_ACCOUNTS else "C2"
     lock_path = _build_runtime_roots(account)["state"] / C2_LIFECYCLE_LOCK_NAME
     _assert_dest_safe(lock_path)
     current = lock_path.parent
@@ -684,11 +687,11 @@ def _c2_lifecycle_serialized(*, readonly_preflight: bool = False):
 
 
 def _fabric_lifecycle_serialized(*, readonly_preflight: bool = False):
-    """Only the existing Fabric seat shares its release lock with lifecycle calls."""
+    """Only the two enrolled Fabric seats share their release locks with lifecycle calls."""
     def decorate(function):
         @wraps(function)
         def guarded(args):
-            if (args.account != FABRIC_BACKEND_ACCOUNT
+            if (args.account not in FABRIC_BACKEND_ACCOUNTS
                     or (readonly_preflight and getattr(args, "preflight_only", False) is True)):
                 return function(args)
             # First-install staging predates a runtime/state directory. There can
@@ -1063,9 +1066,10 @@ def _lifecycle_inspect(account: str, label: str, roots: dict, *,
     Preserve generic C2 Business lifecycle inspection semantics; its dedicated
     Paper cutover explicitly opts into stricter absence proof.
     """
-    if account not in (C2_PAPER_ACCOUNT, C4_PAPER_ACCOUNT, FABRIC_BACKEND_ACCOUNT) and not require_positive:
+    if (account not in (C2_PAPER_ACCOUNT, C4_PAPER_ACCOUNT)
+            and account not in FABRIC_BACKEND_ACCOUNTS and not require_positive):
         return _launchd_inspect(label)
-    subject = "Fabric" if account == FABRIC_BACKEND_ACCOUNT else "C2"
+    subject = "Fabric" if account in FABRIC_BACKEND_ACCOUNTS else "C2"
     target = _launchd_target(label)
     absent = (f'Bad request.\nCould not find service "{label}" '
               f'in domain for user gui: {os.getuid()}\n')
@@ -2448,8 +2452,8 @@ def cmd_fabric_backend_release(args) -> int:
     """
     account = args.account
     _validate_account_label(account)
-    if account != FABRIC_BACKEND_ACCOUNT or type(args.preflight_only) is not bool:
-        raise SystemExit("Fabric backend release requires the existing restricted c3 account")
+    if account not in FABRIC_BACKEND_ACCOUNTS or type(args.preflight_only) is not bool:
+        raise SystemExit("Fabric backend release requires an explicitly enrolled restricted c3 account")
     expected = args.expected_manifest_sha256
     if not _sha256_hex(expected):
         raise SystemExit("Fabric backend release requires the original manifest CAS")
@@ -2469,6 +2473,16 @@ def cmd_fabric_backend_release(args) -> int:
     except (ValueError, UnicodeError) as exc:
         raise SystemExit("Fabric backend release: original config invalid") from exc
     argv = old_config.get("args") if isinstance(old_config, dict) else None
+    # The live modern seat is one exact enrollment, not permission to migrate
+    # another profile or change its protocol, port, or capability boundary.
+    if account == FABRIC_BACKEND_MODERN_ACCOUNT and (
+            type(old_config) is not dict
+            or old_config.get("modernFabricProtocol") is not True
+            or old_config.get("backendMode") != "shared-account"
+            or type(old_config.get("port")) is not int
+            or old_config["port"] != FABRIC_BACKEND_MODERN_PORT
+            or "fleetStatus" in old_config):
+        raise SystemExit("Fabric backend release: exact enrolled modern profile required")
     if (type(old_config) is not dict or old_config.get("fabricOnly") is not True
             or old_config.get("gitPublish") is not False or old_config.get("paperDesign") is not False
             or any(key in old_config for key in ("repositoryWorkspaces", "commissionPublication", "fleetRouting", "publicUrl"))
@@ -2732,8 +2746,8 @@ def cmd_stop(args) -> int:
                 return 1
             time.sleep(0.2)
     except SystemExit as exc:
-        if account in (C2_PAPER_ACCOUNT, C4_PAPER_ACCOUNT, FABRIC_BACKEND_ACCOUNT):
-            subject = "Fabric" if account == FABRIC_BACKEND_ACCOUNT else "Paper"
+        if account in (C2_PAPER_ACCOUNT, C4_PAPER_ACCOUNT) or account in FABRIC_BACKEND_ACCOUNTS:
+            subject = "Fabric" if account in FABRIC_BACKEND_ACCOUNTS else "Paper"
             raise SystemExit(f"{subject} stop: EFFECT_UNKNOWN after bootout; service absence is unverified") from exc
         raise
 
