@@ -396,11 +396,24 @@ def execute_or_queue(
                 pass
             return out
         try:
-            paper_account.settle_target(
+            from portfolio import price_evidence
+            price_context = {}
+            try:
+                from portfolio import registry
+                currency = registry.currency(pid)
+                for ticker, price in prices.items():
+                    price_context[ticker] = price_evidence.make_read(
+                        ticker, price, currency, "decision_mark", stage="decision_input",
+                    )
+            except Exception:
+                pass  # Missing upstream context stays explicit in the receipt snapshot.
+            price_evidence.call_with_evidence(
+                paper_account.settle_target,
                 prices,
                 asof,
                 portfolio_id=pid,
                 _price_sources={ticker: "decision_mark" for ticker in prices},
+                evidence=price_context,
             )
         except paper_account.PendingTargetQuarantined as exc:
             # A v1 autonomous target must never be followed by the current-session rebalance in the
@@ -514,32 +527,28 @@ def _open_price_usd(ticker: str,
                     *,
                     _polygon=None,
                     _yahoo=None,
-                    _paper=None) -> tuple[float | None, str]:
-    """Best-estimate USD session-OPEN price for a US-listed ticker, with source attribution.
+                    _paper=None,
+                    _evidence: dict | None = None) -> tuple[float | None, str]:
+    """Select the existing USD Open preference, preserving optional source-read context.
 
-    Priority (A4a): polygon day-open (snapshot ``day.o``) → yahoo daily-bar Open → last price
-    (today's Close / vendored snapshot).  Returns ``(price_or_None, source_label)`` where
-    ``source_label`` is one of ``'polygon_open'``, ``'yahoo_open'``, or ``'last_price'``.
-
-    The ``_polygon`` / ``_yahoo`` / ``_paper`` kwargs are injection points for tests: pass
-    callables with the same signatures as the real functions to avoid network calls.
+    Priority remains Polygon day-open, Yahoo daily-bar Open, then the paper-price
+    fallback. A source label alone does not qualify its session or opening event.
+    Injected scalar-only helpers keep their original one-call protocol.
     """
-    # Allow tests to inject stubs; default to the real modules (lazy to avoid import cost
-    # on the Asia/non-USD code paths that call _price with ccy!='USD').
+    from portfolio import price_evidence
+
     if _polygon is None:
         try:
             from data_layer import polygon as _pg
             _polygon = _pg.day_open
         except Exception:
             _polygon = lambda t: None  # noqa: E731
-
     if _yahoo is None:
         try:
             from data_layer import yahoo_feed as _yf
             _yahoo = _yf.open_price_local
         except Exception:
             _yahoo = lambda t: None  # noqa: E731
-
     if _paper is None:
         try:
             from portfolio import paper_account as _pa
@@ -548,80 +557,140 @@ def _open_price_usd(ticker: str,
             _paper = lambda t: None  # noqa: E731
 
     t = (ticker or "").upper().strip()
+    attempts = []
+
+    def note(source, outcome):
+        if _evidence is not None:
+            try:
+                attempts.append({"source": source, "outcome": outcome})
+            except Exception:
+                pass
+
+    def observed(value, source, upstream=None):
+        if _evidence is not None:
+            try:
+                price_evidence.emit(_evidence, price_evidence.make_read(
+                    t, value, "USD", source, stage="us_open_selection",
+                    upstream=upstream, attempts=attempts,
+                ))
+            except Exception:
+                pass
+        return value, source
+
     if not t:
-        return None, "last_price"
+        return observed(None, "last_price")
 
     try:
-        px = _polygon(t)
+        if _evidence is None:
+            px, context = _polygon(t), None
+        else:
+            px, context = price_evidence.read_with_evidence(_polygon, t)
         if px and float(px) > 0:
-            return float(px), "polygon_open"
+            note("polygon_open", "selected")
+            return observed(float(px), "polygon_open", context)
+        note("polygon_open", "no_positive_price")
     except Exception:
-        pass
-
+        note("polygon_open", "error")
     try:
-        px = _yahoo(t)
+        if _evidence is None:
+            px, context = _yahoo(t), None
+        else:
+            px, context = price_evidence.read_with_evidence(_yahoo, t)
         if px and float(px) > 0:
-            return float(px), "yahoo_open"
+            note("yahoo_open", "selected")
+            return observed(float(px), "yahoo_open", context)
+        note("yahoo_open", "no_positive_price")
     except Exception:
-        pass
-
+        note("yahoo_open", "error")
     try:
-        px = _paper(t)
+        if _evidence is None:
+            px, context = _paper(t), None
+        else:
+            px, context = price_evidence.read_with_evidence(_paper, t)
         if px and float(px) > 0:
-            return float(px), "last_price"
+            note("last_price", "selected")
+            return observed(float(px), "last_price", context)
+        note("last_price", "no_positive_price")
     except Exception:
-        pass
-
-    return None, "last_price"
+        note("last_price", "error")
+    return observed(None, "last_price")
 
 
 def _price_and_sources(pid: str, syms,
                        *,
-                       _open_price_fn=None) -> tuple[dict[str, float], dict[str, str]]:
-    """Live marks for `syms` in `pid`'s base currency plus per-ticker source labels.
+                       _open_price_fn=None,
+                       _evidence: dict | None = None) -> tuple[dict[str, float], dict[str, str]]:
+    """Existing numeric price/source maps, with optional per-ticker observations.
 
-    For USD books (autonomous): prefer session open price (A4a) via ``_open_price_usd``.
-    For the ETF book: the dedicated live-Yahoo Close pricer (its own warm logic).
-    For HKD/CNY books: FX-converted last price (unchanged — no open semantics after Asia close).
-
-    Returns ``(prices, sources)`` where ``sources`` maps ticker → source label
-    (``'polygon_open'`` | ``'yahoo_open'`` | ``'last_price'`` | ``'etf_universe'``).
-    ``_open_price_fn`` is an injection point for tests (same signature as ``_open_price_usd``).
+    USD keeps its Open preference; ETF keeps its dedicated pricer; CNY/HKD keeps
+    the existing USD-to-book conversion. Observation does not certify source time
+    or FX quality, and cannot request an extra quote to decorate a selected price.
     """
-    from portfolio import paper_account, registry
+    from portfolio import paper_account, price_evidence, registry
+
     prices: dict[str, float] = {}
     sources: dict[str, str] = {}
+    observations = {}
+
+    def observe(ticker, value, currency, source, upstream, *, input_price=None, input_currency=None):
+        if _evidence is not None:
+            try:
+                observations[ticker] = price_evidence.make_read(
+                    ticker, value, currency, source, stage="settlement_selection",
+                    upstream=upstream, input_price=input_price, input_currency=input_currency,
+                )
+            except Exception:
+                pass
+
+    def result():
+        if _evidence is not None:
+            try:
+                _evidence.clear()
+                _evidence.update(observations)
+            except Exception:
+                pass
+        return prices, sources
 
     if pid == "etf":
-        # ETF book: the dedicated live-Yahoo pricer (unchanged — has its own warm logic).
         from portfolio import etf_universe
         etf_universe.warm(syms)
         for t in syms:
-            px = etf_universe.price(t)
+            if _evidence is None:
+                px, context = etf_universe.price(t), None
+            else:
+                px, context = price_evidence.read_with_evidence(etf_universe.price, t)
             if px and px > 0:
                 prices[t] = px
                 sources[t] = "etf_universe"
-        return prices, sources
+                observe(t, px, "USD", "etf_universe", context)
+        return result()
 
     ccy = registry.currency(pid)
     if ccy == "USD":
-        # USD Brain books (autonomous): prefer session open so fill semantics match the flagship.
-        # The source label is stamped on each executed trade for auditability.
         price_fn = _open_price_fn or _open_price_usd
         for t in syms:
-            px, src = price_fn(t)
+            if _evidence is None:
+                (px, src), context = price_fn(t), None
+            else:
+                (px, src), context = price_evidence.read_with_evidence(price_fn, t)
             if px and px > 0:
                 prices[t] = px
                 sources[t] = src
-        return prices, sources
+                observe(t, px, ccy, src, context)
+        return result()
 
     from portfolio import fx
     for t in syms:
-        base = fx.usd_to(paper_account._current_price(t), ccy)
+        if _evidence is None:
+            usd, context = paper_account._current_price(t), None
+        else:
+            usd, context = price_evidence.read_with_evidence(paper_account._current_price, t)
+        base = fx.usd_to(usd, ccy)
         if base and base > 0:
             prices[t] = base
             sources[t] = "last_price"
-    return prices, sources
+            observe(t, base, ccy, "last_price", context, input_price=usd, input_currency="USD")
+    return result()
 
 
 def _price(pid: str, syms, *, _open_price_fn=None) -> dict[str, float]:
@@ -962,9 +1031,11 @@ def settle_open(pid: str, asof: str | None = None,
     rebalance at the live open marks, re-mark NAV, and republish the book contract so the dashboard
     shows the filled positions. No-op (safe) if the market is closed or nothing is queued.
 
-    For USD Brain books the fill prices are the session OPEN (polygon day.o → yahoo Open → last
-    price fallback); each trade in ``executed`` carries a ``fill_price_source`` stamp so mixed
-    semantics are auditable in the blotter.  ``_open_price_fn`` is an injection point for tests.
+    USD Brain books retain their Open-price preference (Polygon day.o → Yahoo Open → last-price
+    fallback). Each execution has a source label; that label does not establish the selected bar's
+    session, an individual security's opening event, or order eligibility. Optional observations
+    retain the actual read context inside the existing settlement identity. ``_open_price_fn``
+    remains an injection point for tests.
     """
     from portfolio import paper_account, registry
     if not _locked:
@@ -1001,7 +1072,10 @@ def settle_open(pid: str, asof: str | None = None,
         return {"ok": False, "skipped": "nothing_queued"}
     bench = registry.benchmark(pid)
     sym_set = set(_held(pid)) | {bench} | set(pending.get("target") or {})
-    prices, sources = _price_and_sources(pid, sym_set, _open_price_fn=_open_price_fn)
+    from portfolio import price_evidence
+    (prices, sources), price_context = price_evidence.read_with_evidence(
+        _price_and_sources, pid, sym_set, _open_price_fn=_open_price_fn,
+    )
     before = dict((paper_account._load_account(pid).get("positions") or {}))
     missing_prices = paper_account.unpriceable_target_requirements(
         pending.get("target") or {},
@@ -1019,11 +1093,13 @@ def settle_open(pid: str, asof: str | None = None,
         }
     recovered_transaction = None
     try:
-        target = paper_account.settle_target(
+        target = price_evidence.call_with_evidence(
+            paper_account.settle_target,
             prices,
             asof,
             portfolio_id=pid,
             _price_sources=sources,
+            evidence=price_context,
         )
         if target is None:
             receipts = paper_account.pending_settlement_receipts(pid)
