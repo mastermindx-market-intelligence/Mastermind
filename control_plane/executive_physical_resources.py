@@ -582,9 +582,10 @@ def physical_request_fingerprint(request: Mapping[str, Any]) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def _admission_context(request, policy, observations, decision_time_ms):
+def _admission_context(request, policy, observations, decision_time_ms, *, production=False):
     normalized = validate_physical_request(request)
-    policy = _validate_policy(policy, allow_synthetic=True)
+    # Synthetic mode admits only SYNTHETIC_TEST_ONLY; production only QUALIFIED.
+    policy = _validate_policy(policy, allow_synthetic=not production)
     if not policy["production_armed"]:
         _refuse("POLICY_UNARMED", "physical resource policy is unarmed")
     selected_host, effective_policy = _select_host_qualification(normalized, policy)
@@ -717,8 +718,9 @@ def _check_capacity(policy, observations, charges):
             _refuse("INSUFFICIENT_CAPACITY", f"protected reserve would be breached for {pool}")
 
 
-def evaluate_reservation(request, *, policy, current_charges, observations, decision_time_ms):
-    normalized, policy, host_capacity = _admission_context(request, policy, observations, decision_time_ms)
+def evaluate_reservation(request, *, policy, current_charges, observations, decision_time_ms, production=False):
+    normalized, policy, host_capacity = _admission_context(
+        request, policy, observations, decision_time_ms, production=production)
     new_charges = _request_charges(normalized)
     _check_capacity(policy, observations, [*current_charges, *new_charges])
     result = {"admitted": True, "code": "RESERVED", "request_fingerprint": physical_request_fingerprint(request), "fresh_begin": False, "charges": new_charges}
@@ -764,7 +766,7 @@ def _validate_host_pressure_begin_evidence(*, request, policy, observations, dec
     }
 
 
-def evaluate_begin(request, *, policy, current_charges, observations, decision_time_ms):
+def evaluate_begin(request, *, policy, current_charges, observations, decision_time_ms, production=False):
     """Evaluate additive capacity after the broker proves the owned reservation.
 
     ``current_charges`` is the global accounting view, so it cannot prove which
@@ -772,7 +774,8 @@ def evaluate_begin(request, *, policy, current_charges, observations, decision_t
     the request's exact commitment rows.  A successful result here is therefore
     conditional accounting evidence, not an independently usable resource grant.
     """
-    normalized, policy, host_capacity = _admission_context(request, policy, observations, decision_time_ms)
+    normalized, policy, host_capacity = _admission_context(
+        request, policy, observations, decision_time_ms, production=production)
     host_pressure = _validate_host_pressure_begin_evidence(
         request=normalized, policy=policy, observations=observations, decision_time_ms=decision_time_ms
     )
