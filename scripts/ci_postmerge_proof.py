@@ -101,6 +101,16 @@ def find_reusable_run(
         or current.get("workflow_id") != 324108847
         or current.get("event") != "push"
         or current.get("head_branch") != "master"
+        # Only the native merge queue may originate a reusable protected
+        # push. A direct human/API push of even an otherwise proven group SHA
+        # must run full pytest. Identity is obtained from the GitHub API, not
+        # from caller-provided GITHUB_ACTOR environment variables.
+        or any(
+            not isinstance(current.get(key), dict)
+            or current[key].get("login") != "github-merge-queue[bot]"
+            or current[key].get("type") != "Bot"
+            for key in ("actor", "triggering_actor")
+        )
         or current.get("head_sha") != sha
         or current.get("path") != _WORKFLOW
         or current.get("status") not in {"in_progress", "completed"}
@@ -217,7 +227,8 @@ def find_reusable_run(
     current_recheck = read_json(f"{prefix}/actions/runs/{env['GITHUB_RUN_ID']}")
     if (not isinstance(current_recheck, dict)
         or any(current_recheck.get(key) != current.get(key) for key in
-               ("id", "run_attempt", "workflow_id", "head_sha", "event", "head_branch", "created_at"))):
+               ("id", "run_attempt", "workflow_id", "head_sha", "event", "head_branch",
+                "created_at", "actor", "triggering_actor"))):
         return None
     return identifier
 

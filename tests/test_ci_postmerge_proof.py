@@ -57,6 +57,8 @@ def _push() -> dict:
         "status": "in_progress",
         "conclusion": None,
         "created_at": "2026-10-16T21:36:27Z",
+        "actor": {"login": "github-merge-queue[bot]", "type": "Bot"},
+        "triggering_actor": {"login": "github-merge-queue[bot]", "type": "Bot"},
         "repository": {"full_name": _REPO},
         "head_repository": {"full_name": _REPO},
     }
@@ -172,6 +174,8 @@ def test_unproven_source_never_queries_api(key: str, replacement: str):
         ("current", ("status",), "queued"),
         ("current_recheck", ("run_attempt",), 2),
         ("current_recheck", ("head_sha",), "f" * 40),
+        ("current_recheck", ("actor", "login"), "mastermindxryan"),
+        ("current_recheck", ("triggering_actor", "type"), "User"),
         ("listing", ("total_count",), 0),
         ("listing", ("total_count",), 2),
         ("listing", ("workflow_runs", 0, "event"), "push"),
@@ -237,6 +241,26 @@ def test_other_valid_commit_must_use_its_own_exact_sha():
     assert proof.find_reusable_run(env, read_json=no_matching_group) is None
     assert len(touched) == 2
     assert "head_sha=" + "1" * 40 in touched[1]
+
+
+@pytest.mark.parametrize(
+    ("actor_field", "replacement"),
+    [
+        ("actor", {"login": "mastermindxryan", "type": "User"}),
+        ("triggering_actor", {"login": "mastermindxryan", "type": "User"}),
+        ("actor", {"login": "github-merge-queue[bot]", "type": "User"}),
+        ("triggering_actor", {"login": "github-merge-queue[bot]", "type": "User"}),
+        ("actor", None),
+        ("triggering_actor", None),
+    ],
+)
+def test_direct_or_unverified_push_actor_cannot_reuse(
+    actor_field: str, replacement: object,
+):
+    sample = _subject()
+    sample["current"][actor_field] = replacement
+    sample["current_recheck"][actor_field] = replacement
+    assert proof.find_reusable_run(_env(), read_json=_read(sample)) is None
 
 
 def test_second_matching_run_is_ambiguous_and_cannot_reuse():
