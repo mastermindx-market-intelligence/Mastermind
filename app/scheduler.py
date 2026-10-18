@@ -2042,7 +2042,8 @@ def maybe_first_autonomous_run() -> bool:
                 from bot.autonomous import run_autonomous
                 _result = run_autonomous()
                 _post_mark_forward_evaluation("autonomous", _result)
-            _ledger_end(handle, "ok")
+            _status, _severity, _extra = _brain_job_outcome(_result)
+            _ledger_end(handle, _status, severity=_severity, extra=_extra)
         except Exception as exc:  # noqa: BLE001
             _ledger_end(handle, "error")
             log.warning("autonomous first-run failed: %s", exc)
@@ -2133,7 +2134,8 @@ def maybe_first_china_run() -> bool:
                 from bot.china import run_china
                 _result = run_china()
                 _post_mark_forward_evaluation("china", _result)
-            _ledger_end(handle, "ok")
+            _status, _severity, _extra = _brain_job_outcome(_result)
+            _ledger_end(handle, _status, severity=_severity, extra=_extra)
         except Exception as exc:  # noqa: BLE001
             _ledger_end(handle, "error")
             log.warning("china first-run failed: %s", exc)
@@ -2175,7 +2177,8 @@ def maybe_first_hk_run() -> bool:
                 from bot.hk import run_hk
                 _result = run_hk()
                 _post_mark_forward_evaluation("hk", _result)
-            _ledger_end(handle, "ok")
+            _status, _severity, _extra = _brain_job_outcome(_result)
+            _ledger_end(handle, _status, severity=_severity, extra=_extra)
         except Exception as exc:  # noqa: BLE001
             _ledger_end(handle, "error")
             log.warning("hk first-run failed: %s", exc)
