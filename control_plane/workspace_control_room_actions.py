@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import re
 import time
+from pathlib import Path
 from types import MappingProxyType
 
 from common.executive_workspace_contract import error, permission_stamp
@@ -72,6 +73,7 @@ class ExistingControlRoomActions:
         try:
             authorizers = (self._authorize, self._authorize_actions[operation])
             expected_owner, expected_instance = self._current_owner()
+            expected_bindings_path = expected_owner.bindings_path
             initial_permission = self._permission(authorizers, principal)
 
             def check_admission(*, check_permission):
@@ -91,6 +93,14 @@ class ExistingControlRoomActions:
                 # Do not hold the state lock during permission or provider work.
                 owner, instance = self._current_owner()
                 if owner is not expected_owner or instance != expected_instance:
+                    raise _AdmissionRefused("source_unavailable", 503)
+                if operation != "refresh-builds" and (
+                        not isinstance(expected_bindings_path, Path)
+                        or not expected_bindings_path.is_absolute()
+                        or owner.bindings_path != expected_bindings_path):
+                    # The READ composer treats an absent path as unavailable.
+                    # Authenticated actions must not expand the legacy HOME
+                    # fallback or switch stores during admission.
                     raise _AdmissionRefused("source_unavailable", 503)
                 try:
                     now = self._now()

@@ -323,3 +323,41 @@ def test_factory_action_names_cannot_enter_the_read_frame_path(tmp_path):
     read = {"schema": FRAME_SCHEMA, "operation": "open", "principal": request["principal"]}
     response = asyncio.run(provide(object()).handle_frame(read))
     assert response["ok"] is False and response["status"] == 400
+
+
+@pytest.mark.parametrize("operation", ["open", "bind", "unbind"])
+@pytest.mark.parametrize("path", [None, "absolute_string", "relative_path"])
+def test_binding_actions_require_the_explicit_incumbent_store(tmp_path, monkeypatch, operation, path):
+    from pathlib import Path
+    cfg = config(tmp_path)
+    service, _, _, _, request = owner_fixture(cfg)
+    cfg.bindings_path = (str(tmp_path / "unselected.json") if path == "absolute_string"
+                         else Path("unselected.json") if path == "relative_path" else None)
+    request["operation"], request["payload"] = operation, payload(operation)
+    monkeypatch.setattr(sb, "load_bindings", lambda *a: pytest.fail("no selected binding store"))
+    monkeypatch.setattr(sb, "save_bindings", lambda *a: pytest.fail("no selected binding store"))
+    cfg.open_binding_fn = lambda *a, **k: pytest.fail("no selected binding store")
+    result = call(service, request)
+    assert result == wire.refused_result(operation, code="source_unavailable", status=503)
+
+
+@pytest.mark.parametrize("operation", ["open", "bind", "unbind"])
+def test_store_movement_during_read_refuses_before_provider_or_write(tmp_path, monkeypatch, operation):
+    cfg = config(tmp_path)
+    save(cfg, [binding(FIRST)])
+    original_path, original_bytes = cfg.bindings_path, cfg.bindings_path.read_bytes()
+    service, _, _, _, request = owner_fixture(cfg)
+    request["operation"], request["payload"] = operation, payload(operation)
+    replacement = tmp_path / "replacement.json"
+    replacement.write_bytes(original_bytes)
+    original_read = sb.load_bindings
+    def read(path):
+        value = original_read(path)
+        cfg.bindings_path = replacement
+        return value
+    monkeypatch.setattr(sb, "load_bindings", read)
+    monkeypatch.setattr(sb, "save_bindings", lambda *a: pytest.fail("store moved before effect"))
+    cfg.open_binding_fn = lambda *a, **k: pytest.fail("store moved before provider")
+    result = call(service, request)
+    assert result == wire.refused_result(operation, code="source_unavailable", status=503)
+    assert original_path.read_bytes() == replacement.read_bytes() == original_bytes
