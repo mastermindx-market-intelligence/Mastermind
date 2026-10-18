@@ -1,4 +1,5 @@
 // Disposable stdio fixture: no Fabric adapter, credentials or real work.
+import { createHash } from 'node:crypto';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { ListToolsRequestSchema, CallToolRequestSchema, McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
@@ -7,8 +8,13 @@ const names = ['fabric_capabilities', 'fabric_request', 'fabric_status', 'fabric
   'fabric_result', 'fabric_accept', 'fabric_controller_output'];
 let effects = 0;
 let resultCalls = 0;
-const finished = value => ({ content: [{ type: 'text', text:
-  `Process started with PID 123 (shell: /bin/zsh)\nInitial output:\n${JSON.stringify(value)}\nMMX_FABRIC_EXIT=0\n` }] });
+const finished = value => {
+  const stdout = Buffer.from(JSON.stringify(value), 'utf8');
+  const envelope = { exit_code: 0, stdout_base64: stdout.toString('base64'),
+    stdout_bytes: stdout.length, stdout_sha256: createHash('sha256').update(stdout).digest('hex') };
+  return { content: [{ type: 'text', text:
+    `Process started with PID 123 (shell: /bin/zsh)\nInitial output:\n${JSON.stringify(envelope)}\nMMX_FABRIC_EXIT=0\n` }] };
+};
 // Real incumbent facade, disposable engine. This checks its anti-replay state
 // across the new HTTP request lifetime without starting a shell/provider.
 const facade = createFabricFacade({ async callTool(request) {
