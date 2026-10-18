@@ -2315,6 +2315,66 @@ def _fabric_release_json(value: dict) -> bytes:
     return json.dumps(value, indent=2, sort_keys=True, allow_nan=False).encode("utf-8")
 
 
+def _validate_legacy_fleet_status(config: dict, user_root: Path) -> bool:
+    """Admit only the narrow legacy fleetStatus on an existing restricted profile.
+
+    The legacy sealed config contained fleetStatus but predated the
+    modernFabricProtocol and backendMode selectors. This validator never invokes
+    the launcher. It re-derives the owner-bound helper and requires exact field
+    and type equality with the freshly derived owner configuration; the launcher
+    descriptor bytes are then read through the existing owned, regular-file,
+    no-symlink, no-follow reader and their SHA256 must equal the freshly
+    derived expected['launcherSha256']. A None, missing, or unsafe launcher,
+    wrong field type, ownership/file-type/links/permissions/read/stability or
+    digest error, or any extra/omitted key fails closed. Profile-driven
+    launcher execution is not authorised by this validator; only sealed
+    fleetStatus identity is admitted.
+
+    Profiles without fleetStatus continue to be governed by every other check.
+    """
+    if "fleetStatus" not in config:
+        return True
+    if "modernFabricProtocol" in config or "backendMode" in config:
+        raise SystemExit(
+            "Fabric backend release: legacy fleetStatus requires absent "
+            "modernFabricProtocol and backendMode selectors"
+        )
+    fleet_status = config["fleetStatus"]
+    required_keys = frozenset(("enabled", "launcherPath", "launcherSha256", "timeoutMs"))
+    if type(fleet_status) is not dict or set(fleet_status) != required_keys:
+        raise SystemExit(
+            "Fabric backend release: legacy fleetStatus requires exact "
+            "enabled/launcherPath/launcherSha256/timeoutMs keys"
+        )
+    if (fleet_status["enabled"] is not True
+            or type(fleet_status["launcherPath"]) is not str
+            or type(fleet_status["launcherSha256"]) is not str
+            or type(fleet_status["timeoutMs"]) is not int):
+        raise SystemExit(
+            "Fabric backend release: legacy fleetStatus field types are invalid"
+        )
+    expected = _fleet_status_config(user_root)
+    if expected is None:
+        raise SystemExit(
+            "Fabric backend release: legacy fleetStatus owner launcher unavailable"
+        )
+    # _fleet_status_config delegates launcher reads to _stable_regular_file_hash,
+    # which does not check st_uid. Read the launcher descriptor via the existing
+    # owned, regular, no-follow, bounded reader so a wrong-owner launcher is
+    # caught before this validator returns. Any ownership, file-type, links,
+    # permissions, read/stability or digest error must refuse the release.
+    launcher_bytes = _fabric_release_bytes(user_root / FLEET_STATUS_LAUNCHER_REL)
+    if hashlib.sha256(launcher_bytes).hexdigest() != expected["launcherSha256"]:
+        raise SystemExit(
+            "Fabric backend release: legacy fleetStatus owner launcher digest mismatch"
+        )
+    if fleet_status != expected:
+        raise SystemExit(
+            "Fabric backend release: legacy fleetStatus does not match owner"
+        )
+    return True
+
+
 @_fabric_lifecycle_serialized(readonly_preflight=True)
 def cmd_fabric_backend_release(args) -> int:
     """Select one merged Fabric backend while preserving the entire sealed seat.
@@ -2348,7 +2408,8 @@ def cmd_fabric_backend_release(args) -> int:
     argv = old_config.get("args") if isinstance(old_config, dict) else None
     if (type(old_config) is not dict or old_config.get("fabricOnly") is not True
             or old_config.get("gitPublish") is not False or old_config.get("paperDesign") is not False
-            or any(key in old_config for key in ("repositoryWorkspaces", "commissionPublication", "fleetStatus", "fleetRouting", "publicUrl"))
+            or any(key in old_config for key in ("repositoryWorkspaces", "commissionPublication", "fleetRouting", "publicUrl"))
+            or not _validate_legacy_fleet_status(old_config, _user_root())
             or old_config.get("testMode") is not False
             or old_config.get("accountLabel") != account
             or old_config.get("command") != prior["node"]

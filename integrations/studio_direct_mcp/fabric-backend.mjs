@@ -104,6 +104,38 @@ function completedOutput(text) {
   if (!match) return null;
   return {stdout:text.slice(start,finish),exit_code:Number(match[1])};
 }
+function decodeCapturedEnvelope(envelopeText) {
+  // Validate ONE complete capture envelope produced by the fixed CAPTURE_PROGRAM
+  // wrapper. The envelope carries the original child adapter exit code and the
+  // exact verified stdout bytes (base64 + byte count + sha256 + canonical
+  // base64 round-trip + strict UTF-8). Returns null on any malformed,
+  // truncated, oversized or mismatched framing. capture_error is surfaced via
+  // the sole fixed captureError variant; strict UTF-8 retains its existing
+  // result diagnostic. No transport-selected error code is reflected.
+  let envelope;
+  try { envelope = JSON.parse(envelopeText); } catch { return null; }
+  if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) return null;
+  if (Object.hasOwn(envelope, 'capture_error')) {
+    if (Object.keys(envelope).length !== 1
+        || envelope.capture_error !== 'RESULT_RESPONSE_TOO_LARGE') return null;
+    return { captureError: 'RESULT_RESPONSE_TOO_LARGE' };
+  }
+  if (Object.keys(envelope).length !== 4
+      || !Number.isSafeInteger(envelope.exit_code)
+      || envelope.exit_code < -255 || envelope.exit_code > 255
+      || typeof envelope.stdout_base64 !== 'string'
+      || !/^[A-Za-z0-9+/]*={0,2}$/.test(envelope.stdout_base64)
+      || !Number.isSafeInteger(envelope.stdout_bytes) || envelope.stdout_bytes < 0
+      || envelope.stdout_bytes > MAX_RESPONSE_BYTES * 2) return null;
+  const bytes = Buffer.from(envelope.stdout_base64, 'base64');
+  if (bytes.length !== envelope.stdout_bytes
+      || hash(bytes) !== envelope.stdout_sha256
+      || bytes.toString('base64') !== envelope.stdout_base64) return null;
+  let stdoutText;
+  try { stdoutText = new TextDecoder('utf-8', {fatal: true}).decode(bytes); } catch { return {decodeError: 'RESULT_NOT_UTF8'}; }
+  return { exit_code: envelope.exit_code, stdout: stdoutText,
+           stdout_sha256: envelope.stdout_sha256, stdout_bytes: envelope.stdout_bytes };
+}
 function statusJSON(result, runId, follow=false) {
   if (result.exit_code!==0) fail('ADAPTER_OBSERVATION_UNAVAILABLE',{adapter_exit_code:result.exit_code});
   let s; try{s=JSON.parse(result.stdout);}catch{fail('ADAPTER_STATUS_INVALID');}
@@ -157,15 +189,28 @@ export function createFabricFacade(engine, options={}) {
     if(!parsed) fail('OBSERVATION_INCOMPLETE',{controller_pid:pid});
     return parsed;
   }
+  // Reusable captured-short helper for adapter commands whose output the
+  // facade must interpret (status, wait, accept completion/readback,
+  // capabilities/help). Reuses the fixed CAPTURE_PROGRAM and validates ONE
+  // complete capture envelope. Outer wrapper success is required; the
+  // returned exit_code is the ORIGINAL child adapter exit code and the
+  // stdout is the exact verified bytes (no reserialization, no stderr use).
+  async function runCapturedShort(argv, timeoutMs=10000) {
+    const parsed=await runShort(argv,timeoutMs,true);
+    if(parsed.exit_code!==0) fail('CAPTURE_INVALID');
+    const decoded=decodeCapturedEnvelope(parsed.stdout);
+    if(!decoded || decoded.captureError || decoded.decodeError) fail('CAPTURE_INVALID');
+    return {exit_code:decoded.exit_code,stdout:decoded.stdout};
+  }
   async function continuityAvailable() {
     if(!cfg.quotaFallback) return false;
-    const requestHelp=await runShort(['request','--help']);
-    const statusHelp=await runShort(['status','--help']);
+    const requestHelp=await runCapturedShort(['request','--help']);
+    const statusHelp=await runCapturedShort(['status','--help']);
     return requestHelp.exit_code===0 && statusHelp.exit_code===0 &&
       requestHelp.stdout.includes('--quota-fallback') && statusHelp.stdout.includes('--follow');
   }
   async function status(args,follow=cfg.quotaFallback) {
-    const s=statusJSON(await runShort(['status',args.run_id,...(follow?['--follow']:[])]),args.run_id,follow);
+    const s=statusJSON(await runCapturedShort(['status',args.run_id,...(follow?['--follow']:[])]),args.run_id,follow);
     checkRoot(s,args);return s;
   }
   async function retained(args,s) {
@@ -173,21 +218,19 @@ export function createFabricFacade(engine, options={}) {
     resultReady(s,args);
     const r=await runShort(['result',s.run_id,'--max-bytes',String(args.max_bytes??8192)],10000,true);
     if(r.exit_code!==0) fail('RESULT_UNAVAILABLE',{adapter_exit_code:r.exit_code});
-    let captured; try{captured=JSON.parse(r.stdout);}catch{fail('RESULT_TRANSFER_INVALID');}
-    if(captured.capture_error) fail('RESULT_RESPONSE_TOO_LARGE');
-    if(captured.exit_code!==0) fail('RESULT_UNAVAILABLE',{adapter_exit_code:captured.exit_code});
-    if(typeof captured.stdout_base64!=='string' || !/^[A-Za-z0-9+/]*={0,2}$/.test(captured.stdout_base64) || !Number.isSafeInteger(captured.stdout_bytes) || captured.stdout_bytes<0 || captured.stdout_bytes>MAX_RESPONSE_BYTES*2) fail('RESULT_TRANSFER_INVALID');
-    const bytes=Buffer.from(captured.stdout_base64,'base64');
-    if(bytes.length!==captured.stdout_bytes || hash(bytes)!==captured.stdout_sha256 || bytes.toString('base64')!==captured.stdout_base64) fail('RESULT_TRANSFER_INVALID');
-    let text; try{text=new TextDecoder('utf-8',{fatal:true}).decode(bytes);}catch{fail('RESULT_NOT_UTF8');}
-    return {adapter_response:text,response_sha256:captured.stdout_sha256,response_bytes:captured.stdout_bytes};
+    const decoded=decodeCapturedEnvelope(r.stdout);
+    if(!decoded) fail('RESULT_TRANSFER_INVALID');
+    if(decoded.captureError) fail('RESULT_RESPONSE_TOO_LARGE');
+    if(decoded.decodeError) fail('RESULT_NOT_UTF8');
+    if(decoded.exit_code!==0) fail('RESULT_UNAVAILABLE',{adapter_exit_code:decoded.exit_code});
+    return {adapter_response:decoded.stdout,response_sha256:decoded.stdout_sha256,response_bytes:decoded.stdout_bytes};
   }
   return { async call(name,args={}) {
     let effectStarted=false;
     try {
       validate(name,args);
       if(name==='fabric_capabilities') {
-        const h=await runShort(['--help']);
+        const h=await runCapturedShort(['--help']);
         const continuity=await continuityAvailable();
         return response({action:'capabilities',adapter_available:h.exit_code===0 && ['request','status','result','accept'].every(x=>h.stdout.includes(x)),
           quota_continuity:{enabled:cfg.quotaFallback,adapter_available:continuity,max_attempts:3,
@@ -229,7 +272,7 @@ export function createFabricFacade(engine, options={}) {
       if(name==='fabric_status') return response({action:name,run_id:args.run_id,effective_run_id:s.run_id,expected_root_id:args.root_id,status:s,root_verified:s.root_id===args.root_id,execution_absence_proven:false});
       if(name==='fabric_wait') {
         const seconds=args.timeout_seconds??5;
-        const waited=statusJSON(await runShort(['wait',args.run_id,'--timeout',String(seconds),'--interval','2',...(cfg.quotaFallback?['--follow']:[])],Math.min(12000,(seconds+2)*1000)),args.run_id,cfg.quotaFallback);
+        const waited=statusJSON(await runCapturedShort(['wait',args.run_id,'--timeout',String(seconds),'--interval','2',...(cfg.quotaFallback?['--follow']:[])],Math.min(12000,(seconds+2)*1000)),args.run_id,cfg.quotaFallback);
         checkRoot(waited,args);
         return response({action:name,run_id:args.run_id,effective_run_id:waited.run_id,status:waited,root_verified:waited.root_id===args.root_id,execution_absence_proven:false});
       }
@@ -240,7 +283,7 @@ export function createFabricFacade(engine, options={}) {
         digest_scope:'exact complete adapter CLI response; not a cryptographic artifact attestation'});
       if(data.response_sha256!==args.expected_response_sha256) fail('RESULT_CHANGED',{current_response_sha256:data.response_sha256});
       effectStarted=true;
-      const accepted=await runShort(['accept',args.run_id,'--by',args.by]);
+      const accepted=await runCapturedShort(['accept',args.run_id,'--by',args.by]);
       if(accepted.exit_code!==0) fail('ACCEPTANCE_UNCONFIRMED',{adapter_exit_code:accepted.exit_code});
       const after=await status(args);
       if(after.accepted!==true) fail('ACCEPTANCE_UNCONFIRMED');
