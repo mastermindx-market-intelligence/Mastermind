@@ -19,7 +19,7 @@ function facade(e) { assert.ok(api?.createFabricFacade, 'the Fabric-only MCP fac
 
 test('closed, correctly annotated catalog with no generic command tools',()=>{
  assert.ok(api?.FABRIC_TOOLS, 'the Fabric-only tool catalog must exist');
- assert.deepEqual(api.FABRIC_TOOLS.map(t=>t.name).sort(),['fabric_accept','fabric_capabilities','fabric_controller_output','fabric_request','fabric_result','fabric_status','fabric_wait'].sort());
+ assert.deepEqual(api.FABRIC_TOOLS.map(t=>t.name).sort(),['fabric_accept','fabric_capabilities','fabric_controller_output','fabric_request','fabric_result','fabric_result_page','fabric_status','fabric_wait'].sort());
  for(const t of api.FABRIC_TOOLS){assert.equal(t.inputSchema.additionalProperties,false);assert.equal(t.annotations.readOnlyHint,!['fabric_request','fabric_accept'].includes(t.name));}
 });
 test('rejects unknown tool and caller-selected shell, provider, host, model, or cwd before engine access',async()=>{
