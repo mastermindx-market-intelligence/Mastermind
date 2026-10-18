@@ -74,9 +74,17 @@ Native parent token/context exhaustion, fixed-model or artifact contracts and
 cross-provider resume after tool activity require their existing lifecycle and
 review owners. This feature does not restart a native parent conversation.
 
-Roll out the complete native source group first, then upgrade this same facade
-account from the actual merged release with its existing service owner. Preserve
-the account, tunnel, port and selected protocol profile. See
+Roll out the complete native code generation first, then select this same facade
+account's backend from the actual merged release with its existing service owner.
+For the enrolled `subagent-fabric-c3` account, use the narrow
+`private_service.py fabric-backend-release` preview and apply contract. It checks
+the old manifest and full runtime seal, the merged backend's Git blob and SHA256,
+and the exact preview plan; apply requires the original service to be unloaded.
+It updates only `config.args[0]` and the corresponding three manifest fields,
+preserving the gateway bundle, private SDK, account, tunnel, port and selected
+protocol. The generic `upgrade` retains its same-backend-path requirement.
+The operator separately reconciles existing controllers, then stops and starts
+this original service through the same owner. See
 `ops/native_fabric/quota_continuity/README.md` for native evidence, retention and
 publication boundaries.
 

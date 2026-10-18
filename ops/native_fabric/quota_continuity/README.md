@@ -108,16 +108,22 @@ conversation/lifecycle owner. This candidate does not supply that owner.
 
 ## Source and validation layout
 
-`candidate/` contains the proposed native files. `source/` contains unchanged
-inspected dependencies needed by offline tests. `baseline.json` records exact
-preimage hashes. The MCP facade
-change belongs to `integrations/studio_direct_mcp/fabric-backend.mjs` in the same PR.
+`candidate/` contains the proposed native files. `source/` contains inspected
+preimages and the unchanged native dependency closure. `baseline.json` records
+exact preimage hashes for overlaid source. The rollout manifest names every
+published native file explicitly; state and credential contents are excluded.
+`rollout/` contains the finite native artifact publisher and ingress installer.
+The MCP facade and its existing service owner remain in
+`integrations/studio_direct_mcp/` in the same PR.
 
 Run the offline tests with `python3 -m unittest discover -s tests -v` from this
 directory. Run the facade tests with `node fabric-backend.test.mjs` in its
 incumbent integration directory. Fixtures use isolated databases and inert CLI
 processes; they do not spend provider quota, read real credentials or exercise
-the held Executive proof operations.
+the held Executive proof operations. The wrapper integration test runs the actual
+remote executor, physical process owner, MiniMax/GLM wrappers and broker observer
+against an isolated loopback provider. Its receipts are produced by those owners,
+including the actual stdout hash and cleanup evidence.
 
 Claude result/error enums were checked against the official published
 `@anthropic-ai/claude-agent-sdk` 0.3.301 declarations and the official CLI reference:
@@ -141,12 +147,41 @@ before creating a controller; an older adapter produces
 `ADAPTER_CONTINUITY_UNAVAILABLE`. Preserve the account, port, tunnel, installed
 protocol selection and current runtime owner.
 
-The flat native kit must not be updated while controllers can still reopen its
-files. Use a dispatch-ingress pause and a verified drain; the broker lock alone
-is not such a barrier. Existing workers retain their immutable remote releases
-and settle through their original controllers. Verify all installed hashes and
-the dependency closure before reopening ingress. The reviewed rollout procedure
-must establish how every supported native entry point is fenced.
+Publish the complete reviewed native code closure as one immutable generation.
+The original broker, state, lanes, configuration and credential owners remain on
+their current paths through a fixed, declared binding map. Strict custody readers
+map only those declared prefixes back to the original owner before applying their
+existing file and directory checks; symlinks inside state are still rejected.
+The atomic quota-cache writer uses its original canonical destination so it
+cannot replace a generation's fixed alias.
+
+Bootstrap the public entry points in two phases. First, the existing `pool`
+launcher and the CLI branch of `fabric_task.py` select the generation once and
+exec an absolute immutable path. Imported flat APIs keep their prior bodies;
+old flat controllers keep all their original helper files. After the original
+owner reconciles the finite inventory of legacy parent/launcher processes and
+imported mutating callers, the second phase bridges `remote_sub.sh`. The phase-two
+receipt is bound to the exact bootstrap plan and epoch. Neither an empty lease
+table nor elapsed time substitutes for that reconciliation.
+
+Future generation selection uses an atomic compare-and-swap under an artifact
+publication lock. Running controllers retain their selected code and remote
+support closure; broker heartbeat and lease release remain on their own existing
+lock. Bootstrap rollback restores exact future-ingress preimages, preserves all
+running attempts and state, and ends that bootstrap epoch. It never kills work.
+
+Advance the already enrolled `subagent-fabric-c3` backend with
+`private_service.py fabric-backend-release`, after the native rollout. The normal
+generic `upgrade` requires an unchanged backend path and cannot perform this
+selection. The new command belongs to the same private service owner: its
+read-only preview binds the existing manifest, complete runtime seal, exact
+merged Git blob, released backend hash and proposed plan. Once the original
+service is safely stopped, apply changes only `config.args[0]` and manifest
+`backend`, `backendHash`, `configHash`. The existing gateway, dependencies, Node,
+port, tunnel and protocol choice stay sealed. Private intent/backup/result
+evidence records the transition; uncertain results require same-owner inspection.
+Start the original account through that owner's normal command and consume the
+actual bounded native canary result before reporting installation complete.
 
 Publication, independent review, protected merge, installed native bytes, facade
 restart and an observed native canary are separate gates. This source checkpoint

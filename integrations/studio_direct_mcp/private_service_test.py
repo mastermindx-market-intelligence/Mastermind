@@ -1759,7 +1759,7 @@ class TestCLI(unittest.TestCase):
         sub = next(a for a in parser._actions if hasattr(a, "choices") and a.choices)
         self.assertEqual(
             set(sub.choices),
-            {"stage", "upgrade", "paper-runtime-upgrade", "seal-runtime", "start", "status", "stop"},
+            {"stage", "upgrade", "paper-runtime-upgrade", "fabric-backend-release", "seal-runtime", "start", "status", "stop"},
         )
 
     def test_stage_requires_all_args(self):
@@ -2033,6 +2033,63 @@ class TestFleetV10PublisherCompatibility(unittest.TestCase):
                 {k: v for k, v in cfg.items() if k != "gitPublish"},
                 {k: v for k, v in before_cfg.items() if k != "gitPublish"})
             svc._verify_staged_install("chatgpt3", _label_for("chatgpt3"), roots)
+
+    def test_exact_closed_v10_predecessor_may_receive_only_the_reviewed_module_patch(self):
+        # The live ChatGPT1 seat can already contain #1535's closed publisher.
+        # Do not treat that as a fresh grant or allow arbitrary closed versions.
+        with self._installed_fleet_fixture() as (args, roots, _cfg):
+            source = Path(args.source)
+            prior_bytes = b"fixture reviewed closed publisher before await fix\n"
+            (roots["base"] / "git-publish.mjs").write_bytes(prior_bytes)
+            (roots["base"] / "workspace-access.mjs").write_bytes(
+                (source / "workspace-access.mjs").read_bytes())
+            cfg = json.loads(roots["config"].read_text())
+            cfg["gitPublish"] = svc._typed_git_config(
+                Path(os.environ["HOME"]), closed_repositories=True)
+            roots["config"].write_text(
+                json.dumps(cfg, indent=2, sort_keys=True), encoding="utf-8")
+            manifest = json.loads(roots["manifest"].read_text())
+            for name in svc.FLEET_V10_PUBLISHER_PATCH_SHA256:
+                manifest["files"][name] = svc._sha256_file(roots["base"] / name)
+            manifest["configHash"] = svc._sha256_file(roots["config"])
+            roots["manifest"].write_text(
+                json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+            args.publisher_expected_manifest_sha256 = svc._sha256_file(
+                roots["manifest"])
+            before = (roots["manifest"].read_bytes(), roots["config"].read_bytes(),
+                      self._all_files(roots))
+            exact_prior_sha = hashlib.sha256(prior_bytes).hexdigest()
+            with mock.patch.object(svc, "FLEET_V10_PREVIOUS_CLOSED_PUBLISHER_SHA256", "0" * 64):
+                with self.assertRaisesRegex(SystemExit, "unrecognized prior publisher identity"):
+                    svc.cmd_upgrade(args)
+            self.assertEqual(
+                before, (roots["manifest"].read_bytes(),
+                         roots["config"].read_bytes(), self._all_files(roots)),
+                "foreign closed publishers must refuse before writing anything")
+            with mock.patch.object(svc, "FLEET_V10_PREVIOUS_CLOSED_PUBLISHER_SHA256", exact_prior_sha):
+                args.publisher_preflight_only = True
+                with mock.patch.object(svc, "_run", CmdRecorder()):
+                    code, receipt = _capture_stdout(lambda: svc.cmd_upgrade(args))
+                self.assertEqual(code, 0)
+                self.assertEqual(json.loads(receipt)["effect"], "NOT_APPLIED")
+                self.assertEqual(
+                    before, (roots["manifest"].read_bytes(),
+                             roots["config"].read_bytes(), self._all_files(roots)))
+                args.publisher_preflight_only = False
+                with mock.patch.object(svc, "_run", CmdRecorder()):
+                    code, receipt = _capture_stdout(lambda: svc.cmd_upgrade(args))
+                self.assertEqual(code, 0)
+                self.assertEqual(json.loads(receipt)["effect"], "APPLIED")
+            self.assertEqual(roots["config"].read_bytes(), before[1],
+                             "closed predecessor must not change grants or fleet controls")
+            self.assertEqual(
+                {name for name, old in before[2].items()
+                 if (roots["base"] / name).read_bytes() != old},
+                {"git-publish.mjs"}, "second stage changes only the publisher module")
+            self.assertEqual(
+                svc._sha256_file(roots["base"] / "git-publish.mjs"),
+                svc.FLEET_V10_PUBLISHER_PATCH_SHA256["git-publish.mjs"])
+            svc._verify_staged_install("chatgpt1", _label_for("chatgpt1"), roots)
 
     def test_non_enrolled_seats_refused_despite_fleet_file_similarity(self):
         with self._installed_fleet_fixture() as (args, roots, _cfg):
@@ -2888,6 +2945,308 @@ class TestC2PaperRuntimeCompatibility(unittest.TestCase):
                 with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN after bootout"):
                     svc.cmd_stop(args)
             self.assertEqual([cmd[1] for cmd in recorder.calls], ["print", "bootout", "print"])
+
+
+class TestC2BusinessHistoricalCompatibility(unittest.TestCase):
+    """No new repository enrollment; exact 11-file original C2 only."""
+
+    @staticmethod
+    def _legacy_11_set():
+        return frozenset((
+            "gateway.mjs", "git-publish.mjs", "output-budget.mjs",
+            "package.json", "package-lock.json", "paper-design.mjs",
+            "fleet-status.mjs", "fleet-routing.mjs",
+            "tailnet-gateway.mjs", "private-tunnel-auth.mjs",
+            "private-tunnel-gateway.mjs",
+        ))
+
+    @contextmanager
+    def _installed_c2(self):
+        """Hermetic hash-sealed C2 seat, never a real host write."""
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            home = tmp / "home"
+            home.mkdir()
+            (home / "Library" / "LaunchAgents").mkdir(parents=True)
+            account = "chatgpt2-business"
+            with mock.patch.dict(os.environ, {"HOME": str(home)}):
+                source, node, backend, _rec = _do_stage(
+                    tmp, home, account=account)
+                roots = svc._build_runtime_roots(account)
+                _seed_node_modules(roots)
+                _seal_runtime(account)
+                old_names = self._legacy_11_set()
+                for name in set(svc.STAGE_FILES) - old_names:
+                    (roots["base"] / name).unlink()
+                for name in old_names - set(svc.STAGE_FILES):
+                    (roots["base"] / name).write_text(
+                        f"// sealed old C2 {name}\n", encoding="utf-8")
+                cfg = json.loads(roots["config"].read_text())
+                cfg["gitPublish"] = svc._typed_git_config(home)
+                cfg.pop("repositoryWorkspaces", None)
+                cfg["fleetRouting"] = {
+                    "enabled": True,
+                    "requestTimeoutMs": svc.REQUEST_TIMEOUT_MS,
+                    "routes": [
+                        {"hostRef": "ubuntu1", "url": "https://ubuntu1.example.ts.net/mcp"},
+                        {"hostRef": "ubuntu2", "url": "https://ubuntu2.example.ts.net/mcp"},
+                    ],
+                }
+                cfg["maxPerSessionConcurrency"] = 8
+                cfg["maxQueuedPerSession"] = 16
+                cfg["fleetStatus"] = {
+                    "enabled": True,
+                    "launcherPath": str(home / ".local/bin/studio-direct"),
+                    "launcherSha256": "a"*64, "timeoutMs": 15000,
+                    "fabricLauncherPath": str(home / ".local/bin/fabric"),
+                    "fabricLauncherSha256": "b"*64,
+                    "fabricTimeoutMs": 8000,
+                }
+                roots["config"].write_text(
+                    json.dumps(cfg, sort_keys=True), encoding="utf-8")
+                prior = json.loads(roots["manifest"].read_text())
+                prior["files"] = {
+                    name: svc._sha256_file(roots["base"] / name)
+                    for name in sorted(old_names)
+                }
+                prior["configHash"] = svc._sha256_file(roots["config"])
+                roots["manifest"].write_text(
+                    json.dumps(prior, sort_keys=True), encoding="utf-8")
+                for name in svc.C2_BUSINESS_TARGET_PATCH_SHA256:
+                    (source / name).write_text(
+                        f"// reviewed target C2 {name}\n", encoding="utf-8")
+                args = _stage_args(source, node, backend, account=account)
+                args.c2_business_fleet_compat = True
+                args.publisher_preflight_only = False
+                args.publisher_expected_manifest_sha256 = svc._sha256_file(
+                    roots["manifest"])
+                pins = {}
+                for name in old_names:
+                    data = (roots["base"] / name).read_bytes()
+                    pins[name] = hashlib.sha1(
+                        b"blob " + str(len(data)).encode("ascii") + b"\0" + data
+                    ).hexdigest()
+                target = {
+                    name: svc._sha256_file(source / name)
+                    for name in svc.C2_BUSINESS_TARGET_PATCH_SHA256
+                }
+                with mock.patch.object(
+                    svc, "C2_BUSINESS_V10_ORIGINAL_BLOBS", pins
+                ), mock.patch.object(
+                    svc, "C2_BUSINESS_TARGET_PATCH_SHA256", target
+                ), mock.patch.object(
+                    svc, "_run", CmdRecorder()
+                ):
+                    yield args, roots, cfg, prior
+
+    def test_generic_upgrade_from_c2_11file_refuses_downgrade_before_effect(self):
+        with self._installed_c2() as (args, roots, cfg, prior):
+            originals = {
+                name:(roots["base"] / name).read_bytes()
+                for name in prior["files"]
+            }
+            manifest = roots["manifest"].read_bytes()
+            args.c2_business_fleet_compat = False
+            args.publisher_expected_manifest_sha256 = None
+            with self.assertRaisesRegex(SystemExit, "fleet/tailnet capability modules absent"):
+                svc.cmd_upgrade(args)
+            self.assertEqual(roots["manifest"].read_bytes(), manifest)
+            self.assertEqual(
+                {name:(roots["base"] / name).read_bytes() for name in prior["files"]},
+                originals)
+            self.assertFalse((roots["base"] / "workspace-access.mjs").exists())
+
+    def test_c2_11_to_12_success_preserves_every_grant_and_fleet_byte(self):
+        with self._installed_c2() as (args, roots, cfg, prior):
+            before_files = {
+                n: (roots["base"] / n).read_bytes() for n in prior["files"]
+            }
+            before_config = roots["config"].read_bytes()
+            rc, out = _capture_stdout(lambda: svc.cmd_upgrade(args))
+            self.assertEqual(rc, 0)
+            result = json.loads(out)
+            self.assertEqual(result["effect"], "APPLIED")
+            self.assertTrue(result["noNewRepositoryGrants"])
+            updated = svc._verify_staged_install(
+                args.account, _label_for(args.account), roots)
+            self.assertEqual(
+                frozenset(updated["files"]),
+                svc.V2_CHATGPT1_FLEET_TAILNET_PREDECESSOR)
+            self.assertEqual(roots["config"].read_bytes(), before_config)
+            self.assertEqual(
+                {n for n in prior["files"]
+                 if (roots["base"] / n).read_bytes() != before_files[n]},
+                {"gateway.mjs", "git-publish.mjs"})
+            self.assertEqual(
+                (roots["base"] / "workspace-access.mjs").read_bytes(),
+                Path(args.source, "workspace-access.mjs").read_bytes())
+            self.assertEqual(updated["dependencyTreeHash"], prior["dependencyTreeHash"])
+            self.assertNotIn(
+                "repositoryWorkspaces", json.loads(roots["config"].read_text()))
+
+    def test_c2_preflight_is_read_only_with_loaded_service(self):
+        with self._installed_c2() as (args, roots, cfg, prior):
+            before = (
+                roots["manifest"].read_bytes(),
+                roots["config"].read_bytes(),
+                {n: (roots["base"] / n).read_bytes() for n in prior["files"]},
+            )
+            args.publisher_preflight_only = True
+            with mock.patch.object(
+                svc, "_run", CmdRecorder(
+                    handler=lambda c: FakeResult(
+                        0, _print_running(str(roots["plist"]), _label_for(args.account)), "")
+                    if c[:2] == ["launchctl", "print"] else None
+                )
+            ):
+                rc, output = _capture_stdout(lambda: svc.cmd_upgrade(args))
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(output)["effect"], "NOT_APPLIED")
+            self.assertEqual(before, (
+                roots["manifest"].read_bytes(), roots["config"].read_bytes(),
+                {n: (roots["base"] / n).read_bytes() for n in prior["files"]},
+            ))
+            self.assertFalse((roots["base"] / "workspace-access.mjs").exists())
+
+    def test_c2_refuses_wrong_cas_grant_and_unreviewed_source_before_effect(self):
+        with self._installed_c2() as (args, roots, cfg, prior):
+            before = roots["manifest"].read_bytes()
+            args.publisher_expected_manifest_sha256 = "0"*64
+            with self.assertRaisesRegex(SystemExit, "CAS mismatch"):
+                svc.cmd_upgrade(args)
+            args.publisher_expected_manifest_sha256 = svc._sha256_file(
+                roots["manifest"])
+            args.enable_repository_workspaces = True
+            with self.assertRaisesRegex(SystemExit, "no new repository grants"):
+                svc.cmd_upgrade(args)
+            args.enable_repository_workspaces = False
+            p = Path(args.source) / "workspace-access.mjs"
+            p.write_text("// malicious source replacement\n")
+            with self.assertRaisesRegex(SystemExit, "reviewed source hash mismatch"):
+                svc.cmd_upgrade(args)
+            self.assertEqual(roots["manifest"].read_bytes(), before)
+            self.assertFalse((roots["base"] / "workspace-access.mjs").exists())
+
+    def test_c2_running_service_blocks_effects_after_verified_preflight(self):
+        with self._installed_c2() as (args, roots, cfg, prior):
+            original_manifest = roots["manifest"].read_bytes()
+            recorder = CmdRecorder(
+                handler=lambda c: FakeResult(
+                    0, _print_running(str(roots["plist"]), _label_for(args.account)), "")
+                if c[:2] == ["launchctl","print"] else None)
+            with mock.patch.object(svc, "_run", recorder):
+                with self.assertRaisesRegex(SystemExit, "service is loaded"):
+                    svc.cmd_upgrade(args)
+            self.assertEqual(roots["manifest"].read_bytes(), original_manifest)
+            self.assertFalse((roots["base"] / "workspace-access.mjs").exists())
+            self.assertTrue(all(call[:2] == ["launchctl","print"] for call in recorder.calls))
+
+    def test_c2_unexpected_extra_workspace_file_refused_without_overwrite(self):
+        with self._installed_c2() as (args, roots, cfg, prior):
+            extra = roots["base"] / "workspace-access.mjs"
+            extra.write_text("third party workspace module\n")
+            manifest = roots["manifest"].read_bytes()
+            with self.assertRaisesRegex(SystemExit, "new module already exists"):
+                svc.cmd_upgrade(args)
+            self.assertEqual(extra.read_text(), "third party workspace module\n")
+            self.assertEqual(roots["manifest"].read_bytes(), manifest)
+
+    def test_c2_rollback_failure_reports_effect_unknown_not_safe_replay(self):
+        with self._installed_c2() as (args, roots, cfg, prior):
+            manifest = roots["manifest"].read_bytes()
+            real = svc._atomic_write_bytes
+            seen_gateway = [0]
+            def injected(path,data,mode=svc.FILE_MODE):
+                name = Path(path).name
+                if name == "gateway.mjs":
+                    seen_gateway[0] += 1
+                    if seen_gateway[0] > 1:
+                        raise OSError("rollback cannot restore gateway")
+                if name == "git-publish.mjs":
+                    raise OSError("next planned write refused")
+                return real(path,data,mode)
+            with mock.patch.object(svc, "_atomic_write_bytes", injected):
+                with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN during rollback"):
+                    svc.cmd_upgrade(args)
+            self.assertEqual(seen_gateway[0], 2)
+            self.assertEqual(roots["manifest"].read_bytes(), manifest)
+            self.assertFalse((roots["base"] / "workspace-access.mjs").exists())
+
+    def test_c2_atomic_new_module_post_rename_rollback(self):
+        with self._installed_c2() as (args, roots, cfg, prior):
+            before = {
+                n: (roots["base"] / n).read_bytes() for n in prior["files"]
+            }
+            manifest = roots["manifest"].read_bytes()
+            real = svc._atomic_write_bytes
+            injected = [False]
+            def fail_after_rename(path, data, mode=svc.FILE_MODE):
+                real(path, data, mode)
+                if Path(path).name == "workspace-access.mjs" and not injected[0]:
+                    injected[0] = True
+                    raise OSError("simulated failure after creation rename")
+            with mock.patch.object(svc, "_atomic_write_bytes", fail_after_rename):
+                with self.assertRaisesRegex(SystemExit, "NOT_APPLIED"):
+                    svc.cmd_upgrade(args)
+            self.assertTrue(injected[0])
+            self.assertEqual(roots["manifest"].read_bytes(), manifest)
+            self.assertFalse((roots["base"] / "workspace-access.mjs").exists())
+            self.assertEqual(
+                {n:(roots["base"] / n).read_bytes() for n in prior["files"]},
+                before)
+            svc._verify_staged_install(args.account,_label_for(args.account),roots)
+
+    def test_original_c2_only_v2_fileset_can_be_verified_without_a_grant(self):
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            home = tmp / "home"
+            home.mkdir()
+            (home / "Library" / "LaunchAgents").mkdir(parents=True)
+            account = "chatgpt2-business"
+            with mock.patch.dict(os.environ, {"HOME": str(home)}):
+                _src, _node, _backend, _ = _do_stage(tmp, home, account=account)
+                roots = svc._build_runtime_roots(account)
+                _seed_node_modules(roots)
+                _seal_runtime(account)
+                historical = self._legacy_11_set()
+                for name in set(svc.STAGE_FILES) - historical:
+                    (roots["base"] / name).unlink()
+                for name in historical - set(svc.STAGE_FILES):
+                    (roots["base"] / name).write_text("// sealed original "+name+"\n")
+                cfg = json.loads(roots["config"].read_text())
+                cfg["gitPublish"] = svc._typed_git_config(home)
+                cfg["fleetRouting"] = {
+                    "enabled": True, "requestTimeoutMs": svc.REQUEST_TIMEOUT_MS,
+                    "routes":[
+                        {"hostRef":"ubuntu1","url":"https://ubuntu1.example.ts.net/mcp"},
+                        {"hostRef":"ubuntu2","url":"https://ubuntu2.example.ts.net/mcp"},
+                    ],
+                }
+                cfg["maxPerSessionConcurrency"] = 8
+                cfg["maxQueuedPerSession"] = 16
+                cfg.pop("repositoryWorkspaces", None)
+                roots["config"].write_text(json.dumps(cfg, sort_keys=True))
+                prior = json.loads(roots["manifest"].read_text())
+                prior["files"] = {
+                    name: svc._sha256_file(roots["base"] / name)
+                    for name in sorted(historical)
+                }
+                prior["configHash"] = svc._sha256_file(roots["config"])
+                roots["manifest"].write_text(json.dumps(prior, sort_keys=True))
+                manifest_before = roots["manifest"].read_bytes()
+                self.assertTrue(svc._valid_manifest(
+                    prior, account, _label_for(account)))
+                actual = svc._verify_staged_install(
+                    account, _label_for(account), roots)
+                self.assertEqual(frozenset(actual["files"]), historical)
+                self.assertEqual(roots["manifest"].read_bytes(), manifest_before)
+                self.assertNotIn("repositoryWorkspaces", cfg)
+                self.assertEqual(cfg["gitPublish"], svc._typed_git_config(home))
+                self.assertFalse(svc._valid_manifest(
+                    {**prior,"account":"chatgpt3"}, account, _label_for(account)))
+                self.assertFalse(svc._valid_manifest(
+                    {**prior,"files":{**prior["files"],"unexpected.mjs":"a"*64}},
+                    account, _label_for(account)))
 
 
 if __name__ == "__main__":

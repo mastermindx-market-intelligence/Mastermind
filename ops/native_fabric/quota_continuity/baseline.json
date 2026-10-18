@@ -11,6 +11,12 @@
     "mm_codex_exec.sh": "8875be8db4ecdf0a16529687de7062d5215da43ba8f7c1481283f042bb218e9a",
     "sub.sh": "39601b1c2485190049b54183bed82f43c9390339bce59b460d5e6aed9e3e6866",
     "support_bundle.py": "e054b05fece124c6918f12dc1ce3962e6f20b5d74dea5e26630524be9b20295a",
-    "remote_sub_helpers.py": "60a01b4a56f827b36885ff262c407a3f47af69398cbe4a6fd8eb57b5520eec1b"
+    "remote_sub_helpers.py": "60a01b4a56f827b36885ff262c407a3f47af69398cbe4a6fd8eb57b5520eec1b",
+    "quota_remote.py": "a1dab11da10264836e6271955b375b8e6508c23f23d0444c99d96464deb70f2b",
+    "artifact_delivery.py": "28af21eba16fa54ee47b29c6848ae5ec0f3d5f6052ac59746e3e35254cf60eea",
+    "glm_host_account_source.py": "1ec07bd756e8b3edc66f39218b69876f2e9aa898b0b539319e93d8c2ff68587c",
+    "native_prestart_reconcile.py": "94e94625fefcfe09368b397493415dc6cd401a40f77d3787217f4fbf225e1dee",
+    "native_preexec_reconcile.py": "880b8e6a2d26206f69f03a3ed04ba23c1a575a692860313680bc83a7f992f119",
+    "pool_launcher.sh": "95dad5ac680d605200252f7152ecc80b77a767016874028288822a98b2b72c78"
   }
 }

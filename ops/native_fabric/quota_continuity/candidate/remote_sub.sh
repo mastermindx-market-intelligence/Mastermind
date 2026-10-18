@@ -755,7 +755,7 @@ run "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
   'mkdir -p ~/lanes/tmp ~/lanes/ext/active ~/lanes/ext/lanes ~/lanes/orch/fabric' || { RC=$?; log "REMOTE_SETUP_FAILED rc=$RC"; exit "$RC"; }
 
 SUPPORT_FILES=(
-  provider_outcome.py quota_circuit.py recovery_artifacts.py capacity_preflight.py
+  provider_outcome.py quota_circuit.py recovery_artifacts.py capacity_preflight.py native_runtime_bindings.py
   pools.yaml fabric_policy_snapshot.py remote_sub_exec.py fabric_cpu_scope.py native_remote.py fabric_operator_client.py fabric_operator_stop.py fabric_operator_diagnostics.py artifact_production.py artifact_reader.py lane_runtime.py sub.sh slot.py pick.py glm_bound_claude.py model_tier.py yes
   codex_usage.py go_remote_codex.py go_remote_capsule.py
   mm_codex_exec.sh glm_codex_exec.sh go_codex_exec.sh qwen_exec.sh
