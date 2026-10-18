@@ -4353,8 +4353,13 @@ class RuntimeStore:
                 raise PersistenceError(
                     "Executive schema upgrade barrier appeared after write lock acquisition"
                 )
+            from control_plane.finite_initial_admission import (
+                _classification_before_transaction, _finish_transaction,
+            )
+            initial_classifications = _classification_before_transaction(connection)
             self._write_connections.add(connection)
             yield connection
+            _finish_transaction(connection, initial_classifications)
             if self._upgrade_barrier_present():
                 raise PersistenceError(
                     "Executive schema upgrade barrier appeared before write commit"
@@ -15883,6 +15888,7 @@ class AttemptRegistry:
         carrier_claim: _CarrierClaimSpec | None = None,
         _c2_capability: object | None = None,
         exact_target: ExactWorkerClaimTarget | None = None,
+        _initial_capacity_evidence: Mapping[str, Any] | None = None,
     ) -> AttemptLease | None:
         """Own the existing quota/Attempt/Job/claim mutation sequence."""
 
@@ -16092,6 +16098,8 @@ class AttemptRegistry:
                     carrier_claim.carrier_authority_fingerprint
                 ),
             }
+        if _initial_capacity_evidence is not None:
+            claim_payload["capacity_evidence"] = dict(_initial_capacity_evidence)
         if exact_target is not None:
             claim_payload["exact_worker_target"] = exact_target.evidence()
         self.store.append_event(
@@ -16130,6 +16138,7 @@ class AttemptRegistry:
         command_id: str | None = None,
         _coo_cycle_dispatch_capability: object | None = None,
         exact_target: ExactWorkerClaimTarget | object = _NO_EXACT_WORKER_TARGET,
+        _initial_prepared: object | None = None,
     ) -> AttemptLease | OrchestrationDispatchOutcome | None:
         duration = (
             self.store.lease_seconds if lease_seconds is None else int(lease_seconds)
@@ -16222,6 +16231,9 @@ class AttemptRegistry:
                             str(replay_token) if replay_token is not None else None
                         ),
                     )
+            if _initial_prepared is not None:
+                from control_plane.finite_initial_admission import _activate
+                _activate(_initial_prepared, self.store, connection, job_id, command_id, worker_id, selected_quota)
             job_row = connection.execute(
                 "SELECT * FROM jobs WHERE job_id=?", (job_id,)
             ).fetchone()
@@ -16238,6 +16250,8 @@ class AttemptRegistry:
                     + ", ".join(str(row["job_id"]) for row in living_children)
                 )
             if timestamp < int(job_row["available_at_ms"]):
+                if _initial_prepared is not None:
+                    raise StateConflict("finite initial common claim deferred")
                 return None
             if int(job_row["attempt_count"]) >= int(job_row["attempt_limit"]):
                 raise StateConflict(f"job {job_id} exhausted its attempt limit")
@@ -16414,6 +16428,8 @@ class AttemptRegistry:
                     continue
                 candidates.append(row)
             if not candidates:
+                if _initial_prepared is not None:
+                    raise StateConflict("finite initial common claim refused")
                 return None
             candidates.sort(key=lambda row: _capacity_route_rank(row, constraints))
             capacity = candidates[0]
@@ -16456,7 +16472,10 @@ class AttemptRegistry:
                 placement_snapshot=placement_snapshot,
                 placement_snapshot_digest=placement_snapshot_digest,
                 exact_target=exact_target,
+                _initial_capacity_evidence=(_initial_prepared.evidence if _initial_prepared is not None else None),
             )
+            if _initial_prepared is not None and claimed is None:
+                raise StateConflict("finite initial common claim lost CAS")
         return claimed
 
     def _validate_exact_target_launch(
@@ -16601,6 +16620,7 @@ class AttemptRegistry:
         lease_seconds: int | None = None,
         lease_owner: str = "executive-coo-cycle",
         exact_target: ExactWorkerClaimTarget | object = _NO_EXACT_WORKER_TARGET,
+        _initial_prepared: object | None = None,
     ) -> OrchestrationDispatchOutcome | None:
         """Claim exactly one persisted orchestration Job under one command."""
 
@@ -16627,6 +16647,8 @@ class AttemptRegistry:
             lease_owner=lease_owner,
             command_id=command_id,
             _coo_cycle_dispatch_capability=_COO_CYCLE_DISPATCH_CAPABILITY,
+            # Sealed owner-issued finite preparation only; claim_job verifies it.
+            _initial_prepared=_initial_prepared,
             **({"exact_target": exact_target} if exact_target is not _NO_EXACT_WORKER_TARGET else {}),
         )
         if claimed is None:
@@ -22042,13 +22064,19 @@ class ResourceBroker:
     def _physical_admission(
         self, request: Any, caller_context: Any, *, connection=None, stage="entry"
     ) -> dict[str, Any]:
-        """Unresolved transport/caller/runtime/schema admission; no production bypass.
+        """Caller/runtime/schema admission; no production bypass.
 
-        Pytest may replace this boundary with synthetic context. Normal Runtime
-        composition, constructor parameters, policy files and environment cannot.
-        This refuses before this resource path opens or queries a database.
+        Only a process-local context sealed by the physical-admission composer
+        (fresh foreground principal, own process identity, kernel boot, armed
+        qualified policy file, probe observations) is accepted. Any other
+        context, including dicts, flags, constructor parameters, policy files or
+        environment, refuses before this resource path opens or queries a
+        database. Pytest may still replace this boundary with synthetic context.
         """
         from .executive_physical_resources import PhysicalResourceRefusal
+        from .executive_physical_admission import PhysicalCallerContext, admit
+        if type(caller_context) is PhysicalCallerContext:
+            return admit(self, request, caller_context, connection=connection, stage=stage)
         raise PhysicalResourceRefusal("CALLER_BINDING_UNAVAILABLE", "physical resource caller admission is unavailable")
 
     def reserve_physical(self, request, *, caller_context):
@@ -22373,6 +22401,9 @@ class ResourceBroker:
     def _physical_command(self, action, request, caller_context):
         import time
         from . import executive_physical_resources as physical
+        from .executive_physical_admission import PhysicalCallerContext
+        # Only the sealed composer's context selects QUALIFIED-only evaluation.
+        production = type(caller_context) is PhysicalCallerContext
         try:
             # Default production composition always exits here, before parsing,
             # file lookup, DB open, status read or transaction acquisition.
@@ -22455,6 +22486,7 @@ class ResourceBroker:
                             current_charges=charges,
                             observations=context["observations"],
                             decision_time_ms=timestamp,
+                            production=production,
                         )
                     except physical.PhysicalResourceRefusal as refusal:
                         # No headers or demands have been written. Preserve the
@@ -22533,7 +22565,8 @@ class ResourceBroker:
                             # Own-phase identity and pristine charge are proven
                             # above; global pool rows only supply additive capacity.
                             physical.evaluate_begin(reservation, policy=context["policy"], current_charges=charges,
-                                                    observations=context["observations"], decision_time_ms=timestamp)
+                                                    observations=context["observations"], decision_time_ms=timestamp,
+                                                    production=production)
                         planned = []
                         for row in headers:
                             demands = self._physical_demands(connection, row)

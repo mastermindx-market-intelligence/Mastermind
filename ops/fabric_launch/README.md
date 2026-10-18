@@ -126,6 +126,15 @@ An ordinary activation refuses when enabled Studio consumers expect different by
 Use the existing Studio publication owner's coordinated stopped-service upgrade and
 verification process; do not edit pin hashes manually or weaken the refusal.
 
+If an OS error occurs at or after the launcher's atomic replacement, or the
+post-replacement readback is unavailable or differs, activation reports
+BOOT_INSTALL_REFUSED WRAPPER_ACTIVATION_EFFECT_UNKNOWN. This is **not** a
+confirmed no-write result: the new launcher may already be installed. Freeze
+that release attempt, read the original wrapper and preimage backup byte hashes
+and all consumer pins through the original Studio owner, and reconcile its
+effect before any retry, rollback or service restart. No wrapper-install error
+authorizes guessing which consumer has switched versions.
+
 Native Skill/profile admission, authenticated app enrollment, global wrapper rollout
 and exact-provider live proof are separate release conditions. Source CI or one
 successful worker never grants all of them.

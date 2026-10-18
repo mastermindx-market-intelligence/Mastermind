@@ -52,6 +52,14 @@ Do not address a dependency to an archived chat or assume it will wake. A new se
 needs actual creation and current delivery/admission before it is a receiver. Recover
 its mission from the existing durable frontier, not an imagined persistent Web parent.
 A historical author, department or owner label is not evidence of an active writer.
+If a checkpoint says "only the original writer/parent must finish", treat that as
+a custody/lineage clue, not a command to return the work to an old conversation.
+The currently commissioned receiver owns recovery: inspect the original PR/workspace,
+live writer and effects through existing owners; consume the next permitted result or
+advance an independent in-scope step. A live STARTed exact-session operation remains
+bound to its admitted receiver until lawful reconciliation, never assumed transferred.
+When writing a handoff, name a safe next action for the current or next valid receiver
+with source/effect checks, not an unreachable original parent as the sole actor.
 
 An architectural owner is not a live session. Data OS and other system names identify
 existing contracts and implementation boundaries, not an approver to find in another

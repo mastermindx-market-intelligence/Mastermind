@@ -93,6 +93,30 @@ REVIEWED_FILES = {
                                                   (778, 97, 120, 'str', '_mastermind_agent_relay'),
                                                   (784, 89, 92, 'int', '457'))}}
 
+# Candidate-only fixed finite publisher principal/mode postimage for independent
+# review: SHA and precise sites are frozen, not computed at runtime. This does
+# not authorize publication, merge, release or Capacity admission.
+REVIEWED_FILES['ops/executive_os/finite_definition_publication.py'] = {'sha256': '580134e478b7ff954302a1ec0f4780a8fad92b7e31071107260c87d70fa6cd6f',
+ 'sites': ((112, 54, 59, 'int', '0o700'),
+ (112, 61, 66, 'int', '0o755'),
+ (139, 45, 50, 'int', '0o755'),
+ (148, 53, 58, 'int', '0o444'),
+ (189, 29, 34, 'int', '0o700'),
+ (195, 28, 33, 'int', '0o700'),
+ (198, 88, 93, 'int', '0o700'),
+ (251, 71, 76, 'int', '0o700'),
+ (260, 28, 33, 'int', '0o755'),
+ (268, 75, 80, 'int', '0o755'),
+ (280, 60, 65, 'int', '0o700'),
+ (337, 25, 30, 'int', '0o444'),
+ (345, 39, 44, 'int', '0o440'),
+ (345, 59, 62, 'int', '470'),
+ (357, 55, 76, 'str', '"_mastermind_minimax"'),
+ (358, 25, 46, 'str', '"_mastermind_minimax"'),
+ (358, 59, 62, 'int', '470'),
+ (358, 75, 78, 'int', '470'),
+ (359, 24, 27, 'int', '450'))}
+
 # Exact finite lifecycle successor postimage. The production delta changes only
 # socket ACL observation/currentness; the same 37 reviewed principal/mode literals
 # remain fixed. Any other byte or token movement exposes the complete source to D8.
@@ -165,3 +189,11 @@ REVIEWED_FILES["integrations/session_bridge/r2_plain_review_scopes/candidate/art
 # Scoped independent native-finite-capacity-owner-review-01a12a08-v1 PASS
 # on 4c24b21bcc96ea2215e7c3bbc9782b59b9ff46ed approves only the unchanged
 # two renderer and 37 lifecycle literal sites above; no new identity exemption.
+
+# Scoped SourceOS initial-reference review, 2026-10-16: fixed predecessor
+# validation only. Any changed byte or token restores the generic D8 guard.
+REVIEWED_FILES['ops/executive_os/finite_reference_assignment.py'] = {'sha256': '7d2cc97ab91900804f2755b5f11edbd40fa3cca36b6d973ba3e87c5e9a55dc4a', 'sites': ((103, 49, 70, 'str', "'_mastermind_minimax'"), (104, 26, 29, 'int', '470'), (104, 45, 48, 'int', '470'), (104, 65, 68, 'int', '450'), (105, 27, 30, 'int', '450'))}
+
+# Native Root scoped review EC-1 closed: exact fixed directory/HOME permission
+# sites only, not principal identity; every changed byte invalidates this pin.
+REVIEWED_FILES['ops/executive_os/finite_enrollment_completion.py'] = {'sha256': 'c49496b13380aa2b1d61cd12454ea21a89fc7b34a8de5c16b9ecb25da9afa3b4', 'sites': ((174, 111, 116, 'int', '0o755'), (228, 95, 100, 'int', '0o700'), (289, 26, 31, 'int', '0o700'))}

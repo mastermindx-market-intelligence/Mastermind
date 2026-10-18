@@ -327,6 +327,7 @@ _CONFIG_OPTIONAL = frozenset(
         "fabric_bindings_sha256",
         "fabric_bridge_armed",
         "fabric_attended_probe",
+        "native_capacity_v2",
     }
 )
 _CEO_INGRESS_CONFIG_KEYS = frozenset(
@@ -388,6 +389,15 @@ def _validate_fabric_bridge_config(raw: Mapping[str, Any]) -> bool:
                 or str(Path(probe["worker_config_path"])) != probe["worker_config_path"]
                 or "\x00" in probe["worker_config_path"]):
             raise ServiceError("Fabric attended probe requires one fixed worker definition")
+    if "native_capacity_v2" in raw:
+        stanza = raw["native_capacity_v2"]
+        if ("fabric_attended_probe" not in raw or raw.get("coo_foreground_only") is not True
+                or type(stanza) is not dict or set(stanza) != {"macro_release", "producer_sha256"}
+                or type(stanza["macro_release"]) is not str
+                or re.fullmatch(r"[0-9a-f]{40}", stanza["macro_release"]) is None
+                or type(stanza["producer_sha256"]) is not str
+                or re.fullmatch(r"[0-9a-f]{64}", stanza["producer_sha256"]) is None):
+            raise ServiceError("native V2 capacity requires fixed source and foreground Control custody")
     return bool(present)
 
 
@@ -1969,6 +1979,15 @@ def _service_from_config(
             raise ServiceError("product acceptance review requires the sealed COO and complete App binding") from None
         product_acceptance_macro_root = Path(raw["ceo_ingress_app_macro_root"])
 
+    native_capacity_source = None
+    if "native_capacity_v2" in raw:
+        if (len(attended_work_placements) != 1
+                or qualification_for(attended_work_placements) is None):
+            raise ServiceError("native V2 capacity requires the single original finite placement")
+        from control_plane.native_capacity_acquisition import NativeCapacitySource
+        native_capacity_source = NativeCapacitySource.from_startup(
+            fabric_attended_probe_source, fabric_worker_binding_source)
+
     def supervisor_factory(runtime):
         def validations(spec):
             job = runtime.jobs.get_job(spec.job_id)
@@ -2086,7 +2105,11 @@ def _service_from_config(
                 product_acceptance_context_reader=(product_acceptance_basis_reader()
                     if product_acceptance_context_owner is not None else None),
             )
-        mixed = MixedExecutionOwnerSupervisor(primary, owners)
+        initial_admission = None
+        if native_capacity_source is not None:
+            from control_plane.finite_initial_admission import FiniteInitialAdmission
+            initial_admission = FiniteInitialAdmission(native_capacity_source)
+        mixed = MixedExecutionOwnerSupervisor(primary, owners, initial_admission=initial_admission)
         recovery_controller["owners"] = mixed.owners
         return mixed
 
@@ -2666,6 +2689,10 @@ def _service_from_config(
     if qualification_for(attended_work_placements) is not None:
         from control_plane.fabric_attended_registration import register_fixed_finite
         def attended_registration(runtime):
+            if native_capacity_source is not None:
+                from control_plane.finite_initial_registration import register_initial
+                return register_initial(runtime, attended_work_placements[0],
+                    native_capacity_source, autonomy_guard)
             return register_fixed_finite(runtime, attended_work_placements[0],
                 fabric_worker_binding_source, fabric_attended_probe_source, autonomy_guard)
     service = ExecutiveControlService(
