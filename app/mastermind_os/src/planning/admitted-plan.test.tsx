@@ -123,3 +123,42 @@ describe("admitted plan inspector", () => {
     expect(screen.queryByText("Investigate the original parent route")).toBeNull();
   });
 });
+
+describe("existing MissionHost authenticated plan acquisition", () => {
+  it("omits the port when the source owner is unmounted", async () => {
+    const { bindMissionHost } = await import("../host");
+    const client: any = {
+      getState: () => ({ status: "signed_in", acquisition: true, content: false, reason: null }),
+      invalidationGeneration: () => 1, subscribe: () => () => {},
+      signIn: async () => {}, signOut: async () => {},
+      readPrograms: async () => null, readWork: async () => null,
+      readMission: async () => null, readCurrentWindow: async () => null,
+    };
+    expect(bindMissionHost(client).readAdmittedPlan).toBeUndefined();
+  });
+  it("revalidates selection and authentication after the owner acquisition", async () => {
+    const { bindMissionHost } = await import("../host");
+    let epoch = 1;
+    let allowed = true;
+    let resolve!: (value: unknown) => void;
+    const read = vi.fn(() => new Promise<unknown>(r => { resolve = r; }));
+    const client: any = {
+      getState: () => ({ status: allowed ? "signed_in" : "signed_out", acquisition: allowed, content: false, reason: null }),
+      invalidationGeneration: () => epoch, subscribe: () => () => {},
+      signIn: async () => {}, signOut: async () => {},
+      readPrograms: async () => null, readWork: async () => null,
+      readMission: async () => null, readCurrentWindow: async () => null,
+      readAdmittedPlan: read,
+    };
+    const host = bindMissionHost(client);
+    await expect(host.readAdmittedPlan!({ ...selection, root_job_id: "NOT-A-JOB",
+      signal: new AbortController().signal })).rejects.toThrow("PLAN_SELECTION_INVALID");
+    expect(read).not.toHaveBeenCalled();
+    const pending = host.readAdmittedPlan!({ ...selection, signal: new AbortController().signal });
+    epoch += 1;
+    allowed = false;
+    resolve(fixture());
+    await expect(pending).rejects.toThrow("READ_CANCELLED");
+    expect(read).toHaveBeenCalledTimes(1);
+  });
+});
