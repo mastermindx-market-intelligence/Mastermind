@@ -1,49 +1,65 @@
 # Executive bridge completion - 2026-10-18 UTC
 
-Mission: Chris directs completion of the Executive bridge and Executive OS backend so existing sessions can actually execute and return results. This checkpoint is a source milestone, not mission acceptance.
+Mission: Chris directs completion of the Executive bridge and Executive OS backend so sessions actually execute and return results. This is a recoverable source/runtime frontier, not mission acceptance.
 
-## Source and custody
+## Authority, source, custody
 
-- Protected source-law/base pin: `d65414e89ad3b930d84d614196a91d3cce8ba589` in `mastermindx-market-intelligence/Mastermind`.
-- Operation: `executive-bridge-completion-20261018-web-001`.
-- Branch: `sol/web-executive-bridge-completion-20261018-web-001`.
-- Canonical attended workspace: `/Volumes/Mastermind 2/agent-workspaces/web/executive-bridge-completion-20261018-web-001`.
-- No live recipient instruction, Job, worker, activation grant, service restart or deployment was issued by this source repair. No uncertain modifying effect remains at this milestone.
-- PR #1362 owns the separate original-parent reply subscription/delivery work. Preserve it; this repair addresses outbound continuation attention. Inspected #1362 head `190ea6647fba6a8bfc6ac34fe6cd409fb5672992`; its Executive service changes are separate reply-composition/terminal-dispatch hunks.
+Protected source-law/base: `d65414e89ad3b930d84d614196a91d3cce8ba589`, `mastermindx-market-intelligence/Mastermind` (reconfirmed unchanged after the first repair). Operation: `executive-bridge-completion-20261018-web-001`. Branch: `sol/web-executive-bridge-completion-20261018-web-001`. Managed workspace: `/Volumes/Mastermind 2/agent-workspaces/web/executive-bridge-completion-20261018-web-001`.
 
-## Concrete defects and repair
+First published repair: PR #1594, commit `ed4228caf19de48b8a6b50b35946eab371e60da6`. Later revisions on this same PR add the corrected generic-source assertion, the bounded admission-status timeout repair and its tests. No new source law, provider authority, global arming grant, queue, listener, target registry or retry owner was created.
 
-Before: `build_runtime_session_bridge` always supplied an attention callback returning `UNAVAILABLE`. Successful reply commits therefore never entered the existing Wake owner through that callback. The existing parenting test invoked a separate Relay observation cycle afterward, so it did not prove this installed callback.
+## Repaired consumer path
 
-After in source: the actual installed service factory supplies `RuntimeSessionAttention`. It reads the original immutable continuation and current Runtime source, matches target/operation/message/read reference, rechecks service admission and the same Wake-owner instance, and invokes the already-composed `ExecutiveDialogueWakeBridge` once. It creates no queue, listener, native process, grant, session registry, or independent retry owner.
+Before: `build_runtime_session_bridge` always supplied an attention callback returning `UNAVAILABLE`. A reply could commit without this callback requesting any native attention. The earlier parenting fixture invoked a separate Relay observation pass, so it did not prove the installed callback.
 
-The integrated test found a second defect: generic armed Wake composition omitted physical message correlation because only the canary path forwarded it. The recipient consequently retained the preceding message reference. The service and existing carrier now preserve the closed physical source identity for an existing registry-backed generic route as well. Source correlation does not arm the route. Existing production, target, retry, current-writer and binding checks remain in their owners. The constructor still refuses physical correlation with neither a target registry nor a closed canary profile.
+After in source: the installed service factory supplies `RuntimeSessionAttention`. It reads the original immutable continuation and current Runtime source, matches target/operation/message/read reference, rechecks admission and the same Wake-owner instance, then calls the already-composed `ExecutiveDialogueWakeBridge` once. It never starts a replacement worker or invents a canary grant.
 
-Duplicate `session_send` reconciliation remains read-only with respect to attention. It does not attempt to repair an unconfirmed wake by submitting another one. Pre-effect source/admission failure returns unavailable; uncertainty after calling the owner remains `EFFECT_UNKNOWN`. `RECORDED` is not a claim of delivery, native consumption, completed work or parent consumption.
+A new integrated test found another defect: generic armed Wake omitted physical message correlation because only the canary path forwarded it. The recipient therefore kept the previous reply reference. The existing service/factory/carrier now retain the closed physical source for an existing registry-backed generic route. Production, target, retry, current-writer and binding gates remain in their existing owners. A physical identity is correlation, not permission.
 
-## Evidence and validation
+Duplicate `session_send` reconciliation remains read-only with respect to attention. Pre-effect source/admission refusal is unavailable. Uncertainty after calling Wake remains `EFFECT_UNKNOWN`. `RECORDED` never means native consumption, completed work, or parent consumption.
 
-Evidence directory: `/Volumes/Mastermind/evidence/executive-bridge-completion-20261018/`.
+## Admission-status defect, separate from the live rollback's unknown cause
 
-- `baseline-py312.log`: newly introduced callback test could not import the missing implementation before the repair.
-- `attention-first.xml`: 29 focused tests passed before adding the inline generic roundtrip.
-- `inline-first.xml`: reproduces the stale recipient message reference after a successful inline Wake request.
-- `inline-physical.xml`: 30 tests pass after preserving physical correlation, including the original-parent read using real Runtime, Relay and Wake ledger owners. Slack/provider/native-host effects are test fixtures, not live proof.
-- Extended owning-suite validation and protected CI are separate subsequent receipts; do not infer their outcome from these earlier passes.
-- The initial console pytest invocation lacked the source import path; the initial broad Python 3.12 run lacked PyJWT. Those are test-environment failures, not product failures. The isolated workspace `.venv` uses Python 3.12 and the repository-pinned PyJWT 2.13.0 and MCP 1.28.1. No global or installed Executive environment was changed.
+The installed admission probe calls a read-only status subprocess with a 10-second timeout inside an existing bounded 45-second admission wait. An uncaught `TimeoutExpired` previously escaped that wait and could force an early transaction abort. Three new tests reproduced this before the source fix. The probe now treats only that timeout as a failed read; later admission still requires the complete current config/process/release attestation. Permission errors and interruption still propagate. No mutation is retried and no wait/worker/queue is added.
 
-## Observed installed state, not inferred readiness
+This source defect is proven. It is NOT established as the historical cause of the live CEO-arm rollback described below; that transaction's public result did not retain the triggering exception.
 
-At `2026-10-18T03:07:35Z`, Executive readback reported installed source `91c1cac5a20a01f4bf1ac9e92e55613fd4640e1f`, 3 queued Jobs, 0 running Attempts and an empty `session_targets` projection. Read-only host inspection found the control service running; the dedicated Codex worker service and worker socket were absent. That does not by itself prove the attended Fabric route is down.
+The wider owner suite also exposed an existing test-only macOS group assumption. `/private/tmp` produced a fixture directory with group 0 while the process's primary group was 20. The fixture now uses its actual directory owner/group for its simulated account. The production `validate_acceptance` method remains byte-for-byte structurally identical to the protected base; no ownership check was relaxed.
 
-At `2026-10-18T03:19:12Z`, canonical `executive_fabric(view=roots, limit=3)` explicitly reported `ceo_submit_armed: false; new CEO submissions are unavailable through this arm`. No test Job or reviewer was submitted into that known unavailable arm.
+## Test evidence
 
-The host user received permission denied reading the root-owned control configuration. The operation was not retried through another carrier or elevated raw read. No secrets were read. Root-controlled release/activation remains a separate action with its actual authorization and exact source requirements.
+Remote evidence: `/Volumes/Mastermind/evidence/executive-bridge-completion-20261018/`.
 
-## Remaining acceptance and next executable actions
+- `baseline-py312.log`: missing callback implementation reproduced before repair.
+- `inline-first.xml`: integrated inline Wake reached the operator but exposed the stale recipient reply reference.
+- `inline-physical.xml`: 30 focused passes after physical-source repair.
+- `owning-suite-final.xml`: 854 passed, zero failures/errors/skips (191.465 seconds). Session Bridge, canary, Executive service, persisted Wake, and native dispatcher owners.
+- `installed-boundaries.xml`: 594 passed, zero failures/errors/skips (29.750 seconds). Identity, installed peer, launchd configuration and native service dispatch.
+- `admission-probe-red.xml`: three expected timeout regressions before the fix; denial/interruption protections already passed.
+- `admission-probe-owner-final.xml`: 390 passed, zero failures/errors/skips (20.351 seconds), after the timeout fix and test-fixture correction.
+- `integrated-candidate.xml`: 1,838 passed, zero failures/errors/skips (210.733 seconds) in one combined postimage campaign across the preceding owner families.
+- `attention-ceo-composition.xml`: 174 passed, zero failures/errors/skips (20.762 seconds). The additional D7 test first exposed its expected frozen module-fingerprint mismatch. The canonical `serve_installed_control` entry AST is unchanged from protected source (`060525ac61b01452e7a84397f0e68ab4be9c0a05f6dac560113bce8180adc819`); the test retains that exact AST fence, all foreign/mutated-source negatives, and a static candidate module digest. Updating candidate metadata is not independent review acceptance.
 
-The assigned receiver continues this same operation: finish the owning test campaign, adjudicate failures, publish the exact source candidate using protected delivery, obtain one independent authority/exactly-once review through an admitted route, and qualify the exact integrated source. Then use the existing release owner for the actual merged SHA, reconcile current runtime effects, and perform one explicitly scoped native continuation/return against a current addressable recipient. Do not bulk-arm stale queued work or replace existing sessions merely to manufacture a green demo.
+These are source/in-process proofs. Runtime, Relay and Wake ledger owners are real in the parenting test, but Slack, provider and native-host effects are fixtures. Historical campaigns overlap; do not sum them as independent proof. Initial console import/JWT collection errors were isolated test-environment issues, not product failures. The workspace Python 3.12 venv contains the repository-pinned PyJWT 2.13.0 and MCP 1.28.1; the installed Executive environment was not changed.
 
-Live acceptance requires: an authorized original sender; exact current recipient discovery; one canonical continuation; one correlated Wake attempt; observed native resumed turn; native result on the original carrier; original-parent read/consumption; and duplicate/uncertain-effect recovery without a second execution. New work also requires actual admitted START/RUNNING and retained result, not a QUEUED-only receipt. Claude ownership and broader Executive backend readiness are not proven by the Codex fixture.
+## Live operation and reconciled outcome
 
-`MISSION_COMPLETE: false`. Current source capability: `BUILT_NOT_PROVEN` on the installed path. No change to company authority, source law, global arming, or accepted-work ownership is implied.
+Installed release: `91c1cac5a20a01f4bf1ac9e92e55613fd4640e1f`. Canonical reads showed three queued Jobs, zero running Attempts, and empty `session_targets`. `JOB-003`, an existing interconnect acceptance review, has been QUEUED since October 3 with zero Attempts; it was not duplicated.
+
+At `2026-10-18T03:19:12Z`, Fabric explicitly reported `ceo_submit_armed=false`. The original unprivileged raw control-config read was denied and was not retried with elevated raw access. The installed, reviewed `autonomy-control.sh` wrapper subsequently proved available through `sudo -n`; root administration must NOT be reported categorically unavailable.
+
+Its status showed both control/worker arms false and readiness expired at `2026-10-18T01:17:35Z`. CEO-submit status independently showed disarmed. After confirming the exact existing owner keeps submission separate from worker/full-autonomy arming, one `ceo-submit-arm --expected-sha 91c1...` operation was attempted. It returned `arm_rolled_back` / `CEO_SUBMIT_UNVERIFIED`, exit 2. It was NOT retried.
+
+One original-owner `ceo-submit-reconcile` returned EFFECT_UNKNOWN because no retained recovery marker was available. Subsequent public receipt, absent-marker and canonical `ceo-submit-status` readback established the actual completed rollback: **CEO_SUBMIT_DISARMED**, transaction **`autonomy-174a75c059eb`**. Its projection preserves CEO, COO, operator and worker arms false. The exact original operation is reconciled to disarmed, not an unresolved native execution.
+
+The live read-only control client then returned `ok=true`, `AWAITING_CANARY`, PID `61926`, fixed socket `/private/var/run/mastermind-executive/control.sock`. Evidence: `control-status-after-rollback.json`. The owner did reconcile/restart Control during its transaction; no worker, native recipient, new Job, or deployment was started. No credentials were exposed. Old stderr namespace failures were dated September 22 and referenced an older release; they are not the current rollback cause and do not justify changing filesystem permissions.
+
+## Remaining critical path
+
+PR #1362 owns the separate original-parent subscription/return work. At takeover its published head was `190ea6647fba6a8bfc6ac34fe6cd409fb5672992`: draft, conflicting with master, hosted tests/CodeQL passed, no GitHub review. Its original managed workspace was behind at `e5e59e7415973fccf32b249a0412b3b1aaebdb78` with a held untracked `tests/test_fabric_routing_guard_receipts.py`. No process had that workspace as its working directory. The existing branch was fast-forwarded to its published head, then the one real test-fingerprint conflict with protected master was resolved. Local integration commit: `9d61e76d6a134532a265af2075cea1e6707e4ab0`. The held file remains untracked and byte-identical (`held-guard-preimage.sha256`), never staged, executed or modified. Existing immutable review/effect identities remain unchanged.
+
+Next executable actions: publish this verified #1594 revision and integrate its immutable commit with the original #1362 return branch, retaining one combined backend delivery candidate rather than racing two overlapping module fingerprints. Test that combined source; obtain the one consequential authority/exactly-once independent review through an admitted existing route; qualify protected integrated source; then use the existing release owner for the actual merged SHA. No branch/draft release or admin bypass. Any later live activation must first use the reconciled original state and materially changed accepted source/evidence, not repeat the failed arm unchanged.
+
+Live acceptance remains: original sender and exact current recipient; one continuation; one correlated Wake attempt; observed native resumed turn; result on the original carrier; original-parent read/consumption; no second execution on replay/uncertainty. New work additionally requires real START/RUNNING and retained results, not QUEUED alone. Original-account READ authorization, host key/profile selection, Claude ownership and broader backend readiness are not proven by the Codex fixture.
+
+`MISSION_COMPLETE: false`. Source capability: `BUILT_NOT_PROVEN` on the installed path. GitHub owns this source/evidence frontier; no Agent OS write receipt is claimed.
