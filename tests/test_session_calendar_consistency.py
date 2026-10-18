@@ -257,3 +257,110 @@ def test_bot_half_day_queue_survives_then_settles_once_at_next_open(tmp_path, mo
     again = settle.settle_open("autonomous", "2026-11-30", _open_price_fn=fixture_open)
     assert again == {"ok": False, "skipped": "nothing_queued"}
     assert fills_path.read_bytes() == fills_before_repeat
+
+
+@pytest.mark.parametrize("venue,expected", [("US", 48), ("CN", 43), ("HK", 48)])
+def test_session_date_evidence_uses_the_existing_regional_schedule(venue, expected):
+    from datetime import date
+    from portfolio import market_calendar as us, china_calendar as asia
+
+    begin, end = date(2026, 8, 11), date(2026, 10, 16)
+    evidence = (us.session_date_evidence(begin, end) if venue == "US"
+                else asia.session_date_evidence(begin, end, venue=venue))
+    assert evidence["schema"] == "mastermind.cash_session_date_evidence.v1"
+    assert evidence["venue"] == venue
+    assert evidence["status"] == "available"
+    assert evidence["start"] == begin.isoformat()
+    assert evidence["end"] == end.isoformat()
+    assert len(evidence["scheduled_dates"]) == expected
+    assert evidence["scheduled_dates"] == sorted(set(evidence["scheduled_dates"]))
+    assert evidence["source_refs"]
+    assert evidence["scope"] == "published_static_cash_session_dates"
+    assert evidence["exceptional_closures"] == "listed_only"
+    assert evidence["price_or_cutoff_qualified"] is False
+    excluded = {"US": ["2026-09-07"],
+                "CN": ["2026-09-25", "2026-10-01", "2026-10-02",
+                       "2026-10-05", "2026-10-06", "2026-10-07"],
+                "HK": ["2026-10-01"]}[venue]
+    assert not set(excluded).intersection(evidence["scheduled_dates"])
+
+
+@pytest.mark.parametrize("venue", ["US", "CN", "HK"])
+@pytest.mark.parametrize("year", [2024, 2028])
+def test_session_date_evidence_withholds_outside_published_coverage(venue, year):
+    from datetime import date
+    from portfolio import market_calendar as us, china_calendar as asia
+
+    begin, end = date(year, 1, 2), date(year, 1, 9)
+    evidence = (us.session_date_evidence(begin, end) if venue == "US"
+                else asia.session_date_evidence(begin, end, venue=venue))
+    assert evidence["status"] == "unavailable"
+    assert evidence["missing_reason"] == "outside_published_calendar_coverage"
+    assert evidence["scheduled_dates"] is None
+
+
+def test_session_date_evidence_never_qualifies_approximate_cn_2027(monkeypatch):
+    from datetime import date
+    from portfolio import china_calendar as asia
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("unpublished years must be withheld before weekday classification")
+
+    monkeypatch.setattr(asia, "is_trading_day", forbidden)
+    evidence = asia.session_date_evidence(date(2026, 12, 31), date(2027, 1, 4), venue="CN")
+    assert evidence["coverage_end"] == "2026-12-31"
+    assert evidence["status"] == "unavailable"
+    assert evidence["scheduled_dates"] is None
+
+
+@pytest.mark.parametrize("venue", ["", "hk", "US", None])
+def test_session_date_evidence_does_not_apply_legacy_unknown_venue_fallback(venue):
+    from datetime import date
+    from portfolio import china_calendar as asia
+
+    with pytest.raises(ValueError):
+        asia.session_date_evidence(date(2026, 7, 1), date(2026, 7, 2), venue=venue)
+
+
+@pytest.mark.parametrize("venue,day", [("US", "2026-11-27"), ("HK", "2026-02-16")])
+def test_session_date_evidence_counts_shortened_day_once_without_price_claim(venue, day):
+    from datetime import date
+    from portfolio import market_calendar as us, china_calendar as asia
+
+    d = date.fromisoformat(day)
+    evidence = (us.session_date_evidence(d, d) if venue == "US"
+                else asia.session_date_evidence(d, d, venue=venue))
+    assert evidence["scheduled_dates"] == [day]
+    assert evidence["price_or_cutoff_qualified"] is False
+
+
+def test_session_date_evidence_requires_canonical_date_window():
+    from datetime import date, datetime
+    from portfolio import market_calendar as us, china_calendar as asia
+
+    for begin, end in [
+        ("2026-08-11", date(2026, 8, 12)),
+        (date(2026, 8, 11), datetime(2026, 8, 12)),
+        (date(2026, 8, 12), date(2026, 8, 11)),
+    ]:
+        for owner in (us, asia):
+            with pytest.raises(ValueError):
+                owner.session_date_evidence(begin, end)
+
+
+def test_session_date_evidence_tracks_owner_closures_without_aliasing(monkeypatch):
+    from datetime import date
+    from portfolio import market_calendar as us
+
+    begin, end = date(2026, 8, 11), date(2026, 8, 12)
+    before = us.session_date_evidence(begin, end)
+    monkeypatch.setattr(us, "_HOLIDAYS", us._HOLIDAYS | {begin})
+    after = us.session_date_evidence(begin, end)
+    assert before["scheduled_dates"] == ["2026-08-11", "2026-08-12"]
+    assert after["scheduled_dates"] == ["2026-08-12"]
+    assert "2026-08-11" in after["full_day_closures"]
+    after["scheduled_dates"].append("fake")
+    after["source_refs"].clear()
+    repeated = us.session_date_evidence(begin, end)
+    assert repeated["scheduled_dates"] == ["2026-08-12"]
+    assert repeated["source_refs"]

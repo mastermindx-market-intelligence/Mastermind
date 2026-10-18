@@ -187,6 +187,60 @@ def is_trading_day(d: date, venue: str = "CN") -> bool:
     return d not in _HOLIDAYS     # 'CN' (default) or any unrecognised venue → A-share gate
 
 
+def session_date_evidence(start: date, end: date, venue: str = "CN") -> dict[str, object]:
+    """Describe only published CN/HK session dates, with explicit venue and coverage.
+
+    The approximate mainland 2027 table remains usable by legacy callers but
+    cannot qualify evaluation evidence through this stricter observation contract.
+    """
+    if type(start) is not date or type(end) is not date or start > end:
+        raise ValueError("session date evidence requires an ordered date window")
+    if type(venue) is not str or venue not in {"CN", "HK"}:
+        raise ValueError("session date evidence requires CN or HK")
+    coverage_start = date(2025, 1, 1)
+    coverage_end = date(2027 if venue == "HK" else 2026, 12, 31)
+    holidays = _HKEX_HOLIDAYS if venue == "HK" else _HOLIDAYS
+    sources = [
+        "https://www.hkex.com.hk/-/media/HKEX-Market/Services/Circulars-and-Notices/Participant-and-Members-Circulars/SEHK/2024/ce_SEHK_CT_063_2024.pdf",
+        "https://www.hkex.com.hk/-/media/HKEX-Market/Services/Circulars-and-Notices/Participant-and-Members-Circulars/SEHK/2025/ce_SEHK_CT_075_2025.pdf",
+        "https://www.hkex.com.hk/Services/Circulars-and-Notices/Participant-and-Members-Circulars/SEHK/2026/SEHK_CT_077_2026Jun01162846?sc_lang=en",
+    ] if venue == "HK" else [
+        "https://www.sse.com.cn/disclosure/announcement/general/c/c_20241223_10767108.shtml",
+        "https://www.sse.com.cn/disclosure/announcement/general/c/c_20251222_10802507.shtml",
+    ]
+    evidence = {
+        "schema": "mastermind.cash_session_date_evidence.v1",
+        "calendar_owner": "portfolio.china_calendar",
+        "venue": venue,
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "coverage_start": coverage_start.isoformat(),
+        "coverage_end": coverage_end.isoformat(),
+        "source_checked_on": "2026-10-18",
+        "source_refs": sources,
+        "scope": "published_static_cash_session_dates",
+        "exceptional_closures": "listed_only",
+        "price_or_cutoff_qualified": False,
+        "rule_version": "monday_friday_excluding_listed_closures.v1",
+        "full_day_closures": [
+            day.isoformat() for day in sorted(holidays)
+            if coverage_start <= day <= coverage_end
+        ],
+        "scheduled_dates": None,
+        "status": "unavailable",
+        "missing_reason": "outside_published_calendar_coverage",
+    }
+    if start < coverage_start or end > coverage_end:
+        return evidence
+    days = [start + timedelta(days=i) for i in range((end - start).days + 1)]
+    return {
+        **evidence,
+        "scheduled_dates": [day.isoformat() for day in days if is_trading_day(day, venue=venue)],
+        "status": "available",
+        "missing_reason": None,
+    }
+
+
 def _now_cst(now: datetime | None) -> datetime:
     """Coerce `now` to a China-time aware datetime (naive is assumed CST)."""
     if now is None:

@@ -74,6 +74,52 @@ def is_trading_day(d: date) -> bool:
     return d.weekday() < 5 and d not in _HOLIDAYS
 
 
+def session_date_evidence(start: date, end: date) -> dict[str, object]:
+    """Describe the published static schedule; do not qualify prices or fills.
+
+    The caller receives a fresh, bounded window from this calendar's existing
+    trading-day rule. Dates outside published coverage are never extrapolated.
+    """
+    if type(start) is not date or type(end) is not date or start > end:
+        raise ValueError("session date evidence requires an ordered date window")
+    coverage_start, coverage_end = date(2025, 1, 1), date(2027, 12, 31)
+    evidence = {
+        "schema": "mastermind.cash_session_date_evidence.v1",
+        "calendar_owner": "portfolio.market_calendar",
+        "venue": "US",
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "coverage_start": coverage_start.isoformat(),
+        "coverage_end": coverage_end.isoformat(),
+        "source_checked_on": "2026-10-18",
+        "source_refs": [
+            "https://www.nyse.com/trade/hours-calendars",
+            "https://ir.theice.com/press/news-details/2022/NYSE-Group-Announces-2023-2024-and-2025-Holiday-and-Early-Closings-Calendar/default.aspx",
+            "https://ir.theice.com/press/news-details/2024/The-New-York-Stock-Exchange-Will-Close-Markets-on-January-9-to-Honor-the-Passing-of-Former-President-Jimmy-Carter-on-National-Day-of-Mourning/default.aspx",
+        ],
+        "scope": "published_static_cash_session_dates",
+        "exceptional_closures": "listed_only",
+        "price_or_cutoff_qualified": False,
+        "rule_version": "monday_friday_excluding_listed_closures.v1",
+        "full_day_closures": [
+            day.isoformat() for day in sorted(_HOLIDAYS)
+            if coverage_start <= day <= coverage_end
+        ],
+        "scheduled_dates": None,
+        "status": "unavailable",
+        "missing_reason": "outside_published_calendar_coverage",
+    }
+    if start < coverage_start or end > coverage_end:
+        return evidence
+    days = [start + timedelta(days=i) for i in range((end - start).days + 1)]
+    return {
+        **evidence,
+        "scheduled_dates": [day.isoformat() for day in days if is_trading_day(day)],
+        "status": "available",
+        "missing_reason": None,
+    }
+
+
 def _now_et(now: datetime | None) -> datetime:
     """Coerce `now` to an Eastern-time aware datetime (naive is assumed ET)."""
     if now is None:
