@@ -3147,7 +3147,17 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
 
     def cleanup_after_failure(self) -> None:
         if self.services_started:
-            self._capture_failure_observability()
+            try:
+                self._capture_failure_observability()
+            except Exception as exc:
+                # Observability is best effort (e.g. the 90 s control client
+                # call can raise TimeoutExpired); it must never skip the
+                # helper kill or the service stop below.
+                print(
+                    f"acceptance cleanup: failure observability capture raised "
+                    f"{type(exc).__name__}; continuing to service stop",
+                    file=sys.stderr,
+                )
         if self.helper_pid is not None and self._pid_exists(self.helper_pid):
             try:
                 os.kill(self.helper_pid, signal.SIGKILL)
