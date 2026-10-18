@@ -247,3 +247,17 @@ REVIEWED_FILES['ops/native_fabric/quota_continuity/source/glm_host_account_readi
     "sha256": "b8921960e7e46a472b536895b5a6491096627d1c8fd58ea0baf283ff34accc07",
     "sites": ((31, 18, 21, "int", "600"),),
 }
+
+# Pre-Job acceptance-maintenance consumer, 2026-10-18 (PR 1609 Repair 3). The
+# eight-key protected-group-membership.json validator mirrors the contract the
+# acceptance producer (ops/executive_os/acceptance.py, reviewed above at the
+# same account regex and 400 <= id < 500 bounds) already writes: it only
+# CHECKS a retained receipt's shape. It registers no account, assigns no uid or
+# gid and grants nothing. Exact full-file bytes and the three token sites only;
+# any changed byte exposes every site to the generic D8 scanner again.
+REVIEWED_FILES['ops/executive_os/acceptance_maintenance.py'] = {
+    "sha256": "4bca69145c0bb0eda2fd1bdd023e02675eb03e0043ac63014cbfed342031262e",
+    "sites": ((63, 31, 56, "str", 'r"_mastermind_[a-z0-9_]+"'),
+              (828, 46, 49, "int", "400"),
+              (828, 66, 69, "int", "500")),
+}
