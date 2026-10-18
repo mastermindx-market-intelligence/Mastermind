@@ -18,13 +18,15 @@ from typing import Any, Callable, Mapping
 
 MAX_EVENT_BYTES = 32768
 MAX_READER_BYTES = 256 * 1024
-MAX_HOOK_JSON_BYTES = 16384
+MAX_HOOK_JSON_BYTES = 65536
+MAX_CONTEXT_BYTES = 32768
 DEFAULT_CONTEXT_BYTES = 6000
 PROVIDERS = frozenset({"codex", "claude"})
 SOURCES = frozenset({"startup", "resume", "clear", "compact"})
-# Fork is a documented Claude source, but is never an inherited assignment.
-PROVIDER_SOURCES = {"codex": SOURCES, "claude": SOURCES | {"fork"}}
-PROVIDER_MATCHERS = {"codex": "startup|resume|clear|compact",
+# Fork is a documented source for both supported providers, but is never an
+# inherited assignment: the bound reader is never invoked on a fork event.
+PROVIDER_SOURCES = {"codex": SOURCES | {"fork"}, "claude": SOURCES | {"fork"}}
+PROVIDER_MATCHERS = {"codex": "startup|resume|clear|compact|fork",
                      "claude": "startup|resume|clear|compact|fork"}
 _SHA = re.compile(r"[0-9a-f]{40}\Z")
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
@@ -134,7 +136,9 @@ def canonical_argv(binding: Binding, *, compiler_budget: int = 4000,
                    timeout: float = 10.0) -> list[str]:
     if type(compiler_budget) is not int or not 1 <= compiler_budget <= 8000:
         raise ContextError("invalid_compiler_budget")
-    if type(timeout) not in (int, float) or not math.isfinite(timeout) or not 0 < timeout <= 15:
+    # Explicit on-demand hydration may use the canonical reader's 60-second ceiling.
+    # Startup stays orientation-only unless bound; its default remains ten seconds.
+    if type(timeout) not in (int, float) or not math.isfinite(timeout) or not 0 < timeout <= 60:
         raise ContextError("invalid_timeout")
     return ["--workstream", "WS:" + binding.workstream,
             "--macro-root", str(binding.macro_root),
@@ -206,7 +210,7 @@ def render_hook(raw_event: bytes, *, provider: str,
         raise ContextError("unsupported_provider")
     if type(hydrate) is not bool:
         raise ContextError("invalid_hydration_mode")
-    if type(max_context_bytes) is not int or not 2048 <= max_context_bytes <= 8192:
+    if type(max_context_bytes) is not int or not 2048 <= max_context_bytes <= MAX_CONTEXT_BYTES:
         raise ContextError("invalid_hook_budget")
     try:
         event = strict_json(raw_event, limit=MAX_EVENT_BYTES)

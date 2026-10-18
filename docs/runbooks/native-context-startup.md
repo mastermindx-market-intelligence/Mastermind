@@ -106,3 +106,51 @@ Do not paste hidden reasoning, entire chat history, credentials, broad personal 
 For each selected Codex/Claude host and principal profile, record source publication, installed revision, selected native configuration, observed instruction/catalog loading, successful authorized tool read, task recovery, one useful child/result cycle where admitted, and checkpoint restart. Each row is separate. One profile passing does not establish another account/host/harness.
 
 Do not count this runbook or the provider-free tests as a native canary. Exact-head review/CI, role-qualified installation, any required human-only authentication and real same-parent continuation proof remain release obligations.
+
+
+## Explicit native-pilot limits and observed recall (2026-10-17)
+
+The native adapter's default remains 6,000 **bytes**, not 6,000 tokens. An explicitly
+selected project pilot may request up to 32,768 context bytes, under an independent
+65,536-byte encoded JSON ceiling. Both ceilings are hard; an oversized complete packet
+is still withheld rather than clipped. No launcher, user profile, hook, permission or
+worker allowance is changed by this source option. The default reader deadline remains
+10 seconds; an explicit on-demand read may use up to the incumbent reader's 60-second
+ceiling. Keep expensive hydration out of unbound global startup.
+
+A settled canonical read for `WS:MACRO-CONTEXT-INDEX` at Macro
+`eb55c8573d94700dde35b6ce5b9af23738c710c0` returned 22,962 JSON bytes for a
+4,000-token request (4,703 estimated tokens, 12 budget omissions). The unchanged
+6,000-byte policy correctly withheld the body. With the selected 32,768-byte budget,
+the adapter preserved the entire captured packet in 24,544 context bytes / 25,739
+encoded bytes. This comparison reused the captured successful result and did not
+repeat the compiler read. This ordinary packet fits; giant workstream records still
+need canonical source hygiene or bounded expansion, not an unlimited startup budget.
+
+A real M2 Codex 0.159.3 read-only test using the same logged-in account and unchanged
+global configuration consumed that complete context through the native nested
+`AGENTS.md` instruction chain. It correctly returned the exact workstream, Macro
+revision, record digest, selected handoff, token estimate, omission count, advisory
+status, absence of automatic successor-wave authority, and lack of verified live PR
+state: nine checks passed with no tool calls. The temporary owned fixture was removed.
+This is **initial-context comprehension proof**, not an installed SessionStart hook,
+a Context MCP call, current-handoff acceptance, or fleet-wide parity.
+
+The preceding native CLI test failed before inference because its configured
+`disable_direct_message` required an agent message board not available in that CLI
+session. For the no-children diagnostic only, disabling the entire multi-agent/helper
+capability made the test run; direct-message suppression, execution rules, hook trust,
+and the tightened read-only sandbox were preserved. Do not enable direct messaging,
+bypass hook trust, change accounts, or weaken sandbox restrictions to repeat a failure.
+Normal interactive sessions require their own capability-compatible profile.
+
+Both Codex and Claude now treat a supported `SessionStart` `fork` event as
+`FORK_REQUIRES_REBIND`. It emits no inherited workstream/continuation and invokes no
+reader. New sessions do not inherit a lease or assignment merely by copying history.
+
+The old review `native-context-v2-static-review-20261009-001` and the earlier
+`EXECUTIVE-AUTONOMY-V1-CLOSURE` hydration uncertainty are distinct held operations.
+These new source repairs and the separate read-only test do not resolve, replay or
+replace either operation. Source publication, hosted checks, independent current-delta
+review, accepted installation, effective hook trust, real task retrieval, and original
+parent consumption remain separate proof obligations.

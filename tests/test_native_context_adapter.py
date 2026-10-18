@@ -227,7 +227,7 @@ def test_binding_refuses_ambiguous_or_unsafe_shapes(kwargs):
 
 
 @pytest.mark.parametrize("budget,timeout", [(0, 10), (True, 10), (8001, 10), (100, 0),
-                                            (100, True), (100, float("nan")), (100, 16)])
+                                            (100, True), (100, float("nan")), (100, 61)])
 def test_invalid_limits_refused_before_any_reader_call(budget, timeout):
     calls = []
     with pytest.raises(ContextError):
@@ -246,7 +246,7 @@ def test_canonical_argv_has_explicit_target_and_source_no_global_fallback():
 
 def test_hook_output_serialized_ceiling_is_not_silently_truncated():
     with pytest.raises(ContextError):
-        encode_response({"oversize": "X" * 16384})
+        encode_response({"oversize": "X" * 65536})
 
 
 def test_bounded_output_under_varied_multibyte_and_escaping_payloads():

@@ -37,10 +37,19 @@ def test_claude_fork_gets_orientation_without_inheriting_assignment(bound, hydra
     assert 'No parent workstream payload' in body
 
 
-def test_codex_fork_is_not_invented_as_a_supported_event():
-    assert render_hook(b'{"hook_event_name":"SessionStart","source":"fork"}',
-                       provider='codex', binding=BINDING, hydrate=True,
-                       reader=lambda *a: pytest.fail('unsupported read')) == {}
+@pytest.mark.parametrize('bound', [None, BINDING])
+@pytest.mark.parametrize('hydrate', [False, True])
+def test_codex_fork_gets_orientation_without_inheriting_assignment(bound, hydrate):
+    def must_not_run(*args):
+        pytest.fail('fork reused the parent reader')
+    out = render_hook(b'{"hook_event_name":"SessionStart","source":"fork"}',
+                      provider='codex', binding=bound, hydrate=hydrate,
+                      reader=must_not_run)
+    body = text(out)
+    assert 'FORK_REQUIRES_REBIND' in body
+    assert 'EXAMPLE-CONTEXT' not in body
+    assert 'OLD-ASSIGNMENT' not in body
+    assert 'No parent workstream payload' in body
 
 
 @pytest.mark.parametrize('provider', ['codex', 'claude'])
@@ -49,7 +58,7 @@ def test_fragment_matches_only_the_documented_provider_sources(provider):
                          script=Path('/release/hook.py'))['hooks']['SessionStart'][0]
     for source in ['startup', 'resume', 'clear', 'compact']:
         assert re.fullmatch(item['matcher'], source)
-    assert bool(re.fullmatch(item['matcher'], 'fork')) == (provider == 'claude')
+    assert bool(re.fullmatch(item['matcher'], 'fork'))
 
 
 def test_codex_fragment_prevents_second_silent_truncation_after_our_hard_byte_cap():
