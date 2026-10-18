@@ -996,15 +996,44 @@ def acknowledge_settlement_receipt(
     transaction_id: str,
     portfolio_id: str | None = None,
 ) -> bool:
-    """Acknowledge only the exact committed receipt after mark/publish finalization."""
+    """Retain the exact committed receipt before removing it from the active outbox.
+
+    The archive preserves the original transaction preimage, queue and price facts;
+    acknowledgement does not reserialize it or add a supposed fill timestamp.
+    An archive may coexist with an active receipt after an interrupted ACK.  The
+    active copy still owns recovery until its removal succeeds.
+    """
     value = str(transaction_id or "")
     if len(value) != 64 or any(ch not in "0123456789abcdef" for ch in value):
         raise ValueError("invalid settlement receipt transaction id")
-    path = _settlement_receipt_path(value, portfolio_id)
-    if not path.exists():
-        return False
-    _durable_unlink(path)
-    return True
+    with _paper_transaction_lock(portfolio_id):
+        path = _settlement_receipt_path(value, portfolio_id)
+        if not path.exists():
+            return False
+        payload = path.read_bytes()
+        archive = path.parent / "acknowledged" / path.name
+        # The existing book lock serializes cooperating receipt writers.  Never
+        # replace a retained preimage, including one left by an interrupted ACK.
+        if not archive.exists():
+            _atomic_write_bytes(archive, payload)
+        if archive.read_bytes() != payload:
+            raise PaperTransactionConflict("settlement receipt archive differs from active receipt")
+
+        # The shared atomic writer tolerates unsupported directory fsync.  Here
+        # retention must be durable before deleting the only active preimage, so
+        # archive sync errors deliberately leave the active receipt for retry.
+        # Sync both directories: the archive directory itself may be newly made.
+        # Repeat these syncs for an identical copy left by an interrupted write.
+        with archive.open("rb") as retained:
+            os.fsync(retained.fileno())
+        for directory in (archive.parent, path.parent):
+            dir_fd = os.open(directory, os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        _durable_unlink(path)
+        return True
 
 
 def _pending_orders_transition(
