@@ -49,7 +49,27 @@ _MAX_CARRY_DEPTH = 64
 _MAX_SUPERSEDE_DEPTH = 64
 _SHA = re.compile(r"[0-9a-f]{40}")
 _DIGEST = re.compile(r"[0-9a-f]{64}")
-_TERMINAL = {"COMPLETED", "FAILED", "LOST", "CANCELLED", "RATE_LIMITED"}
+# The interrupted pre-Job group receipt is written by ``Acceptance`` (acceptance.py,
+# ``protected-group-membership.json``); keep these key sets equal to that producer.
+_GROUP_RECEIPT_KEYS = frozenset({
+    "passed", "effective_members", "attended_worker_membership", "control_definition_sha256",
+    "primary_gid_census", "name_members", "uuid_members", "nested_groups",
+})
+# The pre-``control_definition_sha256`` / pre-``attended_worker_membership`` generation of the same
+# receipt (Oct 11, e.g. interrupted release 0123ad5a). It is admitted only while re-validating an
+# already-sealed historical ``supersede_prejob_v1`` link, never for a candidate release.
+_LEGACY_GROUP_RECEIPT_KEYS = frozenset({
+    "passed", "effective_members", "primary_gid_census", "name_members", "uuid_members",
+    "nested_groups",
+})
+# ``_attended_worker_membership`` returns None without a ``fabric_attended_probe`` stanza.
+_ATTENDED_MEMBERSHIP_KEYS = frozenset({
+    "worker_user", "worker_uid", "worker_group", "worker_gid", "provider_home", "worker_id",
+    "worker_config_path", "worker_config_sha256", "bindings_sha256", "physical_binding_sha256",
+})
+_ATTENDED_ACCOUNT = re.compile(r"_mastermind_[a-z0-9_]+")
+_WORKER_HOMES = Path("/private/var/db/mastermind-executive/workers")
+_TERMINAL ={"COMPLETED", "FAILED", "LOST", "CANCELLED", "RATE_LIMITED"}
 _HEARTBEAT = {"last_seen_at_ms", "updated_at_ms", "version"}
 _QUOTA_MUTABLE = _HEARTBEAT | {"status", "held_attempt_id", "fence_counter"}
 _JOB_MUTABLE = {"status", "assigned_worker_id", "assigned_quota_class",
@@ -278,7 +298,7 @@ def validate_prior_carry_binding(descriptor: dict, *, _seen: frozenset[str] = fr
             raise MaintenanceError("maintenance predecessor root binding changed")
 
     if descriptor["schema_version"] in {SCHEMA_SUPERSEDE, SCHEMA_PREJOB}:
-        validate_superseded_binding(descriptor)
+        validate_superseded_binding(descriptor, historical=True)
 
 
 def prior_carry_material(sha: str, *, _seen: frozenset[str] = frozenset()) -> tuple[dict, dict, dict]:
@@ -805,11 +825,55 @@ def sealed_backup_snapshot(path: Path, expected_digest: str) -> dict:
         os.close(fd)
 
 
-def prejob_evidence(sha: str) -> str:
+def _attended_membership_shape_valid(value: Any) -> bool:
+    """Shape of ``Acceptance._attended_worker_membership``: None, or exactly its ten fields."""
+    if value is None:
+        return True
+    if type(value) is not dict or set(value) != _ATTENDED_MEMBERSHIP_KEYS:
+        return False
+    for key in ("worker_uid", "worker_gid"):
+        if type(value[key]) is not int or not 400 <= value[key] < 500:
+            return False
+    for key in ("worker_user", "worker_group"):
+        name = value[key]
+        if (type(name) is not str or len(name) > 31
+                or _ATTENDED_ACCOUNT.fullmatch(name) is None):
+            return False
+    worker_id, config_path = value["worker_id"], value["worker_config_path"]
+    if (type(worker_id) is not str or not worker_id
+            or type(config_path) is not str or not Path(config_path).is_absolute()
+            or value["provider_home"] != os.fspath(_WORKER_HOMES / worker_id / "provider-home")):
+        return False
+    return all(type(value[key]) is str and _DIGEST.fullmatch(value[key]) is not None
+               for key in ("worker_config_sha256", "bindings_sha256", "physical_binding_sha256"))
+
+
+def _group_receipt_valid(value: dict, *, historical: bool) -> bool:
+    """Protected-group receipt shape: the current eight-key form; with ``historical`` also the
+    legacy six-key form. Exactly two generations are admitted; any other shape is refused."""
+    current = (set(value) == _GROUP_RECEIPT_KEYS
+               and value["passed"] is True and isinstance(value["effective_members"], dict)
+               and isinstance(value["control_definition_sha256"], str)
+               and _DIGEST.fullmatch(value["control_definition_sha256"]) is not None
+               and _attended_membership_shape_valid(value["attended_worker_membership"])
+               and value["primary_gid_census"] == "COMPLETE"
+               and value["name_members"] == value["uuid_members"] == "EXACT"
+               and value["nested_groups"] == "ABSENT")
+    legacy = (historical and set(value) == _LEGACY_GROUP_RECEIPT_KEYS
+              and value["passed"] is True and isinstance(value["effective_members"], dict)
+              and value["primary_gid_census"] == "COMPLETE"
+              and value["name_members"] == value["uuid_members"] == "EXACT"
+              and value["nested_groups"] == "ABSENT")
+    return current or legacy
+
+
+def prejob_evidence(sha: str, *, historical: bool = False) -> str:
     """Hash only the two control-owned receipts preceding service attestation.
 
     This is evidence of an interrupted prefix, never a successful acceptance.
-    No receipt, marker, service or Runtime state is modified.
+    No receipt, marker, service or Runtime state is modified. ``historical`` re-validates an
+    already-sealed link and additionally admits the legacy six-key group receipt; a candidate
+    release never sets it.
     """
     import pwd
     import grp
@@ -862,12 +926,7 @@ def prejob_evidence(sha: str) -> str:
                      and _DIGEST.fullmatch(value["sha256"]) is not None
                      and type(value["labels_excluded"]) is int and value["labels_excluded"] == 2)
         else:
-            valid = (set(value) == {"passed", "effective_members", "primary_gid_census",
-                                   "name_members", "uuid_members", "nested_groups"}
-                     and value["passed"] is True and isinstance(value["effective_members"], dict)
-                     and value["primary_gid_census"] == "COMPLETE"
-                     and value["name_members"] == value["uuid_members"] == "EXACT"
-                     and value["nested_groups"] == "ABSENT")
+            valid = _group_receipt_valid(value, historical=historical)
         if not valid:
             raise MaintenanceError("interrupted acceptance receipt schema drifted")
         manifest[name] = hashlib.sha256(raw).hexdigest()
@@ -881,12 +940,14 @@ def prejob_evidence(sha: str) -> str:
 
 def validate_superseded_binding(descriptor: dict, *, before: dict | None = None,
                                  artifacts: dict | None = None,
-                                 prior_canary: dict | None = None) -> None:
+                                 prior_canary: dict | None = None,
+                                 historical: bool = False) -> None:
     """Validate the entire selected unstarted lineage against one accepted ancestor.
 
     No provider recovery, schema translation, or partial-acceptance replay is
     granted. Future carry validation retains this immutable selected binding,
     but compares live prestate only before this successor starts acceptance.
+    ``historical`` is set only by the carry-chain walk over already-sealed links.
     """
     if descriptor["schema_version"] not in {SCHEMA_SUPERSEDE, SCHEMA_PREJOB}:
         raise MaintenanceError("invalid supersession schema")
@@ -900,18 +961,20 @@ def validate_superseded_binding(descriptor: dict, *, before: dict | None = None,
             raise MaintenanceError("unstarted supersession chain is too deep")
         seen.add(selected_sha)
         selected = _validate_superseded_link(
-            descriptor, before=before, artifacts=artifacts, prior_canary=prior_canary)
+            descriptor, before=before, artifacts=artifacts, prior_canary=prior_canary,
+            historical=historical)
         if selected["schema_version"] == SCHEMA_V2:
             return
         descriptor = selected
 
 
 def _validate_superseded_link(descriptor: dict, *, before: dict | None,
-                              artifacts: dict | None, prior_canary: dict | None) -> dict:
+                              artifacts: dict | None, prior_canary: dict | None,
+                              historical: bool = False) -> dict:
     prejob = descriptor["schema_version"] == SCHEMA_PREJOB
     selected_sha = descriptor["interrupted_prejob_sha" if prejob else "superseded_unstarted_sha"]
     selected = descriptor_for(selected_sha)
-    allowed = {SCHEMA_V2} if prejob else {SCHEMA_V2, SCHEMA_SUPERSEDE}
+    allowed = {SCHEMA_V2, SCHEMA_SUPERSEDE}
     if (selected is None or selected["schema_version"] not in allowed
             or digest(selected) != descriptor["superseded_descriptor_sha256"]
             or selected["predecessor_sha"] != descriptor["predecessor_sha"]):
@@ -935,8 +998,9 @@ def _validate_superseded_link(descriptor: dict, *, before: dict | None,
     from ops.executive_os.autonomy_control import RUNTIME_ROOT
     if prejob:
         if (sealed_json(bundle/"run-started.json") != {
-                "schema_version": SCHEMA_V2, "descriptor_sha256": digest(selected)}
-                or prejob_evidence(selected_sha) != descriptor["prejob_evidence_sha256"]):
+                "schema_version": selected["schema_version"], "descriptor_sha256": digest(selected)}
+                or prejob_evidence(selected_sha, historical=historical)
+                != descriptor["prejob_evidence_sha256"]):
             raise MaintenanceError("interrupted pre-Job evidence drifted")
     else:
         _require_runtime_acceptance_absent(RUNTIME_ROOT/"control"/"acceptance"/selected_sha)

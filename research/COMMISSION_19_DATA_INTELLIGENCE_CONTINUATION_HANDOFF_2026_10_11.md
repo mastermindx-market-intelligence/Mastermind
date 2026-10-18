@@ -646,3 +646,120 @@ Running (r6, 2026-10-12 ~08:45Z): no native Opus orchestrator — ORCH-I and ORC
 2. Run `register()` from a non-sparse tree before ~2026-10-20, and record the trial-ledger row in r12.
 3. Commission the WP32 P5/P6 tests-only fabric lane.
 4. Run WP31 wave 2: EX-99.1 enrichment, the runner, and a `prior_filings` UTC source. Hold the S reader as-of design with its owner.
+
+#### r12 cycle 2026-10-18T14:58Z (seat 7ab343c8) — wave 11: WP31 evaluator landed + baselined, trial-ledger legacy-row fix, WP31 family registered, WP32 P5/P6 pins, WP31 wave 2 landed, WP31 wave 3 accepted + integrated
+
+**FACTS**
+- Ledger r11 = Mastermind #1595. It landed on master as `0d51da54`, and this r12 branch was cut from master after it.
+- **WP31 evaluator landed.** Macro #9577 squash-merged as `1ddfee654eea`. The covering ci.yml main baseline, run `39098878023`, was dispatched once over a clear field and concluded SUCCESS.
+- **Trial-ledger regression, repaired.** After #9463, identity-less legacy rows in `data/trial_ledger.jsonl` were counted as corrupt, so every non-strict append was refused. Macro #9582 (engine + tests only) squash-merged as `59e26b1ef51d`. It is the fix that made `register()` possible.
+- **WP31 family registered before any label read.** Macro #9586 squash-merged as `af5379b11d9c` at 2026-10-18T06:09:25Z.
+  - It appended exactly one `declared_budget` row: family `c19_wp31_incremental_information`, n=6, itemized basis. The reason string carries prereg commit `8e1950932b29` and doc sha256 `44c9df659288…`.
+  - `register()` ran from a full (non-sparse) SSD worktree whose base held #9577 and #9582. It checked the on-disk bytes against the committed blob before writing, and checked afterwards that the file was only appended to. G-3 `check_budget_row` passes.
+  - This landed before the first eligible universe release (DHI, from 2026-10-19/20). No price, return, outcome, EPS or EX-99.1 value was read for any universe issuer.
+- **WP32 P5/P6 pins = Macro #9587** (tests-only, plus CI registration). The fabric lane `c19-w5s-wp32-p5p6-tests-bailian-20261017` delivered, and the seat ACCEPTED it by artifact.
+  - `tests/test_c19_wp32_correction.py` (P5, 7 tests) pins:
+    - one generation identity cited in both the body leg ref and the consumed-receipt producer id;
+    - a correction replaces every identity;
+    - no mixed response mid-correction;
+    - an absent ticker is answered honestly;
+    - re-pointing the marker restores the surviving identity;
+    - the CTE leg is never cached.
+  - `tests/test_c19_wp32_denial_cache.py` (P6, 6 tests) pins:
+    - 401 and 403 after a warm entitled 200 carry no leg evidence, SHA header or receipts header;
+    - poisoned `_k3e_cached_*` / `_chip_cached_*` never surface;
+    - the flag-off 404 leaks nothing.
+  - Fixtures are the synthetic non-universe ZZWP/ZZWQ. The flag is set only inside monkeypatch scope.
+  - **Offline compose latency** (`WP32-COMPOSE-LATENCY`, n=20, stubbed legs, five runs): median 0.121–0.124 ms, p95 0.151–0.155 ms, max 0.184–0.190 ms. This is offline only, not production latency.
+  - **Inert-guard repair.** In `tests/test_c19_wp19_integrated_answer_entitlement_pins.py`, `_forbid_compose` patched only `_compose_page`, but the route calls `_compose_page_with_receipts`, so the guard could never fire. It now forbids both. Positive control: an allowed request with the repaired guard raises `composed`; before the fix it returned 200.
+  - **CI repair.** First CI was red on the contract-delta packing probes (`scripts/build_free_content.py` 135 > 134, `templates/index.html` 137 > 136) and on `tests/test_ci_pack.py`. Path inference had selected the new job because its tests import `app/` and `engine/`. The repair declared the job `scope: exclusive`, added it to `CURATED_EXCLUSIVE`, and listed its 720-file static import closure as literal paths (no globs), so the probe ceilings stay fixed. `curated_exclusive_closure_findings` = 0 misses. The literal closure also exposed 15 undeclared tracked ancestor `__init__.py` files, which tripped `test_ancestor_init_census_does_not_grow` (ceilings 344 total / 138 substantive). Those 15 are now declared literally too, so the ratchet does not grow.
+  - **Second CI repair.** The 36 `site/` closure leaves that hosted CI found were declared. CI was then fully green on repair head `a8491547`, including `reference-integrity`. The only non-green check was the advisory `ci-authority/codex/merge-queue-pilot`.
+  - **MERGED** at 2026-10-18T14:07:43Z as `f0f080974812`. It was hand-merged with `--match-head-commit`. Main baseline `ci.yml` run `39134772854` was dispatched at 14:10:09Z on `f0f080974812`, once, covering #9602 and #9587. It concluded `failure` at 14:55Z: the only failing pack was ci-pack-10 with `CI_PACK_FAILED_JOBS=["reference-integrity"]`, and its RIG findings (the three Sol #9592 sector-central packets) are IDENTICAL to main's earlier baseline `39113460230`. No other error line appears. That is the inherited Sol #9592 red, not a C19 regression.
+- **WP31 wave 2 = Macro #9602.** The GLM lane `c19-w5s-wp31-wave2-build-glm-20261018` returned PASS at base `9eba2441`, and the seat ACCEPTED it by artifact.
+  - `scripts/c19_wp31_sources.py` adds:
+    - the S reader `s_from_revisions` and `collect_s_legs` (ONE batched revisions-reader call);
+    - `resolve_company_id`, `parse_fiscal_q`/`previous_fiscal_q` and `s_event_ids`;
+    - EX-99.1 enrichment from the index-headers manifest (exhibit TYPES only);
+    - companyfacts label/A0 located by period end;
+    - the `q_release_before_cutoff`/`pit_unrecoverable` leak rules.
+  - The new `scripts/c19_wp31_runner.py:run_evaluation` is one evaluator read in which every I/O is injected:
+    - gates → episodes → K → one S chain read;
+    - the exposure ledger is recorded BEFORE the label read, and an outside read marks the episode EXPOSED;
+    - then the leak rules, the label status and `stats.build_report`.
+    - It has no CLI, no network and no import-time I/O.
+  - The seat integrated it on a fresh SSD tree from origin/main `cf73aecc4957`: lane cherry-pick `552b0694`, then registration commit `855930ab`, which adds the runner test and script to the `c19-wp31-incremental-information` job (0 closure misses, 0 ancestor inits).
+  - Local checks:
+    - 202 named WP31 tests pass;
+    - `tests/test_ci_pack.py` 196 passed / 2 skipped;
+    - contract-delta rc=0 (0 introduced / 0 inherited);
+    - all 12 packs validate.
+  - **MERGED** at 2026-10-18T13:22:22Z as `eb0dbd77cf38`. It was hand-merged with `--match-head-commit` on the inherited-RIG basis:
+    - every CI pack's `CI_PACK_FAILED_JOBS` was `["reference-integrity"]` only;
+    - the PR's RIG findings were byte-identical to main's own failed run `39113460230`;
+    - the legacy-jobs diff was confined to the WP31 job.
+
+    Main is red on RIG L8 from Sol-owned #9592 (three sector-central packets without a RIG-RECEIPT). That heal is Sol's, and this seat neither touched nor posted on it.
+- **WP31 wave 3 = Macro #9607.** The MiniMax lane `c19-w5s-wp31-wave3-build-minimax-20261018` (ubuntu1) returned PASS at `8f82e279730a`, base `855930ab`, with a bundle-only return (sha256 `8c50a8b2d3d8…84be`). The seat ACCEPTED it by artifact.
+  - `scripts/c19_wp31_production.py:ProductionInputs` lazily wires every runner input to its incumbent producer:
+    - EDGAR submissions and Item-2.02 rows via `collectors/edgar_earnings_8k`;
+    - the index-headers manifest via `collectors/edgar_8k._fetch_doc_text`;
+    - Company Facts via `SecCompanyFactsCollector`;
+    - K via the frozen k3e git-blob loaders at HEAD.
+  - `scripts/c19_wp31_evaluate.py` is the manual seat CLI: an exclusive non-blocking flock (busy exits 3, a refusal exits 2), an atomic report-only write, and counts-only output.
+  - The runner's step 5 now records the evaluator label read whenever ≥1 original-filing period context matches. That is the conservative exposure record from the spec §3.
+  - Tests: 15 new cases. 217 job tests pass.
+  - The seat integrated it on an SSD tree from origin/main `eb0dbd77`: cherry-pick `4626279a`, then registration commit `4dd7b1c0`, which adds the 3 new files plus 21 tracked closure leaves.
+  - Local checks:
+    - closure (tracked-path inventory): 0 misses;
+    - `tests/test_ci_pack.py`: 196 passed / 2 skipped;
+    - contract-delta: 0/0;
+    - all 12 packs validate.
+
+    The evaluator has not been run against real data. Its first live read is a separate gated seat act, taken only after an eligible universe release.
+  - **CI repair.** The first CI on `4dd7b1c0` was red in two packs. ci-pack-3 `unrun-import-hygiene` was the seat's own defect: `scripts/c19_wp31_evaluate.py` is a file-path entry script with no repo-root pin. Repair commit `eb6ee6b3` adds the top-level `_ROOT`/`sys.path.insert(0, …)` pin without extending the baseline (pin test 11 passed, job tests 217 passed, contract-delta 0/0, closure 0). ci-pack-4 failed only `reference-integrity` (`CI_PACK_FAILED_JOBS=["reference-integrity"]`), with the three Sol #9592 sector-central packet findings IDENTICAL to main's baseline log; the legacy-jobs diff is confined to the WP31 job.
+  - **MERGED** at 2026-10-18T14:51:41Z as `e61632b63c22`, hand-merged with `--match-head-commit eb6ee6b3` on that inherited-RIG basis.
+- **Sparse closure false-green (CI trap, remedied).** #9587's first repair passed `curated_exclusive_closure_findings` locally on a sparse tree, but hosted CI found 36 `site/` leaves in the closure that were absent from the sparse checkout. The seat now checks closure with the exact-tree tracked-path inventory (`ci_scope_dependencies.write_tracked_path_inventory` + `planner_tracked_path_inventory`), the same existence oracle contract-delta uses.
+- **Bailian lease refusal (fleet infra).** The WP31 wave-2 bailian lane `c19-w5s-wp31-wave2-build-bailian-20261018` returned LEASE_REFUSED rc=75 at acquire, so the id is burned. Broker status, read-only, showed bailian qwen3.8-flash pairing "readiness envelope invalid" on ubuntu0, ubuntu1 and ubuntu2, while GLM glm-5.3-flash pairing was ok. The seat did not touch readiness documents, hosts or pools.
+
+**DECIDED**
+- WP31 wave 2 was rerouted to GLM unchanged: same frozen spec `WP31_WAVE2_SPEC.md` sha256 `bb0ad59a…`, same owned files, new run id `c19-w5s-wp31-wave2-build-glm-20261018`. Its scope:
+  - the S reader replaces the `s_from_workspace` stub, only CALLING the event-workspace and company-intelligence readers read-only;
+  - EX-99.1 enrichment reads the index-headers manifest (exhibit TYPES) only, never exhibit bodies;
+  - the runner (`scripts/c19_wp31_runner.py`).
+
+  Tests use injected synthetic non-universe revisions with no network.
+- A new legacy-jobs CI job whose tests import `app/` or `engine/` must ship `scope: exclusive` + `CURATED_EXCLUSIVE` + a literal closure + every tracked ancestor `__init__.py` of those literal paths in the SAME PR. Otherwise it reds the packing probes, which sit at zero headroom.
+- WP31 wave 3 starts with a read-only census, not a build. The first lane, `c19-w5s-wp31-wave3-census-glm-20261018` on ubuntu1 (packet sha256 `253f2a0c…`), died after one turn on a GLM provider 429 ("Weekly/Monthly Limit Exhausted"). It was rerouted unchanged to MiniMax as `c19-w5s-wp31-wave3-census-minimax-20261018` (packet sha256 `6dcdc249…`), which launches only once host_pick names an eligible host. The census maps the incumbent production owner of every injected runner input: 8-K rows, submissions, companyfacts, index headers, the SEC HTTP client, k3e inputs, the company-intelligence revision store and identity, and the gate inputs. It also maps the CLI/output conventions, the existing workflows that could host the read, and the CI closure sizes. Wave 3 may only CALL incumbent fetchers; the prereg §9 forbids an invented schedule and a changed producer.
+- The MiniMax census returned PASS at `bc94f4ac5db6`, and the seat ACCEPTED it by artifact with deviations.
+  - **Correction:** `data/revisions/` IS tracked (4 files committed by daily.yml). The census called it untracked; it is not.
+  - The universe CIKs are code-pinned (`engine/security_state.py:77` for AAPL; `engine/company_intelligence/issuer_profiles.py:68-71` for DHI/PHM/KBH/TOL). The wave-3 module carries them as a literal map whose keys must equal `UNIVERSE`, and it does not read `ticker_cik_ledger`.
+- The wave-3 build spec is FROZEN as `WP31_WAVE3_SPEC.md` (sha256 `8b3cf32f…56fe`). Its scope:
+  - `scripts/c19_wp31_production.py` builds `ProductionInputs`. Every injected runner input comes from an incumbent producer, imported lazily: EDGAR submissions and Item-2.02 rows via `collectors/edgar_earnings_8k`, the index-headers manifest via `collectors/edgar_8k._fetch_doc_text`, Company Facts via `SecCompanyFactsCollector`, and K via the frozen k3e git-blob loaders at the HEAD revision.
+  - `scripts/c19_wp31_evaluate.py` is a manual seat CLI. It holds an exclusive non-blocking flock on the exposure ledger for the whole run (busy exits 3; a gate refusal exits 2), atomically writes only the report, and prints counts only. It never writes or prints episodes, labels, K/S values or exhibit details.
+  - There is no workflow, schedule or new collector (prereg §9).
+  - Tests are synthetic, with no network.
+- The wave-3 build was commissioned on MiniMax as `c19-w5s-wp31-wave3-build-minimax-20261018` (ubuntu1, started 12:58Z). It branches from the wave-2 head `855930ab`, because #9602 is not merged yet. The return is bundle-only; the seat integrates it after #9602 lands.
+
+**OPEN** (owner → next action)
+- **Flag-off 404 lacks private headers.** `app/integrated_answer.py:165-167` `_require_enabled` raises a plain `HTTPException`, so the 404 carries no `Cache-Control: private, no-store` and no `Vary: Authorization`, unlike the 401/403 path at `app/forensics.py:164`. It leaks no evidence (P6 pins that), but an intermediary may cache it.
+  - Owner: the composer owner (no lane may touch `app/integrated_answer.py`).
+  - Next: wrap it with `_private_error` and update the P6 assertion in the same change.
+- **Bailian readiness envelope invalid fleet-wide.** Owner: fleet/pool infrastructure. Bailian lanes are unavailable until it is repaired.
+- **GLM pool quota exhausted.** The provider returned 429 at 2026-10-18 12:24Z, with reset at 2026-10-19 05:16:16 on the provider clock. Owner: fleet/pool infrastructure. Until then C19 labor routes to MiniMax through bounded host_pick waits. Gates are never bypassed: at 12:30Z no MiniMax host qualified, and at 12:58Z ubuntu1 did.
+- **WP31 exposure record on an ambiguous period match.** RESOLVED in the wave-3 spec §3 and built in #9607. The runner records the evaluator label read whenever the facts JSON holds ≥1 original-filing context for the episode's period, not only exactly one. That is more conservative under prereg §6, and label extraction is unchanged (`_q_accession_for_period` still returns None on an ambiguous match). No prereg amendment is needed.
+- Carried from r11:
+  - The upstream EDGAR clock gap at `collectors/edgar_earnings_8k.py:12` (collector owner; must remove A2 in the same change).
+  - The R2 source_clock regression and the Jul 31 → Oct 3 chain gap (event-workspace owner).
+  - G9 / WP32 P2–P3: Chairman, human-only.
+  - G10, G11, WP32 P7: WS:MARKET-INTELLIGENCE-INSTITUTIONAL-BUILDOUT.
+  - G3: WS:FUNDAMENTAL-FORENSICS.
+  - G1, G8, WP28: WS:CAPITAL-STRUCTURE-INTELLIGENCE-V2.
+  - WP26, WP27: WS-MARKET-OS.
+  - WP01: NOT_LOCATED.
+  - The `trial-budgets` lint is disabled at BASE.
+  - The forensics no-bound gap.
+
+**NEXT**
+1. #9607 has landed (`e61632b63c22`). Its ONE main baseline, ci.yml run `39138202471`, was dispatched at 14:56:04Z on `e61632b63c22` after the in-flight preflight showed none. Read its conclusion once; a red that is RIG-only and identical to `39113460230` is the inherited #9592 red.
+2. Run ONE ci.yml main baseline per merge. Preflight for in-flight runs first and never dispatch over one. A main baseline cannot go green until Sol heals the #9592 RIG packets.
+3. The first evaluator read happens only after an eligible universe release (from 2026-10-19). Every read prints its counts, and a look is declared only at the prereg §5 thresholds (40 episodes / 12 clusters, then 80 common-support episodes).

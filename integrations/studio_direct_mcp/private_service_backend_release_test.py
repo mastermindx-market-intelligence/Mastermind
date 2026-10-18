@@ -20,7 +20,11 @@ from unittest import mock
 import private_service as svc
 
 
-class BackendReleaseTests(unittest.TestCase):
+class BackendReleaseFixture:
+    ACCOUNT = svc.FABRIC_BACKEND_ACCOUNT
+    PORT = 45119
+    MODERN = False
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -29,7 +33,7 @@ class BackendReleaseTests(unittest.TestCase):
         self.fixture_root = mock.patch.object(svc, '_user_root', return_value=self.home)
         self.fixture_root.start()
         self.addCleanup(self.fixture_root.stop)
-        self.account = svc.FABRIC_BACKEND_ACCOUNT
+        self.account = self.ACCOUNT
         self.label = f'com.mastermind.studio-direct-private.{self.account}'
         self.roots = svc._build_runtime_roots(self.account)
         self.loaded = False
@@ -62,9 +66,9 @@ class BackendReleaseTests(unittest.TestCase):
         node.chmod(0o700)
         self.old_backend = self.home / 'old-backend.mjs'
         self.old_backend.write_text('export const oldBackend = true;\n')
-        stage = SimpleNamespace(account=self.account, port=45119, source=str(source),
+        stage = SimpleNamespace(account=self.account, port=self.PORT, source=str(source),
             node=str(node), backend=str(self.old_backend), fabric_only=True,
-            modern_fabric_protocol=None, enable_repository_workspaces=False,
+            modern_fabric_protocol=True if self.MODERN else None, enable_repository_workspaces=False,
             os_commission_config_sha256=None)
         self.capture(lambda: svc.cmd_stage(stage))
         deps = self.roots['node_modules'] / 'fixture-package'
@@ -74,7 +78,7 @@ class BackendReleaseTests(unittest.TestCase):
         # Preserve deliberately non-default policy values and opaque child env.
         config = json.loads(self.roots['config'].read_bytes())
         config.update({'requestTimeoutMs': 199_999, 'backendMode': 'shared-account',
-                       'modernFabricProtocol': False, 'maxPerSessionConcurrency': 6})
+                       'modernFabricProtocol': self.MODERN, 'maxPerSessionConcurrency': 6})
         config['args'].append('--retained-existing-flag')
         config['childEnv']['OPAQUE_EXISTING_POLICY'] = 'fixture-only'
         self.roots['config'].write_bytes(svc._fabric_release_json(config))
@@ -133,6 +137,7 @@ class BackendReleaseTests(unittest.TestCase):
         self.assertEqual(len(dirs), 1)
         return dirs[0]
 
+class BackendReleaseTests(BackendReleaseFixture, unittest.TestCase):
     def test_live_preview_has_no_effect_and_exact_diff_then_apply_preserves_seal(self):
         self.loaded = True
         preview = self.preview()
@@ -565,6 +570,193 @@ class BackendReleaseTests(unittest.TestCase):
         finally:
             launcher.write_bytes(original_launcher_bytes)
             launcher.chmod(0o700)
+
+
+class ModernBackendReleaseTests(BackendReleaseFixture, unittest.TestCase):
+    ACCOUNT = svc.FABRIC_BACKEND_MODERN_ACCOUNT
+    PORT = svc.FABRIC_BACKEND_MODERN_PORT
+    MODERN = True
+
+    def reseal_config(self, config, **manifest_fields):
+        """Keep the fixture seal valid so profile refusals exercise admission."""
+        self.roots['config'].write_bytes(svc._fabric_release_json(config))
+        manifest = json.loads(self.roots['manifest'].read_bytes())
+        manifest.update(manifest_fields)
+        manifest['configHash'] = svc._sha256_file(self.roots['config'])
+        self.roots['manifest'].write_bytes(svc._fabric_release_json(manifest))
+        self.args.expected_manifest_sha256 = svc._sha256_file(self.roots['manifest'])
+        self.before = self.snapshot()
+
+    def assert_profile_refused_without_write(self):
+        with self.assertRaisesRegex(SystemExit, 'modern profile|restricted profile'):
+            self.preview()
+        self.assertEqual(self.snapshot(), self.before)
+        self.assertFalse((self.roots['state'] / 'fabric-backend-releases').exists())
+
+    def test_modern_13_file_preview_apply_preserves_every_other_byte(self):
+        self.assertEqual(self.account, 'fabric-c3-570f6f34')
+        original_manifest = json.loads(self.before[self.roots['manifest']])
+        self.assertEqual(len(original_manifest['files']), 13)
+        self.assertIn('modern-fabric-http.mjs', original_manifest['files'])
+        original_config = json.loads(self.before[self.roots['config']])
+        self.assertIs(original_config['modernFabricProtocol'], True)
+        self.assertEqual(original_config['backendMode'], 'shared-account')
+        self.assertEqual(original_config['port'], 45280)
+        self.assertNotIn('fleetStatus', original_config)
+        # Exercise every existing round-trip, seal, transaction and no-lifecycle
+        # assertion against the modern seat, without inheriting legacy-only tests.
+        BackendReleaseTests.test_live_preview_has_no_effect_and_exact_diff_then_apply_preserves_seal(self)
+        expected_config = {**original_config, 'args': [str(self.backend), *original_config['args'][1:]]}
+        expected_config_bytes = svc._fabric_release_json(expected_config)
+        self.assertEqual(self.roots['config'].read_bytes(), expected_config_bytes)
+        expected_manifest = {**original_manifest, 'backend': str(self.backend),
+            'backendHash': self.args.backend_sha256,
+            'configHash': hashlib.sha256(expected_config_bytes).hexdigest()}
+        self.assertEqual(self.roots['manifest'].read_bytes(), svc._fabric_release_json(expected_manifest))
+
+    def test_neighbor_accounts_cannot_release_or_acquire_enrolled_lock(self):
+        for account in ('fabric-c3-570f6f35', 'fabric-c3-other', 'subagent-fabric-c3-extra'):
+            with self.subTest(account=account):
+                args = SimpleNamespace(**{**vars(self.args), 'account': account})
+                with self.assertRaisesRegex(SystemExit, 'explicitly enrolled restricted c3 account'):
+                    svc.cmd_fabric_backend_release(args)
+                with self.assertRaisesRegex(SystemExit, 'cannot select another account'):
+                    with svc._c2_lifecycle_mutex(account):
+                        self.fail('neighbor acquired an enrolled lifecycle lock')
+                self.assertFalse(svc._build_runtime_roots(account)['base'].exists())
+                self.assertEqual(self.snapshot(), self.before)
+
+    def test_modern_selectors_are_required_with_exact_types_and_values(self):
+        original = json.loads(self.before[self.roots['config']])
+        cases = (
+            ('modernFabricProtocol', False), ('modernFabricProtocol', None),
+            ('modernFabricProtocol', 1), ('modernFabricProtocol', 'true'),
+            ('backendMode', 'per-session'), ('backendMode', None),
+            ('backendMode', False), ('backendMode', 'SHARED-ACCOUNT'),
+        )
+        for key, value in cases:
+            with self.subTest(key=key, value=value):
+                self.reseal_config({**original, key: value})
+                self.assert_profile_refused_without_write()
+        for key in ('modernFabricProtocol', 'backendMode'):
+            with self.subTest(missing=key):
+                config = {k: v for k, v in original.items() if k != key}
+                self.reseal_config(config)
+                self.assert_profile_refused_without_write()
+
+    def test_modern_port_is_the_exact_enrolled_integer(self):
+        original = json.loads(self.before[self.roots['config']])
+        for port in (45119, 45281, '45280', 45280.0, True, None):
+            with self.subTest(port=port):
+                self.reseal_config({**original, 'port': port}, port=port)
+                self.assert_profile_refused_without_write()
+        self.reseal_config({k: v for k, v in original.items() if k != 'port'}, port=45280)
+        self.assert_profile_refused_without_write()
+
+    def test_modern_capability_boundary_cannot_be_broadened_or_normalized(self):
+        original = json.loads(self.before[self.roots['config']])
+        for key in ('fleetStatus', 'repositoryWorkspaces', 'commissionPublication',
+                    'fleetRouting', 'publicUrl'):
+            with self.subTest(forbidden=key):
+                self.reseal_config({**original, key: None})
+                self.assert_profile_refused_without_write()
+        for key, value in (('fabricOnly', False), ('fabricOnly', 1),
+                           ('gitPublish', True), ('gitPublish', 0),
+                           ('paperDesign', True), ('paperDesign', 0),
+                           ('host', 'localhost'), ('host', '0.0.0.0'),
+                           ('accountLabel', 'fabric-c3-570f6f35')):
+            with self.subTest(key=key, value=value):
+                self.reseal_config({**original, key: value})
+                self.assert_profile_refused_without_write()
+
+    def test_modern_release_and_lifecycle_share_the_same_lock(self):
+        self.prepare_apply()
+        with svc._c2_lifecycle_mutex(self.account):
+            with self.assertRaisesRegex(SystemExit, 'already in progress'):
+                svc.cmd_fabric_backend_release(self.args)
+            for operation in (svc.cmd_start, svc.cmd_stop, svc.cmd_seal_runtime):
+                with self.subTest(operation=operation.__name__):
+                    with self.assertRaisesRegex(SystemExit, 'already in progress'):
+                        operation(SimpleNamespace(account=self.account))
+        self.assertEqual(self.snapshot(), self.before)
+        self.assertFalse((self.roots['state'] / 'fabric-backend-releases').exists())
+
+    def test_legacy_lock_does_not_block_modern_lock_or_release(self):
+        legacy_roots = svc._build_runtime_roots(svc.FABRIC_BACKEND_ACCOUNT)
+        legacy_roots['state'].mkdir(mode=0o700, parents=True)
+        self.prepare_apply()
+        with svc._c2_lifecycle_mutex(svc.FABRIC_BACKEND_ACCOUNT):
+            legacy_lock = legacy_roots['state'] / svc.C2_LIFECYCLE_LOCK_NAME
+            legacy_identity = (legacy_lock.stat().st_dev, legacy_lock.stat().st_ino)
+            with svc._c2_lifecycle_mutex(self.account):
+                modern_lock = self.roots['state'] / svc.C2_LIFECYCLE_LOCK_NAME
+                self.assertNotEqual(legacy_identity, (modern_lock.stat().st_dev, modern_lock.stat().st_ino))
+            result = self.capture(lambda: svc.cmd_fabric_backend_release(self.args))
+            self.assertEqual(result['effect'], 'APPLIED')
+            self.assertEqual(legacy_identity, (legacy_lock.stat().st_dev, legacy_lock.stat().st_ino))
+            self.assertEqual(legacy_lock.read_bytes(), b'')
+            self.assertFalse(legacy_roots['config'].exists())
+            self.assertFalse(legacy_roots['manifest'].exists())
+            self.assertFalse((legacy_roots['state'] / 'fabric-backend-releases').exists())
+
+    def test_malformed_named_absence_blocks_modern_release_before_intent(self):
+        self.prepare_apply()
+        exact_absence = (f'Bad request.\nCould not find service "{self.label}" '
+                         f'in domain for user gui: {os.getuid()}\n')
+        cases = (
+            svc.CmdResult(1, '', 'permission denied'),
+            svc.CmdResult(113, 'unexpected output', exact_absence),
+            svc.CmdResult(113, '', exact_absence + '\n'),
+            svc.CmdResult(113, '', exact_absence.replace(self.account, svc.FABRIC_BACKEND_ACCOUNT)),
+            svc.CmdResult(0, '', ''),
+        )
+        original_run = svc._run
+        for result in cases:
+            def run(argv, **kwargs):
+                if argv[0] == 'launchctl':
+                    self.assertEqual(argv, ['launchctl', 'print', svc._launchd_target(self.label)])
+                    return result
+                return original_run(argv, **kwargs)
+            with self.subTest(returncode=result.returncode, stdout=result.stdout, stderr=result.stderr):
+                with mock.patch.object(svc, '_run', side_effect=run):
+                    with self.assertRaisesRegex(SystemExit, 'state is indeterminate'):
+                        svc.cmd_fabric_backend_release(self.args)
+                self.assertEqual(self.snapshot(), self.before)
+                self.assertFalse((self.roots['state'] / 'fabric-backend-releases').exists())
+
+    def test_modern_stop_preserves_unknown_after_bootout_until_exact_absence(self):
+        target = svc._launchd_target(self.label)
+        running = svc.CmdResult(0, f'{target} = {{\n'
+            f'\tpath = {self.roots["plist"]}\n\tstate = running\n\tpid = 4321\n}}\n', '')
+        exact_absence = svc.CmdResult(113, '',
+            f'Bad request.\nCould not find service "{self.label}" '
+            f'in domain for user gui: {os.getuid()}\n')
+        for after_bootout in (svc.CmdResult(113, '', 'unverified absence'), exact_absence):
+            calls = []
+            observations = iter((running, after_bootout))
+
+            def run(argv, **kwargs):
+                calls.append(argv)
+                if argv == ['launchctl', 'print', target]:
+                    return next(observations)
+                self.assertEqual(argv, ['launchctl', 'bootout', target])
+                return svc.CmdResult(0, '', '')
+
+            with self.subTest(stderr=after_bootout.stderr):
+                with mock.patch.object(svc, '_run', side_effect=run):
+                    if after_bootout is exact_absence:
+                        result = self.capture(lambda: svc.cmd_stop(SimpleNamespace(account=self.account)))
+                        self.assertIs(result['stopped'], True)
+                        self.assertEqual(result['account'], self.account)
+                    else:
+                        with self.assertRaisesRegex(SystemExit, 'EFFECT_UNKNOWN after bootout; service absence is unverified'):
+                            svc.cmd_stop(SimpleNamespace(account=self.account))
+                self.assertEqual(calls, [
+                    ['launchctl', 'print', target],
+                    ['launchctl', 'bootout', target],
+                    ['launchctl', 'print', target],
+                ])
+                self.assertEqual(self.snapshot(), self.before)
 
 
 if __name__ == '__main__':

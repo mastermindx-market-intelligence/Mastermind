@@ -1761,7 +1761,8 @@ def _eligible_host_routes(host: str, route_key: Optional[str] = None,
                           required_modes: Optional[List[str]] = None,
                           required_platforms: Optional[List[str]] = None,
                           glm_model: Optional[str] = None,
-                          qwen_model: Optional[str] = None) -> Dict[str, Tuple[str, str]]:
+                          qwen_model: Optional[str] = None,
+                          excluded_hosts: Optional[List[str]] = None) -> Dict[str, Tuple[str, str]]:
     # Lazy imports keep unconstrained picks and launch-policy independent of hosts.
     import host_pick
     import placement_view
@@ -1775,6 +1776,7 @@ def _eligible_host_routes(host: str, route_key: Optional[str] = None,
     routes = _HostRoutes()
     blocked: dict[str, set[str]] = {}
     excluded = set() if host == "auto" else set(registry) - {host}
+    excluded |= set(excluded_hosts or ())
     if required_platforms is not None:
         excluded |= {name for name, entry in registry.items()
                      if not isinstance(entry, dict) or entry.get("platform") not in required_platforms}
@@ -1851,7 +1853,8 @@ def format_pick(task_class: str, prefer: Optional[str] = None,
                 requested_model: Optional[str] = None,
                 route_key: Optional[str] = None,
                 required_modes: Optional[List[str]] = None,
-                required_platforms: Optional[List[str]] = None) -> str:
+                required_platforms: Optional[List[str]] = None,
+                excluded_hosts: Optional[List[str]] = None) -> str:
     """Select a new request, preserving Grok model affinity on quota exhaustion."""
     if os.environ.get("POOL_OPERATOR_CHILD_BUDGET", "0") != "0":
         # Same model is not the same harness capability. The existing operator
@@ -1869,6 +1872,8 @@ def format_pick(task_class: str, prefer: Optional[str] = None,
                   task_complexity=task_complexity, escalation_reason=escalation_reason,
                   route_key=route_key, required_modes=required_modes,
                   required_platforms=required_platforms)
+    if excluded_hosts is not None:
+        common["excluded_hosts"] = excluded_hosts
     affinity = (requested_model == "grok-4.6" and canonical_pool(pool) in (None, "grok")) or (
         canonical_pool(pool) == "grok" and requested_model is None)
     if not affinity:
@@ -1894,8 +1899,15 @@ def _format_pick_host(task_class: str, prefer: Optional[str] = None,
                 requested_model: Optional[str] = None,
                 route_key: Optional[str] = None,
                 required_modes: Optional[List[str]] = None,
-                required_platforms: Optional[List[str]] = None) -> str:
+                required_platforms: Optional[List[str]] = None,
+                excluded_hosts: Optional[List[str]] = None) -> str:
     """Read-only selection; host name or auto also requires placement eligibility."""
+    if excluded_hosts is not None:
+        if (not host or type(excluded_hosts) is not list or len(excluded_hosts) > 64
+                or any(type(value) is not str or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", value) is None
+                       for value in excluded_hosts)
+                or len(set(excluded_hosts)) != len(excluded_hosts)):
+            return "NONE reason=invalid excluded_hosts or host"
     if required_modes is not None:
         known_modes = {mode for adapters in _HOST_POOL_MODES.values() for mode in adapters}
         if (type(required_modes) is not list or not required_modes
@@ -1923,6 +1935,7 @@ def _format_pick_host(task_class: str, prefer: Optional[str] = None,
                 **({"route_key": route_key} if route_key is not None else {}),
                 **({"required_modes": required_modes} if required_modes is not None else {}),
                 **({"required_platforms": required_platforms} if required_platforms is not None else {}),
+                **({"excluded_hosts": excluded_hosts} if excluded_hosts is not None else {}),
             )
             modes = {pool: route[1] for pool, route in routes.items()}
         except Exception as exc:

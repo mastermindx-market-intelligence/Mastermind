@@ -14,6 +14,7 @@ import time
 import uuid
 
 import provider_outcome
+from commission_deadline import CommissionDeadlineExpired, remaining_seconds
 
 MAX_ATTEMPTS = 3
 SCHEMA = "mastermind.fabric_continuation.v1"
@@ -35,6 +36,13 @@ def _read(path):
 def eligible(api, here, run, root, parent):
     """Check original ledger, process, observer, packet and released lease."""
     status = api.inspect_run(run)
+    if (status.get("state") == "TERMINAL_FAILURE" and status.get("signal") == "quota"
+            and status.get("reason") == "prelease_quota_cooldown"
+            and status.get("execution_absence_proven") is True
+            and status.get("root_id") == root and status.get("parent_run_id") == parent):
+        import quota_circuit
+        return quota_circuit.validate_prelease_refusal(here, run, root, parent,
+                                                       packet_limit=api.MAX_RESULT_BYTES)
     if (status.get("state") != "TERMINAL" or status.get("signal") != "quota"
             or type(status.get("rc")) is not int or status["rc"] == 0
             or status.get("root_id") != root or status.get("parent_run_id") != parent):
@@ -122,7 +130,7 @@ def foreground(api, run_id, task_class, **kwargs):
     floor = 7200 if kwargs.get("task_complexity") == "C3_FRONTIER_JUDGMENT" else (
         3600 if kwargs.get("task_complexity") in (None, "", "C2_COMPLEX_BOUNDED") else 0)
     budget = max(budget, floor)
-    deadline = time.monotonic() + budget
+    deadline_ns = time.monotonic_ns() + budget * 1_000_000_000
     request_path = _path(here, run_id, ".continuation-request.json")
     request_path.parent.mkdir(parents=True, exist_ok=True)
     if any(p.exists() or p.is_symlink() for p in (*api._paths(run_id),
@@ -130,20 +138,37 @@ def foreground(api, run_id, task_class, **kwargs):
         raise ValueError("continuation_origin_already_exists")
     provider_outcome.write_new(request_path, {"schema": SCHEMA, "origin_run_id": run_id,
         "root_id": root, "parent_run_id": parent, "max_attempts": MAX_ATTEMPTS,
-        "wall_seconds": budget, "background_execution": False})
+        "wall_seconds": budget, "deadline_ns": deadline_ns, "background_execution": False})
     current, rc, reason = run_id, 75, "controller_exception"
     try:
         for ordinal in range(MAX_ATTEMPTS):
-            remaining = int(deadline - time.monotonic())
+            remaining = int(remaining_seconds(deadline_ns))
             if remaining < 30:
                 reason = "commission_time_exhausted"
                 break
             rc = 75
             reason = "controller_exception"
-            rc = api.request(current, task_class, **kwargs, request_remaining_seconds=remaining,
-                             request_capacity_preflight=True)
+            try:
+                rc = api.request(current, task_class, **kwargs, request_remaining_seconds=remaining,
+                                 request_capacity_preflight=True, request_deadline_ns=deadline_ns)
+            except CommissionDeadlineExpired:
+                reason = "commission_time_exhausted"
+                break
+            except Exception:
+                # An ordinary no-route refusal has its own retained request
+                # proof. It ends this foreground invocation, never starts an
+                # additional attempt and never becomes quota replay evidence.
+                status = api.inspect_run(current)
+                if (status.get("state") == "REQUEST_REFUSED_BEFORE_LAUNCH"
+                        and status.get("execution_absence_proven") is True):
+                    reason = "request_refused_before_launch"
+                    break
+                raise
             if rc == 0:
                 reason = "terminal_return"
+                break
+            if remaining_seconds(deadline_ns) < 30:
+                reason = "commission_time_exhausted"
                 break
             try:
                 proof = eligible(api, here, current, root, parent)

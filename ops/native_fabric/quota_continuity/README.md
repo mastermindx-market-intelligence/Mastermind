@@ -77,6 +77,22 @@ strict ledger outcome, released lease, and frozen packet digest. A task-start
 reservation prevents conversion of a later CLI error into pre-task evidence.
 Each failed attempt remains independently observable and auditable.
 
+## Conservative host disk telemetry
+
+The collector floors available disk space to one decimal GiB before publishing
+host state. Both Linux and Darwin keep the existing disk measurement and volume
+selection. This prevents a host below its configured base floor plus checkout
+reserve from becoming eligible solely because telemetry rounded upward. For
+example, 330253288 available KiB becomes 314.9 GiB and remains below a 315 GiB
+requirement; exactly 315 GiB remains eligible. The locked physical admission
+check still uses current capacity and may refuse a host after concurrent usage.
+
+The regression tests execute both actual disk-probe blocks and pass their output
+through the real host picker, including the original rounding failure, exact
+boundary controls and selection of another healthy host. When deploying a new
+generation, rebind the existing host-pull collector to that same generation and
+verify fresh host state: its probe template is loaded once at process startup.
+
 ## Credential custody in the published generation
 
 The Qwen wrapper loads its selected account through a fixed `exec-codex` helper.
@@ -220,3 +236,15 @@ actual bounded native canary result before reporting installation complete.
 Publication, independent review, protected merge, installed native bytes, facade
 restart and an observed native canary are separate gates. This source checkpoint
 alone is not a production installation or proof of automatic native-parent wake.
+
+## Contention handoff and commission deadlines
+
+An eligible foreground commission can continue after a broker-confirmed pre-lease capacity refusal as well as the existing provider-confirmed pre-task rejection. This closes the race in which routing selected a pool before another run placed its shared allowance on cooldown. Under its existing lock, the broker requires every relevant configured account to be otherwise enabled and covered by a valid active recorded capacity cooldown. It grants no lease to that acquire. Disabled or parked accounts, independent usable accounts, non-capacity failures, expired cooldowns, and busy half-open probes do not qualify this handoff.
+
+The foreground owner waits for its actual one-shot controller return. Its refusal proof binds the frozen request, packet, selected route, original run/root/parent, and exact controller/broker/circuit source. Contradictory effect-unknown markers, lease or launch evidence, and retained execution artifacts remain disqualifying even when their bytes match recorded hashes. A fresh successor keeps the original packet and lineage, the existing three-attempt bound, and exact-leaf acceptance. This path reports `prelease_quota_cooldown`; it does not claim that the contender received a new provider rejection.
+
+One origin monotonic deadline governs routing, provider-lease acquisition, controller staging, new launch attempts, and successors. The existing picker runs with routing metadata only under the incumbent process owner. Broker flock/SQLite waits and controller commands consume the same remaining budget. Each remote launch receives a remaining duration and subtracts its own local preparation time; monotonic clock values never cross hosts. Once launch effects are possible, expiration prevents new attempts while the existing owner completes settlement or preserves uncertain custody. Cleanup, terminal collection, and transit ambiguity may extend observed return time.
+
+Deadline routing excludes only the local `m2` slot transport, whose slot wait and child lifetime do not yet consume this commission deadline. Remote Darwin hosts remain eligible through all ordinary economic, readiness, and placement gates. Direct deadline-bearing `m2` calls refuse before slot acquisition or task creation. Local calls without commission metadata retain their incumbent behavior.
+
+Automatic continuation applies to eligible ordinary C3 commissions and explicitly opted-in native CLI requests. It does not add a background scheduler, wake an ended native parent conversation, replay uncertain task effects, or bypass context, output, turn, resource, or time limits. Exhausting all authorized routes or the commission budget still returns retained evidence for the existing owner. A healthy canary validates normal dispatch and settlement; it does not establish that a real provider returned HTTP 429 or that quota failover occurred.

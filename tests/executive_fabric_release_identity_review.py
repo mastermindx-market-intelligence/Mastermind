@@ -57,7 +57,7 @@ REVIEWED_FILES = {
                                                                                              90,
                                                                                              'int',
                                                                                              '0o700'))},
- 'ops/executive_os/acceptance.py': {'sha256': '54cbcfa7379efec31ec909256603ef04e9658b0d9cfb2b584470b4e6bcf8de35',
+ 'ops/executive_os/acceptance.py': {'sha256': 'd2ea00133d7563263bc64d36038199c022380d25321375b29897cf3b807b8a5a',
                                     'sites': ((842, 59, 62, 'int', '454'),
                                               (842, 64, 67, 'int', '455'),
                                               (842, 69, 72, 'int', '456'),
@@ -246,4 +246,20 @@ REVIEWED_FILES['ops/native_fabric/quota_continuity/source/fabric_operator_owner.
 REVIEWED_FILES['ops/native_fabric/quota_continuity/source/glm_host_account_readiness.py'] = {
     "sha256": "b8921960e7e46a472b536895b5a6491096627d1c8fd58ea0baf283ff34accc07",
     "sites": ((31, 18, 21, "int", "600"),),
+}
+
+# Pre-Job acceptance-maintenance consumer, 2026-10-18 (PR 1609 Repair 3). The
+# eight-key protected-group-membership.json validator mirrors the contract the
+# acceptance producer (ops/executive_os/acceptance.py, reviewed above at the
+# same account regex and 400 <= id < 500 bounds) already writes: it only
+# CHECKS a retained receipt's shape. It registers no account, assigns no uid or
+# gid and grants nothing. Exact full-file bytes and the three token sites only;
+# any changed byte exposes every site to the generic D8 scanner again.
+# Re-pinned for the historical-only legacy six-key admission (no new literal; the same three
+# tokens moved with the added constant and helper).
+REVIEWED_FILES['ops/executive_os/acceptance_maintenance.py'] = {
+    "sha256": "2523c0c0618106555b49b29199a6151f12f3ddd725d929c0595dce388dd5a314",
+    "sites": ((70, 31, 56, "str", 'r"_mastermind_[a-z0-9_]+"'),
+              (835, 46, 49, "int", "400"),
+              (835, 66, 69, "int", "500")),
 }
