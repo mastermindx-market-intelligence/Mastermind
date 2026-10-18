@@ -588,6 +588,7 @@ def main(argv=None):
             app = build_personal_read_mcp_app(settings, audit_sink=sink)
         elif profile == WEB_CEO_V3_PROFILE:
             from integrations.session_bridge.return_tools import NativeReplyReadTool
+            from integrations.session_bridge.reference_tools import NativeReplyReferencesTool
             from integrations.mosyle_mdm.client import MosyleInventoryClient
             from integrations.mosyle_mdm.credential import FileMosyleCredentialSource
             from integrations.session_bridge.installed import InstalledSessionBridgeClient
@@ -620,6 +621,7 @@ def main(argv=None):
                 session_reply_handler=session_client.send,
                 session_summon_handler=session_client.summon,
                 session_reply_read_tool=NativeReplyReadTool(session_client),
+                session_reply_references_tool=NativeReplyReferencesTool(session_client),
                 enable_os_executive_transport=raw.get('os_executive_transport', False),
                 os_executive_resource=validate_os_executive_resource(raw),
                 os_commission_preparer=build_os_commission_client(raw),
@@ -633,6 +635,7 @@ def main(argv=None):
             from integrations.session_bridge.installed import InstalledSessionBridgeClient
 
             from integrations.session_bridge.return_tools import NativeReplyReadTool
+            from integrations.session_bridge.reference_tools import NativeReplyReferencesTool
             session_client = InstalledSessionBridgeClient(
                 settings.ceo_ingress_socket_path
             )
@@ -643,6 +646,7 @@ def main(argv=None):
                 session_reply_handler=session_client.send,
                 session_summon_handler=session_client.summon,
                 session_reply_read_tool=NativeReplyReadTool(session_client),
+                session_reply_references_tool=NativeReplyReferencesTool(session_client),
                 **mounts,
             )
         elif profile == WEB_CEO_V2_PROFILE:

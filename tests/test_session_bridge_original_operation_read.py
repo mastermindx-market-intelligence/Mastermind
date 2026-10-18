@@ -423,3 +423,79 @@ def test_reference_projection_oversized_candidate_is_unavailable(setup):
     with pytest.raises(BridgeError):
         s.owner.session_reply_references(
             principal=s.projection, work_ref="WS:WORKSPACE-AGENT-PROGRAM")
+
+
+def test_original_reference_private_read_route_is_closed_and_effect_free(setup):
+    from common.session_bridge_private_contract import (
+        PRIVATE_SCHEMA, SESSION_TOOLS, MODIFYING_TOOLS)
+    from integrations.session_bridge.installed import (
+        InstalledSessionBridgeProvider, private_ingress_owner, principal_frame)
+    from integrations.session_bridge.reference_tools import NativeReplyReferencesTool
+
+    s = setup
+    expected = populate(s)
+    s.service.calls.clear()
+    assert "session_reply_references" in SESSION_TOOLS
+    assert "session_reply_references" not in MODIFYING_TOOLS
+    provider = InstalledSessionBridgeProvider(
+        target_projector=lambda *_: [], reply_handler=lambda *_: {},
+        summon_handler=lambda *_: {},
+        reference_handler=lambda principal, args:
+            s.owner.session_reply_references(principal=principal, **args))
+    frame = {"schema": PRIVATE_SCHEMA, "tool": "session_reply_references",
+             "principal": principal_frame(s.principal),
+             "arguments": {"work_ref": "WS:WORKSPACE-AGENT-PROGRAM"}}
+    response = asyncio.run(private_ingress_owner(provider).handle_frame(frame))
+    assert response["ok"] is True
+    assert response["data"]["references"][0]["read_ref"] == expected
+    assert response["data"]["references"][0]["reference_only"] is True
+    assert not s.service.calls
+    foreign = dataclasses.replace(s.principal, subject_digest="f" * 64)
+    denied = asyncio.run(private_ingress_owner(provider).handle_frame(
+        {**frame, "principal": principal_frame(foreign)}))
+    assert denied["ok"] is True
+    assert denied["data"]["references"] == []
+    assert not s.service.calls
+    assert NativeReplyReferencesTool.validate(
+        "session_reply_references", frame["arguments"]) == frame["arguments"]
+    for invalid in ({"work_ref": "A", "page_size": True},
+                    {"work_ref": "A", "page_size": 33},
+                    {"work_ref": "A", "fake": 1}, {}):
+        with pytest.raises(Exception):
+            NativeReplyReferencesTool.validate("session_reply_references", invalid)
+
+
+def test_original_reference_tool_uses_existing_private_read_peer(setup):
+    from types import SimpleNamespace
+    from integrations.mastermind_executive_app.gateway import TRANSPORT_SENT_OK
+    from integrations.session_bridge.installed import (
+        InstalledSessionBridgeClient, InstalledSessionBridgeProvider)
+    from integrations.session_bridge.reference_tools import NativeReplyReferencesTool
+
+    s = setup
+    expected = populate(s)
+    s.service.calls.clear()
+    provider = InstalledSessionBridgeProvider(
+        target_projector=lambda *_: [], reply_handler=lambda *_: {},
+        summon_handler=lambda *_: {},
+        reference_handler=lambda principal, args:
+            s.owner.session_reply_references(principal=principal, **args))
+
+    class ExistingPrivatePeer:
+        async def send_frame(self, _socket, frame):
+            return SimpleNamespace(transport=TRANSPORT_SENT_OK, ok=True,
+                                   result=await provider.handle_frame(frame))
+
+    client = InstalledSessionBridgeClient(
+        "/private/tmp/isolated-r2-reference-test.sock", client=ExistingPrivatePeer())
+    tool = NativeReplyReferencesTool(client)
+    result = asyncio.run(tool.handle(s.principal, "session_reply_references",
+                                     {"work_ref": "WS:WORKSPACE-AGENT-PROGRAM"}))
+    assert result["ok"] is True
+    assert result["data"]["references"][0]["read_ref"] == expected
+    assert result["data"]["references"][0]["reference_only"] is True
+    assert not s.service.calls
+    for args in ({"work_ref": "A", "page_size": True}, {}, {"work_ref": 19}):
+        refused = asyncio.run(tool.handle(s.principal, "session_reply_references", args))
+        assert refused["ok"] is False
+        assert refused["error"]["code"] == "invalid_input"
