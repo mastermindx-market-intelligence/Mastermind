@@ -80,6 +80,18 @@ class Peer:
         self.rows = [row()]
         self.send_result = committed()
         self.reply_result = reply()
+        self.references_result = {
+            "schema": "mastermind.session_reply_references.v1",
+            "status": "COMPLETE", "next_cursor": None, "high_water": 12,
+            "references": [{"read_ref": "session-reply-" + "a" * 64,
+                            "operation_key": KEY,
+                            "request_ref": "session-bridge-continue:" + "a" * 64,
+                            "request_event_id": 12,
+                            "request_revision": "c" * 64,
+                            "requested_at": "2026-10-18T00:00:00Z",
+                            "work_ref": WORK, "root_job_id": ROOT,
+                            "target_ref": TARGET, "reference_only": True}],
+        }
         self.error = None
         self.transport = TRANSPORT_SENT_OK
         self.after = lambda: None
@@ -92,7 +104,8 @@ class Peer:
             result = private_result(tool, code=self.error, message="PRIVATE-BACKEND-DIAGNOSTIC")
         else:
             data = {"session_targets": self.rows, "session_send": self.send_result,
-                    "session_reply_read": self.reply_result}[tool]
+                    "session_reply_read": self.reply_result,
+                    "session_reply_references": self.references_result}[tool]
             result = private_result(tool, data=copy.deepcopy(data))
         return SimpleNamespace(transport=self.transport, ok=True, result=result)
 
@@ -644,3 +657,48 @@ def test_review_constructor_rejects_same_authenticator_with_split_audited_policy
         kwargs["submit_verifier"]._policy = auth_fixture._submit_policy(policy_id="different-policy")
     with pytest.raises(ValueError, match="one composition"):
         make_app(rsa_key, modify_kwargs=split_policy)
+
+
+
+@pytest.mark.parametrize("submit", [False, True])
+def test_read_only_original_references_authenticated_no_send(rsa_key, submit):
+    app, peer, _, _ = make_app(rsa_key)
+    token = (auth_fixture._submit_token(rsa_key) if submit
+             else auth_fixture._read_token(rsa_key))
+    status, result = request(
+        app, token, "references",
+        {"arguments": {"work_ref": WORK, "root_job_id": ROOT}})
+    assert status == 200 and result["effect"] == "NONE"
+    assert result["operation"] == "references" and result["operation_key"] is None
+    assert result["data"]["references"] == peer.references_result["references"]
+    assert result["data"]["references"][0]["reference_only"] is True
+    assert len(peer.calls) == 1
+    assert peer.calls[0]["tool"] == "session_reply_references"
+    assert peer.calls[0]["arguments"] == {"work_ref": WORK, "root_job_id": ROOT}
+    assert peer.calls[0]["principal"]["policy_id"] == (
+        "bsc-e1-test-submit" if submit else "bsc-e1-test-read")
+
+
+@pytest.mark.parametrize("arguments", [
+    {}, {"work_ref": "bad"}, {"work_ref": WORK, "root_job_id": "bad"},
+    {"work_ref": WORK, "page_size": True},
+    {"work_ref": WORK, "page_size": 33},
+    {"work_ref": WORK, "unknown": "value"},
+])
+def test_original_reference_http_validation_before_private_effect(rsa_key, arguments):
+    app, peer, _, _ = make_app(rsa_key)
+    status, result = request(app, auth_fixture._read_token(rsa_key),
+                             "references", {"arguments": arguments})
+    assert status == 400 and result["effect"] == "NONE"
+    assert result["data"] is None and not peer.calls
+
+
+def test_original_references_foreign_projection_is_withheld(rsa_key):
+    app, peer, _, _ = make_app(rsa_key)
+    peer.references_result["references"][0]["work_ref"] = "WS:FOREIGN"
+    status, result = request(
+        app, auth_fixture._read_token(rsa_key), "references",
+        {"arguments": {"work_ref": WORK}})
+    assert status == 503 and result["effect"] == "NONE"
+    assert result["data"] is None
+    assert len(peer.calls) == 1 and peer.calls[0]["tool"] == "session_reply_references"

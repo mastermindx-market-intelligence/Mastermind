@@ -1,6 +1,6 @@
 """App selected-session HTTP transport for the installed v3 OS composition.
 
-This module owns exactly three fixed authenticated HTTPS POST routes around
+This module owns four fixed authenticated HTTPS POST routes around
 the actual :class:`InstalledSessionBridgeClient`.  It registers no routes and
 constructs no Runtime, socket listener, provider or credential; it remains
 disconnected until the integrator supplies the protected composition and the
@@ -11,6 +11,8 @@ principal into ASGI state, or takes a caller-selected private route.
   an exact work/root selection through ``bridge.targets`` only.
 * ``/os/executive/session/send`` commits one continuation with precisely the
   four validated existing arguments, passed once to ``bridge.send``.
+* ``/os/executive/session/references`` discovers bounded original-request
+  references through the same read-only bridge; never commits or acknowledges.
 * ``/os/executive/session/reply`` recovers the committed native reply by the
   exact original operation key through ``bridge.reply_read`` only.  It never
   reads targets, never sends, and never marks ``parent_consumed``.
@@ -84,11 +86,13 @@ _OPERATIONS: dict[str, str] = {
     "/os/executive/session/context": "context",
     "/os/executive/session/send": "send",
     "/os/executive/session/reply": "reply",
+    "/os/executive/session/references": "references",
 }
 
 _RESULT_SCHEMA = "mastermind.os.executive.session_result.v1"
 _CONTEXT_SCHEMA = "mastermind.os.executive.session_context.v1"
 _NATIVE_REPLY_SCHEMA = "mastermind.native_reply_read.v1"
+_REFERENCE_SCHEMA = "mastermind.session_reply_references.v1"
 
 #: The existing exact read policy and the existing exact read+intent.submit
 #: policy.  Both must concern the same configured resource/issuer/subjects.
@@ -194,8 +198,8 @@ def _json_response(payload: dict[str, Any], status: int, *, operation: str) -> R
         # A malformed or oversize release is UNKNOWN once an effect may have
         # happened; context never has an effect and reports the projection
         # unusable instead.
-        if operation == "context":
-            return _failure_response("context", "session_unavailable", effect="NONE")
+        if operation in ("context", "references"):
+            return _failure_response(operation, "session_unavailable", effect="NONE")
         return _failure_response(
             operation, "effect_unknown", effect="UNKNOWN",
             operation_key=payload.get("operation_key"),
@@ -379,7 +383,7 @@ def _validated_native_reply(operation_key: str, native: Any) -> dict[str, Any]:
 
 
 class OsSessionTransportApp:
-    """Three fixed selected-session routes around the installed bridge client.
+    """Four fixed selected-session routes around the installed bridge client.
 
     No inner app is wrapped: unrecognized scopes, methods, paths, schemes and
     query strings fail closed here, and the private bridge call is reached
@@ -525,8 +529,8 @@ class OsSessionTransportApp:
             return await self._dispatch(operation, scope, body, principal, chain)
         except Exception:
             # No phase may be inferred from an unexpected internal failure.
-            if operation == "context":
-                return _failure_response("context", "session_unavailable", effect="NONE")
+            if operation in ("context", "references"):
+                return _failure_response(operation, "session_unavailable", effect="NONE")
             return _failure_response(
                 operation,
                 "effect_unknown",
@@ -630,6 +634,8 @@ class OsSessionTransportApp:
             return await self._context(scope, body, principal, chain)
         if operation == "send":
             return await self._send(scope, body, principal, chain)
+        if operation == "references":
+            return await self._references(scope, body, principal, chain)
         return await self._reply(scope, body, principal, chain)
 
     async def _context(
@@ -772,6 +778,51 @@ class OsSessionTransportApp:
             HTTPStatus.OK,
             operation="send",
         )
+
+    async def _references(
+        self, scope: Mapping[str, Any], body: dict[str, Any],
+        principal: VerifiedPrincipal, chain: tuple[tuple[Any, Any], ...],
+    ) -> Response:
+        """READ-only original reference lookup; never consults the active slot."""
+        from integrations.session_bridge.reference_tools import NativeReplyReferencesTool
+        arguments = body.get("arguments") if isinstance(body, dict) and set(body) == {"arguments"} else None
+        try:
+            validated = NativeReplyReferencesTool.validate("session_reply_references", arguments)
+            if (_WORK_REF_RE.fullmatch(validated["work_ref"]) is None
+                    or ("root_job_id" in validated
+                        and _ROOT_JOB_RE.fullmatch(validated["root_job_id"]) is None)):
+                raise ValueError("invalid OS selection")
+        except Exception:
+            return _failure_response("references", "invalid_input", effect="NONE")
+        if not await self._same_principal(scope, principal, chain):
+            return _failure_response("references", "authentication_required", effect="NONE")
+        try:
+            data = await self._bridge.reply_references(principal, validated)
+            if (type(data) is not dict
+                    or set(data) != {"schema", "status", "references", "next_cursor", "high_water"}
+                    or data["schema"] != _REFERENCE_SCHEMA
+                    or data["status"] not in ("PARTIAL", "COMPLETE")
+                    or type(data["references"]) is not list
+                    or len(data["references"]) > validated.get("page_size", 16)
+                    or type(data["high_water"]) is not int
+                    or data["high_water"] < 0
+                    or (data["status"] == "PARTIAL") != (data["next_cursor"] is not None)):
+                raise ValueError("invalid reference response")
+            for row in data["references"]:
+                if (type(row) is not dict or row.get("reference_only") is not True
+                        or row.get("work_ref") != validated["work_ref"]
+                        or ("root_job_id" in validated
+                            and row.get("root_job_id") != validated["root_job_id"])
+                        or type(row.get("request_event_id")) is not int
+                        or not 1 <= row["request_event_id"] <= data["high_water"]):
+                    raise ValueError("foreign reference")
+        except Exception:
+            return _failure_response("references", "session_unavailable", effect="NONE")
+        if not await self._same_principal(scope, principal, chain):
+            return _failure_response("references", "authentication_required", effect="NONE")
+        return _json_response(
+            _result("references", ok=True, effect="NONE", data=data),
+            HTTPStatus.OK, operation="references")
 
     async def _reply(
         self,

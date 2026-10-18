@@ -83,6 +83,7 @@ _OS_SESSION_EXECUTIVE_ROUTES: tuple[str, ...] = (
     "/os/executive/session/context",
     "/os/executive/session/send",
     "/os/executive/session/reply",
+    "/os/executive/session/references",
 )
 
 __all__ = ["build_executive_mcp_app", "build_web_ceo_mcp_app", "build_web_ceo_sessions_mcp_app", "build_web_ceo_v3_mcp_app", "build_e1_mcp_app", "build_e1_tools", "build_personal_read_mcp_app", "build_personal_read_tools", "build_mcp_server", "build_tools", "build_web_ceo_tools", "build_web_ceo_sessions_tools", "run_stdio"]
