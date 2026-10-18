@@ -52,12 +52,21 @@ def _validated_sample(raw: object) -> dict[str, Any] | None:
     limit_id = account.get("limit_id")
     if not isinstance(limit_id, str) or _LIMIT_ID.fullmatch(limit_id) is None:
         return None
+    plan_type = account.get("plan_type")
+    if not isinstance(plan_type, str) or _LIMIT_ID.fullmatch(plan_type) is None:
+        return None
     observed_at = _number(account.get("observed_at_unix"))
     if observed_at is None or observed_at <= 0:
         return None
     windows = account.get("windows")
     states = account.get("window_states")
     if not isinstance(windows, Mapping) or not isinstance(states, Mapping):
+        return None
+    # Unmodeled quota windows could hold the binding constraint. Never
+    # classify a refresh while silently discarding a provider-added window.
+    if any(name not in _WINDOW_NAMES for name in windows) or any(
+        name not in _WINDOW_NAMES for name in states
+    ):
         return None
     checked: dict[str, dict[str, float | int]] = {}
     checked_states: dict[str, str] = {}

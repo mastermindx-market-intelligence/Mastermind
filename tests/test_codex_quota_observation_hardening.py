@@ -133,3 +133,31 @@ def test_inputs_unchanged_and_no_secret_output():
     got = compare_native_codex_quota(a,b)
     assert (a,b)==frozen
     assert "CANARY_SECRET_NEVER_PROJECT" not in str(got)
+
+
+@pytest.mark.parametrize("shape", [
+    "unexpected_window", "unexpected_window_state", "plan_missing",
+    "plan_blank", "plan_object",
+])
+def test_unknown_quota_constraints_or_entitlement_fail_closed(shape):
+    """Unmodeled limits cannot be ignored while asserting a refresh candidate."""
+    before, after = sample(), updated()
+    if shape == "unexpected_window":
+        after["account"]["windows"]["tertiary"] = dict(
+            after["account"]["windows"]["secondary"]
+        )
+    elif shape == "unexpected_window_state":
+        after["account"]["window_states"]["tertiary"] = "OBSERVED"
+    elif shape == "plan_missing":
+        before["account"].pop("plan_type")
+        after["account"].pop("plan_type")
+    elif shape == "plan_blank":
+        before["account"]["plan_type"] = " "
+        after["account"]["plan_type"] = " "
+    else:
+        before["account"]["plan_type"] = {"tier": "pro"}
+        after["account"]["plan_type"] = {"tier": "pro"}
+    result = compare_native_codex_quota(before, after)
+    assert result["state"] == "UNKNOWN"
+    assert result["early_refresh_candidate"] is False
+    assert result["admission_granted"] is False

@@ -40,7 +40,8 @@ def probe(*, at=T, subject="a" * 64, weekly_reset=T + WEEK,
         "home_identity": {"account_id_sha256": subject, "ignored": "secret-do-not-copy"},
         "account": {
             "observed_at_unix": at, "auth_state": "MANAGED_CHATGPT_OBSERVED",
-            "limit_id": "codex", "windows": windows, "window_states": states,
+            "limit_id": "codex", "plan_type": "pro",
+            "windows": windows, "window_states": states,
             "arbitrary_provider_text": "access_token=must-never-escape",
         },
     }

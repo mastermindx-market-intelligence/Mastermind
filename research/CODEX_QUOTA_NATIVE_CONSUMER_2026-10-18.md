@@ -105,3 +105,28 @@ real originally-parented admitted Codex work return remain outstanding. Keep
 Draft/uninstalled. Existing CODEX-01 and Auth0 unknown effects remain frozen
 on their original carriers; unrelated Fable programme and messaging PR #1587
 remain separate.
+
+## October 17 late follow-up - refuse unknown quota qualifiers
+
+After hosted CI passed predecessor 8fb4ad0fbf4a9c3aba57c6056422be748d3fb960,
+a second read-only adversarial review identified that the pure native comparison
+discarded unknown extra windows/window_states keys and accepted identical
+null, blank or structured plan_type values as equal entitlements. Five
+RED-first cases reproduced CHANGE_OBSERVED when UNKNOWN was required.
+
+This same original source branch now rejects an additional unmodeled quota
+window/state rather than inferring refresh from only the modeled subset,
+and requires an explicit bounded nonempty plan identifier. The existing
+provider-free fixture lacked the plan_type emitted by the real managed
+native account/read; it was corrected to "pro" rather than weakening the
+runtime check. No account/home, credentials, entitlement, source owner,
+reservation, model turn, worker, or provider state changed.
+
+M2 regression: 149/149 passed, comprising account environment (75),
+quota comparison (27), quota adversarial (23), reset inventory (14), and
+native worker factory (10). Python compileall and git diff --check
+passed. Previous exact-head CI must not be reused as approval for this
+successor head. Still DRAFT / NOT_INSTALLED / SOURCE_ONLY, pending
+independent new-head security review, hosted CI, existing canonical quota
+producer and claim-time revalidation, enrolled native accounts, and
+one real original-parent worker return and acceptance.
