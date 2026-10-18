@@ -965,7 +965,12 @@ def validate_native_subscription_capacity_enrollment(value: object) -> dict[str,
                         ("config_custody_ref", "custody")):
         if type(value[key]) is not str or re.fullmatch(prefix + r"-[0-9a-f]{64}", value[key]) is None:
             raise CapacitySourceContractError("NATIVE_ENROLLMENT_INVALID")
-    source = value["registration_source"]
+    source = validate_native_registration_source(value["registration_source"])
+    return {**value, "registration_source": source}
+
+
+def validate_native_registration_source(source: object) -> dict[str, str]:
+    """Copy the existing four source pins; syntax confers no acceptance."""
     if (type(source) is not dict or set(source) != {"release_commit", "previous_release_commit", "material_source_digest", "export_sha256"}
             or any(type(source[key]) is not str or _COMMIT_RE.fullmatch(source[key]) is None
                    for key in ("release_commit", "previous_release_commit"))
@@ -973,7 +978,7 @@ def validate_native_subscription_capacity_enrollment(value: object) -> dict[str,
             or any(type(source[key]) is not str or _DIGEST_RE.fullmatch(source[key]) is None
                    for key in ("material_source_digest", "export_sha256"))):
         raise CapacitySourceContractError("NATIVE_REGISTRATION_SOURCE_INVALID")
-    return {**value, "registration_source": dict(source)}
+    return dict(source)
 
 
 def acquire_native_registration(realm_owner: object) -> dict[str, Any]:
