@@ -7,6 +7,7 @@ an already-published exact target and never replays the write.
 from __future__ import annotations
 
 import json
+import os
 import copy
 from pathlib import Path
 import pwd
@@ -21,10 +22,16 @@ OPERATION = 'FINITE_CONTROL_STAGE'
 COMMANDS = frozenset({'finite-control-stage', 'finite-control-stage-reconcile'})
 FIELDS = frozenset({'fabric_bridge_armed', 'fabric_bindings_path',
                     'fabric_bindings_sha256', 'fabric_attended_probe'})
+NATIVE_FIELDS = FIELDS | {'native_capacity_v2'}
+
+
+def _staged_delta(control):
+    fields = NATIVE_FIELDS if 'native_capacity_v2' in control else FIELDS
+    return {key: control[key] for key in fields}
 
 
 def candidate(prior, delta):
-    if (set(delta) != FIELDS or delta.get('fabric_bridge_armed') is not False
+    if (set(delta) not in (FIELDS, NATIVE_FIELDS) or delta.get('fabric_bridge_armed') is not False
             or any(prior.control.get(key, False) is not False for key in (
                 'coo_autonomy_armed', 'coo_operator_harness_armed',
                 'coo_foreground_only', 'ceo_submit_armed', 'fabric_bridge_armed'))
@@ -35,6 +42,8 @@ def candidate(prior, delta):
     if any(key in prior.control and prior.control[key] != value for key, value in delta.items()):
         raise ValueError('existing finite selection differs')
     value = dict(prior.control, **delta)
+    from scripts.executive_os_phase1c import _validate_fabric_bridge_config
+    _validate_fabric_bridge_config(value)
     raw = owner.encode_config(value)
     return owner.CandidateConfigs(value, prior.worker, raw, prior.worker_bytes,
         owner.sha256_bytes(raw), prior.worker_sha256)
@@ -45,13 +54,55 @@ def rebind_disarmed_receipt(tx, payload):
     if (payload.get('state') != 'DISARMED'
             or payload.get('control_config_sha256') != tx.prior_configs.control_sha256
             or payload.get('worker_config_sha256') != tx.prior_configs.worker_sha256
-            or candidate(tx.prior_configs, {k: tx.candidates.control[k] for k in FIELDS}) != tx.candidates):
+            or candidate(tx.prior_configs, _staged_delta(tx.candidates.control)) != tx.candidates):
         raise owner.TransactionEffectUnknown()
     value = copy.deepcopy(payload)
     value.update(control_config_sha256=tx.candidates.control_sha256,
                  prior_control_config_sha256=tx.prior_configs.control_sha256,
                  transaction_id=tx.transaction_id)
     return value
+
+
+def _native_source_pin(worker):
+    """Derive optional pins from the selected root definition and sealed source.
+
+    Registration is checked without requiring credential enrollment or claiming
+    provider readiness. No caller path, producer code execution or network read.
+    The transaction rereads this exact selection before and after publication.
+    """
+    if 'native_capacity_enrollment' not in worker:
+        return None
+    from control_plane.codex_provider_realm import _native_read_config, _native_open
+    from control_plane.native_capacity_acquisition import PRODUCER_RELATIVE
+    from ops.executive_os import capacity_source_contract as source
+    enrollment = source.validate_native_subscription_capacity_enrollment(
+        worker['native_capacity_enrollment'])
+    selected = enrollment['registration_source']
+    export_path = source.SYSTEM_ROOT/'config/capacity-source-components-native-v2'/(
+        selected['release_commit'] + '.json')
+    export = _native_read_config(export_path, selected['export_sha256'])
+    registration = source.validate_native_registration_document(worker, export)
+    if registration['provider'] != 'minimax':
+        raise ValueError('native finite source provider differs')
+    source_root = source.SYSTEM_ROOT/'capacity-sources/macro'/selected['release_commit']
+    producer = source_root/PRODUCER_RELATIVE
+    with _native_open(producer) as (fd, _):
+        content = os.read(fd, 65537)
+    if not content or len(content) > 65536:
+        raise ValueError('native capacity producer size is invalid')
+    # Custody alone cannot bless new code bytes. Use the existing complete Git
+    # source-closure owner, and require this producer in its qualified material.
+    # A source profile that does not yet include V2 must continue to refuse.
+    from ops.executive_os.capacity_host_artifacts import _verify_installed_repair_source
+    manifest, _ = _verify_installed_repair_source(source_root, selected['release_commit'])
+    rows = [row for row in manifest['material'] if row['path'] == str(PRODUCER_RELATIVE)]
+    if (len(rows) != 1 or rows[0]['sha256'] != owner.sha256_bytes(content)
+            or rows[0]['size'] != len(content)):
+        raise ValueError('native producer is outside the qualified source material')
+    if _native_read_config(export_path, selected['export_sha256']) != export:
+        raise ValueError('native registration changed during staging')
+    return {'macro_release': selected['release_commit'],
+            'producer_sha256': rows[0]['sha256']}
 
 
 class ProductionFiniteStagingHost(owner.ProductionCeoSubmitHost):
@@ -162,7 +213,8 @@ class ProductionFiniteStagingHost(owner.ProductionCeoSubmitHost):
         from control_plane.executive_worker_broker import _ps_pids_for_uid
         if _ps_pids_for_uid(470):
             raise ValueError('finite principal is not quiescent')
-        return build_finite_control_delta(definition_dir=str(directory), worker_artifacts=artifacts)
+        return build_finite_control_delta(definition_dir=str(directory), worker_artifacts=artifacts,
+            native_capacity_v2=_native_source_pin(worker))
 
     def checked_configs(self, expected_sha):
         if self.require_exact_install(expected_sha) != expected_sha:

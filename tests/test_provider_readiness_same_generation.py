@@ -246,16 +246,24 @@ def test_unreviewed_live_binary_refuses(state, monkeypatch):
 
 
 # 11
-@pytest.mark.parametrize("change", ["stale_identity", "identity_plan"])
-def test_reserve_requires_fresh_unchanged_identity(state, change):
+@pytest.mark.parametrize(("change", "reason"), [
+    ("stale_identity", "requalification_fresh_identity_required"),
+    ("future_identity", "requalification_fresh_identity_required"),
+    ("identity_plan", "requalification_provider_identity_changed"),
+])
+def test_reserve_requires_fresh_unchanged_identity(state, capsys, change, reason):
     value = copy.deepcopy(state.identity)
     if change == "stale_identity":
         value["observed_at"] = iso(datetime.now(UTC) - timedelta(minutes=10))
+    elif change == "future_identity":
+        value["observed_at"] = iso(datetime.now(UTC) + timedelta(minutes=10))
     else:
         value["plan_type"] = "enterprise"
     write_json(state.identity_path, value)
     original = state.receipt.read_bytes()
+    capsys.readouterr()
     assert cli(state, "reserve") == 2
+    assert f"provider readiness refused: {reason}\n" in capsys.readouterr().err
     assert_untouched(state, original)
 
 
@@ -364,3 +372,93 @@ def test_shell_counts_option_as_one_explicit_transition(extra, status) -> None:
     assert result.returncode == status
     if status == 77:
         assert "root" in result.stderr
+
+
+# 17
+@pytest.mark.parametrize("changes", [
+    {"timed_out": True},
+    {"exit_code": 0}, {"exit_code": 2}, {"exit_code": -9}, {"exit_code": None},
+    {"exit_code": "1"}, {"exit_code": True}, {"exit_code": 1.0},
+    {"result_valid": True},
+    {"terminal_event_class": "turn_completed"}, {"terminal_event_class": None},
+    {"refusal": "provider_timeout"},
+], ids=lambda changes: ",".join(f"{key}={value!r}" for key, value in changes.items()))
+def test_canary_must_record_a_closed_terminal_failure(state, changes):
+    d = copy.deepcopy(state.document)
+    d["inference_canary"].update(changes)
+    original, digest = replace(state, d)
+    assert refusal(state, d) == "requalification_effect_not_closed_terminal"
+    assert cli(state, "reuse", digest=digest) == 2
+    assert cli(state, "reserve", digest=digest) == 2
+    assert_untouched(state, original)
+
+
+# 18
+SKEW_PAST = r.MAX_CLOCK_SKEW + timedelta(minutes=1)
+
+
+@pytest.mark.parametrize(("component", "offset", "status"), [
+    ("provider_identity", SKEW_PAST, 2),
+    ("provider_identity", -SKEW_PAST, 2),
+    ("inference_canary", SKEW_PAST, 2),
+    ("inference_canary", -SKEW_PAST, 2),
+    ("provider_identity", r.MAX_CLOCK_SKEW, 9),
+    ("inference_canary", -r.MAX_CLOCK_SKEW, 9),
+])
+def test_component_timestamps_must_match_the_failure(state, component, offset, status):
+    d = copy.deepcopy(state.document)
+    d[component]["observed_at"] = iso(datetime.fromisoformat(d["observed_at"]) + offset)
+    original, digest = replace(state, d)
+    assert cli(state, "reuse", digest=digest) == status
+    if status == 2:
+        assert refusal(state, d) == "requalification_component_timestamp_conflict"
+        assert cli(state, "reserve", digest=digest) == 2
+    assert_untouched(state, original)
+
+
+# 19
+@pytest.mark.parametrize("field", ["codex_binary", "credential_lstat"])
+def test_identity_component_must_carry_the_failure_lstat(state, field):
+    d = copy.deepcopy(state.document)
+    changed = d["provider_identity"][field]
+    d["provider_identity"][field] = {**changed, "inode": changed["inode"] + 1}
+    original, digest = replace(state, d)
+    assert refusal(state, d) == "requalification_identity_mismatch"
+    assert cli(state, "reuse", digest=digest) == 2
+    assert cli(state, "reserve", digest=digest) == 2
+    assert_untouched(state, original)
+
+
+# 20
+def test_privileged_broker_does_not_forward_the_option() -> None:
+    from control_plane.executive_privileged_action import (
+        REQUEST_SCHEMA, PrivilegedActionError, validate_request,
+    )
+
+    def request(args):
+        return {"schema": REQUEST_SCHEMA, "request_id": "req-same-gen-001",
+                "action": "executive.worker_auth.verify_ready", "args": args}
+
+    company = {"expected_credential_kind": "device-auth",
+               "workspace_binding_class": r.WORKSPACE_BINDING_CLASS,
+               "credential_expires_at": "2026-10-11T12:00:00Z"}
+    validate_request(request(company))
+    validate_request(request({**company, "requalify_terminal_adverse_sha256": "a" * 64}))
+    with pytest.raises(PrivilegedActionError, match="verify_ready arguments must select"):
+        validate_request(request({**company, "requalify_same_generation_terminal_sha256": "a" * 64}))
+
+
+# 21
+def test_admin_client_rejects_the_option_before_transport(monkeypatch, capsys) -> None:
+    from scripts import mmx_admin
+
+    monkeypatch.setattr(mmx_admin, "send_request", lambda *a, **k: pytest.fail("transport reached"))
+    argv = ["executive.worker_auth.verify_ready", "--expected-credential-kind", "device-auth",
+            "--workspace-binding-class", r.WORKSPACE_BINDING_CLASS,
+            "--credential-expires-at", "2026-10-11T12:00:00Z", "--request-id", "req-same-gen-001"]
+    assert mmx_admin.build_request(argv)["action"] == "executive.worker_auth.verify_ready"
+    capsys.readouterr()
+    with pytest.raises(SystemExit) as caught:
+        mmx_admin.main([*argv, FLAG, "a" * 64])
+    assert caught.value.code == 2
+    assert "unrecognized arguments" in capsys.readouterr().err
