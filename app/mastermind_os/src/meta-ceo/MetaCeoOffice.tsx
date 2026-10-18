@@ -189,6 +189,9 @@ export function MetaCeoOffice({ projection, draft, onDraftChange, locale = "en" 
       canRead={typeof window !== "undefined" && window.MastermindMissionHost?.auth
         ? officePlanPermission : undefined}
       locale={locale}
+      mission={mission}
+      missionSourceState={projection.mission.source.state}
+      missionObservedAt={projection.mission.source.observed_at}
     />
     <FabricMissionInspector
       key={JSON.stringify([projection.context.authGeneration, projection.context.selection])}

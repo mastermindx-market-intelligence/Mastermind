@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { validPlanSelection, type PlanRead, type PlanSelection } from "./admitted-plan";
+import type { MissionDocument, Missionv3Document } from "../mission";
+import { observePlanWorkers } from "./plan-mission-observation";
 import "./admitted-plan.css";
 
 /** The existing authenticated MissionHost performs the sole raw-owner decode. */
@@ -11,10 +13,15 @@ export interface AdmittedPlanInspectorProps {
   sourceGeneration?: () => number;
   canRead?: () => boolean;
   locale?: "en" | "zh-CN";
+  /** Independently authorized Mission source; never proof of the plan snapshot. */
+  mission?: MissionDocument | Missionv3Document | null;
+  missionSourceState?: string;
+  missionObservedAt?: string | null;
 }
 
 export function AdmittedPlanInspector({
   selection, read, sourceGeneration, canRead, locale = "en",
+  mission = null, missionSourceState = "UNAVAILABLE", missionObservedAt = null,
 }: AdmittedPlanInspectorProps) {
   const [document, setDocument] = useState<PlanRead | null>(null);
   const [state, setState] = useState<"idle" | "loading" | "ready" | "unavailable">("idle");
@@ -34,6 +41,9 @@ export function AdmittedPlanInspector({
   const qualified = validPlanSelection(selection);
   const ready = qualified && !!read && !!sourceGeneration && !!canRead && canRead();
   const chinese = locale === "zh-CN";
+  const observedWorkers = document?.availability === "AVAILABLE" && selection
+    ? observePlanWorkers(selection, document.plan, mission, missionSourceState, missionObservedAt)
+    : null;
   const open = async () => {
     if (!ready || !selection || !read || !sourceGeneration || !canRead || state === "loading") return;
     const controller = new AbortController();
@@ -96,6 +106,22 @@ export function AdmittedPlanInspector({
               {chinese ? "依赖：" : "Depends on: "}{step.prerequisite_step_ids.join(", ")}
             </span>}
           </div>
+          {observedWorkers?.get(step.step_id)?.state === "OBSERVED" && <div className="mm-admitted-plan__observed">
+            <strong>{chinese ? "任务观测（独立快照）" : "Mission jobs (separate observation)"}</strong>
+            <p className="mm-admitted-plan__observed-source">
+              {chinese ? "来源覆盖" : "Source coverage"}: {observedWorkers.get(step.step_id)!.coverage}
+              {observedWorkers.get(step.step_id)!.observed_at && <> · {chinese ? "观测时间" : "observed at"} {observedWorkers.get(step.step_id)!.observed_at}</>}
+              {" · "}{chinese ? "非原子联合，不能推断计划完成" : "non-atomic with plan; no completion inferred"}
+            </p>
+            <ul>{observedWorkers.get(step.step_id)!.workers.map(worker => <li key={worker.job_id}>
+              <code>{worker.job_id}</code> · {chinese ? "观测状态" : "observed job state"}: {worker.status ?? (chinese ? "未知" : "unknown")}
+              {worker.worker_id && <span> · {chinese ? "工作代理" : "worker"}: {worker.worker_id}</span>}
+            </li>)}</ul>
+            {observedWorkers.get(step.step_id)!.omitted && <p>{chinese ? "部分关联任务未显示。" : "Some associated jobs exceed this display bound."}</p>}
+          </div>}
+          {observedWorkers?.get(step.step_id)?.state === "NO_MATCH_IN_SAMPLE" && <p className="mm-admitted-plan__observed-note">
+            {chinese ? "所提供的任务观测未列出此步骤的关联任务；这不代表没有执行。" : "No associated job in the supplied Mission sample; absence of execution is not established."}
+          </p>}
         </li>)}
       </ol>
       <p className="mm-admitted-plan__footnote">{chinese ?
