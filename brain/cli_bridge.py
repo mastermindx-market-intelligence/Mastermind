@@ -18,8 +18,10 @@ import functools
 import inspect
 import json
 import os
+import re
 import shutil
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
@@ -49,6 +51,73 @@ except Exception:                       # SDK not installed -> subprocess fallba
 
 class ProviderStartRefused(RuntimeError):
     """Veto before an SDK/subprocess/model effect; no retry/fallback allowed."""
+
+
+@dataclass(frozen=True, slots=True)
+class _ProviderRefusalRunBinding:
+    """Identity owned by one existing Claude invocation, not an effect verdict."""
+
+    run_id: str
+    book: str
+    role: str
+
+
+_REFUSAL_RUN_ID = re.compile(r"[A-Za-z0-9_.:+-]{1,160}\Z")
+
+
+def _valid_refusal_run_binding(value) -> bool:
+    return (
+        type(value) is _ProviderRefusalRunBinding
+        and type(value.run_id) is str
+        and _REFUSAL_RUN_ID.fullmatch(value.run_id) is not None
+        and type(value.book) is str
+        and value.book in _CLAUDE_BOOK_SERVERS
+        and type(value.role) is str
+        and 0 < len(value.role) <= 64
+        and value.role.isascii()
+    )
+
+
+def _bind_provider_refusal_run(
+    exc: ProviderStartRefused, run_id: str | None, book: str | None, role: str,
+) -> None:
+    """Attach only this invocation's identity; ambiguity stays unavailable.
+
+    Early waterfall/Codex dispatch and low-level transports do not own this
+    run-log identity and must not call this helper. Metadata never enters the
+    exception's args/text or grants provider, retry or submission authority.
+    """
+    if type(exc) is not ProviderStartRefused:
+        return
+    binding = _ProviderRefusalRunBinding(run_id, book, role)
+    fields = exc.__dict__
+    if type(fields) is not dict:
+        return
+    key = "_provider_refusal_run"
+    if not _valid_refusal_run_binding(binding):
+        fields[key] = None
+    elif key not in fields:
+        fields[key] = binding
+    elif not _valid_refusal_run_binding(fields[key]) or fields[key] != binding:
+        # An explicit unavailable state cannot be rebound by a later wrapper.
+        fields[key] = None
+
+
+def provider_refusal_run_id(
+    exc: BaseException, *, book: str, role: str = "deep",
+) -> str | None:
+    """Return the exact locally bound ID only to its matching book/role."""
+    if (type(exc) is not ProviderStartRefused
+            or type(book) is not str or type(role) is not str):
+        return None
+    fields = exc.__dict__
+    if type(fields) is not dict:
+        return None
+    binding = fields.get("_provider_refusal_run")
+    if (not _valid_refusal_run_binding(binding)
+            or binding.book != book or binding.role != role):
+        return None
+    return binding.run_id
 
 
 def _require_provider_start(guard: Callable[[], None] | None) -> None:
@@ -518,7 +587,8 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                 used_key_id = _key_id
                 break
 
-            except ProviderStartRefused:
+            except ProviderStartRefused as _refusal:
+                _bind_provider_refusal_run(_refusal, _run_id, book, role)
                 # This veto stops the next provider entry; an earlier invocation
                 # may already have effects. Never classify it as auth/quota,
                 # rotate keys, fall back, or infer that the whole turn was unapplied.
@@ -591,11 +661,15 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                     # result it would ride with is a different generation (and the CLI
                     # JSON backend exposes no thinking blocks at all).
                     _think_box.clear()
-                    result = await _via_subprocess(
-                        prompt, mdl, role, system, append_system, tools, dirs, turns, workdir,
-                        rc.get("permission_mode", "default"), base, env_name=_env_name,
-                        **_veto_kw,
-                    )
+                    try:
+                        result = await _via_subprocess(
+                            prompt, mdl, role, system, append_system, tools, dirs, turns, workdir,
+                            rc.get("permission_mode", "default"), base, env_name=_env_name,
+                            **_veto_kw,
+                        )
+                    except ProviderStartRefused as _refusal:
+                        _bind_provider_refusal_run(_refusal, _run_id, book, role)
+                        raise
                     # Classify subprocess result for key failure too
                     _classified2 = None
                     if _pool and _key_id is not None:
@@ -629,11 +703,15 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                           "error": "armed research needs the Agent SDK + a subscription credential"}
                 used_key_id = _key_id
                 break
-            result = await _via_subprocess(
-                prompt, mdl, role, system, append_system, tools, dirs, turns, workdir,
-                rc.get("permission_mode", "default"), base, env_name=_env_name,
-                **_veto_kw,
-            )
+            try:
+                result = await _via_subprocess(
+                    prompt, mdl, role, system, append_system, tools, dirs, turns, workdir,
+                    rc.get("permission_mode", "default"), base, env_name=_env_name,
+                    **_veto_kw,
+                )
+            except ProviderStartRefused as _refusal:
+                _bind_provider_refusal_run(_refusal, _run_id, book, role)
+                raise
             _classified3 = None
             if _pool and _key_id is not None:
                 try:

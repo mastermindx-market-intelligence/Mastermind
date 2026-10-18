@@ -147,6 +147,13 @@ def run_autonomous(asof: str | None = None, *, force: bool = False, armed: bool 
             brain = _run_brain(asof, inaugural, directive=directive) if directive else _run_brain(asof, inaugural)
         except Exception as e:                       # noqa: BLE001
             brain = {"ok": False, "error": repr(e)[:300]}
+            try:
+                from brain.cli_bridge import provider_refusal_run_id
+                _refusal_run_id = provider_refusal_run_id(e, book=PORTFOLIO_ID)
+                if _refusal_run_id is not None:
+                    brain["run_id"] = _refusal_run_id
+            except Exception:
+                pass  # Evidence recovery cannot replace the original error/submission.
         # record this seat's known cost + token usage against the nightly per-book ledger.
         _usg = brain.get("usage") or {}
         cost_guard.record(
