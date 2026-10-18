@@ -544,8 +544,18 @@ def _require_initial_native_context(prior, custody):
     from control_plane.executive_physical_resources import load_physical_resource_policy
     from ops.executive_os.finite_reference_assignment import require_initial_reference_context
     from ops.executive_os.subscription_provider_credential import _assert_worker_quiescent
+    from ops.executive_os.finite_enrollment_completion import _absent
+    from ops.executive_os.finite_service_lifecycle import LABEL, SOCKET, checked_command, parse_override
     require_initial_reference_context(dict(prior.control), dict(prior.worker),
                                       load_physical_resource_policy())
+    # No process is weaker than no activation route. Reuse the completion
+    # owner's observe-only finite lifecycle checks; never unload or clean up.
+    if (owner.ProductionCeoSubmitHost()._loaded_observe_only(LABEL)
+            or parse_override(checked_command([
+                "/bin/launchctl", "print-disabled", "system"]).stdout.decode())
+                not in {"default", "disabled"}):
+        raise FinitePublicationRefused("finite service must remain absent and disabled")
+    _absent(Path(SOCKET))
     home = Path("/private/var/db/mastermind-executive/workers/minimax-finite-01/provider-home")
     user = pwd.getpwnam("_mastermind_minimax")
     group = grp.getgrnam("_mastermind_minimax")

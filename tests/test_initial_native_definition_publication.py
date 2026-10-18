@@ -299,16 +299,31 @@ def test_source_pin_validator_is_only_syntax_and_copies_its_input():
 
 @pytest.mark.parametrize("fault", ["none", "incumbent-control", "incumbent-primary",
     "qualified-policy", "principal-uid", "principal-home", "principal-shell",
-    "group", "home-uid", "home-gid", "home-mode", "live-worker"])
+    "group", "home-uid", "home-gid", "home-mode", "live-worker",
+    "loaded-idle", "enabled-override", "socket-file", "socket-directory", "socket-symlink"] )
 def test_actual_initial_context_qualifies_principal_home_and_absent_coordinates(
-        qualified_host, monkeypatch, fault):
+        qualified_host, monkeypatch, tmp_path, fault):
     from contextlib import ExitStack
     import grp
     import pwd
     from control_plane import codex_provider_realm as realm
     from control_plane import executive_physical_resources as physical
     from ops.executive_os import subscription_provider_credential as credential
+    from ops.executive_os import finite_service_lifecycle as lifecycle
+    monkeypatch.setattr(pub.owner, "ProductionCeoSubmitHost", lambda: SimpleNamespace(
+        _loaded_observe_only=lambda label: label == lifecycle.LABEL and fault == "loaded-idle"))
+    override = ('disabled services = {\n"' + lifecycle.LABEL + '" => enabled\n}'
+                if fault == "enabled-override" else "disabled services = {\n}")
+    def observed_command(argv):
+        assert argv == ["/bin/launchctl", "print-disabled", "system"]
+        return SimpleNamespace(stdout=override.encode())
+    socket_path = tmp_path/"finite.sock"
+    monkeypatch.setattr(lifecycle, "SOCKET", str(socket_path))
+    if fault == "socket-file": socket_path.write_bytes(b"retained object")
+    if fault == "socket-directory": socket_path.mkdir()
+    if fault == "socket-symlink": socket_path.symlink_to(tmp_path/"absent-target")
     _, prior, _, _ = qualified_host
+    monkeypatch.setattr(lifecycle, "checked_command", observed_command)
     prior.control = {"ceo_submit_armed": False}
     policy = physical.load_physical_resource_policy()
     home = "/private/var/db/mastermind-executive/workers/minimax-finite-01/provider-home"
