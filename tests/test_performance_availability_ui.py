@@ -90,7 +90,10 @@ def test_critical_fetch_omits_unqualified_preview_but_preserves_qualified_zero()
     if not NODE:
         pytest.skip("Node is required")
     start = HTML.index("function _fetchPortfolioCritical")
-    script = HTML[start:HTML.index("function _fetchPortfolioDetails", start)] + """
+    # Include the actual helper when composed with decision availability.
+    helper_start = HTML.find("function _isAvailabilityBook(")
+    helper = "" if helper_start < 0 else HTML[helper_start:HTML.index("\n}", helper_start) + 2] + "\n"
+    script = helper + HTML[start:HTML.index("function _fetchPortfolioDetails", start)] + """
     var preview = {current_nav:777777,cash:777777};
     function fetch() {return Promise.resolve({ok:true,json:()=>Promise.resolve({account_preview:preview})});}
     (async function() {
