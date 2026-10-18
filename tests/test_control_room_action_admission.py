@@ -124,3 +124,35 @@ def test_refresh_refused_at_effect_edge_never_invokes_compiler_or_reserves(tmp_p
     assert cfg.state_compose_seq == cfg.state_explicit_floor == 0
     assert cfg.state_refreshes_in_flight == 0
     assert cfg.live_cache == cfg.state_cache == {}
+
+@pytest.mark.parametrize("movement", ["expiry", "publication"])
+def test_owed_open_rechecks_source_after_the_admission_callback(tmp_path, monkeypatch, movement):
+    from tests.test_chairman_control_room_server import (
+        _b5_navigation_fixture, _b5_owed_request, _b5_sample,
+    )
+    cfg, clock, original = _b5_navigation_fixture(tmp_path, monkeypatch)
+    publisher._refresh_state_cache(
+        cfg, timeout=240, generation=publisher._reserve_composition(cfg),
+        include_capabilities=False,
+    )
+    snapshot = publisher._cached_state_snapshot(cfg)
+    request = _b5_owed_request({
+        "control_room": snapshot["doc"], "source_validity": snapshot["source_validity"],
+    })
+    before = cfg.bindings_path.read_bytes()
+    admissions, providers = [], []
+    cfg.open_binding_fn = lambda *a, **k: providers.append(a) or {"ok": True, "verified": True}
+
+    def admission():
+        admissions.append(True)
+        if movement == "expiry":
+            clock[:] = _b5_sample(1984)
+        else:
+            with cfg.state_lock:
+                cfg.state_published_seq += 1
+
+    result = publisher.open_surface(cfg, before_effect=admission, **request)
+    assert result.source_precondition_failed is True
+    assert result.outcome["failure_kind"] == "source_precondition_failed"
+    assert admissions == [True] and providers == []
+    assert cfg.bindings_path.read_bytes() == before

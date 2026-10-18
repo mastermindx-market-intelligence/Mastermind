@@ -1077,8 +1077,9 @@ def open_surface(config: ServerConfig, *, binding_id: str,
     malformed owed context never falls back to ordinary Open. A provider's
     exception or outcome is not reclassified as a pre-dispatch refusal.
     before_effect is a trusted transport callback, never a request field. It
-    rechecks admission after source reads, immediately before the first effect;
-    once admitted, ordinary verification metadata stays part of the same work.
+    rechecks admission after source reads. Owed validity is sampled again
+    after that callback, before the provider. Once admitted, ordinary
+    verification metadata stays part of the same work.
     """
     if not isinstance(binding_id, str) or not binding_id:
         raise ValueError("binding_id: required (non-empty string)")
@@ -1133,6 +1134,10 @@ def open_surface(config: ServerConfig, *, binding_id: str,
             return _owed_open_refusal_result()
     if before_effect is not None:
         before_effect()
+        # Admission may perform blocking permission work. Its successful
+        # return cannot renew an owed source's finite validity or publication.
+        if owed_route and not _owed_handoff_current(config, owed_context, binding, doc["bindings"]):
+            return _owed_open_refusal_result()
     outcome = open_fn(binding, provider_runner, **provider_options)
     # last_verified_at / VERIFIED_OPENABLE law (Sol review 5000169412,
     # blocker 2): a mere Terminal-launch ACK must never advance this —

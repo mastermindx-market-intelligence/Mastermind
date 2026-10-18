@@ -85,7 +85,9 @@ def validate_result(value, *, operation):
 
     OWNER_RETURNED means only that the original operation returned this outcome.
     It is neither success proof nor a statement that no effect occurred.
-    NOT_DISPATCHED is available only before the first-effect guard admits work.
+    NOT_DISPATCHED requires either refusal before first-effect admission or
+    the original owner's explicit no-provider precondition refusal. A provider
+    outcome with a similarly named failure kind supplies no such proof.
     """
     try:
         if (type(operation) is not str or operation not in OPERATIONS
