@@ -38,8 +38,14 @@ class CeoIngressWorkspaceClient:
         # result frame can never widen into the larger Mission ceiling.
         from control_plane.coo_principal_host import FACT_SCHEMA, validate_facts_frame
         from common.product_acceptance_read_contract import FRAME_SCHEMA as ACCEPTANCE_FRAME_SCHEMA, validate_frame as validate_acceptance_frame
+        from common.workspace_control_room_read_contract import (
+            FRAME_SCHEMA as CCR_READ_FRAME_SCHEMA, validate_frame as validate_ccr_read_frame,
+        )
         timeout = self.timeout_seconds
-        if isinstance(frame, dict) and frame.get("schema") == ACCEPTANCE_FRAME_SCHEMA:
+        if isinstance(frame, dict) and frame.get("schema") == CCR_READ_FRAME_SCHEMA:
+            validate_ccr_read_frame(frame)
+            ceiling = MAX_RESPONSE_BYTES
+        elif isinstance(frame, dict) and frame.get("schema") == ACCEPTANCE_FRAME_SCHEMA:
             from common.product_acceptance_acquisition_contract import (
                 OPERATION as ORIGINAL_OPERATION, validate_frame as validate_original_frame,
             )

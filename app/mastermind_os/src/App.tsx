@@ -57,6 +57,8 @@ import {
   type Missionv3Document,
   type UnavailableMission,
 } from "./mission";
+import { type ControlRoomState } from "./control-room";
+import { ControlRoomPanel } from "./ControlRoomPanel";
 import {
   decodeResultEnvelope,
   normalizeResultSelection,
@@ -76,6 +78,7 @@ export const navigation = [
   "Knowledge",
   "Work",
   "Programs",
+  "Control Room",
   "Fleet & Capacity",
   "Mission Workspace",
   "Conversation",
@@ -91,7 +94,7 @@ const primaryNavigation: readonly View[] = [
   "Conversations",
   "Knowledge",
 ];
-type OperationalView = "Work" | "Programs" | "Fleet & Capacity";
+type OperationalView = "Work" | "Programs" | "Control Room" | "Fleet & Capacity";
 function OperationalNavigation({ label, onNavigate }: {
   label: string;
   onNavigate: (view: OperationalView) => void;
@@ -101,6 +104,7 @@ function OperationalNavigation({ label, onNavigate }: {
       <div className="segmented">
         <button type="button" onClick={() => onNavigate("Work")}>Work</button>
         <button type="button" onClick={() => onNavigate("Programs")}>Open Programs</button>
+        <button type="button" onClick={() => onNavigate("Control Room")}>Control Room</button>
         <button type="button" onClick={() => onNavigate("Fleet & Capacity")}>Fleet &amp; Capacity</button>
       </div>
     </nav>
@@ -123,6 +127,7 @@ const navGlyph: Record<View, string> = {
   Knowledge: "□",
   Work: "▤",
   Programs: "◫",
+  "Control Room": "◎",
   "Fleet & Capacity": "◇",
   "Mission Workspace": "◎",
   Conversation: "◌",
@@ -1287,6 +1292,10 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       reason: "SOURCE_READ_PENDING",
     }),
     [programRevision, setProgramRevision] = useState(0),
+    [controlRoom, setControlRoom] = useState<ControlRoomState>({
+      state: "UNAVAILABLE", reason: "NOT_READ", ownerRevision: -1,
+    }),
+    [controlRoomRevision, setControlRoomRevision] = useState(0),
     [workState, setWorkState] = useState<WorkState>({ kind: "PENDING" }),
     [workRevision, setWorkRevision] = useState(0),
     [mission, setMission] = useState<MissionDocument | UnavailableMission>(() =>
@@ -2001,6 +2010,39 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     selection?.rootJobId,
   ]);
   useEffect(() => {
+    if (active !== "Control Room") return;
+    const host = window.MastermindMissionHost;
+    const read = host?.readControlRoomState;
+    const ownerRevision = authRevision;
+    if (!authState?.acquisition || typeof read !== "function") {
+      setControlRoom({
+        state: "UNAVAILABLE", ownerRevision,
+        reason: !authState?.acquisition ? "AUTHENTICATION_REQUIRED" : "SIGNED_CONTROL_ROOM_READ_UNAVAILABLE",
+      });
+      return;
+    }
+    let attached = true;
+    const controller = new AbortController();
+    setControlRoom({ state: "PENDING", ownerRevision });
+    Promise.resolve()
+      .then(() => read({ signal: controller.signal }))
+      .then((value) => {
+        if (attached && !controller.signal.aborted)
+          setControlRoom({ ...value, ownerRevision });
+      })
+      .catch(() => {
+        if (attached && !controller.signal.aborted)
+          setControlRoom({ state: "UNAVAILABLE", ownerRevision, reason: "SOURCE_UNAVAILABLE" });
+      });
+    return () => { attached = false; controller.abort(); };
+  }, [active, authRevision, authState?.acquisition, controlRoomRevision]);
+  // An old auth epoch's Control Room data may remain in state while another
+  // view is mounted, but must never render for the next signed-in account.
+  const currentControlRoom: ControlRoomState =
+    authState?.acquisition && controlRoom.ownerRevision === authRevision
+      ? controlRoom
+      : { state: "UNAVAILABLE", reason: "AUTHENTICATION_REQUIRED", ownerRevision: authRevision };
+  useEffect(() => {
     let attached = true;
     const current = ++workRequest.current;
     const controller = new AbortController();
@@ -2259,6 +2301,8 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
                 : workState.kind === "DOCUMENT"
                   ? workState.document.availability
                   : "UNAVAILABLE"
+              : active === "Control Room"
+                ? currentControlRoom.state === "PENDING" ? "SOURCE_READ_PENDING" : currentControlRoom.state
               : active === "Fleet & Capacity"
                 ? "NOT_PROJECTED"
                 : (d?.read_state.state ?? "UNAVAILABLE"),
@@ -2302,6 +2346,12 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
                           ? `${workState.document.coverage.count} Work roots from the bounded Executive observation.`
                           : "Work owner returned a typed unavailable observation; no empty queue is inferred."
                         : "Work source unavailable; no empty queue is inferred."
+                    : active === "Control Room"
+                      ? currentControlRoom.state === "AVAILABLE"
+                        ? `${currentControlRoom.programs.length} programmes observed. Review the next step and its source.`
+                        : currentControlRoom.state === "PENDING"
+                          ? "Reading one authenticated incumbent Control Room cache."
+                          : "Authenticated Control Room source unavailable; no current operation is inferred."
                     : active === "Fleet & Capacity"
                       ? "Fleet health and placement require their canonical Capacity source."
                       : d
@@ -3292,6 +3342,14 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
         ) : null}
       </section>
     );
+  else if (active === "Control Room")
+    content = (
+      <ControlRoomPanel key={authRevision} state={currentControlRoom}
+        canRefresh={Boolean(authState?.acquisition) &&
+          typeof window.MastermindMissionHost?.readControlRoomState === "function"}
+        onRefresh={() => setControlRoomRevision(revision => revision + 1)}
+        onOpen={open} />
+    );
   else if (active === "Work")
     content = (
       <>
@@ -3457,7 +3515,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
   else if (active === "Evidence") content = <><Evidence d={d} />{productAcceptancePanel}</>;
   else content = <Conversation />;
   return (
-    <div className="shell" data-theme={theme} lang={locale}>
+    <div className="shell" data-theme={theme} data-active-route={active} lang={locale}>
       <a className="skip" href="#content" onClick={event => {
         event.preventDefault();
         document.getElementById("content")?.focus();
@@ -3610,9 +3668,9 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
             ) : null}
           </div>
         </header>
-        <div className="notice" role="status">
+        {active !== "Control Room" && <div className="notice" role="status">
           {visibleNotice}
-        </div>
+        </div>}
         {build ? (
           <details className="build-details">
             <summary>Build details</summary>

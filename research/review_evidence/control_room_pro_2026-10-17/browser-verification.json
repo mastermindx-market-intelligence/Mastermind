@@ -1,0 +1,35 @@
+{
+  "data": "synthetic fixtures; real browser/source",
+  "checks": [
+    {
+      "viewport": "desktop",
+      "width": 1440,
+      "overflow": false,
+      "errors": 0,
+      "external_requests": 0,
+      "search_reads": 1,
+      "keyboard_details": true,
+      "reduced_motion": true
+    },
+    {
+      "viewport": "tablet",
+      "width": 768,
+      "overflow": false,
+      "errors": 0,
+      "external_requests": 0,
+      "search_reads": 1,
+      "keyboard_details": true,
+      "reduced_motion": true
+    },
+    {
+      "viewport": "mobile",
+      "width": 390,
+      "overflow": false,
+      "errors": 0,
+      "external_requests": 0,
+      "search_reads": 1,
+      "keyboard_details": true,
+      "reduced_motion": true
+    }
+  ]
+}

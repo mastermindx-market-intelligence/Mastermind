@@ -66,22 +66,42 @@ def principal_frame(principal):
 
 
 
-def validate_workspace_bindings(value, policy):
-    """Validate the existing sealed owner's two acquisition permission slots.
+MEMBER_BINDINGS_SCHEMA = "mastermind.workspace_acquisition_bindings.v2"
+MAX_MEMBER_PROFILES = 128
+_PROFILE_REF = re.compile(r"[a-z][a-z0-9_.-]{0,63}\Z")
 
-    permission_digest is the enrolled owner receipt's digest, not a content
-    grant. This pure function cannot enroll a client or mint that receipt.
+
+def validate_workspace_bindings(value, policy):
+    """Validate versioned membership in the existing sealed permission owner.
+
+    V1 retains exactly web/mac and its original unique-client semantics. V2
+    permits bounded enrolled subject/client pairs sharing a public OAuth client.
+    primary_profile is a designation, never an additional scope or admin grant.
+    permission_digest still comes from the actual enrolled owner's receipt.
+    No file, principal, token, enrollment, issuer or authority is created here.
     """
     from integrations.business_mcp_auth.contracts import validate_resource_policy
     policy = validate_resource_policy(policy)
     if policy.resource != RESOURCE or policy.required_scopes != (SCOPE,):
         raise ValueError("access_denied")
-    if (type(value) is not dict or set(value) != {"schema", "profiles"}
-            or value["schema"] != BINDINGS_SCHEMA or type(value["profiles"]) is not dict
-            or set(value["profiles"]) != {"web", "mac"}):
+    if type(value) is not dict or type(value.get("profiles")) is not dict:
+        raise ValueError("access_denied")
+    members = value.get("schema") == MEMBER_BINDINGS_SCHEMA
+    if not members:
+        if (set(value) != {"schema", "profiles"} or value.get("schema") != BINDINGS_SCHEMA
+                or set(value["profiles"]) != {"web", "mac"}):
+            raise ValueError("access_denied")
+    elif (set(value) != {"schema", "profiles", "primary_profile"}
+            or not 1 <= len(value["profiles"]) <= MAX_MEMBER_PROFILES
+            or any(type(ref) is not str or _PROFILE_REF.fullmatch(ref) is None
+                   for ref in value["profiles"])
+            or (value["primary_profile"] is not None and (
+                type(value["primary_profile"]) is not str
+                or value["primary_profile"] not in value["profiles"]))):
         raise ValueError("access_denied")
     issuer = hashlib.sha256(policy.issuer.encode()).hexdigest()
     clients = set()
+    principal_pairs = set()
     for slot in value["profiles"].values():
         if type(slot) is not dict or set(slot) != {"enabled", "binding"} or type(slot["enabled"]) is not bool:
             raise ValueError("access_denied")
@@ -96,9 +116,11 @@ def validate_workspace_bindings(value, policy):
                 or binding["resource"] != RESOURCE or binding["scopes"] != [SCOPE]
                 or any(type(binding[k]) is not str or _HEX.fullmatch(binding[k]) is None
                        for k in ("issuer_digest", "subject_digest", "client_ref", "permission_digest"))
-                or binding["client_ref"] in clients):
+                or (not members and binding["client_ref"] in clients)
+                or (binding["subject_digest"], binding["client_ref"]) in principal_pairs):
             raise ValueError("access_denied")
         clients.add(binding["client_ref"])
+        principal_pairs.add((binding["subject_digest"], binding["client_ref"]))
     # Return detached closed bytes: no caller-owned mutable dict aliases.
     return json.loads(canonical(value))
 

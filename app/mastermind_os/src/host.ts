@@ -41,6 +41,7 @@ export interface AuthState {
   content: boolean;
 }
 import type { ResearchEvidenceTransport } from "./research/evidence-contract";
+import { decodeControlRoomRead, type ControlRoomRead } from "./control-room";
 
 export interface RawClient {
   /** Existing authenticated original-owner acquisition; no caller-supplied request key. */
@@ -62,6 +63,8 @@ export interface RawClient {
   /** Optional owner-authorized status-only Fabric port. No default browser/machine credential bridge. */
   readAttendedFabric?(request: AttendedSelection & { signal: AbortSignal }): Promise<unknown>;
   readPrograms(request: { signal: AbortSignal }): Promise<unknown>;
+  /** Fixed authenticated one-cache Control Room state; no operator writes. */
+  readControlRoomState?(request: { signal: AbortSignal }): Promise<unknown>;
   readWork(request: { signal: AbortSignal }): Promise<unknown>;
   readMission(request: {
     work_ref: string;
@@ -107,6 +110,7 @@ export interface MissionHost {
   ) => Promise<unknown>;
   readAttendedFabric?: (request: AttendedSelection & { signal: AbortSignal }) => Promise<AttendedStatus>;
   readPrograms?: ProgramRead;
+  readControlRoomState?: (request: { signal: AbortSignal }) => Promise<ControlRoomRead>;
   /** Same fixed Programs acquisition, retaining its collection owner receipt. */
   readProgramsObservation?: (request: { signal: AbortSignal }) => Promise<ProgramsObservation>;
   readWork?: (request: { signal: AbortSignal }) => Promise<WorkDocument>;
@@ -240,6 +244,15 @@ export function bindMissionHost(
       check(signal, started);
       return decodeProgramsEnvelope(raw);
     },
+    ...(client.readControlRoomState ? {
+      async readControlRoomState({ signal }: { signal: AbortSignal }) {
+        const started = epoch;
+        check(signal, started);
+        const raw = await client.readControlRoomState!({ signal });
+        check(signal, started);
+        return decodeControlRoomRead(raw);
+      },
+    } : {}),
     async readProgramsObservation({ signal }) {
       const started = epoch;
       check(signal, started);

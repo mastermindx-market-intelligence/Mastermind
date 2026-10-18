@@ -5293,7 +5293,12 @@ class ExecutiveControlService:
             from common.product_acceptance_read_contract import (
                 FRAME_SCHEMA as ACCEPTANCE_FRAME_SCHEMA, validate_frame as validate_acceptance_frame,
             )
-            if app_peer and isinstance(parsed, dict) and parsed.get("schema") in {FRAME_SCHEMA, FRAME_SCHEMA_V2, FRAME_SCHEMA_V3, ACCEPTANCE_FRAME_SCHEMA}:
+            from common.workspace_control_room_read_contract import (
+                FRAME_SCHEMA as CCR_READ_FRAME_SCHEMA, validate_frame as validate_ccr_read_frame,
+            )
+            if app_peer and isinstance(parsed, dict) and parsed.get("schema") in {
+                    FRAME_SCHEMA, FRAME_SCHEMA_V2, FRAME_SCHEMA_V3, ACCEPTANCE_FRAME_SCHEMA,
+                    CCR_READ_FRAME_SCHEMA}:
                 factory = app_binding.workspace_read_provider_factory
                 # Pick the operation-specific ceiling BEFORE any work so an
                 # unknown or malformed frame never widens to a larger ceiling.
@@ -5308,6 +5313,14 @@ class ExecutiveControlService:
                             validate_original_frame(parsed)
                         else:
                             validate_acceptance_frame(parsed)
+                    except (TypeError, ValueError):
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400),
+                                                             response_ceiling=ceiling)
+                        return
+                elif parsed.get("schema") == CCR_READ_FRAME_SCHEMA:
+                    ceiling = WORKSPACE_MAX_RESPONSE_BYTES
+                    try:
+                        validate_ccr_read_frame(parsed)
                     except (TypeError, ValueError):
                         await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400),
                                                              response_ceiling=ceiling)

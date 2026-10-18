@@ -213,3 +213,81 @@ def test_actual_executive_service_workspace_socket_reuses_cache_only_owner(
         assert host.current_owner() is None
         assert host._cache_active is False
     asyncio.run(run())
+
+
+def test_actual_executive_app_socket_serves_one_signed_member_state_without_tcp(
+        tmp_path, short_socket_root, monkeypatch):
+    """The real private App-peer dispatcher reaches the same cache exactly once.
+
+    The fixture principal is host-verified in the existing socket law; JWT
+    verification itself is exercised separately at the signed A1 HTTP edge.
+    Discovery and all effectful routes remain refused without a new action
+    grant. No real Control HTTP listener, accounts, Macro or provider used.
+    """
+    import os
+    from control_plane.executive_service import CeoIngressAppBinding, ExecutiveControlService
+    from control_plane.workspace_read_service import workspace_provider_factory
+    from integrations.mastermind_workspace_app.installed import CeoIngressWorkspaceClient
+    from common.workspace_control_room_read_contract import FRAME_SCHEMA
+    from tests.test_executive_ceo_ingress import _FakeGrounding, _FakeSupervisor, _config
+    from tests.test_workspace_read_service import cache_fixture, frame
+
+    owners, clock, _ = cache_fixture(tmp_path)
+    baseline = copy.deepcopy(owners[0].state_cache["doc"])
+    monkeypatch.setattr(ccr, "_compose_state_doc", lambda *_a, **_k: copy.deepcopy(baseline))
+    monkeypatch.setattr(ccr.capability, "census", lambda **kw: {"test-only": True})
+    cfg = config(tmp_path, ttl=30)
+    cfg.validity_sample_fn = lambda: tuple(clock)
+    host = HostedControlRoom(cfg, cache_only=True)
+
+    def authorize(p):
+        return (type(p) is dict and p.get("client_ref") == "fixture-web"
+                and p.get("scopes") == ["mastermind.workspace.read"])
+    authorize.binding_digest = lambda p: ("d" * 64 if authorize(p) else None)
+    provider = workspace_provider_factory(
+        control_room=host, authorize=authorize, armed={}, runtime_identity={},
+    )
+
+    async def run():
+        svc = ExecutiveControlService(
+            _config(tmp_path, socket_root=short_socket_root),
+            supervisor_factory=lambda runtime: _FakeSupervisor(),
+            ceo_ingress_socket_path=short_socket_root / "ceo-ccr.sock",
+            ceo_ingress_peer_uid=1000 + os.geteuid(),
+            ceo_ingress_grounding_provider=_FakeGrounding(),
+            ceo_ingress_app_binding=CeoIngressAppBinding(
+                peer_uid=os.geteuid(), armed=False,
+                grounding_provider=_FakeGrounding(),
+                workspace_read_provider_factory=provider,
+            ),
+            workspace_control_room=host,
+        )
+        await svc.start()
+        try:
+            assert host.current_owner() is host.config
+            assert host._server is None and host._server_thread is None
+            client = CeoIngressWorkspaceClient(svc.ceo_ingress_socket_path)
+            principal = frame("programs")["principal"]
+            state = await client.request({
+                "schema": FRAME_SCHEMA, "operation": "state",
+                "principal": dict(principal),
+            })
+            assert state["ok"] is True
+            assert state["result"]["control_room"] == baseline
+            assert state["result"]["capabilities"] == {"test-only": True}
+            discovery = await client.request({
+                "schema": FRAME_SCHEMA, "operation": "discover",
+                "principal": dict(principal),
+            })
+            assert discovery["status"] == 403
+            assert "result" not in discovery
+            # No effectful action is a valid CCR READ request on this socket.
+            with pytest.raises(ValueError, match="invalid_input"):
+                await client.request({"schema": FRAME_SCHEMA, "operation": "bind",
+                                      "principal": dict(principal)})
+            assert host.config.state_published_seq == 1
+        finally:
+            await svc.close()
+        assert host.current_owner() is None
+        assert host._cache_active is False
+    asyncio.run(run())

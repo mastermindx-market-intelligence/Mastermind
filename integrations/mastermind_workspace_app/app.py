@@ -64,6 +64,8 @@ _MISSION_V3_ROUTE = "/workspace/mission/v3/current"
 _MISSION_V4_ROUTE = "/workspace/mission/v4/current"
 _RESULT_ROUTE = "/workspace/result/current"
 _PLAN_ROUTE = "/workspace/plan/current"
+_CCR_STATE_ROUTE = "/workspace/control-room/state/current"
+_CCR_DISCOVER_ROUTE = "/workspace/control-room/discover/current"
 _MISSION_QUERY_KEYS = frozenset({"work_ref", "root_job_id"})
 _RESULT_QUERY_KEYS = frozenset(
     {"work_ref", "root_job_id", "job_id", "attempt_id", "result_envelope_digest"}
@@ -651,6 +653,67 @@ async def mission_current(
     return _envelope_response(envelope)
 
 
+async def control_room_current(
+    request: Request, *, config: WorkspaceAppConfig, operation: str,
+) -> JSONResponse:
+    """Authenticated incumbent CCR READ; never an operator-action endpoint.
+
+    Identical A1 JWT/installed-member/fresh-epoch barriers to Programs, with
+    one new fixed read frame on the existing private App socket. GET-only;
+    no path/query/body selector, no new cache, and no surface-binding write.
+    Candidate discovery is separately gated again by the original Control
+    owner, where its operator grant remains uninstalled by default.
+    """
+    from common.workspace_control_room_read_contract import (
+        FRAME_SCHEMA as CCR_READ_FRAME_SCHEMA, validate_frame as validate_ccr_read_frame,
+    )
+    if operation not in {"state", "discover"}:
+        return _refuse_json(400, "invalid_input")
+    principal_or_response = await _authenticate(
+        request, config.authenticator, clock=config.now,
+    )
+    if isinstance(principal_or_response, JSONResponse):
+        return _with_no_store(principal_or_response)
+    principal = principal_or_response
+    refused = await _reject_any_body(request)
+    if refused is not None:
+        return refused
+    if request.scope.get("query_string"):
+        return _refuse_json(400, "invalid_input")
+    refused = _check_authorize(config.authorize_principal, principal)
+    if refused is not None:
+        return refused
+    try:
+        stamp = contract.permission_stamp(config.authorize_principal, principal)
+        if stamp is None:
+            return _refuse_json(403, "access_denied")
+        frame = validate_ccr_read_frame({
+            "schema": CCR_READ_FRAME_SCHEMA, "operation": operation,
+            "principal": contract.principal_frame(principal),
+        })
+    except (TypeError, ValueError):
+        return _refuse_json(403, "access_denied")
+    try:
+        envelope = await config.client.request(frame)
+    except Exception:
+        return _refuse_json(503, "internal_error")
+    try:
+        current = config.now()
+        if type(current) is not int or current >= principal.expires_at:
+            return _refuse_json(403, "access_denied")
+    except Exception:
+        return _refuse_json(503, "internal_error")
+    refused = _check_authorize(config.authorize_principal, principal)
+    if refused is not None:
+        return refused
+    try:
+        if contract.permission_stamp(config.authorize_principal, principal) != stamp:
+            return _refuse_json(403, "access_denied")
+    except Exception:
+        return _refuse_json(403, "access_denied")
+    return _envelope_response(envelope)
+
+
 def _with_no_store(response: JSONResponse) -> JSONResponse:
     """Attach the canonical ``Cache-Control: no-store`` to an A1 JSONResponse
     in place.  Starlette's :class:`MutableHeaders` supports in-place update,
@@ -917,6 +980,8 @@ class _RawPathFence:
         _MISSION_V4_ROUTE,
         _RESULT_ROUTE,
         _PLAN_ROUTE,
+        _CCR_STATE_ROUTE,
+        _CCR_DISCOVER_ROUTE,
     )
 
     def __init__(self, app: Any) -> None:
@@ -975,6 +1040,12 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
     async def plan_endpoint(request: Request) -> JSONResponse:
         return await plan_current(request, config=config)
 
+    async def ccr_state_endpoint(request: Request) -> JSONResponse:
+        return await control_room_current(request, config=config, operation="state")
+
+    async def ccr_discover_endpoint(request: Request) -> JSONResponse:
+        return await control_room_current(request, config=config, operation="discover")
+
     routes = [
         Route(_PROGRAMS_ROUTE, programs_endpoint, methods=["GET"]),
         Route(_WORK_ROUTE, work_endpoint, methods=["GET"]),
@@ -983,6 +1054,8 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
         Route(_MISSION_V4_ROUTE, mission_v4_endpoint, methods=["GET"]),
         Route(_RESULT_ROUTE, result_endpoint, methods=["GET"]),
         Route(_PLAN_ROUTE, plan_endpoint, methods=["GET"]),
+        Route(_CCR_STATE_ROUTE, ccr_state_endpoint, methods=["GET"]),
+        Route(_CCR_DISCOVER_ROUTE, ccr_discover_endpoint, methods=["GET"]),
     ]
     application = Starlette(routes=routes)
     # Never silently rewrite a trailing-slash alias onto a different route:

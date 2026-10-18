@@ -701,6 +701,8 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     signOut,
     readPrograms: ({ signal }) =>
       read("acquisition", `${ORIGIN}/workspace/programs/current`, signal),
+    readControlRoomState: ({ signal }) =>
+      read("acquisition", `${ORIGIN}/workspace/control-room/state/current`, signal),
     readWork: ({ signal }) =>
       read(
         "acquisition",

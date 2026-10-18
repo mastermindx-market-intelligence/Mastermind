@@ -398,12 +398,17 @@ class WorkspaceReadService:
                  mission_v3_compose=None, work_acquire=None, work_compose=None,
                  product_acceptance_basis_reader=None, product_acceptance_owner_target=None,
                  product_acceptance_owner_guard=None, product_acceptance_read=None,
-                 product_acceptance_observe=None):
+                 product_acceptance_observe=None, control_room_presenter=None):
         self.cache = cache
         self.runtime = runtime
         self.authorize = authorize
         self.armed = armed
         self.runtime_identity = runtime_identity
+        if control_room_presenter is not None:
+            from control_plane.workspace_control_room_presenter import ExistingControlRoomPresenter
+            if type(control_room_presenter) is not ExistingControlRoomPresenter:
+                raise ValueError("exact existing Control Room read owner required")
+        self._control_room_presenter = control_room_presenter
         self._acquire = acquire
         self._compose = compose
         self._bounded_runtime = bounded_runtime
@@ -1152,6 +1157,17 @@ class WorkspaceReadService:
         return self._read_mission_v3({"selection": selection})["result"]
 
     async def handle_frame(self, frame):
+        from common.workspace_control_room_read_contract import (
+            FRAME_SCHEMA as CCR_READ_FRAME_SCHEMA, validate_frame as validate_ccr_read_frame,
+        )
+        if isinstance(frame, dict) and frame.get("schema") == CCR_READ_FRAME_SCHEMA:
+            try:
+                validate_ccr_read_frame(frame)
+            except (TypeError, ValueError):
+                return error("invalid_input", 400)
+            presenter = self._control_room_presenter
+            return (await presenter.read(frame["principal"], frame["operation"])
+                    if presenter is not None else error("source_unavailable", 503))
         from common.product_acceptance_read_contract import FRAME_SCHEMA as ACCEPTANCE_FRAME_SCHEMA
         if isinstance(frame, dict) and frame.get("schema") == ACCEPTANCE_FRAME_SCHEMA:
             from common.product_acceptance_acquisition_contract import OPERATION as ORIGINAL_OPERATION
@@ -1351,9 +1367,14 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
     if type(control_room) is not HostedControlRoom or not callable(authorize):
         raise ValueError("workspace owner configuration refused")
     cache = ExistingControlRoomCache(control_room.current_owner)
+    # The original source+permission owner, not a new publisher or identity.
+    # Discovery requires an independent callback and remains dark by default.
+    from control_plane.workspace_control_room_presenter import ExistingControlRoomPresenter
+    presenter = ExistingControlRoomPresenter(cache, authorize=authorize)
     def provide(runtime):
         return WorkspaceReadService(cache=cache, runtime=runtime, authorize=authorize,
-                                    armed=armed, runtime_identity=runtime_identity, bounded_runtime=bounded_runtime,
+                                    armed=armed, runtime_identity=runtime_identity,
+                                    control_room_presenter=presenter, bounded_runtime=bounded_runtime,
                                     product_acceptance_basis_reader=product_acceptance_basis_reader,
                                     product_acceptance_owner_target=product_acceptance_owner_target,
                                     product_acceptance_owner_guard=product_acceptance_owner_guard,
