@@ -18,6 +18,7 @@ from control_plane.operator_activity_projection import (
     project_retained_operator_activity,
 )
 from tests.test_executive_os_phase1fc import _register, _v2_intent
+from tests import test_interactive_tx5_runtime as tx5
 from tests.test_runtime_admitted_plan_read import _bound, _corrupt
 
 WORK_REF = "WS:OHF-ACTIVITY"
@@ -25,24 +26,17 @@ SECRET = "PRIVATE-TOOL-INPUT-AND-TOKEN-EXCLUDE"
 
 
 @pytest.fixture
-def original(tmp_path):
-    runtime = Runtime.at(tmp_path / "runtime")
-    _register(runtime, "worker-a")
-    receipt = submit_intent(
-        runtime, _v2_intent(intent_id="CEO-RETAINED-OHF-READER", workstream=WORK_REF),
+def original(tmp_path, monkeypatch):
+    """Genuine sealed, attested Operator Harness Attempt; not a regular planner."""
+    existing_intent = tx5._intent
+    monkeypatch.setattr(
+        tx5, "_intent",
+        lambda intent_id: {**existing_intent(intent_id), "workstream": WORK_REF},
     )
-    root = runtime.jobs.get_job(receipt["job_id"])
-    assert root is not None
-    child = runtime.jobs.create_cycle_planner(
-        root.job_id, command_id=f"coo-cycle:{root.job_id}:create-planner:0",
-    )
-    dispatched = runtime.attempts.dispatch_cycle_job(
-        child.job_id,
-        command_id=f"coo-cycle:{root.job_id}:dispatch:{child.job_id}:attempt:1",
-        worker_id="worker-a",
-    )
-    assert dispatched is not None
-    return runtime, root, child, dispatched.attempt
+    runtime, root, child, dispatch, _epoch, _generation = tx5._started_interactive(tmp_path)
+    attempt = runtime.attempts.get_attempt(dispatch.attempt.attempt_id)
+    assert attempt is not None and attempt.execution_mode == "OPERATOR_HARNESS"
+    return runtime, root, child, attempt
 
 
 def seed_candidate(
@@ -277,3 +271,71 @@ def test_aggregate_source_bytes_cap_prevents_many_individually_valid_big_candida
                 observation.read_retained_operator_activity_bounded(
                     root.job_id, child.job_id, attempt.attempt_id,
                 )
+
+def test_regular_sealed_worker_cannot_disclose_forged_ohf_candidate(tmp_path):
+    """Same root/work/Job/Attempt is insufficient without the genuine OHF mode."""
+    runtime = Runtime.at(tmp_path / "regular-runtime")
+    _register(runtime, "worker-a")
+    receipt = submit_intent(
+        runtime, _v2_intent(intent_id="CEO-SEALED-WORKER-NEGATIVE", workstream=WORK_REF),
+    )
+    root = runtime.jobs.get_job(receipt["job_id"])
+    assert root is not None
+    child = runtime.jobs.create_cycle_planner(
+        root.job_id, command_id=f"coo-cycle:{root.job_id}:create-planner:0",
+    )
+    dispatched = runtime.attempts.dispatch_cycle_job(
+        child.job_id,
+        command_id=f"coo-cycle:{root.job_id}:dispatch:{child.job_id}:attempt:1",
+        worker_id="worker-a",
+    )
+    assert dispatched is not None
+    attempt = runtime.attempts.get_attempt(dispatched.attempt.attempt_id)
+    assert attempt is not None and attempt.execution_mode != "OPERATOR_HARNESS"
+    # A synthetic raw EventRegistry entry has the candidate event label but
+    # never crossed the actual harness write owner. No activity is released.
+    seed_candidate((runtime, root, child, attempt))
+    with _bound(runtime) as (reader, _namespace, _binding):
+        with pytest.raises(RuntimeReadUnavailable, match="Attempt identity"):
+            with reader.observe_bounded_read() as observation:
+                observation.read_retained_operator_activity_bounded(
+                    root.job_id, child.job_id, attempt.attempt_id,
+                )
+        with pytest.raises(StateConflict):
+            _ = observation.receipt
+
+def test_real_lease_fenced_harness_candidate_to_original_runtime_read(tmp_path, monkeypatch):
+    """Actual incumbent harness writer, not a synthetic EventRegistry insert."""
+    previous = tx5._intent
+    monkeypatch.setattr(
+        tx5, "_intent",
+        lambda intent_id: {**previous(intent_id), "workstream": WORK_REF},
+    )
+    runtime, root, child, dispatch, epoch, generation = tx5._started_interactive(tmp_path)
+    operation = tx5.OperationId(f"ohf-op:turn:{dispatch.attempt.attempt_id}:1")
+    turn = tx5._reserve_turn(runtime, dispatch, epoch, generation, 1)
+    tx5._acknowledge_turn(runtime, dispatch, turn, operation)
+    tx5._record_candidate(runtime, dispatch, turn)
+    assert runtime.jobs.get_job(child.job_id).status.value == "RUNNING"
+    with _bound(runtime) as (reader, _namespace, _binding):
+        with reader.observe_bounded_read() as observation:
+            snapshot = observation.read_retained_operator_activity_bounded(
+                root.job_id, child.job_id, dispatch.attempt.attempt_id,
+            )
+        receipt = observation.receipt
+    view = project_retained_operator_activity(
+        snapshot, receipt, work_ref=WORK_REF, root_job_id=root.job_id,
+        job_id=child.job_id, attempt_id=dispatch.attempt.attempt_id,
+    )
+    assert receipt.state == "SAME"
+    assert snapshot.attempt.execution_mode == "OPERATOR_HARNESS"
+    assert len(snapshot.events) == 1
+    assert snapshot.events[0].aggregate_id == turn.turn_id
+    assert view["rows"] == [{
+        "candidate_event_id": snapshot.events[0].event_id,
+        "turn_id": turn.turn_id, "ordinal_in_candidate": 0,
+        "category": "TURN_COMPLETED",
+        "candidate_recorded_at": snapshot.events[0].created_at,
+    }]
+    assert view["source"]["live_worker_count"] is None
+    assert view["availability"] == "RETAINED"

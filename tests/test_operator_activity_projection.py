@@ -44,7 +44,7 @@ def _attempt():
         lease_expires_at=STAMP, heartbeat_at=STAMP, checkpoint_sequence=0,
         checkpoint={"secret": SECRET}, result={"secret": SECRET},
         error=None, started_at=STAMP, finished_at=STAMP, version=1,
-        authority_policy_hash="f" * 64,
+        authority_policy_hash="f" * 64, execution_mode="OPERATOR_HARNESS",
         pid=None, pgid=None, process_start_identity=None, boot_id=None,
         provider_session_id=SECRET, stdout_path="/private/stdout",
         stderr_path="/private/stderr", result_path="/private/result",
@@ -281,6 +281,7 @@ def test_candidate_source_order_and_duplicate_turn_protection():
 
 
 def test_snapshot_mutation_and_foreign_records_refused():
+    _refused(_snapshot(attempt=replace(_attempt(), execution_mode="SEALED_WORKER")))
     _refused(_snapshot(events=[{"event_type": "OHF_CANDIDATE_RESULT_RECORDED"}]))
     _refused(_snapshot(events=[replace(_event(), event_id=0)]))
     _refused(_snapshot(events=[replace(_event(), attempt_id="ATT-" + "d" * 32)]))

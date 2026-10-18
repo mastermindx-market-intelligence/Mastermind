@@ -24457,7 +24457,8 @@ def _read_retained_operator_activity_bounded(
         attempt = loader.execute("SELECT * FROM attempts WHERE attempt_id=?", (attempt_token,)).fetchone()
         if (attempt is None or attempt["job_id"] != job_token
                 or job["assigned_worker_id"] != attempt["worker_id"]
-                or job["assigned_quota_class"] != attempt["quota_class"]):
+                or job["assigned_quota_class"] != attempt["quota_class"]
+                or attempt["execution_mode"] != "OPERATOR_HARNESS"):
             raise RuntimeReadUnavailable("retained activity Attempt identity unavailable")
 
         # SQL LIMIT bounds both metadata and payload acquisitions. The probe

@@ -79,7 +79,7 @@ def _exact(value: object, keys: set[str]) -> bool:
 
 def _event_category(value: object) -> str:
     """Coarsen provider event kinds; never copy opaque kind or payload text."""
-    if value == "turn/completed":
+    if value in {"turn/completed", "turn.completed"}:
         return "TURN_COMPLETED"
     if value in {"turn/started", "turn/updated"}:
         return "TURN_ACTIVITY"
@@ -126,7 +126,8 @@ def _qualify(snapshot: RetainedActivitySnapshot, receipt: RuntimeReadObservation
             or root.orchestration_role != "aggregation" or root.work_ref != work_ref
             or not isinstance(job, Job) or job.job_id != job_id
             or job.root_job_id != root_job_id or not isinstance(attempt, Attempt)
-            or attempt.attempt_id != attempt_id or attempt.job_id != job_id):
+            or attempt.attempt_id != attempt_id or attempt.job_id != job_id
+            or attempt.execution_mode != "OPERATOR_HARNESS"):
         _refuse()
 
 
