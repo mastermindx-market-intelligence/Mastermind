@@ -1,0 +1,3 @@
+Non-production Git publication canary for Mastermind#1333.
+Operation: gitpub-canary-1333-20261018-c1
+Written 2026-10-18 by the M2 Studio Direct recovery session; never merge.
