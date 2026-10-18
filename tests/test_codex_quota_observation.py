@@ -180,6 +180,9 @@ def test_changed_plan_is_not_promotional_reset_evidence():
     after = probe(at=T + HOUR, weekly_reset=T + WEEK + HOUR, used=0)
     before["account"]["plan_type"] = "pro"
     after["account"]["plan_type"] = "business"
+    # Preserve the same native person across the plan/context transition.
+    before["home_identity"]["user_id_sha256"] = "a" * 64
+    after["home_identity"]["user_id_sha256"] = "a" * 64
     got = compare_native_codex_quota(before, after)
     assert got["state"] == "UNKNOWN"
     assert got["reason"] == "ENTITLEMENT_CHANGED"

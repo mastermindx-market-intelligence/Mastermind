@@ -55,6 +55,15 @@ def _validated_sample(raw: object) -> dict[str, Any] | None:
     plan_type = account.get("plan_type")
     if not isinstance(plan_type, str) or _LIMIT_ID.fullmatch(plan_type) is None:
         return None
+    # Business users can share a workspace account ID but have separate
+    # included seat allowances. Never compare one member's quota to another.
+    user_hash = identity.get("user_id_sha256")
+    if user_hash is not None and (
+        not isinstance(user_hash, str) or _HASH.fullmatch(user_hash) is None
+    ):
+        return None
+    if "business" in plan_type.lower() and user_hash is None:
+        return None
     observed_at = _number(account.get("observed_at_unix"))
     if observed_at is None or observed_at <= 0:
         return None
@@ -93,8 +102,9 @@ def _validated_sample(raw: object) -> dict[str, Any] | None:
             return None
         checked[name] = {"used_percent": used, "remaining_percent": remaining,
                          "resets_at": reset_at, "window_minutes": minutes}
-    return {"account_hash": account_hash, "observed_at": observed_at,
-            "limit_id": limit_id, "plan_type": account.get("plan_type"),
+    return {"account_hash": account_hash, "user_hash": user_hash,
+            "observed_at": observed_at, "limit_id": limit_id,
+            "plan_type": plan_type,
             "windows": checked, "window_states": checked_states}
 
 
@@ -120,7 +130,9 @@ def compare_native_codex_quota(before: object, after: object) -> dict[str, Any]:
     old, new = _validated_sample(before), _validated_sample(after)
     if old is None or new is None:
         return result
-    if old["account_hash"] != new["account_hash"] or old["limit_id"] != new["limit_id"]:
+    if (old["account_hash"] != new["account_hash"]
+            or old["user_hash"] != new["user_hash"]
+            or old["limit_id"] != new["limit_id"]):
         result["reason"] = "SUBJECT_OR_LIMIT_MISMATCH"
         return result
     if old["plan_type"] != new["plan_type"]:

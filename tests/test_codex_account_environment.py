@@ -542,3 +542,62 @@ def test_native_read_observer_has_fixed_minimal_executable_path(
         "construction", "start", "initialize", "notification",
         "account/read", "account/rateLimits/read",
     ]
+
+
+@pytest.mark.parametrize("different_member", [False, True])
+def test_native_account_home_metadata_distinguishes_business_members(
+    home, different_member,
+):
+    """Two members can share chatgpt_account_id while owning different seats.
+
+    This tests local token-claim projection, not signature verification or a
+    runtime admission receipt; never emit raw account/user identifiers.
+    """
+    import base64
+    import hashlib
+
+    business_workspace = "workspace-business"
+    person = "member-b" if different_member else "member-a"
+    claims = {"https://api.openai.com/auth": {
+        "chatgpt_account_id": business_workspace,
+        "chatgpt_user_id": person,
+    }}
+    payload = base64.urlsafe_b64encode(
+        json.dumps(claims, sort_keys=True).encode()
+    ).decode().rstrip("=")
+    doc = auth()
+    doc["tokens"]["account_id"] = business_workspace
+    doc["tokens"]["id_token"] = "e30." + payload + ".fixture"
+    private(home / "auth.json", doc)
+    with native_codex_account_scope(home) as environment:
+        projected = environment.auth_metadata()
+    assert projected["account_id_sha256"] == hashlib.sha256(
+        business_workspace.encode()
+    ).hexdigest()
+    assert projected["user_id_sha256"] == hashlib.sha256(person.encode()).hexdigest()
+    assert "member-a" not in str(projected)
+    assert "member-b" not in str(projected)
+
+
+def test_native_account_unparseable_claims_are_not_invented(home):
+    private(home / "auth.json", auth())
+    with native_codex_account_scope(home) as environment:
+        projected = environment.auth_metadata()
+    assert "user_id_sha256" not in projected
+
+
+def test_native_account_mismatched_claimed_business_workspace_is_not_accepted(
+    home,
+):
+    import base64
+    claims = {"https://api.openai.com/auth": {
+        "chatgpt_account_id": "different-workspace",
+        "chatgpt_user_id": "member-a",
+    }}
+    payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
+    doc = auth()
+    doc["tokens"]["id_token"] = "e30." + payload + ".fixture"
+    private(home / "auth.json", doc)
+    with native_codex_account_scope(home) as environment:
+        projected = environment.auth_metadata()
+    assert "user_id_sha256" not in projected

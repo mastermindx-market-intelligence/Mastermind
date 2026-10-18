@@ -161,3 +161,55 @@ def test_unknown_quota_constraints_or_entitlement_fail_closed(shape):
     assert result["state"] == "UNKNOWN"
     assert result["early_refresh_candidate"] is False
     assert result["admission_granted"] is False
+
+
+def test_business_quota_comparison_refuses_cross_user_same_workspace():
+    old, new = sample(), updated()
+    for row in (old, new):
+        row["account"]["plan_type"] = "self_serve_business_prolite"
+        row["home_identity"]["user_id_sha256"] = "a" * 64
+    new["home_identity"]["user_id_sha256"] = "b" * 64
+    got = compare_native_codex_quota(old, new)
+    assert got["state"] == "UNKNOWN"
+    assert got["reason"] == "SUBJECT_OR_LIMIT_MISMATCH"
+    assert got["early_refresh_candidate"] is False
+
+
+def test_business_quota_comparison_refuses_missing_member_identity():
+    old, new = sample(), updated()
+    old["account"]["plan_type"] = "self_serve_business_prolite"
+    new["account"]["plan_type"] = "self_serve_business_prolite"
+    got = compare_native_codex_quota(old, new)
+    assert got["state"] == "UNKNOWN"
+    assert got["early_refresh_candidate"] is False
+
+
+def test_business_quota_comparison_same_member_remains_observable():
+    old, new = sample(), updated()
+    for row in (old, new):
+        row["account"]["plan_type"] = "self_serve_business_prolite"
+        row["home_identity"]["user_id_sha256"] = "a" * 64
+    got = compare_native_codex_quota(old, new)
+    assert got["state"] == "CHANGE_OBSERVED"
+    assert got["early_refresh_candidate"] is True
+    assert got["admission_granted"] is False
+
+
+@pytest.mark.parametrize("value", ["", "a" * 63, "z" * 64, 0, None])
+def test_business_quota_comparison_refuses_unqualified_user_hash(value):
+    old, new = sample(), updated()
+    for row in (old, new):
+        row["account"]["plan_type"] = "self_serve_business_prolite"
+        row["home_identity"]["user_id_sha256"] = value
+    got = compare_native_codex_quota(old, new)
+    assert got["state"] == "UNKNOWN"
+    assert got["early_refresh_candidate"] is False
+
+
+def test_personal_quota_comparison_checks_user_identity_when_provided():
+    old, new = sample(), updated()
+    old["home_identity"]["user_id_sha256"] = "a" * 64
+    new["home_identity"]["user_id_sha256"] = "b" * 64
+    got = compare_native_codex_quota(old, new)
+    assert got["state"] == "UNKNOWN"
+    assert got["reason"] == "SUBJECT_OR_LIMIT_MISMATCH"

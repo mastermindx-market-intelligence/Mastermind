@@ -8,6 +8,8 @@ reconciled before a native login file may be seeded onto a serialized stream.
 """
 from __future__ import annotations
 
+import base64
+import binascii
 from contextlib import contextmanager
 from dataclasses import asdict
 import fcntl
@@ -79,6 +81,40 @@ def _managed_auth(raw: bytes) -> Mapping[str, Any]:
            for k in ("access_token", "refresh_token", "id_token", "account_id")):
         raise CodexAccountError("MANAGED_CHATGPT_AUTH_INCOMPLETE")
     return value
+
+
+def _local_user_claim_sha256(tokens: Mapping[str, Any]) -> str | None:
+    """Hash a bounded OpenAI ID-token user claim, never export token contents.
+
+    This is a local identity discriminator, NOT JWT signature verification,
+    seat entitlement, provider quota proof, or broker admission. Missing or
+    contradictory claims cannot qualify a Business quota comparison.
+    """
+    jwt = tokens.get("id_token")
+    if not isinstance(jwt, str) or len(jwt) > 131072:
+        return None
+    parts = jwt.split(".")
+    if len(parts) != 3 or not 1 <= len(parts[1]) <= 87382:
+        return None
+    try:
+        payload = base64.b64decode(
+            (parts[1] + "=" * (-len(parts[1]) % 4)).encode("ascii"),
+            altchars=b"-_", validate=True,
+        )
+        claims = json.loads(payload)
+    except (ValueError, UnicodeError, binascii.Error):
+        return None
+    if not isinstance(claims, Mapping):
+        return None
+    auth = claims.get("https://api.openai.com/auth")
+    if not isinstance(auth, Mapping):
+        return None
+    workspace = auth.get("chatgpt_account_id")
+    user = auth.get("chatgpt_user_id")
+    if (not isinstance(workspace, str) or workspace != tokens.get("account_id")
+            or not isinstance(user, str) or not 1 <= len(user) <= 512):
+        return None
+    return hashlib.sha256(user.encode()).hexdigest()
 
 
 def _home(path: Path, *, principal_home_admitted: bool = False) -> Path:
@@ -195,9 +231,13 @@ Existing credentials take precedence even when the seed is absent or stale.
     def auth_metadata(self) -> dict[str, Any]:
         self._check()
         value = _managed_auth(_private_file(self.home / "auth.json"))
-        return {"auth_mode": "chatgpt", "has_refresh_token": True,
-                "account_id_sha256": hashlib.sha256(
-                    value["tokens"]["account_id"].encode()).hexdigest()}
+        metadata = {"auth_mode": "chatgpt", "has_refresh_token": True,
+                    "account_id_sha256": hashlib.sha256(
+                        value["tokens"]["account_id"].encode()).hexdigest()}
+        user_hash = _local_user_claim_sha256(value["tokens"])
+        if user_hash is not None:
+            metadata["user_id_sha256"] = user_hash
+        return metadata
 
     def process_environment(self) -> dict[str, str]:
         self.auth_metadata()

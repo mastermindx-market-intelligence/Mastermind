@@ -168,3 +168,54 @@ seat-to-email binding, canonical sample custody, runtime claim-time reservation,
 or six-seat admission. Preserve the C1 credentials as observed; only the
 account owner can correct the browser login for the intended C1 identity.
 Remain DRAFT / NOT_INSTALLED pending reviewed exact head CI and integration.
+
+
+## October 18 verified Business user-vs-workspace identity guard
+
+After the Chairman reauthenticated B1 using the regular Codex browser login,
+a differential of the locally held native OpenAI-issued ID-token claims
+(no raw JWT, personal email, IDs, hashes or credentials exported) confirmed:
+
+- B1 is the ChrisWong user; B2 is the ChatGPT2 Business user.
+- B1 and B2 have DIFFERENT chatgpt_user_id/user_id claims but the
+  SAME chatgpt_account_id (shared Business workspace).
+- B2 and C2 Personal have the SAME user ID but DIFFERENT
+  chatgpt_account_id (Business versus Personal context).
+- Native account/read.email in this environment is not a reliable
+  member-identity field; both Business contexts projected the same
+  misleading email, while local sign-in claims matched intended aliases.
+- B1/B2 separately reported Business plan self_serve_business_prolite,
+  AVAILABLE_OBSERVED, primary 100% / 10080-minute windows, secondary
+  NOT_APPLICABLE, Astra and Sol 6.1 listed, clean isolated App Server
+  process group teardown. The exact seat type (Standard/Premium) is not
+  established by the planType alone.
+- Official Business documentation distinguishes member-seat included
+  allowance from optional shared workspace-credit funds; same Business
+  workspace ID MUST NOT collapse two different individual member seats.
+
+Regression closure within the ORIGINAL #1585 source carrier:
+
+1. Native auth_metadata still supplies the existing hashed account/workspace
+   ID; it additionally projects a hashed chatgpt_user_id when present in the
+   bounded local native ID-token claim AND matching the auth file's account ID.
+   No token/email/ID values or signature-verification claim is exported.
+2. The read-only quota comparator now requires this separate user hash
+   for Business-plan samples and refuses a cross-user comparison even when
+   the Business workspace ID, plan and limit ID match.
+3. Personal legacy observations without an available user hash retain their
+   existing behavior; when both provide user hashes they must match.
+4. Missing, malformed, or contradictory user claims fail closed. This source
+   adds NO admission, broker lease, account selection, quota pooling, reset
+   redemption, native worker or execution authority.
+
+RED-first evidence on the predecessor: 8 of 9 new Business/personal
+comparator cases failed, and 2 of 4 local metadata cases failed.
+After correction, the combined M2 account/quota/reset/native-worker
+suite passed **164/164** tests: 81 account, 27 comparison, 32 adversarial,
+14 reset-inventory, 10 worker factory. Python compileall and git diff
+check passed. Actual private B1/B2/C2 auth_metadata readback verified
+same workspace/different user, same user/different context, without
+printing identifying values. Independent source review, exact successor
+head hosted CI, eligible-seat owner attestation, and real broker/relay
+claim-result-original-parent acceptance remain pending. Keep Draft/HOLD;
+do not install or increase native Codex broker capacity from this evidence.
