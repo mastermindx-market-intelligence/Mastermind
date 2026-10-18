@@ -1047,6 +1047,59 @@ def _codex_sessions() -> list[dict[str, Any]]:
     return entries[:_DISCOVER_CAP]
 
 
+def refresh_builds(config: ServerConfig) -> dict[str, Any]:
+    """Run the existing active-build refresh on this exact Control Room owner.
+
+    The calling transport owns authentication and request validation. This
+    operation accepts no caller-selected root, command or replacement cache.
+    A false publication result may still retain the accepted live input; it
+    must not be interpreted as a no-effect receipt or automatic retry advice.
+    """
+    macro_root = config.macro_root
+    if not macro_root:
+        return {"ok": False, "detail": "no macro root resolved"}
+
+    script_path = Path(macro_root) / "scripts" / "build_project_active_build_map.py"
+    if not script_path.is_file():
+        return {"ok": False, "detail": "--json-stdout seam not present at macro root"}
+
+    argv = [sys.executable, str(script_path), "--json-stdout"]
+    # Preserve the existing compiler's explicit 4 MiB JSON-output budget.
+    result = config.runner(
+        argv, timeout=_REFRESH_BUILDS_TIMEOUT, cwd=macro_root,
+        max_bytes=_REFRESH_BUILDS_MAX_OUTPUT_BYTES,
+    )
+    if not isinstance(result, dict) or result.get("timed_out") or result.get("code") != 0:
+        stderr_tail = ""
+        if isinstance(result, dict):
+            stderr_tail = (result.get("stderr") or "")[-2000:]
+        detail = f"build_project_active_build_map.py failed: {stderr_tail}".rstrip(": ")
+        return {"ok": False, "detail": detail}
+
+    stdout = result.get("stdout") or ""
+    try:
+        parsed = json.loads(stdout)
+    except ValueError:
+        return {"ok": False, "detail": "stdout was not valid JSON"}
+    if not isinstance(parsed, dict) or parsed.get("schema") != "project_active_builds.v1":
+        return {"ok": False, "detail": "stdout schema was not project_active_builds.v1"}
+
+    # Retain the detached input and reserve its explicit floor atomically.
+    # Recompose synchronously so success describes this exact publication,
+    # while old background work cannot overwrite the accepted generation.
+    try:
+        gen = _reserve_composition(config, explicit=True, active_builds_snapshot=parsed)
+    except RuntimeError:
+        return {"ok": False, "detail": "control room is stopping"}
+    published = _refresh_state_cache(
+        config, timeout=config.compose_timeout, generation=gen,
+        include_capabilities=True, active_builds_snapshot=parsed,
+    )
+    if not published:
+        return {"ok": False, "detail": "refreshed builds were not published by this request"}
+    return {"ok": True, "collected_at": parsed.get("collected_at")}
+
+
 def _discover_document(config: ServerConfig) -> dict[str, Any]:
     """Zero-write candidate-surface census. Confers zero ownership/binding."""
     return {
@@ -1492,74 +1545,7 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
             return self._bad_request(f"unknown key: {unknown!r}")
 
         config: ServerConfig = self.server.config  # type: ignore[attr-defined]
-        macro_root = config.macro_root
-        if not macro_root:
-            return self._send_json(200, {"ok": False, "detail": "no macro root resolved"}, no_store=True)
-
-        script_path = Path(macro_root) / "scripts" / "build_project_active_build_map.py"
-        if not script_path.is_file():
-            return self._send_json(
-                200,
-                {"ok": False, "detail": "--json-stdout seam not present at macro root"},
-                no_store=True,
-            )
-
-        argv = [sys.executable, str(script_path), "--json-stdout"]
-        # 4 MiB, not the runner's default 64 KiB — the real project_active_
-        # builds.v1 document is real organizational data (Wave D live proof:
-        # 112,569 bytes) and must never be silently truncated below valid
-        # JSON. See _REFRESH_BUILDS_MAX_OUTPUT_BYTES's docstring.
-        result = config.runner(
-            argv, timeout=_REFRESH_BUILDS_TIMEOUT, cwd=macro_root, max_bytes=_REFRESH_BUILDS_MAX_OUTPUT_BYTES
-        )
-
-        if not isinstance(result, dict) or result.get("timed_out") or result.get("code") != 0:
-            stderr_tail = ""
-            if isinstance(result, dict):
-                stderr_tail = (result.get("stderr") or "")[-2000:]
-            detail = f"build_project_active_build_map.py failed: {stderr_tail}".rstrip(": ")
-            return self._send_json(200, {"ok": False, "detail": detail}, no_store=True)
-
-        stdout = result.get("stdout") or ""
-        try:
-            parsed = json.loads(stdout)
-        except ValueError:
-            return self._send_json(200, {"ok": False, "detail": "stdout was not valid JSON"}, no_store=True)
-        if not isinstance(parsed, dict) or parsed.get("schema") != "project_active_builds.v1":
-            return self._send_json(
-                200, {"ok": False, "detail": "stdout schema was not project_active_builds.v1"}, no_store=True
-            )
-
-        # Retain the accepted input atomically with its explicit reservation
-        # below. A failed publication keeps that input for later composition,
-        # while the response reports this attempt's actual publication outcome.
-        # H0 hardening (2026-08-22): GET /api/state now serves a cache, not
-        # a fresh composition per request — but this ONE write path (a live
-        # active-builds refresh) must still be visible on the very next GET,
-        # not eventually-consistent up to state_ttl. Recompose synchronously
-        # here, once, rather than leaving the cache stamped with whatever
-        # was true before this refresh. refresh-builds is already an
-        # explicit, infrequent, user-initiated action with its own 180s
-        # subprocess timeout; this costs the same gather-layer time GET
-        # /api/state used to pay on every request, but only for this action.
-        # H1 repair (Sol review 5000983751 Blocker 2): reserve this as an
-        # EXPLICIT generation — it raises state_explicit_floor, so an older
-        # background recompose that finishes after this one may never
-        # overwrite it.
-        try:
-            gen = _reserve_composition(config, explicit=True, active_builds_snapshot=parsed)
-        except RuntimeError:
-            return self._send_json(200, {"ok": False, "detail": "control room is stopping"}, no_store=True)
-        published = _refresh_state_cache(
-            config, timeout=config.compose_timeout, generation=gen,
-            include_capabilities=True, active_builds_snapshot=parsed,
-        )
-        if not published:
-            return self._send_json(
-                200, {"ok": False, "detail": "refreshed builds were not published by this request"},
-                no_store=True,
-            )
-        self._send_json(200, {"ok": True, "collected_at": parsed.get("collected_at")}, no_store=True)
+        self._send_json(200, refresh_builds(config), no_store=True)
 
 
 class ControlRoomServer(http.server.ThreadingHTTPServer):
