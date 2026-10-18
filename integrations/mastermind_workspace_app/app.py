@@ -28,6 +28,7 @@ host-installed client; this file is a closed transport framing only.
 """
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import inspect
 import json
@@ -45,6 +46,10 @@ from integrations.business_mcp_auth.contracts import VerifiedPrincipal
 from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
 from integrations.mastermind_executive_app.app import _authenticate
 from integrations.mastermind_workspace_app import contract
+from control_plane.workspace_fabric_authorized import (
+    FabricScopeDenied, FabricSourceUnavailable, WorkspaceFabricAuthorizedStatus,
+    selection as fabric_selection,
+)
 
 __all__ = ["WorkspaceAppConfig", "create_workspace_app"]
 
@@ -64,6 +69,8 @@ _MISSION_V3_ROUTE = "/workspace/mission/v3/current"
 _MISSION_V4_ROUTE = "/workspace/mission/v4/current"
 _RESULT_ROUTE = "/workspace/result/current"
 _PLAN_ROUTE = "/workspace/plan/current"
+_FABRIC_STATUS_ROUTE = "/workspace/fabric/status/current"
+_FABRIC_STATUS_QUERY_KEYS = frozenset({"root_id", "run_id"})
 _MISSION_QUERY_KEYS = frozenset({"work_ref", "root_job_id"})
 _RESULT_QUERY_KEYS = frozenset(
     {"work_ref", "root_job_id", "job_id", "attempt_id", "result_envelope_digest"}
@@ -360,6 +367,8 @@ class WorkspaceAppConfig:
     now: Callable[[], int] = dataclasses.field(default=lambda: int(time.time()))
     authorize_principal: Callable[[VerifiedPrincipal], bool] | None = None
     client: Any = None
+    # Trusted, owner-composed, exact-run-only join; absent by default.
+    fabric_status_owner: WorkspaceFabricAuthorizedStatus | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.authenticator, JwtAuthenticator):
@@ -372,6 +381,9 @@ class WorkspaceAppConfig:
             raise ValueError("client must expose an async request(frame) method")
         if not inspect.iscoroutinefunction(getattr(self.client, "request", None)):
             raise ValueError("client.request must be a coroutine function")
+        if (self.fabric_status_owner is not None
+                and type(self.fabric_status_owner) is not WorkspaceFabricAuthorizedStatus):
+            raise ValueError("fabric status owner must be an exact trusted Workspace owner")
         # Revalidate the authenticator's policy first — a frozen dataclass can
         # still be substituted or low-level mutated, and the wiring contract
         # below requires the immutable ResourcePolicy it claims to bind.
@@ -661,6 +673,80 @@ def _with_no_store(response: JSONResponse) -> JSONResponse:
     return response
 
 
+async def fabric_status_current(
+    request: Request, *, config: WorkspaceAppConfig,
+) -> JSONResponse:
+    """Signed-in exact-run status; no machine catalog or transport credentials.
+
+    The owner is injected by the trusted installed runtime composition only.
+    It must resolve original Executive Job/Attempt lineage and Agent OS
+    workstream visibility from their *current* owners before touching M2,
+    then check both again before returning status. The outer gate also
+    verifies the existing Workspace revocable permission stamp around the read.
+    """
+    principal_or_response = await _authenticate(
+        request, config.authenticator, clock=config.now,
+    )
+    if isinstance(principal_or_response, JSONResponse):
+        return _with_no_store(principal_or_response)
+    principal = principal_or_response
+
+    body_refusal = await _reject_any_body(request)
+    if body_refusal is not None:
+        return body_refusal
+    selected = _decode_v2_query(
+        request.scope.get("query_string") or b"",
+        required_keys=_FABRIC_STATUS_QUERY_KEYS,
+    )
+    try:
+        fabric_selection(selected.get("root_id"), selected.get("run_id"))
+    except ValueError:
+        return _refuse_json(400, "invalid_input")
+    permit = _check_authorize(config.authorize_principal, principal)
+    if permit is not None:
+        return permit
+
+    owner = config.fabric_status_owner
+    if owner is None:
+        return _refuse_json(503, "source_unavailable")
+    try:
+        stamp = contract.permission_stamp(config.authorize_principal, principal)
+        if stamp is None:
+            return _refuse_json(403, "access_denied")
+        principal_frame = contract.principal_frame(principal)
+    except Exception:
+        return _refuse_json(403, "access_denied")
+
+    try:
+        result = await asyncio.wait_for(owner.read(
+            principal_frame=principal_frame,
+            principal_stamp=stamp,
+            root_id=selected["root_id"],
+            run_id=selected["run_id"],
+        ), timeout=10)
+    except FabricScopeDenied:
+        return _refuse_json(403, "access_denied")
+    except Exception:
+        return _refuse_json(503, "source_unavailable")
+
+    try:
+        now = config.now()
+        if type(now) is not int or now >= principal.expires_at:
+            return _refuse_json(403, "access_denied")
+        permit = _check_authorize(config.authorize_principal, principal)
+        if permit is not None:
+            return permit
+        if (owner is not config.fabric_status_owner
+                or contract.permission_stamp(config.authorize_principal, principal) != stamp):
+            return _refuse_json(403, "access_denied")
+    except Exception:
+        return _refuse_json(403, "access_denied")
+
+    return JSONResponse(result, headers={
+        "Cache-Control": "no-store", "Content-Type": "application/json",
+    })
+
+
 async def _dispatch_v2(
     request: Request,
     *,
@@ -917,6 +1003,7 @@ class _RawPathFence:
         _MISSION_V4_ROUTE,
         _RESULT_ROUTE,
         _PLAN_ROUTE,
+        _FABRIC_STATUS_ROUTE,
     )
 
     def __init__(self, app: Any) -> None:
@@ -975,6 +1062,9 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
     async def plan_endpoint(request: Request) -> JSONResponse:
         return await plan_current(request, config=config)
 
+    async def fabric_status_endpoint(request: Request) -> JSONResponse:
+        return await fabric_status_current(request, config=config)
+
     routes = [
         Route(_PROGRAMS_ROUTE, programs_endpoint, methods=["GET"]),
         Route(_WORK_ROUTE, work_endpoint, methods=["GET"]),
@@ -983,6 +1073,7 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
         Route(_MISSION_V4_ROUTE, mission_v4_endpoint, methods=["GET"]),
         Route(_RESULT_ROUTE, result_endpoint, methods=["GET"]),
         Route(_PLAN_ROUTE, plan_endpoint, methods=["GET"]),
+        Route(_FABRIC_STATUS_ROUTE, fabric_status_endpoint, methods=["GET"]),
     ]
     application = Starlette(routes=routes)
     # Never silently rewrite a trailing-slash alias onto a different route:
