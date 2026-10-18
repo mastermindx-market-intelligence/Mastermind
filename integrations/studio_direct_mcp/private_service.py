@@ -245,6 +245,93 @@ C2_PAPER_BUSINESS_NON_PAPER_CONFIG_SHA256 = "ed2dc2b9f7f812406c7ef7e9297b3ad5b54
 C2_PAPER_BUSINESS_RUNTIME_IDENTITY = {**C2_PAPER_RUNTIME_IDENTITY, "port": 45028}
 
 
+# Exact reviewed October-18 legacy Studio seats. The two canonical hashes
+# admit ONLY the byte-identical predecessor and its Paper-pointer-only
+# v12 successor. A different module, port, config, seal or cohort refuses.
+PAPER_FLEET_V12_SEATS = {'admin-business': {'fileCount': 11,
+                    'futureCanonical': '432e6b40925cf6160d320e73d9d18c97f15411b1aad52717fa7116a6509f68b0',
+                    'identity': {'backendHash': 'a4145198dc75cd34e7c7452c2054b4cc0d29e199ae1459961a17e4da25a13500',
+                                 'dependencyTreeHash': '91ce96dc69159edcabb3eee472e6ebafb18450b93a03addd6adf0df6dca47e29',
+                                 'host': '127.0.0.1',
+                                 'nodeHash': '3fbe98203f8f4a86ce5b0b573a1a30aa4253064c4c2a0299c436d259b68e54b0',
+                                 'port': 45030},
+                    'manifestSha256': '5dc83dd6aa840b3d321502045db1c4dcaf6fa9d09d5cca8422d5717c84191b1a',
+                    'nonPaperSha256': '634530b520d1acc8d5e91a6536a9128df388a773570fbb77dded522501963ac0',
+                    'originalCanonical': '68792c832344c61a7f0ca3462d85c85eba0e586877ee68934153c2bc18e55ebd'},
+ 'chatgpt1': {'fileCount': 12,
+              'futureCanonical': 'fa81bbe6f6ce5881ceb8a1a156ea4da8d49888553ea09d842a2accc909bbcc05',
+              'identity': {'backendHash': 'a4145198dc75cd34e7c7452c2054b4cc0d29e199ae1459961a17e4da25a13500',
+                           'dependencyTreeHash': '639c904d1d5832baa832eac8519cf2304073d3d72fdacc03fd879281068e6211',
+                           'host': '127.0.0.1',
+                           'nodeHash': '3fbe98203f8f4a86ce5b0b573a1a30aa4253064c4c2a0299c436d259b68e54b0',
+                           'port': 45018},
+              'manifestSha256': 'f521703f022dd4b9e03545ac1043435c30ebfdd70980b778e850b72c9c50fdc5',
+              'nonPaperSha256': 'a76f4c9b9a04f4c086f8a0538301bd65953202a691e7a9c19d8ef6c5dd88951d',
+              'originalCanonical': 'de397231a808fb4f3c65fac30466956b2653d039266d3a2d54dc74e745352efc'},
+ 'chatgpt3': {'fileCount': 12,
+              'futureCanonical': 'fc9f4abf6531ec1709a9dead4cde14a09e6f636d25bfa165fb8507dbd2eaca61',
+              'identity': {'backendHash': 'a4145198dc75cd34e7c7452c2054b4cc0d29e199ae1459961a17e4da25a13500',
+                           'dependencyTreeHash': '639c904d1d5832baa832eac8519cf2304073d3d72fdacc03fd879281068e6211',
+                           'host': '127.0.0.1',
+                           'nodeHash': '3fbe98203f8f4a86ce5b0b573a1a30aa4253064c4c2a0299c436d259b68e54b0',
+                           'port': 45022},
+              'manifestSha256': 'b0e1e3e7812d3f789cc24561fdd9c6c1976f060f6b677798d4c7578b48d5ef1f',
+              'nonPaperSha256': '1a45a34fa0ab9df1dc56815775fab385672dfa225459c5bea7ee06995efe1713',
+              'originalCanonical': '9f4ddf970b88adac301cb123044c7bcc5e702fee6cb57a27043e94f63b5d937f'},
+ 'chatgpt3-w570f6f34': {'fileCount': 11,
+                        'futureCanonical': '78d5328bfc757a69347ea043d165c11641b204ab974ec93e2834f8e98394a4c8',
+                        'identity': {'backendHash': 'a4145198dc75cd34e7c7452c2054b4cc0d29e199ae1459961a17e4da25a13500',
+                                     'dependencyTreeHash': '91ce96dc69159edcabb3eee472e6ebafb18450b93a03addd6adf0df6dca47e29',
+                                     'host': '127.0.0.1',
+                                     'nodeHash': '3fbe98203f8f4a86ce5b0b573a1a30aa4253064c4c2a0299c436d259b68e54b0',
+                                     'port': 45032},
+                        'manifestSha256': '5462b46a30a5d67fbc3dcee368bfe2675eb409b3bacecbeddc70e9a5a3d9a123',
+                        'nonPaperSha256': 'b91b48eb8c1b0a7f069ab5404b098a351afe7cab2fb9e0f58d357254a5f7bb27',
+                        'originalCanonical': '35246e482e79f3203b3e1cd28e76c77cfbef8681c1157a9a5add4e232a7820e5'},
+ 'chatgpt3-wa2a9e6f9': {'fileCount': 11,
+                        'futureCanonical': 'c1889af5019d4f26dd5186a01bc92ea2f7210c8b58f119cf22d088a84af7af95',
+                        'identity': {'backendHash': 'a4145198dc75cd34e7c7452c2054b4cc0d29e199ae1459961a17e4da25a13500',
+                                     'dependencyTreeHash': '91ce96dc69159edcabb3eee472e6ebafb18450b93a03addd6adf0df6dca47e29',
+                                     'host': '127.0.0.1',
+                                     'nodeHash': '3fbe98203f8f4a86ce5b0b573a1a30aa4253064c4c2a0299c436d259b68e54b0',
+                                     'port': 45034},
+                        'manifestSha256': '39c6bbe7ddfb69b8ac837be37f7b9fed06f10645967dc1675221dad4b5040879',
+                        'nonPaperSha256': 'a56c4fad7bfa96e690ab03dbba6dda670d2dd9c63e12c94df937a0eb59156b6d',
+                        'originalCanonical': '0a248967072622afa375c6e6ab749d025150b7805fe288c2de83da381c66e0b4'},
+ 'chatgpt4': {'fileCount': 11,
+              'futureCanonical': '2252819766e266ac0be6b30c94694b503aad4634d8de184f62611542fb581bd0',
+              'identity': {'backendHash': 'a4145198dc75cd34e7c7452c2054b4cc0d29e199ae1459961a17e4da25a13500',
+                           'dependencyTreeHash': '639c904d1d5832baa832eac8519cf2304073d3d72fdacc03fd879281068e6211',
+                           'host': '127.0.0.1',
+                           'nodeHash': '3fbe98203f8f4a86ce5b0b573a1a30aa4253064c4c2a0299c436d259b68e54b0',
+                           'port': 45024},
+              'manifestSha256': '849e0af6b498408eba843bcbf2c9c500e199c218db06f00db9cb13b54303b071',
+              'nonPaperSha256': '94a480d9db9c59e2d76b6d3fdd9f9b1a448bcd77c26fbe30f430f79357e36894',
+              'originalCanonical': 'e0e7865965285af6372fdf27ee70ae27f494b37fe19e1f5af763406295a96ec2'},
+ 'fabric-design': {'fileCount': 10,
+                   'futureCanonical': '284cc262986e343c9fdf86467988c2cad69430665ba4703e29865270025cbd14',
+                   'identity': {'backendHash': 'a4145198dc75cd34e7c7452c2054b4cc0d29e199ae1459961a17e4da25a13500',
+                                'dependencyTreeHash': '91ce96dc69159edcabb3eee472e6ebafb18450b93a03addd6adf0df6dca47e29',
+                                'host': '127.0.0.1',
+                                'nodeHash': '3fbe98203f8f4a86ce5b0b573a1a30aa4253064c4c2a0299c436d259b68e54b0',
+                                'port': 45118},
+                   'manifestSha256': '0481da04b267ea610a917e78203ac7829c1799a2a83e226502978c6d8bc7d2f9',
+                   'nonPaperSha256': '922477852f3d5335f1ae735f2f78f9efc1f015bbc765745dd16658268e7f2b6f',
+                   'originalCanonical': '87de91f4fd0d51571c2350cf4fe53704ad035eba8f095c13b09352732307671c'},
+ 'fabric-read': {'fileCount': 11,
+                 'futureCanonical': '4bb033afb13873b84ecd0557e7534a965da4e86289d21617d5c328da8ba97bd3',
+                 'identity': {'backendHash': 'a4145198dc75cd34e7c7452c2054b4cc0d29e199ae1459961a17e4da25a13500',
+                              'dependencyTreeHash': '91ce96dc69159edcabb3eee472e6ebafb18450b93a03addd6adf0df6dca47e29',
+                              'host': '127.0.0.1',
+                              'nodeHash': '3fbe98203f8f4a86ce5b0b573a1a30aa4253064c4c2a0299c436d259b68e54b0',
+                              'port': 45117},
+                 'manifestSha256': 'c0fda20241050072ccdecc4cfa5e31d4322a3e0a645404666e7116db372954d3',
+                 'nonPaperSha256': 'c5f7917afb60d2147db977c6f39a86e975eda48737eebff68cf421de1ca11df9',
+                 'originalCanonical': 'f39e118cb770d4f793dd92c31e9f17f7153e7daef4e9703be7408fde702d40bb'}}
+PAPER_FLEET_UPGRADE_ACCOUNTS = C2_PAPER_UPGRADE_ACCOUNTS | frozenset(PAPER_FLEET_V12_SEATS)
+# Only these two installed producer profiles use the historical tailnet entrypoint.
+PAPER_FLEET_TAILNET_ENTRYPOINTS = frozenset(("fabric-design", "fabric-read"))
+
 KNOWN_MANIFEST_FILESETS = frozenset(
     (
         frozenset(STAGE_FILES),
@@ -599,15 +686,15 @@ def _build_runtime_roots(account: str) -> dict:
 
 @contextmanager
 def _c2_lifecycle_mutex(account: str):
-    """Serialize the two explicitly enrolled lifecycle owners on private inodes.
+    """Serialize only enrolled service lifecycle owners on private inodes.
 
     Never unlink this file: replacement would let another invocation lock a new
     inode while the previous one is still held. Closing the descriptor (including
     process exit) releases the lock, and CLOEXEC prevents launchctl inheriting it.
     """
-    # Preserve Fabric backend's existing locked lifecycle and extend only the
-    # exact sealed C2 Paper upgrade cohort (personal plus business).
-    if account not in C2_PAPER_UPGRADE_ACCOUNTS | {FABRIC_BACKEND_ACCOUNT}:
+    # Keep the independently sealed Fabric backend lease and the exact
+    # historical Paper fleet cohort in the same per-seat filesystem mutex.
+    if account not in PAPER_FLEET_UPGRADE_ACCOUNTS | {FABRIC_BACKEND_ACCOUNT}:
         raise SystemExit("C2 lifecycle mutex cannot select another account")
     subject = "Fabric" if account == FABRIC_BACKEND_ACCOUNT else "C2"
     lock_path = _build_runtime_roots(account)["state"] / C2_LIFECYCLE_LOCK_NAME
@@ -656,7 +743,7 @@ def _c2_lifecycle_serialized(*, readonly_preflight: bool = False):
     def decorate(function):
         @wraps(function)
         def guarded(args):
-            if (args.account not in C2_PAPER_UPGRADE_ACCOUNTS
+            if (args.account not in PAPER_FLEET_UPGRADE_ACCOUNTS
                     or (readonly_preflight and getattr(args, "preflight_only", False) is True)):
                 return function(args)
             with _c2_lifecycle_mutex(args.account):
@@ -931,13 +1018,21 @@ def _valid_manifest(data, account: str, label: str) -> bool:
         and all(data.get(key) == value for key, value in C2_PAPER_RUNTIME_IDENTITY.items())
         and _canonical_json_sha256(data) in C2_PAPER_MANIFEST_CANONICAL_SHA256
     )
+    fleet_pin = PAPER_FLEET_V12_SEATS.get(account)
+    reviewed_paper_fleet_manifest = (
+        version == MANIFEST_VERSION and fleet_pin is not None
+        and len(files) == fleet_pin["fileCount"]
+        and all(data.get(key) == value for key, value in fleet_pin["identity"].items())
+        and _canonical_json_sha256(data) in (
+            fleet_pin["originalCanonical"], fleet_pin["futureCanonical"]))
     if (fileset not in KNOWN_MANIFEST_FILESETS
             and not (version == MANIFEST_VERSION and (
                 fileset == V2_CHATGPT1_FLEET_TAILNET_PREDECESSOR
                 or (account == "chatgpt2-business"
                     and fileset == V2_C2_BUSINESS_FLEET_PREDECESSOR)
             ))
-            and not c2_paper_predecessor):
+            and not c2_paper_predecessor
+            and not reviewed_paper_fleet_manifest):
         return False
     if any(not _sha256_hex(digest) for digest in files.values()):
         return False
@@ -1544,10 +1639,21 @@ def _verify_staged_install(
     if plist.get("Label") != label:
         raise SystemExit("plist is not our exact install")
 
-    expected_argv = _expected_argv(node, roots["gateway"], roots["config"])
+    # Two already-sealed Fabric producer seats launch through their own
+    # historical tailnet-gateway.mjs, not private-tunnel-gateway.mjs. Only
+    # their exact original/v12 manifest fingerprints admit that distinction.
+    tailnet_profile = account in PAPER_FLEET_TAILNET_ENTRYPOINTS
+    pin = PAPER_FLEET_V12_SEATS.get(account)
+    if tailnet_profile and (
+        pin is None or _canonical_json_sha256(manifest) not in (
+            pin["originalCanonical"], pin["futureCanonical"])):
+        raise SystemExit("plist is not our exact install")
+    entrypoint = (roots["base"] / "tailnet-gateway.mjs") if tailnet_profile else roots["gateway"]
+    expected_argv = _expected_argv(node, entrypoint, roots["config"])
     if list(plist.get("ProgramArguments") or []) != expected_argv:
         raise SystemExit("plist is not our exact install")
-    if Path(expected_argv[1]).name != PRIVATE_GATEWAY_NAME:
+    if Path(expected_argv[1]).name != (
+            "tailnet-gateway.mjs" if tailnet_profile else PRIVATE_GATEWAY_NAME):
         raise SystemExit("plist is not our exact install")
 
     return manifest
@@ -2096,6 +2202,11 @@ def cmd_paper_runtime_upgrade(args) -> int:
         original_manifest = C2_PAPER_BUSINESS_ORIGINAL_MANIFEST_SHA256
         non_paper_pin = C2_PAPER_BUSINESS_NON_PAPER_CONFIG_SHA256
         runtime_identity = C2_PAPER_BUSINESS_RUNTIME_IDENTITY
+    elif account in PAPER_FLEET_V12_SEATS:
+        fleet_pin = PAPER_FLEET_V12_SEATS[account]
+        original_manifest = fleet_pin["manifestSha256"]
+        non_paper_pin = fleet_pin["nonPaperSha256"]
+        runtime_identity = fleet_pin["identity"]
     else:
         raise SystemExit("paper runtime compatibility requires the exact enrolled C2 account")
     if type(preview) is not bool:
@@ -2115,7 +2226,13 @@ def cmd_paper_runtime_upgrade(args) -> int:
     if _stable_regular_file_hash(manifest_path, label="installed manifest") != expected:
         raise SystemExit("paper runtime compatibility: installed manifest CAS mismatch")
     prior = _verify_staged_install(account, label, roots, require_runtime_seal=True)
-    if (prior.get("files") != C2_PAPER_FILES_SHA256
+    files_match = (
+        (len(prior.get("files", {})) == fleet_pin["fileCount"]
+         and _canonical_json_sha256(prior) == fleet_pin["originalCanonical"])
+        if account in PAPER_FLEET_V12_SEATS
+        else prior.get("files") == C2_PAPER_FILES_SHA256
+    )
+    if (not files_match
             or any(prior.get(key) != value for key, value in runtime_identity.items())):
         raise SystemExit("paper runtime compatibility: original sealed identity does not match")
     for name in prior["files"]:
@@ -2662,7 +2779,7 @@ def build_parser() -> argparse.ArgumentParser:
     paper = sub.add_parser("paper-runtime-upgrade")
     paper.add_argument("--account", required=True)
     paper.add_argument("--expected-manifest-sha256", required=True,
-                       help="CAS pin for the exact reviewed sealed C2 predecessor")
+                       help="CAS pin for an exact reviewed sealed Paper v10 predecessor")
     paper.add_argument("--preflight-only", action="store_true",
                        help="read-only Paper selection plan; no service or installation changes")
     paper.set_defaults(func=cmd_paper_runtime_upgrade)

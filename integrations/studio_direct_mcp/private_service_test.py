@@ -2228,6 +2228,12 @@ class TestC2PaperRuntimeCompatibility(unittest.TestCase):
                 roots = svc._build_runtime_roots(account)
                 _seed_node_modules(roots)
                 names = frozenset(svc.C2_PAPER_FILES_SHA256)
+                if account in ("chatgpt1", "chatgpt3"):
+                    names |= {"workspace-access.mjs"}
+                elif account == "fabric-design":
+                    names -= {"fleet-routing.mjs"}
+                elif account == "fabric-read":
+                    names = (names - {"fleet-routing.mjs"}) | {"fabric-operator.mjs"}
                 for name in set(svc.STAGE_FILES) - names:
                     (roots["base"] / name).unlink()
                 for name in names - set(svc.STAGE_FILES):
@@ -2263,6 +2269,11 @@ class TestC2PaperRuntimeCompatibility(unittest.TestCase):
                 }
                 prior["configHash"] = svc._sha256_file(roots["config"])
                 prior["dependencyTreeHash"] = svc._dependency_tree_hash(roots["node_modules"])
+                if account in svc.PAPER_FLEET_TAILNET_ENTRYPOINTS:
+                    plist = plistlib.loads(roots["plist"].read_bytes())
+                    plist["ProgramArguments"][1] = str(roots["base"] / "tailnet-gateway.mjs")
+                    roots["plist"].write_bytes(plistlib.dumps(plist))
+                    prior["plistHash"] = svc._sha256_file(roots["plist"])
                 roots["manifest"].write_text(json.dumps(prior, indent=2, sort_keys=True))
                 original_sha = svc._sha256_file(roots["manifest"])
                 non_paper_sha = hashlib.sha256(json.dumps(
@@ -2278,8 +2289,17 @@ class TestC2PaperRuntimeCompatibility(unittest.TestCase):
                 ).encode()).hexdigest()}
                 canonical_pins = frozenset(svc._canonical_json_sha256(value)
                                            for value in (prior, future))
-                # Only fixture identity data are replaced. All admission, runtime,
-                # hash, config, transaction and rollback checks execute unchanged.
+                # Only fixture identities replace pinned production identities.
+                fixture_pins = dict(svc.PAPER_FLEET_V12_SEATS)
+                if account in fixture_pins:
+                    fixture_pins[account] = {
+                        "manifestSha256": original_sha,
+                        "nonPaperSha256": non_paper_sha,
+                        "originalCanonical": svc._canonical_json_sha256(prior),
+                        "futureCanonical": svc._canonical_json_sha256(future),
+                        "fileCount": len(prior["files"]),
+                        "identity": identity,
+                    }
                 with mock.patch.multiple(
                     svc, C2_PAPER_FILES_SHA256=prior["files"],
                     C2_PAPER_RUNTIME_IDENTITY=identity,
@@ -2289,6 +2309,7 @@ class TestC2PaperRuntimeCompatibility(unittest.TestCase):
                     C2_PAPER_BUSINESS_ORIGINAL_MANIFEST_SHA256=original_sha,
                     C2_PAPER_BUSINESS_NON_PAPER_CONFIG_SHA256=non_paper_sha,
                     C2_PAPER_BUSINESS_RUNTIME_IDENTITY=identity,
+                    PAPER_FLEET_V12_SEATS=fixture_pins,
                     PAPER_BRIDGE_SHA256=PAPER_BRIDGE_FIXTURE_SHA,
                 ):
                     with svc._c2_lifecycle_mutex(account):
@@ -2397,6 +2418,82 @@ class TestC2PaperRuntimeCompatibility(unittest.TestCase):
             with mock.patch.object(svc, "C2_PAPER_BUSINESS_ORIGINAL_MANIFEST_SHA256",
                                    args.expected_manifest_sha256):
                 self._assert_no_writes(args, roots, "non-Paper profile changed")
+
+    def test_eight_reviewed_fleet_seats_preflight_and_stopped_apply_are_paper_only(self):
+        seats = tuple(sorted(svc.PAPER_FLEET_V12_SEATS))
+        self.assertEqual(len(seats), 8)
+        for account in seats:
+            with self.subTest(account=account), self._installed_c2_fixture(account) as (args, roots, original):
+                before = self._snapshot(roots)
+                prior = json.loads(roots["manifest"].read_text())
+                self.assertTrue(svc._valid_manifest(prior, args.account, _label_for(args.account)))
+                args.preflight_only = True
+                with mock.patch.object(svc, "_atomic_write_bytes") as write:
+                    rc, output = _capture_stdout(lambda: svc.cmd_paper_runtime_upgrade(args))
+                    write.assert_not_called()
+                preview = json.loads(output)
+                self.assertEqual((rc, preview["effect"], preview["preflight"]),
+                                 (0, "NOT_APPLIED", True))
+                self.assertEqual(before, self._snapshot(roots))
+                args.preflight_only = False
+                recorder = self._unloaded_recorder(account=account)
+                with mock.patch.object(svc, "_run", recorder):
+                    rc, output = _capture_stdout(lambda: svc.cmd_paper_runtime_upgrade(args))
+                applied = json.loads(output)
+                self.assertEqual((rc, applied["effect"]), (0, "APPLIED"))
+                self.assertEqual(applied["preservedGatewayFiles"], len(prior["files"]))
+                after = self._snapshot(roots)
+                self.assertEqual(set(before), set(after))
+                self.assertEqual({n for n in before if before[n] != after[n]},
+                                 {"config.json", "manifest.json"})
+                changed = json.loads(roots["config"].read_text())
+                self.assertEqual({k: v for k, v in changed.items() if k != "paperDesign"},
+                                 {k: v for k, v in original.items() if k != "paperDesign"})
+                self.assertEqual({k for k in original["paperDesign"]
+                                  if original["paperDesign"][k] != changed["paperDesign"][k]},
+                                 {"bridgePath", "pythonPath", "bridgeSha256"})
+                self.assertEqual(json.loads(roots["manifest"].read_text()),
+                                 args._fixture_target_manifest)
+                self.assertTrue(all(c[:2] == ["launchctl", "print"] for c in recorder.calls))
+
+    def test_eight_reviewed_fleet_seats_refuse_wrong_manifest_and_active_service(self):
+        for account in tuple(sorted(svc.PAPER_FLEET_V12_SEATS)):
+            with self.subTest(account=account), self._installed_c2_fixture(account) as (args, roots, _):
+                before = self._snapshot(roots)
+                actual = args.expected_manifest_sha256
+                args.expected_manifest_sha256 = "a" * 64
+                with mock.patch.object(svc, "_atomic_write_bytes") as write:
+                    with self.assertRaisesRegex(SystemExit, "reviewed predecessor"):
+                        svc.cmd_paper_runtime_upgrade(args)
+                    write.assert_not_called()
+                args.expected_manifest_sha256 = actual
+                running = CmdRecorder(default=FakeResult(0, _print_running(
+                    str(roots["plist"]), _label_for(account))))
+                with mock.patch.object(svc, "_run", running), \
+                     mock.patch.object(svc, "_atomic_write_bytes") as write:
+                    with self.assertRaisesRegex(SystemExit, "while service is loaded"):
+                        svc.cmd_paper_runtime_upgrade(args)
+                    write.assert_not_called()
+                self.assertEqual(before, self._snapshot(roots))
+
+    def test_fabric_tailnet_entrypoint_requires_sealed_exact_identity(self):
+        for account in ("fabric-design", "fabric-read"):
+            with self.subTest(account=account), self._installed_c2_fixture(account) as (args, roots, _):
+                manifest = json.loads(roots["manifest"].read_text())
+                plist = plistlib.loads(roots["plist"].read_bytes())
+                self.assertEqual(Path(plist["ProgramArguments"][1]).name,
+                                 "tailnet-gateway.mjs")
+                plist["ProgramArguments"][1] = str(roots["gateway"])
+                roots["plist"].write_bytes(plistlib.dumps(plist))
+                manifest["plistHash"] = svc._sha256_file(roots["plist"])
+                roots["manifest"].write_text(json.dumps(manifest, indent=2, sort_keys=True))
+                altered = {**svc.PAPER_FLEET_V12_SEATS[account],
+                           "originalCanonical": svc._canonical_json_sha256(manifest)}
+                selected = {**svc.PAPER_FLEET_V12_SEATS, account: altered}
+                with mock.patch.object(svc, "PAPER_FLEET_V12_SEATS", selected):
+                    self.assertTrue(svc._valid_manifest(manifest, account, _label_for(account)))
+                    with self.assertRaisesRegex(SystemExit, "plist is not our exact install"):
+                        svc._verify_staged_install(account, _label_for(account), roots)
 
     def test_exact_cohort_admission_is_account_version_identity_and_digest_bound(self):
         with self._installed_c2_fixture() as (args, roots, _):
