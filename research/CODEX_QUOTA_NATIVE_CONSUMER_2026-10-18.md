@@ -239,3 +239,34 @@ and git show HEAD. D8 test must be re-run only after the successor source
 commit exists; passing uncommitted tests alone cannot make a claim about
 the protected committed diff. Full current-head hosted CI and independent
 review are still required; no broker or provider mutation authorized.
+
+
+## October 18 native Astra/Sol model visibility from SAME private App Server
+
+The quota-only observer previously required separately supplied model-list
+metadata. The existing native account owner now optionally calls model/list
+(limit 100, includeHidden false) inside the SAME locked private Codex App
+Server session after account/read and account/rateLimits/read. This is an
+additive opt-in (include_models=true), so established quota readers retain
+their original two-call shape and refresh comparison semantics.
+
+The model-list response is sanitized to a closed two-model allowlist
+(gpt-6-astra, gpt-6.1-sol) with UNKNOWN on invalid, incomplete, duplicated
+or unavailable catalogs. Raw model descriptions, IDs outside that allowlist,
+provider errors, secret-bearing RPC bodies and credentials are never emitted.
+Hidden models are omitted. Failure of an OPTIONAL model read preserves the
+already observed quota status but cannot produce model eligibility, quota
+admission, reset rights or a broker lease.
+
+RED-first: 13 model-catalog/isolated-App-Server tests failed before implementation.
+GREEN: all 13 new cases passed; the existing 166 focused
+native-environment/quota/reset/worker tests continue to pass (179 total).
+Real read-only C1 private App Server smoke on M2 returned
+NATIVE_READS_COMPLETED, model state OBSERVED,
+Astra=true, Sol6.1=true, quota AVAILABLE_OBSERVED,
+cleanup.private_group_empty=true, admission_granted=false.
+No model invocation, quota debit, credential export, broker lease or
+production install occurred. Test and source current-head hosted CI remains
+required. The existing ranker PR #1365 must consume this sanitized model
+observation in its own bounded helper; separate manually supplied visibility
+must not override a native mismatch.

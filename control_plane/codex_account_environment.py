@@ -18,6 +18,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import stat
 import sys
 import time
@@ -402,10 +403,54 @@ def _failure_kind(error: Exception) -> str:
     return "NATIVE_READ_UNAVAILABLE"
 
 
+_VISIBLE_FRONTIER_MODELS = ("gpt-6-astra", "gpt-6.1-sol")
+_NATIVE_MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}")
+
+
+def native_model_visibility(raw: Any) -> dict[str, Any]:
+    """Sanitize one native model/list response; never infer quota or grant.
+
+    Unrecognized provider model IDs are discarded. An invalid, incomplete, or
+    duplicate catalog does not authorize any model and leaks no provider text.
+    """
+    result = {"state": "UNKNOWN", "supported_models": [],
+              "source": "model/list", "admission_granted": False}
+    if not isinstance(raw, Mapping) or raw.get("nextCursor") is not None:
+        return result
+    values = raw.get("data")
+    if not isinstance(values, list) or len(values) > 100:
+        return result
+    seen: set[str] = set()
+    qualified: set[str] = set()
+    for item in values:
+        if not isinstance(item, Mapping):
+            return result
+        ident = item.get("id")
+        if (type(ident) is not str or _NATIVE_MODEL_ID.fullmatch(ident) is None
+                or ident in seen
+                or any(field in item and type(item[field]) is not bool
+                       for field in ("isHidden", "hidden"))):
+            return result
+        seen.add(ident)
+        if ident in _VISIBLE_FRONTIER_MODELS and not (
+            item.get("isHidden") is True or item.get("hidden") is True
+        ):
+            qualified.add(ident)
+    result["state"] = "OBSERVED"
+    result["supported_models"] = [
+        model for model in _VISIBLE_FRONTIER_MODELS if model in qualified
+    ]
+    return result
+
+
 def probe_native_account(environment: CodexAccountEnvironment, binary: Path,
                          *, timeout: float = 20,
-                         previous_observation: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    """Two native reads; optional same-seat comparison adds no provider calls.
+                         previous_observation: Mapping[str, Any] | None = None,
+                         include_models: bool = False) -> dict[str, Any]:
+    """Two required native reads, optional bounded model/catalog read.
+
+    The optional native model list is obtained on the SAME locked App Server
+    session and never creates model usage, lease, credit, or dispatch authority.
 
     The existing observation owner supplies its prior sanitized result. Nothing
     is persisted here, and a comparison never grants quota or changes admission.
@@ -442,6 +487,20 @@ def probe_native_account(environment: CodexAccountEnvironment, binary: Path,
         stage = "account/rateLimits/read"
         limits = client.request("account/rateLimits/read", {}, timeout=timeout)
         result["account"] = account_readiness(account, limits)
+        # Model metadata is advisory; quota-state reconciliation remains
+        # independently useful even if model/list is missing or unavailable.
+        # The selector must refuse UNKNOWN, never infer model eligibility.
+        if include_models:
+            result["model_visibility"] = native_model_visibility(None)
+            try:
+                stage = "model/list"
+                models = client.request("model/list",
+                                        {"limit": 100, "includeHidden": False},
+                                        timeout=timeout)
+                result["model_visibility"] = native_model_visibility(models)
+            except Exception:
+                # Provider errors can contain credentials: keep only UNKNOWN.
+                result["model_visibility"] = native_model_visibility(None)
         result["state"] = "NATIVE_READS_COMPLETED"
     except Exception as error:
         # Provider errors can echo tokens/headers. Never return arbitrary errors.

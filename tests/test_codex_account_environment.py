@@ -626,3 +626,132 @@ def test_native_business_member_claim_has_bounded_length(home, member_length, ad
         assert data["account_id_sha256"] == hashlib.sha256(
             b"business-workspace"
         ).hexdigest()
+
+
+
+@pytest.mark.parametrize("payload,models,state", [
+    ({"data": [{"id": "gpt-6-astra"}, {"id": "gpt-6.1-sol"}, {"id": "unrelated"}]},
+     ["gpt-6-astra", "gpt-6.1-sol"], "OBSERVED"),
+    ({"data": [{"id": "gpt-6-astra", "isHidden": True},
+               {"id": "gpt-6.1-sol", "hidden": True}]}, [], "OBSERVED"),
+    ({"data": []}, [], "OBSERVED"),
+    ({"data": [{"id": "gpt-6-astra"}, {"id": "gpt-6-astra"}]}, [], "UNKNOWN"),
+    ({"data": [{"id": "gpt-6-astra"}], "nextCursor": "another-page"}, [], "UNKNOWN"),
+    ({"data": [{"id": "gpt-6-astra", "isHidden": "false"}]}, [], "UNKNOWN"),
+    ({"data": [{"id": "gpt-6-astra", "description": "Bearer SECRET-DO-NOT-SHOW"}]},
+     ["gpt-6-astra"], "OBSERVED"),
+    ({"data": [{"id": 6}]}, [], "UNKNOWN"),
+    ({"data": "invalid"}, [], "UNKNOWN"),
+    ({"models": [{"id": "gpt-6-astra"}]}, [], "UNKNOWN"),
+    (None, [], "UNKNOWN"),
+])
+def test_native_model_catalog_projects_only_safe_visible_frontier_ids(
+    payload, models, state
+):
+    from control_plane.codex_account_environment import native_model_visibility
+    actual = native_model_visibility(payload)
+    assert actual["state"] == state
+    assert actual["supported_models"] == models
+    assert actual["source"] == "model/list"
+    assert actual["admission_granted"] is False
+    assert "SECRET" not in json.dumps(actual)
+    assert "unrelated" not in json.dumps(actual)
+
+
+def test_native_model_probe_uses_same_isolated_appserver_and_preserves_quota(
+    home, monkeypatch
+):
+    from scripts.ohf import laboratory
+    private(home / "auth.json", auth())
+    calls = []
+
+    class Client:
+        def __init__(self, argv, *, env, cwd, start_new_session):
+            assert env["CODEX_HOME"] == str(home)
+            assert start_new_session and cwd == home
+            calls.append("construct")
+
+        def start(self):
+            calls.append("start")
+
+        def request(self, method, *args, **kwargs):
+            calls.append(method)
+            if method == "initialize":
+                return {"userAgent": "fixture-only"}
+            if method == "account/read":
+                return ACCOUNT
+            if method == "account/rateLimits/read":
+                return {"rateLimits": {"primary": {**window(10), "resetsAt": int(time.time())+3600},
+                                       "secondary": None}}
+            if method == "model/list":
+                assert args[0] == {"limit": 100, "includeHidden": False}
+                return {"data": [{"id": "gpt-6-astra"}, {"id": "gpt-6.1-sol"}]}
+            raise AssertionError("unexpected model observer method")
+
+        def notify(self, *args):
+            calls.append("notify")
+
+        def graceful_close(self):
+            return laboratory.AppServerStopProof(
+                controller_returncode=0, private_group_id=12345,
+                private_group_empty=True, leader_exit_confirmed_graceful=True,
+                survivors_detected_after_controller_exit=False,
+                termination_outcome="fixture")
+
+    monkeypatch.setattr(laboratory, "AppServerClient", Client)
+    with native_codex_account_scope(home) as env:
+        result = account_environment.probe_native_account(
+            env, Path("/not-launched"), include_models=True)
+    assert result["state"] == "NATIVE_READS_COMPLETED"
+    assert result["stop"]["private_group_empty"] is True
+    assert result["account"]["capacity_state"] == "AVAILABLE_OBSERVED"
+    assert result["model_visibility"]["state"] == "OBSERVED"
+    assert result["model_visibility"]["supported_models"] == [
+        "gpt-6-astra", "gpt-6.1-sol"]
+    assert calls.count("model/list") == 1
+    assert calls.index("account/read") < calls.index("account/rateLimits/read") < calls.index("model/list")
+    assert "admission_granted" not in result or result["account"]["admission_granted"] is False
+
+
+def test_native_model_rpc_failure_does_not_forge_model_eligibility_or_erase_quota(
+    home, monkeypatch
+):
+    from scripts.ohf import laboratory
+    private(home / "auth.json", auth())
+
+    class Client:
+        def __init__(self, *args, **kwargs):
+            pass
+        def start(self):
+            pass
+        def request(self, method, *args, **kwargs):
+            if method == "initialize":
+                return {"userAgent": "fixture"}
+            if method == "account/read":
+                return ACCOUNT
+            if method == "account/rateLimits/read":
+                return {"rateLimits": {
+                    "primary": {**window(10), "resetsAt": int(time.time())+3600},
+                    "secondary": None}}
+            if method == "model/list":
+                raise RuntimeError("Authorization: Bearer CANARY-PRIVATE-SECRET")
+            raise AssertionError("unexpected method")
+        def notify(self, *args):
+            pass
+        def graceful_close(self):
+            return laboratory.AppServerStopProof(
+                controller_returncode=0, private_group_id=12345,
+                private_group_empty=True, leader_exit_confirmed_graceful=True,
+                survivors_detected_after_controller_exit=False,
+                termination_outcome="fixture")
+
+    monkeypatch.setattr(laboratory, "AppServerClient", Client)
+    with native_codex_account_scope(home) as env:
+        result = account_environment.probe_native_account(
+            env, Path("/not-launched"), include_models=True)
+    assert result["state"] == "NATIVE_READS_COMPLETED"
+    assert result["account"]["capacity_state"] == "AVAILABLE_OBSERVED"
+    assert result["model_visibility"]["state"] == "UNKNOWN"
+    assert result["model_visibility"]["supported_models"] == []
+    assert "CANARY" not in json.dumps(result)
+    assert result["stop"]["private_group_empty"] is True
