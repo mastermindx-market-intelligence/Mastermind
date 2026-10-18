@@ -57,7 +57,7 @@ REVIEWED_FILES = {
                                                                                              90,
                                                                                              'int',
                                                                                              '0o700'))},
- 'ops/executive_os/acceptance.py': {'sha256': '54cbcfa7379efec31ec909256603ef04e9658b0d9cfb2b584470b4e6bcf8de35',
+ 'ops/executive_os/acceptance.py': {'sha256': 'c2ecd43e7d84557d35dc333ea5c3e634cae3c966f5343c0d296efd73815bc617',
                                     'sites': ((842, 59, 62, 'int', '454'),
                                               (842, 64, 67, 'int', '455'),
                                               (842, 69, 72, 'int', '456'),
