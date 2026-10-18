@@ -456,3 +456,107 @@ def test_source_timing_limits_are_explicit_before_price_details(state, reason, z
     else:
         assert ("来源时间证据不完整" if zh else "Source timing partial") in html
     assert ("记录的缺口" if zh else "recorded gap") in html
+
+
+def polygon_receipt_payload():
+    data = receipt_payload()
+    quote = data["settlement_price_inspection"]["price_context"]["quotes"]["AAPL"]
+    quote["source"] = "polygon_open"
+    outer = quote["observation"]
+    outer.update(source="polygon_open", attempts=[])
+    inner = outer["upstream"]
+    inner.update(source="polygon_open", attempts=[{"source": "polygon_open", "outcome": "selected"}])
+    source = {
+        "schema": "mastermind.polygon_snapshot_evidence.v1", "ticker": "AAPL",
+        "field": "day.o", "price": 100.0, "currency": "USD",
+        "status": "available", "reason": None,
+        "payload_ticker": "AAPL", "payload_ticker_status": "matched",
+        "source_updated_raw": "1791896400123456789", "source_updated_unit": "not_established",
+        "source_bar_label": None, "source_bar_label_kind": "not_provided",
+        "cache_anchor_at": "2026-08-13T08:29:00+00:00",
+        "request_started_at": "2026-08-13T08:29:01+00:00",
+        "response_returned_at": "2026-08-13T08:29:04+00:00",
+        "cache_age_observed_at": "2026-08-13T08:30:40+00:00",
+        "cache_age_seconds": 100.0, "within_cache_ttl": False,
+        "cache_clock_basis": "lookup_before_request",
+        "market_observed_at": None, "execution_qualification": "not_checked",
+    }
+    inner["upstream"] = source
+    return data, source
+
+
+@pytest.mark.parametrize("zh", [False, True])
+def test_polygon_snapshot_source_clocks_and_raw_precision_are_visible(zh):
+    data, _ = polygon_receipt_payload()
+    html = render_receipt(data, zh=zh)
+    assert "$100.00" in html
+    assert ("Polygon 快照开盘价" if zh else "Polygon snapshot Open") in html
+    assert "1791896400123456789" in html
+    assert ("单位未确定" if zh else "unit not established") in html
+    assert ("快照更新时间并非开盘事件时间" if zh else "Snapshot update is not the Open event time") in html
+    assert ("请求开始" if zh else "Request started") in html
+    assert ("响应返回" if zh else "Response returned") in html
+    assert ("缓存年龄起点" if zh else "Cache age anchor") in html
+    assert ("捕获时已超过缓存有效期" if zh else "Outside cache TTL at capture") in html
+    if not zh:
+        assert "2026-08-13 08:29:01 UTC" in html
+        assert "2026-08-13 08:29:04 UTC" in html
+        assert "Source bar label: 2026" not in html
+
+
+@pytest.mark.parametrize("field,value", [
+    ("schema", "mastermind.polygon_snapshot_evidence.v2"),
+    ("field", "day.c"),
+    ("currency", "CNY"),
+    ("source_updated_raw", 1791896400123456789),
+    ("source_updated_raw", "01"),
+    ("source_updated_raw", "not-a-timestamp"),
+    ("source_updated_unit", "nanoseconds"),
+    ("cache_clock_basis", "response_return"),
+    ("source_bar_label", "2026-08-13"),
+    ("source_bar_label_kind", "opening_event"),
+    ("payload_ticker", "MSFT"),
+    ("payload_ticker_status", "qualified"),
+    ("status", "fresh"),
+])
+def test_polygon_unknown_or_mislabeled_context_stays_unavailable(field, value):
+    data, source = polygon_receipt_payload()
+    source[field] = value
+    html = render_receipt(data)
+    assert "$100.00" in html
+    assert "Source context unavailable" in html
+    assert "Polygon snapshot Open" not in html
+    assert "1791896400123456789" not in html
+
+
+@pytest.mark.parametrize("zh", [False, True])
+def test_payload_symbol_mismatch_is_prominent_before_price_details(zh):
+    data, source = polygon_receipt_payload()
+    source.update(payload_ticker="MSFT", payload_ticker_status="mismatch",
+                  status="partial", reason="payload_ticker_mismatch")
+    html = render_receipt(data, zh=zh)
+    notice = "所选报价的快照证券代码不匹配" if zh else "selected quote has a payload symbol mismatch"
+    assert notice in html and "MSFT" in html and "$100.00" in html
+    assert html.index(notice) < html.index("<table")
+    assert ("与所选证券 AAPL 不匹配" if zh else "does not match selected AAPL") in html
+
+
+@pytest.mark.parametrize("state", ["partial", "unavailable"])
+@pytest.mark.parametrize("zh", [False, True])
+def test_incomplete_snapshot_context_is_visible_without_hiding_selected_price(state, zh):
+    data, source = polygon_receipt_payload()
+    source.update(status=state, reason="retrieval_clock_unavailable", response_returned_at=None)
+    if state == "unavailable":
+        source.update(reason="snapshot_context_unavailable", payload_ticker=None,
+                      payload_ticker_status="unavailable", source_updated_raw=None,
+                      cache_anchor_at=None, request_started_at=None, cache_age_observed_at=None,
+                      cache_age_seconds=None, within_cache_ttl=None)
+    html = render_receipt(data, zh=zh)
+    notice = "所选报价的快照证据不完整" if zh else "selected quote has incomplete snapshot evidence"
+    assert notice in html and html.index(notice) < html.index("<table")
+    assert "$100.00" in html
+    if zh:
+        assert ("快照证据不完整" if state == "partial" else "快照证据不可用") in html
+    else:
+        assert ("Snapshot evidence partial" if state == "partial" else "Snapshot evidence unavailable") in html
+        assert "Market observation time was not captured." in html
