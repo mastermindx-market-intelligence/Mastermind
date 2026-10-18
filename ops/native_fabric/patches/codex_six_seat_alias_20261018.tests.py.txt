@@ -54,7 +54,13 @@ def test_six_alias_advisory_accepts_only_explicit_fresh_qualified_input():
         row("B1", ready=True, bound=True, remaining=90),
         row("B2", ready=True, bound=False, remaining=100),
     ]
-    decision = select_account(rows, now=NOW)
+    from dataclasses import replace
+    rows[1] = replace(
+        rows[1], account_id_sha256="a"*64, user_id_sha256="b"*64,
+        entitlement_class="business_premium_included",
+        qualified_models=frozenset({"gpt-6-astra", "gpt-6.1-sol"}),
+    )
+    decision = select_account(rows, now=NOW, requested_model="gpt-6-astra")
     assert decision is not None and decision.alias == "B1"
     assert not hasattr(decision, "reservation") and not hasattr(decision, "dispatch_ready")
 

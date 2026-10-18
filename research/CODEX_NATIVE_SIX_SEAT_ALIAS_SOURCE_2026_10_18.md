@@ -72,3 +72,64 @@ window and original owner.
    retry, controller, identity ledger, queue or account switcher.
 
 Status: SOURCE_CANDIDATE_ONLY / NOT_INSTALLED / NOT_SIX_SEAT_READY.
+
+
+## October 18 successor: provider-free Business member inclusion gate
+
+The preceding B1/B2 unenrolled status in this source note is now superseded.
+All six private M2 native homes were authenticated by the Chairman. C1-C4
+native account subjects matched their intended Switcher labels and listed both
+Astra and Sol 6.1. For B1/B2, the local OpenAI ID-token claims establish
+two DISTINCT users in the SAME Business workspace (chatgpt_user_id differs,
+chatgpt_account_id matches); B2's user ID also matches C2 Personal, while
+its Business workspace/account ID differs from C2 Personal. Native
+account/read email is not a reliable per-user discriminator in this case.
+No raw names, emails, account IDs, hashes, tokens, or credentials are in
+this repository.
+
+An actual provider Business plan/seat-type response has NOT yet proven the
+Premium-vs-Standard included entitlement for either member. Native quota
+observations reported each Business home as 100% remaining for a seven-day
+primary window, but do not prove that shared workspace credits are independent.
+Existing quota comparator PR #1585 added separate member ID matching for
+same-workspace comparisons; that source change is not installed.
+
+The originally published four-plus-two alias-only patch is now extended in
+the SAME source candidate. It adds model- and quota-context-dependent advisory
+eligibility to codex_pool_policy.AccountObservation with optional hashed
+workspace and member IDs, an explicitly owner-qualified entitlement class,
+and visible model identifiers. A Business seat is advisory-selectable only
+with a business_premium_included entitlement, well-formed separate workspace
+and member hashes, a fresh future quota horizon, active subscription headroom,
+an explicitly requested model present in its qualified model set, and an
+available broker slot. An unknown Standard tier, missing member ID, missing
+model list, or business_workspace_shared_credits class cannot qualify.
+Two aliases with an IDENTICAL (workspace, user, entitlement class) tuple are
+both excluded, without starving an unrelated eligible account. DIFFERENT
+members of the SAME Business workspace are deliberately eligible separately
+when their exact seat allowance was independently qualified. One user in
+Personal vs Business scopes stays a different quota context.
+
+RED-first proof: 32 parametrized new Business/model/duplicate cases failed
+against the alias-only predecessor (construction lacked identity fields).
+GREEN after correction: 58/58 combined existing selector/profile and new
+Business scope tests, plus the existing source bundle tests independently.
+The digest-sealed replay helper adds the new Business cases, requires
+byte-exact installed preimages, verifies the resulting source/postimage
+hashes and checks that installed source remained unchanged. This remains
+SOURCE ONLY. No current upstream Runtime or native provider grants emerge
+from fabricated synthetic metadata, and no broker/runner/launcher is changed.
+
+CRITICAL PATH STILL OPEN: the currently installed legacy remote
+native_remote.scope() expects codex-native/default and refuses
+M2-local host placement, while enrolled Ubuntu hosts lack an allowed
+codex-native execution mode. Thus there is currently no lawful path from
+the six M2 account homes to those legacy remote runners. Do not add six
+broker slots or copy credentials onto Ubuntu. Integration must use the
+incumbent Executive worker broker's isolated per-worker on-host process
+realm and capability/admission checks, with exact seat identity and
+original-parent acceptance. Existing Executive worker slot catalog currently
+defines only codex-pro-01/02/03 plus the distinct company slot; it is not
+six installed subscription processes. A future source owner must reconcile
+the actual runtime's reviewed OS UIDs, model entitlement, issuer quota scope,
+release/merge readiness, and the previously accepted platform gate.

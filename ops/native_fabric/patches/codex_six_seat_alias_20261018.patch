@@ -1,12 +1,90 @@
 diff --git a/codex_pool_policy.py b/codex_pool_policy.py
 --- a/codex_pool_policy.py
 +++ b/codex_pool_policy.py
-@@ -15 +15,4 @@
+@@ -12,0 +13 @@
++import re
+@@ -15 +16,7 @@
 -CODEX_ACCOUNT_ALIASES = frozenset({"C1", "C2", "C3", "C4"})
 +# B1/B2 are candidate Business realms, not automatically entitled or admitted.
 +# The existing per-seat native identity, plan, quota, relay, and atomic broker
 +# gates still apply. This set alone creates no worker or subscription right.
 +CODEX_ACCOUNT_ALIASES = frozenset({"C1", "C2", "C3", "C4", "B1", "B2"})
++BUSINESS_ALIASES = frozenset({"B1", "B2"})
++_SHA256 = re.compile(r"[0-9a-f]{64}")
++_MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
+@@ -31,0 +39,7 @@
++    # Advisory identity only; no authority is minted by populating these.
++    # Business users may share a workspace while holding separate included
++    # seat allowances. A shared workspace credit pool is never per-member.
++    account_id_sha256: Optional[str] = None
++    user_id_sha256: Optional[str] = None
++    entitlement_class: Optional[str] = None
++    qualified_models: Optional[frozenset[str]] = None
+@@ -44,0 +59,39 @@
++
++
++def _subject_key(row: AccountObservation) -> tuple[str, str, str] | None:
++    """Business quota key: workspace + individual user + included quota class.
++
++    Never treat two users of one Business workspace as the same included seat.
++    This is a pure selector identity, not authentication or reservation proof.
++    """
++    workspace, member, category = (
++        row.account_id_sha256, row.user_id_sha256, row.entitlement_class
++    )
++    if (type(workspace) is not str or _SHA256.fullmatch(workspace) is None
++            or type(member) is not str or _SHA256.fullmatch(member) is None
++            or type(category) is not str):
++        return None
++    return workspace, member, category
++
++
++def _model_and_realm_qualified(
++    row: AccountObservation, requested_model: Optional[str], now: datetime
++) -> bool:
++    # Only the incumbent provider/Capacity owner may supply these observations.
++    # The pure policy neither mints entitlements nor grants a broker lease.
++    models = row.qualified_models
++    if models is not None and (
++        type(models) is not frozenset
++        or not 1 <= len(models) <= 32
++        or any(type(m) is not str or _MODEL.fullmatch(m) is None for m in models)
++    ):
++        return False
++    if requested_model is not None and (models is None or requested_model not in models):
++        return False
++    if row.alias not in BUSINESS_ALIASES:
++        return True
++    if (requested_model is None or row.entitlement_class != "business_premium_included"
++            or _subject_key(row) is None or models is None):
++        return False
++    # A Business quota with no live reset horizon is not evidence of room.
++    return row.reset_at is not None and _utc(row.reset_at) > now
+@@ -88,0 +142 @@
++    requested_model: Optional[str] = None,
+@@ -99,0 +154,4 @@
++    if requested_model is not None and (
++        type(requested_model) is not str or _MODEL.fullmatch(requested_model) is None
++    ):
++        raise ValueError("codex_requested_model_invalid")
+@@ -104 +162,16 @@
+-    eligible = [r for r in rows if _fresh_and_eligible(r, now)]
++    eligible = [
++        r for r in rows if _fresh_and_eligible(r, now)
++        and _model_and_realm_qualified(r, requested_model, now)
++    ]
++    # Duplicate aliases could create separate subscriptions for the same
++    # Business member. Exclude *both* ambiguous candidates, never arbitrarily
++    # choose one. A different Personal workspace for the same user is distinct.
++    seen: dict[tuple[str, str, str], int] = {}
++    for r in eligible:
++        key = _subject_key(r)
++        if key is not None:
++            seen[key] = seen.get(key, 0) + 1
++    eligible = [
++        r for r in eligible
++        if (key := _subject_key(r)) is None or seen[key] == 1
++    ]
 diff --git a/tests/test_codex_native_profile.py b/tests/test_codex_native_profile.py
 --- a/tests/test_codex_native_profile.py
 +++ b/tests/test_codex_native_profile.py

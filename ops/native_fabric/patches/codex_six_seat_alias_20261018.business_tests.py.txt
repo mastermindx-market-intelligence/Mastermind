@@ -1,0 +1,121 @@
+"""Provider-free six-seat native Codex ranker security regression tests.
+
+No credentials, subscriptions, network, leases, or actual grants. Business
+inclusion requires independently supplied, current owner-qualified metadata.
+"""
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+import sys
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from codex_pool_policy import AccountObservation, select_account
+
+NOW = datetime(2026, 10, 18, 8, 0, tzinfo=timezone.utc)
+ASTRA = "gpt-6-astra"
+SOL = "gpt-6.1-sol"
+MODELS = frozenset((ASTRA, SOL))
+
+
+def row(alias, pct, *, workspace="a"*64, user="b"*64,
+        entitlement="business_premium_included", models=MODELS,
+        active=0, cap=1, age=0, reset_hours=144):
+    return AccountObservation(
+        alias=alias, remaining_pct=pct,
+        observed_at=NOW-timedelta(minutes=age),
+        reset_at=NOW+timedelta(hours=reset_hours),
+        reset_credits=None, active_leases=active, lease_cap=cap,
+        auth_ready=True, binding_verified=True,
+        account_id_sha256=workspace, user_id_sha256=user,
+        entitlement_class=entitlement, qualified_models=models,
+    )
+
+
+def pick(rows, *, strategy="conserve_resets", model=ASTRA, sticky=None):
+    return select_account(rows, now=NOW, strategy=strategy,
+                          requested_model=model, sticky_account=sticky)
+
+
+def test_two_distinct_business_users_same_workspace_are_independent_candidates():
+    rows=[row("B1", 88, workspace="a"*64, user="1"*64),
+          row("B2", 96, workspace="a"*64, user="2"*64)]
+    assert pick(rows).alias == "B2"
+
+
+@pytest.mark.parametrize("strategy", [
+    "conserve_resets", "single_account_heavy", "timer_priority",
+])
+def test_duplicate_business_user_in_same_workspace_is_excluded(strategy):
+    rows=[row("B1", 100, user="1"*64), row("B2", 100, user="1"*64),
+          row("C3", 62, workspace="c"*64, user="3"*64,
+              entitlement="personal_pro", models=MODELS)]
+    result=pick(rows, strategy=strategy, sticky="B2")
+    assert result is not None and result.alias == "C3"
+
+
+def test_single_duplicate_business_identity_without_alternative_cannot_run():
+    rows=[row("B1", 100, user="1"*64), row("B2", 100, user="1"*64)]
+    assert pick(rows) is None
+
+
+@pytest.mark.parametrize("invalid", [None, "", "a"*63, "Z"*64, True, {}, 0])
+def test_business_user_identity_is_mandatory_and_well_formed(invalid):
+    assert pick([row("B1", 100, user=invalid)]) is None
+
+
+@pytest.mark.parametrize("invalid", [None, "", "a"*63, "Z"*64, False, []])
+def test_business_workspace_identity_is_mandatory_and_well_formed(invalid):
+    assert pick([row("B1", 100, workspace=invalid)]) is None
+
+
+@pytest.mark.parametrize("tier", [
+    None, "", "business_standard_included", "business_workspace_shared_credits",
+    "personal_pro",
+])
+def test_unproven_business_premium_entitlement_is_ineligible(tier):
+    assert pick([row("B1", 100, entitlement=tier)]) is None
+
+
+def test_workspace_credits_cannot_be_counted_once_per_business_member():
+    rows=[row("B1", 100, entitlement="business_workspace_shared_credits", user="1"*64),
+          row("B2", 100, entitlement="business_workspace_shared_credits", user="2"*64)]
+    assert pick(rows) is None
+
+
+def test_same_person_different_personal_and_business_quota_realms_are_distinct():
+    rows=[row("C2", 78, workspace="c"*64, user="2"*64,
+              entitlement="personal_pro"),
+          row("B2", 100, workspace="a"*64, user="2"*64)]
+    assert pick(rows).alias=="B2"
+
+
+@pytest.mark.parametrize("model", [ASTRA, SOL])
+def test_business_model_must_be_explicitly_qualified_for_request(model):
+    assert pick([row("B1", 80, models=frozenset({model}))],model=model).alias=="B1"
+    other=SOL if model==ASTRA else ASTRA
+    assert pick([row("B1", 80, models=frozenset({other}))],model=model) is None
+
+
+def test_business_selector_never_prefers_model_blind_row():
+    assert pick([row("B1", 100, models=None)]) is None
+    assert select_account([row("B1", 100)],now=NOW) is None
+
+
+@pytest.mark.parametrize("strategy", [
+    "conserve_resets", "single_account_heavy", "timer_priority",
+])
+def test_business_expired_quota_observation_or_lease_cannot_use_sticky(strategy):
+    rows=[row("B2",100,age=11),row("B1",95,active=1,cap=1),
+          row("C1",45,workspace="d"*64,user="4"*64,
+              entitlement="personal_pro")]
+    assert pick(rows,strategy=strategy,sticky="B2").alias=="C1"
+    assert pick([row("B1",100,reset_hours=-1)],strategy=strategy,sticky="B1") is None
+
+
+def test_account_decision_still_never_mints_a_lease_or_grant():
+    result=pick([row("B1",100)])
+    assert result is not None
+    assert result.alias=="B1"
+    assert not hasattr(result,"lease") and not hasattr(result,"provider_home")
+    assert not hasattr(result,"admission_granted")

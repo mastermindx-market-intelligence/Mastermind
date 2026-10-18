@@ -23,6 +23,7 @@ FILES = ("codex_pool_policy.py", "codex_native_profile.py",
 NAME = "codex_six_seat_alias_20261018"
 PATCH = HERE / "patches" / (NAME + ".patch")
 EXTRA_TEST = HERE / "patches" / (NAME + ".tests.py.txt")
+BUSINESS_TEST = HERE / "patches" / (NAME + ".business_tests.py.txt")
 MANIFEST = HERE / "patches" / (NAME + ".manifest.json")
 
 
@@ -40,6 +41,8 @@ def verify(source: Path) -> None:
         raise ValueError("source_patch_digest_changed")
     if sha(EXTRA_TEST.read_bytes()) != metadata["additional_tests_sha256"]:
         raise ValueError("source_tests_digest_changed")
+    if sha(BUSINESS_TEST.read_bytes()) != metadata["business_tests_sha256"]:
+        raise ValueError("business_tests_digest_changed")
     observed = {}
     for name in FILES:
         path = source / name
@@ -57,6 +60,7 @@ def verify(source: Path) -> None:
         for name in FILES:
             shutil.copy2(source / name, work / name)
         shutil.copy2(EXTRA_TEST, work / "tests/test_codex_six_seat_alias.py")
+        shutil.copy2(BUSINESS_TEST, work / "tests/test_codex_business_quota_scope.py")
 
         for argv in (
             ["git", "apply", "--unidiff-zero", "--check", str(PATCH)],
@@ -78,7 +82,8 @@ def verify(source: Path) -> None:
                      "--basetemp", str(work / "pytest-private"),
                      "tests/test_codex_pool_policy.py",
                      "tests/test_codex_native_profile.py",
-                     "tests/test_codex_six_seat_alias.py"]
+                     "tests/test_codex_six_seat_alias.py",
+                     "tests/test_codex_business_quota_scope.py"]
         result = subprocess.run(test_argv, cwd=work, env=env, text=True,
                                 capture_output=True, check=False, timeout=40)
         if result.returncode:
